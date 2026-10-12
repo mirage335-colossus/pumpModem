@@ -294,6 +294,121 @@ void xrun_erasure_evidence() {
         }
     }
 }
+// Paired finite-interruption channel: delayed/stale final PCM followed by the
+// same5ms quintic transition and1649-frame forward repair as the real callback
+// fixture. Downstream DAC damage is not known from a graph counter, so this is
+// an explicit channel model, separately from the production callback oracle.
+void forward_repair_evidence() {
+ for(const unsigned factor:{1U,10U,100U,1000U})for(const bool hopping:{false,true}) {
+  auto c=configuration(factor);c.sample_rate=2048;c.carrier_hz=437;
+  c.bandwidth_hz=512./factor;c.integration_seconds=std::max(12.8,factor/32.);
+  c.stream_phase_samples=0;c.dsss=factor>1;
+  if(hopping){auto p=std::make_shared<modem::FhssPlan>();p->channels=3;p->dwell_seconds=.4;
+   p->shifts[0]=10;p->shifts[1]=20;p->shifts[2]=30;p->power_ramps=true;
+   p->clock_error_seconds=.01;p->peer_clock_error_seconds=.01;p->region_seconds=.001;p->audio_error_seconds=.05;
+   p->smooth_ramps=true;p->mandatory_ramps=true;p->ramp_seconds=1./175;c.fake_hopping=p;}
+  const Bytes bits{1,0,1};const auto symbol=modem::symbol_sample_count(c);
+  const auto first=modem::training_sample_count(c)+modem::pattern_pulse_padding_samples(c);
+  modem::PatternTransmitter tx(bits,c,c.stream_epoch);std::vector<Complex> original(tx.total_samples());tx.read_analytic(original);
+  const auto absence=(1+static_cast<std::uint64_t>(std::ceil(6.*c.sample_rate/symbol)))*symbol;
+  const auto interpolate=[&](double p){if(p<0 || p+1>=original.size())return Complex{};
+   const auto i=static_cast<std::size_t>(p);const auto f=p-i;return original[i]*(1-f)+original[i+1]*f;};
+  const auto smooth=[](double x){x=std::clamp(x,0.,1.);return x*x*x*(10+x*(-15+6*x));};
+  for(const bool final_bit:{false,true})for(const int extremum:{0,-1,1}) {
+   const auto start=first+(final_bit?2:1)*symbol+symbol/2+3;
+   const double gap=.0343548633333333,skip=extremum?gap-extremum*.5/c.sample_rate:1649./48000,ramp=.005;
+   std::vector<Complex> repaired(original.size());
+   for(std::size_t i=0;i<repaired.size();++i) {
+    const auto t=(static_cast<double>(i)-start)/c.sample_rate;
+    repaired[i]=t<0?original[i]:t<gap?Complex{}:t<gap+ramp?
+     interpolate(i-gap*c.sample_rate)*(1-smooth((t-gap)/ramp)):
+     interpolate(i-(gap-skip)*c.sample_rate)*smooth((t-gap-ramp)/ramp);
+   }
+   // Conditional matched-I/Q projection; evaluate every carrier phase at1deg.
+   // Noise covariance G is unchanged and includes pulse overlap. This reports
+   // waveform damage, not detector threshold or full acquisition qualification.
+   double cc=0,ss=0,cs=0,b00=0,b01=0,b10=0,b11=0,worst=0;
+   const auto bit=final_bit?2:1;
+   for(auto i=first+bit*symbol;i<first+(bit+1)*symbol;++i) {
+    const auto a=original[i],b=repaired[i];cc+=a.real()*a.real();ss+=a.imag()*a.imag();cs+=a.real()*a.imag();
+    b00+=a.real()*b.real();b01+=a.real()*b.imag();b10+=a.imag()*b.real();b11+=a.imag()*b.imag();
+   }
+   for(unsigned phase=0;phase<360;++phase) {const auto p=phase*std::numbers::pi/180.;const auto x=std::cos(p),y=std::sin(p);
+    const auto v0=b00*x+b01*y,v1=b10*x+b11*y;
+    const auto original_energy=cc*x*x+2*cs*x*y+ss*y*y;
+    const auto projected=(ss*v0*v0-2*cs*v0*v1+cc*v1*v1)/(cc*ss-cs*cs);
+    worst=std::max(worst,10*std::log10(original_energy/projected));
+   }
+   if(!extremum)check(std::isfinite(worst)&&worst<1.,"forward repair exceeded conditional one-dB fixture allowance");
+   else check(std::isfinite(worst)&&worst<2.,"cumulative displacement extremum exceeded conditional two-dB allowance");
+   for(const bool damage:{false,true}) {
+    std::vector<float> input(original.size()+absence);std::mt19937_64 rng(19437);std::normal_distribution<double> noise(0,.003);
+    for(std::size_t i=0;i<input.size();++i)input[i]=static_cast<float>((i<original.size()?(damage?repaired[i]:original[i]).real():0)+noise(rng));
+    modem::PatternSearch search;search.frequency_offsets_hz={0};search.clock_errors_ppm={0};search.initial_stream_symbols=1;
+    search.start_offset_seconds=double(first)/c.sample_rate;search.start_uncertainty_seconds=.5/c.sample_rate;search.compact_clock_search=true;
+    modem::PatternReceiver rx(c,32*1024*1024,search);std::map<std::pair<std::uint64_t,std::uint64_t>,Bytes> streams;
+    std::size_t publications=0;std::uint64_t consumed=0;bool complete=false;
+    const auto harvest=[&]{for(const auto& event:rx.take_bursts()) {auto& got=streams[{event.stream_first_sample,event.stream_first_symbol}];
+     check(!event.missing_slots&&event.first_stream_symbol==got.size(),"forward repair changed bit identity");
+     if(!event.bits.empty()){++publications;check(event.bits.size()==1,"forward repair batched publication");}
+     got.insert(got.end(),event.bits.begin(),event.bits.end());
+     if(event.complete)check(consumed>=first+bits.size()*symbol+6*c.sample_rate,"repair manufactured observed absence");complete|=event.complete;
+    }};
+    while(consumed<input.size()){const auto count=std::min<std::size_t>(113,input.size()-consumed);rx.push(std::span(input).subspan(consumed,count));consumed+=count;harvest();}
+    rx.finish();harvest();check(streams.size()==1&&streams.begin()->second==bits&&complete&&publications==bits.size(),"forward repair lost/added bits or physical completion");
+   }
+   std::cout<<"forward repair factor="<<factor<<" hopping="<<hopping<<" final_bit="<<final_bit
+    <<" residual_extremum="<<extremum<<" symbol_s="<<double(symbol)/c.sample_rate<<" conditional_phase_grid_loss_db="<<worst<<'\n';
+  }
+ }
+}
+// Confirmed-date recovery adds two graph quanta before the existing shaped
+// skip. Use48kHz analytic source to avoid attributing coarse6120Hz linear-
+// interpolation attenuation to the production48kHz integer skip. Both the
+// interrupted bit and EVERY later bit retain the residual displacement.
+void confirmed_forward_repair_evidence() {
+ for(const unsigned factor:{1U,10U,100U,1000U})for(const bool hopping:{false,true}) {
+  auto c=configuration(factor);c.sample_rate=48000;c.carrier_hz=1500;
+  c.bandwidth_hz=360./factor;c.integration_seconds=35.555556;
+  c.stream_phase_samples=0;c.dsss=factor>1;
+  if(hopping){auto p=std::make_shared<modem::FhssPlan>();p->channels=3;p->dwell_seconds=.4;
+   p->shifts[0]=10;p->shifts[1]=20;p->shifts[2]=30;p->power_ramps=true;
+   p->clock_error_seconds=.01;p->peer_clock_error_seconds=.01;p->region_seconds=.001;p->audio_error_seconds=.05;
+   p->smooth_ramps=true;p->mandatory_ramps=true;p->ramp_seconds=1./175;c.fake_hopping=p;}
+  const Bytes bits{1,0,1};const auto symbol=modem::symbol_sample_count(c);
+  const auto first=modem::training_sample_count(c)+modem::pattern_pulse_padding_samples(c);
+  modem::PatternTransmitter tx(bits,c,c.stream_epoch);std::vector<Complex> original(tx.total_samples());tx.read_analytic(original);
+  const auto interpolate=[&](double p){if(p<0 || p+1>=original.size())return Complex{};
+   const auto i=static_cast<std::size_t>(p);const auto f=p-i;return original[i]*(1-f)+original[i+1]*f;};
+  const auto smooth=[](double x){x=std::clamp(x,0.,1.);return x*x*x*(10+x*(-15+6*x));};
+  for(const int extremum:{-1,1})for(const bool final_bit:{false,true}) {
+   const auto start=first+(final_bit?2:1)*symbol+symbol/2+3;
+   constexpr double gap=.018062712,confirmation=1024./48000,ramp=.005;
+   const auto residual=extremum*.625/6120.;double maximum_loss=0;
+   for(unsigned bit=final_bit?2:1;bit<bits.size();++bit) {
+    double cc=0,ss=0,cs=0,b00=0,b01=0,b10=0,b11=0;
+    for(auto i=first+bit*symbol;i<first+(bit+1)*symbol;++i) {
+     const auto t=(static_cast<double>(i)-start)/c.sample_rate;
+     const auto b=t<0?original[i]:t<gap?Complex{}:t<gap+confirmation?
+      interpolate(i-gap*c.sample_rate):t<gap+confirmation+ramp?
+      interpolate(i-gap*c.sample_rate)*(1-smooth((t-gap-confirmation)/ramp)):
+      interpolate(i-residual*c.sample_rate)*smooth((t-gap-confirmation-ramp)/ramp);
+     const auto a=original[i];cc+=a.real()*a.real();ss+=a.imag()*a.imag();cs+=a.real()*a.imag();
+     b00+=a.real()*b.real();b01+=a.real()*b.imag();b10+=a.imag()*b.real();b11+=a.imag()*b.imag();
+    }
+    for(unsigned phase=0;phase<360;++phase) {const auto p=phase*std::numbers::pi/180.;const auto x=std::cos(p),y=std::sin(p);
+     const auto v0=b00*x+b01*y,v1=b10*x+b11*y;
+     const auto energy=cc*x*x+2*cs*x*y+ss*y*y;
+     const auto projected=(ss*v0*v0-2*cs*v0*v1+cc*v1*v1)/(cc*ss-cs*cs);
+     maximum_loss=std::max(maximum_loss,10*std::log10(energy/projected));
+    }
+   }
+   check(std::isfinite(maximum_loss)&&maximum_loss<2.,"confirmed repair exceeded conditional two-dB impairment allowance");
+   std::cout<<"confirmed repair factor="<<factor<<" hopping="<<hopping<<" final_bit="<<final_bit
+    <<" residual_us="<<residual*1e6<<" all_later_bits_conditional_loss_db="<<maximum_loss<<'\n';
+  }
+ }
+}
 void encrypted_echoes(bool hopping=false,unsigned models=4,bool ramp=true) {
     for(const unsigned factor:{1U,10U,100U,1000U})for(unsigned model=0;model<models;++model) {
         auto c=configuration(factor);c.sample_rate=2048;c.carrier_hz=512;c.bandwidth_hz=512./factor;
@@ -961,7 +1076,7 @@ void diagnostic_cover_compatibility() {
 }
 }
 int main(int argc,char** argv) {
-    try {if(argc==2&&std::string_view(argv[1])=="--xrun") {finish_paths();xrun_erasure_evidence();return 0;}
+    try {if(argc==2&&std::string_view(argv[1])=="--xrun") {finish_paths();xrun_erasure_evidence();forward_repair_evidence();confirmed_forward_repair_evidence();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--smooth") {smooth_envelope();qualified_cipher_phase_cells();matched_gap_channel_stress(true);return 0;}
         if(argc==2&&std::string_view(argv[1])=="--matched-stress") {matched_gap_channel_stress();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--matched") {
@@ -970,6 +1085,6 @@ int main(int argc,char** argv) {
         if(argc==2&&std::string_view(argv[1])=="--fhss-echo-reference") {encrypted_echoes(true,4,false);return 0;}
         if(argc==2&&std::string_view(argv[1])=="--fhss-echo") {encrypted_echoes(true);return 0;}
         smooth_envelope();qualified_cipher_phase_cells();matched_gap_channel_stress(true);matched_gap_channel_stress();omitted_pulse_evidence();mandatory_gate_rejection();matched_hop_gaps(1);matched_hop_gaps(10);matched_hop_gaps(10,false,true);matched_hop_gaps(10,false,true,true);matched_hop_gaps(1,true);matched_hop_gaps(10,true);matched_hop_gaps(100,true);matched_hop_gaps(1000,true);
-        deferred_calendar();deferred_calendar(10);hop_arrival_timing();hop_power_boundaries();full_outer_cover();encrypted_echoes();encrypted_echoes(true,1);finish_paths();xrun_erasure_evidence();cancelled_partial_chip_lattice();finite_tuning();production_boundaries();diagnostic_cover_compatibility();std::cout<<"full virtual cover, shared boundaries and finish passed\n";return 0;}
+        deferred_calendar();deferred_calendar(10);hop_arrival_timing();hop_power_boundaries();full_outer_cover();encrypted_echoes();encrypted_echoes(true,1);finish_paths();xrun_erasure_evidence();forward_repair_evidence();confirmed_forward_repair_evidence();cancelled_partial_chip_lattice();finite_tuning();production_boundaries();diagnostic_cover_compatibility();std::cout<<"full virtual cover, shared boundaries and finish passed\n";return 0;}
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

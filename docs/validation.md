@@ -4,6 +4,93 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Forward presentation repair and larger preparation — local candidate, 12 October 2026
+
+This follow-up addresses the recorded failure of the preceding bounded-xrun
+candidate. At about 780 seconds, four source deliveries coincided with six graph
+cycles and a 77.022 ms dated advance. The 250 ms ring was full. The graph counter
+increased by 12.604 ms, while the source/presentation displacement was 34.355 ms.
+Accepting the counter report did not repair that displacement; the original UTC
+model correctly rejected the next observation.
+
+The native PipeWire callback now fades through zero, discards eligible expired
+unplayed frames, and resumes at the original source addresses. It never replays
+PCM or resets cryptographic/UTC/resampler state. The original timestamp history
+must accept the post-repair observation before continuation is reported. A
+separate cumulative signed interval includes both integer discards and the full
+original inverse ±2000 ppm clock-rate envelope. Its experimental limit is half a
+logical sample and never resets. The recorded case discards 1,649 native frames
+and fits at 6,120 logical samples/s; another similar event would exhaust this
+conservative bound. Short-symbol, higher-bandwidth, ambiguous, negative,
+changed-topology, insufficient-data and final/drain cases can remain ineligible.
+
+The ring grows from 250 to 750 ms: +96,000 bytes at 48 kHz stereo S16, while the
+callback quantum remains 512 frames. Queued delay is compensated, not added to
+the configured Audio error. Graceful stopping may need up to 500 ms more committed
+PCM; immediate abort remains prompt. The two 5 ms quintic transitions accept
+approximately 200 Hz transition bandwidth for a rare repair. This is a deliberate
+spectral tradeoff, not preservation of an arbitrarily narrow nominal bandwidth.
+
+An injected public PipeWire ABI drives the actual production callback with the
+recorded timing, including null-dequeue opportunities, a transition split across
+small callbacks, duplicate graph timestamps with advancing queues, unsafe
+transitions and empty final callbacks. It verifies source addressing, both
+channels, original timeline validation and rejection after cumulative exhaustion.
+No daemon or test copy of the recovery algorithm substitutes for the callback.
+
+Ninety-six paired finite-channel receptions cover DSSS Off/10/100/1000, production
+FHSS ramps on/off, middle/final-bit events and persistent displacement at both
+experimental extrema. All streams retain three exact bits, next-poll publication
+and fully scored physical absence. At the recorded nominal residual, conditional
+I/Q projection penalties on a 360-phase grid are 0.0048–0.0695 dB. The ±half-logical-sample fixtures
+also include interpolation of the finite waveform and measure up to about
+1.61 dB. These are deterministic conditional projections and strong-signal
+receptions, **not full acquisition-bank 90%/99% sensitivity curves**, statistical
+confidence intervals, or a bound on unknown DAC damage. The conservative duration
+budget likewise does not prove a universal sensitivity limit for random envelopes.
+
+Complete GUI 38/38, frontends 3/3, CLI 1/1 and the separate native PipeWire/UTC
+runtime checks pass. The final affected runtime set passes 14/15 and retains the
+pre-existing fractional-DSSS clipping assertion (peak 1.00944, 63 clipped samples,
+distortion energy fraction 2.47619e-08); later assertions in that invocation are
+not counted. No assertion was weakened. Matching GUI/controller evidence was
+reused after the final native-only displacement refinement.
+
+Seven isolated alternating paired callback/queue runs, with identical PCM and
+100,000 callbacks (1,066.667 seconds of audio) per run, measure median CPU
+0.448002 s before and 0.467191 s after. Mean added CPU is 19.317 ms, paired-t 95%
+interval 18.819–19.816 ms for this benchmark, including queue copies. This is
+roughly 0.00181% of one CPU core per real-time audio second, not a whole-receiver
+speedup. Native playback workspace is 49,488 versus 146,144 bytes on this build.
+The benchmark does not measure analog loss or real interruption frequency.
+
+A final physical full-GUI duplex run with synthetic keys and the reported
+Rate3.6/DSSS100/FakeFCC/GPS10ms/Region1ms/Audio50ms configuration passed. TX
+completed after 110.973 s. The three exact bits appeared separately at 49.7558,
+77.7187 and 113.640 s from launch, in the same row; physical completion appeared
+at 149.019 s. Wall time was 151.515451 s, CPU 572.686624 s, peak RSS 184144 KiB.
+The native ring reached 36,000 frames (750 ms); quantum stayed 512 frames. The
+largest next-plus-protected-stop bound was 15.579214 ms against the unchanged
+25 ms radius. UTC TX remained active with no fallback or error. The verified
+verbose trace contains 61,569 records, no drops, and a complete finalization seal.
+No physical xrun occurred, so this does not qualify physical event recovery.
+
+Receiver backlog peaked at 2.41993 s and remained 0.410 s at the last live poll.
+The receiver narrow-window flag was false for this long-symbol geometry despite
+accepted capture timestamp metadata. This is not tight-GPS acquisition-bank or
+receiver-throughput qualification. Receiver behavior and its existing limitation
+were not changed or hidden. The physical run uses different epochs/PCM from the
+preceding candidate, so its total CPU is not a paired speed comparison.
+
+GUI SHA256: `97a0f9ac47aa738b41fb3eb00991fdce78f473fac18c9e597ff64dd0e6229ec7`.
+Source is HEAD `593655cffe82cf2c990524a3b1c7fd3263c5a29b` plus the local overlay.
+Exact source/build/measurement identity and launcher are retained under
+`.agent-work/artifacts/receiver-opt-20261008/realign-final/manifest.json` and
+`manual-audio-realign.sh`. Full-bank threshold/false-acceptance validation, repeated real
+interruptions, exact downstream sample-loss measurement, other devices, ARM,
+sanitizers and broader platform/SDK qualification remain outstanding. No receiver
+algorithm, threshold, hypothesis, payload bit, framing or completion rule changed.
+
 ## Bounded audio recovery — local manual checkpoint, 12 October 2026
 
 Built on the preserved `manual-utc-verbose` candidate, this change distinguishes
@@ -10575,3 +10662,102 @@ UTC/noise, prior cover/echo/legacy clipping failures, hardware FHSS/emission mas
 ARM/other platforms, native graphics/sanitizers, SDK/packaging and broader
 qualification remain open. No new C/N0 interval is claimed. No push, publication,
 hostedCI or GPU work.
+
+
+## 2026-10-12 — Counter-free PipeWire date confirmation, local follow-up
+
+Preceding runnable GUI97a0f9ac and its seven modified source files are frozen in
+`.agent-work/artifacts/receiver-opt-20261008/gap-baseline/`; HEAD remains
+593655cffe82cf2c990524a3b1c7fd3263c5a29b. Four user traces and earlier raw/optimized
+references remain untouched. All changes are local.
+
+The latest user trace contains two counter-free date jumps10.854313/18.062712ms
+with a full750ms ring, and a separate protected timing stop at682.454source
+seconds. The abrupt failures do not establish exact lost DAC samples; the old
+verbose failure lacked its raw graph pair. Full-buffer evidence rules out an
+application producer underrun as their demonstrated cause. A default-timing
+786.518s success is not tight-timing qualification.
+
+A bounded probe now retains the pre-event anchor, continues sequential PCM and
+quarantines its suspect timestamp. Two later graph dates and independent callback
+CLOCK_MONOTONIC arrival evidence must support a persistent offset before shaped
+forward repair. A transient date which returns and settles does not change PCM.
+A provider-only step at normal callback cadence, or callback catch-up, cannot
+trigger a skip. Final/drain state cannot conceal an unfinished probe or ramp.
+
+The original token budget charges confirmation and all uncertain affected time;
+18.063ms at512/48kHz charges96.104ms. A corrected cumulative residual certificate
+includes the preceding delivery and confirmation frames under the original
+inverse±2000ppm envelope. Its ceiling is5/8logical sample,102.124us at6120Hz;
+this is an explicit impairment tradeoff, not improved numerical precision or a
+universal loss bound. Queue size remains750ms. Verbose records add graph and
+independent arrival evidence; no RT allocation, logging or waiting is added.
+The counter-free repair still depends on estimated presentation semantics:
+arrival evidence cannot establish downstream DAC loss or rule out every small
+correlated metadata error. The residual certificate is conditional on valid
+presentation dates.
+
+All96 pre-existing paired finite-channel reception assertions remain.32additional
+conditional projections use48kHz waveform construction,1500Hz carrier, DSSS
+Off/10/100/1000, FHSS off/on, middle/final-bit interruptions and±102.124us
+residuals, including every later bit. They measure1.0550–1.09486dB worst-phase
+projection loss on those finite fixtures. This is not a90%/99% full-bank detection
+curve, statistical confidence interval or bound on arbitrary hardware damage.
+Existing I/Q, exact bits/all streams, next-poll identity and six-second scored
+absence assertions are retained. Receiver thresholds, search banks, source bits,
+keys, framing and waveform addressing are unchanged.
+
+A separate audit finds no sample-rate sign or rounding defect in the long drift
+stop: the graph accrued10.551ms over688.704s; applied steering was+0.0003ppm.
+True inverse-DAC calibration could cancel hardware drift, but the present
+estimated past interval[-18.939,+49.312]ppm cannot certify the selected GPSDO
+residual domain. Capture remains fixed-ratio. The current change neither resets
+UTC references nor removes this limitation. See `docs/clock-sync.md` for the
+physical-rate equation and required residual/affinity certificate.
+
+
+Final GUI SHA256: `b93225b187606014098f39bfedab56ffb56b45bf41ef3d57c358ec0fe5aed84a`.
+GCC 14.2 Release FLTK, `-O3 -DNDEBUG -ffp-contract=off`; preceding runnable GUI
+97a0f9ac preserved. Source/build snapshot and evidence hashes: `gap-final/manifest.json`.
+Launcher: `manual-audio-gap.sh`; report: `MANUAL-AUDIO-GAP.md`, both under
+`.agent-work/artifacts/receiver-opt-20261008/`.
+
+- Fresh native callback and UTC runtime tests passed. The complete affected
+  runtime/audio/search selection remains **14/15**, 204.94 s: the unchanged
+  `alsa_audio_contract` fractional-DSSS clipping assertion still fails at peak
+  1.00944, 63 samples, energy fraction 2.47619e-08. Later assertions in that
+  failing invocation are not counted as passes. No assertion was weakened.
+- Complete GUI **38/38**, frontends **3/3** and CLI **1/1** passed. Matching GUI,
+  frontend and unaffected receiver evidence was reused after the final
+  native-callback-only corroboration change; native/UTC, full affected runtime
+  selection, CLI and the launcher self-check were rerun. Diff/shell checks pass.
+- Seven alternating isolated callback/queue pairs on identical PCM: median CPU
+  0.469669 s before / 0.480476 s after per 1,066.667 s of audio; wall medians
+  0.470020 / 0.480777 s. Paired mean difference −5.337 ms, t-based 95% interval
+  [−34.971,+24.296] ms: no statistically resolved CPU difference. Workspace
+  146,144→147,056 bytes (+912). This measures uninterrupted callback overhead,
+  not whole-receiver speedup or a physical recovery event.
+- Final full-GUI physical duplex, synthetic key and raw `101010`, with the
+  latest Audio **70 ms** settings: **passed**, 217.859 s TX/drain, 258.710 s wall,
+  1,101.256 s total process CPU, peak RSS 186,620 KiB. Native UTC stayed active;
+  no fallback or transmit error. One unchanged stream published bits at
+  49.775, 78.135, 114.178, 149.292, 185.141 and 220.430 s; scored absence
+  completed it at 256.143 s. No extra or missing bits.
+- The sealed 82,165-record trace has no drops and no repair/xrun-counter change.
+  Maximum next+stop bound was 16.518 ms against the 35 ms radius. The queue
+  reached 750 ms; quantum stayed 512/48000. This establishes one ordinary
+  physical run, **not** recovery from a measured physical interruption and
+  not a demonstrated need for 70 ms rather than 50 ms.
+- RX retained its broad-bank geometry (`rx_timed=0`) despite qualified native
+  TX timing. Backlog peaked at 2.475 s and ended at 0.375 s. This stage does not
+  resolve that receiver restriction or the earlier heavy-load reception failures.
+  Different epochs and physical captures prohibit a paired receiver CPU or
+  sensitivity inference from the preceding GUI run.
+
+Remaining work: actual interrupted DAC/capture measurements, repeated-event and
+metadata-bias qualification, full-bank near-threshold/rare-acceptance evidence,
+certified inverse-DAC and ADC discipline, long/hours-per-bit operation, the
+retained clipping failure and earlier cover/echo/receiver limitations, calibrated
+IC-7100/independent devices, ARM, sanitizers, platforms, SDK and packaging.
+Everything remains local. This is the rebuilt-GUI manual checkpoint; no broader
+qualification, publication, hosted CI or GPU work was started.

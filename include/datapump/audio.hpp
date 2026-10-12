@@ -115,8 +115,11 @@ struct Options {
     // still passes the original UTC/affine/FHSS checks. Zero preserves the
     // generic diagnostic full-tail forecast. This never shortens emitted PCM.
     double timing_independent_cover_seconds=0;
-    // Permit bounded *graph counter only* xrun reports, not local starvation or
-    // a changed clock mapping. The budget is a conservative operational limit,
+    // Permit bounded graph reports and forward removal of expired queued PCM
+    // on a same-clock native PipeWire interruption. Original time/address maps
+    // must validate after repair; no replay or history reset. Budget the entire
+    // affected interval, including ramps and uncertainty. This is an operational limit,
+    // including bounded confirmation of counter-free presentation dates; it is
     // not proof of downstream erasure length or detector sensitivity. Zero is
     // strict. Reports use timing_status; no source/timestamp state is restarted.
     double reported_xrun_budget_seconds=0;

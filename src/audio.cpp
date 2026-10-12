@@ -771,7 +771,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
             const auto target=detail::local_pipewire_sink(stop);
             if(rate>192000)throw Error("logical passband exceeds native shared-server timing support");
             const auto native_rate=rate<=48000?48000u:rate<=96000?96000u:192000u;
-            graph=std::make_unique<detail::PipeWirePlayback>(native_rate,target,stop,options->reported_xrun_budget_seconds,options->reported_xrun_window_seconds);
+            graph=std::make_unique<detail::PipeWirePlayback>(native_rate,target,stop,options->reported_xrun_budget_seconds,options->reported_xrun_window_seconds,rate);
             api.close(stream.pcm);stream.pcm=nullptr;
             stream.hardware_rate=native_rate;stream.channels=graph->channels();
         }catch(const Error& e){throw TimingPreflightUnavailable(std::numeric_limits<double>::infinity(),

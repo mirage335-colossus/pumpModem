@@ -19,6 +19,228 @@ namespace a=datapump::audio;
 namespace f=alsa_test;
 void check(bool value,const char* reason){if(!value)throw std::runtime_error(reason);}
 template<class F> void rejects(F action){try{action();}catch(const datapump::Error&){check(f::state.live==0,"leaked failed stream");return;}throw std::runtime_error("invalid audio accepted");}
+// Inject the public ABI table; drive the production RT callback, not a copy of
+// its policy. No audio daemon, global route or secret material is involved.
+struct FakePipeWire {
+ using Api=datapump::audio::detail::pwabi::Api;
+ using Events=datapump::audio::detail::pwabi::Events;
+ using Clock=datapump::audio::detail::pwabi::Clock;
+ using Time=datapump::audio::detail::pwabi::Time;
+ using PWBuffer=datapump::audio::detail::pwabi::PWBuffer;
+ inline static FakePipeWire* current=nullptr;
+ Api api{Api::Injected{}};const Events* events=nullptr;void* user=nullptr;
+ Clock clock{};Time time{};std::vector<std::int16_t> output=std::vector<std::int16_t>(2048);
+ datapump::audio::detail::pwabi::Chunk chunk{};
+ datapump::audio::detail::pwabi::Data data{};
+ datapump::audio::detail::pwabi::Buffer buffer{};PWBuffer pw{};
+ std::vector<std::int16_t> captured;bool null_dequeue=false;unsigned returned=0;
+ std::int64_t host_offset=0;
+ static void* props(const char*,...){return current;}
+ FakePipeWire() {
+  current=this;clock.id=58;clock.rate={1,48000};clock.duration=512;clock.position=1432205952;
+  clock.cycle=1857468;clock.nsec=1000000000000ULL;clock.xrun=14980;clock.rate_diff=1;
+  time.rate=clock.rate;time.now=clock.nsec;time.delay=512;
+  data.data=output.data();data.maxsize=output.size()*sizeof(std::int16_t);data.chunk=&chunk;
+  buffer.n_datas=1;buffer.datas=&data;pw.buffer=&buffer;pw.requested=512;
+  api.props=props;api.prop_set=[](void*,const char*,const char*){return 0;};
+  api.loop_new=[](const char*,const void*)->void*{return current;};api.loop_get=[](void* p){return p;};
+  api.loop_start=[](void*){return 0;};api.loop_stop=[](void*){};api.loop_destroy=[](void*){};
+  api.lock=[](void*){};api.unlock=[](void*){};
+  api.stream_new=[](void*,const char*,void*,const Events* e,void* p)->void*{current->events=e;current->user=p;return current;};
+  api.connect=[](void*,int,std::uint32_t,int,const datapump::audio::detail::pwabi::Pod**,std::uint32_t){
+   current->events->io_changed(current->user,7,&current->clock,sizeof(Clock));
+   current->events->state_changed(current->user,0,2,nullptr);
+   alignas(8) const std::uint32_t latency[]{32,15,0x4000b,15,1,0,4,3,0,0};
+   current->events->param_changed(current->user,15,reinterpret_cast<const datapump::audio::detail::pwabi::Pod*>(latency));return 0;};
+  api.get_time=[](void*,Time* t,std::size_t){*t=current->time;return 0;};
+  api.monotonic_ns=[]()->std::uint64_t{return current->clock.nsec+current->host_offset;};
+  api.dequeue=[](void*)->PWBuffer*{return current->null_dequeue?nullptr:&current->pw;};
+  api.queue=[](void*,PWBuffer* p){current->captured.insert(current->captured.end(),current->output.begin(),current->output.begin()+p->size*2);return 0;};
+  api.return_buffer=[](void*,PWBuffer*){++current->returned;return 0;};
+  api.active=[](void*,bool){return 0;};api.flush=[](void*,bool drain){if(drain)current->events->drained(current->user);return 0;};
+  api.destroy_stream=[](void*){};
+ }
+ void step(std::uint64_t ns=10666667,std::uint64_t cycles=1,std::uint64_t xruns=0) {
+  clock.nsec+=ns;clock.position+=cycles*clock.duration;clock.cycle+=cycles;clock.xrun+=xruns;
+  time.now=clock.nsec;time.ticks+=cycles*clock.duration;events->process(user);
+ }
+ auto stamp(datapump::audio::detail::PipeWirePlayback& p) {
+  const long double mono=clock.nsec*1e-9L;
+  return p.timestamp(std::array<long double,3>{mono,mono,1791790000.L+mono});
+ }
+};
+void native_pipewire_forward_repair() {
+ using namespace datapump::audio::detail;
+ const auto fixture=[](double budget,double window,bool bad_topology,bool negative,bool final,unsigned request) {
+  FakePipeWire f;f.pw.requested=request;PipeWirePlayback p(f.api,48000,"",{},budget,window,6120);
+  std::vector<std::int16_t> input(36000*2);
+  for(std::size_t i=0;i<input.size()/2;++i){input[2*i]=static_cast<std::int16_t>(i%20000+1);input[2*i+1]=-input[2*i];}
+  check(p.write(input.data(),36000)==36000,"750ms prepared buffer not retained");
+  f.events->process(f.user);p.private_started();
+  a::UtcTimeline original(48000,.001,a::UtcTimeline::Prediction::timestamp_intersection,pipewire_shared_codec_floor+1./48000,true);
+  const auto before=f.stamp(p);original.observe(before);
+  // Four deliveries versus six graph cycles and77.021530ms dated advance:
+  // exact geometry of the user's13-minute failure. Missed callbacks are real
+  // null dequeues. The xrun counter reports only605ticks, not the34.355ms step.
+  for(unsigned i=0;i<3;++i)f.step();
+  if(final)p.end_input();
+  if(bad_topology)++f.clock.id;
+  if(!negative){f.null_dequeue=true;f.step();f.step();f.null_dequeue=false;}
+  f.step(negative?1:23688195,1,605);
+  if(budget<.1 || bad_topology || negative || final) {
+   bool failed=false;try{(void)p.write(input.data(),1);}catch(const datapump::Error&){failed=true;}
+   check(failed,"unsafe forward repair accepted");return;
+  }
+  // The ramp can span callbacks smaller than5ms. No partial-map timestamp is
+  // published; original timeline is validated only after both ramps finish.
+  for(unsigned i=0;i<6;++i)f.step();
+  check(p.write(input.data(),1)==1,"safe bounded forward repair failed");f.step();
+  const auto after=f.stamp(p);original.observe(after);
+  const auto c=p.counters();
+  check(c.repairs==1 && c.discarded==1649 && c.read==c.submitted+c.discarded,
+    "recorded presentation step was not repaired in original source addresses");
+  check(c.affected> .08 && c.affected<.1,"repair did not charge entire uncertain interval");
+  const auto prediction=original.predict(before.frame);
+  check(std::abs(prediction.utc_seconds-before.utc_seconds)<.0001,"repair reset original UTC origin");
+  check(!p.recovery_notice().empty(),"successful recovery remained invisible");
+  // Last ordinary samples are exactly the original unplayed suffix. Source
+  // addresses advance once, including discarded frames; channels keep signs.
+  check(f.captured[f.captured.size()-2]==input[2*(c.read-1)] &&
+        f.captured.back()==-f.captured[f.captured.size()-2],"repair replayed PCM or corrupted channels");
+  std::cout<<"native callback repair: discarded="<<c.discarded<<" affected_ms="<<c.affected*1000
+           <<" workspace="<<p.workspace_bytes()<<" original_reference_retained\n";
+ };
+ fixture(.1,35.555556,false,false,false,512);
+ fixture(.0001,.01,false,false,false,512);
+ fixture(.1,35.555556,true,false,false,512);
+ fixture(.1,35.555556,false,true,false,512);
+ fixture(.1,35.555556,false,false,true,512);
+ // Counter-free dates can be delayed or merely jittered. No first-point skip;
+ // two later graph dates must agree with the same anchor. User gaps10.854ms
+ // and18.063ms both have unchanged xrun/cycle reports and a full prepared FIFO.
+ for(const auto gap_ns:{10854313ULL,18062712ULL})for(const bool late_counter:{false,true}) {
+  FakePipeWire f;PipeWirePlayback p(f.api,48000,"",{},.1,35.555556,6120);
+  std::vector<std::int16_t> input(72000,10000);p.write(input.data(),36000);
+  f.events->process(f.user);p.private_started();
+  a::UtcTimeline original(48000,.001,a::UtcTimeline::Prediction::timestamp_intersection,pipewire_shared_codec_floor+1./48000,true);
+  const auto before=f.stamp(p);original.observe(before);
+  f.step(10666667+gap_ns);
+  check(p.counters().discarded==0&&f.captured.back()==10000,"one timestamp jump erased or muted PCM");
+  f.step(10666667,1,late_counter?100:0);check(p.counters().discarded==0,"one later point prematurely confirmed jump");
+  f.step();check(p.write(input.data(),1)==1,"persistent counter-free forward gap rejected");
+  f.step();original.observe(f.stamp(p));
+  const auto c=p.counters();check(c.repairs==1&&c.discarded==std::llround(gap_ns*48000./1e9)&&c.read==c.submitted+c.discarded,
+    "confirmed timestamp step lost source identity");
+  check(c.affected>.08&&c.affected<.1,"confirmation interval omitted from damage budget");
+  check(!p.recovery_notice().empty(),"confirmed timestamp repair was not published");
+ }
+ // A persistent timestamp-only bias or a stalled callback which catches up
+ // does not establish persistent presentation loss. Never erase PCM for it.
+ for(const bool catchup:{false,true}) {
+  FakePipeWire f;PipeWirePlayback p(f.api,48000,"",{},.1,35.555556,6120);
+  std::vector<std::int16_t> input(72000);for(std::size_t i=0;i<input.size();++i)input[i]=1+i%20000;
+  p.write(input.data(),36000);
+  f.events->process(f.user);p.private_started();
+  if(!catchup)f.host_offset=-18062712;
+  f.step(10666667+18062712);
+  if(catchup)f.host_offset=-9000000;
+  f.step();f.host_offset=-18062712;f.step();
+  bool failed=false;try{p.write(input.data(),1);}catch(const datapump::Error&){failed=true;}
+  check(failed&&std::equal(f.captured.begin(),f.captured.end(),input.begin()),
+    "timestamp bias or caught-up callback created a false PCM repair");
+ }
+ // A monotone date excursion that returns to the original grid is validated
+ // without altering even one PCM sample; still charge the uncertain interval.
+ {
+  FakePipeWire f;PipeWirePlayback p(f.api,48000,"",{},.1,35.555556,6120);
+  std::vector<std::int16_t> input(72000,10000);p.write(input.data(),36000);f.events->process(f.user);p.private_started();
+  a::UtcTimeline original(48000);original.observe(f.stamp(p));
+  f.step(15666667);f.step(5666667);f.step();f.step();p.write(input.data(),1);f.step();
+  original.observe(f.stamp(p));const auto c=p.counters();
+  check(c.repairs==1&&c.discarded==0&&c.read==c.submitted,"jitter return skipped/replayed source frames");
+  check(std::all_of(f.captured.begin(),f.captured.end(),[](auto v){return v==10000;}),"jitter excursion modified PCM");
+ }
+ for(unsigned bad=0;bad<5;++bad) {
+  FakePipeWire f;PipeWirePlayback p(f.api,48000,"",{},.1,35.555556,6120);std::vector<std::int16_t> input(72000,10000);
+  p.write(input.data(),36000);f.events->process(f.user);p.private_started();f.step(15666667);
+  if(bad==0)++f.time.delay;
+  if(bad==1)p.end_input();
+  if(bad==2)++f.clock.id;
+  f.step(bad==3?16666667:bad==4?1:10666667);
+  bool failed=false;try{p.write(input.data(),1);}catch(const datapump::Error&){failed=true;}
+  check(failed,"ambiguous/topology/final confirmation failure was ignored");
+ }
+ // No subsequent callback is guaranteed after end_input/flush. An unresolved
+ // event must never turn into successful drain, even with no report frontier.
+ {
+  FakePipeWire f;PipeWirePlayback p(f.api,48000,"",{},.1,35.555556,6120);std::vector<std::int16_t> input(2048,10000);
+  p.write(input.data(),1024);f.events->process(f.user);p.private_started();f.step(15666667);
+  bool failed=false;try{p.end_input();p.drain();}catch(const datapump::Error&){failed=true;}
+  check(failed,"unfinishable timestamp probe reached successful final drain");
+ }
+ // Multiple buffers in the same dated graph cycle are valid only when the
+ // server queue advances to place them consecutively in presentation time.
+ for(const bool queued:{true,false}) {
+  FakePipeWire f;PipeWirePlayback p(f.api,48000,"",{},.1,35.555556,6120);
+  std::vector<std::int16_t> input(72000,10000);p.write(input.data(),36000);
+  f.events->process(f.user);p.private_started();
+  if(queued)f.time.queued+=512;
+  f.events->process(f.user);
+  bool failed=false;try{p.write(input.data(),1);}catch(const datapump::Error&){failed=true;}
+  check(failed!=queued,"duplicate graph date ignored presentation queue progression");
+ }
+ // Smaller callback quanta force fade/skip/fade across eight RT invocations.
+ for(const bool second_gap:{false,true}) {
+  FakePipeWire f;f.pw.requested=64;f.clock.duration=64;
+  PipeWirePlayback p(f.api,48000,"",{},.1,35.555556,6120);std::vector<std::int16_t> input(72000,10000);
+  p.write(input.data(),36000);f.events->process(f.user);p.private_started();
+  f.step(14000000,10,500);
+  for(unsigned i=0;i<10;++i)f.step(i==0&&second_gap?2666666:1333333,i==0&&second_gap?2:1);
+  if(second_gap){bool failed=false;try{p.write(input.data(),1);}catch(const datapump::Error&){failed=true;}
+   check(failed,"second interruption during repair escaped damage accounting");}
+  else {check(p.write(input.data(),1)==1,"multi-buffer repair failed");f.step(1333333);
+   const auto c=p.counters();check(c.repairs==1&&c.discarded==608&&c.read==c.submitted+608,"multi-buffer skip address wrong");
+   check(*std::min_element(f.captured.begin(),f.captured.end())==0 && f.captured.back()==10000,
+       "multi-buffer repair did not pass smoothly through zero");}
+ }
+ // A late zero-count callback is audited even though there is no PCM to copy.
+ {
+  FakePipeWire f;PipeWirePlayback p(f.api,48000,"",{},.1,35.555556);
+  std::vector<std::int16_t> input(1024,10000);p.write(input.data(),512);f.events->process(f.user);p.private_started();p.end_input();
+  f.step(10666667,1,512);bool failed=false;try{p.drain();}catch(const datapump::Error&){failed=true;}
+  check(failed,"final empty callback concealed an xrun");
+ }
+ // Preserve uncertainty from the original rate domain across EVERY repair.
+ // The mean rate hint cannot reset or average away accumulated displacement.
+ {
+  PipeWireRepairCoordinate coordinate(48000,6120);
+  const auto one=coordinate.propose(.0343548633333333L);
+  check(one.valid&&one.frames==1649&&one.bound>.000068&&one.bound<.000071,
+    "repair omitted original clock-rate uncertainty");
+  coordinate.commit(one);
+  check(!coordinate.propose(.0343548633333333L).valid,"repeated repair reset cumulative displacement");
+  check(!PipeWireRepairCoordinate(48000,48000).propose(.0343548633333333L).valid,
+    "high-bandwidth repair admitted excessive persistent displacement");
+  PipeWireRepairCoordinate small(48000,6120);unsigned admitted=0;
+  for(unsigned i=0;i<1000;++i){const auto next=small.propose(.001L);if(!next.valid)break;small.commit(next);++admitted;}
+  check(admitted>1&&admitted<100,"small repeated errors escaped cumulative bound");
+  const auto anchored=PipeWireRepairCoordinate(48000,6120).propose(.0343548633333333L,2e-9L,512);
+  check(anchored.valid&&anchored.bound>.000090&&anchored.bound<.000092,
+    "preceding delivered frames omitted from slope certificate");
+  const auto confirmed=PipeWireRepairCoordinate(48000,6120).propose(.018062712L,2e-9L,1536);
+  check(confirmed.valid&&confirmed.bound>.000100&&confirmed.bound<.000102,
+    "confirmation frames omitted from slope certificate");
+  for(const long double q:{1.L/(48000*1.002L),1.L/(48000*.998L)}) {
+   const auto residual=.018062712L+1536.L/48000-(1536+confirmed.frames)*q;
+   check(residual>=confirmed.low&&residual<=confirmed.high,"rate endpoint escaped repair certificate");
+  }
+ }
+ // Budget does not restart at blocks/symbols, and refuses entire short bits.
+ PipeWireRepairBudget b(.1,35.555556);check(b.admit(.09,1000000000),"initial repair budget failed");
+ check(!b.admit(.02,1100000000),"repair budget reset on next callback");
+ check(b.admit(.09,40000000000ULL)&&b.count()==2,"long-run budget failed to replenish");
+ check(!PipeWireRepairBudget(.1,.01).admit(.02,1),"whole short symbol erased");
+}
 void bounded_graph_xrun_policy() {
     using namespace datapump::audio::detail;
     pwabi::Clock origin{};auto& a=origin;a.id=58;a.rate={1,48000};a.duration=512;
@@ -71,6 +293,7 @@ void bounded_graph_xrun_policy() {
 }
 void native_pipewire_dated_observations() {
     bounded_graph_xrun_policy();
+    native_pipewire_forward_repair();
     using namespace datapump::audio::detail;
     struct Kernel {
         bool alive=true;int policy=SCHED_OTHER,priority=0;

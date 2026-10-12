@@ -486,7 +486,7 @@ See [PipeWire time units](https://docs.pipewire.org/structpw__time.html),
 [graph clock](https://docs.pipewire.org/structspa__io__clock.html) and
 [latency propagation](https://docs.pipewire.org/page_latency.html).
 
-A bounded250ms S16 stereo ring provides preparation headroom, charged to the
+A bounded 750 ms S16 stereo ring provides preparation headroom, charged to the
 audio workspace. Logical rates up
 to192kHz use48/96/192kHz output; the server may independently resample to its
 device clock. Known queued delay is compensated rather than added to Audio error.
@@ -501,8 +501,9 @@ capacity and generation-block size. A256/48kHz prototype lowered reported
 uncertainty but lost a graph quantum during full-GUI receiver load; a smaller
 period alone also failed the preceding timing-headroom check. These failed
 experiments are retained. Negotiation is a hint: uncertainty always includes the
-full quantum actually reported. A changed lost-sample counter remains fatal,
-with the previous/current clock fields in the error; it is not hidden as jitter.
+full quantum actually reported. Changed clock geometry remains fatal, with previous/current fields in the error.
+Bounded graph reports and forward presentation repair are described below;
+neither is hidden as jitter.
 
 Live reception on native Linux now leaves one whole physical CPU core outside
 the decoder's affinity when its current allowed domain contains at least four
@@ -563,7 +564,7 @@ remain. The later counter-only continuation and valid-pulse forecast below
 supersede unconditional xrun rejection and full-independent-cover reservation. A larger1024-frame quantum would
 contribute21.333ms at48kHz before codec and stopping-forecast uncertainty; it does
 not fit this25ms-radius example. Increasing an application queue cannot prevent
-a missed graph/driver cycle. The current512-frame request and250ms ring remain.
+a missed graph/driver cycle. The512-frame request remains; the forward-realignment follow-up below increases the prepared ring to 750 ms.
 Physical stress outcomes and the separate capture-validation limitation are
 recorded in [validation](validation.md#2026-10-12--acknowledged-audio-callback-priority-local-checkpoint).
 
@@ -827,8 +828,8 @@ widen the receiver's hypotheses or relax the unchanged protection guards.
 
 Native PipeWire previously aborted on any increase in the shared graph's xrun
 counter. That counter estimates graph interruption duration; it is not an exact
-count of this stream's missing or replayed DAC samples. The new production
-policy permits a counter-only report when clock ID, rate, quantum and mapped IO
+count of this stream's missing or replayed DAC samples. The first recovery candidate
+permitted a counter-only report when clock ID, rate, quantum and mapped IO
 are unchanged, position and cycle advance by exactly compatible quanta, and
 MONOTONIC nanoseconds agree with that advance within two graph frames plus the
 existing 2000ppm envelope and nanosecond rounding. Local prepared-ring starvation,
@@ -857,7 +858,8 @@ finite-template calculations, not estimates of full-bank detection probability,
 not threshold-region sensitivity measurements, and not a bound on arbitrary
 hardware xruns, inserted/deleted PCM or persistent phase/time shifts. Larger or
 unmeasured damage remains outside this recovery scope. An actual clock-map change
-cannot be repaired by pretending a graph report was advisory.
+cannot be repaired by pretending a graph report was advisory. The following
+forward-realignment path repairs eligible presentation interruptions explicitly.
 
 The recorded headroom failure had a current bound near16.15ms but added about
 8.75ms for a4.37s independent-cover forecast. Forecasting only through committed
@@ -872,3 +874,170 @@ block and device drain retain strict xrun handling. A counter event racing the
 final frontier must have a subsequent validated timestamp and visible report;
 otherwise drain fails explicitly. No event may disappear at a zero-frame return.
 The CLI message path and GUI message/tuning-noise paths install the same policy.
+
+
+## Forward presentation realignment and 750 ms preparation (local candidate)
+
+The first recovery policy accepted the graph xrun report but could still fail
+`audio device clock exceeds UTC timing model`. The recorded 13-minute failure
+advanced source deliveries 42.667 ms, graph position 64 ms and dated graph time
+77.022 ms. The application ring was full 250 ms; the 12.604 ms graph counter increase
+was **not** the 34.355 ms source/presentation displacement. More FIFO capacity
+alone would not fix a missed graph delivery.
+
+The native callback now compares the next dated delivery with the previous
+successful buffer **end**, including server queue/delay. With the same clock,
+rate, quantum, latency and queue geometry, a forward interruption accompanied by
+missed graph cycles or an xrun may discard expired **unplayed** final PCM. A 5 ms
+quintic fade reaches zero, the consumer advances once past the expired addresses,
+and a 5 ms fade restores gain. This permits approximately 200 Hz transition bandwidth
+for a rare repair; it is not the original arbitrarily narrow pulse bandwidth.
+No private generator, resampler, epoch or UTC history restarts. The converter's
+filter history and every subsequent sample address remain original. Both stereo
+channels receive the same gain and skip. No repair inserts or replays PCM.
+
+The next publication occurs only after the transition; the playback thread must
+validate it against the **original** timestamp history and timing allowance.
+Integer-frame discards carry a signed cumulative displacement interval. Each
+proposal uses the original generic inverse ±2000 ppm clock-rate envelope, not a
+rate fit treated as metrology. The interval is committed only when the buffer
+containing the actual skip is successfully queued. It never resets at a block,
+symbol or elapsed-time boundary. The initial recovery candidate used a half-logical-sample ceiling (superseded
+by the complete anchor certificate below); this is a tested impairment allowance, not a universal detector-loss
+bound. The recorded fixture removes 1,649 frames at 48 kHz and charges roughly
+70 microseconds of possible persistent displacement, within 81.7 microseconds
+at 6,120 logical samples/s. Another comparable interruption would exhaust this
+conservative cumulative bound and stop. Higher-bandwidth configurations can be
+ineligible even for the first interruption. Fractional-delay recovery and a
+better independently justified device-rate bound remain future work.
+
+A separate token bucket charges the entire affected bound: interruption,
+previous delivery, downstream queue/delay, timestamp uncertainty and both ramps.
+B is capped at min(100 ms,1% of symbol duration); at most 2 B can occur in any
+symbol-length interval. The bound must also be shorter than a symbol and six
+seconds. This is an operational damage limit, **not** a sensitivity guarantee
+for amplitude-varying private patterns. The recorded callback fixture charges
+91.0632 ms, not merely the 12.604 ms counter. Negative/ambiguous shifts, changed
+clock/queue geometry, insufficient unplayed suffix, overlapping interruptions,
+exhausted budget and final/drain events fail. No threshold, hypothesis, bit
+position, publication or physical-completion rule is changed. Source EOF and
+repair never count as observed absence.
+
+The application ring is now 750 ms instead of 250 ms. At 48 kHz stereo S16 this adds
+96,000 bytes; at 192 kHz it adds 384,000 bytes. Its delay remains compensated; it does
+not add 500 ms to the Audio error allowance. The existing 2000 ppm timestamp cone
+adds about 1 ms for 500 ms more lead. Callback quantum remains 512/48000, rather than
+increasing the driver's timing uncertainty. More prepared data tolerates source
+thread scheduling stalls; it does not guarantee sound-server/driver deadlines.
+Graceful stopping can have up to 500 ms more already-admitted PCM to finish.
+Immediate abort still destroys the stream without waiting for the ring to play.
+The new verbose fields distinguish submitted frames, discarded source addresses,
+repair count and affected bound; graph counter duration remains separate.
+
+The exact callback regression includes the recorded six-cycle/four-delivery
+failure, small callbacks splitting the transition, unchanged original UTC
+history, unsafe short symbols, backwards/changed clocks, repeated interruptions
+and an empty final callback. Paired finite-channel receptions cover DSSS
+Off/10/100/1000, production FHSS ramps, middle/final-bit interruptions, every
+stream, next-poll publication and scored absence. Conditional I/Q projection
+penalties are 0.0048–0.0695 dB for those particular signals and the stated channel.
+The additional ±half-logical-sample persistent-displacement fixtures measure up
+to 1.61 dB under the same explicit finite-channel interpolation model. These
+are deterministic calculations, not 90%/99% full-bank sensitivity estimates.
+Actual downstream missing/repeated DAC samples, rare false accepts, other devices,
+repeated real interruptions, ARM and broader qualification remain outstanding.
+
+
+## Counter-free presentation dates: confirmation before repair
+
+The later manual trace `datapump-verbose-1791810770262374091.jsonl` contains
+10.854313 ms and18.062712 ms date jumps with a full750 ms prepared ring, unchanged
+queue geometry and no independently reported xrun/skipped cycle. The preceding
+candidate rejected both immediately. Neither trace includes the failed raw clock
+pair, so these are not measurements of missing DAC samples.
+[SPA clock documentation](https://docs.pipewire.org/structspa__io__clock.html)
+explicitly permits jitter in `nsec`; [stream time](https://docs.pipewire.org/structpw__time.html)
+does not turn it into a hardware loss ledger.
+
+The native provider now quarantines a counter-free forward date and checks two
+later, advancing graph dates against the **same pre-event delivery anchor**.
+PCM remains sequential during confirmation. A persistent coherent displacement
+can use the shaped forward repair only if independently sampled callback
+`CLOCK_MONOTONIC` elapsed time supports it at onset and both later points.
+The supporting tolerance is2ms +2native samples +the original2000ppm elapsed
+clock allowance +clock-query bracketing. Queries taking over2ms cannot support
+a counter-free skip. This screens a provider-only timestamp step at ordinary
+callback cadence and a late callback that subsequently catches up; it does not
+prove downstream DAC sample loss. An excursion that returns to the original
+grid and remains there for two further dates changes no PCM. Both paths charge
+the entire uncertain interval and must pass the original UTC timeline before
+publishing recovery. No timestamps, counters, keys, epoch origins or receiver
+hypotheses are reset. A correlated provider/arrival error or downstream buffering
+can still differ from actual DAC presentation. The residual certificate below
+is conditional on the estimated presentation provider being valid; it is not a
+physical xrun diagnosis or an end-to-end hardware guarantee.
+
+Confirmation is bounded by the same100 ms/1%-of-symbol token policy. Reserve its
+remaining callbacks before admitting their PCM. The18.063 ms case at512/48k adds
+21.333 ms confirmation time and charges approximately96.104 ms affected duration.
+Short symbols, drifting or contradictory offsets, backward dates, changed queues,
+insufficient unplayed suffix, overlapping repairs and final/drain events remain
+ineligible. A transient event that cannot return and settle inside that budget
+still stops. A larger Audio error does not override these impairment constraints.
+
+The residual certificate now includes rate uncertainty from the preceding
+successful buffer and **all confirmation deliveries**, as well as skipped frames.
+For nominal gap g, total anchor-delivery count n, skipped count k and true seconds
+per native frame q, the increment is `g + n/Fnative - (n+k)*q`. The whole original
+inverse±2000 ppm envelope is propagated outward and never reset. The old34.355 ms
+fixture therefore needs approximately90 microseconds, rather than the incomplete
+70 microsecond certificate. The bounded impairment ceiling is now5/8 logical
+sample (102.124 microseconds at6120Hz). This modest relaxation is a waveform
+tradeoff, not a precision improvement. Repeated repairs can still exhaust it.
+
+The original96 paired finite-channel receptions and their assertions remain.
+An additional32 conditional I/Q projection cases use48kHz analytic waveform
+construction,1500Hz carrier, DSSS Off/10/100/1000, FHSS on/off, middle/final-bit
+interruptions and both±102.124 microsecond residual extrema. They include every
+later bit and measure1.0550–1.09486dB worst-phase loss. The48k construction avoids
+misattributing coarse6120Hz linear-interpolation attenuation to the production
+48k integer skip. These are finite-template matched-projection calculations,
+not a full-bank90%/99% detection curve, confidence interval, or universal loss
+bound. Subsequent source addresses stay original and physical completion remains
+fully scored absence; no EOF or recovery event substitutes for it.
+
+Verbose failure and recovery records now retain the previous/current graph dates,
+cycles, positions, flags, xrun values, rate estimates, queue/delay fields, anchor
+frame count, confirmation count and independent callback-arrival evidence.
+Formatting stays off the realtime callback; its clock reads allocate nothing.
+
+### Separate sustained-drift limitation
+
+The same trace contains a distinct protected stop at682.454 source seconds.
+The reported timing center moved to+10.378 ms while uncertainty stayed near14.21ms;
+the next-block-plus-stop bound reached25.002431ms against a25ms radius. The applied
+correction remained+0.0003ppm under the selected GPSDO model. Graph dates accrued
+10.551ms over688.704s, whereas the UTC/monotonic bridge varied by only396ns. This
+is not sample rounding or a system-clock step, but it also does not independently
+calibrate the DAC: the past rate interval still straddled zero.
+
+This recovery does not conceal sustained drift with repeated skips or enlarge
+clock coverage. A generic sound card cannot acquire an independently demonstrated
+sub-ppb discipline merely by selecting GPSDO. Longer operation can require a
+larger arrival allowance or actual audio-clock discipline; supporting broader
+continuous correction needs separate waveform-map and receiver validation. The
+successful786.518s default-timing transmission does not qualify tight UTC timing.
+
+In a genuinely calibrated controller, let `1+a` be physical UTC seconds per
+nominal DAC second and `1+c` be generated source seconds per nominal DAC second.
+Emitted source rate is `(1+c)/(1+a)`, so exact `c=a` would cancel device drift.
+The current conservative software cap and affine guard do not certify that
+inverse calibration. A replacement would need a bounded residual interval
+`[(1+c)/(1+aUpper)-1, (1+c)/(1+aLower)-1]` and a physical-UTC waveform-affinity
+bound. The trace's past interval[-18.939,+49.312]ppm leaves about±34.125ppm
+uncertainty even at its midpoint, versus the selected±0.0003ppm software domain.
+Simply removing the cap or restarting its reference would not establish the
+required receiver compatibility. Capture is also fixed-ratio: correcting only
+TX can remove shared-card ADC/DAC cancellation and expose ADC drift. A certified
+hardware-to-UTC controller and corresponding capture discipline remain separate
+work; the present change addresses bounded presentation interruptions.
