@@ -282,7 +282,7 @@ void continuous_guard() {
         "controller spent the one-block protected-stop reaction margin");
     require(protected_timing_action(.001,.002,.0003,3,.05,1e-6,.00291)==ProtectedTimingAction::abort,
         "infeasible protected tail was falsely promised after uncertainty increased");
-    for(const auto fs:{64U,6000U,48000U})for(const double initial:{-.0001,0.,.0001})for(const bool steering:{false,true}) {
+    for(const auto fs:{64U,6000U,48000U})for(const double initial:{-.00085,-.0001,0.,.0001,.00085})for(const bool steering:{false,true}) {
         Resampler resampler(fs,fs,true);resampler.initialize_timing(.375,initial);
         const auto origin=resampler.source_seconds();resampler.observe_affine_timing(origin,initial);
         ContinuousAffineTimingGuard guard(origin,initial,fs,fs,.01/fs);

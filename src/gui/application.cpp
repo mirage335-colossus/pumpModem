@@ -119,9 +119,9 @@ void Application::start() {
     if(launch.debug_live) {
         if(launch.simulation||launch.smoke)throw Error("Hardware debug cannot use Simulation/smoke");
         impl_->debug=std::make_unique<DebugLive>(launch.debug_timeout,std::cerr,
-            launch.settings && launch.settings->clock_sync && *launch.settings->clock_sync!="default");
+            launch.settings && launch.settings->clock_sync && *launch.settings->clock_sync!="default",launch.debug_bits);
         impl_->controller.toggle(ui::Field::live_duplex,true);
-        impl_->controller.edit(ui::Field::binary,"1");
+        impl_->controller.edit(ui::Field::binary,launch.debug_bits);
     }
     impl_->controller.start();impl_->bitmaps.update(impl_->controller);
     if(impl_->fast_selected()&&!launch.simulation&&!launch.smoke)impl_->fast_controller.set_selected(true);
@@ -609,7 +609,7 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
         std::vector<std::string> settings_arguments;
         for(int i=1;i<argc;++i) {
             const std::string arg=argv[i];
-            if(arg=="--help") {std::cout<<"Data Pump continuous console\n"<<frontend_label<<backend<<" (selected at build time)\nUsage: "<<program_name<<" [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nLink settings: --tx-dbm DBM --path-loss-db DB --noise-dbm-hz DBM/Hz\n  --oscillator ID --rf-oscillator ID --shift HZ (default 0) --search-margin N (default 3)\n  --clock-sync default|GPS_1ms-400ms_region-2564ms_offset\n  --audio-error default|TIME (total lag 0..+50ms per station by default)\n  --keyfile PATH --tx-key named|none --key-name NAME (all loaded entries remain RX keys)\n  --dsss-mode off|interleave --dsss-factor 1|10|100|1000 --dsss-version interleave|legacy (both peers must match)\n  --search-arithmetic default|fp32-min|fp64-force (experimental CPU policy; legacy IDs accepted)\n  --fhss off|fake-fcc|fake-eu|fake-list (legacy fake-0.4s-200 maps to fake-fcc)\n  --fhss-list '30MHz,30.006MHz' or --fhss-list-file PATH (2-200 Shift frequencies)\n  --live-duplex yes|no (default no; simultaneous hardware input/output)\n  --reference independent|shared-radio --lf-reference 0 (shared-radio shorthand)\n  --doppler VELOCITY (c, knots, mph, kph or %; default 0.000000c)\n  --carrier HZ is configured absolute; stream is Doppler-adjusted Carrier minus Shift (>0)\n  --target-snr DB-Hz --rate HZ --carrier HZ --dsp-workspace 25%|50%|75%\n  --auto-pattern or --pattern MODE; --bw is an alias for --rate\n  --target-snr sets preview, short and long targets; --short-target-snr / --long-target-snr override them\nHardware diagnostic: --debug [--debug-timeout 10..300] (default 120 seconds)\n  Sends one raw bit using a supplied synthetic named key through real GUI duplex audio;\n  JSON lines on stderr; closes on error/completion/deadline; never enables Simulation.\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
+            if(arg=="--help") {std::cout<<"Data Pump continuous console\n"<<frontend_label<<backend<<" (selected at build time)\nUsage: "<<program_name<<" [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nLink settings: --tx-dbm DBM --path-loss-db DB --noise-dbm-hz DBM/Hz\n  --oscillator ID --rf-oscillator ID --shift HZ (default 0) --search-margin N (default 3)\n  --clock-sync default|GPS_1ms-400ms_region-2564ms_offset\n  --audio-error default|TIME (total lag 0..+50ms per station by default)\n  --keyfile PATH --tx-key named|none --key-name NAME (all loaded entries remain RX keys)\n  --dsss-mode off|interleave --dsss-factor 1|10|100|1000 --dsss-version interleave|legacy (both peers must match)\n  --search-arithmetic default|fp32-min|fp64-force (experimental CPU policy; legacy IDs accepted)\n  --fhss off|fake-fcc|fake-eu|fake-list (legacy fake-0.4s-200 maps to fake-fcc)\n  --fhss-list '30MHz,30.006MHz' or --fhss-list-file PATH (2-200 Shift frequencies)\n  --live-duplex yes|no (default no; simultaneous hardware input/output)\n  --reference independent|shared-radio --lf-reference 0 (shared-radio shorthand)\n  --doppler VELOCITY (c, knots, mph, kph or %; default 0.000000c)\n  --carrier HZ is configured absolute; stream is Doppler-adjusted Carrier minus Shift (>0)\n  --target-snr DB-Hz --rate HZ --carrier HZ --dsp-workspace 25%|50%|75%\n  --auto-pattern or --pattern MODE; --bw is an alias for --rate\n  --target-snr sets preview, short and long targets; --short-target-snr / --long-target-snr override them\nHardware diagnostic: --debug [--debug-bits BITS] [--debug-timeout 10..300]\n  Sends 1..16 raw bits (default 1) using a supplied synthetic named key through real GUI duplex audio;\n  JSON lines on stderr; closes on error/completion/deadline; never enables Simulation.\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
             if(arg=="--version") {std::cout<<"Data Pump "<<DATAPUMP_VERSION<<' '<<frontend_label<<backend<<'\n';return 0;}
             if(arg=="--self-check") {self_check_requested=true;continue;}
             if(arg=="--color")launch.color=true;
@@ -617,6 +617,11 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
             else if(arg=="--simulation")launch.simulation=true;
             else if(arg=="--smoke-test")launch.smoke=true;
             else if(arg=="--debug"||arg=="--debug-live-duplex")launch.debug_live=true;
+            else if(arg=="--debug-bits"&&i+1<argc) {
+                launch.debug_bits=argv[++i];
+                if(launch.debug_bits.empty()||launch.debug_bits.size()>16||launch.debug_bits.find_first_not_of("01")!=std::string::npos)
+                    throw Error("Debug bits must contain 1..16 binary digits");
+            }
             else if(arg=="--debug-timeout"&&i+1<argc) {
                 const std::string value=argv[++i];std::size_t used=0;launch.debug_timeout=std::stod(value,&used);
                 if(used!=value.size()||!std::isfinite(launch.debug_timeout)||launch.debug_timeout<10||launch.debug_timeout>300)

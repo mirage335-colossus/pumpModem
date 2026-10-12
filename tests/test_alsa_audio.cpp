@@ -4,6 +4,7 @@
 #include "datapump/pattern_pulse.hpp"
 #include "alsa_stub.hpp"
 #include "../src/alsa_plugin_path.hpp"
+#include "../src/pulse_playback.hpp"
 #include <algorithm>
 #include <cerrno>
 #include <chrono>
@@ -18,6 +19,98 @@ namespace a=datapump::audio;
 namespace f=alsa_test;
 void check(bool value,const char* reason){if(!value)throw std::runtime_error(reason);}
 template<class F> void rejects(F action){try{action();}catch(const datapump::Error&){check(f::state.live==0,"leaked failed stream");return;}throw std::runtime_error("invalid audio accepted");}
+void native_pipewire_dated_observations() {
+    using namespace datapump::audio::detail;
+    // RT and control threads exchange a whole dated observation, not separately
+    // published fields. In particular validity must never precede its value.
+    struct Observation {std::uint64_t generation=0;std::array<std::uint64_t,24> fields{};bool valid=false;};
+    PipeWireMailbox<Observation> mailbox;
+    Observation initial{};
+    check(mailbox.load(initial) && !initial.valid,"unpublished RT latency became valid");
+    std::atomic<bool> done=false;
+    std::atomic<unsigned> published=0;
+    std::thread writer([&] {
+        for(std::uint64_t generation=1;generation<=100000;++generation) {
+            Observation value{};value.generation=generation;value.valid=true;
+            value.fields.fill(generation^0xdac0a17e83591246ULL);
+            if(mailbox.store(value))++published;
+        }
+        done.store(true,std::memory_order_release);
+    });
+    bool coherent=true;std::uint64_t previous=0;
+    do {
+        Observation value{};
+        if(!mailbox.load(value) || !value.valid)continue;
+        coherent&=value.generation>=previous;
+        for(const auto field:value.fields)coherent&=field==(value.generation^0xdac0a17e83591246ULL);
+        previous=value.generation;
+    } while(!done.load(std::memory_order_acquire));
+    writer.join();
+    check(coherent && published>0,"RT timing mailbox tore or reordered an observation");
+    for(const double cap:{0.,3e-10,1e-6,1e-4,.001})for(const double desired:{-.0009,-1e-6,0.,1e-6,.0009}) {
+        const auto applied=pipewire_search_safe_rate(desired,cap);
+        check(std::abs(applied)<=cap && applied==std::clamp(desired,-cap,cap),
+              "native fit injected correction outside receiver coverage");
+        // The existing hardware bound A plus the ENTIRE software correction C
+        // must fit A+C+AC; an independent fitted baseline must not be composed.
+        for(const double hardware:{-1e-8,1e-8})
+            check(std::abs((1.L+hardware)*(1.L+applied)-1)<=1e-8L+cap+1e-8L*cap+1e-18L,
+                  "native initial/runtime correction escaped original clock union");
+    }
+    rejects([]{(void)pipewire_search_safe_rate(0.,-.001);});
+    rejects([]{(void)pipewire_search_safe_rate(std::numeric_limits<double>::infinity(),.001);});
+    pwabi::Time time{};time.now=100000000000LL;time.rate={1,48000};
+    time.delay=960;time.queued=4800;time.buffered=240;
+    pwabi::Clock clock{};clock.nsec=time.now;clock.rate=time.rate;clock.duration=512;
+    clock.position=100;clock.cycle=100;
+    auto next=clock;++next.position;++next.cycle;
+    check(pipewire_same_clock(clock,next),"continuous graph cycle rejected");
+    for(unsigned field=0;field<7;++field){auto changed=next;
+        switch(field){case 0:++changed.id;break;case 1:++changed.rate.num;break;case 2:++changed.rate.denom;break;case 3:++changed.duration;break;case 4:++changed.xrun;break;case 5:changed.position=99;break;case 6:changed.cycle=99;break;}
+        check(!pipewire_same_clock(clock,changed),"mixed graph clocks qualified stationary baseline");
+    }
+    const long double epoch=1900000000.L;
+    const auto stamp=pipewire_presentation_stamp(48000,96000,time,clock,.0003,100.004L,100.006L,epoch);
+    check(std::abs(stamp.steady_seconds-100.125L)<1e-12L &&
+          std::abs(stamp.utc_seconds-(epoch+.120L))<1e-9L,
+          "PipeWire omitted queues or counted callback age twice");
+    check(stamp.frame==96000 && stamp.quality==a::TimingQuality::estimated &&
+          stamp.uncertainty_seconds>.014 && stamp.uncertainty_seconds<.015,
+          "PipeWire erased full quantum/codec/bracket/rate uncertainty");
+    auto shorter_clock=clock;shorter_clock.duration=256;
+    const auto shorter=pipewire_presentation_stamp(48000,96000,time,shorter_clock,.0003,100.004L,100.006L,epoch);
+    check(shorter.utc_seconds==stamp.utc_seconds &&
+          std::abs(stamp.uncertainty_seconds-shorter.uncertainty_seconds-256./48000)<1e-12,
+          "negotiated smaller quantum changed queue compensation or lost actual uncertainty");
+    // The request does not authorize assuming it was honored. An unchanged
+    // 512-frame graph must retain the preceding full radius.
+    check(std::string_view(pipewire_latency_request)=="512/48000" &&
+          pipewire_presentation_stamp(48000,96000,time,clock,.0003,100.004L,100.006L,epoch).uncertainty_seconds==stamp.uncertainty_seconds,
+          "latency negotiation hint silently narrowed an unchanged graph");
+    // A later callback for the SAME dated graph cycle produces the same event
+    // UTC when the two clocks progress together. No interpolated query-age bias.
+    const auto later=pipewire_presentation_stamp(48000,96000,time,clock,.0003,100.014L,100.016L,epoch+.010L);
+    check(std::abs(later.utc_seconds-stamp.utc_seconds)<1e-9L,
+          "PipeWire callback age changed frame presentation UTC");
+    time.rate={1,8000};clock.rate=time.rate;clock.duration=80;
+    time.delay=80;time.queued=80;time.buffered=0;
+    const auto low=pipewire_presentation_stamp(8000,800,time,clock,0,100.004L,100.006L,epoch);
+    check(low.uncertainty_seconds>=.014375,"true8k graph lost its codec allowance");
+    const auto fast_client=pipewire_presentation_stamp(48000,4800,time,clock,0,100.004L,100.006L,epoch);
+    check(fast_client.uncertainty_seconds>=.01427 && pipewire_shared_codec_floor>=.00325,
+          "48k client with8k graph erased shared codec uncertainty");
+    // App stream and graph clocks differ when PipeWire resamples. Use graph
+    // ticks for delay, app frames for queued/buffered; retain both correctly.
+    time.rate={1,48000};clock.rate=time.rate;clock.duration=512;time.delay=480;
+    const auto resampled=pipewire_presentation_stamp(8000,800,time,clock,0,100.004L,100.006L,epoch);
+    check(std::abs(resampled.steady_seconds-100.020L)<1e-12L,
+          "PipeWire mixed graph/stream units during rate conversion");
+    const auto bad=[&](auto mutate){auto t=time;auto c=clock;mutate(t,c);rejects([&]{(void)pipewire_presentation_stamp(8000,800,t,c,0,100.004L,100.006L,epoch);});};
+    bad([](auto&,auto& c){++c.nsec;});bad([](auto& t,auto&){t.rate.denom=0;});
+    bad([](auto& t,auto&){t.queued=UINT64_MAX;t.buffered=1;});
+    bad([](auto& t,auto& c){t.now-=1000000000;c.nsec=t.now;});
+    rejects([&]{(void)pipewire_presentation_stamp(8000,800,time,clock,0,100.006L,100.004L,epoch);});
+}
 void native_audio_error_model() {
     // A one-second reported capture queue changes the time origin, not the
     // residual uncertainty. Buffer capacity likewise is not timestamp jitter.
@@ -1930,12 +2023,13 @@ void audio_options() {
           "shared capture did not keep its own route after exclusive access was busy");
 }
 int main(int argc,char** argv){try{
+    if(argc==2 && std::string(argv[1])=="--pipewire") {native_pipewire_dated_observations();std::cout<<"Native PipeWire dated observations passed\n";return 0;}
     if(argc==2 && std::string(argv[1])=="--live-debug") {native_source_endpoint_contract();shared_server_timing_fallback();native_prepared_positive_pointer();native_prepared_delay_readiness();return 0;}
     if(argc==2 && std::string(argv[1])=="--absolute-rate") {native_absolute_clock_not_steering_limit();return 0;}
     if(argc==2 && std::string(argv[1])=="--headroom") {native_protected_period_reserve();return 0;}
     if(argc==2 && std::string(argv[1])=="--native-frontier") {native_playback_frontiers();return 0;}
     if(argc==2 && std::string(argv[1])=="--utc-runtime") {
-        native_source_endpoint_contract();shared_server_timing_fallback();native_prepared_positive_pointer();native_absolute_clock_not_steering_limit();native_running_pointer_intervals();native_slow_query_recovers();native_playback_frontiers();native_audio_error_model();native_period_refinement();native_protected_period_reserve();
+        native_pipewire_dated_observations();native_source_endpoint_contract();shared_server_timing_fallback();native_prepared_positive_pointer();native_absolute_clock_not_steering_limit();native_running_pointer_intervals();native_slow_query_recovers();native_playback_frontiers();native_audio_error_model();native_period_refinement();native_protected_period_reserve();
         bounded_clock_provider();protected_timing_playback();native_queued_dsss_playback(true);
         std::cout<<"Native runtime UTC timing passed\n";return 0;
     }
@@ -2051,6 +2145,7 @@ int main(int argc,char** argv){try{
     rejects([&]{a::capture(96000,"default",[&](std::span<const float> values){check(values.size()<=4096,"capture resampling exceeded bounded callback size");capture_cancel.request_stop();return false;},capture_cancel.get_token());});
     capture_discontinuities();
     native_period_refinement();native_protected_period_reserve();
+    native_pipewire_dated_observations();
     native_audio_error_model();
     stricter_caller_timing_allowance();
     visible_timing_fallback();

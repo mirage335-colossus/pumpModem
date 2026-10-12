@@ -1,5 +1,6 @@
 #include "datapump/live.hpp"
 #include "../src/signal_view.hpp"
+#include "../src/live_scheduling.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -13,6 +14,26 @@ using namespace datapump;
 using namespace std::chrono_literals;
 namespace {
 void check(bool value,const char* message) { if(!value)throw Error(message); }
+void decoder_cpu_headroom() {
+    using live::detail::CpuCore;
+    using live::detail::decoder_cpu_subset;
+    std::vector<CpuCore> topology;
+    for (int cpu=0;cpu<12;++cpu) topology.push_back({cpu,0,cpu/2});
+    check(decoder_cpu_subset(topology)==std::vector<int>({0,1,2,3,4,5,6,7,8,9}),
+          "audio headroom must exclude both SMT siblings of one physical core");
+    topology={{1,0,0},{4,0,1},{8,1,0},{11,1,1},{15,2,0},{20,2,1}};
+    check(decoder_cpu_subset(topology)==std::vector<int>({1,4,8,11,15}),
+          "sparse affinity and repeated core IDs across packages must retain their identity");
+    topology.pop_back();
+    check(decoder_cpu_subset(topology).empty(),"small CPU domains must retain ordinary affinity");
+    topology.push_back({11,1,-1});
+    check(decoder_cpu_subset(topology).empty(),"unknown topology must not fabricate a reserved core");
+    topology.back()={1,1,1};
+    check(decoder_cpu_subset(topology).empty(),"duplicate CPU topology must be rejected");
+    topology={{0,0,0},{1,0,1},{2,0,2},{3,0,3}};
+    check(decoder_cpu_subset(topology).empty(),"audio headroom must not sacrifice a large fraction of automatic workers");
+    check(decoder_cpu_subset({}).empty(),"missing topology must retain ordinary affinity");
+}
 template<class Action> void rejects(Action action,const char* message) {
     try { action(); } catch(const Error&) { return; }
     throw Error(message);
@@ -324,6 +345,7 @@ void reconfiguration_discards_cancelled_work() {
 }
 int main(int argc,char** argv) {
     const std::pair<const char*,void(*)()> tests[]{
+        {"decoder CPU headroom",decoder_cpu_headroom},
         {"idle workspace and plots",idle_workspace_and_plots},
         {"startup spectrum reference survives replay",startup_spectrum_reference_survives_replay},
         {"default workspace admits long key banks",default_workspace_admits_long_key_banks},

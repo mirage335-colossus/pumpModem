@@ -15,7 +15,11 @@ namespace datapump::gui {
 class DebugLive {
 public:
     enum class Action { wait, transmit, close };
-    explicit DebugLive(double timeout,std::ostream& log,bool require_utc=false):timeout_(timeout),log_(log),require_utc_(require_utc) {}
+    explicit DebugLive(double timeout,std::ostream& log,bool require_utc=false,std::string bits="1"):
+        timeout_(timeout),log_(log),expected_(std::move(bits)),require_utc_(require_utc) {
+        if(expected_.empty() || expected_.size()>16 || expected_.find_first_not_of("01")!=std::string::npos)
+            throw Error("Debug bits must contain 1..16 binary digits");
+    }
     int result() const {return fallback_received_?2:passed_?0:1;}
     Action step(double elapsed,const live::Snapshot& s,const Signals& signals,bool ready,bool keyed,const std::string& status={}) {
         if(done_)return Action::close;
@@ -25,11 +29,19 @@ public:
                 <<",\"text\":\""<<json_escape(last_status_)<<"\"}\n"<<std::flush;
         }
         bool complete=false,unexpected=false;
+        // A stronger hypothesis may supersede a wrong admission within the
+        // same GUI poll. Inspect delivered updates before bounded row retention
+        // hides that evidence; this diagnostic does not alter receiver policy.
+        for(const auto& update:s.signals) {
+            const auto& bits=update.raw_bits.empty()&&update.binary?update.text:update.raw_bits;
+            if(update.received_bits && (bits.size()!=update.received_bits || !expected_.starts_with(bits) ||
+               update.missing_symbols || (update.complete && bits!=expected_)))unexpected=true;
+        }
         for(const auto& line:signals.lines()) {
             const auto bits=line.raw_bits.empty()&&line.binary?line.text:line.raw_bits;
             if(line.received_bits) {
-                if(requested_ && !preexisting_.contains(line.id) && line.complete && line.received_bits==1 && bits=="1" && !line.missing_symbols)complete=true;
-                if(line.received_bits!=1 || bits!="1" || line.missing_symbols)unexpected=true;
+                if(requested_ && !preexisting_.contains(line.id) && line.complete && line.received_bits==expected_.size() && bits==expected_ && !line.missing_symbols)complete=true;
+                if(bits.size()!=line.received_bits || !expected_.starts_with(bits) || line.missing_symbols || (line.complete && bits!=expected_))unexpected=true;
             }
             const auto identity=std::tuple{line.revision,line.received_bits,line.complete,line.missing_symbols};
             if(!rows_.contains(line.id)||rows_.at(line.id)!=identity) {
@@ -37,7 +49,7 @@ public:
                 std::osyncstream(log_)<<"{\"event\":\"stream\",\"seconds\":"<<elapsed<<",\"id\":"<<line.id
                     <<",\"revision\":"<<line.revision<<",\"bits\":"<<line.received_bits
                     <<",\"complete\":"<<line.complete<<",\"missing\":"<<line.missing_symbols
-                    <<",\"expected_prefix\":"<<(bits=="1")<<"}\n"<<std::flush;
+                    <<",\"expected_prefix\":"<<expected_.starts_with(bits)<<"}\n"<<std::flush;
             }
         }
         // State follows the GUI's bounded retained identities, not an unbounded
@@ -46,6 +58,9 @@ public:
             if(std::none_of(signals.lines().begin(),signals.lines().end(),[&](const auto& line){return line.id==it->first;}))it=rows_.erase(it);
             else ++it;
         }
+        // A wrong admission remains evidence even after bounded GUI retention
+        // evicts its row. Later correct reception must not turn that run green.
+        unexpected_seen_|=unexpected;
         if(elapsed>=next_log_ || s.error!=last_error_ || s.transmission_failed || s.transmission_stopping) {
             next_log_=elapsed+1;last_error_=s.error;
             std::osyncstream(log_)<<"{\"event\":\"live\",\"seconds\":"<<elapsed<<",\"tx\":"<<s.transmitting
@@ -57,6 +72,7 @@ public:
                 <<",\"rx_timed\":"<<s.clock_window_modeled<<",\"fallback\":"<<s.clock_timing_fallback
                 <<",\"tx_timed\":"<<s.transmit_clock_following<<",\"streams\":"<<signals.lines().size()
                 <<",\"complete_match\":"<<complete<<",\"unexpected_bits\":"<<unexpected
+                <<",\"unexpected_seen\":"<<unexpected_seen_
                 <<",\"timing\":\""<<json_escape(s.clock_timing_status)<<"\",\"error\":\""<<json_escape(s.error)<<"\"}\n"<<std::flush;
         }
         if(s.simulation)return finish(elapsed,"refused simulation",false);
@@ -78,10 +94,10 @@ public:
         if(started_ && !s.transmitting && s.transmission_finished && complete) {
             if(!settled_)settled_=elapsed;
             if(elapsed-*settled_>=2) {
-                fallback_received_=require_utc_&&!utc_seen_&&capture_advanced_&&!unexpected&&!s.transmission_cancelled;
+                fallback_received_=require_utc_&&!utc_seen_&&capture_advanced_&&!unexpected_seen_&&!s.transmission_cancelled;
                 return finish(elapsed,require_utc_&&!utc_seen_?
                 "hardware duplex received; requested UTC playback untested after fallback":"hardware duplex reception",
-                capture_advanced_&&!unexpected&&!s.transmission_cancelled&&(!require_utc_||utc_seen_));
+                capture_advanced_&&!unexpected_seen_&&!s.transmission_cancelled&&(!require_utc_||utc_seen_));
             }
         }
         return Action::wait;
@@ -97,9 +113,9 @@ private:
     std::set<std::uint64_t> preexisting_; // Bounded snapshot at the single TX request.
     double timeout_,next_log_=0;
     std::ostream& log_;
-    std::string last_error_,last_status_;
+    std::string last_error_,last_status_,expected_;
     bool require_utc_=false,utc_seen_=false,fallback_received_=false;
-    bool requested_=false,started_=false,capture_advanced_=false,done_=false,passed_=false;
+    bool requested_=false,started_=false,capture_advanced_=false,done_=false,passed_=false,unexpected_seen_=false;
     std::optional<double> settled_;
     std::uint64_t initial_id_=0,start_samples_=0;
 };

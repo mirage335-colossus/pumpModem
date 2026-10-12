@@ -71,6 +71,48 @@ void growing_pool() {
     }
 }
 
+void submitting_cpu_domain() {
+#if defined(__linux__)
+    cpu_set_t original;
+    if (sched_getaffinity(0,sizeof(original),&original)!=0 || CPU_COUNT(&original)<4) return;
+    struct Restore {
+        cpu_set_t original;
+        ~Restore() { (void)sched_setaffinity(0,sizeof(original),&original); }
+    } restore{original};
+    std::vector<int> cpus;
+    for (int cpu=0;cpu<CPU_SETSIZE;++cpu) if(CPU_ISSET(cpu,&original)) cpus.push_back(cpu);
+    // growing_pool() has already created persistent workers with a broad mask.
+    // Reuse them under two different narrower masks, then the original domain.
+    for (unsigned pass=0;pass<4;++pass) {
+        cpu_set_t selected=original;
+        if(pass<3) {
+            CPU_ZERO(&selected);
+            const auto start=pass==1?cpus.size()-3:0;
+            for(std::size_t i=start;i<start+3;++i) CPU_SET(cpus[i],&selected);
+        }
+        check(sched_setaffinity(0,sizeof(selected),&selected)==0,"test caller affinity failed");
+        Rendezvous rendezvous(3);
+        std::vector<std::atomic<unsigned>> visits(113);
+        bool threw=false;
+        try {
+            parallel_search(visits.size(),3,[&](auto,auto index) {
+                cpu_set_t actual;
+                check(sched_getaffinity(0,sizeof(actual),&actual)==0 && CPU_EQUAL(&actual,&selected),
+                      "pre-existing workers must follow each submitting CPU domain");
+                if(index<3) rendezvous.arrive();
+                ++visits[index];
+                if(pass==1 && index==17) throw std::runtime_error("domain exception");
+            });
+        } catch(const std::runtime_error& error) {
+            if(std::string(error.what())!="domain exception") throw;
+            threw=true;
+        }
+        check(threw==(pass==1),"CPU-domain test lost its expected exception");
+        for(const auto& count:visits) check(count==1,"CPU-domain changes must retain every search index");
+    }
+#endif
+}
+
 void coverage_and_reuse() {
     const auto concurrency = search_concurrency(4);
     std::vector<std::thread::id> first(concurrency), second(concurrency);
@@ -306,6 +348,7 @@ int main() {
     try {
         concurrency_defaults();
         growing_pool();
+        submitting_cpu_domain();
         coverage_and_reuse();
         exceptions_join_and_reuse();
         large_logical_ranges();

@@ -66,11 +66,13 @@ struct Options {
     // actual lag to [0,A]. This never advances the logical source coordinate.
     double presentation_lag_seconds=0;
     double maximum_timing_slew_per_second=1e-5;
-    // Zero requests timestamped scheduling only. A nonzero domain bounds BOTH
-    // software correction and the independently admitted stationary device
-    // clock, with corresponding receiver coverage. EstimatedDeviceTiming uses
-    // that assumption during preparation and protected stopping; it is not a
-    // claim that noisy native timestamps measure the rate this accurately.
+    // Zero requests timestamped scheduling only. A nonzero domain bounds the
+    // entire software source-rate correction admitted by the receiver bank.
+    // Native PipeWire estimates an initial correction during public silence,
+    // clipping it and every subsequent correction to this absolute domain.
+    // The original affine baseline never resets. A noisy fit must not inject
+    // an uncovered device-clock error; hardware still must match its model.
+    // Neither fit nor EstimatedDeviceTiming is GPSDO metrology.
     double maximum_timing_rate_correction=0;
     // Maximum remaining logical duration after a protected stop. Independent
     // of final message/noise length. The backend adds prefetch/filter/queue

@@ -89,6 +89,12 @@ public:
         ensure_workers(concurrency - 1);
         {
             std::lock_guard lock(state_mutex_);
+#if defined(__linux__)
+            // Persistent workers may predate a Live decoder's audio headroom
+            // policy. Follow this submission's CPU domain, including a later
+            // broader non-Live submission; never change its search coverage.
+            batch_affinity_valid_ = sched_getaffinity(0, sizeof(batch_affinity_), &batch_affinity_) == 0;
+#endif
             work_ = &work;
             count_ = count;
             grain_ = grain;
@@ -122,6 +128,10 @@ private:
     }
 
     void worker_loop(std::size_t slot, std::size_t generation) {
+#if defined(__linux__)
+        cpu_set_t affinity;
+        bool affinity_valid = sched_getaffinity(0, sizeof(affinity), &affinity) == 0;
+#endif
         for (;;) {
             {
                 std::unique_lock lock(state_mutex_);
@@ -130,7 +140,17 @@ private:
                 generation = generation_;
                 if (slot >= concurrency_) continue;
             }
-            execute(slot);
+            bool eligible = true;
+#if defined(__linux__)
+            if (batch_affinity_valid_ && (!affinity_valid || !CPU_EQUAL(&affinity, &batch_affinity_))) {
+                eligible = sched_setaffinity(0, sizeof(batch_affinity_), &batch_affinity_) == 0;
+                if (eligible) { affinity = batch_affinity_; affinity_valid = true; }
+                else affinity_valid = false;
+            }
+#endif
+            // If this worker cannot enter the caller's domain, the caller and
+            // remaining workers drain every index. No hypotheses are omitted.
+            if (eligible) execute(slot);
             {
                 std::lock_guard lock(state_mutex_);
                 if (--remaining_ == 0) finished_.notify_one();
@@ -178,6 +198,10 @@ private:
     std::exception_ptr error_;
     std::size_t error_index_ = 0;
     bool stopping_ = false;
+#if defined(__linux__)
+    cpu_set_t batch_affinity_{};
+    bool batch_affinity_valid_ = false;
+#endif
 };
 
 } // namespace

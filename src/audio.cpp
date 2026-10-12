@@ -21,6 +21,7 @@
 #include <mmsystem.h>
 #else
 #include "alsa_plugin_path.hpp"
+#include "pulse_playback.hpp"
 #include <dlfcn.h>
 #include <mutex>
 #endif
@@ -542,6 +543,7 @@ class AlsaTimeline {
     long double latest_frame_=0;
     double allowance_=0,variable_allowance_=0,shared_allowance_=0;
     bool playback_=false;
+    detail::PipeWirePlayback* graph_=nullptr;
     bool observed_delay_=false;
     const Options* options_=nullptr;
     bool diagnostic_=false;
@@ -550,11 +552,16 @@ class AlsaTimeline {
     long first_delay_=0;
     std::uint64_t first_accepted_=0;
 public:
-    AlsaTimeline(Alsa& api,Stream& stream,const Options* options,bool playback=false):api_(api),stream_(stream),
-        timeline_(stream.hardware_rate),playback_(playback),options_(options) {
+    AlsaTimeline(Alsa& api,Stream& stream,const Options* options,bool playback=false,detail::PipeWirePlayback* graph=nullptr):api_(api),stream_(stream),
+        timeline_(stream.hardware_rate),playback_(playback),graph_(graph),options_(options) {
         const auto trace=std::getenv("DATAPUMP_AUDIO_TIMING_TRACE");
         diagnostic_=trace && std::string_view(trace)=="1";
         if(options_ && options_->frame_timestamp)return;
+        if(graph_) {
+            allowance_=shared_allowance_=detail::pipewire_shared_codec_floor+1./stream.hardware_rate;
+            timeline_=UtcTimeline(stream.hardware_rate,.001,UtcTimeline::Prediction::timestamp_intersection,shared_allowance_,true);
+            return;
+        }
         unsigned long buffer=0,period=0;
         if(!api.delay || !api.get_params || api.get_params(stream.pcm,&buffer,&period)<0 ||
            !buffer || !period || period>buffer)
@@ -580,12 +587,13 @@ public:
             shared_allowance_,playback_);
     }
     bool native_playback() const {return playback_ && options_ && !options_->frame_timestamp;}
-    void diagnostic(long double output_frame,long double source_seconds,const TimePrediction& p,double error) {
+    void diagnostic(long double output_frame,long double source_seconds,const TimePrediction& p,double error,double actual_rate,double initial_rate) {
         if(!diagnostic_ || !native_playback() || source_seconds<next_diagnostic_)return;
         next_diagnostic_=static_cast<double>(source_seconds)+1;
         const auto interval=rate_.interval();
         std::osyncstream(std::cerr)<<std::setprecision(12)<<"{\"event\":\"audio_timing\",\"source_seconds\":"
             <<source_seconds<<",\"center_ms\":"<<error*1000<<",\"radius_ms\":"<<p.uncertainty_seconds*1000
+            <<",\"correction_ppm\":"<<actual_rate*1e6<<",\"initial_correction_ppm\":"<<initial_rate*1e6
             <<",\"period_ms\":"<<variable_allowance_*1000<<",\"ahead_ms\":"<<(output_frame-latest_frame_)*1000/stream_.hardware_rate
             <<",\"rate_low_ppm\":"<<(interval?interval->lower*1e6:0)<<",\"rate_high_ppm\":"<<(interval?interval->upper*1e6:0)
             <<",\"rate_duration\":"<<(interval?interval->duration_seconds:0)<<",\"first_pcm_state\":"<<first_state_
@@ -633,6 +641,10 @@ public:
     }
     void observe(std::uint64_t frames,bool capture,std::stop_token stop) {
         check_cancelled(stop);
+        if(graph_) {
+            const auto value=graph_->timestamp();variable_allowance_=graph_->period_seconds();
+            observe_timestamp(value);return;
+        }
         if(options_ && options_->frame_timestamp) {
             const auto value=options_->frame_timestamp(frames,capture);
             check_cancelled(stop);
@@ -720,21 +732,37 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
     if(!next_samples)throw Error("playback callback is required");
     const bool timed=options && options->follow_system_clock;
     Alsa api; Stream stream(api,device,0,rate,stop,timed,options);
+    std::unique_ptr<detail::PipeWirePlayback> graph;
+#ifndef DATAPUMP_ALSA_STUB
+    if(timed && !options->frame_timestamp && shared_server_endpoint(stream.endpoint)) {
+        try {
+            const auto target=detail::local_pipewire_sink(stop);
+            if(rate>192000)throw Error("logical passband exceeds native shared-server timing support");
+            const auto native_rate=rate<=48000?48000u:rate<=96000?96000u:192000u;
+            graph=std::make_unique<detail::PipeWirePlayback>(native_rate,target,stop);
+            api.close(stream.pcm);stream.pcm=nullptr;
+            stream.hardware_rate=native_rate;stream.channels=graph->channels();
+        }catch(const Error& e){throw TimingPreflightUnavailable(std::numeric_limits<double>::infinity(),
+            std::string("Native shared-server UTC unavailable: ")+e.what()+"; ordinary playback; peer arrival timing unqualified");}
+    }
+#endif
+    const auto write=[&](const void* data,unsigned long count){return graph?graph->write(data,count):api.write(stream.pcm,data,count);};
+    const auto wait=[&](int ms){return graph?graph->wait(ms):api.wait(stream.pcm,ms);};
+    const auto drop=[&]{if(graph){graph->reset_silence();return 0;}return api.drop(stream.pcm);};
+    const auto prepare=[&]{return graph?0:api.prepare(stream.pcm);};
     detail::UtcPlaybackScope timing_scope(timed);
     std::unique_ptr<AlsaTimeline> timing;
     if(timed) {
-        // The ALSA shared-server plugins expose an interpolated latency model,
-        // not a bounded DAC presentation timestamp. Real duplex traces include
-        // corrections outside the generic period/rate envelope. Do not qualify
-        // that model then abort private output seconds later. Decline BEFORE
-        // source scheduling; ordinary playback is the existing visible fallback.
-        // An explicit timestamp provider retains its own tested contract.
-        if(!options->frame_timestamp && shared_server_endpoint(stream.endpoint))
+        // ALSA shared-server latency interpolation is unsuitable for this
+        // timing model. A native dated PipeWire graph clock can replace it on
+        // a verified local default route; unsupported routes decline BEFORE
+        // private scheduling. Explicit providers retain their tested contract.
+        if(!graph && !options->frame_timestamp && shared_server_endpoint(stream.endpoint))
             throw TimingPreflightUnavailable(std::numeric_limits<double>::infinity(),
                 "Shared audio server ("+stream.endpoint+") has no qualified UTC presentation clock; ordinary playback; peer arrival timing unqualified");
         if(rate>stream.hardware_rate)throw TimingPreflightUnavailable(
             std::numeric_limits<double>::infinity(),"UTC playback requires a hardware rate at least the logical rate");
-        try {timing=std::make_unique<AlsaTimeline>(api,stream,options,true);}
+        try {timing=std::make_unique<AlsaTimeline>(api,stream,options,true,graph.get());}
         catch(const Error& e) {throw TimingPreflightUnavailable(std::numeric_limits<double>::infinity(),e.what());}
         // This known lower allowance cannot improve with rate calibration.
         // Reject impossible geometry before silence preparation or scheduling.
@@ -756,7 +784,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
     // A provider model may tighten the caller's allowance, never enlarge it.
     const auto timing_error=timed?std::min(options->maximum_utc_error_seconds,
         estimated?options->estimated_timing->maximum_utc_error_seconds:options->maximum_utc_error_seconds):0.;
-    if(estimated && (!api.drop || !api.prepare))throw TimingPreflightUnavailable(
+    if(estimated && !graph && (!api.drop || !api.prepare))throw TimingPreflightUnavailable(
         timing->allowance(),"audio provider cannot restart silence-only UTC preparation");
     const bool preflight=timed && static_cast<bool>(options->timing_status);
     bool reported=false;
@@ -765,11 +793,11 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
     const auto report=[&] {
         if(preflight) {
             options->timing_status({true,timing_error,qualified_uncertainty,
-                options->frame_timestamp?"UTC provider preflight accepted":"Estimated UTC model accepted; hardware/radio timing remains assumed"});
+                options->frame_timestamp?"UTC provider preflight accepted":graph?"Native PipeWire UTC adjustment active; estimated hardware timing":"Estimated UTC model accepted; hardware/radio timing remains assumed"});
         }
         reported=true;
         report_format(rate,stream.hardware_rate,source.workspace_bytes()+block.capacity()*sizeof(std::int16_t)+samples.capacity()*sizeof(float)+
-            (timed?sizeof(AlsaTimeline):0),on_format,timed && (estimated || !options->frame_timestamp),
+            (timed?sizeof(AlsaTimeline):0)+(graph?graph->workspace_bytes():0),on_format,timed && (estimated || !options->frame_timestamp),
             preflight?qualified_uncertainty:timed?timing->allowance():0,timed,
             preflight?qualified_quality:TimingQuality::unavailable);
     };
@@ -786,7 +814,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
         auto uncertainty=timing->timeline().predict(accepted).uncertainty_seconds;
         if(timing->native_playback()) {
             const auto horizon=(options->timing_stop_duration_seconds+.1+
-                source.converter().source_lookahead_seconds())/(1-options->maximum_timing_rate_correction);
+                source.converter().source_lookahead_seconds())/(1-(graph?.001:options->maximum_timing_rate_correction));
             const auto frontier=accepted+std::ceil(horizon*stream.hardware_rate);
             uncertainty=std::max({uncertainty,timing->timeline().predict(frontier).uncertainty_seconds,
                 timing->timeline().predict_without_history(frontier).uncertainty_seconds});
@@ -808,9 +836,22 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
             auto model=*options->estimated_timing;model.maximum_utc_error_seconds=timing_error;
             const auto uncertainty=preparation_uncertainty();
             qualified_uncertainty=uncertainty;
-            try {prepared_rate=model.initial_correction(timing->rate_interval(),
-                options->timing_stop_duration_seconds+.1+source.converter().source_lookahead_seconds(),uncertainty,
-                options->maximum_timing_rate_correction);}
+            try {
+                if(graph) {
+                    // A stationary rate estimate before private admission. It is
+                    // NOT an independent DAC calibration: the complete installed
+                    // correction stays inside the receiver-covered domain.
+                    const auto measured=timing->rate_interval();
+                    if(measured && measured->duration_seconds>=4) {
+                        const auto b=timing->timeline().predict(accepted).seconds_per_frame*stream.hardware_rate-1;
+                        if(!std::isfinite(b) || std::abs(b)>.0009)throw Error("native PipeWire device rate outside compensation range");
+                        if(uncertainty+model.variable_timestamp_error_seconds>=timing_error)throw Error("native PipeWire stop horizon exceeds Audio error");
+                        prepared_rate=detail::pipewire_search_safe_rate(b,options->maximum_timing_rate_correction);
+                    }
+                }else prepared_rate=model.initial_correction(timing->rate_interval(),
+                    options->timing_stop_duration_seconds+.1+source.converter().source_lookahead_seconds(),uncertainty,
+                    options->maximum_timing_rate_correction);
+            }
             catch(const Error& e) {throw TimingPreflightUnavailable(uncertainty,e.what());}
             if(prepared_rate) {
                 // Calibration contains only silence. Stop it before invoking
@@ -818,16 +859,16 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                 // that callback can underrun the already running device.
                 // Retain only the mean RATE under the stationary-device model.
                 // The actual transmission gets a new position/UTC timeline.
-                if(api.drop(stream.pcm)<0)throw Error("audio UTC preparation stop failed");
+                if(drop()<0)throw Error("audio UTC preparation stop failed");
                 check_cancelled(stop);
                 accepted=0;
-                timing=std::make_unique<AlsaTimeline>(api,stream,options,true);
+                timing=std::make_unique<AlsaTimeline>(api,stream,options,true,graph.get());
                 // The source callback schedules a fresh future epoch only
                 // after calibration. No private samples have been requested.
                 report();
                 if(!detail::utc_playback_epoch)throw Error("UTC playback requires a scheduled source epoch");
                 check_cancelled(stop);
-                if(api.prepare(stream.pcm)<0)throw Error("audio UTC preparation restart failed");
+                if(prepare()<0)throw Error("audio UTC preparation restart failed");
             }
         }
         if(preflight && !estimated && !reported && timing->timeline().ready()) {
@@ -848,15 +889,15 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                 if(!api.drop || !api.prepare)throw TimingPreflightUnavailable(predicted.uncertainty_seconds,
                     "audio provider cannot stop silence before source scheduling");
                 qualified_uncertainty=uncertainty;qualified_quality=predicted.quality;
-                if(api.drop(stream.pcm)<0)throw Error("audio UTC preflight stop failed");
+                if(drop()<0)throw Error("audio UTC preflight stop failed");
                 check_cancelled(stop);accepted=0;
-                timing=std::make_unique<AlsaTimeline>(api,stream,options,true);
+                timing=std::make_unique<AlsaTimeline>(api,stream,options,true,graph.get());
                 // Source construction may be slow. Keep the DAC stopped until
                 // its callback has selected a fresh epoch, as in preparation.
                 report();
                 if(!detail::utc_playback_epoch)throw Error("UTC playback requires a scheduled source epoch");
                 check_cancelled(stop);
-                if(api.prepare(stream.pcm)<0)throw Error("audio UTC preflight restart failed");
+                if(prepare()<0)throw Error("audio UTC preflight restart failed");
             }
         }
         if(timed && detail::utc_playback_epoch && !source_started && std::chrono::duration<long double>(
@@ -886,11 +927,9 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                     auto fraction=static_cast<double>((start-epoch)*rate);
                     if(fraction<0 && fraction>=-rounding*rate*predicted.seconds_per_frame)fraction=0;
                     if(fraction<0 || fraction>=1)throw Error("UTC scheduled start was missed before source generation");
-                    // Initial rate can be installed before the first source
-                    // sample, avoiding a hours-long convergence ramp. A caller
-                    // enabling it must also cover the entire correction domain
-                    // in its receive policy. Native estimated clocks fail this
-                    // gate and cannot silently steer the waveform.
+                    // Install the bounded initial correction before the first
+                    // private sample; subsequent corrections keep the original
+                    // affine reference, absolute rate cap and waveform warp bound.
                     double initial_rate=0;
                     if(estimated)initial_rate=*prepared_rate;
                     else if(options->maximum_timing_rate_correction>0) {
@@ -908,6 +947,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                         affine_timing.emplace(origin,initial_rate,rate,stream.hardware_rate,.01/rate);
                         source.converter().observe_affine_timing(origin,initial_rate);
                     }
+                    if(graph)graph->private_started();
                     source_started=true;
                 }
             }
@@ -926,14 +966,16 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                    (at_source.quality!=TimingQuality::bounded ||
                     at_source.rate_uncertainty_fraction>options->maximum_timing_rate_correction/4))
                     throw Error("audio UTC rate estimate is not precise enough for waveform correction");
-                const auto corrected=timing->correction(at_source,accepted+leading,epoch+source.converter().source_seconds(),
-                    timing_error,options->maximum_timing_rate_correction,source.converter().rate_correction(),"current source");
-                timing->diagnostic(accepted+leading,source.converter().source_seconds(),at_source,corrected.error_seconds);
+                auto corrected=timing->correction(at_source,accepted+leading,epoch+source.converter().source_seconds(),
+                    timing_error,graph?.001:options->maximum_timing_rate_correction,source.converter().rate_correction(),"current source");
+                if(graph)corrected.rate_fraction=detail::pipewire_search_safe_rate(
+                    corrected.rate_fraction,options->maximum_timing_rate_correction);
+                timing->diagnostic(accepted+leading,source.converter().source_seconds(),at_source,corrected.error_seconds,source.converter().rate_correction(),reference_rate);
                 // Protect enough FUTURE media for pulse tails, useful cover,
                 // converter lookahead and one source/output block. Known queued
                 // output is already included by predict(accepted+leading).
                 const auto stop_horizon=(options->timing_stop_duration_seconds+.05+
-                    source.converter().source_lookahead_seconds())/(1-options->maximum_timing_rate_correction);
+                    source.converter().source_lookahead_seconds())/(1-(graph?.001:options->maximum_timing_rate_correction));
                 const auto mean=at_source.seconds_per_frame*stream.hardware_rate-1;
                 auto lower=mean-at_source.rate_uncertainty_fraction,upper=mean+at_source.rate_uncertainty_fraction;
                 if(options->maximum_timing_rate_correction>0 && !timing->native_playback()) {
@@ -988,7 +1030,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                         const auto remaining=std::max(0.L,static_cast<long double>(*end)/rate-
                             source.converter().source_seconds());
                         terminal=std::ceil((remaining+source.converter().source_lookahead_seconds()+1.L/rate)*
-                            stream.hardware_rate/(1-options->maximum_timing_rate_correction));
+                            stream.hardware_rate/(1-(graph?.001:options->maximum_timing_rate_correction)));
                     }
                     native_frontiers=std::array{bound(0),bound(std::min(next,terminal)),
                         bound(std::min(static_cast<long double>(ending),terminal)),
@@ -1007,6 +1049,8 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                         std::to_string(timing->period_seconds()*1000)+" ms, ":std::string{})+
                         "now="+std::to_string(f[0]*1000)+" ms, next="+std::to_string(f[1]*1000)+
                         " ms, cover end="+std::to_string(f[2]*1000)+" ms, cover after next="+std::to_string(f[3]*1000)+
+                        " ms, center error="+std::to_string(corrected.error_seconds*1000)+
+                        " ms, timestamp radius="+std::to_string(at_source.uncertainty_seconds*1000)+
                         " ms, allowed radius="+std::to_string(timing_error*1000)+" ms; cover horizon="+
                         std::to_string(stop_horizon)+" s)";
                     if(action==ProtectedTimingAction::abort)
@@ -1032,21 +1076,25 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                 // allowance at the end of a queued output block.
                 (void)timing->correction(timing->timeline().predict(accepted+count),accepted+count,
                     epoch+source.converter().source_seconds(),timing_error,
-                    options->maximum_timing_rate_correction,source.converter().rate_correction(),"generated block end");
+                    graph?.001:options->maximum_timing_rate_correction,source.converter().rate_correction(),"generated block end");
             }
         }
         if(count>samples.size())throw Error("playback callback returned invalid sample count");
-        if(!count)break;
+        if(!count){if(graph)graph->end_input();break;}
+        if(graph && source.converter().finished())graph->end_input(count);
         playback_pcm(std::span<const float>(samples.data(),count),block,stream.channels,channels,gain);
         std::size_t offset=0;
         while(offset<count) {
             check_cancelled(stop);
             check_preparation();
-            const auto n=api.write(stream.pcm,block.data()+offset*stream.channels,count-offset);
+            long n=0;
+            try {n=write(block.data()+offset*stream.channels,count-offset);}
+            catch(const Error& e){if(graph && !reported)throw TimingPreflightUnavailable(timing->allowance(),
+                std::string("native PipeWire silence preparation failed: ")+e.what());throw;}
             check_cancelled(stop);
             if(timed && (n==-EAGAIN || n==-EINTR)) {
                 if(n==-EAGAIN) {
-                    const auto ready=api.wait(stream.pcm,20);
+                    const auto ready=wait(20);
                     if(ready<0 && ready!=-EINTR)throw Error("UTC audio playback wait failed");
                 }
                 continue;
@@ -1068,10 +1116,15 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                 if(!reported)throw TimingPreflightUnavailable(timing->allowance(),
                     std::string(e.what())+"; silence preparation before source scheduling");
                 throw Error(std::string(e.what())+"; source already scheduled, playback stopped without restart");
+            }catch(const Error& e){
+                if(graph && !reported)throw TimingPreflightUnavailable(timing->allowance(),
+                    std::string("native PipeWire silence preparation failed: ")+e.what());
+                throw;
             }
         }
     }
     check_cancelled(stop);
+    if(graph){graph->drain();check_cancelled(stop);return;}
     while(true) {
         check_cancelled(stop);
         const auto drained=api.drain(stream.pcm);
@@ -1081,7 +1134,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
         // Nonblocking drain reports EAGAIN while already queued samples are
         // still playing. Closing here would truncate the finite pulse tail.
         // Keep cancellation responsive without recovering or replaying PCM.
-        const auto ready=api.wait(stream.pcm,20);
+        const auto ready=wait(20);
         if(ready<0 && ready!=-EINTR)throw Error("audio playback drain wait failed");
     }
     check_cancelled(stop);

@@ -236,9 +236,11 @@ open-ended noise use the same preparation based on their protected stopping
 horizon, including pulse support, useful cover and converter/prefetch allowance.
 They no longer select different timing policies based on known message length.
 Preparation emits only silence, remains capped at 120 seconds and may visibly
-fall back before source scheduling. Zero initial correction is valid when that
-common stopping horizon fits without an extended rate measurement. This makes
-no promise about unlimited transmission duration.
+fall back before source scheduling. Direct native playback can select zero initial
+correction when that common stopping horizon fits. The optional native PipeWire
+path instead prepares for at least four seconds and selects a bounded initial
+correction before scheduling; see below. Neither policy promises unlimited transmission
+duration.
 
 After preparation only the silent stream stops. Source construction and fresh
 scheduling happen with the DAC stopped, then the source advances continuously.
@@ -302,9 +304,10 @@ uncertainty/domain failures and output discontinuities never trigger a silent
 policy switch, waveform restart or reused address. A finite-horizon guard remains
 only as a separately tested historical diagnostic utility.
 
-Native estimated preparation retains its existing zero-correction or bounded
+Direct ALSA estimated preparation retains its zero-correction or bounded
 initial-correction selection, with an independent full-cone stopping-horizon
-check. During playback, absolute DAC/system-UTC rate is **not** restricted to the
+check. The native PipeWire path estimates an initial correction, clipped to the
+same receiver-covered domain as every subsequent correction, as described below. During playback, absolute DAC/system-UTC rate is **not** restricted to the
 software steering cap derived from the relative link oscillator. The two are
 different quantities: a GPS-disciplined link model does not measure a PC DAC's
 absolute relation to system time. Native playback uses all four full-cone
@@ -404,11 +407,13 @@ withholds numerical RX probability pending its separate sensitivity validation.
 “Ordinary playback” means a fixed logical-to-output sample-rate conversion and
 ordinary scheduled start, without Data Pump's continuous UTC rate steering or
 UTC timestamp guarantees. It does not select an older Linux sound system or
-bypass the selected device. `pulse` still selects the ALSA PulseAudio plugin;
-that can connect to a PulseAudio daemon or PipeWire's compatible server. The
-host tested in October2026 uses the latter. `pipewire` selects its ALSA plugin.
+bypass the selected device. In ordinary playback, `pulse` selects the ALSA
+PulseAudio plugin, which can connect to PulseAudio or PipeWire's compatible server;
+`pipewire` selects its ALSA plugin. The host tested in October2026 uses PipeWire.
+For custom UTC mode, these resolved endpoints can use the native PipeWire
+presentation-clock adapter below, targeting the same verified local sink.
 `default` follows the configured route and the documented advertised-server
-fallback; explicit aliases are never silently replaced. Direct/exclusive ALSA
+fallback; unknown explicit aliases are never silently replaced. Direct/exclusive ALSA
 remains a separate route selection, with its existing availability constraints.
 
 PipeWire itself uses ALSA for device access and supports PulseAudio clients; see
@@ -426,9 +431,10 @@ Continuous UTC adjustment remains required for tight GPS arrival bounds and
 accurately aligned genuine FHSS tuning/ramp boundaries. Ordinary playback is a
 temporary fallback, not an implementation of that requirement. It preserves the
 selected fake-hop waveform/construction but supplies no continuous presentation
-clock guarantee. A qualified shared-server timestamp/control path and complete
-link timing validation remain outstanding; no Audio-error allowance is silently
-increased to make a failed model pass.
+clock guarantee. The native shared-server implementation below now performs
+continuous estimated UTC adjustment on the tested PC route. Complete link timing
+validation remains outstanding; no Audio-error allowance is silently increased
+to make a failed model pass.
 
 FHSS ramps are evaluated on the source calendar: epoch plus the continuous
 source coordinate and the configured lag allowance. Timed playback maps that
@@ -438,45 +444,142 @@ generated samples; it is not measured DAC timing or radio-tuning telemetry.
 
 ## Shared sound-server playback
 
-The resolved ALSA `pulse` and `pipewire` endpoints do not currently qualify for
-native UTC playback. They use the existing **visible preflight fallback**, before
-private source scheduling or generation. Ordinary playback, shaping, FHSS ramps,
-cryptographic addresses and physical receiver completion remain unchanged. The
-clock controls are retained; the GUI explicitly reports unavailable UTC TX timing.
-The unsupported playback route is recognized before optional native period
-refinement: freeing/reapplying hardware parameters to improve an unused timing
-model can fail to restore a shared plugin and prevent even ordinary playback.
-No such refinement is attempted for resolved `pulse`/`pipewire` playback. Capture
-retains its independent refinement/model. Failed restoration on other routes
-still closes/rejects before PCM; the error identifies capture/playback, endpoint,
-rate, channel count and failing restoration stage. Unknown aliases remain an
-explicit limitation, not permission to reuse a partly reconfigured handle.
+Custom UTC mode now has an optional native PipeWire output path for a verified
+local `default`, `pulse` or `pipewire` route. It loads the public PipeWire0.3
+runtime ABI dynamically; no SDK or new link-time dependency is required.
+The tested library is1.4.2 on64-bit little-endian Linux. Other platforms, missing
+libraries, non-PipeWire Pulse servers and unsupported/custom routing retain
+visible preflight fallback before private source scheduling. Unknown ALSA aliases
+and custom ALSA/server overrides are not automatically rerouted. `PULSE_SINK`
+is resolved to its canonical PipeWire node name. No system configuration or mixer settings are modified; normal server
+format/rate/latency negotiation remains active. Capture remains independent.
+
+The adapter uses dated `pw_time` plus the matching `SPA_IO_Position` clock instead
+of ALSA Pulse's interpolated latency query. Queued/buffered stream frames, graph
+delay ticks and the application's unread ring each contribute exactly once.
+A fresh MONOTONIC/UTC bracket maps the dated presentation edge to system UTC.
+The uncertainty includes downstream latency's half-range, a **full graph quantum**,
+codec floor, stream-frame rounding, clock bracket and a generic device/UTC rate
+cone. The minimum retained shared codec floor is3.25ms, including when a48kHz
+stream feeds an8kHz graph. Callback age is handled through the dated observation;
+it is not mistaken for a change in device rate. Topology/clock/rate/quantum/xrun
+or downstream-latency changes invalidate private playback. The prepared-PCM copy
+runs in PipeWire's `RT_PROCESS` data callback, rather than its ordinary control
+loop. That flag selects callback context; it does not guarantee privileged OS
+realtime scheduling. Multiword observations use nonblocking fixed-size mailboxes;
+the callback never waits for the consumer. A separate gate protects mapped clock
+storage through IO replacement and quiescent public-silence reset. Identical IO
+notifications do not interrupt audio. The callback only copies prepared PCM and
+records timing; it does not allocate, log, generate cryptographic waveforms or
+run DSP. Control/reset API calls never hold that gate. See also the
+[PipeWire stream callback contract](https://github.com/PipeWire/pipewire/blob/1.4.2/src/pipewire/stream.h).
+See [PipeWire time units](https://docs.pipewire.org/structpw__time.html),
+[graph clock](https://docs.pipewire.org/structspa__io__clock.html) and
+[latency propagation](https://docs.pipewire.org/page_latency.html).
+
+A bounded250ms S16 stereo ring provides preparation headroom, charged to the
+audio workspace. Logical rates up
+to192kHz use48/96/192kHz output; the server may independently resample to its
+device clock. Known queued delay is compensated rather than added to Audio error.
+The normal50ms generation blocks remain. End-of-input declares an exact final
+frame frontier: only its final partial buffer is allowed, then all prepared audio
+and server buffers drain. Unexpected starvation remains a visible discontinuity;
+it does not restart private audio. Repeated starts/reset/drain in one process
+are tested. Default clock mode continues using ordinary playback.
+
+The scheduling request remains512/48kHz (10.667ms), independently of the ring
+capacity and generation-block size. A256/48kHz prototype lowered reported
+uncertainty but lost a graph quantum during full-GUI receiver load; a smaller
+period alone also failed the preceding timing-headroom check. These failed
+experiments are retained. Negotiation is a hint: uncertainty always includes the
+full quantum actually reported. A changed lost-sample counter remains fatal,
+with the previous/current clock fields in the error; it is not hidden as jitter.
+
+Live reception on native Linux now leaves one whole physical CPU core outside
+the decoder's affinity when its current allowed domain contains at least four
+physical cores and at least80% of the preceding automatic search participant
+count would remain. All allowed SMT siblings of that core are excluded. Capture,
+playback, GUI and encoder keep their original domain. Missing/invalid topology,
+small CPU domains or rejected affinity operations retain ordinary scheduling.
+The decoder also lowers its own priority to nice5, without raising an existing
+lower priority. New search workers inherit that priority; previously created
+workers can retain their original priority. Each serialized search submission
+propagates its caller's affinity to persistent workers, including workers created
+before the Live decoder. A later non-Live caller supplies its own domain. A
+worker unable to adopt the submitted mask takes no jobs; the caller and other
+workers still drain every candidate. No frequency, timing, clock, key or epoch
+alternative is removed. This is scheduling headroom, not a receiver speedup,
+exclusive core reservation against other applications or a hard deadline guarantee.
+Other platforms and cooperative execution retain their previous policy.
+
+On this six-core/twelve-thread PC, excluding one physical core leaves ten logical
+CPUs in the decoder domain. The automatic pool then uses up to nine participants,
+including its caller, versus eleven previously. CPU work can still arrive in
+bursts: bank orchestration is serial while individual searches use persistent
+workers. A transient LATE indication remains meaningful even when average
+multicore utilization is modest; it does not alone mean samples were dropped.
+The bounded measurements and failed alternatives are recorded in the local
+`MANUAL-UTC-HEADROOM.md` artifact and the validation record.
+
+Observed audio threads on this host remained `SCHED_OTHER` despite PipeWire's
+RTKit success wording. In the pinned1.4.2 implementation,
+[`pw_rtkit_make_realtime`](https://github.com/PipeWire/pipewire/blob/1.4.2/src/modules/module-rt.c#L379)
+queues its D-Bus request without waiting for an acknowledged result. That log
+therefore does not establish realtime scheduling. The actual kernel policy was
+sampled in the physical runs; the specific host-side reason for no promotion
+remains unresolved. No system permission, mixer, daemon configuration or global
+priority was changed to make the test pass.
+
+Before either message or open-ended noise constructs its private source, at least
+four seconds of public silence provide an initial stationary-rate estimate.
+The existing64-point timeline fit selects a desired correction, but a short noisy
+fit is **not an independent DAC calibration**. Both the initial correction `b`
+and every subsequent absolute software correction `c(t)` are clipped to the
+existing receiver-covered domain `[-C,+C]`. No extra baseline is composed outside
+that cap. For configured hardware/link error `|a|<=A`, the complete scale error
+still obeys `|(1+a)(1+c)-1| <= A+C+AC`. Exact receiver contents and their coverage
+under the original oscillator assumption are preserved. An earlier local
+prototype installed a larger fitted baseline; review rejected that policy because
+its fit error was an uncovered clock/frequency uncertainty, even though strong
+shared-PC duplex runs decoded. That prototype is not the delivered policy.
+
+The preparation retains the complete generic future position cone and protected
+stop horizon; both must fit Audio error. It stops before fresh source scheduling.
+The source starts with the **clipped** initial correction installed. The original
+source coordinate, timing origin and affine baseline never reset. The original
+braking invariant and0.01-logical-sample warp limit remain. Stop/terminal forecasts
+include queued PCM, converter support and a conservative device-rate bound;
+position uncertainty retains the generic±approximately2000ppm future cone.
+Every generated block is checked before submission. Receiver lanes, waveform
+coefficients, cryptographic addresses and source bits are unchanged.
+
+This implements bounded continuous UTC correction, not arbitrary sound-card
+calibration or indefinite tracking. A raw PC sound card does not become a GPSDO
+by selecting that oscillator model. External discipline/calibration must actually
+satisfy the chosen hardware model; the four-second fit does not prove that fact.
+With very tight oscillator coverage, permitted software corrections are tiny;
+accurate dated observations can still prevent spurious timing stops without
+injecting a larger unsearched source-rate error. Incompatible evidence still
+causes protected stopping where feasible, or immediate abort for discontinuity.
+
+Audio50 remains causal lag[0,50ms], targeted at25ms with25ms allowed radius.
+Neither period refinement nor this baseline fit enlarges that interval or proves
+unknown radio/peer delay. Status reads “Native PipeWire UTC adjustment active;
+estimated hardware timing.” A successful physical duplex run establishes local
+execution and strong-signal reception, not calibrated RF presentation time or
+qualified tight peer acquisition. Capture may retain its full search fallback.
+
+The earlier ALSA-plugin experiments are retained as failed diagnostic evidence:
+one39.8623s transmission/reception succeeded with a4ms period, but its repeat
+contradicted the clock envelope at37.85s; native48kHz ALSA-plugin playback also
+failed. Neither rate change nor finer period was retained as a cure. The new
+native adapter addresses the interpolated timestamp path instead. Optional
+shared-plugin period refinement is still skipped: freeing/reapplying parameters
+to improve an unused native model can fail to restore the plugin. Other-route
+restoration failures still reject before PCM, with direction/endpoint/context.
 An explicitly supplied timestamp provider retains its separate tested contract.
-Direct ALSA hardware still uses the guarded native model. Unknown custom aliases
-are not automatically identified as shared-server routes and remain unqualified
-hardware coverage.
-
-This is an implementation limit, not a claim that these servers cannot support
-accurate timing. On the tested PipeWire/Pulse route, the ALSA plugin's interpolated
-latency correction did not remain inside the period-based observation model.
-One full39.8623s transmission and physical reception succeeded with a4ms period,
-but its repeat contradicted the clock envelope at37.85s. Native48k playback also
-failed. Neither rate change nor finer-period experiment was retained as a cure.
-Audio50 was not enlarged, and no historical mean-rate fit replaced the future
-wander bound. A qualified shared-server presentation-timestamp backend remains
-outstanding. This fallback does **not** validate tight arrival windows at a peer;
-peers must retain full timing search unless the complete link timing is qualified.
-Capture's independent timing model is unchanged. Playback fallback does not
-automatically widen any receiver's arrival window: that window still depends on
-the capture model and the configured peer assumption. The physical duplex
-results are conditional on those retained settings, not proof of the peer bound.
-
-The [ALSA Pulse plugin source](https://github.com/alsa-project/alsa-plugins/blob/master/pulse/pcm_pulse.c)
-uses Pulse latency with automatic/interpolated timing updates. Its period and
-buffer parameters are not a calibrated bound on analog presentation timing.
-Before any native playback timestamp anchors the source, PCM must be RUNNING;
-a small positive `accepted - delay` while PREPARED is not presentation evidence.
-Known queue delay remains compensated separately from uncertainty.
+See [local validation](validation.md) for final build identity, full-GUI live
+outcomes, retained failures and outstanding qualification.
 
 ## Hardware evidence and limits
 

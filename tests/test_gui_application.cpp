@@ -59,6 +59,32 @@ void physical_debug_workflow() {
     check(timeout.step(10,snap,Signals{},false,true)==A::close&&timeout.result()!=0,"Diagnostic timeout was a pass");
     snap.simulation=true;DebugLive simulated(10,log);
     check(simulated.step(0,snap,Signals{},true,true)==A::close,"Debug accepted simulation instead of hardware");
+    snap.simulation=false;snap.transmission_id=0;DebugLive longer(300,log,false,"1010");Signals longer_rows;
+    longer.step(0,snap,longer_rows,true,true);snap.transmission_id=1;snap.transmitting=true;snap.transmission_finished=false;
+    longer.step(1,snap,longer_rows,false,true);++snap.samples_received;
+    line.id=20;line.text="10";line.received_bits=2;line.complete=false;longer_rows.update(line);
+    check(longer.step(2,snap,longer_rows,false,true)==A::wait,"Long diagnostic rejected a correct partial prefix");
+    snap.transmitting=false;snap.transmission_finished=true;
+    check(longer.step(3,snap,longer_rows,true,true)==A::wait,"Long diagnostic accepted TX EOF as physical completion");
+    line.text="1010";line.received_bits=4;line.complete=true;longer_rows.update(line);longer.step(4,snap,longer_rows,true,true);
+    check(longer.step(6,snap,longer_rows,true,true)==A::close&&longer.result()==0,"Long physical diagnostic did not finish");
+    DebugLive evicted(300,log,false,"1010");snap.transmission_id=0;evicted.step(0,snap,Signals{},true,true);
+    snap.transmission_id=1;snap.transmitting=true;snap.transmission_finished=false;evicted.step(1,snap,Signals{},false,true);
+    ++snap.samples_received;Signals wrong;line.text="100";line.received_bits=3;line.complete=false;wrong.update(line);
+    evicted.step(2,snap,wrong,false,true);evicted.step(3,snap,Signals{},false,true);
+    snap.transmitting=false;snap.transmission_finished=true;evicted.step(4,snap,longer_rows,true,true);
+    check(evicted.step(6,snap,longer_rows,true,true)==A::close&&evicted.result()!=0,"Evicted wrong admission was forgotten by physical diagnostic");
+    DebugLive superseded(300,log,false,"1010");snap.transmission_id=0;superseded.step(0,snap,Signals{},true,true);
+    snap.transmission_id=1;snap.transmitting=true;snap.transmission_finished=false;superseded.step(1,snap,Signals{},false,true);
+    ++snap.samples_received;superseded.step(2,snap,Signals{},false,true);
+    live::SignalUpdate bad;bad.id=30;bad.binary=true;bad.text="100";bad.received_bits=3;
+    auto good=bad;good.id=31;good.text="1010";good.received_bits=4;good.complete=true;good.superseded_ids={30};
+    snap.signals={bad,good};Signals final_rows;Inbox inbox;apply_receptions(inbox,final_rows,snap);
+    check(final_rows.lines().size()==1 && final_rows.lines().front().id==31,"Superseded diagnostic fixture did not hide first row");
+    snap.transmitting=false;snap.transmission_finished=true;superseded.step(3,snap,final_rows,true,true);
+    snap.signals.clear();
+    check(superseded.step(5,snap,final_rows,true,true)==A::close&&superseded.result()!=0,
+          "Same-poll superseded wrong admission was forgotten by physical diagnostic");
     const auto parse=[&](std::vector<std::string> arguments,bool expected) {
         std::vector<char*> argv;for(auto& arg:arguments)argv.push_back(arg.data());bool called=false;
         const auto result=gui_main(static_cast<int>(argv.size()),argv.data(),"test",[&](Launch launch) {
@@ -72,6 +98,8 @@ void physical_debug_workflow() {
     parse({"gui","--debug"},false);
     parse({"gui","--debug","--simulation"},false);
     parse({"gui","--debug","--debug-timeout","nan"},false);
+    parse({"gui","--debug","--debug-timeout","30","--keyfile","synthetic.keys","--tx-key","named","--debug-bits","1010"},true);
+    parse({"gui","--debug","--debug-bits","102"},false);
 }
 void fast_default_console() {
     using F=ui::Field;using C=ui::Command;using P=ui::Page;

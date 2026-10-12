@@ -141,6 +141,10 @@ void protected_stop_status() {
         auto value=slow_settings();value.transfer.modem.bandwidth_hz=16;value.transfer.modem.integration_seconds=2;
         const auto& c=value.transfer.modem;
         live::Session session([]{return static_cast<double>(epoch);});session.start(value);
+        // start() is asynchronous. The restart assertion below needs an
+        // actually opened initial capture; an immediately queued TX can
+        // otherwise precede it while decoder startup is still pending.
+        await([&]{return playback.captures==1;},"protected-stop initial capture did not open");
         const Bytes bits(12,1);
         auto original=transfer::binary_transmitter(bits,value.transfer);
         const auto point=modem::training_sample_count(c)+modem::pattern_pulse_padding_samples(c)+13;

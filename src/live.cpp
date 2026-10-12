@@ -12,6 +12,7 @@
 #include "signal_view.hpp"
 #include "live_pattern_scores.hpp"
 #include "live_receptions.hpp"
+#include "live_scheduling.hpp"
 #include "transmit_timing.hpp"
 #include "transmit_epoch_guard.hpp"
 #include "pattern_projection_cache.hpp"
@@ -2218,6 +2219,7 @@ struct Session::Impl {
         }
     }
     void decode_loop(std::stop_token stop) {
+        detail::configure_decoder_scheduling();
         std::optional<Bank> bank; std::uint64_t local_generation = 0, local_revision = 0;
         while (!stop.stop_requested()) {
             Settings value; AudioBlock block; std::uint64_t version; std::stop_token token;
