@@ -14,6 +14,7 @@ coverage and decoded-message reliability are related but distinct quantities.
 | --- | --- |
 | [Modem](../modem.md) | Reference: pattern waveform, timing, receiver search and resource limits. |
 | [Protocol](../protocol.md) | Reference: fixed-interval wire geometry, exact short/raw paths and physical completion. |
+| [Public alphabet](../public-pattern-alphabet.md) | Local manual checkpoint: independent public amplitude/phase rows, compatibility and measured limits. |
 | [Pattern constellation](../pattern-constellation.md) | Reference: binary pattern construction, settling waveform and constellation interpretation. |
 | [Development contract](../development.md) | Requirements: short messages, pending progress, physical end and regression preservation. |
 | [Modem inspection](../inspection.md) | Reference: flow views, plots and interpretation boundaries. |

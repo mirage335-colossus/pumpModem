@@ -18,10 +18,151 @@ constexpr double tau = 2 * std::numbers::pi;
 constexpr std::array<std::uint8_t, 32> public_seed{
     'D','a','t','a','P','u','m','p','/','p','a','t','t','e','r','n',
     '/','b','i','n','a','r','y','/','v','1',0,0,0,0,0,0};
-// Public unkeyed alphabet only. Private candidates use independent CTR domains.
-// Balanced, neither a global sign reversal nor an alternating carrier shift.
-// Every four consecutive positions include a nonconstant, nonalternating row.
+// Public alphabet 2026-10: bit 0 retains the public Payload row; bit 1
+// uses the same known seed at epoch zero in PatternOneV2, starting at chip
+// 1886. This fixed public prefix was selected for short-pattern energy and
+// amplitude/complex/shift separation, not normalized or balanced at runtime.
+// See docs/public-pattern-alphabet.md. Secret positions are never offset.
+constexpr std::uint64_t public_one_first_chip = 1886;
+// Preserve low-level Data-only encrypted diagnostics byte for byte. Ordinary
+// encrypted messages use independent private rows, never this legacy mask.
 constexpr std::array<int, 8> bit_mask{1,-1,-1,1,1,1,-1,-1};
+
+// Immutable public waveform prefix: 4 KiB of read-only image, no allocation,
+// secret data, or workspace cache. Values are the mapping below at Payload/i
+// and PatternOneV2/(1886+i); tests independently reconstruct all entries.
+// Longer rows use the same stream mapping lazily. Trace capture bypasses this
+// table so it records the actual public mapper bytes.
+constexpr std::array<std::array<std::complex<double>,2>,128> public_prefix{{
+    {{{-0x1.c60f9987d4f85p+0,0x1.08bc38e7d42a6p-2},{0x1.24a1d559f58dcp-1,-0x1.383425fabbec1p+0}}},
+    {{{-0x1.74b3bf048b8c5p-2,-0x1.77611fda2dec9p-2},{-0x1.7c3397b8d5165p+0,0x1.dcf3d80ec3cb0p-4}}},
+    {{{-0x1.2c4bb3f95a78fp+0,-0x1.2043b617cef72p-1},{0x1.f532cdd240a65p-2,0x1.28614a51e0282p-4}}},
+    {{{-0x1.e8ca73dff1319p-2,-0x1.e30a6f473c294p-2},{-0x1.d761bf940bce3p-2,-0x1.a1973d5c9d6bdp-5}}},
+    {{{-0x1.c35249e3e01b6p-2,-0x1.bab6aa6165d35p-3},{-0x1.a36056f3ad8b4p+0,0x1.badd784b6920ap-3}}},
+    {{{0x1.1b3d0243c7c73p+0,-0x1.93d79c3170d12p-1},{-0x1.344aedf6702f4p-1,0x1.05b971f19d21ap-1}}},
+    {{{0x1.c6656ac35a5c3p-2,-0x1.b03705059ea66p-2},{-0x1.db8dec2275affp-2,0x1.dfc0fb5a154e5p-2}}},
+    {{{0x1.6fb3510964113p-3,-0x1.8c5a20d388e6ap-1},{0x1.1efb29a9fe7ddp+0,0x1.1065f81f78d59p-1}}},
+    {{{0x1.4398ccf6aed0ep+0,0x1.38ce94911c35ap+0},{-0x1.f101bc6ebdb3ep-3,0x1.0b2e7004b5cd0p-2}}},
+    {{{-0x1.74923ba83f445p-3,0x1.bd20c2caf7db5p-2},{0x1.aa1505f29cbedp-2,0x1.d3416187b6310p-1}}},
+    {{{-0x1.c54eca33a94bep-3,0x1.aaca274fdc5bdp-12},{-0x1.1e4c57a64436ap-2,-0x1.019cf2254a0a4p-3}}},
+    {{{0x1.6db8304fe1b5ep-3,-0x1.adebcc6461c94p-2},{0x1.77c5eb399055cp-1,-0x1.beccdad4e34edp-1}}},
+    {{{0x1.17288e83499edp+0,0x1.206af731ef6eep+0},{0x1.fa26195e54c31p-1,-0x1.5607d514635cap-1}}},
+    {{{0x1.8f26c55ebb8adp-3,-0x1.47ad333697678p-1},{-0x1.57532842b2c2ep+0,-0x1.c995b3fe3b844p-2}}},
+    {{{-0x1.263deb098b208p-2,0x1.29352d0ad8776p-2},{0x1.0ce09bd9f3a77p+0,0x1.4e7915e0b5ffcp-3}}},
+    {{{-0x1.224d65c0e272ap+0,0x1.96a3a80e08bd5p-1},{0x1.51c383f20ad4ap-4,0x1.e1d608f9115dap-3}}},
+    {{{0x1.59905145046a8p-1,-0x1.43a90fe72d5dcp+0},{0x1.88f722fe43cbap-2,0x1.00f9201336f1ep-1}}},
+    {{{0x1.20d0a538059c4p-1,0x1.cb4454a1d05efp-1},{-0x1.300f222cc43eep+0,0x1.d9fccba3a924ap-3}}},
+    {{{0x1.491b228ff62d0p-3,-0x1.e0cf1b37e92bdp-2},{0x1.e64c4eeb688ddp-4,-0x1.0e1cee7d994c1p+0}}},
+    {{{-0x1.05c6079102e88p-2,0x1.c62b1207fd9eep+0},{0x1.6dde12b18747dp-1,-0x1.b65eaff914312p-4}}},
+    {{{0x1.313118e5e674ap-3,-0x1.c4631fdea35c9p-4},{0x1.541201ddbd4cap-1,-0x1.a6712fad48f81p-3}}},
+    {{{-0x1.40dc5f9d7507bp-2,0x1.2467d92f573aep-3},{0x1.6aece0128b5e5p-1,0x1.aeb110825215fp-1}}},
+    {{{0x1.d97fa6553e518p-2,-0x1.49867e93ab467p-2},{0x1.c8421dd09fa85p-1,-0x1.cfcfa20088729p-1}}},
+    {{{0x1.eb40b1bc24df0p-3,-0x1.32ced36de7d10p-1},{-0x1.65a50ac804006p-1,0x1.252bd343c9ea8p-2}}},
+    {{{-0x1.472588c0504abp-2,-0x1.05b5096ffc3fdp-2},{-0x1.b780199cda953p-1,0x1.5b6b035ebeeebp-1}}},
+    {{{0x1.4e4fc408637cap-1,-0x1.9413595c735cap+0},{0x1.edf6fb32d529ap-1,-0x1.82b7faf76908dp+0}}},
+    {{{-0x1.190091639dc32p-2,0x1.068e5782f826cp-1},{-0x1.eb54bfed93e9ap-1,0x1.840e924efc7c4p-1}}},
+    {{{0x1.82af1cec72d6ep-4,-0x1.40d47aac2e2ddp-2},{-0x1.667a5bdfed1abp-1,-0x1.9c7aeeeabdb0fp-1}}},
+    {{{0x1.d35528257c5efp-2,-0x1.2d1fa036f8386p-2},{0x1.ebd862337abe2p-1,-0x1.64591e89c8ef6p-2}}},
+    {{{-0x1.7b4c85ceb5e19p-7,-0x1.d20cf7d48af87p-1},{0x1.c8650342c8fc5p-1,0x1.1f8d94f23eec4p+0}}},
+    {{{-0x1.2c9426dbf92e8p-2,0x1.b95a0bd1b0706p-2},{-0x1.5b12515889968p+0,0x1.08c26b9ba49ecp-1}}},
+    {{{-0x1.b037e0926cd20p-3,0x1.a07ccd9c1950ep-6},{-0x1.e202e4e45a7aep-1,0x1.f117792dc6b88p-4}}},
+    {{{-0x1.806ec32c3f89cp-2,-0x1.4f7ac382d2e3ep-3},{0x1.4300ed59ef4bdp-1,0x1.15a86ab19c8bep-1}}},
+    {{{0x1.08fb8b4d065e4p-2,0x1.eeaae729135f0p-7},{-0x1.2d62e0cfff4d9p-2,-0x1.40c471bf048b2p-1}}},
+    {{{-0x1.e3ad8006c30b2p-3,0x1.8c6aec40a36c0p-2},{-0x1.8a8fd756396fbp-1,-0x1.3a54f7df5132bp+0}}},
+    {{{0x1.458e113b814b0p-2,-0x1.c39555227ce06p+0},{0x1.ae3b34b2a0758p-1,-0x1.6d56de235b680p-6}}},
+    {{{-0x1.09528f6e710e5p+0,-0x1.9f14d797c8d66p-2},{0x1.017bba9ceb8a1p+0,-0x1.03fb3b8acc087p-1}}},
+    {{{0x1.0112e048621a9p-4,0x1.236e8e239eea1p-1},{-0x1.cdfa1d915e0d2p-2,0x1.2633bdcd16a28p-1}}},
+    {{{-0x1.cae099bf0ff3dp-1,0x1.5c67996a0a57fp-4},{0x1.443d17e3f3cecp+0,0x1.c5792df079315p-2}}},
+    {{{-0x1.6a5340ecdc0c4p+0,-0x1.5f85d29e7a4b8p-2},{0x1.79acbb687a675p-3,0x1.dba406dcefcf8p-3}}},
+    {{{-0x1.0ef46c8f47921p-1,0x1.3455b64498523p+0},{0x1.6aacbc6fb3721p-4,0x1.1e7aa0d5cbf2fp-3}}},
+    {{{-0x1.7a4e65dc51144p-3,0x1.73c78918f7b91p-1},{0x1.d2b5707a19536p-3,-0x1.2393fc3cd2cffp-1}}},
+    {{{0x1.5444fe171c966p-1,0x1.8837a9035be84p-4},{-0x1.b06bdf051d79cp+0,0x1.b39f4e2e059b8p-2}}},
+    {{{0x1.a497e6a387641p-3,-0x1.c0237a0457d31p-5},{-0x1.035eacc850f2ap-1,0x1.7d98f3951296dp-2}}},
+    {{{-0x1.48e457aa8508cp-1,-0x1.f2d1f6d3008b4p-2},{-0x1.4302b98f71721p-3,0x1.c638cfdd5b9eep-6}}},
+    {{{-0x1.1490f4efdeee3p-1,0x1.4cb7af7f03f37p-2},{0x1.5dadf30e4b8e0p-2,-0x1.5b1c648ec1be2p+0}}},
+    {{{0x1.c479064d7ee24p-2,-0x1.c155a430bd498p-7},{-0x1.da605fbc92fefp-2,-0x1.19dcd350191eep-2}}},
+    {{{-0x1.00a116298a5e6p+0,-0x1.8a1ab3d88bf50p-3},{0x1.e168f52bbf9b7p-2,-0x1.603c466cfcbe7p-2}}},
+    {{{0x1.2d8ebb099b40ep-2,0x1.043ecc8d3e3e2p-2},{-0x1.fe46512e5511fp-5,0x1.389a7d7a605c8p-1}}},
+    {{{0x1.2a7eb27d1c9dap-2,0x1.c4c01a9a70230p+0},{-0x1.029c083b882bap-3,0x1.7be53f1dcddbbp+0}}},
+    {{{-0x1.06afd58af292fp-2,-0x1.55bf120981951p+0},{0x1.08fa069f901ccp-4,0x1.084c287f6e9ddp+0}}},
+    {{{0x1.f70c46010950dp-1,-0x1.7fc7c21223185p+0},{-0x1.7ac049d6f8d70p-3,-0x1.4128bba843396p+0}}},
+    {{{-0x1.331adfcf7f735p-1,-0x1.51cbe566762e9p+0},{-0x1.998eb9f24f14bp-1,-0x1.5a73b49f7cb59p+0}}},
+    {{{0x1.0867ba06057b1p+0,-0x1.24d09c7adc7bcp+0},{0x1.c8bdcd89e0a52p-2,-0x1.c19f268b0a410p-3}}},
+    {{{0x1.a67c818a7dc7cp-1,-0x1.c4ccc6473e897p-5},{0x1.2431e1e0dde86p+0,-0x1.50528fdf123afp+0}}},
+    {{{-0x1.ebf8562b29e1bp-6,0x1.6732cb394f6bdp-4},{0x1.95d9db7cf7984p-2,-0x1.ea9b3678d1dcap-3}}},
+    {{{0x1.1c6add0064b00p-1,-0x1.57725f8f0136ep-1},{0x1.48f9e5463032dp-1,0x1.0b57c2e223a34p+0}}},
+    {{{0x1.c268ec179b40fp-2,0x1.ec426fa1f8145p-5},{0x1.d1d3734b52ffap-4,0x1.bb0b943860021p-3}}},
+    {{{-0x1.8fb05876e0fc8p-2,-0x1.3adb367bfd1a0p+0},{-0x1.bedd96218c0c5p-1,-0x1.411362b9bb86ep-1}}},
+    {{{-0x1.70288e6573122p-1,-0x1.f460dbbc7fb89p-2},{0x1.361482509699fp-1,-0x1.bf3929c0cd34fp-1}}},
+    {{{0x1.aef026ae94401p+0,0x1.3b3d530902e3cp-1},{-0x1.91ef13ed72afbp-2,-0x1.d965bfff807e7p-3}}},
+    {{{-0x1.795b46c143469p-2,0x1.52482844a04ecp-1},{-0x1.9aebfea6ab16ap-2,-0x1.9b237f0dcb83ap-2}}},
+    {{{0x1.a7c1e7adfb643p-5,-0x1.9aeb52ac660e1p-3},{0x1.4049bec0a799ep-2,0x1.38709d25185b6p-4}}},
+    {{{0x1.a5a71cfa40306p+0,0x1.988bcfdbc57c4p-2},{-0x1.2f672c1991658p+0,-0x1.b4386a9457867p-4}}},
+    {{{-0x1.56c708e3e1da6p-1,0x1.8d25ef8d431c1p+0},{-0x1.06062679bbdbbp-1,0x1.f4153e511ba10p-1}}},
+    {{{-0x1.17fea60863d8ap-1,0x1.650128c4081e3p-1},{-0x1.33cbdd7e0d4c9p-2,-0x1.9407d7850537ep+0}}},
+    {{{0x1.687a9280fd54ep-1,-0x1.e6992fb87245dp-1},{0x1.3c505b2d900efp-1,0x1.d5de204d108f6p-2}}},
+    {{{0x1.d1e65d7fcf273p-4,-0x1.7484aab53c17bp-4},{-0x1.13a007a462131p-1,0x1.e0325c17deac2p-2}}},
+    {{{-0x1.48560334d19b9p-2,0x1.109a436454305p+0},{0x1.90199566cb7e7p-5,0x1.dcd90633e5951p-6}}},
+    {{{0x1.a4150462744bfp-1,0x1.0b68b522ae30fp-1},{-0x1.de6c80f1cc8d3p-5,0x1.ca9d8c596892fp+0}}},
+    {{{-0x1.bc39e729ab932p-3,-0x1.cbbc9b667042ap-3},{-0x1.4669b7d942bd2p-2,-0x1.84e0f89627e4ep-2}}},
+    {{{0x1.6c6d343dc867ap-1,0x1.56e76bae24300p-2},{-0x1.5be39ba76a810p-2,0x1.f20de63982238p-2}}},
+    {{{0x1.4f5b65f9dce33p-4,-0x1.83556076e97f9p-2},{0x1.114430a69eeecp-3,0x1.0c468cce24ae1p+0}}},
+    {{{-0x1.ae1174e0275cbp-2,-0x1.308c9780d36b7p+0},{-0x1.ab102dbc2936ap+0,0x1.4fab9feaaad28p-1}}},
+    {{{-0x1.50d71fac50418p-3,-0x1.ed51e247d871bp-3},{0x1.f92ae6d228150p-3,-0x1.1bf15cfcf3f92p-4}}},
+    {{{-0x1.0f654463af688p-8,0x1.304afae92283fp-4},{0x1.4b43b0afee1b6p-1,0x1.18bf0f6f3a168p-2}}},
+    {{{0x1.e7f5419dc697fp-1,0x1.b1c06fd4c0dc9p-14},{-0x1.8dba4b045131cp-2,-0x1.64feb09b3bf98p-1}}},
+    {{{0x1.832cb56df913cp-1,0x1.a5fa5bedc47b8p-1},{-0x1.dd526b16f037ep-2,-0x1.0cdfada47ad0cp-2}}},
+    {{{0x1.ed69ac6d5b703p-3,0x1.7159ef5930b67p-3},{0x1.4214e715b7c25p-1,0x1.0b2ae6be3f0a4p-3}}},
+    {{{0x1.50cb1ae318a03p-5,0x1.f292b8e868696p-1},{-0x1.e1de085799e88p-3,-0x1.c4fbfce45edbep-3}}},
+    {{{-0x1.95936977c1eafp-2,-0x1.654b31572abb0p-2},{-0x1.7c19f6479959fp-1,0x1.cc216d710d693p-2}}},
+    {{{-0x1.f4df2e20b36e9p-2,-0x1.30ff2eab9ce3bp-2},{0x1.3102d866968a8p-5,-0x1.fa89b10b6251bp-3}}},
+    {{{0x1.20c3db46a7072p-2,0x1.b13ef038ac369p-1},{-0x1.ecdd90a0bb5bfp-1,-0x1.7f720e0ddafb6p-4}}},
+    {{{-0x1.c3de7417ff29fp-3,-0x1.1b0bc580cfae5p-1},{0x1.6962ddc6b6d15p-1,-0x1.ca0488f494bc8p-2}}},
+    {{{0x1.2139044d4f89dp-3,-0x1.2e5e98f9d772dp-1},{0x1.032490e636140p+0,-0x1.a7dd77a74c401p-2}}},
+    {{{-0x1.870eab094f6e4p-2,-0x1.906bfab11c0b6p-3},{0x1.bacb049e73b6dp-4,0x1.456720e49ae60p-1}}},
+    {{{0x1.84ff350d195abp-3,-0x1.ae6e0de66d098p-1},{0x1.3627fe0c0d6b6p-1,-0x1.71b9748989ae3p-1}}},
+    {{{0x1.35b0651c9848dp-1,-0x1.56fd53756d8aap-1},{0x1.0e920943175f9p-1,0x1.5bca37aeecac1p+0}}},
+    {{{0x1.1d6d4095a8026p-1,0x1.9941d551279f0p-2},{-0x1.c14dbf60d56d0p-2,-0x1.d4efec9448477p-1}}},
+    {{{0x1.47a118814a7bbp-1,-0x1.bf49ed89bcdabp-2},{-0x1.5fba6dabe4dcdp+0,0x1.7ab92307159a9p-3}}},
+    {{{0x1.f91a73515ffa8p-1,-0x1.fc764535eadccp-1},{0x1.1c54c16946b6cp-2,-0x1.24d3a26a59adcp-2}}},
+    {{{0x1.4cae8a1fdc8d9p-1,-0x1.b44560bd87908p-1},{-0x1.9dd030c322b61p+0,-0x1.8c894139b420bp-1}}},
+    {{{0x1.15f75ced66d4dp-1,0x1.b1e02ca49524ap-1},{-0x1.d09e55bc08c28p-1,0x1.8314afec9936ap-1}}},
+    {{{0x1.6bd02e5b99e18p-2,-0x1.3304f8642f95ap-1},{-0x1.644e33ca5d579p+0,-0x1.eaf5667163797p-4}}},
+    {{{0x1.3d9680917786bp+0,0x1.2090d27f59de3p-3},{-0x1.b5dd184efa9cbp-3,-0x1.c083dab7b1435p-2}}},
+    {{{0x1.fd7e2d6324366p-4,0x1.5dd3726a0eb18p+0},{0x1.6b617e3894acbp-5,-0x1.244285236e1d3p-4}}},
+    {{{0x1.7bb4d6733dd05p-2,-0x1.394f67e2ec290p+0},{0x1.84cc4c6522a30p+0,-0x1.e764531b695d4p-1}}},
+    {{{0x1.ee2ef037f3668p-3,0x1.7238ee7be3a9ap-3},{-0x1.c001418a5c816p-2,0x1.23ec5c773be67p+0}}},
+    {{{0x1.0907cadbc1afcp-3,-0x1.0bc4d426aae42p-2},{-0x1.98dde5b5f0093p-7,-0x1.0de6a1e9691c7p-2}}},
+    {{{0x1.babc69655634dp-2,-0x1.2598dc0c3e015p+0},{0x1.165345d0d696dp+0,-0x1.be43c0301c986p-3}}},
+    {{{-0x1.cd53dddf5da61p-1,-0x1.eaa7b0a05e974p-3},{0x1.a96d06f8b6b4fp-1,0x1.1469e6c505d31p-1}}},
+    {{{-0x1.008c93e61a1ebp-1,0x1.1026e7f2f2134p-1},{-0x1.dfd121823b084p-3,-0x1.90c7875173a71p-1}}},
+    {{{-0x1.add73ed1f093bp-1,-0x1.be23e858fa6a9p-2},{-0x1.7b96b7501d772p+0,-0x1.eaf4574885fb7p-2}}},
+    {{{-0x1.3e4a4f2215048p-2,0x1.26a1593a66436p-2},{-0x1.58ebceaae821ep-3,0x1.f4fa069415906p-1}}},
+    {{{0x1.3c611e4ee44e3p-2,-0x1.832289db843e6p+0},{-0x1.7ea2aaa2e649ap-2,0x1.84e770b7a448cp+0}}},
+    {{{-0x1.6436bb1ccd72ep-1,0x1.ec9f83a937ac9p-4},{-0x1.3d24c23d0ea6cp-3,-0x1.3e1054987876cp+0}}},
+    {{{0x1.6083af00f1b66p-1,0x1.c7f3bef52c078p-3},{0x1.4ad08af0a1709p-3,0x1.c056e9871ed49p-1}}},
+    {{{-0x1.588ef4afe0460p+0,-0x1.3e01c25417be2p-1},{-0x1.537650f401cd8p-1,0x1.4f8807507f39dp-1}}},
+    {{{-0x1.93ff2d198b6ecp-2,0x1.063553106d2dcp-1},{-0x1.2644b5b9c4b36p-1,0x1.6ce8412d0bdc7p-3}}},
+    {{{-0x1.06c7a5867c7e1p-2,-0x1.1ee19edb668c2p-2},{-0x1.79fc3e0b4328fp-4,-0x1.ff56928193ad9p-4}}},
+    {{{-0x1.eb7c3872553c5p-6,0x1.03e1dd851f700p-5},{-0x1.8f28195172a93p-1,-0x1.6b17651e908b6p-4}}},
+    {{{-0x1.cd2fcd50d82abp-12,-0x1.2fa165ee5bd6ap-3},{0x1.2dd7ec9c7a522p-2,0x1.76f5308288130p-7}}},
+    {{{0x1.c84f984909041p+0,-0x1.82530d17e0f6dp-3},{-0x1.cb1ee2d9635afp-1,-0x1.e01aa8f1c946dp-2}}},
+    {{{-0x1.4b83f5d79fb3fp-2,-0x1.39bf64c9a3c49p-1},{-0x1.dcd367b8ea619p-4,-0x1.3ccab8ef22170p-1}}},
+    {{{0x1.271f3bfe29596p-1,0x1.0597f60063435p-1},{0x1.2df2c432f3fcfp-1,-0x1.f2599a582a486p-3}}},
+    {{{0x1.2d53639669d7ap-1,0x1.c89ff3d1aedabp-2},{-0x1.8750553a631f2p-2,0x1.aa7b3b4d9ac9fp-3}}},
+    {{{0x1.c9dffc6b8524cp+0,0x1.e093b92b3601ep-4},{0x1.6e48655984f7ep-2,0x1.84768f27c256ap-2}}},
+    {{{0x1.7cddd644d790ep-2,-0x1.2e9043e930cb3p+0},{-0x1.8f08f6d23e83dp-2,0x1.b054a7b38636ep-3}}},
+    {{{0x1.00c0af7a0fd7fp+0,-0x1.adc9a1af5db9fp-2},{-0x1.8164c0377b0f3p-1,-0x1.512a69b0c863bp+0}}},
+    {{{-0x1.c1fab1e6794e4p-5,0x1.30499505cedacp+0},{0x1.fef5620686e3cp-3,0x1.902c10114e795p-1}}},
+    {{{-0x1.ca0ea1f1674b6p+0,0x1.b1da98be08d64p-4},{-0x1.24e171c84a5d1p-3,-0x1.5efcaec65bda9p-1}}},
+    {{{-0x1.94d80a90c6598p-3,0x1.2321461b452d6p-3},{0x1.adbc45a8cce32p-1,-0x1.2233236d2f563p+0}}},
+    {{{-0x1.57f4e78f8f561p-1,0x1.77cfe1e21ae0cp-1},{0x1.c8d2705bef366p-2,-0x1.c5cae91d970efp-2}}},
+    {{{-0x1.4dd4cf3741e5ap-2,-0x1.2e4ec7a83bfa3p-5},{-0x1.2ca930e8c78fcp-4,-0x1.fbec1334b129ep-2}}},
+    {{{0x1.52ff16d533299p-1,-0x1.486ef1ec18e36p-1},{0x1.3e5ab107e3732p-1,-0x1.6ee302331fe3ap-1}}},
+    {{{-0x1.18d93b1590c4dp-5,0x1.7a3e0220ea196p-6},{0x1.148318f3aaa55p-2,0x1.b08d52660d444p-1}}},
+    {{{0x1.bcab5d3aaef43p-2,0x1.0730866429b04p+0},{0x1.0a4ffdf7ed2e4p-1,0x1.0d361156b9dffp-1}}},
+    {{{-0x1.ad8dce483b0acp-1,-0x1.3d7483b69a0e9p-2},{0x1.1511e2c0027b7p+0,0x1.163145289b34bp+0}}},
+}};
 
 void require(bool condition, const char* message) {
     if (!condition) throw Error(message);
@@ -365,7 +506,14 @@ struct PatternCode::Impl {
                     if(!entry.valid)captured=&entry;
                 }
             }
-            auto& row = private_patterns && bit ? pattern_one : pattern;
+            const bool distinct = !legacy_public_pattern(config);
+            auto& row = distinct && bit ? pattern_one : pattern;
+            auto row_position=position;
+            if(!private_patterns && distinct && bit) {
+                require(position<=std::numeric_limits<std::uint64_t>::max()/8-public_one_first_chip,
+                        "public pattern byte address would overflow");
+                row_position+=public_one_first_chip;
+            }
             auto* layer = config.dsss ? (private_patterns && bit ? &dsss_one : &dsss) : nullptr;
             auto& inner=symbol_state ? symbol_state->coarse[bit][position%Interleaved::coarse_capacity] : inner_chips[bit];
             // Valid only for this candidate's exact epoch and canonical coarse
@@ -373,9 +521,11 @@ struct PatternCode::Impl {
             // across bit positions, keys, epochs or the zero/one alternatives.
             auto result = outer && inner.valid && inner.epoch==row.epoch &&
                 inner.position==position && !captured ? inner.value :
-                row.noise(position,layer,nullptr,nullptr,captured);
+                (!private_patterns && distinct && !captured && position<public_prefix.size() ?
+                 public_prefix[static_cast<std::size_t>(position)][bit] :
+                 row.noise(row_position,layer,nullptr,nullptr,captured));
             if(outer)inner={row.epoch,position,result,true};
-            if (bit && !private_patterns) result *= bit_mask[static_cast<std::size_t>((absolute_chip % chips) % bit_mask.size())];
+            if (bit && !distinct) result *= bit_mask[static_cast<std::size_t>((absolute_chip % chips) % bit_mask.size())];
             return result*outer_value*pulse_gain;
         }
         const auto angle = (bit ? 1. : -1.) * std::numbers::pi / 2 *
@@ -391,14 +541,15 @@ struct PatternCode::Impl {
         return {cached_value(absolute,0),cached_value(absolute,1)};
     }
     std::complex<double> cached_value(std::uint64_t absolute,unsigned bit) {
-        auto& cache = private_patterns && bit ? shaped_chips_one : shaped_chips;
+        const bool distinct = !legacy_public_pattern(config);
+        auto& cache = distinct && bit ? shaped_chips_one : shaped_chips;
         auto& entry=cache[absolute%cache.size()];
         if(!entry.valid || entry.address!=absolute) {
-            entry.value=value(absolute,private_patterns ? bit : 0,0);
+            entry.value=value(absolute,distinct ? bit : 0,0);
             entry.address=absolute;entry.valid=true;
         }
         auto result=entry.value;
-        if(bit && !private_patterns)result*=bit_mask[static_cast<std::size_t>((absolute%chips)%bit_mask.size())];
+        if(bit && !distinct)result*=bit_mask[static_cast<std::size_t>((absolute%chips)%bit_mask.size())];
         return result;
     }
     std::array<std::complex<double>,2> shaped_values(std::uint64_t first_chip,double within) {

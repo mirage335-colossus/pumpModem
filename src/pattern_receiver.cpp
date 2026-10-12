@@ -623,6 +623,7 @@ struct PatternReceiver::Impl {
             shaped?1U:0U,config.scramble?1U:0U,config.dsss?1U:0U,
             config.spreading_seed,config.dsss_seed,config.dsss_factor,
             static_cast<std::uint32_t>(config.outer_dsss_version)};
+        geometry.pattern.legacy_public=legacy_public_pattern(config);
         if(config.fake_hopping && config.fake_hopping->matched_gaps) {
             const auto& plan=*config.fake_hopping;
             geometry.pattern.fhss_matched_gaps=1;geometry.pattern.fhss_dwell=plan.dwell_seconds;

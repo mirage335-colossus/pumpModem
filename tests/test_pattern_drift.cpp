@@ -279,24 +279,41 @@ void compact_budget_fallback_preserves_accumulation() {
     const auto budget=reference.working_bytes()+128;
     modem::PatternCorrelator limited(c,search(true),budget),coherent(c,search(false),budget);
     check(!limited.drift_tolerant(),"insufficient optional workspace must preserve the complete coherent search bank");
-    const auto a=receive_with(limited,c,pcm,257,false),b=receive_with(coherent,c,pcm,257,false);
+    const auto prefix=static_cast<std::size_t>(modem::symbol_sample_count(c)/2);
+    limited.push(std::span(pcm).first(prefix));coherent.push(std::span(pcm).first(prefix));
+    check(limited.working_bytes()<=budget && coherent.working_bytes()<=budget &&
+          limited.take_bursts().empty() && coherent.take_bursts().empty(),
+          "tight constructor fallback changed the unfinished symbol or memory ceiling");
+    // Keep the original tight optional-detector exercise, then reserve the
+    // mandatory lazy timing guides and pending publication before admission.
+    // Even one TimingEntry exceeds the former 128-byte idle allowance.
+    const auto evidence_budget=std::max(limited.working_bytes()+limited.projection_cache_headroom(pcm.size()-prefix),
+        coherent.working_bytes()+coherent.projection_cache_headroom(pcm.size()-prefix));
+    limited.set_workspace_bytes(evidence_budget);coherent.set_workspace_bytes(evidence_budget);
+    check(!limited.drift_tolerant(),"evidence headroom must not silently re-enable dropped drift state");
+    const auto a=receive_with(limited,c,pcm,257,false,prefix),b=receive_with(coherent,c,pcm,257,false,prefix);
     exact(a,bits,true);exact(b,bits,true);
-    check(a.peak_working<=budget&&b.peak_working<=budget&&a.events.size()==b.events.size(),
+    check(a.peak_working<=evidence_budget&&b.peak_working<=evidence_budget&&a.events.size()==b.events.size(),
           "constructor fallback changed memory bounds or exact progress");
     for(std::size_t i=0;i<a.events.size();++i)
         check(a.events[i].score==b.events[i].score,"constructor fallback relaxed coherent evidence thresholds");
 
     modem::PatternCorrelator shrinking(c,search(true),workspace),baseline(c,search(false),workspace);
-    const auto prefix=static_cast<std::size_t>(modem::symbol_sample_count(c)/2);
     shrinking.push(std::span(pcm).first(prefix));baseline.push(std::span(pcm).first(prefix));
     check(shrinking.drift_tolerant()&&shrinking.take_bursts().empty()&&baseline.take_bursts().empty(),
           "workspace-shrink fixture must retain an unfinished whole-symbol accumulation");
     const auto reduced=baseline.working_bytes()+128;
     shrinking.set_workspace_bytes(reduced);baseline.set_workspace_bytes(reduced);
     check(!shrinking.drift_tolerant(),"workspace reduction must release optional drift state without replacing reception");
+    check(shrinking.working_bytes()<=reduced&&baseline.working_bytes()<=reduced,
+          "dropping optional drift state exceeded the tight reduced budget");
+    const auto continued_budget=std::max(shrinking.working_bytes()+shrinking.projection_cache_headroom(pcm.size()-prefix),
+        baseline.working_bytes()+baseline.projection_cache_headroom(pcm.size()-prefix));
+    shrinking.set_workspace_bytes(continued_budget);baseline.set_workspace_bytes(continued_budget);
+    check(!shrinking.drift_tolerant(),"post-shrink evidence headroom must not reconstruct discarded drift state");
     const auto after=receive_with(shrinking,c,pcm,257,false,prefix),control=receive_with(baseline,c,pcm,257,false,prefix);
     exact(after,bits,true);exact(control,bits,true);
-    check(after.peak_working<=reduced&&after.events.size()==control.events.size(),
+    check(after.peak_working<=continued_budget&&control.peak_working<=continued_budget&&after.events.size()==control.events.size(),
           "workspace shrink changed the bounded pending stream");
     for(std::size_t i=0;i<after.events.size();++i)
         check(after.events[i].first_sample==control.events[i].first_sample&&

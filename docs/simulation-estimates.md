@@ -660,7 +660,11 @@ symbol duration; they do not reproduce every extreme tail of the sampled
 channel.
 
 For patterns with at most 1024 complete chips, the model calculates quarter
-correlations from the unshaped chip weights and sign mask. Denser patterns use
+correlations from both actual unshaped chip rows. The new public alternatives
+have different energy profiles, so finite public estimates average the two
+equiprobable source-bit conditions, just as independent private rows do. This
+does not create extra Monte Carlo trials: paired draws retain the smaller trial
+count. Data-only diagnostic mask geometry retains its previous estimate. Denser patterns use
 the orthogonal mean. Pulse shaping and within-section coupling between pattern
 weights and a particular phase path remain approximations. The same fixed
 normal draws serve both bit alternatives and both detectors; a small cache
@@ -1211,3 +1215,9 @@ Deferred payload scoring slots stay at unity gain, but source cover/tails and
 wall-time throughput still pay for the gaps. A full remote uncertainty wider than
 the dwell is explicitly unguaranteed, never reported as a small guaranteed loss
 using only the local guard. Fake does not implement RF hopping or compliance.
+
+The [2026-10 public alphabet measurement](public-pattern-alphabet.md) now averages
+both public candidate envelopes, including their finite limiter projections.
+Its coefficient table changes construction cost modestly; existing engineering
+CPU coefficients were retained. The measured short/long public-bank differences
+are not a blanket CPU multiplier for unmeasured application geometries.

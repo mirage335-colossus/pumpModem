@@ -533,13 +533,15 @@ struct Fixture {
 };
 
 void score_equivalence() {
-    for(const bool shaped:{false,true})for(unsigned variant=0;variant<4;++variant) {
+    for(const bool shaped:{false,true})for(unsigned variant=0;variant<5;++variant) {
         Fixture f(shaped,variant==1||variant==2?10:1,
-            variant==2?OuterDsssVersion::interleaved_v2:OuterDsssVersion::legacy_v1,variant==3);
+            variant==2?OuterDsssVersion::interleaved_v2:OuterDsssVersion::legacy_v1,variant>=3);
+        if(variant==4) {f.config.data_key.emplace(Bytes(32,0x37));f.batch.geometry.pattern.legacy_public=1;}
         std::vector<std::array<FftComplex,2>> nominal;
-        if(variant==3){nominal.resize(f.batch.geometry.bins_per_symbol);PatternCode code(f.config,f.config.stream_epoch);
+        if(variant>=3){nominal.resize(f.batch.geometry.bins_per_symbol);PatternCode code(f.config,f.config.stream_epoch);
             prepare_fft_nominal_reference(f.batch.geometry,code,nominal);f.batch.nominal_reference=nominal;
-            for(auto& job:f.jobs)job.clock_ratio=1;}
+            if(variant==3)for(auto& job:f.jobs)job.clock_ratio=1;
+            else f.jobs[2].clock_ratio=1;}
         std::vector<FftSearchWorkspace> workers;workers.emplace_back(f.config,f.spectrum.size(),true);
         std::vector<FftSearchScore> expected(f.jobs.size()*f.batch.score_stride,untouched);
         f.batch.observations={};execute_fft_search_cpu(f.batch,f.jobs,expected,workers);f.batch.observations=f.input;

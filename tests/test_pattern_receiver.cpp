@@ -2159,7 +2159,12 @@ void hardware_settling_is_not_payload() {
         const Bytes bits{0,0,1};
         modem::PatternTransmitter source(bits,c,c.stream_epoch);
         std::vector<float> samples(static_cast<std::size_t>(source.total_samples()));source.read(samples);
-        c.data_key.reset(); // Acquisition needs no knowledge of the settling Data stream.
+        // Acquisition needs no knowledge of the actual settling Data secret.
+        // Its presence selects the preserved Data-only diagnostic alphabet;
+        // replace the secret with an unrelated key rather than changing that
+        // waveform identity. Private payload candidates need no Data key.
+        if(data && mode==0)c.data_key.emplace(Bytes(32,0));
+        else c.data_key.reset();
         const auto prefix=static_cast<std::size_t>(modem::training_sample_count(c)+modem::pattern_pulse_padding_samples(c));
         check(prefix>0,"hardware-settling fixture must contain a physical prefix");
         const std::vector<float> settling(samples.begin(),samples.begin()+static_cast<std::ptrdiff_t>(prefix));

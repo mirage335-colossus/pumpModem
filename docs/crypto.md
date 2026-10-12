@@ -145,14 +145,27 @@ consecutive fully scored failed symbols whose durations cover six seconds;
 an individual symbol lasting at least six seconds ends the stream on its first
 completed failure. A partial long-symbol window cannot end reception.
 
-Unkeyed public patterns use the same circular I/Q mapping with the public
-Scrambler seed, epoch zero and symbol-local chip positions. Amplitude and phase
-both vary, but their rows restart each symbol and are intentionally recognizable.
-Their bit-1 alternative retains the public balanced eight-chip mask
-`{1,-1,-1,1,1,1,-1,-1}` applied to bit 0. Two bit alternatives mean two complete
-pattern templates, not a two-point constellation. Short public templates legitimately yield sparse plots because
-later symbols reuse the same finite chip values. All templates use complex
-`value` samples; the former real `sign`/`fill` API has been removed.
+Unkeyed public patterns use the same circular I/Q mapping with the known
+Scrambler seed and epoch zero. Both rows restart at symbol boundaries. Bit 0
+uses `Payload` at chip `i`; bit 1 uses `PatternOneV2` at chip `1886+i`.
+The public prefix was selected for finite-pattern energy and amplitude/complex
+separation, including shifted alternatives; no chip or whole-symbol energy
+normalization is applied. The first 128 coefficients of both rows are immutable
+precomputed public values; longer patterns lazily use exactly the same mapping.
+This is not secret material or an extra cryptographic counter domain.
+
+The former balanced sign-mask public alphabet is no longer the default. Both
+public peers must use the new alphabet; no wire marker, new hypothesis or GUI
+option selects it. Private waveforms and addresses are unchanged. Low-level
+Data-only encrypted diagnostics retain the old mask; production keyed transfer
+always enables Scrambler and uses the existing independent private alphabet.
+See [public alphabet construction and measurements](public-pattern-alphabet.md).
+
+Two bit alternatives mean two complete templates, not a two-point constellation.
+Short public templates yield sparse plots because later symbols reuse the same
+finite values. Their known repetition remains recognizable and provides no
+secrecy. All templates use complex `value` samples; the former real `sign`/`fill`
+API has been removed.
 
 ### Independent private alphabet compatibility and limits
 

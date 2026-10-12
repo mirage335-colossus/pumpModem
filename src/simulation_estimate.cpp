@@ -165,7 +165,7 @@ bool same_profile(const modem::Config& a,const modem::Config& b) {
     return hopping_equal()&& a.sample_rate==b.sample_rate && a.carrier_hz==b.carrier_hz && a.bandwidth_hz==b.bandwidth_hz && a.dsss_factor==b.dsss_factor &&
         (a.dsss_factor<=1||a.outer_dsss_version==b.outer_dsss_version) &&
         a.spreading_mode==b.spreading_mode && a.scramble==b.scramble && a.dsss==b.dsss &&
-        a.pulse_shaping==b.pulse_shaping &&
+        a.pulse_shaping==b.pulse_shaping && modem::legacy_public_pattern(a)==modem::legacy_public_pattern(b) &&
         modem::symbol_sample_count(a)==modem::symbol_sample_count(b) &&
         modem::pattern_chip_samples(a)==modem::pattern_chip_samples(b);
 }
@@ -897,6 +897,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         g.private_template_reuse=modem::detail::PrivateTemplateReuse::bounded_interpolation;
         g.drift_sections=1;g.pattern.chip_samples=chip;g.pattern.chips_per_symbol=modem::pattern_chips_per_symbol(config);
         g.pattern.symbol_samples=symbol;g.pattern.sample_rate=config.sample_rate;g.pattern.shaped=modem::pattern_pulse_enabled(config);
+        g.pattern.legacy_public=modem::legacy_public_pattern(config);
         g.pattern.scramble=config.scramble;g.pattern.dsss=config.dsss;g.pattern.spreading_mode=static_cast<std::uint32_t>(config.spreading_mode);
         bool eligible=true;
         for(const auto& h:bank.hypotheses) {modem::detail::FftSearchJob job;
@@ -1586,6 +1587,7 @@ bool interleaved_statistics(const transfer::Options& options,const Work& work,
         modem::pattern_chips_per_symbol(config),total,config.sample_rate,static_cast<std::uint32_t>(config.spreading_mode),
         1U,config.scramble?1U:0U,config.dsss?1U:0U,configured.spreading_seed,configured.dsss_seed,
         config.dsss_factor,static_cast<std::uint32_t>(config.outer_dsss_version)};
+    identity.legacy_public=modem::legacy_public_pattern(configured);
     if(configured.fake_hopping && configured.fake_hopping->power_ramps) {
         const auto& plan=*configured.fake_hopping;
         identity.fhss_matched_gaps=plan.smooth_ramps?(plan.remote_guard_covered?2U:3U):(plan.matched_gaps?1U:0U);
@@ -2345,12 +2347,13 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
             return probability_result();
         }
         auto probability=detail::receiver_probability(parameters,stop);
-        bool averaged_private_candidates=false;
+        bool averaged_candidates=false;
         // The planner has no wire-bit content. Independent finite candidates
         // need an equiprobable-bit estimate, including each source's limiter
         // projections. Common random draws are paired, so retain the smaller
         // trial count rather than counting correlated draws as extra evidence.
-        if(probability.available && (config.scramble || config.dsss) &&
+        if(probability.available && !modem::legacy_public_pattern(config) &&
+           config.spreading_mode==modem::SpreadingMode::pattern &&
            (samples_per_symbol/chip<=1024 || differential_window || interleaved_reference)) {
             if(!configure_statistics(alternative_parameters,1)) {
                 result.confidence_available=false;
@@ -2361,7 +2364,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
             const auto other=detail::receiver_probability(alternative_parameters,stop);
             if(!other.available)probability=other;
             else {
-                averaged_private_candidates=true;
+                averaged_candidates=true;
                 using P=detail::ReceiverProbability;
                 for(auto field:{&P::acquired_correct,&P::acquired_wrong,&P::retained_correct,&P::retained_wrong,
                     &P::coherent_acquired_correct,&P::coherent_acquired_wrong,
@@ -2446,7 +2449,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
             }
             return p.signal_energy*fitted_fraction;
         };
-        const auto modeled_energy=joint*(averaged_private_candidates?
+        const auto modeled_energy=joint*(averaged_candidates?
             (fitted_energy(parameters)+fitted_energy(alternative_parameters))/2:fitted_energy(parameters));
         result.modeled_symbol_snr_db=modeled_energy>0?10*std::log10(modeled_energy):-300;
         if(differential_window&&matching_work.compact&&transmission.wire_bits>1) {

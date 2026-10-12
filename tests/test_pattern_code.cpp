@@ -399,14 +399,18 @@ void alphabet_and_repetition() {
     auto c = config(); modem::PatternCode public_code(c);
     const auto length = public_code.chips_per_symbol();
     std::complex<double> normalized_overlap{};
+    double zero_energy=0,one_energy=0,amplitude_product=0;
     for (std::uint64_t i = 0; i < length; ++i) {
         const auto zero = public_code.value(i, 0), one = public_code.value(i, 1);
-        normalized_overlap += std::conj(zero) * one / std::norm(zero);
+        normalized_overlap += std::conj(zero) * one;
+        zero_energy+=std::norm(zero);one_energy+=std::norm(one);
+        amplitude_product+=std::abs(zero)*std::abs(one);
         check(zero == public_code.value(length + i, 0) && one == public_code.value(length + i, 1),
               "public symbols must be identifiable without their transmission index");
     }
-    check(std::abs(normalized_overlap) < 1e-12,
-          "complete binary mask periods must preserve balanced internal transitions");
+    check(std::norm(normalized_overlap)/(zero_energy*one_energy)<.01 &&
+          amplitude_product*amplitude_product/(zero_energy*one_energy)<.75,
+          "public alternatives need independent useful amplitude and complex evidence");
     c.scramble = true; modem::PatternCode private_code(c, 73);
     bool adjacent_changed = false, legacy_period_changed = false;
     for (std::uint64_t i = 0; i < length; ++i) {
@@ -415,22 +419,112 @@ void alphabet_and_repetition() {
     }
     check(adjacent_changed && legacy_period_changed,
           "private noise must neither reset per symbol nor repeat a finite template");
-    c.scramble=false; // Public mask properties are not private alphabet constraints.
-    for (unsigned chips : {2U,3U,4U,8U}) {
+    c.scramble=false;
+    constexpr std::array<std::uint8_t,32> seed{
+        'D','a','t','a','P','u','m','p','/','p','a','t','t','e','r','n',
+        '/','b','i','n','a','r','y','/','v','1',0,0,0,0,0,0};
+    for(unsigned bit=0;bit<2;++bit)for(unsigned i=0;i<128;++i) {
+        const auto bytes=Crypto(seed).stream(StreamPurpose::Scrambler,0,8*(i+(bit?1886:0)),8,
+            bit?StreamDomain::PatternOneV2:StreamDomain::Payload);
+        const auto uniform=[&](unsigned off) {std::uint32_t word=0;for(unsigned j=0;j<4;++j)word=(word<<8)|bytes[off+j];
+            return (static_cast<double>(word)+.5)/4294967296.;};
+        const auto expected=std::polar(std::min(1.75,std::sqrt(-std::log(uniform(0))))/
+            std::sqrt(1-std::exp(-1.75*1.75)),2*std::numbers::pi*uniform(4));
+        check(std::abs(public_code.value(i,bit)-expected)<1e-14,
+              "public read-only prefix differs from its specified stream mapping");
+    }
+    constexpr std::array<std::complex<double>,4> public_one{{{0.57154719088682837,-1.2195457207816818},{-1.4851622415781887,0.11644348523644754},{1.1210199394249607,0.53202796348743242},{-0.9414283303024058,0.12136027656053561}}};
+    constexpr std::array<unsigned,4> positions{0,1,7,31};
+    for(unsigned i=0;i<4;++i)check(std::abs(public_code.value(positions[i],1)-public_one[i])<1e-14,
+        "frozen public bit-one domain/address vector changed");
+    for (unsigned chips : {2U,3U,4U,6U,8U,12U,16U,32U,64U,128U}) {
         c.spreading_factor = chips; modem::PatternCode short_code(c, 73);
-        std::vector<int> relative(chips);
-        for (unsigned i = 0; i < chips; ++i)
-            relative[i]=std::real(short_code.value(i,0)/short_code.value(i,1))>0?1:-1;
-        check(std::find(relative.begin(), relative.end(), 1) != relative.end() &&
-              std::find(relative.begin(), relative.end(), -1) != relative.end(),
-              "binary rows must differ in internal transitions, not only absolute phase");
-        if (chips >= 3)
-            check(relative[0] * relative[1] != relative[1] * relative[2],
-                  "the binary distinction must not be an alternating carrier alias");
+        double e0=0,e1=0,amp=0;std::complex<double> dot{};
+        for(unsigned i=0;i<chips;++i) {
+            auto a=short_code.value(i,0),b=short_code.value(i,1);
+            e0+=std::norm(a);e1+=std::norm(b);amp+=std::abs(a)*std::abs(b);dot+=std::conj(a)*b;
+        }
+        check(std::abs(10*std::log10(e1/e0))<1.2,
+              "short public alternatives have excessive whole-symbol power imbalance");
+        check(std::norm(dot)/(e0*e1)<.23 && amp*amp/(e0*e1)<.73,
+              "short public rows need complex and phase-independent amplitude separation");
+        // A frequency rotation cannot change these magnitudes, so no constant
+        // phase OR alternating carrier rotation maps the complete rows.
     }
     c.spreading_factor = 1; modem::PatternCode degenerate(c);
-    check(degenerate.value(0, 0) == degenerate.value(0, 1),
-          "one-chip binary template must expose its unavoidable unknown-phase ambiguity");
+    const auto a=degenerate.value(0,0),b=degenerate.value(0,1);
+    check(std::abs(std::norm(std::conj(a)*b)/(std::norm(a)*std::norm(b))-1)<1e-14,
+          "one chip remains indistinguishable under unknown complex gain");
+}
+void public_alphabet_cache_and_partial() {
+    auto c=config();c.sample_rate=256;c.carrier_hz=64;c.bandwidth_hz=32;
+    for(unsigned chips:{2U,3U,16U,64U})for(bool partial:{false,true}) {
+        c.spreading_factor=chips;c.integration_seconds=0;
+        const auto length=modem::symbol_sample_count(c),chip=modem::pattern_chip_samples(c);
+        if(partial)c.integration_seconds=std::nextafter((length+.375*chip)/c.sample_rate,0.);
+        modem::PatternCode code(c,73),other(c,91);
+        const auto memory=code.working_bytes(),count=code.chips_per_symbol();
+        for(std::uint64_t pos:{0ULL,1ULL,31ULL,64ULL,4096ULL}) {
+            const auto pair=code.values(pos);
+            for(unsigned bit=0;bit<2;++bit)check(pair[bit]==code.value(pos,bit) &&
+                pair[bit]==other.value(pos%count,bit),"public scalar/paired/cache/epoch identity diverged");
+        }
+        for(double clock:{.9997,1.,1.0003})for(double n=-8.*chip;n<code.symbol_samples()+8.*chip;n+=.73*chip) {
+            const auto pair=code.shaped_values(0,n*clock+.37);
+            for(unsigned bit=0;bit<2;++bit)check(pair[bit]==code.shaped_value(0,bit,n*clock+.37),
+                "public fractional, clock-scaled, partial-chip or pulse-boundary pair cache changed template");
+        }
+        code.set_stream_phase_samples(17);
+        check(code.values(0)==other.values(0) && code.working_bytes()==memory,
+              "public phase invalidation changed repeatable alphabet or grew cache");
+    }
+    // Low-level Data-only captures are encrypted diagnostics, so retain their
+    // independent historical waveform identity, including the former mask.
+    c.integration_seconds=0;c.spreading_factor=64;c.data_key.emplace(Bytes(32,0x37));
+    modem::PatternCode legacy(c,73);constexpr std::array<int,8> mask{1,-1,-1,1,1,1,-1,-1};
+    check(modem::legacy_public_pattern(c),"Data-only diagnostic identity not retained");
+    for(unsigned i=0;i<128;++i)check(legacy.values(i)[1]==legacy.value(i,0)*double(mask[i%8]),
+        "Data-only encrypted diagnostic waveform changed");
+    c.data_key.emplace(Bytes(32,0));modem::PatternCode unrelated_data(c,73);
+    for(unsigned i=0;i<128;++i)check(unrelated_data.values(i)==legacy.values(i),
+        "public diagnostic payload requires knowledge of the settling Data secret");
+    c.scramble=true;check(!modem::legacy_public_pattern(c),"private candidate accidentally selected legacy public mapping");
+
+}
+void public_shaped_alphabet_ambiguity() {
+    auto c=config();c.sample_rate=256;c.carrier_hz=64;c.bandwidth_hz=32;
+    for(unsigned chips:{2U,3U,16U,64U}) {
+        c.spreading_factor=chips;
+        std::array<std::vector<std::complex<double>>,2> rows;
+        std::array<double,2> energy{};
+        for(unsigned bit=0;bit<2;++bit) {
+            modem::PatternTransmitter tx(Bytes{static_cast<std::uint8_t>(bit)},c,73,0,false);
+            rows[bit].resize(tx.total_samples());tx.read_analytic(rows[bit]);
+            for(const auto z:rows[bit])energy[bit]+=std::norm(z);
+        }
+        double amplitude=0;
+        for(std::size_t n=0;n<rows[0].size();++n)amplitude+=std::abs(rows[0][n])*std::abs(rows[1][n]);
+        check(amplitude*amplitude/(energy[0]*energy[1])<.78 &&
+              std::abs(10*std::log10(energy[1]/energy[0]))<1.3,
+              "actual shaped/limited public rows lost amplitude separation or energy balance");
+        // A bounded ambiguity regression, not a proof for every admitted bank:
+        // +/- two chips, +/-4 Hz, fractional samples and clock endpoints.
+        double worst=0;
+        for(double clock:{.9997,1.,1.0003})for(int lag=-32;lag<=32;lag+=4)
+        for(double frequency=-4;frequency<=4;frequency+=.5) {
+            std::complex<double> dot{};
+            for(std::size_t n=0;n<rows[0].size();++n) {
+                const auto x=(static_cast<double>(n)-lag-.37)*clock;
+                if(x<0 || x>=rows[1].size()-1)continue;
+                const auto k=static_cast<std::size_t>(x);const auto fraction=x-k;
+                const auto z=rows[1][k]*(1-fraction)+rows[1][k+1]*fraction;
+                dot+=std::conj(rows[0][n])*z*std::polar(1.,2*std::numbers::pi*frequency*n/c.sample_rate);
+            }
+            worst=std::max(worst,std::norm(dot)/(energy[0]*energy[1]));
+        }
+        check(worst<(chips==2?.65:chips==3?.45:chips==16?.32:.18),
+              "shaped public shifted/frequency/clock ambiguity regressed");
+    }
 }
 void independent_private_candidates() {
     constexpr std::array<int,8> old_mask{1,-1,-1,1,1,1,-1,-1};
@@ -495,13 +589,14 @@ void independent_private_candidates() {
     }
 }
 void public_waveform_uses_amplitude_and_phase() {
+    for(unsigned bit=0;bit<2;++bit) {
     auto c=config();c.spreading_factor=4096;
     modem::PatternCode code(c,73),other_epoch(c,74);
     const auto count=code.chips_per_symbol();
     std::complex<double> mean{},square{};double energy=0,energy_square=0;
     for(std::uint64_t chip=0;chip<count;++chip) {
-        const auto value=code.value(chip,0);
-        check(value==other_epoch.value(chip,0) && value==code.value(chip+count,0),
+        const auto value=code.value(chip,bit);
+        check(value==other_epoch.value(chip,bit) && value==code.value(chip+count,bit),
               "public circular templates must be independent of epoch and repeat each symbol");
         mean+=value;square+=value*value;
         const auto power=std::norm(value);energy+=power;energy_square+=power*power;
@@ -510,6 +605,7 @@ void public_waveform_uses_amplitude_and_phase() {
           "public pattern chips must occupy both quadratures, not a two-point binary line");
     check(std::abs(energy/count-1)<.08 && energy_square/count-std::pow(energy/count,2)>.4,
           "public pattern chips must vary amplitude as well as phase");
+    }
 }
 void carrier_phase_integer_positions() {
     struct Example {std::uint64_t cursor;std::uint32_t rate;double carrier,cycles;};
@@ -1085,7 +1181,8 @@ int main() {
         interleaved_dsss_state_and_waveform();
         interleaved_dsss_legacy_and_gain();
         seek_and_domains(); symbol_epoch_schedule(); symbol_schedule_integer_bounds();
-        alphabet_and_repetition();independent_private_candidates(); public_waveform_uses_amplitude_and_phase();
+        alphabet_and_repetition();public_alphabet_cache_and_partial();public_shaped_alphabet_ambiguity();
+        independent_private_candidates(); public_waveform_uses_amplitude_and_phase();
         carrier_phase_integer_positions();exact_pcm_and_chunks(); tones_and_bounded_state();
         streaming_and_modem_integration();complete_symbols_require_aligned_starts();
         rounded_hardware_duration();hardware_noise_keystreams();

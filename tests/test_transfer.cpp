@@ -454,8 +454,8 @@ void transmission_generation_trace() {
         for(std::size_t symbol=0;symbol<3;++symbol) {
             const auto address=modem::symbol_stream_address(value.timestamp,config.stream_phase_samples,
                 symbol,modem::symbol_sample_count(config),config.sample_rate);
-            const auto position=encrypted?modem::symbol_stream_chip(address,chips,0):0;
-            const auto domain=encrypted?(done.wire_bits[symbol]?StreamDomain::PatternOneV2:StreamDomain::PatternZeroV2):StreamDomain::Payload;
+            const auto position=encrypted?modem::symbol_stream_chip(address,chips,0):(done.wire_bits[symbol]?1886U:0U);
+            const auto domain=encrypted?(done.wire_bits[symbol]?StreamDomain::PatternOneV2:StreamDomain::PatternZeroV2):(done.wire_bits[symbol]?StreamDomain::PatternOneV2:StreamDomain::Payload);
             const auto pattern=Crypto(seed).stream(StreamPurpose::Scrambler,encrypted?address.epoch:0,position*8,8,domain);
             const auto key=encrypted?Crypto(config.dsss_seed).stream(StreamPurpose::Dsss,address.epoch,position*8,8,domain):Bytes(8,0);
             for(std::size_t byte=0;byte<8;++byte) {

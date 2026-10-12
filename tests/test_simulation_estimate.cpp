@@ -674,7 +674,7 @@ void drift_receiver_estimate() {
     near(value.section_phase_coherence_loss_db,0,"stable phase must have no section phase loss");
     modem::PatternCode finite_code(options.modem,options.modem.stream_epoch);
     double finite_power=0;
-    for(std::uint64_t i=0;i<finite_code.chips_per_symbol();++i)finite_power+=std::norm(finite_code.value(i,0));
+    for(std::uint64_t i=0;i<finite_code.chips_per_symbol();++i)finite_power+=(std::norm(finite_code.value(i,0))+std::norm(finite_code.value(i,1)))/2;
     finite_power/=finite_code.chips_per_symbol();
     near(value.modeled_symbol_snr_db,20+10*std::log10(finite_power),
          "the joint statistic must retain actual finite-template power without an arbitrary three-dB margin");

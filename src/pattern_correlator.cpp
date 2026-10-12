@@ -1621,7 +1621,7 @@ struct PatternCorrelator::Impl {
              config.sample_rate,search.frequency_offsets_hz.size(),config.carrier_hz,shaped,
              config.spreading_mode==SpreadingMode::tone,
              {static_cast<std::uint32_t>(config.spreading_mode),config.scramble,config.dsss,
-              config.spreading_seed,config.dsss_seed,config.dsss_factor,config.outer_dsss_version},drift_fits.empty()?1:drift_sections,differential_window,!chip_evidence.empty(),outer_presence},
+              config.spreading_seed,config.dsss_seed,config.dsss_factor,config.outer_dsss_version,legacy_public_pattern(config)},drift_fits.empty()?1:drift_sections,differential_window,!chip_evidence.empty(),outer_presence},
             {blocks.get(),block_count},{projections.get(),row_offset},{frequencies.get(),banks.size()},search.frequency_offsets_hz};
         // Numeric tiles contain no PatternBurst, heap-owned input, or references
         // to peer admission state. Device implementations can operate on these

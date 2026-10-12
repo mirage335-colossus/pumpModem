@@ -42,6 +42,7 @@ struct FftPatternParameters {
     std::uint32_t fhss_matched_gaps=0;
     double fhss_ramp=0;
     double fhss_dwell=0,fhss_clock=0,fhss_peer_clock=0,fhss_audio=0,fhss_region=0;
+    std::uint32_t legacy_public=0; // Data-only diagnostic alphabet identity
     bool operator==(const FftPatternParameters&) const = default;
 };
 enum class PrivateTemplateReuse : std::uint32_t { exact_only, bounded_interpolation };

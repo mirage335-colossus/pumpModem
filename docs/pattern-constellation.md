@@ -42,11 +42,13 @@ resets its local positions under the new epoch; hours-long symbols skip
 intervening seconds. Epoch, subsecond phase and chip index are local hypotheses
 and are never transmitted fields.
 
-Public unkeyed patterns use a deterministic circular I/Q noise row that restarts
-each symbol. Its amplitude and phase both vary; a binary pattern alphabet
+Public unkeyed patterns use two deterministic circular I/Q rows that restart
+each symbol. The alternatives have distinct amplitude and phase profiles; a binary pattern alphabet
 means two complete codewords, not two permitted chip values. A short public
 codeword still has few distinct points: repeated transmissions reuse its chips,
 so the scatter plot contains at most twice its chip count across both bit values.
+The [public alphabet evidence](public-pattern-alphabet.md) records the default
+construction change, short-pattern limits and public-peer interoperability.
 Selected keys always enable private Scrambler waveforms on the
 transfer path. A private row consumes eight bytes per addressed chip, mixing
 Scrambler and enabled DSSS bytes before mapping to circular noise. Both its

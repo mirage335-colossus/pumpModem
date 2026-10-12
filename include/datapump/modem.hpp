@@ -95,6 +95,13 @@ struct Config {
     std::shared_ptr<const FhssPlan> fake_hopping;
     std::size_t memory_limit = default_memory_limit;
 };
+// Low-level Data-only diagnostic captures retain their historical public mask.
+// Production encrypted transfer always enables Scrambler; this is an internal
+// waveform identity, not a selectable public alphabet or an extra hypothesis.
+inline bool legacy_public_pattern(const Config& config) {
+    return config.spreading_mode == SpreadingMode::pattern && !config.scramble &&
+           !config.dsss && config.data_key.has_value();
+}
 inline double waveform_bandwidth_hz(const Config& config) {
     return config.bandwidth_hz * config.dsss_factor;
 }

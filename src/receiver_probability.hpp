@@ -61,7 +61,7 @@ struct ReceiverProbabilityParameters {
     double noise_condition=1;
     double acquisition_threshold=30, continuation_threshold=5;
     std::array<double,4> weights{.25,.25,.25,.25};
-    // rho = sum(a * conj(b)) / sqrt(Ea * Eb). Private candidates may
+    // rho = sum(a * conj(b)) / sqrt(Ea * Eb). Public and private candidates may
     // have different envelopes and a complex overlap in every section.
     std::array<std::complex<double>,4> correlations{};
     std::optional<std::array<double,4>> alternative_weights;
