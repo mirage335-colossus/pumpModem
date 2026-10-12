@@ -271,6 +271,18 @@ void native_frozen_source_timing() {
         "native block-end forecast ignored uncertainty growth");
     require(protected_timing_frontiers(.020,.0201,.02499,.02501,limit)==ProtectedTimingAction::finish,
         "native stop forecast spent the next-block reaction margin");
+    // Recorded failure: full independent cover forecast crosses 25ms while
+    // current PCM remains at16.145ms. Reserve valid pulse support, not a second
+    // copy of the entire separately keyed3+s cover. Runtime cover checks remain.
+    constexpr double observed=.016145462,cone=1./(1.-.002)-1.;
+    require(protected_timing_frontiers(observed,observed+cone*.05,
+        observed+cone*4.369402,observed+cone*4.419402,limit)==ProtectedTimingAction::finish,
+        "recorded conservative full-cover stop was not reproduced");
+    require(protected_timing_frontiers(observed,observed+cone*.05,
+        observed+cone*.15,observed+cone*.20,limit)==ProtectedTimingAction::proceed,
+        "independent cover incorrectly consumes valid-pulse timing reserve");
+    require(protected_timing_frontiers(.0251,.0252,.0253,.0254,limit)==ProtectedTimingAction::abort,
+        "independent cover exemption excused an actual current UTC violation");
     require(protected_timing_frontiers(.020,.0201,.023,.0231,limit)==ProtectedTimingAction::proceed,
         "native safe stop frontier was rejected");
 }

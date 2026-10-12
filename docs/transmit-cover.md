@@ -118,7 +118,7 @@ on ordinary idle channel samples and must establish absence itself.
 
 Noise and messages now use the same fresh scheduled payload epoch, leading
 padding/prefix offset, output provider, source thread, buffered drain, and
-playback-discontinuity abort. Noise retains fresh temporary keys and does not
+bounded graph-counter continuation and actual playback-discontinuity abort. Noise retains fresh temporary keys and does not
 consume the selected communication key's reuse history. Noise does not wait
 behind a previous message's saved-key/long-symbol separation lock.
 
@@ -127,7 +127,10 @@ same protected-stop preparation horizon. Gain and channel routing are frozen
 with the queued profile. One original source origin/rate is kept throughout:
 there is no resetting at callbacks, symbols or repeated finite horizons. The
 controller reserves braking distance, actual converter lookahead, source
-prefetch and the protected tail. Every generated block is checked before device
+prefetch and every committed valid pulse. Native forecasts distinguish that
+endpoint from the independent cover: the latter still passes the same current
+UTC/affine/FHSS checks block by block, but does not consume a speculative
+full-tail payload-timing reserve. Actual cover duration is unchanged. Every generated block is checked before device
 submission. See [continuous timing](clock-sync.md#timing-and-private-pattern-addresses).
 
 A stationary native clock remains an engineering assumption. When UTC accuracy

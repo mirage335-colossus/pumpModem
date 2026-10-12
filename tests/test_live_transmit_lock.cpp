@@ -35,7 +35,7 @@ struct Playback {
     std::atomic<std::uint64_t> released{0},delivered{0};
     std::atomic<unsigned> opened{0},started{0},closed{0},captures{0};
     std::atomic<bool> finish{false},hold_drain{false},draining{false},inject_gap{false};
-    std::atomic<double> gain{0},timing_rate{0},timing_stop{0};
+    std::atomic<double> gain{0},timing_rate{0},timing_stop{0},timing_cover{0},xrun_budget{0},xrun_window{0};
     std::atomic<bool> protected_hook{false},inject_protected_stop{false};
     std::atomic<bool> exclusive{false};
     bool timed_mock=false,timing_accepted=false;std::atomic<bool> requested_timing{false};
@@ -130,6 +130,12 @@ void tuning_utc() {
         check(playback.timing_rate>0 && playback.timing_rate==*expected_rate &&
               playback.timing_stop==*expected_stop && playback.protected_hook,
               "finite message and open tuning resolved different timing/stop controllers");
+        const auto& c=value.transfer.modem;
+        const auto symbol_seconds=static_cast<double>(modem::symbol_sample_count(c))/c.sample_rate;
+        check(playback.timing_cover==static_cast<double>(modem::suppression_sample_count(c))/c.sample_rate &&
+              playback.timing_cover>0 && playback.xrun_window==symbol_seconds &&
+              playback.xrun_budget==std::min(.1,.01*symbol_seconds),
+              "message/noise recovery or valid-pulse forecast geometry differed");
         check(playback.requested_timing && state.transmit_clock_following==accepted &&
               state.clock_timing_fallback==!accepted,"tuning/message UTC request or visible fallback differed");
         session.cancel_transmit();await([&]{return playback.closed==1;},"UTC source failed immediate abort");session.stop();
@@ -469,6 +475,8 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
     validate_options(options);
     script->gain=options.transmit_gain;script->exclusive=options.exclusive;
     script->timing_rate=options.maximum_timing_rate_correction;script->timing_stop=options.timing_stop_duration_seconds;
+    script->timing_cover=options.timing_independent_cover_seconds;
+    script->xrun_budget=options.reported_xrun_budget_seconds;script->xrun_window=options.reported_xrun_window_seconds;
     script->protected_hook=static_cast<bool>(options.timing_protected_stop);
     // The deterministic provider accepts schedules without sleeping. Its
     // status callback tests successful and fallback preflight independently

@@ -141,6 +141,11 @@ void finish_paths() {
             if(shaped && point<train+3*symbol)
                 check(whole.total_samples()==point+4*pad+3*c.sample_rate+1,
                     "graceful stop shortened the protected three seconds or shaping support");
+            if(shaped && point<train+3*symbol) {
+                const auto valid_end=whole.total_samples()-modem::suppression_sample_count(c);
+                check(valid_end==point+2*pad && valid_end<=content,
+                    "timing endpoint omitted already-contributed valid pulse support");
+            }
             std::vector<Complex> tail(whole.total_samples()-point),pieces(tail.size());whole.read_analytic(tail);
             std::size_t offset=0;while(!fragmented.finished()) {
                 const auto n=fragmented.read_analytic(std::span(pieces).subspan(offset,std::min<std::size_t>(13,pieces.size()-offset)));
@@ -222,6 +227,71 @@ void finite_tuning() {
               "tuning bypassed dedicated continuous keyed FHSS schedule");
         check(trace.temporary_key && !trace.dsss && !trace.active && trace.source.empty() && trace.data_key_bits.empty(),
               "tuning disclosed a root or became communication payload");
+    }
+}
+// A bounded physical-damage fixture, separate from graph telemetry. The
+// provider counter does NOT establish this erasure model. Keep the whole burst,
+// channel noise, all streams, next-poll publication and observed absence.
+void xrun_erasure_evidence() {
+    for(const unsigned factor:{1U,10U,100U,1000U}) {
+        auto c=configuration(factor);c.sample_rate=2048;c.carrier_hz=512;
+        c.bandwidth_hz=512./factor;c.integration_seconds=std::max(2.,factor/32.);
+        c.stream_phase_samples=0;c.dsss=factor>1;
+        const Bytes bits{1,0,1};const auto symbol=modem::symbol_sample_count(c);
+        const auto first=modem::training_sample_count(c)+modem::pattern_pulse_padding_samples(c);
+        modem::PatternTransmitter tx(bits,c,c.stream_epoch);
+        std::vector<Complex> original(tx.total_samples());tx.read_analytic(original);
+        const auto gap=static_cast<std::uint64_t>(std::ceil(512.*c.sample_rate/48000));
+        const auto start=first+symbol+symbol/2+3;
+        // Conditional, worst-carrier-phase matched projection loss. H is the
+        // removed I/Q Gram matrix and G the original. The exact generalized
+        // eigenvalue gives max removed matched energy; no independent-sample
+        // assumption or thermal-noise resemblance is made.
+        double cc=0,ss=0,cs=0,hc=0,hs=0,hcs=0;
+        for(std::uint64_t i=first+symbol;i<first+2*symbol;++i) {
+            const auto re=original[i].real(),im=original[i].imag();cc+=re*re;ss+=im*im;cs+=re*im;
+            if(i>=start&&i<start+gap){hc+=re*re;hs+=im*im;hcs+=re*im;}
+        }
+        const auto determinant=cc*ss-cs*cs;
+        const auto trace=(ss*hc+cc*hs-2*cs*hcs)/determinant;
+        const auto det=(hc*hs-hcs*hcs)/determinant;
+        const auto fraction=.5*(trace+std::sqrt(std::max(0.,trace*trace-4*det)));
+        const auto loss=-20*std::log10(1-fraction);
+        check(std::isfinite(loss)&&loss<1.,"bounded erasure lost excessive conditional matched energy");
+        const auto absence=(1+static_cast<std::uint64_t>(std::ceil(6.*c.sample_rate/symbol)))*symbol;
+        for(const bool erase:{false,true}) {
+            std::vector<float> input(original.size()+absence);
+            std::mt19937_64 rng(19437);std::normal_distribution<double> noise(0,.003);
+            for(std::size_t i=0;i<input.size();++i) {
+                const bool removed=erase&&i>=start&&i<start+gap;
+                input[i]=static_cast<float>((i<original.size()&&!removed?original[i].real():0)+noise(rng));
+            }
+            modem::PatternSearch search;search.frequency_offsets_hz={0};search.clock_errors_ppm={0};
+            search.initial_stream_symbols=1;search.start_offset_seconds=double(first)/c.sample_rate;
+            search.start_uncertainty_seconds=.5/c.sample_rate;search.compact_clock_search=true;
+            modem::PatternReceiver rx(c,32*1024*1024,search);
+            std::map<std::pair<std::uint64_t,std::uint64_t>,Bytes> streams;
+            std::size_t publications=0;bool complete=false;std::uint64_t consumed=0;
+            const auto harvest=[&]{for(const auto& event:rx.take_bursts()) {
+                auto& got=streams[{event.stream_first_sample,event.stream_first_symbol}];
+                check(!event.missing_slots&&event.first_stream_symbol==got.size(),"xrun fixture moved bit identity");
+                if(!event.bits.empty()) {++publications;check(event.bits.size()==1,"xrun fixture batched accepted bits");}
+                got.insert(got.end(),event.bits.begin(),event.bits.end());
+                if(event.complete)check(consumed>=first+bits.size()*symbol+6*c.sample_rate,
+                    "xrun gap or source EOF manufactured physical completion");
+                complete|=event.complete;
+            }};
+            while(consumed<input.size()) {
+                const auto count=std::min<std::size_t>(113,input.size()-consumed);
+                rx.push(std::span(input).subspan(consumed,count));consumed+=count;harvest();
+            }
+            rx.finish();harvest();
+            check(streams.size()==1&&streams.begin()->second==bits&&complete&&publications==bits.size(),
+                "xrun erasure caused extra/lost bits, publication or completion failure");
+            std::cout<<"xrun fixture factor="<<factor<<" erase="<<erase<<" symbol_s="<<double(symbol)/c.sample_rate
+                <<" gap_ms="<<1000.*gap/c.sample_rate<<" conditional_worst_phase_loss_db="<<loss
+                <<" workspace="<<rx.working_bytes()<<'\n';
+        }
     }
 }
 void encrypted_echoes(bool hopping=false,unsigned models=4,bool ramp=true) {
@@ -891,7 +961,8 @@ void diagnostic_cover_compatibility() {
 }
 }
 int main(int argc,char** argv) {
-    try {if(argc==2&&std::string_view(argv[1])=="--smooth") {smooth_envelope();qualified_cipher_phase_cells();matched_gap_channel_stress(true);return 0;}
+    try {if(argc==2&&std::string_view(argv[1])=="--xrun") {finish_paths();xrun_erasure_evidence();return 0;}
+        if(argc==2&&std::string_view(argv[1])=="--smooth") {smooth_envelope();qualified_cipher_phase_cells();matched_gap_channel_stress(true);return 0;}
         if(argc==2&&std::string_view(argv[1])=="--matched-stress") {matched_gap_channel_stress();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--matched") {
             smooth_envelope();matched_gap_channel_stress(true);matched_gap_channel_stress();omitted_pulse_evidence();mandatory_gate_rejection();matched_hop_gaps(1);matched_hop_gaps(10);matched_hop_gaps(10,false,true);matched_hop_gaps(10,false,true,true);matched_hop_gaps(1,true);matched_hop_gaps(10,true);matched_hop_gaps(100,true);matched_hop_gaps(1000,true);return 0;}
@@ -899,6 +970,6 @@ int main(int argc,char** argv) {
         if(argc==2&&std::string_view(argv[1])=="--fhss-echo-reference") {encrypted_echoes(true,4,false);return 0;}
         if(argc==2&&std::string_view(argv[1])=="--fhss-echo") {encrypted_echoes(true);return 0;}
         smooth_envelope();qualified_cipher_phase_cells();matched_gap_channel_stress(true);matched_gap_channel_stress();omitted_pulse_evidence();mandatory_gate_rejection();matched_hop_gaps(1);matched_hop_gaps(10);matched_hop_gaps(10,false,true);matched_hop_gaps(10,false,true,true);matched_hop_gaps(1,true);matched_hop_gaps(10,true);matched_hop_gaps(100,true);matched_hop_gaps(1000,true);
-        deferred_calendar();deferred_calendar(10);hop_arrival_timing();hop_power_boundaries();full_outer_cover();encrypted_echoes();encrypted_echoes(true,1);finish_paths();cancelled_partial_chip_lattice();finite_tuning();production_boundaries();diagnostic_cover_compatibility();std::cout<<"full virtual cover, shared boundaries and finish passed\n";return 0;}
+        deferred_calendar();deferred_calendar(10);hop_arrival_timing();hop_power_boundaries();full_outer_cover();encrypted_echoes();encrypted_echoes(true,1);finish_paths();xrun_erasure_evidence();cancelled_partial_chip_lattice();finite_tuning();production_boundaries();diagnostic_cover_compatibility();std::cout<<"full virtual cover, shared boundaries and finish passed\n";return 0;}
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

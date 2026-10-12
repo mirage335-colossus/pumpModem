@@ -1,5 +1,9 @@
 #include "application.hpp"
 #include "debug_live.hpp"
+#include "../src/audio_trace.hpp"
+#include "audio_diagnostic.hpp"
+#include <random>
+#include <fstream>
 #include <sstream>
 #include "control_interactions.hpp"
 #include "record_presentations.hpp"
@@ -100,6 +104,102 @@ void physical_debug_workflow() {
     parse({"gui","--debug","--debug-timeout","nan"},false);
     parse({"gui","--debug","--debug-timeout","30","--keyfile","synthetic.keys","--tx-key","named","--debug-bits","1010"},true);
     parse({"gui","--debug","--debug-bits","102"},false);
+}
+
+void verbose_diagnostics() {
+    namespace tr=audio::trace;
+    tr::Fields fields;fields.add("utc",1800000000.123456789L);fields.add("unknown",INFINITY);fields.add("text","\"\n");
+    check(fields.out.str().find("1800000000.123456")!=std::string::npos&&fields.out.str().find("\"unknown\":null")!=std::string::npos&&
+        fields.out.str().find("\\\"\\u000a")!=std::string::npos,"Verbose trace lost absolute timestamp precision or JSON escaping");
+    tr::State bounded;
+    for(unsigned i=0;i<tr::State::capacity+7;++i)bounded.push("fixture\n");
+    check(bounded.queued()==tr::State::capacity&&bounded.dropped==7,"Verbose queue was not bounded/accounted");
+    tr::State concurrent;
+    {std::array<std::jthread,4> producers;for(unsigned j=0;j<4;++j)producers[j]=std::jthread([&,j]{
+        for(unsigned i=0;i<1000;++i)concurrent.push(std::to_string(j)+":"+std::to_string(i));});}
+    std::string item;std::set<std::string> unique;while(concurrent.pop(item))check(unique.insert(item).second,"Concurrent trace queue duplicated a record");
+    check(unique.size()==tr::State::capacity&&unique.size()+concurrent.dropped==4000,"Concurrent trace queue lost unaccounted records");
+    const auto path=std::filesystem::temp_directory_path()/("datapump-trace-test-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl");
+    {tr::Scope trace(path);tr::record("fixture",[](auto& f){f.add("frame",123);});}
+    std::ifstream in(path);const std::string text((std::istreambuf_iterator<char>(in)),{});
+    check(text.find("\"event\":\"fixture\"")!=std::string::npos&&text.find("\"event\":\"trace_end\"")!=std::string::npos&&
+        text.find("\"prior_io_failed\":false")!=std::string::npos&&text.find("\"finalization_required\":true")!=std::string::npos,
+        "Verbose trace failed to drain before provisional footer");
+    auto* close_fixture=std::tmpfile();check(close_fixture!=nullptr,"Cannot create trace close fixture");
+    auto final=tr::finish_file(close_fixture,false);
+    check(final.succeeded()&&close_fixture==nullptr&&!tr::finish_file(close_fixture,false).succeeded(),
+        "Trace finalization did not close exactly once");
+    close_fixture=std::tmpfile();check(close_fixture!=nullptr,"Cannot create trace flush fixture");
+    final=tr::finish_file(close_fixture,false,+[](std::FILE*){return EOF;});
+    check(!final.succeeded()&&!final.flush_ok&&final.close_ok&&close_fixture==nullptr,
+        "Failed final trace flush was certified complete");
+    close_fixture=std::tmpfile();check(close_fixture!=nullptr,"Cannot create trace close-error fixture");
+    final=tr::finish_file(close_fixture,false,std::fflush,+[](std::FILE* f){std::fclose(f);return EOF;});
+    check(!final.succeeded()&&final.flush_ok&&!final.close_ok&&close_fixture==nullptr,
+        "Failed final trace close was certified complete");
+    const auto seal=tr::finalization_record("fixture-token","fixture-path",2,0,false,{false,true,true});
+    check(seal.find("\"result\":\"complete\"")!=std::string::npos&&seal.find("fixture-token")!=std::string::npos&&
+        tr::finalization_record("fixture-token","fixture-path",2,0,false,{true,true,true}).find("\"result\":\"incomplete\"")!=std::string::npos&&
+        tr::finalization_record("fixture-token","fixture-path",2,1,false,{false,true,true}).find("\"result\":\"incomplete\"")!=std::string::npos&&
+        tr::finalization_record("fixture-token","fixture-path",2,0,true,{false,true,true}).find("\"result\":\"incomplete\"")!=std::string::npos,
+        "Trace seal hid write failure or lost records");
+    bool rejected=false;try {tr::Scope trace(path);}catch(const std::exception&){rejected=true;}
+    check(rejected,"Verbose trace overwrote an existing file");in.close();std::filesystem::remove(path);
+    std::vector<std::string> arguments{"gui","--verbose","--verbose-file","new-trace.jsonl"};std::vector<char*> argv;
+    for(auto& arg:arguments)argv.push_back(arg.data());bool called=false;
+    check(gui_main(argv.size(),argv.data(),"test",[&](Launch l){called=true;check(l.verbose&&l.verbose_file=="new-trace.jsonl","Verbose CLI option lost");return 0;})==0&&called,
+        "Verbose CLI did not reach GUI without enabling a physical test");
+    arguments={"gui","--audio-timing-test","nan"};argv.clear();for(auto& arg:arguments)argv.push_back(arg.data());
+    check(gui_main(argv.size(),argv.data(),"test",[](Launch){return 0;})!=0,"Audio probe accepted an unbounded duration");
+    arguments={"gui","--audio-test-device","default"};argv.clear();for(auto& arg:arguments)argv.push_back(arg.data());
+    check(gui_main(argv.size(),argv.data(),"test",[](Launch){return 0;})!=0,"Orphan audio device option was silently ignored");
+}
+
+namespace probe_fixture {
+using namespace datapump::gui::audio_diagnostic;
+std::vector<float> diagnostic_synthetic(double seconds,const std::function<double(unsigned)>& delay,double noise=0,double gain=1) {
+    std::vector<float> pcm(std::size_t((seconds+1)*capture_rate));std::mt19937_64 rng(0x1234);
+    std::normal_distribution<double> normal(0,noise);
+    for(auto& v:pcm)v=float(normal(rng));
+    for(const auto k:ordinals(seconds)) {
+        const auto onset=k+delay(k);const auto begin=std::size_t(std::max(0.,std::floor(onset*capture_rate)));
+        const auto end=std::min(pcm.size(),std::size_t(std::ceil((onset+pulse_seconds)*capture_rate)));
+        for(auto i=begin;i<end;++i)pcm[i]+=float(gain*probe(double(i)/capture_rate-onset,k));
+    }
+    return pcm;
+}
+void run() {
+        // Independent analytic sampled fixture, not delayed copies of FFT output.
+        auto pcm=diagnostic_synthetic(8,[](unsigned){return .0302734375;});
+        auto fixed=analyze(pcm,8,0,0);
+        check(fixed.sufficient&&fixed.matches.size()==6,"fractional return did not match every complete chirp");
+        check(std::abs(fixed.median_delay_seconds-.0302734375)<.2/capture_rate,"fractional delay estimate biased");
+        check(std::abs(fixed.drift_ppm)<1,"constant fractional delay invented drift");
+        auto drift=analyze(diagnostic_synthetic(12,[](unsigned k){return .021+.000125*k;},.0001),12,0,0);
+        check(drift.sufficient&&drift.matches.size()==10,"changing-delay noisy fixture lost a probe");
+        check(std::abs(drift.drift_ppm-125)<8,"relative clock drift measurement wrong");
+        check(drift.residual_rms_seconds<.3/capture_rate,"smooth drift invented excessive jitter");
+        auto jitter=analyze(diagnostic_synthetic(10,[](unsigned k){return .04+.001*(k%2);},.0001),10,0,0);
+        check(jitter.sufficient&&jitter.residual_rms_seconds>.0003,"alternating physical delay hidden by fitted drift");
+        auto inverted=analyze(diagnostic_synthetic(5,[](unsigned){return .027;},0,-1),5,0,0);
+        check(inverted.sufficient&&inverted.matches.size()==3,"polarity-inverted loopback rejected");
+        auto shifted=analyze(pcm,8,1800000000.125L,1800000000.125L);
+        check(shifted.sufficient&&std::abs(shifted.median_delay_seconds-fixed.median_delay_seconds)<1e-8,"absolute epoch changed fractional correlation");
+        auto empty=analyze(std::vector<float>(8*capture_rate),8,0,0);
+        check(!empty.sufficient&&empty.matches.empty(),"silence claimed a physical return");
+        auto noise=diagnostic_synthetic(8,[](unsigned){return 0.;},.001,0);
+        check(!analyze(noise,8,0,0).sufficient,"noise-only claimed sufficient physical return");
+        for(std::size_t i=0;i<noise.size();++i)noise[i]=float(.01*std::sin(2*std::numbers::pi*1000*i/capture_rate));
+        check(!analyze(noise,8,0,0).sufficient,"narrowband interference claimed physical return");
+        check(!analyze(std::span(pcm).first(capture_rate),8,0,0).sufficient,"partial observation manufactured sufficient return");
+        for(double seconds:{4.,301.,std::numeric_limits<double>::quiet_NaN()}){bool rejected=false;try{(void)ordinals(seconds);}catch(const Error&){rejected=true;}check(rejected,"invalid duration accepted");}
+        std::stop_source stop;stop.request_stop();bool cancelled=false;
+        try{(void)analyze(pcm,8,0,0,stop.get_token());}catch(const Error&){cancelled=true;}check(cancelled,"analysis ignored cancellation");
+        std::vector<std::complex<double>> x(32);for(std::size_t i=0;i<x.size();++i)x[i]={double(i%7),double(i%5)};auto original=x;
+        fft(x,false);fft(x,true);for(std::size_t i=0;i<x.size();++i)check(std::abs(x[i]-original[i])<1e-12,"diagnostic FFT roundtrip wrong");
+        std::ostringstream text;quoted(text,"name\"\\\n");check(text.str()=="\"name\\\"\\\\?\"","diagnostic JSON string escaping wrong");
+
+}
 }
 void fast_default_console() {
     using F=ui::Field;using C=ui::Command;using P=ui::Page;
@@ -1508,6 +1608,6 @@ int main(int argc,char** argv) {
         });
     }
 #endif
-    try {physical_debug_workflow();fhss_developer_editor();fast_default_console();developer_mode_presentation();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();planner_clock_details();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();smoke_shutdown_does_not_resume_workflow();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {physical_debug_workflow();verbose_diagnostics();probe_fixture::run();fhss_developer_editor();fast_default_console();developer_mode_presentation();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();planner_clock_details();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();smoke_shutdown_does_not_resume_workflow();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

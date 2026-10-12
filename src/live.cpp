@@ -1826,6 +1826,14 @@ struct Session::Impl {
                     output_options.maximum_utc_error_seconds=clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds);
                     output_options.presentation_lag_seconds=clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds);
                     output_options.timing_stop_duration_seconds=wave->timing_stop_seconds;
+                    if(wave->timing_stop_seconds>0 && modem::private_cover_enabled(transmit_modem)) {
+                        // total_samples - suppression_sample_count is the last
+                        // valid pulse endpoint, also after request_finish().
+                        // The independent cover still uses the same controller
+                        // and is validated before every device submission.
+                        output_options.timing_independent_cover_seconds=static_cast<double>(
+                            modem::suppression_sample_count(transmit_modem))/transmit_modem.sample_rate;
+                    }
                     output_options.timing_source_end=[&]() -> std::optional<std::uint64_t> {
                         // Identical termination accounting for message/noise.
                         // No source callbacks or keystream addresses advance.
@@ -1853,6 +1861,15 @@ struct Session::Impl {
                         output_options.estimated_timing->maximum_utc_error_seconds=clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds);
                     }
                     output_options.allow_timing_fallback=output_options.follow_system_clock;
+                    if(output_options.follow_system_clock) {
+                        const auto symbol_seconds=static_cast<double>(modem::symbol_sample_count(transmit_modem))/transmit_modem.sample_rate;
+                        // A token budget limits counter-only reports to at most
+                        // two budgets in any symbol-length interval. It is NOT
+                        // a hardware-loss certificate. Fast symbols remain strict
+                        // when a graph quantum exceeds their budget.
+                        output_options.reported_xrun_budget_seconds=std::min(.1,.01*symbol_seconds);
+                        output_options.reported_xrun_window_seconds=symbol_seconds;
+                    }
                     output_options.playback_discontinuity=[](const std::string& reason) {
                         throw Error(reason); // A recovered device gap invalidates this private transmission.
                     };

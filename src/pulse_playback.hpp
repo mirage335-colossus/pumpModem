@@ -4,6 +4,8 @@
 // (MIT licensed). No SDK or link-time dependency is imposed on portable builds.
 // https://gitlab.freedesktop.org/pipewire/pipewire/-/tree/1.4.2
 #include "datapump/audio.hpp"
+#include "audio_realtime.hpp"
+#include "audio_trace.hpp"
 #include <algorithm>
 #include <atomic>
 #include <filesystem>
@@ -125,6 +127,42 @@ inline bool pipewire_same_clock(const pwabi::Clock& previous,const pwabi::Clock&
         current.rate.denom==previous.rate.denom && current.duration==previous.duration &&
         current.xrun==previous.xrun && current.position>=previous.position && current.cycle>=previous.cycle;
 }
+// An xrun counter is shared graph telemetry, not a local missing-PCM ledger.
+// This policy tolerates only a counter advance with a continuous dated clock.
+// Never use it to excuse an empty ring, a failed queue call or a timeline jump.
+// The token bucket bounds reports in ANY interval T to B*(1+T/window), rather
+// than resetting a damage allowance at each callback or symbol boundary.
+class PipeWireXrunPolicy {
+    double budget_=0,window_=0,debt_=0;
+    std::uint64_t last_nsec_=0,count_=0;
+    double total_=0,last_=0;
+public:
+    PipeWireXrunPolicy(double budget=0,double window=0):budget_(budget),window_(window){}
+    bool admit(const pwabi::Clock& a,const pwabi::Clock& b,bool draining=false) {
+        if(draining || !(budget_>0 && window_>0) || !std::isfinite(budget_) || !std::isfinite(window_) ||
+           b.id!=a.id || b.rate.num!=a.rate.num || b.rate.denom!=a.rate.denom ||
+           !b.rate.num || !b.rate.denom || !b.duration || b.duration!=a.duration ||
+           b.nsec<last_nsec_ || b.xrun<=a.xrun || b.position<=a.position || b.cycle<=a.cycle || b.nsec<=a.nsec ||
+           count_==UINT64_MAX)return false;
+        const auto cycles=b.cycle-a.cycle;const auto frames=b.position-a.position;
+        if(cycles>UINT64_MAX/b.duration || frames!=cycles*b.duration)return false;
+        const long double tick=static_cast<long double>(b.rate.num)/b.rate.denom;
+        const auto elapsed=static_cast<long double>(b.nsec-a.nsec)*1e-9L;
+        // Integer-nanosecond rounding plus two graph frames and the already
+        // admitted generic clock-rate envelope. A skipped quantum fails this
+        // gate; it cannot be hidden inside the GUI Audio error interval.
+        if(std::abs(elapsed-frames*tick)>2*tick+.002L*elapsed+2e-9L)return false;
+        const double duration=static_cast<double>((b.xrun-a.xrun)*tick);
+        const auto debt=std::max(0.,debt_-(last_nsec_?static_cast<double>(b.nsec-last_nsec_)*1e-9:0)*budget_/window_);
+        if(!std::isfinite(duration) || duration>budget_ || duration>budget_-debt ||
+           !std::isfinite(total_+duration))return false;
+        debt_=debt+duration;last_nsec_=b.nsec;last_=duration;total_+=duration;++count_;
+        return true;
+    }
+    std::uint64_t count()const{return count_;}
+    double total_seconds()const{return total_;}
+    double last_seconds()const{return last_;}
+};
 inline constexpr double pipewire_shared_codec_floor=.00325; // lowest supported8k graph
 // Keep a moderate scheduling quantum independently of the 250ms application
 // ring. A256/48k prototype reduced timing uncertainty but missed graph deadlines
@@ -187,10 +225,14 @@ class PipeWirePlayback {
  std::atomic<bool> started_{false},draining_{false},drained_{false},failed_{false},private_{false};
  std::atomic<int> state_{0};std::atomic<unsigned> failure_{0};
  std::atomic_flag process_busy_=ATOMIC_FLAG_INIT;
+ std::atomic<int> callback_tid_{0};int admitted_tid_=0;
+ bool realtime_attempted_=false;int realtime_tid_=0;AudioRealtimeResult realtime_{};
  struct ProcessRelease {std::atomic_flag& flag;~ProcessRelease(){flag.clear(std::memory_order_release);}};
  void fail(unsigned reason){failure_.store(reason);failed_.store(true);}std::atomic<const Clock*> clock_{nullptr};
- struct Snapshot {std::uint64_t frontier=0,serial=0;Time time{};Clock clock{};double latency_radius=0;};
+ struct Snapshot {std::uint64_t frontier=0,serial=0,ring_available=0;Time time{};Clock clock{};double latency_radius=0;std::uint64_t recovered=0;double xrun_total=0,xrun_last=0;};
  PipeWireMailbox<Snapshot> snapshot_;
+ PipeWireXrunPolicy xrun_policy_;std::atomic<std::uint64_t> recovery_frontier_{0};
+ std::uint64_t reported_recoveries_=0;Snapshot observed_snapshot_{};
  struct ClockChange {Clock previous{},current{};};PipeWireMailbox<ClockChange> clock_change_;
  std::uint64_t serial_=0,last_serial_=0;std::optional<std::uint64_t> last_frontier_;std::optional<Clock> original_clock_;
  struct Latency {float min_quantum=0,max_quantum=0;std::int32_t min_rate=0,max_rate=0;std::int64_t min_ns=0,max_ns=0;bool valid=false;bool operator==(const Latency&)const=default;};
@@ -244,6 +286,9 @@ class PipeWirePlayback {
   // silence is inactive. RT never waits; private reset is forbidden.
   if(process_busy_.test_and_set(std::memory_order_acquire))return;
   ProcessRelease release{process_busy_};
+  const auto tid=static_cast<int>(syscall(SYS_gettid));
+  callback_tid_.store(tid,std::memory_order_release);
+  if(private_ && admitted_tid_ && admitted_tid_!=tid){fail(9);return;}
   if(failed_)return;
   auto* b=api_.dequeue(stream_);if(!b)return;
   const auto reject=[&](unsigned reason=2){fail(reason);api_.return_buffer(stream_,b);};
@@ -251,7 +296,11 @@ class PipeWirePlayback {
   if(!b->buffer || b->buffer->n_datas!=1 || !b->buffer->datas || !b->buffer->datas[0].data || !b->buffer->datas[0].chunk || !graph_clock){reject();return;}
   const auto c=*graph_clock;Time t{};
   if(api_.get_time(stream_,&t,sizeof(t))<0 || t.now<=0 || !t.rate.num || !t.rate.denom || !c.duration || !c.rate.denom || c.nsec!=static_cast<std::uint64_t>(t.now) || c.rate.num!=t.rate.num || c.rate.denom!=t.rate.denom){reject(3);return;}
-  if(original_clock_ && !pipewire_same_clock(*original_clock_,c)){clock_change_.store({*original_clock_,c});reject(7);return;}
+  if(original_clock_ && !pipewire_same_clock(*original_clock_,c)) {
+   clock_change_.store({*original_clock_,c});
+   if(!(private_ && xrun_policy_.admit(*original_clock_,c,draining_.load()))) {reject(7);return;}
+   recovery_frontier_.store(xrun_policy_.count(),std::memory_order_release);
+  }
   original_clock_=c;
   latency_.load(process_latency_);const auto l=process_latency_;
   const double tick=static_cast<double>(t.rate.num)/t.rate.denom;
@@ -268,7 +317,7 @@ class PipeWirePlayback {
   if(count<want && !final){reject(4);return;}
   // The ring is part of the queued frontier and has not yet entered pw_time.
   if(available>UINT64_MAX-t.queued){reject();return;}t.queued+=available;
-  if(serial_==UINT64_MAX){reject();return;}Snapshot snap{w,++serial_,t,c,radius};static_assert(sizeof(Snapshot)<=32*sizeof(std::uint64_t));
+  if(serial_==UINT64_MAX){reject();return;}Snapshot snap{w,++serial_,available,t,c,radius,xrun_policy_.count(),xrun_policy_.total_seconds(),xrun_policy_.last_seconds()};static_assert(sizeof(Snapshot)<=40*sizeof(std::uint64_t));
   
   auto* out=static_cast<std::int16_t*>(data.data);const auto frames=ring_.size()/channels_;
   for(std::size_t i=0;i<count;++i)for(unsigned ch=0;ch<channels_;++ch)out[i*channels_+ch]=ring_[((r+i)%frames)*channels_+ch];
@@ -279,17 +328,18 @@ class PipeWirePlayback {
  }
  Snapshot snapshot(){Snapshot s;until([&]{return snapshot_.load(s);},2);return s;}
  void check(){if(stop_.stop_requested())throw Error("audio operation cancelled");if(failed_ || state_<0){
-  static constexpr const char* reasons[]{"unknown failure","server stream failed","invalid mapped buffer","incoherent graph timestamp","prepared PCM underrun","buffer submission failed","latency evidence changed or invalid","graph clock/topology discontinuity","graph IO clock replaced"};
-  const auto reason=failure_.load();std::string message=std::string("native PipeWire playback continuity/timing lost: ")+reasons[std::min<std::size_t>(reason,8)];
+  static constexpr const char* reasons[]{"unknown failure","server stream failed","invalid mapped buffer","incoherent graph timestamp","prepared PCM underrun","buffer submission failed","latency evidence changed or invalid","graph clock/topology discontinuity","graph IO clock replaced","audio callback thread replaced"};
+  const auto reason=failure_.load();std::string message=std::string("native PipeWire playback continuity/timing lost: ")+reasons[std::min<std::size_t>(reason,9)];
   if(reason==7){ClockChange change;if(clock_change_.load(change)) {
    const auto& a=change.previous;const auto& b=change.current;
    message+=" (id="+std::to_string(a.id)+"->"+std::to_string(b.id)+", rate="+std::to_string(a.rate.denom)+"/"+std::to_string(a.rate.num)+"->"+std::to_string(b.rate.denom)+"/"+std::to_string(b.rate.num)+", quantum="+std::to_string(a.duration)+"->"+std::to_string(b.duration)+", xrun="+std::to_string(a.xrun)+"->"+std::to_string(b.xrun)+", position="+std::to_string(a.position)+"->"+std::to_string(b.position)+", cycle="+std::to_string(a.cycle)+"->"+std::to_string(b.cycle)+")";
   }}
+  trace::record("pipewire_failure",[&](auto& f){f.add("reason",reason);f.add("error",message);});
   throw Error(message);
  }}
  template<class F>void until(F predicate,double seconds){check();const auto begin=std::chrono::steady_clock::now();while(!predicate()){check();if(std::chrono::duration<double>(std::chrono::steady_clock::now()-begin).count()>seconds)throw Error("native PipeWire operation timed out");std::this_thread::sleep_for(std::chrono::milliseconds(1));}check();}
 public:
- PipeWirePlayback(std::uint32_t rate,const std::string& target,std::stop_token stop):rate_(rate),ring_(rate/4*channels_),stop_(stop){
+ PipeWirePlayback(std::uint32_t rate,const std::string& target,std::stop_token stop,double xrun_budget=0,double xrun_window=0):rate_(rate),ring_(rate/4*channels_),xrun_policy_(xrun_budget,xrun_window),stop_(stop){
   if(sizeof(void*)!=8 || std::endian::native!=std::endian::little ||
      !std::atomic<std::uint64_t>::is_always_lock_free || !std::atomic<const Clock*>::is_always_lock_free)
       throw Error("native PipeWire realtime timing ABI unavailable on this build");
@@ -316,7 +366,20 @@ public:
   if(!started_.exchange(true)){Locked lock(api_,loop_);if(api_.active(stream_,true)<0)throw Error("cannot activate PipeWire stream");}return static_cast<long>(n);
  }
  int wait(int){check();std::this_thread::sleep_for(std::chrono::milliseconds(1));return 1;}
- void private_started(){private_=true;}
+ void private_started(){
+  const auto tid=callback_tid_.load(std::memory_order_acquire);AudioRealtimeKernel kernel;
+  // Explicit scheduled-provider paths can omit public reset/preparation.
+  // They keep best-effort scheduling and adopt only their current owned TID.
+  const auto prepared_tid=realtime_attempted_?realtime_tid_:tid;
+  if(!audio_realtime_admission_valid(tid,prepared_tid,realtime_.state==AudioRealtimeState::verified,kernel))
+   throw Error("PipeWire callback identity or verified priority changed before private admission");
+  admitted_tid_=tid;private_=true;
+ }
+ std::string realtime_status()const {
+  if(realtime_.state==AudioRealtimeState::verified)return "callback realtime priority "+std::to_string(realtime_.priority)+" verified before TX";
+  if(realtime_.state==AudioRealtimeState::uncertain)return "callback realtime request unconfirmed";
+  return "callback scheduling best effort";
+ }
  void reset_silence(){if(private_)throw Error("cannot reset a private PipeWire stream");
   // Successful deactivation removes this node from graph processing through
   // PipeWire's blocking data-loop operation. Do not hold our gate across API
@@ -328,19 +391,64 @@ public:
    check();if(std::chrono::steady_clock::now()-begin>std::chrono::seconds(2))throw Error("PipeWire preparation quiescence timed out");
    std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
-  ProcessRelease release{process_busy_};check();
-  written_=0;read_=0;final_frontier_=UINT64_MAX;draining_=false;drained_=false;started_=false;failed_=false;failure_=0;last_serial_=serial_;last_frontier_.reset();}
+  {
+   ProcessRelease release{process_busy_};check();
+   written_=0;read_=0;final_frontier_=UINT64_MAX;draining_=false;drained_=false;started_=false;failed_=false;failure_=0;last_serial_=serial_;last_frontier_.reset();
+  }
+  // The graph is inactive public silence. Never block the active PCM producer
+  // or the data callback on DBus. Its context/data-loop lifetime remains held.
+  if(!realtime_attempted_) {
+   realtime_attempted_=true;
+   realtime_tid_=callback_tid_.load(std::memory_order_acquire);
+   realtime_=try_audio_realtime(realtime_tid_);
+  }
+ }
  void end_input(std::uint64_t remaining=0){
   const auto w=written_.load();if(remaining>UINT64_MAX-w)throw Error("PipeWire final address exhausted");
   const auto end=w+remaining;const auto previous=final_frontier_.load();
   if(previous!=UINT64_MAX && previous!=end)throw Error("PipeWire final frontier changed");
   final_frontier_.store(end,std::memory_order_release);draining_=true;
  }
- void drain(){end_input();until([&]{return read_.load()==written_.load();},3);{Locked lock(api_,loop_);if(api_.flush(stream_,true)<0)throw Error("PipeWire drain request failed");}until([&]{return drained_.load();},3);}
+ void drain(){
+  end_input();until([&]{return read_.load()==written_.load();},3);
+  {Locked lock(api_,loop_);if(api_.flush(stream_,true)<0)throw Error("PipeWire drain request failed");}
+  until([&]{return drained_.load();},3);
+  // Join any in-flight admission before auditing. end_input can race the
+  // RT draining check; an atomic count alone could still be the old value.
+  // Only this control thread waits. Future callbacks see draining=true.
+  const auto begin=std::chrono::steady_clock::now();
+  while(process_busy_.test_and_set(std::memory_order_acquire)) {
+   check();if(std::chrono::steady_clock::now()-begin>std::chrono::seconds(2))
+    throw Error("PipeWire final recovery audit timed out");
+   std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ProcessRelease release{process_busy_};check();
+  // Never silently accept an event after the last source-thread timestamp
+  // validation/publication, including zero-count final callbacks.
+  if(recovery_frontier_.load(std::memory_order_acquire)!=reported_recoveries_)
+   throw Error("native PipeWire playback continuity unqualified: graph xrun reached final drain without a validated timestamp");
+ }
+ std::string recovery_notice(){
+  const auto& s=observed_snapshot_;
+  if(s.recovered==reported_recoveries_)return {};
+  reported_recoveries_=s.recovered;
+  const auto reason="Graph xrun report tolerated; original UTC map retained (events="+std::to_string(s.recovered)+
+   ", last estimated duration="+std::to_string(s.xrun_last*1000)+" ms, cumulative="+std::to_string(s.xrun_total*1000)+
+   " ms; downstream PCM loss unknown)";
+  trace::record("pipewire_recovery",[&](auto& f){f.add("count",s.recovered);f.add("last_seconds",s.xrun_last);
+   f.add("total_seconds",s.xrun_total);f.add("frontier",s.frontier);f.add("ring_available",s.ring_available);f.add("reason",reason);});
+  return reason;
+ }
  FrameTimestamp timestamp(){
-  Snapshot s;until([&]{s=snapshot();return s.serial>last_serial_ && (!last_frontier_ || s.frontier>*last_frontier_);},2);last_serial_=s.serial;last_frontier_=s.frontier;
+  Snapshot s;until([&]{s=snapshot();return s.serial>last_serial_ && (!last_frontier_ || s.frontier>*last_frontier_);},2);last_serial_=s.serial;last_frontier_=s.frontier;observed_snapshot_=s;
   timespec mono{},utc{},after{};if(clock_gettime(CLOCK_MONOTONIC,&mono) || clock_gettime(CLOCK_REALTIME,&utc) || clock_gettime(CLOCK_MONOTONIC,&after))throw Error("native PipeWire clock read failed");
   const long double m0=mono.tv_sec+mono.tv_nsec*1e-9L,m1=after.tv_sec+after.tv_nsec*1e-9L,u=utc.tv_sec+utc.tv_nsec*1e-9L;
+  trace::record("pipewire_snapshot",[&](auto& f){f.add("frontier",s.frontier);f.add("serial",s.serial);
+   f.add("ring_read",s.frontier-s.ring_available);f.add("ring_available",s.ring_available);f.add("monotonic_before",m0);f.add("monotonic_after",m1);f.add("utc",u);
+   f.add("time_now",s.time.now);f.add("rate_num",s.time.rate.num);f.add("rate_denom",s.time.rate.denom);
+   f.add("ticks",s.time.ticks);f.add("delay",s.time.delay);f.add("queued_including_ring",s.time.queued);f.add("buffered",s.time.buffered);
+   f.add("clock_id",s.clock.id);f.add("clock_nsec",s.clock.nsec);f.add("position",s.clock.position);f.add("quantum",s.clock.duration);
+   f.add("cycle",s.clock.cycle);f.add("xrun",s.clock.xrun);f.add("recovered",s.recovered);f.add("xrun_total_seconds",s.xrun_total);f.add("rate_diff",s.clock.rate_diff);f.add("latency_radius",s.latency_radius);});
   if(trace_ && m0>=next_trace_) {
    next_trace_=m0+1;
    std::osyncstream(std::cerr)<<std::setprecision(15)<<"{\"event\":\"pipewire_clock\",\"monotonic\":"<<m0

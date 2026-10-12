@@ -7,6 +7,8 @@
 #include "bitmap_sources.hpp"
 #include "gui_smoke.hpp"
 #include "debug_live.hpp"
+#include "../audio_trace.hpp"
+#include "audio_diagnostic.hpp"
 #include <condition_variable>
 #include <thread>
 #include <cstdio>
@@ -38,6 +40,8 @@ struct Application::Impl {
             if(fast_controller.active())return false;
             audio_suspended=true;return controller.try_suspend_capture();
         }) {}
+    // Outlives every controller/audio worker, so its footer follows their joins.
+    std::unique_ptr<audio::trace::Scope> trace;
     std::shared_ptr<smoke_detail::InterruptionClock> smoke_clock;
     Controller controller;
     fast_ui::Controller fast_controller;
@@ -49,6 +53,8 @@ struct Application::Impl {
     std::unique_ptr<Smoke> smoke;
     std::unique_ptr<DebugLive> debug;
     bool started_session=false,passed=false;
+    std::string traced_error;
+    Clock::time_point next_trace=Clock::now();
     std::uint64_t poll_count=0,presentation_revision=0;
     std::shared_ptr<const ui::OverlayDefinition> overlay;
     std::uint64_t overlay_generation=0;
@@ -113,6 +119,12 @@ Application::Application(Launch options):launch(std::move(options)),impl_(std::m
 Application::~Application()=default;
 void Application::start() {
     if(impl_->started_session)return;
+    if(launch.verbose) {
+        impl_->trace=std::make_unique<audio::trace::Scope>(launch.verbose_file);
+        std::cerr<<"Verbose timing trace: "<<impl_->trace->path()<<'\n';
+        audio::trace::record("gui_start",[&](auto& f){f.add("version",DATAPUMP_VERSION);f.add("debug",launch.debug_live);
+            f.add("simulation",launch.simulation);});
+    }
     impl_->started_session=true;
     impl_->next=impl_->next_presentation=impl_->started=Clock::now();
     if(launch.smoke)impl_->smoke=std::make_unique<Smoke>(impl_->smoke_clock,launch.smoke_directory,launch.timeout);
@@ -131,6 +143,22 @@ bool Application::tick() {
     if(now>=impl_->next) {
         impl_->next=now+std::chrono::milliseconds(40);
         impl_->controller.poll();
+        if(launch.verbose) {
+            const auto& s=impl_->controller.snapshot();
+            if(now>=impl_->next_trace) {
+                impl_->next_trace=now+std::chrono::seconds(1);
+                audio::trace::record("gui_state",[&](auto& f){f.add("samples",s.samples_received);f.add("hardware_rate",s.hardware_sample_rate);
+                    f.add("transmitting",s.transmitting);f.add("tx_id",s.transmission_id);f.add("tx_seconds",s.transmission_seconds);
+                    f.add("tx_fraction",s.transmission_fraction);f.add("tx_finished",s.transmission_finished);f.add("tx_failed",s.transmission_failed);
+                    f.add("tx_stopping",s.transmission_stopping);f.add("tx_timed",s.transmit_clock_following);
+                    f.add("backlog",s.receiver_backlog_seconds);f.add("oldest",s.receiver_oldest_input_seconds);
+                    f.add("banks",s.receiver_instances);f.add("admissions",s.receiver_admissions);
+                    f.add("rx_timed",s.clock_window_modeled);f.add("fallback",s.clock_timing_fallback);f.add("timing",s.clock_timing_status);});
+            }
+            if(s.error!=impl_->traced_error) {impl_->traced_error=s.error;
+                audio::trace::record("gui_error",[&](auto& f){f.add("error",s.error);f.add("tx_failed",s.transmission_failed);
+                    f.add("tx_stopping",s.transmission_stopping);f.add("tx_timed",s.transmit_clock_following);});}
+        }
         const auto& devices=impl_->controller.audio_devices();
         if(impl_->device_count!=devices.size()) {
             impl_->fast_controller.set_devices(devices);impl_->legacy_controller.set_devices(devices);
@@ -604,18 +632,26 @@ void gui_self_check() {
 int gui_main(int argc,char** argv,const char* backend,const std::function<int(Launch)>& run,const char* program_name) {
     bool smoke_requested=false,self_check_requested=false;
     try {
-        Launch launch;
+        Launch launch;bool audio_device_option=false;
         const auto frontend_label=std::string_view(program_name)=="datapump-gui"?"GUI backend: ":"Frontend: ";
         std::vector<std::string> settings_arguments;
         for(int i=1;i<argc;++i) {
             const std::string arg=argv[i];
-            if(arg=="--help") {std::cout<<"Data Pump continuous console\n"<<frontend_label<<backend<<" (selected at build time)\nUsage: "<<program_name<<" [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nLink settings: --tx-dbm DBM --path-loss-db DB --noise-dbm-hz DBM/Hz\n  --oscillator ID --rf-oscillator ID --shift HZ (default 0) --search-margin N (default 3)\n  --clock-sync default|GPS_1ms-400ms_region-2564ms_offset\n  --audio-error default|TIME (total lag 0..+50ms per station by default)\n  --keyfile PATH --tx-key named|none --key-name NAME (all loaded entries remain RX keys)\n  --dsss-mode off|interleave --dsss-factor 1|10|100|1000 --dsss-version interleave|legacy (both peers must match)\n  --search-arithmetic default|fp32-min|fp64-force (experimental CPU policy; legacy IDs accepted)\n  --fhss off|fake-fcc|fake-eu|fake-list (legacy fake-0.4s-200 maps to fake-fcc)\n  --fhss-list '30MHz,30.006MHz' or --fhss-list-file PATH (2-200 Shift frequencies)\n  --live-duplex yes|no (default no; simultaneous hardware input/output)\n  --reference independent|shared-radio --lf-reference 0 (shared-radio shorthand)\n  --doppler VELOCITY (c, knots, mph, kph or %; default 0.000000c)\n  --carrier HZ is configured absolute; stream is Doppler-adjusted Carrier minus Shift (>0)\n  --target-snr DB-Hz --rate HZ --carrier HZ --dsp-workspace 25%|50%|75%\n  --auto-pattern or --pattern MODE; --bw is an alias for --rate\n  --target-snr sets preview, short and long targets; --short-target-snr / --long-target-snr override them\nHardware diagnostic: --debug [--debug-bits BITS] [--debug-timeout 10..300]\n  Sends 1..16 raw bits (default 1) using a supplied synthetic named key through real GUI duplex audio;\n  JSON lines on stderr; closes on error/completion/deadline; never enables Simulation.\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
+            if(arg=="--help") {std::cout<<"Data Pump continuous console\n"<<frontend_label<<backend<<" (selected at build time)\nUsage: "<<program_name<<" [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nLink settings: --tx-dbm DBM --path-loss-db DB --noise-dbm-hz DBM/Hz\n  --oscillator ID --rf-oscillator ID --shift HZ (default 0) --search-margin N (default 3)\n  --clock-sync default|GPS_1ms-400ms_region-2564ms_offset\n  --audio-error default|TIME (total lag 0..+50ms per station by default)\n  --keyfile PATH --tx-key named|none --key-name NAME (all loaded entries remain RX keys)\n  --dsss-mode off|interleave --dsss-factor 1|10|100|1000 --dsss-version interleave|legacy (both peers must match)\n  --search-arithmetic default|fp32-min|fp64-force (experimental CPU policy; legacy IDs accepted)\n  --fhss off|fake-fcc|fake-eu|fake-list (legacy fake-0.4s-200 maps to fake-fcc)\n  --fhss-list '30MHz,30.006MHz' or --fhss-list-file PATH (2-200 Shift frequencies)\n  --live-duplex yes|no (default no; simultaneous hardware input/output)\n  --reference independent|shared-radio --lf-reference 0 (shared-radio shorthand)\n  --doppler VELOCITY (c, knots, mph, kph or %; default 0.000000c)\n  --carrier HZ is configured absolute; stream is Doppler-adjusted Carrier minus Shift (>0)\n  --target-snr DB-Hz --rate HZ --carrier HZ --dsp-workspace 25%|50%|75%\n  --auto-pattern or --pattern MODE; --bw is an alias for --rate\n  --target-snr sets preview, short and long targets; --short-target-snr / --long-target-snr override them\nHardware diagnostic: --debug [--debug-bits BITS] [--debug-timeout 10..300]\n  Sends 1..16 raw bits (default 1) using a supplied synthetic named key through real GUI duplex audio;\n  JSON lines on stderr; closes on error/completion/deadline; never enables Simulation.\nDeveloper timing trace: --verbose [--verbose-file NEW-PATH] (bounded asynchronous JSONL; no secrets/PCM)\nPhysical audio instrument: --audio-timing-test 5..300 [--audio-test-device DEVICE]\n  Emits a low-level public probe; physical return path required for measured latency/jitter.\n  No GUI or modem; does not calibrate the hardware clock or change mixer routing.\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
             if(arg=="--version") {std::cout<<"Data Pump "<<DATAPUMP_VERSION<<' '<<frontend_label<<backend<<'\n';return 0;}
             if(arg=="--self-check") {self_check_requested=true;continue;}
             if(arg=="--color")launch.color=true;
             else if(arg=="--monochrome")launch.color=false;
             else if(arg=="--simulation")launch.simulation=true;
             else if(arg=="--smoke-test")launch.smoke=true;
+            else if(arg=="--verbose")launch.verbose=true;
+            else if(arg=="--verbose-file"&&i+1<argc){launch.verbose=true;launch.verbose_file=std::filesystem::u8path(argv[++i]);}
+            else if(arg=="--audio-test-device"&&i+1<argc){audio_device_option=true;launch.audio_test_device=argv[++i];}
+            else if(arg=="--audio-timing-test"&&i+1<argc) {
+                const std::string value=argv[++i];std::size_t used=0;launch.audio_test_seconds=std::stod(value,&used);
+                if(used!=value.size()||!std::isfinite(launch.audio_test_seconds)||launch.audio_test_seconds<5||launch.audio_test_seconds>300)
+                    throw Error("Audio timing test must be 5..300 seconds");
+            }
             else if(arg=="--debug"||arg=="--debug-live-duplex")launch.debug_live=true;
             else if(arg=="--debug-bits"&&i+1<argc) {
                 launch.debug_bits=argv[++i];
@@ -648,6 +684,21 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
             }
         }
         if(!settings_arguments.empty())launch.settings=launch_command::parse_arguments(settings_arguments);
+        if(audio_device_option&&!launch.audio_test_seconds)throw Error("--audio-test-device requires --audio-timing-test");
+        if(launch.audio_test_seconds) {
+            if(launch.debug_live||launch.smoke||launch.simulation||self_check_requested||launch.settings)
+                throw Error("Audio timing test cannot combine with modem settings, debug, Simulation, smoke or self-check");
+            std::unique_ptr<audio::trace::Scope> trace;
+            if(launch.verbose) {trace=std::make_unique<audio::trace::Scope>(launch.verbose_file);std::cerr<<"Verbose timing trace: "<<trace->path()<<'\n';}
+            // Device/driver teardown is not guaranteed to honor a stop token.
+            // A stuck diagnostic exits124 rather than hanging or reporting success.
+            std::mutex mutex;std::condition_variable changed;bool finished=false;
+            std::jthread watchdog([&]{std::unique_lock lock(mutex);
+                if(!changed.wait_for(lock,std::chrono::duration<double>(launch.audio_test_seconds+30),[&]{return finished;}))std::_Exit(124);});
+            const auto finish=[&]{{std::lock_guard lock(mutex);finished=true;}changed.notify_one();};
+            try {const auto result=audio_diagnostic::run_audio_timing_test(launch.audio_test_seconds,launch.audio_test_device,std::cout);finish();return result;}
+            catch(...){finish();throw;}
+        }
         if(launch.debug_live && (launch.smoke||launch.simulation||self_check_requested))
             throw Error("Hardware debug cannot use Simulation, smoke or self-check");
         if(launch.debug_live && (!launch.settings || !launch.settings->keyfile || launch.settings->tx_key!="named"))

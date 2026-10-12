@@ -1,4 +1,5 @@
 #include "datapump/audio.hpp"
+#include "audio_trace.hpp"
 #include <iostream>
 #include <syncstream>
 #include "datapump/resampler.hpp"
@@ -402,7 +403,7 @@ void refine_timing_period(Alsa& api,Alsa::PCM* pcm,std::uint32_t rate,unsigned c
         // This does not reduce ANY observation radius, assume zero-mean jitter,
         // or narrow the cone using an oscillator dropdown. Actual resampler
         // lookahead and observed queue/query uncertainty are checked later.
-        const auto horizon=(options->timing_stop_duration_seconds+.1+
+        const auto horizon=((options->timing_stop_duration_seconds-options->timing_independent_cover_seconds)+.1+
             static_cast<double>(buffer)/rate)/(1-options->maximum_timing_rate_correction);
         reserve=(1./(1.-.002)-1.)*horizon;
         if(overhead+2.*wanted/rate+reserve>=limit)wanted=std::max(1u,rate/200);
@@ -551,15 +552,27 @@ class AlsaTimeline {
     int first_state_=-1;
     long first_delay_=0;
     std::uint64_t first_accepted_=0;
+    const std::uint64_t trace_id_=trace::identity();
+    void trace_model() const {
+        const bool custom=options_&&options_->frame_timestamp;
+        trace::record("timeline",[&](auto& f){f.add("timeline",trace_id_);f.add("hardware_rate",stream_.hardware_rate);
+            f.add("playback",playback_);f.add("native",!options_||!options_->frame_timestamp);
+            f.add("pipewire",graph_!=nullptr);f.add("rate_limit",.001);f.add("shared_radius",shared_allowance_);
+            f.add("prediction",custom?"fitted":"timestamp_intersection");
+            f.add("has_shared_radius",!custom);f.add("persistent",!custom&&(graph_||playback_));f.add("observation_floor",allowance_);
+            f.add("estimated_rate",options_&&options_->estimated_timing.has_value());
+            if(options_&&options_->estimated_timing)f.add("variable_timestamp_error",options_->estimated_timing->variable_timestamp_error_seconds);});
+    }
 public:
     AlsaTimeline(Alsa& api,Stream& stream,const Options* options,bool playback=false,detail::PipeWirePlayback* graph=nullptr):api_(api),stream_(stream),
         timeline_(stream.hardware_rate),playback_(playback),graph_(graph),options_(options) {
         const auto trace=std::getenv("DATAPUMP_AUDIO_TIMING_TRACE");
         diagnostic_=trace && std::string_view(trace)=="1";
-        if(options_ && options_->frame_timestamp)return;
+        if(options_ && options_->frame_timestamp){trace_model();return;}
         if(graph_) {
             allowance_=shared_allowance_=detail::pipewire_shared_codec_floor+1./stream.hardware_rate;
             timeline_=UtcTimeline(stream.hardware_rate,.001,UtcTimeline::Prediction::timestamp_intersection,shared_allowance_,true);
+            trace_model();
             return;
         }
         unsigned long buffer=0,period=0;
@@ -585,8 +598,10 @@ public:
         shared_allowance_=(playback_?overhead:allowance_)+1./stream.hardware_rate;
         timeline_=UtcTimeline(stream.hardware_rate,.001,UtcTimeline::Prediction::timestamp_intersection,
             shared_allowance_,playback_);
+        trace_model();
     }
     bool native_playback() const {return playback_ && options_ && !options_->frame_timestamp;}
+    std::uint64_t trace_id() const {return trace_id_;}
     void diagnostic(long double output_frame,long double source_seconds,const TimePrediction& p,double error,double actual_rate,double initial_rate) {
         if(!diagnostic_ || !native_playback() || source_seconds<next_diagnostic_)return;
         next_diagnostic_=static_cast<double>(source_seconds)+1;
@@ -605,9 +620,17 @@ public:
     std::optional<LinkRateInterval> rate_interval() const {return rate_.interval();}
     UtcCorrection correction(const TimePrediction& value,long double frame,long double desired,
             double maximum_error,double maximum_rate,double current_rate,const char* point) const {
+        trace::record("correction_query",[&](auto& f){f.add("timeline",trace_id_);f.add("point",point);f.add("frame",frame);
+            f.add("desired_utc",desired);f.add("predicted_utc",value.utc_seconds);f.add("radius",value.uncertainty_seconds);
+            f.add("seconds_per_frame",value.seconds_per_frame);f.add("rate_uncertainty",value.rate_uncertainty_fraction);
+            f.add("maximum_error",maximum_error);f.add("maximum_rate",maximum_rate);f.add("current_rate",current_rate);});
         try {
-            return presentation_correction(value,desired,stream_.hardware_rate,maximum_error,8,maximum_rate,current_rate);
+            const auto result=presentation_correction(value,desired,stream_.hardware_rate,maximum_error,8,maximum_rate,current_rate);
+            trace::record("correction_result",[&](auto& f){f.add("timeline",trace_id_);f.add("point",point);
+                f.add("error",result.error_seconds);f.add("rate",result.rate_fraction);});
+            return result;
         } catch(const Error& error) {
+            trace::record("timing_failure",[&](auto& f){f.add("timeline",trace_id_);f.add("point",point);f.add("error",error.what());});
             std::string query_context;
             if(!options_ || !options_->frame_timestamp) {
                 const auto observation_floor=allowance_+1./stream_.hardware_rate;
@@ -629,7 +652,12 @@ public:
         }
     }
     void observe_timestamp(const FrameTimestamp& value) {
-        timeline_.observe(value);
+        trace::record("timestamp",[&](auto& f){f.add("timeline",trace_id_);f.add("frame",value.frame);
+            f.add("utc",value.utc_seconds);f.add("monotonic",value.steady_seconds);f.add("radius",value.uncertainty_seconds);
+            f.add("read_radius",value.clock_read_uncertainty_seconds);f.add("continuity",value.continuity);
+            f.add("quality",static_cast<int>(value.quality));});
+        try {timeline_.observe(value);}
+        catch(const Error& error) {trace::record("timestamp_rejected",[&](auto& f){f.add("timeline",trace_id_);f.add("error",error.what());});throw;}
         latest_frame_=value.frame;
         if(options_ && options_->estimated_timing && (!rate_frame_ || value.frame>*rate_frame_)) {
             rate_.observe({value.frame/stream_.hardware_rate,value.utc_seconds,value.steady_seconds,
@@ -708,6 +736,10 @@ public:
             if(diagnostic_ && playback_ && !timeline_.ready()) {
                 first_delay_=delay;first_accepted_=frames;
             }
+            trace::record("alsa_query",[&](auto& f){f.add("timeline",trace_id_);f.add("accepted_or_read",frames);
+                f.add("capture",capture);f.add("reported_delay",delay);f.add("device_frame",frame);
+                f.add("utc_before",utc0);f.add("utc_after",utc1);f.add("monotonic_before",steady0);f.add("monotonic_after",steady1);
+                f.add("period",variable_allowance_);f.add("observation_floor",allowance_);});
             observe_timestamp({frame,(utc0+utc1)/2,(steady0+steady1)/2,
                 allowance_+bracket/2+1./stream_.hardware_rate,bracket+1e-6,TimingQuality::estimated,0});
             return;
@@ -739,7 +771,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
             const auto target=detail::local_pipewire_sink(stop);
             if(rate>192000)throw Error("logical passband exceeds native shared-server timing support");
             const auto native_rate=rate<=48000?48000u:rate<=96000?96000u:192000u;
-            graph=std::make_unique<detail::PipeWirePlayback>(native_rate,target,stop);
+            graph=std::make_unique<detail::PipeWirePlayback>(native_rate,target,stop,options->reported_xrun_budget_seconds,options->reported_xrun_window_seconds);
             api.close(stream.pcm);stream.pcm=nullptr;
             stream.hardware_rate=native_rate;stream.channels=graph->channels();
         }catch(const Error& e){throw TimingPreflightUnavailable(std::numeric_limits<double>::infinity(),
@@ -793,7 +825,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
     const auto report=[&] {
         if(preflight) {
             options->timing_status({true,timing_error,qualified_uncertainty,
-                options->frame_timestamp?"UTC provider preflight accepted":graph?"Native PipeWire UTC adjustment active; estimated hardware timing":"Estimated UTC model accepted; hardware/radio timing remains assumed"});
+                options->frame_timestamp?"UTC provider preflight accepted":graph?"Native PipeWire UTC adjustment active; estimated hardware timing; "+graph->realtime_status():"Estimated UTC model accepted; hardware/radio timing remains assumed"});
         }
         reported=true;
         report_format(rate,stream.hardware_rate,source.workspace_bytes()+block.capacity()*sizeof(std::int16_t)+samples.capacity()*sizeof(float)+
@@ -813,7 +845,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
     const auto preparation_uncertainty=[&] {
         auto uncertainty=timing->timeline().predict(accepted).uncertainty_seconds;
         if(timing->native_playback()) {
-            const auto horizon=(options->timing_stop_duration_seconds+.1+
+            const auto horizon=((options->timing_stop_duration_seconds-options->timing_independent_cover_seconds)+.1+
                 source.converter().source_lookahead_seconds())/(1-(graph?.001:options->maximum_timing_rate_correction));
             const auto frontier=accepted+std::ceil(horizon*stream.hardware_rate);
             uncertainty=std::max({uncertainty,timing->timeline().predict(frontier).uncertainty_seconds,
@@ -849,7 +881,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                         prepared_rate=detail::pipewire_search_safe_rate(b,options->maximum_timing_rate_correction);
                     }
                 }else prepared_rate=model.initial_correction(timing->rate_interval(),
-                    options->timing_stop_duration_seconds+.1+source.converter().source_lookahead_seconds(),uncertainty,
+                    (options->timing_stop_duration_seconds-options->timing_independent_cover_seconds)+.1+source.converter().source_lookahead_seconds(),uncertainty,
                     options->maximum_timing_rate_correction);
             }
             catch(const Error& e) {throw TimingPreflightUnavailable(uncertainty,e.what());}
@@ -942,6 +974,12 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                     }
                     source.converter().initialize_timing(fraction,initial_rate);
                     reference_rate=initial_rate;
+                    trace::record("private_start",[&](auto& f){f.add("timeline",timing->trace_id());f.add("epoch",epoch);
+                        f.add("unshifted_epoch",*detail::utc_playback_epoch);f.add("presentation_lag",options->presentation_lag_seconds);
+                        f.add("logical_rate",rate);f.add("hardware_rate",stream.hardware_rate);f.add("fraction",fraction);
+                        f.add("source_seconds",source.converter().source_seconds());f.add("reference_rate",reference_rate);
+                        f.add("allowed_radius",timing_error);f.add("correction_limit",options->maximum_timing_rate_correction);
+                        f.add("slew_limit",options->maximum_timing_slew_per_second);f.add("stop_duration",options->timing_stop_duration_seconds);});
                     if(options->maximum_timing_rate_correction>0) {
                         const auto origin=source.converter().source_seconds();
                         affine_timing.emplace(origin,initial_rate,rate,stream.hardware_rate,.01/rate);
@@ -971,10 +1009,10 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                 if(graph)corrected.rate_fraction=detail::pipewire_search_safe_rate(
                     corrected.rate_fraction,options->maximum_timing_rate_correction);
                 timing->diagnostic(accepted+leading,source.converter().source_seconds(),at_source,corrected.error_seconds,source.converter().rate_correction(),reference_rate);
-                // Protect enough FUTURE media for pulse tails, useful cover,
+                // Protect enough FUTURE media for all committed valid pulse tails,
                 // converter lookahead and one source/output block. Known queued
                 // output is already included by predict(accepted+leading).
-                const auto stop_horizon=(options->timing_stop_duration_seconds+.05+
+                const auto stop_horizon=((options->timing_stop_duration_seconds-options->timing_independent_cover_seconds)+.05+
                     source.converter().source_lookahead_seconds())/(1-(graph?.001:options->maximum_timing_rate_correction));
                 const auto mean=at_source.seconds_per_frame*stream.hardware_rate-1;
                 auto lower=mean-at_source.rate_uncertainty_fraction,upper=mean+at_source.rate_uncertainty_fraction;
@@ -1008,7 +1046,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                 std::optional<std::array<double,4>> native_frontiers;
                 if(timing->native_playback()) {
                     // Forecast actual timestamp intervals at both the next
-                    // output edge and the entire stop/cover frontier BEFORE
+                    // output edge and the last committed valid-pulse frontier BEFORE
                     // asking for private PCM. Current and future checks use
                     // the same full clock-rate envelope and retained phase
                     // evidence. An arbitrary callback boundary adds no budget.
@@ -1016,18 +1054,25 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                         const auto predicted=timing->timeline().predict(accepted+leading+frames);
                         const auto desired=epoch+source.converter().source_seconds()+
                             (1.L+reference_rate)*frames/stream.hardware_rate;
-                        return static_cast<double>(std::abs(predicted.utc_seconds-desired))+
+                        const auto result=static_cast<double>(std::abs(predicted.utc_seconds-desired))+
                             predicted.uncertainty_seconds+.02/rate;
+                        trace::record("frontier",[&](auto& f){f.add("timeline",timing->trace_id());f.add("frame",accepted+leading+frames);
+                            f.add("ahead_frames",frames);f.add("predicted_utc",predicted.utc_seconds);f.add("desired_utc",desired);
+                            f.add("radius",predicted.uncertainty_seconds);f.add("warp",.02/rate);f.add("bound",result);});
+                        return result;
                     };
                     const auto next=static_cast<long double>(samples.size()-leading);
                     const auto ending=std::ceil(stop_horizon*stream.hardware_rate);
                     auto terminal=std::numeric_limits<long double>::infinity();
-                    if(const auto end=source.observe_end(*options)) {
+                    const auto absolute_end=source.observe_end(*options);
+                    if(const auto end=absolute_end) {
                         // Absolute endpoint minus OUTPUT coordinate includes
-                        // any source PCM already prefetched. Retain converter
+                        // any source PCM already prefetched; independent cover is
+                        // not valid payload. Every cover block still undergoes
+                        // its own original UTC check below. Retain converter
                         // support/rounding margin and slowest admitted steering;
                         // never replenish this endpoint at a block boundary.
-                        const auto remaining=std::max(0.L,static_cast<long double>(*end)/rate-
+                        const auto remaining=std::max(0.L,static_cast<long double>(*end)/rate-options->timing_independent_cover_seconds-
                             source.converter().source_seconds());
                         terminal=std::ceil((remaining+source.converter().source_lookahead_seconds()+1.L/rate)*
                             stream.hardware_rate/(1-(graph?.001:options->maximum_timing_rate_correction)));
@@ -1037,6 +1082,17 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                         bound(std::min(ending+next,terminal))};
                     const auto& f=*native_frontiers;
                     action=protected_timing_frontiers(f[0],f[1],f[2],f[3],timing_error);
+                    trace::record("decision",[&](auto& t){t.add("timeline",timing->trace_id());t.add("accepted",accepted);
+                        t.add("leading",leading);t.add("block_frames",samples.size());t.add("source_seconds",source.converter().source_seconds());
+                        t.add("now",f[0]);t.add("next",f[1]);t.add("cover",f[2]);t.add("cover_next",f[3]);
+                        t.add("allowed_radius",timing_error);t.add("horizon",stop_horizon);t.add("terminal_frames",terminal);
+                        t.add("lookahead",source.converter().source_lookahead_seconds());
+                        if(absolute_end)t.add("absolute_end",*absolute_end);else t.add("absolute_end",INFINITY);
+                        t.add("action",static_cast<int>(action));t.add("already_stopping",protected_stopping);
+                        t.add("capped_rate",corrected.rate_fraction);t.add("applied_rate",source.converter().rate_correction());});
+                    trace::record("rate_interval",[&](auto& t){t.add("timeline",timing->trace_id());t.add("source_seconds",source.converter().source_seconds());
+                        if(const auto interval=timing->rate_interval()) {t.add("lower",interval->lower);t.add("upper",interval->upper);t.add("duration",interval->duration_seconds);}
+                        else {t.add("lower",INFINITY);t.add("upper",INFINITY);t.add("duration",0);}});
                 }
                 // Generic diagnostic PCM has no protected coefficient source.
                 // Production message/noise entry points both install this hook.
@@ -1063,6 +1119,9 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                 if(affine_timing)plan=affine_timing->plan(corrected.rate_fraction,
                     {source.converter().source_seconds(),before.frames,source.converter().rate_correction()},
                     samples.size()-leading,options->maximum_timing_slew_per_second);
+                trace::record("rate_plan",[&](auto& f){f.add("timeline",timing->trace_id());f.add("source_seconds",source.converter().source_seconds());
+                    f.add("proposal",corrected.rate_fraction);f.add("target",plan?plan->target:corrected.rate_fraction);
+                    f.add("slew",options->maximum_timing_slew_per_second);f.add("affine_guard",plan.has_value());});
                 source.converter().set_rate_correction(plan?plan->target:corrected.rate_fraction,options->maximum_timing_slew_per_second);
                 source.converter().begin_timing_block();
                 count+=source.read(std::span(samples).subspan(leading));
@@ -1070,6 +1129,10 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                 if(plan) {
                     const auto actual=source.converter().timing_block();
                     affine_timing->verify(*plan,{source.converter().source_seconds(),actual.frames,source.converter().rate_correction()},actual.minimum,actual.maximum);
+                    trace::record("generated_block",[&](auto& f){f.add("timeline",timing->trace_id());f.add("accepted",accepted);
+                        f.add("count",count);f.add("source_seconds",source.converter().source_seconds());f.add("frames",actual.frames);
+                        f.add("minimum_warp",actual.minimum);f.add("maximum_warp",actual.maximum);
+                        f.add("rate",source.converter().rate_correction());});
                 }
                 // Validate the far edge before any generated PCM is submitted.
                 // A current-point check alone can miss an error beyond the
@@ -1111,7 +1174,16 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
             else {offset+=static_cast<std::size_t>(n);accepted+=static_cast<std::size_t>(n);failures=0;}
         }
         if(timed) {
-            try {timing->observe(accepted,false,stop);}
+            try {
+                timing->observe(accepted,false,stop);
+                // Only report continuation after the fresh dated observation
+                // intersected the ORIGINAL timeline. No phase/rate/epoch reset.
+                if(graph && reported && options->timing_status) {
+                    const auto notice=graph->recovery_notice();
+                    if(!notice.empty())options->timing_status({true,timing_error,
+                        timing->timeline().predict(accepted).uncertainty_seconds,notice});
+                }
+            }
             catch(const DelayObservationFailure& e) {
                 if(!reported)throw TimingPreflightUnavailable(timing->allowance(),
                     std::string(e.what())+"; silence preparation before source scheduling");
@@ -1409,7 +1481,7 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
             "Windows audio provider has no UTC capture timestamps; full search retained"});
         check_cancelled(stop);
         auto ordinary=*options;ordinary.follow_system_clock=false;ordinary.maximum_timing_rate_correction=0;
-        ordinary.timing_stop_duration_seconds=0;ordinary.estimated_timing.reset();ordinary.allow_timing_fallback=false;
+        ordinary.timing_stop_duration_seconds=0;ordinary.timing_independent_cover_seconds=0;ordinary.reported_xrun_budget_seconds=0;ordinary.reported_xrun_window_seconds=0;ordinary.estimated_timing.reset();ordinary.allow_timing_fallback=false;
         capture_device(rate,device,on_chunk,stop,std::move(on_format),monitor,discontinuity,&ordinary);return;
     }
     if(!on_chunk) throw Error("capture callback is required");
@@ -1466,7 +1538,7 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
         options.timing_status({false,options.maximum_utc_error_seconds,e.uncertainty,e.what()});
         check_cancelled(stop);
         options.follow_system_clock=false;options.maximum_timing_rate_correction=0;
-        options.timing_stop_duration_seconds=0;options.estimated_timing.reset();options.timing_status={};
+        options.timing_stop_duration_seconds=0;options.timing_independent_cover_seconds=0;options.reported_xrun_budget_seconds=0;options.reported_xrun_window_seconds=0;options.estimated_timing.reset();options.timing_status={};
         options.allow_timing_fallback=false;
         playback_device(rate,selected_endpoint(device,false,options.exclusive),next_samples,stop,
             std::move(on_format),channels,options.transmit_gain,&options);

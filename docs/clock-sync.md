@@ -260,7 +260,7 @@ rate-reversal extrema. A certificate checks these, the endpoint/rate and the
 remaining braking corridor BEFORE any part of a generated block is submitted.
 Source prefetch is not confused with output progress. Known output queue time is
 already included in the provider prediction of that frontier. The stop forecast
-adds prefetched source, filter lookahead, support/cover duration and one further
+adds prefetched source, filter lookahead, committed valid-pulse support and one further
 output block. It distinguishes safe continuation, a protected stop that still
 fits, and an already-infeasible stop requiring immediate abort. Native future
 positions retain their full device/UTC rate envelope; reported UTC position
@@ -272,20 +272,28 @@ including its existing suppression and shaping. Once known, that endpoint can
 only decrease; it cannot precede PCM already supplied to the converter. Normal
 messages have a finite endpoint; open-ended tuning keeps the worst-stop reserve
 until its shared finish operation commits an endpoint. Preparation and the
-initial/continuous correction policy still use the common worst-stop horizon,
+initial/continuous correction policy use the common valid-pulse stopping horizon,
 independent of message length.
 
 At runtime the remaining terminal distance is computed from the converter's
 next **output source coordinate**, not the transmitter's prefetched input cursor.
 Converter support and one logical sample of rounding are retained, and the
 slowest admitted steering converts this to an output-frame upper bound E.
-For next-block N and the existing worst-stop B, frontiers are
+For private production sources, subtract the independently keyed final cover
+from both the known endpoint and worst-stop duration before computing E and B.
+The subtraction leaves every already-contributed valid payload/prefix pulse,
+including prefetched PCM and both sides of finite support. For next-block N
+and this valid-pulse worst-stop B, frontiers are
 `0, min(N,E), min(B,E), min(N+B,E)`. Both stop forecasts use the SAME absolute end;
 no budget resets at a block or symbol. The actual generated block still passes
 its endpoint and timestamp checks before device submission. Known queued audio
 remains part of the timestamp prediction. This avoids reserving another full
 tail after the source is already draining, without shortening actual protection
-or fabricating receiver completion.
+or fabricating receiver completion. Independent cover still passes the original
+current/next generated-block UTC, source-affine and FHSS checks. This removes
+a speculative full-cover reserve; it does not promise to finish cover through
+an arbitrary later clock failure. Generic PCM diagnostics retain their full-tail
+forecast unless their caller supplies the explicit independent-cover contract.
 
 Both production entry points install the same protected-stop hook. Low-level
 arbitrary PCM diagnostics without a coefficient source retain strict runtime
@@ -462,8 +470,9 @@ The uncertainty includes downstream latency's half-range, a **full graph quantum
 codec floor, stream-frame rounding, clock bracket and a generic device/UTC rate
 cone. The minimum retained shared codec floor is3.25ms, including when a48kHz
 stream feeds an8kHz graph. Callback age is handled through the dated observation;
-it is not mistaken for a change in device rate. Topology/clock/rate/quantum/xrun
-or downstream-latency changes invalidate private playback. The prepared-PCM copy
+it is not mistaken for a change in device rate. Topology/clock/rate/quantum
+or downstream-latency changes invalidate private playback. Bounded counter-only
+xrun reports have the separate continuation policy below. The prepared-PCM copy
 runs in PipeWire's `RT_PROCESS` data callback, rather than its ordinary control
 loop. That flag selects callback context; it does not guarantee privileged OS
 realtime scheduling. Multiword observations use nonblocking fixed-size mailboxes;
@@ -521,14 +530,42 @@ multicore utilization is modest; it does not alone mean samples were dropped.
 The bounded measurements and failed alternatives are recorded in the local
 `MANUAL-UTC-HEADROOM.md` artifact and the validation record.
 
-Observed audio threads on this host remained `SCHED_OTHER` despite PipeWire's
-RTKit success wording. In the pinned1.4.2 implementation,
+In the preceding checkpoint, observed audio threads on this host remained
+`SCHED_OTHER` despite PipeWire's RTKit success wording. In the pinned1.4.2 implementation,
 [`pw_rtkit_make_realtime`](https://github.com/PipeWire/pipewire/blob/1.4.2/src/modules/module-rt.c#L379)
 queues its D-Bus request without waiting for an acknowledged result. That log
 therefore does not establish realtime scheduling. The actual kernel policy was
 sampled in the physical runs; the specific host-side reason for no promotion
 remains unresolved. No system permission, mixer, daemon configuration or global
 priority was changed to make the test pass.
+
+Native UTC playback now makes one optional, acknowledged RTKit request for its
+**own exact callback TID**, while public silence is inactive. The requested
+priority is the service maximum capped at10, below the usual driver priority20.
+An existing realtime policy is retained. A successful bus reply is insufficient:
+actual kernel FIFO/RR policy and positive priority must be observed. The prepared
+TID and policy are rechecked before private admission; later callback replacement
+is fatal. Explicit scheduled-provider paths without public preparation retain
+best-effort scheduling. No system daemon, global priority, mixer, route or process
+resource limit is changed. The existing finite `RLIMIT_RTTIME` hard limit must
+already fit the service's watchdog cap; otherwise acquisition is skipped.
+The optional `libsystemd.so.0` ABI adds no build/link dependency. Custom
+`DBUS_SYSTEM_BUS_ADDRESS` routes decline this request. Missing service/library,
+rejection and lost replies retain a visible best-effort/unconfirmed status, with
+no blind retry. An owned bus is closed before release, without a blocking flush.
+See the [systemd public bus API](https://github.com/systemd/systemd/blob/v257/src/systemd/sd-bus.h)
+and the [PipeWire RTKit integration](https://github.com/PipeWire/pipewire/blob/1.4.2/src/modules/module-rt.c).
+
+This protects a bounded prepared-PCM callback from ordinary compute scheduling;
+it cannot repair a stalled external sound server/driver or guarantee deadlines
+under arbitrary load. Full-quantum uncertainty and UTC rate/affine-source checks
+remain. The later counter-only continuation and valid-pulse forecast below
+supersede unconditional xrun rejection and full-independent-cover reservation. A larger1024-frame quantum would
+contribute21.333ms at48kHz before codec and stopping-forecast uncertainty; it does
+not fit this25ms-radius example. Increasing an application queue cannot prevent
+a missed graph/driver cycle. The current512-frame request and250ms ring remain.
+Physical stress outcomes and the separate capture-validation limitation are
+recorded in [validation](validation.md#2026-10-12--acknowledged-audio-callback-priority-local-checkpoint).
 
 Before either message or open-ended noise constructs its private source, at least
 four seconds of public silence provide an initial stationary-rate estimate.
@@ -719,3 +756,119 @@ remain ±10ms at EACH endpoint and audio lag0..50ms. The slot calendar is not a
 clock-tracking algorithm, and scheduled holes cannot supply observed absence.
 See [deferred whole symbols](spread-spectrum-controls.md#deferred-whole-symbols-local-manual-candidate)
 for the exact rounding, fit limits, work/airtime and interoperability requirements.
+
+## Developer timing instruments
+
+`datapump-gui --verbose` runs the complete ordinary GUI with an additional
+asynchronous JSONL timing trace. `--verbose-file NEW-PATH` selects a new file;
+an existing file is never overwritten. Otherwise a unique `datapump-verbose-*.jsonl`
+is created in the working directory and its path is printed to stderr. This is
+an opt-in diagnostic, not a saved modem setting or a timing-policy override.
+
+The trace records each consumed native timestamp with full `long double`
+serialization precision, model/reset identity, coherent PipeWire graph/queue
+snapshots, native ALSA query brackets, original epoch and presentation midpoint,
+rate limits/estimates/plans, all four protected-stop frontiers, generated-block
+checks and native playback discontinuities. It contains no PCM, message bits,
+keystream bytes or root keys. Formatting occurs on ordinary producer threads;
+the real-time callback only supplies its bounded existing clock snapshot.
+The bounded nonblocking queue holds at most 256 records of at most 16 KiB each;
+file output is capped at 256 MiB. Slow storage cannot block audio submission.
+Shutdown waits at most 500 ms for the writer after controllers join. The schema2
+footer is provisional: `prior_io_failed` describes writes before finalization.
+After flushing and explicitly closing the file, the writer emits a matching
+`trace_finalization` JSON line on stderr with its token, path, accounting and
+flush/close results. Complete evidence requires both the footer and this successful
+external seal, with no dropped records, size limit or I/O failure. Preserve stderr
+with the trace. A missing seal/footer makes the trace incomplete, including a
+stalled writer detached at shutdown. The diagnostic watchdog's exit124 is a
+failure, not completion. Failed finalization never deletes or renames user paths.
+
+For a bounded device/return-path experiment, run:
+
+```sh
+./build/dev/datapump-gui --audio-timing-test 30 --audio-test-device default --verbose
+```
+
+This developer CLI instrument has no GUI button and needs no keyfile. Durations
+are 5–300 seconds. It emits quiet public, smoothly windowed chirps (peak 0.005 FS),
+requests 48 kHz input/output, filters the input to 8 kHz and searches each known
+probe using bounded FFT correlations with fractional refinement. It does not
+alter mixer/routing settings. The recorded PCM stays in bounded RAM, not files.
+The process watchdog exits124 if device teardown exceeds duration + 30 seconds.
+Exit 0 means enough input returns were measured; exit 2 means insufficient/no
+return, and exit 1 means a device, continuity, cancellation or analysis error.
+No-return measurements are null. None of these is a modem or timing-qualification
+pass. A digital monitor can also return the probe; establish the physical route
+before attributing the result to DAC/cable/microphone/ADC hardware.
+
+The probe deliberately observes ordinary input rather than requiring the ADC's
+estimated UTC model to qualify. Native sound-server pointers can remain frozen
+while startup PCM is drained; strict estimator failure would otherwise prevent
+the measurement. Full-GUI verbose runs retain the production capture model and
+record that failure. The probe's immutable nominal-map delay includes unknown
+startup/driver/analog offsets, and is not calibrated one-way latency. Its fitted
+delay slope includes relative clock, path and buffering changes. Per-probe host
+round-trip delay includes output/input queues and callback quantization; detrended
+jitter is the observed finite-run residual, not a bound on future jitter. Playback
+UTC is separately labeled estimated or fallback. The optional radius sum uses
+playback **preflight** uncertainty and is not a runtime DAC-error certificate.
+
+Comparing 50 and 60 ms Audio error changes both the allowed radius (25 versus 30 ms)
+and scheduled midpoint (+25 versus +30 ms). A successful 60 ms run does not prove
+actual hardware lag exceeded 50 ms. Replaying timestamp/frontier arithmetic can
+identify a conservative forecast or numerical error; it cannot independently
+calibrate analog presentation time, certify a sub-ppb GPSDO or prove an arbitrary
+future clock trajectory stays within the allowance. These instruments never
+widen the receiver's hypotheses or relax the unchanged protection guards.
+
+
+## Bounded graph-xrun continuation (local manual candidate)
+
+Native PipeWire previously aborted on any increase in the shared graph's xrun
+counter. That counter estimates graph interruption duration; it is not an exact
+count of this stream's missing or replayed DAC samples. The new production
+policy permits a counter-only report when clock ID, rate, quantum and mapped IO
+are unchanged, position and cycle advance by exactly compatible quanta, and
+MONOTONIC nanoseconds agree with that advance within two graph frames plus the
+existing 2000ppm envelope and nanosecond rounding. Local prepared-ring starvation,
+failed buffer submission, changed topology, backwards counters and contradictory
+UTC evidence still fail. The unchanged timestamp history, original source/epoch,
+absolute rate cap and affine guard are never reset. Each queued PCM frame is
+copied at most once; no private source is rewound or restarted.
+
+Production selects a token budget B = min(100ms, 1% of symbol duration), draining
+at B/symbol-duration. In any interval T, admitted reported duration is at most
+B*(1+T/symbol-duration). A graph quantum larger than B is ineligible; short fast
+symbols do not silently tolerate whole-bit gaps. The cumulative event count and
+estimated duration never reset. These are conservative operational limits, **not
+an erasure-energy certificate or a guaranteed sensitivity loss**. Private-pattern
+power varies; stable graph telemetry cannot certify downstream PCM continuity.
+The GUI timing status and `pipewire_recovery` verbose event expose that limitation.
+The real-time callback performs only bounded arithmetic and existing PCM copies;
+status formatting, logging and timestamp checks stay on the playback thread.
+
+A separate known-erasure regression blanks 10.7422ms of transmitted signal,
+leaving channel noise and original time coordinates intact. Off/10/100/1000 DSSS
+bursts retain exact bits, individual progress publications and physical absence.
+Conditional worst-phase I/Q matched-projection penalties are 0.070751, 0.028056,
+0.017622 and 0.004702dB for their particular synthetic templates. These are
+finite-template calculations, not estimates of full-bank detection probability,
+not threshold-region sensitivity measurements, and not a bound on arbitrary
+hardware xruns, inserted/deleted PCM or persistent phase/time shifts. Larger or
+unmeasured damage remains outside this recovery scope. An actual clock-map change
+cannot be repaired by pretending a graph report was advisory.
+
+The recorded headroom failure had a current bound near16.15ms but added about
+8.75ms for a4.37s independent-cover forecast. Forecasting only through committed
+valid pulse support avoids this premature stop without enlarging Audio50ms's
+[0,50ms] interval. All actual cover/output blocks retain current UTC validation.
+Indefinite tracking on an uncalibrated sound card, arbitrary clock steps and
+unbounded downstream interruptions remain unsupported; this checkpoint does not
+establish that50ms universally suffices or that60ms is necessary.
+
+Continuation is restricted to active source production. The final generated
+block and device drain retain strict xrun handling. A counter event racing the
+final frontier must have a subsequent validated timestamp and visible report;
+otherwise drain fails explicitly. No event may disappear at a zero-frame return.
+The CLI message path and GUI message/tuning-noise paths install the same policy.

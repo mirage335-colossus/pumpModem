@@ -109,6 +109,18 @@ struct Options {
     // Anticipated loss of UTC headroom, while protection still fits. Called
     // once before further source generation; abrupt discontinuities still abort.
     std::function<void(const std::string&)> timing_protected_stop={};
+    // The source's independent final cover, included in timing_stop_duration
+    // and timing_source_end. Native playback forecasts strict payload timing
+    // only through the last committed valid pulse; every cover/output block
+    // still passes the original UTC/affine/FHSS checks. Zero preserves the
+    // generic diagnostic full-tail forecast. This never shortens emitted PCM.
+    double timing_independent_cover_seconds=0;
+    // Permit bounded *graph counter only* xrun reports, not local starvation or
+    // a changed clock mapping. The budget is a conservative operational limit,
+    // not proof of downstream erasure length or detector sensitivity. Zero is
+    // strict. Reports use timing_status; no source/timestamp state is restarted.
+    double reported_xrun_budget_seconds=0;
+    double reported_xrun_window_seconds=0;
 };
 // Capabilities belong to the selected audio provider, not the UI or target OS.
 bool exclusive_supported();
@@ -140,6 +152,14 @@ inline void validate_options(const Options& options) {
     if(!std::isfinite(options.timing_stop_duration_seconds) || options.timing_stop_duration_seconds<0 ||
        (options.maximum_timing_rate_correction>0 && options.timing_stop_duration_seconds==0))
         throw Error("audio timing correction requires a protected stop duration");
+    if(!std::isfinite(options.timing_independent_cover_seconds) || options.timing_independent_cover_seconds<0 ||
+       options.timing_independent_cover_seconds>options.timing_stop_duration_seconds)
+        throw Error("invalid independent cover timing duration");
+    if(!std::isfinite(options.reported_xrun_budget_seconds) || options.reported_xrun_budget_seconds<0 ||
+       !std::isfinite(options.reported_xrun_window_seconds) || options.reported_xrun_window_seconds<0 ||
+       (options.reported_xrun_budget_seconds>0 &&
+        (options.reported_xrun_window_seconds<=0 || !options.timing_status || !options.follow_system_clock)))
+        throw Error("xrun continuation requires a bounded window and visible UTC status");
     if(options.estimated_timing) {
         options.estimated_timing->validate();
         if(!options.follow_system_clock || options.maximum_timing_rate_correction<=0)

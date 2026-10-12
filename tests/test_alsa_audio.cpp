@@ -19,8 +19,125 @@ namespace a=datapump::audio;
 namespace f=alsa_test;
 void check(bool value,const char* reason){if(!value)throw std::runtime_error(reason);}
 template<class F> void rejects(F action){try{action();}catch(const datapump::Error&){check(f::state.live==0,"leaked failed stream");return;}throw std::runtime_error("invalid audio accepted");}
-void native_pipewire_dated_observations() {
+void bounded_graph_xrun_policy() {
     using namespace datapump::audio::detail;
+    pwabi::Clock origin{};auto& a=origin;a.id=58;a.rate={1,48000};a.duration=512;
+    a.position=1321852544;a.cycle=1647776;a.nsec=1000000000000ULL;a.xrun=14468;
+    auto advance=[](pwabi::Clock c,std::uint64_t cycles,std::uint64_t xrun) {
+        c.position+=cycles*c.duration;c.cycle+=cycles;
+        c.nsec+=static_cast<std::uint64_t>(std::llround(cycles*c.duration*1e9L/48000));c.xrun+=xrun;return c;
+    };
+    const auto b=advance(a,1,512);
+    check(!pipewire_same_clock(a,b),"strict diagnostic xrun reference was weakened");
+    PipeWireXrunPolicy disabled;
+    check(!disabled.admit(a,b),"generic output silently acquired recovery policy");
+    PipeWireXrunPolicy draining(.1,35.555556);
+    check(!draining.admit(a,b,true) && draining.count()==0,
+          "final drain silently tolerated an unobservable graph xrun");
+    PipeWireXrunPolicy long_symbol(.1,35.555556);
+    check(long_symbol.admit(a,b) && long_symbol.count()==1 &&
+          std::abs(long_symbol.total_seconds()-512./48000)<1e-12,
+          "stable recorded xrun-only graph rejected or counted as exact PCM samples");
+    for(unsigned mutation=0;mutation<10;++mutation) {
+        auto c=b;
+        switch(mutation) {
+            case 0:++c.id;break;case 1:++c.rate.denom;break;case 2:++c.duration;break;
+            case 3:c.position=a.position;break;case 4:c.cycle=a.cycle;break;
+            case 5:c.nsec+=10666667;break; // missing-time quantum, not advisory telemetry
+            case 6:++c.position;break;case 7:c.xrun=a.xrun-1;break;
+            case 8:c.nsec=a.nsec;break;case 9:c.xrun=a.xrun+4801;break;
+        }
+        PipeWireXrunPolicy policy(.1,35.555556);
+        check(!policy.admit(a,c),"unbounded or changed-clock xrun was forgiven");
+    }
+    PipeWireXrunPolicy fast(.0001,.01);
+    check(!fast.admit(a,b),"one graph quantum overwhelmed a short symbol recovery budget");
+    PipeWireXrunPolicy repeated(.03,10);auto previous=a;
+    for(unsigned i=0;i<2;++i) {const auto next=advance(previous,1,512);
+        check(repeated.admit(previous,next),"bounded repeated reports rejected");previous=next;}
+    check(!repeated.admit(previous,advance(previous,1,512)),"callbacks reset cumulative xrun budget");
+    const auto later=advance(previous,1000,0),recovered=advance(later,1,512);
+    check(repeated.admit(later,recovered) && repeated.count()==3,
+          "bounded long-transmission recovery never replenished with elapsed time");
+    // Replenishment permits long runs, but never erases the diagnostic total.
+    check(std::abs(repeated.total_seconds()-3*512./48000)<1e-12,"recovery erased cumulative evidence");
+    datapump::audio::Options options;options.follow_system_clock=true;options.timing_stop_duration_seconds=4.37;
+    options.timing_independent_cover_seconds=4.28;options.reported_xrun_budget_seconds=.1;
+    options.reported_xrun_window_seconds=35.555556;options.timing_status=[](const auto&){};
+    datapump::audio::validate_options(options);
+    options.timing_independent_cover_seconds=4.38;rejects([&]{datapump::audio::validate_options(options);});
+    options.timing_independent_cover_seconds=4.28;options.timing_status={};rejects([&]{datapump::audio::validate_options(options);});
+    std::cout<<"Bounded graph-xrun continuation and strict-clock rejection passed\n";
+}
+void native_pipewire_dated_observations() {
+    bounded_graph_xrun_policy();
+    using namespace datapump::audio::detail;
+    struct Kernel {
+        bool alive=true;int policy=SCHED_OTHER,priority=0;
+        std::pair<rlim_t,rlim_t> budget={200000,200000};
+        bool owned(int tid)const{return alive && tid==42;}
+        std::uint64_t process()const{return 123;}
+        auto watchdog()const{return budget;}
+        auto scheduling(int)const{return std::pair(policy,priority);}
+    };
+    struct Service {
+        Kernel& kernel;AudioRealtimeLimits bound={20,200000};
+        unsigned requests=0;bool apply=true,remove=false;int reply=0;
+        AudioRealtimeLimits limits()const{return bound;}
+        int promote(std::uint64_t process,int tid,std::uint32_t priority) {
+            check(process==123 && tid==42 && priority==static_cast<unsigned>(std::min(10,bound.priority)),"RTKit target/priority escaped own callback");
+            ++requests;if(apply){kernel.policy=SCHED_RR|SCHED_RESET_ON_FORK;kernel.priority=static_cast<int>(priority);}
+            if(remove)kernel.alive=false;return reply;
+        }
+    };
+    {
+        Kernel kernel;Service service{kernel};
+        const auto result=acquire_audio_realtime(42,service,kernel);
+        check(result.state==AudioRealtimeState::verified && result.priority==10 && service.requests==1,
+              "acknowledged audio priority was not kernel verified");
+        check(audio_realtime_admission_valid(42,42,true,kernel),"verified callback failed private admission");
+        check(!audio_realtime_admission_valid(42,41,true,kernel),"replacement callback inherited a prior grant");
+        const auto policy=kernel.policy;kernel.policy=SCHED_OTHER;
+        check(!audio_realtime_admission_valid(42,42,true,kernel),"revoked callback priority remained verified");
+        check(audio_realtime_admission_valid(42,42,false,kernel),"optional best-effort callback was rejected");
+        kernel.policy=policy;
+        (void)acquire_audio_realtime(42,service,kernel);
+        check(service.requests==1,"already realtime callback was demoted/re-requested");
+    }
+    for(const int cap:{1,5,20,99}) {
+        Kernel kernel;Service service{kernel};service.bound.priority=cap;
+        const auto result=acquire_audio_realtime(42,service,kernel);
+        check(result.state==AudioRealtimeState::verified && result.priority==std::min(10,cap),
+              "audio callback priority exceeded service cap or raised the requested maximum");
+    }
+    for(const auto budget:{std::pair<rlim_t,rlim_t>{RLIM_INFINITY,RLIM_INFINITY},{200001,200001},{0,200000},{200001,200000}}) {
+        Kernel kernel;kernel.budget=budget;Service service{kernel};
+        check(acquire_audio_realtime(42,service,kernel).state==AudioRealtimeState::unavailable && service.requests==0,
+              "audio helper changed or ignored an ineligible process watchdog");
+    }
+    for(const auto bound:{AudioRealtimeLimits{0,200000},{100,200000},{20,0}}) {
+        Kernel kernel;Service service{kernel};service.bound=bound;
+        check(acquire_audio_realtime(42,service,kernel).state==AudioRealtimeState::unavailable && service.requests==0,
+              "invalid/missing realtime service properties accepted");
+    }
+    for(const auto reply:{0,-EACCES,-ETIMEDOUT,-ETIME,-ECONNRESET,-ENOTCONN,-EPIPE,-ESHUTDOWN}) {
+        Kernel kernel;Service service{kernel};service.apply=false;service.reply=reply;
+        const auto result=acquire_audio_realtime(42,service,kernel);
+        check(result.state==((reply!=0 && reply!=-EACCES)?AudioRealtimeState::uncertain:AudioRealtimeState::rejected),
+              "bus reply substituted for actual audio priority or timeout was called denial");
+    }
+    {
+        Kernel kernel;Service service{kernel};service.reply=-ETIMEDOUT;
+        check(acquire_audio_realtime(42,service,kernel).state==AudioRealtimeState::verified,
+              "kernel-verified promotion lost after reply timeout");
+    }
+    {
+        Kernel kernel;Service service{kernel};service.remove=true;
+        check(acquire_audio_realtime(42,service,kernel).state==AudioRealtimeState::rejected,
+              "replaced callback thread retained a realtime claim");
+        check(acquire_audio_realtime(99,service,kernel).state==AudioRealtimeState::rejected && service.requests==1,
+              "unowned thread was submitted for promotion");
+    }
     // RT and control threads exchange a whole dated observation, not separately
     // published fields. In particular validity must never precede its value.
     struct Observation {std::uint64_t generation=0;std::array<std::uint64_t,24> fields{};bool valid=false;};
@@ -1217,6 +1334,43 @@ std::vector<float> dsss_audio_pcm(bool interleave) {
     }
     return result;
 }
+void independent_cover_runtime() {
+    constexpr unsigned rate=48000;std::vector<std::int16_t> reference;
+    for(unsigned scenario=0;scenario<3;++scenario) {
+        f::reset();f::state.available={"default"};f::state.supported_rates={rate};f::state.write_limit=137;
+        const long double origin=std::ceil(std::chrono::duration<long double>(
+            std::chrono::system_clock::now().time_since_epoch()).count())+5;
+        std::size_t cursor=0,at_failure=0;bool injected=false;
+        a::Options options;options.follow_system_clock=true;options.maximum_utc_error_seconds=.025;
+        options.maximum_timing_rate_correction=.0003;options.maximum_timing_slew_per_second=1e-14;
+        options.timing_stop_duration_seconds=3.2;options.timing_independent_cover_seconds=scenario?3.:0.;
+        options.timing_source_end=[] {return std::optional<std::uint64_t>{rate*4};};
+        options.timing_protected_stop=[](const auto&){throw datapump::Error("unexpected fixture forecast stop");};
+        options.frame_timestamp=[&](std::uint64_t frames,bool capture) {
+            check(!capture,"cover timing fixture queried capture");
+            const long double elapsed=static_cast<long double>(frames)/rate;
+            const bool bad=scenario==2&&elapsed>1.625L;
+            if(bad&&!injected){injected=true;at_failure=cursor;}
+            return a::FrameTimestamp{static_cast<long double>(frames),origin+elapsed+(bad?.04L:0),
+                elapsed+(bad?.04L:0),1e-7,1e-7,a::TimingQuality::bounded,717};
+        };
+        std::string failure;
+        try {a::playback(rate,"default",[&](std::span<float> out) {
+            const auto count=std::min<std::size_t>(out.size(),rate*4-cursor);
+            for(std::size_t i=0;i<count;++i)out[i]=static_cast<float>(.1*std::sin((cursor+i)*.08));
+            cursor+=count;return count;
+        },{},[&](const auto&){a::schedule_output(static_cast<double>(origin+.125L));},a::ChannelMode::left_mono,options);}
+        catch(const datapump::Error& e){failure=e.what();}
+        if(scenario==0) {check(failure.empty(),"generic full-tail fixture failed");reference=f::state.played;}
+        else if(scenario==1)check(failure.empty()&&f::state.played==reference&&cursor==rate*4,
+            "independent-cover forecast altered PCM or shortened drain");
+        else check(injected&&!failure.empty()&&failure!="unexpected fixture forecast stop"&&
+            cursor==at_failure&&cursor>rate&&cursor<rate*4&&f::state.recovered_errors.empty(),
+            "cover timing violation silently restarted or generated further source PCM");
+        check(!f::state.live,"cover timing fixture leaked device");
+    }
+    std::cout<<"Independent-cover playback identical PCM and late timing rejection passed\n";
+}
 void protected_timing_playback() {
     f::reset();f::state.available={"default"};f::state.supported_rates={48000};f::state.write_limit=137;
     const auto epoch=std::ceil(std::chrono::duration<long double>(std::chrono::system_clock::now().time_since_epoch()).count())+6;
@@ -2023,14 +2177,18 @@ void audio_options() {
           "shared capture did not keep its own route after exclusive access was busy");
 }
 int main(int argc,char** argv){try{
-    if(argc==2 && std::string(argv[1])=="--pipewire") {native_pipewire_dated_observations();std::cout<<"Native PipeWire dated observations passed\n";return 0;}
+    std::unique_ptr<datapump::audio::trace::Scope> verbose;
+    if(argc==3&&std::string(argv[1])=="--trace-utc") {
+        verbose=std::make_unique<datapump::audio::trace::Scope>(argv[2]);argv[1]=const_cast<char*>("--utc-runtime");argc=2;
+    }
+    if(argc==2 && std::string(argv[1])=="--pipewire") {native_pipewire_dated_observations();independent_cover_runtime();std::cout<<"Native PipeWire dated observations passed\n";return 0;}
     if(argc==2 && std::string(argv[1])=="--live-debug") {native_source_endpoint_contract();shared_server_timing_fallback();native_prepared_positive_pointer();native_prepared_delay_readiness();return 0;}
     if(argc==2 && std::string(argv[1])=="--absolute-rate") {native_absolute_clock_not_steering_limit();return 0;}
     if(argc==2 && std::string(argv[1])=="--headroom") {native_protected_period_reserve();return 0;}
     if(argc==2 && std::string(argv[1])=="--native-frontier") {native_playback_frontiers();return 0;}
     if(argc==2 && std::string(argv[1])=="--utc-runtime") {
         native_pipewire_dated_observations();native_source_endpoint_contract();shared_server_timing_fallback();native_prepared_positive_pointer();native_absolute_clock_not_steering_limit();native_running_pointer_intervals();native_slow_query_recovers();native_playback_frontiers();native_audio_error_model();native_period_refinement();native_protected_period_reserve();
-        bounded_clock_provider();protected_timing_playback();native_queued_dsss_playback(true);
+        independent_cover_runtime();bounded_clock_provider();protected_timing_playback();native_queued_dsss_playback(true);
         std::cout<<"Native runtime UTC timing passed\n";return 0;
     }
     if(argc==2 && std::string(argv[1])=="--period") {native_period_refinement();native_protected_period_reserve();std::cout<<"Native period refinement passed\n";return 0;}
@@ -2158,7 +2316,7 @@ int main(int argc,char** argv){try{
     bounded_clock_provider();
     zero_audio_error_requests();
     playback_discontinuity_observer();
-    protected_timing_playback();
+    independent_cover_runtime();protected_timing_playback();
     native_queued_dsss_playback();
     std::cout<<"ALSA default resolution and streaming tests passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

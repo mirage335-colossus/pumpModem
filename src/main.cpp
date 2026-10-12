@@ -395,6 +395,11 @@ void play_transmission(const Args& a, transfer::Options& options, Factory make) 
     auto timing_config=options.modem;
     if(options.key)timing_config.scramble=true;
     output.timing_stop_duration_seconds=static_cast<double>(modem::transmit_stop_sample_count(timing_config))/timing_config.sample_rate;
+    if(modem::private_cover_enabled(timing_config))
+        output.timing_independent_cover_seconds=static_cast<double>(modem::suppression_sample_count(timing_config))/timing_config.sample_rate;
+    output.timing_source_end=[&]() -> std::optional<std::uint64_t> {
+        return source?std::optional<std::uint64_t>(source->total_samples()):std::nullopt;
+    };
     if(timing_config.fake_hopping && timing_config.fake_hopping->smooth_ramps) {
         const modem::FhssPowerShape shape(*timing_config.fake_hopping,timing_config.sample_rate,
             modem::pattern_pulse_padding_samples(timing_config),modem::symbol_sample_count(timing_config));
@@ -408,9 +413,13 @@ void play_transmission(const Args& a, transfer::Options& options, Factory make) 
     output.follow_system_clock=options.clock_sync && audio::utc_follow_supported() &&
         (!options.modem.oscillator_search || options.modem.oscillator_search->reference==modem::OscillatorReference::independent_audio);
     output.allow_timing_fallback=options.clock_sync.has_value();
+    if(output.follow_system_clock) {
+        const auto symbol_seconds=static_cast<double>(modem::symbol_sample_count(timing_config))/timing_config.sample_rate;
+        output.reported_xrun_budget_seconds=std::min(.1,.01*symbol_seconds);
+        output.reported_xrun_window_seconds=symbol_seconds;
+    }
     output.timing_status=[](const audio::TimingStatus& status) {
-        if(!status.following_system_clock)
-            std::cerr<<"UTC timing fallback: "<<status.reason<<"\n";
+        std::cerr<<(status.following_system_clock?"UTC timing: ":"UTC timing fallback: ")<<status.reason<<"\n";
     };
     if(options.clock_sync && a.has("time"))throw Error("UTC hardware transmission requires a freshly scheduled epoch");
     if(output.follow_system_clock && options.modem.oscillator_search) {
