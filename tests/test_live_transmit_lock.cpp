@@ -36,7 +36,7 @@ struct Playback {
     std::atomic<unsigned> opened{0},started{0},closed{0},captures{0};
     std::atomic<bool> finish{false},hold_drain{false},draining{false},inject_gap{false};
     std::atomic<double> gain{0},timing_rate{0},timing_stop{0};
-    std::atomic<bool> protected_hook{false};
+    std::atomic<bool> protected_hook{false},inject_protected_stop{false};
     std::atomic<bool> exclusive{false};
     bool timed_mock=false,timing_accepted=false;std::atomic<bool> requested_timing{false};
 };
@@ -133,6 +133,55 @@ void tuning_utc() {
         check(playback.requested_timing && state.transmit_clock_following==accepted &&
               state.clock_timing_fallback==!accepted,"tuning/message UTC request or visible fallback differed");
         session.cancel_transmit();await([&]{return playback.closed==1;},"UTC source failed immediate abort");session.stop();
+    }
+}
+void protected_stop_status() {
+    for(const bool noise:{false,true})for(const bool abort:{false,true}) {
+        Playback playback;playback.hold_drain=true;
+        auto value=slow_settings();value.transfer.modem.bandwidth_hz=16;value.transfer.modem.integration_seconds=2;
+        const auto& c=value.transfer.modem;
+        live::Session session([]{return static_cast<double>(epoch);});session.start(value);
+        const Bytes bits(12,1);
+        auto original=transfer::binary_transmitter(bits,value.transfer);
+        const auto point=modem::training_sample_count(c)+modem::pattern_pulse_padding_samples(c)+13;
+        playback.released=point;
+        if(noise)session.transmit_noise();else session.transmit_bits(bits);
+        await([&]{return playback.delivered==point;},"protected-stop fixture did not emit a private prefix");
+        if(!noise)session.transmit_bits(bits,true); // Must not replace the failed request after drain.
+        playback.inject_protected_stop=true;playback.released=point+1;
+        await([&]{return playback.delivered==point+1;},"protected-stop callback did not return to finite output");
+        const auto stopping=session.snapshot();
+        check(stopping.transmitting && stopping.transmission_stopping && !stopping.transmission_finished &&
+              stopping.transmission_failed && stopping.error=="synthetic UTC headroom exhausted",
+              "automatic protected stop hid its failure or omitted the stopping state");
+        if(abort) {
+            session.finish_transmit();
+            await([&]{return playback.closed==1;},"Abort now requested another graceful stop instead of aborting");
+            check(playback.delivered==point+1,"immediate abort emitted extra cover");
+        } else {
+            playback.released=point+modem::transmit_stop_sample_count(c)+100;
+            await([&]{return playback.draining.load();},"automatic protection did not drain shaped cover");
+            const auto draining=session.snapshot();
+            check(draining.transmitting && draining.transmission_stopping && draining.transmission_failed &&
+                !draining.transmission_finished && draining.received.empty() && playback.closed==0,
+                "protected-stop failure bypassed device drain or invented reception");
+            check(playback.delivered==point+4*modem::pattern_pulse_padding_samples(c)+3*c.sample_rate+1 &&
+                playback.delivered<original->total_samples(),"protected stop altered cover length or sent the entire payload");
+            playback.hold_drain=false;
+        }
+        await([&]{return session.snapshot().transmission_finished && playback.captures>=2;},
+              "capture did not resume after protected-stop completion");
+        auto done=session.snapshot();
+        check(playback.opened==1 && !done.transmitting && done.transmission_cancelled && !done.transmission_stopping &&
+            done.transmission_failed && done.error==stopping.error && done.received.empty(),
+            "capture restart hid automatic truncation or manufactured physical completion");
+        const auto exposure=done.transmit_key_lock_seconds;
+        session.clear_received();done=session.snapshot();
+        check(done.transmission_failed && done.error==stopping.error && done.transmit_key_lock_seconds==exposure,
+              "Clear received erased the protected-stop reason or exposed-key lock");
+        // A new independent temporary-key request clears the old failure.
+        session.transmit_noise();check(!session.snapshot().transmission_failed,"new TX retained the prior failure");
+        session.cancel_transmit();session.stop();
     }
 }
 void private_discontinuity() {
@@ -430,8 +479,21 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
         check(static_cast<bool>(options.timing_status),"timed source omitted status callback");
         options.timing_status({script->timing_accepted,.05,.03,"synthetic timed provider preflight"});
     }
+    check(static_cast<bool>(options.timing_source_end),"message/noise omitted common terminal endpoint hook");
+    std::optional<std::uint64_t> terminal;
+    std::uint64_t supplied=0;
     const auto checked=[&](std::span<float> output) {
+        if(script->inject_protected_stop.exchange(false)) {
+            check(static_cast<bool>(options.timing_protected_stop),"private output omitted protected-stop hook");
+            options.timing_protected_stop("synthetic UTC headroom exhausted");
+        }
         const auto n=callback(output);
+        supplied+=n;
+        const auto end=options.timing_source_end();
+        check(!terminal || (end && *end<=*terminal),"source endpoint was reset/extended during playback");
+        check(!end || *end>=supplied,"source endpoint ignored PCM already supplied to converter");
+        if(!n)check(end && *end==supplied,"finite message/noise EOF lost committed terminal endpoint");
+        terminal=end;
         if(n && script->inject_gap) {
             check(static_cast<bool>(options.playback_discontinuity),"private tuning/message output omitted discontinuity protection");
             options.playback_discontinuity("synthetic private playback discontinuity");
@@ -478,9 +540,10 @@ std::vector<float> record(double,std::uint32_t,const std::string&,std::size_t,st
     throw Error("unexpected record");
 }
 }
-int main() {
+int main(int argc,char** argv) {
     try {
-        private_discontinuity();graceful_drain();tuning_profile();tuning_utc();boundary_accounting();shaped_future_exposure();queued_request_rechecks();normal_quiet_override();
+        if(argc==2 && std::string(argv[1])=="--protected-stop") {protected_stop_status();return 0;}
+        protected_stop_status();private_discontinuity();graceful_drain();tuning_profile();tuning_utc();boundary_accounting();shaped_future_exposure();queued_request_rechecks();normal_quiet_override();
         unkeyed_slow_quiet_override();
         std::cout<<"live transmit epoch lock passed\n";
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}

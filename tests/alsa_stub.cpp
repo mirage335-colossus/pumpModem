@@ -9,6 +9,13 @@ namespace alsa_test {
 State state=[] {State value;value.available={"default"};value.supported_rates={48000};return value;}();
 void reset(){state=State{};}
 }
+namespace {
+struct HardwareParams {
+    int access=0,format=0;unsigned channels=0,rate=0,resample=1;
+    unsigned long buffer=0,period=0;
+};
+struct SoftwareParams {unsigned long avail_min=0,start_threshold=0;};
+}
 extern "C" {
 int snd_pcm_open(void** pcm,const char* name,int direction,int) {
     auto& s=alsa_test::state;s.attempts.emplace_back(name);
@@ -30,6 +37,58 @@ int snd_pcm_set_params(void*,int format,int access,unsigned channels,unsigned ra
 }
 int snd_pcm_get_params(void*,unsigned long* buffer,unsigned long* period) {
     *buffer=alsa_test::state.buffer_frames;*period=alsa_test::state.period_frames;return 0;
+}
+int snd_pcm_hw_params_malloc(HardwareParams** params) {
+    auto& s=alsa_test::state;if(!s.period_refinement)return -38;
+    *params=new HardwareParams;++s.parameter_objects;return 0;
+}
+void snd_pcm_hw_params_free(HardwareParams* p){delete p;--alsa_test::state.parameter_objects;}
+int snd_pcm_sw_params_malloc(SoftwareParams** params) {
+    *params=new SoftwareParams;++alsa_test::state.parameter_objects;return 0;
+}
+void snd_pcm_sw_params_free(SoftwareParams* p){delete p;--alsa_test::state.parameter_objects;}
+int snd_pcm_hw_params_current(void*,HardwareParams* p) {
+    const auto& s=alsa_test::state;*p={3,2,s.channels,s.rate,0,s.buffer_frames,s.period_frames};return 0;
+}
+int snd_pcm_hw_free(void*) {
+    auto& s=alsa_test::state;++s.hardware_releases;s.hardware_released=true;return s.hardware_release_result;
+}
+int snd_pcm_hw_params_any(void*,HardwareParams* p){
+    if(!alsa_test::state.hardware_released)throw std::runtime_error("hardware still constrains period negotiation");
+    *p={};return 0;
+}
+int snd_pcm_sw_params_current(void*,SoftwareParams* p) {
+    const auto& s=alsa_test::state;*p={s.avail_min,s.start_threshold};return 0;
+}
+int snd_pcm_hw_params_set_access(void*,HardwareParams* p,int access){p->access=access;return 0;}
+int snd_pcm_hw_params_set_format(void*,HardwareParams* p,int format){p->format=format;return 0;}
+int snd_pcm_hw_params_set_channels(void*,HardwareParams* p,unsigned channels){p->channels=channels;return 0;}
+int snd_pcm_hw_params_set_rate(void*,HardwareParams* p,unsigned rate,int direction){
+    if(direction)throw std::runtime_error("expected exact rate constraint");p->rate=rate;return 0;
+}
+int snd_pcm_hw_params_set_rate_resample(void*,HardwareParams* p,unsigned resample){p->resample=resample;return 0;}
+int snd_pcm_hw_params_set_buffer_size(void*,HardwareParams* p,unsigned long buffer){p->buffer=buffer;return 0;}
+int snd_pcm_hw_params_set_period_size_near(void*,HardwareParams* p,unsigned long* period,int*) {
+    auto& s=alsa_test::state;++s.period_requests;s.requested_period=*period;
+    if(s.after_period_request)s.after_period_request();
+    // current() fixes all intervals and therefore cannot be modified this way.
+    if(s.period_candidate_rejected || p->period)return -22;
+    p->period=s.negotiated_period?s.negotiated_period:*period;*period=p->period;return 0;
+}
+int snd_pcm_hw_params(void*,HardwareParams* p) {
+    auto& s=alsa_test::state;
+    if(p->access!=3 || p->format!=2 || p->channels!=s.channels || p->rate!=s.rate ||
+       p->resample!=0 || p->buffer!=s.buffer_frames || !p->period)
+        throw std::runtime_error("period negotiation changed fixed hardware configuration");
+    // Model a partial apply even when the driver reports failure.
+    s.hardware_released=false;s.period_frames=p->period;s.avail_min=p->period;s.start_threshold=0;
+    const auto n=s.hw_applies++;
+    return n<s.hw_apply_results.size()?s.hw_apply_results[n]:0;
+}
+int snd_pcm_sw_params(void*,SoftwareParams* p) {
+    auto& s=alsa_test::state;s.avail_min=p->avail_min;s.start_threshold=p->start_threshold;
+    const auto n=s.sw_applies++;
+    return n<s.sw_apply_results.size()?s.sw_apply_results[n]:0;
 }
 int snd_pcm_delay(void*,long* delay) {
     auto& s=alsa_test::state;++s.delay_calls;if(s.before_delay)s.before_delay();

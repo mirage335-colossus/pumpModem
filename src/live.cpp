@@ -1825,6 +1825,12 @@ struct Session::Impl {
                     output_options.maximum_utc_error_seconds=clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds);
                     output_options.presentation_lag_seconds=clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds);
                     output_options.timing_stop_duration_seconds=wave->timing_stop_seconds;
+                    output_options.timing_source_end=[&]() -> std::optional<std::uint64_t> {
+                        // Identical termination accounting for message/noise.
+                        // No source callbacks or keystream addresses advance.
+                        if(!wave->transmitter || (wave->noise && !wave->graceful))return std::nullopt;
+                        return wave->transmitter->total_samples();
+                    };
                     if(transmit_modem.fake_hopping && transmit_modem.fake_hopping->smooth_ramps) {
                         const modem::FhssPowerShape shape(*transmit_modem.fake_hopping,transmit_modem.sample_rate,
                             modem::pattern_pulse_padding_samples(transmit_modem),modem::symbol_sample_count(transmit_modem));
@@ -1858,9 +1864,20 @@ struct Session::Impl {
 
                         }
                     };
-                    output_options.timing_protected_stop=[&,version](const std::string& reason) {
+                    output_options.timing_protected_stop=[&](const std::string& reason) {
+                        std::lock_guard lock(mutex);
+                        if(generation!=wave->generation || tx_serial!=wave->serial || wave->stop.stop_requested())
+                            throw Error("transmission cancelled");
                         wave->transmitter->request_finish();wave->graceful=true;
-                        timing_status({true,clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds),0,reason},version,false);
+                        // This is a truncated request, not successful completion
+                        // or a user cancellation. Keep the failure through cover,
+                        // DAC drain and later capture updates. Do not throw here:
+                        // the finite coefficient source must finish protection.
+                        transmit_error=reason;current.error=reason;
+                        finish_requested=true;current.transmission_stopping=true;
+                        queued.clear();
+                        current.status="Finishing echo protection and pulse tails; cancel again to abort immediately";
+                        ++current.sequence;changed.notify_all();
                     };
                     if(!value.full_duplex)discontinuity();
                     audio::playback(transmit_modem.sample_rate, value.device, [&](std::span<float> output) {

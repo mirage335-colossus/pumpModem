@@ -486,6 +486,11 @@ A transmit failure remains visible as **FAIL: transmit**, with its error text,
 across capture restart and Clear received. Receiver-dropping failures retain
 priority. Starting a new transmission clears the old TX failure. Device failures
 after private generation never unlock/replay the generated epoch.
+Automatic UTC protection also latches a transmit failure: the detailed reason is
+visible as soon as stopping begins, while shaped cover and device drain continue.
+**Abort now** immediately interrupts that protection. After drain, **FAIL: transmit**
+remains even if a transient receiver backlog has caught up; receiver loss still
+has priority. User-requested graceful cancellation does not invent a TX failure.
 
 The editable **Clock accuracy**, **Clock region** and **Clock offset** controls
 describe PC synchronization and propagation independently of oscillator selection.
@@ -1215,3 +1220,37 @@ and during simulation reception-only/replay work, cancellation remains immediate
 The source thread owns the transition; the GUI does not splice PCM or end RX.
 TX remains active through physical buffer drain, and key-exposure history retains
 the original payload extent. See [transmitter cover](transmit-cover.md).
+
+## Opt-in hardware duplex diagnostic
+
+`--debug` (alias `--debug-live-duplex`) opens the ordinary Robust GUI and runs one
+raw `1` bit using an explicitly supplied `--keyfile` and `--tx-key named`.
+Use a synthetic key. It enables Live/Duplex through the normal controller, waits
+for ordinary transmit readiness/key guards, and uses the real configured audio
+route. Simulation, smoke and self-check combinations are rejected. This is an
+automated physical test, not the existing simulated smoke workflow.
+
+`--debug-timeout 10..300` sets the entire application deadline (default 120 s).
+It forces duplex even across asynchronous key/settings loading and observes
+concurrent capture and every retained receive row; TX EOF alone
+cannot pass. A pass requires a complete matching physical reception, no extra or
+wrong retained bits, no reported input/coverage loss, and successful TX. A bounded
+two-second settling interval is not a guarantee against arbitrarily late echoes.
+Transient backlog is logged, not classified as lost input. Receive identities
+that predate its TX request cannot satisfy the new reception. Exit0 means the
+requested path completed; exit2 means physical duplex reception completed but
+requested UTC playback used fallback (incomplete UTC coverage); exit1 means
+failure or timeout. The log distinguishes those outcomes.
+
+JSON lines on stderr report controller status (including preparation/key errors),
+timing/fallback state, TX progress, receiver banks,
+backlog and per-row bit counts/identity on the next GUI poll. They omit message
+contents, key/keystream bytes and temporary roots. Ordinary backend diagnostics
+may also appear on stderr. Errors/deadlines close the diagnostic GUI with failure;
+closing an active transmission aborts and forfeits echo protection. A separate
+watchdog covers blocked startup/teardown and exits 124 after the deadline plus
+15 seconds without waiting for a potentially blocked stderr; the launcher must
+interpret that exit even without a final log line. This is incomplete coverage,
+never a test pass. `DATAPUMP_AUDIO_TIMING_TRACE=1` additionally logs native timing
+coordinates/radii at one-second intervals without PCM or secrets. The diagnostic flags
+are launch-only and are not saved/exported as ordinary modem parameters.

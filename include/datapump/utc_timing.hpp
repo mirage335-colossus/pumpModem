@@ -5,6 +5,7 @@
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <string>
 
 namespace datapump::audio {
 // A timestamp describes a device frame, not the time a callback happened to
@@ -124,10 +125,18 @@ struct EstimatedDeviceTiming {
 // years from the epoch. Frame/UTC observations are never used as crypto indices.
 class UtcTimeline {
 public:
-    explicit UtcTimeline(std::uint32_t rate,double rate_limit=.001)
-        :rate_(rate),rate_limit_(rate_limit) {
-        if(!rate || !std::isfinite(rate_limit) || rate_limit<=0 || rate_limit>.001)
+    enum class Prediction { fitted, timestamp_intersection };
+    explicit UtcTimeline(std::uint32_t rate,double rate_limit=.001,
+            Prediction prediction=Prediction::fitted,std::optional<double> shared_uncertainty=std::nullopt,
+            bool persistent_observations=false)
+        :rate_(rate),rate_limit_(rate_limit),prediction_(prediction),shared_uncertainty_(shared_uncertainty),
+         persistent_observations_(persistent_observations) {
+        if(!rate || !std::isfinite(rate_limit) || rate_limit<=0 || rate_limit>.001 ||
+           (shared_uncertainty_ && (prediction_!=Prediction::timestamp_intersection ||
+            !std::isfinite(*shared_uncertainty_) || *shared_uncertainty_<0)))
             throw Error("invalid audio UTC clock model");
+        if(persistent_observations_ && prediction_!=Prediction::timestamp_intersection)
+            throw Error("persistent observations require timestamp intervals");
     }
     void observe(FrameTimestamp value) {
         if(!std::isfinite(value.frame) || !std::isfinite(value.utc_seconds) ||
@@ -136,6 +145,8 @@ public:
            !std::isfinite(value.clock_read_uncertainty_seconds) || value.clock_read_uncertainty_seconds<0 ||
            value.quality==TimingQuality::unavailable)
             throw Error("audio UTC timestamp unavailable");
+        if(shared_uncertainty_ && value.uncertainty_seconds<*shared_uncertainty_)
+            throw Error("audio UTC observation omits shared provider uncertainty");
         if(count_) {
             const auto& previous=points_[(next_+points_.size()-1)%points_.size()];
             const auto elapsed=value.steady_seconds-previous.steady_seconds;
@@ -147,16 +158,46 @@ public:
             const auto clock_error=value.clock_read_uncertainty_seconds+previous.clock_read_uncertainty_seconds;
             if(std::abs(wall_elapsed-elapsed)>rate_limit_*elapsed+clock_error+1e-9L)
                 throw Error("system clock stepped during UTC audio");
-            if(value.frame==previous.frame)return; // no new device observation
+            if(value.frame==previous.frame && !persistent_observations_)return; // historical provider policy
             const auto duration=(value.frame-previous.frame)/rate_;
             if(std::abs(duration-wall_elapsed)>2*rate_limit_*wall_elapsed+
                value.uncertainty_seconds+previous.uncertainty_seconds)
                 throw Error("audio device clock exceeds UTC timing model");
         }
+        // Propagate the unchanged generic clock-rate envelope (including UTC
+        // discipline), and intersect full observation radii. An oscillator GUI
+        // selection must NOT narrow this position bound for an unmeasured DAC.
+        // Never forget an earlier constraint when the diagnostic ring wraps.
+        // No independent/zero-mean jitter assumption or source-origin reset.
+        auto position=position_;
+        if(persistent_observations_) {
+            if(!position)position=Position{value.frame,value.utc_seconds,-value.uncertainty_seconds,value.uncertainty_seconds};
+            else {
+                const auto [minimum,maximum]=scale_bounds();
+                const auto delta=(value.frame-position->frame)/rate_;
+                const auto center=value.utc_seconds-position->origin;
+                const auto rounding=32*std::numeric_limits<long double>::epsilon()*
+                    (std::abs(value.utc_seconds)+std::abs(position->low)+std::abs(position->high)+std::abs(delta)+1);
+                position->low=std::max(position->low+delta*minimum-rounding,center-value.uncertainty_seconds-rounding);
+                position->high=std::min(position->high+delta*maximum+rounding,center+value.uncertainty_seconds+rounding);
+                if(!std::isfinite(delta) || !std::isfinite(rounding) ||
+                   !std::isfinite(position->low) || !std::isfinite(position->high) || position->low>position->high)
+                    throw Error("audio UTC observations contradict the clock-rate envelope");
+                position->frame=value.frame;
+            }
+        }
         points_[next_]=value;next_=(next_+1)%points_.size();count_=std::min(count_+1,points_.size());
+        position_=position;
         fit();
     }
     bool ready() const noexcept {return count_!=0;}
+    struct ObservationUncertainty {double latest=0,maximum=0;};
+    ObservationUncertainty observation_uncertainty() const noexcept {
+        if(!count_)return {};
+        ObservationUncertainty result{points_[(next_+points_.size()-1)%points_.size()].uncertainty_seconds,0};
+        for(std::size_t i=0;i<count_;++i)result.maximum=std::max(result.maximum,points_[i].uncertainty_seconds);
+        return result;
+    }
     TimePrediction predict(long double frame) const {
         if(!count_ || !std::isfinite(frame) || frame<0)throw Error("audio UTC timeline not ready");
         const auto& latest=points_[(next_+points_.size()-1)%points_.size()];
@@ -165,17 +206,84 @@ public:
         // the full residual, and widen extrapolation by the entire rate bound.
         const auto span=latest.frame-points_[count_<points_.size()?0:next_].frame;
         const auto rate_uncertainty=span>0?std::min(2*rate_limit_,2*uncertainty_*rate_/static_cast<double>(span)):2*rate_limit_;
+        if(prediction_==Prediction::timestamp_intersection) {
+            // A quantized native pointer need not lie on its least-squares
+            // line. Propagate each observation interval to the requested
+            // frame using the admitted rate envelope, then intersect. Any
+            // compatible timeline belongs to every interval. A fit residual
+            // is not an additional independent device error to add to Ui.
+            // Relative UTC coordinates preserve fractional-frame precision.
+            long double low=-std::numeric_limits<long double>::infinity();
+            long double high=std::numeric_limits<long double>::infinity();
+            double provider_floor=shared_uncertainty_.value_or(0);
+            // observe() bounds nominal-frame duration relative to elapsed UTC,
+            // not the reverse. Invert that interval before propagating it.
+            const auto [minimum_scale,maximum_scale]=scale_bounds();
+            const auto propagation_rate=std::max(1-minimum_scale,maximum_scale-1);
+            const auto roundoff=32*std::numeric_limits<long double>::epsilon()*
+                (std::abs(latest.utc_seconds)+std::abs(frame)/rate_+1);
+            for(std::size_t i=0;i<count_;++i) {
+                const auto delta=(frame-points_[i].frame)/rate_;
+                const auto center=points_[i].utc_seconds-latest.utc_seconds+delta;
+                const auto radius=points_[i].uncertainty_seconds+propagation_rate*std::abs(delta)+roundoff;
+                low=std::max(low,center-radius);high=std::min(high,center+radius);
+                if(!shared_uncertainty_)provider_floor=std::max(provider_floor,points_[i].uncertainty_seconds);
+            }
+            if(position_) {
+                const auto delta=(frame-position_->frame)/rate_;
+                const auto offset=position_->origin-latest.utc_seconds;
+                low=std::max(low,offset+position_->low+delta*(delta>=0?minimum_scale:maximum_scale)-roundoff);
+                high=std::min(high,offset+position_->high+delta*(delta>=0?maximum_scale:minimum_scale)+roundoff);
+            }
+            if(low>high)throw Error("audio UTC timestamp intervals contradict the admitted clock model");
+            // Do not average away shared codec/driver offset or upgrade an
+            // estimated timestamp to calibrated evidence. Retain the entire
+            // shared provider radius, plus the original extrapolation bound,
+            // even when observations have a narrower intersection. Native
+            // queries separate this fixed floor from their individual query
+            // brackets: a single slow query must not make every later query
+            // equally uncertain. Its FULL Ui still participates above. Without
+            // an explicit decomposition retain the historical largest-Ui floor.
+            const auto radius=std::max((high-low)/2,
+                provider_floor+propagation_rate*horizon)+roundoff;
+            const auto returned_slope=slope_;
+            const auto fitted_scale=static_cast<long double>(static_cast<double>(returned_slope))*rate_;
+            const auto native_rate_uncertainty=std::max(std::abs(fitted_scale-minimum_scale),
+                std::abs(maximum_scale-fitted_scale))+4*std::numeric_limits<double>::epsilon();
+            return {latest.utc_seconds+low+(high-low)/2,
+                std::nextafter(static_cast<double>(radius),std::numeric_limits<double>::infinity()),
+                static_cast<double>(returned_slope),quality_,
+                std::nextafter(static_cast<double>(native_rate_uncertainty),std::numeric_limits<double>::infinity())};
+        }
         return {origin_+slope_*(frame-center_),
             uncertainty_+static_cast<double>(2*rate_limit_*horizon),static_cast<double>(slope_),quality_,rate_uncertainty};
+    }
+    // Preparation will stop/restart silence before scheduling private PCM.
+    // Its refined phase evidence cannot qualify the new stream's first query.
+    // Retain the latest FULL observation radius and the same provider model.
+    TimePrediction predict_without_history(long double frame) const {
+        if(!count_)throw Error("audio UTC timeline not ready");
+        UtcTimeline fresh(rate_,rate_limit_,prediction_,shared_uncertainty_,persistent_observations_);
+        fresh.observe(points_[(next_+points_.size()-1)%points_.size()]);
+        return fresh.predict(frame);
     }
 private:
     std::uint32_t rate_;
     double rate_limit_;
+    Prediction prediction_;
+    std::optional<double> shared_uncertainty_;
+    bool persistent_observations_;
+    struct Position {long double frame,origin,low,high;};
+    std::optional<Position> position_;
     std::array<FrameTimestamp,64> points_{};
     std::size_t count_=0,next_=0;
     long double origin_=0,center_=0,slope_=0;
     double uncertainty_=0;
     TimingQuality quality_=TimingQuality::unavailable;
+    std::pair<long double,long double> scale_bounds() const {
+        return {std::nextafter(1/(1.L+2*rate_limit_),-std::numeric_limits<long double>::infinity()),
+                std::nextafter(1/(1.L-2*rate_limit_), std::numeric_limits<long double>::infinity())};
+    }
     void fit() {
         const auto& latest=points_[(next_+points_.size()-1)%points_.size()];
         long double x=0,y=0,xx=0,xy=0;
@@ -355,6 +463,17 @@ private:
 };
 
 enum class ProtectedTimingAction { proceed, finish, abort };
+// All four bounds use the SAME timestamp model as the actual submission check.
+// The stop endpoint is independent of a message's eventual length. Include the
+// queued next block before choosing whether to request the protected tail now.
+inline ProtectedTimingAction protected_timing_frontiers(double current,double block_end,
+        double stop_end,double next_stop_end,double allowance) {
+    for(const auto value:{current,block_end,stop_end,next_stop_end})
+        if(!std::isfinite(value) || value<0)throw Error("invalid UTC timing frontier");
+    if(!std::isfinite(allowance) || allowance<=0)throw Error("invalid UTC timing allowance");
+    if(std::max({current,block_end,stop_end})>=allowance)return ProtectedTimingAction::abort;
+    return next_stop_end>=allowance?ProtectedTimingAction::finish:ProtectedTimingAction::proceed;
+}
 inline ProtectedTimingAction protected_timing_action(double error,double uncertainty,double drift,
         double stop_seconds,double next_block_seconds,double warp,double allowance) {
     if(!std::isfinite(error) || !std::isfinite(uncertainty) || uncertainty<0 ||
@@ -379,7 +498,10 @@ inline UtcCorrection presentation_correction(const TimePrediction& predicted,lon
         throw Error("invalid UTC presentation correction");
     const auto error=static_cast<double>(predicted.utc_seconds-desired_utc);
     if(std::abs(error)+predicted.uncertainty_seconds>maximum_error_seconds)
-        throw Error("UTC audio timing error exceeds allowance; transmission stopped");
+        throw Error("UTC audio timing error exceeds allowance; transmission stopped (center error="+
+            std::to_string(error*1000)+" ms, timestamp radius="+
+            std::to_string(predicted.uncertainty_seconds*1000)+" ms, allowed radius="+
+            std::to_string(maximum_error_seconds*1000)+" ms)");
     auto rate=predicted.seconds_per_frame*hardware_rate-1;
     // Preserve a rate already consistent with the observation interval. Do
     // not turn timestamp rounding/buffering uncertainty into waveform jitter.

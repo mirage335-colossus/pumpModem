@@ -1,4 +1,6 @@
 #include "application.hpp"
+#include "debug_live.hpp"
+#include <sstream>
 #include "control_interactions.hpp"
 #include "record_presentations.hpp"
 #include "transmit_scope.hpp"
@@ -15,6 +17,61 @@ void check(bool value,const char* message) { if(!value)throw Error(message); }
 const ui::Control& control(ui::Field field) {
     for(const auto& value:ui::console_screen())if(value.field==field)return value;
     throw Error("Missing shared control");
+}
+void physical_debug_workflow() {
+    using A=DebugLive::Action;
+    std::ostringstream log;DebugLive debug(120,log);live::Snapshot snap;Signals signals;
+    snap.running=true;snap.samples_received=100;
+    check(debug.step(0,snap,signals,true,false)==A::wait,"Debug transmitted before named key loaded");
+    check(debug.step(1,snap,signals,true,true)==A::transmit,"Debug failed to request normal ready transmission");
+    check(debug.step(2,snap,signals,true,true)==A::wait,"Debug requested a second transmission");
+    snap.transmitting=true;snap.transmission_finished=false;snap.transmission_id=1;
+    debug.step(3,snap,signals,false,true);snap.samples_received+=100;debug.step(4,snap,signals,false,true);
+    snap.transmitting=false;snap.transmission_finished=true;
+    check(debug.step(5,snap,signals,true,true)==A::wait,"TX EOF manufactured physical completion");
+    SignalLine line;line.id=1;line.binary=true;line.text="1";line.received_bits=1;line.complete=true;signals.update(line);
+    debug.step(6,snap,signals,true,true);
+    check(debug.step(8,snap,signals,true,true)==A::close&&debug.result()==0,"Complete physical diagnostic did not close");
+    check(log.str().find("capture_during_tx\":1")!=std::string::npos,"Diagnostic lost concurrent capture evidence");
+    DebugLive extra(120,log);snap.transmission_id=0;extra.step(0,snap,Signals{},true,true);
+    snap.transmitting=true;snap.transmission_finished=false;snap.transmission_id=1;extra.step(1,snap,Signals{},false,true);
+    ++snap.samples_received;extra.step(2,snap,Signals{},false,true);
+    line.id=2;line.text="0";signals.update(line);snap.transmitting=false;snap.transmission_finished=true;
+    extra.step(3,snap,signals,false,true);extra.step(5,snap,signals,false,true);
+    check(extra.result()!=0,"Debug ignored an extra wrong stream");
+    DebugLive stale(120,log);Signals old;line.id=10;line.text="1";old.update(line);
+    snap.transmission_id=0;stale.step(0,snap,old,true,true);
+    snap.transmitting=true;snap.transmission_finished=false;snap.transmission_id=1;stale.step(1,snap,old,false,true);
+    ++snap.samples_received;stale.step(2,snap,old,false,true);
+    snap.transmitting=false;snap.transmission_finished=true;
+    check(stale.step(3,snap,old,false,true)==A::wait&&stale.step(6,snap,old,false,true)==A::wait,
+        "Preexisting matching row satisfied the new diagnostic transmission");
+    DebugLive fallback(120,log,true);snap.transmission_id=0;fallback.step(0,snap,Signals{},true,true);
+    snap.transmitting=true;snap.transmission_finished=false;snap.transmission_id=1;fallback.step(1,snap,Signals{},false,true);
+    ++snap.samples_received;fallback.step(2,snap,Signals{},false,true);
+    snap.transmitting=false;snap.transmission_finished=true;fallback.step(3,snap,old,false,true);
+    check(fallback.step(5,snap,old,false,true)==A::close&&fallback.result()==2,
+        "Ordinary timing fallback qualified requested UTC playback");
+    DebugLive error(120,log);snap.error="timing error\"\n";
+    check(error.step(0,snap,Signals{},false,true)==A::close&&error.result()!=0,"Debug hid hardware error");
+    check(log.str().find("timing error\\\"\\n")!=std::string::npos,"Debug error was not JSON escaped");
+    snap.error.clear();DebugLive timeout(10,log);
+    check(timeout.step(10,snap,Signals{},false,true)==A::close&&timeout.result()!=0,"Diagnostic timeout was a pass");
+    snap.simulation=true;DebugLive simulated(10,log);
+    check(simulated.step(0,snap,Signals{},true,true)==A::close,"Debug accepted simulation instead of hardware");
+    const auto parse=[&](std::vector<std::string> arguments,bool expected) {
+        std::vector<char*> argv;for(auto& arg:arguments)argv.push_back(arg.data());bool called=false;
+        const auto result=gui_main(static_cast<int>(argv.size()),argv.data(),"test",[&](Launch launch) {
+            called=true;check(launch.debug_live&&launch.debug_timeout==30&&!launch.simulation&&!launch.smoke&&launch.settings->full_duplex==true,
+                "Hardware diagnostic CLI policy lost");return 0;
+        });
+        check(called==expected&&(result==0)==expected,"Hardware diagnostic CLI validation incorrect");
+    };
+    parse({"gui","--debug","--debug-timeout","30","--keyfile","synthetic.keys","--tx-key","named"},true);
+    parse({"gui","--debug","--debug-timeout","30","--keyfile","synthetic.keys","--tx-key","named","--live-duplex","no"},true);
+    parse({"gui","--debug"},false);
+    parse({"gui","--debug","--simulation"},false);
+    parse({"gui","--debug","--debug-timeout","nan"},false);
 }
 void fast_default_console() {
     using F=ui::Field;using C=ui::Command;using P=ui::Page;
@@ -1411,7 +1468,18 @@ void smoke_shutdown_does_not_resume_workflow() {
     check(app.finished(),"Closed smoke fixture did not finish teardown");
 }
 }
-int main() {
-    try {fhss_developer_editor();fast_default_console();developer_mode_presentation();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();planner_clock_details();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();smoke_shutdown_does_not_resume_workflow();std::cout<<"Shared GUI application/records/declarations passed\n";}
+int main(int argc,char** argv) {
+#ifndef _WIN32
+    if(argc==2&&std::string(argv[1])=="--watchdog-fixture") {
+        std::vector<std::string> arguments{"gui","--debug","--debug-timeout","10","--keyfile","synthetic.keys","--tx-key","named"};
+        std::vector<char*> args;for(auto& arg:arguments)args.push_back(arg.data());
+        return gui_main(static_cast<int>(args.size()),args.data(),"test",[](Launch) {
+            flockfile(stderr); // The hard watchdog must not acquire this held lock.
+            std::this_thread::sleep_for(std::chrono::seconds(60));
+            funlockfile(stderr);return 0;
+        });
+    }
+#endif
+    try {physical_debug_workflow();fhss_developer_editor();fast_default_console();developer_mode_presentation();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();planner_clock_details();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();smoke_shutdown_does_not_resume_workflow();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

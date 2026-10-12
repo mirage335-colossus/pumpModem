@@ -1761,7 +1761,7 @@ struct Controller::Impl {
         diagnostics<<" | DSP "<<settings.transfer.modem.sample_rate<<" Hz | Carrier "<<std::defaultfloat<<std::setprecision(6)<<settings.transfer.modem.carrier_hz+settings.transfer.modem.oscillator_search->rf_shift_hz<<" Hz";
         if(settings.transfer.modem.oscillator_search->rf_shift_hz>0)diagnostics<<" | Stream "<<settings.transfer.modem.carrier_hz<<" Hz";
         if(settings.transfer.clock_sync && !next.simulation) {
-            if(next.clock_timing_fallback)diagnostics<<" | UTC fallback; ordinary playback/full search";
+            if(next.clock_timing_fallback)diagnostics<<" | UTC timing fallback; see status";
             else if(next.transmit_clock_following)diagnostics<<" | UTC transmit timing qualified";
             diagnostics<<" | Audio lag 0..+"<<1000*settings.transfer.audio_timing_error_seconds<<" ms per station (assumed)";
             if(next.clock_window_modeled)

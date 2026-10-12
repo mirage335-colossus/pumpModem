@@ -77,6 +77,149 @@ codec/USB component, `max(2 ms, 1 ms + 18 / hardware_rate)`. The period and quer
 uncertainty also enter the rate-estimator endpoint errors; a fixed codec delay
 does not become rate precision by averaging or waiting. Period-sized pointer
 uncertainty is an engineering assumption, not a universal driver guarantee.
+Timed ALSA capture and playback now try a **10 ms hardware period** when the
+convenience configuration's approximately 25 ms period would fail the requested
+allowance and the shorter period can fit. The existing negotiated buffer capacity
+(usually 100 ms), exact rate/format/channels, application `avail_min` and playback
+start threshold stay unchanged. No samples exist yet: the adapter saves hardware
+and software parameters, frees the installed configuration, negotiates fresh
+constraints, and restores both snapshots on rejection. Failed restoration closes
+the stream and reports an error. Optional API absence or an unsupported period
+retains the ordinary visible fallback. Already sufficient geometries, Default
+clock mode and explicit timestamp providers keep their existing configuration.
+
+Protected playback additionally considers the stop horizon when selecting the
+period. A timestamp that fits now can still leave too little room for already
+committed pulses, protected cover and shutdown. Selection reserves the full
+native rate cone over the configured stop duration, actual buffer capacity and
+100 ms of block reaction allowance, plus one period for pointer-phase movement.
+It requests **5 ms** instead of 10 ms when that setup estimate requires it. This
+is a configuration heuristic, not a timing certificate: actual resampler
+lookahead, queue position, full observation intervals and every existing runtime
+frontier check remain authoritative. Periods below 5 ms are not requested.
+Capture, explicit timestamp providers and Default clock mode keep their preceding
+policies. Drivers may reject or round the request; successful negotiation uses
+the actual period, and rejected negotiation restores the original configuration.
+The native period appears in a protected-stop failure diagnostic.
+
+The playback buffer remains 100 ms in the usual configuration. Increasing it
+would not repair a UTC-headroom failure: compensated queued frames still extend
+the forecast, although they do not become unknown Audio lag. Finer periods may
+increase driver interrupts (10 to 5 ms means 100 to 200 period events/s), but the
+application's software wakeup thresholds, 50 ms maximum blocks, allocations and
+receiver work are unchanged. Physical driver CPU and timing need manual testing.
+At 8 kHz, the native single-query radius before measured bracketing falls from
+14.375 to 9.375 ms; at 48 kHz, from 13.0208 to 8.0208 ms. These reductions come from
+a smaller negotiated period, never from dividing an unchanged error bound.
+
+At 48 kHz, the modeled minimum radius changes from 28.0208 ms to 13.0208 ms;
+equivalent total Audio allowances are **56.0417 ms and 26.0417 ms**. These include
+one sample of position rounding, before query-bracketing and extrapolation uncertainty. At
+8 kHz the corresponding totals are 58.75 ms and 28.75 ms. The model's reported
+period error is never divided or clamped to make 50 ms pass. Failure diagnostics
+show the required full width rounded outward and the selected total lag width.
+This is not a measurement that physical PC audio latency exceeds 50 ms.
+
+The implementation follows the [ALSA hardware configuration API](https://www.alsa-project.org/alsa-doc/alsa-lib/group___p_c_m___h_w___params.html)
+and [ALSA configuration source](https://raw.githubusercontent.com/alsa-project/alsa-lib/master/src/pcm/pcm.c):
+`hw_params_current` fixes intervals, and even `hw_params_any` can retain installed
+constraints until `snd_pcm_hw_free`. Preserving application software thresholds
+avoids increasing application callback frequency or reducing underrun buffering;
+a shorter hardware period may still increase driver interrupts. This setup-only
+change adds no receiver bank, sample transform or steady-state allocation.
+Native stub tests verify PCM identity and success/rejection/partial failure,
+cancellation, and source-before-qualification ordering. A real ALSA `null` endpoint
+confirms parameter negotiation and rollback, **not physical timing**. The reported
+PC loopback and IC-7100 remain unmeasured in this follow-up. Plugins can reject the
+new period, and later uncertainty, discontinuities or rate-model checks can still
+force the documented fallback. See the [validation record](validation.md#native-audio-period-and-total-lag-allowance--local-manual-checkpoint-11-october-2026).
+
+Native running timestamps use interval prediction. Each provider observation
+`(frame_i, utc_i, U_i)` gives an interval at the requested frame after propagation
+through the full admitted clock-rate envelope. The predictor intersects those
+intervals and rejects contradictory evidence. Native playback observations split
+`U_i = U_shared + U_period + query_bracket_i / 2`. Playback's immutable `U_shared`
+contains fixed query-jitter allowance, codec/USB allowance and one frame of
+rounding. Its full period error remains in **every raw observation**, but is not
+also imposed as a permanent floor after intersection. Capture preserves the
+preceding conservative policy: its shared floor still includes the period.
+Neither floor depends on the operator's Audio error setting. A constant period
+bias or sustained broad queries retain broad intervals; no independence,
+zero-mean jitter or statistical averaging assumption is used. The output retains
+at least the shared floor plus extrapolation error. Explicit providers without
+this decomposition retain the historical fitted path/largest-provider allowance.
+Relative UTC arithmetic and outward rounding retain fractional frames at
+contemporary epoch magnitudes.
+
+Native playback also retains one feasible position interval across the entire
+continuous stream. It propagates through the **original generic clock envelope**
+and intersects each complete new observation, including duplicate-frame queries.
+Its relative UTC origin never resets at a block, symbol or 64-point history wrap.
+Contradictions reject before modifying the retained state. This costs fixed
+storage; the original 64-point history remains. Propagation includes continuous
+UTC discipline as well as device-rate uncertainty. The GUI GPSDO model is NOT
+used to tighten this position envelope for an unmeasured device. An oscillator
+selection describes achieved clock performance, which may come from external
+GPS calibration rather than the card's native oscillator. This implementation
+neither adds calibration tones nor verifies any external calibration method.
+The continuity gate bounds nominal duration relative to UTC by `b=2*rate_limit`,
+so propagation uses at least `b/(1-b)` per nominal second. Returned slope
+uncertainty covers the inverted interval `[1/(1+b),1/(1-b)]` around the rounded
+slope. Explicit timestamp providers retain the earlier fitted diagnostic path.
+
+This corrects a reproduced false stop: three valid period-quantized observations
+on a steady 48 kHz clock gave the old fit a 26.2908 ms radius, exceeding the 25 ms
+radius for Audio50. The native interval predictor retains 13.0208 ms of provider
+uncertainty instead of adding the fit residual to it. It does not change the
+operator allowance, erase jitter, or establish a calibrated hardware bound.
+Playback errors now show signed center error, timestamp radius, allowed radius,
+current-source versus generated-block-end check, period and prediction horizon.
+Native failures also include the shared radius and latest/maximum retained query
+brackets. In the preceding query-bracket candidate, the shared floor at 8 kHz
+with a 10 ms period was 14.375 ms. A deterministic
+case matching the reported 102.125 ms horizon and 8.709924 ms center error, with
+one older 3.440737 ms query, gave the preceding model 16.300028 ms uncertainty:
+25.009952 ms total exceeded Audio50's 25 ms radius. The split model retains
+14.57966 ms uncertainty and 23.28958 ms total in that case. This is a reproduced
+software failure consistent with the screenshot, not a recorded device-query
+trace or proof of that PC's actual latency. All-broad or contradictory intervals
+still reject; the Audio allowance and physical-device assumptions are unchanged.
+Known queued frames remain compensated in the local timestamp; the remote
+receiver neither receives nor needs the transmitter's driver-buffer report.
+It allows for the remaining causal TX lag `[0,A]` together with its own capture
+uncertainty, GPS and propagation model. Unknown plugin/radio latency outside
+that declared model still invalidates a tight timing claim.
+
+The subsequent block-end screenshot reports **10.368093 + 14.681870 =
+25.049963 ms**, exceeding Audio50 by 49.963 microseconds. Playback's new shared
+floor is 4.375 ms at 8 kHz, while each raw observation still has at least
+14.375 ms. At a 153.125 ms horizon the unchanged generic rate cone adds
+0.306864 ms; this does not imply that every prediction achieves the floor.
+A deterministic 50-second fixture freezes the initial source origin 10.368093 ms
+early, then presents repeating period-error extremes. The preceding predictor
+exceeds 25 ms in 1664 queried positions; the revised predictor has zero such
+exceedances, with a worst combined bound 21.3563 ms, including 3.2-second forecasts.
+This is a constructed failure/regression, not a captured trace of the user's DAC.
+
+Native playback forecasts the current source, next output edge, protected-stop
+edge and stop-after-next-block edge **using the same full position envelope**
+before requesting private PCM. Preparation includes that stop horizon, too, in
+both estimated and zero-correction native modes. It also forecasts from the latest
+full observation without accumulated phase history: silence preparation is
+stopped and restarted before source scheduling, so its refined position evidence
+cannot qualify the new stream. Actual post-restart blocks are still checked.
+The final generated-block check remains. The prior stop forecast's small
+oscillator correction domain no longer hides the broader native position cone.
+The original affine-source guard and phase-feedback deadband remain: this change
+does not inject a millisecond source warp to force a timestamp check to pass.
+A looming limit triggers protected stopping while feasible; a contradiction or
+insufficient remaining headroom still aborts. Very long protected tails may
+require visible fallback before scheduling: with the 8 kHz shared floor alone,
+the generic cone consumes a 25 ms radius after roughly 10.29 seconds of
+extrapolation, sooner with center error or broader observations. This is a
+conservative model limit, not a measurement of hardware lag. Native failure
+context includes measured rate interval and the configured correction limit.
+
 The earlier 100 ms buffer-based floor and fixed 500 ms transmit guard are removed.
 Both transmit presentation checks use half the selected Audio error around its
 positive midpoint; the complete allowed physical lag remains [0, Audio error].
@@ -86,8 +229,9 @@ transmission then visibly fall back to ordinary playback before private PCM or
 source scheduling. The selected allowance is not enlarged or falsely satisfied.
 Low-level callers remain strict unless they opt in and provide a status observer.
 These are engineering assumptions, not IC-7100 specifications or measurements.
-The future native clock is assumed stationary within its measured/admitted
-rate interval; this is not a guarantee against arbitrary wander. Message and
+Native timestamp forecasts retain the generic device/UTC rate envelope (about
+±2000 ppm, including system-clock discipline), independently of the configured
+relative link oscillator. This is not a guarantee against arbitrary wander. Message and
 open-ended noise use the same preparation based on their protected stopping
 horizon, including pulse support, useful cover and converter/prefetch allowance.
 They no longer select different timing policies based on known message length.
@@ -117,26 +261,67 @@ already included in the provider prediction of that frontier. The stop forecast
 adds prefetched source, filter lookahead, support/cover duration and one further
 output block. It distinguishes safe continuation, a protected stop that still
 fits, and an already-infeasible stop requiring immediate abort. Native future
-rate evidence retains its explicitly assumed stationary domain; reported UTC
-position uncertainty is never discarded. Unexpected jumps can still abort before
+positions retain their full device/UTC rate envelope; reported UTC position
+uncertainty is never discarded. Unexpected jumps can still abort before
 a full tail is possible.
+
+Native runtime forecasts also accept the source's absolute logical PCM endpoint,
+including its existing suppression and shaping. Once known, that endpoint can
+only decrease; it cannot precede PCM already supplied to the converter. Normal
+messages have a finite endpoint; open-ended tuning keeps the worst-stop reserve
+until its shared finish operation commits an endpoint. Preparation and the
+initial/continuous correction policy still use the common worst-stop horizon,
+independent of message length.
+
+At runtime the remaining terminal distance is computed from the converter's
+next **output source coordinate**, not the transmitter's prefetched input cursor.
+Converter support and one logical sample of rounding are retained, and the
+slowest admitted steering converts this to an output-frame upper bound E.
+For next-block N and the existing worst-stop B, frontiers are
+`0, min(N,E), min(B,E), min(N+B,E)`. Both stop forecasts use the SAME absolute end;
+no budget resets at a block or symbol. The actual generated block still passes
+its endpoint and timestamp checks before device submission. Known queued audio
+remains part of the timestamp prediction. This avoids reserving another full
+tail after the source is already draining, without shortening actual protection
+or fabricating receiver completion.
 
 Both production entry points install the same protected-stop hook. Low-level
 arbitrary PCM diagnostics without a coefficient source retain strict runtime
 error rejection. The CLI reports a timing-protected truncated transmission as
-unsuccessful after drain; the GUI marks it cancelled. Clock steps, missed starts,
+unsuccessful after drain. The GUI latches the failure immediately, offers
+**Abort now** while finishing cover and device drain, then retains **FAIL: transmit**
+and the reason across capture restart and Clear received. This is truncation, not
+a successful send; its cancellation flag also remains set. A later explicit TX
+request clears the old failure. The diagnostic includes current/next-block,
+cover-end and cover-after-next-block error bounds plus the allowed radius and
+cover horizon. These are conservative timing bounds, not measured physical lag.
+Default clock mode does not impose this qualified UTC limit, so absence of this
+stop in Default does not qualify the device for a tight arrival window.
+Clock steps, missed starts,
 uncertainty/domain failures and output discontinuities never trigger a silent
 policy switch, waveform restart or reused address. A finite-horizon guard remains
 only as a separately tested historical diagnostic utility.
 
-Native estimated preparation can accept zero correction using the independently
-admitted stationary device-rate domain (derived from the configured oscillator
-bound); otherwise it requires the complete measured rate interval inside that
-domain. Runtime stopping intersects the measured interval with that domain.
-This is an explicit engineering assumption, not measured rate precision. A
-disjoint interval fails. UTC position uncertainty is never reduced by that
-intersection. Arbitrary device wander outside that domain is unsupported,
-including during a protected stop.
+Native estimated preparation retains its existing zero-correction or bounded
+initial-correction selection, with an independent full-cone stopping-horizon
+check. During playback, absolute DAC/system-UTC rate is **not** restricted to the
+software steering cap derived from the relative link oscillator. The two are
+different quantities: a GPS-disciplined link model does not measure a PC DAC's
+absolute relation to system time. Native playback uses all four full-cone
+position frontiers instead. The software correction clamp, original affine
+reference, generated-block check and Audio error allowance remain unchanged;
+receiver hypotheses do not expand. Explicit timestamp-provider diagnostics keep
+their existing admitted-rate contract. Long transmissions may still reach a real
+position/cover limit: this change does not promise unlimited UTC tracking.
+
+A physical PC/PipeWire run reproduced the old rejection at source 35.730673 s:
+measured absolute rate +283.059..+919.097 ppm, steering cap ±0.000300 ppm,
+center error 9.017217 ms and position radius 4.568643 ms (25 ms allowed).
+These are driver-model estimates, not calibrated ADC/DAC frequency or latency.
+The new paced-native regression admits an absolute +1500 ppm trajectory over
+eight seconds while keeping the original ±0.0003 ppm correction cap and all
+position checks. It failed before the fix. See the local manual validation record
+for complete physical-run outcomes and remaining scope.
 
 The correction domain is separate from the oscillator description. For existing
 effective-link bound A and correction cap C, the bank covers A+C+AC and retains
@@ -214,6 +399,85 @@ labeled conditional matched-template AWGN calculations; device steering failure
 and the outer-code presence guard are outside that model. Interleaved V2
 withholds numerical RX probability pending its separate sensitivity validation.
 
+## Playback route and clock policy are independent
+
+“Ordinary playback” means a fixed logical-to-output sample-rate conversion and
+ordinary scheduled start, without Data Pump's continuous UTC rate steering or
+UTC timestamp guarantees. It does not select an older Linux sound system or
+bypass the selected device. `pulse` still selects the ALSA PulseAudio plugin;
+that can connect to a PulseAudio daemon or PipeWire's compatible server. The
+host tested in October2026 uses the latter. `pipewire` selects its ALSA plugin.
+`default` follows the configured route and the documented advertised-server
+fallback; explicit aliases are never silently replaced. Direct/exclusive ALSA
+remains a separate route selection, with its existing availability constraints.
+
+PipeWire itself uses ALSA for device access and supports PulseAudio clients; see
+[PipeWire architecture](https://docs.pipewire.org/page_overview.html) and
+[PulseAudio-compatible server](https://docs.pipewire.org/page_man_pipewire-pulse_1.html).
+Its adapters can convert formats, mix channels and resample to reconcile graph,
+stream and device clocks. This is configurable processing, not evidence that
+noise suppression or echo cancellation is present on a particular route; see
+[adapter/resampler properties](https://docs.pipewire.org/page_man_pipewire-props_7.html).
+No system-wide effects, routing, sample rates or volumes were changed by the
+local diagnostic runs. A successful strong loopback does not qualify weak-signal
+sensitivity or prove absence of downstream processing.
+
+Continuous UTC adjustment remains required for tight GPS arrival bounds and
+accurately aligned genuine FHSS tuning/ramp boundaries. Ordinary playback is a
+temporary fallback, not an implementation of that requirement. It preserves the
+selected fake-hop waveform/construction but supplies no continuous presentation
+clock guarantee. A qualified shared-server timestamp/control path and complete
+link timing validation remain outstanding; no Audio-error allowance is silently
+increased to make a failed model pass.
+
+FHSS ramps are evaluated on the source calendar: epoch plus the continuous
+source coordinate and the configured lag allowance. Timed playback maps that
+coordinate to modeled DAC presentation UTC through the adjustable resampler.
+Ordinary fallback does not maintain that mapping. The Fake hop display follows
+generated samples; it is not measured DAC timing or radio-tuning telemetry.
+
+## Shared sound-server playback
+
+The resolved ALSA `pulse` and `pipewire` endpoints do not currently qualify for
+native UTC playback. They use the existing **visible preflight fallback**, before
+private source scheduling or generation. Ordinary playback, shaping, FHSS ramps,
+cryptographic addresses and physical receiver completion remain unchanged. The
+clock controls are retained; the GUI explicitly reports unavailable UTC TX timing.
+The unsupported playback route is recognized before optional native period
+refinement: freeing/reapplying hardware parameters to improve an unused timing
+model can fail to restore a shared plugin and prevent even ordinary playback.
+No such refinement is attempted for resolved `pulse`/`pipewire` playback. Capture
+retains its independent refinement/model. Failed restoration on other routes
+still closes/rejects before PCM; the error identifies capture/playback, endpoint,
+rate, channel count and failing restoration stage. Unknown aliases remain an
+explicit limitation, not permission to reuse a partly reconfigured handle.
+An explicitly supplied timestamp provider retains its separate tested contract.
+Direct ALSA hardware still uses the guarded native model. Unknown custom aliases
+are not automatically identified as shared-server routes and remain unqualified
+hardware coverage.
+
+This is an implementation limit, not a claim that these servers cannot support
+accurate timing. On the tested PipeWire/Pulse route, the ALSA plugin's interpolated
+latency correction did not remain inside the period-based observation model.
+One full39.8623s transmission and physical reception succeeded with a4ms period,
+but its repeat contradicted the clock envelope at37.85s. Native48k playback also
+failed. Neither rate change nor finer-period experiment was retained as a cure.
+Audio50 was not enlarged, and no historical mean-rate fit replaced the future
+wander bound. A qualified shared-server presentation-timestamp backend remains
+outstanding. This fallback does **not** validate tight arrival windows at a peer;
+peers must retain full timing search unless the complete link timing is qualified.
+Capture's independent timing model is unchanged. Playback fallback does not
+automatically widen any receiver's arrival window: that window still depends on
+the capture model and the configured peer assumption. The physical duplex
+results are conditional on those retained settings, not proof of the peer bound.
+
+The [ALSA Pulse plugin source](https://github.com/alsa-project/alsa-plugins/blob/master/pulse/pcm_pulse.c)
+uses Pulse latency with automatic/interpolated timing updates. Its period and
+buffer parameters are not a calibrated bound on analog presentation timing.
+Before any native playback timestamp anchors the source, PCM must be RUNNING;
+a small positive `accepted - delay` while PREPARED is not presentation evidence.
+Known queue delay remains compensated separately from uncertainty.
+
 ## Hardware evidence and limits
 
 ALSA distinguishes application, DMA, link and analog presentation time. A
@@ -236,7 +500,8 @@ DSP, host/plugin or analog latency. The rate-aware term also avoids assuming a
 2 ms ADC allowance at 8 kHz, where the specified filter delay alone is larger.
 [TI PCM2901 datasheet, pages 4, 5 and 24](https://www.ti.com/lit/ds/symlink/pcm2901.pdf)
 
-The user has no loopback available for this development stage. Publicly documented
+The later PC audio tests use the host analog route and a physical return path;
+there is still no measured IC-7100 loopback calibration. Publicly documented
 IC-7100 RF/USB clock assumptions are recorded in
 [oscillator models](oscillator-models.md#ic-7100-assumptions); they are used as
 models, not presented as measurements of this particular radio. Software work

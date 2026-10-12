@@ -10,6 +10,270 @@
 namespace {
 void require(bool value,const char* message) {if(!value)throw std::runtime_error(message);}
 template<class F> void rejects(F function) {try {function();}catch(const datapump::Error&){return;}throw std::runtime_error("unsafe timing accepted");}
+void native_timestamp_intervals() {
+    using namespace datapump::audio;
+    constexpr auto mode=UtcTimeline::Prediction::timestamp_intersection;
+    constexpr long double epoch=1800000000.L;
+    constexpr double radius=.0130208333333333;
+    // Exact reproduction: valid +10,+10,-10 ms pointer errors on a steady
+    // clock inflate the old fitted radius beyond the 25 ms half-width of the
+    // operator's causal 0..50 ms lag interval. Keep the old failure as evidence.
+    UtcTimeline old(48000),native(48000,.001,mode);
+    for(const auto [frame,time]:{std::pair{4320.L,.1L},std::pair{6720.L,.15L},std::pair{10080.L,.2L}}) {
+        const FrameTimestamp stamp{frame,epoch+time,time,radius,1e-6,TimingQuality::estimated,7};
+        old.observe(stamp);native.observe(stamp);
+    }
+    const auto desired=epoch+10080.L/48000;
+    rejects([&]{(void)presentation_correction(old.predict(10080),desired,48000,.025);});
+    const auto prediction=native.predict(10080);
+    const auto corrected=presentation_correction(prediction,desired,48000,.025);
+    require(std::abs(corrected.error_seconds)+prediction.uncertainty_seconds<.016,
+        "valid native pointer intervals still inflate the UTC error");
+    require(prediction.uncertainty_seconds>=radius && prediction.quality==TimingQuality::estimated,
+        "native timestamp model erased provider uncertainty or upgraded quality");
+    std::cout<<"Native UTC counterexample: old radius_ms="<<old.predict(10080).uncertainty_seconds*1000
+        <<" new radius_ms="<<prediction.uncertainty_seconds*1000
+        <<" center_error_ms="<<corrected.error_seconds*1000<<'\n';
+    // Includes common codec offset (never averages down), fractional frames,
+    // long epoch origins, clock envelope edges, arbitrary block cadence,
+    // extrapolation, and multiple wraps of the bounded observation history.
+    for(const auto fs:{8000U,48000U,192000U})for(const double ppm:{-2000.,-1000.,0.,1000.,2000.})
+        for(const long double offset:{-.002L,0.L,.002L}) {
+            UtcTimeline timeline(fs,.001,mode);long double elapsed=0;
+            for(unsigned i=0;i<256;++i) {
+                elapsed+=.05L+.003L*(i%5);
+                const auto jitter=i%3==2?-.010L:.010L;
+                const auto frame=elapsed*fs*(1-ppm*1e-6L)+jitter*fs+.375L;
+                timeline.observe({frame,epoch+elapsed+offset,elapsed+offset,radius,1e-6,TimingQuality::estimated,12});
+                for(const long double horizon:{-.025L,0.L,.05L,.25L}) {
+                    const auto target=frame+horizon*fs;
+                    const auto actual_scale=1/(1-ppm*1e-6L);
+                    const auto actual=epoch+target*actual_scale/fs;
+                    const auto p=timeline.predict(target);
+                    require(std::abs(p.utc_seconds-actual)<=p.uncertainty_seconds,
+                        "native prediction omitted an admitted timing corner");
+                    require(p.uncertainty_seconds>=radius+.002*std::abs(horizon),
+                        "native prediction lost provider floor or extrapolation allowance");
+                    require(std::abs(p.seconds_per_frame*fs-actual_scale)<=p.rate_uncertainty_fraction+1e-15,
+                        "native rate metadata lost an admitted clock envelope edge");
+                }
+            }
+        }
+    UtcTimeline contradiction(48000,.001,mode);
+    // Each adjacent pair passes the existing continuity gate. Collectively
+    // they cannot describe a clock in the admitted envelope.
+    for(unsigned i=0;i<4;++i)contradiction.observe({4800.L+i*4896.L,epoch+.1L+i*.1L,
+        .1L+i*.1L,.001,1e-6,TimingQuality::estimated,8});
+    rejects([&]{(void)contradiction.predict(19488);});
+    rejects([&]{native.observe({12480,epoch+.3L,.25L,radius,1e-6,TimingQuality::estimated,7});});
+    try {
+        (void)presentation_correction({epoch+.04L,.014,1./48000,TimingQuality::estimated},epoch,48000,.025);
+        throw std::runtime_error("unsafe native playback accepted");
+    } catch(const datapump::Error& e) {
+        const std::string message=e.what();
+        require(message.find("center error=")!=std::string::npos && message.find("timestamp radius=")!=std::string::npos &&
+            message.find("allowed radius=25.000000 ms")!=std::string::npos,"UTC failure omitted numeric timing evidence");
+    }
+}
+void native_query_uncertainty() {
+    using namespace datapump::audio;
+    constexpr auto mode=UtcTimeline::Prediction::timestamp_intersection;
+    constexpr long double epoch=1800000000.L;
+    constexpr double shared=.014375; // 8 kHz, 10 ms period, codec/query floor, one frame
+    constexpr double query=.003440737362; // isolated slow query consistent with the user report
+    constexpr long double center_error=.008709924L;
+    UtcTimeline previous(8000,.001,mode),native(8000,.001,mode,shared);
+    require(native.observation_uncertainty().maximum==0,"empty timeline invented query uncertainty");
+    for(unsigned i=1;i<=16;++i) {
+        const auto t=i*.05L;
+        const auto bracket=i==3?query:0.;
+        const FrameTimestamp observation{t*8000,epoch+t+center_error,t,shared+bracket/2,
+            bracket+1e-6,TimingQuality::estimated,9};
+        previous.observe(observation);native.observe(observation);
+    }
+    const auto frame=.8L*8000+817; // user's 102.125 ms prediction horizon
+    const auto desired=epoch+frame/8000;
+    const auto before=previous.predict(frame),after=native.predict(frame);
+    rejects([&]{(void)presentation_correction(before,desired,8000,.025);});
+    const auto correction=presentation_correction(after,desired,8000,.025);
+    require(std::abs(correction.error_seconds)+after.uncertainty_seconds<.0233 &&
+        after.uncertainty_seconds>=shared && after.quality==TimingQuality::estimated,
+        "isolated slow query persisted as a shared native clock error");
+    require(std::abs(after.utc_seconds-desired)<=after.uncertainty_seconds,
+        "native interval omitted the compatible physical clock");
+    const auto raw=native.observation_uncertainty();
+    require(raw.latest==shared && raw.maximum==shared+query/2,
+        "query diagnostic lost complete observation uncertainties");
+    std::cout<<"Native query counterexample: previous radius_ms="<<before.uncertainty_seconds*1000
+        <<" new radius_ms="<<after.uncertainty_seconds*1000
+        <<" center_error_ms="<<correction.error_seconds*1000
+        <<" previous_total_ms="<<(std::abs(before.utc_seconds-desired)+before.uncertainty_seconds)*1000
+        <<" new_total_ms="<<(std::abs(after.utc_seconds-desired)+after.uncertainty_seconds)*1000<<'\n';
+    // No better evidence: the full interval, not just its shared floor, must
+    // determine the bound. The decomposition must not force unsafe acceptance.
+    UtcTimeline broad(8000,.001,mode,shared);
+    for(unsigned i=1;i<=16;++i)broad.observe({i*400.L,epoch+i*.05L,i*.05L,.030,.031251,
+        TimingQuality::estimated,9});
+    require(broad.predict(6400).uncertainty_seconds>=.030,"wide queries were discarded from the intersection");
+    rejects([&]{(void)presentation_correction(broad.predict(6400),epoch+.8L,8000,.025);});
+    // Shared offsets do not average down. Include rate edges, fractional
+    // frames, both prediction directions and several observation-ring wraps.
+    for(const auto fs:{8000U,48000U,192000U})for(const double ppm:{-2000.,0.,2000.})
+        for(const long double offset:{-static_cast<long double>(shared),static_cast<long double>(shared)}) {
+            UtcTimeline timeline(fs,.001,mode,shared);
+            for(unsigned i=1;i<=150;++i) {
+                const auto t=i*.05L,position=t*fs*(1-ppm*1e-6L)+.375L;
+                const auto bracket=i%13==0?query:0.;
+                timeline.observe({position,epoch+t+offset,t,shared+bracket/2,
+                    bracket+1e-6,TimingQuality::estimated,9});
+                for(const long double horizon:{-.025L,0.L,.102125L,.25L}) {
+                    const auto target=position+horizon*fs;
+                    const auto truth=epoch+(target-.375L)/fs/(1-ppm*1e-6L);
+                    const auto p=timeline.predict(target);
+                    require(std::abs(p.utc_seconds-truth)<=p.uncertainty_seconds,
+                        "split native uncertainty omitted common offset or rate corner");
+                    require(p.uncertainty_seconds>=shared+.002*std::abs(horizon),
+                        "split native uncertainty lost its shared provider floor");
+                }
+            }
+        }
+    rejects([&]{UtcTimeline invalid(8000,.001,mode,-1.);});
+    rejects([&]{UtcTimeline invalid(8000,.001,mode,std::numeric_limits<double>::quiet_NaN());});
+    rejects([&]{UtcTimeline invalid(8000,.001,mode,std::numeric_limits<double>::infinity());});
+    rejects([&]{UtcTimeline invalid(8000,.001,UtcTimeline::Prediction::fitted,shared);});
+    UtcTimeline missing(8000,.001,mode,shared);
+    rejects([&]{missing.observe({400,epoch+.05L,.05L,shared-1e-6,1e-6,TimingQuality::estimated,9});});
+    require(!missing.ready(),"invalid provider observation mutated empty timing state");
+    rejects([&]{native.observe({6800,epoch+.85L+center_error,.85L,shared-1e-6,1e-6,TimingQuality::estimated,9});});
+    const auto unchanged=native.predict(frame);
+    require(unchanged.utc_seconds==after.utc_seconds && unchanged.uncertainty_seconds==after.uncertainty_seconds,
+        "invalid provider observation changed an established timing prediction");
+    for(unsigned i=17;i<=67;++i)native.observe({i*400.L,epoch+i*.05L+center_error,i*.05L,
+        shared,1e-6,TimingQuality::estimated,9});
+    require(native.observation_uncertainty().maximum==shared,
+        "query diagnostic retained an evicted observation");
+    UtcTimeline contradiction(48000,.001,mode,.001);
+    for(unsigned i=0;i<4;++i)contradiction.observe({4800.L+i*4896.L,epoch+.1L+i*.1L,
+        .1L+i*.1L,.001,1e-6,TimingQuality::estimated,8});
+    rejects([&]{(void)contradiction.predict(19488);});
+}
+void native_frozen_source_timing() {
+    using namespace datapump::audio;
+    constexpr auto mode=UtcTimeline::Prediction::timestamp_intersection;
+    constexpr long double epoch=1800000000.L;
+    constexpr double raw_radius=.014375,shared=.004375,limit=.025;
+    UtcTimeline preceding(8000,.001,mode,raw_radius);
+    UtcTimeline native(8000,.001,mode,shared,true);
+    const FrameTimestamp first{400,epoch+.05L-.010368093L,.05L-.010368093L,raw_radius,1e-6,TimingQuality::estimated,17};
+    preceding.observe(first);native.observe(first);
+    const auto source_origin=native.predict(400).utc_seconds;
+    double worst=0;unsigned old_failures=0,new_failures=0;
+    for(unsigned i=2;i<=1000;++i) {
+        // Quantized pointer phases recur, without independent jitter or a
+        // zero-mean assumption. The SOURCE origin never moves.
+        const auto jitter=i%3?.010L:-.010L;
+        const auto frame=i*400.L,time=i*.05L;
+        const FrameTimestamp stamp{frame,epoch+time+jitter,time+jitter,raw_radius,1e-6,TimingQuality::estimated,17};
+        preceding.observe(stamp);native.observe(stamp);
+        for(const long double horizon:{-.025L,0.L,.153125L,3.2L}) {
+            const auto target=frame+horizon*8000;
+            const auto desired=source_origin+(target-400)/8000;
+            const auto p=native.predict(target),old=preceding.predict(target);
+            require(std::abs(p.utc_seconds-(epoch+target/8000))<=p.uncertainty_seconds,
+                "persistent native interval omitted the physical device clock");
+            const auto total=std::abs(p.utc_seconds-desired)+p.uncertainty_seconds;
+            worst=std::max(worst,static_cast<double>(total));
+            require(total<limit && p.uncertainty_seconds>=shared && p.quality==TimingQuality::estimated,
+                "native interval moved the immutable source outside Audio50");
+            new_failures+=total>limit;
+            (void)presentation_correction(p,desired,8000,limit);
+            old_failures+=std::abs(old.utc_seconds-desired)+old.uncertainty_seconds>limit;
+        }
+    }
+    require(old_failures>100,"frozen-origin fixture did not retain preceding false-stop evidence");
+    std::cout<<"Native frozen-origin history: previous failures="<<old_failures
+        <<" new failures="<<new_failures<<" new worst_total_ms="<<worst*1000<<" source_origin_shift_ms=-10.368093\n";
+    // A constant unknown period bias may not be averaged away. With no phase
+    // diversity the interval stays broad, and an out-of-range clock rejects.
+    for(const double bias:{-.010,.010}) {
+        UtcTimeline t(8000,.001,mode,shared,true);
+        for(unsigned i=1;i<=130;++i)t.observe({i*400.L,epoch+i*.05L+bias,i*.05L,raw_radius,1e-6,TimingQuality::estimated,17});
+        require(t.predict(52000).uncertainty_seconds>=raw_radius-1e-8,
+            "constant correlated pointer bias was averaged away");
+    }
+    // Full existing generic clock-envelope endpoints, including UTC slew,
+    // shared offsets, fractional positions and extrapolation.
+    for(const double drift:{1/(1+.002)-1,0.,1/(1-.002)-1})for(const double offset:{-shared,shared}) {
+        UtcTimeline t(48000,.001,mode,shared,true);
+        for(unsigned i=1;i<=300;++i) {
+            const auto frame=i*2400.L+.375L;
+            const auto truth=epoch+frame/48000*(1+drift);
+            const auto jitter=i%3==0?.010L:-.010L;
+            t.observe({frame,truth+offset+jitter,frame/48000*(1+drift)+offset+jitter,
+                raw_radius,1e-6,TimingQuality::estimated,17});
+            for(const long double horizon:{-.025L,0.L,.153125L,3.2L}) {
+                const auto target=frame+horizon*48000;
+                const auto p=t.predict(target);
+                const auto actual=epoch+target/48000*(1+drift);
+                require(std::abs(p.utc_seconds-actual)<=p.uncertainty_seconds,
+                    "native rate propagation omitted a fractional/offset endpoint");
+            }
+        }
+    }
+    // Informative constraints survive history eviction; broad-but-compatible
+    // later observations cannot reset either source origin or the rate budget.
+    UtcTimeline persistent(8000,.001,mode,shared,true),recent(8000,.001,mode,shared);
+    for(unsigned i=1;i<=140;++i) {
+        const auto time=i*.001L;
+        const auto radius=i<=2?shared:.030;
+        const auto bias=i<=2?0.L:.010L;
+        const FrameTimestamp value{i*8.L,epoch+time+bias,time+bias,radius,1e-6,TimingQuality::estimated,17};
+        persistent.observe(value);recent.observe(value);
+    }
+    require(persistent.predict(1120).uncertainty_seconds<.005 && recent.predict(1120).uncertainty_seconds>.029,
+        "persistent phase constraint was forgotten at ring wrap");
+    require(persistent.predict_without_history(1120+48000).uncertainty_seconds>.042,
+        "silence restart incorrectly retained refined phase evidence during qualification");
+    // Continuous UTC slew is still admitted; GUI oscillator precision must not
+    // silently replace the native provider's existing generic rate envelope.
+    for(const double slew:{-.0005,.0005}) {
+        UtcTimeline t(8000,.001,mode,shared,true);
+        for(unsigned i=1;i<=160;++i) {
+            const auto frame=i*400.L;
+            const auto steady=frame/8000*1.0001L;
+            const auto truth=epoch+steady*(1+slew);
+            t.observe({frame,truth,steady,raw_radius,1e-6,TimingQuality::estimated,17});
+            const auto p=t.predict(frame+1225);
+            const auto future=epoch+(frame+1225)/8000*1.0001L*(1+slew);
+            require(std::abs(p.utc_seconds-future)<=p.uncertainty_seconds,
+                "native position bound discarded sound-card drift or continuous UTC slew");
+        }
+    }
+    UtcTimeline duplicate(8000,.001,mode,shared,true);
+    duplicate.observe({400,epoch+.05L,.05L,raw_radius,1e-6,TimingQuality::estimated,17});
+    duplicate.observe({400,epoch+.07L,.07L,raw_radius,1e-6,TimingQuality::estimated,17});
+    const auto unchanged=duplicate.predict(400);
+    rejects([&]{duplicate.observe({400,epoch+.09L,.09L,raw_radius,1e-6,TimingQuality::estimated,17});});
+    require(duplicate.predict(400).utc_seconds==unchanged.utc_seconds &&
+        duplicate.predict(400).uncertainty_seconds==unchanged.uncertainty_seconds,
+        "contradictory duplicate observation mutated the retained timeline");
+    UtcTimeline wrong_clock(8000,.001,mode,shared,true);
+    bool rejected=false;
+    for(unsigned i=1;i<=1000 && !rejected;++i) {
+        try {wrong_clock.observe({i*400.L,epoch+i*.05L*1.003L,i*.05L*1.003L,
+            raw_radius,1e-6,TimingQuality::estimated,17});}catch(const datapump::Error&){rejected=true;}
+    }
+    require(rejected,"native rate envelope silently forgot a contradictory clock");
+    rejects([&]{UtcTimeline bad(8000,.001,UtcTimeline::Prediction::fitted,shared,true);});
+    // Screenshot's current point fits, but the full generic cone used at its
+    // block end grows by0.1002ms. Do not call this a safe continuation.
+    require(protected_timing_frontiers(.02494976,.025049963,.02499,.024999,limit)==ProtectedTimingAction::abort,
+        "native block-end forecast ignored uncertainty growth");
+    require(protected_timing_frontiers(.020,.0201,.02499,.02501,limit)==ProtectedTimingAction::finish,
+        "native stop forecast spent the next-block reaction margin");
+    require(protected_timing_frontiers(.020,.0201,.023,.0231,limit)==ProtectedTimingAction::proceed,
+        "native safe stop frontier was rejected");
+}
 void continuous_guard() {
     using namespace datapump::audio;
     require(protected_timing_action(.001,.001,.0003,3,.05,1e-6,.004)==ProtectedTimingAction::proceed,
@@ -105,6 +369,7 @@ void shaped_timing_error(datapump::modem::Config config) {
 }
 }
 int main() {try {
+    native_timestamp_intervals();native_query_uncertainty();native_frozen_source_timing();
     require(datapump::clock_sync::parse_audio_error("default")==.05&&
         datapump::clock_sync::parse_audio_error("Default")==.05&&
         datapump::clock_sync::parse_audio_error("50ms")==.05,

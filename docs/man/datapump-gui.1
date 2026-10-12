@@ -50,6 +50,24 @@ The last color or monochrome option wins.
 .B \-\-simulation
 Open Robust Modem with a continuous simulated noisy channel instead of live
 audio. Transmissions run at computation speed, then replay in the plots.
+.TP
+.B \-\-debug, \-\-debug-live-duplex
+Run a bounded real-audio Robust GUI duplex diagnostic. Sends one raw 1 bit
+through the ordinary transmit path, requires an explicit synthetic
+\fB\-\-keyfile\fP and \fB\-\-tx-key named\fP, and enables Live/Duplex.
+Requires a physical cable or acoustic path. Cannot combine with Simulation,
+smoke or self-check. Reports JSON lines to stderr and closes on error,
+physical reception or deadline. TX EOF alone or preexisting receive rows cannot pass.
+Exit 0 means successful requested coverage; exit 2 means completed duplex
+reception with unavailable requested UTC playback; exit 1 means failure.
+Controller status and preparation errors are included in the log.
+.TP
+.BI \-\-debug-timeout " SECONDS"
+Hardware diagnostic deadline, 10 through 300 seconds; default 120.
+A stuck startup/shutdown watchdog exits 124 after a further 15 seconds, even
+when stderr is blocked (a final log line is not guaranteed).
+Timeout is incomplete coverage. Diagnostic closure during TX aborts immediately
+and forfeits echo protection. These flags are not saved modem settings.
 .SS Robust link settings
 Supplying any link setting opens Robust Modem.
 These options also accept

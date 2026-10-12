@@ -4,6 +4,365 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Playback setup ordering — local follow-up, 11 October 2026
+
+The reported immediate “audio timing period negotiation failed to restore the
+original device configuration” exposed an ordering bug: resolved pulse/pipewire
+playback underwent optional destructive period refinement before its native UTC
+model was rejected. Such a restore failure escaped the intended visible
+pre-source fallback. Those playback routes now skip the unused refinement.
+Capture/direct-native timing and restoration rejection remain intact; remaining
+errors identify direction, endpoint, rate/channels and failed restoration stage.
+No PCM, waveform, receiver or cryptographic changes. The GUI no longer implies
+that TX fallback automatically widens RX timing coverage.
+
+Injected candidate+restore failure failed before and passed after this change,
+covering explicit/default-resolved pulse/pipewire and strict/fallback settings.
+Existing native UTC checks passed14.54s, including independent capture refinement
+and fatal restoration/cancellation assertions. A further normal full-GUI physical
+run transmitted39.8623s, accepted one correct bit at49.0594s and physically
+completed at72.6351s. Exit2 explicitly withholds UTC qualification. Wall74.793s,
+CPU201.405s, peakRSS174600KiB, maximum pending audio2.750s. This fresh-epoch,
+strong real-input run is not an identical-PCM benchmark or sensitivity evidence.
+
+Complete GUI tests passed38/38 (175.90s); affected runtime passed10/11
+(146.31s), retaining the same legacy clipping assertion failure (peak1.00944,
+clipped63, energy fraction2.47619e-08). Launcher self-check and normal build pass.
+Exact local source/build/GUI identity and complete results are recorded in
+`.agent-work/artifacts/receiver-opt-20261008/MANUAL-PLAYBACK-ROUTE.md` and
+`playback-route-final/manifest.json`. The preceding candidate remains runnable.
+Continuous UTC adjustment is still required for tight GPS and genuine FHSS:
+the ordinary fallback does not fulfill that requirement. A qualified shared-server
+presentation-clock/control backend remains outstanding, along with the existing
+legacy clipping failure and broader timing/sensitivity/platform qualification.
+No push or hosted CI.
+
+## Real GUI duplex and shared-server UTC — local follow-up, 11 October 2026
+
+The actual normal FLTK GUI was exercised on the PC analog audio route, using a
+fresh synthetic key, one raw bit, DSSS100 Interleave, Rate3.6, DSP6120Hz and8kHz
+hardware I/O. The default ALSA route resolved to `pulse` on PipeWire1.4.2.
+ClockGPS10ms/Region1ms/Offset0/Audio50ms remained unchanged. No system audio,
+volume or clock settings were modified. These are strong physical return-path
+experiments, not180dB RF-loss simulations or sensitivity measurements.
+
+The old runtime rejected a measured absolute driver rate of+283..+919ppm against
+a relative software steering cap of±0.0003ppm, despite a current timing bound
+of13.586ms within the25ms radius. That conflation is repaired for native playback;
+full timestamp frontiers, affine reference, correction clamp and receiver bank
+remain intact. The runtime also unnecessarily reserved a whole additional tail
+past an already-known source end. A checked, nonincreasing absolute endpoint now
+caps forecasts near drain; message/noise use the same hook. PREPARED positive
+pointer values cannot establish the initial presentation clock before RUNNING.
+
+These fixes alone did not qualify the shared-server model. A native48k prototype
+failed after~7.5s of source. A finer4ms period completed one39.8623s transmission
+and physical reception, but its repeat contradicted the clock envelope at37.85s.
+Both experiments remain recorded and neither was promoted as a cure. The named
+ALSA `pulse`/`pipewire` routes now report unavailable native UTC playback BEFORE
+private scheduling and use the existing visible ordinary-playback fallback.
+Explicit validated providers and direct-device guarded timing remain available.
+No Audio-error enlargement or hidden historical-rate/future-wander substitution.
+
+Two repeated final physical GUI runs completed the entire39.8623s transmission,
+accepted exactly bit1 at39.126/39.090s, and completed reception through observed
+absence at72.104/72.267s. No extra/missing accepted bits or input-loss failure was
+reported. Pending-audio peaks1.940/2.120s recovered. Whole-session wall74.264/
+74.404s, CPU190.199/191.737s, peakRSS175784/165512KiB. Failed shorter runs are
+censored; these values establish no receiver speedup. Capture's independent
+model/receiver algorithms are unchanged; a peer must retain full search unless
+the complete link timing is qualified.
+
+The new `--debug` GUI workflow drives ordinary key/readiness/transmit paths,
+logs statuses/timing/progress and all retained rows, and closes on error,
+completion or a bounded deadline. It rejects Simulation and stale-row success.
+Exit2 records completed duplex reception with requested UTC coverage unavailable;
+both final physical runs correctly returned2, not a UTC pass. The stderr-lock
+watchdog fixture exits124 at25.004s even when normal error output is blocked.
+
+Focused nativeUTC, source-end contracts, startup/EIO, shared-server fallback,
+GUI diagnostic and Live termination checks pass. Complete affected runtime is
+10/11 in150.09s, retaining the identical legacy clipping failure
+`peak=1.00944 clipped=63 energy_fraction=2.47619e-08`; it is not a pass and later
+assertions in that executable remain unexecuted after the failure. Separate
+Interleave and focused UTC coverage pass. The complete GUI group passed38/38
+in176.25s, and the normal application build passed. A final status-text correction
+clarifies that playback fallback does not automatically widen any RX arrival
+window; the timing/waveform implementation is unchanged from the physical runs.
+The focused assertion and launcher results are recorded in the manual manifest.
+
+Evidence, rejected prototypes, exact commands and launchers:
+`.agent-work/artifacts/receiver-opt-20261008/MANUAL-LIVE-DUPLEX.md` and
+`live-debug-final/manifest.json`. The preceding runnable source/build is retained.
+Tight shared-server UTC requires a qualified presentation-timestamp backend;
+custom aliases, direct PC/IC-7100 timing, indefinite tracking, sensitivity,
+ARM/platform/SDK, sanitizer and broader qualification remain outstanding.
+No publication, hostedCI or hours-long qualification occurred.
+
+## Native protected-stop headroom selection — local follow-up, 11 October 2026
+
+The next readable PC screenshot gives current16.232255 ms, next16.332056 ms,
+cover-end24.945079 ms and cover-after-next25.044880 ms against a25 ms radius;
+the protected-stop horizon is4.365033 s. The next forecast exceeds the limit by
+44.880 microseconds. This is not evidence of a buffer underrun. The preceding
+`protected-stop-final` snapshot and runnable GUI remain preserved.
+
+Native playback's period-selection heuristic now considers protected-stop
+reserve, the full generic rate cone and known buffer capacity. It requests5 ms
+instead of10 ms when10 ms leaves insufficient setup headroom, with a5 ms lower
+request bound. Actual negotiated geometry feeds the original timestamp model;
+preflight, continuity checks, full observation intervals, immutable source
+reference and all runtime frontiers remain unchanged. The usual100 ms buffer,
+application software thresholds and50 ms blocks are preserved. Failure text
+includes the actual native period. Capture, Default clock mode and explicit
+providers retain their previous policies. Driver interrupts may increase;
+physical CPU impact and successful sustained PC playback remain unmeasured.
+
+A new negotiation regression fails on the preceding implementation and passes
+on the candidate. A deterministic full-symbol phase-error fixture compares10 ms
+and5 ms periods with the same physical trajectory, fixed initial reference and
+full rate envelope. Native paced8/48 kHz fixtures additionally exercise delay
+queries, qualification, source scheduling and drain with a4.265 s configured
+stop duration; finer periods yield modeled preflight radii18.219/16.854 ms.
+Those are modeled observations, not calibration or physical latency measurements.
+
+The full35.6 s model's largest forecast changes31.026→22.076 ms at8 kHz
+and29.6717→20.7217 ms at48 kHz; all712 finer-period frontiers fit, with the
+known physical path still contained. Native UTC checks pass(6.524 s). Complete
+affected runtime coverage is10/11(146.52 s), with the unchanged legacy clipping
+failure; a final ALSA rerun after fixture-only review retains that failure.
+GUI38/38 passes(175.23 s test time), and the normal application build passes.
+
+Exact results and the manual launcher are recorded in
+`.agent-work/artifacts/receiver-opt-20261008/MANUAL-PLAYBACK-HEADROOM.md` and its
+source/build manifest. No hosted CI, publication or broader qualification was
+performed. Unsupported/rounded periods and actual clock wander can still cause
+visible fallback or protected stop. The known legacy DSSS clipping diagnostic
+and its assertion remain; Interleave coverage is separate. Physical PC/IC-7100,
+sensitivity, ARM/platform/SDK and broader qualification remain outstanding.
+
+## Visible protected UTC truncation — local follow-up, 11 October 2026
+
+The user reports that the timing-frontier GUI stops without an error, while a
+brief receiver backlog warning clears; Default clock mode continues transmitting.
+Inspection and a failing deterministic Live regression identify a missing status
+transition: the automatic timing hook requested graceful source finish, but never
+latched a TX error or exposed the stopping state. Capture could consequently
+return the GUI to Listening after truncation. Default playback does not impose
+the qualified UTC guard; that difference does not establish tight device timing.
+
+Live now records the reason immediately under the request's generation/serial,
+retains shaped suppression and device drain, and exposes Abort now. The error
+survives capture restart, Clear received and a recovered receiver backlog. A new
+TX request clears it. Genuine receiver-loss indicators retain priority; a healed
+backlog still clears normally. Native stop diagnostics report the existing
+current/next/cover frontiers, allowance and horizon. No timing allowance,
+waveform, receiver, scoring threshold or completion rule changed.
+
+The preceding runnable GUI/source remain frozen as `timing-frontier-final`.
+The new focused regression failed on that implementation and passes for message
+and noise, graceful drain and immediate abort. Native runtime timing checks pass.
+Complete GUI coverage passes38/38(174.78s); normal application build and launcher
+self-check pass. Affected runtime coverage is10/11(146.02s), retaining the identical
+legacy clipping failure; seven consumers relinked after diagnostic wording changes
+pass7/7(55.47s), with the other four cases already current. Exact logs and source/build
+identity accompany `.agent-work/artifacts/receiver-opt-20261008/MANUAL-PROTECTED-STOP.md`.
+This fixes the hidden failure, not the still-unmeasured physical PC timing limit.
+No physical device is exposed to this executor; sustained tight timing, sensitivity,
+ARM/platform/SDK qualification and the preexisting legacy clipping failure remain
+outstanding. No hosted CI or publication was performed.
+
+## Native playback period and stopping frontier — local follow-up, 11 October 2026
+
+The next screenshot reports center error 10.368093 ms plus timestamp radius
+14.681870 ms at the generated-block edge: **25.049963 ms**, 49.963 microseconds
+beyond Audio50's 25 ms radius. This is a model-limit failure, not a measurement
+of physical lag exceeding 50 ms. The preceding runnable GUI and exact source
+remain frozen under `query-jitter-final` / `manual-query-jitter.sh`.
+
+Playback now distinguishes the period term in each complete raw observation from
+its nonshrinking codec/query/rounding floor. At 8 kHz / 10 ms period these are
+14.375 ms and 4.375 ms respectively, before the query bracket. It also retains
+one bounded feasible position interval across history wraps. The **original
+full generic clock-rate envelope** remains; it is not narrowed by selecting
+GPSDO. No independence or averaging assumption removes correlated error.
+The native stop forecast and preflight now use that same envelope, including
+next-block reaction distance and the full observation uncertainty remaining
+after silence-only restart. Both estimated and zero-correction native modes
+check this before source scheduling. Actual generated blocks remain checked.
+Capture metadata, explicit timestamp providers, waveform construction, receiver
+search/admission, source addresses and physical-completion rules are unchanged.
+See [the invariant and limits](clock-sync.md).
+
+A constructed 50-second case freezes the initial source origin 10.368093 ms early
+and supplies recurrent period-error extremes. The preceding model exceeds its
+25 ms bound at 1664 queried positions; the new model has zero exceedances, worst
+21.3563 ms including 3.2-second forecasts. This is regression evidence, not the
+missing physical-device trace. Tests cover full generic-rate endpoints, sound
+card drift plus continuous UTC slew, fractional/backward prediction, constant
+bias, retained history, history-free restart forecasts and nonmutating rejection.
+A paced native ALSA adapter fixture without a timestamp override passes at 8/48
+kHz, with 16 observations and complete 4000/24000-sample sources. Focused
+qualification radii are 20.6893/19.3239 ms including stopping reserve. Six- and
+12-second impossible-tail cases fall back before private source scheduling in
+both native modes. Existing protected stop and supported Interleave PCM tests
+pass (peak 0.678044, no clipping); every original assertion is retained.
+
+Complete GUI checks pass **38/38 in 177.61 s**. Complete affected runtime checks
+pass **10/11 in 145.60 s**. The only failure
+is the unchanged legacy DSSS clipping assertion: peak 1.00944, 63 clipped
+samples, energy fraction 2.47619e-08. `UtcTimeline` grows from 5248 to 5328 bytes
+on this Linux x86-64 build; the added state is fixed, with no PCM buffering or
+success-path heap allocation. Preflight briefly constructs one timeline on the
+stack to evaluate restart uncertainty. CPU cost was not benchmarked: native
+playback adds four bounded 64-observation forecasts per output block (normally
+50 ms). This is not a receiver throughput fix.
+
+This is a manual checkpoint, not hardware or full qualification. The reported
+496% receiver load, physical PC/IC-7100 traces and timing/driver bounds remain
+unmeasured here. External GPS calibration may establish the selected oscillator
+accuracy; this change does not add calibration tones or validate that method.
+The preexisting legacy DSSS clipping failure and broader receiver sensitivity,
+ARM/platform/SDK/sanitizer qualification remain outstanding. Local final test
+results and exact source/build hashes accompany `MANUAL-TIMING-FRONTIER.md` in
+`.agent-work/artifacts/receiver-opt-20261008/`. No push or hosted CI was run.
+
+## Native query-bracket uncertainty — local follow-up, 11 October 2026
+
+The later screenshot provides the full stop: center error 8.709924 ms plus
+timestamp radius 16.300028 ms exceeds the 25 ms limit by 9.952 microseconds.
+Hardware was 8 kHz, native period 10 ms, prediction horizon 102.125 ms. This
+does not measure physical lag beyond Audio50. The native predictor retained the
+largest complete observation uncertainty for 64 points, including a transient
+query's bracket. It now separates the immutable shared driver/codec floor from
+that per-observation term while intersecting **every complete interval**. No
+operator allowance, provider quality, waveform, receiver threshold or completion
+rule changes. Explicit-provider behavior remains unchanged. See the
+[bound and remaining assumptions](clock-sync.md).
+
+A deterministic case with the reported center/horizon and one older 3.440737 ms
+query reproduces the old 25.009952 ms total. The corrected total is 23.28958 ms
+(14.57966 ms radius). This establishes a compatible software cause, not the
+user's missing driver trace. Tests retain the old failing reference, and verify
+shared-offset/rate-bound/fractional-frame containment, bounded history eviction,
+unchanged quality, invalid-provider rejection before mutation, and rejection of
+all-broad or contradictory evidence. An actual native-adapter stub without a
+timestamp override recovers after one delayed query at 8 kHz. No sound hardware
+is available in this environment; PC and IC-7100 validation remains outstanding.
+
+Complete affected runtime checks pass **10/11** in 146.39 s; the sole failure is
+the identical preexisting legacy DSSS clipping assertion (peak 1.00944,
+63 clipped samples, energy fraction 2.47619e-08). Supported Interleave playback
+and all new timing checks pass. Complete GUI checks pass **38/38** in 173.39 s.
+No assertions were removed or weakened. Timing state grows 5232→5248 bytes on
+this build; the 64-observation bound and number of interval passes are unchanged.
+No PCM buffers, receiver banks or success-path allocations are added. The new
+maximum/latest query diagnostic scan is used only when reporting a failure.
+
+Local exact-source/build evidence and manual-test results are recorded in
+`.agent-work/artifacts/receiver-opt-20261008/MANUAL-QUERY-JITTER.md`; earlier frozen
+GUI `5c525d2a` and `manual-utc-runtime.sh` remain runnable. This stage does not
+qualify sustained hardware timing, the screenshot's CPU load, full-bank
+sensitivity, prior cover/echo limitations or broader platform/SDK behavior.
+
+## Native runtime UTC prediction — local follow-up, 11 October 2026
+
+The `manual-capture-period` GUI was reported to stop after seconds with PC audio.
+A bounded reproduction found a reachable software cause: three native timestamps
+on a stationary 48 kHz clock, each within its 13.020833 ms uncertainty, give the
+preceding fitted predictor 26.290833 ms uncertainty. Adding the fit residual to
+the full provider radius fails Audio50's unchanged 25 ms half-width. Native
+prediction now intersects complete timestamp intervals propagated through the
+inverted admitted clock envelope. That candidate preserves the largest full provider radius
+and extrapolation allowance; no repeated-observation averaging, user-limit clamp
+or quality upgrade. The reproduced new radius is 13.02084 ms, with −.0701402 ms
+center error. Explicit timestamp providers keep the fitted reference. See the
+[policy and mathematical bounds](clock-sync.md).
+
+The peer does not receive or need local driver-buffer reports. The sender uses
+known queued frames to schedule presentation; the receiver allows the configured
+causal TX lag and its own capture, GPS and propagation uncertainty. Audio50
+continues to mean 0…+50 ms. The reported physical-device failure has **not** been
+reproduced here. Runtime errors now include center error, timestamp radius,
+allowance, period, prediction horizon, and current-source/block-end context.
+
+New assertions cover the retained failing reference, fractional frames, common
+offset, full rate-envelope endpoints, extrapolation, 64-point history wrap,
+contradictory intervals, clock steps and numeric diagnostics. The native adapter
+is tested without a timestamp override using repeated period-sized pointer jitter.
+The affected runtime selection passes 10/11 in 145.42 s: the sole failure remains
+the identical preexisting legacy DSSS clipping assertion (peak 1.00944,
+63 clipped samples, energy fraction 2.47619e-08). Supported Interleave playback,
+clock, resampler, capture/lag, Windows adapter and Live tests pass. Existing
+assertions remain intact. Complete GUI **38/38** passes in 174.56 s, and the
+rebuilt exact-command launcher self-check passes.
+
+An isolated CPU0 Release timing-component probe, three alternating pairs of
+200,000 updates each, measures 0.512–0.519 microseconds for the preceding fit and
+1.689–1.704 microseconds for the new interval update plus three predictions.
+At 20 such updates/s, the additional cost is about24 microseconds/s (extrapolation,
+not a whole-receiver benchmark). `UtcTimeline` grows 5216→5232 bytes; native
+adapter diagnostic state adds one long-double frame coordinate. There are no
+new PCM buffers, receiver banks or success-path heap allocations. The returned
+native rate uncertainty conservatively covers the full envelope around its slope;
+this can retain additional timing-search coverage and is not a receiver speedup.
+
+Baseline HEAD `b3f9f4c4fcdbaac05c8e0f429824ee0473502070` plus the frozen
+`capture-period-final/manifest.json` overlay; preceding GUI SHA256
+`43cf766e3f699098edf7a9dbc7e75dbeb1796485396df1031078fd23f8cc4aa7` remains runnable.
+New GUI SHA256 `5c525d2ab6d9348b2a07ee3f5d02eddd1cd01ccab4ec020aea62989574fa02aa`;
+local `manual-utc-runtime.sh`, `MANUAL-UTC-RUNTIME.md` and
+`utc-runtime-final/manifest.json` retain exact source/build and test evidence.
+This is a local manual checkpoint. Physical PC/IC-7100 timing, sustained real
+devices, full-bank sensitivity and earlier cover/echo limitations, other
+providers/platforms/SDKs and broader qualification remain outstanding.
+
+## Native audio period and total lag allowance — local manual checkpoint, 11 October 2026
+
+The immediate custom-clock capture warning exposed a native ALSA configuration
+mismatch: a common 25 ms period plus the existing query/codec allowance exceeds
+the 25 ms radius representing **50 ms total causal audio lag**. The allowance was
+not widened. Timed native capture and playback now optionally negotiate a 10 ms
+period before I/O while preserving the actual buffer capacity, exact format/rate,
+channels and original software wakeup/start thresholds. Saved hardware/software
+parameters are restored on rejection; failed restoration stops startup. Default
+clock behavior and explicit timestamp providers remain unchanged. The receiver,
+waveforms, cryptographic addresses, thresholds and physical completion are
+unchanged. Fallback diagnostics show modeled full width and selected total lag.
+See [timing policy and limits](clock-sync.md).
+
+At 48 kHz the modeled minimum equivalent total allowance changes from 56.0417 ms
+to 26.0417 ms; at 8 kHz, 58.75 ms to 28.75 ms. Query brackets, fits and playback
+rate qualification can add uncertainty. These are analytical provider-model
+bounds, **not measured PC or IC-7100 latency**. A configuration-only real ALSA
+`null` check preserves a 4800-frame buffer, `avail_min=1200` and start threshold
+4800 with period 1200→480, and restores the original setup in both directions.
+The actual default sound card is unavailable in this environment (ENOENT).
+
+The focused native-period matrix passes, including identical capture PCM across
+hardware/logical rates and input block limits, unchanged software thresholds,
+unsupported/rejected/coarse periods, partial apply/free failures, failed rollback,
+cancellation and TX qualification before private generation. Complete **GUI
+38/38** passes (175.35 s); the affected audio/rate/resampler/clock/Live selection
+passes **10/11** (147.21 s). Its only failure is the unchanged known legacy DSSS
+ALSA clipping assertion: peak 1.00944, 63 clipped samples, energy fraction
+2.47619e-08. Supported Interleave playback passes. The rebuilt exact-command
+launcher self-check passes. No assertion was removed or relaxed.
+
+Baseline HEAD `b3f9f4c4fcdbaac05c8e0f429824ee0473502070`, Release FLTK/GCC14.2;
+new GUI SHA256 `43cf766e3f699098edf7a9dbc7e75dbeb1796485396df1031078fd23f8cc4aa7`.
+Local artifacts under `.agent-work/artifacts/receiver-opt-20261008/`:
+`capture-period-final/manifest.json`, `MANUAL-CAPTURE-PERIOD.md`, and
+`manual-capture-period.sh`. The preceding runnable GUI and exact baseline remain.
+Three temporary ALSA parameter payloads total 1352 bytes on this libasound, plus
+allocator overhead, and are freed before streaming. No new receiver work or
+steady-state allocation; driver interrupt overhead is unmeasured.
+
+This is a **manual-test checkpoint**, not device or overall qualification.
+Physical loopback, sustained timing/underrun and interrupt-cost checks, other
+providers/platforms/SDKs, the legacy clipping failure and earlier sensitivity/
+cover/echo qualification remain open. No publication, hosted CI or GPU work.
+
 ## Sustained hardware CPU estimate — local manual checkpoint, 11 October 2026
 
 The Rate360/target8/DSSS10/FakeFCC report exactly reproduced the GUI's
@@ -9670,7 +10029,7 @@ for the conservative75% per-symbol support guard and exact shaping rule.
 
 Complete affected tests: **59/60 passed**,415.29s; GUI38/38 and runtime/native21/22.
 The sole failure is the retained legacy ALSA fractional-DSSS clipping assertion
-(peak1.00944,63clipped samples, energy fraction2.47619e-08), also present in the
+(peak 1.00944,63clipped samples, energy fraction 2.47619e-08), also present in the
 frozen preceding candidate. Interleave playback and the new one-sided timestamp
 fixture pass. No assertion was removed or loosened. Boundary tests cover Off/10/
 100/1000, fractional/block timing, supported clean reception, cancellation,
@@ -9741,7 +10100,7 @@ Focused clock/cover/launch/import: **4/4 passed**,9.77s. Actual launcher self-ch
 and FCC/EU/List display tests pass, including2564ms delayed arrival and restoration.
 Complete affected GUI/runtime: **59/60 passed**,419.03s; all38 GUI cases pass.
 The sole failure remains the preceding legacy ALSA fractional-DSSS clipping
-assertion (peak1.00944,63clipped samples, energy fraction2.47619e-08). The current
+assertion (peak 1.00944,63clipped samples, energy fraction 2.47619e-08). The current
 Interleave playback case passes. Complete CLI: **1/1 passed**,41.54s, retaining
 all prior assertions and adding default/Default/50ms coverage. No receiver,
 framing, threshold or physical-completion requirement changed.
@@ -9820,7 +10179,7 @@ mask echoes within a quiet gap.
 
 Complete affected suite: **62/63 passed**,435.25s; all38GUI cases pass. The sole
 failure is the unchanged legacy ALSA fractional-DSSS clipping assertion
-(peak1.00944,63clipped samples, energy fraction2.47619e-08); current Interleave
+(peak 1.00944,63clipped samples, energy fraction 2.47619e-08); current Interleave
 playback passes. Complete CLI: **1/1 passed**,34.09s. Assertions are retained.
 GUI SHA256: `d0fa9486cf1a59abe9108578f85f784ed2fcf184be6551533afd4c7ab213a34a`.
 Exact source/build identity is frozen in `fhss-mandatory-final/manifest.json`.

@@ -11,6 +11,8 @@
 namespace datapump::gui {
 struct Launch {
     bool color=true,simulation=false,smoke=false;
+    bool debug_live=false; // Explicit real-audio one-bit duplex diagnostic.
+    double debug_timeout=120;
     double hold=0,timeout=100,scroll=0;
     ui::Page page=ui::Page::console;
     std::filesystem::path smoke_directory;

@@ -61,6 +61,10 @@ void receiver_health_indicator() {
     snapshot={};snapshot.running=true;show();check(field.text=="Listening / default" && field.text_tone==ui::TextTone::normal,"fresh receiver retained red mode");
     snapshot.transmission_failed=true;show();
     check(field.text=="FAIL: transmit"&&field.text_tone==ui::TextTone::negative,"failed transmit returned to healthy listening mode");
+    snapshot.receiver_behind=true;show();
+    check(field.text=="FAIL: transmit","transient backlog hid a failed protected transmission");
+    snapshot.receiver_behind=false;show();
+    check(field.text=="FAIL: transmit","drained backlog erased a protected transmission failure");
     snapshot.receiver_health.input_overruns=1;show();
     check(field.text.starts_with("FAIL: receiver "),"transmit failure hid dropped receiver input");
     snapshot={};snapshot.running=true;show();
@@ -102,7 +106,14 @@ void backend_status_notice() {
     next.error="TX output underrun";next.clock_timing_status="UTC timing fallback";
     ui::publish_backend_status(field,next.status,next.error,next.clock_timing_status,previous.error,false);
     check(field.text=="TX output underrun · UTC timing fallback","changed backend failure or its timing explanation was deferred");
-    previous=next;next.error.clear();
+    previous=next;next.error="UTC timing headroom exhausted; protected stop requested";
+    field.text="Transmission started";
+    ui::publish_backend_status(field,next.status,next.error,next.clock_timing_status,previous.error,false);
+    check(field.text.starts_with(next.error),"protected truncation remained hidden behind a start notice");
+    previous=next;
+    ui::publish_backend_status(field,next.status,next.error,next.clock_timing_status,previous.error,true);
+    check(field.text.starts_with(next.error),"expired notice erased the protected-stop reason");
+    next.error.clear();
     ui::publish_backend_status(field,next.status,next.error,next.clock_timing_status,previous.error,true);
     check(field.text=="UTC timing fallback · Listening","ordinary status did not resume after the notice expired");
 }

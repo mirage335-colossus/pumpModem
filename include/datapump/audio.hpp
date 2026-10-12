@@ -56,8 +56,8 @@ struct Options {
     // timestamps never authorize a GPS-only narrow acquisition window; an
     // explicitly assumed backend/propagation allowance remains necessary.
     bool follow_system_clock=false;
-    // Total residual UTC presentation-error allowance, after compensating
-    // known queued audio. It cannot reduce a provider's reported uncertainty.
+    // Residual UTC presentation-error radius, after compensating known queued
+    // audio (half the GUI/CLI total Audio error lag interval). It cannot reduce a provider's reported uncertainty.
     // Zero is a valid requested hard bound, but native audio cannot establish
     // it. Visible pre-source fallback or strict failure retains actual error.
     double maximum_utc_error_seconds=.03;
@@ -76,6 +76,11 @@ struct Options {
     // of final message/noise length. The backend adds prefetch/filter/queue
     // allowance; the affine reference itself NEVER has a resettable horizon.
     double timing_stop_duration_seconds=0;
+    // Absolute logical PCM endpoint, including committed suppression/shaping.
+    // Playback-thread only; unknown/open-ended sources may return nullopt.
+    // Once known it may only decrease, never below already supplied PCM. This
+    // caps runtime frontiers near drain; it does not alter rate preparation.
+    std::function<std::optional<std::uint64_t>()> timing_source_end={};
     // Opt-in engineering model for generic native timestamps. Quality remains
     // estimated; the caller must cover maximum_timing_rate_correction in its
     // receiver bank. Preparation emits only silence until its protected-stop horizon

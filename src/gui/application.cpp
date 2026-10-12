@@ -6,6 +6,11 @@
 #include "legacy/screen.hpp"
 #include "bitmap_sources.hpp"
 #include "gui_smoke.hpp"
+#include "debug_live.hpp"
+#include <condition_variable>
+#include <thread>
+#include <cstdio>
+#include <cstdlib>
 #include "inspection_page.hpp"
 #include "link_planner_page.hpp"
 #include "text_policy.hpp"
@@ -42,6 +47,7 @@ struct Application::Impl {
     BitmapSources bitmaps;
     Clock::time_point next=Clock::now(),next_presentation=next,started=next,completed=next;
     std::unique_ptr<Smoke> smoke;
+    std::unique_ptr<DebugLive> debug;
     bool started_session=false,passed=false;
     std::uint64_t poll_count=0,presentation_revision=0;
     std::shared_ptr<const ui::OverlayDefinition> overlay;
@@ -101,7 +107,7 @@ Application::Application(Launch options):launch(std::move(options)),impl_(std::m
     impl_->shellcode_mode.visible=launch.smoke;
     impl_->fast_mode.options={{"fast","Fast Modem"},{"robust","Robust Modem"},{"legacy","Legacy Modem"}};
     // Explicit Robust simulation/settings/page launches keep their requested work.
-    impl_->fast_mode.selected=launch.simulation||launch.smoke||launch.settings||launch.page!=ui::Page::console?"robust":"fast";
+    impl_->fast_mode.selected=launch.simulation||launch.smoke||launch.debug_live||launch.settings||launch.page!=ui::Page::console?"robust":"fast";
     select_page(launch.page);
 }
 Application::~Application()=default;
@@ -110,6 +116,13 @@ void Application::start() {
     impl_->started_session=true;
     impl_->next=impl_->next_presentation=impl_->started=Clock::now();
     if(launch.smoke)impl_->smoke=std::make_unique<Smoke>(impl_->smoke_clock,launch.smoke_directory,launch.timeout);
+    if(launch.debug_live) {
+        if(launch.simulation||launch.smoke)throw Error("Hardware debug cannot use Simulation/smoke");
+        impl_->debug=std::make_unique<DebugLive>(launch.debug_timeout,std::cerr,
+            launch.settings && launch.settings->clock_sync && *launch.settings->clock_sync!="default");
+        impl_->controller.toggle(ui::Field::live_duplex,true);
+        impl_->controller.edit(ui::Field::binary,"1");
+    }
     impl_->controller.start();impl_->bitmaps.update(impl_->controller);
     if(impl_->fast_selected()&&!launch.simulation&&!launch.smoke)impl_->fast_controller.set_selected(true);
 }
@@ -128,6 +141,13 @@ bool Application::tick() {
             impl_->controller.resume_capture();impl_->audio_suspended=false;
         }
         ++impl_->poll_count;
+        if(impl_->debug&&!closing()) {
+            const auto action=impl_->debug->step(std::chrono::duration<double>(now-impl_->started).count(),
+                impl_->controller.snapshot(),impl_->controller.signals(),impl_->controller.enabled(ui::Command::transmit),
+                impl_->controller.settings().transfer.key.has_value(),impl_->controller.field(ui::Field::status).text);
+            if(action==DebugLive::Action::transmit)impl_->controller.activate(ui::Command::transmit);
+            if(action==DebugLive::Action::close)close();
+        }
         if(impl_->smoke&&!closing()) {
             impl_->smoke->step(impl_->controller, &impl_->bitmaps);
             if(!impl_->passed&&impl_->smoke->done()) {
@@ -145,7 +165,7 @@ bool Application::tick() {
     return true;
 }
 bool Application::finished() const { return impl_->controller.ready_to_close()&&impl_->fast_controller.ready_to_close()&&impl_->legacy_controller.ready_to_close(); }
-int Application::result() const { return launch.smoke&&!impl_->passed?1:0; }
+int Application::result() const { return impl_->debug?impl_->debug->result():(launch.smoke&&!impl_->passed?1:0); }
 void Application::close() { dismiss_overlay();impl_->controller.close();impl_->fast_controller.close();impl_->legacy_controller.close();impl_->service_routes.clear();impl_->service_completion_routes.clear(); }
 bool Application::closing() const { return impl_->controller.closing(); }
 void Application::edit(ui::Field field,std::string text) {
@@ -589,13 +609,19 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
         std::vector<std::string> settings_arguments;
         for(int i=1;i<argc;++i) {
             const std::string arg=argv[i];
-            if(arg=="--help") {std::cout<<"Data Pump continuous console\n"<<frontend_label<<backend<<" (selected at build time)\nUsage: "<<program_name<<" [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nLink settings: --tx-dbm DBM --path-loss-db DB --noise-dbm-hz DBM/Hz\n  --oscillator ID --rf-oscillator ID --shift HZ (default 0) --search-margin N (default 3)\n  --clock-sync default|GPS_1ms-400ms_region-2564ms_offset\n  --audio-error default|TIME (total lag 0..+50ms per station by default)\n  --keyfile PATH --tx-key named|none --key-name NAME (all loaded entries remain RX keys)\n  --dsss-mode off|interleave --dsss-factor 1|10|100|1000 --dsss-version interleave|legacy (both peers must match)\n  --search-arithmetic default|fp32-min|fp64-force (experimental CPU policy; legacy IDs accepted)\n  --fhss off|fake-fcc|fake-eu|fake-list (legacy fake-0.4s-200 maps to fake-fcc)\n  --fhss-list '30MHz,30.006MHz' or --fhss-list-file PATH (2-200 Shift frequencies)\n  --live-duplex yes|no (default no; simultaneous hardware input/output)\n  --reference independent|shared-radio --lf-reference 0 (shared-radio shorthand)\n  --doppler VELOCITY (c, knots, mph, kph or %; default 0.000000c)\n  --carrier HZ is configured absolute; stream is Doppler-adjusted Carrier minus Shift (>0)\n  --target-snr DB-Hz --rate HZ --carrier HZ --dsp-workspace 25%|50%|75%\n  --auto-pattern or --pattern MODE; --bw is an alias for --rate\n  --target-snr sets preview, short and long targets; --short-target-snr / --long-target-snr override them\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
+            if(arg=="--help") {std::cout<<"Data Pump continuous console\n"<<frontend_label<<backend<<" (selected at build time)\nUsage: "<<program_name<<" [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nLink settings: --tx-dbm DBM --path-loss-db DB --noise-dbm-hz DBM/Hz\n  --oscillator ID --rf-oscillator ID --shift HZ (default 0) --search-margin N (default 3)\n  --clock-sync default|GPS_1ms-400ms_region-2564ms_offset\n  --audio-error default|TIME (total lag 0..+50ms per station by default)\n  --keyfile PATH --tx-key named|none --key-name NAME (all loaded entries remain RX keys)\n  --dsss-mode off|interleave --dsss-factor 1|10|100|1000 --dsss-version interleave|legacy (both peers must match)\n  --search-arithmetic default|fp32-min|fp64-force (experimental CPU policy; legacy IDs accepted)\n  --fhss off|fake-fcc|fake-eu|fake-list (legacy fake-0.4s-200 maps to fake-fcc)\n  --fhss-list '30MHz,30.006MHz' or --fhss-list-file PATH (2-200 Shift frequencies)\n  --live-duplex yes|no (default no; simultaneous hardware input/output)\n  --reference independent|shared-radio --lf-reference 0 (shared-radio shorthand)\n  --doppler VELOCITY (c, knots, mph, kph or %; default 0.000000c)\n  --carrier HZ is configured absolute; stream is Doppler-adjusted Carrier minus Shift (>0)\n  --target-snr DB-Hz --rate HZ --carrier HZ --dsp-workspace 25%|50%|75%\n  --auto-pattern or --pattern MODE; --bw is an alias for --rate\n  --target-snr sets preview, short and long targets; --short-target-snr / --long-target-snr override them\nHardware diagnostic: --debug [--debug-timeout 10..300] (default 120 seconds)\n  Sends one raw bit using a supplied synthetic named key through real GUI duplex audio;\n  JSON lines on stderr; closes on error/completion/deadline; never enables Simulation.\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
             if(arg=="--version") {std::cout<<"Data Pump "<<DATAPUMP_VERSION<<' '<<frontend_label<<backend<<'\n';return 0;}
             if(arg=="--self-check") {self_check_requested=true;continue;}
             if(arg=="--color")launch.color=true;
             else if(arg=="--monochrome")launch.color=false;
             else if(arg=="--simulation")launch.simulation=true;
             else if(arg=="--smoke-test")launch.smoke=true;
+            else if(arg=="--debug"||arg=="--debug-live-duplex")launch.debug_live=true;
+            else if(arg=="--debug-timeout"&&i+1<argc) {
+                const std::string value=argv[++i];std::size_t used=0;launch.debug_timeout=std::stod(value,&used);
+                if(used!=value.size()||!std::isfinite(launch.debug_timeout)||launch.debug_timeout<10||launch.debug_timeout>300)
+                    throw Error("Debug timeout must be 10..300 seconds");
+            }
             else if(arg=="--smoke-dir"&&i+1<argc)launch.smoke_directory=std::filesystem::u8path(argv[++i]);
             else if((arg=="--smoke-hold"||arg=="--smoke-timeout"||arg=="--smoke-scroll")&&i+1<argc) {
                 const std::string value=argv[++i];std::size_t used=0;const double number=std::stod(value,&used);
@@ -617,9 +643,28 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
             }
         }
         if(!settings_arguments.empty())launch.settings=launch_command::parse_arguments(settings_arguments);
+        if(launch.debug_live && (launch.smoke||launch.simulation||self_check_requested))
+            throw Error("Hardware debug cannot use Simulation, smoke or self-check");
+        if(launch.debug_live && (!launch.settings || !launch.settings->keyfile || launch.settings->tx_key!="named"))
+            throw Error("Hardware debug requires an explicit --keyfile and --tx-key named; use a synthetic key");
+        if(launch.debug_live)launch.settings->full_duplex=true; // Normalize asynchronous key-load settings too.
         if(self_check_requested) {gui_self_check();return 0;}
         smoke_requested=launch.smoke;
-        return run(launch);
+        if(!launch.debug_live)return run(launch);
+        // Includes backend construction and destruction: UI-thread deadlines
+        // cannot break a blocked device/worker join. This diagnostic-only hard
+        // stop deliberately forfeits tail protection, and is never a pass.
+        std::mutex mutex;std::condition_variable cv;bool joined=false;
+        std::jthread watchdog([&] {
+            std::unique_lock lock(mutex);
+            if(!cv.wait_for(lock,std::chrono::duration<double>(launch.debug_timeout+15),[&]{return joined;})) {
+                // Never wait for a stdio lock or a full pipe in the hard-stop path.
+                // Exit124 is the authoritative watchdog result for the launcher.
+                std::_Exit(124);
+            }
+        });
+        const auto finish=[&]{ {std::lock_guard lock(mutex);joined=true;}cv.notify_one(); };
+        try {const auto result=run(launch);finish();return result;}catch(...) {finish();throw;}
     }catch(const SmokeBudgetExhausted& error) {
         if(!smoke_requested) {std::cerr<<"Data Pump "<<backend<<": "<<error.what()<<'\n';return 1;}
         std::cerr<<smoke_budget_marker<<error.what()<<'\n';return smoke_budget_exit_code;
