@@ -104,3 +104,187 @@ planner coefficients alone do not establish an improvement.
 Use docs/search-compute.md and docs/scheduled-hops.md for current implementations,
 recorded positive/negative results and remaining efficiency gaps. Follow their
 linked investigations before choosing another algorithm or cache design.
+
+
+
+
+
+
+
+
+2026-10-13 / Codex side conversation: finish practical Sched_Hop acceleration
+=============================================================================
+
+Continue the current Sched_Hop work, preserving all existing corrections,
+runnable references, investigations, measurements and other agents' work.
+
+The central acceptance criterion needs particular attention:
+
+Sched_Hop must make an existing, useful, extensively optimized
+continuous-reception configuration practical when that receiver is slightly
+too slow for real time. It should retain the useful decoder and most of its
+existing acceleration, while supplying additional physical time to process the
+same source waveform.
+
+This does not require extending the continuous receiver into previously
+unsupported weak-signal territory. Hold the configuration and target SNR fixed
+when establishing the scheduling benefit.
+
+Keep everything local. Follow AGENTS.md, coordination and the development
+contract. Reuse completed work. Serialize heavy measurements. Do not push,
+publish, dispatch hosted CI, add GPU work or start hours-long platform/SDK
+qualification. Deliver a rebuilt GUI at a manual-testing checkpoint.
+
+1. Establish the correct comparisons.
+
+Compare:
+- The latest optimized continuous receiver with Sched_Hop disabled.
+- The preceding scheduled implementation.
+- The corrected scheduled implementation.
+
+Record the actual executed decoder, algorithms, arithmetic, reuse and fallback
+coverage.
+
+Use identical original PCM for receiver-only changes. Enabling scheduling
+changes the capture: compare those waveforms using matched synthetic keys,
+payloads, channel/noise conditions and explicit active-power/energy
+constraints.
+
+Do not count an improvement between two scheduled implementations as proof
+that scheduling preserves continuous-receiver efficiency.
+
+Measure aggregate CPU and elapsed processing separately. Keep input rates,
+available workers and hardware conditions matched; report
+application-selected-rate comparisons separately.
+
+2. Audit scheduling-induced loss of acceleration.
+
+Identify every condition under which enabling Sched_Hop disables or bypasses
+an existing FFT, frequency-axis transform, pulse projection, template reuse,
+reduced-precision path or batching mechanism.
+
+For each restriction, distinguish:
+- An inherent requirement arising from physical capture time or uncertainty.
+- A restriction of the current representation or implementation.
+- An unsupported numerical approximation.
+- A measured algorithm crossover.
+
+An eligibility exclusion is not an impossibility proof. An unsuccessful large
+sparse FFT, correlation-only transform, cache implementation or arithmetic
+microprototype does not rule out the broader strategy.
+
+Prioritize restoring efficient representations across split symbols. Do not
+spend the remainder solely optimizing already-expensive direct candidate loops
+or introducing more caches.
+
+3. Implement practical calendar-aware acceleration.
+
+Investigate and implement the strongest applicable combination of:
+- Bounded tiled or partitioned correlation over active intervals.
+- Shared pulse projections and real I/Q sufficient statistics.
+- Integrated energy, Gram and guard processing.
+- Frequency-family transforms or fusion.
+- Candidate-family batching and cross-bank preprocessing reuse.
+- Productive native arithmetic under the existing Search arithmetic policy.
+
+Include preparation, packing, plans, allocation, cache misses,
+synchronization, numerical controls, refinement and publication in complete
+cost.
+
+Preserve physical carrier time across gaps. Source coordinates pause; physical
+phase does not. Never concatenate separated bursts as adjacent physical
+samples, count inserted zeros as observations, or allocate enormous
+mostly-null transforms.
+
+Some additional frequency/clock coverage may be mathematically necessary.
+Reduce its execution cost rather than dropping required hypotheses or assuming
+every hypothesis needs independent sample-by-sample reconstruction.
+
+4. Explicitly search for consequential scheduling-induced cliffs.
+
+Compare scheduling off/on across nearby configurations, including:
+- Small changes in symbol sample count, chip duration and sample rate.
+- Integer and fractional boundaries and partial final chips.
+- Default timing and genuinely qualified tighter timing.
+- DSSS Off/10/100/1000 and FHSS off/on where the continuous configuration is
+  supported.
+- Multiplier and dilution changes.
+- Broader oscillator uncertainty.
+- Multiple keys, rolling admissions and constrained workspace.
+- Default, FP32 minimum and FP64 force.
+
+Inspect GCD/canonical-phase changes, timing subdivisions, backend eligibility
+thresholds, frequency/clock caps, per-bank workspace shares, cache exhaustion
+and fallback storms.
+
+Distinguish cliffs already present in continuous reception from additional
+costs introduced by scheduling. Report actual combined arrival uncertainty;
+capture timestamp radius alone is not the arrival window.
+
+A broader weakening sweep can diagnose scaling, but do not demand scheduling
+support for configurations the continuous receiver itself cannot use.
+
+5. Demonstrate the intended processing headroom.
+
+Predeclare at least one useful configuration that accumulates backlog under
+independent continuous input because processing is slightly too slow.
+
+With scheduling enabled, demonstrate:
+- The preferred useful complex strategy remains available.
+- Processing can span multiple cycles.
+- Average throughput is sustainable with meaningful margin.
+- Backlog and memory remain bounded and the capture drains completely.
+- Accepted bits publish promptly and physical completion remains correct.
+
+Measure CPU per active/source second and per physical second, elapsed
+throughput, queue age, peak backlog, memory and publication latency.
+
+Do not let producer backpressure hide an unsustainable receiver. Do not impose
+an unnecessary per-hop clearance deadline.
+
+Greater dilution is useful to investigate, but a specially tuned case must not
+conceal failures in ordinary scheduling settings.
+
+6. Preserve correctness and useful sensitivity.
+
+Preserve transmitted bits, framing, independent private candidates,
+cryptographic addressing, all admitted hypotheses, real I/Q, template/noise
+energy, covariance, trial accounting and interference guards.
+
+Preserve cancellation, pending identity and observed-absence completion.
+Nulls, EOF, flushing and queue retirement must not manufacture absence.
+
+FP64 force remains the original-template diagnostic reference. Default may use
+existing authorized approximations with appropriate numerical and sensitivity
+evidence; do not impose accidental bitwise-reference requirements that
+prohibit legitimate acceleration.
+
+Validate receiver-only statistic/decision agreement, threshold-region behavior
+and important boundaries. Clearly distinguish measured additional loss,
+uncertainty and unqualified scope.
+
+7. Complete the implementation assessment honestly.
+
+For each substantial applicable strategy, provide:
+- Implemented and measured.
+- Prototyped and rejected with complete execution evidence.
+- Quantitatively bounded out for a precise scope.
+- Outstanding with a concrete blocker.
+
+Do not claim unavoidable cliffs without evidence that distinguishes
+mathematical necessity from the current implementation.
+
+Do not declare the implementation objective complete while major applicable
+acceleration strategies remain unattempted without a defensible bound or
+blocker.
+
+Run focused checks, then complete affected local groups. Rebuild the GUI and
+provide normal and verbose/debug launchers.
+
+Report the scheduling overhead relative to the optimized continuous receiver,
+demonstrated rescued configurations, cliff/boundary coverage, remaining
+restrictions and deferred qualification.
+
+An honest partial checkpoint is permissible, but must explicitly state that
+Sched_Hop's practical processing-headroom objective remains unfinished if the
+matched sustained-reception demonstration has not succeeded.
