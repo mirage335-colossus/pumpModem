@@ -339,6 +339,99 @@ void test_source_map() {
     rejects([&] { (void)terminal.source_to_physical({last_group*4500,0}); },
             "source inverse returned an unrepresentable complete physical group");
 }
+void test_source_map_frame_cache() {
+    const auto key = test_key();
+    // These deliberately collide in a simple index-modulo-capacity cache.
+    // A broad timing bank revisits a small set of neighboring frame identities
+    // for each frequency; entry identity must not depend on visit order.
+    constexpr std::array<std::uint64_t,3> frames{8192,8200,8208};
+    constexpr std::array<unsigned,9> order{0,2,1,0,1,2,2,0,1};
+    for (const auto fs : {512U,6120U})
+        for (const auto multiplier : {10U,100U,1000U,10000U})
+            for (const auto active : {1ULL,3ULL}) {
+                const SchedHopPlan plan{multiplier,active};
+                const SchedHopSourceMap map(plan,key,fs);
+                const SchedHopSchedule oracle(plan,key);
+                const auto group = map.source_samples_per_group();
+                std::array<std::uint64_t,frames.size()> starts{};
+                for (std::size_t i=0;i<frames.size();++i)
+                    starts[i]=SchedHopSchedule::sample_boundary(oracle.frame(frames[i]).active_begin_hop,fs,true);
+                for (unsigned repeat=0;repeat<32;++repeat)
+                    for (const auto which : order) {
+                        const auto source=SchedHopCoordinate{frames[which]*group+group/2,.375L};
+                        const auto physical=map.source_to_physical(source);
+                        check(physical.sample == starts[which]+group/2 && physical.fraction == .375L,
+                              "multi-frame cache changed an exact keyed inverse");
+                        const auto found=map.locate(physical);
+                        check(found.active && found.frame_index == frames[which] &&
+                              found.source.sample == source.sample && found.source.fraction == source.fraction,
+                              "multi-frame cache changed fractional physical/source mapping");
+                    }
+                const auto statistics=map.cache_statistics();
+                check(statistics.misses == frames.size() &&
+                      statistics.generated_bytes == frames.size()*SchedHopSchedule::frame_bytes &&
+                      statistics.hits == 32*order.size()*2-frames.size(),
+                      "revisiting a retained frame regenerated its keyed draw");
+                check(map.working_bytes() == sizeof(map) &&
+                      map.working_bytes() <= sizeof(SchedHopSchedule)+
+                          SchedHopSourceMap::cached_frame_capacity*sizeof(SchedHopFrame)+128,
+                      "bounded frame cache storage was omitted or grew unexpectedly");
+
+                // Copies own their entries and counters, including assignment
+                // over another key/geometry. No shared mutable cache can leak a
+                // frame or a counter update between search workers.
+                auto copy=map;
+                copy.reset_cache_statistics();
+                (void)copy.source_to_physical({frames[0]*group,0});
+                check(copy.cache_statistics().hits == 1 && copy.cache_statistics().misses == 0 &&
+                      map.cache_statistics().hits == statistics.hits,
+                      "map copies shared cache/counter mutations or reset evicted exact entries");
+                SchedHopSourceMap assigned({10,2},test_key(1),fs);
+                (void)assigned.source_to_physical({0,0});
+                assigned=map;
+                const auto physical=assigned.source_to_physical({frames[1]*group,0});
+                check(physical.sample == starts[1] && assigned.cache_statistics().misses == statistics.misses,
+                      "map assignment retained the preceding key's cached calendar");
+            }
+
+    const SchedHopSourceMap evict({10,1},key,6120);
+    const auto group=evict.source_samples_per_group();
+    for (std::uint64_t q=0;q<SchedHopSourceMap::cached_frame_capacity;++q)
+        (void)evict.source_to_physical({q*group,0});
+    check(evict.cache_statistics().misses == SchedHopSourceMap::cached_frame_capacity,
+          "cache fill constructed a retained frame more than once");
+    (void)evict.source_to_physical({0,0}); // Keep frame zero; frame one is oldest.
+    (void)evict.source_to_physical({SchedHopSourceMap::cached_frame_capacity*group,0});
+    (void)evict.source_to_physical({0,0});
+    check(evict.cache_statistics().hits == 2,
+          "least-recent eviction discarded a recently reused frame");
+    const auto recomputed=evict.source_to_physical({group,0});
+    const SchedHopSchedule oracle({10,1},key);
+    check(recomputed.sample == SchedHopSchedule::sample_boundary(oracle.frame(1).active_begin_hop,6120,true) &&
+          evict.cache_statistics().misses == SchedHopSourceMap::cached_frame_capacity+2 &&
+          evict.cache_statistics().generated_bytes ==
+              (SchedHopSourceMap::cached_frame_capacity+2)*SchedHopSchedule::frame_bytes,
+          "exhausted cache did not recompute the identical keyed frame");
+
+    const SchedHopSourceMap terminal({10000,1},key,64);
+    (void)terminal.source_to_physical({0,0});
+    const auto before=terminal.cache_statistics();
+    rejects([&] { (void)terminal.source_to_physical({std::numeric_limits<std::uint64_t>::max(),0}); },
+            "cached source map accepted a wrapping future frame");
+    const auto after=terminal.cache_statistics();
+    check(after.misses == before.misses+1 && after.generated_bytes == before.generated_bytes,
+          "failed frame generation consumed or misreported cryptographic bytes");
+    (void)terminal.source_to_physical({0,0});
+    check(terminal.cache_statistics().hits == before.hits+1,
+          "failed generation evicted a previously valid frame");
+
+    const SchedHopSourceMap continuous({10,10},key,6120);
+    (void)continuous.locate(1000,.25L);
+    (void)continuous.source_to_physical({1000,.25L});
+    check(continuous.cache_statistics().hits == 0 && continuous.cache_statistics().misses == 0 &&
+          continuous.cache_statistics().generated_bytes == 0,
+          "continuous schedule unnecessarily generated frame draws");
+}
 void test_physical_span_bounds() {
     Config config;
     const auto maximum=std::numeric_limits<std::uint64_t>::max();
@@ -455,7 +548,7 @@ void test_physical_span_bounds() {
 int main() {
     try {
         test_policy();test_draws();test_frozen_vectors();test_separation();test_calendar();
-        test_rational_samples();test_source_map();test_physical_span_bounds();
+        test_rational_samples();test_source_map();test_source_map_frame_cache();test_physical_span_bounds();
         std::cout << "scheduled-hop primitive tests passed\n";
         return 0;
     } catch (const std::exception& error) {

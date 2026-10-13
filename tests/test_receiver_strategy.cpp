@@ -55,6 +55,8 @@ void scheduled_strategy_geometry() {
     PatternSearch narrow;narrow.start_offset_seconds=1;narrow.start_uncertainty_seconds=.01;
     narrow.search_stream_phases=false;narrow.hypotheses={{0,0}};narrow.receiver_schedule_key_count=1;
     constexpr auto workspace=128U*1024*1024;
+    // Preserve the independently guarded amplitude strategy checks.
+    c.receiver_strategy=ReceiverStrategy::amplitude_only;
     const auto p=resolve_receiver_strategy(c,narrow,workspace);
     check(p.scheduled&&p.supported&&p.experimental&&p.backend==ReceiverBackend::amplitude_energy,
           "split schedule did not choose its implemented experimental energy decoder");
@@ -78,8 +80,8 @@ void scheduled_strategy_geometry() {
               (p.scheduled_minimum_quiet_seconds-p.scheduled_interval_width_seconds))<1e-12&&
           p.scheduled_guaranteed_recovery_seconds>0&&
           p.scheduled_deadline_processing_ratio>p.scheduled_mean_processing_ratio&&
-          p.selected_processing_ratio==p.scheduled_deadline_processing_ratio,
-          "nominal average duty concealed the earliest-next-burst drain deadline");
+          p.selected_processing_ratio==p.scheduled_mean_processing_ratio,
+          "scheduled mean selection lost its separate stricter per-hop diagnostic");
     auto broad=narrow;broad.start_uncertainty_seconds=6;
     const auto all=resolve_receiver_strategy(c,broad,workspace);
     check(all.scheduled_recording_union_upper==1&&all.scheduled_fft_union_upper==1&&
@@ -102,16 +104,55 @@ void scheduled_strategy_geometry() {
     schedule=std::make_shared<SchedHopPlan>(*schedule);schedule->time_multiplier=10000;c.scheduled_hopping=schedule;
     check(receiver_strategy_bank_count(c,6,2,1)==bounded,
           "null-only UTC epochs inflated the active resident-bank bound with total frame length");
-    c.receiver_strategy=ReceiverStrategy::complex_only;
-    const auto complex=resolve_receiver_strategy(c,narrow,workspace);
-    check(!complex.supported&&!complex.empty_scheduled_epoch&&!complex.workspace_limited&&complex.backend!=ReceiverBackend::amplitude_energy&&
-          complex.reason.find("Complex only prohibits amplitude")!=std::string::npos,
-          "scheduled Complex only silently selected amplitude or mislabeled a policy prohibition as RAM failure");
-    c.receiver_strategy=ReceiverStrategy::existing_only;
-    const auto denied=resolve_receiver_strategy(c,narrow,workspace);
-    check(!denied.supported&&!denied.workspace_limited&&denied.backend!=ReceiverBackend::amplitude_energy&&
-          std::isinf(denied.selected_processing_ratio)&&denied.reason.find("disabled")!=std::string::npos,
-          "disabled experimental decoders silently used contiguous complex search on split symbols");
+    schedule=std::make_shared<SchedHopPlan>(*schedule);schedule->time_multiplier=10;c.scheduled_hopping=schedule;
+    for(const auto strategy:{ReceiverStrategy::automatic,ReceiverStrategy::complex_only,ReceiverStrategy::existing_only}) {
+        c.receiver_strategy=strategy;
+        // Explicit diagnostics retain supplied exact frequency/clock candidates.
+        const auto complex=resolve_receiver_strategy(c,narrow,workspace);
+        check(complex.supported&&!complex.workspace_limited&&complex.backend==ReceiverBackend::existing_complex&&
+              complex.reason.find("split complex")!=std::string::npos,
+              "scheduled split symbol unnecessarily disabled the original complex detector");
+        check(complex.scheduled_timing_positions>0 && complex.scheduled_fft_seconds==0,
+              "mapped streaming complex model invented a whole-symbol FFT");
+        PatternReceiver runtime(c,workspace,narrow);
+        check(runtime.working_bytes()<=workspace,"mapped split complex ignored workspace");
+        runtime.finish();check(runtime.take_bursts().empty(),"mapped complex EOF manufactured physical absence");
+    }
+
+}
+
+void packed_defaults_use_complex_evidence() {
+    for(const auto chips:{128u,64u})for(const auto arithmetic:
+            {SearchArithmetic::default_mode,SearchArithmetic::fp32,SearchArithmetic::fp64}) {
+        Config c;c.sample_rate=14400;c.bandwidth_hz=3600;c.carrier_hz=1500;
+        c.spreading_factor=chips;c.scramble=true;c.search_arithmetic=arithmetic;
+        c.data_key.emplace(Bytes(32,0x5b));c.scheduled_hopping=std::make_shared<SchedHopPlan>(SchedHopPlan{10,1});
+        c=scheduled_estimate_config(c);
+        check(packed_scheduled_symbols(c),"ordinary short defaults did not retain protected whole-symbol slots");
+        PatternSearch s;s.start_offset_seconds=1;s.start_uncertainty_seconds=6;
+        s.search_stream_phases=true;s.hypotheses={{-.2,-300},{0,0},{.2,300}};s.worker_threads=1;
+        constexpr auto bytes=64U*1024*1024;
+        const auto phases=packed_scheduled_phase_count(c,c.stream_epoch);
+        for(const auto strategy:{ReceiverStrategy::automatic,ReceiverStrategy::existing_only,ReceiverStrategy::complex_only}) {
+            c.receiver_strategy=strategy;
+            const auto p=resolve_receiver_strategy(c,s,bytes);
+            check(p.supported&&p.backend==ReceiverBackend::existing_complex&&p.scheduled&&
+                  p.full_frequency_coverage&&p.full_clock_coverage&&p.scheduled_canonical_phases==phases,
+                  "packed defaults lost the complete complex detector or enumerated an all-sample phase bank");
+            PatternReceiver rx(c,bytes,s);
+            check(rx.working_bytes()<=bytes&&!rx.local_clock_fallback(),
+                  "packed complex constructor exceeded workspace or discarded clock hypotheses");
+            rx.finish();check(rx.take_bursts().empty(),"packed complex EOF manufactured absence");
+        }
+        c.receiver_strategy=ReceiverStrategy::amplitude_only;
+        const auto denied=resolve_receiver_strategy(c,s,bytes);
+        check(!denied.supported&&denied.reason.find("requires64 retained whole FFT observations")!=std::string::npos,
+              "packed complex support weakened the independent amplitude eligibility guard");
+        c.receiver_strategy=ReceiverStrategy::automatic;
+        auto constrained=s;constrained.receiver_strategy_workspace_bytes=1024;
+        const auto full=resolve_receiver_strategy(c,constrained,bytes);
+        check(!full.supported&&full.workspace_limited,"packed complex ignored its rolling workspace reservation");
+    }
 }
 
 void scheduled_packed_phase_model() {
@@ -262,7 +303,7 @@ void frequency_axis_preserves_long_private_progress() {
     check(candidate.fft_work().frequency_axis_fallback_batches==0,"qualified fixture retained broad numerical work");
 }
 }
-int main(){try {amplitude_band_geometry_survives_factoring();scheduled_strategy_geometry();scheduled_packed_phase_model();scheduled_short_split_late_phase_model();scheduled_long_chip_receiver_grid_model();
+int main(){try {amplitude_band_geometry_survives_factoring();scheduled_strategy_geometry();packed_defaults_use_complex_evidence();scheduled_packed_phase_model();scheduled_short_split_late_phase_model();scheduled_long_chip_receiver_grid_model();
     auto c=geometry();PatternSearch s;s.start_offset_seconds=0;s.start_uncertainty_seconds=7;
     s.worker_threads=1;s.compact_clock_search=true;s.search_stream_phases=true;
     for(int i=-100;i<=100;++i)s.hypotheses.push_back({i*.05,0});

@@ -2,6 +2,7 @@
 #include "datapump/tuning.hpp"
 #include "datapump/compression.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "datapump/symbol_schedule.hpp"
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -98,6 +99,35 @@ void static_pattern_binding() {
     const auto other_key=gui::inspect(request);
     check(keyed.pattern_space->codewords==other_key.pattern_space->codewords,
           "static keyed illustration retained actual private epoch material");
+}
+void scheduled_representative_binding() {
+    for(const bool split:{false,true})for(const unsigned factor:{1u,10u,100u,1000u}) {
+        gui::InspectionRequest request;request.binary=Bytes{0};
+        request.target_snr=split?3:32;
+        request.options.modem=tuning::resolve(split?3.6:3600,request.target_snr,
+            tuning::PatternMode::auto_keystream,true,1500.*factor,factor).config;
+        request.options.key.emplace(Bytes(32,0x57));
+        request.options.modem.data_key=request.options.key;
+        request.options.modem.scheduled_hopping=std::make_shared<const modem::SchedHopPlan>(modem::SchedHopPlan{10,1});
+        check(modem::packed_scheduled_symbols(request.options.modem)!=split,
+              "scheduled inspection fixture lost its packed/split calendar geometry");
+        const auto expected=transfer::estimate_binary(*request.binary,request.options);
+        const auto original_tag=request.options.modem.data_key->mac(Bytes{'p','r','e','v','i','e','w'});
+        const auto first=gui::inspect(request);
+        check(first.pattern_space && first.pattern_space->representative_keyed &&
+              first.pattern_space->bounded_pattern_preview && first.pattern_space->codewords.size()==2 &&
+              first.estimate.waveform_samples==expected.waveform_samples && first.estimate.wire_bits==1,
+              "scheduled representative illustration blocked exact keyed airtime inspection");
+        check(request.options.modem.data_key->mac(Bytes{'p','r','e','v','i','e','w'})==original_tag,
+              "representative inspection modified the communication schedule key");
+        request.options.key.emplace(Bytes(32,0x91));request.options.modem.data_key=request.options.key;
+        request.options.modem.spreading_seed.fill(99);request.options.modem.dsss_seed.fill(143);
+        const auto second=gui::inspect(request);
+        check(second.pattern_space && first.pattern_space->codewords==second.pattern_space->codewords &&
+              first.pattern_space->independent_squared_distance==second.pattern_space->independent_squared_distance &&
+              first.pattern_space->one_chip_shift.correlation==second.pattern_space->one_chip_shift.correlation,
+              "scheduled public illustration retained actual communication key or seed material");
+    }
 }
 void lpi_advisory() {
     gui::InspectionRequest request;request.message.data=Bytes{'e'};request.target_snr=0;
@@ -301,4 +331,4 @@ void raw_and_short_sources() {
     check_airtime(marked);
 }
 }
-int main(){try{fixed_stream_layout();tone_protection();static_pattern_binding();lpi_advisory();empty_gui_preview();raw_and_short_sources();std::cout<<"inspection tests passed\n";}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+int main(){try{fixed_stream_layout();tone_protection();static_pattern_binding();scheduled_representative_binding();lpi_advisory();empty_gui_preview();raw_and_short_sources();std::cout<<"inspection tests passed\n";}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

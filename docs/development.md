@@ -209,6 +209,10 @@ and decoder could otherwise change the codebook together without a test failing.
 | Joint Sched_Hop/FHSS full-gain short-bit slots, complete pulse support, five-residue capacity, exact rank/phase inverses and bounded long-history lookup | `scheduled_symbol_calendar` |
 | Split-source waveform continuity, physical carrier/FHSS time, independent full-DSSS wait/cover construction, actual-UTC private addressing, continuous-mode compatibility and protected/immediate stopping | `sched_hop_transmit` |
 | Shared flat-safe timing/phase/clock geometry, native arithmetic policy, whole-FFT eligibility, sparse/full input equivalence, latest-cell endpoints, next-poll bits and source-symbol absence | `sched_hop_receiver` |
+| Packed complex keyed-slot reception, broad/qualified arrival bounds, fractional cells, long-null clock coverage, erased-slot recovery, arithmetic policy, next-poll bits and calendar-scored absence | `sched_hop_complex` |
+| Split-calendar physical I/Q fits, source-window ownership, adjacent-symbol carry, wrong keys, clock/frequency boundaries and calendar-scored absence | `sched_hop_correlator` |
+| Bounded physical-aperture oscillator refinement, original exact pairs, UTC allowance, coupled topology and explicit cap failures | `scheduled_complex_search` |
+| Conditional bounded frequency moments, native/portable arithmetic, Gram/dot error certificates and explicit numerical fallbacks (not enabled in production) | `scheduled_frequency_fusion` |
 | Complete key/epoch/timing/rate capture unions, rolling-admission fences, current revision identity, future-envelope bounds and fail-closed null skipping | `sched_capture` |
 | Bounded carrier/clock search, sub-Hz configuration, exact weak sampled reception and noise-only rejection | `pattern_search`, `tuning`, `simulation_estimate`, `weak_signal`; coupled-clock and streamed-template checks in `pattern_receiver` |
 | Whole-bit section fitting under phase and gain changes, conservative evidence, isolated-tail rejection, exact pending prefixes and bounded memory | `pattern_drift`, `pattern_fft_batch`, `pattern_correlator_batch` |

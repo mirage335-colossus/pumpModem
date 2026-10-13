@@ -13,15 +13,20 @@
 #include "pattern_projection_cache.hpp"
 #include "pattern_envelope.hpp"
 #include "search_fft.hpp"
+#include "audio_trace.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <limits>
 #include <numbers>
 #include <numeric>
+#include <set>
 #include <chrono>
 #include <bit>
 #include <ctime>
+#include <atomic>
+#include <mutex>
+#include <utility>
 #include <openssl/crypto.h>
 
 namespace datapump::modem {
@@ -29,8 +34,29 @@ namespace {
 using Complex = std::complex<double>;
 constexpr double tau = 2 * std::numbers::pi;
 constexpr std::size_t block_size = 128;
+constexpr std::size_t scheduled_block_size = 512;
 void require(bool condition, const char* message) { if (!condition) throw Error(message); }
 void cancelled(std::stop_token stop) { if (stop.stop_requested()) throw Error("pattern correlation cancelled"); }
+// Bounds only: unlike correlation_pulse_segment(), this does not construct
+// seventeen unused pulse values and derivatives. The same knot/closed-support
+// endpoint checks delimit the affine table interval in physical samples.
+std::uint64_t pulse_span_count(long double offset,std::uint64_t maximum,long double duration) {
+    constexpr long double resolution=256;
+    const auto position=[&](std::uint64_t n){return (offset+n)/duration-.5L;};
+    const auto endpoint=[](long double q){
+        for(std::size_t j=0;j<detail::correlation_pulse_atoms;++j) {
+            const auto p=static_cast<double>(q+8-static_cast<long double>(j));
+            if(p==-8 || p==8)return true;
+        }
+        return false;
+    };
+    const auto q=position(0),knot=std::floor(resolution*q);
+    if(endpoint(q))return 1;
+    const auto distance=((knot+1)/resolution-q)*duration;
+    auto count=distance>=maximum?maximum:static_cast<std::uint64_t>(std::max(1.L,std::ceil(distance)));
+    while(count>1 && (std::floor(resolution*position(count-1))!=knot || endpoint(position(count-1))))--count;
+    return count;
+}
 using Projection=detail::CorrelationProjection;
 using Fit=detail::CorrelationFit;
 using DriftFit=detail::CorrelationDriftFit;
@@ -68,6 +94,7 @@ struct Bank {
             affine_carrier[i]=detail::correlation_carrier_moments(affine_lengths[i],2*tau*frequency/sample_rate);
     }
     const detail::CorrelationCarrierMoments* carrier(std::uint64_t count) const {
+        if(affine_carrier.size()>affine_lengths.size())return count && count<=affine_carrier.size()?&affine_carrier[count-1]:nullptr;
         for(std::size_t i=0;i<affine_carrier.size();++i)
             if(affine_lengths[i]==count)return &affine_carrier[i];
         return nullptr;
@@ -92,6 +119,170 @@ struct WorkTimer {
 };
 }
 
+PatternScheduledComplexGeometry pattern_scheduled_complex_geometry(const Config& c,const PatternSearch& search) {
+    PatternScheduledComplexGeometry out;
+    const auto fail=[&](const char* reason){out.reason=reason;return out;};
+    if(!scheduled_bursts(c) || packed_scheduled_symbols(c))
+        return fail("complex split geometry requires split scheduled symbols");
+    if(!c.data_key || !c.pattern_symbols || c.spreading_mode!=SpreadingMode::pattern)
+        return fail("complex split geometry requires keyed pattern-mode symbols");
+    if(!search.start_offset_seconds || !std::isfinite(*search.start_offset_seconds) ||
+       !std::isfinite(search.start_uncertainty_seconds) || search.start_uncertainty_seconds<0)
+        return fail("complex split geometry requires a finite arrival window");
+    try {
+        const auto total=symbol_sample_count(c),chip=pattern_chip_samples(c);
+        if(search.hypotheses.size()>maximum_pattern_frequency_rate_hypotheses ||
+           search.frequency_offsets_hz.size()>maximum_pattern_frequency_hypotheses || search.clock_errors_ppm.size()>65)
+            return fail("complex split bank exceeds finite hypothesis limits");
+        const SchedHopSourceMap map(*c.scheduled_hopping,*c.data_key,c.sample_rate);
+        const auto flat=map.minimum_flat_samples();
+        out.physical_aperture_samples=scheduled_physical_span_samples(c,total);
+        out.frequency_step_hz=.25*c.sample_rate/static_cast<double>(out.physical_aperture_samples);
+        out.clock_step_ppm=static_cast<double>(2e6L*std::min(chip/4.L,flat/8.L)/out.physical_aperture_samples);
+        out.receiver_phase_step_samples=canonical_phase_step(c);
+        const auto cap=std::max<std::uint64_t>(1,flat/8);
+        if(out.receiver_phase_step_samples>cap) {
+            const auto old=out.receiver_phase_step_samples;std::uint64_t step=1;
+            for(std::uint64_t d=1;d<=old/d;++d)if(old%d==0) {
+                if(d<=cap)step=std::max(step,d);
+                if(old/d<=cap)step=std::max(step,old/d);
+            }
+            out.receiver_phase_step_samples=step;
+        }
+        const auto subdivisions=std::max(1.L,std::ceil(2*static_cast<long double>(chip)/flat));
+        while(out.receiver_timing_subdivisions<subdivisions) {
+            if(out.receiver_timing_subdivisions>std::numeric_limits<std::uint64_t>::max()/2)
+                return fail("complex split timing subdivision overflow");
+            out.receiver_timing_subdivisions*=2;
+        }
+        const auto scan=[&](bool frequency) {
+            std::vector<double> values;values.reserve(search.hypotheses.empty()?
+                (frequency?search.frequency_offsets_hz.size():search.clock_errors_ppm.size()):search.hypotheses.size());
+            if(search.hypotheses.empty())values=frequency?search.frequency_offsets_hz:search.clock_errors_ppm;
+            else for(const auto& item:search.hypotheses)values.push_back(frequency?item.frequency_offset_hz:item.clock_error_ppm);
+            for(auto value:values)if(!std::isfinite(value))throw Error("complex split bank contains nonfinite coordinates");
+            std::sort(values.begin(),values.end());values.erase(std::unique(values.begin(),values.end()),values.end());
+            return values;
+        };
+        const auto f=scan(true),r=scan(false);
+        const auto flo=f.empty()?0:f.front(),fhi=f.empty()?0:f.back();
+        const auto rlo=r.empty()?0:r.front(),rhi=r.empty()?0:r.back();
+        const auto domain_radius=[](const std::vector<double>& values,double half) {
+            if(values.empty())return half;
+            double left=std::numeric_limits<double>::infinity(),right=left;
+            for(auto value:values){left=std::min(left,std::abs(value+half));right=std::min(right,std::abs(value-half));}
+            auto radius=std::max(left,right);
+            for(std::size_t i=1;i<values.size();++i) {
+                const auto middle=(values[i-1]+values[i])/2;
+                if(middle>=-half && middle<=half)radius=std::max(radius,(values[i]-values[i-1])/2);
+            }
+            return radius;
+        };
+        out.admitted_frequency_half_width_hz=search.admitted_frequency_half_width_hz.value_or(std::max(-flo,fhi));
+        out.admitted_clock_half_width_ppm=search.admitted_clock_half_width_ppm.value_or(std::max(-rlo,rhi));
+        if(c.oscillator_search) {
+            const auto original=oscillator_pattern_search(c);
+            out.admitted_frequency_half_width_hz=std::max(out.admitted_frequency_half_width_hz,original.frequency.requested_half_width_hz);
+            out.admitted_clock_half_width_ppm=std::max(out.admitted_clock_half_width_ppm,original.requested_clock_half_width_ppm);
+        }
+        const auto rf=out.admitted_frequency_half_width_hz,rr=out.admitted_clock_half_width_ppm;
+        if(std::isfinite(rr) && rr>=0 && rr<=10000) {
+            // The slowest admitted TX clock lengthens the physical aperture;
+            // carrier phase and source-clock displacement use that full time.
+            const auto aperture=std::ceil(static_cast<long double>(out.physical_aperture_samples)/(1-rr*1e-6L));
+            if(aperture>=std::ldexp(1.L,64))return fail("complex split physical aperture overflow");
+            out.physical_aperture_samples=static_cast<std::uint64_t>(aperture);
+            out.frequency_step_hz=.25*c.sample_rate/static_cast<double>(out.physical_aperture_samples);
+            out.clock_step_ppm=static_cast<double>(2e6L*std::min(chip/4.L,flat/8.L)/out.physical_aperture_samples);
+        }
+        if(!std::isfinite(rf) || rf<0 || !std::isfinite(rr) || rr<0 || rr>10000 ||
+           !(out.frequency_step_hz>0) || !(out.clock_step_ppm>0))return fail("invalid complex split oscillator domain");
+        out.clock_cell_radius_ppm=domain_radius(r,rr);
+        out.frequency_grid_qualified=domain_radius(f,rf)<=out.frequency_step_hz/2*(1+1e-12);
+        out.clock_grid_qualified=out.clock_cell_radius_ppm<=out.clock_step_ppm/2*(1+1e-12);
+        if(!search.hypotheses.empty() && (c.oscillator_search || search.admitted_frequency_half_width_hz || search.admitted_clock_half_width_ppm)) {
+            out.frequency_grid_qualified=out.frequency_grid_qualified && search.complex_frequency_coverage.value_or(false);
+            out.clock_grid_qualified=out.clock_grid_qualified && search.complex_clock_coverage.value_or(false);
+        }
+        const auto clock_half=std::ceil(rr/out.clock_step_ppm);
+        if(static_cast<long double>(clock_half)>static_cast<long double>((std::numeric_limits<std::size_t>::max()-1)/2))return fail("complex split clock count overflow");
+        out.clock_hypotheses=rr?2*static_cast<std::size_t>(clock_half)+1:1;
+        const auto origins=std::ceil(2*search.start_uncertainty_seconds*c.sample_rate/(chip/(2.L*(1+rr*1e-6L))/out.receiver_timing_subdivisions))+1;
+        if(origins>std::numeric_limits<std::size_t>::max())return fail("complex split timing count overflow");
+        out.timing_positions=static_cast<std::size_t>(origins);
+        const bool stream_phases=search.search_stream_phases && (c.scramble || c.dsss);
+        const auto phase_low=stream_phases?0:c.stream_phase_samples;
+        const auto phase_high=stream_phases?(canonical_phase_extent(c)-1)/out.receiver_phase_step_samples*out.receiver_phase_step_samples:c.stream_phase_samples;
+        std::vector<std::pair<std::uint64_t,std::uint64_t>> phase_ranges;
+        if(c.stream_epoch>std::numeric_limits<std::uint64_t>::max()/c.sample_rate)return fail("complex split UTC sample coordinate overflow");
+        const auto epoch=c.stream_epoch*c.sample_rate;
+        auto cursor=SchedHopCoordinate{epoch,0}.add_samples(phase_low);
+        const auto last=SchedHopCoordinate{epoch,0}.add_samples(phase_high);
+        while(cursor.distance(last)<=0) {
+            const auto group=map.locate(cursor);
+            if(!group.active){cursor=map.source_to_physical(group.source,false);continue;}
+            const auto lo=std::max(phase_low,group.physical_begin>epoch?group.physical_begin-epoch:0);
+            const auto hi=std::min(phase_high,group.physical_end-1-epoch);
+            const auto first=phase_low+(lo-phase_low+out.receiver_phase_step_samples-1)/out.receiver_phase_step_samples*out.receiver_phase_step_samples;
+            if(first<=hi){phase_ranges.emplace_back(first,hi);out.phase_positions+=(hi-first)/out.receiver_phase_step_samples+1;}
+            cursor={group.physical_end,0};
+        }
+        const auto lower=(static_cast<long double>(*search.start_offset_seconds)-search.start_uncertainty_seconds)*c.sample_rate;
+        const auto upper=(static_cast<long double>(*search.start_offset_seconds)+search.start_uncertainty_seconds)*c.sample_rate;
+        const bool paired=!search.hypotheses.empty();
+        const auto pairs=paired?search.hypotheses.size():search.clock_errors_ppm.size();
+        const auto frequencies=paired?1:std::max<std::size_t>(1,search.frequency_offsets_hz.empty()?5:search.frequency_offsets_hz.size());
+        long double highest=1;
+        for(auto ppm:r)highest=std::max(highest,1+ppm*1e-6L);
+        const auto original_step=std::max(1.L,std::floor(chip/(2*highest)));
+        long double retained=0,full=0,enumerated=0;
+        out.timing_positions=0;
+        for(std::size_t pair=0;pair<pairs;++pair) {
+            const auto ppm=paired?search.hypotheses[pair].clock_error_ppm:search.clock_errors_ppm[pair];
+            const auto ratio=1+ppm*1e-6L;
+            const auto step=(paired?chip/(2*ratio):original_step)/out.receiver_timing_subdivisions;
+            const auto origins=std::ceil((upper-lower)/step)+1;
+            if(origins>std::numeric_limits<std::size_t>::max())return fail("complex split origin count overflow");
+            out.timing_positions=std::max(out.timing_positions,static_cast<std::size_t>(origins));
+            full+=origins*out.phase_positions*frequencies;
+            if(!search.qualified_start_window){retained+=origins*out.phase_positions*frequencies;continue;}
+            enumerated+=origins;
+            if(enumerated>10000000)return fail("complex split qualified lane enumeration exceeds bounded preflight");
+            const auto& q=*search.qualified_start_window;
+            if(!std::isfinite(q.epoch_origin_samples) || !std::isfinite(q.phase_scale) || q.phase_scale<=0 ||
+                !std::isfinite(q.half_width_samples) || q.half_width_samples<0)return fail("invalid qualified UTC start map");
+            for(std::size_t i=0;i<static_cast<std::size_t>(origins);++i) {
+                const auto at=std::min(upper,lower+i*step);
+                const auto previous=i?std::min(upper,lower+(i-1)*step):lower;
+                const auto next=i+1<origins?std::min(upper,lower+(i+1)*step):upper;
+                const auto cell_lo=(previous+at)/2,cell_hi=(at+next)/2;
+                const auto pad=64*std::numeric_limits<long double>::epsilon()*std::max({1.L,std::abs(cell_lo),std::abs(cell_hi),std::abs(q.epoch_origin_samples),q.half_width_samples});
+                auto lo=(cell_lo-q.epoch_origin_samples-q.half_width_samples-pad)/q.phase_scale;
+                auto hi=(cell_hi-q.epoch_origin_samples+q.half_width_samples+pad)/q.phase_scale;
+                if(search.search_stream_phases)lo-=out.receiver_phase_step_samples-1;
+                if(lo>phase_high || hi<phase_low)continue;
+                lo=std::clamp(lo,static_cast<long double>(phase_low),static_cast<long double>(phase_high));
+                hi=std::clamp(hi,static_cast<long double>(phase_low),static_cast<long double>(phase_high));
+                const auto first=std::ceil((lo-phase_low)/out.receiver_phase_step_samples),final=std::floor((hi-phase_low)/out.receiver_phase_step_samples);
+                if(first>final)continue;
+                const auto pl=phase_low+static_cast<std::uint64_t>(first)*out.receiver_phase_step_samples;
+                const auto ph=phase_low+static_cast<std::uint64_t>(final)*out.receiver_phase_step_samples;
+                for(const auto& range:phase_ranges) {
+                    const auto left=std::max(pl,range.first),right=std::min(ph,range.second);
+                    if(left<=right)retained+=((right-left)/out.receiver_phase_step_samples+1)*frequencies;
+                }
+            }
+        }
+        if(retained>std::numeric_limits<std::size_t>::max() || full>std::numeric_limits<std::size_t>::max())return fail("complex split lane count overflow");
+        out.retained_hypotheses=static_cast<std::size_t>(retained);out.full_hypotheses=static_cast<std::size_t>(full);
+        const auto minimum=retained*(4*sizeof(Fit)+sizeof(SchedHopCoordinate)+sizeof(long double)+3*sizeof(std::uint64_t));
+        if(minimum<=std::numeric_limits<std::size_t>::max())out.workspace_lower_bound_bytes=static_cast<std::size_t>(minimum);
+        out.supported=true;
+        if(!out.frequency_grid_qualified || !out.clock_grid_qualified)out.reason="explicit complex bank requires physical-aperture frequency/clock refinement for complete coverage";
+        return out;
+    } catch(const Error& error){out.reason=error.what();return out;}
+}
+
 struct PatternCorrelator::Impl {
     Config config;
     PatternSearch search;
@@ -99,6 +290,7 @@ struct PatternCorrelator::Impl {
     // Mutable keystream/chip caches belong to one scoring worker. Completions
     // still run in hypothesis order on the caller after these workers finish.
     std::vector<PatternCode> worker_codes;
+    struct ScheduledTemplateCache;
     std::size_t budget=0,bit_limit=0,accounted_bytes=0,drift_reserved=0,amplitude_scratch_reservation=0;
     std::uint64_t sample=0,trials=0;
     std::uint64_t phase_step=1;
@@ -107,26 +299,174 @@ struct PatternCorrelator::Impl {
     unsigned drift_sections=1;
     std::uint64_t differential_window=0;
     long double origin_lower=0;
-    bool finished=false,shaped=false,pulse_segmented=false,guard_chains=false,outer_presence=false,timing_enabled=false,timing_dirty=false;
+    bool finished=false,shaped=false,pulse_segmented=false,scheduled_affine=false,guard_chains=false,outer_presence=false,timing_enabled=false,timing_dirty=false;
     PatternCorrelatorOptions options;
     PatternCorrelatorWork work;
-    PatternAmplitudeGeometry amplitude_geometry;
+    std::unique_ptr<PatternAmplitudeGeometry> amplitude_geometry;
     // The compact ordinary receiver has a strict small idle footprint. Sparse
-    // calendar state belongs only to scheduled amplitude reception; its object
+    // calendar state belongs only to scheduled reception; its object
     // and every owned allocation are charged to that bank's workspace below.
+    struct ScheduledCarry {
+        std::array<Fit,2> fits{};
+        std::uint64_t observed_start=0;
+    };
+    struct ScheduledMoment {
+        Complex signal1{},square1{},square2{};
+        double norm1=0,norm2=0;
+    };
+    template<class Scalar> struct ScheduledCurveCacheT {
+        struct Key {
+            std::uint64_t epoch=0,ordinal=0,chip=0;
+            std::uint32_t gate_phase=0;
+            bool operator==(const Key&) const = default;
+        };
+        struct Row {
+            Key key;
+            std::array<std::array<std::complex<Scalar>,2>,257> knots{};
+            std::atomic<unsigned> readers{0};
+            std::uint64_t stamp=0;
+            bool valid=false;
+        };
+        struct Lease {
+            Row* row=nullptr;
+            Lease()=default;
+            explicit Lease(Row* p):row(p){}
+            Lease(const Lease&)=delete;
+            Lease& operator=(const Lease&)=delete;
+            Lease(Lease&& other) noexcept:row(std::exchange(other.row,nullptr)){}
+            Lease& operator=(Lease&& other) noexcept {
+                if(row)row->readers.fetch_sub(1,std::memory_order_release);
+                row=std::exchange(other.row,nullptr);return *this;
+            }
+            ~Lease(){if(row)row->readers.fetch_sub(1,std::memory_order_release);}
+        };
+        std::array<Row,8> rows;
+        std::mutex mutex;
+        std::uint64_t stamp=0,hits=0,misses=0,evictions=0,exhaustions=0;
+        ~ScheduledCurveCacheT(){for(auto& row:rows)OPENSSL_cleanse(row.knots.data(),sizeof(row.knots));}
+        Lease get(Key key,PatternCode& pattern,std::uint64_t first_chip,std::uint64_t chip,std::stop_token stop) {
+            std::lock_guard lock(mutex);
+            for(auto& row:rows)if(row.valid && row.key==key) {
+                ++hits;row.stamp=++stamp;row.readers.fetch_add(1,std::memory_order_relaxed);return Lease(&row);
+            }
+            ++misses;Row* selected=nullptr;
+            for(auto& row:rows)if(!row.readers.load(std::memory_order_acquire) &&
+                (!selected || !row.valid || (selected->valid && row.stamp<selected->stamp)))selected=&row;
+            if(!selected){++exhaustions;return {};}
+            if(selected->valid)++evictions;
+            selected->valid=false;
+            for(std::size_t k=0;k<selected->knots.size();++k) {
+                if((k&31U)==0)cancelled(stop);
+                const auto within=(static_cast<long double>(key.chip)+static_cast<long double>(k)/256)*chip;
+                const auto values=pattern.shaped_values(first_chip,static_cast<double>(within));
+                for(unsigned bit=0;bit<2;++bit)selected->knots[k][bit]={static_cast<Scalar>(values[bit].real()),static_cast<Scalar>(values[bit].imag())};
+            }
+            selected->key=key;selected->stamp=++stamp;selected->valid=true;
+            selected->readers.store(1,std::memory_order_relaxed);return Lease(selected);
+        }
+        static bool evaluate(const Lease& view,long double within,std::uint64_t chip,std::array<Complex,2>& result) {
+            if(!view.row)return false;
+            const auto position=(within-static_cast<long double>(view.row->key.chip)*chip)*256/chip;
+            if(position<0 || position>=256)return false;
+            const auto k=static_cast<std::size_t>(std::floor(position));
+            // The finite pulse has closed, nonzero support endpoints at the
+            // half-chip knot. Never smear either one-sided discontinuity.
+            if(k==127 || k==128)return false;
+            const auto fraction=static_cast<Scalar>(position-k);
+            for(unsigned bit=0;bit<2;++bit) {
+                const auto value=view.row->knots[k][bit]*(Scalar{1}-fraction)+view.row->knots[k+1][bit]*fraction;
+                result[bit]={static_cast<double>(value.real()),static_cast<double>(value.imag())};
+            }
+            return true;
+        }
+    };
+    using ScheduledCurveCache=ScheduledCurveCacheT<double>;
+    using ScheduledFloatCurveCache=ScheduledCurveCacheT<float>;
     struct ScheduledState {
+        PatternScheduledComplexGeometry complex_geometry;
+        std::vector<std::unique_ptr<SchedHopSourceMap>> worker_maps;
+        std::vector<std::unique_ptr<ScheduledTemplateCache>> worker_template_caches;
+        // Key-independent physical carrier moments for one bounded input
+        // block. No source-time concatenation and no symbol-length buffering.
+        std::vector<std::vector<ScheduledMoment>> moments;
+        bool moments_eligible=false;
+        std::unique_ptr<ScheduledCurveCache> curves;
+        std::unique_ptr<ScheduledFloatCurveCache> float_curves;
+        std::uint64_t curve_hits=0,curve_misses=0,curve_evictions=0,curve_exhaustions=0;
         std::unique_ptr<SchedHopSourceMap> map;
         std::unique_ptr<ScheduledSymbolCalendar> calendar;
         FhssPowerShape fhss_shape;
+        std::vector<ScheduledCarry> scheduled_carry;
+        std::vector<std::array<DriftFit,2>> scheduled_carry_drift;
+        std::vector<std::array<unsigned char,2>> scheduled_quarter_ranks,scheduled_carry_quarter_ranks;
+        bool scheduled_cache_possible=false;
+        std::vector<std::array<DifferentialFit,2>> scheduled_carry_differential;
+        std::vector<std::array<detail::CorrelationChipEvidence,2>> scheduled_carry_chips;
+        std::vector<detail::CorrelationOuterEvidence> scheduled_carry_outer;
         std::vector<SchedHopCoordinate> anchors;
         std::vector<long double> observed_begin;
         std::vector<std::uint64_t> last_accepted;
         std::vector<std::uint64_t> source_starts;
+        std::vector<std::uint64_t> template_uncached;
+        // Fixed physical timing map; refresh only when the permanent source
+        // symbol advances. Temporary adjacent-symbol carry must not reuse it.
+        std::vector<long double> symbol_ends;
+        std::vector<std::uint64_t> end_indices,first_full_indices;
+        long double earliest_end=0;
+        long double drift_begin=0;
+        std::uint64_t null_end=0;
         std::uint64_t epoch_sample=0;
         long double timing_radius=0,clock_radius=0;
     };
     std::unique_ptr<ScheduledState> scheduled;
-    SchedHopSourceMap* scheduled_map() const {return scheduled?scheduled->map.get():nullptr;}
+    // Exact current-block rows reuse shaped/limited/gated candidates across
+    // fine frequencies. Identity excludes frequency, includes every coordinate
+    // that changes coefficients. Each worker owns its cache; no shared mutable
+    // private templates or shifted-PCM matrices are introduced.
+    struct ScheduledTemplateCache {
+        struct Row {
+            long double origin=0,rate=0;
+            std::uint64_t phase=0,index=0,stamp=0;
+            std::array<std::array<Complex,2>,scheduled_block_size> value{};
+            std::array<std::uint64_t,scheduled_block_size/64> valid{};
+            bool occupied=false;
+        };
+        std::array<Row,8> rows;
+        std::uint64_t block=std::numeric_limits<std::uint64_t>::max(),stamp=0,hits=0,constructions=0;
+        Row& row(long double origin,long double rate,std::uint64_t phase,std::uint64_t index,std::uint64_t input_block) {
+            if(block!=input_block || stamp==std::numeric_limits<std::uint64_t>::max()) {
+                for(auto& item:rows){item.occupied=false;item.valid={};}
+                block=input_block;stamp=0;
+            }
+            for(auto& item:rows)if(item.occupied && item.origin==origin && item.rate==rate && item.phase==phase && item.index==index) {
+                item.stamp=++stamp;return item;
+            }
+            auto* selected=&rows.front();
+            for(auto& item:rows) {
+                if(!item.occupied){selected=&item;break;}
+                if(item.stamp<selected->stamp)selected=&item;
+            }
+            selected->origin=origin;selected->rate=rate;selected->phase=phase;selected->index=index;
+            selected->stamp=++stamp;selected->valid={};selected->occupied=true;return *selected;
+        }
+    };
+    static auto& worker_template_view() {
+        static thread_local std::pair<const Impl*,ScheduledTemplateCache*> view{};
+        return view;
+    }
+    ScheduledTemplateCache* scheduled_template_cache() const {
+        const auto& view=worker_template_view();
+        if(view.first==this)return view.second;
+        return scheduled && worker_codes.empty() && !scheduled->worker_template_caches.empty()?scheduled->worker_template_caches.front().get():nullptr;
+    }
+    static auto& worker_map_view() {
+        static thread_local std::pair<const Impl*,SchedHopSourceMap*> view{};
+        return view;
+    }
+    SchedHopSourceMap* scheduled_map() const {
+        const auto& view=worker_map_view();
+        return view.first==this?view.second:scheduled?scheduled->map.get():nullptr;
+    }
     ScheduledSymbolCalendar* scheduled_calendar() const {return scheduled?scheduled->calendar.get():nullptr;}
     bool amplitude_publication_dirty=true;
     std::vector<PatternAmplitudeChannel> amplitude_channels;
@@ -282,9 +622,8 @@ struct PatternCorrelator::Impl {
     Impl(Config c,PatternSearch search_options,std::size_t bytes,PatternCorrelatorOptions work_options)
         :config(c),search(std::move(search_options)),code(c,c.stream_epoch),budget(bytes),options(work_options) {
         validate(c);
-        if(options.amplitude_only) {
-            if(c.scheduled_hopping && c.scheduled_hopping->enabled() && !c.scheduled_hopping->continuous()) {
-                require(c.data_key.has_value(),"scheduled amplitude reception requires a calendar key");
+        if(c.scheduled_hopping && c.scheduled_hopping->enabled() && !c.scheduled_hopping->continuous()) {
+                require(c.data_key.has_value(),"scheduled reception requires a calendar key");
                 require(c.stream_epoch<=std::numeric_limits<std::uint64_t>::max()/c.sample_rate,
                     "scheduled UTC epoch exceeds sample coordinates");
                 scheduled=std::make_unique<ScheduledState>();
@@ -293,13 +632,18 @@ struct PatternCorrelator::Impl {
                 if(packed_scheduled_symbols(c))scheduled->calendar=std::make_unique<ScheduledSymbolCalendar>(c);
                 if(c.fake_hopping)scheduled->fhss_shape=FhssPowerShape(*c.fake_hopping,c.sample_rate,
                     pattern_pulse_padding_samples(c),code.symbol_samples());
-            }
-            amplitude_geometry=pattern_amplitude_geometry(c,search);
-            if(!amplitude_geometry.supported)throw Error(amplitude_geometry.reason);
-            amplitude_scratch_reservation=amplitude_geometry.fft_samples*2*sizeof(Complex)+sizeof(detail::search_fft::DoublePlan)+
-                (amplitude_geometry.bin_count+1)*sizeof(long double);
+        }
+        if(scheduled_map() && !options.amplitude_only) {
+            scheduled->complex_geometry=pattern_scheduled_complex_geometry(c,search);
+            if(!scheduled->complex_geometry.supported)throw Error(scheduled->complex_geometry.reason);
+        }
+        if(options.amplitude_only) {
+            amplitude_geometry=std::make_unique<PatternAmplitudeGeometry>(pattern_amplitude_geometry(c,search));
+            if(!amplitude_geometry->supported)throw Error(amplitude_geometry->reason);
+            amplitude_scratch_reservation=amplitude_geometry->fft_samples*2*sizeof(Complex)+sizeof(detail::search_fft::DoublePlan)+
+                (amplitude_geometry->bin_count+1)*sizeof(long double);
             amplitude_scratch_limit=amplitude_scratch_reservation;
-            const auto frontend_bytes=static_cast<long double>(amplitude_geometry.fft_samples)*sizeof(float)+amplitude_scratch_reservation;
+            const auto frontend_bytes=static_cast<long double>(amplitude_geometry->fft_samples)*sizeof(float)+amplitude_scratch_reservation;
             require(frontend_bytes<budget,"amplitude frontend exceeds DSP workspace");
             search.hypotheses.clear();search.frequency_offsets_hz.clear();search.clock_errors_ppm={0};
             search.couple_clock_to_carrier=false;search.expand_clock_search=false;
@@ -307,13 +651,13 @@ struct PatternCorrelator::Impl {
             // A single energy frontend covers every declared carrier position.
             // Its rate bank still covers the entire original clock interval.
             search.hypotheses.push_back({0,0});
-            for(std::size_t j=1;j<=(amplitude_geometry.clock_hypotheses-1)/2;++j) {
-                const auto ppm=static_cast<double>(j)*amplitude_geometry.clock_step_ppm;
+            for(std::size_t j=1;j<=(amplitude_geometry->clock_hypotheses-1)/2;++j) {
+                const auto ppm=static_cast<double>(j)*amplitude_geometry->clock_step_ppm;
                 search.hypotheses.push_back({0,-ppm});search.hypotheses.push_back({0,ppm});
             }
-            amplitude_pcm.resize(amplitude_geometry.fft_samples);
-            const auto remainder=search.input_sample_origin%amplitude_geometry.fft_samples;
-            amplitude_processed=remainder?amplitude_geometry.fft_samples-remainder:0;
+            amplitude_pcm.resize(amplitude_geometry->fft_samples);
+            const auto remainder=search.input_sample_origin%amplitude_geometry->fft_samples;
+            amplitude_processed=remainder?amplitude_geometry->fft_samples-remainder:0;
         }
         require(!options.measure_affine_work || search.worker_threads==1,
                 "detailed affine work timing requires one scoring worker");
@@ -326,8 +670,10 @@ struct PatternCorrelator::Impl {
             search.candidate_limit=std::min<std::size_t>(search.candidate_limit,32);
             block_samples=32;
         }
+        if(scheduled_map() && !options.amplitude_only && !options.raw_reference)block_samples=scheduled_block_size;
         const std::size_t point_capacity=search.compact_clock_search?64:2048;
-        phase_step=scheduled_map()?amplitude_geometry.receiver_phase_step_samples:canonical_phase_step(c);
+        phase_step=scheduled_map()?(options.amplitude_only?amplitude_geometry->receiver_phase_step_samples:
+            scheduled->complex_geometry.receiver_phase_step_samples):canonical_phase_step(c);
         const auto phase_upper=search.search_stream_phases && (c.scramble || c.dsss)?
             (canonical_phase_extent(c)-1)/phase_step*phase_step:
             c.stream_phase_samples;
@@ -381,6 +727,11 @@ struct PatternCorrelator::Impl {
                     "coupled carrier competition requires FFT workspace");
             require(search.frequency_offsets_hz.size()<=65,"frequency bank exceeds 65 hypotheses");
         }
+        if(scheduled_map() && !options.amplitude_only) {
+            std::set<double> exact_rates;
+            for(const auto& pair:search.hypotheses)exact_rates.insert(pair.clock_error_ppm);
+            scheduled->scheduled_cache_possible=paired?search.hypotheses.size()>exact_rates.size():search.frequency_offsets_hz.size()>1;
+        }
         const auto tone_limit=static_cast<double>(c.sample_rate)/(4*static_cast<double>(code.chip_samples()));
         const auto offset_limit=paired?pattern_frequency_offset_limit(c):c.bandwidth_hz/8;
         for(auto frequency:search.frequency_offsets_hz) {
@@ -401,9 +752,11 @@ struct PatternCorrelator::Impl {
         const auto upper=(static_cast<long double>(*search.start_offset_seconds)+search.start_uncertainty_seconds)*c.sample_rate;
         origin_lower=lower;
         if(scheduled_map()) {
-            scheduled->timing_radius=lower<upper?code.chip_samples()/(4.L*amplitude_geometry.receiver_timing_subdivisions):0;
-            scheduled->clock_radius=(amplitude_geometry.clock_hypotheses>1?
-                amplitude_geometry.clock_step_ppm/2:amplitude_geometry.clock_half_width_ppm)*1e-6L;
+            scheduled->timing_radius=lower<upper?code.chip_samples()/(4.L*(options.amplitude_only?amplitude_geometry->receiver_timing_subdivisions:
+                scheduled->complex_geometry.receiver_timing_subdivisions)):0;
+            scheduled->clock_radius=(options.amplitude_only?(amplitude_geometry->clock_hypotheses>1?
+                amplitude_geometry->clock_step_ppm/2:amplitude_geometry->clock_half_width_ppm):
+                scheduled->complex_geometry.clock_cell_radius_ppm)*1e-6L;
         }
         require(std::isfinite(lower) && std::isfinite(upper) && std::abs(lower)<1e15L && std::abs(upper)<1e15L,
                 "clock start window exceeds precise sample-coordinate range");
@@ -411,7 +764,8 @@ struct PatternCorrelator::Impl {
         const auto pair_count=paired?search.hypotheses.size():search.frequency_offsets_hz.size()*search.clock_errors_ppm.size();
         const auto origin_step=[&](long double ratio) {
             const auto original=paired?static_cast<long double>(code.chip_samples())/(2*ratio):step;
-            return scheduled_map()?original/amplitude_geometry.receiver_timing_subdivisions:original;
+            return scheduled_map()?original/(options.amplitude_only?amplitude_geometry->receiver_timing_subdivisions:
+                scheduled->complex_geometry.receiver_timing_subdivisions):original;
         };
         const auto phase_bounds=[&](long double origin,long double previous,long double next) {
             auto lo=phase_lower,hi=phase_upper;
@@ -423,7 +777,7 @@ struct PatternCorrelator::Impl {
                 auto a=(cell_lower-qualified->epoch_origin_samples-qualified->half_width_samples-pad)/qualified->phase_scale;
                 auto b=(cell_upper-qualified->epoch_origin_samples+qualified->half_width_samples+pad)/qualified->phase_scale;
                 const auto cell_width=search.search_stream_phases?
-                    (scheduled_map()?amplitude_geometry.receiver_phase_step_samples-1:
+                    (scheduled_map()?phase_step-1:
                         canonical_phase_cell_upper(config,phase_upper)-phase_upper):0;
                 a-=cell_width;
                 if(a>phase_upper || b<phase_lower)return std::optional<PhaseGroup>{};
@@ -508,10 +862,12 @@ struct PatternCorrelator::Impl {
             static_cast<long double>(search.candidate_limit)*sizeof(PatternEvidence)+search.track_limit*(sizeof(PatternBurst)+sizeof(Emission))+
             (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double)+
             search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis);
+        if(scheduled_map() && !options.amplitude_only)fixed+=total*(sizeof(ScheduledCarry)+
+            3*sizeof(std::uint64_t)+sizeof(long double));
+        if(scheduled_map())fixed+=sizeof(ScheduledState)+scheduled_map()->working_bytes()+total*(sizeof(SchedHopCoordinate)+sizeof(long double)+sizeof(std::uint64_t))+
+            scheduled_phases.capacity()*sizeof(PhaseGroup)+(scheduled_calendar()?scheduled_calendar()->working_bytes()+total*sizeof(std::uint64_t):0);
         if(options.amplitude_only) {
-            fixed+=amplitude_pcm.capacity()*sizeof(float)+amplitude_scratch_reservation;
-            if(scheduled_map())fixed+=sizeof(ScheduledState)+scheduled_map()->working_bytes()+total*(sizeof(SchedHopCoordinate)+sizeof(long double)+sizeof(std::uint64_t))+
-                scheduled_phases.capacity()*sizeof(PhaseGroup)+(scheduled_calendar()?scheduled_calendar()->working_bytes()+total*sizeof(std::uint64_t):0);
+            fixed+=sizeof(PatternAmplitudeGeometry)+amplitude_pcm.capacity()*sizeof(float)+amplitude_scratch_reservation;
             // Band selection is detector geometry, not a reward for smaller
             // storage. Preserve the preceding unfactored moment allowance;
             // otherwise the same workspace changes band widths/trial charges.
@@ -520,11 +876,11 @@ struct PatternCorrelator::Impl {
             const auto retention=2*total+2*search.track_limit+2;
             const auto available=std::floor((bytes-fixed-retention)/per_channel);
             require(available>=1,"complete amplitude timing coverage exceeds DSP workspace");
-            const auto selected=static_cast<std::size_t>(std::min(available,static_cast<long double>(amplitude_geometry.channel_count)));
-            if(selected<amplitude_geometry.channel_count)amplitude_geometry.reason="coarse amplitude channels widened to preserve complete coverage within workspace";
-            amplitude_geometry.channel_count=selected;
+            const auto selected=static_cast<std::size_t>(std::min(available,static_cast<long double>(amplitude_geometry->channel_count)));
+            if(selected<amplitude_geometry->channel_count)amplitude_geometry->reason="coarse amplitude channels widened to preserve complete coverage within workspace";
+            amplitude_geometry->channel_count=selected;
             amplitude_channels.reserve(selected);
-            for(std::size_t j=0;j<selected;++j)amplitude_channels.push_back(pattern_amplitude_channel(amplitude_geometry,j));
+            for(std::size_t j=0;j<selected;++j)amplitude_channels.push_back(pattern_amplitude_channel(*amplitude_geometry,j));
             fixed+=total*(alternate_groups+1)*sizeof(detail::EnvelopeTemplateFit)+total*sizeof(AmplitudePhaseEntry)+
                 total*(alternate_groups+1)*selected*sizeof(decltype(amplitude_fits)::value_type)+amplitude_channels.capacity()*sizeof(PatternAmplitudeChannel);
             require(fixed+retention<bytes,"selected amplitude bands exceed actual factored workspace");
@@ -533,14 +889,21 @@ struct PatternCorrelator::Impl {
         // multi-symbol acquisition chain before physical absence expires it.
         guard_chains=config.spreading_mode==SpreadingMode::pattern && (c.scramble || c.dsss) &&
             static_cast<long double>(code.symbol_samples())/highest_rate<pattern_absence_seconds*c.sample_rate;
-        if(guard_chains)fixed+=total*((alternate_groups+1)*sizeof(decltype(chip_evidence)::value_type)+sizeof(double));
+        const bool chip_guard=guard_chains || (scheduled_map() && !options.amplitude_only);
+        if(chip_guard)fixed+=total*((alternate_groups+1)*sizeof(decltype(chip_evidence)::value_type)+sizeof(double)+
+            (scheduled_map() && !options.amplitude_only?sizeof(decltype(scheduled->scheduled_carry_chips)::value_type):0));
         require(total>=1 && total<=std::numeric_limits<std::size_t>::max() && fixed<bytes,
                 "complete half-chip clock/frequency/rate coverage exceeds DSP workspace");
         const auto count=static_cast<std::size_t>(total);
-        if(guard_chains){chip_evidence.resize(count*(alternate_groups+1));pending_chip_scores.resize(count);}
+        if(scheduled_map() && !options.amplitude_only){scheduled->scheduled_carry.resize(count);scheduled->template_uncached.resize(count);}
+        if(chip_guard){chip_evidence.resize(count*(alternate_groups+1));
+            if(guard_chains)pending_chip_scores.resize(count);
+            if(scheduled_map() && !options.amplitude_only)scheduled->scheduled_carry_chips.resize(count);}
         const auto denominator=2*count+2*search.track_limit+2;
         if(drift_sections>1) {
-            const auto extra=total*(alternate_groups+1)*sizeof(std::array<DriftFit,2>);
+            const auto extra=total*(alternate_groups+1)*(sizeof(std::array<DriftFit,2>)*
+                (scheduled_map() && !options.amplitude_only?2:1)+
+                (scheduled_map() && !options.amplitude_only?2*sizeof(std::array<unsigned char,2>):0));
             // Drift tolerance is optional; it must not displace an otherwise
             // affordable complete clock bank or its minimum bit retention.
             if(fixed+extra+denominator<=bytes) {
@@ -549,7 +912,8 @@ struct PatternCorrelator::Impl {
         }
         if(drift_sections==1)differential_window=0;
         if(differential_window) {
-            const auto extra=total*(alternate_groups+1)*sizeof(std::array<DifferentialFit,2>);
+            const auto extra=total*(alternate_groups+1)*sizeof(std::array<DifferentialFit,2>)*
+                (scheduled_map() && !options.amplitude_only?2:1);
             if(fixed+extra+denominator<=bytes)fixed+=extra;
             else differential_window=0;
         }
@@ -560,10 +924,15 @@ struct PatternCorrelator::Impl {
             config.spreading_mode==SpreadingMode::pattern && drift_sections==1 && !differential_window;
         if(outer_presence) {
             const auto extra=sizeof(*outer_evidence)+total*(alternate_groups+1)*(sizeof(detail::CorrelationOuterEvidence)+
-                (guard_chains?0:sizeof(decltype(chip_evidence)::value_type)));
+                (chip_guard?0:sizeof(decltype(chip_evidence)::value_type)))*
+                (scheduled_map() && !options.amplitude_only?2:1);
             if(fixed+extra+denominator<=bytes) {
                 fixed+=extra;outer_evidence=std::make_unique<std::vector<detail::CorrelationOuterEvidence>>(count*(alternate_groups+1));
-                if(!guard_chains)chip_evidence.resize(count*(alternate_groups+1));
+                if(!chip_guard)chip_evidence.resize(count*(alternate_groups+1));
+                if(scheduled_map() && !options.amplitude_only) {
+                    scheduled->scheduled_carry_outer.resize(count);
+                    if(!chip_guard)scheduled->scheduled_carry_chips.resize(count);
+                }
             } else outer_presence=false;
         }
         timing_enabled=static_cast<long double>(code.symbol_samples())/highest_rate>=
@@ -572,7 +941,7 @@ struct PatternCorrelator::Impl {
         // pulse. Two half-chip origin parities share each projection. Affine
         // spans below cover partial chips or unaffordable shared-cell kernels;
         // unsupported legacy fractional grids retain the raw reference path.
-        const bool pulse_geometry=!options.amplitude_only && !options.raw_reference && shaped && code.symbol_samples()>=16ULL*c.sample_rate &&
+        const bool pulse_geometry=!scheduled_map() && !options.amplitude_only && !options.raw_reference && shaped && code.symbol_samples()>=16ULL*c.sample_rate &&
             // Historical low-level compact banks promise a sub-64-KiB idle
             // footprint. Application oscillator banks provide explicit pairs;
             // retain the bounded raw fallback for legacy long-chip callers.
@@ -594,12 +963,30 @@ struct PatternCorrelator::Impl {
         const auto affine_capacity=std::tuple_size_v<decltype(Bank::affine_lengths)>;
         const auto segment_extra=bank_count*((block_samples+1)*sizeof(Complex)+
             affine_capacity*sizeof(detail::CorrelationCarrierMoments))+total*sizeof(std::uint64_t);
-        pulse_segmented=!options.amplitude_only && !options.raw_reference && shaped && paired &&
+        pulse_segmented=!scheduled_map() && !options.amplitude_only && !options.raw_reference && shaped && paired &&
             code.symbol_samples()>=16ULL*c.sample_rate &&
             code.chip_samples()>=1024 &&
             !pulse_enabled &&
             fixed+segment_extra+denominator<=bytes;
         if(pulse_segmented){fixed+=segment_extra;affine_counts.resize(count);}
+        // The source warp is affine INSIDE an active flat interval. Contract
+        // table-affine pulse spans there; never interpolate through a gate,
+        // limiter, chip ownership, detector window or source-symbol boundary.
+        // FP64-force remains an independent original-template reference.
+        const auto dense_count=static_cast<std::size_t>(std::min<long double>(block_size,
+            std::ceil(code.chip_samples()/(256*lowest_rate))+1));
+        const auto mapped_extra=bank_count*((block_samples+1)*sizeof(Complex)+dense_count*sizeof(detail::CorrelationCarrierMoments))+
+            total*sizeof(std::uint64_t);
+        scheduled_affine=options.scheduled_affine_experiment && scheduled_map() && !options.amplitude_only && !options.raw_reference && shaped && !outer_presence &&
+            code.chip_samples()>=1024 && config.search_arithmetic!=SearchArithmetic::fp64 &&
+            fixed+mapped_extra+denominator<=bytes;
+        if(scheduled_affine){fixed+=mapped_extra;affine_counts.resize(count);}
+        if(scheduled_map())scheduled->moments_eligible=!options.amplitude_only && !options.raw_reference &&
+            !options.scheduled_moment_reference && !scheduled_affine && shaped && !outer_presence &&
+            code.chip_samples()>=1024 && config.search_arithmetic!=SearchArithmetic::fp64 &&
+            fixed+total*sizeof(std::uint64_t)+denominator<=bytes;
+        if(scheduled_map() && scheduled->moments_eligible){fixed+=total*sizeof(std::uint64_t);affine_counts.resize(count);}
+        require(fixed+denominator<=bytes,"clock-search workspace cannot retain symbol evidence");
         const auto remaining=bytes-static_cast<std::size_t>(std::ceil(fixed));
         bit_limit=std::min(search.bit_limit,remaining/denominator);
         require(bit_limit>0,"clock-search workspace cannot retain symbol evidence");
@@ -616,11 +1003,17 @@ struct PatternCorrelator::Impl {
                 coefficient_count<=std::numeric_limits<std::size_t>::max() &&
                 fixed+coefficient_extra+denominator<=bytes)
             affine_coefficients.resize(static_cast<std::size_t>(coefficient_count));
-        hypotheses.reserve(count);if(scheduled_map()){scheduled->anchors.reserve(count);scheduled->observed_begin.resize(count);scheduled->last_accepted.resize(count);if(scheduled_calendar())scheduled->source_starts.resize(count);}
+        hypotheses.reserve(count);if(scheduled_map()){scheduled->anchors.reserve(count);scheduled->observed_begin.resize(count);scheduled->last_accepted.resize(count);if(scheduled_calendar())scheduled->source_starts.resize(count);
+            if(!options.amplitude_only){scheduled->symbol_ends.resize(count);scheduled->end_indices.resize(count);scheduled->first_full_indices.resize(count);}}
         emissions.reserve(search.track_limit);banks.resize(bank_count);
         for(auto& bank:banks) {
             bank.prefix.resize(block_samples+1);
-            if(pulse_segmented || (pulse_enabled && code.chip_samples()>4096))bank.first_moment.resize(block_samples+1);
+            if(pulse_segmented || scheduled_affine || (pulse_enabled && code.chip_samples()>4096))bank.first_moment.resize(block_samples+1);
+            if(scheduled_affine) {
+                bank.affine_carrier.resize(dense_count);
+                for(std::size_t n=1;n<=dense_count;++n)bank.affine_carrier[n-1]=detail::correlation_carrier_moments(n,
+                    2*tau*(c.carrier_hz+search.frequency_offsets_hz[&bank-banks.data()])/c.sample_rate);
+            }
         }
         points.resize(point_capacity);
         require(!alternate_groups || count<=std::numeric_limits<std::size_t>::max()/alternate_groups,
@@ -631,7 +1024,10 @@ struct PatternCorrelator::Impl {
             amplitude_templates.resize(count*(alternate_groups+1));
             amplitude_phases.resize(count);
         }
-        if(differential_window)differential_fits.resize(count*(alternate_groups+1));
+        if(differential_window) {
+            differential_fits.resize(count*(alternate_groups+1));
+            if(scheduled_map() && !options.amplitude_only)scheduled->scheduled_carry_differential.resize(count);
+        }
         if(drift_sections>1) {
             require(count<=std::numeric_limits<std::size_t>::max()/(alternate_groups+1),
                     "pattern drift fits exceed address space");
@@ -682,7 +1078,7 @@ struct PatternCorrelator::Impl {
                     // Intersect every physical phase represented by the exact
                     // cipher cell; do not instantiate a template per sample.
                     const auto cell_width=search.search_stream_phases?
-                        (scheduled_map()?amplitude_geometry.receiver_phase_step_samples-1:
+                        (scheduled_map()?phase_step-1:
                         canonical_phase_cell_upper(config,phase_upper)-phase_upper):0;
                     lo-=cell_width;
                     if(lo>phase_upper || hi<phase_lower)continue;
@@ -735,6 +1131,19 @@ struct PatternCorrelator::Impl {
             }
         }
         require(!hypotheses.empty(),"qualified UTC interval does not intersect the existing search lattice");
+        if(scheduled_map() && !options.amplitude_only) {
+            scheduled->symbol_ends.resize(hypotheses.size());scheduled->end_indices.resize(hypotheses.size());scheduled->first_full_indices.resize(hypotheses.size());
+            scheduled->earliest_end=std::numeric_limits<long double>::infinity();
+            scheduled->drift_begin=std::numeric_limits<long double>::infinity();
+            for(std::size_t i=0;i<hypotheses.size();++i) {
+                const auto& h=hypotheses[i];scheduled->end_indices[i]=h.index;
+                scheduled->symbol_ends[i]=scheduled_boundary(h,scheduled_source_start(h,h.index)+code.symbol_samples(),true);
+                scheduled->earliest_end=std::min(scheduled->earliest_end,scheduled->symbol_ends[i]);
+                scheduled->drift_begin=std::min(scheduled->drift_begin,scheduled_boundary(h,scheduled_source_start(h,h.index)+
+                    detail::drift_boundary(1,code.symbol_samples(),drift_sections),false));
+                scheduled->first_full_indices[i]=scheduled_index_at(h.phase_lower,scheduled->observed_begin[i],true);
+            }
+        }
         if(pulse_segmented)for(auto& bank:banks)
             bank.prepare_carrier(block_samples,code.chip_samples()/(256*lowest_rate),c.sample_rate);
         accounted_bytes=working_bytes()+drift_reserved+amplitude_scratch_reservation;
@@ -743,13 +1152,33 @@ struct PatternCorrelator::Impl {
             code.chip_samples()>4096?PatternCorrelationBackend::pulse_moments:PatternCorrelationBackend::pulse;
         work.hypotheses=hypotheses.size();work.lattices=pulse_lattices.size();work.phase_groups=alternate_groups+1;
         work.affine_coefficient_cache_entries=affine_coefficients.size();
-        work.amplitude_bins=amplitude_geometry.bin_count;work.amplitude_fft_samples=amplitude_geometry.fft_samples;
+        work.amplitude_bins=amplitude_geometry?amplitude_geometry->bin_count:0;work.amplitude_fft_samples=amplitude_geometry?amplitude_geometry->fft_samples:0;
         work.amplitude_channels=amplitude_channels.size();
         work.peak_workspace_bytes=sizeof(PatternCorrelator)+accounted_bytes;
+        if(scheduled_map() && !options.amplitude_only)audio::trace::record("split_complex_constructed",[&](auto& f) {
+            f.add("epoch",config.stream_epoch);f.add("sample_rate",config.sample_rate);
+            f.add("chip_samples",code.chip_samples());f.add("symbol_samples",code.symbol_samples());
+            f.add("physical_aperture_samples",scheduled->complex_geometry.physical_aperture_samples);
+            f.add("required_frequency_step_hz",scheduled->complex_geometry.frequency_step_hz);
+            f.add("required_clock_step_ppm",scheduled->complex_geometry.clock_step_ppm);
+            f.add("clock_cell_radius_ppm",scheduled->complex_geometry.clock_cell_radius_ppm);
+            f.add("frequency_grid_qualified",scheduled->complex_geometry.frequency_grid_qualified);
+            f.add("clock_grid_qualified",scheduled->complex_geometry.clock_grid_qualified);
+            f.add("hypotheses",hypotheses.size());f.add("frequency_count",banks.size());
+            f.add("phase_step_samples",phase_step);f.add("timing_subdivisions",scheduled->complex_geometry.receiver_timing_subdivisions);
+            f.add("workspace_bytes",work.peak_workspace_bytes);f.add("backend",scheduled_affine?"mapped physical-IQ table-affine diagnostic + exact fallback":
+                scheduled->moments_eligible?"mapped physical-IQ bounded pulse moments/source curves when workspace permits; direct fallback":"mapped physical-IQ original direct contraction");
+            f.add("resolved_search_operands",scheduled->moments_eligible?
+                "FP64 private coefficients and curve interpolation; FP64 physical projections; original direct fallback":"FP64 original limited templates; FP64 physical projections");
+            f.add("score_precision","FP64 real I/Q Gram; source-quarter/window guards");
+            f.add("template_reuse",scheduled->moments_eligible?
+                "eligible bounded source-chip curves and intervals; exact worker caches; direct boundary/resource fallback":"exact per-worker private chip cache; approximate interpolation bypassed");
+        });
     }
     std::uint64_t scheduled_cell_width(const Hypothesis& h) const {
         if(scheduled_calendar())return 0;
-        return search.search_stream_phases?pattern_amplitude_phase_cell_upper(config,amplitude_geometry,h.phase_lower)-h.phase_lower:0;
+        return search.search_stream_phases?(options.amplitude_only?pattern_amplitude_phase_cell_upper(config,*amplitude_geometry,h.phase_lower)-h.phase_lower:
+            std::min(phase_step-1,canonical_phase_extent(config)-1-h.phase_lower)):0;
     }
     std::uint64_t scheduled_index_at(std::uint64_t phase,long double position,bool fully_observed) const {
         if(!scheduled_calendar()) {
@@ -769,7 +1198,8 @@ struct PatternCorrelator::Impl {
     }
     long double scheduled_source_start(const Hypothesis& h,std::uint64_t index) const {
         if(scheduled_calendar()) {
-            if(index==h.index)return scheduled->source_starts[static_cast<std::size_t>(&h-hypotheses.data())];
+            const auto lane=static_cast<std::size_t>(&h-hypotheses.data());
+            if(index==(scheduled->end_indices.empty()?h.index:scheduled->end_indices[lane]))return scheduled->source_starts[lane];
             return scheduled_calendar()->offset_source(config.stream_epoch,h.phase_lower,index);
         }
         return static_cast<long double>(index)*code.symbol_samples();
@@ -807,11 +1237,11 @@ struct PatternCorrelator::Impl {
         }
         return result;
     }
-    bool scheduled_flat(const Hypothesis& h,std::uint64_t first,std::uint64_t end) const {
+    bool scheduled_flat(const Hypothesis& h,std::uint64_t first,std::uint64_t end,bool whole_cell=true) const {
         if(!scheduled_map())return true;
-        const auto width=scheduled_cell_width(h);
-        const auto left=scheduled_tick(h,first).add_signed(-scheduled_uncertainty(h,first));
-        const auto right=scheduled_tick(h,end).add_samples(width).add_signed(scheduled_uncertainty(h,end));
+        const auto width=whole_cell?scheduled_cell_width(h):0;
+        const auto left=scheduled_tick(h,first).add_signed(whole_cell?-scheduled_uncertainty(h,first):0);
+        const auto right=scheduled_tick(h,end).add_samples(width).add_signed(whole_cell?scheduled_uncertainty(h,end):0);
         const auto a=scheduled_map()->locate(left),b=scheduled_map()->locate(right.add_signed(-1e-9L));
         if(!a.active || !b.active || a.frame_index!=b.frame_index ||
            left.distance(SchedHopCoordinate{a.flat_begin,0})<0 ||
@@ -832,6 +1262,10 @@ struct PatternCorrelator::Impl {
         return true;
     }
     long double clock_boundary(const Hypothesis& h,std::uint64_t within=0) const {
+        if(scheduled_map() && !scheduled->symbol_ends.empty() && within==code.symbol_samples()) {
+            const auto i=static_cast<std::size_t>(&h-hypotheses.data());
+            if(scheduled->end_indices[i]==h.index)return scheduled->symbol_ends[i];
+        }
         if(scheduled_map())return scheduled_boundary(h,scheduled_source_start(h,h.index)+within,
             within!=0);
 
@@ -856,36 +1290,66 @@ struct PatternCorrelator::Impl {
         return anchor+(shift*code.chip_samples()+static_cast<long double>(h.index)*code.symbol_samples()+within)/h.rate;
     }
     long double symbol_start(const Hypothesis& h) const {return clock_boundary(h);}
-    void advance_drift(DriftFit& fit,const Hypothesis& h,std::uint64_t observed) const {
-        while(fit.section+1<drift_sections && static_cast<long double>(observed)>=
-              std::ceil(clock_boundary(h,detail::drift_boundary(fit.section+1,code.symbol_samples(),drift_sections)))) {
+    static bool full_rank(const Fit& fit) {
+        return fit.count>2 && fit.cc*fit.ss-fit.cs*fit.cs>1e-12*std::max(1.,fit.cc*fit.ss);
+    }
+    void advance_drift(DriftFit& fit,const Hypothesis& h,std::uint64_t observed,unsigned char* ranks=nullptr,std::optional<long double> within={}) const {
+        while(fit.section+1<drift_sections && (scheduled_map()?
+              (within?*within:source_position(h,observed)-scheduled_source_start(h,h.index))>=
+                detail::drift_boundary(fit.section+1,code.symbol_samples(),drift_sections):
+              static_cast<long double>(observed)>=std::ceil(clock_boundary(h,
+                detail::drift_boundary(fit.section+1,code.symbol_samples(),drift_sections))))) {
+            if(ranks && full_rank(fit.active))*ranks|=static_cast<unsigned char>(1U<<fit.section);
             const auto explained=fit.active.explained();fit.explained_sum+=explained;
             fit.largest_explained=std::max(fit.largest_explained,explained);fit.active={};++fit.section;
         }
     }
-    void advance_differential(DifferentialFit& fit,const Hypothesis& h,std::uint64_t observed) const {
+    void advance_differential(DifferentialFit& fit,const Hypothesis& h,std::uint64_t observed,std::optional<long double> within={}) const {
         const auto total=code.symbol_samples(),width=differential_window;
-        const auto position=std::max(0.L,(static_cast<long double>(observed)-symbol_start(h))*h.rate);
+        const auto position=std::max(0.L,scheduled_map()?
+            (within?*within:source_position(h,observed)-scheduled_source_start(h,h.index)):
+            (static_cast<long double>(observed)-symbol_start(h))*h.rate);
         auto next=static_cast<std::uint64_t>(std::min(std::floor(position/width),static_cast<long double>(total/width)));
-        while(next<total/width && static_cast<long double>(observed)>=std::ceil(clock_boundary(h,(next+1)*width)))++next;
-        while(next && static_cast<long double>(observed)<std::ceil(clock_boundary(h,next*width)))--next;
+        if(!scheduled_map()) {
+            while(next<total/width && static_cast<long double>(observed)>=std::ceil(clock_boundary(h,(next+1)*width)))++next;
+            while(next && static_cast<long double>(observed)<std::ceil(clock_boundary(h,next*width)))--next;
+        }
         if(fit.initialized && next==fit.window_index)return;
-        if(fit.initialized)fit.finish(total,width);
+        if(fit.initialized) {
+            if(scheduled_map() && !options.amplitude_only) {
+                // Raw pushes are contiguous and mapped-complex omission is
+                // disabled. Reaching the next SOURCE window proves every
+                // eligible sample of this representative window was visited;
+                // null time carries neither signal nor noise degrees. The
+                // initial partial source window never receives this proof.
+                const auto lane=static_cast<std::size_t>(&h-hypotheses.data());
+                const auto begin=scheduled_source_start(h,h.index)+fit.window_index*width;
+                fit.expected_count=begin>=scheduled->observed_begin[lane]?fit.active.count:0;
+            }
+            fit.finish(total,width);
+        }
         fit.active={};fit.window_index=next;fit.initialized=true;fit.expected_count=0;
         if(next<total/width)fit.expected_count=static_cast<std::uint64_t>(
             std::ceil(clock_boundary(h,(next+1)*width))-std::ceil(clock_boundary(h,next*width)));
     }
     void prepare_drift(std::uint64_t end) {
         if(!drift_reserved)return;
+        if(scheduled_map() && !options.amplitude_only && end<scheduled->drift_begin)return;
         const auto first_boundary=detail::drift_boundary(1,code.symbol_samples(),drift_sections);
         const auto needed=std::any_of(hypotheses.begin(),hypotheses.end(),[&](const auto& h) {
-            return static_cast<long double>(end)>std::ceil(clock_boundary(h,first_boundary));
+            return scheduled_map() && !options.amplitude_only?
+                source_position(h,end)>scheduled_source_start(h,h.index)+first_boundary:
+                static_cast<long double>(end)>std::ceil(clock_boundary(h,first_boundary));
         });
         if(!needed)return;
         // Until the first boundary the ordinary whole-symbol fit is also the
         // first section fit. Reserve its eventual state from construction, but
         // keep idle long-symbol searches at their historical physical size.
         drift_fits.resize(hypotheses.size()*(alternate_groups+1));
+        if(scheduled_map() && !options.amplitude_only) {
+            scheduled->scheduled_carry_drift.resize(scheduled->scheduled_carry.size());
+            scheduled->scheduled_quarter_ranks.resize(hypotheses.size());scheduled->scheduled_carry_quarter_ranks.resize(hypotheses.size());
+        }
         // Earlier cache ranges were prepared before section state existed.
         // Rebuild them with the newly active quarter boundaries before any
         // interval fast path can bypass section advancement.
@@ -899,18 +1363,64 @@ struct PatternCorrelator::Impl {
         room_for(0);
     }
     void prepare_workers() {
+        if(scheduled && scheduled->moments_eligible && !scheduled->curves && !scheduled->float_curves &&
+           config.scramble && config.spreading_mode==SpreadingMode::pattern && code.symbol_samples()<(1ULL<<40)) {
+            // Arithmetic width is independent of curve/template reuse. The
+            // native-float prototype was slower in complete paired execution.
+            const bool native_float=options.scheduled_float_curve_experiment;
+            const auto bytes=native_float?sizeof(ScheduledFloatCurveCache):sizeof(ScheduledCurveCache);
+            if(bytes<=budget-sizeof(PatternCorrelator)-accounted_bytes) {
+                if(native_float)scheduled->float_curves=std::make_unique<ScheduledFloatCurveCache>();
+                else scheduled->curves=std::make_unique<ScheduledCurveCache>();
+                accounted_bytes=working_bytes()+drift_reserved+amplitude_scratch_reservation;
+                work.peak_workspace_bytes=std::max(work.peak_workspace_bytes,sizeof(PatternCorrelator)+accounted_bytes);
+            }
+        }
+        if(scheduled && scheduled->moments_eligible && scheduled->moments.empty()) {
+            const auto extra=banks.size()*(sizeof(std::vector<ScheduledMoment>)+(block_samples+1)*sizeof(ScheduledMoment));
+            if(extra<=budget-sizeof(PatternCorrelator)-accounted_bytes) {
+                scheduled->moments.resize(banks.size());
+                for(auto& row:scheduled->moments)row.resize(block_samples+1);
+                accounted_bytes=working_bytes()+drift_reserved+amplitude_scratch_reservation;
+                require(sizeof(PatternCorrelator)+accounted_bytes<=budget,"mapped moment scratch exceeds DSP workspace");
+                work.peak_workspace_bytes=std::max(work.peak_workspace_bytes,sizeof(PatternCorrelator)+accounted_bytes);
+            }
+        }
         if(options.amplitude_only)return;
         if(!pulse_lattices.empty())return;
-        if(!worker_codes.empty())return;
+        // A serial bank can retain one exact template cache without any
+        // worker_codes. It is already prepared too: replacing it here would
+        // lose counters and double-charge its retained allocation each push.
+        if(!worker_codes.empty() || (scheduled && !scheduled->worker_template_caches.empty()))return;
         const auto concurrency=std::min(hypotheses.size(),detail::search_concurrency(search.worker_threads));
-        const auto workers=std::min(concurrency,(budget-sizeof(PatternCorrelator)-accounted_bytes)/code.working_bytes());
+        const auto per_worker=code.working_bytes()+(scheduled_map()?sizeof(SchedHopSourceMap)+sizeof(std::unique_ptr<SchedHopSourceMap>):0);
+        const auto workers=std::min(concurrency,(budget-sizeof(PatternCorrelator)-accounted_bytes)/per_worker);
         if(workers>1) {
+            if(scheduled_map())++work.scheduled_worker_preparations;
             std::vector<PatternCode> prepared;prepared.reserve(workers);
             for(std::size_t worker=0;worker<workers;++worker)prepared.emplace_back(config,config.stream_epoch);
+            if(scheduled_map()) {
+                scheduled->worker_maps.reserve(workers);
+                for(std::size_t worker=0;worker<workers;++worker)scheduled->worker_maps.push_back(std::make_unique<SchedHopSourceMap>(*scheduled_map()));
+            }
             worker_codes=std::move(prepared);
             accounted_bytes=working_bytes()+drift_reserved+amplitude_scratch_reservation;
             require(sizeof(PatternCorrelator)+accounted_bytes<=budget,"parallel pattern caches exceed DSP workspace");
             work.peak_workspace_bytes=std::max(work.peak_workspace_bytes,sizeof(PatternCorrelator)+accounted_bytes);
+        }
+        if(scheduled_map() && scheduled->scheduled_cache_possible && !options.scheduled_template_cache_reference) {
+            const auto count=worker_codes.empty()?1:worker_codes.size();
+            const auto pointers=count*sizeof(std::unique_ptr<ScheduledTemplateCache>);
+            if(pointers<=budget-sizeof(PatternCorrelator)-accounted_bytes) {
+                scheduled->worker_template_caches.resize(count);
+                accounted_bytes=working_bytes()+drift_reserved+amplitude_scratch_reservation;
+                for(auto& cache:scheduled->worker_template_caches)if(sizeof(ScheduledTemplateCache)<=budget-sizeof(PatternCorrelator)-accounted_bytes) {
+                    cache=std::make_unique<ScheduledTemplateCache>();accounted_bytes+=sizeof(ScheduledTemplateCache);
+                    work.scheduled_template_cache_peak_bytes=std::max(work.scheduled_template_cache_peak_bytes,
+                        static_cast<std::size_t>(std::count_if(scheduled->worker_template_caches.begin(),scheduled->worker_template_caches.end(),[](const auto& item){return static_cast<bool>(item);})) * sizeof(ScheduledTemplateCache));
+                }
+                work.peak_workspace_bytes=std::max(work.peak_workspace_bytes,sizeof(PatternCorrelator)+accounted_bytes);
+            }
         }
     }
     std::size_t working_bytes() const {
@@ -934,6 +1444,7 @@ struct PatternCorrelator::Impl {
         value+=amplitude_templates.capacity()*sizeof(decltype(amplitude_templates)::value_type);
         value+=amplitude_phases.capacity()*sizeof(AmplitudePhaseEntry)+amplitude_scratch.working_bytes();
         value+=amplitude_channels.capacity()*sizeof(PatternAmplitudeChannel);
+        if(amplitude_geometry)value+=sizeof(PatternAmplitudeGeometry);
         // Kernel preparation has bounded wide polynomial scratch. Retain its
         // reservation across workspace changes and payload allocation too.
         if(!pulse_lattices.empty())value+=detail::correlation_pulse_scratch_bytes;
@@ -941,8 +1452,21 @@ struct PatternCorrelator::Impl {
         for(const auto& h:hypotheses)value+=h.burst.bits.capacity();
         for(const auto& burst:bursts)value+=burst.bits.capacity();
         if(scheduled_map())value+=sizeof(ScheduledState)+scheduled_map()->working_bytes()+
+            scheduled->scheduled_carry.capacity()*sizeof(ScheduledCarry)+
+            scheduled->scheduled_carry_drift.capacity()*sizeof(decltype(scheduled->scheduled_carry_drift)::value_type)+
+            scheduled->scheduled_carry_differential.capacity()*sizeof(decltype(scheduled->scheduled_carry_differential)::value_type)+
+            scheduled->scheduled_carry_chips.capacity()*sizeof(decltype(scheduled->scheduled_carry_chips)::value_type)+
+            scheduled->scheduled_carry_outer.capacity()*sizeof(decltype(scheduled->scheduled_carry_outer)::value_type)+
+            (scheduled->scheduled_quarter_ranks.capacity()+scheduled->scheduled_carry_quarter_ranks.capacity())*sizeof(std::array<unsigned char,2>)+
             scheduled->anchors.capacity()*sizeof(SchedHopCoordinate)+scheduled->observed_begin.capacity()*sizeof(long double)+scheduled->last_accepted.capacity()*sizeof(std::uint64_t)+
-            scheduled->source_starts.capacity()*sizeof(std::uint64_t)+(scheduled_calendar()?scheduled_calendar()->working_bytes():0);
+            (scheduled->source_starts.capacity()+scheduled->template_uncached.capacity()+scheduled->end_indices.capacity()+scheduled->first_full_indices.capacity())*sizeof(std::uint64_t)+
+            scheduled->symbol_ends.capacity()*sizeof(long double)+(scheduled_calendar()?scheduled_calendar()->working_bytes():0);
+        if(scheduled) {
+            if(scheduled->curves)value+=sizeof(ScheduledCurveCache);
+            if(scheduled->float_curves)value+=sizeof(ScheduledFloatCurveCache);
+            value+=scheduled->moments.capacity()*sizeof(std::vector<ScheduledMoment>);
+            for(const auto& row:scheduled->moments)value+=row.capacity()*sizeof(ScheduledMoment);
+        }
         for(const auto& bank:banks)value+=bank.prefix.capacity()*sizeof(Projection)+bank.first_moment.capacity()*sizeof(Complex)+
             bank.affine_carrier.capacity()*sizeof(detail::CorrelationCarrierMoments);
         value+=worker_bytes();
@@ -961,7 +1485,9 @@ struct PatternCorrelator::Impl {
         // Equality can complete a block and must retain the original bound.
         // Initial lattice discard only makes this test more conservative.
         if(options.amplitude_only && !amplitude_publication_dirty && !timing_dirty && bursts.empty() &&
-           input_samples<amplitude_geometry.fft_samples-amplitude_partial)return 0;
+           input_samples<amplitude_geometry->fft_samples-amplitude_partial)return 0;
+        if(scheduled_map() && !options.amplitude_only && !amplitude_publication_dirty && !timing_dirty && bursts.empty() &&
+           static_cast<long double>(sample)+input_samples<scheduled->earliest_end)return 0;
         std::size_t total=0,transient=0,output=0;
         const auto add=[&](std::size_t n){total=n>maximum-total?maximum:total+n;};
         const auto product=[&](std::size_t a,std::size_t b){return a && b>maximum/a?maximum:a*b;};
@@ -1017,12 +1543,43 @@ struct PatternCorrelator::Impl {
     }
     std::size_t worker_bytes() const {
         auto bytes=worker_codes.capacity()*sizeof(PatternCode);
+        if(scheduled) {
+            bytes+=scheduled->worker_maps.capacity()*sizeof(std::unique_ptr<SchedHopSourceMap>)+
+                scheduled->worker_template_caches.capacity()*sizeof(std::unique_ptr<ScheduledTemplateCache>);
+            for(const auto& cache:scheduled->worker_template_caches)if(cache)bytes+=sizeof(ScheduledTemplateCache);
+            for(const auto& map:scheduled->worker_maps)bytes+=map->working_bytes();
+        }
         for(const auto& worker:worker_codes)bytes+=worker.working_bytes()-sizeof(PatternCode);
         return bytes;
     }
     void drop_workers() {
+        if(scheduled)for(const auto& cache:scheduled->worker_template_caches)if(cache) {
+            work.scheduled_template_cache_hits+=cache->hits;work.scheduled_template_constructions+=cache->constructions;
+        }
         accounted_bytes-=worker_bytes();
         std::vector<PatternCode>().swap(worker_codes);
+        if(scheduled) {
+            decltype(scheduled->worker_template_caches)().swap(scheduled->worker_template_caches);
+            decltype(scheduled->worker_maps)().swap(scheduled->worker_maps);
+        }
+    }
+    void drop_scheduled_moments() {
+        if(!scheduled || scheduled->moments.empty())return;
+        auto bytes=scheduled->moments.capacity()*sizeof(std::vector<ScheduledMoment>);
+        for(const auto& row:scheduled->moments)bytes+=row.capacity()*sizeof(ScheduledMoment);
+        accounted_bytes-=bytes;
+        decltype(scheduled->moments)().swap(scheduled->moments);
+    }
+    void drop_scheduled_curves() {
+        if(!scheduled)return;
+        const auto drop=[&](auto& ptr) {
+            if(!ptr)return;
+            scheduled->curve_hits+=ptr->hits;scheduled->curve_misses+=ptr->misses;
+            scheduled->curve_evictions+=ptr->evictions;scheduled->curve_exhaustions+=ptr->exhaustions;
+            using Cache=std::remove_reference_t<decltype(*ptr)>;
+            ptr.reset();accounted_bytes-=sizeof(Cache);
+        };
+        drop(scheduled->curves);drop(scheduled->float_curves);
     }
     void drop_affine_coefficients() {
         accounted_bytes-=affine_coefficients.capacity()*sizeof(AffineCoefficients);
@@ -1032,9 +1589,13 @@ struct PatternCorrelator::Impl {
     void room_for(std::size_t extra) {
         // Called outside affine accumulation, before retained payload/event
         // allocations. No private coefficient pointer survives this eviction.
+        if(scheduled && (scheduled->curves || scheduled->float_curves) && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
+                extra>budget-sizeof(PatternCorrelator)-accounted_bytes))drop_scheduled_curves();
+        if(scheduled && !scheduled->moments.empty() && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
+                extra>budget-sizeof(PatternCorrelator)-accounted_bytes))drop_scheduled_moments();
         if(!affine_coefficients.empty() && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
                 extra>budget-sizeof(PatternCorrelator)-accounted_bytes))drop_affine_coefficients();
-        if(!worker_codes.empty() && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
+        if((!worker_codes.empty() || (scheduled && !scheduled->worker_template_caches.empty())) && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
                 extra>budget-sizeof(PatternCorrelator)-accounted_bytes))drop_workers();
         require(sizeof(PatternCorrelator)+accounted_bytes<=budget && extra<=budget-sizeof(PatternCorrelator)-accounted_bytes,
                 "pattern evidence exceeds DSP workspace");
@@ -1167,6 +1728,12 @@ struct PatternCorrelator::Impl {
                     std::abs(prior.frequency_hz-result.frequency_hz)<=config.sample_rate/static_cast<double>(code.symbol_samples()));
             });
             const auto emitted_end=result.end_sample;
+            if(scheduled_map() && !options.amplitude_only)audio::trace::record(result.complete?"split_complex_physical_end":"split_complex_progress",[&](auto& f) {
+                f.add("epoch",config.stream_epoch);f.add("input_samples",sample);f.add("first_sample",result.first_sample);
+                f.add("end_sample",result.end_sample);f.add("first_stream_symbol",result.first_stream_symbol);
+                f.add("accepted_count",count);f.add("complete",result.complete);f.add("trials",trials);
+                f.add("score",result.score);f.add("threshold",threshold());
+            });
             if(duplicate!=bursts.end()) {
                 if(result.score>duplicate->score) {
                     accounted_bytes=accounted_bytes-duplicate->bits.capacity()+result.bits.capacity();*duplicate=std::move(result);
@@ -1284,10 +1851,13 @@ struct PatternCorrelator::Impl {
         const auto address=scheduled_map()?symbol_stream_address(config,config.stream_epoch,evidence.stream_phase_samples,h.index):
             symbol_stream_address(config.stream_epoch,evidence.stream_phase_samples,h.index,code.symbol_samples(),config.sample_rate);
         state.decisions[h.index%2]={h.index,address.epoch,address.ordinal,evidence.score,accepted,
-            static_cast<long double>(h.observed_start)==std::ceil(symbol_start(h)) &&
+            (scheduled_map() && !options.amplitude_only?scheduled->observed_begin[hypothesis]<=scheduled_source_start(h,h.index):
+                static_cast<long double>(h.observed_start)==std::ceil(symbol_start(h))) &&
             static_cast<long double>(evidence.end_sample)==std::ceil(clock_boundary(h,code.symbol_samples())) &&
-            (scheduled_map()?fits(h,hypothesis,selected)[evidence.bit].count>=
+            (scheduled_map()?(options.amplitude_only?fits(h,hypothesis,selected)[evidence.bit].count>=
                 static_cast<std::uint64_t>(std::floor(code.symbol_samples()/h.rate)):
+                scheduled->observed_begin[hypothesis]<=scheduled_source_start(h,h.index) &&
+                    fits(h,hypothesis,selected)[evidence.bit].count>2):
                 fits(h,hypothesis,selected)[evidence.bit].count==evidence.end_sample-h.observed_start),
             static_cast<std::uint8_t>(evidence.bit)};
         if(accepted){state.last_accepted=h.index;state.pending_terminal=false;}
@@ -1343,9 +1913,16 @@ struct PatternCorrelator::Impl {
         }
     }
     void complete(Hypothesis& h,std::size_t hypothesis,std::uint64_t end,std::stop_token stop) {
-        if(options.amplitude_only)amplitude_publication_dirty=true;
+        amplitude_publication_dirty=true;
         std::size_t group_count=0;
         const auto groups=phase_groups(h,group_count);
+        if(scheduled_map() && !options.amplitude_only && differential_window) {
+            auto& local=local_fits(hypothesis,0);
+            for(auto& item:local)if(item.initialized) {
+                const auto begin=scheduled_source_start(h,h.index)+item.window_index*differential_window;
+                item.expected_count=begin>=scheduled->observed_begin[hypothesis]?item.active.count:0;
+            }
+        }
         PatternEvidence e;e.score=-1;std::size_t selected=0;
         require(group_count<=std::numeric_limits<std::uint64_t>::max()-trials,"pattern trial counter overflow");
         trials+=group_count;
@@ -1360,11 +1937,62 @@ struct PatternCorrelator::Impl {
                     if(zero>a){a=zero;selected_channel[0]=channel;}
                     if(one>b){b=one;selected_channel[1]=channel;}
                 }
+            } else if(scheduled_map()) {
+                const auto score=[&](unsigned bit) {
+                    const auto raw=fit[bit].score();
+                    const auto& chips=chip_evidence[hypothesis][bit];
+                    // Raw white-noise energy and sample degrees remain paired.
+                    // Only certified structured excess activates the existing
+                    // projected-chip guard, which can never increase evidence.
+                    if(!options.scheduled_raw_score_reference && chips.colored_excess(fit[bit],threshold())) {
+                        ++work.scheduled_colored_guard_activations;
+                        return std::min(raw,chips.score(fit[bit]));
+                    }
+                    return raw;
+                };
+                a=score(0);b=score(1);
             } else {a=fit[0].score();b=fit[1].score();}
             if(drift_sections>1) {
                 const auto& drift=section_fits(hypothesis,group);
-                a=detail::combine_drift_evidence(a,drift[0].score(fit[0],drift_sections,code.chip_samples()),drift_sections);
-                b=detail::combine_drift_evidence(b,drift[1].score(fit[1],drift_sections,code.chip_samples()),drift_sections);
+                const auto section_score=[&](unsigned bit) {
+                    if(!scheduled_map())return drift[bit].score(fit[bit],drift_sections,code.chip_samples());
+                    const auto& item=drift[bit];
+                    const auto all=(1U<<(drift_sections-1))-1;
+                    bool aligned=true;
+                    for(unsigned section=1;section<drift_sections;++section)
+                        aligned&=detail::drift_boundary(section,code.symbol_samples(),drift_sections)%code.chip_samples()==0;
+                    if(!aligned || item.section+1!=drift_sections ||
+                       scheduled->scheduled_quarter_ranks[hypothesis][bit]!=all || !full_rank(item.active)) {
+                        ++work.scheduled_quarter_guard_fallbacks;
+                        return item.score(fit[bit],drift_sections,code.chip_samples());
+                    }
+                    const auto last=item.active.explained(),full=item.explained_sum+last;
+                    const auto retained=full-std::max(item.largest_explained,last);
+                    const auto raw=detail::drift_evidence(retained,fit[bit].energy,static_cast<double>(fit[bit].count),drift_sections,true);
+                    if(options.scheduled_raw_score_reference)return raw;
+                    const auto& chips=chip_evidence[hypothesis][bit];
+                    const auto [last_energy,last_rank]=detail::CorrelationChipEvidence::projection(chips.cell);
+                    const auto rank=chips.projected_rank+last_rank;
+                    const auto projected=std::clamp(chips.projected_energy+last_energy,0.,fit[bit].energy);
+                    const auto fitted_rank=2U*drift_sections;
+                    if(!chips.nested || (!detail::CorrelationChipEvidence::zero_basis(chips.cell) &&
+                       last_rank<std::min<std::uint64_t>(2,chips.cell.count)) || rank<=fitted_rank || rank>=fit[bit].count)return raw;
+                    const auto rr=static_cast<double>(rank-fitted_rank),dd=static_cast<double>(fit[bit].count-rank);
+                    constexpr double tail=30;
+                    const auto delta=4*threshold()+32;
+                    const auto lower=dd-2*std::sqrt(dd*tail);
+                    if(lower<=0)return raw;
+                    const auto upper=rr+delta+2*std::sqrt((rr+2*delta)*tail)+2*tail;
+                    const auto residual=fit[bit].energy-projected;
+                    const auto excess=std::max(0.,projected-full);
+                    if(residual<=0 || excess*dd>std::max(2.,(upper/rr)/(lower/dd))*residual*rr) {
+                        ++work.scheduled_colored_guard_activations;
+                        return std::min(raw,detail::drift_evidence(retained,projected,static_cast<double>(rank),drift_sections,true));
+                    }
+                    return raw;
+                };
+                a=detail::combine_drift_evidence(a,section_score(0),drift_sections);
+                b=detail::combine_drift_evidence(b,section_score(1),drift_sections);
             }
             if(differential_window) {
                 const auto& local=local_fits(hypothesis,group);
@@ -1392,7 +2020,7 @@ struct PatternCorrelator::Impl {
         }
         const auto presence=!e.outer_presence_active || e.outer_presence_score>=threshold();
         const auto standalone=e.score>=threshold() && presence;
-        if(scheduled_map() && h.admitted && !standalone &&
+        if(options.amplitude_only && scheduled_map() && h.admitted && !standalone &&
            scheduled->observed_begin[hypothesis]<=scheduled_source_start(h,h.index)) {
             const auto& coverage=amplitude_templates[hypothesis*(alternate_groups+1)+selected];
             const bool whole=coverage.whole.observations>=64;
@@ -1407,6 +2035,9 @@ struct PatternCorrelator::Impl {
             if(!whole || !quarters)throw Error("scheduled amplitude timing coverage exhausted; cannot classify observed absence (retained FFT observations="+
                 std::to_string(coverage.whole.observations)+", required=64; every quarter must be observed)");
         }
+        if(scheduled_map() && !options.amplitude_only && h.admitted && !standalone &&
+           fits(h,hypothesis,selected)[e.bit].count<=2)
+            throw Error("scheduled complex symbol has no scored usable samples; cannot classify observed absence");
         remember(e);
         const auto symbol_support=pattern_symbol_support(
             static_cast<double>(fits(h,hypothesis,selected)[e.bit].count),e.score,code.chip_samples());
@@ -1513,11 +2144,61 @@ struct PatternCorrelator::Impl {
         require(h.index<std::numeric_limits<std::uint64_t>::max(),"pattern stream symbol counter overflow");++h.index;
         if(scheduled_calendar())scheduled->source_starts[hypothesis]=scheduled_calendar()->offset_source(
             config.stream_epoch,h.phase_lower,h.index);
+        if(scheduled_map() && !options.amplitude_only) {
+            scheduled->end_indices[hypothesis]=h.index;
+            scheduled->symbol_ends[hypothesis]=scheduled_boundary(h,scheduled_source_start(h,h.index)+code.symbol_samples(),true);
+            scheduled->earliest_end=*std::min_element(scheduled->symbol_ends.begin(),scheduled->symbol_ends.end());
+        }
+        if(scheduled_map() && !options.amplitude_only) {
+            auto& carry=scheduled->scheduled_carry[hypothesis];
+            work.scheduled_carry_samples+=carry.fits[0].count;
+            h.fits=carry.fits;
+            if(h.fits[0].count)h.observed_start=carry.observed_start;
+            if(drift_sections>1 && !drift_fits.empty()) {
+                section_fits(hypothesis,0)=scheduled->scheduled_carry_drift[hypothesis];scheduled->scheduled_carry_drift[hypothesis]={};
+                scheduled->scheduled_quarter_ranks[hypothesis]=scheduled->scheduled_carry_quarter_ranks[hypothesis];scheduled->scheduled_carry_quarter_ranks[hypothesis]={};
+            }
+            if(differential_window) {
+                local_fits(hypothesis,0)=scheduled->scheduled_carry_differential[hypothesis];scheduled->scheduled_carry_differential[hypothesis]={};
+            }
+            if(!chip_evidence.empty()) {
+                chip_evidence[hypothesis]=scheduled->scheduled_carry_chips[hypothesis];scheduled->scheduled_carry_chips[hypothesis]={};
+            }
+            if(outer_presence) {
+                (*outer_evidence)[hypothesis]=scheduled->scheduled_carry_outer[hypothesis];scheduled->scheduled_carry_outer[hypothesis]={};
+            }
+            carry={};
+        }
     }
     std::uint64_t initial_cursor(const Hypothesis& h,std::uint64_t end) const {
         if(h.origin>static_cast<long double>(sample))
             return static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(h.origin)));
         return sample;
+    }
+    bool advance_certified_null(std::uint64_t count) {
+        if(!scheduled_map() || options.amplitude_only || !count)return false;
+        const auto end=sample+count;
+        // Equality is a genuine completion/publication event, even if the
+        // boundary lies in silence. Null time itself supplies no absence.
+        if(static_cast<long double>(end)>=scheduled->earliest_end)return false;
+        if(scheduled->null_end<=sample) {
+            auto until=std::numeric_limits<std::uint64_t>::max();
+            for(const auto& h:hypotheses) {
+                const auto center=scheduled_tick(h,sample);
+                const auto lower=center.add_signed(-scheduled_uncertainty(h,sample));
+                const auto upper=center.add_samples(scheduled_cell_width(h)).add_signed(scheduled_uncertainty(h,sample));
+                const auto a=scheduled_map()->locate(lower),b=scheduled_map()->locate(upper);
+                if(a.active || b.active || a.source.distance(b.source)!=0)return false;
+                const auto next=scheduled_map()->source_to_physical(a.source,false);
+                const auto duration=std::max(0.L,std::floor(next.distance(upper)/(h.rate+scheduled->clock_radius)));
+                if(duration<static_cast<long double>(std::numeric_limits<std::uint64_t>::max()-sample))
+                    until=std::min(until,sample+static_cast<std::uint64_t>(duration));
+            }
+            scheduled->null_end=until;
+        }
+        if(end>scheduled->null_end)return false;
+        sample=end;work.samples+=count;work.scheduled_null_samples+=count;
+        ++work.scheduled_null_pushes;settle_timing();room_for(0);return true;
     }
     // The same deterministic node/tap order serves ordinary and mapped sparse
     // observations. The caller supplies source-time coordinates; FFT sample
@@ -1616,12 +2297,12 @@ struct PatternCorrelator::Impl {
                     require(h.index<=std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol(),
                         "scheduled amplitude pattern chip coordinate overflow");
                     const auto quadrature=std::max(8U,static_cast<unsigned>(std::ceil(
-                        8*static_cast<long double>(amplitude_geometry.fft_samples)*h.rate/code.chip_samples())));
+                        8*static_cast<long double>(amplitude_geometry->fft_samples)*h.rate/code.chip_samples())));
                     require(quadrature<=17,"scheduled amplitude quadrature exceeds its bounded support");
                     std::array<double,17> coordinates{};
                     for(unsigned node=0;node<quadrature;++node) {
                         const auto physical=static_cast<long double>(first)+
-                            (node+.5L)*amplitude_geometry.fft_samples/quadrature;
+                            (node+.5L)*amplitude_geometry->fft_samples/quadrature;
                         // Proven active-flat interiors have exactly affine U.
                         // No private calendar construction is repeated per node.
                         coordinates[node]=static_cast<double>(source_first+(physical-first)*h.rate-begin);
@@ -1632,7 +2313,7 @@ struct PatternCorrelator::Impl {
                         std::span<const double>(coordinates).first(quadrature),stop);
                     ++work.affine_preparations;timer.finish();
                     const auto quarter=static_cast<unsigned>(std::clamp(quarter_first,0.L,3.L));
-                    const auto independent=2*static_cast<double>(amplitude_geometry.fft_samples*h.rate/code.chip_samples());
+                    const auto independent=2*static_cast<double>(amplitude_geometry->fft_samples*h.rate/code.chip_samples());
                     amplitude_templates[hypothesis].add(weight,quarter,independent);
                     for(std::size_t channel=0;channel<amplitude_channels.size();++channel)
                         amplitude_fits[hypothesis*amplitude_channels.size()+channel].add((*energy)[channel],weight,quarter);
@@ -1655,7 +2336,7 @@ struct PatternCorrelator::Impl {
     void amplitude_block(std::span<const float> input,std::stop_token stop,detail::CorrelationProjectionCache* cache,
                          AmplitudeScratch& scratch,std::vector<long double>& local_spectrum) {
         const auto first=amplitude_processed;
-        const auto end=first+amplitude_geometry.fft_samples;
+        const auto end=first+amplitude_geometry->fft_samples;
         if(scheduled_map() && !scheduled_block_needed(first,end)) {
             ++work.scheduled_omitted_fft_blocks;
             amplitude_scheduled_progress(first,end,nullptr,stop);
@@ -1687,37 +2368,37 @@ struct PatternCorrelator::Impl {
                 if(use_float) {
                     if(!scratch.float_plan) {
                         scratch.plan.reset();std::vector<Complex>{}.swap(scratch.pcm);
-                        scratch.float_plan=std::make_unique<detail::search_fft::FloatPlan>(amplitude_geometry.fft_samples,stop);
-                        scratch.float_pcm.resize(amplitude_geometry.fft_samples);
+                        scratch.float_plan=std::make_unique<detail::search_fft::FloatPlan>(amplitude_geometry->fft_samples,stop);
+                        scratch.float_pcm.resize(amplitude_geometry->fft_samples);
                     }
                     for(std::size_t j=0;j<amplitude_pcm.size();++j)scratch.float_pcm[j]={amplitude_pcm[j],0};
                     detail::search_fft::fft(scratch.float_pcm,false,*scratch.float_plan,stop);
                     for(std::size_t j=1;j<out.size();++j) {
-                        const Complex z=scratch.float_pcm[amplitude_geometry.first_bin+j-1];
+                        const Complex z=scratch.float_pcm[amplitude_geometry->first_bin+j-1];
                         total+=std::norm(z);out[j]=total;
                     }
                 } else {
                     if(!scratch.plan) {
                         scratch.float_plan.reset();std::vector<std::complex<float>>{}.swap(scratch.float_pcm);
-                        scratch.plan=std::make_unique<detail::search_fft::DoublePlan>(amplitude_geometry.fft_samples,stop);
-                        scratch.pcm.resize(amplitude_geometry.fft_samples);
+                        scratch.plan=std::make_unique<detail::search_fft::DoublePlan>(amplitude_geometry->fft_samples,stop);
+                        scratch.pcm.resize(amplitude_geometry->fft_samples);
                     }
                     for(std::size_t j=0;j<amplitude_pcm.size();++j)scratch.pcm[j]={amplitude_pcm[j],0};
                     detail::search_fft::fft(scratch.pcm,false,*scratch.plan,stop);
-                    for(std::size_t j=1;j<out.size();++j){total+=std::norm(scratch.pcm[amplitude_geometry.first_bin+j-1]);out[j]=total;}
+                    for(std::size_t j=1;j<out.size();++j){total+=std::norm(scratch.pcm[amplitude_geometry->first_bin+j-1]);out[j]=total;}
                 }
             };
             require(first<=std::numeric_limits<std::uint64_t>::max()-search.input_sample_origin,
                 "amplitude capture coordinate overflow");
             const auto prior=cache?cache->spectrum_hits():0;
-            const auto view=cache?cache->spectrum(input,search.input_sample_origin+first,amplitude_geometry.fft_samples,
-                amplitude_geometry.first_bin,amplitude_geometry.bin_count,config.sample_rate,compute,stop,requested_float):detail::CorrelationProjectionCache::SpectrumView{};
+            const auto view=cache?cache->spectrum(input,search.input_sample_origin+first,amplitude_geometry->fft_samples,
+                amplitude_geometry->first_bin,amplitude_geometry->bin_count,config.sample_rate,compute,stop,requested_float):detail::CorrelationProjectionCache::SpectrumView{};
             std::span<const long double> prefix;
             if(view)prefix=view.prefix;
-            else {local_spectrum.resize(amplitude_geometry.bin_count+1);compute(local_spectrum);prefix=local_spectrum;}
+            else {local_spectrum.resize(amplitude_geometry->bin_count+1);compute(local_spectrum);prefix=local_spectrum;}
             if(cache)work.amplitude_cache_hits+=cache->spectrum_hits()-prior;
             for(std::size_t j=0;j<amplitude_channels.size();++j) {
-                const auto& channel=amplitude_channels[j];const auto at=channel.first_bin-amplitude_geometry.first_bin;
+                const auto& channel=amplitude_channels[j];const auto at=channel.first_bin-amplitude_geometry->first_bin;
                 energy[j]=static_cast<double>(std::max(0.L,prefix[at+channel.bin_count]-prefix[at]));
                 require(std::isfinite(energy[j]),"nonfinite amplitude energy projection");
             }
@@ -1756,7 +2437,7 @@ struct PatternCorrelator::Impl {
                 const auto first_quarter=std::floor(4*within_first/code.symbol_samples());
                 const auto last_quarter=std::ceil(4*within_last/code.symbol_samples())-1;
                 if(static_cast<long double>(first)>=symbol_first && end<=boundary && first_quarter==last_quarter) {
-                    const auto within=(static_cast<long double>(first)+.5L*amplitude_geometry.fft_samples-symbol_first)*h.rate;
+                    const auto within=(static_cast<long double>(first)+.5L*amplitude_geometry->fft_samples-symbol_first)*h.rate;
                     const auto quarter=static_cast<unsigned>(std::clamp(std::floor(4*within/code.symbol_samples()),0.L,3.L));
                     for(std::size_t group=0;group<group_count;++group) {
                         // Sample fine scopes: timing every small reduction
@@ -1772,7 +2453,7 @@ struct PatternCorrelator::Impl {
                         // shaped and radially limited envelope. Approximation
                         // affects sensitivity, never its null distribution.
                         const auto quadrature=std::max(8U,static_cast<unsigned>(std::ceil(
-                            8*static_cast<long double>(amplitude_geometry.fft_samples)*h.rate/code.chip_samples())));
+                            8*static_cast<long double>(amplitude_geometry->fft_samples)*h.rate/code.chip_samples())));
                         require(quadrature<=17,"amplitude quadrature exceeds its bounded chip support");
                         ++work.affine_preparations;
                         code.set_stream_phase_samples(groups[group].lower);code.prepare_symbol(start_chip,stop);
@@ -1781,10 +2462,10 @@ struct PatternCorrelator::Impl {
                         // taps in exactly the original node/tap order.
                         std::array<double,17> coordinates{};
                         for(unsigned node=0;node<quadrature;++node)coordinates[node]=static_cast<double>(
-                            (static_cast<long double>(first)+(node+.5L)*amplitude_geometry.fft_samples/quadrature-symbol_first)*h.rate);
+                            (static_cast<long double>(first)+(node+.5L)*amplitude_geometry->fft_samples/quadrature-symbol_first)*h.rate);
                         weight=amplitude_weights(start_chip,groups[group].lower,
                             std::span<const double>(coordinates).first(quadrature),stop);
-                        const auto independent=2*static_cast<double>(amplitude_geometry.fft_samples*h.rate/code.chip_samples());
+                        const auto independent=2*static_cast<double>(amplitude_geometry->fft_samples*h.rate/code.chip_samples());
                         preparation_timer.finish();
                         WorkTimer reduction_timer(measured,work.affine_fit_seconds,work.affine_fit_cpu_seconds,64);
                         amplitude_templates[hypothesis*(alternate_groups+1)+group].add(weight,quarter,independent);
@@ -1816,10 +2497,10 @@ struct PatternCorrelator::Impl {
                 const auto skip=std::min<std::uint64_t>(input.size()-offset,amplitude_processed-sample);
                 sample+=skip;offset+=static_cast<std::size_t>(skip);continue;
             }
-            const auto count=std::min(amplitude_geometry.fft_samples-amplitude_partial,input.size()-offset);
+            const auto count=std::min(amplitude_geometry->fft_samples-amplitude_partial,input.size()-offset);
             std::copy_n(input.begin()+offset,count,amplitude_pcm.begin()+amplitude_partial);
             amplitude_partial+=count;offset+=count;sample+=count;
-            if(amplitude_partial==amplitude_geometry.fft_samples) {
+            if(amplitude_partial==amplitude_geometry->fft_samples) {
                 amplitude_block(input,stop,cache,amplitude_scratch,amplitude_scratch.spectrum);amplitude_partial=0;
             }
         }
@@ -1854,8 +2535,254 @@ struct PatternCorrelator::Impl {
             if(differential)add_fit((*differential)[bit].active,contribution);
         }
     }
+    bool fit_mapped_piece(std::size_t frequency,std::size_t left,std::size_t count,
+            const std::array<Complex,2>& value,const std::array<Complex,2>& slope,
+            std::array<Fit,2>& fit,std::array<DriftFit,2>* drift,
+            std::array<DifferentialFit,2>* differential,
+            std::array<detail::CorrelationChipEvidence,2>* chip,std::uint64_t chip_index) {
+        const auto& prefix=scheduled->moments[frequency];
+        const auto& a=prefix[left];const auto& b=prefix[left+count];
+        const auto p=banks[frequency].observations()[left+count]-banks[frequency].observations()[left];
+        const double l=static_cast<double>(left);
+        const Complex z{p.xc,p.xs},c0{p.cc-p.ss,2*p.cs};
+        const auto z1=b.signal1-a.signal1-l*z;
+        const auto c1=b.square1-a.square1-l*c0;
+        const auto c2=b.square2-a.square2-2*l*(b.square1-a.square1)+l*l*c0;
+        const auto n0=p.cc+p.ss,n1=b.norm1-a.norm1-l*n0;
+        const auto n2=b.norm2-a.norm2-2*l*(b.norm1-a.norm1)+l*l*n0;
+        std::array<Fit,2> contributions;
+        for(unsigned bit=0;bit<2;++bit) {
+            const auto v=value[bit],s=slope[bit];
+            const auto dot=v*z+s*z1;
+            const auto trace=std::norm(v)*n0+2*(v*std::conj(s)).real()*n1+std::norm(s)*n2;
+            const auto square=v*v*c0+2.*v*s*c1+s*s*c2;
+            auto& f=contributions[bit];
+            f={dot.real(),dot.imag(),(trace+square.real())/2,(trace-square.real())/2,
+                square.imag()/2,p.energy,count};
+            // Near-singular/cancellation-sensitive pieces retain the original
+            // sample contraction. Never repair an indefinite Gram by clipping.
+            if(!std::isfinite(trace+f.xc+f.xs+f.cs) || f.cc<=0 || f.ss<=0 ||
+               f.cc*f.ss-f.cs*f.cs<=1e-10*trace*trace)return false;
+        }
+        for(unsigned bit=0;bit<2;++bit) {
+            const auto& f=contributions[bit];add_fit(fit[bit],f);
+            if(chip)(*chip)[bit].add_fit(f,chip_index);
+            if(drift)add_fit((*drift)[bit].active,f);
+            if(differential)add_fit((*differential)[bit].active,f);
+        }
+        return true;
+    }
+    std::uint64_t accumulate_scheduled(Hypothesis& h,std::size_t hypothesis,std::uint64_t cursor,
+            std::uint64_t end,PatternCode& pattern,std::stop_token stop) {
+        const auto symbol_source=scheduled_source_start(h,h.index);
+        const auto symbol_end=clock_boundary(h,code.symbol_samples());
+        const auto limit=static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(symbol_end)));
+        require(h.index<=std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol(),
+            "pattern chip coordinate overflow");
+        bool pattern_ready=false;
+        auto prepared_chip=std::numeric_limits<std::uint64_t>::max();
+        auto* cache=scheduled_template_cache();
+        auto* current_row=cache?&cache->row(h.origin,h.rate,h.phase_lower,h.index,sample):nullptr;
+        ScheduledTemplateCache::Row* next_row=nullptr;
+        auto& fit=h.fits;
+        auto* drift=drift_fits.empty()?nullptr:&section_fits(hypothesis,0);
+        auto* differential=differential_window?&local_fits(hypothesis,0):nullptr;
+        std::array<Complex,2> interval_value{},interval_slope{};
+        std::uint64_t interval_first=0,interval_end=0,interval_index=0;
+        const bool interval_reuse=scheduled->moments_eligible;
+        ScheduledCurveCache::Lease curve;
+        ScheduledFloatCurveCache::Lease float_curve;
+        std::uint64_t curve_index=std::numeric_limits<std::uint64_t>::max(),curve_chip=curve_index;
+        auto observed=cursor;
+        while(observed<limit) {
+            cancelled(stop);
+            const auto tick=scheduled_tick(h,observed);
+            const auto location=scheduled_map()->locate(tick);
+            if(!location.active) {
+                const auto next=scheduled_map()->source_to_physical(location.source,false);
+                const auto advance=next.distance(tick)/h.rate;
+                const auto count=std::max(1.L,std::ceil(advance));
+                observed+=static_cast<std::uint64_t>(std::min(count,static_cast<long double>(limit-observed)));
+                continue;
+            }
+            // This immutable location is valid to its actual physical end.
+            // Source advances only here; carrier prefixes always advance in
+            // physical time, including all quiet calendar intervals.
+            const auto piece_count=std::max(1.L,std::ceil(SchedHopCoordinate{location.physical_end,0}.distance(tick)/h.rate));
+            const auto piece_end=observed+static_cast<std::uint64_t>(std::min(piece_count,static_cast<long double>(limit-observed)));
+            const auto source=location.source.distance(scheduled->anchors[hypothesis])-symbol_source;
+            const auto piece_first=observed;
+            const auto amplitude=std::sqrt(2*nominal_signal_power)*outer_dsss_transmit_gain(config);
+            // This is an algebra shortcut for the actual central candidate,
+            // not a proof that an entire timing/clock coverage cell is null.
+            // Admission, completion and capture proofs retain whole_cell=true.
+            const bool piece_flat=(scheduled_affine || !scheduled->moments.empty()) && scheduled_flat(h,piece_first,piece_end,false);
+            interval_end=0;
+            for(;observed<piece_end;++observed) {
+                auto within=source+static_cast<long double>(observed-piece_first)*h.rate;
+                if(within<0)continue;
+                if(within>=2.L*code.symbol_samples())throw Error("scheduled complex clock-cell coverage exhausted: more than one adjacent source symbol precedes the completion fence");
+                const bool next=within>=code.symbol_samples();
+                if(next)within-=code.symbol_samples();
+                const auto current_index=h.index;
+                require(!next || current_index<std::numeric_limits<std::uint64_t>::max(),"scheduled carry symbol coordinate overflow");
+                const auto target_index=current_index+(next?1:0);
+                require(target_index<=std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol(),"scheduled carry chip coordinate overflow");
+                const auto target_chip=target_index*code.chips_per_symbol();
+                const auto physical=tick.add_signed(static_cast<long double>(observed-piece_first)*h.rate);
+                auto gain=SchedHopSourceMap::gain(location,physical);
+                if(scheduled->fhss_shape.enabled)gain*=scheduled->fhss_shape.gain(0,
+                    physical.sample%(2ULL*config.sample_rate)+physical.fraction,config.sample_rate);
+                if(gain==0)continue;
+                auto& carry=scheduled->scheduled_carry[hypothesis];
+                auto& target_fit=next?carry.fits:fit;
+                auto* target_drift=next?(drift?&scheduled->scheduled_carry_drift[hypothesis]:nullptr):drift;
+                auto* target_differential=next?(differential?&scheduled->scheduled_carry_differential[hypothesis]:nullptr):differential;
+                auto* target_chips=chip_evidence.empty()?nullptr:next?&scheduled->scheduled_carry_chips[hypothesis]:&chip_evidence[hypothesis];
+                auto* target_outer=outer_presence?(next?&scheduled->scheduled_carry_outer[hypothesis]:&(*outer_evidence)[hypothesis]):nullptr;
+                // Only source-symbol ownership changes temporarily. The fixed
+                // physical timing reference, phase and rate never reset.
+                struct RestoreIndex {std::uint64_t& index;std::uint64_t value;~RestoreIndex(){index=value;}} restore_index{h.index,current_index};
+                h.index=target_index;
+                if(target_drift)for(unsigned bit=0;bit<2;++bit)advance_drift((*target_drift)[bit],h,observed,
+                    &(next?scheduled->scheduled_carry_quarter_ranks[hypothesis]:scheduled->scheduled_quarter_ranks[hypothesis])[bit],within);
+                if(target_differential)for(auto& item:*target_differential)advance_differential(item,h,observed,within);
+                if(!target_fit[0].count)(next?carry.observed_start:h.observed_start)=observed;
+                if(next && cache && !next_row)next_row=&cache->row(h.origin,h.rate,h.phase_lower,target_index,sample);
+                auto* row=next?next_row:current_row;
+                const auto left=static_cast<std::size_t>(observed-sample);
+                const auto valid=row && (row->valid[left/64]&(1ULL<<(left%64)));
+                const auto prepare=[&] {
+                    if(!pattern_ready){pattern.set_stream_phase_samples(h.phase_lower);pattern_ready=true;}
+                    if(target_chip!=prepared_chip){pattern.prepare_symbol(target_chip,stop);prepared_chip=target_chip;}
+                };
+                const auto shape=[&](long double at) {
+                    std::array<Complex,2> result;
+                    const auto local=static_cast<std::uint64_t>(at/code.chip_samples());
+                    const auto partial=code.symbol_samples()%code.chip_samples();
+                    const auto final_chip=code.chips_per_symbol()-1;
+                    const bool shifted_tail=partial && final_chip>=local && final_chip-local<=8;
+                    if((scheduled->curves || scheduled->float_curves) && !shifted_tail && local<code.chips_per_symbol()) {
+                        const auto use=[&](auto& cache,auto& lease) {
+                            if(curve_index!=target_index || curve_chip!=local) {
+                                lease={}; // Release the obsolete row before seeking an evictable slot.
+                                // Same canonical crypto address reproduces both
+                                // private candidates and the full outer permutation.
+                                const auto address=scheduled_map()->source_to_physical(scheduled->anchors[hypothesis].add_samples(
+                                    symbol_schedule_detail::multiply(target_index,code.symbol_samples())));
+                                require(address.fraction==0,"scheduled curve symbol address must be integral");
+                                const auto phase=static_cast<std::uint32_t>(address.sample%config.sample_rate);
+                                const auto gate_phase=config.fake_hopping && config.fake_hopping->matched_gaps?phase:0U;
+                                lease=cache->get({address.sample/config.sample_rate,phase/code.symbol_samples(),local,gate_phase},
+                                    pattern,target_chip,code.chip_samples(),stop);
+                                curve_index=target_index;curve_chip=local;
+                            }
+                            return cache->evaluate(lease,at,code.chip_samples(),result);
+                        };
+                        if(scheduled->float_curves?use(scheduled->float_curves,float_curve):use(scheduled->curves,curve))return result;
+                    }
+                    return pattern.shaped_values(target_chip,static_cast<double>(at));
+                };
+                if(piece_flat) {
+                    const auto chip=code.chip_samples(),symbol=code.symbol_samples();
+                    const auto local=static_cast<std::uint64_t>(within/chip);
+                    auto source_end=std::min<long double>(symbol,(local+1)*chip);
+                    if(target_drift)source_end=std::min(source_end,static_cast<long double>(detail::drift_boundary(
+                        (*target_drift)[0].section+1,symbol,drift_sections)));
+                    if(target_differential)source_end=std::min(source_end,static_cast<long double>(
+                        std::min(symbol,((*target_differential)[0].window_index+1)*differential_window)));
+                    const auto maximum=static_cast<std::uint64_t>(std::min<long double>(std::min<std::uint64_t>(piece_end-observed,block_size),
+                        std::max(1.L,std::ceil((source_end-within)/h.rate))));
+                    const auto duration=static_cast<long double>(chip)/h.rate;
+                    const auto offset=(within-static_cast<long double>(local)*chip)/h.rate;
+                    auto count=pulse_span_count(offset,maximum,duration);
+                    const auto tail=symbol%chip,final_chip=code.chips_per_symbol()-1;
+                    if(tail && final_chip>=local && final_chip-local<=8) {
+                        const auto last=pulse_span_count(offset+
+                            static_cast<long double>(chip-tail)/(2*h.rate),maximum,duration);
+                        count=std::min(count,last);
+                    }
+                    if(count>1) {
+                        prepare();const auto first=shape(within);
+                        const auto last=shape(within+(count-1)*h.rate);
+                        const auto radius=pattern_pcm_radius_limit/amplitude;
+                        bool unclipped=true;
+                        for(unsigned bit=0;bit<2;++bit)unclipped&=std::norm(first[bit])<radius*radius*(1-1e-10) && std::norm(last[bit])<radius*radius*(1-1e-10);
+                        if(unclipped) {
+                            std::array<Complex,2> slope;
+                            for(unsigned bit=0;bit<2;++bit)slope[bit]=(last[bit]-first[bit])/static_cast<double>(count-1);
+                            bool fitted=false;
+                            if(!scheduled->moments.empty())fitted=fit_mapped_piece(h.frequency,left,count,first,slope,target_fit,
+                                target_drift,target_differential,target_chips,local);
+                            else {
+                                fit_affine_piece(banks[h.frequency],left,count,first,slope,target_fit,
+                                    target_drift,target_differential,target_chips,local);fitted=true;
+                            }
+                            if(fitted){++affine_counts[hypothesis];observed+=count-1;continue;}
+                        }
+                    }
+                }
+                if(!valid || target_outer)prepare();
+                const auto projection=banks[h.frequency].observations()[left+1]-banks[h.frequency].observations()[left];
+                std::array<Complex,2> phases{};
+                if(valid){phases=row->value[left];++cache->hits;}
+                else {
+                    if(interval_reuse && observed<interval_end && interval_index==target_index) {
+                        const auto delta=static_cast<double>(observed-interval_first);
+                        for(unsigned bit=0;bit<2;++bit)phases[bit]=interval_value[bit]+delta*interval_slope[bit];
+                    } else {
+                        auto count=std::uint64_t{1};
+                        if(interval_reuse) {
+                            const auto chip=code.chip_samples(),symbol=code.symbol_samples();
+                            const auto local=static_cast<std::uint64_t>(within/chip);
+                            const auto source_end=std::min<long double>(symbol,(local+1)*chip);
+                            const auto maximum=static_cast<std::uint64_t>(std::min<long double>(std::min<std::uint64_t>(piece_end-observed,block_size),
+                                std::max(1.L,std::ceil((source_end-within)/h.rate))));
+                            const auto duration=static_cast<long double>(chip)/h.rate;
+                            const auto offset=(within-static_cast<long double>(local)*chip)/h.rate;
+                            count=pulse_span_count(offset,maximum,duration);
+                            const auto tail=symbol%chip,final_chip=code.chips_per_symbol()-1;
+                            if(tail && final_chip>=local && final_chip-local<=8)count=std::min(count,
+                                pulse_span_count(offset+static_cast<long double>(chip-tail)/(2*h.rate),maximum,duration));
+                        }
+                        phases=shape(within);
+                        if(count>=4) {
+                            const auto last=shape(within+(count-1)*h.rate);
+                            interval_value=phases;interval_first=observed;interval_end=observed+count;interval_index=target_index;
+                            for(unsigned bit=0;bit<2;++bit)interval_slope[bit]=(last[bit]-phases[bit])/static_cast<double>(count-1);
+                        } else interval_end=0;
+                    }
+                    // The row retains the exact production limiter and gates.
+                    // A common scalar cancels in the two-basis fit; clipping
+                    // belongs in both the dot and complete real I/Q Gram.
+                    for(auto& phase:phases)phase=gain*pattern_limit_pcm(amplitude*phase)/amplitude;
+                    if(row){row->value[left]=phases;row->valid[left/64]|=1ULL<<(left%64);++cache->constructions;}
+                    else ++scheduled->template_uncached[hypothesis];
+                }
+                const auto chip=static_cast<std::uint64_t>(within/code.chip_samples());
+                if(target_outer)pattern_pulse_each(static_cast<double>(within),code.symbol_samples(),code.chip_samples(),
+                    [&](std::uint64_t local,double pulse) {
+                        target_outer->add(local,gain*pulse*Complex{projection.xc,projection.xs},
+                            [&](std::uint64_t position){return pattern.values(target_chip+position);});
+                    });
+                for(unsigned bit=0;bit<2;++bit) {
+                    Fit contribution;contribution.add(projection,phases[bit],1);
+                    const auto add=[&](Fit& value) {
+                        value.xc+=contribution.xc;value.xs+=contribution.xs;value.cc+=contribution.cc;
+                        value.ss+=contribution.ss;value.cs+=contribution.cs;value.energy+=contribution.energy;value.count+=contribution.count;
+                    };
+                    add(target_fit[bit]);
+                    if(target_chips)(*target_chips)[bit].add_fit(contribution,chip);
+                    if(target_drift)add((*target_drift)[bit].active);
+                    if(target_differential)add((*target_differential)[bit].active);
+                }
+            }
+        }
+        return limit;
+    }
     std::uint64_t accumulate(Hypothesis& h,std::size_t hypothesis,std::uint64_t cursor,
                              std::uint64_t end,PatternCode& pattern,std::stop_token stop) {
+        if(scheduled_map())return accumulate_scheduled(h,hypothesis,cursor,end,pattern,stop);
         if(cursor<end && !affine_coefficients.empty() && h.affine_groups) {
             const auto base=hypothesis*(alternate_groups+1);
             bool covered=true;
@@ -2240,7 +3167,7 @@ struct PatternCorrelator::Impl {
         // The compact lane ABI has three phase fits; UTC gated coefficients
         // can distinguish every original phase point. Scalar/pulse execution
         // retains those points with workspace-charged fit arrays.
-        if(config.fake_hopping&&config.fake_hopping->matched_gaps)return 0;
+        if(scheduled_map() || (config.fake_hopping&&config.fake_hopping->matched_gaps))return 0;
         if(!pulse_lattices.empty() || !search.hypotheses.empty() || worker_codes.size()<2 || input.size()<=block_samples)return 0;
         constexpr std::size_t max_blocks=64,max_lanes=65536;
         using Lane=detail::CorrelationLane;
@@ -2356,14 +3283,22 @@ struct PatternCorrelator::Impl {
     }
     void process(std::span<const float> input,std::stop_token stop,detail::CorrelationProjectionCache* cache) {
         struct ClearSharedViews {
-            std::vector<Bank>& banks;
-            ~ClearSharedViews(){for(auto& bank:banks){bank.shared_prefix={};bank.shared_moment={};}}
+            std::vector<Bank>& banks;bool enabled=true;
+            ~ClearSharedViews(){if(enabled)for(auto& bank:banks){bank.shared_prefix={};bank.shared_moment={};}}
         } clear_shared{banks};
         WorkTimer frontend_timer(options.measure_work,work.frontend_seconds,work.frontend_cpu_seconds);
-        for(std::size_t b=0;b<banks.size();++b) {
+        bool certified_null=scheduled_map()!=nullptr;
+        if(certified_null)for(const auto& h:hypotheses) {
+            const auto first=scheduled_tick(h,sample).add_signed(-scheduled_uncertainty(h,sample));
+            const auto last=scheduled_tick(h,sample+input.size()).add_samples(scheduled_cell_width(h)).add_signed(scheduled_uncertainty(h,sample+input.size()));
+            if(scheduled_map()->locate(first).source.distance(scheduled_map()->locate(last).source)!=0) {certified_null=false;break;}
+        }
+        if(certified_null)work.scheduled_null_samples+=input.size();
+        clear_shared.enabled=!certified_null;
+        if(!certified_null)for(std::size_t b=0;b<banks.size();++b) {
             cancelled(stop);auto& bank=banks[b];bank.shared_prefix={};bank.shared_moment={};
-            if(cache && (work.backend==PatternCorrelationBackend::pulse_moments || pulse_segmented)) {
-                const auto shared=cache->get(input,sample,config.sample_rate,bank.frequency,block_samples,true,stop);
+            if(cache && (scheduled_map() || work.backend==PatternCorrelationBackend::pulse_moments || pulse_segmented)) {
+                const auto shared=cache->get(input,sample,config.sample_rate,bank.frequency,block_samples,!scheduled_map() || scheduled_affine,stop);
                 if(shared){bank.shared_prefix=shared.prefix;bank.shared_moment=shared.first_moment;continue;}
             }
             bank.prefix[0]={};
@@ -2375,6 +3310,16 @@ struct PatternCorrelator::Impl {
                 auto p=bank.prefix[i];p.xc+=x*c;p.xs+=x*s;p.cc+=c*c;p.ss+=s*s;p.cs+=c*s;p.energy+=x*x;
                 if(!bank.first_moment.empty())bank.first_moment[i+1]=bank.first_moment[i]+static_cast<double>(i)*Complex{x*c,x*s};
                 bank.prefix[i+1]=p;oscillator*=step;
+            }
+        }
+        if(!certified_null && scheduled && !scheduled->moments.empty())for(std::size_t b=0;b<banks.size();++b) {
+            auto& out=scheduled->moments[b];out[0]={};
+            const auto prefix=banks[b].observations();
+            for(std::size_t i=0;i<input.size();++i) {
+                const auto p=prefix[i+1]-prefix[i];const auto n=static_cast<double>(i),n2=n*n;
+                const Complex square{p.cc-p.ss,2*p.cs};auto next=out[i];
+                next.signal1+=n*Complex{p.xc,p.xs};next.square1+=n*square;next.square2+=n2*square;
+                next.norm1+=n*(p.cc+p.ss);next.norm2+=n2*(p.cc+p.ss);out[i+1]=next;
             }
         }
         const auto end=sample+input.size();
@@ -2399,6 +3344,12 @@ struct PatternCorrelator::Impl {
         WorkTimer search_timer(options.measure_work,work.search_seconds,work.search_cpu_seconds);
         const auto parallel=worker_codes.size()>1;
         if(parallel)detail::parallel_search(hypotheses.size(),worker_codes.size(),[&](std::size_t worker,std::size_t hypothesis) {
+            auto& view=worker_map_view();const auto previous=view;
+            struct RestoreMapView {decltype(view) target;decltype(previous) old;~RestoreMapView(){target=old;}} restore{view,previous};
+            if(scheduled && !scheduled->worker_maps.empty())view={this,scheduled->worker_maps[worker].get()};
+            auto& template_view=worker_template_view();const auto previous_template=template_view;
+            struct RestoreTemplateView {decltype(template_view) target;decltype(previous_template) old;~RestoreTemplateView(){target=old;}} restore_template{template_view,previous_template};
+            if(scheduled && !scheduled->worker_template_caches.empty())template_view={this,scheduled->worker_template_caches[worker].get()};
             cancelled(stop);auto& h=hypotheses[hypothesis];
             const auto cursor=initial_cursor(h,end);
             const auto symbol_end=clock_boundary(h,code.symbol_samples());
@@ -2426,8 +3377,8 @@ struct PatternCorrelator::Impl {
             }
         }
         settle_timing();
-        if(pulse_segmented)work.segments=std::accumulate(affine_counts.begin(),affine_counts.end(),std::uint64_t{0});
-        record_point(banks.front().observations()[input.size()]);
+        if(pulse_segmented || scheduled_affine || (scheduled && scheduled->moments_eligible))work.segments=std::accumulate(affine_counts.begin(),affine_counts.end(),std::uint64_t{0});
+        if(!certified_null)record_point(banks.front().observations()[input.size()]);
         sample=end;
         room_for(0);
     }
@@ -2435,7 +3386,28 @@ struct PatternCorrelator::Impl {
 
 PatternCorrelator::PatternCorrelator(Config c,PatternSearch search,std::size_t bytes,PatternCorrelatorOptions options)
     :impl_(std::make_unique<Impl>(c,std::move(search),bytes,options)){}
-PatternCorrelator::~PatternCorrelator()=default;
+PatternCorrelator::~PatternCorrelator(){
+    if(impl_ && impl_->scheduled_map() && !impl_->options.amplitude_only && audio::trace::active.load()) {
+        const auto w=work();audio::trace::record("split_complex_work",[&](auto& f) {
+            f.add("epoch",impl_->config.stream_epoch);f.add("samples",w.samples);f.add("hypotheses",w.hypotheses);
+            f.add("null_samples",w.scheduled_null_samples);f.add("null_pushes",w.scheduled_null_pushes);
+            f.add("worker_preparations",w.scheduled_worker_preparations);f.add("template_constructions",w.scheduled_template_constructions);
+            f.add("template_cache_hits",w.scheduled_template_cache_hits);f.add("carry_samples",w.scheduled_carry_samples);
+            f.add("colored_guard_activations",w.scheduled_colored_guard_activations);
+            f.add("quarter_guard_fallbacks",w.scheduled_quarter_guard_fallbacks);f.add("pulse_spans",w.segments);
+            f.add("counter_scope","per-sample template pairs; span endpoints/worker setup are separate");
+            const auto& state=*impl_->scheduled;const auto* curves=state.curves.get();const auto* floats=state.float_curves.get();
+            f.add("curve_hits",state.curve_hits+(curves?curves->hits:0)+(floats?floats->hits:0));
+            f.add("curve_misses",state.curve_misses+(curves?curves->misses:0)+(floats?floats->misses:0));
+            f.add("curve_evictions",state.curve_evictions+(curves?curves->evictions:0)+(floats?floats->evictions:0));
+            f.add("curve_exhaustions",state.curve_exhaustions+(curves?curves->exhaustions:0)+(floats?floats->exhaustions:0));
+            f.add("curve_arithmetic",impl_->options.scheduled_float_curve_experiment?"native FP32 table/interpolation; FP64 moments/fits":"FP64 table/interpolation/moments/fits");
+            f.add("peak_workspace_bytes",w.peak_workspace_bytes);f.add("timers_enabled",impl_->options.measure_work);
+            if(impl_->options.measure_work){f.add("validation_cpu_seconds",w.validation_cpu_seconds);
+                f.add("frontend_cpu_seconds",w.frontend_cpu_seconds);f.add("search_cpu_seconds",w.search_cpu_seconds);}
+        });
+    }
+}
 PatternCorrelator::PatternCorrelator(PatternCorrelator&&) noexcept=default;
 PatternCorrelator& PatternCorrelator::operator=(PatternCorrelator&&) noexcept=default;
 void PatternCorrelator::push(std::span<const float> samples,std::stop_token stop,detail::CorrelationProjectionCache* cache) {
@@ -2447,11 +3419,16 @@ void PatternCorrelator::push(std::span<const float> samples,std::stop_token stop
             for(auto value:samples)require(std::isfinite(value),"nonfinite pattern sample");
     }
     if(s.options.amplitude_only){s.push_amplitude(samples,stop,cache);return;}
-    // Idle epochs keep their original footprint so parallel scratch cannot
-    // displace other clock/key hypotheses from a shared receiver bank.
+    // Still validate the original PCM and cancellation above. This is only a
+    // computation omission under an exact monotone calendar proof, not a
+    // capture omission or an observation of absent valid symbols.
+    if(s.advance_certified_null(samples.size()))return;
+    // Ordinary epochs retain their original idle footprint. Mapped workers
+    // can be reused between pushes; they remain charged/evictable, and Live
+    // reclaims them before required clock/key/epoch admissions.
     struct ReleaseWorkers {
         Impl& state;
-        ~ReleaseWorkers() {state.drop_workers();}
+        ~ReleaseWorkers() {if(!state.scheduled_map())state.drop_workers();}
     } release{s};
     if(!samples.empty()){s.prepare_drift(s.sample+samples.size());s.prepare_workers();}
     for(std::size_t offset=0;offset<samples.size();) {
@@ -2483,9 +3460,9 @@ bool PatternCorrelator::try_skip_unobserved(std::uint64_t count,std::stop_token 
     const auto begin=s.sample;
     s.amplitude_scheduled_progress(begin,end,nullptr,stop);
     s.sample=end;s.amplitude_partial=0;
-    const auto remainder=(s.search.input_sample_origin%s.amplitude_geometry.fft_samples+
-        end%s.amplitude_geometry.fft_samples)%s.amplitude_geometry.fft_samples;
-    const auto tail=remainder?s.amplitude_geometry.fft_samples-remainder:0;
+    const auto remainder=(s.search.input_sample_origin%s.amplitude_geometry->fft_samples+
+        end%s.amplitude_geometry->fft_samples)%s.amplitude_geometry->fft_samples;
+    const auto tail=remainder?s.amplitude_geometry->fft_samples-remainder:0;
     require(tail<=std::numeric_limits<std::uint64_t>::max()-end,"amplitude block coordinate overflow");
     s.amplitude_processed=end+tail;s.work.scheduled_null_samples+=count;
     return true;
@@ -2533,7 +3510,7 @@ std::vector<PatternBurst> PatternCorrelator::take_bursts(){
     // Amplitude evidence changes only at scored symbol boundaries. Partial
     // FFT input cannot accept a bit or resolve timing. Retain the empty queue
     // and avoid scanning every rolling-bank hypothesis on such polls.
-    if(s.options.amplitude_only && !s.amplitude_publication_dirty && !s.timing_dirty && s.bursts.empty()) {
+    if((s.options.amplitude_only || s.scheduled_map()) && !s.amplitude_publication_dirty && !s.timing_dirty && s.bursts.empty()) {
         ++s.work.amplitude_unchanged_polls;return {};
     }
     // A consumer drain is also a presentation boundary. Publish every
@@ -2542,7 +3519,7 @@ std::vector<PatternBurst> PatternCorrelator::take_bursts(){
     // admit weak decisions, release the clock, or imply physical completion.
     s.settle_timing();
     for(auto& h:s.hypotheses)s.publish(h,false,true,true);
-    if(s.options.amplitude_only) {
+    if(s.options.amplitude_only || s.scheduled_map()) {
         ++s.work.amplitude_publication_polls;
         // A full output queue can leave committed bits for the next poll.
         // Keep that work pending even without further PCM, including EOF.
@@ -2581,9 +3558,10 @@ bool PatternCorrelator::initial_search_complete()const {
         // capture start. Wait for the next full symbol in that hypothesis's
         // own rate. index advances only after complete() scores every phase;
         // clearing noise candidates or flushing EOF never advances it.
-        const auto remainder=s.options.amplitude_only?s.search.input_sample_origin%s.amplitude_geometry.fft_samples:0;
-        const auto first_observation=remainder?s.amplitude_geometry.fft_samples-remainder:0;
-        const auto first_full=s.scheduled_map()?s.scheduled_index_at(h.phase_lower,s.source_position(h,first_observation),true):
+        const auto remainder=s.options.amplitude_only?s.search.input_sample_origin%s.amplitude_geometry->fft_samples:0;
+        const auto first_observation=remainder?s.amplitude_geometry->fft_samples-remainder:0;
+        const auto first_full=s.scheduled_map() && !s.scheduled->first_full_indices.empty()?
+            s.scheduled->first_full_indices[static_cast<std::size_t>(&h-s.hypotheses.data())]:s.scheduled_map()?s.scheduled_index_at(h.phase_lower,s.source_position(h,first_observation),true):
             std::ceil(std::max(0.L,static_cast<long double>(first_observation)-h.origin)*h.rate/s.code.symbol_samples());
         return static_cast<long double>(h.index)>first_full;
     });
@@ -2595,9 +3573,14 @@ std::size_t PatternCorrelator::reserved_workspace_bytes()const{return sizeof(Pat
 void PatternCorrelator::set_workspace_bytes(std::size_t bytes) {
     if(!impl_->affine_coefficients.empty() && bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)
         impl_->drop_affine_coefficients();
-    if(bytes<working_bytes())impl_->drop_workers();
+    // Deferred detector state is promised even before it is allocated.
+    // Reclaim optional reuse against that reservation, not only live storage.
+    if(bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)impl_->drop_scheduled_curves();
+    if(bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)impl_->drop_scheduled_moments();
+    if(bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)impl_->drop_workers();
     if(impl_->differential_window && bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes) {
         decltype(impl_->differential_fits)().swap(impl_->differential_fits);
+        if(impl_->scheduled)decltype(impl_->scheduled->scheduled_carry_differential)().swap(impl_->scheduled->scheduled_carry_differential);
         impl_->differential_window=0;
         impl_->accounted_bytes=impl_->working_bytes()+impl_->drift_reserved+impl_->amplitude_scratch_reservation;
     }
@@ -2605,11 +3588,17 @@ void PatternCorrelator::set_workspace_bytes(std::size_t bytes) {
         // Whole-symbol coherent fits have always been retained; reducing an
         // optional detector's reservation never resets physical reception.
         decltype(impl_->drift_fits)().swap(impl_->drift_fits);
+        if(impl_->scheduled) {
+            decltype(impl_->scheduled->scheduled_carry_drift)().swap(impl_->scheduled->scheduled_carry_drift);
+            decltype(impl_->scheduled->scheduled_quarter_ranks)().swap(impl_->scheduled->scheduled_quarter_ranks);
+            decltype(impl_->scheduled->scheduled_carry_quarter_ranks)().swap(impl_->scheduled->scheduled_carry_quarter_ranks);
+        }
         impl_->drift_reserved=0;impl_->drift_sections=1;
         impl_->accounted_bytes=impl_->working_bytes()+impl_->amplitude_scratch_reservation;
     }
     require(bytes>=working_bytes()+impl_->amplitude_scratch_reservation,"DSP workspace is smaller than streaming pattern state");impl_->budget=bytes;
 }
+void PatternCorrelator::trim_optional_workspace(){impl_->drop_scheduled_curves();impl_->drop_scheduled_moments();impl_->drop_workers();}
 Diagnostics PatternCorrelator::diagnostics()const {
     const auto burst=provisional();Diagnostics result;result.bit_rate=static_cast<double>(impl_->config.sample_rate)/static_cast<double>(impl_->code.symbol_samples());
     result.sample_offset=static_cast<std::size_t>(burst.first_sample);result.pattern_score=burst.score;return result;
@@ -2617,6 +3606,11 @@ Diagnostics PatternCorrelator::diagnostics()const {
 PatternCorrelatorWork PatternCorrelator::work()const {
     auto result=impl_->work;result.drift_sections=impl_->drift_sections;
     result.differential_window_samples=impl_->differential_window;
+    if(impl_->scheduled)result.scheduled_template_constructions+=std::accumulate(
+        impl_->scheduled->template_uncached.begin(),impl_->scheduled->template_uncached.end(),std::uint64_t{0});
+    if(impl_->scheduled)for(const auto& cache:impl_->scheduled->worker_template_caches)if(cache) {
+        result.scheduled_template_cache_hits+=cache->hits;result.scheduled_template_constructions+=cache->constructions;
+    }
     return result;
 }
 }

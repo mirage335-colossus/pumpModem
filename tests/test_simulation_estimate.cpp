@@ -6,6 +6,8 @@
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/pattern_search.hpp"
+#include "datapump/receiver_strategy.hpp"
+#include "datapump/scheduled_complex_search.hpp"
 #include "../src/receiver_probability.hpp"
 #include "../src/estimate_cancellation.hpp"
 #include <atomic>
@@ -2183,6 +2185,141 @@ void scheduled_short_phase_prior_model() {
     check(!plan.confidence_available&&!plan.gpu_work_supported,
           "full scheduled UTC phase coverage invented detector probability or GPU qualification");
 }
+void scheduled_packed_complex_model() {
+    transfer::Options options;options.timestamp=1800000000;options.search_seconds=6;
+    options.key.emplace(Bytes(32,0x72));options.dsp_workspace_bytes=512ULL*1024*1024;
+    options.modem=tuning::resolve(3600,32,tuning::PatternMode::auto_keystream,true,1500).config;
+    auto& c=options.modem;c.receiver_strategy=modem::ReceiverStrategy::automatic;
+    modem::OscillatorSearchConfig oscillator;
+    oscillator.lf=tuning::oscillator_model(tuning::parse_oscillator_preset("crystal"));
+    oscillator.rf={0,0};oscillator.margin=3;c.oscillator_search=oscillator;
+    for(const auto multiplier:{10U,100U,1000U,10000U}) {
+        auto schedule=std::make_shared<modem::SchedHopPlan>();schedule->time_multiplier=multiplier;
+        schedule->clock_error_seconds=schedule->peer_clock_error_seconds=.01;
+        schedule->audio_error_seconds=.05;c.scheduled_hopping=schedule;
+        check(modem::packed_scheduled_symbols(c),"default short symbols must use complete packed calendar slots");
+        const auto draft=transfer::estimate_binary(Bytes{0,1},options);
+        const auto probe=[&](simulation::ReceiverWorkMode mode,std::size_t keys=1) {
+            return simulation::estimate(draft,options,true,clean_channel(),{},keys,false,100,128,
+                mode,{.001,0,1./c.sample_rate});
+        };
+        options.clock_sync.reset();
+        const auto defaults=probe(simulation::ReceiverWorkMode::hardware_fallback);
+        check(defaults.receiver_work_supported&&defaults.receiver_workspace_supported,
+            "default clock policy rejected practical packed complex geometry");
+        // Compare pruning at one unchanged UTC/oscillator bank. Enabling UTC
+        // correction itself may add legitimate clock/frequency hypotheses.
+        options.clock_sync=clock_sync::Policy{.001,.001,0};options.audio_timing_error_seconds=.05;
+        const auto broad=probe(simulation::ReceiverWorkMode::hardware_fallback);
+        auto representative=c;representative.data_key=options.key;representative.stream_epoch=options.timestamp;
+        representative=modem::scheduled_estimate_config(representative);
+        const auto exact_phases=modem::packed_scheduled_phase_count(representative,representative.stream_epoch);
+        const auto& g=broad.receiver_geometry;
+        check(broad.receiver_work_supported&&broad.receiver_workspace_supported&&
+            g.receiver_strategy_selected==modem::receiver_backend_name(modem::ReceiverBackend::existing_complex)&&
+            exact_phases>0&&g.canonical_phases==exact_phases&&g.canonical_phases<c.sample_rate&&
+            g.canonical_phase_step_seconds==0&&g.scheduled_recording_union_upper==1,
+            "packed estimate expanded singleton phases or rejected practical complete complex slots");
+        check(!broad.confidence_available&&!broad.one_bit_confidence_available&&!broad.gpu_work_supported&&
+            broad.probability_model_limit.find("Packed scheduled complex full-bank")!=std::string::npos&&
+            g.scheduled_limit.find("uncalibrated")!=std::string::npos&&
+            broad.receiver_work_assumptions.find("without a nominal duty discount")!=std::string::npos,
+            "packed estimate borrowed contiguous detector probability or an unsupported compute calibration");
+        near(broad.tracking_symbol_windows,1.+static_cast<double>(modem::pattern_absence_samples(c))/
+            modem::symbol_sample_count(c),"packed waits became failed payload symbols in continuation estimates");
+        check(broad.hardware_sustained_modeled&&broad.hardware_sustained_realtime_ratio>0,
+            "packed steady work disappeared behind a finite early-prefix estimate");
+        options.clock_sync=clock_sync::Policy{.001,.001,0};options.audio_timing_error_seconds=.05;
+        const auto narrow=probe(simulation::ReceiverWorkMode::hardware_timing_model);
+        check(narrow.receiver_work_supported&&narrow.timing_window_modeled&&
+            narrow.frequency_rate_hypotheses==broad.frequency_rate_hypotheses&&
+            narrow.receiver_geometry.scheduled_timing_positions<=g.scheduled_timing_positions&&
+            narrow.receiver_geometry.scheduled_canonical_phases==exact_phases,
+            "qualified packed prior changed frequency coverage or widened singleton timing work");
+        const auto dual=probe(simulation::ReceiverWorkMode::hardware_timing_model,2);
+        check(dual.receiver_cpu_seconds>narrow.receiver_cpu_seconds&&
+            dual.hardware_sustained_receiver_instances>=2*narrow.hardware_sustained_receiver_instances,
+            "independent packed schedule keys lost processing or resident-bank work");
+        c.search_arithmetic=modem::SearchArithmetic::fp64;
+        const auto reference=probe(simulation::ReceiverWorkMode::hardware_timing_model);
+        check(reference.receiver_geometry.arithmetic_operands.find("Original unquantized FP64")!=std::string::npos&&
+            reference.receiver_geometry.template_reuse.find("approximate interpolation prohibited")!=std::string::npos&&
+            reference.timing_hypotheses==narrow.timing_hypotheses,
+            "FP64 packed diagnostic changed templates or admitted timing hypotheses");
+        c.search_arithmetic=modem::SearchArithmetic::default_mode;
+    }
+}
+void scheduled_split_complex_model() {
+    transfer::Options options;options.timestamp=1800000000;options.search_seconds=0;
+    options.key.emplace(Bytes(32,0x79));options.dsp_workspace_bytes=8ULL*1024*1024*1024;
+    auto& c=options.modem;c.sample_rate=400;c.carrier_hz=100;c.bandwidth_hz=50;
+    c.spreading_factor=256;c.scramble=true;c.receiver_strategy=modem::ReceiverStrategy::existing_only;
+    modem::OscillatorSearchConfig oscillator;oscillator.lf={.0001,.005};oscillator.rf={0,0};
+    oscillator.margin=3;c.oscillator_search=oscillator;
+    options.clock_sync=clock_sync::Policy{.001,.001,0};options.audio_timing_error_seconds=.001;
+    for(const auto multiplier:{10U,100U,1000U,10000U}) {
+        auto schedule=std::make_shared<modem::SchedHopPlan>();schedule->time_multiplier=multiplier;
+        schedule->clock_error_seconds=schedule->peer_clock_error_seconds=.001;
+        schedule->region_seconds=schedule->audio_error_seconds=.001;schedule->ramp_seconds=.01;
+        c.scheduled_hopping=schedule;
+        check(!modem::packed_scheduled_symbols(c),"split model fixture must span multiple active groups");
+        const auto draft=transfer::estimate_binary(Bytes{0,1},options);
+        const auto probe=[&](simulation::ReceiverWorkMode mode) {
+            return simulation::estimate(draft,options,true,clean_channel(),{},1,false,100,128,
+                mode,{.0001,0,1./c.sample_rate});
+        };
+        const auto broad=probe(simulation::ReceiverWorkMode::hardware_fallback);
+        const auto qualified=probe(simulation::ReceiverWorkMode::hardware_timing_model);
+        auto keyed=transfer::seeded_config(options,options.timestamp);
+        const auto original=modem::oscillator_pattern_search(c,modem::utc_transmit_rate_limit(c));
+        modem::PatternSearch search;search.start_offset_seconds=0;search.start_uncertainty_seconds=0;
+        search.hypotheses=original.hypotheses;
+        search.admitted_frequency_half_width_hz=original.frequency.requested_half_width_hz;
+        search.admitted_clock_half_width_ppm=original.requested_clock_half_width_ppm;
+        search.complex_frequency_coverage=!original.frequency.limited;
+        search.complex_clock_coverage=original.clock_half_width_ppm>=original.requested_clock_half_width_ppm;
+        const auto refined=modem::scheduled_complex_search(keyed,search,modem::utc_transmit_rate_limit(c));
+        check(refined.complete_coverage,"disciplined split fixture must retain complete physical-aperture grid");
+        for(const auto* value:{&broad,&qualified}) {
+            const auto& g=value->receiver_geometry;
+            check(value->receiver_work_supported&&value->receiver_workspace_supported&&
+                g.receiver_strategy_selected==modem::receiver_backend_name(modem::ReceiverBackend::existing_complex)&&
+                g.backend=="Mapped split complex direct correlation"&&g.scheduled_fft_seconds==0&&
+                g.first_fft_seconds==0&&g.fft_hop_seconds==0&&value->fft_acquisition_batches==0&&
+                value->frequency_rate_hypotheses==refined.search.hypotheses.size(),
+                "split direct model retained a source-time FFT or omitted refined alternatives");
+            check(!value->confidence_available&&!value->one_bit_confidence_available&&!value->gpu_work_supported&&
+                value->probability_model_limit.find("Split mapped complex full-bank")!=std::string::npos&&
+                g.arithmetic_operands.find("FP64")!=std::string::npos&&
+                g.arithmetic_limit.find("partial coverage")!=std::string::npos&&
+                g.scheduled_limit.find("uncalibrated")!=std::string::npos,
+                "split direct model invented precision, sensitivity or GPU coverage");
+            check(g.scheduled_recording_union_upper==1&&value->receiver_frontend_seconds>0&&
+                value->hardware_sustained_modeled&&value->hardware_sustained_realtime_ratio>0&&
+                value->simulated_seconds>draft.total_seconds,
+                "split direct model omitted physical capture, resident work or absence tail");
+        }
+        check(qualified.timing_window_modeled&&qualified.timing_hypotheses<=broad.timing_hypotheses&&
+            qualified.frequency_rate_hypotheses==broad.frequency_rate_hypotheses,
+            "qualified split timing enlarged starts or changed the oscillator domain");
+        near(qualified.tracking_symbol_windows,1.+static_cast<double>(modem::pattern_absence_samples(c))/
+            modem::symbol_sample_count(c),"split nulls manufactured failed-symbol continuation work");
+        c.search_arithmetic=modem::SearchArithmetic::fp64;
+        const auto reference=probe(simulation::ReceiverWorkMode::hardware_timing_model);
+        check(reference.frequency_rate_hypotheses==qualified.frequency_rate_hypotheses&&
+            reference.timing_hypotheses==qualified.timing_hypotheses&&
+            reference.receiver_geometry.template_reuse.find("original templates")!=std::string::npos&&
+            reference.receiver_geometry.template_reuse.find("no approximate interpolation")!=std::string::npos&&
+            reference.receiver_geometry.arithmetic_operands.find("Original unquantized FP64")!=std::string::npos,
+            "FP64 split reference changed admitted pairs or original templates");
+        c.search_arithmetic=modem::SearchArithmetic::default_mode;
+        const auto budget=options.dsp_workspace_bytes;options.dsp_workspace_bytes=2*1024*1024;
+        const auto limited=probe(simulation::ReceiverWorkMode::hardware_timing_model);
+        check(!limited.receiver_work_supported&&!limited.receiver_workspace_supported&&!limited.confidence_available,
+            "unaffordable complete mapped bank must retain explicit workspace refusal");
+        options.dsp_workspace_bytes=budget;
+    }
+}
 void projected_pattern_workload() {
     transfer::Options options;
     options.timestamp=1800000000;options.search_seconds=0;
@@ -2245,7 +2382,7 @@ void projected_pattern_workload() {
 }
 int main(int argc,char** argv) {
     try {
-        if(argc==2&&std::string_view(argv[1])=="--strategy-only") {receiver_strategy_model();scheduled_strategy_model();scheduled_short_phase_prior_model();return 0;}
+        if(argc==2&&std::string_view(argv[1])=="--strategy-only") {receiver_strategy_model();scheduled_strategy_model();scheduled_short_phase_prior_model();scheduled_packed_complex_model();scheduled_split_complex_model();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--sustained-only") {sustained_hardware_acquisition();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--spread-only") {spread_example_reference();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--sub9-only") {sub9_probability_model_limits();return 0;}
@@ -2274,7 +2411,7 @@ int main(int argc,char** argv) {
         if(argc==2&&std::string(argv[1])=="--partial-only") {
             partial_compact_probability();std::cout<<"partial simulation estimate tests passed\n";return 0;
         }
-        receiver_strategy_model();scheduled_strategy_model();scheduled_short_phase_prior_model();sustained_hardware_acquisition();
+        receiver_strategy_model();scheduled_strategy_model();scheduled_short_phase_prior_model();scheduled_packed_complex_model();scheduled_split_complex_model();sustained_hardware_acquisition();
         utc_bank_estimate();clock_dsss_reference();restricted_fft_direct_and_bounded_fallback();guarded_component_workload();versioned_outer_work_and_probability_scope();rolling_fft_epoch_workload();compact_clock_prior_workload();probability_and_framing();workload_and_impairments();receiver_cpu_budget();received_processing_budget();whole_symbol_phase_coherence();partial_compact_probability();spread_example_reference();sub9_probability_model_limits();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
         coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();oscillator_policy_geometry();nearby_shift_workload();equivalent_receive_profiles();affine_coefficient_workload();projected_pattern_workload();
         std::cout<<"simulation estimate tests passed\n";return 0;}

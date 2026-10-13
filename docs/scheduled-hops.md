@@ -1,15 +1,15 @@
 # Scheduled burst hops (local experimental candidate)
 
 **Sched_Hop** spreads a Robust Modem transmission over keyed active and null
-time slots. It gives the receiver time to process captured active samples before
-the next burst. It is independent of Fake FHSS: Sched_Hop changes physical audio
+time slots. It gives the receiver additional physical time to process captured active samples.
+Queued processing may cross subsequent bursts when memory and sustained throughput permit. It is independent of Fake FHSS: Sched_Hop changes physical audio
 by inserting silence, whereas Fake FHSS illustrates tuning without retuning the
 radio. Both can be enabled together. Sched_Hop requires a selected encryption
 key and matching peer settings.
 
 This is a manual-test candidate, not qualified hardware, receiver-sensitivity or
-security coverage. In particular, the scheduled amplitude detector has no
-calibrated RX-success probability. A favorable CPU estimate is not proof of
+security coverage. The packed complex, mapped split complex and amplitude paths have no
+calibrated scheduled full-bank RX-success probability. A favorable CPU estimate is not proof of
 real-time reception. The [receiver strategies](receiver-strategies.md),
 [clock timing](clock-sync.md), [spread-spectrum controls](spread-spectrum-controls.md)
 and [transmit cover](transmit-cover.md) describe the underlying paths and their
@@ -49,10 +49,11 @@ measured processing deadlines. Multiple receive keys, arrival uncertainty and
 clock hypotheses can require recording overlapping groups and consume the quiet
 interval. A broad several-second prior can erase most of the recording benefit
 of 10× scheduling. A tighter qualified prior can make that union much smaller.
-The planner compares mean work with work due before the next guaranteed recovery
-deadline. Split-DSSS weight construction and setup remain uncalibrated in this
-cost model; these are engineering estimates pending complete execution evidence.
-The larger ratio informs decoder selection and warnings. The processing budget
+The planner selects using estimated sustainable mean work. It also displays the
+more stringent work-to-next-active-group ratio as a diagnostic, not a mandatory
+per-hop clearance deadline. Split-DSSS weight construction and setup remain
+uncalibrated outside the explicitly measured family below. These are engineering
+estimates pending complete execution evidence. The processing budget
 is advisory; an uncertain estimate does not authorize discarding hypotheses or
 forbidding transmission. A per-frame raw recording-union demand is not measured
 peak memory or a guarantee that the configured workspace can retain it.
@@ -217,17 +218,80 @@ indefinitely.
 
 ## Receiver and workspace limits
 
-The initial supported split-symbol receiver is the experimental amplitude-energy
-path. It retains whole nonoverlapping real-input FFT observations only when the
-entire window fits the admitted active flat portion, including timing cells,
-clock scaling and any FHSS guard. It never concatenates samples from opposite
-sides of a null interval into one FFT. Original shaped-envelope quadrature
-follows source time, while capture coordinates and publication endpoints retain
-physical time. I/Q bin energy, original noise degrees, quarter guards and trial
-accounting accompany every retained observation.
+Packed short symbols use the calendar-aware existing complex FFT receiver when
+its complete declared frequency/clock bank is covered. Each candidate occupies a
+complete full-gain slot, with finite pulse support reserved on both sides. The
+receiver enumerates actual keyed singleton starts in the UTC epoch; it does not
+turn the calendar's one-sample address grid into a row for every input sample.
+Initial symbol alternatives and independent private 0/1 candidates retain their
+original addresses. The complex I/Q statistic, energy/covariance calculations,
+quarter guards, trial charges and numerical fallbacks are unchanged.
 
-Every noncontinuous scheduled profile retains physical start phases throughout
-the full UTC second, including when a source symbol is shorter than one second.
+Continuation scores the complete carrier/clock bank. Its timing radius includes
+rate displacement across the actual keyed gap from the last accepted anchor;
+a failed slot does not reset that anchor. Cache entries remain specific to the
+key, epoch, exact calendar rank, independent bit candidate and hypothesis.
+Calendar/phase storage and the continuation ring are charged before allocation.
+An uncovered frequency/clock bank or exhausted workspace remains explicit.
+
+### Long split symbols
+
+Automatic, Existing only and Complex only can use a mapped complex streaming
+correlator for a completely supported split-symbol bank. This is a physical-I/Q
+direct contraction, distinct from the packed short-symbol FFT path. The keyed
+source map controls private coefficients and finite pulse positions; carrier
+phase continues in physical time across nulls. Samples from separate active
+groups are never concatenated as if carrier time had paused. Original limited
+templates include scheduled/FHSS gains, with both real-input I/Q basis vectors,
+their Gram covariance, usable observation energy and noise degrees retained.
+Zero-template-gain samples add neither signal evidence nor noise degrees; PCM
+is not divided by the gate gain.
+
+Physical coherence requires a finer frequency bank when scheduling increases a
+symbol's wall aperture. The metadata-only builder uses a conservative physical
+span `A` in samples, enlarged for the slowest admitted physical clock rate,
+with frequency spacing at most `0.25 Fs/A` and clock spacing
+at most `2e6 min(chip/4, flat/8)/A` ppm. It retains every original exact alternative
+and appends the required refined lanes. Oscillator topology and UTC correction
+supply joint coverage provenance; marginal extrema alone do not certify it.
+Without an oscillator topology, a declared rectangular domain is conservatively
+overcovered. Finite hypothesis/passband/workspace limits remain enforced.
+Explicit diagnostic banks may run without a continuous-domain certificate, but
+must not be advertised as full coverage. More null time therefore does not make
+a fixed coarse coherent frequency bank sufficient.
+
+Noise normalization follows the actual selected observations. A rejected
+prototype capped raw-sample evidence degrees while keeping broadband raw noise
+energy; it would sacrifice useful weak-signal gain and is not the shipped score.
+The coherent calculation retains its raw I/Q fit and white-noise sample count.
+The existing nested projected-chip excess guard may only lower that evidence;
+projected energy and rank change together. Four-quarter correction requires
+rank-two quarter fits and aligned chip/quarter partitions, uses the complete
+quarter projection for the excess check, and retains strongest-quarter rejection
+for admission. Uncertified quarter geometries keep the preceding conservative
+quarter fallback, exposed by a work counter. Differential evidence remains
+separately whitened. These detector guards require their own sensitivity and
+structured-interference qualification; clean decoding is not that evidence.
+
+Quarters, local differential windows and symbol ownership follow source time.
+The physical completion fence includes the entire timing/phase/clock cell. If
+the next symbol begins before that fence, separate charged carry state retains
+its fresh independent candidate evidence; it is not discarded or assigned to
+the previous bit. More than one extra source symbol beyond the fence explicitly
+exhausts supported coverage. Neither a null interval nor filter draining creates
+failed-symbol evidence, and the original timing reference is never restarted.
+
+Amplitude-energy reception remains the separately guarded fallback when complete
+mapped complex geometry/state is unavailable, or when Amplitude only is forced.
+It retains whole nonoverlapping real-input FFT observations only when the entire
+window fits the admitted active flat portion, including timing cells, clock
+scaling and any FHSS guard. It never concatenates samples across a null into one
+FFT. Original shaped-envelope quadrature follows source time; capture and
+publication retain physical time. I/Q bin energy, noise degrees, quarter guards
+and trial accounting accompany every retained observation.
+
+Every noncontinuous scheduled profile retains the possible physical start phases
+throughout the full UTC second, including when a source symbol is shorter than one second.
 The ordinary `min(symbol samples, sample rate)` phase extent relies on shifting
 the symbol index along a continuously advancing source. Scheduled null plateaus
 break that equivalence: reducing a late physical start modulo the source-symbol
@@ -238,7 +302,7 @@ pruning and exact packed-slot enumeration still apply separately. Receiver,
 planner and simulation counts charge the retained domain rather than silently
 truncating it to improve cost estimates.
 
-The receiver and planner share a flat-safe geometry calculation. A long chip's
+For split amplitude reception, the receiver and planner share a flat-safe geometry calculation. A long chip's
 ordinary half-chip timing cell can be wider than an entire active interval;
 retaining that cell unchanged would leave no complete FFT that is safe for all
 represented arrivals. The scheduled path therefore refines coverage cells:
@@ -263,6 +327,11 @@ window. These limits follow active flat duration rather than an arbitrarily long
 chip. Refinement adds charged timing/phase/clock work and can exhaust workspace;
 it does not remove hypotheses, change private addresses or certify sensitivity.
 The planner reports the actual refined spacing and retained-position count.
+Mapped-complex admission uses the same exact origin/phase enumeration as its
+constructor. Its cheap necessary-state lower bound can rule out impossible RAM
+shares; it does not certify complete allocation. The constructor additionally
+reserves prefixes, private/permutation state, optional detectors, retained bits
+and caches against the actual workspace share.
 
 Within an FFT interval already proven flat for the complete physical coverage
 cell, the source map is affine. The original canonical grid aligns with active
@@ -275,28 +344,44 @@ therefore do not discard another phase-cell width. The physical flat-window
 guards and latest admitted endpoint remain unchanged; this cancellation does
 not permit observations across a ramp, null or source-map discontinuity.
 
-Eligibility requires shaped private patterns, at least 64 chips, at least 64
+Split amplitude eligibility requires shaped private patterns, at least 64 chips, at least 64
 retained whole energy observations per symbol, a complete clock grid of at most
 65 lanes, and a positive-frequency band with all transition margins inside
 capture Nyquist. Scheduled Interleave DSSS and supported FHSS masks use this
 path; legacy outer DSSS, too-short symbols, inadequate flat groups or unavailable
-coverage remain explicitly unsupported. Disabling the new decoders prevents
-split-symbol reception. Complex only also prohibits this amplitude path.
-`G=M` returns to ordinary decoder eligibility. Packing a short symbol into a
-full-gain slot does not relax the 64-retained-observation requirement: very fast
-geometries can remain unsupported even when their waveform fits a slot.
+coverage remain explicitly unsupported for amplitude reception. Existing only
+and Complex only prohibit that fallback; a complete supported mapped complex
+bank remains available at those settings.
+`G=M` returns to ordinary decoder eligibility. Forced Amplitude only retains the
+64-observation requirement even for packed slots. Automatic, Existing only and
+Complex only can instead select the packed complex path when its full bank is
+supported. Split symbols may use the mapped complex path under the same
+policies; forcing Amplitude only never relaxes its independent guards.
+
+| Scheduled geometry | Production selection | Important limits |
+| --- | --- | --- |
+| Short symbol packed wholly inside a full-gain slot | Existing complex FFT | Complete carrier/clock coverage; exact keyed slots; bounded continuation ring |
+| Long split symbol, complete refined bank fits | Mapped physical-I/Q direct complex | Physical-aperture refinement, finite banks/passband, carry and workspace bounds |
+| Long split symbol without supported complete complex state | Automatic may use amplitude; Amplitude only forces it | At least 64 retained whole observations, refined clock grid and complete flat-window coverage |
+| Continuous `G=M` | Ordinary receiver policy | Ordinary eligibility and numerical fallbacks |
 
 ### Unavailable receiver versus exhausted workspace
 
-The initial manual launcher opens the ordinary 3,600 Hz rate / 1,500 Hz carrier
-defaults with scheduling disabled. Loading a key and choosing 10 does **not**
-make those defaults eligible for scheduled amplitude reception. At the resolved
-14,400 Hz input rate and eight samples per chip, the default short/long target
-profiles have 1,024/512 sample symbols (71.111/35.556 ms). Even the minimum
-16-sample FFT gives conservative retained counts of only 56/24 after boundary
-allowances, below the required 64. This is a detector limitation, not a shortage
-of DSP workspace. A scheduled complex decoder for such short profiles remains
-unimplemented; changing allocation alone cannot enable them.
+The ordinary 3,600 Hz rate / 1,500 Hz carrier defaults now use packed complex
+reception after a communication key is selected and Sched_Hop is enabled. At the
+resolved 14,400 Hz input rate and eight samples per chip, the short/long target
+profiles have 1,024/512 sample symbols (71.111/35.556 ms). The preceding candidate
+incorrectly required these profiles to use the amplitude detector. Its minimum
+16-sample FFT gives only 56/24 retained observations after boundary allowances,
+below the required 64. That diagnostic remains correct for forced amplitude
+reception; it no longer prevents the full-complex alternative.
+
+The GUI's representative pattern illustration uses a deterministic public
+synthetic schedule key. It never borrows communication key bytes. Previously,
+removing the illustration's key while retaining its scheduled geometry could
+make valid TX settings report a missing encryption key. Actual transmission,
+exact keyed airtime and receiver banks continue using the selected real key.
+The public illustration is not evidence of receiver availability or sensitivity.
 
 Live reception now retains the concrete eligibility or allocation error for
 Automatic selection as well as forced strategies. Unsupported initial banks
@@ -307,12 +392,16 @@ instead of resetting acquisition and retrying on every PCM callback. A valid
 configuration change clears this diagnostic. Actual processing failures that
 discard acquisition state still report **receiver restarted**.
 
-An exact-nominal geometry preflight also reports intrinsically unsupported
-profiles during long null frames. It uses the production private flags and joint
-FHSS guards, but zero frequency/clock/arrival error, so it tests maximum available
-support and minimum spectral margins. Passing is only necessary: actual admission
-still requires the complete configured uncertainty, epoch and workspace checks.
-This preflight does not remove any hypothesis from an admitted receiver.
+A nominal-arrival geometry preflight also reports intrinsically unsupported
+profiles during long null frames. It retains production private flags, joint
+FHSS guards, the declared oscillator frequency/clock grid and the applicable UTC
+rate-correction allowance. Only arrival uncertainty and workspace are optimistic.
+Clearing the oscillator here would hide an unsupported forced grid whenever the
+current keyed epochs were quiet. Passing remains only necessary: actual admission
+still requires the complete configured uncertainty, epoch and cohort-workspace
+checks. This preflight neither admits a receiver nor removes a hypothesis.
+Verbose `receiver_profile_preflight` records its grid, backend, reason and elapsed
+time separately from actual epoch admission.
 
 This eligibility handling also applies to an unsupported forced ordinary
 amplitude profile. A keyed epoch proved to have no admitted active start is
@@ -325,13 +414,280 @@ display priority. The snapshot's `receiver_bank_builds` diagnostic counts initia
 construction and subsequent admission refreshes, independently of successful
 receiver admissions.
 
-Search arithmetic remains independent of the schedule. Default and FP32 minimum
-use the demonstrated native FP32 spectral FFT and packed FP32 envelope path,
-with finite-range FP64 transform fallback. FP64 force uses native FP64 FFTs and
-original FP64 coefficients, bypassing approximate template interpolation. Energy
-and limiting calculations retain FP64, and sensitive moments/scoring retain
-wide arithmetic. Every choice retains the existing envelope-quadrature
-approximation; FP64 is not an exact continuous-envelope integral.
+Search arithmetic remains independent of the schedule. Split amplitude Default
+and FP32 minimum use the demonstrated native FP32 spectral FFT and packed FP32
+envelope path, with finite-range FP64 transform fallback. FP64 force uses native
+FP64 FFTs and original FP64 coefficients, bypassing approximate interpolation.
+Energy and limiting calculations retain FP64, and sensitive moments/scoring use
+wide arithmetic. All settings retain the envelope-quadrature approximation;
+FP64 is not an exact continuous-envelope integral.
+
+Packed complex reception retains the existing arithmetic dispatch. Small and
+unsupported native geometries use FP64 operands, including under Default and
+FP32 minimum; eligible large acquisition geometries may use native FP32 with
+bounded numerical fallbacks. FP64 force keeps original FP64 templates and
+bypasses approximate template interpolation. Exact reuse is allowed at every
+precision. The trace identifies actual resolved operands/backend rather than
+inferring execution precision from the dropdown.
+
+Mapped split complex physical projections, products, real Gram terms and scoring
+retain FP64 at every public Search arithmetic setting. Default and FP32 minimum
+may additionally use the bounded source-curve and physical-moment reductions
+below. FP64 force keeps original per-sample templates and bypasses these
+interpolations. Globally affine continuous-source caches cannot cross nulls
+unchanged; exact worker-local private-chip reuse remains allowed at every setting. Each
+source map has an eight-frame exact keyed calendar cache; an entry is identified
+by frame index within one immutable plan/key/sample-rate instance. Exhaustion
+recomputes the frame exactly, and copies own independent storage. The local ABI
+adds 312 bytes per map versus the preceding single-frame cache; that is not a
+process-RSS or complete receiver memory measurement.
+
+Mapped complex input preparation can omit mixing only where source-map
+monotonicity and timing/phase/clock endpoint bounds prove the whole input block
+null for every retained lane. This is key-specific preprocessing reuse, not a
+capture-omission certificate: original raw PCM remains retained for rolling banks.
+Permanent physical END and first-full-symbol coordinates are cached under the
+immutable key/calendar, origin, rate, phase and source-symbol identity. Temporary
+adjacent-symbol carry has a separate source-start identity. A cached null deadline
+also includes timing, phase-cell width and accumulated clock-cell uncertainty;
+reaching an END fence always executes ordinary scoring and publication. A null
+fast path advances physical counters only. It supplies no fit, trials or absence.
+Unchanged progress polls need not rescan every lane, but committed/queued output
+and timing work keep publication pending for the next poll.
+
+Mapped contraction uses bounded 512-sample dispatch blocks; its original raw
+diagnostic retains 128. Exact worker/private-chip caches may survive PCM pushes,
+remain fully charged. Live retains them across ordinary admission refreshes,
+but reclaims them before they could exclude a required rolling bank or a
+promised detector reservation during workspace reduction. Reclamation changes neither observations nor detector
+promises. This avoids repeatedly constructing worker state without letting
+optional scratch exclude a required key, epoch or profile.
+
+A table-affine flat-span prototype retains original ramps, clipping and boundary
+fallbacks, with original real I/Q Gram and moments. The first full Live experiment
+was slower; bounds-only preparation improved its one-bank result but did not
+establish a complete-execution advantage. It is an internal diagnostic, not an
+automatic production selection. FP64 force bypasses it. Fine-frequency moment
+fusion is likewise a measured kernel prototype, not an integrated receiver gain.
+The older affine prototype is separate from the new bounded pulse moments and
+source curves below. The cost/workspace models retain engineering allowances;
+complete live-bank CPU is measured only for the configurations below; sensitivity is not
+calibrated. A successful bounded mapped
+correlation is not proof that arbitrary multipliers, DSSS factors or oscillator
+models are real-time feasible. Full-bank scheduled RX probability and GPU time
+remain unavailable.
+
+### Practical split-symbol manual checkpoint (2026-10-13)
+
+The bounded full Live fixture uses encrypted production PCM, 6,000 samples/s,
+0.25-second chips and 16-source-second symbols split across 0.4-second active
+groups (`M=10,G=1`). It retains the complex coherent/four-quarter branches,
+five exact original/refined frequency-rate pairs, up to 230 timing/phase lanes
+per epoch and 54 resident rolling banks. Capture dates are mocked qualified
+GPSDO-OCXO dates, not sound-card measurements. The full 348-physical-second
+capture includes 34.8 source seconds, settling, cover and a complete absent
+source symbol. Original input is retained; no raw recording omission is claimed.
+
+An early mapped implementation accepted the bit but failed its 120-second
+drain bound at about 184 physical seconds. That failure is retained. Exact
+null/control caching, larger dispatch and reusable worker state subsequently
+completed identical PCM in 115.808 receiver wall seconds and 906.683 CPU seconds.
+The preceding direct512 reference completed in 129.054 wall/904.865 CPU seconds.
+Worker reuse therefore improved this observed wall pair 1.114×, with essentially
+unchanged CPU; a single pair supplies no speedup confidence interval. DSP peaks
+were 47,763,702 versus 44,387,190 bytes (3.38 MB additional, 7.6%). These are
+backpressured functional runs, not independent real-time backlog evidence.
+
+The independent normal-rate producer subsequently passed: 87 active groups and
+86 intervening null-clearance checks, 838.312 CPU / 348.256 wall seconds,
+1.4507 seconds maximum backlog and 47,790,038 DSP bytes. Provider delivery lag
+peaked at 13.0 ms. All previous active work cleared before the next active group;
+null samples still arrived independently. At twice real-time pacing the same
+fixture **failed** that clearance assertion at about 136 physical seconds with
+2.048 seconds backlog. This strict per-hop failure does not establish unsustainable average throughput.
+The later sustained fixture below measures that separately. Dates and provider are
+mocked; actual Live processing, queues, admission, scoring and publication run.
+
+The frozen preceding scheduled receiver used amplitude-only on the identical
+PCM and completed in 49.233 CPU / 51.048 wall seconds with 29,264,000 DSP bytes.
+Restoring complex evidence is therefore not a CPU improvement over that detector.
+Its sensitivity difference has not been measured by these strong-signal runs.
+The prior conditional amplitude penalty must not be treated as universal.
+
+Without scheduling, the same public settings used the optimized existing complex
+FFT/pulse receiver: 42 physical/source seconds took 0.373 CPU / 0.926 wall seconds
+and 16,664,877 DSP bytes. That reference actually used its broader FFT timing
+window; the requested narrow timing was unavailable and was explicitly classified
+as such. Its waveform and energy differ: captures use the same synthetic key,
+payload, noise seed, downstream gain and hardware peak limit, with no power
+normalization. These are not identical-PCM or equal-received-energy comparisons.
+
+This exposes an unfinished architectural efficiency gap. The mapped split direct
+loop is much more expensive than the optimized continuous FFT/pulse path; that
+cost is not a fundamental requirement of phase-sensitive reception. The normal
+paced result proves headroom for this expensive scheduled bank, but does **not**
+prove that this already-feasible continuous configuration became feasible because
+of scheduling. The later follow-up below implements bounded shared pulse moments and source
+curves. Calendar-aware transform processing remains a substantial opportunity. Broad-prior, high-DSSS and wide
+oscillator banks need separate performance evidence.
+
+Every received row was inspected: one intended raw bit, no extra admissions,
+pending publication at 180.394667 physical seconds and completion at 341.248,
+after the required 338-second absence endpoint. The roughly three seconds beyond
+ideal endpoints reflect conservative calendar/clock-cell observation coverage,
+not a byte/message publication batch. One sixteen-second source symbol must be
+fully scored absent; six physical seconds of silence cannot complete it.
+
+The mapped path remains FP64 at all public arithmetic choices. Focused tests
+also exercise FHSS, fractional timing, frequency/clock endpoints, wrong keys,
+noise, cancellation, original-template parity, source-quarter evidence and an
+eligible DSSS100 differential branch under phase diffusion. They do not establish
+full-bank negligible-loss sensitivity. Headroom outside the measured normal-paced
+scope, broader long-prior banks and other multipliers require separately identified
+execution evidence; nominal duty alone must not be reported as a speedup.
+
+Scheduling-specific limits are distinct:
+
+| Restriction | Nature and current handling |
+| --- | --- |
+| Frequency-axis CZT/FFT engine is not used for split source time | Implementation gap in its contiguous-observation interface; supported mapped complex is retained instead |
+| Full-span coherent frequency spacing follows physical aperture | Mathematical requirement of this coherent statistic; burst-local combination would be a changed detector and remains unimplemented |
+| 4,097 frequencies / 8,194 joint pairs / 65 clock rows | Finite implementation/resource bounds; unsupported coverage is explicit, never silently coarsened |
+| At most one adjacent source-symbol carry | Bounded implementation; a larger clock-cell displacement explicitly exhausts coverage |
+| Ten-million-position metadata enumeration bound | Implementation/work bound; failure does not discard required cells |
+| Four-quarter and differential eligibility | Ordinary statistic rules, not Sched_Hop prohibitions; the eligible DSSS100 phase-diffusion regression retains both |
+| Singular or chip-unaligned quarter certificate | Uses the conservative original raw-reference quarter fallback; sensitivity outside the certified geometry is unqualified |
+| Amplitude needs 64 whole retained FFT observations | Eligibility of that particular statistic; it is no longer imposed on complex reception |
+| Mapped Default/FP32 minimum retain FP64 moments/products | Partial precision coverage; native FP32 curve interpolation was slower in a complete pair and remains diagnostic-only; reduced-precision contraction remains outstanding |
+| Complex cannot omit raw capture | Missing complete capture certificate; internal null computation skipping is separate |
+
+### Split-symbol efficiency follow-up (2026-10-13)
+
+Default and FP32 minimum now share physical carrier prefix moments within bounded
+512-sample input pieces. Finite-table affine pulse spans contract those moments
+into the original real I/Q correlation vector and full 2×2 template Gram. Raw
+input energy, sample degrees, chip projection, quarter/differential partitions,
+thresholds and trial charges remain unchanged. Candidate-specific ramp, limiter,
+pulse-knot, chip, symbol, window and carry boundaries retain direct fallbacks.
+The central candidate's flatness admits this algebra shortcut; the stronger
+whole-cell proof still governs admission, null skipping and absence.
+
+An eight-row source-chip curve cache shares independently generated 0/1 values
+under the exact resolved physical epoch, ordinal and local source chip. Matched
+FHSS also includes sample-in-second. The immutable parent binds keys, waveform
+geometry, DSSS construction and calendar. Reader leases pin rows; exhaustion
+uses original construction. Limiting and physical gates occur after lookup.
+Both intervals touching a closed support-change knot, and shifted final partial
+chip support, retain original evaluation. This is numerical interpolation/reuse,
+not guaranteed bitwise identity with original FP64 evaluation order. No root-key
+bytes or communication addresses change. Optional storage is fully charged and
+reclaimable; required banks and deferred detector state take priority.
+
+On the complete identical-PCM fixture above, the preceding optimized mapped
+receiver used 906.683 CPU / 115.808 wall seconds and 47,763,702 DSP bytes. The
+new source-curve path used 417.138–474.716 CPU / 61.193–64.657 wall seconds in
+separate local observations, with approximately 60.29 MB DSP peak. This is an
+observed 1.91–2.17× CPU improvement and about 12.53 MB additional DSP storage,
+not a statistical confidence interval or a universal speedup. A conservative
+whole-cell prototype improved CPU only 2.3% for +9 MB and was superseded. The
+planner applies a provisional 2× contraction allowance only to the matching
+measured geometry; broader geometries retain uncalibrated engineering costs.
+
+A final driver linked against the exact frozen `before-moments` headers/libraries
+completed in 923.545 CPU / 118.884 wall seconds and 47,752,902 DSP bytes. The
+preflight-predecessor candidate used 520.099 CPU / 71.986 wall seconds and 60,289,862 DSP bytes on the
+same PCM: 1.776× CPU, 1.652× wall, +12,536,960 bytes DSP (26.3%). A separate repeat
+against the earlier worker-reuse binary measured 1,209.052 / 153.493 versus
+520.099 / 71.986, or 2.325× CPU. These observations show substantial run variation;
+they are not a confidence interval. Unpaced publication/end capture times remained
+180.394667 / 341.248 seconds. No new frontend or preparation cost is excluded.
+
+Native FP32 curve storage/interpolation used 498.686 CPU / 67.443 wall seconds
+versus the paired FP64 curve's 474.716 / 64.657, saving 1.78 MB DSP but costing
+5.1% more CPU. It is retained as an internal experiment, not selected by either
+Default or FP32 minimum. Generated code includes native packed float arithmetic;
+the result is not evidence that every FP32 strategy is unhelpful. FP64 force
+bypasses approximate interval/curve reuse and retains the original direct
+reference. No automatic INT8 path or GPU execution is added.
+
+The separate sustained FIFO fixture independently delivered the full capture at
+4× accelerated physical time. It processed all 87 keyed groups, retained complex
+decoding, crossed 11 subsequent active-hop starts with previous work queued,
+and drained completely. Peak backlog was 7.083 physical seconds under a declared
+16-second cap; provider delivery lateness was below 44 ms under its unchanged
+750 ms limit. CPU was 430.103 seconds (12.359 per source second, 1.236 per
+physical second), wall 87.254 seconds, DSP peak 60,376,178 bytes and process RSS
+72,308 KiB. Pending publication occurred at capture time 180.48 seconds and
+completion at 341.504, after the unchanged 338-second absence endpoint. This is
+accelerated mocked transport/timestamps with actual Live queues and receiver
+execution, not physical audio or long-duration clock qualification. Processing
+time is separate from captured carrier phase. All input remains retained unless
+a complete omission certificate exists.
+
+The preflight-predecessor sustained confirmation used the optimistic processing frontier
+to certify 42 later active starts with prior work pending. All 87 group ledgers
+closed. Peak backlog was 9.813 seconds, still below 16 seconds; final drain took
+88.556 wall seconds for 348 physical seconds at 4× delivery. CPU was 516.955
+seconds (14.855 per source second, 1.486 per physical second), DSP peak 60,424,390
+bytes and RSS 67,608 KiB. Provider delivery lateness stayed below 104 ms. Pending
+publication at capture frontier 181.418667 and completion at 346.112 reflect queued
+processing delay; accepted output still appears on the next poll. These are
+mocked transport/timestamps, not hardware measurements.
+
+After the declared-oscillator preflight correction, the rebuilt candidate passed
+the identical complete replay in 457.735 CPU / 65.709 wall seconds, with the same
+60,289,862-byte DSP peak and unchanged publication/end capture coordinates.
+Against the exact frozen run above this is an observed 2.018× CPU / 1.809× wall
+improvement; the preceding 1.776× observation and host variation preclude a
+confidence interval. All 348 declared-grid preflights summed to 0.0321 wall
+seconds (maximum 0.195 ms), included in the total. This bounds their measured
+wall contribution only in this five-pair geometry, not larger oscillator banks.
+
+The rebuilt-source independent 4× capture also drained all 87 groups, certified
+21 later active starts with prior work pending, and peaked at 7.424 seconds of
+backlog below the 16-second cap. CPU was 462.850 seconds (13.300 per source second,
+1.330 per physical second), wall 87.786 seconds and DSP peak 60,378,022 bytes.
+Queued PCM peaked at 44,544 samples / 178,176 bytes. Pending publication at
+181.674667 and completion at 343.722667 reflect queued processing, while the
+fully observed absence endpoint remains 338. These are bounded mocked-provider
+runs, not indefinite sustainable-throughput or physical-clock qualification.
+
+The workspace regressions also cover an exact minimal direct-bank budget and a
+reduced loan between live storage and deferred quarter reservations. Optional
+counters/caches must fall back or be evicted before they displace those promises.
+Bounded identical-PCM tests include fractional timing, frequency/clock endpoints,
+FHSS, phase diffusion and noise, with unchanged 1e-7 relative statistic gates,
+bit decisions, publication and completion. They do not measure full-bank 90%/99%
+sensitivity, BER or cumulative loss below 0.1 dB. The conditional AWGN evidence
+below predates these interpolation changes and does not qualify them.
+
+Exact manifests, timing logs, arithmetic experiment and retained failures live in
+`.agent-work/artifacts/sched-practical-20261013/EFFICIENCY-FOLLOWUP.md`. Dense/tiled
+correlation, shared rolling-bank moment caches, reduced-precision contraction,
+broader timing/high-DSSS/multiple-key performance, hardware, ARM and long-duration
+qualification remain outstanding. The continuous reference's different waveform,
+energy and bank prevent presenting its timing as an attainable scheduled speedup.
+This manual checkpoint does not restore universal continuous-receiver parity.
+The complete work traces provide counts with fine timers disabled; whole-Live
+stage CPU fractions remain unmeasured. Do not generalize the separately measured
+single-bank frontend fraction into a whole-Live Amdahl bound.
+
+The conditional exact-template AWGN guard instrument used 40,000 paired draws
+at each of three raw observation dimensions (512, 8,192 and 196,608), rank 128
+and threshold 30. Decisions agreed over the sampled SNR grid; observed additional
+required signal-energy/noise was 0 dB **in that model**. Monte Carlo 95% halfwidths
+on absolute 90%/99% crossings were 0.017–0.045 dB. Zero discordance yields a
+pointwise one-sided 95% event-probability upper bound of 7.49e-5 per 40,000 draws;
+the same draws across SNR points are not additional independent trials. This is
+not PCM, BER, full-bank sensitivity or a measured rare false-acceptance rate.
+Cumulative loss below 0.1 dB against the original raw receiver remains unqualified.
+
+The current packed complex path retains raw input through null intervals; it has
+no complete capture-omission certificate. Its planner uses a full-input CPU and
+recording allowance, not a nominal `G/M` discount. Timing-position fields are
+engineering allowances for a representative keyed epoch and complete cohort,
+not executed counters or measured throughput. Full-bank probability and GPU time
+remain unavailable. This is independent of successful signal decoding.
 
 Recording may be skipped only for an interval proved null for every admitted
 key, epoch, timing cell and clock hypothesis, including the future rolling bank
@@ -357,7 +713,10 @@ An invalid or nonfinite mapping revokes the certificate instead of granting a
 null skip. Current-cohort proofs also stop before the next UTC admission fence.
 
 Completion still requires fully scored failed source-symbol durations covering
-the existing six-second minimum. Null wall time does not count; this is not a
+the existing six-second minimum. Packed reception scores actual subsequent
+calendar slots; waiting cover and null gaps are not symbol alternatives and add
+no absence duration. Thus physical completion may require many wall seconds
+beyond the final payload even for short source symbols. Null wall time does not count; this is not a
 sum of only retained flat FFT observation durations. Scheduled nulls, EOF, flushes,
 cancellation and decoding success do not provide that evidence. Every newly
 accepted bit reaches the next progress poll in the same pending reception.
@@ -372,12 +731,36 @@ duration, and a fixture ending at only the nominal endpoint is incomplete.
 
 Clock-cell uncertainty continues growing from the original timing reference;
 new bits and rolling epochs do not restart its budget. The current grid provides
-finite support, not indefinite clock tracking. On an admitted stream, a failed
+finite support, not indefinite clock tracking. On an admitted amplitude stream, a failed
 standalone full-symbol test cannot classify absence if fewer than 64 whole FFT
 observations remain or any quarter is unobserved. It instead reports
 `scheduled amplitude timing coverage exhausted` before changing pending,
 missing-bit or completion state. Strong evidence retains the existing admission
 statistic. Adaptive reconstruction of an aging clock grid remains outstanding.
+
+## Practical diagnostics
+
+Use `--verbose` with the full GUI, optionally adding `--verbose-file NEW-PATH`.
+The asynchronous JSONL trace includes GUI inspection/advice completion or
+failure, receiver profile selection and rejection, exact packed geometry,
+workspace admission/retirement, accepted-bit publication and physical-end
+coordinates. `receiver_selection.timing_positions_allowance` is a modeled work
+allowance; it is not an executed-correlation count. `packed_complex_constructed`
+records actual FFT geometry, carrier/clock counts, resolved arithmetic and
+workspace use. `split_complex_constructed` records the physical aperture,
+required carrier/clock spacing, coverage-qualified flags, refined lane count,
+phase/timing spacing, mapped-direct backend and actual FP64 execution. Progress/end events record accepted counts and failed source
+support without logging bits, PCM or key material.
+
+For a bounded physical-loopback run, add `--debug --debug-bits 0
+--debug-timeout 300` and a synthetic named key. This drives the ordinary GUI
+through hardware duplex audio, emits JSON diagnostics to stderr and closes on
+error, completion or deadline; it does not enable Simulation. A large multiplier
+may outlast this bounded watchdog and must not be called a completed reception.
+Keep stderr with the trace: complete trace evidence requires the successful
+footer and external finalization record described in [clock timing](clock-sync.md).
+No default, example or preparation check substitutes for real audio/long-duration
+qualification.
 
 ## Compact storage and workspace accounting
 
@@ -411,6 +794,11 @@ This storage correction changes no waveform, cryptographic address, arithmetic,
 search geometry or detection threshold.
 
 ## Bounded execution evidence
+
+The following preceding amplitude-path measurements remain diagnostic references.
+They do not measure the newly added mapped complex path or its finer physical
+frequency bank. New complete-bank CPU/sensitivity evidence must identify the
+actual selected backend before comparison.
 
 The final local Live probes exercise the complete rolling bank with two
 synthetic keys (one wrong), one encrypted raw bit, an eight-second source symbol,

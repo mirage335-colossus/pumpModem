@@ -423,13 +423,22 @@ void scheduled_timing_and_exposure() {
 }
 
 void scheduled_disabled_decoder() {
-    for(const auto strategy:{modem::ReceiverStrategy::existing_only,modem::ReceiverStrategy::complex_only}) {
+    // Split complex is now supported: a quiet epoch alone is not an error.
+    // Preserve immediate forced-policy rejection using a genuinely unsupported
+    // physical-aperture grid, rather than the old blanket split prohibition.
+    for(const auto strategy:{modem::ReceiverStrategy::existing_only,modem::ReceiverStrategy::complex_only})
+    for(const bool unsupported:{false,true}) {
         Playback playback;playback.emit_capture_once=true;
         auto value=slow_settings();value.transfer.timestamp=0;
         auto& config=value.transfer.modem;
         config.sample_rate=1000;config.bandwidth_hz=40;config.carrier_hz=250;
         config.integration_seconds=16;config.data_key=value.transfer.key;
         config.receiver_strategy=strategy;
+        if(unsupported) {
+            modem::OscillatorSearchConfig oscillator;
+            oscillator.lf={100,0};oscillator.rf={100,0};oscillator.margin=3;
+            config.oscillator_search=oscillator;
+        }
         auto plan=std::make_shared<modem::SchedHopPlan>();plan->time_multiplier=1000;
         config.scheduled_hopping=plan;
         const modem::SchedHopSchedule schedule(*plan,*value.transfer.key);
@@ -441,15 +450,23 @@ void scheduled_disabled_decoder() {
         }
         check(quiet<epoch+800,"disabled-decoder fixture found no entirely quiet UTC epoch");
         live::Session session([&]{return static_cast<double>(quiet)+.125;});session.start(value);
-        await([&]{return !session.snapshot().error.empty();},
-              "quiet scheduled epoch hid a disabled decoder behind healthy listening");
-        const auto state=session.snapshot();
-        const auto reason=strategy==modem::ReceiverStrategy::complex_only?
-            "Complex only prohibits amplitude decoding":"new decoders are disabled";
-        check(state.error.find(reason)!=std::string::npos && state.receiver_instances==0 &&
-              (state.receiver_health.receiver_reset || state.receiver_health.search_limited),
-              "disabled scheduled decoder lacked explicit immediate unavailability");
-        check(state.signals.empty() && state.received.empty(),"disabled decoder invented physical evidence");
+        if(unsupported) {
+            await([&]{return !session.snapshot().error.empty();},
+                  "quiet scheduled epoch hid an unsupported forced decoder behind healthy listening");
+            const auto state=session.snapshot();
+            check(state.error.find("physical-aperture oscillator grid exceeds")!=std::string::npos &&
+                  state.receiver_instances==0 &&
+                  (state.receiver_health.receiver_reset || state.receiver_health.search_limited),
+                  "unsupported forced scheduled decoder lacked explicit immediate unavailability");
+            check(state.signals.empty() && state.received.empty(),"disabled decoder invented physical evidence");
+        } else {
+            await([&]{return session.snapshot().receiver_bank_builds>0;},
+                  "supported quiet scheduled epoch was not processed");
+            const auto state=session.snapshot();
+            check(state.error.empty() && !state.receiver_health.failed() && state.receiver_instances==0,
+                  "supported split-complex policy was rejected merely because its current epoch is quiet");
+            check(state.signals.empty() && state.received.empty(),"quiet supported decoder invented physical evidence");
+        }
         session.stop();
     }
 }

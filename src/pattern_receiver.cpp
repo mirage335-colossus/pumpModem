@@ -3,6 +3,7 @@
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_correlator.hpp"
 #include "datapump/pattern_search.hpp"
+#include "datapump/scheduled_complex_search.hpp"
 #include "datapump/receiver_strategy.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "search_parallel.hpp"
@@ -10,6 +11,7 @@
 #include "pattern_fft_window.hpp"
 #include "pattern_correlator_batch.hpp"
 #include "pattern_drift.hpp"
+#include "audio_trace.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -55,6 +57,20 @@ struct PatternReceiver::Impl {
     // Immutable geometry: never rebuild pulse validation/calendar guards in
     // the phase-bank binary searches or per-track address comparisons.
     std::optional<FhssSymbolCalendar> symbol_calendar;
+    std::unique_ptr<ScheduledSymbolCalendar> packed_calendar;
+    std::vector<std::uint64_t> packed_phases;
+    // A broad symbol-zero prediction is not a qualified UTC phase map. Keep
+    // its admission bound private so diagnostics never imply GPS qualification.
+    std::optional<PatternStartWindow> acquisition_window;
+    bool broad_start_window=false;
+    long double packed_latest_start_samples=std::numeric_limits<long double>::infinity();
+    long double packed_rate_displacement=0;
+    std::size_t packed_ring_extra=0;
+    bool calendar_symbols() const {return symbol_calendar.has_value() || static_cast<bool>(packed_calendar);}
+    std::uint64_t calendar_rank(std::uint64_t phase) const {
+        return packed_calendar?packed_calendar->first_rank(config.stream_epoch,phase):
+            symbol_calendar->first_rank(config.stream_epoch,phase);
+    }
     std::unique_ptr<PatternCorrelator> fallback;
     bool frequency_axis_selected=false;
     std::size_t budget=0,fixed_reservation=0,arithmetic_reservation=0,configured_bit_limit=0,bin_samples=0,length=0,transform=0,hop=0;
@@ -135,6 +151,9 @@ struct PatternReceiver::Impl {
         std::vector<double> frequency_scores;
         std::size_t confirmed=0,gap_slots=0;
         std::uint64_t confirmed_end=0;
+        // Calendar continuation is predicted from the last accepted start.
+        // Failed slots/nulls never reset accumulated timing displacement.
+        std::uint64_t anchor_start=0,anchor_index=0;
         long double absent_samples=0;
         std::size_t frequency=0;
         bool admitted=false,established=false,pending_gap=false;
@@ -145,6 +164,7 @@ struct PatternReceiver::Impl {
     Impl(Config c,std::size_t bytes,PatternSearch options)
         :config(c),search(std::move(options)),code(c,c.stream_epoch),budget(bytes) {
         validate(c);
+        if(packed_scheduled_symbols(c))packed_calendar=std::make_unique<ScheduledSymbolCalendar>(c);
         if(deferred_symbols(c))symbol_calendar.emplace(*c.fake_hopping,c.sample_rate,
             pattern_pulse_padding_samples(c),code.symbol_samples());
         shaped=pattern_pulse_enabled(c);
@@ -170,6 +190,18 @@ struct PatternReceiver::Impl {
             if(wrapper>=bytes)throw Error("pattern workspace cannot retain amplitude control state");
             fallback=std::make_unique<PatternCorrelator>(config,search,bytes-wrapper,
                 PatternCorrelatorOptions{.amplitude_only=true});
+            return;
+        }
+        if(scheduled_bursts(config) && !packed_scheduled_symbols(config)) {
+            double correction=0;
+            if(config.oscillator_search && search.admitted_clock_half_width_ppm &&
+               *search.admitted_clock_half_width_ppm>oscillator_pattern_search(config).requested_clock_half_width_ppm)
+                correction=utc_transmit_rate_limit(config);
+            auto prepared=scheduled_complex_search(config,search,correction);
+            search=std::move(prepared.search);
+            const auto wrapper=wrapper_bytes();
+            if(wrapper>=bytes)throw Error("pattern workspace cannot retain split-complex control state");
+            fallback=std::make_unique<PatternCorrelator>(config,search,bytes-wrapper);
             return;
         }
         if(strategy.backend==ReceiverBackend::frequency_axis) {
@@ -255,7 +287,7 @@ struct PatternReceiver::Impl {
             search.initial_stream_symbols=std::max<std::size_t>(search.initial_stream_symbols,
                 symbol_calendar->lower_bound(c.stream_epoch,0,c.sample_rate));
         }
-        if(search.compact_clock_search && !search.couple_clock_to_carrier && !deferred_symbols(c)) {
+        if(search.compact_clock_search && !search.couple_clock_to_carrier && !calendar_symbols()) {
             const auto wrapper=wrapper_bytes();
             if(wrapper>=bytes)throw Error("pattern workspace cannot retain correlator control state");
             fallback=std::make_unique<PatternCorrelator>(config,search,bytes-wrapper);
@@ -268,18 +300,79 @@ struct PatternReceiver::Impl {
         active_stream_phase=c.stream_phase_samples;
         phase_step=canonical_phase_step(c);
         phase_upper=search.search_stream_phases?
-            (std::min(symbols,static_cast<std::uint64_t>(c.sample_rate))-1)/phase_step*phase_step:c.stream_phase_samples;
-        if(search.qualified_start_window) {
+            (canonical_phase_extent(c)-1)/phase_step*phase_step:c.stream_phase_samples;
+        if(packed_calendar && search.search_stream_phases) {
+            const auto phases=packed_calendar->first_rank(symbol_schedule_detail::add(c.stream_epoch,1),0)-
+                packed_calendar->first_rank(c.stream_epoch,0);
+            if(phases>bytes/sizeof(std::uint64_t))throw Error("packed complex phases exceed DSP workspace");
+            packed_phases.reserve(static_cast<std::size_t>(phases));
+            packed_calendar->for_each_phase_in_epoch(c.stream_epoch,[&](std::uint64_t phase) {
+                if(packed_phases.size()>=bytes/sizeof(std::uint64_t))
+                    throw Error("packed complex phases exceed DSP workspace");
+                packed_phases.push_back(phase);
+            });
+            if(packed_phases.empty())throw Error("no packed scheduled payload start in this UTC epoch");
+            phase_upper=packed_phases.back();
+        }
+        if(packed_calendar) {
+            auto radius=search.admitted_clock_half_width_ppm.value_or(0.);
+            for(std::size_t f=0;f<search.frequency_offsets_hz.size();++f)
+                radius=std::max(radius,static_cast<double>(std::abs(clock_ratio(f)-1)*1e6L));
+            if(!std::isfinite(radius) || radius>=1e6)
+                throw Error("packed complex clock interval is not finite");
+            const auto error=static_cast<long double>(radius)*1e-6L;
+            // Both the selected lane and true declared rate are in this
+            // interval. This bound does not assume a finer joint-cell proof.
+            packed_rate_displacement=error==0?0:std::nextafter(1/(1-error)-1/(1+error),
+                std::numeric_limits<long double>::infinity());
+        }
+        acquisition_window=search.qualified_start_window;
+        if(packed_calendar && !acquisition_window && search.start_offset_seconds) {
+            broad_start_window=true;
+            acquisition_window=PatternStartWindow{
+                static_cast<long double>(*search.start_offset_seconds)*c.sample_rate,1,
+                static_cast<long double>(search.start_uncertainty_seconds)*c.sample_rate};
+        }
+        if(acquisition_window) {
             // Keep the original short FFT phase groups and retirement grid.
             // Qualified work selection never changes their coordinates.
-            fft_workload->timing_window=PatternFftWindowStatus::unsupported_geometry;
+            auto status=PatternFftWindowStatus::unsupported_geometry;
             if((!long_symbol || frequency_axis_selected) && (c.scramble||c.dsss) && c.spreading_mode==SpreadingMode::pattern &&
-               !search.hypotheses.empty() && !search.couple_clock_to_carrier && search.start_offset_seconds) {
-                fft_workload->timing_window=detail::pattern_fft_window_finite(*search.qualified_start_window,phase_upper)?
+               (!search.hypotheses.empty() || broad_start_window) && !search.couple_clock_to_carrier && search.start_offset_seconds) {
+                status=detail::pattern_fft_window_finite(*acquisition_window,broad_start_window?0:phase_upper)?
                     PatternFftWindowStatus::active:PatternFftWindowStatus::invalid_numerics;
             }
-            if(fft_workload->timing_window!=PatternFftWindowStatus::active)search.qualified_start_window.reset();
-            else fft_workload->restricted_timing_active=search.restricted_timing_search;
+            if(!broad_start_window)fft_workload->timing_window=status;
+            if(status!=PatternFftWindowStatus::active) {
+                acquisition_window.reset();search.qualified_start_window.reset();
+            } else fft_workload->restricted_timing_active=search.restricted_timing_search;
+        }
+        if(packed_calendar && !acquisition_window && search.start_offset_seconds) {
+            // Invalid/unsupported tight timing returns to the original broad
+            // admission policy, never to an unbounded calendar acquisition.
+            broad_start_window=true;
+            const PatternStartWindow broad{
+                static_cast<long double>(*search.start_offset_seconds)*c.sample_rate,1,
+                static_cast<long double>(search.start_uncertainty_seconds)*c.sample_rate};
+            if(detail::pattern_fft_window_finite(broad,0)) {
+                acquisition_window=broad;
+                fft_workload->restricted_timing_active=search.restricted_timing_search;
+            }
+        }
+        if(packed_calendar && acquisition_window) {
+            // Calendar deltas need not be monotone across canonical phases:
+            // one initial alternative may cross a long null while another
+            // stays inside its active group. Cache the exact union endpoint.
+            packed_latest_start_samples=-std::numeric_limits<long double>::infinity();
+            const auto include=[&](std::uint64_t phase) {
+                const auto geometry=window_geometry(search.initial_stream_symbols-1,{phase,phase});
+                packed_latest_start_samples=std::max(packed_latest_start_samples,
+                    acquisition_window->epoch_origin_samples+acquisition_window->phase_scale*geometry.upper+
+                    acquisition_window->half_width_samples+
+                    static_cast<long double>(geometry.samples)*geometry.index/timing_minimum_rate);
+            };
+            if(search.search_stream_phases)for(const auto phase:packed_phases)include(phase);
+            else include(c.stream_phase_samples);
         }
         // Chip and symbol boundaries must fall on bin boundaries. Rounding a
         // symbol to whole bins would accumulate timing drift and count edges
@@ -336,9 +429,20 @@ struct PatternReceiver::Impl {
         required_tracking_reference=variable_clock || transform<2*length;
         // Transform and baseband history allocations are checked before any
         // allocation. The RAM dropdown is a ceiling, not an allocation target.
+        if(packed_calendar) {
+            const auto failed=(6ULL*c.sample_rate+symbols-1)/symbols;
+            const auto groups=2+(failed+packed_calendar->slots_per_group()-1)/packed_calendar->slots_per_group();
+            const auto source=symbol_schedule_detail::multiply(groups,
+                symbol_schedule_detail::multiply(2ULL*c.sample_rate/5,c.scheduled_hopping->group_hops));
+            const auto span=scheduled_physical_span_samples(c,source);
+            const auto extra=std::ceil(2*static_cast<long double>(span)*packed_rate_displacement/bin_samples)+8;
+            if(!std::isfinite(extra) || extra>std::numeric_limits<std::size_t>::max()-4*length-2*hop)
+                throw Error("packed complex continuation coverage exceeds address space");
+            packed_ring_extra=static_cast<std::size_t>(extra);
+        }
         const auto arrays=5+2*search.frequency_offsets_hz.size();
         long double required=sizeof(Impl)+sizeof(PatternFftWork)+sizeof(TimingComponents)+static_cast<long double>(transform)*sizeof(Complex)*arrays+
-            static_cast<long double>(4*length+2*hop)*sizeof(Complex)+
+            static_cast<long double>(4*length+2*hop+packed_ring_extra)*sizeof(Complex)+
             (required_tracking_reference?2.L*length*sizeof(Complex):0.L)+
             static_cast<long double>(transform+1)*sizeof(double)+
             static_cast<long double>(2*search.candidate_limit)*sizeof(PatternEvidence)+
@@ -349,7 +453,7 @@ struct PatternReceiver::Impl {
             static_cast<long double>(search.frequency_offsets_hz.size())*sizeof(decltype(template_square)::value_type)+
             static_cast<long double>(search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double)+
             static_cast<long double>(search.hypotheses.capacity())*sizeof(PatternFrequencyRateHypothesis)+
-            4096*sizeof(Complex)+code.working_bytes()+sizeof(PatternReceiver);
+            4096*sizeof(Complex)+code.working_bytes()+sizeof(PatternReceiver)+packed_phases.capacity()*sizeof(std::uint64_t)+(packed_calendar?packed_calendar->working_bytes():0);
         if(drift_sections>1)required+=static_cast<long double>(hop)*
             (sizeof(detail::FftDriftAccumulator)+sizeof(detail::FftSearchScore));
         if(differential_window)required+=static_cast<long double>(hop)*sizeof(detail::DifferentialAccumulator);
@@ -390,6 +494,8 @@ struct PatternReceiver::Impl {
                 streamed_templates=true;required=without_rows;
             }
         }
+        if(required>bytes && packed_calendar)
+            throw Error("complete packed complex timing/clock coverage exceeds DSP workspace");
         if(required>bytes && search.start_offset_seconds) {
             if(permit_local_fallback && search.couple_clock_to_carrier) {
                 search.frequency_offsets_hz=local_frequency_offsets(c);
@@ -419,7 +525,7 @@ struct PatternReceiver::Impl {
         // allocation/copy in flight can each retain an independent bit vector.
         search.bit_limit=std::min(search.bit_limit,(bytes-fixed_reservation)/(2*search.track_limit+2));
         if(!search.bit_limit)throw Error("pattern workspace cannot retain bit candidates");
-        ring.resize(4*length+2*hop);
+        ring.resize(4*length+2*hop+packed_ring_extra);
         if(!search.prefer_streamed_templates || !search.release_idle_fft_scratch)ensure_execution_scratch();
         if(drift_sections>1){drift_scratch.resize(hop);drift_scores.resize(hop);}
         if(differential_window)differential_scratch.resize(hop);
@@ -434,7 +540,10 @@ struct PatternReceiver::Impl {
         // bank every hop. Cache its exact transforms only in spare workspace;
         // payload capacity and search coverage retain their original limits.
         const auto frequencies=search.frequency_offsets_hz.size();
-        const auto cache_count=search.initial_stream_symbols+(symbol_calendar&&search.search_stream_phases?1:0);
+        const auto rank_span=packed_calendar && search.search_stream_phases?
+            calendar_rank(phase_upper)-calendar_rank(packed_phases.front()):
+            symbol_calendar && search.search_stream_phases?1:0;
+        const auto cache_count=symbol_schedule_detail::add(search.initial_stream_symbols,rank_span);
         const long double cache_bytes=static_cast<long double>(cache_count)*
             (sizeof(CachedTemplates)+static_cast<long double>(frequencies)*
              (sizeof(decltype(templates)::value_type)+sizeof(decltype(template_energy)::value_type)+
@@ -451,7 +560,7 @@ struct PatternReceiver::Impl {
         // changing phase cannot change an address proven equal over its range.
         // Do not displace the separately measured native FP32 execution path
         // with a persistent FP64 transform cache merely because it fits.
-        const bool deferred_cache=symbol_calendar && search.reuse_deferred_templates && cache_bytes<=8*1024*1024 &&
+        const bool deferred_cache=calendar_symbols() && search.reuse_deferred_templates && cache_bytes<=8*1024*1024 &&
             acquisition_arithmetic()!=SearchArithmetic::fp32;
         if((deferred_cache || (!streamed_templates && initial_phases_equivalent && symbols<=256)) &&
            search.initial_stream_symbols>1 && cache_bytes<=bytes-fixed_reservation) {
@@ -477,7 +586,34 @@ struct PatternReceiver::Impl {
             }
             if((deferred_cache && cache_reservation>8*1024*1024) || !cache_fits(bytes,0))drop_template_cache();
         }
-        stream_phase(search.search_stream_phases?0:c.stream_phase_samples);prepare_templates(0,{});
+        stream_phase(search.search_stream_phases?(packed_calendar?packed_phases.front():0):c.stream_phase_samples);prepare_templates(0,{});
+        if(packed_calendar)audio::trace::record("packed_complex_constructed",[&](auto& f) {
+            f.add("epoch",config.stream_epoch);f.add("sample_rate",config.sample_rate);
+            f.add("chip_samples",code.chip_samples());f.add("symbol_samples",code.symbol_samples());
+            f.add("bin_samples",bin_samples);f.add("transform_bins",transform);f.add("hop_bins",hop);
+            f.add("phase_count",search.search_stream_phases?packed_phases.size():1);
+            f.add("frequency_rate_pairs",templates.size());
+            std::vector<double> frequencies=search.frequency_offsets_hz,rates;rates.reserve(templates.size());
+            for(std::size_t i=0;i<templates.size();++i)rates.push_back(clock_ratio(i));
+            std::sort(frequencies.begin(),frequencies.end());std::sort(rates.begin(),rates.end());
+            f.add("frequency_count",std::unique(frequencies.begin(),frequencies.end())-frequencies.begin());
+            f.add("clock_count",std::unique(rates.begin(),rates.end())-rates.begin());
+            f.add("minimum_rate",timing_minimum_rate);
+            f.add("maximum_rate",timing_maximum_rate);f.add("initial_symbols",search.initial_stream_symbols);
+            f.add("restricted_timing",fft_workload->restricted_timing_active);
+            f.add("arrival_window_source",acquisition_window?
+                (broad_start_window?"broad symbol-zero prediction":"qualified UTC phase map"):"unbounded diagnostic fallback");
+            if(acquisition_window)f.add("arrival_half_width_samples",acquisition_window->half_width_samples);
+            f.add("packed_slots_per_group",packed_calendar->slots_per_group());
+            f.add("retained_ring_bins",ring.size());f.add("clock_displacement_per_sample",packed_rate_displacement);
+            f.add("arithmetic_policy",static_cast<unsigned>(config.search_arithmetic));
+            f.add("resolved_search_operands",acquisition_arithmetic()==SearchArithmetic::fp32?"FP32":"FP64");
+            f.add("fft_backend",acquisition_arithmetic()==SearchArithmetic::fp32?"native FP32 or bounded FFT":"FP64 FFT");
+            f.add("score_precision","FP64/wide original evidence");
+            f.add("exact_template_cache_rows",cached_templates.size());f.add("streamed_templates",streamed_templates);
+            f.add("working_bytes",working_bytes());f.add("reserved_bytes",fixed_reservation+cache_reservation);
+            f.add("workspace_limit",budget);f.add("raw_capture_fallback",true);
+        });
     }
     void stream_phase(std::uint64_t phase) {
         if(active_stream_phase==phase)return;
@@ -488,7 +624,9 @@ struct PatternReceiver::Impl {
     struct PhaseGroups {
         std::array<PhaseGroup,3> small{};
         std::uint64_t first=0,step=0;
+        std::span<const std::uint64_t> exact;
         PhaseGroup operator[](std::size_t index) const {
+            if(!exact.empty())return {exact[index],exact[index]};
             if(step){const auto phase=first+index*step;return {phase,phase};}
             return small.at(index);
         }
@@ -496,6 +634,12 @@ struct PatternReceiver::Impl {
     PhaseGroups phase_groups(std::uint64_t index,std::uint64_t lower,std::uint64_t upper,
                                         std::size_t& count)const {
         PhaseGroups groups;count=0;
+        if(packed_calendar) {
+            if(!search.search_stream_phases) {groups.small[0]={lower,upper};count=1;return groups;}
+            const auto first=std::lower_bound(packed_phases.begin(),packed_phases.end(),lower);
+            const auto last=std::upper_bound(first,packed_phases.end(),upper);
+            groups.exact=std::span<const std::uint64_t>(first,last);count=groups.exact.size();return groups;
+        }
         if(config.fake_hopping && config.fake_hopping->matched_gaps && lower<=upper) {
             // Same cipher address need not mean the same UTC pulse omission.
             // Retain each already-admitted phase point without a large array.
@@ -528,11 +672,17 @@ struct PatternReceiver::Impl {
         return groups;
     }
     std::uint64_t source_start(std::uint64_t index,std::uint64_t phase)const {
+        if(packed_calendar) {
+            const auto physical=packed_calendar->physical_slot(symbol_schedule_detail::add(calendar_rank(phase),index));
+            const auto anchor=symbol_schedule_detail::add(symbol_schedule_detail::multiply(config.stream_epoch,config.sample_rate),phase);
+            if(physical<anchor)throw Error("packed complex symbol precedes its anchor");
+            return physical-anchor;
+        }
         return symbol_calendar?symbol_calendar->offset(config.stream_epoch,phase,index):
             symbol_schedule_detail::multiply(index,code.symbol_samples());
     }
     SymbolStreamAddress stream_address(std::uint64_t index,std::uint64_t phase)const {
-        if(!symbol_calendar)return symbol_stream_address(config.stream_epoch,phase,index,
+        if(!calendar_symbols())return symbol_stream_address(config.stream_epoch,phase,index,
             code.symbol_samples(),config.sample_rate);
         const auto total=symbol_schedule_detail::add(source_start(index,phase),phase);
         const auto sample=static_cast<std::uint32_t>(total%config.sample_rate);
@@ -540,26 +690,29 @@ struct PatternReceiver::Impl {
             sample/code.symbol_samples(),sample};
     }
     CachedTemplates& template_bank(std::uint64_t index) {
-        const auto slot=index+(symbol_calendar&&search.search_stream_phases?
-            symbol_calendar->first_rank(config.stream_epoch,active_stream_phase)-
-            symbol_calendar->first_rank(config.stream_epoch,0):0);
+        const auto slot=index+(calendar_symbols()&&search.search_stream_phases?
+            calendar_rank(active_stream_phase)-calendar_rank(packed_calendar?packed_phases.front():0):0);
         return cached_templates.at(static_cast<std::size_t>(slot));
     }
     std::uint64_t advance_bins(std::uint64_t index,std::uint64_t phase,std::size_t frequency)const {
-        if(!deferred_symbols(config))return symbol_bins(frequency);
+        if(!calendar_symbols())return symbol_bins(frequency);
         const auto delta=source_start(index+1,phase)-source_start(index,phase);
         return static_cast<std::uint64_t>(std::llround(static_cast<long double>(delta)/clock_ratio(frequency)/bin_samples));
     }
     struct WindowGeometry {std::uint64_t samples,index,lower,upper,step;};
     WindowGeometry window_geometry(std::uint64_t index,PhaseGroup group)const {
-        if(!deferred_symbols(config))return {code.symbol_samples(),index,group.lower,
+        if(!calendar_symbols())return {code.symbol_samples(),index,group.lower,
             search.search_stream_phases?canonical_phase_cell_upper(config,group.upper):group.upper,
             search.search_stream_phases?1U:phase_step};
         // Same actual symbol address implies the same canonical slot rank and
         // hence the same preceding/future schedule. No gap is scored as data.
         const auto first=source_start(0,group.lower),delta=source_start(index,group.lower)-first;
         const auto phase=first+group.lower;
-        return {std::max<std::uint64_t>(1,delta),delta?1U:0U,phase,phase,1};
+        // Broad start_offset predicts symbol zero independently of the private
+        // canonical phase; later alternatives advance by the exact keyed delta.
+        // Qualified maps instead date the UTC epoch and explicitly scale phase.
+        return {std::max<std::uint64_t>(1,delta),delta?1U:0U,
+            broad_start_window?0:phase,broad_start_window?0:phase,1};
     }
     SearchArithmetic acquisition_arithmetic()const {
         if(fp32_exact_fallback)return SearchArithmetic::fp64;
@@ -864,11 +1017,39 @@ struct PatternReceiver::Impl {
         return -std::log(search.false_alarm_probability)+2*std::log(t)+
             std::log(2.*static_cast<double>(templates.size()*search.initial_stream_symbols));
     }
-    double continuation_penalty()const {
-        // Expanded banks compare both bits, five timing refinements and all
-        // carrier/clock alternatives. Do not inherit the old five-bin bound.
-        return std::log(((search.expand_clock_search && templates.size()>5) || !search.hypotheses.empty())?
+    double continuation_penalty(std::uint64_t radius=2)const {
+        // Every retained timing refinement compares both independent bits.
+        // Calendar gaps may need more than the ordinary five starts; charge
+        // those alternatives rather than retaining the former five-bin bound.
+        if(radius==2)return std::log((packed_calendar || (search.expand_clock_search && templates.size()>5) || !search.hypotheses.empty())?
             10.*static_cast<double>(templates.size()):10.);
+        const auto timing=2.L*(2.L*radius+1);
+        return static_cast<double>(std::log((packed_calendar || (search.expand_clock_search && templates.size()>5) || !search.hypotheses.empty())?
+            timing*templates.size():timing));
+    }
+    std::uint64_t track_radius(const Track& track) const {
+        if(!packed_calendar)return 2;
+        const auto distance=source_start(track.index,track.phase_lower)-source_start(track.anchor_index,track.phase_lower);
+        const auto radius=2+std::ceil(static_cast<long double>(distance)*packed_rate_displacement/bin_samples);
+        if(!std::isfinite(radius) || radius>std::numeric_limits<std::uint64_t>::max()/2 ||
+           radius>(ring.size()-std::min(ring.size(),length))/2)
+            throw Error("packed complex continuation timing interval exceeds retained workspace");
+        return static_cast<std::uint64_t>(radius);
+    }
+    std::uint64_t track_start(const Track& track,std::uint64_t index) const {
+        if(!packed_calendar)return track.next+advance_bins(track.index,track.phase_lower,track.frequency);
+        const auto delta=source_start(index,track.phase_lower)-source_start(track.anchor_index,track.phase_lower);
+        const auto offset=std::round(static_cast<long double>(delta)/clock_ratio(track.frequency)/bin_samples);
+        if(!std::isfinite(offset) || offset>std::numeric_limits<std::uint64_t>::max()-track.anchor_start)
+            throw Error("packed complex continuation coordinate would overflow");
+        return track.anchor_start+static_cast<std::uint64_t>(offset);
+    }
+    void advance_track(Track& track,std::optional<std::uint64_t> accepted={}) {
+        if(packed_calendar) {
+            if(accepted){track.anchor_start=*accepted;track.anchor_index=track.index;}
+            track.next=track_start(track,symbol_schedule_detail::add(track.index,1));
+        } else track.next=accepted.value_or(track.next)+advance_bins(track.index,track.phase_lower,track.frequency);
+        track.index=symbol_schedule_detail::add(track.index,1);
     }
     void remember(PatternEvidence item) {
         if(item.score<search.retain_score)return;
@@ -1132,11 +1313,20 @@ struct PatternReceiver::Impl {
             event.bits.assign(track.burst.bits.begin(),track.burst.bits.begin()+static_cast<std::ptrdiff_t>(count));
             event.complete=complete && count==track.confirmed;
             event.end_sample=count==track.confirmed?track.confirmed_end:
-                !deferred_symbols(config)?event.first_sample+count*(search.hypotheses.empty()?code.symbol_samples():symbol_bins(track.frequency)*bin_samples):
+                !calendar_symbols()?event.first_sample+count*(search.hypotheses.empty()?code.symbol_samples():symbol_bins(track.frequency)*bin_samples):
                 event.first_sample+static_cast<std::uint64_t>(std::llround((static_cast<long double>(source_start(event.first_stream_symbol+count-1,track.phase_lower))-
                     source_start(event.first_stream_symbol,track.phase_lower)+code.symbol_samples())/clock_ratio(track.frequency)));
             event.score=track.confirmed_score;
             event.support_samples=track.confirmed_support;
+            if(packed_calendar)audio::trace::record(event.complete?"packed_complex_physical_end":"packed_complex_progress",[&](auto& f) {
+                f.add("epoch",config.stream_epoch);f.add("sample_rate",config.sample_rate);
+                f.add("observed_input_samples",sample);f.add("first_sample",event.first_sample);f.add("end_sample",event.end_sample);
+                f.add("first_stream_symbol",event.first_stream_symbol);f.add("accepted_count",count);
+                f.add("confirmed_count",track.confirmed);f.add("failed_source_samples",track.absent_samples);
+                f.add("unconfirmed_symbols",track.unconfirmed_symbols);f.add("next_slot_bin",track.next);
+                f.add("next_continuation_radius_bins",track_radius(track));f.add("trials",trials);
+                f.add("score",event.score);f.add("threshold",threshold());f.add("complete",event.complete);
+            });
             room_for_bits(3*event.bits.capacity());latest=event;
             if(count) {
                 if(completed.size()==search.track_limit)completed.erase(completed.begin());
@@ -1145,7 +1335,7 @@ struct PatternReceiver::Impl {
             bursts.push_back(std::move(event));
             track.burst.bits.erase(track.burst.bits.begin(),track.burst.bits.begin()+static_cast<std::ptrdiff_t>(count));
             track.burst.first_stream_symbol+=count;track.burst.first_sample=bursts.back().end_sample;
-            if(count && deferred_symbols(config)) {
+            if(count && calendar_symbols()) {
                 const auto next=track.burst.first_stream_symbol;
                 const auto gap=source_start(next,track.phase_lower)-source_start(next-1,track.phase_lower)-code.symbol_samples();
                 track.burst.first_sample+=static_cast<std::uint64_t>(std::llround(static_cast<long double>(gap)/clock_ratio(track.frequency)));
@@ -1230,29 +1420,52 @@ struct PatternReceiver::Impl {
                          std::uint64_t latest_start=std::numeric_limits<std::uint64_t>::max()) {
         for(auto it=tracks.begin();it!=tracks.end();) {
             cancelled(stop);auto& track=*it;bool ended=false;
-            while(track.next<=latest_start && track.next+length+(final?0:2)<=bins) {
+            while(track.next<=latest_start) {
+                const auto radius=track_radius(track);
+                const auto lookahead=final && !packed_calendar?0:radius;
+                if(track.next>std::numeric_limits<std::uint64_t>::max()-length-lookahead ||
+                   track.next+length+lookahead>bins)break;
                 ensure_execution_scratch();
                 PatternEvidence best;best.score=-1;std::uint64_t chosen=track.next;
                 std::size_t group_count=0;
                 const auto groups=phase_groups(track.index,track.phase_lower,track.phase_upper,group_count);
                 PhaseGroup selected{track.phase_lower,track.phase_upper};
-                const auto low=track.next>2?track.next-2:0;
-                const auto high=std::min(track.next+2,bins-length);
+                std::vector<std::array<double,2>> frequency_scores(templates.size());
+                auto selected_frequency=track.frequency;
+                const auto low=track.next>radius?track.next-radius:0;
+                const auto high=std::min(track.next+radius,bins-length);
                 // Acquisition is finished while tracks run. Its work buffer
                 // fits all five overlapping timing windows, whose exact
                 // carrier Gram phases also repeat across frequency fits.
-                if(sample_fit || differential_window)for(std::size_t i=0;i<length+high-low;++i)work[i]=carrier_square(low+i);
+                const bool wide_carriers=(sample_fit || differential_window) && length+high-low>work.size();
+                if((sample_fit || differential_window) && !wide_carriers)
+                    for(std::size_t i=0;i<length+high-low;++i)work[i]=carrier_square(low+i);
+                auto carrier_start=std::numeric_limits<std::uint64_t>::max();
                 const auto carrier_phases=[&](std::uint64_t start) {
-                    return sample_fit || differential_window?std::span<const Complex>(work).subspan(static_cast<std::size_t>(start-low),length):
-                        std::span<const Complex>{};
+                    if(!sample_fit && !differential_window)return std::span<const Complex>{};
+                    if(!wide_carriers)return std::span<const Complex>(work).subspan(static_cast<std::size_t>(start-low),length);
+                    if(carrier_start!=start) {
+                        for(std::size_t i=0;i<length;++i)reference[i]=carrier_square(start+i);
+                        carrier_start=start;
+                    }
+                    return std::span<const Complex>(reference).first(length);
                 };
                 for(std::size_t g=0;g<group_count;++g) {
                     stream_phase(groups[g].lower);
-                    for(auto start=low;start<=high;++start) {
+                    // A physical null can separate the clock lanes by many
+                    // bins. Evaluate the complete bank in that timing interval;
+                    // frequency-first order reuses each exact template pair.
+                    const auto first_frequency=packed_calendar?0:track.frequency;
+                    const auto end_frequency=packed_calendar?templates.size():track.frequency+1;
+                    for(auto f=first_frequency;f<end_frequency;++f)for(auto start=low;start<=high;++start) {
                         if(bins-start>ring.size())continue;
-                        auto fit=measure(start,track.index,track.frequency,track.burst.end_sample/bin_samples,
+                        auto fit=measure(start,track.index,f,track.burst.end_sample/bin_samples,
                             carrier_phases(start),stop);++trials;
-                        if(fit.score>best.score){best=fit;chosen=start;selected=groups[g];}
+                        if(packed_calendar) {
+                            frequency_scores[f][fit.bit]=std::max(frequency_scores[f][fit.bit],fit.score);
+                            frequency_scores[f][1-fit.bit]=std::max(frequency_scores[f][1-fit.bit],fit.alternative_score);
+                        }
+                        if(fit.score>best.score){best=fit;chosen=start;selected=groups[g];selected_frequency=f;}
                     }
                 }
                 // Acquisition can select a neighboring carrier from one
@@ -1260,11 +1473,11 @@ struct PatternReceiver::Impl {
                 // against the finite carrier bank as reception continues;
                 // frequency is evidence accumulated over the stream, not a
                 // permanent label inherited from its first admitted peak.
-                std::vector<std::array<double,2>> frequency_scores(templates.size());
                 stream_phase(selected.lower);
                 const auto timing_fit=best;
-                auto selected_frequency=track.frequency;
+                const auto chosen_carriers=carrier_phases(chosen);
                 const auto eligible=[&](std::size_t f) {
+                    if(packed_calendar)return false; // Full bank already scored above.
                     return competing_frequencies() || track.established || std::abs(search.frequency_offsets_hz[f]-search.frequency_offsets_hz[track.frequency])<=
                         static_cast<double>(config.sample_rate)/static_cast<double>(code.symbol_samples());
                 };
@@ -1287,7 +1500,7 @@ struct PatternReceiver::Impl {
                                 cancelled(stop);
                                 if(f==track.frequency || !eligible(f))continue;
                                 frequency_scores[f]=measure_streamed(pattern,chosen,track.index,f,
-                                    track.burst.end_sample/bin_samples,carrier_phases(chosen),stop);
+                                    track.burst.end_sample/bin_samples,chosen_carriers,stop);
                             }
                         });
                 }
@@ -1304,10 +1517,10 @@ struct PatternReceiver::Impl {
                             // Original arithmetic decides the strongest carrier
                             // and near ties, independently of transform rounding.
                             if(axis && fit.score>=axis_max-1e-5*std::max(1.,axis_max)) {
-                                fit=measure(chosen,track.index,f,track.burst.end_sample/bin_samples,carrier_phases(chosen),stop);
+                                fit=measure(chosen,track.index,f,track.burst.end_sample/bin_samples,chosen_carriers,stop);
                                 ++fft_workload->frequency_axis_refinements;
                             }
-                        } else fit=measure(chosen,track.index,f,track.burst.end_sample/bin_samples,carrier_phases(chosen),stop);
+                        } else fit=measure(chosen,track.index,f,track.burst.end_sample/bin_samples,chosen_carriers,stop);
                     }
                     if(f!=track.frequency)++trials;
                     frequency_scores[f][fit.bit]=fit.score;
@@ -1362,7 +1575,7 @@ struct PatternReceiver::Impl {
                         track.pending_gap=true;track.total_score=track.confirmed_score;
                         track.total_support=track.confirmed_support;
                         track.pending_score=track.penalty=0;
-                        track.next+=advance_bins(track.index,track.phase_lower,track.frequency);++track.index;
+                        advance_track(track);
                         continue;
                     }
                     publish(track,gap_expired,true);
@@ -1374,7 +1587,7 @@ struct PatternReceiver::Impl {
                     track.admitted=false;track.confirmed=0;track.pending_gap=false;track.gap_slots=0;
                     track.total_score=track.pending_score=track.confirmed_score=track.penalty=0;
                     track.total_support=track.confirmed_support=0;
-                    track.next+=advance_bins(track.index,track.phase_lower,track.frequency);++track.index;
+                    advance_track(track);
                     continue;
                 }
                 if(standalone && !track.pending_gap && track.confirmed<track.burst.bits.size()) {
@@ -1383,7 +1596,7 @@ struct PatternReceiver::Impl {
                     // must not confirm a tail whose joint bound still fails.
                     const auto n=static_cast<double>(track.burst.bits.size()-track.confirmed+1);
                     const auto score=track.pending_score+best.score;
-                    const auto bound=score>n?score-n-n*std::log(score/n)-track.penalty-continuation_penalty():0;
+                    const auto bound=score>n?score-n-n*std::log(score/n)-track.penalty-continuation_penalty(radius):0;
                     if(bound<threshold()) {
                         if(track.admitted) {
                             track.gap_slots=track.burst.bits.size()-track.confirmed;track.burst.bits.resize(track.confirmed);
@@ -1420,10 +1633,10 @@ struct PatternReceiver::Impl {
                     track.gap_slots=track.burst.bits.size()-track.confirmed+1;track.burst.bits.resize(track.confirmed);
                     track.pending_gap=true;track.pending_score=track.penalty=0;track.total_score=track.confirmed_score;
                     track.total_support=track.confirmed_support;
-                    track.next+=advance_bins(track.index,track.phase_lower,track.frequency);++track.index;continue;
+                    advance_track(track);continue;
                 }
                 append_bit(track.burst.bits,static_cast<std::uint8_t>(best.bit));track.burst.end_sample=best.end_sample;
-                track.total_score+=best.score;track.pending_score+=track.established?best.score:chain_score;track.penalty+=continuation_penalty();
+                track.total_score+=best.score;track.pending_score+=track.established?best.score:chain_score;track.penalty+=continuation_penalty(radius);
                 track.total_support+=symbol_support;
                 const auto count=static_cast<double>(track.burst.bits.size()-track.confirmed);
                 // Chernoff bound for the sum of independent Exp(1) null scores,
@@ -1444,8 +1657,8 @@ struct PatternReceiver::Impl {
                     track.confirmed_score=track.total_score;track.pending_score=0;track.penalty=0;
                     track.confirmed_support=track.total_support;
                 }
-                track.next=chosen+advance_bins(track.index,track.phase_lower,track.frequency);
-                ++track.index;
+                advance_track(track,(!packed_calendar || bound>=threshold() || standalone)?
+                    std::optional<std::uint64_t>{chosen}:std::nullopt);
                 publish(track,false);
                 if(gap_expired && track.unconfirmed_symbols){publish(track,true,true);ended=true;break;}
             }
@@ -1499,7 +1712,7 @@ struct PatternReceiver::Impl {
                         (next<item.first_sample && slots<=std::numeric_limits<std::uint64_t>::max()-track.index &&
                          item.stream_symbol==track.index+slots);
                     follows_gap=same_clock && same_index;
-                    if(deferred_symbols(config)) {
+                    if(calendar_symbols()) {
                         const auto predicted=static_cast<long double>(next)+
                             (static_cast<long double>(source_start(item.stream_symbol,track.phase_lower))-
                              source_start(track.index,track.phase_lower))/clock_ratio(track.frequency);
@@ -1543,7 +1756,10 @@ struct PatternReceiver::Impl {
             }
         }
         track.burst.stream_phase_samples=track.phase_lower;
-        track.next=item.first_sample/bin_samples+advance_bins(item.stream_symbol,track.phase_lower,f);track.frequency=f;track.total_score=item.score;track.penalty=std::log(2.);
+        track.anchor_start=item.first_sample/bin_samples;track.anchor_index=item.stream_symbol;track.frequency=f;
+        track.next=packed_calendar?track_start(track,track.index):
+            item.first_sample/bin_samples+advance_bins(item.stream_symbol,track.phase_lower,f);
+        track.total_score=item.score;track.penalty=std::log(2.);
         track.total_support=pattern_symbol_support(static_cast<double>(item.end_sample-item.first_sample),item.score,code.chip_samples());
         track.frequency_scores[f]=item.score;
         track.admitted=track.established=item.score>=threshold();
@@ -1583,7 +1799,7 @@ struct PatternReceiver::Impl {
     detail::PatternFftStartSelection select_starts(std::uint64_t index,PhaseGroup group,std::size_t count)const {
         if(!fft_workload->restricted_timing_active)return {{},0,count,true};
         const auto geometry=window_geometry(index,group);
-        auto selected=detail::pattern_fft_select_starts(*search.qualified_start_window,geometry.samples,geometry.index,
+        auto selected=detail::pattern_fft_select_starts(*acquisition_window,geometry.samples,geometry.index,
             geometry.lower,geometry.upper,geometry.step,component_hop?logical_hop_begin:next_start,
             component_hop?hop:count,bin_samples,timing_minimum_rate,timing_maximum_rate);
         if(!component_hop)return selected;
@@ -1620,7 +1836,7 @@ struct PatternReceiver::Impl {
         if(!acquisition_prepaid){trials+=count-previous;fft_workload->skipped_start_trials+=count-previous;}
     }
     bool fft_batch_may_intersect(std::size_t count)const {
-        if(!search.qualified_start_window)return true;
+        if(!acquisition_window)return true;
         for(std::uint64_t index=0;index<search.initial_stream_symbols;++index) {
             std::size_t group_count=0;
             const auto groups=phase_groups(index,search.search_stream_phases?0:config.stream_phase_samples,phase_upper,group_count);
@@ -1629,7 +1845,7 @@ struct PatternReceiver::Impl {
                     if(select_starts(index,groups[g],count).selected_count)return true;
                 } else {
                     const auto geometry=window_geometry(index,groups[g]);
-                    if(detail::pattern_fft_batch_may_intersect(*search.qualified_start_window,geometry.samples,geometry.index,
+                    if(detail::pattern_fft_batch_may_intersect(*acquisition_window,geometry.samples,geometry.index,
                         geometry.lower,geometry.upper,next_start,count,bin_samples))return true;
                 }
             }
@@ -2196,10 +2412,11 @@ struct PatternReceiver::Impl {
         }
         if(continuation_schedule!=next_start) {
             continuation_schedule=next_start;earliest_unscored_start=next_start;
-            const auto& window=*search.qualified_start_window;
+            const auto& window=*acquisition_window;
             const auto offset=static_cast<long double>(source_start(search.initial_stream_symbols-1,phase_upper))/timing_minimum_rate;
             const auto physical_upper=search.search_stream_phases?canonical_phase_cell_upper(config,phase_upper):phase_upper;
-            const auto upper=window.epoch_origin_samples+window.phase_scale*physical_upper+window.half_width_samples+offset;
+            const auto upper=packed_calendar?packed_latest_start_samples:
+                window.epoch_origin_samples+window.phase_scale*physical_upper+window.half_width_samples+offset;
             const auto magnitude=std::max({1.L,std::abs(window.epoch_origin_samples),
                 window.phase_scale*phase_upper,std::abs(upper),std::abs(offset),
                 static_cast<long double>(next_start)*bin_samples});
@@ -2275,7 +2492,7 @@ struct PatternReceiver::Impl {
                 phase_upper,groups);
             for(std::size_t g=0;g<groups;++g) {
                 const auto geometry=window_geometry(index,phases[g]);
-                const auto selected=detail::pattern_fft_select_starts(*search.qualified_start_window,geometry.samples,geometry.index,
+                const auto selected=detail::pattern_fft_select_starts(*acquisition_window,geometry.samples,geometry.index,
                     geometry.lower,geometry.upper,geometry.step,logical_hop_begin,hop,bin_samples,
                     timing_minimum_rate,timing_maximum_rate);
                 retained+=static_cast<std::uint64_t>(selected.selected_count)*templates.size();
@@ -2575,7 +2792,8 @@ struct PatternReceiver::Impl {
             template_energy.capacity()*sizeof(decltype(template_energy)::value_type)+
             template_square.capacity()*sizeof(decltype(template_square)::value_type)+
             (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double)+
-            search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis);
+            search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis)+
+            packed_phases.capacity()*sizeof(std::uint64_t)+(packed_calendar?packed_calendar->working_bytes():0);
         for(const auto& row:templates)for(const auto& v:row)total+=v.capacity()*sizeof(Complex);
         total+=cached_templates.capacity()*sizeof(CachedTemplates);
         total+=tracking_reference.capacity()*sizeof(decltype(tracking_reference)::value_type);
@@ -2592,7 +2810,8 @@ struct PatternReceiver::Impl {
     std::size_t wrapper_bytes()const {
         return sizeof(Impl)+sizeof(PatternReceiver)+code.working_bytes()+(fft_workload?sizeof(PatternFftWork):0)+(timing_components?sizeof(TimingComponents):0)+
             search.frequency_offsets_hz.capacity()*sizeof(double)+search.clock_errors_ppm.capacity()*sizeof(double)+
-            search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis);
+            search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis)+
+            packed_phases.capacity()*sizeof(std::uint64_t)+(packed_calendar?packed_calendar->working_bytes():0);
     }
     void set_workspace_bytes(std::size_t bytes) {
         if(fallback) {
@@ -2622,6 +2841,18 @@ std::uint64_t pattern_absence_samples(const Config& config) {
 }
 std::uint64_t pattern_absence_capture_samples(const Config& config) {
     const auto eligible=pattern_absence_samples(config);
+    if(packed_scheduled_symbols(config)) {
+        const ScheduledSymbolCalendar calendar(config);
+        const auto slots=eligible/symbol_sample_count(config);
+        // Waiting cover consumes source samples but is never a failed symbol.
+        // Reserve enough complete keyed groups to score every required slot,
+        // including an unfavorable initial placement and final group residue.
+        const auto groups=symbol_schedule_detail::add(1,
+            slots/calendar.slots_per_group()+(slots%calendar.slots_per_group()!=0));
+        const auto group=symbol_schedule_detail::multiply(2ULL*config.sample_rate/5,
+            config.scheduled_hopping->group_hops);
+        return scheduled_physical_span_samples(config,symbol_schedule_detail::multiply(groups,group));
+    }
     if(scheduled_bursts(config))return scheduled_physical_span_samples(config,eligible);
     if(deferred_symbols(config)) {
         const auto count=eligible/symbol_sample_count(config),symbol=symbol_sample_count(config);
@@ -2728,10 +2959,11 @@ bool PatternReceiver::initial_search_complete()const {
     if(!s.search.start_offset_seconds)return false;
     auto upper=(static_cast<long double>(*s.search.start_offset_seconds)+
         s.search.start_uncertainty_seconds)*s.config.sample_rate;
-    if(deferred_symbols(s.config)) {
+    if(s.calendar_symbols()) {
         const auto phase=s.phase_upper;
         upper+=phase+static_cast<long double>(s.source_start(s.search.initial_stream_symbols-1,phase))/s.timing_minimum_rate;
     }
+    if(s.packed_calendar)upper=s.packed_latest_start_samples;
     // next_start advances only after a complete FFT acquisition batch. It
     // includes the actual stretched integration and batching lookahead;
     // merely consuming a nominal symbol's PCM is not sufficient.
@@ -2761,6 +2993,7 @@ std::size_t PatternReceiver::projection_cache_headroom(std::size_t input_samples
     return impl_->fallback?impl_->fallback->projection_cache_headroom(input_samples):std::numeric_limits<std::size_t>::max();
 }
 void PatternReceiver::set_workspace_bytes(std::size_t bytes){impl_->set_workspace_bytes(bytes);}
+void PatternReceiver::trim_optional_workspace(){if(impl_->fallback)impl_->fallback->trim_optional_workspace();}
 Diagnostics PatternReceiver::diagnostics()const {
     if(impl_->fallback)return impl_->fallback->diagnostics();
     const auto& s=*impl_;const auto& burst=s.current_burst();Diagnostics d;d.bit_rate=bit_rate(s.config);d.sample_offset=static_cast<std::size_t>(burst.first_sample);

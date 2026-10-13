@@ -322,6 +322,7 @@ public:
     // Reject a reduction that cannot retain current state. Future candidate
     // growth is capped within the new ceiling; excess payload throws Error.
     void set_workspace_bytes(std::size_t);
+    void trim_optional_workspace();
     Diagnostics diagnostics() const;
 private:
     struct Impl;

@@ -19,6 +19,22 @@ struct PatternCorrelatorOptions {
     // and stream addressing are unchanged. Unsupported geometry is rejected.
     // Appended to preserve diagnostic aggregate-initializer meaning.
     bool amplitude_only=false;
+    // Exact mapped-template cache opt-out for complete-execution comparisons.
+    // Never changes waveform, hypotheses, arithmetic or statistical guards.
+    bool scheduled_template_cache_reference=false;
+    // Unsafe raw-scoring diagnostic: conditional sensitivity comparisons only,
+    // never selected by production entry points or persisted settings.
+    bool scheduled_raw_score_reference=false;
+    // Bounded pulse-span prototype. Complete Live crossover evidence did not
+    // justify automatic selection at the tested small table spans. Diagnostic
+    // callers may evaluate it; production Default retains direct execution.
+    bool scheduled_affine_experiment=false;
+    // Original direct mapped contraction for paired execution/statistic checks.
+    // FP64 force also bypasses finite-table interval reuse automatically.
+    bool scheduled_moment_reference=false;
+    // Native FP32 curve storage/interpolation diagnostic. Complete paired
+    // execution did not demonstrate a speed advantage on the measured host.
+    bool scheduled_float_curve_experiment=false;
 };
 enum class PatternCorrelationBackend { raw, pulse, pulse_moments, pulse_segments, amplitude };
 struct PatternAmplitudeGeometry {
@@ -39,6 +55,23 @@ PatternAmplitudeChannel pattern_amplitude_channel(const PatternAmplitudeGeometry
 // The complete carrier domain is integrated into one orthogonal energy channel.
 PatternAmplitudeGeometry pattern_amplitude_geometry(const Config&,const PatternSearch&);
 std::uint64_t pattern_amplitude_phase_cell_upper(const Config&,const PatternAmplitudeGeometry&,std::uint64_t phase);
+// Bounded metadata-only coverage summary for complex split-symbol reception.
+// Required spacings use PHYSICAL aperture; pausing source time never pauses
+// carrier phase or sample-clock uncertainty. Explicit diagnostic banks remain
+// permitted, but callers must not advertise them as complete coverage unless
+// the two grid-qualified flags hold. No probability qualification is implied.
+struct PatternScheduledComplexGeometry {
+    bool supported=false,frequency_grid_qualified=false,clock_grid_qualified=false;
+    std::string reason;
+    std::uint64_t physical_aperture_samples=0,receiver_phase_step_samples=1,receiver_timing_subdivisions=1;
+    std::size_t clock_hypotheses=0,timing_positions=0,phase_positions=0,workspace_lower_bound_bytes=0;
+    // Total lanes including frequency/rate pairs and their arrival/phase cells.
+    // full_hypotheses precedes qualified-prior pruning; retained is exact.
+    std::size_t retained_hypotheses=0,full_hypotheses=0;
+    double frequency_step_hz=0,clock_step_ppm=0,clock_cell_radius_ppm=0;
+    double admitted_frequency_half_width_hz=0,admitted_clock_half_width_ppm=0;
+};
+PatternScheduledComplexGeometry pattern_scheduled_complex_geometry(const Config&,const PatternSearch&);
 struct PatternCorrelatorWork {
     PatternCorrelationBackend backend=PatternCorrelationBackend::raw;
     std::size_t hypotheses=0,lattices=0,phase_groups=0,peak_workspace_bytes=0;
@@ -61,6 +94,14 @@ struct PatternCorrelatorWork {
     std::uint64_t amplitude_float_transforms=0,amplitude_precision_fallbacks=0;
     std::uint64_t amplitude_float_envelopes=0;
     std::uint64_t scheduled_null_samples=0,scheduled_omitted_fft_blocks=0;
+    std::uint64_t scheduled_null_pushes=0;
+    std::uint64_t scheduled_worker_preparations=0;
+    // Samples retained for the next fresh source symbol before the current
+    // conservative physical completion fence; included in ordinary search cost.
+    std::uint64_t scheduled_carry_samples=0;
+    std::uint64_t scheduled_colored_guard_activations=0,scheduled_quarter_guard_fallbacks=0;
+    std::uint64_t scheduled_template_constructions=0,scheduled_template_cache_hits=0;
+    std::size_t scheduled_template_cache_peak_bytes=0;
     std::uint64_t amplitude_publication_polls=0,amplitude_unchanged_polls=0;
 };
 // Finite clock/frequency/start-time hypotheses with streaming sufficient
@@ -102,6 +143,9 @@ public:
     // SIZE_MAX disables optional shared preprocessing for unsupported geometry.
     std::size_t projection_cache_headroom(std::size_t input_samples) const;
     void set_workspace_bytes(std::size_t);
+    // Release exact, reconstructible worker scratch without touching evidence
+    // or promised detectors. Required rolling admissions take priority over it.
+    void trim_optional_workspace();
     Diagnostics diagnostics() const;
     PatternCorrelatorWork work() const;
 private:

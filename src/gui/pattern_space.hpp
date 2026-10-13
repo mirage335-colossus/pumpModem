@@ -1,7 +1,9 @@
 #pragma once
 #include "datapump/modem.hpp"
 #include "datapump/pattern_code.hpp"
+#include "datapump/sched_hop.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <complex>
 #include <limits>
@@ -91,6 +93,16 @@ inline PatternSpace inspect_pattern_space(const modem::Config& config, double cn
         // configuration need not contain the epoch-derived transmit seeds.
         // Never silently portray this illustration as the secret wire code.
         illustrated.stream_epoch=0;illustrated.data_key.reset();
+        if (illustrated.scheduled_hopping && illustrated.scheduled_hopping->enabled()) {
+            // Calendar lookup is part of PatternCode even in this logical-chip
+            // preview. Use fixed PUBLIC demonstration material instead of the
+            // communication key. Its schedule and rows are reproducible and
+            // reveal no actual key, seed or transmission address.
+            std::array<std::uint8_t,32> public_schedule_root{};
+            for (std::size_t i=0;i<public_schedule_root.size();++i)
+                public_schedule_root[i]=static_cast<std::uint8_t>(0xd3U+11U*i);
+            illustrated.data_key.emplace(public_schedule_root);
+        }
         for (std::size_t i = 0; i < illustrated.spreading_seed.size(); ++i) {
             illustrated.spreading_seed[i] = static_cast<std::uint8_t>(0x39U + 17U * i);
             illustrated.dsss_seed[i] = static_cast<std::uint8_t>(0xa7U + 29U * i);

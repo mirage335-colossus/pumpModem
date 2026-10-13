@@ -153,6 +153,7 @@ public:
     // Shared receiver banks can lend unused DSP space to an active recording.
     // The limit cannot be reduced below storage already in use.
     void set_workspace_bytes(std::size_t bytes);
+    void trim_optional_workspace();
     void reset();
 private:
     struct Impl;

@@ -238,6 +238,7 @@ ConstellationBatch StreamingReceiver::take_payload_constellation(){return {impl_
 std::size_t StreamingReceiver::working_bytes()const{return sizeof(StreamingReceiver)+sizeof(Impl)+impl_->pattern.working_bytes();}
 std::size_t StreamingReceiver::reserved_workspace_bytes()const{return sizeof(StreamingReceiver)+sizeof(Impl)+impl_->pattern.reserved_workspace_bytes();}
 std::size_t StreamingReceiver::projection_cache_headroom(std::size_t input_samples)const{return impl_->pattern.projection_cache_headroom(input_samples);}
+void StreamingReceiver::trim_optional_workspace(){impl_->pattern.trim_optional_workspace();}
 void StreamingReceiver::set_workspace_bytes(std::size_t bytes) {
     if(bytes<working_bytes())throw Error("DSP workspace is smaller than retained receiver history");
     impl_->pattern.set_workspace_bytes(bytes-sizeof(Impl));impl_->workspace=bytes;

@@ -61,6 +61,16 @@ OscillatorEffects oscillator_effects(const Config&);
 // Original exact frequency/clock pairs remain retained, including when finite
 // caps prevent complete widening; limited then describes the expanded request.
 OscillatorPatternSearch oscillator_pattern_search(const Config&,double transmit_rate_correction=0);
+// Receiver-only resolution overrides. These refine the oscillator domain using
+// its physical observation aperture without changing symbol/chip geometry or
+// oscillator specifications. Zero retains the ordinary resolution. Existing
+// callers and the two-argument overload retain their exact original bank.
+struct PatternSearchResolution {
+    std::uint64_t physical_aperture_samples=0;
+    double maximum_clock_step_ppm=0;
+};
+OscillatorPatternSearch oscillator_pattern_search(const Config&,double transmit_rate_correction,
+                                                 PatternSearchResolution);
 // Candidate steering range for independent audio clocks. The search builder
 // admits it only when the complete expanded domain AND every original lane fit.
 double utc_transmit_rate_limit(const Config&);

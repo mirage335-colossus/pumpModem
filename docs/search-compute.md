@@ -565,6 +565,15 @@ does not authorize it. Identity, finite-pulse boundaries, displacement and works
 checks remain mandatory. FP64 force and original-operand numerical fallbacks bypass
 it. This does not disable any existing exact template or transform cache.
 
+For mapped split Sched_Hop complex reception, Default and FP32 minimum retain
+FP64 carrier moments, products, Gram/covariance and final scoring. Eligible long
+fine chips share bounded physical moments and source-curve interpolation; FP64
+force keeps original per-sample templates and bypasses that approximate reuse.
+Exact caches remain allowed at every setting. A native FP32 source-curve prototype
+was 5.1% slower in a complete local pair despite smaller storage, so it is not
+selected automatically. This is partial precision coverage, separate from the
+continuous acquisition dispatch above. See the [measured split follow-up](scheduled-hops.md#split-symbol-efficiency-follow-up-2026-10-13).
+
 The retained internal integer diagnostic coverage is deliberately explicit: coherent bounded
 paired direct acquisition with at most 32 admitted starts. Broader partitioned/FFT
 searches, compact pulse statistics and tracking still execute FP64. This is

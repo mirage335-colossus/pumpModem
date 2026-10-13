@@ -3,6 +3,7 @@
 #include "datapump/crypto.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -271,11 +272,20 @@ struct SchedHopLocation {
 // Piecewise-affine physical/source map for split symbols. This changes neither
 // the source's pulse shaping nor its bit position. The physical carrier clock
 // MUST remain physical; only coefficient/pulse position follows source time.
-// The one exact frame cache belongs to one sequential stream/bank, not a shared
-// concurrently accessed calendar. It is invalidated solely by frame identity;
+// The bounded exact frame cache belongs to one sequential stream/bank, not a
+// shared concurrently accessed calendar. Frame index identifies each entry;
 // plan, key and sample rate are immutable for the lifetime of this object.
+// Copies retain the exact entries and diagnostic counters, then mutate their
+// own storage independently. Cache exhaustion only recomputes an exact frame.
 class SchedHopSourceMap {
 public:
+    static constexpr std::size_t cached_frame_capacity = 8;
+    struct CacheStatistics {
+        // Saturating diagnostic counters; never used to choose keyed output.
+        // Misses count attempted constructions. Bytes count successful frame
+        // draws, excluding the geometry-specific child-key setup at creation.
+        std::uint64_t hits = 0, misses = 0, generated_bytes = 0;
+    };
     SchedHopSourceMap(SchedHopPlan plan,const Crypto& key,std::uint32_t sample_rate)
         : schedule_(plan,key),rate_(sample_rate) {
         if (!rate_) throw Error("invalid scheduled-hop source sample rate");
@@ -298,6 +308,9 @@ public:
     std::uint64_t source_samples_per_hop() const { return quantum_; }
     std::uint64_t source_samples_per_group() const { return group_samples_; }
     std::size_t working_bytes() const { return sizeof(*this); }
+    CacheStatistics cache_statistics() const { return cache_statistics_; }
+    // Resetting diagnostics neither invalidates entries nor rewinds a stream.
+    void reset_cache_statistics() const { cache_statistics_ = {}; }
     std::uint64_t minimum_flat_samples() const {
         return continuous() ? std::numeric_limits<std::uint64_t>::max() :
             group_samples_-left_-right_-2*ramp_;
@@ -360,9 +373,37 @@ public:
     }
 
 private:
+    static void count(std::uint64_t& counter,std::uint64_t increment = 1) {
+        counter += std::min(increment,std::numeric_limits<std::uint64_t>::max()-counter);
+    }
     const SchedHopFrame& frame(std::uint64_t q) const {
-        if (!cached_frame_ || cached_frame_->index != q) cached_frame_ = schedule_.frame(q);
-        return *cached_frame_;
+        // Most lookups stay in one frame. Checking the most recent slot first
+        // keeps that path constant-time; neighboring timing/frequency searches
+        // reuse the remaining entries without generating the same AES stream.
+        std::size_t position = 0;
+        while (position < cached_size_ && cached_frames_[cached_order_[position]].index != q)
+            ++position;
+        std::uint8_t slot;
+        if (position < cached_size_) {
+            count(cache_statistics_.hits);
+            slot = cached_order_[position];
+        } else {
+            count(cache_statistics_.misses);
+            // Construct before evicting: an overflow/exhaustion failure leaves
+            // all prior entries intact and cannot wrap to an earlier address.
+            const auto generated = schedule_.frame(q);
+            if (schedule_.enabled()) count(cache_statistics_.generated_bytes,SchedHopSchedule::frame_bytes);
+            if (cached_size_ < cached_frame_capacity) {
+                slot = cached_size_++;
+            } else {
+                position = cached_frame_capacity-1;
+                slot = cached_order_[position];
+            }
+            cached_frames_[slot] = generated;
+        }
+        for (; position; --position) cached_order_[position] = cached_order_[position-1];
+        cached_order_[0] = slot;
+        return cached_frames_[slot];
     }
     SchedHopLocation locate_in_frame(SchedHopCoordinate physical,std::uint64_t hop,const SchedHopFrame& f) const {
         using namespace sched_hop_detail;
@@ -385,7 +426,10 @@ private:
     SchedHopSchedule schedule_;
     std::uint32_t rate_ = 0;
     std::uint64_t quantum_ = 0,group_samples_ = 0,left_ = 0,right_ = 0,ramp_ = 0;
-    mutable std::optional<SchedHopFrame> cached_frame_;
+    mutable std::array<SchedHopFrame,cached_frame_capacity> cached_frames_{};
+    mutable std::array<std::uint8_t,cached_frame_capacity> cached_order_{};
+    mutable std::uint8_t cached_size_ = 0;
+    mutable CacheStatistics cache_statistics_;
 };
 
 } // namespace datapump::modem

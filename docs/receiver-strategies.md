@@ -60,6 +60,125 @@ the existing bounded policy. Thus this path accelerates the fully covered
 256-second EME bank; it does not alone expand the capped very-long-symbol bank.
 DSSS factorization is a plausible extension, not implemented coverage.
 
+## Scheduled short-symbol complex reception
+
+When Sched_Hop defers a short symbol into a complete full-gain slot, Automatic,
+Existing only and Complex only can use the existing complex FFT statistic with
+exact keyed calendar starts. This is distinct from long split-symbol mapped
+complex or amplitude reception. Actual singleton phase starts, initial symbol alternatives and all
+declared frequency/clock hypotheses remain. Continuation covers rate displacement
+through physical null gaps from the last accepted anchor, with full trial charges.
+Waiting and null time cannot create absent symbols or early physical completion.
+
+Small/unsupported native FFT geometries retain FP64 bulk execution even under
+Default and FP32 minimum. Eligible large native paths retain their existing FP32
+dispatch and numerical fallbacks. FP64 force uses original templates, bypasses
+approximate interpolation and permits exact caching. Actual operands/backend
+are recorded by `--verbose`; the amplitude precision table below describes the
+amplitude path only.
+
+Packed scheduled estimates count exact representative calendar phases but retain
+a full-input complete-cohort engineering allowance. They have no calibrated
+whole-bank probability, GPU estimate or guaranteed real-time CPU ceiling. Raw
+capture is retained because this path has no complete omission certificate.
+Unsupported full coverage and workspace limits remain explicit. See
+[scheduled hops](scheduled-hops.md) for split eligibility, diagnostics and the
+separate manual-checkpoint limitations.
+
+## Scheduled split-symbol complex reception
+
+Long scheduled symbols can use streaming physical-I/Q direct contraction when
+the complete bank and state fit. Automatic retains this complex evidence when
+supported; Existing only and Complex only permit it too. Amplitude is a separate
+fallback for unsupported complete complex geometry/state, and can still be
+forced explicitly. A CPU-budget warning is not permission to omit alternatives.
+
+The source map pauses coefficient/pulse position during nulls, while physical
+carrier phase continues. Required frequency spacing follows the full physical
+aperture, not compressed active time. The shared builder retains original exact
+frequency/clock pairs before adding physical-aperture refinement. It verifies
+joint oscillator/UTC provenance, passband, finite bank and workspace limits;
+explicit incomplete diagnostic banks cannot advertise complete coverage.
+
+The mapped scorer keeps raw white-noise energy and sample degrees together.
+A first prototype copied a four-dimensions-per-chip count cap without projecting
+its raw-noise denominator; that was invalid and is retained only as diagnostic
+evidence. The implemented coherent path uses the ordinary two-real-basis score.
+Only the existing nested chip-subspace excess test can lower it to projected-chip
+evidence. This conditional correction never increases white-noise evidence.
+It is a scheduled detector guard, not a claim of exact FFT-score identity.
+
+Four-quarter evidence uses the corresponding raw/projected calculation only when
+all quarters have rank-two Grams and chip partitions respect quarter boundaries.
+The full quarter projection supplies the lack-of-fit test; the strongest quarter
+is still removed from admission evidence. Singular or unaligned quarter geometry
+retains the original conservative raw-reference quarter fallback, counted in
+work diagnostics. Differential whitening and its separate guard remain intact.
+The excess test's analytical activation bound assumes the documented correct
+signal/mismatch and white-noise model; it is not a universal wrong-key bound.
+Full acquisition sensitivity, interference and phase-diffusion behavior still
+need paired qualification.
+
+Mapped samples retain limited I/Q template construction, real-noise Gram covariance,
+usable energy and source-quarter/local-window guards. Nulls are excluded from
+both template energy and noise degrees. Independent adjacent-symbol carry state
+preserves samples that arrive before the previous cell's completion fence; more
+than one additional symbol explicitly exhausts supported coverage. Timing budgets
+do not restart at bursts, symbols or rolling admissions, and observed absence
+still requires fully scored source symbols totaling six seconds.
+
+Mapped physical projections, I/Q products, real Gram terms, covariance and scoring
+retain FP64 under all public arithmetic choices. Default and FP32 minimum may use
+bounded 512-sample carrier moments and an eight-row source-chip curve cache for
+eligible long fine chips. Both candidate rows remain independent. Curve identity
+uses resolved physical epoch/ordinal/local chip and matched-FHSS phase, under the
+immutable parent key/geometry/calendar. Leases prevent in-use eviction. Physical
+gates and limiting remain after lookup; support-change knots and partial-chip
+boundaries use direct fallbacks. Reordered finite-table interpolation is an
+approximation; it is not an original-template reference. FP64 force bypasses it,
+while retaining exact worker/chip/calendar reuse.
+
+Native FP32 curve storage/interpolation was implemented and inspected, but its
+complete local pair used 5.1% more CPU for 1.78 MB less DSP memory. It remains an
+internal override; no narrower automatic path is selected solely for its type.
+Fine-frequency fusion remains a kernel prototype, not an integrated gain. Exact
+block-local gated-template reuse remains allowed at every precision when its
+full source/rate/phase/index identity repeats. No enormous shifted-PCM matrix or
+whole-symbol buffer is introduced.
+
+Key-dependent mixing may be skipped only after a whole-null proof for every
+retained timing/phase/clock lane. Raw capture remains retained without a complete
+mapped-complex omission certificate. Cached physical END/first-full coordinates
+and null deadlines preserve ordinary scoring at completion fences. Silence never
+adds observed absence. Dirty publication state preserves next-poll bit delivery.
+Live retains optional scratch across ordinary refreshes, but reclaims it before
+required admissions or deferred detector reservations could be excluded.
+
+The bounded FIFO permits processing across multiple active/null cycles. Strategy
+selection uses sustainable mean work; the stricter next-hop cost remains visible
+as a diagnostic. A full 348-physical-second accelerated predecessor fixture certified 42 later
+active-hop starts with prior work queued; the rebuilt-source confirmation certified
+21 and peaked at 7.424 seconds of backlog. Both drained all 87 groups within the
+declared 16-second queue bound. An earlier conservative ledger indicated 11
+crossings; it did not provide the same optimistic-frontier certificate.
+See [scheduled hops](scheduled-hops.md#split-symbol-efficiency-follow-up-2026-10-13)
+for exact performance, memory, approximation and sensitivity limits.
+
+Cost and workspace allowances are provisional engineering estimates. Full-bank
+sensitivity, high multipliers, broad oscillator banks and
+hardware execution remain unqualified; scheduled probability/GPU estimates must
+stay unavailable. A bounded complete Live 16-source-second split-symbol run is
+recorded in [scheduled hops](scheduled-hops.md); it does not qualify arbitrary
+rolling cohorts or hardware timing. See that document for the restriction
+matrix and diagnostic events. No transmitted waveform or private address changes
+are required by this receiver path.
+
+Supported split-complex scheduling currently retains complex evidence even above
+the advisory CPU budget. Switching to a different statistic needs a separately
+qualified complete-execution/sensitivity crossover; scheduling alone does not
+authorize amplitude substitution. Explicit amplitude-only selection remains
+available where its own geometry is supported.
+
 ## Amplitude-only acquisition
 
 This is a receiver of the existing varying envelope, not a new OOK transmitter.
@@ -161,11 +280,13 @@ prune alternatives. There is no INT8 screen, residual plane or hidden FP64
 correlation refinement in this amplitude path. The inexpensive policy/control
 calculations need not use the same precision as bulk correlation.
 
-Amplitude-only currently requires shaped DSSS-Off, no FHSS masking, at least
+Ordinary unscheduled amplitude-only currently requires shaped DSSS-Off, no FHSS masking, at least
 64 chips and 16-second symbols, and a positive-frequency admitted band with
 FFT transition margins. A finite arrival interval and a complete clock grid of
 at most 65 lanes within +/-10,000 ppm are also required. It does not discard
-time/clock/epoch alternatives.
+time/clock/epoch alternatives. Scheduled split symbols have separate flat-window
+geometry and support Interleave DSSS and applicable FHSS masks, as documented in
+[scheduled hops](scheduled-hops.md); the retained-observation guard remains.
 Long private messages still pay for independently keyed rolling epochs and
 for their template construction. Cohort estimates include prefix/pulse-support
 retirement time and reserve a per-bank share of the total workspace. Shared
@@ -176,7 +297,7 @@ bank has been calibrated; the existing complex probability is not reused.
 
 ## Compatibility and limits
 
-Both decoders use the existing pending/accepted-bit interface. Completion still
+All decoder paths use the existing pending/accepted-bit interface. Completion still
 requires fully scored absent symbols covering at least six seconds. EOF,
 flushing and cancellation provide no absent-symbol evidence. No amplitude-only
 source interpretation or successful decryption can end a physical stream.

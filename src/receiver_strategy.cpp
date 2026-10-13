@@ -1,5 +1,6 @@
 #include "datapump/receiver_strategy.hpp"
 #include "datapump/pattern_correlator.hpp"
+#include "datapump/scheduled_complex_search.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/symbol_schedule.hpp"
@@ -51,6 +52,98 @@ ReceiverStrategyPlan resolve_receiver_strategy(const Config& c,const PatternSear
     p.frequency_axis_processing_ratio=p.amplitude_processing_ratio=std::numeric_limits<double>::infinity();
     const auto symbol=symbol_sample_count(c),chip=pattern_chip_samples(c);
     const auto seconds=static_cast<double>(symbol)/c.sample_rate;
+    // Streaming mapped contraction is independent of a symbol-sized FFT.
+    // Resolve it before any transform sizing, including hours-long symbols.
+    if(scheduled_bursts(c) && !packed_scheduled_symbols(c) &&
+       c.receiver_strategy!=ReceiverStrategy::amplitude_only) {
+        double correction=0;
+        if(c.oscillator_search && search.admitted_clock_half_width_ppm &&
+           *search.admitted_clock_half_width_ppm>oscillator_pattern_search(c).requested_clock_half_width_ppm)
+            correction=utc_transmit_rate_limit(c);
+        const auto refined=scheduled_complex_search(c,search,correction);
+        const auto& g=refined.geometry;
+        const bool zero_domain=search.admitted_frequency_half_width_hz && search.admitted_clock_half_width_ppm &&
+            *search.admitted_frequency_half_width_hz==0 && *search.admitted_clock_half_width_ppm==0;
+        const bool diagnostic=!c.oscillator_search && (zero_domain ||
+            (!search.admitted_frequency_half_width_hz && !search.admitted_clock_half_width_ppm));
+        const bool complete=refined.complete_coverage;
+        const bool runnable=complete || (diagnostic && g.supported);
+        const double width=search.qualified_start_window?
+            static_cast<double>(2*search.qualified_start_window->half_width_samples/c.sample_rate):2*search.start_uncertainty_seconds;
+        const auto& s=*c.scheduled_hopping;
+        const auto spacing=static_cast<double>(chip)/(2*std::max<std::uint64_t>(1,g.receiver_timing_subdivisions)*c.sample_rate);
+        const auto lanes=static_cast<long double>(g.retained_hypotheses);
+        // The cheap geometry shares the constructor's exact origin/phase-cell
+        // enumeration. Reject only a necessary fixed-state lower bound here;
+        // the real constructor checks complete caches, optional detectors,
+        // retention and prefixes against this same cohort workspace share.
+        // This avoids an arbitrary 8 KiB-per-lane admission restriction.
+        const auto state=static_cast<long double>(g.workspace_lower_bound_bytes);
+        const bool fits=state<workspace;
+        if(runnable && !g.retained_hypotheses) {
+            p.scheduled=p.experimental=true;p.supported=false;p.empty_scheduled_epoch=true;
+            p.full_frequency_coverage=p.full_clock_coverage=complete;
+            p.selected_processing_ratio=std::numeric_limits<double>::infinity();
+            p.reason="no active split-symbol phase intersects the admitted arrival cells";
+            return p;
+        }
+        if(runnable && fits) {
+            p.scheduled=p.experimental=true;p.backend=ReceiverBackend::existing_complex;
+            p.full_frequency_coverage=p.full_clock_coverage=complete;
+            p.scheduled_frame_hops=s.time_multiplier;p.scheduled_active_hops=s.group_hops;
+            p.scheduled_frame_seconds=.4*s.time_multiplier;
+            p.scheduled_active_seconds=static_cast<double>(2ULL*c.sample_rate/5)*s.group_hops/c.sample_rate;
+            p.scheduled_effective_multiplier=p.scheduled_frame_seconds/p.scheduled_active_seconds;
+            p.scheduled_minimum_quiet_seconds=.4*(s.time_multiplier-s.group_hops-(s.time_multiplier-s.group_hops)/2);
+            p.scheduled_flat_duty=p.scheduled_active_seconds/p.scheduled_frame_seconds;
+            p.scheduled_recording_union_upper=1;
+            p.scheduled_capture_frame_bytes_upper=p.scheduled_frame_seconds*c.sample_rate*sizeof(float);
+            p.scheduled_interval_width_seconds=width;
+            p.scheduled_canonical_phases=g.phase_positions;
+            p.scheduled_timing_spacing_seconds=spacing;
+            p.scheduled_phase_spacing_seconds=static_cast<double>(g.receiver_phase_step_samples)/c.sample_rate;
+            p.scheduled_timing_positions=finite_ratio(lanes);
+            p.scheduled_full_timing_positions=static_cast<double>(g.full_hypotheses);
+            p.scheduled_fft_union_upper=std::min(1.,(p.scheduled_active_seconds+width)/p.scheduled_frame_seconds);
+            p.scheduled_guaranteed_recovery_seconds=std::max(0.,p.scheduled_minimum_quiet_seconds-width);
+            const auto banks=std::max<std::size_t>(1,search.receiver_bank_count);
+            // Keep the complete raw mapped allowance outside the measured
+            // crossover scope. The bounded pulse/curve path changes arithmetic
+            // work, never the admitted lanes, capture union or trial count.
+            const bool measured_reuse=c.search_arithmetic!=SearchArithmetic::fp64 && c.scramble &&
+                c.dsss_factor==1 && pattern_pulse_enabled(c) && !c.fake_hopping &&
+                c.sample_rate==6000 && chip==1500 && symbol==96000 && s.time_multiplier==10 && s.group_hops==1 &&
+                search.qualified_start_window && width<=.2 && refined.search.hypotheses.size()<=5 &&
+                state+1024*1024<workspace;
+            // Full identical-PCM pairs observed about1.9--2.17x CPU reduction.
+            // Use2x only for that local geometry; absolute work remains an
+            // engineering estimate, not a realtime or sensitivity certificate.
+            const auto reuse=measured_reuse?2.L:1.L;
+            const auto cost=banks*(c.sample_rate*35e-9L+lanes*c.sample_rate*60e-9L*p.scheduled_fft_union_upper/reuse);
+            p.scheduled_mean_processing_ratio=p.existing_processing_ratio=finite_ratio(cost);
+            const auto available=p.scheduled_active_seconds+p.scheduled_guaranteed_recovery_seconds;
+            p.scheduled_deadline_processing_ratio=finite_ratio(cost*p.scheduled_frame_seconds/std::max(.001,available));
+            // Queued work may cross several cycles. The per-hop deadline is
+            // a diagnostic stricter bound, not the sustainable CPU criterion.
+            p.selected_processing_ratio=p.scheduled_mean_processing_ratio;
+            p.estimated_workspace_bytes=static_cast<std::size_t>(state);
+            p.reason=complete?
+                "calendar-aware split complex; physical I/Q phase; refined physical-aperture bank; eligible bounded pulse/curve reuse with original-template fallback; total cost uncalibrated":
+                "calendar-aware split complex; exact supplied diagnostic candidates; no continuous-domain coverage certificate; FP64 mapped fallback; total cost uncalibrated";
+            if(p.selected_processing_ratio>p.cpu_budget)p.reason+="; estimated processing exceeds budget, no measured cheaper equivalent selected";
+            if(measured_reuse)p.reason+="; local paired pulse/curve work crossover included, absolute model remains engineering";
+            return p;
+        }
+        if(c.receiver_strategy==ReceiverStrategy::complex_only || c.receiver_strategy==ReceiverStrategy::existing_only) {
+            p.scheduled=p.experimental=true;p.supported=false;p.workspace_limited=runnable&&!fits;
+            p.full_frequency_coverage=p.full_clock_coverage=complete;
+            p.selected_processing_ratio=std::numeric_limits<double>::infinity();
+            p.reason=runnable?"complete split complex state exceeds rolling workspace share":refined.reason;
+            return p;
+        }
+        // Automatic may consider the separately validated energy detector only
+        // when complete complex geometry/grid/state cannot be represented.
+    }
     auto hypotheses=search.hypotheses;
     bool limited=false;
     if(!hypotheses.empty()) {
@@ -112,8 +205,16 @@ ReceiverStrategyPlan resolve_receiver_strategy(const Config& c,const PatternSear
     const auto hop_seconds=static_cast<double>(hop)*static_cast<double>(bin)/c.sample_rate;
     const auto banks=std::max<std::size_t>(1,search.receiver_bank_count);
     const auto workers=detail::search_concurrency(search.worker_threads);
-    const auto phases=search.search_stream_phases?std::max<std::uint64_t>(1,
-        (canonical_phase_extent(c)-1)/canonical_phase_step(c)+1):1;
+    const bool scheduled=scheduled_bursts(c);
+    const bool packed=scheduled && packed_scheduled_symbols(c);
+    const auto phases=search.search_stream_phases?(packed?packed_scheduled_phase_count(c,c.stream_epoch):
+        std::max<std::uint64_t>(1,(canonical_phase_extent(c)-1)/canonical_phase_step(c)+1)):1;
+    if(packed && !phases) {
+        p.scheduled=true;p.experimental=true;p.supported=false;p.empty_scheduled_epoch=true;
+        p.selected_processing_ratio=std::numeric_limits<double>::infinity();
+        p.reason="no active scheduled payload anchor intersects this representative key/epoch arrival bank";
+        return p;
+    }
     const auto initial=(c.scramble||c.dsss)?search.initial_stream_symbols:1;
     const auto cohorts=static_cast<long double>(phases)*initial;
     const auto correlator_groups=phases>1?(c.fake_hopping&&c.fake_hopping->matched_gaps?phases:
@@ -204,7 +305,6 @@ ReceiverStrategyPlan resolve_receiver_strategy(const Config& c,const PatternSear
             p.estimated_workspace_bytes=static_cast<std::size_t>(core)+axis_requirements.score_bytes+axis_requirements.scratch_bytes;
         }
     }
-    const bool scheduled=c.scheduled_hopping && c.scheduled_hopping->enabled() && !c.scheduled_hopping->continuous();
     p.scheduled=scheduled;
     if(scheduled) {
         const auto& schedule=*c.scheduled_hopping;schedule.validate();
@@ -235,6 +335,46 @@ ReceiverStrategyPlan resolve_receiver_strategy(const Config& c,const PatternSear
         // A duty ratio alone does not calibrate DSSS weight construction or the
         // rolling key/epoch lifecycle; those costs require complete execution.
     }
+    if(packed && c.receiver_strategy!=ReceiverStrategy::amplitude_only && !limited) {
+        // Every complete packed symbol and its finite pulse support lies inside
+        // a full-gain slot. It uses the original complex statistic, with exact
+        // keyed slot times and ordinary local waveform clock scaling. Null and
+        // waiting time is not a failed symbol. Do not force short symbols through
+        // the spectral-energy detector's independently necessary 64-block gate.
+        p.backend=ReceiverBackend::existing_complex;p.experimental=true;
+        p.estimated_workspace_bytes=static_cast<std::size_t>(std::min<long double>(core,
+            std::numeric_limits<std::size_t>::max()));
+        if(core>workspace) {
+            p.supported=false;p.workspace_limited=true;
+            p.selected_processing_ratio=std::numeric_limits<double>::infinity();
+            p.reason="packed scheduled complex FFT core exceeds the configured rolling workspace share";
+            return p;
+        }
+        p.scheduled_canonical_phases=static_cast<std::size_t>(phases);
+        p.scheduled_phase_spacing_seconds=0; // exact singleton slot phases
+        p.scheduled_timing_spacing_seconds=static_cast<double>(bin)/c.sample_rate;
+        const auto width=search.qualified_start_window?
+            2*search.qualified_start_window->half_width_samples/c.sample_rate:2*search.start_uncertainty_seconds;
+        p.scheduled_interval_width_seconds=finite_ratio(width);
+        // Bounded engineering position allowance, not a measured acquisition
+        // count. Runtime tracing records actually scored FFT alternatives.
+        p.scheduled_timing_positions=finite_ratio(cohorts*hypotheses.size()*(std::ceil(width*c.sample_rate/bin)+1));
+        p.scheduled_full_timing_positions=finite_ratio(cohorts*hypotheses.size()*
+            (std::ceil(2*search.start_uncertainty_seconds*c.sample_rate/bin)+1));
+        p.scheduled_fft_seconds=static_cast<double>(transform)*static_cast<double>(bin)/c.sample_rate;
+        p.scheduled_fft_union_upper=1;
+        p.scheduled_guaranteed_recovery_seconds=finite_ratio(std::max(0.L,p.scheduled_minimum_quiet_seconds-width));
+        // Keep the full-input/FFT engineering cost until complete rolling-bank
+        // measurements justify a geometry-specific reduction. Nominal duty
+        // alone does not certify capture omission or a processing deadline.
+        p.scheduled_mean_processing_ratio=p.existing_processing_ratio;
+        p.scheduled_deadline_processing_ratio=p.existing_processing_ratio;
+        p.selected_processing_ratio=p.existing_processing_ratio;
+        p.reason="calendar-aware packed complex FFT; exact keyed singleton starts; full frequency/clock coverage; total cost uncalibrated";
+        if(c.receiver_strategy==ReceiverStrategy::existing_only)p.reason+="; alternative decoders disabled";
+        if(p.selected_processing_ratio>p.cpu_budget)p.reason+="; estimated processing still exceeds selected CPU budget";
+        return p;
+    }
     if(scheduled && (c.receiver_strategy==ReceiverStrategy::complex_only ||
                      c.receiver_strategy==ReceiverStrategy::existing_only)) {
         // Policy rejection precedes geometry and key/epoch eligibility. A null
@@ -242,9 +382,8 @@ ReceiverStrategyPlan resolve_receiver_strategy(const Config& c,const PatternSear
         // disguise a disabled decoder as a workspace or arrival-bank problem.
         p.backend=ReceiverBackend::existing_complex;p.supported=false;p.experimental=true;
         p.selected_processing_ratio=std::numeric_limits<double>::infinity();
-        p.reason=c.receiver_strategy==ReceiverStrategy::complex_only?
-            "scheduled split symbols have no implemented complex decoder; Complex only prohibits amplitude decoding":
-            "scheduled split symbols require the experimental amplitude decoder; new decoders are disabled";
+        p.reason=packed?"packed scheduled complex search does not cover the complete declared frequency/clock bank":
+            "scheduled split complex geometry/grid is unsupported; selected policy prohibits amplitude fallback";
         return p;
     }
     const auto amplitude=pattern_amplitude_geometry(c,search);
@@ -282,7 +421,6 @@ ReceiverStrategyPlan resolve_receiver_strategy(const Config& c,const PatternSear
             // A split warp requires independent canonical phase state. Count
             // original coverage cells, including fractional phase cells, rather
             // than multiplying a narrow width by the entire phase bank.
-            const bool packed=packed_scheduled_symbols(c);
             const auto phase_step=amplitude.receiver_phase_step_samples;
             const auto phase_lower=search.search_stream_phases&&(c.scramble||c.dsss)?0:c.stream_phase_samples;
             const auto phase_upper=search.search_stream_phases&&(c.scramble||c.dsss)?
@@ -420,7 +558,9 @@ ReceiverStrategyPlan resolve_receiver_strategy(const Config& c,const PatternSear
                 ((double_fft?2.5e-6L:2.35e-6L)+0.08e-6L*p.amplitude_channels));
             p.scheduled_mean_processing_ratio=finite_ratio(cost);
             p.scheduled_deadline_processing_ratio=finite_ratio(deadline_cost);
-            p.amplitude_processing_ratio=std::max(p.scheduled_mean_processing_ratio,p.scheduled_deadline_processing_ratio);
+            // The bounded FIFO may carry work across active groups. Keep the
+            // worst per-hop ratio visible, but select by sustainable throughput.
+            p.amplitude_processing_ratio=p.scheduled_mean_processing_ratio;
         }
         if(p.amplitude_channels && amplitude_bytes<=workspace && ((scheduled && c.receiver_strategy==ReceiverStrategy::automatic) ||
            c.receiver_strategy==ReceiverStrategy::amplitude_only ||

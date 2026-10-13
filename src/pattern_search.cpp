@@ -107,7 +107,8 @@ OscillatorEffects oscillator_effects(const Config& config) {
     return result;
 }
 
-static OscillatorPatternSearch oscillator_pattern_search_domain(const Config& config) {
+static OscillatorPatternSearch oscillator_pattern_search_domain(const Config& config,
+                                                                PatternSearchResolution resolution={}) {
     validate(config);
     if(!config.oscillator_search)throw Error("oscillator pattern search requires an oscillator search policy");
     const auto& policy=*config.oscillator_search;
@@ -133,7 +134,22 @@ static OscillatorPatternSearch oscillator_pattern_search_domain(const Config& co
         "expanded oscillator frequency allowance exceeds numeric range");
     OscillatorPatternSearch result;
     auto& frequency=result.frequency;
-    const auto maximum_frequency_step=.25*config.sample_rate/static_cast<double>(symbol_sample_count(config));
+    const auto symbol=symbol_sample_count(config);
+    const auto aperture=std::max(symbol,resolution.physical_aperture_samples);
+    auto maximum_frequency_step=.25*config.sample_rate/static_cast<double>(aperture);
+    const auto original_clock_step=.25*static_cast<double>(pattern_chip_samples(config))/
+        static_cast<double>(symbol)*1e6;
+    const auto maximum_clock_step=resolution.maximum_clock_step_ppm==0?original_clock_step:
+        std::min(original_clock_step,resolution.maximum_clock_step_ppm);
+    // A coupled frequency lane also represents clock error. Refining phase
+    // alone need not resolve a very low carrier's timing domain; use whichever
+    // required spacing is finer without adding Cartesian clock alternatives.
+    const bool correlated=(shared && extra_frequency_bound==0) || rf_bound==0 || clock_bound==0;
+    if((resolution.physical_aperture_samples || resolution.maximum_clock_step_ppm) &&
+       correlated && clock_bound>0)
+        maximum_frequency_step=std::min(maximum_frequency_step,std::abs(coupling)*maximum_clock_step*1e-6);
+    if(!std::isfinite(maximum_frequency_step) || maximum_frequency_step<=0)
+        throw Error("oscillator search resolution is below numeric range");
     const auto base_frequency_steps=base_frequency_bound==0?0.L:
         std::ceil(static_cast<long double>(base_frequency_bound)/maximum_frequency_step);
     const auto base_frequency_step=base_frequency_bound==0?maximum_frequency_step:
@@ -192,15 +208,12 @@ static OscillatorPatternSearch oscillator_pattern_search_domain(const Config& co
             std::min(std::abs(offset/coupling*1e6),clock_bound);
         return std::copysign(magnitude,offset/coupling);
     };
-    const bool correlated=(shared && extra_frequency_bound==0) || rf_bound==0 || clock_bound==0;
     // An independent conversion error describes a strip around the sampling
     // clock relation, not necessarily a separately resolved timing dimension.
     // For f=c*epsilon*1e-6+r, choosing epsilon_i=clamp(f_i/c*1e6,-A,A)
     // at the nearest frequency gives |epsilon-epsilon_i| <= (df/2+B)/c*1e6.
     // Keep one lane per frequency only when that entire strip fits the same
     // quarter-chip timing resolution as the independent rectangular grid.
-    const auto maximum_clock_step=.25*static_cast<double>(pattern_chip_samples(config))/
-        static_cast<double>(symbol_sample_count(config))*1e6;
     auto thin_clock_step=std::numeric_limits<double>::infinity();
     const auto strip_clock_step=(static_cast<long double>(frequency.step_hz)+2.L*rf_bound)/
         std::abs(coupling)*1e6L;
@@ -365,11 +378,11 @@ static OscillatorPatternSearch oscillator_pattern_search_domain(const Config& co
 }
 
 namespace {
-OscillatorPatternSearch expanded_oscillator_pattern_search(const Config& config) {
-    if(config.frequency_search_multiplier==1)return oscillator_pattern_search_domain(config);
+OscillatorPatternSearch expanded_oscillator_pattern_search(const Config& config,PatternSearchResolution resolution={}) {
+    if(config.frequency_search_multiplier==1)return oscillator_pattern_search_domain(config,resolution);
     auto base_config=config;base_config.frequency_search_multiplier=1;
-    auto base=oscillator_pattern_search_domain(base_config);
-    auto expanded=oscillator_pattern_search_domain(config);
+    auto base=oscillator_pattern_search_domain(base_config,resolution);
+    auto expanded=oscillator_pattern_search_domain(config,resolution);
     std::set<std::pair<double,double>> pairs;
     std::set<double> frequencies;
     for(const auto lane:base.hypotheses) {
@@ -410,9 +423,16 @@ double utc_transmit_rate_limit(const Config& config) {
 }
 
 OscillatorPatternSearch oscillator_pattern_search(const Config& config,double correction) {
+    return oscillator_pattern_search(config,correction,{});
+}
+
+OscillatorPatternSearch oscillator_pattern_search(const Config& config,double correction,
+                                                 PatternSearchResolution resolution) {
     if(!std::isfinite(correction) || correction<0 || correction>.001)
         throw Error("invalid transmit timing correction search allowance");
-    auto original=expanded_oscillator_pattern_search(config);
+    if(!std::isfinite(resolution.maximum_clock_step_ppm) || resolution.maximum_clock_step_ppm<0)
+        throw Error("invalid oscillator search resolution");
+    auto original=expanded_oscillator_pattern_search(config,resolution);
     if(correction==0)return original;
     const auto fallback=[&] {
         original.timing_correction_unavailable=true;
@@ -431,7 +451,7 @@ OscillatorPatternSearch oscillator_pattern_search(const Config& config,double co
     if(ppm>10000)return fallback();
     adjusted.oscillator_search->lf.accuracy_ppm=std::nextafter(static_cast<double>(ppm),
         std::numeric_limits<double>::infinity());
-    auto result=expanded_oscillator_pattern_search(adjusted);
+    auto result=expanded_oscillator_pattern_search(adjusted,resolution);
     if(result.limited)return fallback();
     std::set<std::pair<double,double>> pairs;
     std::set<double> frequencies;

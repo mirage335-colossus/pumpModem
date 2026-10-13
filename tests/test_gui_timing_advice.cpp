@@ -67,8 +67,8 @@ std::vector<float> record(double,std::uint32_t,const std::string&,std::size_t,st
 std::vector<float> record(double t,std::uint32_t r,const std::string& d,std::size_t m,std::stop_token s,StreamFormatCallback f){return record(t,r,d,m,s,f,{});}
 }
 // Exercise the actual asynchronous capture/decode path, not just persistence.
-// The launcher's short defaults are valid TX profiles but are not eligible for
-// the scheduled amplitude detector. They must not masquerade as exhausted RAM
+// Forcing the scheduled amplitude detector on short defaults is unsupported.
+// The refusal must not masquerade as exhausted RAM
 // or an acquisition-state reset, nor trigger construction on every PCM block.
 void check_scheduled_initial_unavailability() {
     using F=ui::Field;
@@ -93,8 +93,11 @@ void check_scheduled_initial_unavailability() {
          "synthetic keyed capture did not start");
     const auto before=controller.settings().transfer.modem;
     const auto before_long=*controller.settings().long_message_modem;
+    controller.select(F::receiver_strategy,"amplitude");
     controller.select(F::sched_hop,"10");
-    wait([&]{return controller.snapshot().receiver_health.failed();},"unsupported scheduled geometry was hidden");
+    wait([&]{return controller.snapshot().receiver_health.failed()&&
+        controller.snapshot().error.find("requires64 retained whole FFT observations")!=std::string::npos;},
+        "unsupported scheduled geometry was hidden");
     const auto& unavailable=controller.snapshot();
     std::cout<<"Scheduled default: "<<unavailable.error<<'\n';
     check(unavailable.error.find("requires64 retained whole FFT observations")!=std::string::npos,
@@ -132,9 +135,14 @@ void check_scheduled_initial_unavailability() {
     controller.select(F::sched_hop,"10k");
     wait([&]{return controller.snapshot().receiver_bank_builds>0&&controller.snapshot().receiver_health.search_limited;},
          "long scheduled null frame hid unsupported geometry");
+    // Keeping the declared free-running clock domain in preflight exposes
+    // this stronger restriction over the 10k physical aperture before the
+    // short-symbol FFT-count check. Neither domain may be cleared to make
+    // quiet-epoch diagnostics agree with the optimistic nominal model.
     check(!controller.snapshot().receiver_health.receiver_reset&&
-          controller.snapshot().error.find("requires64 retained whole FFT observations")!=std::string::npos,
-          "long null frame lost the geometry error or restarted input");
+          controller.snapshot().error.find("amplitude decoder full clock domain requires more than 65 lanes")!=std::string::npos,
+          ("long null frame lost the geometry error or restarted input: "+controller.snapshot().error).c_str());
+    controller.select(F::receiver_strategy,"auto");
     controller.select(F::sched_hop,"disabled");
     wait([&]{return controller.snapshot().samples_received>0&&controller.snapshot().receiver_admissions>0;},
          "ordinary receiver did not recover after disabling scheduling");
@@ -149,6 +157,49 @@ void check_scheduled_initial_unavailability() {
           controller.snapshot().error.find("16-second symbol")!=std::string::npos,
           "ordinary eligibility failure lost its specific reason or restarted acquisition");
     controller.close();wait([&]{return controller.ready_to_close();},"unavailable receiver prevented GUI close");
+}
+void check_scheduled_defaults_and_keyed_estimate() {
+    using F=ui::Field;using C=ui::Command;
+    struct KeyFixture {
+        std::filesystem::path path=std::filesystem::temp_directory_path()/
+            ("datapump-sched-ready-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        ~KeyFixture(){std::error_code ignored;std::filesystem::remove(path,ignored);}
+    } key;
+    create_keyring(key.path,{"Default"});
+    Controller::Options options;
+    options.launch_settings=launch_command::parse("--pattern auto-keystream --sched-hop 10");
+    options.launch_settings->keyfile=key.path.string();options.launch_settings->key_name="Default";
+    options.launch_settings->tx_key="named";
+    Controller controller(options);controller.start();controller.edit(F::binary,"0");
+    const auto wait=[&](auto predicate,const char* reason) {
+        const auto until=std::chrono::steady_clock::now()+15s;
+        do {controller.poll();
+            if(controller.enabled(C::acknowledge_key_failure))
+                throw Error(std::string(reason)+": "+controller.field(F::status).text);
+            if(predicate())return;std::this_thread::sleep_for(5ms);}
+        while(std::chrono::steady_clock::now()<until);
+        throw Error(std::string(reason)+": "+controller.field(F::status).text+" / "+controller.field(F::airtime).text+
+            " key="+std::to_string(bool(controller.settings().transfer.key))+
+            " estimate="+std::to_string(bool(controller.estimate()))+
+            " memory="+std::to_string(controller.estimate()&&controller.estimate()->memory_supported)+
+            " transmit="+std::to_string(controller.enabled(C::transmit))+
+            " force="+std::to_string(controller.enabled(C::force_transmit))+
+            " noise="+std::to_string(controller.enabled(C::transmit_noise)));
+    };
+    wait([&]{return controller.settings().transfer.key&&controller.estimate()&&
+        (controller.enabled(C::transmit)||controller.enabled(C::force_transmit));},
+        "selected schedule key failed inspection or blocked transmit readiness");
+    wait([&]{return controller.snapshot().receiver_admissions>0&&
+        !controller.snapshot().receiver_health.failed();},"ordinary short scheduled profiles were not admitted");
+    check(controller.estimate()->wire_bits==1&&controller.field(F::airtime).text.find("requires an encryption key")==std::string::npos,
+          "scheduled representative preview lost its selected key or exact raw endpoint");
+    check(controller.settings().transfer.modem.bandwidth_hz==3600&&
+          controller.settings().transfer.modem.carrier_hz==1500&&
+          controller.snapshot().capture_certified_null_samples==0,
+          "default scheduled reception changed waveform settings or discarded uncertified capture");
+    std::cout<<"Scheduled defaults: TX-ready, exact one-bit airtime, "
+        <<controller.snapshot().receiver_admissions<<" admitted receivers, no omitted input\n";
+    controller.close();wait([&]{return controller.ready_to_close();},"supported scheduled defaults prevented GUI close");
 }
 void check_advice_envelope() {
     ReceiverTimingAdvice cache;auto now=ReceiverTimingAdvice::Clock::now();
@@ -206,6 +257,7 @@ void check_stale_plan(const Launch& launch) {
 int main(int argc,char** argv) {
  try {
     check_scheduled_initial_unavailability();
+    check_scheduled_defaults_and_keyed_estimate();
     if(argc>1&&std::string_view(argv[1])=="--sched-hop"){std::cout<<"Scheduled initial availability passed\n";return 0;}
     check_advice_envelope();
     using F=ui::Field;using C=ui::Command;const bool probe=argc>1;
