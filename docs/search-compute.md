@@ -990,3 +990,135 @@ shared by an exact shift family, so a reductions-only fraction does not bound
 this opportunity. Current production retains direct streaming statistics;
 large broad timing families and repeated public templates are explicit remaining
 optimization targets, rather than dismissed on the strength of small-bank tests.
+
+
+## Scheduled shared-execution precision and profiling (local candidate)
+
+The mapped split-symbol path has no timing FFT to narrow. Arithmetic choice,
+algorithm choice and exact/approximate reuse remain separate. The current
+precision inventory is:
+
+| Stage | Default / FP32 minimum | FP64 force |
+| --- | --- | --- |
+| Original PCM | Original FP32 input | Same input |
+| Physical oscillator, real I/Q projections and prefix/moment rows | FP64; exact original recurrence seed for shared rows | FP64 original |
+| Private coefficients, finite pulse/limiter/gates | Original FP64 | Original FP64 |
+| Eligible source-chip curves and interval contraction | FP64 knots/interpolation/products; approximation retained with direct fallbacks | Approximation bypassed; original templates/products |
+| Exact key-address/permutation reuse | Integer addresses, uint32 complete permutation; permitted independent of precision | Same exact reuse permitted |
+| Dot, complete real Gram, raw energy, fit reductions | FP64 | FP64 |
+| Chip/quarter/differential/outer guards and scoring | Existing FP64/wider evidence | Same original guard precision |
+| Absolute timing, epochs and source/calendar coordinate | Original integer/long-double precision | Same |
+| Common-family execution | Enabled bounded exact sharing; original FP64 fine-carrier products/contributions | Same exact sharing allowed; original FP64, no approximate interpolation |
+
+Native FP32 signal-dot, FP32 packed Gram and exact FP64 candidate-axis SIMD are
+separate default-off diagnostics, distinct from the measured slower FP32 curve
+experiment. They have bounded arithmetic and instruction evidence. The FP32
+signal prototype failed the original 1e-7 whole-fixture statistic comparison
+despite correct clean bits; it is not selected automatically. Packed Gram tests
+include rank/error fallback, but do not qualify whole-receiver cost or decisions.
+A local dot/matrix certificate does not certify the complete colored/quarter/
+outer/differential guard tree. Integer/frequency-fusion kernels likewise require
+complete preparation, packing, fallback/refinement and guard accounting.
+The dropdown never proves which backend executed: inspect resolved backend,
+actual reuse/fallback counters and stage precision in the trace. GPU remains
+deferred. Existing native FP32 FFT paths elsewhere do not accelerate a mapped
+path that executes no FFT.
+
+The integer audit identifies a concrete kernel limit: current affine pieces are
+at most six samples and do not enter the existing temporal AVX2 INT8 loop.
+Weighted moments need INT64 intermediates. A bounded Q15-prefix proposal retains
+I/Q, complete real Gram, original energy and FP64 refinement, but remains
+uncompiled/unmeasured. This does not rule out candidate-axis integer SIMD or
+longer-block strategies; their packing, scaling, certificates, reconstruction
+and fallback costs remain explicit work, not assumed throughput gains.
+
+A build containing `scheduled_work_profile.hpp` supports developer-only
+`DATAPUMP_RX_CPU_PROFILE=coarse|fine|sampled`; unset disables profiling. On the
+supported native Linux sampler, `DATAPUMP_RX_CPU_SAMPLE_US=10000` selects a 10 ms
+thread-CPU period. This is not a persisted modem setting or a waveform/timing
+policy. Use ordinary `--verbose` to retain the emitted component event, stderr
+and trace finalization. Unsupported timer/signal environments, setup failures,
+foreign deliveries and lost expirations are explicit, never silent zero cost.
+
+Coarse scopes provide exclusive native-thread CPU categories with timer overhead
+included. Fine scopes are too intrusive in the recorded complete-receiver
+attempt and failed to drain. Sampled stage fractions are statistical tags;
+outer context CPU and independently measured process total remain separate.
+Overruns are unassigned, and periodic/serial bias prevents treating ticks as
+independent probability trials. Do not add nested frontend/pulse/kernel subsets,
+sum parallel wall intervals or calibrate a model from a failed partial profile.
+See [measured shared diagnosis](scheduled-hops.md#shared-execution-measured-diagnosis-2026-10-13)
+for complete baseline totals, conditional one-bank gains and outstanding scope.
+
+
+The 2026-10-13 shared hot/cold follow-up measured complete fixed-bank arithmetic
+ABBA comparisons with original PCM, all setup and guards included. FP32 packed
+Gram cost about 9.8% more CPU; combined FP32 signal/Gram about 21.4% more and
+retained strict statistic failures. Exact FP64 candidate-axis SIMD had essentially
+unchanged aggregate CPU with large pair variance. Neither primitive throughput
+nor narrower operands justify automatic selection here. Default and FP32 minimum
+therefore retain mapped FP64 work; FP64 force still bypasses approximate curves.
+One cohort ran faster with original FP64 templates, so the mapped automatic
+backend crossover itself remains an optimization opportunity. This is partial
+arithmetic coverage, not receiver-wide reduced-precision completion.
+
+The fixed timing sweep reduced 882 to 18 retained hypotheses and 8.6735 to
+0.18222 CPU seconds from 6 s to 10 ms, then plateaued at the same fractional/clock
+cells. Full rolling-bank measurements and the remaining demanding DSSS100 gap
+are described in [scheduled measurements](scheduled-hops.md#final-shared-hotcold-measurements-and-remaining-gap).
+
+
+### Fine-chip public geometry follow-up
+
+The demanding scheduled DSSS100 case has fine chips of 15 samples. It gets no
+useful multi-sample table-affine spans; lowering the old eligibility threshold
+alone would not fix that. Its independent private candidates can nevertheless
+share public pulse geometry after whole-chip column relabeling. Exact complete
+waveform aliases and public geometry equivalence are different questions.
+A bounded actual-descriptor capture found up to **310 independently addressed
+private windows** sharing complete public pulse/gain/prefix geometry in both
+nominal and non-nominal clock families. All 16 snapshots completed (19,575
+descriptors); none exhausted the separate 64 MiB diagnostic arena. This is
+within-bank, early-cell evidence, not a full-bank census or proof that private
+coefficient bytes differ. Non-nominal lanes are compared through their original
+arguments, never ideal modulo-chip arithmetic.
+
+The actual full-chip DSSS gain and bounded private coefficients give a pulse-
+table worst-radius estimate of 0.89119 against the 0.992 limiter. This is not a
+blanket limiter exclusion. An actual-row outward certificate passed 256 table-phase rows, with L1 bound
+1.79689 and computed-power upper bound 0.79473. The bounded 27,720-byte
+real-I/Q pulse-projection oracle passed six geometry cases. These are local
+prototype checks, not production integration or full detector qualification.
+
+A separate exact public-weight cache has passed original weight-bit and private
+0/1 sum/Fit oracles. It compares every original scalar pulse argument and scale,
+then retains original coefficient, limiter, sample and guard accumulation order.
+Its 28,728-byte pool and 1,024-byte scratch are per worker; GCC measured a
+432-byte outlined lookup frame. A serialized A/B/B/A identical-prefix comparison
+(including setup, rolling admissions, guards and complete prefix drain) found
+**12.89% more CPU**, despite about 67% cache hits, and 2,143,488 additional DSP
+bytes. This full-argument variant is rejected for automatic use in that scope.
+The prefix contains 40.62 physical / 3.22 source seconds and no complete
+16-source-second symbol; it establishes neither full-reception performance nor
+sensitivity. A smaller half-sample specialization passed exact-weight/private-Fit
+oracles but admitted no actual calls in its first capture. General fractional
+coordinate reuse was then implemented as a default-off artifact with exact
+binary64 residue keys, original nonzero callback order, partial-symbol gates and
+worker-local rounding checks. Both 64- and 512-entry versions passed the original
+weight/private-Fit oracles. The 512-entry B/A/A/B prefix comparison gave only
+1.0107× aggregate CPU and 0.9974× wall ratios, with opposing CPU pairs
+1.1549× / 0.8847×, while adding 5,931,840 DSP bytes. No repeatable advantage is
+established, so it remains disabled. All three cache variants are absent from
+the delivered GUI; their results do not reject public-geometry sharing generally.
+
+Aggregated pulse dots and real Gram matrices change summation association.
+Current-block refinement cannot universally recover discarded historical
+rounding state near a future cutoff. This warns against claiming exact original
+cutoff equivalence from a local error bound. It does **not** rule out a useful
+approximate projection engine with measured sensitivity and a sound continuation
+policy. Cross-origin planning, independent coefficient preparation, every guard
+and carry route, bounded history/refinement, productive native precision and
+complete measured crossover remain substantive implementation work.
+
+
+The latest [shared-execution and fine-chip checkpoint](scheduled-hops.md#shared-execution-and-fine-chip-follow-up-13-october-2026) records complete-prefix CPU measurements, actual arithmetic, cache identities, numerical scope and unresolved full-bank work. Native FP32, fine source tables and borrowing experiments receive no automatic planner/simulation speed discount from operand width or kernel timing. Default/FP32 minimum mapped arithmetic remains partial FP64 coverage; FP64 force retains original templates and bypasses approximate interpolation.

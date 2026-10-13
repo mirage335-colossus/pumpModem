@@ -150,6 +150,9 @@ public:
     // Additional allocation bound for one finite PCM push and its next drain.
     // SIZE_MAX disables optional shared preprocessing for unsupported geometry.
     std::size_t projection_cache_headroom(std::size_t input_samples) const;
+    // No allocation: nullopt unsupported, zero eligible but cold/reselecting,
+    // positive only after the original worker and Temporal choices are retained.
+    std::optional<std::size_t> temporal_plan_workers() const;
     // Shared receiver banks can lend unused DSP space to an active recording.
     // The limit cannot be reduced below storage already in use.
     void set_workspace_bytes(std::size_t bytes);

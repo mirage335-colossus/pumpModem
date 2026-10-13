@@ -2992,6 +2992,9 @@ std::size_t PatternReceiver::reserved_workspace_bytes()const {
 std::size_t PatternReceiver::projection_cache_headroom(std::size_t input_samples)const {
     return impl_->fallback?impl_->fallback->projection_cache_headroom(input_samples):std::numeric_limits<std::size_t>::max();
 }
+std::optional<std::size_t> PatternReceiver::temporal_plan_workers()const {
+    return impl_->fallback?impl_->fallback->temporal_plan_workers():std::nullopt;
+}
 void PatternReceiver::set_workspace_bytes(std::size_t bytes){impl_->set_workspace_bytes(bytes);}
 void PatternReceiver::trim_optional_workspace(){if(impl_->fallback)impl_->fallback->trim_optional_workspace();}
 Diagnostics PatternReceiver::diagnostics()const {

@@ -60,6 +60,7 @@ public:
     // Optional bounded instrumentation for transmitter generation only.
     void enable_transmit_trace(std::uint64_t first_chip);
     void capture_transmit_trace(bool enabled);
+    bool transmit_trace_enabled() const noexcept;
     void copy_transmit_trace(TransmitTrace&, std::uint64_t begun_chips) const;
 private:
     struct Impl;

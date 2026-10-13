@@ -1,4 +1,6 @@
+#include "scheduled_work_profile.hpp"
 #include "datapump/pattern_code.hpp"
+#include "pattern_permutation_cache.hpp"
 #include "datapump/fhss_schedule.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/symbol_schedule.hpp"
@@ -14,6 +16,7 @@
 #include <numbers>
 
 namespace datapump::modem {
+namespace rx_cpu = ::datapump::detail::cpu_profile;
 namespace {
 constexpr double tau = 2 * std::numbers::pi;
 constexpr std::array<std::uint8_t, 32> public_seed{
@@ -298,7 +301,8 @@ struct PatternCode::Impl {
         void invalidate() {
             for(auto& state:symbols)state.valid=false;
         }
-        SymbolState& select(const SymbolStreamAddress& address,const Crypto& key,std::stop_token stop={}) {
+        SymbolState& select(const SymbolStreamAddress& address,const Crypto& key,
+                            const std::array<std::uint8_t,32>& root,unsigned factor,std::stop_token stop={}) {
             cancelled(stop);
             for(unsigned i=0;i<symbols.size();++i) {
                 auto& state=symbols[i];
@@ -314,36 +318,51 @@ struct PatternCode::Impl {
             // from a fixed, disjoint 32-byte seed address in a separate domain.
             require(address.ordinal<=(std::numeric_limits<std::uint64_t>::max()-31)/32,
                     "DSSS permutation seed address would overflow");
-            auto seed=key.stream(StreamPurpose::Dsss,address.epoch,address.ordinal*32,32,permutation_domain);
-            std::copy(seed.begin(),seed.end(),state.seed.begin());
-            struct CleanSeed {
-                Bytes& value;
-                ~CleanSeed() { OPENSSL_cleanse(value.data(),value.size()); }
-            } clean{seed};
-            StreamCache draws(seed,StreamPurpose::Dsss,0);
-            std::uint64_t offset=0;
-            // Unbiased rejection sampling has an explicit failure bound, not a
-            // modulo-biased fallback or an unbounded setup loop. At this N cap
-            // each draw's rejection probability is below 1/4096.
-            const auto maximum_draws=2*state.permutation.size()+1024;
-            const auto word=[&]() {
-                cancelled(stop);
-                require(offset/4<maximum_draws,"DSSS permutation rejection budget exhausted");
-                std::uint32_t result=0;
-                for(unsigned byte=0;byte<4;++byte)result=(result<<8)|draws.byte(offset++);
-                return result;
+            const auto original=[&] {
+                // Exclusive receiver diagnostics distinguish complete private
+                // shuffle construction from lookup/copy and raw contraction.
+                // Disabled profiling performs no clock read or stream access.
+                rx_cpu::Scope cpu_permutation(rx_cpu::Stage::private_permutation,true);
+                auto seed=key.stream(StreamPurpose::Dsss,address.epoch,address.ordinal*32,32,permutation_domain);
+                std::copy(seed.begin(),seed.end(),state.seed.begin());
+                struct CleanSeed {
+                    Bytes& value;
+                    ~CleanSeed() { OPENSSL_cleanse(value.data(),value.size()); }
+                } clean{seed};
+                StreamCache draws(seed,StreamPurpose::Dsss,0);
+                std::uint64_t offset=0;
+                // Unbiased rejection sampling has an explicit failure bound, not a
+                // modulo-biased fallback or an unbounded setup loop. At this N cap
+                // each draw's rejection probability is below 1/4096.
+                const auto maximum_draws=2*state.permutation.size()+1024;
+                const auto word=[&]() {
+                    cancelled(stop);
+                    require(offset/4<maximum_draws,"DSSS permutation rejection budget exhausted");
+                    std::uint32_t result=0;
+                    for(unsigned byte=0;byte<4;++byte)result=(result<<8)|draws.byte(offset++);
+                    return result;
+                };
+                for(std::size_t i=0;i<state.permutation.size();++i) {
+                    if((i&255U)==0)cancelled(stop);
+                    state.permutation[i]=static_cast<std::uint32_t>(i);
+                }
+                for(auto i=state.permutation.size();i>1;--i) {
+                    if((i&255U)==0)cancelled(stop);
+                    const auto bound=static_cast<std::uint32_t>(i);
+                    const auto threshold=(std::uint32_t{0}-bound)%bound;
+                    auto selected=word();while(selected<threshold)selected=word();
+                    std::swap(state.permutation[i-1],state.permutation[selected%bound]);
+                }
             };
-            for(std::size_t i=0;i<state.permutation.size();++i) {
-                if((i&255U)==0)cancelled(stop);
-                state.permutation[i]=static_cast<std::uint32_t>(i);
-            }
-            for(auto i=state.permutation.size();i>1;--i) {
-                if((i&255U)==0)cancelled(stop);
-                const auto bound=static_cast<std::uint32_t>(i);
-                const auto threshold=(std::uint32_t{0}-bound)%bound;
-                auto selected=word();while(selected<threshold)selected=word();
-                std::swap(state.permutation[i-1],state.permutation[selected%bound]);
-            }
+            const auto binding=detail::pattern_permutation_binding;
+            if(binding.pools && binding.key_namespace) {
+                detail::PermutationKey cache_key;
+                cache_key.key_namespace=binding.key_namespace;cache_key.epoch=address.epoch;
+                cache_key.ordinal=address.ordinal;cache_key.complete_chips=static_cast<std::uint32_t>(state.permutation.size());
+                cache_key.factor=factor;cache_key.domain=permutation_domain;cache_key.dsss_root=root;
+                binding.pools->copy_or_build(cache_key,state.permutation,state.seed,
+                    [&](auto,auto&){original();},stop);
+            } else original();
             state.epoch=address.epoch;state.ordinal=address.ordinal;
             state.rotations.select_epoch(address.epoch);
             state.valid=true;recent=index;
@@ -447,6 +466,7 @@ struct PatternCode::Impl {
         if(!address_cache)return symbol_stream_address(epoch,config.stream_phase_samples,index,symbol,config.sample_rate);
         auto& cache=*address_cache;
         if(!cache.valid || index!=cache.index || cache.phase!=config.stream_phase_samples) {
+            rx_cpu::Scope cpu_address(rx_cpu::Stage::private_address,true);
             if(cache.packed) {
                 if(!cache.packed_anchor_valid || cache.packed_phase!=config.stream_phase_samples) {
                     cache.packed_rank=cache.packed->first_rank(epoch,config.stream_phase_samples);
@@ -490,7 +510,7 @@ struct PatternCode::Impl {
             if(outer) {
                 auto* rotations=outer.get();
                 if(interleaved) {
-                    symbol_state=&interleaved->select(address,outer->key);
+                    symbol_state=&interleaved->select(address,outer->key,config.dsss_seed,config.dsss_factor);
                     rotations=&symbol_state->rotations;
                 }
                 rotations->select_epoch(address.epoch);
@@ -552,11 +572,35 @@ struct PatternCode::Impl {
             // Valid only for this candidate's exact epoch and canonical coarse
             // chip address. Outer chips share the coefficient, never a pattern
             // across bit positions, keys, epochs or the zero/one alternatives.
-            auto result = outer && inner.valid && inner.epoch==row.epoch &&
-                inner.position==position && !captured ? inner.value :
-                (!private_patterns && distinct && !captured && position<public_prefix.size() ?
-                 public_prefix[static_cast<std::size_t>(position)][bit] :
-                 row.noise(row_position,layer,nullptr,nullptr,captured));
+            auto result = [&] {
+                if(outer && inner.valid && inner.epoch==row.epoch && inner.position==position && !captured)
+                    return inner.value;
+                if(!private_patterns && distinct && !captured && position<public_prefix.size())
+                    return public_prefix[static_cast<std::size_t>(position)][bit];
+                const auto original=[&] {
+                    rx_cpu::Scope cpu_coefficient(rx_cpu::Stage::private_coefficient,true);
+                    return row.noise(row_position,layer,nullptr,nullptr,captured);
+                };
+                const auto binding=detail::pattern_permutation_binding;
+                if(symbol_state && private_patterns && config.scramble && !captured &&
+                    !(trace && trace->capture) && binding.pools && binding.key_namespace &&
+                    binding.pools->has_inner_coefficient_cache()) {
+                    // Preserve original generator validation even on an exact
+                    // copied hit. Canonical position is AFTER permutation and
+                    // coarse addressing; no fine-chip/phase alias substitutes.
+                    require(row_position<=(std::numeric_limits<std::uint64_t>::max()-7)/8,
+                            "pattern noise coordinate overflow");
+                    detail::InnerCoefficientKey key;
+                    key.key_namespace=binding.key_namespace;key.pattern_epoch=row.epoch;
+                    key.position=row_position;key.bit=static_cast<std::uint8_t>(bit);
+                    key.factor=config.dsss_factor;key.outer_version=static_cast<std::uint8_t>(config.outer_dsss_version);
+                    key.pattern_purpose=row.purpose;key.pattern_domain=row.domain;key.pattern_root=config.spreading_seed;
+                    key.layer_present=layer?1:0;key.dsss_root=config.dsss_seed;
+                    if(layer){key.layer_epoch=layer->epoch;key.layer_purpose=layer->purpose;key.layer_domain=layer->domain;}
+                    return binding.pools->inner_coefficient_or_build(key,original);
+                }
+                return original();
+            }();
             if(outer)inner={row.epoch,position,result,true};
             if (bit && !distinct) result *= bit_mask[static_cast<std::size_t>((absolute_chip % chips) % bit_mask.size())];
             return result*outer_value*pulse_gain;
@@ -618,23 +662,28 @@ PatternCode::~PatternCode() = default;
 PatternCode::PatternCode(PatternCode&&) noexcept = default;
 PatternCode& PatternCode::operator=(PatternCode&&) noexcept = default;
 std::complex<double> PatternCode::value(std::uint64_t chip, unsigned bit, double fraction) {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::template_build,true);
     return impl_->value(chip, bit, fraction);
 }
 std::array<std::complex<double>,2> PatternCode::values(std::uint64_t chip,double fraction) {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::template_build,true);
     return impl_->values(chip,fraction);
 }
 std::complex<double> PatternCode::shaped_value(std::uint64_t first_chip,unsigned bit,double within) {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::template_build,true);
     return impl_->shaped_value(first_chip,bit,within);
 }
 std::array<std::complex<double>,2> PatternCode::shaped_values(std::uint64_t first_chip,double within) {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::template_build,true);
     return impl_->shaped_values(first_chip,within);
 }
 void PatternCode::prepare_symbol(std::uint64_t first_chip,std::stop_token stop) {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::template_build,true);
     cancelled(stop);
     require(first_chip%impl_->chips==0,"pattern setup requires a symbol-aligned chip address");
     if(impl_->interleaved) {
         const auto address=impl_->stream_address(first_chip/impl_->chips);
-        (void)impl_->interleaved->select(address,impl_->outer->key,stop);
+        (void)impl_->interleaved->select(address,impl_->outer->key,impl_->config.dsss_seed,impl_->config.dsss_factor,stop);
     }
 }
 void PatternCode::set_stream_phase_samples(std::uint64_t phase_samples) {
@@ -667,6 +716,7 @@ void PatternCode::enable_transmit_trace(std::uint64_t first_chip) {
             "pattern trace exceeds memory limit");
     impl_->trace=std::make_unique<Impl::TraceStorage>();impl_->trace->first_chip=first_chip;
 }
+bool PatternCode::transmit_trace_enabled() const noexcept {return bool(impl_->trace);}
 void PatternCode::capture_transmit_trace(bool enabled) {
     if(impl_->trace)impl_->trace->capture=enabled;
 }

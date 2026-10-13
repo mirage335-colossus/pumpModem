@@ -1,3 +1,4 @@
+#include "scheduled_work_profile.hpp"
 #include "datapump/live.hpp"
 #include "datapump/fhss_schedule.hpp"
 #include "datapump/sched_hop.hpp"
@@ -28,6 +29,8 @@
 #include <cmath>
 #include <condition_variable>
 #include <deque>
+#include <cstdlib>
+#include <string_view>
 #include <limits>
 #include <map>
 #include <mutex>
@@ -40,6 +43,7 @@
 #include <variant>
 
 namespace datapump::live {
+namespace rx_cpu = ::datapump::detail::cpu_profile;
 namespace {
 using Clock = std::chrono::steady_clock;
 constexpr std::size_t plot_size = 2048;
@@ -324,6 +328,8 @@ struct Session::Impl {
         // its actual completion, with the same bound as the content collector.
         std::map<std::pair<std::uint64_t,std::uint64_t>,Presentation> presentations;
         std::vector<modem::PatternBurst> bursts;
+        // Immutable capability survives optional arena trims.
+        std::unique_ptr<const modem::detail::SourceFamily> source_curve_family;
         std::unique_ptr<modem::StreamingReceiver> modem;
         std::unique_ptr<transfer::StreamReceiver> content;
     };
@@ -331,10 +337,13 @@ struct Session::Impl {
         std::shared_ptr<transfer::ReceiveStorageQuota> source_quota;
         std::vector<Receiver> receivers;
         detail::ReceptionHistory receptions;
+        std::unique_ptr<modem::detail::SharedSourceCurves<>> source_curves;
+        std::unique_ptr<modem::detail::PatternPermutationPools> permutations;
+        std::unique_ptr<modem::detail::SharedTemporalPlans> temporal_plans;
         std::uint64_t samples = 0, next_candidate = 1,revision=0;
         std::uint64_t admissions = 0, retirements = 0, builds = 0;
         std::size_t peak_receivers = 0;
-        std::size_t working_bytes = sizeof(detail::ReceptionHistory);
+        std::size_t working_bytes = sizeof(detail::ReceptionHistory)+sizeof(source_curves)+sizeof(permutations)+sizeof(temporal_plans);
         double created_at = 0;
         // UTC for a captured block, independent of when its search runs. Sample
         // coordinates remain continuous; fresh stamps only guide new admission.
@@ -347,6 +356,27 @@ struct Session::Impl {
         std::string receiver_limit;
         std::complex<double> mixer{1,0};
     };
+    static void trace_permutation_release(const Bank& bank,const char* reason) {
+        if(!bank.permutations)return;
+        audio::trace::record("receiver_permutation_release",[&](auto& f) {
+            const auto all=bank.permutations->request_statistics();
+            const auto rows=bank.permutations->statistics();
+            f.add("sample",bank.samples);f.add("reason",reason);f.add("final_snapshot",true);
+            f.add("requests",all.requests);f.add("hits",all.hits);
+            f.add("builder_attempts",all.builder_attempts);f.add("builder_completed",all.builder_completed);
+            f.add("child_fallbacks",all.child_fallbacks);f.add("row_misses",rows.misses);
+            f.add("row_private_builds",rows.private_builds);f.add("publications",rows.publications);
+            f.add("busy",rows.busy);f.add("evictions",rows.evictions);f.add("bypassed",rows.bypassed);
+            f.add("reserved_bytes",bank.permutations->working_bytes());
+            f.add("allocated_bytes",bank.permutations->allocated_bytes());
+            f.add("effective_row_limit",bank.permutations->row_limit());
+            const auto inner=bank.permutations->inner_coefficient_statistics();
+            f.add("inner_bytes",bank.permutations->inner_coefficient_bytes());
+            f.add("inner_requests",inner.requests);f.add("inner_hits",inner.hits);
+            f.add("inner_builds",inner.builder_completed);f.add("inner_evictions",inner.evictions);
+            f.add("inner_busy",inner.busy);f.add("inner_bypassed",inner.bypassed);
+        });
+    }
     static void note_oscillator_coverage(Bank& bank,const modem::OscillatorPatternSearch& search) {
         if(!search.limited)return;
         bank.limited=bank.coverage_limited=true;
@@ -366,7 +396,8 @@ struct Session::Impl {
         for(const auto& burst:receiver.bursts)burst_bytes+=burst.bits.capacity();
         return receiver.modem->working_bytes() + margin + sizeof(Receiver) + burst_bytes +
             receiver.presentations.size()*(sizeof(decltype(receiver.presentations)::value_type)+4*sizeof(void*)) +
-            (receiver.content?receiver.content->working_bytes():0);
+            (receiver.content?receiver.content->working_bytes():0) +
+            (receiver.source_curve_family?sizeof(modem::detail::SourceFamily):0);
     }
     EpochClock epoch_clock;
     ReplayClock replay_clock;
@@ -446,6 +477,7 @@ struct Session::Impl {
     ~Impl() {
         halt(); source.request_stop(); capture_worker.request_stop(); encoder.request_stop(); decoder.request_stop(); recovery_worker.request_stop(); changed.notify_all();
         source.join(); capture_worker.join(); encoder.join(); decoder.join(); recovery_worker.join();
+        if(rx_cpu::global().mode!=rx_cpu::Mode::disabled)audio::trace::record("receiver_component_cpu",[&](auto& f) {rx_cpu::write_fields(f,rx_cpu::global().snapshot());});
     }
     double current_epoch() const {
         const auto now = epoch_clock();
@@ -953,14 +985,65 @@ struct Session::Impl {
         search.qualified_start_window=modem::PatternStartWindow{map->origin_samples,map->phase_scale,map->half_width_samples};
         return true;
     }
+    static bool crossbank_temporal_plans_requested() {
+        // Internal experiment: OFF by default; row capacity is independently
+        // compiled as DATAPUMP_SCHED_CROSSBANK_PLAN_CACHE_ENTRIES (default 4).
+        static const bool requested=[] {
+            const auto* value=std::getenv("DATAPUMP_SCHED_CROSSBANK_PLAN_CACHE");
+            return value && std::string_view(value)=="1";
+        }();
+        return requested;
+    }
+    static bool large_permutation_cache_requested() {
+        // Explicit developer experiment; default grants remain 8 rows/256KiB
+        // even in binaries compiled with larger finite capacity ceilings.
+        static const bool requested=[] {
+            const auto* value=std::getenv("DATAPUMP_RX_PERMUTATION_LARGE_POOL");
+            return value && std::string_view(value)=="1";
+        }();
+        return requested;
+    }
+    static void drop_shared_temporal_plans(Bank& bank,const char* reason="optimization_or_cohort") {
+        if(!bank.temporal_plans)return;
+        if(!bank.temporal_plans->idle())throw Error("shared temporal Plan owner still borrowed");
+        const auto bytes=bank.temporal_plans->working_bytes();
+        const auto counters=bank.temporal_plans->statistics();
+        audio::trace::record("receiver_shared_temporal_plans_retired",[&](auto& f) {
+            f.add("reason",reason);
+            f.add("sample",bank.samples);f.add("bytes",bytes);f.add("workers",bank.temporal_plans->workers());
+            f.add("requests",counters.requests);f.add("hits",counters.hits);f.add("builds",counters.builds);
+            f.add("evictions",counters.evictions);f.add("unavailable",counters.unavailable);
+            f.add("rejected",counters.rejected);f.add("cancelled",counters.cancelled);f.add("exceptions",counters.exceptions);
+            f.add("hash_words",counters.hash_words);f.add("compared_words",counters.compared_words);
+        });
+        bank.temporal_plans.reset();bank.working_bytes-=bytes;
+    }
     Bank make_bank(const Settings& value) { return make_bank(value, Bank{}); }
     Bank make_bank(const Settings& value, Bank bank) {
+        rx_cpu::Context cpu_context(rx_cpu::Stage::rolling);
+        // Calendar refresh alone neither invalidates public N/C/coordinate
+        // keys nor changes any original receiver grant. Retain the complete
+        // joined owner until a genuinely new receiver is found below.
+        const auto prior_admissions=bank.admissions;
         // Optional reusable scratch must not displace a required admission.
         // Preserve it while space suffices; a calendar refresh is not itself
         // cache invalidation. Retry sizing/construction after actual pressure.
         const auto reclaim_scratch=[&] {
+            rx_cpu::Scope cpu_reclaim(rx_cpu::Stage::allocation);
             std::size_t released=0;
+            if(bank.permutations) {
+                const auto bytes=bank.permutations->working_bytes();
+                trace_permutation_release(bank,"admission_pressure");
+                bank.permutations.reset();released+=bytes;
+            }
+            // Feeds join every reader before admission/reclamation. A pinned
+            // row refuses reclamation rather than dropping its reservation.
+            if(bank.source_curves) {
+                const auto bytes=bank.source_curves->working_bytes();
+                if(bank.source_curves->try_reclaim()){released+=bytes;bank.source_curves.reset();}
+            }
             for(auto& receiver:bank.receivers) {
+                if(receiver.source_curve_family){released+=sizeof(modem::detail::SourceFamily);receiver.source_curve_family.reset();}
                 const auto before=receiver.modem->working_bytes();receiver.modem->trim_optional_workspace();
                 released+=before-receiver.modem->working_bytes();
             }
@@ -1109,6 +1192,18 @@ struct Session::Impl {
                         c.pulse_shaping==profile.pulse_shaping && c.oscillator_search==profile.oscillator_search;
                 });
                 if (existing != bank.receivers.end()) continue;
+                // Exact admission fence: release the full owner (including
+                // optional precision payloads) BEFORE original sizing/selection.
+                // A matching retained receiver above performs no preparation.
+                drop_shared_temporal_plans(bank,"new_receiver");
+                // Experimental surplus may not change a new receiver's
+                // original constructor/worker grant. Admission is a joined barrier.
+                if(bank.permutations && (bank.permutations->working_bytes()>256*1024 ||
+                   bank.permutations->row_limit()>8)) {
+                    const auto bytes=bank.permutations->working_bytes();
+                    trace_permutation_release(bank,"new_receiver");
+                    bank.permutations.reset();bank.working_bytes-=bytes;
+                }
                 const auto capacity = bank_capacity(value);
                 const auto compact=key && modem::symbol_sample_count(profile)>=60ULL*profile.sample_rate;
                 const auto control_margin = (compact?8192:65536) + sizeof(Receiver);
@@ -1199,6 +1294,7 @@ struct Session::Impl {
                     if(declared_search && !(selection.supported && selection.full_frequency_coverage && selection.full_clock_coverage))
                         note_oscillator_coverage(bank,*declared_search);
                     const auto construct=[&] {
+                        rx_cpu::Scope cpu_construct(rx_cpu::Stage::setup);
                         const auto allocation=std::min(value.dsp_workspace_bytes/2,capacity-bank.working_bytes-control_margin);
                         return std::make_unique<modem::StreamingReceiver>(config,
                             selection.backend==modem::ReceiverBackend::existing_complex?allocation:
@@ -1228,6 +1324,13 @@ struct Session::Impl {
             }
             }
         }
+        if(bank.temporal_plans && bank.admissions==prior_admissions)
+            audio::trace::record("receiver_shared_temporal_plans_retained",[&](auto& f) {
+                f.add("sample",bank.samples);f.add("bytes",bank.temporal_plans->working_bytes());
+                f.add("workers",bank.temporal_plans->workers());f.add("resident",bank.receivers.size());
+                f.add("admissions",bank.admissions);f.add("retirements",bank.retirements);
+                f.add("reason","no_new_receiver");
+            });
         bank.created_at = now;
         if(bank.receivers.empty() && !(scheduled_quiet_only && !bank.coverage_limited) && bank.receiver_limit.empty())
             unavailable("no receive profile fits the configured DSP workspace");
@@ -1237,6 +1340,7 @@ struct Session::Impl {
         return bank;
     }
     void refresh_bank(Bank& bank, const Settings& value) {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::rolling);
         // Receiver epoch admission is independent of transmit preparation.
         // Both hardware and simulation retain only observed acquisition state.
         if(value.transfer.timestamp && std::none_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver){
@@ -1277,7 +1381,10 @@ struct Session::Impl {
             f.add("revision",bank.revision);f.add("sample",bank.samples);f.add("retired",retired);
             f.add("resident",bank.receivers.size());f.add("retirements",bank.retirements);
         });
-        bank.working_bytes=sizeof(detail::ReceptionHistory);for(const auto& receiver:bank.receivers)bank.working_bytes+=receiver_workspace(receiver);
+        bank.working_bytes=sizeof(detail::ReceptionHistory)+sizeof(bank.source_curves)+sizeof(bank.permutations)+sizeof(bank.temporal_plans)+
+            (bank.source_curves?bank.source_curves->working_bytes():0)+(bank.permutations?bank.permutations->working_bytes():0)+
+            (bank.temporal_plans?bank.temporal_plans->working_bytes():0);
+        for(const auto& receiver:bank.receivers)bank.working_bytes+=receiver_workspace(receiver);
         bank=make_bank(value,std::move(bank));
     }
     void append_signal(SignalUpdate event) {
@@ -1502,6 +1609,7 @@ struct Session::Impl {
     template<class Feed> void feed_bank(Bank& bank, const Settings& value, std::uint64_t version,
                                         std::stop_token stop, std::span<const float> samples, Feed feed,
                                         Prepared* simulation_wave = nullptr) {
+        rx_cpu::Context cpu_context(rx_cpu::Stage::control_residual);
         // Admit the receiver's current clock epoch before consuming this PCM
         // block. A short burst can finish within one block after a second rolls
         // over; refreshing afterward can miss every chip of the new stream.
@@ -1519,6 +1627,18 @@ struct Session::Impl {
         if(sample_count>std::numeric_limits<std::uint64_t>::max()-bank.samples)
             throw Error("receive sample clock exceeds its platform range");
         const auto capacity = bank_capacity(value);
+        // Phase 1 is read-only. Any cold eligible profile forces complete
+        // eviction before the first feed can run original worker preparation.
+        std::size_t temporal_receivers=0,temporal_workers=0;bool temporal_cold=false;
+        if(crossbank_temporal_plans_requested())for(const auto& receiver:bank.receivers) {
+            const auto workers=receiver.modem->temporal_plan_workers();
+            if(!workers)continue;
+            ++temporal_receivers;temporal_cold|=!*workers;temporal_workers=std::max(temporal_workers,*workers);
+        }
+        const bool temporal_ready=temporal_receivers>1 && !temporal_cold && temporal_workers &&
+            temporal_workers<=modem::detail::SharedTemporalPlans::maximum_workers;
+        if(!temporal_ready || (bank.temporal_plans && bank.temporal_plans->workers()!=temporal_workers))
+            drop_shared_temporal_plans(bank,"cold_or_changed_cohort");
         struct SharedProjection {
             Bank& bank;
             std::unique_ptr<modem::detail::CorrelationProjectionCache> cache;
@@ -1532,10 +1652,16 @@ struct Session::Impl {
         const auto moment_receivers=std::count_if(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver){
             const auto& config=receiver.options.modem;
             const auto chip=modem::pattern_chip_samples(config),symbol=modem::symbol_sample_count(config);
-            return receiver.amplitude_fft_samples || (config.oscillator_search && modem::pattern_pulse_enabled(config) &&
+            return receiver.amplitude_fft_samples ||
+                (modem::scheduled_bursts(config) && config.search_arithmetic!=modem::SearchArithmetic::fp64) ||
+                (config.oscillator_search && modem::pattern_pulse_enabled(config) &&
                 (chip>4096 || (chip>=1024 && symbol>=16ULL*config.sample_rate)));
         });
-        if(!samples.empty() && moment_receivers>1 && bank.working_bytes<=capacity &&
+        const auto permutation_receivers=std::count_if(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver) {
+            const auto& c=receiver.options.modem;
+            return modem::detail::pattern_permutation_sharing_supported && receiver.options.key && c.dsss_factor>1 && c.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2;
+        });
+        if(!samples.empty() && (moment_receivers>1 || permutation_receivers>1) && bank.working_bytes<=capacity &&
            std::all_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver){return receiver.modem->clock_windowed();})) {
             auto reserved=bank.working_bytes;
             bool fits=true;
@@ -1551,12 +1677,180 @@ struct Session::Impl {
                 std::size_t fft_samples=0;
                 for(const auto& receiver:bank.receivers)fft_samples=std::max(fft_samples,receiver.amplitude_fft_samples);
                 const auto allowance=std::min<std::size_t>(256*1024+64*fft_samples,capacity-reserved);
-                projection.cache=std::make_unique<modem::detail::CorrelationProjectionCache>(samples,allowance,fft_samples);
+                const auto mapped=std::any_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver){
+                    return modem::scheduled_bursts(receiver.options.modem) && !receiver.amplitude_fft_samples;
+                });
+                projection.cache=std::make_unique<modem::detail::CorrelationProjectionCache>(samples,allowance,fft_samples,
+                    mapped?std::optional<std::uint64_t>{bank.samples}:std::nullopt);
                 if(projection.cache->enabled()) {
                     projection.charged=projection.cache->working_bytes();bank.working_bytes+=projection.charged;
                 } else projection.cache.reset();
             }
         }
+        // V2 permutation reuse is independent of fine-chip curve eligibility.
+        // Keep its persistent optional pool inside the same protected surplus.
+        // Diagnostic restriction: every receiver must be keyed V2 and already
+        // retain its original workers AND Temporal state. Other algorithms and
+        // mixed cohorts keep the original 8-row/256KiB optional policy.
+        const bool permutation_workers_retained=std::all_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver) {
+            const auto& c=receiver.options.modem;
+            if(!receiver.options.key || c.dsss_factor<=1 || c.outer_dsss_version!=modem::OuterDsssVersion::interleaved_v2)return false;
+            const auto workers=receiver.modem->temporal_plan_workers();return workers && *workers;
+        });
+        if(bank.permutations && !permutation_workers_retained &&
+           (bank.permutations->working_bytes()>256*1024 || bank.permutations->row_limit()>8)) {
+            const auto bytes=bank.permutations->working_bytes();
+            trace_permutation_release(bank,"workers_unretained");
+            bank.permutations.reset();bank.working_bytes-=bytes;
+        }
+        if(projection.cache && permutation_receivers>1 && bank.working_bytes<=capacity) {
+            const auto old_bytes=bank.permutations?bank.permutations->working_bytes():0;
+            auto reserved=bank.working_bytes-old_bytes;
+            const auto reserve=[&](std::size_t bytes) {
+                if(bytes>capacity-reserved)return false;
+                reserved+=bytes;return true;
+            };
+            if(reserve(projection.remaining_headroom) && reserve(projection.deferred_detectors)) {
+                const bool larger=permutation_workers_retained && large_permutation_cache_requested() &&
+                    modem::detail::permutation_bank_byte_limit>256*1024 &&
+                    modem::detail::permutation_bank_byte_limit<=capacity-reserved;
+                const auto allowance=larger?modem::detail::permutation_bank_byte_limit:
+                    std::min<std::size_t>(256*1024,capacity-reserved);
+                const auto rows=larger?modem::detail::permutation_cache_max_rows:8;
+                const bool replace=bank.permutations && larger &&
+                    (old_bytes<allowance || bank.permutations->row_limit()<rows);
+                if((!bank.permutations || replace) && allowance>4096) {
+                    // Release before allocation: no peak double reservation.
+                    if(bank.permutations){trace_permutation_release(bank,"optional_upgrade");bank.permutations.reset();bank.working_bytes-=old_bytes;}
+                    try {
+                        auto pool=std::make_unique<modem::detail::PatternPermutationPools>(allowance,rows);
+                        bank.working_bytes+=pool->working_bytes();bank.permutations=std::move(pool);
+                    }catch(const std::bad_alloc&) {} // Exact original private generator remains available.
+                }
+            }
+        }
+        // Spend only genuine surplus after all detector and push/drain
+        // reservations. Existing projection eligibility supplies a synchronous
+        // borrowing channel; other geometries retain the original local L1.
+        const auto prepare_source_curve_pool=[&](bool include_fine) {
+            if(!projection.cache || bank.working_bytes>capacity)return;
+            using Curves=modem::detail::SharedSourceCurves<>;
+            const auto eligible=[include_fine](const Receiver& receiver) {
+                const auto& c=receiver.options.modem;
+                return !receiver.amplitude_fft_samples && receiver.options.key &&
+                    modem::scheduled_bursts(c) && c.scramble &&
+                    c.spreading_mode==modem::SpreadingMode::pattern && modem::pattern_pulse_enabled(c) &&
+                    (modem::pattern_chip_samples(c)>=1024 ||
+                     modem::detail::fine_source_curve_geometry(c,include_fine)) &&
+                    modem::symbol_sample_count(c)<(1ULL<<40) &&
+                    c.search_arithmetic!=modem::SearchArithmetic::fp64;
+            };
+            std::size_t count=0,missing=0;
+            for(const auto& receiver:bank.receivers)if(eligible(receiver)) {
+                ++count;if(!receiver.source_curve_family)++missing;
+            }
+            auto reserved=bank.working_bytes;
+            const auto add=[&](std::size_t bytes) {
+                if(bytes>capacity-reserved)return false;
+                reserved+=bytes;return true;
+            };
+            const bool fits=add(projection.remaining_headroom) && add(projection.deferred_detectors);
+            const auto capability_bytes=sizeof(modem::detail::SourceFamily);
+            if(count>1 && fits && missing<=(capacity-reserved)/capability_bytes &&
+               (bank.source_curves || capacity-reserved-missing*capability_bytes>=Curves::minimum_working_bytes())) {
+                try {
+                    for(auto& receiver:bank.receivers)if(eligible(receiver) && !receiver.source_curve_family) {
+                        // Family numbers identify keys only within this Bank
+                        // generation; exact purpose roots also bind equality.
+                        if(receiver.family==UINT64_MAX)throw Error("source family namespace exhausted");
+                        const auto c=transfer::seeded_config(receiver.options,receiver.epoch);
+                        receiver.source_curve_family=std::make_unique<const modem::detail::SourceFamily>(
+                            modem::detail::source_family(c,receiver.family+1));
+                        bank.working_bytes+=capability_bytes;reserved+=capability_bytes;
+                    }
+                    if(!bank.source_curves) {
+                        const auto ceiling=include_fine && modem::detail::fine_source_curve_revision()==2?
+                            1024U*1024U:256U*1024U;
+                        auto pool=std::make_unique<Curves>(std::min<std::size_t>(ceiling,capacity-reserved));
+                        if(pool->capacity()) {
+                            bank.working_bytes+=pool->working_bytes();bank.source_curves=std::move(pool);
+                            audio::trace::record("receiver_source_curve_cache",[&](auto& f) {
+                                f.add("sample",bank.samples);f.add("bytes",bank.source_curves->working_bytes());
+                                f.add("rows",bank.source_curves->capacity());f.add("families",count);
+                                f.add("fine_curve_table_revision",include_fine?modem::detail::fine_source_curve_revision():1U);
+                            });
+                        }
+                    }
+                } catch(const std::bad_alloc&) {
+                    // Optional allocation failure retains original local rows.
+                }
+            }
+        };
+        prepare_source_curve_pool(false); // Keep legacy coarse grant order.
+        // Phase 2: additive optional grant AFTER all original workers/Temporal,
+        // older optional caches, deferred detectors, and finite push/drain
+        // reservations. This pool is separate from the 256 KiB projection cap.
+        if(projection.cache && temporal_ready && !bank.temporal_plans && bank.working_bytes<=capacity) {
+            auto reserved=bank.working_bytes;
+            const auto add=[&](std::size_t bytes) {
+                if(bytes>capacity-reserved)return false;reserved+=bytes;return true;
+            };
+            if(add(projection.remaining_headroom) && add(projection.deferred_detectors))try {
+                auto pool=modem::detail::SharedTemporalPlans::create(temporal_workers,capacity-reserved);
+                if(pool) {
+                    const auto bytes=pool->working_bytes();
+                    bank.temporal_plans=std::move(pool);bank.working_bytes+=bytes;
+                    audio::trace::record("receiver_shared_temporal_plans_allocated",[&](auto& f) {
+                        f.add("sample",bank.samples);f.add("bytes",bytes);f.add("workers",temporal_workers);
+                        f.add("entries",modem::detail::ScheduledTemporalTemplates::SharedPlanCache::capacity);
+                    });
+                }
+            }catch(const std::bad_alloc&) {} // Original owned/public Plan fallback.
+        }
+        // A second additive optional grant, after the ORIGINAL exact owner,
+        // earlier caches, all original worker grants and deferred/push reserve.
+        // Payload is owned by each public shard row and shared across sequential
+        // receivers through their already-acquired exact Lease; no private data.
+        if(projection.cache && modem::detail::ScheduledTemporalFp32Execution::payload_requested() && bank.temporal_plans &&
+           bank.temporal_plans->idle() && !bank.temporal_plans->payload_bytes() && bank.working_bytes<=capacity) {
+            auto reserved=bank.working_bytes;
+            const auto add=[&](std::size_t bytes){if(bytes>capacity-reserved)return false;reserved+=bytes;return true;};
+            if(add(projection.remaining_headroom) && add(projection.deferred_detectors))try {
+                const auto before=bank.temporal_plans->working_bytes();
+                if(bank.temporal_plans->template allocate_payloads<modem::detail::ScheduledTemporalFp32Execution::Native::PackedPlan>(capacity-reserved)) {
+                    const auto added=bank.temporal_plans->working_bytes()-before;bank.working_bytes+=added;
+                    audio::trace::record("receiver_shared_temporal_fp32_payloads",[&](auto& f) {
+                        f.add("sample",bank.samples);f.add("bytes",added);f.add("workers",bank.temporal_plans->workers());
+                        f.add("entries",modem::detail::ScheduledTemporalTemplates::SharedPlanCache::capacity);
+                    });
+                }
+            }catch(const std::bad_alloc&) {} // All new shard arenas rolled back.
+        }
+        // Fine L2 uses final surplus after preceding exact/shared grants.
+        if(modem::detail::fine_source_curves_requested())prepare_source_curve_pool(true);
+        const auto reclaim_source_curves=[&] {
+            drop_shared_temporal_plans(bank);
+            // Every synchronous feed/worker has joined before this callback.
+            if(bank.permutations) {
+                const auto bytes=bank.permutations->working_bytes();
+                trace_permutation_release(bank,"workspace_loan");
+                bank.permutations.reset();bank.working_bytes-=bytes;
+            }
+            if(bank.source_curves) {
+                const auto bytes=bank.source_curves->working_bytes();
+                if(!bank.source_curves->try_reclaim())return;
+                bank.source_curves.reset();bank.working_bytes-=bytes;
+            }
+            for(auto& receiver:bank.receivers)if(receiver.source_curve_family) {
+                receiver.source_curve_family.reset();bank.working_bytes-=sizeof(modem::detail::SourceFamily);
+            }
+        };
+        const auto release_optimization=[&] {projection.release();reclaim_source_curves();};
+        // An unavailable context cannot use the optional arena and must not
+        // let it reduce the original receiver recording/replay allowance.
+        if(!projection.cache)reclaim_source_curves();
+        const bool projection_context_created=static_cast<bool>(projection.cache);
+        bool projection_context_used=false;
         std::vector<std::complex<double>> pattern_scores;
         std::vector<PatternScoreObservation> pattern_observations;
         // Observe every profile before publishing any completion. Otherwise a
@@ -1574,13 +1868,13 @@ struct Session::Impl {
                 try {
                     if(phase==0) {
                         const auto actual=receiver.modem->working_bytes();
-                        const auto overhead = accounted - actual;
+                        auto overhead = accounted - actual;
                         auto other = bank.working_bytes - accounted;
                         const auto growth=projection.cache?receiver.modem->projection_cache_headroom(sample_count):0;
                         const auto deferred=projection.cache?receiver.modem->reserved_workspace_bytes():actual;
                         const auto extra=deferred>actual?deferred-actual:0;
                         if(projection.cache && (growth>projection.remaining_headroom || extra>projection.deferred_detectors)) {
-                            projection.release();other=bank.working_bytes-accounted;
+                            release_optimization();accounted=receiver_workspace(receiver);overhead=accounted-actual;other=bank.working_bytes-accounted;
                         }
                         if(projection.cache) {
                             const auto peers=projection.deferred_detectors-extra;
@@ -1600,7 +1894,7 @@ struct Session::Impl {
                            growth>capacity-other-overhead-deferred)) {
                             // If recording grew past the surplus, release the
                             // optimization before restoring the original loan.
-                            projection.release();other=bank.working_bytes-accounted;
+                            release_optimization();accounted=receiver_workspace(receiver);overhead=accounted-actual;other=bank.working_bytes-accounted;
                         }
                         if (other > capacity || overhead > capacity - other)
                             throw Error("key and epoch receiver bank exceeds the configured DSP workspace");
@@ -1608,9 +1902,33 @@ struct Session::Impl {
                         // fed can use all remaining shared space for recording and
                         // replay, while later keys see its measured growth.
                         receiver.modem->set_workspace_bytes(capacity - other - overhead);
-                        feed(*receiver.modem,projection.cache.get());
+                        {
+                            auto* context=projection.cache.get();
+                            projection_context_used|=context!=nullptr;
+                            // One exclusive coordinator Borrow. Outer guards
+                            // may pin rows through raw work; joined cleanup
+                            // unbinds every Temporal before the next receiver.
+                            const auto workers=receiver.modem->temporal_plan_workers();
+                            auto plans=bank.temporal_plans && workers && *workers?
+                                bank.temporal_plans->try_borrow(*workers):modem::detail::SharedTemporalPlans::Borrow{};
+                            struct ClearSourceBinding {
+                                modem::detail::CorrelationProjectionCache* cache;
+                                ~ClearSourceBinding(){if(cache){cache->clear_source_curves();cache->clear_permutations();cache->clear_temporal_plans();}}
+                            } clear{context};
+                            if(context && plans)context->bind_temporal_plans(&plans);
+                            if(context)context->bind_source_curves(bank.source_curves.get(),receiver.source_curve_family.get());
+                            if(context) {
+                                const auto& c=receiver.options.modem;
+                                const bool eligible=receiver.options.key && c.dsss_factor>1 &&
+                                    c.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2;
+                                const auto ns=eligible && receiver.family<UINT64_MAX?receiver.family+1:0;
+                                context->bind_permutations(eligible?bank.permutations.get():nullptr,ns);
+                            }
+                            feed(*receiver.modem,context);
+                        }
                         update_workspace();
                         {
+                            rx_cpu::Scope cpu_candidates(rx_cpu::Stage::publication);
                             const auto candidates = receiver.modem->pattern_candidates(pattern_score_limit);
                             receiver.pattern_score_history.update(candidates, replay_clock(), [&] {
                                 return pattern_score_observation_id.fetch_add(1, std::memory_order_relaxed) + 1;
@@ -1625,12 +1943,13 @@ struct Session::Impl {
                             const auto retained=receiver.modem->working_bytes();
                             const auto promised=receiver.modem->reserved_workspace_bytes();
                             const auto pending=promised>retained?promised-retained:0;
-                            if(pending>capacity-projection.deferred_detectors)projection.release();
+                            if(pending>capacity-projection.deferred_detectors) {release_optimization();accounted=receiver_workspace(receiver);}
                             else projection.deferred_detectors+=pending;
                         }
                         continue;
                     }
                     {
+                        rx_cpu::Scope cpu_publish(rx_cpu::Stage::publication);
                         for(auto& burst:receiver.bursts) {
                             if(burst.bits.empty() && !burst.missing_slots && !burst.complete)continue;
                             const auto score=burst.score,frequency=burst.frequency_hz;
@@ -1707,7 +2026,7 @@ struct Session::Impl {
                 } catch (const Error& error) {
                     update_workspace();
                     if (stop.stop_requested()) return;
-                    projection.release();
+                    release_optimization();accounted=receiver_workspace(receiver);
                     {
                         {
                             std::lock_guard lock(mutex);
@@ -1819,6 +2138,53 @@ struct Session::Impl {
                     bank.working_bytes=bank.working_bytes-before+receiver_workspace(receiver);
                 }
             }
+        }
+        if(bank.source_curves && bank.samples/value.transfer.modem.sample_rate!=
+           (bank.samples+sample_count)/value.transfer.modem.sample_rate) {
+            const auto stats=bank.source_curves->statistics();
+            audio::trace::record("receiver_source_curve_counts",[&](auto& f) {
+                f.add("sample",bank.samples+sample_count);
+                f.add("counter_scope","current bank pool lifetime; successive records are cumulative");
+                f.add("bytes",bank.source_curves->working_bytes());f.add("rows",bank.source_curves->capacity());
+                f.add("hits",stats.hits);f.add("misses",stats.misses);f.add("builds",stats.builds);
+                f.add("busy",stats.busy);f.add("evictions",stats.evictions);f.add("exhaustions",stats.exhaustions);
+                f.add("failed_builds",stats.failed_builds);
+            });
+        }
+        if(permutation_receivers && (
+#if defined(DATAPUMP_PERMUTATION_TRACE_EVERY_PUSH)
+           true ||
+#endif
+           bank.samples/value.transfer.modem.sample_rate!=
+           (bank.samples+sample_count)/value.transfer.modem.sample_rate)) {
+            audio::trace::record("receiver_permutation_counts",[&](auto& f) {
+                f.add("sample",bank.samples+sample_count);f.add("resident",bank.receivers.size());
+                f.add("eligible",permutation_receivers);f.add("projection_context_created",projection_context_created);
+                f.add("projection_context_used",projection_context_used);
+                f.add("pool_present",static_cast<bool>(bank.permutations));
+                f.add("row_limit",modem::detail::permutation_cache_max_rows);
+                f.add("byte_limit",modem::detail::permutation_bank_byte_limit);
+                if(bank.permutations) {
+                    const auto rows=bank.permutations->statistics();
+                    const auto all=bank.permutations->request_statistics();
+                    f.add("reserved_bytes",bank.permutations->working_bytes());
+                    f.add("allocated_bytes",bank.permutations->allocated_bytes());
+                    f.add("count_classes",bank.permutations->count_classes());
+                    f.add("row_capacity",bank.permutations->row_capacity());
+                    f.add("effective_row_limit",bank.permutations->row_limit());
+            const auto inner=bank.permutations->inner_coefficient_statistics();
+            f.add("inner_bytes",bank.permutations->inner_coefficient_bytes());
+            f.add("inner_requests",inner.requests);f.add("inner_hits",inner.hits);
+            f.add("inner_builds",inner.builder_completed);f.add("inner_evictions",inner.evictions);
+            f.add("inner_busy",inner.busy);f.add("inner_bypassed",inner.bypassed);
+                    f.add("requests",all.requests);f.add("hits",all.hits);
+                    f.add("builder_attempts",all.builder_attempts);f.add("builder_completed",all.builder_completed);
+                    f.add("child_fallbacks",all.child_fallbacks);
+                    f.add("row_misses",rows.misses);f.add("row_private_builds",rows.private_builds);
+                    f.add("publications",rows.publications);f.add("busy",rows.busy);
+                    f.add("evictions",rows.evictions);f.add("bypassed",rows.bypassed);
+                }
+            });
         }
         bank.samples+=sample_count;
         // Receiver histories are updated even while another receiver wins the

@@ -141,7 +141,17 @@ while retaining exact worker/chip/calendar reuse.
 Native FP32 curve storage/interpolation was implemented and inspected, but its
 complete local pair used 5.1% more CPU for 1.78 MB less DSP memory. It remains an
 internal override; no narrower automatic path is selected solely for its type.
-Fine-frequency fusion remains a kernel prototype, not an integrated gain. Exact
+Fine-frequency fusion remains a kernel prototype, not an integrated gain.
+The later shared candidate adds exact-seed public moment reuse, leased L2 private
+source curves and complete DSSS permutation snapshots; these do not change
+arithmetic policy. Bounded common-family sharing is now enabled with an eight-phase
+cap and at most sixteen total lanes per job. Source/address/ownership proofs and
+same-frequency pure Fit reuse preserve each lane's independent detector state;
+unsupported pieces retain original execution. Conditional one-bank ABBA results
+and one preliminary complete Live observation are documented in the
+[shared-execution diagnosis](scheduled-hops.md#shared-execution-measured-diagnosis-2026-10-13).
+Latest combined paired performance remains pending; full-bank sensitivity and
+native FP32/INT8 production selection do not follow from those observations. Exact
 block-local gated-template reuse remains allowed at every precision when its
 full source/rate/phase/index identity repeats. No enormous shifted-PCM matrix or
 whole-symbol buffer is introduced.
@@ -612,3 +622,15 @@ preceding candidate. The regular calibration case, sanitizer/native-display,
 ARM, platform, SDK and packaging qualification remain deferred. This is a
 local manual-testing checkpoint with a documented pre-existing failure, not
 an overall qualified release.
+
+
+For the shared scheduled complex follow-up, exact common-source and same-frequency
+contributions improve complete identical-PCM CPU by 1.2608× in the measured
+M10/G1, DSSS-Off fixture. Bounded work crosses later active hops and drains;
+scheduling alone still does not force amplitude reception. The demanding DSSS100
+split fixture has not completed its bounded drain, so practical headroom for that
+case remains unsupported. Native FP32/SIMD diagnostics are not selected merely
+because a kernel is narrower or faster. See the [measured scope and gap](scheduled-hops.md#final-shared-hotcold-measurements-and-remaining-gap).
+
+
+The latest [shared-execution and fine-chip checkpoint](scheduled-hops.md#shared-execution-and-fine-chip-follow-up-13-october-2026) records complete-prefix CPU measurements, actual arithmetic, cache identities, numerical scope and unresolved full-bank work. Native FP32, fine source tables and borrowing experiments receive no automatic planner/simulation speed discount from operand width or kernel timing. Default/FP32 minimum mapped arithmetic remains partial FP64 coverage; FP64 force retains original templates and bypasses approximate interpolation.

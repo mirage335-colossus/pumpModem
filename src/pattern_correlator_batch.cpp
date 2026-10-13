@@ -1,4 +1,5 @@
 #include "pattern_correlator_batch.hpp"
+#include "pattern_permutation_cache.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "datapump/pattern_search.hpp"
 #include "datapump/pattern_pulse.hpp"
@@ -467,7 +468,9 @@ void accumulate_correlator_cpu(const CorrelationBatch& batch,std::span<Correlati
     // dispatch across up to sixteen neighboring lanes. This is CPU scheduling
     // only; logical lane identity and each lane's arithmetic stay unchanged.
     const auto grain=std::max<std::size_t>(1,std::min<std::size_t>(16,lanes.size()/workers.size()/16));
+    const auto permutations=pattern_permutation_binding;
     parallel_search_ranges(lanes.size(),workers.size(),grain,[&](std::size_t worker,std::size_t begin,std::size_t end) {
+        PatternPermutationScope permutation_scope(permutations.pools,permutations.key_namespace);
         for(auto i=begin;i<end;++i)accumulate_lane(batch,lanes[i],workers[worker],stop);
     });
 }

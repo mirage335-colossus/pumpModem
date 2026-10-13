@@ -903,13 +903,13 @@ Work scheduled_complex_receiver_work(modem::Config config,const SearchBank& bank
     if(!packed) {
         const bool force=config.search_arithmetic==modem::SearchArithmetic::fp64;
         g.arithmetic_operands=force?"Original unquantized FP64 samples and independently generated complex templates":
-            "FP64 samples, native FP64 curve knots/interpolation and independently generated private candidates; direct fallback";
-        g.arithmetic_accumulation="FP64 I/Q products, real Gram terms, reductions and scoring; precise coordinates retain wider arithmetic";
-        g.arithmetic_backend=force?"CPU mapped complex original-template direct correlation":
-            "CPU mapped complex bounded physical moment and source-curve contraction where eligible; original direct fallback";
-        g.arithmetic_limit="Mapped products, moments, covariance and scoring retain FP64; Default/FP32-minimum are partial coverage. Native FP32 curve storage/interpolation was prototyped and slower in a complete local pair; internal diagnostic only. GPU execution unavailable";
-        g.template_reuse=force?"Exact caches allowed; original templates; no approximate interpolation, including close-clock or finite-table curve reuse":
-            "Eligible bounded eight-row canonical-address chip curves and finite-table intervals; support/partial-tail/limiter/gate fallbacks; no close-clock interpolation. Optional scratch is reclaimed for required admissions";
+            "Original FP64 samples and private candidates; native FP64 source-curve interpolation where eligible; original direct fallback";
+        g.arithmetic_accumulation="FP64 I/Q products, real Gram terms, energy, reductions and scoring; absolute timing and outer-evidence reductions retain wider arithmetic";
+        g.arithmetic_backend=force?"CPU mapped complex original-template direct correlation with eligible exact family reuse":
+            "CPU mapped complex shared exact source families; bounded physical moments and source curves where eligible; original direct fallback";
+        g.arithmetic_limit="Search-arithmetic policy has partial coverage: Default and FP32 minimum currently use the same FP64 mapped products, moments, covariance and scoring. Optional Temporal execution can dispatch ordered FP64 SIMD; native FP32 packing/execution and fine-chip source tables remain internal diagnostics. Complete-prefix measurements do not establish an additional CPU gain for those paths, so no precision speedup is credited here. Complete rolling-bank arithmetic/reuse crossovers and sensitivity remain uncalibrated outside the documented local scope; GPU execution unavailable";
+        g.template_reuse=force?"Exact family/source construction and same-frequency fit reuse allowed; original templates at FP64; no approximate interpolation, including close-clock and finite-table curve reuse":
+            "Bounded exact family/source construction and same-frequency raw/affine fit reuse; up to eight candidate phase roots per job. Eligible local/shared source-chip curves and finite-table intervals retain identity/support/partial-tail/limiter/gate checks; unsupported or exhausted scratch uses original execution. No close-clock interpolation. Optional caches are reclaimed for required admissions";
     }
     return result;
 }
@@ -2498,7 +2498,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
             "Preparation, rolling admissions, component split, arithmetic crossover and complete live-bank CPU are uncalibrated":
             "Split mapped complex engineering reference: actual refined physical-aperture frequency/clock alternatives; original private coefficients, eligible bounded source-curve/pulse-moment reuse and real I/Q Gram statistics. "
             "No source-time whole-symbol FFT is priced. Full physical capture remains charged; active/null overlap contraction uses the selected strategy allowance. "
-            "Constructors, rolling admissions and complete execution remain uncalibrated";
+            "Constructors, rolling admissions, DSSS outer-pulse guards, cache exhaustion and complete execution remain uncalibrated outside the documented local scope; no new shared-family or precision speedup is assumed";
         if(matching_work.timing_window_modeled)result.receiver_work_assumptions+=
             "; selected GPS/audio arrival prior modeled; full-window fallback reported separately";
         else result.receiver_work_assumptions+="; full arrival-window fallback retained";

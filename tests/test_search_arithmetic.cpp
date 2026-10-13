@@ -1,4 +1,6 @@
 #include "../src/search_arithmetic.hpp"
+#include "../src/scheduled_common_simd.hpp"
+#include <bit>
 #include "datapump/types.hpp"
 #include <algorithm>
 #include <array>
@@ -387,6 +389,39 @@ void dispatch_and_disabled_underflow() {
           "disabled gradual underflow fabricated a rigorous certificate");
 #endif
 }
+void scheduled_raw_sample_family_equivalence() {
+    namespace family = datapump::modem::detail::family_simd;
+    using Scratch = datapump::modem::detail::ScheduledRawSampleScratch;
+    std::mt19937_64 random(8315521);std::uniform_real_distribution<double> unit(-1,1);
+    for(const auto backend:{family::Backend::scalar,family::Backend::sse2,family::Backend::avx2,family::Backend::automatic}) {
+        if(!family::available(backend))continue;
+        for(std::size_t lanes=0;lanes<=Scratch::maximum_lanes;++lanes)for(unsigned trial=0;trial<31;++trial) {
+            Scratch scratch;
+            std::array<Complex,2> phase{{{unit(random),unit(random)},{unit(random),unit(random)}}};
+            if(trial==0)phase={Complex{-0.0,0.0},Complex{0.0,-0.0}};
+            if(trial==1)for(auto& z:phase)z*=std::ldexp(1.0,-500);
+            if(trial==2)for(auto& z:phase)z*=1e100;
+            std::array<datapump::modem::detail::CorrelationProjection,Scratch::maximum_lanes> projection;
+            for(std::size_t lane=0;lane<lanes;++lane) {
+                const auto x=unit(random),angle=unit(random)*3,c=std::cos(angle),t=std::sin(angle);
+                projection[lane]={x*c,x*t,c*c,t*t,c*t,x*x};const auto& p=projection[lane];
+                scratch.projection[0][lane]=p.xc;scratch.projection[1][lane]=p.xs;
+                scratch.projection[2][lane]=p.cc;scratch.projection[3][lane]=p.ss;
+                scratch.projection[4][lane]=p.cs;scratch.projection[5][lane]=p.energy;
+            }
+            datapump::modem::detail::scheduled_raw_sample_contributions(scratch,lanes,phase,backend);
+            for(std::size_t lane=0;lane<lanes;++lane)for(unsigned bit=0;bit<2;++bit) {
+                datapump::modem::detail::CorrelationFit expected;expected.add(projection[lane],phase[bit],1);
+                const auto actual=datapump::modem::detail::scheduled_raw_sample_fit(scratch,bit,lane);
+                const std::array<double,6> a{actual.xc,actual.xs,actual.cc,actual.ss,actual.cs,actual.energy};
+                const std::array<double,6> b{expected.xc,expected.xs,expected.cc,expected.ss,expected.cs,expected.energy};
+                for(unsigned field=0;field<6;++field)check(std::bit_cast<std::uint64_t>(a[field])==std::bit_cast<std::uint64_t>(b[field]),
+                    "one-sample family SIMD changed original FP64 contribution bits");
+                check(actual.count==1,"one-sample family SIMD changed real observation count");
+            }
+        }
+    }
+}
 } // namespace
 int main() {
     try {
@@ -398,6 +433,7 @@ int main() {
         residual_and_dot_certificates();
         multi_tile_and_float_widths();
         dispatch_and_disabled_underflow();
+        scheduled_raw_sample_family_equivalence();
         std::cout << "search arithmetic passed; dispatch=" << arithmetic::backend_name() << '\n';
         return 0;
     } catch (const std::exception& error) {

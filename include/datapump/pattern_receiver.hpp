@@ -1,4 +1,5 @@
 #pragma once
+#include <optional>
 #include "datapump/modem.hpp"
 #include "datapump/pattern_search.hpp"
 #include "datapump/sched_hop.hpp"
@@ -319,6 +320,9 @@ public:
     // Additional allocation bound for one finite PCM push and its next drain.
     // SIZE_MAX disables optional shared preprocessing for unsupported geometry.
     std::size_t projection_cache_headroom(std::size_t input_samples) const;
+    // No allocation: nullopt unsupported, zero eligible but cold/reselecting,
+    // positive only after the original worker and Temporal choices are retained.
+    std::optional<std::size_t> temporal_plan_workers() const;
     // Reject a reduction that cannot retain current state. Future candidate
     // growth is capped within the new ceiling; excess payload throws Error.
     void set_workspace_bytes(std::size_t);

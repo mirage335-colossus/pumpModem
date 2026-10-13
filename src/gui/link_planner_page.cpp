@@ -536,9 +536,11 @@ void link_budget(Node& root, const planner::Model& model) {
             model.success_probability<.8?Tone::negative:Tone::accent;
         const bool cpu_available=search_fits&&model.one_bit_cpu_available;
         const auto cpu_ratio=model.cpu_realtime_ratio;
+        const bool uncalibrated_cpu=model.receiver_geometry.scheduled &&
+            !model.receiver_geometry.scheduled_cost_calibrated;
         const auto cpu_tone=!cpu_available?Tone::muted:cpu_ratio>=1?Tone::negative:
-            cpu_ratio>=.5?Tone::caution:Tone::positive;
-        const auto cpu_label=!cpu_available?"CPU estimate unavailable":cpu_ratio>=1?"CPU estimate: slower than real time":
+            cpu_ratio>=.5 || uncalibrated_cpu?Tone::caution:Tone::positive;
+        const auto cpu_label=!cpu_available?"CPU estimate unavailable":uncalibrated_cpu?"CPU engineering estimate: uncalibrated":cpu_ratio>=1?"CPU estimate: slower than real time":
             cpu_ratio>=.5?"CPU estimate: limited headroom":"CPU estimate: headroom";
         const auto pace=!cpu_available?std::string{}:cpu_ratio<.01?"<0.01 s processing per 1 s audio":
             cpu_ratio>1000?">1,000 s processing per 1 s audio":"≈ "+number(cpu_ratio,2)+" s processing per 1 s audio";
@@ -635,7 +637,8 @@ void geometry_details(Node& n,const planner::Model& model) {
                 "; guaranteed drain-window allowance "+number(g.scheduled_deadline_processing_ratio,5)+
                 " s processing / s audio. Remaining guaranteed recovery "+
                 planner::duration(g.scheduled_guaranteed_recovery_seconds)+
-                ". The larger ratio drives selection; this is uncalibrated scheduling evidence, not measured feasibility.",
+                ". Mean is the sustained allowance; the drain-window ratio is a separate short-term diagnostic. "
+                "Backend selection and queued-work policy are described below. These are uncalibrated estimates, not measured feasibility.",
                 11,Tone::muted,false,0);
         }
         if(!g.scheduled&&g.first_fft_seconds>0)paragraph(n,"Full-hop first batch: "+
@@ -710,7 +713,9 @@ void details(Node& root,const planner::Model& model) {
         (g.receiver_strategy_selected.empty()?"diagnostics pending":g.receiver_strategy_selected)+
         "; CPU budget "+number(model.inputs.options.modem.receiver_cpu_budget,6)+
         " s processing per 1 s audio.",11,Tone::muted,false,4);
-    paragraph(n,"Exact complex optimizations use their crossover independently of the CPU budget. Automatic may choose experimental amplitude-only detection above the budget or when full declared coverage is unavailable. Alternative-decoder full-bank sensitivity remains unqualified.",
+    paragraph(n,g.scheduled?
+        "Exact complex optimizations use their crossover independently of the CPU budget. Scheduled Automatic prefers complete complex coverage when its state fits; an uncalibrated CPU allowance alone does not choose amplitude fallback. Unsupported complex geometry/grid/state may select amplitude; Amplitude only forces it. Full-bank sensitivity and automatic cost crossovers remain unqualified":
+        "Exact complex optimizations use their crossover independently of the CPU budget. Automatic may choose experimental amplitude-only detection above the budget or when full declared coverage is unavailable. Alternative-decoder full-bank sensitivity remains unqualified.",
         11,Tone::muted,false,4);
     paragraph(n,"The selected backend is a work-model prediction. In complex frequency-axis search, individual batches may retain the existing complex backend when their crossover or workspace checks require it; execution counters identify actual fallback coverage.",
         11,Tone::muted,false,4);

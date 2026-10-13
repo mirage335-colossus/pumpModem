@@ -213,6 +213,7 @@ and decoder could otherwise change the codebook together without a test failing.
 | Split-calendar physical I/Q fits, source-window ownership, adjacent-symbol carry, wrong keys, clock/frequency boundaries and calendar-scored absence | `sched_hop_correlator` |
 | Bounded physical-aperture oscillator refinement, original exact pairs, UTC allowance, coupled topology and explicit cap failures | `scheduled_complex_search` |
 | Conditional bounded frequency moments, native/portable arithmetic, Gram/dot error certificates and explicit numerical fallbacks (not enabled in production) | `scheduled_frequency_fusion` |
+| Optional original-order temporal pulse plans, exact fractional normalization, independently gathered private candidates, pin/detach lifetime, immutable structural certificates, malformed-plan/fenv/cancellation fallback and unchanged carry/END/progress | `temporal_templates`, `temporal_normalization`, `borrowed_ordered_plan`, `temporal_plan_cache`, `borrowed_plan_prepare`, `temporal_pool_consumer`, `certified_ordered_plan`, `shared_temporal_plans`, `cached_pulse_count`, `pattern_coarse_cache` |
 | Complete key/epoch/timing/rate capture unions, rolling-admission fences, current revision identity, future-envelope bounds and fail-closed null skipping | `sched_capture` |
 | Bounded carrier/clock search, sub-Hz configuration, exact weak sampled reception and noise-only rejection | `pattern_search`, `tuning`, `simulation_estimate`, `weak_signal`; coupled-clock and streamed-template checks in `pattern_receiver` |
 | Whole-bit section fitting under phase and gain changes, conservative evidence, isolated-tail rejection, exact pending prefixes and bounded memory | `pattern_drift`, `pattern_fft_batch`, `pattern_correlator_batch` |
@@ -266,3 +267,13 @@ window rendering or physical-link performance. For adapter changes, also run the
 for each affected backend on a display. Record the actual checks and any limits
 in [validation](validation.md); do not replace physical progress assertions with
 whole-message loopbacks or relax them merely to make a refactor pass.
+
+
+The shared scheduled receiver contract also includes `scheduled_fine_curves`,
+`scheduled_fine_curves_65`, `scheduled_fine_curves_disabled_policy`,
+`scheduled_fine_curves_cached`, `temporal_fine_curve_borrow` and
+`temporal_fine_curve_cached`. The strict 257-node oracle is retained independently
+from the 65-node approximation. Actual-class tests enforce union/layout identity,
+canonical source identity, local/shared lease replacement, blocked duplicate
+fallback, cancellation/retry, joined reclamation and owner destruction. These
+are preservation checks, not full-bank detection/BER qualification.

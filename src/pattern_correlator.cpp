@@ -1,7 +1,9 @@
+#include "scheduled_work_profile.hpp"
 #if defined(__SSE2__)
 #include <emmintrin.h>
 #endif
 #include "datapump/pattern_correlator.hpp"
+#include "datapump/execution.hpp"
 #include "datapump/pattern_search.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
@@ -10,15 +12,27 @@
 #include "datapump/scheduled_symbol_calendar.hpp"
 #include "search_parallel.hpp"
 #include "pattern_correlator_batch.hpp"
+#include "scheduled_common_simd.hpp"
+#include "scheduled_outer_public_replay.hpp"
+#include "scheduled_pulse_moments.hpp"
+#include "scheduled_mapped_piece_groups.hpp"
+#include "scheduled_temporal_templates.hpp"
+#include "scheduled_r1_export.hpp"
+#include "scheduled_flat_export.hpp"
 #include "pattern_projection_cache.hpp"
+#include "scheduled_float_signal_moments.hpp"
+#include "scheduled_float_gram.hpp"
 #include "pattern_envelope.hpp"
 #include "search_fft.hpp"
 #include "audio_trace.hpp"
 #include <algorithm>
+#include <cstdlib>
+#include <string_view>
 #include <array>
 #include <cmath>
 #include <limits>
 #include <numbers>
+#include <new>
 #include <numeric>
 #include <set>
 #include <chrono>
@@ -27,9 +41,11 @@
 #include <atomic>
 #include <mutex>
 #include <utility>
+#include <tuple>
 #include <openssl/crypto.h>
 
 namespace datapump::modem {
+namespace rx_cpu = ::datapump::detail::cpu_profile;
 namespace {
 using Complex = std::complex<double>;
 constexpr double tau = 2 * std::numbers::pi;
@@ -61,6 +77,103 @@ using Projection=detail::CorrelationProjection;
 using Fit=detail::CorrelationFit;
 using DriftFit=detail::CorrelationDriftFit;
 using DifferentialFit=detail::CorrelationDifferentialFit;
+// Ordinary receivers retain the original compact telemetry footprint.
+// The public snapshot remains flat; scheduled-only counters live in ScheduledState.
+struct CoreWork {
+    PatternCorrelationBackend backend=PatternCorrelationBackend::raw;
+    std::size_t hypotheses=0,lattices=0,phase_groups=0,peak_workspace_bytes=0;
+    unsigned drift_sections=1;
+    std::uint64_t differential_window_samples=0,samples=0,cells=0,segments=0;
+    // Kernel preparation is included in frontend time and also shown separately.
+    // Opt-in timers affect execution cost; use uninstrumented runs for speedup.
+    double frontend_seconds=0,search_seconds=0,kernel_seconds=0;
+    double frontend_cpu_seconds=0,search_cpu_seconds=0,kernel_cpu_seconds=0;
+    // Validation is outside frontend. Pulse statistics are a frontend subset
+    // which includes kernel time; the remainder is downconversion/prefix work.
+    double validation_seconds=0,validation_cpu_seconds=0;
+    double pulse_statistics_seconds=0,pulse_statistics_cpu_seconds=0;
+    std::size_t affine_coefficient_cache_entries=0;
+    std::uint64_t affine_preparations=0,affine_reuses=0,affine_interval_fast_paths=0;
+    double affine_prepare_seconds=0,affine_fit_seconds=0;
+    double affine_prepare_cpu_seconds=0,affine_fit_cpu_seconds=0;
+    std::uint64_t amplitude_transforms=0,amplitude_observations=0,amplitude_cache_hits=0,amplitude_channel_updates=0;
+    std::size_t amplitude_bins=0,amplitude_fft_samples=0,amplitude_channels=0;
+    std::uint64_t amplitude_float_transforms=0,amplitude_precision_fallbacks=0;
+    std::uint64_t amplitude_float_envelopes=0;
+    std::uint64_t scheduled_null_samples=0,scheduled_omitted_fft_blocks=0;
+    std::uint64_t scheduled_null_pushes=0;
+    std::uint64_t scheduled_worker_preparations=0;
+    // Samples retained for the next fresh source symbol before the current
+    // conservative physical completion fence; included in ordinary search cost.
+    std::uint64_t scheduled_carry_samples=0;
+    std::uint64_t scheduled_colored_guard_activations=0,scheduled_quarter_guard_fallbacks=0;
+    std::uint64_t scheduled_template_constructions=0,scheduled_template_cache_hits=0;
+    std::size_t scheduled_template_cache_peak_bytes=0;
+    std::uint64_t amplitude_publication_polls=0,amplitude_unchanged_polls=0;
+};
+struct ScheduledExtraWork {
+    std::uint64_t scheduled_float_moment_prepared_samples=0;
+    std::uint64_t scheduled_float_moment_preparations=0;
+    std::uint64_t scheduled_float_moment_prepare_fallbacks=0;
+    std::uint64_t scheduled_float_moment_attempts=0;
+    std::uint64_t scheduled_float_moment_pieces=0;
+    std::uint64_t scheduled_float_moment_condition_fallbacks=0;
+    std::uint64_t scheduled_float_moment_error_fallbacks=0;
+    std::uint64_t scheduled_float_moment_accepted_pairs=0;
+    std::uint64_t scheduled_float_moment_fp64_pairs=0;
+    std::uint64_t scheduled_float_moment_gram_fallbacks=0;
+    std::size_t scheduled_exact_families=0;
+    std::size_t scheduled_family_groups=0;
+    std::size_t scheduled_family_metadata_bytes=0;
+    std::uint64_t scheduled_family_dispatches=0;
+    std::uint64_t scheduled_family_lanes=0;
+    std::size_t scheduled_common_peak_bytes=0;
+    std::uint64_t scheduled_common_families=0;
+    std::uint64_t scheduled_common_lanes=0;
+    std::uint64_t scheduled_common_pieces=0;
+    std::uint64_t scheduled_common_shapes=0;
+    std::uint64_t scheduled_common_raw_samples=0;
+    std::uint64_t scheduled_common_raw_lane_samples=0;
+    std::uint64_t scheduled_common_affine_preparations=0;
+    std::uint64_t scheduled_common_affine_lanes=0;
+    std::uint64_t scheduled_common_gram_fallbacks=0;
+    std::uint64_t scheduled_common_mapped_pairs=0;
+    std::uint64_t scheduled_common_mapped_failed_pairs=0;
+    std::uint64_t scheduled_common_mapped_lanes=0;
+    std::uint64_t scheduled_common_affine_reused_lanes=0;
+    std::uint64_t scheduled_common_phase_attempts=0;
+    std::uint64_t scheduled_common_phase_rejects=0;
+    std::uint64_t scheduled_common_phase_families=0;
+    std::uint64_t scheduled_common_phase_lanes=0;
+    std::size_t scheduled_common_raw_peak_bytes=0;
+    std::uint64_t scheduled_common_raw_fit_pairs=0;
+    std::uint64_t scheduled_common_raw_reused_lane_samples=0;
+    std::uint64_t scheduled_common_raw_packed_values=0;
+    std::uint64_t scheduled_common_raw_workspace_samples=0;
+    std::size_t scheduled_common_simd_peak_bytes=0;
+    unsigned scheduled_common_simd_selected_isa=0;
+    std::uint64_t scheduled_common_simd_attempts=0;
+    std::uint64_t scheduled_common_simd_samples=0;
+    std::uint64_t scheduled_common_simd_lane_samples=0;
+    std::uint64_t scheduled_common_simd_packed_values=0;
+    std::uint64_t scheduled_common_simd_guard_updates=0;
+    std::uint64_t scheduled_common_simd_outer_updates=0;
+    std::uint64_t scheduled_common_simd_short_samples=0;
+    std::uint64_t scheduled_common_simd_workspace_samples=0;
+    std::uint64_t scheduled_common_simd_isa_samples=0;
+    std::uint64_t scheduled_common_simd_scalar_lane_samples=0;
+    std::uint64_t scheduled_common_phase_address_hits=0;
+    std::uint64_t scheduled_common_phase_address_misses=0;
+    std::uint64_t scheduled_common_phase_address_queries=0;
+    std::uint64_t scheduled_float_gram_attempts=0;
+    std::uint64_t scheduled_float_gram_accepted_pairs=0;
+    std::uint64_t scheduled_float_gram_range_fallbacks=0;
+    std::uint64_t scheduled_float_gram_rank_fallbacks=0;
+    std::uint64_t scheduled_float_gram_error_fallbacks=0;
+    std::uint64_t scheduled_float_gram_helper_fallbacks=0;
+    std::uint64_t scheduled_float_gram_signal_attempts=0;
+    double scheduled_float_gram_maximum_relative_error=0;
+};
 struct Bank {
     double frequency=0;
     std::vector<Projection> prefix;
@@ -69,8 +182,16 @@ struct Bank {
     std::array<std::uint64_t,4> affine_lengths{};
     std::span<const Projection> shared_prefix;
     std::span<const Complex> shared_moment;
-    std::span<const Projection> observations() const {return shared_prefix.empty()?std::span<const Projection>(prefix):shared_prefix;}
-    std::span<const Complex> moments() const {return shared_moment.empty()?std::span<const Complex>(first_moment):shared_moment;}
+    struct ProjectionView {
+        std::span<const Projection> original;detail::PhysicalMomentCache::View physical;
+        Projection operator[](std::size_t i)const{return physical?physical.projection(i):original[i];}
+    };
+    struct MomentView {
+        std::span<const Complex> original;detail::PhysicalMomentCache::View physical;
+        Complex operator[](std::size_t i)const{return physical?physical.moment(i).signal1:original[i];}
+    };
+    ProjectionView observations(detail::PhysicalMomentCache::View physical={})const{return {shared_prefix.empty()?std::span<const Projection>(prefix):shared_prefix,physical};}
+    MomentView moments(detail::PhysicalMomentCache::View physical={})const{return {shared_moment.empty()?std::span<const Complex>(first_moment):shared_moment,physical};}
     void prepare_carrier(std::size_t block_samples,long double knot_duration,std::uint32_t sample_rate) {
         // Immutable during parallel lane scoring. A complete oscillator block
         // is the dominant length at large chips; retain three common knot
@@ -301,7 +422,7 @@ struct PatternCorrelator::Impl {
     long double origin_lower=0;
     bool finished=false,shaped=false,pulse_segmented=false,scheduled_affine=false,guard_chains=false,outer_presence=false,timing_enabled=false,timing_dirty=false;
     PatternCorrelatorOptions options;
-    PatternCorrelatorWork work;
+    CoreWork work;
     std::unique_ptr<PatternAmplitudeGeometry> amplitude_geometry;
     // The compact ordinary receiver has a strict small idle footprint. Sparse
     // calendar state belongs only to scheduled reception; its object
@@ -310,88 +431,258 @@ struct PatternCorrelator::Impl {
         std::array<Fit,2> fits{};
         std::uint64_t observed_start=0;
     };
-    struct ScheduledMoment {
-        Complex signal1{},square1{},square2{};
-        double norm1=0,norm2=0;
-    };
+    using ScheduledMoment=detail::PhysicalMomentCache::Moment;
     template<class Scalar> struct ScheduledCurveCacheT {
         struct Key {
             std::uint64_t epoch=0,ordinal=0,chip=0;
+            // Validated sample rates are at most120MHz, leaving the upper
+            // five bits free. Keep the original Key footprint on32/64-bit
+            // targets; these local storage bits never enter SourceKey.
             std::uint32_t gate_phase=0;
-            bool operator==(const Key&) const = default;
+            static constexpr std::uint32_t phase_mask=0x07ffffffU,shared_storage=0x80000000U;
+            unsigned table_revision()const{return 1U+((gate_phase>>27)&15U);}
+            std::uint32_t phase()const{return gate_phase&phase_mask;}
+            void set_revision(unsigned revision) {
+                require(revision==1||revision==2,"invalid local source curve revision");
+                gate_phase=(gate_phase&(phase_mask|shared_storage))|((revision-1U)<<27);
+            }
+            bool operator==(const Key& other) const {
+                return epoch==other.epoch&&ordinal==other.ordinal&&chip==other.chip&&
+                    (gate_phase&~shared_storage)==(other.gate_phase&~shared_storage);
+            }
         };
+        struct OriginalKeyLayout {std::uint64_t epoch,ordinal,chip;std::uint32_t gate_phase;};
+        static_assert(sizeof(Key)==sizeof(OriginalKeyLayout)&&alignof(Key)==alignof(OriginalKeyLayout));
+        using Knots=std::array<std::array<std::complex<Scalar>,2>,257>;
         struct Row {
             Key key;
-            std::array<std::array<std::complex<Scalar>,2>,257> knots{};
+            union {Knots knots;detail::SharedSourceCurves<>::Lease shared;};
             std::atomic<unsigned> readers{0};
             std::uint64_t stamp=0;
             bool valid=false;
+            Row():knots{}{}
+            bool is_shared()const{return (key.gate_phase&Key::shared_storage)!=0;}
+            void reset_shared()noexcept {if(is_shared())shared.reset();}
+            void set_key(Key value)noexcept {
+                const auto storage=key.gate_phase&Key::shared_storage;
+                key=value;key.gate_phase=(key.gate_phase&~Key::shared_storage)|storage;
+            }
+            void ensure_knots()noexcept {
+                if(!is_shared())return;
+                std::destroy_at(&shared);std::construct_at(&knots);
+                key.gate_phase&=~Key::shared_storage;
+            }
+            void adopt_shared(detail::SharedSourceCurves<>::Lease view)noexcept {
+                if(is_shared()){shared=std::move(view);return;}
+                OPENSSL_cleanse(knots.data(),sizeof(knots));
+                std::destroy_at(&knots);std::construct_at(&shared,std::move(view));
+                key.gate_phase|=Key::shared_storage;
+            }
+            ~Row(){if(is_shared())std::destroy_at(&shared);else std::destroy_at(&knots);
+                OPENSSL_cleanse(static_cast<void*>(&knots),sizeof(Knots));}
         };
+        struct OriginalRowLayout {Key key;Knots knots;std::atomic<unsigned> readers;std::uint64_t stamp;bool valid;};
+        static_assert(sizeof(Row)==sizeof(OriginalRowLayout)&&alignof(Row)==alignof(OriginalRowLayout));
         struct Lease {
             Row* row=nullptr;
+            detail::SharedSourceCurves<>::Lease shared;
             Lease()=default;
             explicit Lease(Row* p):row(p){}
+            explicit Lease(detail::SharedSourceCurves<>::Lease view):shared(std::move(view)){}
             Lease(const Lease&)=delete;
             Lease& operator=(const Lease&)=delete;
-            Lease(Lease&& other) noexcept:row(std::exchange(other.row,nullptr)){}
+            Lease(Lease&& other) noexcept:row(std::exchange(other.row,nullptr)),shared(std::move(other.shared)){}
             Lease& operator=(Lease&& other) noexcept {
+                if(this==&other)return *this;
                 if(row)row->readers.fetch_sub(1,std::memory_order_release);
-                row=std::exchange(other.row,nullptr);return *this;
+                row=std::exchange(other.row,nullptr);shared=std::move(other.shared);return *this;
             }
             ~Lease(){if(row)row->readers.fetch_sub(1,std::memory_order_release);}
         };
         std::array<Row,8> rows;
         std::mutex mutex;
         std::uint64_t stamp=0,hits=0,misses=0,evictions=0,exhaustions=0;
-        ~ScheduledCurveCacheT(){for(auto& row:rows)OPENSSL_cleanse(row.knots.data(),sizeof(row.knots));}
-        Lease get(Key key,PatternCode& pattern,std::uint64_t first_chip,std::uint64_t chip,std::stop_token stop) {
+        struct OriginalCacheLayout {std::array<OriginalRowLayout,8> rows;std::mutex mutex;std::uint64_t stamp,hits,misses,evictions,exhaustions;};
+        // Synchronous push owns all scoring workers until they join. Retain
+        // pins through local hits within that push, never across rolling banks.
+        void clear_borrowed_rows() noexcept {
             std::lock_guard lock(mutex);
+            for(auto& row:rows)if(row.is_shared()) {
+                if(row.readers.load(std::memory_order_acquire))std::terminate();
+                row.valid=false;row.reset_shared();
+            }
+        }
+        template<class Pattern>
+        Lease get(Key key,Pattern& pattern,std::uint64_t first_chip,std::uint64_t chip,std::stop_token stop,
+                detail::SharedSourceCurves<>* shared=nullptr,const detail::SourceFamily* family=nullptr) {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::template_cache,true);
+            if(chip<1024)key.set_revision(detail::fine_source_curve_revision());
+            const bool concurrent=chip<1024;
+            const bool borrow_row=concurrent && key.table_revision()==2 &&
+                detail::fine_source_curve_cached_borrow_requested() && shared && family && shared->capacity();
+            const auto populate=[&](auto& knots) {
+                const auto step=key.table_revision()==2?4U:1U;
+                if(step!=1)for(auto& pair:knots)pair={};
+                for(std::size_t k=0;k<knots.size();k+=step) {
+                    if((k&31U)==0)cancelled(stop);
+                    const auto within=(static_cast<long double>(key.chip)+static_cast<long double>(k)/256)*chip;
+                    const auto values=pattern.shaped_values(first_chip,static_cast<double>(within));
+                    for(unsigned bit=0;bit<2;++bit)knots[k][bit]={static_cast<Scalar>(values[bit].real()),static_cast<Scalar>(values[bit].imag())};
+                }
+            };
+            if constexpr(std::is_same_v<Scalar,double>) {
+                if(concurrent && key.table_revision()==2 && detail::fine_source_curve_borrow_requested() &&
+                   shared && family && shared->capacity()) {
+                    // Pin the complete immutable L2 row for this chip/job.
+                    // No private evidence is shared, and the original path
+                    // handles an in-progress or exhausted optional row.
+                    auto identity=detail::source_key(*family,
+                        SymbolStreamAddress{key.epoch,key.ordinal,key.phase()},key.chip);
+                    identity.table_revision=key.table_revision();
+                    auto view=shared->get(identity,populate,stop);
+                    if(view){detail::fine_curve_borrow_statistics().direct.fetch_add(1,std::memory_order_relaxed);return Lease(std::move(view));}
+                    detail::fine_curve_borrow_statistics().l2_fallbacks.fetch_add(1,std::memory_order_relaxed);return {};
+                }
+            }
+            constexpr auto writing=std::numeric_limits<unsigned>::max();
+            std::unique_lock lock(mutex);
             for(auto& row:rows)if(row.valid && row.key==key) {
+                if(concurrent && row.readers.load(std::memory_order_acquire)>=writing-1) {
+                    ++misses;++exhaustions;return {};
+                }
                 ++hits;row.stamp=++stamp;row.readers.fetch_add(1,std::memory_order_relaxed);return Lease(&row);
+            }
+            // Fine-chip construction must not serialize all scoring workers.
+            // A writer is neither valid nor evictable. A duplicate uses the
+            // original direct evaluator instead of building the row twice.
+            if(concurrent)for(auto& row:rows)if(row.readers.load(std::memory_order_acquire)==writing && row.key==key) {
+                ++misses;++exhaustions;return {};
             }
             ++misses;Row* selected=nullptr;
             for(auto& row:rows)if(!row.readers.load(std::memory_order_acquire) &&
                 (!selected || !row.valid || (selected->valid && row.stamp<selected->stamp)))selected=&row;
             if(!selected){++exhaustions;return {};}
             if(selected->valid)++evictions;
-            selected->valid=false;
-            for(std::size_t k=0;k<selected->knots.size();++k) {
-                if((k&31U)==0)cancelled(stop);
-                const auto within=(static_cast<long double>(key.chip)+static_cast<long double>(k)/256)*chip;
-                const auto values=pattern.shaped_values(first_chip,static_cast<double>(within));
-                for(unsigned bit=0;bit<2;++bit)selected->knots[k][bit]={static_cast<Scalar>(values[bit].real()),static_cast<Scalar>(values[bit].imag())};
+            selected->valid=false;selected->reset_shared();
+            if(!borrow_row)selected->ensure_knots();
+            if(concurrent) {
+                selected->set_key(key);selected->readers.store(writing,std::memory_order_release);
+                lock.unlock();
             }
-            selected->key=key;selected->stamp=++stamp;selected->valid=true;
+            bool copied=false,unavailable=false;
+            detail::SharedSourceCurves<>::Lease pending_shared;
+            try {
+                if constexpr(std::is_same_v<Scalar,double>) {
+                    if(shared && family) {
+                    // Both columns belong to this exact canonical symbol. The
+                    // existing local key already resolved target_index/carry;
+                    // no extra calendar/crypto construction occurs here.
+                    auto identity=detail::source_key(*family,
+                        SymbolStreamAddress{key.epoch,key.ordinal,key.phase()},key.chip);
+                    identity.table_revision=key.table_revision();
+                    auto lease=shared->get(identity,populate,stop);
+                        if(lease) {
+                            if(borrow_row)pending_shared=std::move(lease);
+                            else selected->knots=lease.knots();
+                            copied=true;
+                        } else if(borrow_row) {
+                            unavailable=true;detail::fine_curve_borrow_statistics().l2_fallbacks.fetch_add(1,std::memory_order_relaxed);
+                        }
+                    }
+                }
+                if(!copied&&!unavailable)populate(selected->knots);
+                if(concurrent)cancelled(stop);
+            } catch(...) {
+                if(concurrent) {
+                    lock.lock();selected->reset_shared();
+                    if(!selected->is_shared())OPENSSL_cleanse(selected->knots.data(),sizeof(selected->knots));
+                    selected->readers.store(0,std::memory_order_release);
+                }
+                throw;
+            }
+            if(concurrent)lock.lock();
+            if(unavailable){selected->readers.store(0,std::memory_order_release);return {};}
+            selected->set_key(key);
+            if(pending_shared) {
+                selected->adopt_shared(std::move(pending_shared));
+                detail::fine_curve_borrow_statistics().cached.fetch_add(1,std::memory_order_relaxed);
+            }
+            selected->stamp=++stamp;selected->valid=true;
             selected->readers.store(1,std::memory_order_relaxed);return Lease(selected);
         }
         static bool evaluate(const Lease& view,long double within,std::uint64_t chip,std::array<Complex,2>& result) {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::template_cache,true);
+            if(view.shared)return detail::SharedSourceCurves<>::evaluate(view.shared,within,result);
             if(!view.row)return false;
-            const auto position=(within-static_cast<long double>(view.row->key.chip)*chip)*256/chip;
-            if(position<0 || position>=256)return false;
-            const auto k=static_cast<std::size_t>(std::floor(position));
-            // The finite pulse has closed, nonzero support endpoints at the
-            // half-chip knot. Never smear either one-sided discontinuity.
-            if(k==127 || k==128)return false;
-            const auto fraction=static_cast<Scalar>(position-k);
-            for(unsigned bit=0;bit<2;++bit) {
-                const auto value=view.row->knots[k][bit]*(Scalar{1}-fraction)+view.row->knots[k+1][bit]*fraction;
-                result[bit]={static_cast<double>(value.real()),static_cast<double>(value.imag())};
-            }
-            return true;
+            if(view.row->is_shared())return detail::SharedSourceCurves<>::evaluate(view.row->shared,within,result);
+            return detail::evaluate_source_curve(view.row->knots,view.row->key.chip,within,chip,result,view.row->key.table_revision());
         }
     };
     using ScheduledCurveCache=ScheduledCurveCacheT<double>;
     using ScheduledFloatCurveCache=ScheduledCurveCacheT<float>;
+    static_assert(sizeof(ScheduledCurveCache)==sizeof(ScheduledCurveCache::OriginalCacheLayout)&&
+        alignof(ScheduledCurveCache)==alignof(ScheduledCurveCache::OriginalCacheLayout));
+    static_assert(sizeof(ScheduledFloatCurveCache)==sizeof(ScheduledFloatCurveCache::OriginalCacheLayout)&&
+        alignof(ScheduledFloatCurveCache)==alignof(ScheduledFloatCurveCache::OriginalCacheLayout));
+    // Immutable logical-lane permutation, with no PCM/template storage.
+    // Completion and publication still visit the original hypothesis order.
+    struct ScheduledFamilyPlan {
+        struct AddressProof {std::uint64_t index=0;bool equal=false,valid=false;};
+        using AddressCache=std::array<AddressProof,2>;
+        std::vector<AddressCache> phase_addresses;
+        std::vector<std::size_t> members,ends;
+        std::size_t exact_families=0;
+        std::size_t working_bytes() const {
+            return sizeof(*this)+(members.capacity()+ends.capacity())*sizeof(std::size_t)+
+                phase_addresses.capacity()*sizeof(AddressCache);
+        }
+    };
+    struct ScheduledCommonWork {
+        std::uint64_t families=0,lanes=0,pieces=0,shapes=0,raw_samples=0,raw_lane_samples=0,affine_preparations=0,affine_lanes=0,gram_fallbacks=0;
+        std::uint64_t raw_fit_pairs=0,raw_reused_lane_samples=0,raw_packed_values=0,raw_workspace_samples=0;
+        std::uint64_t simd_attempts=0,simd_samples=0,simd_lane_samples=0,simd_packed_values=0,simd_guard_updates=0,simd_outer_updates=0;
+        std::uint64_t simd_short_samples=0,simd_workspace_samples=0,simd_isa_samples=0,simd_scalar_lane_samples=0;
+        std::uint64_t phase_attempts=0,phase_rejects=0,phase_families=0,phase_lanes=0;
+        std::uint64_t mapped_pairs=0,mapped_failed_pairs=0,mapped_lanes=0,affine_reused_lanes=0;
+        std::uint64_t phase_address_hits=0,phase_address_misses=0,phase_address_queries=0;
+    };
+    struct ScheduledFloatCounts {
+        std::uint64_t attempts=0,pieces=0,condition_fallbacks=0,error_fallbacks=0;
+        std::uint64_t accepted_pairs=0,fp64_pairs=0,gram_fallbacks=0;
+    };
+    struct ScheduledFloatGramCounts {
+        std::uint64_t attempts=0,accepted=0,range=0,rank=0,error=0,helper=0,signal_attempts=0;
+        double maximum_relative_error=0;
+    };
     struct ScheduledState {
+        ScheduledExtraWork extra_work;
+        // Non-owning per-push views exist only in scheduled receivers.
+        std::vector<detail::PhysicalMomentCache::View> physical_views;
+        bool common_scratch=false,common_attempted=false,common_raw_scratch=false;
+        std::size_t common_raw_scratch_bytes=0;
+        detail::family_simd::Backend common_simd_backend=detail::family_simd::Backend::scalar;
+        std::vector<ScheduledCommonWork> common_work;
+        std::unique_ptr<ScheduledFamilyPlan> families;
+        bool family_plan_attempted=false;
         PatternScheduledComplexGeometry complex_geometry;
         std::vector<std::unique_ptr<SchedHopSourceMap>> worker_maps;
         std::vector<std::unique_ptr<ScheduledTemplateCache>> worker_template_caches;
+        std::vector<std::unique_ptr<detail::ScheduledTemporalTemplates>> worker_temporal_templates;
+        detail::ScheduledTemporalTemplates::Statistics temporal_retired;
+        std::size_t temporal_peak_bytes=0;
         // Key-independent physical carrier moments for one bounded input
         // block. No source-time concatenation and no symbol-length buffering.
         std::vector<std::vector<ScheduledMoment>> moments;
-        bool moments_eligible=false;
+        bool moments_eligible=false,outer_moment_scratch=false;
+        // Explicit diagnostic: original FP64 Gram/energy/moments remain.
+        // Immutable packed signal rows are shared by scoring workers.
+        std::vector<detail::scheduled_float_signal::Moments> float_signal;
+        std::vector<ScheduledFloatCounts> float_counts;
+        std::vector<ScheduledFloatGramCounts> float_grams;
         std::unique_ptr<ScheduledCurveCache> curves;
         std::unique_ptr<ScheduledFloatCurveCache> float_curves;
+        detail::SharedSourceCurves<>* shared_source_curves=nullptr;
+        const detail::SourceFamily* shared_source_family=nullptr;
         std::uint64_t curve_hits=0,curve_misses=0,curve_evictions=0,curve_exhaustions=0;
         std::unique_ptr<SchedHopSourceMap> map;
         std::unique_ptr<ScheduledSymbolCalendar> calendar;
@@ -419,6 +710,17 @@ struct PatternCorrelator::Impl {
         long double timing_radius=0,clock_radius=0;
     };
     std::unique_ptr<ScheduledState> scheduled;
+    detail::PhysicalMomentCache::View physical_view(std::size_t frequency) const {
+        return scheduled && frequency<scheduled->physical_views.size()?scheduled->physical_views[frequency]:
+            detail::PhysicalMomentCache::View{};
+    }
+    detail::PhysicalMomentCache::View physical_view(const Bank& bank) const {
+        return physical_view(static_cast<std::size_t>(&bank-banks.data()));
+    }
+    void clear_physical_views() {
+        if(scheduled)std::fill(scheduled->physical_views.begin(),scheduled->physical_views.end(),
+            detail::PhysicalMomentCache::View{});
+    }
     // Exact current-block rows reuse shaped/limited/gated candidates across
     // fine frequencies. Identity excludes frequency, includes every coordinate
     // that changes coefficients. Each worker owns its cache; no shared mutable
@@ -434,6 +736,7 @@ struct PatternCorrelator::Impl {
         std::array<Row,8> rows;
         std::uint64_t block=std::numeric_limits<std::uint64_t>::max(),stamp=0,hits=0,constructions=0;
         Row& row(long double origin,long double rate,std::uint64_t phase,std::uint64_t index,std::uint64_t input_block) {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::template_cache,true);
             if(block!=input_block || stamp==std::numeric_limits<std::uint64_t>::max()) {
                 for(auto& item:rows){item.occupied=false;item.valid={};}
                 block=input_block;stamp=0;
@@ -458,6 +761,16 @@ struct PatternCorrelator::Impl {
         const auto& view=worker_template_view();
         if(view.first==this)return view.second;
         return scheduled && worker_codes.empty() && !scheduled->worker_template_caches.empty()?scheduled->worker_template_caches.front().get():nullptr;
+    }
+    static auto& worker_temporal_view() {
+        static thread_local std::pair<const Impl*,detail::ScheduledTemporalTemplates*> view{};
+        return view;
+    }
+    detail::ScheduledTemporalTemplates* scheduled_temporal_templates() const {
+        const auto& view=worker_temporal_view();
+        if(view.first==this)return view.second;
+        return scheduled && worker_codes.empty() && !scheduled->worker_temporal_templates.empty()?
+            scheduled->worker_temporal_templates.front().get():nullptr;
     }
     static auto& worker_map_view() {
         static thread_local std::pair<const Impl*,SchedHopSourceMap*> view{};
@@ -523,10 +836,10 @@ struct PatternCorrelator::Impl {
     std::vector<Hypothesis> hypotheses;
     struct Emission {
         const Hypothesis* owner=nullptr;
-        std::uint64_t first_symbol=0,last_symbol=0;
+        std::uint64_t first_symbol=0,last_symbol=0,stream_first_sample=0;
         long double origin=0;
         double frequency=0,reported_frequency=0,carrier_score=0;
-        bool ended=false;
+        bool ended=false,published_unknown=false;
     };
     std::vector<Emission> emissions;
     struct TimingDecision {
@@ -537,7 +850,7 @@ struct PatternCorrelator::Impl {
     };
     struct TimingRelation {
         std::size_t neighbor=std::numeric_limits<std::size_t>::max();
-        std::uint64_t next=0;
+        std::uint64_t next=0,first_unaccepted=std::numeric_limits<std::uint64_t>::max();
         double owner_score=0,guide_score=0;
         bool invalid=false;
     };
@@ -622,6 +935,11 @@ struct PatternCorrelator::Impl {
     Impl(Config c,PatternSearch search_options,std::size_t bytes,PatternCorrelatorOptions work_options)
         :config(c),search(std::move(search_options)),code(c,c.stream_epoch),budget(bytes),options(work_options) {
         validate(c);
+        // Developer-only process override for full GUI/Live paired diagnostics.
+        // It changes search preparation only; all precision/reference gates
+        // remain below. Unset is default-off until complete cost qualifies it.
+        if(const auto* mode=std::getenv("DATAPUMP_RX_TEMPORAL_TEMPLATES");mode && std::string_view(mode)=="1")
+            options.scheduled_temporal_template_experiment=true;
         if(c.scheduled_hopping && c.scheduled_hopping->enabled() && !c.scheduled_hopping->continuous()) {
                 require(c.data_key.has_value(),"scheduled reception requires a calendar key");
                 require(c.stream_epoch<=std::numeric_limits<std::uint64_t>::max()/c.sample_rate,
@@ -864,6 +1182,8 @@ struct PatternCorrelator::Impl {
             search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis);
         if(scheduled_map() && !options.amplitude_only)fixed+=total*(sizeof(ScheduledCarry)+
             3*sizeof(std::uint64_t)+sizeof(long double));
+        if(scheduled_map() && !options.amplitude_only)
+            fixed+=bank_count*sizeof(detail::PhysicalMomentCache::View);
         if(scheduled_map())fixed+=sizeof(ScheduledState)+scheduled_map()->working_bytes()+total*(sizeof(SchedHopCoordinate)+sizeof(long double)+sizeof(std::uint64_t))+
             scheduled_phases.capacity()*sizeof(PhaseGroup)+(scheduled_calendar()?scheduled_calendar()->working_bytes()+total*sizeof(std::uint64_t):0);
         if(options.amplitude_only) {
@@ -982,7 +1302,7 @@ struct PatternCorrelator::Impl {
             fixed+mapped_extra+denominator<=bytes;
         if(scheduled_affine){fixed+=mapped_extra;affine_counts.resize(count);}
         if(scheduled_map())scheduled->moments_eligible=!options.amplitude_only && !options.raw_reference &&
-            !options.scheduled_moment_reference && !scheduled_affine && shaped && !outer_presence &&
+            !options.scheduled_moment_reference && !scheduled_affine && shaped &&
             code.chip_samples()>=1024 && config.search_arithmetic!=SearchArithmetic::fp64 &&
             fixed+total*sizeof(std::uint64_t)+denominator<=bytes;
         if(scheduled_map() && scheduled->moments_eligible){fixed+=total*sizeof(std::uint64_t);affine_counts.resize(count);}
@@ -1006,6 +1326,7 @@ struct PatternCorrelator::Impl {
         hypotheses.reserve(count);if(scheduled_map()){scheduled->anchors.reserve(count);scheduled->observed_begin.resize(count);scheduled->last_accepted.resize(count);if(scheduled_calendar())scheduled->source_starts.resize(count);
             if(!options.amplitude_only){scheduled->symbol_ends.resize(count);scheduled->end_indices.resize(count);scheduled->first_full_indices.resize(count);}}
         emissions.reserve(search.track_limit);banks.resize(bank_count);
+        if(scheduled_map() && !options.amplitude_only)scheduled->physical_views.resize(bank_count);
         for(auto& bank:banks) {
             bank.prefix.resize(block_samples+1);
             if(pulse_segmented || scheduled_affine || (pulse_enabled && code.chip_samples()>4096))bank.first_moment.resize(block_samples+1);
@@ -1156,6 +1477,7 @@ struct PatternCorrelator::Impl {
         work.amplitude_channels=amplitude_channels.size();
         work.peak_workspace_bytes=sizeof(PatternCorrelator)+accounted_bytes;
         if(scheduled_map() && !options.amplitude_only)audio::trace::record("split_complex_constructed",[&](auto& f) {
+            const bool source_curves=scheduled->moments_eligible||fine_curves_eligible();
             f.add("epoch",config.stream_epoch);f.add("sample_rate",config.sample_rate);
             f.add("chip_samples",code.chip_samples());f.add("symbol_samples",code.symbol_samples());
             f.add("physical_aperture_samples",scheduled->complex_geometry.physical_aperture_samples);
@@ -1167,11 +1489,13 @@ struct PatternCorrelator::Impl {
             f.add("hypotheses",hypotheses.size());f.add("frequency_count",banks.size());
             f.add("phase_step_samples",phase_step);f.add("timing_subdivisions",scheduled->complex_geometry.receiver_timing_subdivisions);
             f.add("workspace_bytes",work.peak_workspace_bytes);f.add("backend",scheduled_affine?"mapped physical-IQ table-affine diagnostic + exact fallback":
-                scheduled->moments_eligible?"mapped physical-IQ bounded pulse moments/source curves when workspace permits; direct fallback":"mapped physical-IQ original direct contraction");
-            f.add("resolved_search_operands",scheduled->moments_eligible?
+                source_curves?"mapped physical-IQ source curves/eligible bounded moments when workspace permits; direct fallback":"mapped physical-IQ original direct contraction");
+            f.add("resolved_search_operands",source_curves?
                 "FP64 private coefficients and curve interpolation; FP64 physical projections; original direct fallback":"FP64 original limited templates; FP64 physical projections");
             f.add("score_precision","FP64 real I/Q Gram; source-quarter/window guards");
-            f.add("template_reuse",scheduled->moments_eligible?
+            f.add("fine_curves_eligible",fine_curves_eligible());
+            f.add("reuse_scope","construction eligibility only; work counters report allocation, execution and fallback");
+            f.add("template_reuse",source_curves?
                 "eligible bounded source-chip curves and intervals; exact worker caches; direct boundary/resource fallback":"exact per-worker private chip cache; approximate interpolation bypassed");
         });
     }
@@ -1211,11 +1535,13 @@ struct PatternCorrelator::Impl {
         return SchedHopCoordinate{scheduled->epoch_sample,0}.add_samples(h.phase_lower).add_signed((physical-h.origin)*h.rate);
     }
     long double source_position(const Hypothesis& h,long double physical) const {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::calendar,true);
         if(!scheduled_map())return (physical-symbol_start(h))*h.rate+static_cast<long double>(h.index)*code.symbol_samples();
         const auto at=scheduled_map()->locate(scheduled_tick(h,physical)).source;
         return at.distance(scheduled->anchors[static_cast<std::size_t>(&h-hypotheses.data())]);
     }
     long double scheduled_boundary(const Hypothesis& h,long double source,bool end) const {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::calendar,true);
         const auto index=static_cast<std::size_t>(&h-hypotheses.data());
         const auto target=scheduled->anchors[index].add_signed(source);
         const auto physical=scheduled_map()->source_to_physical(target,end);
@@ -1238,6 +1564,7 @@ struct PatternCorrelator::Impl {
         return result;
     }
     bool scheduled_flat(const Hypothesis& h,std::uint64_t first,std::uint64_t end,bool whole_cell=true) const {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::calendar,true);
         if(!scheduled_map())return true;
         const auto width=whole_cell?scheduled_cell_width(h):0;
         const auto left=scheduled_tick(h,first).add_signed(whole_cell?-scheduled_uncertainty(h,first):0);
@@ -1294,6 +1621,7 @@ struct PatternCorrelator::Impl {
         return fit.count>2 && fit.cc*fit.ss-fit.cs*fit.cs>1e-12*std::max(1.,fit.cc*fit.ss);
     }
     void advance_drift(DriftFit& fit,const Hypothesis& h,std::uint64_t observed,unsigned char* ranks=nullptr,std::optional<long double> within={}) const {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::guards,true);
         while(fit.section+1<drift_sections && (scheduled_map()?
               (within?*within:source_position(h,observed)-scheduled_source_start(h,h.index))>=
                 detail::drift_boundary(fit.section+1,code.symbol_samples(),drift_sections):
@@ -1305,6 +1633,7 @@ struct PatternCorrelator::Impl {
         }
     }
     void advance_differential(DifferentialFit& fit,const Hypothesis& h,std::uint64_t observed,std::optional<long double> within={}) const {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::guards,true);
         const auto total=code.symbol_samples(),width=differential_window;
         const auto position=std::max(0.L,scheduled_map()?
             (within?*within:source_position(h,observed)-scheduled_source_start(h,h.index)):
@@ -1333,6 +1662,7 @@ struct PatternCorrelator::Impl {
             std::ceil(clock_boundary(h,(next+1)*width))-std::ceil(clock_boundary(h,next*width)));
     }
     void prepare_drift(std::uint64_t end) {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::allocation);
         if(!drift_reserved)return;
         if(scheduled_map() && !options.amplitude_only && end<scheduled->drift_begin)return;
         const auto first_boundary=detail::drift_boundary(1,code.symbol_samples(),drift_sections);
@@ -1362,7 +1692,420 @@ struct PatternCorrelator::Impl {
         drift_reserved=0;accounted_bytes=working_bytes()+amplitude_scratch_reservation;
         room_for(0);
     }
+    void prepare_scheduled_families() {
+        const auto phase_limit=std::min<std::size_t>(options.scheduled_common_phase_limit,16);
+        const bool phase_families=options.scheduled_common_shape_experiment && phase_limit>1 && !scheduled_calendar();
+        if(!scheduled || options.amplitude_only || options.raw_reference || (!options.scheduled_family_experiment && !options.scheduled_common_shape_experiment) ||
+           scheduled->family_plan_attempted || (banks.size()<2 && !phase_families))return;
+        scheduled->family_plan_attempted=true;
+        const auto count=hypotheses.size();
+        if(count<2 || count>(std::numeric_limits<std::size_t>::max()-sizeof(ScheduledFamilyPlan)-sizeof(std::size_t))/(2*sizeof(std::size_t)))return;
+        const auto needed=sizeof(ScheduledFamilyPlan)+(2*count+1)*sizeof(std::size_t);
+        if(sizeof(PatternCorrelator)+accounted_bytes>budget || needed>budget-sizeof(PatternCorrelator)-accounted_bytes)return;
+        std::unique_ptr<ScheduledFamilyPlan> plan;
+        try {
+            plan=std::make_unique<ScheduledFamilyPlan>();
+            plan->members.resize(count);plan->ends.reserve(count+1);
+        } catch(const std::bad_alloc&) {
+            // No plan or charge was published; preserve independent lanes.
+            return;
+        }
+        std::iota(plan->members.begin(),plan->members.end(),std::size_t{0});
+        const auto identity=[&](std::size_t i) {
+            const auto& h=hypotheses[i];
+            // Phase variants are candidates for EXACT common construction only.
+            // Dynamic preflight below must prove their complete processed flat
+            // piece, private address and source coordinates agree; otherwise
+            // every original lane executes separately.
+            return std::tuple{h.origin,h.rate,phase_families?std::uint64_t{0}:h.phase_lower,
+                phase_families?std::uint64_t{0}:h.phase_upper};
+        };
+        std::sort(plan->members.begin(),plan->members.end(),[&](std::size_t a,std::size_t b) {
+            const auto ka=identity(a),kb=identity(b);
+            if(ka<kb)return true;if(kb<ka)return false;
+            // Adjacent canonical phases are most likely to share the same flat
+            // interval. Keep all fine-frequency siblings of one phase adjacent.
+            const auto pa=std::pair{hypotheses[a].phase_lower,hypotheses[a].phase_upper};
+            const auto pb=std::pair{hypotheses[b].phase_lower,hypotheses[b].phase_upper};
+            return pa<pb || (!(pb<pa) && a<b);
+        });
+        // Bound each same-worker group, retaining multiple stealable jobs even
+        // when one family has many frequencies. Current/carry template rows
+        // remain checked by exact dynamic origin/rate/phase/index/block keys.
+        const auto workers=std::max<std::size_t>(1,worker_codes.size());
+        const auto target_jobs=workers>std::numeric_limits<std::size_t>::max()/4?workers:4*workers;
+        const auto per_job=std::clamp(count/target_jobs+static_cast<std::size_t>(count%target_jobs!=0),std::size_t{2},std::size_t{16});
+        plan->ends.push_back(0);
+        for(std::size_t first=0;first<count;) {
+            auto last=first+1;
+            while(last<count && identity(plan->members[first])==identity(plan->members[last]))++last;
+            ++plan->exact_families;
+            for(auto at=first;at<last;) {
+                auto until=at;std::size_t phases=0;
+                std::pair<std::uint64_t,std::uint64_t> prior{};
+                while(until<last && until-at<per_job) {
+                    const auto& h=hypotheses[plan->members[until]];
+                    const auto phase=std::pair{h.phase_lower,h.phase_upper};
+                    if(!phases || phase!=prior) {
+                        if(phase_families && phases==phase_limit)break;
+                        ++phases;prior=phase;
+                    }
+                    ++until;
+                }
+                // Never widen a tight timing bank or remove a rejected lane.
+                // Small phase batches keep a wide phase union from making the
+                // entire physical block fail the common unity-gain test.
+                require(until>at,"scheduled phase-family partition did not advance");
+                at=until;plan->ends.push_back(at);
+            }
+            first=last;
+        }
+        const auto available=budget-sizeof(PatternCorrelator)-accounted_bytes;
+        if(plan->exact_families==count || plan->working_bytes()>available)return;
+        if(phase_families && options.scheduled_common_phase_cache) {
+            const auto groups=plan->ends.size()-1;
+            if(groups<=(available-plan->working_bytes())/sizeof(ScheduledFamilyPlan::AddressCache)) {
+                try {plan->phase_addresses.resize(groups);}
+                catch(const std::bad_alloc&) {
+                    // The fresh vector retains its empty state on allocation
+                    // failure. Families can run without an address-proof cache.
+                }
+                // Actual vector capacity owns workspace; optional reuse must
+                // never displace a required detector or admitted hypothesis.
+                if(plan->working_bytes()>available)
+                    std::vector<ScheduledFamilyPlan::AddressCache>{}.swap(plan->phase_addresses);
+            }
+        }
+        scheduled->families=std::move(plan);
+        accounted_bytes=working_bytes()+drift_reserved+amplitude_scratch_reservation;
+        require(sizeof(PatternCorrelator)+accounted_bytes<=budget,"mapped family metadata exceeds DSP workspace");
+        scheduled->extra_work.scheduled_exact_families=scheduled->families->exact_families;
+        scheduled->extra_work.scheduled_family_groups=scheduled->families->ends.size()-1;
+        scheduled->extra_work.scheduled_family_metadata_bytes=scheduled->families->working_bytes();
+        work.peak_workspace_bytes=std::max(work.peak_workspace_bytes,sizeof(PatternCorrelator)+accounted_bytes);
+    }
+    void prepare_scheduled_common_shape() {
+        if(!scheduled || !options.scheduled_common_shape_experiment || scheduled->common_attempted ||
+           !scheduled->families || options.amplitude_only || options.raw_reference)return;
+        scheduled->common_attempted=true;
+        const auto workers=std::max<std::size_t>(1,worker_codes.size());
+        constexpr auto per_worker=scheduled_common_scratch_bytes+sizeof(ScheduledCommonWork);
+        if(workers>std::numeric_limits<std::size_t>::max()/per_worker)return;
+        const auto bytes=workers*per_worker;
+        if(sizeof(PatternCorrelator)+accounted_bytes>budget || bytes>budget-sizeof(PatternCorrelator)-accounted_bytes)return;
+        std::vector<ScheduledCommonWork> prepared;
+        try {prepared.resize(workers);}
+        catch(const std::bad_alloc&) {return;}
+        const auto actual=workers*scheduled_common_scratch_bytes+
+            prepared.capacity()*sizeof(ScheduledCommonWork);
+        if(actual>budget-sizeof(PatternCorrelator)-accounted_bytes)return;
+        // Publish only the complete affordable vector; failed preparation owns
+        // no persistent allocation and therefore needs no charge rollback.
+        scheduled->common_work=std::move(prepared);
+        scheduled->common_scratch=true;
+        accounted_bytes=working_bytes()+drift_reserved+amplitude_scratch_reservation;
+        require(sizeof(PatternCorrelator)+accounted_bytes<=budget,"shared source-family scratch exceeds workspace");
+        scheduled->extra_work.scheduled_common_peak_bytes=std::max(scheduled->extra_work.scheduled_common_peak_bytes,
+            workers*scheduled_common_scratch_bytes+scheduled->common_work.capacity()*sizeof(ScheduledCommonWork));
+        bool native_family=false,duplicate_family=false,small_duplicate_family=false,general_duplicate_family=false;
+        // At most sixteen candidates per family; this exact metadata scan runs
+        // once during optional preparation, not for every physical sample.
+        for(std::size_t group=1;group<scheduled->families->ends.size();++group) {
+            std::array<std::size_t,detail::ScheduledRawSampleScratch::maximum_lanes> frequency;
+            std::size_t unique=0;bool duplicate=false;
+            for(auto at=scheduled->families->ends[group-1];at<scheduled->families->ends[group];++at) {
+                const auto f=hypotheses[scheduled->families->members[at]].frequency;
+                std::size_t k=0;while(k<unique && frequency[k]!=f)++k;
+                if(k<unique)duplicate=true;
+                else if(unique<frequency.size())frequency[unique++]=f;
+            }
+            duplicate_family|=duplicate;small_duplicate_family|=duplicate && unique==1;
+            general_duplicate_family|=duplicate && unique>1;
+            native_family|=unique>=detail::ScheduledRawSampleScratch::minimum_simd_lanes;
+        }
+        if(options.scheduled_common_simd_experiment && native_family) {
+            scheduled->common_simd_backend=detail::family_simd::selected();
+            scheduled->extra_work.scheduled_common_simd_selected_isa=scheduled->common_simd_backend==detail::family_simd::Backend::avx2?2U:
+                scheduled->common_simd_backend==detail::family_simd::Backend::sse2?1U:0U;
+        }
+        const bool native_possible=options.scheduled_common_simd_experiment && native_family &&
+            scheduled->common_simd_backend!=detail::family_simd::Backend::scalar;
+        if(duplicate_family || native_possible) {
+            auto per_worker_raw=(general_duplicate_family || native_possible)?detail::scheduled_raw_sample_scratch_bytes:
+                detail::scheduled_raw_single_frequency_scratch_bytes;
+            const auto fits=[&](std::size_t per) {
+                return workers<=std::numeric_limits<std::size_t>::max()/per &&
+                    sizeof(PatternCorrelator)+accounted_bytes<=budget &&
+                    workers*per<=budget-sizeof(PatternCorrelator)-accounted_bytes;
+            };
+            // Native/general reuse scratch is optional. Retain cheap exact
+            // single-frequency phase reuse if only its smaller loan fits.
+            if(!fits(per_worker_raw) && small_duplicate_family)per_worker_raw=detail::scheduled_raw_single_frequency_scratch_bytes;
+            if(fits(per_worker_raw)) {
+                const auto extra=workers*per_worker_raw;
+                scheduled->common_raw_scratch=true;scheduled->common_raw_scratch_bytes=per_worker_raw;
+                accounted_bytes=working_bytes()+drift_reserved+amplitude_scratch_reservation;
+                require(sizeof(PatternCorrelator)+accounted_bytes<=budget,"common raw family scratch exceeds workspace");
+                scheduled->extra_work.scheduled_common_raw_peak_bytes=std::max(scheduled->extra_work.scheduled_common_raw_peak_bytes,extra);
+                if(native_possible && per_worker_raw==detail::scheduled_raw_sample_scratch_bytes)
+                    scheduled->extra_work.scheduled_common_simd_peak_bytes=std::max(scheduled->extra_work.scheduled_common_simd_peak_bytes,extra);
+                scheduled->extra_work.scheduled_common_peak_bytes=std::max(scheduled->extra_work.scheduled_common_peak_bytes,
+                    workers*scheduled_common_scratch_bytes+scheduled->common_work.capacity()*sizeof(ScheduledCommonWork)+extra);
+            }
+        }
+        work.peak_workspace_bytes=std::max(work.peak_workspace_bytes,sizeof(PatternCorrelator)+accounted_bytes);
+    }
+    void prepare_scheduled_outer_public_replay() {
+        // Preserve all preceding workers, exact caches and arithmetic choices.
+        // The larger replay frame is an additive loan from final surplus only.
+        if(!scheduled || !scheduled->common_raw_scratch ||
+           config.search_arithmetic==SearchArithmetic::fp64 ||
+           !detail::scheduled_outer_public_replay_requested() ||
+           scheduled->common_raw_scratch_bytes>=detail::scheduled_outer_public_replay_frame)return;
+        const auto workers=std::max<std::size_t>(1,worker_codes.size());
+        const auto per=detail::scheduled_outer_public_replay_frame-scheduled->common_raw_scratch_bytes;
+        if(workers>std::numeric_limits<std::size_t>::max()/per ||
+           sizeof(PatternCorrelator)+accounted_bytes>budget ||
+           workers*per>budget-sizeof(PatternCorrelator)-accounted_bytes)return;
+        scheduled->common_raw_scratch_bytes=detail::scheduled_outer_public_replay_frame;
+        accounted_bytes=working_bytes()+drift_reserved+amplitude_scratch_reservation;
+        require(sizeof(PatternCorrelator)+accounted_bytes<=budget,"outer public replay frame exceeds workspace");
+        const auto raw=workers*scheduled->common_raw_scratch_bytes;
+        scheduled->extra_work.scheduled_common_raw_peak_bytes=std::max(
+            scheduled->extra_work.scheduled_common_raw_peak_bytes,raw);
+        scheduled->extra_work.scheduled_common_peak_bytes=std::max(scheduled->extra_work.scheduled_common_peak_bytes,
+            workers*scheduled_common_scratch_bytes+scheduled->common_work.capacity()*sizeof(ScheduledCommonWork)+raw);
+        work.peak_workspace_bytes=std::max(work.peak_workspace_bytes,sizeof(PatternCorrelator)+accounted_bytes);
+    }
+    void collect_scheduled_common_shape() {
+        if(!scheduled || !scheduled->common_scratch)return;
+        for(auto& c:scheduled->common_work) {
+            scheduled->extra_work.scheduled_common_families+=c.families;scheduled->extra_work.scheduled_common_lanes+=c.lanes;
+            scheduled->extra_work.scheduled_common_pieces+=c.pieces;scheduled->extra_work.scheduled_common_shapes+=c.shapes;
+            scheduled->extra_work.scheduled_common_raw_samples+=c.raw_samples;scheduled->extra_work.scheduled_common_raw_lane_samples+=c.raw_lane_samples;
+            scheduled->extra_work.scheduled_common_affine_preparations+=c.affine_preparations;scheduled->extra_work.scheduled_common_affine_lanes+=c.affine_lanes;
+            scheduled->extra_work.scheduled_common_gram_fallbacks+=c.gram_fallbacks;
+            scheduled->extra_work.scheduled_common_mapped_pairs+=c.mapped_pairs;
+            scheduled->extra_work.scheduled_common_mapped_failed_pairs+=c.mapped_failed_pairs;
+            scheduled->extra_work.scheduled_common_mapped_lanes+=c.mapped_lanes;
+            scheduled->extra_work.scheduled_common_affine_reused_lanes+=c.affine_reused_lanes;
+            scheduled->extra_work.scheduled_common_phase_attempts+=c.phase_attempts;scheduled->extra_work.scheduled_common_phase_rejects+=c.phase_rejects;
+            scheduled->extra_work.scheduled_common_phase_families+=c.phase_families;scheduled->extra_work.scheduled_common_phase_lanes+=c.phase_lanes;
+            scheduled->extra_work.scheduled_common_raw_fit_pairs+=c.raw_fit_pairs;scheduled->extra_work.scheduled_common_raw_reused_lane_samples+=c.raw_reused_lane_samples;
+            scheduled->extra_work.scheduled_common_raw_packed_values+=c.raw_packed_values;scheduled->extra_work.scheduled_common_raw_workspace_samples+=c.raw_workspace_samples;
+            scheduled->extra_work.scheduled_common_simd_attempts+=c.simd_attempts;scheduled->extra_work.scheduled_common_simd_samples+=c.simd_samples;
+            scheduled->extra_work.scheduled_common_simd_lane_samples+=c.simd_lane_samples;scheduled->extra_work.scheduled_common_simd_packed_values+=c.simd_packed_values;
+            scheduled->extra_work.scheduled_common_simd_guard_updates+=c.simd_guard_updates;scheduled->extra_work.scheduled_common_simd_outer_updates+=c.simd_outer_updates;
+            scheduled->extra_work.scheduled_common_simd_short_samples+=c.simd_short_samples;scheduled->extra_work.scheduled_common_simd_workspace_samples+=c.simd_workspace_samples;
+            scheduled->extra_work.scheduled_common_simd_isa_samples+=c.simd_isa_samples;scheduled->extra_work.scheduled_common_simd_scalar_lane_samples+=c.simd_scalar_lane_samples;
+            scheduled->extra_work.scheduled_common_phase_address_hits+=c.phase_address_hits;
+            scheduled->extra_work.scheduled_common_phase_address_misses+=c.phase_address_misses;
+            scheduled->extra_work.scheduled_common_phase_address_queries+=c.phase_address_queries;c={};
+        }
+    }
+    std::optional<std::size_t> temporal_plan_workers()const {
+        if(!scheduled || !options.scheduled_temporal_template_experiment || options.amplitude_only ||
+           options.raw_reference || options.scheduled_moment_reference ||
+           config.search_arithmetic==SearchArithmetic::fp64 || !shaped || scheduled_affine ||
+           scheduled->moments_eligible || scheduled->curves || scheduled->float_curves ||
+           !detail::ScheduledTemporalTemplates::supported() || !pulse_lattices.empty())return std::nullopt;
+        // Match prepare_workers' retained marker exactly. A preceding serial
+        // Temporal alone is not proof: original sizing would run again.
+        if(worker_codes.empty() && scheduled->worker_template_caches.empty())return 0;
+        const auto count=std::max<std::size_t>(1,worker_codes.size());
+        if(scheduled->worker_temporal_templates.size()!=count)return 0;
+        for(const auto& batch:scheduled->worker_temporal_templates)if(!batch)return 0;
+        return count;
+    }
+    void prepare_scheduled_temporal_templates() {
+        if(!scheduled || !options.scheduled_temporal_template_experiment || options.amplitude_only ||
+           options.raw_reference || options.scheduled_moment_reference ||
+           config.search_arithmetic==SearchArithmetic::fp64 || !shaped || scheduled_affine ||
+           scheduled->moments_eligible || scheduled->curves || scheduled->float_curves ||
+           !detail::ScheduledTemporalTemplates::supported() || !scheduled->worker_temporal_templates.empty())return;
+        // Optional output scratch is chosen AFTER the original workers/caches;
+        // it cannot reduce concurrency, bit_limit or promised detector state.
+        const auto count=std::max<std::size_t>(1,worker_codes.size());
+        constexpr auto object=sizeof(detail::ScheduledTemporalTemplates)+detail::ScheduledTemporalTemplates::callee_allowance;
+        constexpr auto pointer=sizeof(std::unique_ptr<detail::ScheduledTemporalTemplates>);
+        if(sizeof(PatternCorrelator)>budget || accounted_bytes>budget-sizeof(PatternCorrelator))return;
+        const auto available=budget-sizeof(PatternCorrelator)-accounted_bytes;
+        if(count>available/(object+pointer))return;
+        std::vector<std::unique_ptr<detail::ScheduledTemporalTemplates>> prepared;
+        std::size_t extra=0;
+        try {
+            prepared.reserve(count);
+            // Charge the allocator's ACTUAL capacity before publishing any
+            // optional member. Failure preserves every original worker/cache.
+            if(prepared.capacity()>available/pointer)return;
+            const auto pointers=prepared.capacity()*pointer;
+            if(count>(available-pointers)/object)return;
+            extra=pointers+count*object;
+            for(std::size_t i=0;i<count;++i)prepared.push_back(std::make_unique<detail::ScheduledTemporalTemplates>());
+        } catch(const std::bad_alloc&) {return;}
+        scheduled->worker_temporal_templates=std::move(prepared);
+        accounted_bytes+=extra;
+        scheduled->temporal_peak_bytes=std::max(scheduled->temporal_peak_bytes,extra);
+        work.peak_workspace_bytes=std::max(work.peak_workspace_bytes,sizeof(PatternCorrelator)+accounted_bytes);
+    }
+    static bool temporal_plan_cache_requested() {
+        // One immutable experiment gate per process. First queried only AFTER
+        // existing worker/template/Temporal choices; public ABI/state unchanged.
+        static const bool requested=[] {
+            const auto* value=std::getenv("DATAPUMP_SCHED_TEMPORAL_PLAN_CACHE");
+            return value && std::string_view(value)=="4";
+        }();
+        return requested;
+    }
+    void prepare_scheduled_temporal_plan_caches() {
+        if(!scheduled || scheduled->worker_temporal_templates.empty() ||
+           !temporal_plan_cache_requested() || scheduled->worker_temporal_templates.front()->plan_cache_attempted())return;
+        for(auto& batch:scheduled->worker_temporal_templates)batch->mark_plan_cache_attempted();
+        // Every original worker, template cache and Temporal object has already
+        // been selected/charged. Optional pools never participate in sizing.
+        constexpr auto charge=detail::ScheduledTemporalTemplates::plan_cache_charge;
+        const auto count=scheduled->worker_temporal_templates.size();
+        if(sizeof(PatternCorrelator)>budget || accounted_bytes>budget-sizeof(PatternCorrelator))return;
+        const auto available=budget-sizeof(PatternCorrelator)-accounted_bytes;
+        if(count>available/charge)return;
+        try {
+            for(auto& batch:scheduled->worker_temporal_templates) {
+                const auto prior=batch->plan_cache_bytes();batch->allocate_plan_cache();
+                accounted_bytes+=batch->plan_cache_bytes()-prior;
+            }
+        } catch(const std::bad_alloc&) {
+            drop_scheduled_temporal_plan_caches();return;
+        }
+        std::size_t temporal_bytes=scheduled->worker_temporal_templates.capacity()*sizeof(std::unique_ptr<detail::ScheduledTemporalTemplates>);
+        for(const auto& batch:scheduled->worker_temporal_templates)temporal_bytes+=sizeof(detail::ScheduledTemporalTemplates)+
+            detail::ScheduledTemporalTemplates::callee_allowance+batch->plan_cache_bytes()+batch->fp32_bytes();
+        scheduled->temporal_peak_bytes=std::max(scheduled->temporal_peak_bytes,temporal_bytes);
+        work.peak_workspace_bytes=std::max(work.peak_workspace_bytes,sizeof(PatternCorrelator)+accounted_bytes);
+    }
+    void drop_scheduled_temporal_plan_caches() {
+        if(!scheduled)return;
+        // Only caller/joined-worker boundaries may reclaim. Each drop detaches
+        // numeric borrowers and releases any retained outer Plan pin before
+        // storage disappears; detached raw outputs themselves remain usable.
+        for(auto& batch:scheduled->worker_temporal_templates)if(batch) {
+            const auto bytes=batch->plan_cache_bytes();
+            batch->drop_plan_cache();accounted_bytes-=bytes;
+        }
+    }
+    struct TemporalFp32Policy {bool requested=false;double limit=1e-5;};
+    static TemporalFp32Policy temporal_fp32_policy() {
+        // Separate default-off process diagnostic. Does not enable Temporal
+        // reuse, change persisted policy, or select any approximate curve.
+        static const auto policy=[] {
+            const auto* value=std::getenv("DATAPUMP_SCHED_TEMPORAL_FP32");
+            const auto mode=value?std::string_view(value):std::string_view{};
+            return TemporalFp32Policy{mode=="1" || mode=="refine",mode=="refine"?0.:1e-5};
+        }();return policy;
+    }
+    void prepare_scheduled_temporal_fp32() {
+        const auto policy=temporal_fp32_policy();
+        if(!policy.requested || !scheduled || scheduled->worker_temporal_templates.empty() ||
+           scheduled->worker_temporal_templates.front()->fp32_attempted() ||
+           (config.search_arithmetic!=SearchArithmetic::default_mode && config.search_arithmetic!=SearchArithmetic::fp32))return;
+        for(auto& batch:scheduled->worker_temporal_templates)batch->mark_fp32_attempted();
+        // AFTER existing worker/Temporal/exact Plan-cache selection. Optional
+        // FP32 never reduces mandatory detector state or original concurrency.
+        constexpr auto charge=detail::ScheduledTemporalTemplates::fp32_charge;
+        const auto count=scheduled->worker_temporal_templates.size();
+        if(sizeof(PatternCorrelator)>budget || accounted_bytes>budget-sizeof(PatternCorrelator))return;
+        const auto available=budget-sizeof(PatternCorrelator)-accounted_bytes;if(count>available/charge)return;
+        try {for(auto& batch:scheduled->worker_temporal_templates) {
+            const auto prior=batch->fp32_bytes();batch->allocate_fp32(policy.limit);accounted_bytes+=batch->fp32_bytes()-prior;
+        }} catch(const std::bad_alloc&) {drop_scheduled_temporal_fp32();return;}
+        std::size_t bytes=scheduled->worker_temporal_templates.capacity()*sizeof(std::unique_ptr<detail::ScheduledTemporalTemplates>);
+        for(const auto& batch:scheduled->worker_temporal_templates)bytes+=sizeof(detail::ScheduledTemporalTemplates)+
+            detail::ScheduledTemporalTemplates::callee_allowance+batch->plan_cache_bytes()+batch->fp32_bytes();
+        scheduled->temporal_peak_bytes=std::max(scheduled->temporal_peak_bytes,bytes);
+        work.peak_workspace_bytes=std::max(work.peak_workspace_bytes,sizeof(PatternCorrelator)+accounted_bytes);
+    }
+    void prepare_scheduled_temporal_fp32_payloads() {
+        if(!detail::ScheduledTemporalFp32Execution::payload_requested() || !scheduled)return;
+        // Optional local precision storage only after every original grant and
+        // the existing native worker scratch selection. Never allocate in get.
+        for(auto& batch:scheduled->worker_temporal_templates)if(batch && batch->fp32_local_payload_pending()) {
+            batch->mark_fp32_local_payload_attempted();
+            constexpr auto charge=detail::ScheduledTemporalTemplates::fp32_local_payload_charge;
+            if(sizeof(PatternCorrelator)>budget || accounted_bytes>budget-sizeof(PatternCorrelator) ||
+               charge>budget-sizeof(PatternCorrelator)-accounted_bytes)continue;
+            const auto before=batch->plan_cache_bytes();
+            try {if(batch->allocate_fp32_local_payload())accounted_bytes+=batch->plan_cache_bytes()-before;}
+            catch(const std::bad_alloc&) {} // Existing single-key native fallback.
+        }
+        std::size_t bytes=scheduled->worker_temporal_templates.capacity()*sizeof(std::unique_ptr<detail::ScheduledTemporalTemplates>);
+        for(const auto& batch:scheduled->worker_temporal_templates)if(batch)bytes+=sizeof(detail::ScheduledTemporalTemplates)+
+            detail::ScheduledTemporalTemplates::callee_allowance+batch->plan_cache_bytes()+batch->fp32_bytes();
+        scheduled->temporal_peak_bytes=std::max(scheduled->temporal_peak_bytes,bytes);
+        work.peak_workspace_bytes=std::max(work.peak_workspace_bytes,sizeof(PatternCorrelator)+accounted_bytes);
+    }
+    void record_temporal_fp32(const detail::ScheduledTemporalTemplates& batch,const char* disposition)const {
+        if(!batch.fp32_bytes() || !audio::trace::active.load())return;
+        const auto c=batch.fp32_counters();
+        audio::trace::record("temporal_fp32_work",[&](auto& f) {
+            f.add("epoch",config.stream_epoch);f.add("samples",sample);f.add("disposition",disposition);
+            f.add("counter_scope","one optional worker lifetime; sum retired events and final live events");
+            f.add("attempts",c.attempts);f.add("native_tiles",c.native_tiles);f.add("native_rows",c.numeric.native_samples);
+            f.add("refined_tiles",c.refined_tiles);f.add("refined_rows",c.refined_rows);
+            f.add("consumed_native",c.consumed_native);f.add("consumed_refined",c.consumed_refined);
+            f.add("packed_hits",c.packed_hits);f.add("packed_misses",c.packed_misses);
+            f.add("entry_payload_hits",c.entry_hits);f.add("entry_payload_builds",c.entry_builds);
+            f.add("entry_payload_rejected",c.entry_rejected);f.add("entry_payload_busy",c.entry_busy);
+            f.add("entry_payload_unavailable",c.entry_unavailable);
+            f.add("weight_narrowings",c.numeric.weight_narrowings);f.add("coefficient_narrowings",c.numeric.coefficient_narrowings);
+            f.add("output_widenings",c.numeric.output_widenings);f.add("shape_terms",c.numeric.shape_terms);
+            f.add("error_fallback_rows",c.numeric.error_fallback_samples);f.add("range_fallbacks",c.numeric.range_fallbacks);
+            f.add("environment_fallbacks",c.numeric.environment_fallbacks);f.add("workspace_bytes",batch.fp32_bytes());
+            f.add("output_arithmetic",c.consumed_native?"diagnostic native FP32 ordered products/sums; FP64 limiter/Fits/guards":
+                "original FP64 outputs; native bypass/rejection/refinement");
+        });
+    }
+    void drop_scheduled_temporal_fp32() {
+        if(!scheduled)return;
+        // Same joined-worker boundary as existing exact Plan-cache/Temporal
+        // eviction. A drop emits its complete optional lifetime once.
+        for(auto& batch:scheduled->worker_temporal_templates)if(batch && batch->fp32_bytes()) {
+            record_temporal_fp32(*batch,"retired");const auto bytes=batch->fp32_bytes(),before=batch->plan_cache_bytes();
+            batch->drop_fp32();accounted_bytes-=bytes+before-batch->plan_cache_bytes();
+        }
+    }
+    bool fine_curves_eligible()const {
+        return scheduled && !options.amplitude_only && !options.raw_reference &&
+            !options.scheduled_moment_reference && !options.scheduled_float_curve_experiment &&
+            !scheduled_affine && shaped && !code.transmit_trace_enabled() &&
+            detail::fine_source_curve_geometry(config,detail::fine_source_curves_requested());
+    }
+    bool fine_curves_allocated()const {
+        return scheduled && scheduled->curves && code.chip_samples()<1024;
+    }
+    // Separate from the existing4096-byte common caller allowance. Covers the
+    // measured compiler-visible fine source/cache helper chain with headroom;
+    // external crypto/libm/OS stack qualification remains independent.
+    static constexpr std::size_t fine_curve_callee_bytes=8192;
+    void prepare_fine_curves() {
+        if(!fine_curves_eligible() || scheduled->curves || scheduled->float_curves)return;
+        // Final surplus only: preceding original workers/exact/Temporal/native
+        // choices and their complete reservations have already been selected.
+        if(sizeof(PatternCorrelator)>budget || accounted_bytes>budget-sizeof(PatternCorrelator))return;
+        const auto available=budget-sizeof(PatternCorrelator)-accounted_bytes;
+        if(sizeof(ScheduledCurveCache)>available ||
+           std::max<std::size_t>(1,worker_codes.size())>
+               (available-sizeof(ScheduledCurveCache))/fine_curve_callee_bytes)return;
+        try {scheduled->curves=std::make_unique<ScheduledCurveCache>();}
+        catch(const std::bad_alloc&){return;}
+        accounted_bytes=working_bytes()+drift_reserved+amplitude_scratch_reservation;
+        work.peak_workspace_bytes=std::max(work.peak_workspace_bytes,sizeof(PatternCorrelator)+accounted_bytes);
+    }
     void prepare_workers() {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::allocation);
+        // A fine diagnostic cannot enter fresh original worker/Temporal sizing.
+        if(fine_curves_allocated() &&
+           ((worker_codes.empty() && scheduled->worker_template_caches.empty()) ||
+            (options.scheduled_temporal_template_experiment && scheduled->worker_temporal_templates.empty())))
+            drop_scheduled_curves();
         if(scheduled && scheduled->moments_eligible && !scheduled->curves && !scheduled->float_curves &&
            config.scramble && config.spreading_mode==SpreadingMode::pattern && code.symbol_samples()<(1ULL<<40)) {
             // Arithmetic width is independent of curve/template reuse. The
@@ -1377,12 +2120,45 @@ struct PatternCorrelator::Impl {
             }
         }
         if(scheduled && scheduled->moments_eligible && scheduled->moments.empty()) {
-            const auto extra=banks.size()*(sizeof(std::vector<ScheduledMoment>)+(block_samples+1)*sizeof(ScheduledMoment));
+            // Optional outer-pulse scratch never displaces detector state or
+            // the established bit limit. Reserve it only with affordable
+            // moments, for every currently executing worker (serial is one).
+            const auto outer_scratch=outer_presence?detail::scheduled_outer_pulse_scratch_bytes*
+                std::max<std::size_t>(1,worker_codes.size()):0;
+            const auto extra=banks.size()*(sizeof(std::vector<ScheduledMoment>)+(block_samples+1)*sizeof(ScheduledMoment))+
+                outer_scratch;
             if(extra<=budget-sizeof(PatternCorrelator)-accounted_bytes) {
+                scheduled->outer_moment_scratch=outer_presence;
                 scheduled->moments.resize(banks.size());
                 for(auto& row:scheduled->moments)row.resize(block_samples+1);
                 accounted_bytes=working_bytes()+drift_reserved+amplitude_scratch_reservation;
                 require(sizeof(PatternCorrelator)+accounted_bytes<=budget,"mapped moment scratch exceeds DSP workspace");
+                work.peak_workspace_bytes=std::max(work.peak_workspace_bytes,sizeof(PatternCorrelator)+accounted_bytes);
+            }
+        }
+        if(scheduled && scheduled->moments_eligible &&
+           options.scheduled_float_moment_experiment && scheduled->float_signal.empty() &&
+           (config.search_arithmetic==SearchArithmetic::default_mode || config.search_arithmetic==SearchArithmetic::fp32)) {
+            const auto extra=banks.size()*sizeof(detail::scheduled_float_signal::Moments)+
+                hypotheses.size()*sizeof(ScheduledFloatCounts)+
+                std::max<std::size_t>(1,worker_codes.size())*detail::scheduled_float_signal::contraction_scratch_bytes;
+            if(extra<=budget-sizeof(PatternCorrelator)-accounted_bytes) {
+                scheduled->float_signal.resize(banks.size());
+                scheduled->float_counts.resize(hypotheses.size());
+                accounted_bytes=working_bytes()+drift_reserved+amplitude_scratch_reservation;
+                require(sizeof(PatternCorrelator)+accounted_bytes<=budget,"mapped FP32 signal scratch exceeds DSP workspace");
+                work.peak_workspace_bytes=std::max(work.peak_workspace_bytes,sizeof(PatternCorrelator)+accounted_bytes);
+            }
+        }
+        if(scheduled && scheduled->moments_eligible && options.scheduled_float_gram_experiment &&
+           scheduled->float_grams.empty() && (config.search_arithmetic==SearchArithmetic::default_mode ||
+           config.search_arithmetic==SearchArithmetic::fp32)) {
+            const auto extra=hypotheses.size()*sizeof(ScheduledFloatGramCounts)+
+                std::max<std::size_t>(1,worker_codes.size())*detail::scheduled_float_gram::scratch_bytes;
+            if(extra<=budget-sizeof(PatternCorrelator)-accounted_bytes) {
+                scheduled->float_grams.resize(hypotheses.size());
+                accounted_bytes=working_bytes()+drift_reserved+amplitude_scratch_reservation;
+                require(sizeof(PatternCorrelator)+accounted_bytes<=budget,"mapped FP32 Gram scratch exceeds workspace");
                 work.peak_workspace_bytes=std::max(work.peak_workspace_bytes,sizeof(PatternCorrelator)+accounted_bytes);
             }
         }
@@ -1391,9 +2167,17 @@ struct PatternCorrelator::Impl {
         // A serial bank can retain one exact template cache without any
         // worker_codes. It is already prepared too: replacing it here would
         // lose counters and double-charge its retained allocation each push.
-        if(!worker_codes.empty() || (scheduled && !scheduled->worker_template_caches.empty()))return;
+        if(!worker_codes.empty() || (scheduled && !scheduled->worker_template_caches.empty())) {
+            prepare_scheduled_families();prepare_scheduled_common_shape();prepare_scheduled_temporal_templates();prepare_scheduled_temporal_plan_caches();prepare_scheduled_temporal_fp32();prepare_scheduled_temporal_fp32_payloads();prepare_scheduled_outer_public_replay();prepare_fine_curves();return;
+        }
+        // No original worker/cache marker survived. Release a preceding
+        // serial tile before re-running the original worker sizing policy.
+        drop_scheduled_temporal_templates();
         const auto concurrency=std::min(hypotheses.size(),detail::search_concurrency(search.worker_threads));
-        const auto per_worker=code.working_bytes()+(scheduled_map()?sizeof(SchedHopSourceMap)+sizeof(std::unique_ptr<SchedHopSourceMap>):0);
+        const auto per_worker=code.working_bytes()+(scheduled_map()?sizeof(SchedHopSourceMap)+sizeof(std::unique_ptr<SchedHopSourceMap>):0)+
+            (scheduled && scheduled->outer_moment_scratch?detail::scheduled_outer_pulse_scratch_bytes:0)+
+            (scheduled && !scheduled->float_signal.empty()?detail::scheduled_float_signal::contraction_scratch_bytes:0)+
+            (scheduled && !scheduled->float_grams.empty()?detail::scheduled_float_gram::scratch_bytes:0);
         const auto workers=std::min(concurrency,(budget-sizeof(PatternCorrelator)-accounted_bytes)/per_worker);
         if(workers>1) {
             if(scheduled_map())++work.scheduled_worker_preparations;
@@ -1422,6 +2206,7 @@ struct PatternCorrelator::Impl {
                 work.peak_workspace_bytes=std::max(work.peak_workspace_bytes,sizeof(PatternCorrelator)+accounted_bytes);
             }
         }
+        prepare_scheduled_families();prepare_scheduled_common_shape();prepare_scheduled_temporal_templates();prepare_scheduled_temporal_plan_caches();prepare_scheduled_temporal_fp32();prepare_scheduled_temporal_fp32_payloads();prepare_scheduled_outer_public_replay();prepare_fine_curves();
     }
     std::size_t working_bytes() const {
         auto value=sizeof(Impl)+code.working_bytes()+hypotheses.capacity()*sizeof(Hypothesis)+banks.capacity()*sizeof(Bank)+
@@ -1462,10 +2247,21 @@ struct PatternCorrelator::Impl {
             (scheduled->source_starts.capacity()+scheduled->template_uncached.capacity()+scheduled->end_indices.capacity()+scheduled->first_full_indices.capacity())*sizeof(std::uint64_t)+
             scheduled->symbol_ends.capacity()*sizeof(long double)+(scheduled_calendar()?scheduled_calendar()->working_bytes():0);
         if(scheduled) {
-            if(scheduled->curves)value+=sizeof(ScheduledCurveCache);
+            value+=scheduled->physical_views.capacity()*sizeof(detail::PhysicalMomentCache::View);
+            if(scheduled->families)value+=scheduled->families->working_bytes();
+            value+=scheduled->common_work.capacity()*sizeof(ScheduledCommonWork);
+            if(scheduled->common_scratch)value+=std::max<std::size_t>(1,worker_codes.size())*scheduled_common_scratch_bytes;
+            if(scheduled->common_raw_scratch)value+=std::max<std::size_t>(1,worker_codes.size())*scheduled->common_raw_scratch_bytes;
+            if(scheduled->outer_moment_scratch)value+=detail::scheduled_outer_pulse_scratch_bytes;
+            if(scheduled->curves)value+=sizeof(ScheduledCurveCache)+(fine_curves_allocated()?fine_curve_callee_bytes:0);
             if(scheduled->float_curves)value+=sizeof(ScheduledFloatCurveCache);
             value+=scheduled->moments.capacity()*sizeof(std::vector<ScheduledMoment>);
             for(const auto& row:scheduled->moments)value+=row.capacity()*sizeof(ScheduledMoment);
+            value+=scheduled->float_signal.capacity()*sizeof(detail::scheduled_float_signal::Moments)+
+                scheduled->float_counts.capacity()*sizeof(ScheduledFloatCounts)+
+                (scheduled->float_signal.empty()?0:detail::scheduled_float_signal::contraction_scratch_bytes);
+            value+=scheduled->float_grams.capacity()*sizeof(ScheduledFloatGramCounts)+
+                (scheduled->float_grams.empty()?0:detail::scheduled_float_gram::scratch_bytes);
         }
         for(const auto& bank:banks)value+=bank.prefix.capacity()*sizeof(Projection)+bank.first_moment.capacity()*sizeof(Complex)+
             bank.affine_carrier.capacity()*sizeof(detail::CorrelationCarrierMoments);
@@ -1544,15 +2340,42 @@ struct PatternCorrelator::Impl {
     std::size_t worker_bytes() const {
         auto bytes=worker_codes.capacity()*sizeof(PatternCode);
         if(scheduled) {
+            // working_bytes() already reserves the serial/first worker.
+            if(scheduled->outer_moment_scratch && worker_codes.size()>1)
+                bytes+=(worker_codes.size()-1)*detail::scheduled_outer_pulse_scratch_bytes;
+            if(!scheduled->float_signal.empty() && worker_codes.size()>1)
+                bytes+=(worker_codes.size()-1)*detail::scheduled_float_signal::contraction_scratch_bytes;
+            if(!scheduled->float_grams.empty() && worker_codes.size()>1)
+                bytes+=(worker_codes.size()-1)*detail::scheduled_float_gram::scratch_bytes;
+            if(fine_curves_allocated() && worker_codes.size()>1)
+                bytes+=(worker_codes.size()-1)*fine_curve_callee_bytes;
             bytes+=scheduled->worker_maps.capacity()*sizeof(std::unique_ptr<SchedHopSourceMap>)+
                 scheduled->worker_template_caches.capacity()*sizeof(std::unique_ptr<ScheduledTemplateCache>);
             for(const auto& cache:scheduled->worker_template_caches)if(cache)bytes+=sizeof(ScheduledTemplateCache);
+            bytes+=scheduled->worker_temporal_templates.capacity()*sizeof(std::unique_ptr<detail::ScheduledTemporalTemplates>);
+            for(const auto& batch:scheduled->worker_temporal_templates)if(batch)
+                bytes+=sizeof(detail::ScheduledTemporalTemplates)+detail::ScheduledTemporalTemplates::callee_allowance+batch->plan_cache_bytes()+batch->fp32_bytes();
             for(const auto& map:scheduled->worker_maps)bytes+=map->working_bytes();
         }
         for(const auto& worker:worker_codes)bytes+=worker.working_bytes()-sizeof(PatternCode);
         return bytes;
     }
+    void drop_scheduled_temporal_templates() {
+        // Same single-caller ownership as drop_workers: all parallel numeric
+        // tasks have joined and their scoped TLS views restored before any
+        // complete()/room_for()/external trim can reclaim this optional owner.
+        if(!scheduled || scheduled->worker_temporal_templates.empty())return;
+        drop_scheduled_temporal_fp32();drop_scheduled_temporal_plan_caches();
+        auto bytes=scheduled->worker_temporal_templates.capacity()*sizeof(std::unique_ptr<detail::ScheduledTemporalTemplates>);
+        for(const auto& batch:scheduled->worker_temporal_templates)if(batch) {
+            scheduled->temporal_retired+=batch->statistics;
+            bytes+=sizeof(detail::ScheduledTemporalTemplates)+detail::ScheduledTemporalTemplates::callee_allowance;
+        }
+        accounted_bytes-=bytes;
+        decltype(scheduled->worker_temporal_templates)().swap(scheduled->worker_temporal_templates);
+    }
     void drop_workers() {
+        drop_scheduled_temporal_templates();drop_scheduled_common_shape();
         if(scheduled)for(const auto& cache:scheduled->worker_template_caches)if(cache) {
             work.scheduled_template_cache_hits+=cache->hits;work.scheduled_template_constructions+=cache->constructions;
         }
@@ -1560,13 +2383,70 @@ struct PatternCorrelator::Impl {
         std::vector<PatternCode>().swap(worker_codes);
         if(scheduled) {
             decltype(scheduled->worker_template_caches)().swap(scheduled->worker_template_caches);
+            decltype(scheduled->worker_temporal_templates)().swap(scheduled->worker_temporal_templates);
             decltype(scheduled->worker_maps)().swap(scheduled->worker_maps);
         }
     }
+    void drop_scheduled_common_shape() {
+        if(!scheduled || !scheduled->common_scratch)return;
+        accounted_bytes-=scheduled->common_work.capacity()*sizeof(ScheduledCommonWork)+
+            std::max<std::size_t>(1,worker_codes.size())*scheduled_common_scratch_bytes;
+        if(scheduled->common_raw_scratch) {
+            accounted_bytes-=std::max<std::size_t>(1,worker_codes.size())*scheduled->common_raw_scratch_bytes;
+            scheduled->common_raw_scratch=false;scheduled->common_raw_scratch_bytes=0;
+        }
+        scheduled->common_scratch=false;decltype(scheduled->common_work)().swap(scheduled->common_work);
+    }
+    void drop_scheduled_families() {
+        drop_scheduled_common_shape();
+        if(!scheduled || !scheduled->families)return;
+        accounted_bytes-=scheduled->families->working_bytes();
+        scheduled->families.reset();
+        scheduled->extra_work.scheduled_exact_families=scheduled->extra_work.scheduled_family_groups=scheduled->extra_work.scheduled_family_metadata_bytes=0;
+        // Do not repeat optional sorting on every low-space PCM push.
+    }
+    void drop_scheduled_float_grams() {
+        if(!scheduled || scheduled->float_grams.empty())return;
+        auto& target=scheduled->extra_work;
+        for(const auto& c:scheduled->float_grams) {
+            target.scheduled_float_gram_attempts+=c.attempts;
+            target.scheduled_float_gram_accepted_pairs+=c.accepted;
+            target.scheduled_float_gram_range_fallbacks+=c.range;
+            target.scheduled_float_gram_rank_fallbacks+=c.rank;
+            target.scheduled_float_gram_error_fallbacks+=c.error;
+            target.scheduled_float_gram_helper_fallbacks+=c.helper;
+            target.scheduled_float_gram_signal_attempts+=c.signal_attempts;
+            target.scheduled_float_gram_maximum_relative_error=std::max(target.scheduled_float_gram_maximum_relative_error,c.maximum_relative_error);
+        }
+        accounted_bytes-=scheduled->float_grams.capacity()*sizeof(ScheduledFloatGramCounts)+
+            std::max<std::size_t>(1,worker_codes.size())*detail::scheduled_float_gram::scratch_bytes;
+        decltype(scheduled->float_grams)().swap(scheduled->float_grams);
+    }
     void drop_scheduled_moments() {
-        if(!scheduled || scheduled->moments.empty())return;
+        drop_scheduled_float_grams();
+        if(!scheduled)return;
+        for(const auto& count:scheduled->float_counts) {
+            scheduled->extra_work.scheduled_float_moment_attempts+=count.attempts;
+            scheduled->extra_work.scheduled_float_moment_pieces+=count.pieces;
+            scheduled->extra_work.scheduled_float_moment_condition_fallbacks+=count.condition_fallbacks;
+            scheduled->extra_work.scheduled_float_moment_error_fallbacks+=count.error_fallbacks;
+            scheduled->extra_work.scheduled_float_moment_accepted_pairs+=count.accepted_pairs;
+            scheduled->extra_work.scheduled_float_moment_fp64_pairs+=count.fp64_pairs;
+            scheduled->extra_work.scheduled_float_moment_gram_fallbacks+=count.gram_fallbacks;
+        }
+        accounted_bytes-=scheduled->float_signal.capacity()*sizeof(detail::scheduled_float_signal::Moments)+
+            scheduled->float_counts.capacity()*sizeof(ScheduledFloatCounts)+
+            (scheduled->float_signal.empty()?0:std::max<std::size_t>(1,worker_codes.size())*
+                detail::scheduled_float_signal::contraction_scratch_bytes);
+        decltype(scheduled->float_signal)().swap(scheduled->float_signal);
+        decltype(scheduled->float_counts)().swap(scheduled->float_counts);
+        if(scheduled->moments.empty())return;
         auto bytes=scheduled->moments.capacity()*sizeof(std::vector<ScheduledMoment>);
         for(const auto& row:scheduled->moments)bytes+=row.capacity()*sizeof(ScheduledMoment);
+        if(scheduled->outer_moment_scratch) {
+            bytes+=std::max<std::size_t>(1,worker_codes.size())*detail::scheduled_outer_pulse_scratch_bytes;
+            scheduled->outer_moment_scratch=false;
+        }
         accounted_bytes-=bytes;
         decltype(scheduled->moments)().swap(scheduled->moments);
     }
@@ -1577,7 +2457,10 @@ struct PatternCorrelator::Impl {
             scheduled->curve_hits+=ptr->hits;scheduled->curve_misses+=ptr->misses;
             scheduled->curve_evictions+=ptr->evictions;scheduled->curve_exhaustions+=ptr->exhaustions;
             using Cache=std::remove_reference_t<decltype(*ptr)>;
-            ptr.reset();accounted_bytes-=sizeof(Cache);
+            auto bytes=sizeof(Cache);
+            if constexpr(std::is_same_v<Cache,ScheduledCurveCache>)if(fine_curves_allocated())
+                bytes+=std::max<std::size_t>(1,worker_codes.size())*fine_curve_callee_bytes;
+            ptr.reset();accounted_bytes-=bytes;
         };
         drop(scheduled->curves);drop(scheduled->float_curves);
     }
@@ -1587,15 +2470,28 @@ struct PatternCorrelator::Impl {
         work.affine_coefficient_cache_entries=0;
     }
     void room_for(std::size_t extra) {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::allocation,true);
         // Called outside affine accumulation, before retained payload/event
         // allocations. No private coefficient pointer survives this eviction.
+        // The new fine diagnostic is the lowest-priority optional allocation.
+        if(fine_curves_allocated() && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
+           extra>budget-sizeof(PatternCorrelator)-accounted_bytes))drop_scheduled_curves();
+        if(sizeof(PatternCorrelator)+accounted_bytes>budget ||
+           extra>budget-sizeof(PatternCorrelator)-accounted_bytes)drop_scheduled_temporal_fp32();
+        if(sizeof(PatternCorrelator)+accounted_bytes>budget ||
+           extra>budget-sizeof(PatternCorrelator)-accounted_bytes)drop_scheduled_temporal_plan_caches();
+        if(scheduled && !scheduled->worker_temporal_templates.empty() && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
+                extra>budget-sizeof(PatternCorrelator)-accounted_bytes))drop_scheduled_temporal_templates();
+        if(scheduled && scheduled->families && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
+                extra>budget-sizeof(PatternCorrelator)-accounted_bytes))drop_scheduled_families();
         if(scheduled && (scheduled->curves || scheduled->float_curves) && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
                 extra>budget-sizeof(PatternCorrelator)-accounted_bytes))drop_scheduled_curves();
-        if(scheduled && !scheduled->moments.empty() && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
+        if(scheduled && (!scheduled->moments.empty() || !scheduled->float_signal.empty() || !scheduled->float_grams.empty()) && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
                 extra>budget-sizeof(PatternCorrelator)-accounted_bytes))drop_scheduled_moments();
         if(!affine_coefficients.empty() && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
                 extra>budget-sizeof(PatternCorrelator)-accounted_bytes))drop_affine_coefficients();
-        if((!worker_codes.empty() || (scheduled && !scheduled->worker_template_caches.empty())) && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
+        if((!worker_codes.empty() || (scheduled && (!scheduled->worker_template_caches.empty() ||
+                !scheduled->worker_temporal_templates.empty()))) && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
                 extra>budget-sizeof(PatternCorrelator)-accounted_bytes))drop_workers();
         require(sizeof(PatternCorrelator)+accounted_bytes<=budget && extra<=budget-sizeof(PatternCorrelator)-accounted_bytes,
                 "pattern evidence exceeds DSP workspace");
@@ -1606,6 +2502,7 @@ struct PatternCorrelator::Impl {
         return -std::log(search.false_alarm_probability)+std::log(t)+std::log(t+1)+std::log(2.);
     }
     void remember(PatternEvidence evidence) {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::publication);
         if(evidence.score<search.retain_score)return;
         evidence.admission_threshold=threshold();
         if(history.size()==search.candidate_limit)history.erase(history.begin());
@@ -1656,14 +2553,16 @@ struct PatternCorrelator::Impl {
         };
         for(auto& emission:emissions)if(same_clock(emission.origin,emission.frequency) &&
             (!emission.ended || h.burst.stream_first_symbol<emission.last_symbol))return emission;
-        // Choose once before immutable output starts. Other hypotheses retain
-        // their evidence but cannot replace already delivered stream bytes.
+        // Choose before output starts. A later timing guide may continue only
+        // after proving the entire published prefix; delivered bytes and this
+        // emission's physical identity are immutable.
         const Hypothesis* owner=&h;
         for(const auto& candidate:hypotheses)if(candidate.admitted && same_clock(candidate.origin,candidate.burst.frequency_hz) &&
             (candidate.burst.stream_first_symbol<owner->burst.stream_first_symbol ||
              (candidate.burst.stream_first_symbol==owner->burst.stream_first_symbol && candidate.sum_score>owner->sum_score)))owner=&candidate;
         Emission emission{owner,owner->burst.stream_first_symbol,owner->burst.first_stream_symbol,
-            owner->origin,owner->burst.frequency_hz,owner->burst.frequency_hz,owner->burst.score,false};
+            owner->burst.stream_first_sample,owner->origin,owner->burst.frequency_hz,
+            owner->burst.frequency_hz,owner->burst.score,false};
         if(emissions.size()==search.track_limit) {
             const auto reusable=std::find_if(emissions.begin(),emissions.end(),[](const auto& item){return item.ended;});
             require(reusable!=emissions.end(),"pattern output stream quota exhausted");*reusable=emission;return *reusable;
@@ -1693,15 +2592,85 @@ struct PatternCorrelator::Impl {
         }
         return stream.reported_frequency;
     }
+    std::size_t process_count(std::size_t count) const {
+        if(scheduled_map() && !options.amplitude_only && timing_enabled) {
+            bool common_fence=bit_limit<2;
+            if(!common_fence)for(const auto& h:hypotheses)if(h.committed)
+                for(const auto& stream:emissions)if(stream.owner!=&h && retain_timing_suffix(h,stream))
+                    common_fence=true;
+            if(!common_fence)return count;
+            // Preserve the one-bit budget and any unresolved retained suffix.
+            // A later owner settles before the earlier guide can require a
+            // further slot or resume across an as-yet-unresolved missing run.
+            // Normal blocks have at most two complete symbols (Fs>=64,T>=6s),
+            // so newly retained work cannot cross a gap and resume in one block.
+            for(const auto& h:hypotheses) {
+                const auto boundary=std::ceil(clock_boundary(h,code.symbol_samples()));
+                const auto span=boundary>static_cast<long double>(sample)?boundary-sample:1.L;
+                count=std::min(count,static_cast<std::size_t>(std::min<long double>(count,std::max(1.L,span))));
+            }
+        }
+        return count;
+    }
+    void trim_emitted_prefix(Hypothesis& h,const Emission& stream) {
+        if(h.burst.first_stream_symbol>=stream.last_symbol || !h.committed)return;
+        const auto duplicate=std::min<std::uint64_t>(h.committed,stream.last_symbol-h.burst.first_stream_symbol);
+        const auto through=h.burst.first_stream_symbol+duplicate;
+        const auto end=duplicate==h.committed?h.committed_end:static_cast<std::uint64_t>(std::max(0.L,
+            std::ceil(scheduled_boundary(h,scheduled_source_start(h,through-1)+code.symbol_samples(),true))));
+        h.burst.bits.erase(h.burst.bits.begin(),h.burst.bits.begin()+static_cast<std::ptrdiff_t>(duplicate));
+        h.burst.first_stream_symbol=through;h.burst.first_sample=end;
+        h.committed-=static_cast<std::size_t>(duplicate);
+    }
+    bool retain_timing_suffix(const Hypothesis& h,const Emission& stream) const {
+        if(!scheduled_map() || options.amplitude_only || !timing_enabled || !timing ||
+           stream.ended || stream.published_unknown || h.burst.stream_first_symbol!=stream.first_symbol ||
+           h.frequency!=stream.owner->frequency || h.rate!=stream.owner->rate ||
+           h.phase_lower!=stream.owner->phase_lower || h.phase_upper!=stream.owner->phase_upper)return false;
+        const auto index=static_cast<std::size_t>(&h-hypotheses.data());
+        // An intermediate qualified guide may later become owner. Keep only
+        // suffixes with a live incoming full-prefix proof, never an alias whose
+        // complete original-prefix proof has permanently failed.
+        for(const auto& entry:*timing)if(entry.state.tracking && entry.state.first==stream.first_symbol)
+            for(const auto& relation:entry.state.relations)
+                if(!relation.invalid && relation.neighbor==index)return true;
+        return false;
+    }
+    void trim_known_alias_prefix(Hypothesis& h) {
+        if(!scheduled_map() || options.amplitude_only || !h.admitted)return;
+        for(const auto& stream:emissions)if(stream.owner!=&h && stream.first_symbol==h.burst.stream_first_symbol &&
+            std::abs(stream.origin-h.origin)<static_cast<long double>(code.symbol_samples())/3 &&
+            ((!search.hypotheses.empty() && search.frequency_rate_competition) ||
+             std::abs(stream.frequency-h.burst.frequency_hz)<=config.sample_rate/static_cast<double>(code.symbol_samples()))) {
+            if(retain_timing_suffix(h,stream))trim_emitted_prefix(h,stream);
+            else {
+                // Reclaim permanently unusable aliases before the quota check,
+                // including an owner that ended since the last consumer poll.
+                h.burst.bits.erase(h.burst.bits.begin(),h.burst.bits.begin()+static_cast<std::ptrdiff_t>(h.committed));
+                h.burst.first_stream_symbol+=h.committed;h.burst.first_sample=h.committed_end;h.committed=0;
+            }
+            return;
+        }
+    }
     void publish(Hypothesis& h,bool complete=false,bool flush=true,bool draining=false) {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::publication);
         if(!h.admitted)return;
         if(draining && !h.committed)return;
         const auto chunk=std::min(search.chunk_bits,bit_limit);
         if(!complete && !flush && h.committed<chunk)return;
         auto& stream=output_stream(h);
         if(stream.owner!=&h) {
-            h.burst.bits.erase(h.burst.bits.begin(),h.burst.bits.begin()+static_cast<std::ptrdiff_t>(h.committed));
-            h.burst.first_stream_symbol+=h.committed;h.burst.first_sample=h.committed_end;h.committed=0;
+            if(retain_timing_suffix(h,stream) && !complete) {
+                // A later owner decision may qualify this guide in the same
+                // input block. Only already-emitted ordinals are duplicates.
+                trim_emitted_prefix(h,stream);
+            } else {
+                // Ended, unknown, incompatible or disproved aliases cannot
+                // replace immutable observations. Terminal retirement happens
+                // only after every available ownership proof has settled.
+                h.burst.bits.erase(h.burst.bits.begin(),h.burst.bits.begin()+static_cast<std::ptrdiff_t>(h.committed));
+                h.burst.first_stream_symbol+=h.committed;h.burst.first_sample=h.committed_end;h.committed=0;
+            }
             return;
         }
         do {
@@ -1711,7 +2680,7 @@ struct PatternCorrelator::Impl {
             room_for(count);
             PatternBurst result;
             result.first_sample=h.burst.first_sample;result.first_stream_symbol=h.burst.first_stream_symbol;
-            result.stream_first_sample=h.burst.stream_first_sample;result.stream_first_symbol=h.burst.stream_first_symbol;
+            result.stream_first_sample=stream.stream_first_sample;result.stream_first_symbol=stream.first_symbol;
             result.frequency_hz=carrier_estimate(h,stream);result.stream_phase_samples=h.burst.stream_phase_samples;
             result.bits.assign(h.burst.bits.begin(),h.burst.bits.begin()+static_cast<std::ptrdiff_t>(count));
             result.complete=complete && count==h.committed;
@@ -1782,17 +2751,24 @@ struct PatternCorrelator::Impl {
         publish(h);
         auto& stream=output_stream(h);
         if(stream.owner!=&h) {
+            // The existing contiguous bit vector cannot join an unpublished
+            // committed suffix across an unresolved erasure run. Never silently
+            // relabel its ordinals or manufacture completion to free storage.
+            require(!h.committed,"timing continuation suffix crosses unresolved missing symbols");
             h.gap_slots=0;h.burst.first_sample=resumed_sample;h.burst.first_stream_symbol=h.index;return;
         }
         require(bursts.size()<search.track_limit,"pattern output queue requires draining");
         PatternBurst event;
         event.first_sample=h.burst.first_sample;event.end_sample=resumed_sample;
         event.first_stream_symbol=h.burst.first_stream_symbol;
-        event.stream_first_sample=h.burst.stream_first_sample;event.stream_first_symbol=h.burst.stream_first_symbol;
+        event.stream_first_sample=stream.stream_first_sample;event.stream_first_symbol=stream.first_symbol;
         event.frequency_hz=carrier_estimate(h,stream);event.score=h.burst.score;
         event.support_samples=h.burst.support_samples;
         event.stream_phase_samples=h.burst.stream_phase_samples;event.missing_slots=h.gap_slots;
         bursts.push_back(std::move(event));h.gap_slots=0;
+        // Unknown observations are immutable too. A later guide cannot turn
+        // already published erasures into received bits through an owner swap.
+        stream.published_unknown=true;
         h.burst.first_sample=resumed_sample;h.burst.first_stream_symbol=h.index;stream.last_symbol=h.index;
     }
     TimingState* timing_state(std::size_t hypothesis) {
@@ -1838,7 +2814,8 @@ struct PatternCorrelator::Impl {
             state.tracking=true;state.pending_terminal=false;state.first=h.burst.stream_first_symbol;
             state.last_accepted=state.first;
             for(auto& relation:state.relations) {
-                relation.next=state.first;relation.owner_score=relation.guide_score=0;relation.invalid=false;
+                relation.next=state.first;relation.first_unaccepted=std::numeric_limits<std::uint64_t>::max();
+                relation.owner_score=relation.guide_score=0;relation.invalid=false;
                 if(relation.neighbor!=std::numeric_limits<std::size_t>::max()) {
                     const auto* neighbor=timing_state(relation.neighbor);
                     // A previously failed earlier lane cannot be reconstructed
@@ -1862,13 +2839,50 @@ struct PatternCorrelator::Impl {
             static_cast<std::uint8_t>(evidence.bit)};
         if(accepted){state.last_accepted=h.index;state.pending_terminal=false;}
     }
-    void settle_timing() {
+    bool continue_timing(Hypothesis& owner,const TimingState& state,const TimingRelation& proof) {
+        // Continuation is a private, same-clock proof. Never replace an emitted
+        // bit, infer an old prefix from a matching suffix, or cross a key/phase
+        // address. The relation has checked every full admitted prefix decision.
+        if(!scheduled_map() || options.amplitude_only || proof.invalid ||
+           proof.neighbor==std::numeric_limits<std::size_t>::max() ||
+           proof.next<=state.last_accepted || proof.guide_score<=proof.owner_score)return false;
+        auto& guide=hypotheses[proof.neighbor];
+        const auto* guide_state=timing_state(proof.neighbor);
+        if(!guide.admitted || !guide_state || !guide_state->tracking ||
+           guide_state->first!=state.first || guide.burst.stream_first_symbol!=state.first ||
+           guide.frequency!=owner.frequency || guide.rate!=owner.rate ||
+           guide.phase_lower!=owner.phase_lower || guide.phase_upper!=owner.phase_upper)return false;
+        for(auto& stream:emissions) {
+            if(stream.ended || stream.published_unknown || stream.owner!=&owner || stream.first_symbol!=state.first ||
+               stream.last_symbol>proof.next || stream.last_symbol>proof.first_unaccepted ||
+               std::abs(guide.origin-stream.origin)>=static_cast<long double>(code.symbol_samples())/3 ||
+               guide.burst.first_stream_symbol>stream.last_symbol)continue;
+            const auto duplicate=stream.last_symbol-guide.burst.first_stream_symbol;
+            if(duplicate>guide.committed)continue; // A lost suffix cannot be reconstructed.
+            if(duplicate) {
+                const auto end=static_cast<std::uint64_t>(std::max(0.L,std::ceil(scheduled_boundary(guide,
+                    scheduled_source_start(guide,stream.last_symbol-1)+code.symbol_samples(),true))));
+                guide.burst.bits.erase(guide.burst.bits.begin(),guide.burst.bits.begin()+
+                    static_cast<std::ptrdiff_t>(duplicate));
+                guide.burst.first_stream_symbol=stream.last_symbol;guide.burst.first_sample=end;
+                guide.committed-=static_cast<std::size_t>(duplicate);
+            }
+            // Neither absence age nor the established first sample/ordinal is
+            // copied from the old timing lane. The guide retains its own fully
+            // scored decisions and future source-symbol completion boundary.
+            stream.owner=&guide;amplitude_publication_dirty=true;
+            return true;
+        }
+        return false;
+    }
+    void settle_timing(bool continuation_only=false) {
         if(!timing || !timing_dirty)return;
-        timing_dirty=false;
+        // Early settlement can prevent chunk_bits=1 from dropping a newly
+        // accepted guide bit. Keep terminal work dirty for its normal fence.
+        if(!continuation_only)timing_dirty=false;
         for(auto& entry:*timing) {
             auto& owner=hypotheses[entry.hypothesis];auto& state=entry.state;
             if(!state.tracking || !owner.admitted)continue;
-            TimingRelation* best=nullptr;
             for(auto& relation:state.relations) {
                 if(relation.invalid || relation.neighbor==std::numeric_limits<std::size_t>::max())continue;
                 const auto& other=*timing_state(relation.neighbor);
@@ -1885,14 +2899,50 @@ struct PatternCorrelator::Impl {
                         relation.invalid=true;break;
                     }
                     if(a.accepted){relation.owner_score+=a.score;relation.guide_score+=b.score;}
+                    else relation.first_unaccepted=std::min(relation.first_unaccepted,a.index);
                     ++relation.next;
                 }
-                if(!relation.invalid && relation.next>state.last_accepted &&
-                    relation.guide_score>relation.owner_score &&
-                    (!best || relation.guide_score-relation.owner_score>best->guide_score-best->owner_score))best=&relation;
             }
-            if(!state.pending_terminal)continue;
-            if(best) {
+        }
+        // All original-prefix proofs are current before an earlier guide can
+        // be retired. Strict matched-prefix improvement makes promotion acyclic;
+        // bounded repeats also cover a guide earlier in the stored lane order.
+        for(std::size_t pass=0;pass<timing->size();++pass) {
+            bool promoted=false;
+            for(auto& entry:*timing) {
+                auto& owner=hypotheses[entry.hypothesis];auto& state=entry.state;
+                if(!state.tracking || !owner.admitted)continue;
+                TimingRelation* best=nullptr;
+                for(auto& relation:state.relations)
+                    if(!relation.invalid && relation.neighbor!=std::numeric_limits<std::size_t>::max() &&
+                       relation.next>state.last_accepted && relation.guide_score>relation.owner_score &&
+                       (!best || relation.guide_score-relation.owner_score>best->guide_score-best->owner_score))best=&relation;
+                if(best) {
+                    bool continued=continue_timing(owner,state,*best);
+                    // A stronger stale or incompatible guide must not hide
+                    // the other bounded neighbor's eligible continuation.
+                    if(!continued)for(auto& relation:state.relations)
+                        if(&relation!=best && continue_timing(owner,state,relation)){continued=true;break;}
+                    if(continued){state.pending_terminal=false;promoted=true;}
+                }
+            }
+            if(!promoted)break;
+            require(pass+1<timing->size(),"timing continuation ownership did not converge");
+        }
+        if(continuation_only)return;
+        // A newly promoted owner may already hold a full publication chunk.
+        // Publish it before the next accumulation so admitted bit_limit=1
+        // configurations do not need an uncharged second retained slot.
+        for(auto& stream:emissions)if(!stream.ended && stream.owner->admitted)
+            publish(*const_cast<Hypothesis*>(stream.owner),false,false);
+        for(auto& entry:*timing) {
+            auto& owner=hypotheses[entry.hypothesis];auto& state=entry.state;
+            if(!state.tracking || !owner.admitted || !state.pending_terminal)continue;
+            bool has_guide=false;
+            for(const auto& relation:state.relations)
+                has_guide=has_guide || (!relation.invalid && relation.neighbor!=std::numeric_limits<std::size_t>::max() &&
+                    relation.next>state.last_accepted && relation.guide_score>relation.owner_score);
+            if(has_guide) {
                 bool ready=true,accepted=false;
                 for(const auto& relation:state.relations) {
                     if(relation.invalid || relation.neighbor==std::numeric_limits<std::size_t>::max() ||
@@ -1913,6 +2963,7 @@ struct PatternCorrelator::Impl {
         }
     }
     void complete(Hypothesis& h,std::size_t hypothesis,std::uint64_t end,std::stop_token stop) {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::guards);
         amplitude_publication_dirty=true;
         std::size_t group_count=0;
         const auto groups=phase_groups(h,group_count);
@@ -2041,6 +3092,9 @@ struct PatternCorrelator::Impl {
         remember(e);
         const auto symbol_support=pattern_symbol_support(
             static_cast<double>(fits(h,hypothesis,selected)[e.bit].count),e.score,code.chip_samples());
+        // Reclaim known duplicate alias bits before the original quota check.
+        // Retained unpublished suffixes remain charged to their existing vector.
+        trim_known_alias_prefix(h);
         // Unknown slots never select a private phase. Keep the existing clock
         // until an independently confident later symbol resolves the schedule.
         const auto pending_count=h.burst.bits.size()-h.committed;
@@ -2111,6 +3165,7 @@ struct PatternCorrelator::Impl {
             } else {publish(h);clear(h);}
         }
         timing_decision(h,hypothesis,e,selected);
+        if(scheduled_map() && !options.amplitude_only)settle_timing(true);
         if(scheduled_map() && h.admitted && h.committed_end==end)scheduled->last_accepted[hypothesis]=h.index+1;
         // Only integer, fully scored failed source symbols count. A conservative
         // latest-cell END can include a few samples from the next active group;
@@ -2176,6 +3231,7 @@ struct PatternCorrelator::Impl {
         return sample;
     }
     bool advance_certified_null(std::uint64_t count) {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::calendar);
         if(!scheduled_map() || options.amplitude_only || !count)return false;
         const auto end=sample+count;
         // Equality is a genuine completion/publication event, even if the
@@ -2510,9 +3566,10 @@ struct PatternCorrelator::Impl {
                           std::array<Fit,2>& fit,std::array<DriftFit,2>* drift,
                           std::array<DifferentialFit,2>* differential,
                           std::array<detail::CorrelationChipEvidence,2>* chip=nullptr,std::uint64_t chip_index=0) {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::gram,true);
         WorkTimer fit_timer(options.measure_affine_work,work.affine_fit_seconds,work.affine_fit_cpu_seconds);
         const auto right=left+static_cast<std::size_t>(piece_count);
-        const auto prefix=bank.observations();const auto moments=bank.moments();
+        const auto prefix=bank.observations(physical_view(bank));const auto moments=bank.moments(physical_view(bank));
         const auto projection=prefix[right]-prefix[left];
         const Complex measured{projection.xc,projection.xs};
         const auto moment=moments[right]-moments[left]-static_cast<double>(left)*measured;
@@ -2535,14 +3592,80 @@ struct PatternCorrelator::Impl {
             if(differential)add_fit((*differential)[bit].active,contribution);
         }
     }
-    bool fit_mapped_piece(std::size_t frequency,std::size_t left,std::size_t count,
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+    __attribute__((noinline))
+#endif
+    bool try_float_gram_piece(std::size_t hypothesis,std::size_t frequency,std::size_t left,
+            const detail::ScheduledSpanMoments& moments,const std::array<Complex,2>& value,
+            const std::array<Complex,2>& slope,std::array<Fit,2>& fit,std::array<DriftFit,2>* drift,
+            std::array<DifferentialFit,2>* differential,std::array<detail::CorrelationChipEvidence,2>* chip,
+            std::uint64_t chip_index,detail::ScheduledSpanMoments* accepted,std::array<Fit,2>* piece_result) {
+        auto& counts=scheduled->float_grams[hypothesis];++counts.attempts;
+        const auto native=detail::scheduled_float_gram::evaluate(moments,value,slope);
+        if(std::isfinite(native.maximum_relative_error))counts.maximum_relative_error=std::max(
+            counts.maximum_relative_error,native.maximum_relative_error);
+        if(!native) {
+            using Failure=detail::scheduled_float_gram::Failure;
+            if(native.failure==Failure::rank)++counts.rank;
+            else if(native.failure==Failure::error)++counts.error;
+            else ++counts.range;
+            return false;
+        }
+        detail::scheduled_float_signal::Result signal;
+        std::array<Complex,2> dots;
+        const std::array<Complex,2>* signal_override=nullptr;
+        if(!scheduled->float_signal.empty()) {
+            ++counts.signal_attempts;
+            signal=scheduled->float_signal[frequency].contract(left,moments.count,value,slope);
+            bool certified=static_cast<bool>(signal);
+            if(certified)for(unsigned bit=0;bit<2;++bit)certified&=detail::scheduled_float_gram::certify_signal(
+                signal.dots[bit],native.lambda_lower[bit],moments.energy);
+            if(certified) {
+                for(unsigned bit=0;bit<2;++bit)dots[bit]=signal.dots[bit].value;
+                signal_override=&dots;
+            }
+        }
+        std::array<Fit,2> contributions;
+        // This helper skips BOTH original Gram products and a supplied signal
+        // dot. Its original finite/rank guards still run on the FP64 fields.
+        if(!detail::scheduled_affine_pair(moments,value,slope,contributions,signal_override,&native.gram)) {
+            ++counts.helper;return false;
+        }
+        ++counts.accepted;
+        if(!scheduled->float_signal.empty()) {
+            auto& c=scheduled->float_counts[hypothesis];++c.attempts;
+            if(signal_override){++c.accepted_pairs;c.pieces+=signal.tiles;}
+            else {++c.fp64_pairs;++c.error_fallbacks;}
+        }
+        for(unsigned bit=0;bit<2;++bit) {
+            const auto& f=contributions[bit];add_fit(fit[bit],f);
+            if(chip)(*chip)[bit].add_fit(f,chip_index);
+            if(drift)add_fit((*drift)[bit].active,f);
+            if(differential)add_fit((*differential)[bit].active,f);
+        }
+        if(accepted)*accepted=moments;
+        if(piece_result)*piece_result=contributions;
+        return true;
+    }
+    // Keep the original FP64 formulas in a separate hot function. Float
+    // diagnostics retain their complete existing body and numerical fallbacks.
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+    __attribute__((noinline))
+#endif
+    bool fit_mapped_piece_fp64(std::size_t /*hypothesis*/,std::size_t frequency,std::size_t left,std::size_t count,
             const std::array<Complex,2>& value,const std::array<Complex,2>& slope,
             std::array<Fit,2>& fit,std::array<DriftFit,2>* drift,
             std::array<DifferentialFit,2>* differential,
-            std::array<detail::CorrelationChipEvidence,2>* chip,std::uint64_t chip_index) {
-        const auto& prefix=scheduled->moments[frequency];
-        const auto& a=prefix[left];const auto& b=prefix[left+count];
-        const auto p=banks[frequency].observations()[left+count]-banks[frequency].observations()[left];
+            std::array<detail::CorrelationChipEvidence,2>* chip,std::uint64_t chip_index,
+            detail::ScheduledSpanMoments* accepted,std::array<Fit,2>* piece_result) {
+        const auto shared=physical_view(frequency);
+        const auto a=shared?shared.moment(left):scheduled->moments[frequency][left];
+        const auto b=shared?shared.moment(left+count):scheduled->moments[frequency][left+count];
+        const auto p=banks[frequency].observations(physical_view(frequency))[left+count]-banks[frequency].observations(physical_view(frequency))[left];
         const double l=static_cast<double>(left);
         const Complex z{p.xc,p.xs},c0{p.cc-p.ss,2*p.cs};
         const auto z1=b.signal1-a.signal1-l*z;
@@ -2570,10 +3693,780 @@ struct PatternCorrelator::Impl {
             if(drift)add_fit((*drift)[bit].active,f);
             if(differential)add_fit((*differential)[bit].active,f);
         }
+        if(accepted)*accepted={{z,z1},{c0,c1,c2},{n0,n1,n2},p.energy,count};
+        if(piece_result)*piece_result=contributions;
         return true;
     }
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+    __attribute__((noinline))
+#endif
+    bool fit_mapped_piece_diagnostic(std::size_t hypothesis,std::size_t frequency,std::size_t left,std::size_t count,
+            const std::array<Complex,2>& value,const std::array<Complex,2>& slope,
+            std::array<Fit,2>& fit,std::array<DriftFit,2>* drift,
+            std::array<DifferentialFit,2>* differential,
+            std::array<detail::CorrelationChipEvidence,2>* chip,std::uint64_t chip_index,
+            detail::ScheduledSpanMoments* accepted,std::array<Fit,2>* piece_result) {
+        const auto shared=physical_view(frequency);
+        const auto a=shared?shared.moment(left):scheduled->moments[frequency][left];
+        const auto b=shared?shared.moment(left+count):scheduled->moments[frequency][left+count];
+        const auto p=banks[frequency].observations(physical_view(frequency))[left+count]-banks[frequency].observations(physical_view(frequency))[left];
+        const double l=static_cast<double>(left);
+        const Complex z{p.xc,p.xs},c0{p.cc-p.ss,2*p.cs};
+        const auto z1=b.signal1-a.signal1-l*z;
+        const auto c1=b.square1-a.square1-l*c0;
+        const auto c2=b.square2-a.square2-2*l*(b.square1-a.square1)+l*l*c0;
+        const auto n0=p.cc+p.ss,n1=b.norm1-a.norm1-l*n0;
+        const auto n2=b.norm2-a.norm2-2*l*(b.norm1-a.norm1)+l*l*n0;
+        if(!scheduled->float_grams.empty() && try_float_gram_piece(hypothesis,frequency,left,
+                {{z,z1},{c0,c1,c2},{n0,n1,n2},p.energy,count},value,slope,fit,drift,differential,chip,
+                chip_index,accepted,piece_result))return true;
+        std::array<Fit,2> contributions;
+        if(scheduled->float_signal.empty()) {
+            for(unsigned bit=0;bit<2;++bit) {
+                const auto v=value[bit],s=slope[bit];
+                const auto dot=v*z+s*z1;
+                const auto trace=std::norm(v)*n0+2*(v*std::conj(s)).real()*n1+std::norm(s)*n2;
+                const auto square=v*v*c0+2.*v*s*c1+s*s*c2;
+                auto& f=contributions[bit];
+                f={dot.real(),dot.imag(),(trace+square.real())/2,(trace-square.real())/2,
+                    square.imag()/2,p.energy,count};
+                // Near-singular/cancellation-sensitive pieces retain the original
+                // sample contraction. Never repair an indefinite Gram by clipping.
+                if(!std::isfinite(trace+f.xc+f.xs+f.cs) || f.cc<=0 || f.ss<=0 ||
+                   f.cc*f.ss-f.cs*f.cs<=1e-10*trace*trace)return false;
+            }
+        } else {
+            std::array<double,2> original_trace{};
+            for(unsigned bit=0;bit<2;++bit) {
+                const auto v=value[bit],s=slope[bit];
+                const auto trace=std::norm(v)*n0+2*(v*std::conj(s)).real()*n1+std::norm(s)*n2;
+                const auto square=v*v*c0+2.*v*s*c1+s*s*c2;
+                auto& f=contributions[bit];
+                f={0,0,(trace+square.real())/2,(trace-square.real())/2,
+                    square.imag()/2,p.energy,count};
+                // Near-singular/cancellation-sensitive pieces retain the original
+                // sample contraction. Never repair an indefinite Gram by clipping.
+                original_trace[bit]=trace;
+                if(f.cc<=0 || f.ss<=0 || f.cc*f.ss-f.cs*f.cs<=1e-10*trace*trace) {
+                    if(!scheduled->float_counts.empty())++scheduled->float_counts[hypothesis].gram_fallbacks;
+                    return false;
+                }
+            }
+            detail::scheduled_float_signal::Result native;
+            bool use_native=false;
+            if(!scheduled->float_signal.empty()) {
+                auto& counts=scheduled->float_counts[hypothesis];++counts.attempts;
+                native=scheduled->float_signal[frequency].contract(left,count,value,slope);
+                use_native=static_cast<bool>(native);
+                if(use_native)for(unsigned bit=0;bit<2;++bit) {
+                    const auto& f=contributions[bit];
+                    const auto certificate=detail::scheduled_float_signal::certify(
+                        native.dots[bit],f.cc,f.ss,f.cs,p.energy,1e-4);
+                    if(certificate!=detail::scheduled_float_signal::Failure::none) {
+                        use_native=false;
+                        if(certificate==detail::scheduled_float_signal::Failure::ill_conditioned_gram)
+                            ++counts.condition_fallbacks;
+                        else ++counts.error_fallbacks;
+                        break;
+                    }
+                } else ++counts.error_fallbacks;
+                if(use_native){counts.pieces+=native.tiles;++counts.accepted_pairs;}
+                else ++counts.fp64_pairs;
+            }
+            // Local disk bounds exercise numerical fallbacks, not an exact final
+            // guard-decision certificate. This explicit diagnostic is NEVER selected
+            // automatically; complete paired/threshold/sensitivity checks remain.
+            for(unsigned bit=0;bit<2;++bit) {
+                const auto dot=use_native?native.dots[bit].value:value[bit]*z+slope[bit]*z1;
+                auto& f=contributions[bit];f.xc=dot.real();f.xs=dot.imag();
+                if(!std::isfinite(original_trace[bit]+f.xc+f.xs+f.cs))return false;
+            }
+        }
+        for(unsigned bit=0;bit<2;++bit) {
+            const auto& f=contributions[bit];add_fit(fit[bit],f);
+            if(chip)(*chip)[bit].add_fit(f,chip_index);
+            if(drift)add_fit((*drift)[bit].active,f);
+            if(differential)add_fit((*differential)[bit].active,f);
+        }
+        if(accepted)*accepted={{z,z1},{c0,c1,c2},{n0,n1,n2},p.energy,count};
+        if(piece_result)*piece_result=contributions;
+        return true;
+    }
+    bool fit_mapped_piece(std::size_t hypothesis,std::size_t frequency,std::size_t left,std::size_t count,
+            const std::array<Complex,2>& value,const std::array<Complex,2>& slope,
+            std::array<Fit,2>& fit,std::array<DriftFit,2>* drift,
+            std::array<DifferentialFit,2>* differential,
+            std::array<detail::CorrelationChipEvidence,2>* chip,std::uint64_t chip_index,
+            detail::ScheduledSpanMoments* accepted=nullptr,std::array<Fit,2>* piece_result=nullptr) {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::gram,true);
+        // Prepared state, rather than Options alone, preserves workspace and
+        // preparation failures as the original exact FP64 fallback.
+        if(scheduled->float_signal.empty() && scheduled->float_grams.empty())
+            return fit_mapped_piece_fp64(hypothesis,frequency,left,count,value,slope,fit,drift,differential,chip,
+                chip_index,accepted,piece_result);
+        return fit_mapped_piece_diagnostic(hypothesis,frequency,left,count,value,slope,fit,drift,differential,chip,
+                chip_index,accepted,piece_result);
+    }
+    // Exact flat-piece descriptor: one keyed calendar lookup. Once left is
+    // within this immutable group's flat interval, its public integer affine
+    // translation gives the ORIGINAL source coordinate at the last physical
+    // sample. Source fractions come from scheduled_tick, never interpolation.
+    bool scheduled_phase_flat_coordinates(const Hypothesis& h,std::size_t lane,
+            std::uint64_t first,std::uint64_t end,long double& lower,long double& upper,
+            detail::ScheduledFlatExportCertificate* export_certificate=nullptr) const {
+        if(export_certificate)*export_certificate={};
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::calendar,true);
+        if(first>=end)return false;
+        const auto left=scheduled_tick(h,first);
+        const auto group=scheduled_map()->locate(left);
+        if(!group.active || left.distance(SchedHopCoordinate{group.flat_begin,0})<0)return false;
+        const auto right=scheduled_tick(h,end);
+        if(right.distance(SchedHopCoordinate{group.flat_end,0})>0)return false;
+        if(scheduled->fhss_shape.enabled) {
+            const auto two=2.L*config.sample_rate;
+            const auto local=std::fmod(static_cast<long double>(left.sample%(2ULL*config.sample_rate))+
+                left.fraction+scheduled->fhss_shape.lag_center,two);
+            const auto period=two/5;
+            const auto position=local-std::floor(local*5/two)*period;
+            const auto radius=scheduled->fhss_shape.affected_radius();
+            if(position<radius || position+right.distance(left)>period-radius)return false;
+        }
+        const auto last=scheduled_tick(h,end-1);
+        if(last.sample<group.physical_begin || last.sample>=group.physical_end)return false;
+        // locate_in_frame uses this SAME bounded integer sum and copies the
+        // original last.fraction. Validated source_end bounds the addition.
+        const SchedHopCoordinate source_last{
+            group.source_begin+(last.sample-group.physical_begin),last.fraction};
+        const auto start=scheduled_source_start(h,h.index);
+        lower=group.source.distance(scheduled->anchors[lane])-start;
+        upper=source_last.distance(scheduled->anchors[lane])-start;
+        if(export_certificate && detail::scheduled_flat_export_requested())
+            *export_certificate=detail::scheduled_flat_export_certificate(this,h.origin,h.rate,h.phase_lower,
+                first,end,left,right,group,scheduled->fhss_shape,config.sample_rate,true);
+        return true;
+    }
+    // One worker owns each exact source family. All original fine-frequency
+    // prefixes/moments remain; only common source construction is shared.
+    struct ScheduledCommonTargets {
+        std::array<Fit,2>* whole=nullptr;
+        std::array<DriftFit,2>* quarter=nullptr;
+        std::array<DifferentialFit,2>* differential=nullptr;
+        std::array<detail::CorrelationChipEvidence,2>* chips=nullptr;
+        detail::CorrelationOuterEvidence* outer=nullptr;
+        std::uint64_t* observed_start=nullptr;
+        bool fitted=false;
+    };
+    static void apply_scheduled_common_pair(const std::array<Fit,2>& pair,
+            ScheduledCommonTargets& target,std::uint64_t chip) {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::gram,true);
+        // Each lane owns every accumulator; preserve its original bit order.
+        for(unsigned bit=0;bit<2;++bit) {
+            const auto& f=pair[bit];add_fit((*target.whole)[bit],f);
+            if(target.chips)(*target.chips)[bit].add_fit(f,chip);
+            if(target.quarter)add_fit((*target.quarter)[bit].active,f);
+            if(target.differential)add_fit((*target.differential)[bit].active,f);
+        }
+    }
+    static constexpr std::size_t scheduled_common_maximum_lanes=16,scheduled_common_scratch_bytes=4096;
+    static_assert(scheduled_common_maximum_lanes*sizeof(ScheduledCommonTargets)+
+        sizeof(detail::ScheduledPulseSpan)+sizeof(detail::ScheduledSpanMoments)+
+        2*sizeof(Fit)+scheduled_common_maximum_lanes*sizeof(bool)+sizeof(detail::ScheduledMappedPieceCounts)+
+        8*sizeof(std::array<Complex,2>)+2*sizeof(detail::CorrelationPulseSegment)+
+        sizeof(detail::ScheduledOuterPublicLockstep)+sizeof(detail::ScheduledOuterPublicScope)+512<=scheduled_common_scratch_bytes);
+    struct ScheduledCommonRawPulse {std::uint64_t index;double weight;};
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+    __attribute__((noinline))
+#endif
+    void add_scheduled_common_raw_one_frequency(std::span<const std::size_t> lanes,
+            std::array<ScheduledCommonTargets,scheduled_common_maximum_lanes>& target,
+            std::size_t left,const std::array<Complex,2>& phase,std::uint64_t local,
+            std::uint64_t first_chip,std::span<const ScheduledCommonRawPulse> pulses,
+            ScheduledCommonWork& counters,PatternCode& pattern) {
+        std::size_t unmatched=0;for(std::size_t j=0;j<lanes.size();++j)unmatched+=!target[j].fitted;
+        if(!unmatched)return;
+        const auto& prefix=banks[hypotheses[lanes.front()].frequency].observations(physical_view(hypotheses[lanes.front()].frequency));const auto p=prefix[left+1]-prefix[left];
+        std::array<Fit,2> contribution;
+        for(unsigned bit=0;bit<2;++bit)contribution[bit].add(p,phase[bit],1);
+        for(std::size_t j=0;j<lanes.size();++j) {
+            auto& t=target[j];if(t.fitted)continue;
+            if(t.outer)for(const auto& pulse:pulses)t.outer->add(pulse.index,
+                pulse.weight*Complex{p.xc,p.xs},[&](std::uint64_t index){return pattern.values(first_chip+index);});
+            for(unsigned bit=0;bit<2;++bit) {
+                add_fit((*t.whole)[bit],contribution[bit]);
+                if(t.chips)(*t.chips)[bit].add_fit(contribution[bit],local);
+                if(t.quarter)add_fit((*t.quarter)[bit].active,contribution[bit]);
+                if(t.differential)add_fit((*t.differential)[bit].active,contribution[bit]);
+            }
+        }
+        ++counters.raw_fit_pairs;counters.raw_reused_lane_samples+=unmatched-1;
+        counters.raw_lane_samples+=unmatched;
+        if(options.scheduled_common_simd_experiment) {
+            ++counters.simd_short_samples;++counters.simd_scalar_lane_samples;
+        }
+    }
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+    __attribute__((noinline))
+#endif
+    void add_scheduled_common_raw_one_frequency_replayed(std::span<const std::size_t> lanes,
+            std::array<ScheduledCommonTargets,scheduled_common_maximum_lanes>& target,
+            std::size_t left,const std::array<Complex,2>& phase,std::uint64_t local,
+            std::uint64_t first_chip,std::span<const ScheduledCommonRawPulse> pulses,
+            ScheduledCommonWork& counters,PatternCode& pattern,detail::ScheduledOuterPublicLockstep& lockstep,
+            detail::ScheduledOuterPublicScope& replay_work) {
+        std::size_t unmatched=0;for(std::size_t j=0;j<lanes.size();++j)unmatched+=!target[j].fitted;
+        if(!unmatched)return;
+        const auto& prefix=banks[hypotheses[lanes.front()].frequency].observations(physical_view(hypotheses[lanes.front()].frequency));const auto p=prefix[left+1]-prefix[left];
+        std::array<Fit,2> contribution;
+        for(unsigned bit=0;bit<2;++bit)contribution[bit].add(p,phase[bit],1);
+        const bool was_checked=lockstep.checked;
+        bool replay=lockstep.bind(lanes.size()==2?target[0].outer:nullptr,lanes.size()==2?target[1].outer:nullptr,
+            first_chip,lanes.size()==2 && unmatched==2 && !pattern.transmit_trace_enabled());
+        if(!was_checked && lockstep.checked){++replay_work.count.pieces;if(lockstep.active)++replay_work.count.equal_pieces;}
+        if(replay && !detail::ScheduledOuterPublicReplay::bounded(*target[0].outer,pulses)) {
+            replay=false;++replay_work.count.bound_fallbacks;
+        }
+        std::optional<detail::ScheduledOuterPublicReplay> tape;
+        if(replay)tape.emplace(*target[0].outer,detail::ScheduledOuterPublicReplay::may_flush(*target[0].outer,pulses));
+        for(std::size_t j=0;j<lanes.size();++j) {
+            auto& t=target[j];if(t.fitted)continue;
+            const auto coefficients=[&](std::uint64_t index){return pattern.values(first_chip+index);};
+            if(t.outer) {
+                if(replay && j==0)tape->leader(*t.outer,pulses,Complex{p.xc,p.xs},coefficients);
+                else if(replay && j==1) {
+                    tape->follower(*t.outer,*target[0].outer,pulses,Complex{p.xc,p.xs},coefficients);
+                    ++replay_work.count.samples;replay_work.count.events+=tape->events();
+                } else for(const auto& pulse:pulses)t.outer->add(pulse.index,pulse.weight*Complex{p.xc,p.xs},coefficients);
+            }
+            for(unsigned bit=0;bit<2;++bit) {
+                add_fit((*t.whole)[bit],contribution[bit]);
+                if(t.chips)(*t.chips)[bit].add_fit(contribution[bit],local);
+                if(t.quarter)add_fit((*t.quarter)[bit].active,contribution[bit]);
+                if(t.differential)add_fit((*t.differential)[bit].active,contribution[bit]);
+            }
+        }
+        ++counters.raw_fit_pairs;counters.raw_reused_lane_samples+=unmatched-1;
+        counters.raw_lane_samples+=unmatched;
+        if(options.scheduled_common_simd_experiment) {
+            ++counters.simd_short_samples;++counters.simd_scalar_lane_samples;
+        }
+    }
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+    __attribute__((noinline))
+#endif
+    void add_scheduled_common_raw_family(std::span<const std::size_t> lanes,
+            std::array<ScheduledCommonTargets,scheduled_common_maximum_lanes>& target,
+            std::size_t left,const std::array<Complex,2>& phase,std::uint64_t local,
+            std::uint64_t first_chip,std::span<const ScheduledCommonRawPulse> pulses,
+            ScheduledCommonWork& counters,PatternCode& pattern) {
+        // Common-entry proofs already establish the same private phase/address,
+        // source coordinate and actual gate for this sample. Equality of the
+        // original frequency index then identifies the exact projection and
+        // BOTH independent raw Fit contributions; detector states never alias.
+        detail::ScheduledRawSampleScratch scratch;std::size_t unique=0,unmatched=0;
+        for(std::size_t j=0;j<lanes.size();++j) {
+            if(target[j].fitted)continue;
+            const auto frequency=hypotheses[lanes[j]].frequency;
+            std::size_t k=0;while(k<unique && scratch.frequency[k]!=frequency)++k;
+            if(k==unique) {
+                const auto& prefix=banks[frequency].observations(physical_view(frequency));const auto p=prefix[left+1]-prefix[left];
+                scratch.frequency[unique]=frequency;
+                scratch.projection[0][unique]=p.xc;scratch.projection[1][unique]=p.xs;
+                scratch.projection[2][unique]=p.cc;scratch.projection[3][unique]=p.ss;
+                scratch.projection[4][unique]=p.cs;scratch.projection[5][unique]=p.energy;++unique;
+            }
+            scratch.member[j]=k;++unmatched;
+        }
+        // Four UNIQUE frequencies, not four phase aliases, qualify for optional
+        // native SIMD. A two-phase/one-frequency family uses one original scalar
+        // Fit pair. Insufficient optional scratch keeps the preceding lane loop.
+        const bool native=options.scheduled_common_simd_experiment &&
+            unique>=detail::ScheduledRawSampleScratch::minimum_simd_lanes &&
+            scheduled->common_simd_backend!=detail::family_simd::Backend::scalar;
+        detail::scheduled_raw_sample_contributions(scratch,unique,phase,
+            native?scheduled->common_simd_backend:detail::family_simd::Backend::scalar);
+        for(std::size_t j=0;j<lanes.size();++j) {
+            auto& t=target[j];if(t.fitted)continue;
+            const auto k=scratch.member[j];const auto p=detail::scheduled_raw_sample_projection(scratch,k);
+            // Every original lane receives its own original real observation,
+            // preserving per-sample outer -> bit0 -> bit1 guard chronology.
+            if(t.outer)for(const auto& pulse:pulses)t.outer->add(pulse.index,
+                pulse.weight*Complex{p.xc,p.xs},[&](std::uint64_t index){return pattern.values(first_chip+index);});
+            for(unsigned bit=0;bit<2;++bit) {
+                const auto contribution=detail::scheduled_raw_sample_fit(scratch,bit,k);
+                add_fit((*t.whole)[bit],contribution);
+                if(t.chips)(*t.chips)[bit].add_fit(contribution,local);
+                if(t.quarter)add_fit((*t.quarter)[bit].active,contribution);
+                if(t.differential)add_fit((*t.differential)[bit].active,contribution);
+                if(native)counters.simd_guard_updates+=1+(t.chips?1U:0U)+(t.quarter?1U:0U)+(t.differential?1U:0U);
+            }
+            if(native && t.outer)counters.simd_outer_updates+=pulses.size();
+        }
+        counters.raw_fit_pairs+=unique;counters.raw_reused_lane_samples+=unmatched-unique;
+        counters.raw_packed_values+=6*unique;counters.raw_lane_samples+=unmatched;
+        if(native) {
+            ++counters.simd_samples;counters.simd_lane_samples+=unique;counters.simd_packed_values+=6*unique;
+        } else if(options.scheduled_common_simd_experiment) {
+            counters.simd_scalar_lane_samples+=unique;
+            if(unique<detail::ScheduledRawSampleScratch::minimum_simd_lanes)++counters.simd_short_samples;
+            else ++counters.simd_isa_samples;
+        }
+    }
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+    __attribute__((noinline))
+#endif
+    void prepare_scheduled_common_temporal(detail::ScheduledTemporalTemplates& output,
+            const Hypothesis& first,std::size_t leader,std::uint64_t piece_first,
+            std::uint64_t selected_first,std::uint64_t limit,std::uint64_t target_index,
+            std::uint64_t first_chip,PatternCode& pattern,
+            const detail::ScheduledFlatExportCertificate& export_certificate,std::stop_token stop) {
+        // Raw-only metadata replay. The original common loop re-anchors source
+        // arithmetic at EVERY chip/quarter/differential piece. Never replace
+        // its at=piece_within+offset*rate with one whole-block affine sequence.
+        rx_cpu::Scope cpu_batch(rx_cpu::Stage::temporal_export,true);
+        output.start(first.phase_lower,first_chip,selected_first);
+        const auto source_first=scheduled_source_start(first,first.index);
+        const auto span=std::max(1.L,std::floor(static_cast<long double>(
+            detail::ScheduledTemporalTemplates::Tile::maximum_coefficients-18)*code.chip_samples()/first.rate));
+        const auto stop_at=selected_first+static_cast<std::uint64_t>(std::min<long double>(limit-selected_first,span));
+        const bool certified_unit=export_certificate.covers(this,first.origin,first.rate,
+            first.phase_lower,selected_first,stop_at);
+        if(detail::scheduled_r1_export_requested()) {
+            detail::scheduled_r1_export_note_attempt();
+            const auto cuts_aligned=[&] {
+                if(differential_window && differential_window%code.chip_samples())return false;
+                if(!drift_fits.empty())for(unsigned k=1;k<drift_sections;++k)
+                    if(detail::drift_boundary(k,code.symbol_samples(),drift_sections)%code.chip_samples())return false;
+                return true;
+            };
+            // Cheap unsupported-rate/grid gate precedes the original full-flat
+            // calendar proof. The optional exporter never changes admission.
+            if(first.rate==1 && detail::scheduled_r1_export_grid(first.origin) &&
+               stop_at<(std::uint64_t{1}<<31) && cuts_aligned() &&
+               scheduled_flat(first,selected_first,stop_at,false)) {
+                const auto location=scheduled_map()->locate(scheduled_tick(first,selected_first));
+                const detail::ScheduledR1ExportInput input{first.rate,first.origin,source_first,
+                    sample,piece_first,selected_first,stop_at,code.symbol_samples(),code.chip_samples(),
+                    first.index,target_index,location.source,scheduled->anchors[leader],true,true};
+                const auto proof=detail::scheduled_r1_export_proof(input);
+                if(proof.eligible) {
+                    const auto exported=detail::scheduled_r1_export_append(output,proof,sample,
+                        selected_first,stop_at,[](std::size_t){return false;},[&]{cancelled(stop);});
+                    detail::scheduled_r1_export_note_row(exported.appended);
+                    output.end(exported.end);output.prepare(pattern,config,stop,outer_presence);return;
+                }
+            }
+        }
+        auto probe=piece_first;
+        while(probe<stop_at) {
+            cancelled(stop);
+            const auto tick=scheduled_tick(first,probe);const auto location=scheduled_map()->locate(tick);
+            if(!location.active) {
+                const auto active=scheduled_map()->source_to_physical(location.source,false);
+                const auto count=std::max(1.L,std::ceil(active.distance(tick)/first.rate));
+                probe+=static_cast<std::uint64_t>(std::min(count,static_cast<long double>(stop_at-probe)));continue;
+            }
+            auto within=location.source.distance(scheduled->anchors[leader])-source_first;
+            if(within<0){++probe;continue;}
+            if(within>=2.L*code.symbol_samples())break;
+            const bool next=within>=code.symbol_samples();if(next)within-=code.symbol_samples();
+            if(first.index+(next?1U:0U)!=target_index)break;
+            const auto local=static_cast<std::uint64_t>(within/code.chip_samples());
+            auto source_end=std::min<long double>(code.symbol_samples(),(local+1)*code.chip_samples());
+            if(!drift_fits.empty()) {
+                unsigned section=0;
+                while(section+1<drift_sections && within>=detail::drift_boundary(section+1,code.symbol_samples(),drift_sections))++section;
+                source_end=std::min(source_end,static_cast<long double>(detail::drift_boundary(section+1,code.symbol_samples(),drift_sections)));
+            }
+            if(differential_window) {
+                const auto window=static_cast<std::uint64_t>(within/differential_window);
+                source_end=std::min(source_end,static_cast<long double>(std::min(code.symbol_samples(),(window+1)*differential_window)));
+            }
+            const auto active_count=std::max(1.L,std::ceil(SchedHopCoordinate{location.physical_end,0}.distance(tick)/first.rate));
+            auto count=static_cast<std::uint64_t>(std::min<long double>({block_size,limit-probe,active_count,
+                std::max(1.L,std::ceil((source_end-within)/first.rate))}));
+            const auto same_owner=[&](std::uint64_t offset) {
+                const auto at=within+offset*first.rate;const auto physical=tick.add_signed(offset*first.rate);
+                return physical.sample<location.physical_end && at>=0 && at<source_end && at<code.symbol_samples() &&
+                    static_cast<std::uint64_t>(at/code.chip_samples())==local;
+            };
+            while(count>1 && !same_owner(count-1))--count;
+            if(!same_owner(0))break; // original consumer retains its own explicit error
+            for(std::uint64_t offset=0;offset<count && probe+offset<stop_at;++offset) {
+                const auto physical=probe+offset;if(physical<selected_first)continue;
+                if((physical&31U)==0)cancelled(stop);
+                if(!certified_unit) {
+                    const auto coordinate=tick.add_signed(offset*first.rate);
+                    auto gain=SchedHopSourceMap::gain(location,coordinate);
+                    if(scheduled->fhss_shape.enabled)gain*=scheduled->fhss_shape.gain(0,
+                        coordinate.sample%(2ULL*config.sample_rate)+coordinate.fraction,config.sample_rate);
+                    if(gain==0)continue;
+                }
+                const auto at=within+offset*first.rate;
+                if(!output.append(static_cast<std::size_t>(physical-sample),static_cast<double>(at))) {
+                    output.end(physical);
+                    if(certified_unit)detail::scheduled_flat_export_note(output.exported_points());
+                    output.prepare(pattern,config,stop,outer_presence);return;
+                }
+            }
+            probe+=count;
+        }
+        output.end(std::min(probe,stop_at));
+        if(certified_unit)detail::scheduled_flat_export_note(output.exported_points());
+        output.prepare(pattern,config,stop,outer_presence);
+    }
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+    __attribute__((noinline))
+#endif
+    bool accumulate_scheduled_common_shape(std::span<const std::size_t> lanes,
+            std::uint64_t end,PatternCode& pattern,std::size_t worker,std::size_t family,std::stop_token stop) {
+        if(!scheduled || !scheduled->common_scratch || lanes.size()<2 || lanes.size()>scheduled_common_maximum_lanes ||
+           alternate_groups || options.amplitude_only)return false;
+        rx_cpu::Scope common_cpu(rx_cpu::Stage::scheduled_common_residual);
+        detail::ScheduledOuterPublicScope public_replay_work;
+        auto& first=hypotheses[lanes.front()];
+        auto& counters=scheduled->common_work[worker];
+        const bool phase_family=std::any_of(lanes.begin()+1,lanes.end(),[&](std::size_t lane) {
+            return hypotheses[lane].phase_lower!=first.phase_lower || hypotheses[lane].phase_upper!=first.phase_upper;
+        });
+        if(phase_family)++counters.phase_attempts;
+        const auto reject=[&](){if(phase_family)++counters.phase_rejects;return false;};
+        const auto cursor=initial_cursor(first,end);
+        const auto fence=clock_boundary(first,code.symbol_samples());
+        const auto first_source=scheduled_source_start(first,first.index);
+        const auto limit=static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(fence)));
+        detail::ScheduledFlatExportCertificate export_certificate;
+        for(auto lane:lanes) {
+            const auto& h=hypotheses[lane];const auto& a=scheduled->anchors[lane];const auto& b=scheduled->anchors[lanes.front()];
+            if(h.origin!=first.origin || h.rate!=first.rate || h.index!=first.index || initial_cursor(h,end)!=cursor ||
+               static_cast<std::uint64_t>(std::min(static_cast<long double>(end),
+                   std::ceil(clock_boundary(h,code.symbol_samples()))))!=limit ||
+               scheduled_source_start(h,h.index)!=first_source)return reject();
+            if(!phase_family && (h.phase_lower!=first.phase_lower || h.phase_upper!=first.phase_upper ||
+               a.sample!=b.sample || a.fraction!=b.fraction))return reject();
+        }
+        if(phase_family) {
+            // Gain/mapping are observed anew every block. Reject nulls/ramps
+            // before expensive private inverses; only exact immutable private
+            // identity is cached, tagged by the COMPLETE target symbol index.
+            if(scheduled_calendar() || cursor>=limit)return reject();
+            long double left=0,right=0;
+            if(!scheduled_phase_flat_coordinates(first,lanes.front(),cursor,limit,left,right,&export_certificate) ||
+               left<0 || right>=2.L*code.symbol_samples())return reject();
+            for(std::size_t j=1;j<lanes.size();++j) {
+                long double a=0,b=0;
+                if(!scheduled_phase_flat_coordinates(hypotheses[lanes[j]],lanes[j],cursor,limit,a,b) ||
+                   a!=left || b!=right)return reject();
+            }
+            const auto private_address=[&](std::size_t lane,std::uint64_t index) {
+                ++counters.phase_address_queries;
+                const auto physical=scheduled_map()->source_to_physical(scheduled->anchors[lane].add_samples(
+                    symbol_schedule_detail::multiply(index,code.symbol_samples())));
+                require(physical.fraction==0,"phase-family private symbol origin must be integral");
+                const auto sample=static_cast<std::uint32_t>(physical.sample%config.sample_rate);
+                return SymbolStreamAddress{physical.sample/config.sample_rate,sample/code.symbol_samples(),sample};
+            };
+            const auto same_address=[&](const SymbolStreamAddress& a,const SymbolStreamAddress& b) {
+                return a.epoch==b.epoch && a.ordinal==b.ordinal &&
+                    (!(config.fake_hopping && config.fake_hopping->matched_gaps) || a.sample_in_second==b.sample_in_second);
+            };
+            const auto identity_equal=[&](std::uint64_t index) {
+                ScheduledFamilyPlan::AddressProof* proof=nullptr;
+                if(scheduled->families && family<scheduled->families->phase_addresses.size())
+                    proof=&scheduled->families->phase_addresses[family][index%2];
+                if(proof && proof->valid && proof->index==index) {
+                    ++counters.phase_address_hits;return proof->equal;
+                }
+                ++counters.phase_address_misses;
+                const auto reference=private_address(lanes.front(),index);bool equal=true;
+                for(std::size_t j=1;j<lanes.size();++j)
+                    if(!same_address(private_address(lanes[j],index),reference)){equal=false;break;}
+                // Each immutable family has one worker at a time. Positive AND
+                // negative proofs require this index, exact members/anchors,
+                // original key/config/omission mode; plan eviction drops all.
+                if(proof)*proof={index,equal,true};
+                return equal;
+            };
+            const bool has_current=left<code.symbol_samples(),carry=right>=code.symbol_samples();
+            if(carry && first.index==std::numeric_limits<std::uint64_t>::max())return reject();
+            if((has_current && !identity_equal(first.index)) || (carry && !identity_equal(first.index+1)))return reject();
+            ++counters.phase_families;counters.phase_lanes+=lanes.size();
+        }
+        // Entry proofs above retain the original exact private/current-carry
+        // family. This optional tile changes only leader raw construction.
+        auto* temporal=worker<scheduled->worker_temporal_templates.size()?
+            scheduled->worker_temporal_templates[worker].get():nullptr;
+        if(temporal && (scheduled_affine || scheduled->moments_eligible || !scheduled->moments.empty() ||
+                scheduled->curves || scheduled->float_curves))temporal=nullptr;
+        if(temporal)for(auto lane:lanes)if(physical_view(hypotheses[lane].frequency))temporal=nullptr;
+        if(temporal)temporal->begin(lanes.front(),sample);
+        auto observed=cursor,prepared_index=std::numeric_limits<std::uint64_t>::max();
+        auto curve_index=prepared_index,curve_chip=prepared_index;
+        ScheduledCurveCache::Lease curve;ScheduledFloatCurveCache::Lease float_curve;
+        pattern.set_stream_phase_samples(first.phase_lower);
+        const auto amplitude=std::sqrt(2*nominal_signal_power)*outer_dsss_transmit_gain(config);
+        ++counters.families;counters.lanes+=lanes.size();
+        bool raw_duplicates=false,one_frequency=true;
+        for(std::size_t j=1;j<lanes.size();++j) {
+            one_frequency&=hypotheses[lanes[j]].frequency==hypotheses[lanes.front()].frequency;
+            for(std::size_t k=0;k<j;++k)raw_duplicates|=hypotheses[lanes[j]].frequency==hypotheses[lanes[k]].frequency;
+        }
+        while(observed<limit) {
+            cancelled(stop);
+            const auto tick=scheduled_tick(first,observed);
+            const auto location=scheduled_map()->locate(tick);
+            if(!location.active) {
+                const auto next=scheduled_map()->source_to_physical(location.source,false);
+                const auto count=std::max(1.L,std::ceil(next.distance(tick)/first.rate));
+                observed+=static_cast<std::uint64_t>(std::min(count,static_cast<long double>(limit-observed)));continue;
+            }
+            auto within=location.source.distance(scheduled->anchors[lanes.front()])-first_source;
+            if(within<0){++observed;continue;}
+            require(within<2.L*code.symbol_samples(),"common scheduled carry exceeds original completion fence");
+            const bool next=within>=code.symbol_samples();if(next)within-=code.symbol_samples();
+            require(!next || first.index<std::numeric_limits<std::uint64_t>::max(),"common scheduled carry overflow");
+            const auto target_index=first.index+(next?1:0);
+            require(target_index<=std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol(),"common scheduled chip overflow");
+            const auto first_chip=target_index*code.chips_per_symbol();
+            const auto local=static_cast<std::uint64_t>(within/code.chip_samples());
+            auto source_end=std::min<long double>(code.symbol_samples(),(local+1)*code.chip_samples());
+            if(!drift_fits.empty()) {
+                unsigned section=0;
+                while(section+1<drift_sections && within>=detail::drift_boundary(section+1,code.symbol_samples(),drift_sections))++section;
+                source_end=std::min(source_end,static_cast<long double>(detail::drift_boundary(section+1,code.symbol_samples(),drift_sections)));
+            }
+            if(differential_window) {
+                const auto window=static_cast<std::uint64_t>(within/differential_window);
+                source_end=std::min(source_end,static_cast<long double>(std::min(code.symbol_samples(),(window+1)*differential_window)));
+            }
+            const auto active_count=std::max(1.L,std::ceil(SchedHopCoordinate{location.physical_end,0}.distance(tick)/first.rate));
+            auto count=static_cast<std::uint64_t>(std::min<long double>({block_size,limit-observed,active_count,
+                std::max(1.L,std::ceil((source_end-within)/first.rate))}));
+            const auto same_owner=[&](std::uint64_t offset) {
+                const auto at=within+offset*first.rate;const auto physical=tick.add_signed(offset*first.rate);
+                return physical.sample<location.physical_end && at>=0 && at<source_end && at<code.symbol_samples() &&
+                    static_cast<std::uint64_t>(at/code.chip_samples())==local;
+            };
+            while(count>1 && !same_owner(count-1))--count;
+            require(same_owner(0),"common scheduled source ownership changed at piece start");
+            if(prepared_index!=target_index){pattern.prepare_symbol(first_chip,stop);prepared_index=target_index;}
+            const auto shape=[&](long double at) {
+                rx_cpu::Scope shape_cpu(rx_cpu::Stage::template_build,true);++counters.shapes;
+                std::array<Complex,2> result;
+                const auto chip=static_cast<std::uint64_t>(at/code.chip_samples());
+                const auto tail=code.symbol_samples()%code.chip_samples(),final=code.chips_per_symbol()-1;
+                const bool shifted=tail && final>=chip && final-chip<=8;
+                if((scheduled->curves || scheduled->float_curves) && !pattern.transmit_trace_enabled() &&
+                   !shifted && chip<code.chips_per_symbol()) {
+                    const auto use=[&](auto& cache,auto& lease) {
+                        if(curve_index!=target_index || curve_chip!=chip) {
+                            lease={};
+                            // Avoid unusable endpoint-only fine-lattice preparation.
+                            if(code.chip_samples()<1024 && !detail::source_curve_cell_eligible(
+                                detail::source_curve_coordinate(at,code.chip_samples()),chip,code.chip_samples(),detail::fine_source_curve_revision()))return false;
+                            const auto address=scheduled_map()->source_to_physical(scheduled->anchors[lanes.front()].add_samples(
+                                symbol_schedule_detail::multiply(target_index,code.symbol_samples())));
+                            require(address.fraction==0,"common scheduled curve address must be integral");
+                            const auto phase=static_cast<std::uint32_t>(address.sample%config.sample_rate);
+                            const auto gate_phase=config.fake_hopping && config.fake_hopping->matched_gaps?phase:0U;
+                            lease=cache->get({address.sample/config.sample_rate,phase/code.symbol_samples(),chip,gate_phase},
+                                pattern,first_chip,code.chip_samples(),stop,
+                                scheduled->shared_source_curves,scheduled->shared_source_family);curve_index=target_index;curve_chip=chip;
+                        }
+                        return cache->evaluate(lease,detail::source_curve_coordinate(at,code.chip_samples()),code.chip_samples(),result);
+                    };
+                    if(scheduled->float_curves?use(scheduled->float_curves,float_curve):use(scheduled->curves,curve))return result;
+                }
+                return pattern.shaped_values(first_chip,static_cast<double>(at));
+            };
+            std::array<ScheduledCommonTargets,scheduled_common_maximum_lanes> target{};
+            const auto prepare_targets=[&](std::uint64_t physical,long double at) {
+                for(std::size_t j=0;j<lanes.size();++j) {
+                    const auto lane=lanes[j];auto& h=hypotheses[lane];auto& carry=scheduled->scheduled_carry[lane];auto& t=target[j];
+                    t.whole=next?&carry.fits:&h.fits;
+                    t.quarter=drift_fits.empty()?nullptr:next?&scheduled->scheduled_carry_drift[lane]:&section_fits(lane,0);
+                    t.differential=differential_window?(next?&scheduled->scheduled_carry_differential[lane]:&local_fits(lane,0)):nullptr;
+                    t.chips=chip_evidence.empty()?nullptr:next?&scheduled->scheduled_carry_chips[lane]:&chip_evidence[lane];
+                    t.outer=outer_presence?(next?&scheduled->scheduled_carry_outer[lane]:&(*outer_evidence)[lane]):nullptr;
+                    t.observed_start=next?&carry.observed_start:&h.observed_start;
+                    struct RestoreIndex {std::uint64_t& target;std::uint64_t old;~RestoreIndex(){target=old;}} restore{h.index,h.index};h.index=target_index;
+                    if(t.quarter)for(unsigned bit=0;bit<2;++bit)advance_drift((*t.quarter)[bit],h,physical,
+                        &(next?scheduled->scheduled_carry_quarter_ranks[lane]:scheduled->scheduled_quarter_ranks[lane])[bit],at);
+                    if(t.differential)for(auto& fit:*t.differential)advance_differential(fit,h,physical,at);
+                    if(!(*t.whole)[0].count)*t.observed_start=physical;
+                }
+            };
+            const auto piece_first=observed;
+            const auto has_moments=[&](std::size_t lane){return !scheduled->moments.empty() || static_cast<bool>(physical_view(hypotheses[lane].frequency));};
+            const auto flat=(scheduled_affine || has_moments(lanes.front())) && scheduled_flat(first,observed,observed+count,false);
+            bool targets_ready=false,any_raw=true;
+            detail::ScheduledPulseSpan outer_pulse;
+            if(flat) {
+                const auto chip=code.chip_samples(),symbol=code.symbol_samples();
+                const auto duration=static_cast<long double>(chip)/first.rate;
+                const auto offset=(within-static_cast<long double>(local)*chip)/first.rate;
+                count=std::min(count,pulse_span_count(offset,count,duration));
+                const auto tail=symbol%chip,final=code.chips_per_symbol()-1;
+                if(tail && final>=local && final-local<=8)count=std::min(count,pulse_span_count(offset+
+                    static_cast<long double>(chip-tail)/(2*first.rate),count,duration));
+                if(outer_presence && has_moments(lanes.front())) {
+                    outer_pulse=detail::scheduled_pulse_span(within,first.rate,chip,symbol,count);count=std::min(count,outer_pulse.count);
+                }
+                if(count>1) {
+                    const auto value=shape(within),last=shape(within+(count-1)*first.rate);
+                    const auto radius=pattern_pcm_radius_limit/amplitude;bool unclipped=true;
+                    for(unsigned bit=0;bit<2;++bit)unclipped&=std::norm(value[bit])<radius*radius*(1-1e-10) && std::norm(last[bit])<radius*radius*(1-1e-10);
+                    if(unclipped) {
+                        std::array<Complex,2> slope;for(unsigned bit=0;bit<2;++bit)slope[bit]=(last[bit]-value[bit])/static_cast<double>(count-1);
+                        prepare_targets(observed,within);targets_ready=true;any_raw=false;++counters.affine_preparations;
+                        // ONE validated pair/physical moment set is live at a
+                        // time. Exact same-bank siblings share only its pure
+                        // contribution; all detector and outer-ring state stays
+                        // independent. The cache ends with this common piece.
+                        const auto reuse=detail::scheduled_mapped_piece_groups<scheduled_common_maximum_lanes>(
+                            lanes.size(),options.scheduled_common_affine_reuse,
+                            [&](std::size_t j) {
+                                const auto lane=lanes[j];
+                                return detail::ScheduledMappedPieceKey{hypotheses[lane].frequency,has_moments(lane)};
+                            },
+                            [&](std::size_t j,std::array<Fit,2>& pair,detail::ScheduledSpanMoments& accepted) {
+                                auto& t=target[j];const auto lane=lanes[j];
+                                if(has_moments(lane))return fit_mapped_piece(lane,hypotheses[lane].frequency,
+                                    static_cast<std::size_t>(observed-sample),count,value,slope,*t.whole,t.quarter,
+                                    t.differential,t.chips,local,&accepted,&pair);
+                                if(scheduled_affine && !t.outer) {
+                                    fit_affine_piece(banks[hypotheses[lane].frequency],static_cast<std::size_t>(observed-sample),count,
+                                        value,slope,*t.whole,t.quarter,t.differential,t.chips,local);return true;
+                                }
+                                return false;
+                            },
+                            [&](std::size_t j,std::size_t representative,bool fitted,
+                                const std::array<Fit,2>& pair,const detail::ScheduledSpanMoments& accepted) {
+                                auto& t=target[j];const auto lane=lanes[j];t.fitted=fitted;
+                                if(fitted) {
+                                    if(j!=representative)apply_scheduled_common_pair(pair,t,local);
+                                    ++counters.affine_lanes;++affine_counts[lane];
+                                    // Raw physical moments enter each original
+                                    // complete-pulse ring, never a covariance
+                                    // fragment or another lane's variance.
+                                    if(t.outer)detail::scheduled_outer_piece(accepted,outer_pulse,*t.outer,
+                                        [&](std::uint64_t at){return pattern.values(first_chip+at);});
+                                } else {any_raw=true;++counters.gram_fallbacks;}
+                            });
+                        counters.mapped_pairs+=reuse.pairs;counters.mapped_failed_pairs+=reuse.failed_pairs;
+                        counters.mapped_lanes+=reuse.logical_lanes;counters.affine_reused_lanes+=reuse.reused_lanes;
+                    }
+                }
+            }
+            if(any_raw) {
+            const bool certified_raw_unit=export_certificate.covers(this,first.origin,first.rate,
+                first.phase_lower,piece_first,piece_first+count);
+            rx_cpu::Scope cpu_common_raw(rx_cpu::Stage::common_raw,true);
+            detail::ScheduledOuterPublicLockstep public_lockstep;
+            for(std::uint64_t offset=0;offset<count;++offset) {
+                cancelled(stop);const auto physical=piece_first+offset;
+                auto gain=1.;
+                if(!certified_raw_unit) {
+                    const auto coordinate=tick.add_signed(offset*first.rate);
+                    gain=SchedHopSourceMap::gain(location,coordinate);
+                    if(scheduled->fhss_shape.enabled)gain*=scheduled->fhss_shape.gain(0,
+                        coordinate.sample%(2ULL*config.sample_rate)+coordinate.fraction,config.sample_rate);
+                }
+                if(gain==0)continue;
+                const auto at=within+offset*first.rate;
+                if(!targets_ready){prepare_targets(physical,at);targets_ready=true;}
+                std::array<Complex,2> phase;bool copied=false;
+                if(temporal) {
+                    if(!temporal->attempted(lanes.front(),sample,first.phase_lower,first_chip,physical)) {
+                        // The outlined replay retains the current ORIGINAL
+                        // piece anchor even when first useful gain is offset>0.
+                        prepared_index=std::numeric_limits<std::uint64_t>::max();
+                        prepare_scheduled_common_temporal(*temporal,first,lanes.front(),piece_first,physical,
+                            limit,target_index,first_chip,pattern,export_certificate,stop);
+                        pattern.set_stream_phase_samples(first.phase_lower);pattern.prepare_symbol(first_chip,stop);
+                        prepared_index=target_index;
+                    }
+                    copied=temporal->raw(lanes.front(),sample,first.phase_lower,first_chip,physical,
+                        static_cast<std::size_t>(physical-sample),static_cast<double>(at),phase);
+                }
+                if(copied)++counters.shapes; // same logical original raw outputs
+                else phase=shape(at);
+                for(auto& coefficient:phase)coefficient=gain*pattern_limit_pcm(amplitude*coefficient)/amplitude;
+                ++counters.raw_samples;
+                // Pulse geometry is public/common, while ring state and the
+                // independent private coefficient flush stay owned per lane.
+                std::array<ScheduledCommonRawPulse,detail::correlation_pulse_atoms> pulses{};std::size_t pulses_count=0;
+                if(outer_presence) {
+                    const auto collect=[&](std::uint64_t index,double pulse) {
+                        require(pulses_count<pulses.size(),"common outer pulse support exceeded seventeen atoms");
+                        pulses[pulses_count++]={index,gain*pulse};
+                    };
+                    const bool reused=copied && temporal && temporal->outer_pulses(lanes.front(),sample,
+                        first.phase_lower,first_chip,physical,static_cast<std::size_t>(physical-sample),
+                        static_cast<double>(at),collect);
+                    if(!reused)pattern_pulse_each(static_cast<double>(at),code.symbol_samples(),code.chip_samples(),collect);
+                }
+                const auto left=static_cast<std::size_t>(physical-sample);
+                if((raw_duplicates || options.scheduled_common_simd_experiment) && scheduled->common_raw_scratch &&
+                   (one_frequency || scheduled->common_raw_scratch_bytes>=detail::scheduled_raw_sample_scratch_bytes)) {
+                    if(options.scheduled_common_simd_experiment)++counters.simd_attempts;
+                    if(one_frequency) {
+                        if(config.search_arithmetic!=SearchArithmetic::fp64 && detail::scheduled_outer_public_replay_requested() &&
+                           scheduled->common_raw_scratch_bytes>=detail::scheduled_outer_public_replay_frame)
+                            add_scheduled_common_raw_one_frequency_replayed(lanes,target,left,phase,local,first_chip,
+                                {pulses.data(),pulses_count},counters,pattern,public_lockstep,public_replay_work);
+                        else add_scheduled_common_raw_one_frequency(lanes,target,left,phase,local,first_chip,
+                            {pulses.data(),pulses_count},counters,pattern);
+                    }
+                    else add_scheduled_common_raw_family(lanes,target,left,phase,local,first_chip,
+                        {pulses.data(),pulses_count},counters,pattern);
+                    continue;
+                }
+                if(raw_duplicates)++counters.raw_workspace_samples;
+                if(options.scheduled_common_simd_experiment) {
+                    std::size_t unmatched=0;for(std::size_t j=0;j<lanes.size();++j)unmatched+=!target[j].fitted;
+                    ++counters.simd_attempts;counters.simd_scalar_lane_samples+=unmatched;
+                    if(unmatched<detail::ScheduledRawSampleScratch::minimum_simd_lanes)++counters.simd_short_samples;
+                    else if(scheduled->common_simd_backend==detail::family_simd::Backend::scalar)++counters.simd_isa_samples;
+                    else ++counters.simd_workspace_samples;
+                }
+                for(std::size_t j=0;j<lanes.size();++j) {
+                    auto& t=target[j];if(t.fitted)continue;
+                    const auto& prefix=banks[hypotheses[lanes[j]].frequency].observations(physical_view(hypotheses[lanes[j]].frequency));
+                    const auto p=prefix[left+1]-prefix[left];
+                    if(t.outer)for(std::size_t pulse=0;pulse<pulses_count;++pulse)t.outer->add(pulses[pulse].index,
+                        pulses[pulse].weight*Complex{p.xc,p.xs},[&](std::uint64_t index){return pattern.values(first_chip+index);});
+                    for(unsigned bit=0;bit<2;++bit) {
+                        Fit contribution;contribution.add(p,phase[bit],1);
+                        add_fit((*t.whole)[bit],contribution);
+                        if(t.chips)(*t.chips)[bit].add_fit(contribution,local);
+                        if(t.quarter)add_fit((*t.quarter)[bit].active,contribution);
+                        if(t.differential)add_fit((*t.differential)[bit].active,contribution);
+                    }
+                    ++counters.raw_lane_samples;++counters.raw_fit_pairs;
+                }
+            }
+            if(certified_raw_unit)detail::scheduled_flat_raw_note(count);
+            } // common raw piece
+            ++counters.pieces;observed+=count;
+        }
+        return true;
+    }
+
     std::uint64_t accumulate_scheduled(Hypothesis& h,std::size_t hypothesis,std::uint64_t cursor,
             std::uint64_t end,PatternCode& pattern,std::stop_token stop) {
+        rx_cpu::Scope cpu_scope(rx_cpu::Stage::scheduled_candidate_residual);
         const auto symbol_source=scheduled_source_start(h,h.index);
         const auto symbol_end=clock_boundary(h,code.symbol_samples());
         const auto limit=static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(symbol_end)));
@@ -2582,6 +4475,8 @@ struct PatternCorrelator::Impl {
         bool pattern_ready=false;
         auto prepared_chip=std::numeric_limits<std::uint64_t>::max();
         auto* cache=scheduled_template_cache();
+        auto* temporal=scheduled_temporal_templates();
+        if(temporal)temporal->begin(hypothesis,sample);
         auto* current_row=cache?&cache->row(h.origin,h.rate,h.phase_lower,h.index,sample):nullptr;
         ScheduledTemplateCache::Row* next_row=nullptr;
         auto& fit=h.fits;
@@ -2596,8 +4491,10 @@ struct PatternCorrelator::Impl {
         auto observed=cursor;
         while(observed<limit) {
             cancelled(stop);
+            rx_cpu::Scope cpu_calendar(rx_cpu::Stage::calendar,true);
             const auto tick=scheduled_tick(h,observed);
             const auto location=scheduled_map()->locate(tick);
+            cpu_calendar.finish();
             if(!location.active) {
                 const auto next=scheduled_map()->source_to_physical(location.source,false);
                 const auto advance=next.distance(tick)/h.rate;
@@ -2616,7 +4513,7 @@ struct PatternCorrelator::Impl {
             // This is an algebra shortcut for the actual central candidate,
             // not a proof that an entire timing/clock coverage cell is null.
             // Admission, completion and capture proofs retain whole_cell=true.
-            const bool piece_flat=(scheduled_affine || !scheduled->moments.empty()) && scheduled_flat(h,piece_first,piece_end,false);
+            const bool piece_flat=(scheduled_affine || !scheduled->moments.empty() || physical_view(h.frequency)) && scheduled_flat(h,piece_first,piece_end,false);
             interval_end=0;
             for(;observed<piece_end;++observed) {
                 auto within=source+static_cast<long double>(observed-piece_first)*h.rate;
@@ -2653,19 +4550,24 @@ struct PatternCorrelator::Impl {
                 const auto left=static_cast<std::size_t>(observed-sample);
                 const auto valid=row && (row->valid[left/64]&(1ULL<<(left%64)));
                 const auto prepare=[&] {
+                    rx_cpu::Scope cpu_prepare(rx_cpu::Stage::template_build,true);
                     if(!pattern_ready){pattern.set_stream_phase_samples(h.phase_lower);pattern_ready=true;}
                     if(target_chip!=prepared_chip){pattern.prepare_symbol(target_chip,stop);prepared_chip=target_chip;}
                 };
                 const auto shape=[&](long double at) {
+                    rx_cpu::Scope cpu_shape(rx_cpu::Stage::template_build,true);
                     std::array<Complex,2> result;
                     const auto local=static_cast<std::uint64_t>(at/code.chip_samples());
                     const auto partial=code.symbol_samples()%code.chip_samples();
                     const auto final_chip=code.chips_per_symbol()-1;
                     const bool shifted_tail=partial && final_chip>=local && final_chip-local<=8;
-                    if((scheduled->curves || scheduled->float_curves) && !shifted_tail && local<code.chips_per_symbol()) {
+                    if((scheduled->curves || scheduled->float_curves) && !pattern.transmit_trace_enabled() &&
+                       !shifted_tail && local<code.chips_per_symbol()) {
                         const auto use=[&](auto& cache,auto& lease) {
                             if(curve_index!=target_index || curve_chip!=local) {
-                                lease={}; // Release the obsolete row before seeking an evictable slot.
+                                lease={}; // Release stale ownership before endpoint fallback.
+                                if(code.chip_samples()<1024 && !detail::source_curve_cell_eligible(
+                                    detail::source_curve_coordinate(at,code.chip_samples()),local,code.chip_samples(),detail::fine_source_curve_revision()))return false;
                                 // Same canonical crypto address reproduces both
                                 // private candidates and the full outer permutation.
                                 const auto address=scheduled_map()->source_to_physical(scheduled->anchors[hypothesis].add_samples(
@@ -2674,10 +4576,11 @@ struct PatternCorrelator::Impl {
                                 const auto phase=static_cast<std::uint32_t>(address.sample%config.sample_rate);
                                 const auto gate_phase=config.fake_hopping && config.fake_hopping->matched_gaps?phase:0U;
                                 lease=cache->get({address.sample/config.sample_rate,phase/code.symbol_samples(),local,gate_phase},
-                                    pattern,target_chip,code.chip_samples(),stop);
+                                    pattern,target_chip,code.chip_samples(),stop,
+                                    scheduled->shared_source_curves,scheduled->shared_source_family);
                                 curve_index=target_index;curve_chip=local;
                             }
-                            return cache->evaluate(lease,at,code.chip_samples(),result);
+                            return cache->evaluate(lease,detail::source_curve_coordinate(at,code.chip_samples()),code.chip_samples(),result);
                         };
                         if(scheduled->float_curves?use(scheduled->float_curves,float_curve):use(scheduled->curves,curve))return result;
                     }
@@ -2702,29 +4605,44 @@ struct PatternCorrelator::Impl {
                             static_cast<long double>(chip-tail)/(2*h.rate),maximum,duration);
                         count=std::min(count,last);
                     }
-                    if(count>1) {
+                    const auto contract=[&](std::uint64_t span_count,detail::ScheduledSpanMoments* accepted) {
+                        if(span_count<=1)return false;
                         prepare();const auto first=shape(within);
-                        const auto last=shape(within+(count-1)*h.rate);
+                        const auto last=shape(within+(span_count-1)*h.rate);
                         const auto radius=pattern_pcm_radius_limit/amplitude;
                         bool unclipped=true;
                         for(unsigned bit=0;bit<2;++bit)unclipped&=std::norm(first[bit])<radius*radius*(1-1e-10) && std::norm(last[bit])<radius*radius*(1-1e-10);
-                        if(unclipped) {
-                            std::array<Complex,2> slope;
-                            for(unsigned bit=0;bit<2;++bit)slope[bit]=(last[bit]-first[bit])/static_cast<double>(count-1);
-                            bool fitted=false;
-                            if(!scheduled->moments.empty())fitted=fit_mapped_piece(h.frequency,left,count,first,slope,target_fit,
-                                target_drift,target_differential,target_chips,local);
-                            else {
-                                fit_affine_piece(banks[h.frequency],left,count,first,slope,target_fit,
-                                    target_drift,target_differential,target_chips,local);fitted=true;
-                            }
-                            if(fitted){++affine_counts[hypothesis];observed+=count-1;continue;}
-                        }
-                    }
+                        if(!unclipped)return false;
+                        std::array<Complex,2> slope;
+                        for(unsigned bit=0;bit<2;++bit)slope[bit]=(last[bit]-first[bit])/static_cast<double>(span_count-1);
+                        if(!scheduled->moments.empty() || physical_view(h.frequency))return fit_mapped_piece(hypothesis,h.frequency,left,span_count,first,slope,target_fit,
+                            target_drift,target_differential,target_chips,local,accepted);
+                        fit_affine_piece(banks[h.frequency],left,span_count,first,slope,target_fit,
+                            target_drift,target_differential,target_chips,local);return true;
+                    };
+                    std::uint64_t fitted_count=0;
+                    if(target_outer && count>1 && (!scheduled->moments.empty() || physical_view(h.frequency))) {
+                        rx_cpu::Scope pulse_cpu_scope(rx_cpu::Stage::template_build,true);
+                        // The outlined helper owns the charged outer-only
+                        // frame. No large pulse scratch enters the ordinary
+                        // accumulator when moments are unavailable/evicted.
+                        fitted_count=detail::scheduled_with_outer_span(within,h.rate,chip,symbol,count,
+                            [&](const detail::ScheduledPulseSpan& pulse,detail::ScheduledSpanMoments& accepted) {
+                                if(!contract(pulse.count,&accepted))return std::uint64_t{0};
+                                rx_cpu::Scope outer_cpu_scope(rx_cpu::Stage::guards,true);
+                                // Complete the original pulse ring; current/
+                                // carry ownership and private addresses stay
+                                // separate from the shared physical moments.
+                                detail::scheduled_outer_piece(accepted,pulse,*target_outer,
+                                    [&](std::uint64_t position){return pattern.values(target_chip+position);});
+                                return pulse.count;
+                            });
+                    } else if(!target_outer && contract(count,nullptr))fitted_count=count;
+                    if(fitted_count){++affine_counts[hypothesis];observed+=fitted_count-1;continue;}
                 }
                 if(!valid || target_outer)prepare();
-                const auto projection=banks[h.frequency].observations()[left+1]-banks[h.frequency].observations()[left];
-                std::array<Complex,2> phases{};
+                const auto projection=banks[h.frequency].observations(physical_view(h.frequency))[left+1]-banks[h.frequency].observations(physical_view(h.frequency))[left];
+                std::array<Complex,2> phases{};bool temporal_copied=false;
                 if(valid){phases=row->value[left];++cache->hits;}
                 else {
                     if(interval_reuse && observed<interval_end && interval_index==target_index) {
@@ -2745,7 +4663,80 @@ struct PatternCorrelator::Impl {
                             if(tail && final_chip>=local && final_chip-local<=8)count=std::min(count,
                                 pulse_span_count(offset+static_cast<long double>(chip-tail)/(2*h.rate),maximum,duration));
                         }
-                        phases=shape(within);
+                        if(temporal && !piece_flat && !interval_reuse && !scheduled->curves && !scheduled->float_curves) {
+                            if(!temporal->attempted(hypothesis,sample,h.phase_lower,target_chip,observed)) {
+                                rx_cpu::Scope cpu_batch(rx_cpu::Stage::template_build,true);
+                                temporal->start(h.phase_lower,target_chip,observed);
+                                // Bound the source-chip union for C4/C10 as
+                                // well as chip15. The exact Plan still rejects
+                                // overflow; another bounded batch handles the
+                                // rest without dropping any original sample.
+                                const auto span=std::max(1.L,std::floor(static_cast<long double>(
+                                    detail::ScheduledTemporalTemplates::Tile::maximum_coefficients-18)*code.chip_samples()/h.rate));
+                                const auto planned_end=observed+static_cast<std::uint64_t>(std::min<long double>(piece_end-observed,span));
+                                auto future=observed;
+                                {
+                                rx_cpu::Scope cpu_export(rx_cpu::Stage::temporal_export,true);
+                                bool r1_exported=false;
+                                if(detail::scheduled_r1_export_requested()) {
+                                    detail::scheduled_r1_export_note_attempt();
+                                    const auto cuts_aligned=[&] {
+                                        if(differential_window && differential_window%code.chip_samples())return false;
+                                        if(target_drift)for(unsigned k=1;k<drift_sections;++k)
+                                            if(detail::drift_boundary(k,code.symbol_samples(),drift_sections)%code.chip_samples())return false;
+                                        return true;
+                                    };
+                                    if(h.rate==1 && detail::scheduled_r1_export_grid(h.origin) &&
+                                       planned_end<(std::uint64_t{1}<<31) && cuts_aligned() &&
+                                       scheduled_flat(h,observed,planned_end,false)) {
+                                        const auto first_source=location.source.add_samples(observed-piece_first);
+                                        const detail::ScheduledR1ExportInput input{h.rate,h.origin,symbol_source,
+                                            sample,piece_first,observed,planned_end,code.symbol_samples(),code.chip_samples(),
+                                            current_index,target_index,first_source,scheduled->anchors[hypothesis],true,true};
+                                        const auto proof=detail::scheduled_r1_export_proof(input);
+                                        if(proof.eligible) {
+                                            const auto exported=detail::scheduled_r1_export_append(*temporal,proof,
+                                                sample,observed,planned_end,[&](std::size_t offset) {
+                                                    return row && (row->valid[offset/64]&(1ULL<<(offset%64)));
+                                                },[&]{cancelled(stop);});
+                                            future=exported.end;r1_exported=true;
+                                            detail::scheduled_r1_export_note_row(exported.appended);
+                                        }
+                                    }
+                                }
+                                if(!r1_exported) {
+                                for(;future<planned_end;++future) {
+                                    if((future&31U)==0)cancelled(stop);
+                                    // Reproduce the ORIGINAL anchored long-double
+                                    // expression, subtraction, cast and gain mask.
+                                    auto at=source+static_cast<long double>(future-piece_first)*h.rate;
+                                    if(at<0)continue;
+                                    if(at>=2.L*code.symbol_samples())break;
+                                    const bool future_next=at>=code.symbol_samples();
+                                    if(future_next!=next)break;
+                                    if(future_next)at-=code.symbol_samples();
+                                    const auto physical_at=tick.add_signed(static_cast<long double>(future-piece_first)*h.rate);
+                                    auto future_gain=SchedHopSourceMap::gain(location,physical_at);
+                                    if(scheduled->fhss_shape.enabled)future_gain*=scheduled->fhss_shape.gain(0,
+                                        physical_at.sample%(2ULL*config.sample_rate)+physical_at.fraction,config.sample_rate);
+                                    if(future_gain==0)continue;
+                                    const auto offset=static_cast<std::size_t>(future-sample);
+                                    if(row && (row->valid[offset/64]&(1ULL<<(offset%64))))continue;
+                                    if(!temporal->append(offset,static_cast<double>(at)))break;
+                                }
+                                }
+                                }
+                                temporal->end(future);
+                                // Gather may change a private context even on
+                                // fallback. Invalidate assumptions, then restore
+                                // before ANY original lookup/outer-ring callback.
+                                pattern_ready=false;prepared_chip=std::numeric_limits<std::uint64_t>::max();
+                                temporal->prepare(pattern,config,stop,target_outer!=nullptr);prepare();
+                            }
+                            temporal_copied=temporal->raw(hypothesis,sample,h.phase_lower,target_chip,observed,left,
+                                static_cast<double>(within),phases);
+                        }
+                        if(!temporal_copied)phases=shape(within);
                         if(count>=4) {
                             const auto last=shape(within+(count-1)*h.rate);
                             interval_value=phases;interval_first=observed;interval_end=observed+count;interval_index=target_index;
@@ -2760,11 +4751,16 @@ struct PatternCorrelator::Impl {
                     else ++scheduled->template_uncached[hypothesis];
                 }
                 const auto chip=static_cast<std::uint64_t>(within/code.chip_samples());
-                if(target_outer)pattern_pulse_each(static_cast<double>(within),code.symbol_samples(),code.chip_samples(),
-                    [&](std::uint64_t local,double pulse) {
+                if(target_outer) {
+                    const auto consume=[&](std::uint64_t local,double pulse) {
                         target_outer->add(local,gain*pulse*Complex{projection.xc,projection.xs},
                             [&](std::uint64_t position){return pattern.values(target_chip+position);});
-                    });
+                    };
+                    const bool reused=temporal_copied && temporal && temporal->outer_pulses(hypothesis,sample,
+                        h.phase_lower,target_chip,observed,left,static_cast<double>(within),consume);
+                    if(!reused)pattern_pulse_each(static_cast<double>(within),code.symbol_samples(),code.chip_samples(),consume);
+                }
+                rx_cpu::Scope cpu_direct_gram(rx_cpu::Stage::gram,true);
                 for(unsigned bit=0;bit<2;++bit) {
                     Fit contribution;contribution.add(projection,phases[bit],1);
                     const auto add=[&](Fit& value) {
@@ -2942,9 +4938,9 @@ struct PatternCorrelator::Impl {
                         }
                         if(outer_presence) {
                             const auto right=left+static_cast<std::size_t>(piece_count);
-                            const auto p=bank.observations()[right]-bank.observations()[left];
+                            const auto p=bank.observations(physical_view(bank))[right]-bank.observations(physical_view(bank))[left];
                             const Complex measured{p.xc,p.xs};
-                            const auto moment=bank.moments()[right]-bank.moments()[left]-static_cast<double>(left)*measured;
+                            const auto moment=bank.moments(physical_view(bank))[right]-bank.moments(physical_view(bank))[left]-static_cast<double>(left)*measured;
                             for(std::size_t j=0;j<detail::correlation_pulse_atoms;++j) {
                                 if(j<8 && local<8-j)continue;
                                 const auto position=j<8?local-(8-j):local+(j-8);
@@ -2958,7 +4954,7 @@ struct PatternCorrelator::Impl {
                             outer_presence?&chip_evidence[hypothesis*(alternate_groups+1)+group]:nullptr,local);
                         ++affine_counts[hypothesis];observed+=piece_count;continue;
                     }
-                    const auto projection=bank.observations()[left+1]-bank.observations()[left];
+                    const auto projection=bank.observations(physical_view(bank))[left+1]-bank.observations(physical_view(bank))[left];
                     // Each alternative schedule fits the same disjoint
                     // raw observations. Its score never borrows samples
                     // or evidence from another possible schedule.
@@ -2987,7 +4983,7 @@ struct PatternCorrelator::Impl {
                 const auto until=static_cast<std::uint64_t>(std::max(static_cast<long double>(observed+1),boundary));
                 const auto left=static_cast<std::size_t>(observed-sample),right=static_cast<std::size_t>(until-sample);
                 if(outer_presence) {
-                    const auto p=banks[h.frequency].observations()[right]-banks[h.frequency].observations()[left];
+                    const auto p=banks[h.frequency].observations(physical_view(h.frequency))[right]-banks[h.frequency].observations(physical_view(h.frequency))[left];
                     (*outer_evidence)[hypothesis*(alternate_groups+1)+group].add(local,{p.xc,p.xs},
                         [&](std::uint64_t position){return pattern.values(h.index*code.chips_per_symbol()+position);});
                 }
@@ -2999,7 +4995,7 @@ struct PatternCorrelator::Impl {
                         const auto tone=bank.frequency-config.carrier_hz-search.frequency_offsets_hz[h.frequency];
                         phase*=std::polar(1.,-static_cast<double>(std::remainder(static_cast<long double>(observed)*tau*tone/config.sample_rate,static_cast<long double>(tau))));
                     }
-                    const auto projection=bank.observations()[right]-bank.observations()[left];
+                    const auto projection=bank.observations(physical_view(bank))[right]-bank.observations(physical_view(bank))[left];
                     fit[bit].add(projection,phase,right-left);
                     if(!chip_evidence.empty())chip_evidence[hypothesis*(alternate_groups+1)+group][bit].add(projection,phase,right-left,local);
                     if(drift)(*drift)[bit].active.add(projection,phase,right-left);
@@ -3036,7 +5032,7 @@ struct PatternCorrelator::Impl {
         for(auto& lattice:pulse_lattices) {
             cancelled(stop);lattice.cells.clear();
             const auto& bank=banks[lattice.frequency];
-            const auto prefix=bank.observations();const auto moments=bank.moments();
+            const auto prefix=bank.observations(physical_view(bank));const auto moments=bank.moments(physical_view(bank));
             const auto duration=static_cast<long double>(code.chip_samples())/lattice.rate;
             for(std::size_t i=0;i<count;) {
                 const auto observed=sample+i;auto& cell=lattice.pending;
@@ -3083,7 +5079,7 @@ struct PatternCorrelator::Impl {
         const auto chip=code.chip_samples();
         for(auto& lattice:pulse_lattices) {
             cancelled(stop);lattice.cells.clear();
-            const auto prefix=banks[lattice.frequency].observations();
+            const auto prefix=banks[lattice.frequency].observations(physical_view(lattice.frequency));
             for(std::size_t i=0;i<count;++i) {
                 const auto observed=sample+i;
                 auto& cell=lattice.pending;
@@ -3282,10 +5278,15 @@ struct PatternCorrelator::Impl {
         return consumed;
     }
     void process(std::span<const float> input,std::stop_token stop,detail::CorrelationProjectionCache* cache) {
+        rx_cpu::Scope cpu_search(rx_cpu::Stage::search_residual);
+        rx_cpu::Scope cpu_frontend(rx_cpu::Stage::mixing);
         struct ClearSharedViews {
-            std::vector<Bank>& banks;bool enabled=true;
-            ~ClearSharedViews(){if(enabled)for(auto& bank:banks){bank.shared_prefix={};bank.shared_moment={};}}
-        } clear_shared{banks};
+            Impl& state;bool enabled=true;
+            ~ClearSharedViews(){if(enabled) {
+                for(auto& bank:state.banks){bank.shared_prefix={};bank.shared_moment={};}
+                state.clear_physical_views();
+            }}
+        } clear_shared{*this};
         WorkTimer frontend_timer(options.measure_work,work.frontend_seconds,work.frontend_cpu_seconds);
         bool certified_null=scheduled_map()!=nullptr;
         if(certified_null)for(const auto& h:hypotheses) {
@@ -3297,6 +5298,15 @@ struct PatternCorrelator::Impl {
         clear_shared.enabled=!certified_null;
         if(!certified_null)for(std::size_t b=0;b<banks.size();++b) {
             cancelled(stop);auto& bank=banks[b];bank.shared_prefix={};bank.shared_moment={};
+            if(scheduled && !scheduled->physical_views.empty())scheduled->physical_views[b]={};
+            if(cache && scheduled && scheduled->moments_eligible && (!outer_presence || scheduled->outer_moment_scratch) &&
+               !options.raw_reference && !options.scheduled_moment_reference) {
+                require(sample<=std::numeric_limits<std::uint64_t>::max()-search.input_sample_origin,
+                    "shared physical capture coordinate overflow");
+                rx_cpu::Scope shared_cpu(rx_cpu::Stage::shared_frontend);
+                const auto shared=cache->physical(input,search.input_sample_origin+sample,sample,config.sample_rate,bank.frequency,stop);
+                if(shared){scheduled->physical_views[b]=shared;continue;}
+            }
             if(cache && (scheduled_map() || work.backend==PatternCorrelationBackend::pulse_moments || pulse_segmented)) {
                 const auto shared=cache->get(input,sample,config.sample_rate,bank.frequency,block_samples,!scheduled_map() || scheduled_affine,stop);
                 if(shared){bank.shared_prefix=shared.prefix;bank.shared_moment=shared.first_moment;continue;}
@@ -3313,13 +5323,27 @@ struct PatternCorrelator::Impl {
             }
         }
         if(!certified_null && scheduled && !scheduled->moments.empty())for(std::size_t b=0;b<banks.size();++b) {
+            rx_cpu::Scope cpu_moments(rx_cpu::Stage::physical_moments);
+            if(physical_view(b))continue;
             auto& out=scheduled->moments[b];out[0]={};
-            const auto prefix=banks[b].observations();
+            const auto prefix=banks[b].observations(physical_view(b));
             for(std::size_t i=0;i<input.size();++i) {
                 const auto p=prefix[i+1]-prefix[i];const auto n=static_cast<double>(i),n2=n*n;
                 const Complex square{p.cc-p.ss,2*p.cs};auto next=out[i];
                 next.signal1+=n*Complex{p.xc,p.xs};next.square1+=n*square;next.square2+=n2*square;
                 next.norm1+=n*(p.cc+p.ss);next.norm2+=n2*(p.cc+p.ss);out[i+1]=next;
+            }
+        }
+        if(!certified_null && scheduled && !scheduled->float_signal.empty()) {
+            for(std::size_t b=0;b<banks.size();++b) {
+                cancelled(stop);const auto prefix=banks[b].observations(physical_view(b));
+                ++scheduled->extra_work.scheduled_float_moment_preparations;
+                const auto status=scheduled->float_signal[b].prepare(input.size(),[&](std::size_t i) {
+                    const auto p=prefix[i+1]-prefix[i];return Complex{p.xc,p.xs};
+                });
+                if(status==detail::scheduled_float_signal::Failure::none)
+                    scheduled->extra_work.scheduled_float_moment_prepared_samples+=input.size();
+                else ++scheduled->extra_work.scheduled_float_moment_prepare_fallbacks;
             }
         }
         const auto end=sample+input.size();
@@ -3331,38 +5355,69 @@ struct PatternCorrelator::Impl {
                     work.pulse_statistics_cpu_seconds);
                 project_pulse_cells(input.size(),stop);
             }
-            frontend_timer.finish();
+            frontend_timer.finish();cpu_frontend.finish();
             WorkTimer search_timer(options.measure_work,work.search_seconds,work.search_cpu_seconds);
             // There is no hypothesis work before a shared chip cell is ready.
             // In particular a high PCM rate must not rescan the timing/key
             // candidates once per tiny oscillator block of an hours-long bit.
             if(work.cells!=cells_before)accumulate_pulse_cells(stop);
             settle_timing();
-            record_point(banks.front().observations()[input.size()]);sample=end;room_for(0);return;
+            record_point(banks.front().observations(physical_view(0))[input.size()]);sample=end;room_for(0);return;
         }
-        frontend_timer.finish();
+        frontend_timer.finish();cpu_frontend.finish();
         WorkTimer search_timer(options.measure_work,work.search_seconds,work.search_cpu_seconds);
         const auto parallel=worker_codes.size()>1;
-        if(parallel)detail::parallel_search(hypotheses.size(),worker_codes.size(),[&](std::size_t worker,std::size_t hypothesis) {
+        const auto* family_plan=scheduled?scheduled->families.get():nullptr;
+        const bool accumulation_ahead=parallel || family_plan;
+        const auto accumulate_one=[&](std::size_t worker,std::size_t hypothesis) {
+            detail::PatternPermutationScope permutation_scope(cache?cache->permutations():nullptr,
+                cache?cache->permutation_namespace():0);
             auto& view=worker_map_view();const auto previous=view;
             struct RestoreMapView {decltype(view) target;decltype(previous) old;~RestoreMapView(){target=old;}} restore{view,previous};
             if(scheduled && !scheduled->worker_maps.empty())view={this,scheduled->worker_maps[worker].get()};
             auto& template_view=worker_template_view();const auto previous_template=template_view;
             struct RestoreTemplateView {decltype(template_view) target;decltype(previous_template) old;~RestoreTemplateView(){target=old;}} restore_template{template_view,previous_template};
             if(scheduled && !scheduled->worker_template_caches.empty())template_view={this,scheduled->worker_template_caches[worker].get()};
+            auto& temporal_view=worker_temporal_view();const auto previous_temporal=temporal_view;
+            struct RestoreTemporalView {decltype(temporal_view) target;decltype(previous_temporal) old;~RestoreTemporalView(){target=old;}} restore_temporal{temporal_view,previous_temporal};
+            if(scheduled && !scheduled->worker_temporal_templates.empty())temporal_view={this,scheduled->worker_temporal_templates[worker].get()};
             cancelled(stop);auto& h=hypotheses[hypothesis];
             const auto cursor=initial_cursor(h,end);
             const auto symbol_end=clock_boundary(h,code.symbol_samples());
             if(cursor<end && static_cast<long double>(cursor)<symbol_end)
-                accumulate(h,hypothesis,cursor,end,worker_codes[worker],stop);
-        });
+                accumulate(h,hypothesis,cursor,end,worker_codes.empty()?code:worker_codes[worker],stop);
+        };
+        if(family_plan) {
+            scheduled->extra_work.scheduled_family_dispatches+=family_plan->ends.size()-1;
+            scheduled->extra_work.scheduled_family_lanes+=family_plan->members.size();
+            detail::parallel_search(family_plan->ends.size()-1,std::max<std::size_t>(1,worker_codes.size()),
+                [&](std::size_t worker,std::size_t family) {
+                    detail::PatternPermutationScope permutation_scope(cache?cache->permutations():nullptr,
+                        cache?cache->permutation_namespace():0);
+                    const auto members=std::span<const std::size_t>{family_plan->members}.subspan(
+                        family_plan->ends[family],family_plan->ends[family+1]-family_plan->ends[family]);
+                    bool shared=false;
+                    if(scheduled->common_scratch) {
+                        auto& view=worker_map_view();const auto previous=view;
+                        struct RestoreMapView {decltype(view) target;decltype(previous) old;~RestoreMapView(){target=old;}} restore{view,previous};
+                        if(!scheduled->worker_maps.empty())view={this,scheduled->worker_maps[worker].get()};
+                        shared=accumulate_scheduled_common_shape(members,end,worker_codes.empty()?code:worker_codes[worker],worker,family,stop);
+                    }
+                    if(!shared)for(auto lane:members) {
+                        accumulate_one(worker,lane);execution::checkpoint();
+                    }
+                });
+        } else if(parallel)detail::parallel_search(hypotheses.size(),worker_codes.size(),accumulate_one);
+        // Serial completions may evict optional family scratch; collect after
+        // all workers join and before any completion can release it.
+        collect_scheduled_common_shape();
         for(std::size_t hypothesis=0;hypothesis<hypotheses.size();++hypothesis) {
             auto& h=hypotheses[hypothesis];
             cancelled(stop);auto cursor=initial_cursor(h,end);
             // Only independent fit accumulation was moved ahead. Trial counts,
             // phase selection, peer ownership and every publication retain the
             // original serial hypothesis/complete-symbol order.
-            if(parallel && cursor<end) {
+            if(accumulation_ahead && cursor<end) {
                 const auto symbol_end=clock_boundary(h,code.symbol_samples());
                 if(static_cast<long double>(cursor)<symbol_end) {
                     cursor=static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(symbol_end)));
@@ -3378,30 +5433,137 @@ struct PatternCorrelator::Impl {
         }
         settle_timing();
         if(pulse_segmented || scheduled_affine || (scheduled && scheduled->moments_eligible))work.segments=std::accumulate(affine_counts.begin(),affine_counts.end(),std::uint64_t{0});
-        if(!certified_null)record_point(banks.front().observations()[input.size()]);
+        if(!certified_null)record_point(banks.front().observations(physical_view(0))[input.size()]);
         sample=end;
         room_for(0);
     }
 };
 
 PatternCorrelator::PatternCorrelator(Config c,PatternSearch search,std::size_t bytes,PatternCorrelatorOptions options)
-    :impl_(std::make_unique<Impl>(c,std::move(search),bytes,options)){}
+    :impl_([&]{rx_cpu::Context cpu(rx_cpu::Stage::setup);return std::make_unique<Impl>(c,std::move(search),bytes,options);}()){}
 PatternCorrelator::~PatternCorrelator(){
     if(impl_ && impl_->scheduled_map() && !impl_->options.amplitude_only && audio::trace::active.load()) {
-        const auto w=work();audio::trace::record("split_complex_work",[&](auto& f) {
+        const auto w=work();
+        for(const auto& batch:impl_->scheduled->worker_temporal_templates)if(batch)impl_->record_temporal_fp32(*batch,"live");
+        auto plan_cache=impl_->scheduled->temporal_retired.plan_cache;
+        std::size_t plan_cache_bytes=0;
+        for(const auto& batch:impl_->scheduled->worker_temporal_templates)if(batch) {
+            plan_cache+=batch->plan_cache_statistics();plan_cache_bytes+=batch->plan_cache_bytes();
+        }
+        audio::trace::record("split_complex_work",[&](auto& f) {
             f.add("epoch",impl_->config.stream_epoch);f.add("samples",w.samples);f.add("hypotheses",w.hypotheses);
             f.add("null_samples",w.scheduled_null_samples);f.add("null_pushes",w.scheduled_null_pushes);
-            f.add("worker_preparations",w.scheduled_worker_preparations);f.add("template_constructions",w.scheduled_template_constructions);
+            f.add("worker_preparations",w.scheduled_worker_preparations);
+            f.add("temporal_requested",impl_->options.scheduled_temporal_template_experiment);
+            f.add("temporal_fp64_backend",detail::ScheduledTemporalTemplates::Tile::component_avx2_available()?
+                "AVX2: four FP64 components, ordered FP64 accumulation":"original ordered FP64 scalar/SSE2");
+            f.add("temporal_fp64_backend_scope","successful original/refined tiles only; native FP32 counts and raw fallbacks are separate");
+            f.add("flat_export_requested",detail::scheduled_flat_export_requested());
+            const auto flat_counts=detail::scheduled_flat_export_counts();
+            f.add("flat_export_counter_scope","process cumulative diagnostic totals; use latest/max, do not sum banks");
+            f.add("flat_export_process_rows",flat_counts.rows);
+            f.add("flat_export_process_samples",flat_counts.samples);
+            f.add("flat_raw_process_pieces",flat_counts.raw_pieces);
+            f.add("flat_raw_process_samples",flat_counts.raw_samples);
+            const auto outer_public_counts=detail::scheduled_outer_public_counts();
+            f.add("outer_public_replay_requested",detail::scheduled_outer_public_replay_requested());
+            f.add("outer_public_counter_scope","process cumulative diagnostic totals; use latest/max, do not sum banks");
+            f.add("outer_public_process_pieces",outer_public_counts.pieces);
+            f.add("outer_public_process_equal_pieces",outer_public_counts.equal_pieces);
+            f.add("outer_public_process_samples",outer_public_counts.samples);
+            f.add("outer_public_process_events",outer_public_counts.events);
+            f.add("outer_public_process_bound_fallbacks",outer_public_counts.bound_fallbacks);
+            f.add("r1_export_requested",detail::scheduled_r1_export_requested());
+            const auto r1_counts=detail::scheduled_r1_export_counts();
+            f.add("r1_export_counter_scope","process cumulative diagnostic totals; use latest/max, do not sum banks");
+            f.add("r1_export_process_attempts",r1_counts.attempts);
+            f.add("r1_export_process_rows",r1_counts.rows);
+            f.add("r1_export_process_samples",r1_counts.samples);
+            f.add("temporal_fp32_requested",impl_->temporal_fp32_policy().requested);
+            f.add("temporal_fp32_component_limit",impl_->temporal_fp32_policy().limit);
+            f.add("temporal_fp32_entry_payload_requested",detail::ScheduledTemporalFp32Execution::payload_requested());
+            f.add("temporal_attempts",w.scheduled_temporal_attempts);f.add("temporal_ready",w.scheduled_temporal_ready);
+            f.add("temporal_fallbacks",w.scheduled_temporal_fallbacks);f.add("temporal_samples",w.scheduled_temporal_samples);
+            f.add("temporal_plan_reuses",w.scheduled_temporal_plan_reuses);f.add("temporal_normalized_reuses",w.scheduled_temporal_normalized_reuses);
+            f.add("temporal_values",w.scheduled_temporal_values);f.add("temporal_shape_terms",w.scheduled_temporal_shape_terms);
+            f.add("temporal_peak_bytes",w.scheduled_temporal_peak_bytes);f.add("template_constructions",w.scheduled_template_constructions);
+            f.add("temporal_plan_cache_requested",impl_->temporal_plan_cache_requested());
+            f.add("temporal_plan_cache_capacity",detail::ScheduledTemporalTemplates::PlanCache::capacity);
+            f.add("temporal_plan_cache_live_bytes",plan_cache_bytes);
+            f.add("temporal_plan_cache_requests",plan_cache.requests);f.add("temporal_plan_cache_hits",plan_cache.hits);
+            f.add("temporal_plan_cache_misses",plan_cache.misses);f.add("temporal_plan_cache_builds",plan_cache.builds);
+            f.add("temporal_plan_cache_evictions",plan_cache.evictions);f.add("temporal_plan_cache_unavailable",plan_cache.unavailable);
+            f.add("temporal_plan_cache_rejected",plan_cache.rejected);f.add("temporal_plan_cache_cancelled",plan_cache.cancelled);
+            f.add("temporal_plan_cache_exceptions",plan_cache.exceptions);f.add("temporal_plan_cache_hash_words",plan_cache.hash_words);
+            f.add("temporal_plan_cache_compared_words",plan_cache.compared_words);
             f.add("template_cache_hits",w.scheduled_template_cache_hits);f.add("carry_samples",w.scheduled_carry_samples);
             f.add("colored_guard_activations",w.scheduled_colored_guard_activations);
             f.add("quarter_guard_fallbacks",w.scheduled_quarter_guard_fallbacks);f.add("pulse_spans",w.segments);
             f.add("counter_scope","per-sample template pairs; span endpoints/worker setup are separate");
+            f.add("common_families",w.scheduled_common_families);f.add("common_lanes",w.scheduled_common_lanes);
+            f.add("common_shapes",w.scheduled_common_shapes);f.add("common_raw_samples",w.scheduled_common_raw_samples);
+            f.add("common_raw_lane_samples",w.scheduled_common_raw_lane_samples);f.add("common_affine_lanes",w.scheduled_common_affine_lanes);
+            f.add("common_mapped_pairs",w.scheduled_common_mapped_pairs);f.add("common_mapped_failed_pairs",w.scheduled_common_mapped_failed_pairs);
+            f.add("common_mapped_lanes",w.scheduled_common_mapped_lanes);f.add("common_affine_reused_lanes",w.scheduled_common_affine_reused_lanes);
+            f.add("common_affine_reuse",impl_->options.scheduled_common_affine_reuse);
+            f.add("common_gram_fallbacks",w.scheduled_common_gram_fallbacks);f.add("common_peak_bytes",w.scheduled_common_peak_bytes);
+            f.add("common_phase_limit",impl_->options.scheduled_common_phase_limit);
+            f.add("common_phase_address_hits",w.scheduled_common_phase_address_hits);
+            f.add("common_phase_address_misses",w.scheduled_common_phase_address_misses);
+            f.add("common_phase_address_queries",w.scheduled_common_phase_address_queries);
+            f.add("common_phase_attempts",w.scheduled_common_phase_attempts);f.add("common_phase_rejects",w.scheduled_common_phase_rejects);
+            f.add("common_phase_families",w.scheduled_common_phase_families);f.add("common_phase_lanes",w.scheduled_common_phase_lanes);
+            f.add("common_raw_fit_pairs",w.scheduled_common_raw_fit_pairs);f.add("common_raw_reused_lane_samples",w.scheduled_common_raw_reused_lane_samples);
+            f.add("common_raw_packed_values",w.scheduled_common_raw_packed_values);f.add("common_raw_workspace_samples",w.scheduled_common_raw_workspace_samples);
+            f.add("common_raw_peak_bytes",w.scheduled_common_raw_peak_bytes);
+            f.add("common_simd_selected_isa",w.scheduled_common_simd_selected_isa);f.add("common_simd_attempts",w.scheduled_common_simd_attempts);
+            f.add("common_simd_samples",w.scheduled_common_simd_samples);f.add("common_simd_lane_samples",w.scheduled_common_simd_lane_samples);
+            f.add("common_simd_packed_values",w.scheduled_common_simd_packed_values);f.add("common_simd_guard_updates",w.scheduled_common_simd_guard_updates);
+            f.add("common_simd_outer_updates",w.scheduled_common_simd_outer_updates);f.add("common_simd_peak_bytes",w.scheduled_common_simd_peak_bytes);
+            f.add("common_simd_short_samples",w.scheduled_common_simd_short_samples);f.add("common_simd_workspace_samples",w.scheduled_common_simd_workspace_samples);
+            f.add("common_simd_isa_samples",w.scheduled_common_simd_isa_samples);f.add("common_simd_scalar_lane_samples",w.scheduled_common_simd_scalar_lane_samples);
             const auto& state=*impl_->scheduled;const auto* curves=state.curves.get();const auto* floats=state.float_curves.get();
             f.add("curve_hits",state.curve_hits+(curves?curves->hits:0)+(floats?floats->hits:0));
             f.add("curve_misses",state.curve_misses+(curves?curves->misses:0)+(floats?floats->misses:0));
             f.add("curve_evictions",state.curve_evictions+(curves?curves->evictions:0)+(floats?floats->evictions:0));
             f.add("curve_exhaustions",state.curve_exhaustions+(curves?curves->exhaustions:0)+(floats?floats->exhaustions:0));
-            f.add("curve_arithmetic",impl_->options.scheduled_float_curve_experiment?"native FP32 table/interpolation; FP64 moments/fits":"FP64 table/interpolation/moments/fits");
+            f.add("fine_curves_requested",detail::fine_source_curves_requested());
+            f.add("fine_curves_eligible",impl_->fine_curves_eligible());
+            f.add("fine_curves_allocated",impl_->fine_curves_allocated());
+            f.add("fine_curve_requested_table_revision",detail::fine_source_curves_requested()?detail::fine_source_curve_revision():1U);
+            const auto& borrow_stats=detail::fine_curve_borrow_statistics();
+            f.add("fine_curve_direct_borrows",borrow_stats.direct.load(std::memory_order_relaxed));
+            f.add("fine_curve_cached_borrows",borrow_stats.cached.load(std::memory_order_relaxed));
+            f.add("fine_curve_l2_borrow_fallbacks",borrow_stats.l2_fallbacks.load(std::memory_order_relaxed));
+            f.add("fine_curve_borrow_counter_scope","process cumulative; do not sum bank snapshots; local writer/exhaustion is in curve_exhaustions");
+            f.add("fine_curve_borrow_mode",detail::fine_source_curve_cached_borrow_requested()?"cached within joined push":
+                detail::fine_source_curve_borrow_requested()?"direct chip/job lease":"copied local rows");
+            f.add("curve_arithmetic",impl_->options.scheduled_float_curve_experiment?"native FP32 table/interpolation":"FP64 table/interpolation");
+            f.add("native_float_gram_experiment",impl_->options.scheduled_float_gram_experiment);
+            f.add("float_gram_attempts",w.scheduled_float_gram_attempts);
+            f.add("float_gram_accepted_pairs",w.scheduled_float_gram_accepted_pairs);
+            f.add("float_gram_range_fallbacks",w.scheduled_float_gram_range_fallbacks);
+            f.add("float_gram_rank_fallbacks",w.scheduled_float_gram_rank_fallbacks);
+            f.add("float_gram_error_fallbacks",w.scheduled_float_gram_error_fallbacks);
+            f.add("float_gram_helper_fallbacks",w.scheduled_float_gram_helper_fallbacks);
+            f.add("float_gram_signal_attempts",w.scheduled_float_gram_signal_attempts);
+            f.add("float_gram_maximum_relative_error",w.scheduled_float_gram_maximum_relative_error);
+            f.add("gram_arithmetic",w.scheduled_float_gram_accepted_pairs?
+                "diagnostic native FP32 normalized Gram products; FP64 fields/state/score and original fallback":
+                "original FP64 Gram products/fields/state/score");
+            f.add("native_float_moment_experiment",impl_->options.scheduled_float_moment_experiment);
+            f.add("float_moment_prepared_samples",w.scheduled_float_moment_prepared_samples);
+            f.add("float_moment_prepare_fallbacks",w.scheduled_float_moment_prepare_fallbacks);
+            f.add("float_moment_attempts",w.scheduled_float_moment_attempts);
+            f.add("float_moment_pieces",w.scheduled_float_moment_pieces);
+            f.add("float_moment_condition_fallbacks",w.scheduled_float_moment_condition_fallbacks);
+            f.add("float_moment_error_fallbacks",w.scheduled_float_moment_error_fallbacks);
+            f.add("float_moment_accepted_pairs",w.scheduled_float_moment_accepted_pairs);
+            f.add("float_moment_fp64_pairs",w.scheduled_float_moment_fp64_pairs);
+            f.add("float_moment_gram_fallbacks",w.scheduled_float_moment_gram_fallbacks);
+            f.add("signal_arithmetic",w.scheduled_float_moment_pieces?
+                "diagnostic native FP32 packed signal moments/products; FP64 real Gram/energy/reductions and guards":
+                "FP64 physical signal products, real Gram, energy, reductions and guards");
             f.add("peak_workspace_bytes",w.peak_workspace_bytes);f.add("timers_enabled",impl_->options.measure_work);
             if(impl_->options.measure_work){f.add("validation_cpu_seconds",w.validation_cpu_seconds);
                 f.add("frontend_cpu_seconds",w.frontend_cpu_seconds);f.add("search_cpu_seconds",w.search_cpu_seconds);}
@@ -3411,14 +5573,41 @@ PatternCorrelator::~PatternCorrelator(){
 PatternCorrelator::PatternCorrelator(PatternCorrelator&&) noexcept=default;
 PatternCorrelator& PatternCorrelator::operator=(PatternCorrelator&&) noexcept=default;
 void PatternCorrelator::push(std::span<const float> samples,std::stop_token stop,detail::CorrelationProjectionCache* cache) {
+        rx_cpu::Context cpu_context(rx_cpu::Stage::control_residual);
     auto& s=*impl_;cancelled(stop);require(!s.finished,"pattern capture already finished");
+    detail::PatternPermutationScope permutation_scope(cache?cache->permutations():nullptr,
+        cache?cache->permutation_namespace():0);
     require(samples.size()<=std::numeric_limits<std::uint64_t>::max()-s.sample,"pattern sample counter overflow");
     {
+        rx_cpu::Scope cpu_validation(rx_cpu::Stage::input_validation);
         WorkTimer validation_timer(s.options.measure_work,s.work.validation_seconds,s.work.validation_cpu_seconds);
         if(s.options.raw_reference || !cache || !cache->covers(samples))
             for(auto value:samples)require(std::isfinite(value),"nonfinite pattern sample");
     }
     if(s.options.amplitude_only){s.push_amplitude(samples,stop,cache);return;}
+    // The prepared capability is borrowed only until this synchronous push
+    // joins every scoring worker. A pool/family never survives as a raw pointer
+    // across admission, trimming, receiver destruction or key replacement.
+    struct ClearSharedSource {
+        Impl::ScheduledState* state;
+        ~ClearSharedSource(){if(state){
+            if(detail::fine_source_curve_cached_borrow_requested()) {
+                if(state->curves)state->curves->clear_borrowed_rows();
+                if(state->float_curves)state->float_curves->clear_borrowed_rows();
+            }
+            state->shared_source_curves=nullptr;state->shared_source_family=nullptr;
+        }}
+    } clear_source{s.scheduled.get()};
+    if(s.scheduled && detail::curve_sharing_allowed(s.config,s.scheduled->moments_eligible || s.fine_curves_eligible()) &&
+       !s.options.scheduled_float_curve_experiment && cache && cache->source_curves() && cache->source_family()) {
+        const auto* family=cache->source_family();
+        // Binding is borrowed, so an allocator-reused address is never a
+        // compatibility certificate. Exact immutable fields are checked on
+        // every push; this constructs no private stream or template row.
+        if(*family==detail::source_family(s.config,family->key_namespace)) {
+            s.scheduled->shared_source_curves=cache->source_curves();s.scheduled->shared_source_family=family;
+        }
+    }
     // Still validate the original PCM and cancellation above. This is only a
     // computation omission under an exact monotone calendar proof, not a
     // capture omission or an observation of absent valid symbols.
@@ -3431,10 +5620,23 @@ void PatternCorrelator::push(std::span<const float> samples,std::stop_token stop
         ~ReleaseWorkers() {if(!state.scheduled_map())state.drop_workers();}
     } release{s};
     if(!samples.empty()){s.prepare_drift(s.sample+samples.size());s.prepare_workers();}
+    struct ClearSharedTemporalPlans {
+        Impl::ScheduledState* state;
+        ~ClearSharedTemporalPlans(){if(state)for(auto& batch:state->worker_temporal_templates)
+            if(batch)batch->bind_shared_plan_cache(nullptr);}
+    } clear_temporal{s.scheduled.get()};
+    // After original preparation, bind exact worker slots only. Live's phase-1
+    // readiness/headroom grant ensures this cannot size workers using cache RAM.
+    if(cache && cache->temporal_plans()) {
+        const auto workers=s.temporal_plan_workers();const auto* borrow=cache->temporal_plans();
+        if(workers && *workers && *workers<=borrow->workers())
+            for(std::size_t i=0;i<*workers;++i)s.scheduled->worker_temporal_templates[i]->bind_shared_plan_cache(borrow->slot(i));
+    }
     for(std::size_t offset=0;offset<samples.size();) {
         auto count=s.process_batch(samples.subspan(offset),stop);
         if(!count) {
             count=std::min(s.block_samples,samples.size()-offset);
+            count=s.process_count(count);
             s.process(samples.subspan(offset,count),stop,cache);
         }
         offset+=count;
@@ -3569,12 +5771,18 @@ bool PatternCorrelator::initial_search_complete()const {
 bool PatternCorrelator::drift_tolerant()const{return impl_->drift_sections>1;}
 std::size_t PatternCorrelator::working_bytes()const{return sizeof(PatternCorrelator)+impl_->working_bytes();}
 std::size_t PatternCorrelator::projection_cache_headroom(std::size_t input_samples)const{return impl_->projection_cache_headroom(input_samples);}
+std::optional<std::size_t> PatternCorrelator::temporal_plan_workers()const{return impl_->temporal_plan_workers();}
 std::size_t PatternCorrelator::reserved_workspace_bytes()const{return sizeof(PatternCorrelator)+impl_->accounted_bytes;}
 void PatternCorrelator::set_workspace_bytes(std::size_t bytes) {
+    if(impl_->fine_curves_allocated() && bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)
+        impl_->drop_scheduled_curves();
+    if(bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)impl_->drop_scheduled_temporal_plan_caches();
+    if(bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)impl_->drop_scheduled_temporal_templates();
     if(!impl_->affine_coefficients.empty() && bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)
         impl_->drop_affine_coefficients();
     // Deferred detector state is promised even before it is allocated.
     // Reclaim optional reuse against that reservation, not only live storage.
+    if(bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)impl_->drop_scheduled_families();
     if(bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)impl_->drop_scheduled_curves();
     if(bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)impl_->drop_scheduled_moments();
     if(bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)impl_->drop_workers();
@@ -3598,13 +5806,159 @@ void PatternCorrelator::set_workspace_bytes(std::size_t bytes) {
     }
     require(bytes>=working_bytes()+impl_->amplitude_scratch_reservation,"DSP workspace is smaller than streaming pattern state");impl_->budget=bytes;
 }
-void PatternCorrelator::trim_optional_workspace(){impl_->drop_scheduled_curves();impl_->drop_scheduled_moments();impl_->drop_workers();}
+void PatternCorrelator::trim_optional_workspace(){impl_->drop_scheduled_families();impl_->drop_scheduled_curves();impl_->drop_scheduled_moments();impl_->drop_workers();}
 Diagnostics PatternCorrelator::diagnostics()const {
     const auto burst=provisional();Diagnostics result;result.bit_rate=static_cast<double>(impl_->config.sample_rate)/static_cast<double>(impl_->code.symbol_samples());
     result.sample_offset=static_cast<std::size_t>(burst.first_sample);result.pattern_score=burst.score;return result;
 }
 PatternCorrelatorWork PatternCorrelator::work()const {
-    auto result=impl_->work;result.drift_sections=impl_->drift_sections;
+    PatternCorrelatorWork result;
+    result.backend=impl_->work.backend;
+    result.hypotheses=impl_->work.hypotheses;
+    result.lattices=impl_->work.lattices;
+    result.phase_groups=impl_->work.phase_groups;
+    result.peak_workspace_bytes=impl_->work.peak_workspace_bytes;
+    result.drift_sections=impl_->work.drift_sections;
+    result.differential_window_samples=impl_->work.differential_window_samples;
+    result.samples=impl_->work.samples;
+    result.cells=impl_->work.cells;
+    result.segments=impl_->work.segments;
+    result.frontend_seconds=impl_->work.frontend_seconds;
+    result.search_seconds=impl_->work.search_seconds;
+    result.kernel_seconds=impl_->work.kernel_seconds;
+    result.frontend_cpu_seconds=impl_->work.frontend_cpu_seconds;
+    result.search_cpu_seconds=impl_->work.search_cpu_seconds;
+    result.kernel_cpu_seconds=impl_->work.kernel_cpu_seconds;
+    result.validation_seconds=impl_->work.validation_seconds;
+    result.validation_cpu_seconds=impl_->work.validation_cpu_seconds;
+    result.pulse_statistics_seconds=impl_->work.pulse_statistics_seconds;
+    result.pulse_statistics_cpu_seconds=impl_->work.pulse_statistics_cpu_seconds;
+    result.affine_coefficient_cache_entries=impl_->work.affine_coefficient_cache_entries;
+    result.affine_preparations=impl_->work.affine_preparations;
+    result.affine_reuses=impl_->work.affine_reuses;
+    result.affine_interval_fast_paths=impl_->work.affine_interval_fast_paths;
+    result.affine_prepare_seconds=impl_->work.affine_prepare_seconds;
+    result.affine_fit_seconds=impl_->work.affine_fit_seconds;
+    result.affine_prepare_cpu_seconds=impl_->work.affine_prepare_cpu_seconds;
+    result.affine_fit_cpu_seconds=impl_->work.affine_fit_cpu_seconds;
+    result.amplitude_transforms=impl_->work.amplitude_transforms;
+    result.amplitude_observations=impl_->work.amplitude_observations;
+    result.amplitude_cache_hits=impl_->work.amplitude_cache_hits;
+    result.amplitude_channel_updates=impl_->work.amplitude_channel_updates;
+    result.amplitude_bins=impl_->work.amplitude_bins;
+    result.amplitude_fft_samples=impl_->work.amplitude_fft_samples;
+    result.amplitude_channels=impl_->work.amplitude_channels;
+    result.amplitude_float_transforms=impl_->work.amplitude_float_transforms;
+    result.amplitude_precision_fallbacks=impl_->work.amplitude_precision_fallbacks;
+    result.amplitude_float_envelopes=impl_->work.amplitude_float_envelopes;
+    result.scheduled_null_samples=impl_->work.scheduled_null_samples;
+    result.scheduled_omitted_fft_blocks=impl_->work.scheduled_omitted_fft_blocks;
+    result.scheduled_null_pushes=impl_->work.scheduled_null_pushes;
+    result.scheduled_worker_preparations=impl_->work.scheduled_worker_preparations;
+    result.scheduled_carry_samples=impl_->work.scheduled_carry_samples;
+    result.scheduled_colored_guard_activations=impl_->work.scheduled_colored_guard_activations;
+    result.scheduled_quarter_guard_fallbacks=impl_->work.scheduled_quarter_guard_fallbacks;
+    result.scheduled_template_constructions=impl_->work.scheduled_template_constructions;
+    result.scheduled_template_cache_hits=impl_->work.scheduled_template_cache_hits;
+    result.scheduled_template_cache_peak_bytes=impl_->work.scheduled_template_cache_peak_bytes;
+    if(impl_->scheduled) {
+        auto counters=impl_->scheduled->temporal_retired;
+        for(const auto& batch:impl_->scheduled->worker_temporal_templates)if(batch)counters+=batch->statistics;
+        result.scheduled_temporal_peak_bytes=impl_->scheduled->temporal_peak_bytes;
+        result.scheduled_temporal_attempts=counters.attempts;result.scheduled_temporal_ready=counters.ready;
+        result.scheduled_temporal_fallbacks=counters.fallbacks;result.scheduled_temporal_samples=counters.consumed;
+        result.scheduled_temporal_plan_reuses=counters.plan_reuses;result.scheduled_temporal_values=counters.numeric.value_pairs;
+        result.scheduled_temporal_shape_terms=counters.numeric.shape_terms;
+        result.scheduled_temporal_normalized_reuses=counters.normalized_reuses;
+    }
+    result.amplitude_publication_polls=impl_->work.amplitude_publication_polls;
+    result.amplitude_unchanged_polls=impl_->work.amplitude_unchanged_polls;
+    if(impl_->scheduled) {
+        result.scheduled_float_moment_prepared_samples=impl_->scheduled->extra_work.scheduled_float_moment_prepared_samples;
+        result.scheduled_float_moment_preparations=impl_->scheduled->extra_work.scheduled_float_moment_preparations;
+        result.scheduled_float_moment_prepare_fallbacks=impl_->scheduled->extra_work.scheduled_float_moment_prepare_fallbacks;
+        result.scheduled_float_moment_attempts=impl_->scheduled->extra_work.scheduled_float_moment_attempts;
+        result.scheduled_float_moment_pieces=impl_->scheduled->extra_work.scheduled_float_moment_pieces;
+        result.scheduled_float_moment_condition_fallbacks=impl_->scheduled->extra_work.scheduled_float_moment_condition_fallbacks;
+        result.scheduled_float_moment_error_fallbacks=impl_->scheduled->extra_work.scheduled_float_moment_error_fallbacks;
+        result.scheduled_float_moment_accepted_pairs=impl_->scheduled->extra_work.scheduled_float_moment_accepted_pairs;
+        result.scheduled_float_moment_fp64_pairs=impl_->scheduled->extra_work.scheduled_float_moment_fp64_pairs;
+        result.scheduled_float_moment_gram_fallbacks=impl_->scheduled->extra_work.scheduled_float_moment_gram_fallbacks;
+        result.scheduled_exact_families=impl_->scheduled->extra_work.scheduled_exact_families;
+        result.scheduled_family_groups=impl_->scheduled->extra_work.scheduled_family_groups;
+        result.scheduled_family_metadata_bytes=impl_->scheduled->extra_work.scheduled_family_metadata_bytes;
+        result.scheduled_family_dispatches=impl_->scheduled->extra_work.scheduled_family_dispatches;
+        result.scheduled_family_lanes=impl_->scheduled->extra_work.scheduled_family_lanes;
+        result.scheduled_common_peak_bytes=impl_->scheduled->extra_work.scheduled_common_peak_bytes;
+        result.scheduled_common_families=impl_->scheduled->extra_work.scheduled_common_families;
+        result.scheduled_common_lanes=impl_->scheduled->extra_work.scheduled_common_lanes;
+        result.scheduled_common_pieces=impl_->scheduled->extra_work.scheduled_common_pieces;
+        result.scheduled_common_shapes=impl_->scheduled->extra_work.scheduled_common_shapes;
+        result.scheduled_common_raw_samples=impl_->scheduled->extra_work.scheduled_common_raw_samples;
+        result.scheduled_common_raw_lane_samples=impl_->scheduled->extra_work.scheduled_common_raw_lane_samples;
+        result.scheduled_common_affine_preparations=impl_->scheduled->extra_work.scheduled_common_affine_preparations;
+        result.scheduled_common_affine_lanes=impl_->scheduled->extra_work.scheduled_common_affine_lanes;
+        result.scheduled_common_gram_fallbacks=impl_->scheduled->extra_work.scheduled_common_gram_fallbacks;
+        result.scheduled_common_mapped_pairs=impl_->scheduled->extra_work.scheduled_common_mapped_pairs;
+        result.scheduled_common_mapped_failed_pairs=impl_->scheduled->extra_work.scheduled_common_mapped_failed_pairs;
+        result.scheduled_common_mapped_lanes=impl_->scheduled->extra_work.scheduled_common_mapped_lanes;
+        result.scheduled_common_affine_reused_lanes=impl_->scheduled->extra_work.scheduled_common_affine_reused_lanes;
+        result.scheduled_common_phase_attempts=impl_->scheduled->extra_work.scheduled_common_phase_attempts;
+        result.scheduled_common_phase_rejects=impl_->scheduled->extra_work.scheduled_common_phase_rejects;
+        result.scheduled_common_phase_families=impl_->scheduled->extra_work.scheduled_common_phase_families;
+        result.scheduled_common_phase_lanes=impl_->scheduled->extra_work.scheduled_common_phase_lanes;
+        result.scheduled_common_raw_peak_bytes=impl_->scheduled->extra_work.scheduled_common_raw_peak_bytes;
+        result.scheduled_common_raw_fit_pairs=impl_->scheduled->extra_work.scheduled_common_raw_fit_pairs;
+        result.scheduled_common_raw_reused_lane_samples=impl_->scheduled->extra_work.scheduled_common_raw_reused_lane_samples;
+        result.scheduled_common_raw_packed_values=impl_->scheduled->extra_work.scheduled_common_raw_packed_values;
+        result.scheduled_common_raw_workspace_samples=impl_->scheduled->extra_work.scheduled_common_raw_workspace_samples;
+        result.scheduled_common_simd_peak_bytes=impl_->scheduled->extra_work.scheduled_common_simd_peak_bytes;
+        result.scheduled_common_simd_selected_isa=impl_->scheduled->extra_work.scheduled_common_simd_selected_isa;
+        result.scheduled_common_simd_attempts=impl_->scheduled->extra_work.scheduled_common_simd_attempts;
+        result.scheduled_common_simd_samples=impl_->scheduled->extra_work.scheduled_common_simd_samples;
+        result.scheduled_common_simd_lane_samples=impl_->scheduled->extra_work.scheduled_common_simd_lane_samples;
+        result.scheduled_common_simd_packed_values=impl_->scheduled->extra_work.scheduled_common_simd_packed_values;
+        result.scheduled_common_simd_guard_updates=impl_->scheduled->extra_work.scheduled_common_simd_guard_updates;
+        result.scheduled_common_simd_outer_updates=impl_->scheduled->extra_work.scheduled_common_simd_outer_updates;
+        result.scheduled_common_simd_short_samples=impl_->scheduled->extra_work.scheduled_common_simd_short_samples;
+        result.scheduled_common_simd_workspace_samples=impl_->scheduled->extra_work.scheduled_common_simd_workspace_samples;
+        result.scheduled_common_simd_isa_samples=impl_->scheduled->extra_work.scheduled_common_simd_isa_samples;
+        result.scheduled_common_simd_scalar_lane_samples=impl_->scheduled->extra_work.scheduled_common_simd_scalar_lane_samples;
+        result.scheduled_common_phase_address_hits=impl_->scheduled->extra_work.scheduled_common_phase_address_hits;
+        result.scheduled_common_phase_address_misses=impl_->scheduled->extra_work.scheduled_common_phase_address_misses;
+        result.scheduled_common_phase_address_queries=impl_->scheduled->extra_work.scheduled_common_phase_address_queries;
+        result.scheduled_float_gram_attempts=impl_->scheduled->extra_work.scheduled_float_gram_attempts;
+        result.scheduled_float_gram_accepted_pairs=impl_->scheduled->extra_work.scheduled_float_gram_accepted_pairs;
+        result.scheduled_float_gram_range_fallbacks=impl_->scheduled->extra_work.scheduled_float_gram_range_fallbacks;
+        result.scheduled_float_gram_rank_fallbacks=impl_->scheduled->extra_work.scheduled_float_gram_rank_fallbacks;
+        result.scheduled_float_gram_error_fallbacks=impl_->scheduled->extra_work.scheduled_float_gram_error_fallbacks;
+        result.scheduled_float_gram_helper_fallbacks=impl_->scheduled->extra_work.scheduled_float_gram_helper_fallbacks;
+        result.scheduled_float_gram_signal_attempts=impl_->scheduled->extra_work.scheduled_float_gram_signal_attempts;
+        result.scheduled_float_gram_maximum_relative_error=impl_->scheduled->extra_work.scheduled_float_gram_maximum_relative_error;
+    }
+    result.drift_sections=impl_->drift_sections;
+    if(impl_->scheduled) {
+        auto& target=result;
+        for(const auto& c:impl_->scheduled->float_grams) {
+            target.scheduled_float_gram_attempts+=c.attempts;
+            target.scheduled_float_gram_accepted_pairs+=c.accepted;
+            target.scheduled_float_gram_range_fallbacks+=c.range;
+            target.scheduled_float_gram_rank_fallbacks+=c.rank;
+            target.scheduled_float_gram_error_fallbacks+=c.error;
+            target.scheduled_float_gram_helper_fallbacks+=c.helper;
+            target.scheduled_float_gram_signal_attempts+=c.signal_attempts;
+            target.scheduled_float_gram_maximum_relative_error=std::max(target.scheduled_float_gram_maximum_relative_error,c.maximum_relative_error);
+        }
+    }
+    if(impl_->scheduled)for(const auto& count:impl_->scheduled->float_counts) {
+        result.scheduled_float_moment_attempts+=count.attempts;
+        result.scheduled_float_moment_pieces+=count.pieces;
+        result.scheduled_float_moment_condition_fallbacks+=count.condition_fallbacks;
+        result.scheduled_float_moment_error_fallbacks+=count.error_fallbacks;
+        result.scheduled_float_moment_accepted_pairs+=count.accepted_pairs;
+        result.scheduled_float_moment_fp64_pairs+=count.fp64_pairs;
+        result.scheduled_float_moment_gram_fallbacks+=count.gram_fallbacks;
+    }
     result.differential_window_samples=impl_->differential_window;
     if(impl_->scheduled)result.scheduled_template_constructions+=std::accumulate(
         impl_->scheduled->template_uncached.begin(),impl_->scheduled->template_uncached.end(),std::uint64_t{0});

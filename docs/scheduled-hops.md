@@ -668,9 +668,11 @@ broader timing/high-DSSS/multiple-key performance, hardware, ARM and long-durati
 qualification remain outstanding. The continuous reference's different waveform,
 energy and bank prevent presenting its timing as an attainable scheduled speedup.
 This manual checkpoint does not restore universal continuous-receiver parity.
-The complete work traces provide counts with fine timers disabled; whole-Live
-stage CPU fractions remain unmeasured. Do not generalize the separately measured
-single-bank frontend fraction into a whole-Live Amdahl bound.
+Those preceding work traces provide counts with fine timers disabled. The
+later [shared-execution diagnosis](#shared-execution-measured-diagnosis-2026-10-13)
+adds bounded whole-Live statistical CPU attribution and a separate coarse
+frontend bound. Neither turns the earlier single-bank fraction into a universal
+whole-Live Amdahl bound.
 
 The conditional exact-template AWGN guard instrument used 40,000 paired draws
 at each of three raw observation dimensions (512, 8,192 and 196,608), rank 128
@@ -737,6 +739,234 @@ observations remain or any quarter is unobserved. It instead reports
 `scheduled amplitude timing coverage exhausted` before changing pending,
 missing-bit or completion state. Strong evidence retains the existing admission
 statistic. Adaptive reconstruction of an aging clock grid remains outstanding.
+
+### Shared execution: measured diagnosis (2026-10-13)
+
+The preserved runnable baseline has GUI SHA256 `a4303d6c…` and core
+`8bfa035c…`, with source preserved at `fe3e2c28…`. An instrumented copy of that
+receiver processed the same 348-second, 6,000 Hz private capture used above:
+PCM hash `12980061178210671347`, M10/G1, DSSS/FHSS Off, 16-source-second symbols,
+five frequency/rate pairs, qualified mocked arrival timing, one key, at most
+230 lanes per epoch and 54 resident banks. This is a baseline diagnosis, not a
+measurement of the subsequently integrated shared candidate. The compact
+[data summary](validation-data/robust/shared-scheduled-20261013/component-summary.json)
+retains exact identities, counts, raw-result hashes and scope.
+
+| Complete baseline diagnostic | Receiver CPU / wall | Scope |
+| --- | ---: | --- |
+| Profiler compiled, disabled | 473.881 / 69.473 s | One complete reference run |
+| Native-thread sampler, 10 ms CPU period | 486.050 / 66.988 s | One complete statistical attribution run |
+| Coarse exclusive thread-CPU scopes | 517.102 / 73.219 s | Coarse category timing; overhead included |
+
+The sampler delivered 47,998 tagged ticks, 264 outside ticks and 181 unassigned
+overruns. Among tagged ticks, search residual was 71.37%, template construction
+9.79%, template/cache access 6.76%, Gram work 7.45% and guards 3.02%. Residual
+includes work not tagged more narrowly; it is not a measured correlation-only
+fraction. Periodic/serial sampling bias and unassigned overruns prevent an IID
+confidence interval. The sampled outer contexts covered 481.230 CPU seconds,
+leaving 4.820 seconds against independently measured receiver process CPU.
+Stage fractions are not exact seconds or portable model coefficients. The
+sampled-versus-disabled CPU difference is 2.57% in single runs with host
+variation, not a precise instrumentation-overhead estimate or confidence interval.
+
+The coarse run measured 1.35185 CPU seconds for mixing plus physical moments,
+0.2614% of total CPU. Eliminating both entirely would improve this one F5,
+DSSS-Off complete capture by at most 1.00262× before replacement/cache overhead.
+This quantitatively limits frontend-only gains here; it does not bound other
+frequency banks, DSSS factors or template/search optimizations. The fine nested
+profiler failed to drain after about 290 wall seconds and 2,397.65 program CPU
+seconds, with 2,012,998,100 clock reads. Its partial fractions are excluded from
+calibration. A balanced profiler context is not a completed reception.
+
+The current source adds several separately bounded reuse mechanisms:
+
+- Physical prefix/moment rows are push-scoped and match the original oscillator
+  recurrence's exact real/imaginary seed bits, absolute PCM range/count, sample
+  rate, exact carrier, phase convention and precision. Canonical carrier-origin
+  rotation is not used: algebraically equivalent rotation can cross an existing
+  rank/whitening cutoff after rounding. Different seeds miss and use original
+  local preparation; no all-rolling-origin sharing discount is justified.
+- The L2 source-chip curve pool stores the preceding approximation, keyed by
+  controller key namespace, exact purpose roots, waveform/table revisions,
+  geometry, resolved physical epoch/ordinal/local chip and applicable FHSS phase.
+  Leases preserve immutable rows. Generation changes retire the pool; required
+  admissions/reservations reclaim optional storage or use local/direct fallback.
+  This does not make interpolated curves an original-template reference.
+- DSSS permutation snapshots copy the existing complete permutation and seed
+  into private symbol state under exact key namespace/root/domain, resolved
+  epoch/ordinal, complete-chip count and factor. Rotation streams and private
+  candidate state remain separate. Busy, oversized or exhausted arenas retain
+  the original generator. No finite noise buffer or cryptographic address is
+  replayed, and this exact reuse remains independent of arithmetic choice.
+- Common source-family execution is enabled in the local candidate. Bounded jobs
+  contain at most sixteen lanes and up to eight distinct canonical phases, with
+  exact origin/rate, processed interval, source coordinates, private address and
+  current-or-carry ownership checked before sharing. Every original alternative
+  still executes when that proof fails; a tighter bank is never expanded to fill
+  a job. The public timing/phase/frequency domain and detector guards are retained.
+- Same-frequency siblings reuse a pure two-candidate FP64 Fit contribution within
+  one proven common piece or raw sample. Each lane still updates its own complete
+  fit, chip/quarter/differential/outer state and original trial/publication path.
+  Distinct frequencies retain their own physical projections and contractions.
+  This is exact contribution reuse, separate from interpolated source curves.
+- An optional per-job private-identity proof cache is tagged by the complete
+  target symbol index under the immutable family members, anchors, key, geometry
+  and omission policy. Current and adjacent carry indices have separate entries;
+  parity alone cannot hit. Positive and negative address equality may be cached.
+  Flatness, gain, physical endpoints, source coordinates, noise and energies are
+  checked anew. Eviction, retirement or unavailable workspace removes reuse only.
+  The preceding frequency-only results below do not qualify every phase family.
+
+The common-shape experiment has complete **one-bank**, identical-PCM ABBA
+measurements with four workers. The receiver timer includes construction,
+all pushes/polls, finish and destruction; common fixture generation is outside.
+The fixture's retained statistic, event and physical-END assertions passed.
+
+| One-bank geometry | Original CPU range | Common-shape CPU range | Peak accounted DSP, original → common |
+| --- | ---: | ---: | ---: |
+| Raw F9 | 6.468–6.651 s | 1.994–2.170 s | 7,272,411 → 7,296,923 B |
+| Moment F9 | 9.864–10.311 s | 2.573–2.706 s | 7,480,858 → 7,505,370 B |
+| DSSS10 raw F9 | 42.369–46.294 s | 11.840–13.350 s | 9,837,623 → 9,891,943 B |
+
+These ranges describe the observed runs, not confidence intervals or full-Live
+speedups. The sparse unique-clock fixture exercised zero shared families;
+2.675–2.805 versus 2.616–2.631 CPU seconds does not establish an optimization
+gain. A complete broad-prior fixture refused its full coverage at 64 MiB; that
+failure remains, and workspace/hypotheses were not relaxed. The first raw
+reference also lacked the admitted physical-END noise interval and failed before
+comparison. The corrected fixture appends independent observed Gaussian samples
+through the original full timing/clock/phase fence; EOF cannot supply absence.
+
+| Substantial strategy | Current disposition and limits |
+| --- | --- |
+| Frontend-only elimination in measured F5 capture | Quantitatively bounded: ideal total gain ≤1.00262×; exact-seed cache cost/hits still need final complete comparison |
+| Exact common-source families, bounded adjacent phases and same-frequency Fit reuse | Implemented and enabled in the local candidate; one-bank ABBA evidence above, preliminary complete Live result below. Complete final paired/sustained results follow; broad/high-DSSS generality remains unqualified |
+| Shared L2 curves, exact DSSS snapshots and per-job private-identity proof | Implemented with bounded/reclaimable storage; complete combined attribution is recorded below; high-DSSS full reception remains unfinished |
+| Native FP32 curve storage/interpolation | Prototyped and rejected for automatic selection in the preceding complete pair: 5.1% more CPU, 1.78 MB less DSP storage |
+| Native FP32 signal contractions / packed Gram | Implemented as separate default-off diagnostics. Signal prototype failed the retained 1e-7 whole-fixture statistic comparison despite correct clean bits; Gram has bounded numerical/fallback tests and complete fixed-bank costs below. Full-bank sensitivity remains outstanding |
+| Integer operands / frequency-moment fusion | No production or full-receiver gain established; current ≤6-sample spans miss the existing temporal AVX2 INT8 loop; Q15 prefix design and complete-cost integer/fusion execution remain outstanding |
+| Whole physical-span silence FFT | Unfavorable analytical operation bound for the preceding sparse pieces; the small tiled native-float/float64 prototype and original guard overlay were measured; integrated guard convolutions remain outstanding |
+| Component-based planner calibration | Design/helper proposal exists but is uncompiled/unintegrated; no speculative coefficient reduction is applied |
+
+An intermediate complete Live run with common execution and phase cap eight
+processed the identical PCM in 381.809 CPU / 56.381 receiver wall seconds versus
+473.881 / 69.473 for the compiled-profiler-disabled baseline. DSP peak was
+62,790,662 bytes and process RSS 72,676 KiB; pending/end input coordinates remained
+180.394667 / 341.248 seconds. This is a single unrepeated observation before the
+latest same-frequency/proof-cache changes, not the final combined gain or its
+uncertainty. It proves neither independent live pacing nor full-bank sensitivity.
+The cap-two phase fixture had an approximately 8% CPU regression with many rejected
+families; subsequent cap-four/eight and F5 fixtures passed their retained assertions
+and improved CPU. These geometry-specific outcomes must not be collapsed into a
+universal phase-sharing speedup or rejection.
+
+The demanding continuous DSSS100 control completed 40.02 audio seconds in
+148.258 CPU seconds (3.7046 CPU seconds/audio second), with 435,450,849 accounted
+DSP bytes. Its preceding scheduled M10/G4 counterpart failed its 180-second drain
+bound after processing only 12.032 of 89.62 supplied audio seconds, with 1,595.19
+program CPU seconds and no admitted bit. This partial failure is preserved;
+nominal duty does not establish practical feasibility, and the changed continuous
+and scheduled waveforms are not an identical-PCM sensitivity comparison. The later M100/G8 DSSS100 attempt also failed its 180-second drain bound after
+124.075 of 484.02 physical seconds and 1,569.88 program CPU seconds, with no bit.
+The latest hot/cold repeat also stops at 124.0747/484.02 physical seconds after
+1,564.37 program CPU/180.127 wall seconds, with no bit. Its partial ledgers show
+87,360 hypotheses, 1,005,860,449 template constructions and 632,966,269 shared raw
+shape evaluations, with zero affine contributions or curve hits. These are
+execution counts, not component CPU fractions. Fine-chip-15 raw construction
+remains the gap. No partial prefix is a complete-reception speedup; the demanding
+headroom delivery criterion remains unmet.
+
+All scheduled full-bank sensitivity and RX-probability claims remain unqualified.
+These CPU results do not establish cumulative loss below 0.1 dB, 90%/99%
+detection crossings, BER or rare wrong-key/false-admission rates. Threshold-region
+PCM, multiple-key/epoch/high-DSSS, interference, phase diffusion, long schedules,
+real audio/radio timing, ARM and broader qualification remain outstanding. Final
+candidate total CPU, workspace/RSS, publication latency and sustained queue/drain
+results must be stamped separately against its exact source/build. Raw capture
+remains retained without a complete omission certificate; null computations,
+EOF, recovery and draining never create observed absence.
+
+### Final shared hot/cold measurements and remaining gap
+
+The final memory-corrected GUI is `47b26398…`, core `e1a0253d…`, with exact
+source/configuration in the local `compact-frozen/identity.json`. It retains the
+same detector arithmetic and shared algorithms as the preceding hot/cold build.
+A complete identical-PCM **B A A B** comparison against frozen optimized core
+`8bfa035c…` includes all rolling banks, setup, guards, publication and drain:
+
+| Path | CPU seconds | Receiver wall seconds | Peak accounted DSP |
+| --- | ---: | ---: | ---: |
+| Frozen optimized | 474.791, 507.007 | 66.234, 70.228 | 60,289,862 B |
+| Final shared | 389.681, 390.137 | 55.600, 56.744 | 63,348,934 B |
+
+The ratio of CPU means is **1.259009×**, with paired ratios 1.218410–1.299560;
+the wall ratio is **1.214669×**, with pairs 1.191248–1.237619. Two runs per path
+on an uncontrolled host do not establish a stable confidence interval. RSS was
+71,988–72,240 KiB versus 72,372–73,000 KiB. The fixture remains 348 physical /
+34.8 source seconds, original 6,000 Hz PCM, M10/G1, DSSS/FHSS Off, one key and
+qualified mocked capture. Pending/end coordinates, all 105 admissions,
+56 retirements and the 54-bank peak remain matched. The earlier hot/cold ABBA
+result (1.260797× CPU) is retained separately; these gains must not be multiplied.
+
+The final independently paced 4× run fully released, delivered, processed and
+drained all 87 groups. Decoder backlog peaked at 3.7547 physical seconds, below
+the existing 16-second cap, while work crossed subsequent active hops. Cost was
+382.497 CPU / 87.256 wall seconds: 10.9913 CPU/source second and 1.09913
+CPU/physical second. Peak accounted DSP was 63,412,806 B and RSS 72,956 KiB.
+First pending appeared at 180.48 input / 45.1221 wall seconds; physical completion
+at 341.504 input / 85.3841 wall seconds. Provider release/delivery lateness was
+below 0.75 s. This is mocked software capture, not hardware qualification.
+Its continuous counterpart is cheap: it **does not** satisfy the requested proof
+that scheduling rescues a genuinely demanding continuous link. The demanding
+DSSS100 failures above remain unfinished implementation evidence.
+
+The memory correction places scheduled-only telemetry and physical views in
+scheduled state, preserving the full public work snapshot. The original
+fractional-clock four-hour ordinary fixture now uses 65,504 B under its unchanged
+65,536 B limit, with all 75 hypotheses. Integer-clock use is 57,104 B; the 4,096
+sample noisy run has no allocation growth. Scheduled capacity remains charged;
+this complete 54-bank fixture adds only 864 B over the measured hot/cold layout.
+
+A fixed-epoch/phase cohort on identical 742,208-sample PCM measured the following
+complete execution, including its original observation-END fence:
+
+| Total arrival width | Retained hypotheses | Shared CPU mean |
+| --- | ---: | ---: |
+| 6 s | 882 | 8.6735 s |
+| 1 s | 162 | 1.5668 s |
+| 100 ms | 27 | 0.26845 s |
+| 10 ms | 18 | 0.18222 s |
+| 1 ms | 18 | 0.18151 s |
+
+All original statistic/event/absence assertions passed. The plateau is from
+retained fractional/clock cells and fixed costs, rather than a hidden broad FFT.
+This is not every rolling/key/phase bank or hardware timing qualification.
+
+Complete current sampled attribution records 43,670 tagged 10 ms thread-CPU
+ticks, 151 unassigned overruns and zero timer setup/foreign/clock/nesting failures.
+Residual is 74.17%, template construction/cache 11.63%, Gram 6.76%, guards 3.52%
+and calendar 3.33%. Residual is not correlation-only. Instrumentation, periodic
+bias and host variance prevent treating these as exact CPU seconds or portable
+model coefficients. Native FP32 signal/Gram and exact candidate-axis SIMD remain
+internal default-off diagnostics: complete fixed-bank comparisons did not show
+an automatic-selection benefit; FP32 signal also failed strict statistic parity.
+
+The bounded paired PCM pilot executed 22 of 24 case/seed/energy pairs, with zero
+strict original-FP64 statistic/event differences. Both wrong-key pairs refused
+complete workspace and are failures, not wrong-key rejection evidence. Two
+seeds per group cannot establish negligible sensitivity loss, BER, 90%/99%
+probability or additional C/N0. A complete-bank interpolation/completion-policy
+sensitivity qualification is still required. The exact frozen-baseline pilot
+was separately bounded and retained as partial evidence.
+
+Detailed build identities, raw-result hashes, arithmetic costs, opportunity
+bounds, preserved failures and strategy dispositions are in the maintained
+[data summary](validation-data/robust/shared-scheduled-20261013/component-summary.json)
+and local `.agent-work/artifacts/sched-shared-20261013/MANUAL-CHECKPOINT.md`.
+Integrated large-frequency fusion, candidate-axis integer arithmetic, adaptive
+transform batches and guard convolutions remain explicit substantial work;
+small kernel prototypes do not complete those strategies. This rebuilt GUI is
+a **partial manual checkpoint**, not optimization completion or qualification.
 
 ## Practical diagnostics
 
@@ -1036,3 +1266,164 @@ add storage until released. This GUI history is outside the reserved DSP pool;
 the manual candidate's total memory report must include it separately. A
 configured search-band display does not certify that an unsupported receiver has
 successfully retained or processed every hypothesis.
+
+
+## Shared execution and fine-chip follow-up (13 October 2026)
+
+This remains a local manual-test investigation, **not completion of the demanding
+split-symbol efficiency objective**. The preceding bounded pulse moments,
+source-curve reuse, approximately 2× recorded improvement and multi-cycle queueing
+are retained. Queueing was already implemented; a FIFO or a favorable duty cycle
+is not new shared execution. Current work adds shared public temporal Plans,
+joined owner retention across no-new-bank refreshes, exact R1/flat exports,
+optional typed native FP32 payloads, ordered runtime-dispatched FP64 SIMD and
+exact public outer-ring replay with independent private callbacks.
+
+The complete six-run prefix comparison (two runs each, serial, uncontrolled host)
+measured mean drained CPU 265.904 s for the frozen preceding export receiver,
+269.719 s for the new wide path and 270.021 s for native FP32 with packed reuse.
+Mean wall times were 32.754, 31.257 and 32.408 s. **No additional CPU gain was
+established by that integration.** These are the same original 243,720 PCM samples
+at 6 kHz, 40.62 physical / 3.22 source seconds, 8 rolling banks, 8 admissions and
+no retirements. The prefix provider is backpressured (`paced_scale=0`), so its small queue is not
+a sustained independent-producer result. All input/work drained, but no whole 16-source-second symbol,
+accepted bit or physical END occurred. Two uncontrolled samples per path do not
+provide a stable confidence interval, sustained headroom or sensitivity evidence.
+
+The separate complete-prefix CPU profile covers 289.608 of 290.909 process CPU
+seconds with exclusive per-thread sampling. Candidate residual work is 20.86%,
+common raw construction 20.57%, public Plan construction 17.95%, export 12.03%,
+evaluation 8.27%, common residual 5.41%, Gram 4.28%, template construction 2.97%,
+validation 2.27% and guards 1.47%. Treating each sampled class as entirely removable gives conditional
+Amdahl estimates of approximately 1.264×, 1.259×, 1.219×, 1.137× and 1.090× for
+the first five classes. These are prioritization estimates, not certified bounds or attainable gains;
+periodic/serial sampling bias and seven unassigned overruns remain. The fractions
+are specific to this complete prefix; overlapping worker wall times and execution counts were not treated as CPU shares.
+
+The shared-owner retention fixture actually retains one owner across 31 refreshes
+without retirement; genuine receiver admission still releases it before original
+required sizing. Exact outer replay has a positive integration witness of 3,072
+samples and 186 private flush events, with byte-identical serialized evidence and
+state digest `9fffe572900a3d0fbf8e4ec41f0a4836cf7e94651a0592d4c73c3675339ef35d`.
+The demanding prefix does not enter that outer-guard geometry, so the witness does
+not imply a benefit there. All existing guards, trials and original callbacks remain.
+
+Fine-chip source curves are a separate **default-off internal experiment**:
+`DATAPUMP_SCHED_FINE_CURVES=1`. Revision 1 retains 257 FP64 knots and the old
+256 KiB L2 ceiling. It matches the existing pulse lookup/interpolation expression
+in the bounded oracle, but its complete prefix cost regressed to 961.948 CPU /
+110.665 wall seconds after removing writer serialization. The earlier serialized
+variant failed its 180-second drain. Neither is selected automatically.
+
+`DATAPUMP_SCHED_FINE_CURVE_DIVISIONS=64` requests a separately keyed revision 2,
+with 65 original knots, expanded exclusion around the two finite-support cells,
+and up to 1 MiB of final-surplus L2 storage. Its initial copied-row implementation
+still regressed: 366.498 CPU / 45.759 wall versus 279.735 / 32.588 for a nearby
+frozen wide control. Its actual 124-row pool logged 13,016,098 hits and 96,677
+builds; copying all 257 storage slots on these hits alone moves about 107 GB.
+The maximum is a ceiling, not an unconditional grant: original required banks,
+workers, deferred work and earlier optional grants retain priority. A pre-existing
+coarse pool can remain at its smaller actual size. Exhaustion never removes banks.
+
+The 65-knot bounded oracle covers 120 private rows, 61,440 exact-node/off-grid
+points, DSSS 10/100/1000, partial final chips, two stream phases and two symbol
+positions. Maximum source difference is 3.39629e-4 and post-limiter difference
+2.47929e-4; the sampled normalized template-angle loss is 4.68886e-7 dB.
+These are finite template/statistic measurements, **not detector sensitivity,
+full-bank 90%/99% detection points or BER qualification**. All strict 257-knot
+assertions remain independently enforced. FP64 force, raw/moment references,
+packed schedules, unsupported geometry and pulse-boundary/tail cells retain
+original templates/evaluation. No waveform or cryptographic address changes.
+
+Revision 2 can borrow an immutable L2 row for the current chip/job rather than
+copying it through the parent cache (`DATAPUMP_SCHED_FINE_CURVE_BORROW=0` retains
+the copy diagnostic). Its lease pins the complete family/epoch/ordinal/chip/
+precision/table identity and the charged backing through retirement. It never
+shares private evidence. Busy/exhausted rows use original direct evaluation;
+this can differ in rounding from copied interpolation under contention. Bounded
+actual-class tests cover concurrent duplicate fallback, cancellation at the final
+knot, retry, mixed local/shared moves, owner destruction and joined reclamation.
+Borrow counts include reclaimed caches; pool counts are cumulative per live pool
+and must not be summed across successive snapshots. Complete cost is recorded in
+the local checkpoint report when measured.
+
+Serious remaining opportunities include integrated fine-frequency fusion,
+calendar-aware tiled timing/guard contractions and shared public pulse projections
+across independent private candidates. Earlier large sparse FFT, whole-dot plus
+direct-guard and conversion-heavy FP32 experiments reject only their measured
+variants. They do not bound these broader strategies. Full public Gram contraction
+changes FP64 association and guard histories; it needs certified continuation,
+original shadow states or complete replayable history, with that cost included.
+The 43× prepared frequency kernel is not a complete-receiver speedup. Burst-local
+complex combination changes the statistic and requires its own noise/threshold law;
+it is not silently substituted for full complex reception.
+
+The preserved shared128 full sustained DSSS100/M100/G8 fixture failed its unchanged
+aggregate backlog bound after 2,725.931 process CPU / 361.644 wall seconds, with no
+accepted bit or END. A prefix or successful cheap DSSS-Off control cannot repair
+that failure. Current full-bank sensitivity, demanding sustainable headroom,
+hardware timing, ARM, long-duration and broader platform/SDK qualification remain
+explicitly outstanding. Planner/simulation scheduled CPU remains uncalibrated;
+no blanket precision discount, manufactured probability or GPU estimate is added.
+
+
+The subsequent B/A/A/B cached-per-push experiment also regressed: mean
+426.880 CPU / 82.641 wall seconds versus 309.255 / 37.061 for the frozen wide
+path, with identical original PCM/hypotheses and strict prefix drain. Its lower
+~114 MiB RSS/~115 MB DSP reservation does not offset the 1.380× CPU cost. Direct
+borrowing was also slower. Neither is automatic. Within-push cached leases use
+a tagged union so original Key/Row/Cache sizes and alignment remain unchanged;
+mandatory State/coarse-cache diagnostic growth found in review was removed.
+Pins release after joined pushes, including exceptions. Three fixed process
+diagnostic counters have explicit cumulative scope and must not be summed across
+bank snapshots. Fine-table sensitivity and complete transitive stack accounting
+remain unqualified; these variants are retained as internal diagnostic references.
+
+The final demanding-prefix timing audit distinguishes the mocked capture timestamp
+radius (10 microseconds) from the actual combined admitted arrival width
+(about141.00336ms). All eight selection records qualify timing; they retain the
+separate4-second source/epoch start radius,1/3/5canonical phases and5frequency-rate
+pairs. Constructed totals1365/4095/6825 include those alternatives and must not be
+relabeled simple arrival-position counts. The historical fixture field
+`arrival_half_width_s` records the capture radius only. This does not measure a
+20-microsecond complete Live acquisition window.
+
+An isolated worker-local fine65 COPY prototype was subsequently compiled and
+measured, rather than inferred from the preceding cache failures. It retained
+the original cache arithmetic and full key identity, with one eight-row cache
+or two hashed eight-row banks per worker, bounded final-surplus admission and
+push-scoped ownership. All 372 observed owners per variant were actually granted.
+The three focused cache/accounting/cancellation/provenance tests passed. Their
+initial inactive-phase construction failure is retained with its test-only fix;
+no workspace increase, coverage removal or receiver change concealed that error.
+
+The predeclared serial A1/B1/C1/W1 complete-prefix measurements were:
+
+| Path | Process CPU seconds | Wall seconds | Peak RSS KiB |
+|---|---:|---:|---:|
+| Current shared fine65 COPY | 391.808 | 48.204 | 116860 |
+| Worker-local eight rows | 486.193 | 66.262 | 118184 |
+| Worker-local two eight-row banks | 468.930 | 62.338 | 119112 |
+| Stable wide path, fine curves off | 270.653 | 33.705 | 218068 |
+
+These are single uncontrolled exploratory runs, not confidence intervals. Each
+uses identical original PCM/hypotheses/input rate and strict prefix drain, but
+has no complete symbol, accepted bit or END. Local hit rates were only 0.260%
+and 1.173%; local misses matched the sole pool's final cumulative hit/build/busy
+counts. Per-worker ownership lost useful cross-worker reuse and repeatedly copied
+full-size rows. These implementations remain isolated and are not in the rebuilt
+manual GUI. Compact65/indexed rows and longer-lived bounded owners remain distinct
+unattempted opportunities, not rejected by this result. Fixed192-byte/thread TLS
+metadata and complete transitive stack accounting also prevent a stronger memory
+qualification claim. The local `fine-local-explore-summary.json` records exact
+binary/source identities, grants, counters, fixtures and limits.
+
+The delivered stable GUI is `97d92eb573469892ad01f969571a02b6a7fa2210a1455c2b6f5ffbda874c855e`,
+core `05696f6f26bb242b4fe9409af6428e6e055739e41bac456a2e2f912f6eefbdd6`.
+Affected local coverage is regular104/105, GUI38/38 and contract79/79. The sole
+regular failure remains the preserved ALSA clipping assertion; the regular group
+is not a pass. A final fineOFF B/A/A/B preservation comparison establishes no
+obvious regression in its stated prefix scope, not an additional proven speedup.
+The demanding sustained-headroom objective and substantial shared contraction/
+transform opportunities above remain unfinished. This is a local manual checkpoint,
+not overall receiver, security, timing, hardware or platform qualification.

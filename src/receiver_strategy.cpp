@@ -128,10 +128,10 @@ ReceiverStrategyPlan resolve_receiver_strategy(const Config& c,const PatternSear
             p.selected_processing_ratio=p.scheduled_mean_processing_ratio;
             p.estimated_workspace_bytes=static_cast<std::size_t>(state);
             p.reason=complete?
-                "calendar-aware split complex; physical I/Q phase; refined physical-aperture bank; eligible bounded pulse/curve reuse with original-template fallback; total cost uncalibrated":
+                "calendar-aware split complex; physical I/Q phase; refined physical-aperture bank; FP64 bulk arithmetic with eligible exact source/family reuse; bounded pulse/curve reuse bypassed by FP64 force; original fallback; total cost uncalibrated":
                 "calendar-aware split complex; exact supplied diagnostic candidates; no continuous-domain coverage certificate; FP64 mapped fallback; total cost uncalibrated";
             if(p.selected_processing_ratio>p.cpu_budget)p.reason+="; estimated processing exceeds budget, no measured cheaper equivalent selected";
-            if(measured_reuse)p.reason+="; local paired pulse/curve work crossover included, absolute model remains engineering";
+            if(measured_reuse)p.reason+="; historical matching local pulse/curve crossover included; new shared-family/RAW/affine execution is not separately discounted; absolute model remains engineering";
             return p;
         }
         if(c.receiver_strategy==ReceiverStrategy::complex_only || c.receiver_strategy==ReceiverStrategy::existing_only) {

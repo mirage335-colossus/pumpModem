@@ -1550,6 +1550,18 @@ void receiver_overlay_and_cpu_status() {
         check(std::any_of(flat.begin(),flat.end(),[&](const auto* node){return node->text==label&&node->tone==tone;}),
               "CPU headroom must retain a readable status as well as its green/yellow/red semantic color");
     }
+    model.receiver_geometry.scheduled=true;
+    model.receiver_geometry.scheduled_cost_calibrated=false;
+    model.cpu_realtime_ratio=.2;
+    const auto engineering=planner_page::build(model,900,false,false);
+    const auto engineering_nodes=nodes(engineering);
+    check(contains_text(engineering,"CPU engineering estimate: uncalibrated")&&
+        !contains_text(engineering,"CPU estimate: headroom")&&
+        std::any_of(engineering_nodes.begin(),engineering_nodes.end(),[](const auto* node) {
+            return node->text=="CPU engineering estimate: uncalibrated"&&node->tone==ui::DocumentTone::caution;
+        }),"uncalibrated scheduled work must not advertise measured CPU headroom");
+    model.receiver_geometry.scheduled=false;
+    model.cpu_realtime_ratio=1;
     model.receiver_workspace_supported=false;
     const auto unsupported=planner_page::build(model,900,false,false);
     check(contains_text(unsupported,"CPU estimate unavailable")&&!contains_text(unsupported,"CPU estimate: headroom"),

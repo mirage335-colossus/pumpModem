@@ -83,7 +83,7 @@ const Stream& best(const Result& r) {
 void conservative_bound() {
     std::mt19937 random(7701);std::exponential_distribution<double> weight;
     for(unsigned fixture=0;fixture<32;++fixture) {
-        std::vector<double> w(128),e(128);detail::EnvelopeMoments m;
+        std::vector<double> w(128),e(128);datapump::modem::detail::EnvelopeMoments m;
         for(std::size_t j=0;j<w.size();++j){w[j]=weight(random);e[j]=1+w[j];m.add(e[j],w[j],3);}
         const auto q=m.weighted_energy/m.energy;
         long double exact=0;
@@ -96,26 +96,26 @@ void conservative_bound() {
         check(m.score()<=exact+1e-9,"moment score exceeded conservative Gamma/Chernoff certificate");
         auto scaled=m;scaled.energy*=1e8L;scaled.energy_square*=1e16L;scaled.weighted_energy*=1e8L;
         check(std::abs(m.score()-scaled.score())<1e-9,"unknown noise-scale invariance failed");
-        detail::EnvelopeMoments tempered;
+        datapump::modem::detail::EnvelopeMoments tempered;
         for(std::size_t j=0;j<w.size();++j)tempered.add(e[j],w[j],3,.125);
         check(tempered.score()<=m.score(),
             "held-chip evidence was charged as fresh independent PCM");
     }
-    detail::EnvelopeFit impulse;
+    datapump::modem::detail::EnvelopeFit impulse;
     for(unsigned j=0;j<128;++j)impulse.add(j<32?1000:1,j<32?10:1,2,j/32);
     check(impulse.score()==0,"one quarter supplied all envelope evidence");
-    detail::EnvelopeMoments constant;
+    datapump::modem::detail::EnvelopeMoments constant;
     for(unsigned j=0;j<128;++j)constant.add(j+1,1,2);
     check(constant.score()==0,"constant envelope manufactured bit evidence");
-    detail::EnvelopeMoments flat_observation;
+    datapump::modem::detail::EnvelopeMoments flat_observation;
     for(unsigned j=0;j<128;++j)flat_observation.add(1,1+j%7,20,.5);
     check(flat_observation.score()==0,"constant received power manufactured a profile match");
 }
 void factored_statistics() {
     std::mt19937 rng(48197);std::uniform_real_distribution<double> unit(.001,1.);
     for(auto degrees:{1U,7U,39U})for(auto scale:{1e-15,1.,1e15})for(auto independent:{.375,100.}) {
-        detail::EnvelopeTemplateFit t;detail::EnvelopeChannelFit c;
-        std::array<detail::EnvelopeFit,2> reference;
+        datapump::modem::detail::EnvelopeTemplateFit t;datapump::modem::detail::EnvelopeChannelFit c;
+        std::array<datapump::modem::detail::EnvelopeFit,2> reference;
         for(unsigned j=0;j<4096;++j) {
             const std::array<double,2> w{unit(rng),unit(rng)};
             const auto e=scale*(.01+w[0]+unit(rng)*.1);const auto q=std::min(3U,j/1024);
@@ -304,7 +304,7 @@ void precision_rows_and_bounded_scratch() {
     for(const auto n:{16U,64U,1024U,65536U}) {
         std::vector<float> pcm(n);for(auto& x:pcm)x=noise(random);
         constexpr auto budget=8*1024*1024;
-        detail::CorrelationProjectionCache cache(pcm,budget,n);
+        datapump::modem::detail::CorrelationProjectionCache cache(pcm,budget,n);
         check(cache.fft_available(n) && !cache.fft_initialized(),"FFT lazy allocation changed");
         std::vector<long double> fp32(n/2),fp64(n/2);
         cache.fft_spectrum(pcm,1,fp32,{},true);
@@ -352,7 +352,7 @@ void finite_energy_ranges() {
     for(const auto scale:{0.F,1e-10F,1.F,1e10F}) {
         std::vector<float> pcm(n);
         for(std::size_t j=0;j<n;++j)pcm[j]=scale*static_cast<float>(.25*std::sin(.37*j)+.1*std::cos(.173*j));
-        detail::CorrelationProjectionCache cache(pcm,256*1024,n);
+        datapump::modem::detail::CorrelationProjectionCache cache(pcm,256*1024,n);
         std::vector<long double> a(n/2),b(n/2);
         cache.fft_spectrum(pcm,1,a,{},true);cache.fft_spectrum(pcm,1,b);
         for(std::size_t j=0;j<a.size();++j)check(std::isfinite(a[j]) && a[j]>=0 &&
@@ -367,7 +367,7 @@ void shared_frontend_identity() {
         "local amplitude fallback scratch was not reserved");
     for(std::size_t offset=0;offset<samples.size();) {
         const auto count=std::min<std::size_t>(317,samples.size()-offset);const auto input=std::span(samples).subspan(offset,count);
-        detail::CorrelationProjectionCache cache(input,64*1024,n);
+        datapump::modem::detail::CorrelationProjectionCache cache(input,64*1024,n);
         check(cache.fft_available(n),"bounded cohort did not share FFT plan/scratch");
         a.push(input,{},&cache);b.push(input,{},&cache);reference.push(input);
         check(cache.working_bytes()<=64*1024,"shared amplitude frontend exceeded its bound");offset+=count;
@@ -383,27 +383,27 @@ void shared_frontend_identity() {
     PatternCorrelator large_a(c,s,4*1024*1024,options()),large_b(c,s,4*1024*1024,options());
     auto exact_config=c;exact_config.search_arithmetic=SearchArithmetic::fp64;
     PatternCorrelator large_exact(exact_config,s,4*1024*1024,options());
-    detail::CorrelationProjectionCache large_cache(large,256*1024,n);
+    datapump::modem::detail::CorrelationProjectionCache large_cache(large,256*1024,n);
     large_a.push(large,{},&large_cache);large_b.push(large,{},&large_cache);large_exact.push(large,{},&large_cache);
     check(large_a.work().amplitude_precision_fallbacks>0 && large_a.work().amplitude_float_transforms==0 &&
           large_b.work().amplitude_transforms==0 && large_b.work().amplitude_cache_hits>0 &&
           large_exact.work().amplitude_transforms>0 && large_exact.work().amplitude_cache_hits==0,
           "deterministic range fallback lost sharing or contaminated FP64-force identity");
     std::vector<float> input(128,.1F);unsigned calls=0;
-    detail::CorrelationProjectionCache cache(input,64*1024);
+    datapump::modem::detail::CorrelationProjectionCache cache(input,64*1024);
     const auto compute=[&]{++calls;return static_cast<double>(input[0]);};
     check(cache.energy(input,0,64,3,20,512,compute)==.1F && calls==1,"energy row did not compute");
     cache.energy(input,0,64,3,20,512,compute);check(calls==1,"energy row was not reused");
     cache.energy(input,64,64,3,20,512,compute);check(calls==2,"different capture coordinate reused energy");
     cache.energy(input,0,64,4,20,512,compute);check(calls==3,"different band reused energy");
-    input[0]=.2F;detail::CorrelationProjectionCache next(input,64*1024);
+    input[0]=.2F;datapump::modem::detail::CorrelationProjectionCache next(input,64*1024);
     check(next.energy(input,0,64,3,20,512,compute)==.2F && calls==4,"next push reused stale energy");
     std::stop_source cancel;cancel.request_stop();
     rejects([&]{next.energy(input,0,64,3,20,512,compute,cancel.get_token());},"energy hit bypassed cancellation");
     check(calls==4,"cancelled energy hit performed work");
     // Partial pushes reserve the complete shared workspace without repeatedly
     // constructing twiddles or clearing unused large buffers.
-    detail::CorrelationProjectionCache lazy(input,64*1024,64);
+    datapump::modem::detail::CorrelationProjectionCache lazy(input,64*1024,64);
     const auto reservation=lazy.working_bytes(),initial_allocation=lazy.allocated_bytes();
     check(lazy.fft_available(64) && !lazy.fft_initialized() && initial_allocation<reservation,
         "partial amplitude push eagerly constructed its FFT or arenas");
@@ -415,7 +415,7 @@ void shared_frontend_identity() {
     check(energy>=0 && lazy.fft_initialized() && lazy.allocated_bytes()>initial_allocation &&
         lazy.allocated_bytes()<=reservation && lazy.working_bytes()==reservation,
         "lazy FFT changed its reservation or exceeded the workspace");
-    detail::CorrelationProjectionCache spectra(input,64*1024,64);unsigned transforms=0;
+    datapump::modem::detail::CorrelationProjectionCache spectra(input,64*1024,64);unsigned transforms=0;
     const auto fill=[&](std::span<long double> out){++transforms;for(std::size_t j=0;j<out.size();++j)out[j]=j*2;};
     const auto row=spectra.spectrum(input,0,64,3,20,512,fill);
     check(row && row.prefix.back()==40 && transforms==1,"shared spectrum prefix did not compute");

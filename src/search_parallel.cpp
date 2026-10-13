@@ -1,3 +1,4 @@
+#include "scheduled_work_profile.hpp"
 #include "search_parallel.hpp"
 #include "datapump/execution.hpp"
 
@@ -17,6 +18,7 @@
 #endif
 
 namespace datapump::modem::detail {
+namespace rx_cpu = ::datapump::detail::cpu_profile;
 namespace {
 
 std::size_t available_cpus() {
@@ -95,6 +97,7 @@ public:
             // broader non-Live submission; never change its search coverage.
             batch_affinity_valid_ = sched_getaffinity(0, sizeof(batch_affinity_), &batch_affinity_) == 0;
 #endif
+            profile_owner_ = rx_cpu::current_collector();
             work_ = &work;
             count_ = count;
             grain_ = grain;
@@ -159,6 +162,7 @@ private:
     }
 
     void execute(std::size_t slot) {
+        rx_cpu::Context cpu(profile_owner_,rx_cpu::Stage::search_residual);
         ExecutionScope scope;
         for (;;) {
             auto begin = next_.load(std::memory_order_relaxed);
@@ -188,6 +192,7 @@ private:
     execution::Condition changed_;
     execution::Condition finished_;
     std::vector<execution::Thread> workers_;
+    rx_cpu::Collector* profile_owner_ = nullptr; // Immutable until all batch workers join.
     const RangeWork* work_ = nullptr;
     std::size_t count_ = 0;
     std::size_t grain_ = 1;

@@ -2,8 +2,14 @@
 
 #include "pattern_correlator_batch.hpp"
 #include "search_fft.hpp"
+#include "pattern_physical_moment_cache.hpp"
+#include "pattern_permutation_cache.hpp"
+#include <optional>
+#include "pattern_shared_source_curve.hpp"
+#include "scheduled_shared_temporal_plans.hpp"
 #include <bit>
 #include <memory>
+#include <new>
 #include <numbers>
 
 namespace datapump::modem::detail {
@@ -22,7 +28,8 @@ public:
         std::span<const long double> prefix;
         explicit operator bool()const{return !prefix.empty();}
     };
-    CorrelationProjectionCache(std::span<const float> input,std::size_t byte_ceiling,std::size_t maximum_fft_samples=0):input_(input) {
+    CorrelationProjectionCache(std::span<const float> input,std::size_t byte_ceiling,std::size_t maximum_fft_samples=0,
+                               std::optional<std::uint64_t> capture_first={}):input_(input) {
         constexpr auto fixed=sizeof(CorrelationProjectionCache)+slots*(sizeof(Entry)+sizeof(EnergyEntry)+sizeof(SpectrumEntry));
         if(byte_ceiling<=fixed)return;
         // A cohort shares the actual FFT work buffers, not just its final
@@ -34,7 +41,19 @@ public:
             fft_maximum_=maximum_fft_samples;
             fft_reserved_bytes_=static_cast<std::size_t>(scratch_bound);
         }
-        const auto remaining=byte_ceiling-fixed-fft_reserved_bytes_;
+        auto remaining=byte_ceiling-fixed-fft_reserved_bytes_;
+        if(capture_first) {
+            // Optional public moments spend surplus after every receiver's
+            // detector/deferred/push-growth reservation has been preserved.
+            // Keep the ordinary carrier/FFT cache available to mixed cohorts.
+            try {
+                auto physical=std::make_unique<PhysicalMomentCache>(input,*capture_first,remaining/2);
+                if(physical->enabled()){remaining-=physical->working_bytes();physical_=std::move(physical);}
+            } catch(const std::bad_alloc&) {
+                // Public moments are optional; keep the ordinary projection
+                // arena and each receiver's already-reserved local buffers.
+            }
+        }
         // At most half of the remaining arena is used for scalar bin-energy
         // prefixes. Mixed cohorts retain ordinary exact carrier projections.
         if(fft_maximum_)spectrum_capacity_=remaining/2/sizeof(long double);
@@ -42,7 +61,7 @@ public:
         if(capacity_<2){capacity_=0;spectrum_capacity_=0;fft_maximum_=0;fft_reserved_bytes_=0;return;}
         // Validation belongs to this immutable span, not a persistent address:
         // a later push creates a new cache even when its PCM buffer is reused.
-        for(const auto x:input)if(!std::isfinite(x))throw Error("pattern input contains a nonfinite sample");
+        if(!physical_)for(const auto x:input)if(!std::isfinite(x))throw Error("pattern input contains a nonfinite sample");
         entries_=std::make_unique<Entry[]>(slots);
         energy_entries_=std::make_unique<EnergyEntry[]>(slots);
         spectrum_entries_=std::make_unique<SpectrumEntry[]>(slots);
@@ -50,6 +69,26 @@ public:
         // twiddles. Their complete reservations are already charged; allocate
         // only when a valid miss actually needs them. Views never move.
     }
+    // Borrowed immutable context for ONE synchronous receiver push. Neither
+    // pointer participates in public PCM/projection identity. Live clears them
+    // before another receiver is fed or the prepared family can be destroyed.
+    void bind_source_curves(SharedSourceCurves<>* pool,const SourceFamily* family) {
+        source_curves_=pool;source_family_=family;
+    }
+    void clear_source_curves() {source_curves_=nullptr;source_family_=nullptr;}
+    SharedSourceCurves<>* source_curves()const{return source_curves_;}
+    const SourceFamily* source_family()const{return source_family_;}
+    void bind_permutations(PatternPermutationPools* pool,std::uint64_t key_namespace) {
+        permutations_=pool;permutation_namespace_=key_namespace;
+    }
+    void clear_permutations(){permutations_=nullptr;permutation_namespace_=0;}
+    PatternPermutationPools* permutations()const{return permutations_;}
+    std::uint64_t permutation_namespace()const{return permutation_namespace_;}
+
+    void bind_temporal_plans(const SharedTemporalPlans::Borrow* borrow)noexcept{temporal_plans_=borrow;}
+    void clear_temporal_plans()noexcept{temporal_plans_=nullptr;}
+    const SharedTemporalPlans::Borrow* temporal_plans()const noexcept{return temporal_plans_;}
+
     bool enabled() const {return capacity_!=0;}
     bool covers(std::span<const float> block) const {
         if(!enabled())return false;
@@ -101,17 +140,23 @@ public:
         }
         ++misses_;return {};
     }
+    PhysicalMomentCache::View physical(std::span<const float> input,std::uint64_t absolute_first,
+            std::uint64_t local_first,std::uint32_t sample_rate,double frequency,std::stop_token stop={}) {
+        return physical_?physical_->get(input,absolute_first,local_first,sample_rate,frequency,stop):PhysicalMomentCache::View{};
+    }
+    const PhysicalMomentCache* physical_cache()const{return physical_.get();}
     // Live charges this once, before any receiver runs. It must include the
     // complete lazy reservation, not just memory allocated at construction.
     std::size_t working_bytes() const {
-        return sizeof(*this)+(enabled()?slots*(sizeof(Entry)+sizeof(EnergyEntry)+sizeof(SpectrumEntry))+capacity_*(sizeof(CorrelationProjection)+sizeof(std::complex<double>))+spectrum_capacity_*sizeof(long double):0)+fft_reserved_bytes_;
+        return sizeof(*this)+(enabled()?slots*(sizeof(Entry)+sizeof(EnergyEntry)+sizeof(SpectrumEntry))+capacity_*(sizeof(CorrelationProjection)+sizeof(std::complex<double>))+spectrum_capacity_*sizeof(long double):0)+fft_reserved_bytes_+(physical_?physical_->working_bytes():0);
     }
     std::size_t allocated_bytes() const {
         return sizeof(*this)+(enabled()?slots*(sizeof(Entry)+sizeof(EnergyEntry)+sizeof(SpectrumEntry)):0)+
             (prefix_?capacity_*sizeof(CorrelationProjection):0)+(moment_?capacity_*sizeof(std::complex<double>):0)+
             (spectrum_?spectrum_capacity_*sizeof(long double):0)+
             (fft_plan_?sizeof(*fft_plan_)+fft_plan_->working_bytes()+fft_scratch_.capacity()*sizeof(std::complex<double>):0)+
-            (fft_float_plan_?sizeof(*fft_float_plan_)+fft_float_plan_->working_bytes()+fft_float_scratch_.capacity()*sizeof(std::complex<float>):0);
+            (fft_float_plan_?sizeof(*fft_float_plan_)+fft_float_plan_->working_bytes()+fft_float_scratch_.capacity()*sizeof(std::complex<float>):0)+
+            (physical_?physical_->allocated_bytes():0);
     }
     bool fft_initialized() const {return static_cast<bool>(fft_plan_) || static_cast<bool>(fft_float_plan_);}
     bool fft_available(std::size_t count) const {
@@ -205,6 +250,11 @@ public:
     std::size_t spectrum_hits()const{return spectrum_hits_;}
     std::size_t spectrum_misses()const{return spectrum_misses_;}
 private:
+    const SharedTemporalPlans::Borrow* temporal_plans_=nullptr;
+    PatternPermutationPools* permutations_=nullptr;
+    std::uint64_t permutation_namespace_=0;
+    SharedSourceCurves<>* source_curves_=nullptr;
+    const SourceFamily* source_family_=nullptr;
     struct EnergyKey {
         std::uint64_t first;
         std::size_t fft_samples,first_bin,bin_count;
@@ -285,6 +335,7 @@ private:
             std::span<const std::complex<double>>(moment_.get()+entry.offset,entry.key.count+1):
             std::span<const std::complex<double>>{}};
     }
+    std::unique_ptr<PhysicalMomentCache> physical_;
     std::span<const float> input_;
     std::unique_ptr<Entry[]> entries_;
     std::unique_ptr<EnergyEntry[]> energy_entries_;

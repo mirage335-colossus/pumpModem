@@ -748,6 +748,29 @@ syntax, MAC validation and decoder success are not used as evidence of physical
 completion or as extra confidence. A displayed value near 100% is still a model
 prediction, never a guarantee or authentication claim.
 
+### Shared scheduled work-model limits
+
+The shared-execution follow-up provides measured baseline CPU attribution,
+conditional one-bank family gains and a preliminary complete Live observation,
+not calibrated coefficients for every scheduled bank. It must not turn a prepared-kernel gain, sampled CPU fraction
+or historical whole-receiver ratio into a blanket cost multiplier. Exact-family
+and same-clock sibling counts differ from retained frequency/rate lanes. Public
+physical rows additionally require the original oscillator's exact seed bits;
+a canonical phase rotation is not a qualified sharing identity. Private source
+curves and DSSS snapshots retain separate complete key/address/geometry identities.
+
+A component-ledger helper/test proposal remains uncompiled and unintegrated.
+Common-family execution is enabled, but its component costs and complete
+geometry-dependent sharing counts are not yet integrated into a calibrated
+planner ledger. Current CPU figures retain their explicit engineering scope. Unknown construction, packing,
+cache exhaustion, certificates/refinement, rolling lifecycle and publication
+work must not be priced as zero. Sampled tags are not exact exclusive seconds,
+and coarse frontend subsets cannot be charged twice. CPU/source-second,
+CPU/physical-second and elapsed service-wall/physical-second are different metrics.
+Sustainable mean informs selection; stricter next-hop clearance remains diagnostic
+under the bounded queued-processing policy. Scheduled full-bank probabilities
+and GPU time remain unavailable. See [the evidence and strategy dispositions](scheduled-hops.md#shared-execution-measured-diagnosis-2026-10-13).
+
 ## Fixed reference compute model
 
 Link planner's **CPU estimate** compares estimated processing for a one-bit receive
@@ -1221,3 +1244,17 @@ both public candidate envelopes, including their finite limiter projections.
 Its coefficient table changes construction cost modestly; existing engineering
 CPU coefficients were retained. The measured short/long public-bank differences
 are not a blanket CPU multiplier for unmeasured application geometries.
+
+
+The shared scheduled follow-up leaves numerical coefficients conservative. Its
+complete paired 1.2608× CPU gain is specific to the recorded F5/DSSS-Off bank;
+there is no blanket family, rolling-bank or precision multiplier. Mapped bulk
+work is still FP64 under Default/FP32 minimum; native signal/Gram/SIMD experiments
+remain disabled automatically after complete fixed-bank comparisons. The GUI
+labels uncalibrated scheduled CPU engineering estimates rather than presenting
+them as demonstrated headroom. Sustained queue and duty-cycle data do not qualify
+an unfinished demanding DSSS100 reception, unsupported RX probabilities or GPU
+time. See [actual execution](scheduled-hops.md#final-shared-hotcold-measurements-and-remaining-gap).
+
+
+The latest [shared-execution and fine-chip checkpoint](scheduled-hops.md#shared-execution-and-fine-chip-follow-up-13-october-2026) records complete-prefix CPU measurements, actual arithmetic, cache identities, numerical scope and unresolved full-bank work. Native FP32, fine source tables and borrowing experiments receive no automatic planner/simulation speed discount from operand width or kernel timing. Default/FP32 minimum mapped arithmetic remains partial FP64 coverage; FP64 force retains original templates and bypasses approximate interpolation.

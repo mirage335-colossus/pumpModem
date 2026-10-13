@@ -1,4 +1,5 @@
 #pragma once
+#include <optional>
 #include "datapump/pattern_receiver.hpp"
 #include <string>
 
@@ -35,6 +36,38 @@ struct PatternCorrelatorOptions {
     // Native FP32 curve storage/interpolation diagnostic. Complete paired
     // execution did not demonstrate a speed advantage on the measured host.
     bool scheduled_float_curve_experiment=false;
+    // Exact-family fit ordering diagnostic; completion/trials/publication keep
+    // original logical order. No waveform, arithmetic or coverage change.
+    bool scheduled_family_experiment=true;
+    // Original fine-bank arithmetic; share exact source geometry/private
+    // construction across proven source-equivalent siblings. Each unsupported
+    // piece retains original contraction; explicit false is the paired reference.
+    bool scheduled_common_shape_experiment=true;
+    // Exact same-bank affine pair reuse within one proven common piece.
+    // False is a paired execution reference; no waveform/arithmetic/guard change.
+    bool scheduled_common_affine_reuse=true;
+    // Separate native FP32 signal moment/product diagnostic. Original FP64 real
+    // Gram/energy and all guard logic remain; local bounds do not certify final
+    // decisions. Never selected by production entry points or persisted settings.
+    bool scheduled_float_moment_experiment=false;
+    // Internal diagnostic:0/1 keep phase-specific families;2..16 bound distinct
+    // phase roots per job. Frequency siblings still share up to16 total lanes.
+    std::size_t scheduled_common_phase_limit=8;
+    // Exact FP64 one-sample candidate-axis SIMD diagnostic. Requires the common
+    // source engine, at least four distinct unfitted frequencies, available ISA
+    // and optional per-worker scratch. Default-off until complete cost qualifies.
+    bool scheduled_common_simd_experiment=false;
+    // Optional exact per-job target-index proof; unavailable workspace disables
+    // reuse only, preserving every original detector and hypothesis.
+    bool scheduled_common_phase_cache=true;
+    // Separate local-matrix-certified affine FP32 Gram/products diagnostic.
+    // Original FP64 fallback and full guard logic remain; not an exact final
+    // decision certificate and never selected by production entry points.
+    bool scheduled_float_gram_experiment=false;
+    // Exact original-order temporal raw-output batching; paired prototype.
+    // Default-off until complete production cost and preservation qualify it.
+    // FP64 force/original-template reference always retain direct construction.
+    bool scheduled_temporal_template_experiment=false;
 };
 enum class PatternCorrelationBackend { raw, pulse, pulse_moments, pulse_segments, amplitude };
 struct PatternAmplitudeGeometry {
@@ -101,8 +134,50 @@ struct PatternCorrelatorWork {
     std::uint64_t scheduled_carry_samples=0;
     std::uint64_t scheduled_colored_guard_activations=0,scheduled_quarter_guard_fallbacks=0;
     std::uint64_t scheduled_template_constructions=0,scheduled_template_cache_hits=0;
+    std::uint64_t scheduled_float_moment_prepared_samples=0,scheduled_float_moment_preparations=0;
+    std::uint64_t scheduled_float_moment_prepare_fallbacks=0;
+    std::uint64_t scheduled_float_moment_attempts=0,scheduled_float_moment_pieces=0;
+    std::uint64_t scheduled_float_moment_condition_fallbacks=0,scheduled_float_moment_error_fallbacks=0;
+    std::uint64_t scheduled_float_moment_accepted_pairs=0,scheduled_float_moment_fp64_pairs=0,scheduled_float_moment_gram_fallbacks=0;
     std::size_t scheduled_template_cache_peak_bytes=0;
+    std::size_t scheduled_temporal_peak_bytes=0;
+    std::uint64_t scheduled_temporal_attempts=0,scheduled_temporal_ready=0,scheduled_temporal_fallbacks=0;
+    std::uint64_t scheduled_temporal_samples=0,scheduled_temporal_plan_reuses=0,scheduled_temporal_values=0;
+    std::uint64_t scheduled_temporal_shape_terms=0,scheduled_temporal_normalized_reuses=0;
+    std::size_t scheduled_exact_families=0,scheduled_family_groups=0,scheduled_family_metadata_bytes=0;
+    std::uint64_t scheduled_family_dispatches=0,scheduled_family_lanes=0;
+    std::size_t scheduled_common_peak_bytes=0;
+    std::uint64_t scheduled_common_families=0,scheduled_common_lanes=0,scheduled_common_pieces=0,scheduled_common_shapes=0;
+    std::uint64_t scheduled_common_raw_samples=0,scheduled_common_raw_lane_samples=0;
+    std::uint64_t scheduled_common_affine_preparations=0,scheduled_common_affine_lanes=0,scheduled_common_gram_fallbacks=0;
+    // Pair counts are actual evaluations/failures; lanes are logical targets.
+    // mapped_pairs + affine_reused_lanes == mapped_lanes, including rejected
+    // groups. Native diagnostic per-hypothesis counters remain actual calls.
+    std::uint64_t scheduled_common_mapped_pairs=0,scheduled_common_mapped_failed_pairs=0;
+    std::uint64_t scheduled_common_mapped_lanes=0,scheduled_common_affine_reused_lanes=0;
+    // Differing canonical phases are exact-reused only after full flat-block,
+    // private-address/source-coordinate and original-mask preflight succeeds.
+    std::uint64_t scheduled_common_phase_attempts=0,scheduled_common_phase_rejects=0;
+    std::uint64_t scheduled_common_phase_families=0,scheduled_common_phase_lanes=0;
+    // Raw fit pairs are distinct-frequency evaluations; reused lane samples
+    // retain all original independent accumulators and noise observations.
+    std::size_t scheduled_common_raw_peak_bytes=0;
+    std::uint64_t scheduled_common_raw_fit_pairs=0,scheduled_common_raw_reused_lane_samples=0;
+    std::uint64_t scheduled_common_raw_packed_values=0,scheduled_common_raw_workspace_samples=0;
+    std::size_t scheduled_common_simd_peak_bytes=0;
+    unsigned scheduled_common_simd_selected_isa=0; // 0 scalar,1 SSE2,2 AVX2; samples count proves actual use.
+    std::uint64_t scheduled_common_simd_attempts=0,scheduled_common_simd_samples=0,scheduled_common_simd_lane_samples=0;
+    std::uint64_t scheduled_common_simd_packed_values=0,scheduled_common_simd_guard_updates=0,scheduled_common_simd_outer_updates=0;
+    std::uint64_t scheduled_common_simd_short_samples=0,scheduled_common_simd_workspace_samples=0,scheduled_common_simd_isa_samples=0;
+    std::uint64_t scheduled_common_simd_scalar_lane_samples=0;
+    std::uint64_t scheduled_common_phase_address_hits=0,scheduled_common_phase_address_misses=0;
+    std::uint64_t scheduled_common_phase_address_queries=0;
     std::uint64_t amplitude_publication_polls=0,amplitude_unchanged_polls=0;
+    std::uint64_t scheduled_float_gram_attempts=0,scheduled_float_gram_accepted_pairs=0;
+    std::uint64_t scheduled_float_gram_range_fallbacks=0,scheduled_float_gram_rank_fallbacks=0;
+    std::uint64_t scheduled_float_gram_error_fallbacks=0,scheduled_float_gram_helper_fallbacks=0;
+    std::uint64_t scheduled_float_gram_signal_attempts=0;
+    double scheduled_float_gram_maximum_relative_error=0;
 };
 // Finite clock/frequency/start-time hypotheses with streaming sufficient
 // statistics. Storage depends on requested coverage and retained bits, never
@@ -142,6 +217,9 @@ public:
     // Additional allocation bound for one finite PCM push and its next drain.
     // SIZE_MAX disables optional shared preprocessing for unsupported geometry.
     std::size_t projection_cache_headroom(std::size_t input_samples) const;
+    // No allocation: nullopt unsupported, zero eligible but cold/reselecting,
+    // positive only after the original worker and Temporal choices are retained.
+    std::optional<std::size_t> temporal_plan_workers() const;
     void set_workspace_bytes(std::size_t);
     // Release exact, reconstructible worker scratch without touching evidence
     // or promised detectors. Required rolling admissions take priority over it.
@@ -149,6 +227,8 @@ public:
     Diagnostics diagnostics() const;
     PatternCorrelatorWork work() const;
 private:
+    // Definition exists only in the source-inclusion internal regression.
+    friend struct PatternCorrelatorTimingTestAccess;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
