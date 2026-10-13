@@ -440,6 +440,14 @@ void play_transmission(const Args& a, transfer::Options& options, Factory make) 
     }
     output.follow_system_clock=options.clock_sync && audio::utc_follow_supported() &&
         (!options.modem.oscillator_search || options.modem.oscillator_search->reference==modem::OscillatorReference::independent_audio);
+    if(output.follow_system_clock && options.modem.oscillator_search) {
+        const auto& declared=*options.modem.oscillator_search;
+        const auto& reference=declared.reference==modem::OscillatorReference::shared_radio && declared.rf_shift_hz>0?
+            declared.rf:declared.lf;
+        // Operational consistency declaration, not a per-device calibration.
+        // Receiver link-domain/margin accounting remains unchanged.
+        output.clock_timing=audio::ClockTimingPolicy{reference.accuracy_ppm*1e-6,.001,options.clock_sync->accuracy_seconds};
+    }
     output.allow_timing_fallback=options.clock_sync.has_value();
     if(output.follow_system_clock) {
         const auto symbol_seconds=static_cast<double>(modem::symbol_sample_count(timing_config))/timing_config.sample_rate;

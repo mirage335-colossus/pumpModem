@@ -1,4 +1,5 @@
 #include "datapump/sched_hop.hpp"
+#include "datapump/modem.hpp"
 
 #include <algorithm>
 #include <array>
@@ -338,12 +339,123 @@ void test_source_map() {
     rejects([&] { (void)terminal.source_to_physical({last_group*4500,0}); },
             "source inverse returned an unrepresentable complete physical group");
 }
+void test_physical_span_bounds() {
+    Config config;
+    const auto maximum=std::numeric_limits<std::uint64_t>::max();
+    check(scheduled_physical_span_samples(config,maximum)==maximum,
+          "disabled physical-span bound changed the source span");
+    config.scheduled_hopping=std::make_shared<SchedHopPlan>(SchedHopPlan{10,10});
+    check(scheduled_physical_span_samples(config,maximum)==maximum &&
+          scheduled_physical_span_samples(config,0)==0,
+          "continuous/empty physical-span bound gained a quiet interval");
+
+    // An independent walk through adversarial, otherwise valid calendars.
+    // Enumerate every rational 2/5-second boundary residue, all endpoint jitter
+    // choices for M=10, and their extrema for larger M. The point set includes
+    // both sides of active/null boundaries and partial active groups; lengths
+    // include exact source-group endpoints, which must use the LEFT inverse.
+    std::uint64_t comparisons=0;
+    bool attained=false;
+    for(const auto fs:{64U,65U,67U,511U,6120U})
+        for(const auto multiplier:{10U,100U,1000U,10000U})
+            for(const auto active:{1ULL,2ULL,3ULL,static_cast<unsigned long long>(multiplier-1)}) {
+                config.sample_rate=fs;
+                const SchedHopPlan plan{multiplier,active};
+                config.scheduled_hopping=std::make_shared<SchedHopPlan>(plan);
+                const std::uint64_t group=(2ULL*fs/5)*active;
+                const std::uint64_t jitter=(multiplier-active)/2;
+                std::vector<std::uint64_t> draws{0,jitter};
+                if(multiplier==10) {
+                    draws.clear();
+                    for(std::uint64_t j=0;j<=jitter;++j)draws.push_back(j);
+                }
+                for(std::uint64_t residue=0;residue<5;++residue)
+                    for(const auto first:draws)for(const auto last:draws) {
+                        std::array<std::uint64_t,5> starts{};
+                        for(std::size_t q=0;q<starts.size();++q) {
+                            const auto draw=q==0?first:last;
+                            starts[q]=SchedHopSchedule::sample_boundary(
+                                residue+q*multiplier+draw,fs,true);
+                        }
+                        const auto end=starts[0]+group;
+                        const std::array points{starts[0],starts[0]+1,starts[0]+group/2,end-1,
+                            end,end+1,starts[1]-1,starts[1]};
+                        for(const auto length:std::array<std::uint64_t,6>{1,group-1,group,group+1,2*group,2*group+1}) {
+                            const auto bound=scheduled_physical_span_samples(config,length);
+                            const auto old_groups=2+(length-1)/group;
+                            const auto old_frame=(2ULL*fs*multiplier+4)/5;
+                            check(bound<=old_groups*old_frame,
+                                  "tight physical-span bound exceeded the preceding whole-frame bound");
+                            for(const auto begin:points) {
+                                auto position=begin,remaining=length;
+                                std::size_t q=0;
+                                while(remaining) {
+                                    while(q<starts.size() && position>=starts[q]+group)++q;
+                                    check(q<starts.size(),"span oracle exhausted its calendar");
+                                    position=std::max(position,starts[q]);
+                                    const auto take=std::min(remaining,starts[q]+group-position);
+                                    position+=take;remaining-=take;
+                                }
+                                check(position-begin<=bound,
+                                      "physical-span bound excluded an admitted partial/null start");
+                                attained=attained || position-begin==bound;
+                                ++comparisons;
+                            }
+                        }
+                    }
+            }
+    check(comparisons>100000 && attained,"physical-span oracle did not cover boundary/extreme cases");
+
+    // Also exercise the real keyed inverse, so the analytic calendar oracle
+    // does not substitute for testing the implementation's endpoint convention.
+    for(const auto fs:{65U,6120U})for(const auto multiplier:{10U,100U,1000U,10000U})
+        for(const auto active:{1ULL,2ULL,static_cast<unsigned long long>(multiplier-1)})
+            for(const auto delta:{std::uint8_t{0},std::uint8_t{137}}) {
+                config.sample_rate=fs;
+                const SchedHopPlan plan{multiplier,active};
+                config.scheduled_hopping=std::make_shared<SchedHopPlan>(plan);
+                const SchedHopSourceMap map(plan,test_key(delta),fs);
+                const auto group=map.source_samples_per_group();
+                for(std::uint64_t q=1;q<=8;++q) {
+                    const auto start=map.source_to_physical({q*group,0}).sample;
+                    for(const auto begin:{start-1,start,start+group/2,start+group-1,start+group}) {
+                        const auto source=map.locate(begin).source;
+                        for(const auto length:std::array<std::uint64_t,4>{1,group,group+1,2*group}) {
+                            const auto end=map.source_to_physical(source.add_samples(length),true);
+                            check(end.sample-begin<=scheduled_physical_span_samples(config,length),
+                                  "physical-span bound excluded an actual keyed source interval");
+                        }
+                    }
+                }
+            }
+
+    // Products in the unreduced formula exceed uint64 here although its final
+    // answer fits. Exact positive quotient/remainder arithmetic must not reject
+    // them. Conversely, unrepresentable final spans must never wrap.
+    config.sample_rate=65;
+    config.scheduled_hopping=std::make_shared<SchedHopPlan>(SchedHopPlan{10,9});
+    const auto large=maximum/2;
+    const auto groups=1+(large-1)/234;
+    check(scheduled_physical_span_samples(config,large)==large+26*groups,
+          "representable physical span rejected/truncated a wide intermediate");
+    config.sample_rate=64;
+    config.scheduled_hopping=std::make_shared<SchedHopPlan>(SchedHopPlan{10000,9999});
+    const auto count=1+(large-1)/249975;
+    const auto extra=count*6025; // gap=30125, J=0, so ceil(count*gap/5).
+    check(scheduled_physical_span_samples(config,large)==large+extra,
+          "rational-boundary remainder widened or truncated a large span");
+    rejects([&] { (void)scheduled_physical_span_samples(config,maximum); },
+            "unrepresentable final physical span wrapped");
+    config.sample_rate=0;
+    rejects([&] { (void)scheduled_physical_span_samples(config,1); },
+            "empty scheduled source group accepted");
+}
 }
 
 int main() {
     try {
         test_policy();test_draws();test_frozen_vectors();test_separation();test_calendar();
-        test_rational_samples();test_source_map();
+        test_rational_samples();test_source_map();test_physical_span_bounds();
         std::cout << "scheduled-hop primitive tests passed\n";
         return 0;
     } catch (const std::exception& error) {

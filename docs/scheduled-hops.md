@@ -286,6 +286,45 @@ split-symbol reception. Complex only also prohibits this amplitude path.
 full-gain slot does not relax the 64-retained-observation requirement: very fast
 geometries can remain unsupported even when their waveform fits a slot.
 
+### Unavailable receiver versus exhausted workspace
+
+The initial manual launcher opens the ordinary 3,600 Hz rate / 1,500 Hz carrier
+defaults with scheduling disabled. Loading a key and choosing 10 does **not**
+make those defaults eligible for scheduled amplitude reception. At the resolved
+14,400 Hz input rate and eight samples per chip, the default short/long target
+profiles have 1,024/512 sample symbols (71.111/35.556 ms). Even the minimum
+16-sample FFT gives conservative retained counts of only 56/24 after boundary
+allowances, below the required 64. This is a detector limitation, not a shortage
+of DSP workspace. A scheduled complex decoder for such short profiles remains
+unimplemented; changing allocation alone cannot enable them.
+
+Live reception now retains the concrete eligibility or allocation error for
+Automatic selection as well as forced strategies. Unsupported initial banks
+show **receiver search limited**, with `RX unavailable:` and the reason in the
+status detail; partial banks show `RX search incomplete:`. They retain their
+physical sample coordinate and retry at ordinary UTC epoch-admission fences,
+instead of resetting acquisition and retrying on every PCM callback. A valid
+configuration change clears this diagnostic. Actual processing failures that
+discard acquisition state still report **receiver restarted**.
+
+An exact-nominal geometry preflight also reports intrinsically unsupported
+profiles during long null frames. It uses the production private flags and joint
+FHSS guards, but zero frequency/clock/arrival error, so it tests maximum available
+support and minimum spectral margins. Passing is only necessary: actual admission
+still requires the complete configured uncertainty, epoch and workspace checks.
+This preflight does not remove any hypothesis from an admitted receiver.
+
+This eligibility handling also applies to an unsupported forced ordinary
+amplitude profile. A keyed epoch proved to have no admitted active start is
+separately identified as an empty epoch, not a decoder failure. Missing coverage
+revokes any existing capture-omission certificates, including when a quota or
+candidate limitation arises during processing. Unavailable banks cannot admit
+bits, certify skipped capture, or manufacture physical completion. RX eligibility
+details survive transient audio/TX status clearing; an actual TX error retains
+display priority. The snapshot's `receiver_bank_builds` diagnostic counts initial
+construction and subsequent admission refreshes, independently of successful
+receiver admissions.
+
 Search arithmetic remains independent of the schedule. Default and FP32 minimum
 use the demonstrated native FP32 spectral FFT and packed FP32 envelope path,
 with finite-range FP64 transform fallback. FP64 force uses native FP64 FFTs and
@@ -490,37 +529,52 @@ references. The probe-2 instrument source was edited after its receipt, so that
 older receipt does not identify its current instrument bytes. No capture here
 measures sensitivity loss or physical sound-card behavior.
 
-## Native UTC limitation and remaining qualification
+## Native UTC timing and remaining qualification
 
-The native timing controller's generic future rate envelope and the current
-conservative scheduled-span reservation can preclude tight Audio error settings
-at large multipliers. For G1, any positive static outstanding-support reservation
-covers at least two frames, approximately `0.8M` seconds. Using the native
-48 kHz PipeWire minimum timestamp floor and generic future cone gives the
-following optimistic lower bounds; actual queue, timestamp and preparation
-uncertainty can increase them.
+The preceding candidate reserved at least two full frames for any positive
+support and propagated a generic approximately 2,000 ppm clock envelope through
+it. That source-derived forecast required about 327 ms total Audio error at
+100× even before real device uncertainty. It was a controller limitation, not a
+measured sound-card requirement. Its baseline and failed traces remain preserved.
 
-| Multiplier | Minimum static horizon | Minimum total Audio error allowance |
-| --- | --- | --- |
-| 10 | 8 s | 38.6 ms |
-| 100 | 80 s | 327 ms |
-| 1,000 | 800 s | 3.21 s |
-| 10,000 | 8,000 s | 32.1 s |
+For source support `N`, sample rate `Fs`, active group size `G`, multiplier `M`,
+let `H=G*floor(2Fs/5)`, `k=ceil(N/H)` and `J=floor((M-G)/2)`. The new
+key-independent upper bound is
 
-These are source-derived bounds, not measured device requirements. Audio error
-remains causal lag `[0,A]`, with allowed radius `A/2`; it is not an extra
-`±A`. Consequently the current native controller cannot qualify M100 or larger
-with 50/60 ms under this reservation, even with perfect instantaneous phase.
-Mock qualification at 1 ms does not establish hardware support. Continuous G=M
-has no null stretch. A tighter physical-span bound, exact keyed preparation
-horizon and safely retiming within nulls are outstanding possibilities, requiring
-joint calendar, addressing and receiver-coverage proofs. Any preparation fallback
-must remain visibly unqualified and retain full receiver timing coverage;
-ordinary playback is not evidence of GPS-controlled DAC timing.
+`N + ceil(2Fs*(kM+J)/5) - kH`.
+
+Only endpoint jitter remains; interior jitter telescopes. Portable exact
+quotient/remainder arithmetic avoids oversized intermediate products. Empty,
+disabled and continuous schedules remain identities. Runtime already uses the
+exact keyed last valid-payload endpoint, including queued/prefetched samples,
+with the left/end inverse at a group boundary. No transmitted sample changes.
+
+Native forecasts now use the explicitly declared physical-clock envelope, with
+host UTC phase and provider uncertainty handled separately. For an illustrative
+0.147375 s support at 48 kHz and G1, the new maximum horizons are 5.347375,
+59.347375, 599.347375 and 5999.347375 s for 10/100/1k/10k. At an assumed
+100 ppm physical sample clock, their clock-only uncertainty is approximately
+0.535, 5.935, 59.941 and 599.995 ms. At a genuinely disciplined 1 ppb it is
+0.005, 0.059, 0.599 and 5.999 microseconds. These are **analytical bounds**, not
+resolved application geometry, device measurements or full-reception results.
+
+This makes 100× practical within reasonable allowances for eligible ordinary
+clock/provider geometry, and removes the generic-cone obstacle at larger
+multipliers for genuinely disciplined clocks. It does not promise that every
+ordinary sound card qualifies at 1k/10k with Audio50. Selecting GPSDO does not
+provide discipline. Exact-key pre-source preparation and safe null retiming are
+not implemented: see the [timing invariant and capability limits](clock-sync.md#declared-sample-clock-host-utc-phase-and-sparse-schedules).
+
+The source calendar, short-bit deferral, long-symbol splitting and receiver
+statistic remain unchanged. Null time and filter drain still cannot count as
+observed absence. Updated bounds can reduce excess receiver lifetime/clock-bank
+reservations; they never discard an admissible endpoint. Any timing fallback is
+visible and retains full arrival coverage. Preparation success alone does not
+qualify an hours-long reception.
 
 Focused regression fixtures cover the calendar/source map, TX/RX integration,
-joint short-bit slots, controls and fullscreen spectrum. Final affected local
-coverage is 38/38 GUI and 62/63 regular cases; `alsa_audio_contract` retains its
+joint short-bit slots, controls and fullscreen spectrum. The preceding manual
+checkpoint recorded 38/38 GUI and 62/63 regular cases; `alsa_audio_contract` retained its
 clipping-assertion failure, also reproduced by the preceding-baseline control.
 It is a failure, not a skipped or passing case. Exact logs and combined counts
 are in `validation-summary.json` under the artifact directory above; broader
@@ -528,6 +582,35 @@ platform, SDK and hardware qualification remains deferred. The current lifetime 
 requires an explicit coverage error rather than false completion as clock-cell
 uncertainty grows. The preceding amplitude receiver's reported conditional
 sensitivity penalty is not a universal bound.
+
+For this timing follow-up, five mocked native audio runs use Audio50 and a
+compensated 750 ms queue. Disabled/10/100 qualify under the declared 100 ppm
+model; 1k/10k qualify under a genuinely disciplined 1 ppb model. These exercise
+preparation and 0.5 s of native-adapter runtime, not full sparse transmission.
+Accelerated 20,000-second timing trajectories retain the original constraints
+and reject wrong-clock declarations and explicit steps/displacements.
+
+Complete paired Live captures retain identical PCM, media publication and
+completion coordinates. One pair each measured 15.186 to 13.975 CPU seconds
+(M10 tight/G1), 54.552 to 51.392 (M10 broad/G5), and 46.699 to 45.474 (M100
+tight/G1). These single pairs do not establish a speedup confidence interval.
+The M100 capture contains 1,679.116 physical seconds and 17.052 source seconds;
+new cost is 0.0271 CPU seconds per physical second, or 2.667 per source second.
+It still constructs 1,681 rolling banks. The broad case still costs 1.238 CPU
+seconds per physical second. The timing correction does not establish a new
+general real-time ceiling. Every pair adds only 32 bytes to accounted workspace.
+Encrypted TX digests match for DSSS Off/10/100/1000.
+
+Exact timing replay, native mocks, paired builds and final local test receipts
+are linked from `.agent-work/artifacts/sched-utc-20261012/MANUAL-SCHED-UTC.md`.
+The rebuilt timing candidate passed 38/38 GUI and 63/64 local regular cases
+(calibration and native-display labels deferred). The unchanged ALSA clipping
+failure remains: peak 1.00944, 63 clipped samples, energy fraction 2.47619e-8
+against the 1e-8 gate. New sparse native and existing bounded-repair checks
+completed before that assertion. It is still a failure, not qualification.
+Original provider recordings establish no independently measured hardware UTC
+truth; complete Live captures use mocked capture dates and backpressure. No new
+sensitivity difference is inferred from those successful functional runs.
 
 Required remaining qualification includes longer/multi-bit rolling-bank and
 multiple-key execution across broad and qualified tight arrival windows, full

@@ -7,6 +7,9 @@ enum class ReceiverBackend { existing_complex, frequency_axis, amplitude_energy 
 struct ReceiverStrategyPlan {
     ReceiverBackend backend=ReceiverBackend::existing_complex;
     bool supported=true,experimental=false,workspace_limited=false;
+    // No candidate in this particular keyed epoch intersects the arrival
+    // prior. This is proved exclusion, not a missing decoder or quota failure.
+    bool empty_scheduled_epoch=false;
     bool full_frequency_coverage=false,full_clock_coverage=false;
     std::string reason;
     double cpu_budget=0,existing_processing_ratio=0,frequency_axis_processing_ratio=0;

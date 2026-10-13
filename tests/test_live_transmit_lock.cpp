@@ -38,6 +38,7 @@ struct Playback {
     std::atomic<bool> finish{false},hold_drain{false},draining{false},inject_gap{false};
     std::atomic<double> gain{0},timing_rate{0},timing_stop{0},timing_cover{0},xrun_budget{0},xrun_window{0};
     std::atomic<bool> protected_hook{false},payload_forecast_hook{false},inject_protected_stop{false};
+    std::atomic<double> declared_rate{-1},declared_phase{-1};
     std::atomic<std::uint64_t> payload_forecast_end{0};
     std::atomic<bool> emit_capture_once{false};
     std::atomic<bool> exclusive{false};
@@ -148,7 +149,7 @@ void scheduled_tuning_utc() {
     if(!audio::utc_follow_supported())return; // Explicit unsupported host branch.
     // This provider exercises source/physical horizon plumbing only. It does
     // not qualify a real device's UTC rate cone over a long scheduled gap.
-    for(const unsigned multiplier:{10U,1000U})
+    for(const unsigned multiplier:{10U,100U,1000U,10000U})
         for(const bool noise:{false,true})for(const bool accepted:{false,true}) {
             Playback playback;playback.timed_mock=true;playback.timing_accepted=accepted;
             auto value=slow_settings();value.transfer.timestamp=0;
@@ -180,6 +181,8 @@ void scheduled_tuning_utc() {
             check(playback.protected_hook && playback.payload_forecast_hook &&
                   playback.payload_forecast_end<=1+valid_wall,
                   "scheduled message/noise omitted its exact physical valid-payload stop forecast");
+            check(playback.declared_rate==oscillator.lf.accuracy_ppm*1e-6 && playback.declared_phase==.001,
+                  "scheduled source lost or doubled the independent Baseband/GPS timing model");
             check(playback.requested_timing && state.transmit_clock_following==accepted &&
                   state.clock_timing_fallback==!accepted,
                   "scheduled UTC mock acceptance or visible fallback changed");
@@ -276,7 +279,7 @@ void boundary_accounting() {
 void scheduled_timing_and_exposure() {
     // No PCM or whole null interval is allocated: scheduling is random access
     // on the same keyed map used by the transmitter and receiver.
-    for(const std::uint32_t rate:{64U,6120U})for(const unsigned multiplier:{10U,1000U}) {
+    for(const std::uint32_t rate:{64U,6120U})for(const unsigned multiplier:{10U,100U,1000U,10000U}) {
         auto config=slow_settings().transfer.modem;
         config.sample_rate=rate;config.bandwidth_hz=rate/2.;config.carrier_hz=rate/4.;
         config.integration_seconds=2;config.pulse_shaping=false;
@@ -700,6 +703,8 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
     script->gain=options.transmit_gain;script->exclusive=options.exclusive;
     script->timing_rate=options.maximum_timing_rate_correction;script->timing_stop=options.timing_stop_duration_seconds;
     script->timing_cover=options.timing_independent_cover_seconds;
+    script->declared_rate=options.clock_timing?options.clock_timing->sample_rate_half_width_fraction:-1;
+    script->declared_phase=options.clock_timing?options.clock_timing->system_clock_phase_uncertainty_seconds:-1;
     script->xrun_budget=options.reported_xrun_budget_seconds;script->xrun_window=options.reported_xrun_window_seconds;
     script->protected_hook=static_cast<bool>(options.timing_protected_stop);
     script->payload_forecast_hook=static_cast<bool>(options.timing_protected_payload_end);

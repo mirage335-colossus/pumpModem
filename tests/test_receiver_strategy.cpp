@@ -58,6 +58,11 @@ void scheduled_strategy_geometry() {
     const auto p=resolve_receiver_strategy(c,narrow,workspace);
     check(p.scheduled&&p.supported&&p.experimental&&p.backend==ReceiverBackend::amplitude_energy,
           "split schedule did not choose its implemented experimental energy decoder");
+    auto excluded=narrow;
+    excluded.qualified_start_window=PatternStartWindow{-10.L*c.sample_rate,1,0};
+    const auto empty=resolve_receiver_strategy(c,excluded,workspace);
+    check(!empty.supported&&empty.empty_scheduled_epoch&&!empty.workspace_limited,
+          "proved-empty qualified epoch was mislabeled as unavailable receiver coverage");
     check(p.scheduled_frame_hops==10&&p.scheduled_active_hops==1&&
           p.scheduled_effective_multiplier>=10&&p.scheduled_effective_multiplier<10.01&&p.scheduled_frame_seconds==4&&
           p.scheduled_minimum_quiet_seconds==2&&p.scheduled_flat_duty>0&&p.scheduled_flat_duty<.1&&
@@ -99,7 +104,7 @@ void scheduled_strategy_geometry() {
           "null-only UTC epochs inflated the active resident-bank bound with total frame length");
     c.receiver_strategy=ReceiverStrategy::complex_only;
     const auto complex=resolve_receiver_strategy(c,narrow,workspace);
-    check(!complex.supported&&!complex.workspace_limited&&complex.backend!=ReceiverBackend::amplitude_energy&&
+    check(!complex.supported&&!complex.empty_scheduled_epoch&&!complex.workspace_limited&&complex.backend!=ReceiverBackend::amplitude_energy&&
           complex.reason.find("Complex only prohibits amplitude")!=std::string::npos,
           "scheduled Complex only silently selected amplitude or mislabeled a policy prohibition as RAM failure");
     c.receiver_strategy=ReceiverStrategy::existing_only;

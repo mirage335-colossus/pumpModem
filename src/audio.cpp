@@ -182,13 +182,15 @@ public:
                 // cold epoch admission uses the updated system-time mapping.
                 predicted=timeline->predict(converter_->source_seconds()*hardware_);
                 if(options_->timing_status) {
-                    if(predicted->uncertainty_seconds>options_->maximum_utc_error_seconds) {
-                        if(!options_->allow_timing_fallback)throw Error(timing_allowance_reason("capture",predicted->uncertainty_seconds,options_->maximum_utc_error_seconds));
-                        options_->timing_status({false,options_->maximum_utc_error_seconds,predicted->uncertainty_seconds,
-                            timing_allowance_reason("capture",predicted->uncertainty_seconds,options_->maximum_utc_error_seconds)+"; full search retained"});
+                    const auto audio_radius=std::max(predicted->provider_uncertainty_floor_seconds,
+                        predicted->uncertainty_seconds-predicted->system_clock_phase_uncertainty_seconds);
+                    if(audio_radius>options_->maximum_utc_error_seconds) {
+                        if(!options_->allow_timing_fallback)throw Error(timing_allowance_reason("capture",audio_radius,options_->maximum_utc_error_seconds));
+                        options_->timing_status({false,options_->maximum_utc_error_seconds,audio_radius,
+                            timing_allowance_reason("capture",audio_radius,options_->maximum_utc_error_seconds)+"; full search retained"});
                         timing_reported_=true;timed_=false;
                     } else if(!timing_reported_) {
-                        options_->timing_status({true,options_->maximum_utc_error_seconds,predicted->uncertainty_seconds,
+                        options_->timing_status({true,options_->maximum_utc_error_seconds,audio_radius,
                             "Capture timestamp model accepted; peer timing remains assumed"});
                         timing_reported_=true;
                     }
@@ -417,15 +419,15 @@ void refine_timing_period(Alsa& api,Alsa::PCM* pcm,std::uint32_t rate,unsigned c
     unsigned long wanted=std::max(1u,rate/100);
     double reserve=0;
     if(playback && options->timing_stop_duration_seconds>0) {
-        // Reserve the native +/-2000 ppm propagation cone over the protected
-        // tail, queued device frames and two application blocks. Also leave a
-        // period for movement of the pointer phase after source scheduling.
-        // This does not reduce ANY observation radius, assume zero-mean jitter,
-        // or narrow the cone using an oscillator dropdown. Actual resampler
-        // lookahead and observed queue/query uncertainty are checked later.
+        // Reserve the declared physical-clock cone (generic diagnostic cone
+        // when absent) over outstanding valid pulses and known queued frames.
+        // GPS phase error is separate; no raw timestamp radius is reduced.
+        // Actual lookahead, queue position and observations are checked later.
         const auto horizon=((options->timing_stop_duration_seconds-options->timing_independent_cover_seconds)+.1+
             static_cast<double>(buffer)/rate)/(1-options->maximum_timing_rate_correction);
-        reserve=(1./(1.-.002)-1.)*horizon;
+        const auto scale=options->clock_timing?options->clock_timing->seconds_per_nominal_second_bounds():
+            std::pair<long double,long double>{1.L/(1.L+.002L),1.L/(1.L-.002L)};
+        reserve=static_cast<double>(std::max(1-scale.first,scale.second-1)*horizon);
         if(overhead+2.*wanted/rate+reserve>=limit)wanted=std::max(1u,rate/200);
     }
     const auto existing=static_cast<double>(period)/rate+overhead;
@@ -578,20 +580,29 @@ class AlsaTimeline {
         trace::record("timeline",[&](auto& f){f.add("timeline",trace_id_);f.add("hardware_rate",stream_.hardware_rate);
             f.add("playback",playback_);f.add("native",!options_||!options_->frame_timestamp);
             f.add("pipewire",graph_!=nullptr);f.add("rate_limit",.001);f.add("shared_radius",shared_allowance_);
+            f.add("declared_clock",options_&&options_->clock_timing.has_value());
+            if(options_&&options_->clock_timing) {
+                f.add("declared_sample_rate_ppm",options_->clock_timing->sample_rate_half_width_fraction*1e6);
+                f.add("system_clock_slew_ppm",options_->clock_timing->system_clock_slew_fraction*1e6);
+                f.add("system_clock_phase_radius",options_->clock_timing->system_clock_phase_uncertainty_seconds);
+            }
             f.add("prediction",custom?"fitted":"timestamp_intersection");
-            f.add("has_shared_radius",!custom);f.add("persistent",!custom&&(graph_||playback_));f.add("observation_floor",allowance_);
+            f.add("has_shared_radius",!custom);
+            f.add("persistent",(!custom&&(graph_||playback_)) || (options_&&options_->clock_timing.has_value()));
+            f.add("observation_floor",allowance_);
             f.add("estimated_rate",options_&&options_->estimated_timing.has_value());
             if(options_&&options_->estimated_timing)f.add("variable_timestamp_error",options_->estimated_timing->variable_timestamp_error_seconds);});
     }
 public:
     AlsaTimeline(Alsa& api,Stream& stream,const Options* options,bool playback=false,detail::PipeWirePlayback* graph=nullptr):api_(api),stream_(stream),
-        timeline_(stream.hardware_rate),playback_(playback),graph_(graph),options_(options) {
+        timeline_(stream.hardware_rate,.001,UtcTimeline::Prediction::fitted,std::nullopt,false,
+            options?options->clock_timing:std::nullopt),playback_(playback),graph_(graph),options_(options) {
         const auto trace=std::getenv("DATAPUMP_AUDIO_TIMING_TRACE");
         diagnostic_=trace && std::string_view(trace)=="1";
         if(options_ && options_->frame_timestamp){trace_model();return;}
         if(graph_) {
             allowance_=shared_allowance_=detail::pipewire_shared_codec_floor+1./stream.hardware_rate;
-            timeline_=UtcTimeline(stream.hardware_rate,.001,UtcTimeline::Prediction::timestamp_intersection,shared_allowance_,true);
+            timeline_=UtcTimeline(stream.hardware_rate,.001,UtcTimeline::Prediction::timestamp_intersection,shared_allowance_,true,options_->clock_timing);
             trace_model();
             return;
         }
@@ -617,7 +628,8 @@ public:
         // Capture retains its preceding conservative policy/receiver metadata.
         shared_allowance_=(playback_?overhead:allowance_)+1./stream.hardware_rate;
         timeline_=UtcTimeline(stream.hardware_rate,.001,UtcTimeline::Prediction::timestamp_intersection,
-            shared_allowance_,playback_);
+            shared_allowance_,playback_ || (options_ && options_->clock_timing.has_value()),
+            options_?options_->clock_timing:std::nullopt);
         trace_model();
     }
     bool native_playback() const {return playback_ && options_ && !options_->frame_timestamp;}
@@ -637,7 +649,21 @@ public:
     double allowance() const {return allowance_;}
     double period_seconds() const {return variable_allowance_;}
     const UtcTimeline& timeline() const {return timeline_;}
-    std::optional<LinkRateInterval> rate_interval() const {return rate_.interval();}
+    std::optional<LinkRateInterval> rate_interval() const {
+        auto result=rate_.interval();
+        if(result && options_ && options_->clock_timing) {
+            // Pair observations include host UTC phase uncertainty. Intersect
+            // that evidence with the DECLARED physical rate, never mistake a
+            // host-clock correction for a calibrated DAC frequency offset.
+            const auto q=options_->clock_timing->seconds_per_nominal_second_bounds();
+            result->lower=std::max(result->lower,std::nextafter(static_cast<double>(q.first-1),
+                -std::numeric_limits<double>::infinity()));
+            result->upper=std::min(result->upper,std::nextafter(static_cast<double>(q.second-1),
+                 std::numeric_limits<double>::infinity()));
+            if(result->lower>result->upper)throw Error("audio device rate contradicts declared Baseband clock model");
+        }
+        return result;
+    }
     UtcCorrection correction(const TimePrediction& value,long double frame,long double desired,
             double maximum_error,double maximum_rate,double current_rate,const char* point) const {
         trace::record("correction_query",[&](auto& f){f.add("timeline",trace_id_);f.add("point",point);f.add("frame",frame);
@@ -665,6 +691,10 @@ public:
                         " ppm over "+std::to_string(static_cast<double>(rate->duration_seconds))+" s";
                 }
             }
+            if(options_ && options_->clock_timing)query_context+=
+                ", Audio radius="+std::to_string(options_->maximum_utc_error_seconds*1000)+
+                " ms, declared GPS phase radius="+std::to_string(options_->clock_timing->system_clock_phase_uncertainty_seconds*1000)+
+                " ms, declared physical sample rate +/-"+std::to_string(options_->clock_timing->sample_rate_half_width_fraction*1e6)+" ppm";
             throw Error(std::string(error.what())+" ["+point+", hardware="+
                 std::to_string(stream_.hardware_rate)+" Hz, native period="+
                 std::to_string(variable_allowance_*1000)+" ms, prediction horizon="+
@@ -682,7 +712,8 @@ public:
         if(options_ && options_->estimated_timing && (!rate_frame_ || value.frame>*rate_frame_)) {
             rate_.observe({value.frame/stream_.hardware_rate,value.utc_seconds,value.steady_seconds,
                 1./stream_.hardware_rate,
-                variable_allowance_+options_->estimated_timing->variable_timestamp_error_seconds+value.clock_read_uncertainty_seconds,
+                variable_allowance_+options_->estimated_timing->variable_timestamp_error_seconds+value.clock_read_uncertainty_seconds+
+                (options_->clock_timing?options_->clock_timing->system_clock_phase_uncertainty_seconds:0.),
                 value.continuity});
             rate_frame_=value.frame;
         }
@@ -833,9 +864,13 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
     std::vector<std::int16_t> block(chunk_limit*stream.channels);
     std::vector<float> samples(chunk_limit);
     const bool estimated=timed && options->estimated_timing.has_value();
-    // A provider model may tighten the caller's allowance, never enlarge it.
-    const auto timing_error=timed?std::min(options->maximum_utc_error_seconds,
+    // Audio lag and host UTC phase are separate allowances. Predictions carry
+    // their full true-UTC interval. Receiver arrival coverage already includes
+    // the GPS phase bound at both stations; never charge it again as Audio lag.
+    const auto audio_error=timed?std::min(options->maximum_utc_error_seconds,
         estimated?options->estimated_timing->maximum_utc_error_seconds:options->maximum_utc_error_seconds):0.;
+    const auto clock_phase=timed && options->clock_timing?options->clock_timing->system_clock_phase_uncertainty_seconds:0.;
+    const auto timing_error=audio_error+clock_phase;
     if(estimated && !graph && (!api.drop || !api.prepare))throw TimingPreflightUnavailable(
         timing->allowance(),"audio provider cannot restart silence-only UTC preparation");
     const bool preflight=timed && static_cast<bool>(options->timing_status);
@@ -844,13 +879,14 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
     TimingQuality qualified_quality=TimingQuality::estimated;
     const auto report=[&] {
         if(preflight) {
-            options->timing_status({true,timing_error,qualified_uncertainty,
-                options->frame_timestamp?"UTC provider preflight accepted":graph?"Native PipeWire UTC adjustment active; estimated hardware timing; "+graph->realtime_status():"Estimated UTC model accepted; hardware/radio timing remains assumed"});
+            options->timing_status({true,audio_error,std::max(timing->allowance(),qualified_uncertainty-clock_phase),
+                (options->frame_timestamp?"UTC provider preflight accepted":graph?"Native PipeWire UTC adjustment active; estimated hardware timing; "+graph->realtime_status():"Estimated UTC model accepted; hardware/radio timing remains assumed")+
+                (options->clock_timing?"; declared Baseband rate checked as a local consistency assumption":"; generic clock-rate envelope")});
         }
         reported=true;
         report_format(rate,stream.hardware_rate,source.workspace_bytes()+block.capacity()*sizeof(std::int16_t)+samples.capacity()*sizeof(float)+
             (timed?sizeof(AlsaTimeline):0)+(graph?graph->workspace_bytes():0),on_format,timed && (estimated || !options->frame_timestamp),
-            preflight?qualified_uncertainty:timed?timing->allowance():0,timed,
+            preflight?std::max(timing->allowance(),qualified_uncertainty-clock_phase):timed?timing->allowance():0,timed,
             preflight?qualified_quality:TimingQuality::unavailable);
     };
     if(!estimated && !preflight)report();
@@ -998,7 +1034,14 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                         f.add("unshifted_epoch",*detail::utc_playback_epoch);f.add("presentation_lag",options->presentation_lag_seconds);
                         f.add("logical_rate",rate);f.add("hardware_rate",stream.hardware_rate);f.add("fraction",fraction);
                         f.add("source_seconds",source.converter().source_seconds());f.add("reference_rate",reference_rate);
-                        f.add("allowed_radius",timing_error);f.add("correction_limit",options->maximum_timing_rate_correction);
+                        f.add("allowed_radius",timing_error);f.add("audio_radius",audio_error);f.add("system_clock_phase_radius",clock_phase);
+                        f.add("correction_limit",options->maximum_timing_rate_correction);
+                        if(options->clock_timing) {
+                            const auto q=options->clock_timing->seconds_per_nominal_second_bounds();
+                            const auto residual=physical_waveform_rate_interval(reference_rate,q.first,q.second);
+                            f.add("physical_waveform_rate_low_ppm",residual.lower*1e6);
+                            f.add("physical_waveform_rate_high_ppm",residual.upper*1e6);
+                        }
                         f.add("slew_limit",options->maximum_timing_slew_per_second);f.add("stop_duration",options->timing_stop_duration_seconds);});
                     if(options->maximum_timing_rate_correction>0) {
                         const auto origin=source.converter().source_seconds();
@@ -1111,7 +1154,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                             predicted.uncertainty_seconds+.02/rate;
                         trace::record("frontier",[&](auto& f){f.add("timeline",timing->trace_id());f.add("frame",accepted+leading+frames);
                             f.add("ahead_frames",frames);f.add("predicted_utc",predicted.utc_seconds);f.add("desired_utc",desired);
-                            f.add("radius",predicted.uncertainty_seconds);f.add("warp",.02/rate);f.add("bound",result);});
+                            f.add("radius",predicted.uncertainty_seconds);f.add("clock_extrapolation",predicted.clock_extrapolation_seconds);f.add("warp",.02/rate);f.add("bound",result);});
                         return result;
                     };
                     const auto next=static_cast<long double>(samples.size()-leading);

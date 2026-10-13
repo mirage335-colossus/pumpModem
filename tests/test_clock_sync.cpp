@@ -10,6 +10,265 @@
 namespace {
 void require(bool value,const char* message) {if(!value)throw std::runtime_error(message);}
 template<class F> void rejects(F function) {try {function();}catch(const datapump::Error&){return;}throw std::runtime_error("unsafe timing accepted");}
+void declared_clock_timing() {
+    using namespace datapump::audio;
+    constexpr auto mode=UtcTimeline::Prediction::timestamp_intersection;
+    constexpr long double epoch=1800000000.L;
+    constexpr double shared=.0001;
+    for(const auto a:{0.,1e-10,.0001,.0003,.01}) {
+        const ClockTimingPolicy policy{a,.001};
+        const auto [lo,hi]=policy.seconds_per_nominal_second_bounds();
+        require(lo<=1/(1.L+a) && hi>=1/(1.L-a),"declared clock inversion lost an endpoint");
+        require(lo<=1 && hi>=1,"declared clock interval omits nominal rate");
+        if(a==0)require(lo==1 && hi==1,"exact declared clock acquired fictional drift");
+    }
+    for(const auto a:{-1.,1.,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()})
+        rejects([&]{ClockTimingPolicy{a,.001}.validate();});
+    for(const auto slew:{-1.,.0011,std::numeric_limits<double>::infinity()})
+        rejects([&]{ClockTimingPolicy{.0001,slew}.validate();});
+
+    // Whole null frames are not a generic +/-2000 ppm open-loop reservation.
+    // These are conditional policy bounds, not measured sound-card accuracy.
+    UtcTimeline generic(48000,.001,mode,shared,true);
+    UtcTimeline crystal(48000,.001,mode,shared,true,ClockTimingPolicy{.0001,.001});
+    UtcTimeline disciplined(48000,.001,mode,shared,true,ClockTimingPolicy{1e-10,.001});
+    const FrameTimestamp anchor{0,epoch,0,shared,0,TimingQuality::estimated,3};
+    generic.observe(anchor);crystal.observe(anchor);disciplined.observe(anchor);
+    for(const auto seconds:{40.L,80.L,400.L,4000.L}) {
+        const auto old=generic.predict(seconds*48000),c=crystal.predict(seconds*48000),g=disciplined.predict(seconds*48000);
+        require(!old.declared_clock_policy && c.declared_clock_policy && g.declared_clock_policy,
+            "prediction does not expose declared versus generic clock coverage");
+        require(c.uncertainty_seconds<old.uncertainty_seconds/15 &&
+                g.uncertainty_seconds<c.uncertainty_seconds/15,
+            "declared clock forecast retains generic long-frame pessimism");
+        require(c.clock_extrapolation_seconds>=static_cast<double>(seconds*.0001L) &&
+                c.clock_extrapolation_seconds<static_cast<double>(seconds*.000101L),
+            "declared clock extrapolation contribution incorrect");
+        require(c.quality==TimingQuality::estimated && g.quality==TimingQuality::estimated,
+            "declared oscillator upgraded estimated provider metrology");
+        const auto fresh=crystal.predict_without_history(seconds*48000);
+        require(fresh.declared_clock_policy && fresh.uncertainty_seconds==c.uncertainty_seconds,
+            "fresh preparation discarded declared clock policy");
+    }
+
+    // Cover signed constant offsets, query jitter, fractional frames, ring
+    // wrapping, and backward/forward prediction at realistic absolute epochs.
+    for(const auto fs:{8000U,48000U,192000U})for(const auto a:{0.,1e-10,.0001,.0003})
+        for(const auto side:{-1.L,1.L}) {
+            const ClockTimingPolicy policy{a,.001};
+            const auto offset=side*a;
+            const auto q=1/(1+offset);
+            UtcTimeline timeline(fs,.001,mode,shared,true,policy);
+            long double last_frame=0,last_elapsed=0;
+            for(unsigned i=0;i<160;++i) {
+                const auto elapsed=static_cast<long double>(i)*.075L;
+                const auto jitter=static_cast<long double>(static_cast<int>(i%5)-2)*.000025L;
+                const auto frame=fs*(1+offset)*elapsed;
+                timeline.observe({frame,epoch+elapsed+jitter,elapsed,shared+static_cast<double>(std::abs(jitter)),
+                    .0001,TimingQuality::estimated,2});
+                last_frame=frame;last_elapsed=elapsed;
+            }
+            for(const auto horizon:{-.025L,.05L,40.L}) {
+                const auto frame=last_frame+horizon*fs;
+                const auto prediction=timeline.predict(frame);
+                const auto truth=epoch+last_elapsed+horizon*q;
+                require(std::abs(prediction.utc_seconds-truth)<=prediction.uncertainty_seconds,
+                    "declared clock forecast omitted a valid constant-rate trajectory");
+                const auto returned_q=static_cast<long double>(prediction.seconds_per_frame)*fs;
+                const auto [lo,hi]=policy.seconds_per_nominal_second_bounds();
+                require(std::abs(returned_q-lo)<=prediction.rate_uncertainty_fraction &&
+                        std::abs(returned_q-hi)<=prediction.rate_uncertainty_fraction,
+                    "declared rate metadata omits an admitted endpoint");
+            }
+        }
+
+    // A good fit cannot turn a physical range into a claim of no future wander.
+    // Integrate a bounded, smoothly varying physical rate, then take the other
+    // endpoint for an unobserved future interval.
+    UtcTimeline wander(48000,.001,mode,shared,true,ClockTimingPolicy{.0001,.001});
+    long double frames=0,elapsed=0;
+    wander.observe({frames,epoch,elapsed,shared,0,TimingQuality::bounded,1});
+    for(unsigned i=1;i<=180;++i) {
+        const auto offset=.0001L*std::sin(static_cast<long double>(i)*.05L);
+        frames+=48000*.1L*(1+offset);elapsed+=.1L;
+        wander.observe({frames,epoch+elapsed,elapsed,shared,0,TimingQuality::bounded,1});
+    }
+    for(const auto future_offset:{-.0001L,.0001L}) {
+        const auto prediction=wander.predict(frames+48000*40);
+        const auto truth=epoch+elapsed+40/(1+future_offset);
+        require(std::abs(prediction.utc_seconds-truth)<=prediction.uncertainty_seconds,
+            "recent rate fit averaged away allowed future wander");
+    }
+
+    // Wall-versus-steady slew has its own gate. It does not enlarge the sample
+    // envelope when dated samples themselves retain the exact admitted UTC rate.
+    UtcTimeline slew(48000,.001,mode,shared,true,ClockTimingPolicy{0,.001});
+    for(unsigned i=0;i<=100;++i) {
+        const auto steady=static_cast<long double>(i)*.1L;
+        const auto utc=steady*1.0005L;
+        slew.observe({utc*48000,epoch+utc,steady,shared,0,TimingQuality::estimated,7});
+    }
+    const auto before=slew.predict(48000*10.055L);
+    require(before.clock_extrapolation_seconds==0,"system slew became permanent sample drift");
+    rejects([&]{slew.observe({48000*10.105L,epoch+10.115L,10.1L,shared,0,TimingQuality::estimated,7});});
+    require(slew.predict(48000*10.055L).utc_seconds==before.utc_seconds,
+        "rejected wall-clock step mutated admitted timeline");
+
+    // A selected GPSDO envelope cannot conceal a contradictory sound card.
+    UtcTimeline contradiction(48000,.001,mode,.000001,true,ClockTimingPolicy{1e-10,.001});
+    contradiction.observe({0,epoch,0,.000001,0,TimingQuality::estimated,1});
+    rejects([&]{contradiction.observe({48000*100*1.0001L,epoch+100,100,.000001,0,TimingQuality::estimated,1});});
+    // Adjacent observations can individually fit while the ORIGINAL interval
+    // cannot. Preserve that constraint beyond the ring; never restart budgets.
+    UtcTimeline accumulated(48000,.001,mode,.001,true,ClockTimingPolicy{0,.001});
+    accumulated.observe({0,epoch,0,.001,0,TimingQuality::bounded,1});
+    accumulated.observe({48000,epoch+1.0015L,1.0015L,.001,0,TimingQuality::bounded,1});
+    rejects([&]{accumulated.observe({96000,epoch+2.003L,2.003L,.001,0,TimingQuality::bounded,1});});
+    UtcTimeline fitted(48000,.001,UtcTimeline::Prediction::fitted,std::nullopt,false,ClockTimingPolicy{.0001,.001});
+    fitted.observe({0,epoch,0,shared,0,TimingQuality::estimated,1});
+    fitted.observe({48000*1.0001L,epoch+1,1,shared,0,TimingQuality::estimated,1});
+    const auto prediction=fitted.predict(48000*41.0001L);
+    const auto opposite_truth=epoch+1+40/(1-.0001L);
+    require(std::abs(prediction.utc_seconds-opposite_truth)<=prediction.uncertainty_seconds,
+        "fitted declared policy omitted opposite future rate endpoint");
+}
+
+void physical_waveform_rate() {
+    using namespace datapump::audio;
+    // Calibration can remove a physical hardware offset without permitting
+    // that correction magnitude as residual error in the emitted waveform.
+    for(const auto correction:{-.0003,-.0001,0.,.0001,.0003}) {
+        const auto q=1.L+correction;
+        const auto residual=physical_waveform_rate_interval(correction,q,q);
+        require(residual.lower<=0 && residual.upper>=0 &&
+                residual.upper-residual.lower<1e-15,
+            "calibration correction confused with residual waveform rate");
+        const auto raw=physical_waveform_rate_interval(0,q,q);
+        const auto truth=1/q-1;
+        require(raw.lower<=truth && raw.upper>=truth,"waveform-rate endpoint lost on conversion");
+    }
+    const ClockTimingPolicy policy{.0001,.001};
+    const auto [lo,hi]=policy.seconds_per_nominal_second_bounds();
+    for(const auto correction:{-.0001,0.,.0001}) {
+        const auto residual=physical_waveform_rate_interval(correction,lo,hi);
+        for(const auto q:{lo,(lo+hi)/2,hi}) {
+            const auto truth=(1.L+correction)/q-1;
+            require(residual.lower<=truth && residual.upper>=truth,"physical waveform interval is not outward rounded");
+        }
+    }
+    rejects([]{physical_waveform_rate_interval(-1,1,1);});
+    rejects([]{physical_waveform_rate_interval(0,0,1);});
+    rejects([]{physical_waveform_rate_interval(0,2,1);});
+    rejects([]{physical_waveform_rate_interval(std::numeric_limits<double>::infinity(),1,1);});
+    rejects([]{physical_waveform_rate_interval(0,1,std::numeric_limits<long double>::infinity());});
+}
+void bounded_system_utc_phase() {
+    using namespace datapump::audio;
+    constexpr long double epoch=1800000000.L;
+    constexpr double phase=.010,raw=.0002;
+    for(const auto invalid:{-1.,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()})
+        rejects([&]{ClockTimingPolicy{0,.001,invalid}.validate();});
+    // True sample presentation is exact. The host clock moves from -C to +C,
+    // with either an independent steady clock or Linux's jointly slewed wall
+    // and monotonic clocks. Neither trajectory is a physical DAC frequency error.
+    for(const auto mode:{UtcTimeline::Prediction::fitted,UtcTimeline::Prediction::timestamp_intersection})
+        for(const auto joint_slew:{false,true}) {
+            UtcTimeline timeline(48000,.001,mode,
+                mode==UtcTimeline::Prediction::timestamp_intersection?std::optional<double>(raw):std::nullopt,
+                mode==UtcTimeline::Prediction::timestamp_intersection,ClockTimingPolicy{0,.001,phase});
+            for(unsigned i=0;i<=200;++i) {
+                const auto true_time=static_cast<long double>(i)*.1L;
+                const auto host_phase=-static_cast<long double>(phase)+2*phase*i/200;
+                timeline.observe({48000*true_time,epoch+true_time+host_phase,
+                    true_time+(joint_slew?host_phase:0),raw,0,TimingQuality::estimated,4});
+                const auto prediction=timeline.predict(48000*(true_time+.05L));
+                const auto truth=epoch+true_time+.05L;
+                require(std::abs(prediction.utc_seconds-truth)<=prediction.uncertainty_seconds,
+                    "bounded system UTC phase rejected an exact physical sample clock");
+                require(prediction.system_clock_phase_uncertainty_seconds==phase &&
+                        prediction.provider_uncertainty_floor_seconds==raw,
+                    "UTC phase/provider uncertainty decomposition missing");
+                require(prediction.clock_extrapolation_seconds==0 && prediction.rate_uncertainty_fraction<1e-12,
+                    "bounded system UTC phase became permanent DAC rate uncertainty");
+                const auto seen=timeline.observation_uncertainty();
+                require(seen.latest==raw && seen.maximum==raw,
+                    "system UTC phase silently changed retained raw timestamp radii");
+            }
+            const auto last=timeline.predict(48000*20.05L);
+            if(mode==UtcTimeline::Prediction::timestamp_intersection)
+                require(last.uncertainty_seconds<raw+1e-7,
+                    "UTC phase intersection unnecessarily restores a full C floor");
+            // Both modes retain the original phase constraints after >64
+            // observations. An endpoint outside the complete +/-C corridor is
+            // not accepted just because each adjacent difference is small.
+            rejects([&]{timeline.observe({48000*20.1L,epoch+20.1L+2*phase,
+                20.1L+(joint_slew?2*phase:0),raw,0,TimingQuality::estimated,4});});
+            require(timeline.predict(48000*20.05L).utc_seconds==last.utc_seconds,
+                "rejected accumulated phase contradiction changed retained evidence");
+        }
+
+    // The phase envelope is bounded rather than a one-time monotonic slew.
+    // Repeat within it for many history wraps; retain independent query jitter.
+    UtcTimeline cycle(8000,.001,UtcTimeline::Prediction::timestamp_intersection,raw,true,
+        ClockTimingPolicy{.0001,.001,phase});
+    for(unsigned i=0;i<600;++i) {
+        const auto true_time=static_cast<long double>(i)*.1L;
+        const auto host_phase=phase*std::sin(true_time*.05L);
+        const auto query_error=(static_cast<int>(i%3)-1)*.00005L;
+        const auto radius=raw+static_cast<double>(std::abs(query_error));
+        cycle.observe({8000*true_time*1.00005L,epoch+true_time+host_phase+query_error,
+            true_time+host_phase,radius,.0001,TimingQuality::bounded,7});
+        const auto prediction=cycle.predict(8000*(true_time+.1L)*1.00005L);
+        require(std::abs(prediction.utc_seconds-(epoch+true_time+.1L))<=prediction.uncertainty_seconds,
+            "clock wander/UTC phase/query jitter lost a valid true-UTC endpoint");
+        require(prediction.rate_uncertainty_fraction<.0003,
+            "system phase or query jitter permanently widened physical sample rate");
+    }
+    UtcTimeline step(48000,.001,UtcTimeline::Prediction::timestamp_intersection,raw,true,
+        ClockTimingPolicy{0,.001,phase});
+    step.observe({0,epoch,0,raw,0,TimingQuality::estimated,1});
+    rejects([&]{step.observe({4800,epoch+.1L+.04L,.1L,raw,0,TimingQuality::estimated,1});});
+    // A GPS phase allowance is not permission to conceal a sudden wall-clock
+    // step or a displaced frame counter. Keep the trace worker's exact 10 ms,
+    // 480-frame counterexamples: both were previously absorbed by C=10 ms.
+    for(const auto frame_displacement:{false,true}) {
+        UtcTimeline local(48000,.001,UtcTimeline::Prediction::timestamp_intersection,.0001,true,
+            ClockTimingPolicy{0,.001,phase});
+        local.observe({0,epoch,0,.0001,0,TimingQuality::estimated,1});
+        rejects([&]{local.observe({48000*(frame_displacement?.21L:.2L),
+            epoch+(frame_displacement?.2L:.21L),.2L,.0001,0,TimingQuality::estimated,1});});
+        const auto unchanged=local.predict(0);
+        require(std::abs(unchanged.utc_seconds-epoch)<=unchanged.uncertainty_seconds,
+            "rejected local continuity event mutated original UTC evidence");
+    }
+    // A declared C=0 physical rate also remains an ORIGINAL stream constraint
+    // when the caller omits the historical persistent-observations flag.
+    // Each adjacent observation and the final 10.1-second jump fit the rawUi
+    // envelope, but the full 50.1-second four-ppm discrepancy does not.
+    UtcTimeline original(48000,.001,UtcTimeline::Prediction::timestamp_intersection,.0001,false,
+        ClockTimingPolicy{1e-10,.001,0});
+    for(unsigned i=0;i<=400;++i) {
+        const auto time=.1L*i;
+        original.observe({48000*time*1.000004L,epoch+time,time,.0001,0,TimingQuality::estimated,8});
+    }
+    rejects([&]{original.observe({48000*50.1L*1.000004L,epoch+50.1L,50.1L,.0001,0,TimingQuality::estimated,8});});
+
+    // Existing two-field policy initializers retain C=0 exactly, including
+    // fitted diagnostics and the historical generic fallback.
+    for(const auto mode:{UtcTimeline::Prediction::fitted,UtcTimeline::Prediction::timestamp_intersection}) {
+        UtcTimeline implicit(48000,.001,mode,std::nullopt,false,ClockTimingPolicy{.0001,.001});
+        UtcTimeline explicit_zero(48000,.001,mode,std::nullopt,false,ClockTimingPolicy{.0001,.001,0});
+        for(unsigned i=0;i<100;++i) {
+            FrameTimestamp value{4800.L*i,epoch+.1L*i,.1L*i,raw,0,TimingQuality::bounded,1};
+            implicit.observe(value);explicit_zero.observe(value);
+        }
+        const auto a=implicit.predict(48000*10.3L),b=explicit_zero.predict(48000*10.3L);
+        require(a.utc_seconds==b.utc_seconds && a.uncertainty_seconds==b.uncertainty_seconds &&
+                a.seconds_per_frame==b.seconds_per_frame && a.rate_uncertainty_fraction==b.rate_uncertainty_fraction &&
+                a.system_clock_phase_uncertainty_seconds==0 && b.system_clock_phase_uncertainty_seconds==0,
+            "zero phase policy changed existing prediction arithmetic");
+    }
+}
 void native_timestamp_intervals() {
     using namespace datapump::audio;
     constexpr auto mode=UtcTimeline::Prediction::timestamp_intersection;
@@ -381,6 +640,7 @@ void shaped_timing_error(datapump::modem::Config config) {
 }
 }
 int main() {try {
+    declared_clock_timing();physical_waveform_rate();bounded_system_utc_phase();
     native_timestamp_intervals();native_query_uncertainty();native_frozen_source_timing();
     require(datapump::clock_sync::parse_audio_error("default")==.05&&
         datapump::clock_sync::parse_audio_error("Default")==.05&&

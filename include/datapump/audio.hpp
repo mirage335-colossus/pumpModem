@@ -1,6 +1,7 @@
 #pragma once
 #include "datapump/types.hpp"
 #include "datapump/utc_timing.hpp"
+#include "datapump/audio_provider_timing.hpp"
 #include <span>
 #include <stop_token>
 #include <functional>
@@ -138,6 +139,12 @@ struct Options {
     // strict. Reports use timing_status; no source/timestamp state is restarted.
     double reported_xrun_budget_seconds=0;
     double reported_xrun_window_seconds=0;
+    // Optional declared continuous ADC/DAC rate envelope, independent of the
+    // transport, queues, timestamp radii and bounded software-event policy.
+    // Native providers retain estimated quality. A declaration is checked for
+    // consistency; it is not a measurement or hardware discipline command.
+    // Absence preserves the generic diagnostic timing envelope.
+    std::optional<ClockTimingPolicy> clock_timing={};
 };
 // Capabilities belong to the selected audio provider, not the UI or target OS.
 bool exclusive_supported();
@@ -149,6 +156,7 @@ std::string default_device_description();
 double minimum_lead_seconds();
 void schedule_output(double epoch_seconds,std::stop_token stop={});
 inline void validate_options(const Options& options) {
+    if(options.clock_timing)options.clock_timing->validate();
     if(options.allow_timing_fallback && !options.timing_status)
         throw Error("audio timing fallback requires a visible status observer");
     if(!std::isfinite(options.presentation_lag_seconds)||options.presentation_lag_seconds<0||

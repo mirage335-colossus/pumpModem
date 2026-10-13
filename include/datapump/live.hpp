@@ -106,7 +106,7 @@ struct ReceiverHealth {
     std::uint64_t input_overruns = 0;
     std::uint64_t dropped_samples = 0; // Known discarded logical PCM only.
     bool input_interrupted = false; // Device continuity lost or uncertain.
-    bool search_limited = false; // Required coverage/candidate omitted by quota.
+    bool search_limited = false; // Required decoder/coverage unavailable, or quota omitted a candidate.
     bool receiver_reset = false; // Processing error discarded acquisition state.
     bool failed() const noexcept {
         return input_overruns || input_interrupted || search_limited || receiver_reset;
@@ -119,6 +119,8 @@ struct Snapshot {
     // these are instance counts, not distinct keys or accepted messages.
     std::size_t receiver_instances = 0, peak_receiver_instances = 0;
     std::uint64_t receiver_admissions = 0, receiver_retirements = 0;
+    std::uint64_t receiver_bank_builds = 0; // Initial construction plus UTC admission refreshes.
+    std::string receiver_error; // RX eligibility detail, independent of transient/TX errors.
     audio::TimingQuality clock_timing_quality=audio::TimingQuality::unavailable;
     double clock_backend_uncertainty_seconds=0;
     bool clock_window_modeled=false;

@@ -20,10 +20,78 @@ struct FrameTimestamp {
 };
 struct TimePrediction {
     long double utc_seconds=0;
+    // Full physical-event UTC radius W, including the separately declared
+    // system-clock phase allowance C below. Audio-only consumers must remove
+    // C once, while a playback UTC check compares W against Audio/2 + C.
     double uncertainty_seconds=0, seconds_per_frame=0;
     TimingQuality quality=TimingQuality::unavailable;
     double rate_uncertainty_fraction=1;
+    double clock_extrapolation_seconds=0;
+    bool declared_clock_policy=false;
+    double system_clock_phase_uncertainty_seconds=0;
+    double provider_uncertainty_floor_seconds=0;
 };
+
+// An explicit operational assumption about physical samples per UTC second,
+// relative to the nominal sample rate. The GUI's effective relative link
+// envelope is NOT a measured per-device specification. A caller using it for
+// local admission must say so and retain contradictory timestamp evidence.
+// In particular, selecting GPSDO cannot discipline an ordinary sound card.
+// System-clock slew is a separate continuity gate, not permanent sample-clock
+// drift. Neither timestamp query jitter nor known queued latency belongs in A.
+struct ClockTimingPolicy {
+    double sample_rate_half_width_fraction=0;
+    double system_clock_slew_fraction=.001;
+    // A bounded phase error of the station's system UTC estimate, independent
+    // of sample-clock rate. It can move within [-C,+C] while both CLOCK_REALTIME
+    // and CLOCK_MONOTONIC slew together. Never turn this into permanent DAC ppm.
+    double system_clock_phase_uncertainty_seconds=0;
+    void validate() const {
+        if(!std::isfinite(sample_rate_half_width_fraction) ||
+           sample_rate_half_width_fraction<0 || sample_rate_half_width_fraction>=1 ||
+           !std::isfinite(system_clock_slew_fraction) ||
+           system_clock_slew_fraction<0 || system_clock_slew_fraction>.001 ||
+           !std::isfinite(system_clock_phase_uncertainty_seconds) ||
+           system_clock_phase_uncertainty_seconds<0)
+            throw Error("invalid declared audio clock policy");
+    }
+    // q = UTC seconds per nominal frame-second. Preserve both asymmetric
+    // endpoints on inversion; zero admits an exact rate, plus explicit numeric
+    // roundoff at the calculation that needs it, not fictional oscillator drift.
+    std::pair<long double,long double> seconds_per_nominal_second_bounds() const {
+        validate();
+        if(sample_rate_half_width_fraction==0)return {1,1};
+        const auto a=static_cast<long double>(sample_rate_half_width_fraction);
+        return {std::nextafter(1/(1+a),-std::numeric_limits<long double>::infinity()),
+                std::nextafter(1/(1-a), std::numeric_limits<long double>::infinity())};
+    }
+};
+
+struct WaveformRateInterval {
+    double lower=0,upper=0;
+};
+// A resampler advances (1+c) source seconds per nominal hardware second;
+// hardware takes q UTC seconds for that interval. Calibration and residual
+// waveform error are therefore different quantities: residual=(1+c)/q-1.
+// This helper does not certify q, authorize a correction, or bound future wander.
+inline WaveformRateInterval physical_waveform_rate_interval(double correction,
+        long double minimum_q,long double maximum_q) {
+    if(!std::isfinite(correction) || correction<=-1 ||
+       !std::isfinite(minimum_q) || !std::isfinite(maximum_q) ||
+       minimum_q<=0 || maximum_q<minimum_q)
+        throw Error("invalid physical waveform rate interval");
+    // Round each operation outwards, including subtraction near zero. A final
+    // nextafter(double) alone cannot cover long-double cancellation error.
+    constexpr auto infinity=std::numeric_limits<long double>::infinity();
+    const auto scale=1.L+correction;
+    const auto lower=std::nextafter(std::nextafter(std::nextafter(scale,-infinity)/maximum_q,-infinity)-1,-infinity);
+    const auto upper=std::nextafter(std::nextafter(std::nextafter(scale, infinity)/minimum_q, infinity)-1, infinity);
+    if(!std::isfinite(lower) || !std::isfinite(upper) ||
+       lower< -std::numeric_limits<double>::max() || upper>std::numeric_limits<double>::max())
+        throw Error("physical waveform rate interval overflow");
+    return {std::nextafter(static_cast<double>(lower),-std::numeric_limits<double>::infinity()),
+            std::nextafter(static_cast<double>(upper), std::numeric_limits<double>::infinity())};
+}
 
 // A paired hardware link counter and UTC reading measures RATE independently
 // of the unknown codec/radio presentation offset. These bounds cover the mean
@@ -128,15 +196,16 @@ public:
     enum class Prediction { fitted, timestamp_intersection };
     explicit UtcTimeline(std::uint32_t rate,double rate_limit=.001,
             Prediction prediction=Prediction::fitted,std::optional<double> shared_uncertainty=std::nullopt,
-            bool persistent_observations=false)
+            bool persistent_observations=false,std::optional<ClockTimingPolicy> clock_policy=std::nullopt)
         :rate_(rate),rate_limit_(rate_limit),prediction_(prediction),shared_uncertainty_(shared_uncertainty),
-         persistent_observations_(persistent_observations) {
+         persistent_observations_(persistent_observations),clock_policy_(clock_policy) {
         if(!rate || !std::isfinite(rate_limit) || rate_limit<=0 || rate_limit>.001 ||
            (shared_uncertainty_ && (prediction_!=Prediction::timestamp_intersection ||
             !std::isfinite(*shared_uncertainty_) || *shared_uncertainty_<0)))
             throw Error("invalid audio UTC clock model");
         if(persistent_observations_ && prediction_!=Prediction::timestamp_intersection)
             throw Error("persistent observations require timestamp intervals");
+        if(clock_policy_)clock_policy_->validate();
     }
     void observe(FrameTimestamp value) {
         if(!std::isfinite(value.frame) || !std::isfinite(value.utc_seconds) ||
@@ -156,30 +225,76 @@ public:
             // Permit continuous system-clock discipline, but never conceal a
             // wall-clock step by relabelling samples or rewinding their origin.
             const auto clock_error=value.clock_read_uncertainty_seconds+previous.clock_read_uncertainty_seconds;
-            if(std::abs(wall_elapsed-elapsed)>rate_limit_*elapsed+clock_error+1e-9L)
+            const auto system_slew=clock_policy_?clock_policy_->system_clock_slew_fraction:rate_limit_;
+            if(std::abs(wall_elapsed-elapsed)>system_slew*elapsed+clock_error+1e-9L)
                 throw Error("system clock stepped during UTC audio");
-            if(value.frame==previous.frame && !persistent_observations_)return; // historical provider policy
+            if(value.frame==previous.frame && !retains_position())return; // historical provider policy
             const auto duration=(value.frame-previous.frame)/rate_;
-            if(std::abs(duration-wall_elapsed)>2*rate_limit_*wall_elapsed+
-               value.uncertainty_seconds+previous.uncertainty_seconds)
-                throw Error("audio device clock exceeds UTC timing model");
+            if(clock_policy_) {
+                const auto [minimum,maximum]=scale_bounds();
+                const auto rounding=32*std::numeric_limits<long double>::epsilon()*
+                    (std::abs(value.utc_seconds)+std::abs(previous.utc_seconds)+std::abs(duration)+1);
+                // Local continuity is independent of the bounded UTC PHASE C.
+                // A host monotonic clock may itself slew at +/-S relative to
+                // true UTC (Linux can slew wall and monotonic together). Thus
+                // steady duration lies in duration*q*[1-S,1+S], with the FULL
+                // raw provider endpoint errors. C must never hide a sudden
+                // inserted/dropped/displaced frame interval. This is a local
+                // observation check, not an extra future sample-clock cone.
+                const auto slew=static_cast<long double>(system_slew);
+                const auto continuity_rounding=32*std::numeric_limits<long double>::epsilon()*
+                    (std::abs(value.steady_seconds)+std::abs(previous.steady_seconds)+
+                     std::abs(duration)*maximum*(1+slew)+1);
+                const auto continuity_radius=(static_cast<long double>(value.uncertainty_seconds)+
+                    previous.uncertainty_seconds)*(1+slew)+continuity_rounding;
+                if(!std::isfinite(continuity_rounding) || !std::isfinite(continuity_radius))
+                    throw Error("audio frame/steady continuity bound overflow");
+                if(elapsed<duration*minimum*(1-slew)-continuity_radius ||
+                   elapsed>duration*maximum*(1+slew)+continuity_radius)
+                    throw Error("audio frame/steady continuity contradicts the declared rate and software slew bounds");
+                const auto radius=observation_radius(value)+observation_radius(previous)+rounding;
+                if(wall_elapsed<duration*minimum-radius || wall_elapsed>duration*maximum+radius)
+                    throw Error("audio device clock contradicts declared sample-clock envelope");
+            } else if(std::abs(duration-wall_elapsed)>2*rate_limit_*wall_elapsed+
+                      value.uncertainty_seconds+previous.uncertainty_seconds)
+                    throw Error("audio device clock exceeds UTC timing model");
         }
-        // Propagate the unchanged generic clock-rate envelope (including UTC
-        // discipline), and intersect full observation radii. An oscillator GUI
-        // selection must NOT narrow this position bound for an unmeasured DAC.
+        // Propagate the generic envelope unless a caller explicitly selected a
+        // declared operational policy. Intersect FULL observation radii under
+        // either policy; a declared oscillator never overrules a contradiction.
         // Never forget an earlier constraint when the diagnostic ring wraps.
         // No independent/zero-mean jitter assumption or source-origin reset.
         auto position=position_;
-        if(persistent_observations_) {
-            if(!position)position=Position{value.frame,value.utc_seconds,-value.uncertainty_seconds,value.uncertainty_seconds};
+        if(retains_position()) {
+            if(!position)position=Position{value.frame,value.utc_seconds,-observation_radius(value),observation_radius(value)};
             else {
                 const auto [minimum,maximum]=scale_bounds();
                 const auto delta=(value.frame-position->frame)/rate_;
                 const auto center=value.utc_seconds-position->origin;
                 const auto rounding=32*std::numeric_limits<long double>::epsilon()*
                     (std::abs(value.utc_seconds)+std::abs(position->low)+std::abs(position->high)+std::abs(delta)+1);
-                position->low=std::max(position->low+delta*minimum-rounding,center-value.uncertainty_seconds-rounding);
-                position->high=std::min(position->high+delta*maximum+rounding,center+value.uncertainty_seconds+rounding);
+                if(clock_policy_) {
+                    // Propagation uses relative coordinates. Charging an
+                    // epoch-sized subtraction allowance on EVERY propagation
+                    // invents cumulative uncertainty even for an exact DAC.
+                    // Charge it only to the new observation; retain a separate
+                    // bound for relative frame subtraction/division/addition.
+                    const auto propagation_rounding=32*std::numeric_limits<long double>::epsilon()*
+                        (std::abs(value.frame)/rate_+std::abs(position->frame)/rate_+
+                         std::abs(position->low)+std::abs(position->high)+std::abs(delta)*maximum+1);
+                    const auto observation_rounding=32*std::numeric_limits<long double>::epsilon()*
+                        (std::abs(value.utc_seconds)+std::abs(position->origin)+std::abs(center)+
+                         observation_radius(value)+1);
+                    if(!std::isfinite(propagation_rounding) || !std::isfinite(observation_rounding))
+                        throw Error("audio UTC propagation bound overflow");
+                    position->low=std::max(position->low+delta*minimum-propagation_rounding,
+                        center-observation_radius(value)-observation_rounding);
+                    position->high=std::min(position->high+delta*maximum+propagation_rounding,
+                        center+observation_radius(value)+observation_rounding);
+                } else {
+                    position->low=std::max(position->low+delta*minimum-rounding,center-observation_radius(value)-rounding);
+                    position->high=std::min(position->high+delta*maximum+rounding,center+observation_radius(value)+rounding);
+                }
                 if(!std::isfinite(delta) || !std::isfinite(rounding) ||
                    !std::isfinite(position->low) || !std::isfinite(position->high) || position->low>position->high)
                     throw Error("audio UTC observations contradict the clock-rate envelope");
@@ -206,7 +321,7 @@ public:
         // the full residual, and widen extrapolation by the entire rate bound.
         const auto span=latest.frame-points_[count_<points_.size()?0:next_].frame;
         const auto rate_uncertainty=span>0?std::min(2*rate_limit_,2*uncertainty_*rate_/static_cast<double>(span)):2*rate_limit_;
-        if(prediction_==Prediction::timestamp_intersection) {
+        if(prediction_==Prediction::timestamp_intersection || phase_uncertainty()>0) {
             // A quantized native pointer need not lie on its least-squares
             // line. Propagate each observation interval to the requested
             // frame using the admitted rate envelope, then intersect. Any
@@ -225,7 +340,7 @@ public:
             for(std::size_t i=0;i<count_;++i) {
                 const auto delta=(frame-points_[i].frame)/rate_;
                 const auto center=points_[i].utc_seconds-latest.utc_seconds+delta;
-                const auto radius=points_[i].uncertainty_seconds+propagation_rate*std::abs(delta)+roundoff;
+                const auto radius=observation_radius(points_[i])+propagation_rate*std::abs(delta)+roundoff;
                 low=std::max(low,center-radius);high=std::min(high,center+radius);
                 if(!shared_uncertainty_)provider_floor=std::max(provider_floor,points_[i].uncertainty_seconds);
             }
@@ -244,26 +359,53 @@ public:
             // brackets: a single slow query must not make every later query
             // equally uncertain. Its FULL Ui still participates above. Without
             // an explicit decomposition retain the historical largest-Ui floor.
-            const auto radius=std::max((high-low)/2,
+            const auto midpoint=low+(high-low)/2;
+            // Fitted diagnostics retain their center but use the same complete
+            // feasible true-UTC interval. The phase budget is not restarted as
+            // the 64-query ring wraps, nor counted a second time as fit residual.
+            const auto center=prediction_==Prediction::timestamp_intersection?midpoint:
+                origin_+slope_*(frame-center_)-latest.utc_seconds;
+            const auto feasible_radius=prediction_==Prediction::timestamp_intersection?(high-low)/2:
+                std::max(std::abs(center-low),std::abs(high-center));
+            const auto radius=std::max(feasible_radius,
                 provider_floor+propagation_rate*horizon)+roundoff;
             const auto returned_slope=slope_;
             const auto fitted_scale=static_cast<long double>(static_cast<double>(returned_slope))*rate_;
             const auto native_rate_uncertainty=std::max(std::abs(fitted_scale-minimum_scale),
                 std::abs(maximum_scale-fitted_scale))+4*std::numeric_limits<double>::epsilon();
-            return {latest.utc_seconds+low+(high-low)/2,
+            const auto utc=prediction_==Prediction::timestamp_intersection?
+                latest.utc_seconds+low+(high-low)/2:latest.utc_seconds+center;
+            return {utc,
                 std::nextafter(static_cast<double>(radius),std::numeric_limits<double>::infinity()),
                 static_cast<double>(returned_slope),quality_,
-                std::nextafter(static_cast<double>(native_rate_uncertainty),std::numeric_limits<double>::infinity())};
+                std::nextafter(static_cast<double>(native_rate_uncertainty),std::numeric_limits<double>::infinity()),
+                static_cast<double>(propagation_rate*horizon),clock_policy_.has_value(),
+                static_cast<double>(phase_uncertainty()),provider_floor};
+        }
+        if(clock_policy_) {
+            const auto [minimum,maximum]=scale_bounds();
+            const auto fitted_scale=static_cast<long double>(static_cast<double>(slope_))*rate_;
+            const auto propagation_rate=std::max(std::abs(slope_*rate_-minimum),std::abs(maximum-slope_*rate_));
+            const auto uncertainty=std::max(std::abs(fitted_scale-minimum),std::abs(maximum-fitted_scale))+
+                4*std::numeric_limits<double>::epsilon();
+            const auto roundoff=32*std::numeric_limits<long double>::epsilon()*
+                (std::abs(latest.utc_seconds)+std::abs(frame)/rate_+1);
+            return {origin_+slope_*(frame-center_),
+                std::nextafter(static_cast<double>(uncertainty_+propagation_rate*horizon+roundoff),
+                    std::numeric_limits<double>::infinity()),static_cast<double>(slope_),quality_,
+                std::nextafter(static_cast<double>(uncertainty),std::numeric_limits<double>::infinity()),
+                static_cast<double>(propagation_rate*horizon),true,0,provider_uncertainty_floor()};
         }
         return {origin_+slope_*(frame-center_),
-            uncertainty_+static_cast<double>(2*rate_limit_*horizon),static_cast<double>(slope_),quality_,rate_uncertainty};
+            uncertainty_+static_cast<double>(2*rate_limit_*horizon),static_cast<double>(slope_),quality_,rate_uncertainty,
+            0,false,0,provider_uncertainty_floor()};
     }
     // Preparation will stop/restart silence before scheduling private PCM.
     // Its refined phase evidence cannot qualify the new stream's first query.
     // Retain the latest FULL observation radius and the same provider model.
     TimePrediction predict_without_history(long double frame) const {
         if(!count_)throw Error("audio UTC timeline not ready");
-        UtcTimeline fresh(rate_,rate_limit_,prediction_,shared_uncertainty_,persistent_observations_);
+        UtcTimeline fresh(rate_,rate_limit_,prediction_,shared_uncertainty_,persistent_observations_,clock_policy_);
         fresh.observe(points_[(next_+points_.size()-1)%points_.size()]);
         return fresh.predict(frame);
     }
@@ -273,6 +415,7 @@ private:
     Prediction prediction_;
     std::optional<double> shared_uncertainty_;
     bool persistent_observations_;
+    std::optional<ClockTimingPolicy> clock_policy_;
     struct Position {long double frame,origin,low,high;};
     std::optional<Position> position_;
     std::array<FrameTimestamp,64> points_{};
@@ -280,7 +423,25 @@ private:
     long double origin_=0,center_=0,slope_=0;
     double uncertainty_=0;
     TimingQuality quality_=TimingQuality::unavailable;
+    long double phase_uncertainty() const noexcept {
+        return clock_policy_?clock_policy_->system_clock_phase_uncertainty_seconds:0;
+    }
+    long double observation_radius(const FrameTimestamp& point) const noexcept {
+        // Raw Ui is retained verbatim in points_ and inspection metadata.
+        const auto radius=static_cast<long double>(point.uncertainty_seconds)+phase_uncertainty();
+        return phase_uncertainty()>0?std::nextafter(radius,std::numeric_limits<long double>::infinity()):radius;
+    }
+    bool retains_position() const noexcept {
+        return persistent_observations_ || clock_policy_.has_value();
+    }
+    double provider_uncertainty_floor() const noexcept {
+        if(shared_uncertainty_)return *shared_uncertainty_;
+        double floor=0;
+        for(std::size_t i=0;i<count_;++i)floor=std::max(floor,points_[i].uncertainty_seconds);
+        return floor;
+    }
     std::pair<long double,long double> scale_bounds() const {
+        if(clock_policy_)return clock_policy_->seconds_per_nominal_second_bounds();
         return {std::nextafter(1/(1.L+2*rate_limit_),-std::numeric_limits<long double>::infinity()),
                 std::nextafter(1/(1.L-2*rate_limit_), std::numeric_limits<long double>::infinity())};
     }
@@ -296,7 +457,12 @@ private:
             xx+=dx*dx;xy+=dx*(points_[i].utc_seconds-origin_);
         }
         slope_=1.L/rate_;
-        if(xx>0) slope_=std::clamp(xy/xx,(1.L-rate_limit_)/rate_,(1.L+rate_limit_)/rate_);
+        if(xx>0) {
+            if(clock_policy_) {
+                const auto [minimum,maximum]=scale_bounds();
+                slope_=std::clamp(xy/xx,minimum/rate_,maximum/rate_);
+            } else slope_=std::clamp(xy/xx,(1.L-rate_limit_)/rate_,(1.L+rate_limit_)/rate_);
+        }
         uncertainty_=0;quality_=TimingQuality::bounded;
         for(std::size_t i=0;i<count_;++i) {
             uncertainty_=std::max(uncertainty_,points_[i].uncertainty_seconds+

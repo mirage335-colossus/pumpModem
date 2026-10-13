@@ -360,6 +360,7 @@ ReceiverStrategyPlan resolve_receiver_strategy(const Config& c,const PatternSear
             reserved_lanes=lanes;
             if(!lanes) {
                 p.backend=ReceiverBackend::amplitude_energy;p.supported=false;p.experimental=true;
+                p.empty_scheduled_epoch=true;
                 p.selected_processing_ratio=std::numeric_limits<double>::infinity();
                 p.reason="no active scheduled payload anchor intersects this representative key/epoch arrival bank";
                 return p;

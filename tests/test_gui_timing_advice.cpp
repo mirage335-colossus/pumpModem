@@ -1,4 +1,5 @@
 #include "../src/gui/application.hpp"
+#include "../src/gui/controller.hpp"
 #include "../src/gui/receiver_timing_advice.hpp"
 #include "datapump/audio.hpp"
 #include "datapump/crypto.hpp"
@@ -65,6 +66,90 @@ void play(std::span<const float> x,std::uint32_t r,const std::string& d,std::sto
 std::vector<float> record(double,std::uint32_t,const std::string&,std::size_t,std::stop_token,StreamFormatCallback,Options){throw Error("unexpected direct record");}
 std::vector<float> record(double t,std::uint32_t r,const std::string& d,std::size_t m,std::stop_token s,StreamFormatCallback f){return record(t,r,d,m,s,f,{});}
 }
+// Exercise the actual asynchronous capture/decode path, not just persistence.
+// The launcher's short defaults are valid TX profiles but are not eligible for
+// the scheduled amplitude detector. They must not masquerade as exhausted RAM
+// or an acquisition-state reset, nor trigger construction on every PCM block.
+void check_scheduled_initial_unavailability() {
+    using F=ui::Field;
+    struct KeyFixture {
+        std::filesystem::path path=std::filesystem::temp_directory_path()/
+            ("datapump-sched-start-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        ~KeyFixture(){std::error_code ignored;std::filesystem::remove(path,ignored);}
+    } key;
+    create_keyring(key.path,{"Default"});
+    Controller::Options options;
+    options.launch_settings=launch_command::parse("--pattern auto-keystream --sched-hop disabled");
+    options.launch_settings->keyfile=key.path.string();
+    options.launch_settings->key_name="Default";options.launch_settings->tx_key="named";
+    Controller controller(options);controller.start();
+    const auto wait=[&](auto predicate,const char* error) {
+        const auto deadline=std::chrono::steady_clock::now()+5s;
+        do {controller.poll();if(predicate())return;std::this_thread::sleep_for(5ms);}
+        while(std::chrono::steady_clock::now()<deadline);
+        throw Error(std::string(error)+": "+controller.field(F::status).text);
+    };
+    wait([&]{return controller.settings().transfer.key&&controller.snapshot().samples_received>0;},
+         "synthetic keyed capture did not start");
+    const auto before=controller.settings().transfer.modem;
+    const auto before_long=*controller.settings().long_message_modem;
+    controller.select(F::sched_hop,"10");
+    wait([&]{return controller.snapshot().receiver_health.failed();},"unsupported scheduled geometry was hidden");
+    const auto& unavailable=controller.snapshot();
+    std::cout<<"Scheduled default: "<<unavailable.error<<'\n';
+    check(unavailable.error.find("requires64 retained whole FFT observations")!=std::string::npos,
+          "scheduled Auto mode discarded the actual detector eligibility reason");
+    check(unavailable.error.find("no receive profile fits")==std::string::npos&&
+          unavailable.receiver_health.search_limited&&!unavailable.receiver_health.receiver_reset,
+          "initial receiver unavailability was mislabeled as a workspace failure or restart");
+    check(controller.field(F::mode).text.find("search limited")!=std::string::npos,
+          "unsupported scheduled receiver was not visible in the shared GUI");
+    const auto samples=unavailable.samples_received;
+    const auto builds=unavailable.receiver_bank_builds;
+    check(builds>0,"unavailable bank construction was not counted");
+    const auto until=std::chrono::steady_clock::now()+1200ms;
+    do {
+        controller.poll();const auto& state=controller.snapshot();
+        check(!state.receiver_health.receiver_reset&&!state.receiver_health.dropped_samples&&
+              !state.receiver_health.input_overruns&&state.signals.empty()&&state.received.empty()&&
+              state.capture_certified_null_samples==0,
+              "unavailable receiver retried/reset input or manufactured a reception");
+        std::this_thread::sleep_for(5ms);
+    } while(std::chrono::steady_clock::now()<until);
+    check(controller.snapshot().samples_received>samples&&controller.snapshot().receiver_admissions==0,
+          "unsupported receiver stopped input monitoring or admitted an invalid profile");
+    const auto elapsed=static_cast<double>(controller.snapshot().samples_received-samples)/before.sample_rate;
+    check(controller.snapshot().receiver_bank_builds-builds<=static_cast<std::uint64_t>(std::ceil(elapsed))+2,
+          "unavailable bank rebuilt on PCM callbacks instead of UTC admission fences");
+    std::cout<<"Scheduled unavailable: "<<elapsed<<" s monitored, "
+             <<controller.snapshot().receiver_bank_builds-builds<<" bank refreshes, no discarded input\n";
+    const auto& after=controller.settings().transfer.modem;
+    check(after.sample_rate==before.sample_rate&&after.bandwidth_hz==before.bandwidth_hz&&
+          after.carrier_hz==before.carrier_hz&&after.spreading_factor==before.spreading_factor&&
+          modem::symbol_sample_count(after)==modem::symbol_sample_count(before)&&
+          modem::symbol_sample_count(*controller.settings().long_message_modem)==modem::symbol_sample_count(before_long),
+          "scheduling silently altered transmitter geometry to fit its receiver");
+    controller.select(F::sched_hop,"10k");
+    wait([&]{return controller.snapshot().receiver_bank_builds>0&&controller.snapshot().receiver_health.search_limited;},
+         "long scheduled null frame hid unsupported geometry");
+    check(!controller.snapshot().receiver_health.receiver_reset&&
+          controller.snapshot().error.find("requires64 retained whole FFT observations")!=std::string::npos,
+          "long null frame lost the geometry error or restarted input");
+    controller.select(F::sched_hop,"disabled");
+    wait([&]{return controller.snapshot().samples_received>0&&controller.snapshot().receiver_admissions>0;},
+         "ordinary receiver did not recover after disabling scheduling");
+    check(!controller.snapshot().receiver_health.failed()&&controller.snapshot().error.empty(),
+          "unavailability survived a valid reconfiguration");
+    // The same eligibility policy applies when a developer explicitly forces
+    // an unsupported ordinary amplitude profile. It is not a runtime reset.
+    controller.select(F::receiver_strategy,"amplitude");
+    wait([&]{return controller.snapshot().receiver_health.search_limited;},
+         "ordinary forced unsupported decoder was hidden");
+    check(!controller.snapshot().receiver_health.receiver_reset&&controller.snapshot().receiver_instances==0&&
+          controller.snapshot().error.find("16-second symbol")!=std::string::npos,
+          "ordinary eligibility failure lost its specific reason or restarted acquisition");
+    controller.close();wait([&]{return controller.ready_to_close();},"unavailable receiver prevented GUI close");
+}
 void check_advice_envelope() {
     ReceiverTimingAdvice cache;auto now=ReceiverTimingAdvice::Clock::now();
     audio::TimePrediction p;p.uncertainty_seconds=.025;p.seconds_per_frame=(1+1.1e-6)/48000;
@@ -120,6 +205,8 @@ void check_stale_plan(const Launch& launch) {
 }
 int main(int argc,char** argv) {
  try {
+    check_scheduled_initial_unavailability();
+    if(argc>1&&std::string_view(argv[1])=="--sched-hop"){std::cout<<"Scheduled initial availability passed\n";return 0;}
     check_advice_envelope();
     using F=ui::Field;using C=ui::Command;const bool probe=argc>1;
     struct KeyFixture {

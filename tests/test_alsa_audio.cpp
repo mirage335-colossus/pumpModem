@@ -2,6 +2,7 @@
 #include "datapump/resampler.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "datapump/sched_hop.hpp"
 #include "alsa_stub.hpp"
 #include "../src/alsa_plugin_path.hpp"
 #include "../src/pulse_playback.hpp"
@@ -659,6 +660,59 @@ void native_playback_frontiers() {
     },a::ChannelMode::left_mono,options);
     check(status_count==1 && formats==1 && generated==1 && !state.live,
         "long native tail fallback did not finish cleanly");
+    }
+}
+void native_sparse_clock_policy() {
+    // Production ALSA timestamps and queues, virtual paced DAC. These are
+    // preflight + half-second runtime checks, not complete sparse receptions.
+    // Same provider/error budget as the generic reference; only declared rate
+    // and the mathematically bounded outstanding pulse horizon differ.
+    for(const auto multiplier:{1u,10u,100u,1000u,10000u}) {
+        constexpr unsigned fs=8000;
+        f::reset();auto& state=f::state;state.available={"default"};state.supported_rates={fs};
+        state.period_refinement=true;state.period_frames=fs/100;state.buffer_frames=fs*3/4;
+        state.avail_min=fs/40;state.start_threshold=fs/10;state.write_limit=fs/20;
+        auto origin=std::chrono::steady_clock::now();std::size_t accepted=0;bool running=false;
+        state.after_prepare=[&]{accepted=0;running=false;};
+        state.after_write=[&](std::size_t frames) {
+            if(!running){origin=std::chrono::steady_clock::now();running=true;}accepted+=frames;
+            std::this_thread::sleep_until(origin+std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<double>(std::max(.001,static_cast<double>(accepted)/fs-.05))));
+        };
+        state.delay_observation=[&] {
+            const auto raw=static_cast<std::size_t>(std::max(0.L,std::chrono::duration<long double>(
+                std::chrono::steady_clock::now()-origin).count())*fs);
+            return static_cast<long>(accepted-std::min(accepted,(raw/state.period_frames)*state.period_frames));
+        };
+        datapump::modem::Config c;c.sample_rate=fs;
+        if(multiplier>1)c.scheduled_hopping=std::make_shared<datapump::modem::SchedHopPlan>(datapump::modem::SchedHopPlan{multiplier,1});
+        const auto horizon=static_cast<double>(datapump::modem::scheduled_physical_span_samples(c,fs/4))/fs;
+        a::Options options;options.follow_system_clock=true;options.maximum_utc_error_seconds=.025;
+        options.presentation_lag_seconds=.025;options.maximum_timing_rate_correction=3e-10;
+        options.clock_timing=a::ClockTimingPolicy{multiplier<=100?100e-6:1e-9,.001,.01};
+        options.timing_stop_duration_seconds=horizon+3;options.timing_independent_cover_seconds=3;
+        options.estimated_timing=a::EstimatedDeviceTiming{.001,.025,5.};
+        unsigned statuses=0;std::size_t cursor=0;double radius=0;
+        options.timing_status=[&](const auto& status) {
+            ++statuses;radius=status.modeled_uncertainty_seconds;
+            check(status.following_system_clock && status.requested_error_seconds==.025 && radius<=.025,
+                "declared sparse native policy changed Audio50 or silently fell back");
+        };
+        options.timing_protected_stop=[](const auto&){throw std::runtime_error("declared sparse fixture lost headroom");};
+        a::playback(fs,"default",[&](std::span<float> output) {
+            check(statuses==1,"declared sparse source before timing qualification");
+            const auto count=std::min(output.size(),fs/2-cursor);
+            for(std::size_t i=0;i<count;++i)output[i]=.1f*std::sin(2*std::numbers::pi*(cursor+i)/16);
+            cursor+=count;return count;
+        },{},[&](const auto&) {
+            const auto now=std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+            a::schedule_output(now+.15);
+        },a::ChannelMode::left_mono,options);
+        check(cursor==fs/2 && statuses==1 && state.drain_calls==1 && !state.live &&
+            state.buffer_frames==fs*3/4,"sparse timing replayed/truncated PCM or changed known queue capacity");
+        std::cout<<"Declared sparse native: multiplier="<<multiplier<<" support_horizon_s="<<horizon
+            <<" assumed_ppm="<<options.clock_timing->sample_rate_half_width_fraction*1e6
+            <<" audio_radius_ms="<<radius*1000<<" queue_capacity_ms=750 runtime_seconds=0.5\n";
     }
 }
 void native_period_refinement() {
@@ -2469,6 +2523,7 @@ int main(int argc,char** argv){try{
         verbose=std::make_unique<datapump::audio::trace::Scope>(argv[2]);argv[1]=const_cast<char*>("--utc-runtime");argc=2;
     }
     if(argc==2 && std::string(argv[1])=="--scheduled-payload") {scheduled_payload_runtime();return 0;}
+    if(argc==2 && std::string(argv[1])=="--sparse-clock") {native_sparse_clock_policy();return 0;}
     if(argc==2 && std::string(argv[1])=="--pipewire") {native_pipewire_dated_observations();independent_cover_runtime();std::cout<<"Native PipeWire dated observations passed\n";return 0;}
     if(argc==2 && std::string(argv[1])=="--live-debug") {native_source_endpoint_contract();shared_server_timing_fallback();native_prepared_positive_pointer();native_prepared_delay_readiness();return 0;}
     if(argc==2 && std::string(argv[1])=="--absolute-rate") {native_absolute_clock_not_steering_limit();return 0;}
@@ -2486,7 +2541,7 @@ int main(int argc,char** argv){try{
         std::cout<<"Interleave queued UTC playback passed\n";return 0;
     }
     plugin_directories();selected_endpoint();default_shared_routes();
-    native_source_endpoint_contract();shared_server_timing_fallback();native_prepared_positive_pointer();native_absolute_clock_not_steering_limit();native_running_pointer_intervals();native_slow_query_recovers();native_playback_frontiers();
+    native_source_endpoint_contract();shared_server_timing_fallback();native_prepared_positive_pointer();native_absolute_clock_not_steering_limit();native_running_pointer_intervals();native_slow_query_recovers();native_playback_frontiers();native_sparse_clock_policy();
     channel_routing();audio_options();
     f::reset();f::state.available={"default:CARD=Good"};f::state.hints={{"default:CARD=Good",""}};
     rejects([&]{a::play(std::vector<float>(1),48000,"explicit-bad");});

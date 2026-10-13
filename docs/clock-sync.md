@@ -46,9 +46,10 @@ selection uses 50 ms unless an explicit numeric audio allowance is already set.
 With clock sync at Default, the audio allowance does not widen or narrow the
 ordinary search, add oscillator hypotheses or change its modeled CPU cost. With
 custom timing, playback targets the midpoint +25 ms while retaining the immutable
-cryptographic epoch and source coordinates. Its full predicted event interval
-must fit between zero and +50 ms lag: provider uncertainty is NEVER halved.
-Capture retains its physical-event timestamp center and full uncertainty U.
+cryptographic epoch and source coordinates. Its audio-lag interval must fit
+between zero and +50 ms; the separate GPS phase allowance is included once in
+the full true-UTC check described below. Provider uncertainty is NEVER halved.
+Capture retains its physical-event timestamp center and audio uncertainty U.
 Equivalently its upper timestamp edge has a causal lag from zero to 2U; 2U must
 fit the selected Audio error. The search map adds only the TX +25 ms center,
 with TX radius 25 ms plus capture U (conservatively the declared 25 ms), then
@@ -90,8 +91,8 @@ clock mode and explicit timestamp providers keep their existing configuration.
 
 Protected playback additionally considers the stop horizon when selecting the
 period. A timestamp that fits now can still leave too little room for already
-committed pulses, protected cover and shutdown. Selection reserves the full
-native rate cone over the configured stop duration, actual buffer capacity and
+committed pulses and shutdown. Selection reserves the full
+declared physical rate cone over the valid-pulse stop duration, actual buffer capacity and
 100 ms of block reaction allowance, plus one period for pointer-phase movement.
 It requests **5 ms** instead of 10 ms when that setup estimate requires it. This
 is a configuration heuristic, not a timing certificate: actual resampler
@@ -151,23 +152,88 @@ this decomposition retain the historical fitted path/largest-provider allowance.
 Relative UTC arithmetic and outward rounding retain fractional frames at
 contemporary epoch magnitudes.
 
-Native playback also retains one feasible position interval across the entire
-continuous stream. It propagates through the **original generic clock envelope**
-and intersects each complete new observation, including duplicate-frame queries.
-Its relative UTC origin never resets at a block, symbol or 64-point history wrap.
-Contradictions reject before modifying the retained state. This costs fixed
-storage; the original 64-point history remains. Propagation includes continuous
-UTC discipline as well as device-rate uncertainty. The GUI GPSDO model is NOT
-used to tighten this position envelope for an unmeasured device. An oscillator
-selection describes achieved clock performance, which may come from external
-GPS calibration rather than the card's native oscillator. This implementation
-neither adds calibration tones nor verifies any external calibration method.
-The continuity gate bounds nominal duration relative to UTC by `b=2*rate_limit`,
-so propagation uses at least `b/(1-b)` per nominal second. Returned slope
-uncertainty covers the inverted interval `[1/(1+b),1/(1-b)]` around the rounded
-slope. Explicit timestamp providers retain the earlier fitted diagnostic path.
+### Declared sample clock, host UTC phase, and sparse schedules
 
-This corrects a reproduced false stop: three valid period-quantized observations
+The Sched_Hop UTC follow-up separates three independent quantities:
+
+* Physical sample-rate offset `a`, with `|a| <= A` from Baseband Osc. Its UTC
+  duration scale is `q = 1/(1+a)`, including the asymmetric inverse endpoints.
+* Host UTC phase error `C`, the selected per-station GPS/clock accuracy. Every
+  complete raw provider interval `Ui` is propagated as `Ui + C` against true
+  UTC. Bounded host clock adjustments are not persistent DAC frequency error.
+* Provider timestamp uncertainty, queue position and explicit software events.
+  Known queue delay is compensated; it is not added to `Ui` as unknown lag.
+
+The crystal preset's 100 ppm remains the documented **effective relative link**
+model. For native timing it is used once as an explicit local consistency
+assumption, not silently relabeled as measured per-device accuracy. Receiver
+margins and clock hypotheses remain unchanged. GPSDO similarly assumes actual
+achieved sample-clock discipline: choosing it does not calibrate a sound card.
+No additional independent USB crystal term is added. Shared ADC/RF references
+retain their coupled receiver model; the current generic shared-radio route does
+not acquire software steering that would break that coupling.
+
+Native playback and declared-clock capture retain one feasible position interval
+from the original reference across the entire stream, including history wraps
+and null hops. Full observations intersect that interval transactionally; a
+contradiction rejects. The 64-entry diagnostic ring does not restart the budget.
+The fixed-size state checks consistency, not absolute GPS lock. A wrong GPSDO
+selection can remain consistent with broad timestamps for a while before it is
+rejected. Neither a short fit nor a transport name establishes discipline.
+
+`TimePrediction` exposes the **full true-UTC radius W**, the separately declared
+`C`, the raw provider floor, and physical-clock extrapolation. Playback checks
+`|center error| + W <= Audio/2 + C`, while preserving its independent provider
+floor check against `Audio/2`. Audio remains causal `[0,A_audio]`. Capture passes
+`max(provider floor, W-C, 0)` into the existing arrival calculation, which already
+includes both stations' GPS bounds. This keeps every raw provider radius and
+counts GPS uncertainty once; when `W<C` it conservatively overcovers. Paired-rate
+observations include `C` and intersect with the declared physical rate before
+being used for software correction. These intersections remain **assumed**, not
+measured clock certification.
+
+Software correction `c` and residual waveform error differ: the emitted logical
+rate against UTC is `(1+c)/q - 1`. Diagnostics report that interval separately
+from the correction cap. The existing receiver-covered correction domain and
+original affine waveform guard remain; this change does not pretend that an
+ordinary crystal card can be corrected to GPSDO accuracy from noisy timestamps.
+No source coordinate, epoch, sample or accumulated guard is reset or replayed.
+
+The generic approximately 2,000 ppm timeline is retained when no declared policy
+is supplied, including diagnostic reference fixtures. Remaining `.002` bounds
+in the PipeWire adapter concern short local graph/host-clock interpolation and
+bounded interruption corroboration, not a whole sparse-frame oscillator forecast.
+They have not been lowered to make the new tests pass. Existing forward-repair
+energy/time budgets and explicit failure for unbounded discontinuities remain.
+
+`audio_provider_timing.hpp` defines a transport-independent capability contract:
+hardware-dated capture, timestamped playback, exact continuous counters, clock
+lock/holdover, expiring certified future-rate intervals, and bounded lost,
+inserted, repeated or displaced samples. Tests validate the contract and reject
+stale certificates, counter resets, lock loss and unbounded events. The contract
+is an integration foundation; an actual dedicated-radio adapter, end-to-end
+certificate enforcement through device submission, and hardware qualification
+remain outstanding. Ordinary native timestamps remain estimated.
+
+Exact-zero null retiming was investigated but is **not enabled**. The unchanged
+receiver reconstructs one affine physical-time map across all nonzero samples.
+Moving successive bursts by `0, +5 ms, 0` at `0,40,80 s` leaves at least 2.5 ms
+error against every affine map, despite making every adjustment inside zero
+PCM. The current 6120 Hz waveform guard is about 1.634 microseconds. Ordinary
+10–16 ms timestamp radii cannot certify that invariant. A future implementation
+needs final-FIR zero certificates, forward-only advancement/zero holding, and
+precise provider dates validating each resumed nonzero sample against the
+original calendar. Resetting a finite guard at each hop is not a valid substitute.
+
+The tighter scheduled support bound and runtime keyed payload endpoints remove
+unnecessary reservations. A real valid-pulse contribution that spans a long null
+still has to be protected; independent future cover is excluded from that strict
+payload forecast, while its actual emitted blocks retain timing and shaping
+checks. See [scheduled-hop timing](scheduled-hops.md#native-utc-timing-and-remaining-qualification).
+
+### Earlier provider-interval and preparation fixes
+
+The preceding interval-predictor follow-up corrected a reproduced false stop: three valid period-quantized observations
 on a steady 48 kHz clock gave the old fit a 26.2908 ms radius, exceeding the 25 ms
 radius for Audio50. The native interval predictor retains 13.0208 ms of provider
 uncertainty instead of adding the fit residual to it. It does not change the
@@ -229,9 +295,10 @@ transmission then visibly fall back to ordinary playback before private PCM or
 source scheduling. The selected allowance is not enlarged or falsely satisfied.
 Low-level callers remain strict unless they opt in and provide a status observer.
 These are engineering assumptions, not IC-7100 specifications or measurements.
-Native timestamp forecasts retain the generic device/UTC rate envelope (about
-±2000 ppm, including system-clock discipline), independently of the configured
-relative link oscillator. This is not a guarantee against arbitrary wander. Message and
+The preceding candidate retained a generic device/UTC envelope of about
+±2000 ppm. Declared-clock native paths now use the separated physical-rate and
+host-phase model above; low-level callers without a declaration retain the
+generic reference behavior. Neither is a guarantee against arbitrary wander. Message and
 open-ended noise use the same preparation based on their protected stopping
 horizon, including pulse support, useful cover and converter/prefetch allowance.
 They no longer select different timing policies based on known message length.
@@ -581,13 +648,15 @@ prototype installed a larger fitted baseline; review rejected that policy becaus
 its fit error was an uncovered clock/frequency uncertainty, even though strong
 shared-PC duplex runs decoded. That prototype is not the delivered policy.
 
-The preparation retains the complete generic future position cone and protected
-stop horizon; both must fit Audio error. It stops before fresh source scheduling.
+The preparation retains the complete admitted future position cone and valid
+pulse stopping horizon. Declared-clock paths check the combined Audio and GPS
+allowance as described above. It stops before fresh source scheduling.
 The source starts with the **clipped** initial correction installed. The original
 source coordinate, timing origin and affine baseline never reset. The original
 braking invariant and0.01-logical-sample warp limit remain. Stop/terminal forecasts
 include queued PCM, converter support and a conservative device-rate bound;
-position uncertainty retains the generic±approximately2000ppm future cone.
+position uncertainty uses the declared physical-rate cone, or the historical
+approximately ±2000 ppm cone for low-level callers without that declaration.
 Every generated block is checked before submission. Receiver lanes, waveform
 coefficients, cryptographic addresses and source bits are unchanged.
 

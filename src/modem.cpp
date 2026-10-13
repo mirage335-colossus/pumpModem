@@ -393,11 +393,30 @@ std::uint64_t transmit_stop_sample_count(const Config& c) {
 }
 std::uint64_t scheduled_physical_span_samples(const Config& c,std::uint64_t source_samples) {
     if(!source_samples || !scheduled_bursts(c))return source_samples;
-    const auto group=symbol_schedule_detail::multiply(2ULL*c.sample_rate/5,c.scheduled_hopping->group_hops);
+    const auto& plan=*c.scheduled_hopping;
+    plan.validate();
+    const auto twice_rate=2ULL*c.sample_rate;
+    const auto group=symbol_schedule_detail::multiply(twice_rate/5,plan.group_hops);
     check(group!=0,"scheduled source group has no samples");
-    const auto groups=symbol_schedule_detail::add(1,1+(source_samples-1)/group);
-    const auto frame=(2ULL*c.sample_rate*c.scheduled_hopping->time_multiplier+4)/5;
-    return symbol_schedule_detail::multiply(groups,frame);
+    const auto groups=1+(source_samples-1)/group;
+    const auto jitter=(plan.time_multiplier-plan.group_hops)/2;
+    // At most ceil(N/H) quiet intervals can interrupt N source samples, even
+    // when observation starts inside a quiet interval. Across those intervals
+    // the keyed frame offsets telescope: only the endpoint difference (<=J),
+    // not a fresh J per interval, remains. Exact rational hop boundaries give
+    // N + ceil(2*Fs*(groups*M+J)/5) - groups*H. The left inverse at an exact
+    // source-group end excludes the following quiet interval.
+    //
+    // Form the nonnegative extra span before multiplying. Quotient/remainder
+    // decomposition computes ceil((groups*gap+2*Fs*J)/5) exactly, without
+    // overflowing intermediate products when the final uint64 span still fits
+    // and without requiring a compiler-specific 128-bit integer type.
+    using symbol_schedule_detail::add;
+    using symbol_schedule_detail::multiply;
+    const auto gap=twice_rate*plan.time_multiplier-5*group;
+    const auto whole=add(multiply(groups,gap/5),multiply(groups/5,gap%5));
+    const auto fraction=((groups%5)*(gap%5)+twice_rate*jitter+4)/5;
+    return add(source_samples,add(whole,fraction));
 }
 Config scheduled_estimate_config(Config c) {
     if(!scheduled_bursts(c))return c;
