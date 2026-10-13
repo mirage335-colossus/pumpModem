@@ -3,10 +3,13 @@
 #include "datapump/types.hpp"
 #include "datapump/fhss_schedule.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "datapump/sched_hop.hpp"
+#include "datapump/scheduled_symbol_calendar.hpp"
 
 #include <cstdint>
 #include <limits>
 #include <numeric>
+#include <utility>
 
 namespace datapump::modem {
 
@@ -119,13 +122,51 @@ public:
     }
 };
 
+inline bool scheduled_bursts(const Config& config) {
+    return config.scheduled_hopping && config.scheduled_hopping->enabled() && !config.scheduled_hopping->continuous();
+}
+// A paused source coordinate is not periodic under a physical T-sample
+// shift: null plateaus break the ordinary phase/index equivalence. Every
+// physical payload start in its UTC second must remain eligible, even when
+// a scheduled symbol is shorter than one second. Active/keyed pruning is a
+// separate operation; continuous and ordinary profiles keep their old extent.
+inline std::uint64_t canonical_phase_extent(const Config& config) {
+    return scheduled_bursts(config)?static_cast<std::uint64_t>(config.sample_rate):
+        std::min(symbol_sample_count(config),static_cast<std::uint64_t>(config.sample_rate));
+}
 inline bool deferred_symbols(const Config& config) {
-    return config.fake_hopping && config.fake_hopping->defer_symbols;
+    // A split-source schedule owns physical placement; the ordinary FHSS
+    // whole-symbol calendar applies only without scheduled null intervals.
+    return !scheduled_bursts(config) && config.fake_hopping && config.fake_hopping->defer_symbols;
+}
+// Packed starts are exact keyed singleton source slots. Acquisition and its
+// planner enumerate the same actual UTC phases, including empty null epochs;
+// neither builds an all-Fs grid merely because canonical_phase_step is one.
+inline std::uint64_t packed_scheduled_phase_count(const Config& config,std::uint64_t epoch) {
+    if(!packed_scheduled_symbols(config))return 0;
+    const ScheduledSymbolCalendar calendar(config);
+    return calendar.first_rank(symbol_schedule_detail::add(epoch,1),0)-calendar.first_rank(epoch,0);
+}
+template<class Consume>
+inline void for_each_packed_scheduled_phase(const Config& config,std::uint64_t epoch,Consume&& consume) {
+    if(!packed_scheduled_symbols(config))return;
+    const ScheduledSymbolCalendar calendar(config);
+    calendar.for_each_phase_in_epoch(epoch,std::forward<Consume>(consume));
 }
 // UTC pulse omissions distinguish sample phases that previously shared the
 // same private epoch/ordinal. Arrival-window pruning may exclude phases; the
 // cipher-address gcd alone may not. The iterator does not allocate this grid.
 inline std::uint64_t canonical_phase_step(const Config& config) {
+    if(scheduled_bursts(config)) {
+        if(packed_scheduled_symbols(config))return 1;
+        if(config.fake_hopping&&config.fake_hopping->matched_gaps)return 1;
+        const auto floor_hop=2ULL*config.sample_rate/5;
+        const auto ceil_hop=(2ULL*config.sample_rate+4)/5;
+        // Every physical UTC second, active-group edge and symbol boundary is
+        // a multiple of this cell. Fractional hop residues reduce it to one.
+        return std::gcd(std::gcd(symbol_sample_count(config),static_cast<std::uint64_t>(config.sample_rate)),
+            std::gcd(floor_hop,ceil_hop));
+    }
     if(config.fake_hopping && (config.fake_hopping->defer_symbols||config.fake_hopping->matched_gaps))return 1;
     return std::gcd(symbol_sample_count(config),static_cast<std::uint64_t>(config.sample_rate));
 }
@@ -133,19 +174,36 @@ inline std::uint64_t canonical_phase_step(const Config& config) {
 // qualified arrival prior must intersect that cell, not only its representative
 // point. This shares the exact templates without discarding fractional starts.
 inline std::uint64_t canonical_phase_cell_upper(const Config& config,std::uint64_t phase) {
-    const auto limit=std::min(symbol_sample_count(config),static_cast<std::uint64_t>(config.sample_rate))-1;
+    if(packed_scheduled_symbols(config))return phase;
+    const auto limit=canonical_phase_extent(config)-1;
     return phase+std::min(canonical_phase_step(config)-1,limit-std::min(phase,limit));
 }
 inline std::uint64_t scheduled_symbol_offset(const Config& config,std::uint64_t epoch,
         std::uint64_t phase,std::uint64_t index) {
     const auto samples=symbol_sample_count(config);
+    if(scheduled_bursts(config)) {
+        if(!config.data_key)throw Error("scheduled hopping requires an encryption key");
+        if(packed_scheduled_symbols(config)) {
+            const ScheduledSymbolCalendar calendar(config);
+            const auto physical=calendar.physical_slot(symbol_schedule_detail::add(calendar.first_rank(epoch,phase),index));
+            const auto anchor=symbol_schedule_detail::add(symbol_schedule_detail::multiply(epoch,config.sample_rate),phase);
+            if(physical<anchor)throw Error("invalid packed scheduled symbol origin");
+            return physical-anchor;
+        }
+        const SchedHopSourceMap map(*config.scheduled_hopping,*config.data_key,config.sample_rate);
+        const auto anchor=symbol_schedule_detail::add(symbol_schedule_detail::multiply(epoch,config.sample_rate),phase);
+        const auto origin=map.locate(anchor).source;
+        const auto physical=map.source_to_physical(origin.add_samples(symbol_schedule_detail::multiply(index,samples)));
+        if(physical.fraction!=0 || physical.sample<anchor)throw Error("invalid scheduled symbol origin");
+        return physical.sample-anchor;
+    }
     if(!deferred_symbols(config))return symbol_schedule_detail::multiply(index,samples);
     return FhssSymbolCalendar(*config.fake_hopping,config.sample_rate,
         pattern_pulse_padding_samples(config),samples).offset(epoch,phase,index);
 }
 inline SymbolStreamAddress symbol_stream_address(const Config& config,std::uint64_t epoch,
         std::uint64_t phase,std::uint64_t index) {
-    if(!deferred_symbols(config))return symbol_stream_address(epoch,phase,index,
+    if(!scheduled_bursts(config)&&!deferred_symbols(config))return symbol_stream_address(epoch,phase,index,
         symbol_sample_count(config),config.sample_rate);
     const auto offset=scheduled_symbol_offset(config,epoch,phase,index);
     const auto total=symbol_schedule_detail::add(offset,phase);

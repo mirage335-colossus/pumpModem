@@ -16,7 +16,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     case Slot::search_margin: case Slot::clock_accuracy: case Slot::clock_region: case Slot::clock_offset: case Slot::audio_error:
         control.purpose=ControlPurpose::planning;break;
     case Slot::device:case Slot::mono:case Slot::live_duplex:case Slot::exclusive:case Slot::key:case Slot::key_actions:
-    case Slot::dsss_factor:case Slot::dsss_version:case Slot::fhss:
+    case Slot::dsss_factor:case Slot::dsss_version:case Slot::fhss:case Slot::sched_hop:case Slot::sched_frequency_search:
     case Slot::pattern:case Slot::fec:case Slot::dsp_workspace:case Slot::receive_snr:
     case Slot::developer_mode:case Slot::shellcode_mode:case Slot::send_key:
         control.purpose=ControlPurpose::setup;break;
@@ -79,6 +79,9 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::dsss_factor)control.help="Additional private outer DSSS spreading factor, using separate DSSS key/counter domains while retaining independent inner private patterns. Selecting 10x, 100x or 1000x starts at Rate 360, 36 or 3.6 Hz and a 1.5 kHz stream carrier, preserving the usual voice-passband width. Rate remains editable; occupied bandwidth grows with Rate times factor. Experimental waveform; both peers must match. Requires an active encryption key; spreading adds no energy per bit.";
     if(slot==Slot::dsss_version)control.help="Off preserves ordinary private patterns. Interleave spreads their coefficients using the independent DSSS key, then shapes the fine chips. Spreading selects 10x, 100x or 1000x. Imported legacy commands remain an explicit diagnostic waveform. Enter actual average radio power in the link budget; interleaving includes digital headroom before limiting.";
     if(slot==Slot::fhss)control.help="Requires a selected encryption key. Fake FCC/EU illustrate band-specific hopping. Below 800 MHz both use narrow experimental spacing; this is a product convention. Carrier/Shift animate during TX; physical audio frequency and radio tuning stay fixed. Supported geometries shape audio power down at hop boundaries; unsupported ramps are reported. Planner uses the highest illustrated RF. Band/access limits and unsupported profiles appear under Model limits and references. No compliance claim or automatic channel-count gain.";
+
+    if(slot==Slot::sched_hop)control.help="Requires a selected encryption key. Secret UTC active/null bursts normally add 10x, 100x, 1000x or 10000x total time; developer dilution can group more active hops per frame. Payload time pauses during null hops, allowing receiver work to catch up. Capture guards, workspace and decoder limits are included in planning; tight clock sync reduces extra recording.";
+    if(slot==Slot::sched_frequency_search)control.help="Widen the complete oscillator frequency uncertainty by this factor while Sched_Hop is enabled. The planner and receiver retain the resulting hypotheses or report unsupported coverage/workspace; burst idle time does not increase available RAM.";
 
     if(slot==Slot::mode)control.help="Receiver failures stay visible until restart or reconfiguration. Dropped input means the capture queue discarded audio; interrupted input means device continuity was lost or uncertain. Search limited means required coverage or candidates were omitted by a resource limit; restarted means an error reset acquisition. Normal weak-candidate rejection and slow lossless simulation are not failures. See Status for details.";
     if(slot==Slot::paste_previous) {control.font_size=11;control.help="Paste the previous transmitted message back into Message for editing or retransmission.";}
@@ -153,13 +156,23 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.help="Copy to launch with this plan. Paste settings, then Load. Uses this target for short and long messages. Enter inserts a new line.";
     }
     if(control.field==Field::planner_target) {control.document_only=true;control.help="Preview target only: typing or choosing a preset selects a clock/RAM fit for one matching receiver profile, preferring an equal or weaker target. The edit buffer is retained; Enter or a preset shows the exact accepted value. Apply a planner target explicitly to change short or long transmission settings.";}
+    if(control.field==Field::sched_hop_dilution) {
+        control.document_only=true;control.developer_only=true;control.purpose=ControlPurpose::setup;
+        control.help="Group this many consecutive active hops in the selected M-hop frame. Effective time multiplier is M divided by this value; 2 active hops in a 10-hop frame gives 5x. Memory and processing limits are included in planning. Requires Sched_Hop and an encryption key.";
+    }
     if(control.field==Field::search_arithmetic) {
         control.document_only=true;control.developer_only=true;control.purpose=ControlPurpose::setup;
         control.help="Receiver execution only; transmitted waveforms, private patterns and required search coverage are unchanged. Default automatically chooses supported implementations with measured total-execution benefit. FP32 minimum prohibits narrower search operands and retains FP64 fallbacks. FP64 force uses original templates and FP64 search. Exact caching is available at every precision; bounded close-clock interpolation is separately permitted for Default/FP32 minimum. No automatic INT8 path is currently demonstrated; no GPU receiver is implemented. Diagnostics distinguish requested policy, modeled arithmetic and template reuse; full-bank sensitivity remains unqualified.";
     }
+    if(control.field==Field::receiver_strategy||control.field==Field::receiver_cpu_budget) {
+        control.document_only=true;control.developer_only=true;control.purpose=ControlPurpose::setup;
+        control.help=control.field==Field::receiver_strategy?
+            "Receiver algorithms only. Exact complex optimizations use their demonstrated crossover independently of the CPU budget. Automatic may enable experimental amplitude-only detection when complex processing exceeds that budget or cannot cover the declared domain. Existing only disables the new frequency-axis and amplitude decoders. Complex only permits exact complex optimizations but prohibits amplitude-only detection. Amplitude only forces that experimental detector and reports unsupported geometry rather than silently substituting coherent reception. Transmitted samples and framing are unchanged. The planner shows the modeled backend; individual complex batches may fall back after execution-time crossover or workspace checks. Details explain the model and fallback limits.":
+            "Estimated elapsed processing seconds per input audio second, default 0.6. Automatic uses this target to decide whether to enable experimental amplitude-only detection; exact complex optimizations are independent of this budget. It is not aggregate CPU utilization, a deadline guarantee or permission to discard search hypotheses. Enter any finite positive ratio. Forced strategies retain their selection even above this budget.";
+    }
     if(slot==Slot::dsp_workspace)control.help="Upper limit for waveform history and DSP processing, measured at startup and when this choice changes. Storage grows only as useful receiver state needs it. The default is 50% of available RAM. Received messages and files have a separate 256 MiB limit.";
     if(slot==Slot::diagnostics)control.help="Gross modem bitrate followed by the Shannon-Hartley theoretical capacity for an ideal Gaussian-noise channel. Uses the selected nominal Rate as bandwidth B in Hz and the current draft's short or long TX target as C/N0 in dB-Hz: B * log2(1 + 10^(C/N0 / 10) / B). This is a channel capacity estimate; actual payload throughput depends on the modem and coding overhead.";
-    if(slot==Slot::waterfall) {control.footer_height=24;control.click=Command::clear_waterfall;control.help="Click to clear the spectrum history. Simulation uses a 40 dB display range with default receiver noise shown in dark blue. Path loss dims the signal; receiver noise density changes the background. The scale follows sample rate, not signal peaks.";}
+    if(slot==Slot::waterfall) {control.footer_height=24;control.click=Command::toggle_waterfall_expanded;control.help="Click for the fullscreen configured search band with adjacent amplitude/phase columns; Escape or another click restores this environmental view. Clear waterfall clears history separately. Simulation uses a fixed 40 dB range; hardware spans the captured sample rate, including surrounding interference.";}
     if(slot==Slot::waveform) {
         control.footer_height=24;control.wheel_up=Command::zoom_in;control.wheel_down=Command::zoom_out;
         control.double_click=Command::reset_zoom;control.help="Wheel zooms the time span. Double-click resets zoom.";
@@ -214,6 +227,9 @@ const std::vector<Control>& console_screen() {
         placed({Kind::text,Field::planner_target,Command::none,Bitmap::none,Page::planner,3,"Target SNR (dB-Hz)",1,false,64}, Slot::none),
         placed({Kind::text,Field::planner_command,Command::none,Bitmap::none,Page::planner,3,"Launch command",1,true,8192}, Slot::none),
         placed({Kind::choice,Field::search_arithmetic,Command::none,Bitmap::none,Page::planner,4,"Search arithmetic"}, Slot::none),
+        placed({Kind::choice,Field::receiver_strategy,Command::none,Bitmap::none,Page::planner,4,"Receiver strategy"}, Slot::none),
+        placed({Kind::text,Field::receiver_cpu_budget,Command::none,Bitmap::none,Page::planner,4,"CPU budget (s / 1 s)",1,false,64}, Slot::none),
+        placed({Kind::choice,Field::sched_hop_dilution,Command::none,Bitmap::none,Page::planner,4,"Sched_Hop Dilution"}, Slot::none),
         placed({Kind::action,Field::count,Command::open_keyfile,Bitmap::none,Page::console,2,"Open keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::generate_keyfile,Bitmap::none,Page::console,2,"Generate keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::show_key_folder,Bitmap::none,Page::console,2,"Show key folder"}, Slot::key_actions, Menu::keyfile),
@@ -221,6 +237,8 @@ const std::vector<Control>& console_screen() {
         placed({Kind::choice,Field::dsss_factor,Command::none,Bitmap::none,Page::console,3,"Spreading"}, Slot::dsss_factor),
         placed({Kind::choice,Field::dsss_version,Command::none,Bitmap::none,Page::console,3,"DSSS"}, Slot::dsss_version),
         placed({Kind::choice,Field::fhss,Command::none,Bitmap::none,Page::console,3,"FHSS"}, Slot::fhss),
+        placed({Kind::choice,Field::sched_hop,Command::none,Bitmap::none,Page::console,3,"Sched_Hop"}, Slot::sched_hop),
+        placed({Kind::choice,Field::sched_frequency_search,Command::none,Bitmap::none,Page::console,3,"Freq search"}, Slot::sched_frequency_search),
         placed({Kind::choice,Field::key,Command::none,Bitmap::none,Page::console,3,"Encryption key entry"}, Slot::key),
         placed({Kind::label,Field::key_path,Command::none,Bitmap::none,Page::console,3,""}, Slot::key_path),
         placed({Kind::text,Field::device,Command::none,Bitmap::none,Page::console,4,"Audio device"}, Slot::device),

@@ -25,7 +25,7 @@ enum class Field {
     fast_device, fast_mono, fast_volume, fast_exclusive, fast_encryption, fast_key, fast_key_path, fast_source, fast_text, fast_file, fast_status,
     fast_progress, fast_rate, fast_tracking, fast_correction, fast_auth, fast_detail, fast_history, fast_airtime, fast_diagnostics, fast_snr, fast_qr_brightness, fast_files,
     legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_status, legacy_device, legacy_volume, legacy_exclusive, legacy_mono,
-    search_arithmetic, doppler, fhss_list, fhss_list_status, count
+    search_arithmetic, doppler, fhss_list, fhss_list_status, receiver_strategy, receiver_cpu_budget, sched_hop, sched_frequency_search, sched_hop_dilution, count
 };
 enum class Command {
     none, transmit, force_transmit, transmit_noise, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,
@@ -41,12 +41,13 @@ enum class Command {
     planner_power_2mw, planner_power_1mw, planner_power_30uw, planner_power_1uw,
     fast_open_key, fast_generate_key, fast_choose_file, fast_transmit, fast_listen, fast_cancel, fast_save, fast_use_text, fast_clear_received, fast_copy_signal, fast_paste_signal, fast_toggle_qr_expanded,
     legacy_transmit,
-    planner_example_spread, planner_example_weak, planner_example_sub9, planner_example_eme, fhss_apply
+    planner_example_spread, planner_example_weak, planner_example_sub9, planner_example_eme, fhss_apply,
+    toggle_waterfall_expanded
 };
 enum class Bitmap {
     none, qr, waveform, waterfall, constellation, pattern_scores, pattern, pattern_distances,
     pattern_evidence, payload_alphabet, reference_alphabet, fast_waveform, fast_waterfall, fast_constellation, fast_qr,
-    legacy_waterfall
+    legacy_waterfall, waterfall_detail
 };
 enum class ScreenScope { regular, fast, legacy, shared };
 enum class Kind { label, action, toggle, choice, text, list, bitmap };

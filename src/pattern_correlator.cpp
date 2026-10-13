@@ -1,11 +1,18 @@
+#if defined(__SSE2__)
+#include <emmintrin.h>
+#endif
 #include "datapump/pattern_correlator.hpp"
 #include "datapump/pattern_search.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/symbol_schedule.hpp"
+#include "datapump/sched_hop.hpp"
+#include "datapump/scheduled_symbol_calendar.hpp"
 #include "search_parallel.hpp"
 #include "pattern_correlator_batch.hpp"
 #include "pattern_projection_cache.hpp"
+#include "pattern_envelope.hpp"
+#include "search_fft.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -13,6 +20,7 @@
 #include <numbers>
 #include <numeric>
 #include <chrono>
+#include <bit>
 #include <ctime>
 #include <openssl/crypto.h>
 
@@ -71,14 +79,15 @@ struct WorkTimer {
     double& cpu;
     std::chrono::steady_clock::time_point start{};
     std::clock_t cpu_start=0;
-    WorkTimer(bool active,double& seconds,double& cpu_seconds):enabled(active),wall(seconds),cpu(cpu_seconds) {
+    double weight=1;
+    WorkTimer(bool active,double& seconds,double& cpu_seconds,double scale=1):enabled(active),wall(seconds),cpu(cpu_seconds),weight(scale) {
         if(enabled){start=std::chrono::steady_clock::now();cpu_start=std::clock();}
     }
     ~WorkTimer(){finish();}
     void finish() {
         if(!enabled)return;
-        wall+=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();
-        cpu+=static_cast<double>(std::clock()-cpu_start)/CLOCKS_PER_SEC;enabled=false;
+        wall+=weight*std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();
+        cpu+=weight*static_cast<double>(std::clock()-cpu_start)/CLOCKS_PER_SEC;enabled=false;
     }
 };
 }
@@ -90,7 +99,7 @@ struct PatternCorrelator::Impl {
     // Mutable keystream/chip caches belong to one scoring worker. Completions
     // still run in hypothesis order on the caller after these workers finish.
     std::vector<PatternCode> worker_codes;
-    std::size_t budget=0,bit_limit=0,accounted_bytes=0,drift_reserved=0;
+    std::size_t budget=0,bit_limit=0,accounted_bytes=0,drift_reserved=0,amplitude_scratch_reservation=0;
     std::uint64_t sample=0,trials=0;
     std::uint64_t phase_step=1;
     std::size_t alternate_groups=0;
@@ -101,6 +110,45 @@ struct PatternCorrelator::Impl {
     bool finished=false,shaped=false,pulse_segmented=false,guard_chains=false,outer_presence=false,timing_enabled=false,timing_dirty=false;
     PatternCorrelatorOptions options;
     PatternCorrelatorWork work;
+    PatternAmplitudeGeometry amplitude_geometry;
+    // The compact ordinary receiver has a strict small idle footprint. Sparse
+    // calendar state belongs only to scheduled amplitude reception; its object
+    // and every owned allocation are charged to that bank's workspace below.
+    struct ScheduledState {
+        std::unique_ptr<SchedHopSourceMap> map;
+        std::unique_ptr<ScheduledSymbolCalendar> calendar;
+        FhssPowerShape fhss_shape;
+        std::vector<SchedHopCoordinate> anchors;
+        std::vector<long double> observed_begin;
+        std::vector<std::uint64_t> last_accepted;
+        std::vector<std::uint64_t> source_starts;
+        std::uint64_t epoch_sample=0;
+        long double timing_radius=0,clock_radius=0;
+    };
+    std::unique_ptr<ScheduledState> scheduled;
+    SchedHopSourceMap* scheduled_map() const {return scheduled?scheduled->map.get():nullptr;}
+    ScheduledSymbolCalendar* scheduled_calendar() const {return scheduled?scheduled->calendar.get():nullptr;}
+    bool amplitude_publication_dirty=true;
+    std::vector<PatternAmplitudeChannel> amplitude_channels;
+    std::vector<float> amplitude_pcm;
+    std::vector<detail::EnvelopeChannelFit> amplitude_fits;
+    std::vector<detail::EnvelopeTemplateFit> amplitude_templates;
+    struct AmplitudeScratch {
+        std::unique_ptr<detail::search_fft::DoublePlan> plan;
+        std::unique_ptr<detail::search_fft::FloatPlan> float_plan;
+        std::vector<Complex> pcm;
+        std::vector<std::complex<float>> float_pcm;
+        std::vector<long double> spectrum;
+        std::size_t working_bytes()const {
+            return (plan?sizeof(*plan)+plan->working_bytes():0)+
+                (float_plan?sizeof(*float_plan)+float_plan->working_bytes():0)+
+                pcm.capacity()*sizeof(Complex)+float_pcm.capacity()*sizeof(std::complex<float>)+
+                spectrum.capacity()*sizeof(long double);
+        }
+    } amplitude_scratch;
+    std::size_t amplitude_scratch_limit=0;
+    std::size_t amplitude_partial=0;
+    std::uint64_t amplitude_processed=0;
     struct Hypothesis {
         long double origin=0,rate=1;
         std::uint64_t index=0,observed_start=0,phase_lower=0,phase_upper=0;
@@ -117,6 +165,21 @@ struct PatternCorrelator::Impl {
         bool admitted=false,pending_gaps=false;
         std::uint8_t affine_groups=0; // Keep ordinary compact-workspace layout.
     };
+    struct PhaseGroup {std::uint64_t lower=0,upper=0;};
+    struct PhaseGroups {
+        std::array<PhaseGroup,3> small{};
+        std::uint64_t first=0,step=0;
+        PhaseGroup operator[](std::size_t index) const {
+            if(step){const auto phase=first+index*step;return {phase,phase};}
+            return small.at(index);
+        }
+    };
+    struct AmplitudePhaseEntry {
+        PhaseGroups groups;
+        std::uint64_t index=std::numeric_limits<std::uint64_t>::max(),lower=0,upper=0;
+        std::size_t count=0;
+    };
+    std::vector<AmplitudePhaseEntry> amplitude_phases;
     std::vector<Hypothesis> hypotheses;
     struct Emission {
         const Hypothesis* owner=nullptr;
@@ -219,6 +282,39 @@ struct PatternCorrelator::Impl {
     Impl(Config c,PatternSearch search_options,std::size_t bytes,PatternCorrelatorOptions work_options)
         :config(c),search(std::move(search_options)),code(c,c.stream_epoch),budget(bytes),options(work_options) {
         validate(c);
+        if(options.amplitude_only) {
+            if(c.scheduled_hopping && c.scheduled_hopping->enabled() && !c.scheduled_hopping->continuous()) {
+                require(c.data_key.has_value(),"scheduled amplitude reception requires a calendar key");
+                require(c.stream_epoch<=std::numeric_limits<std::uint64_t>::max()/c.sample_rate,
+                    "scheduled UTC epoch exceeds sample coordinates");
+                scheduled=std::make_unique<ScheduledState>();
+                scheduled->epoch_sample=c.stream_epoch*c.sample_rate;
+                scheduled->map=std::make_unique<SchedHopSourceMap>(*c.scheduled_hopping,*c.data_key,c.sample_rate);
+                if(packed_scheduled_symbols(c))scheduled->calendar=std::make_unique<ScheduledSymbolCalendar>(c);
+                if(c.fake_hopping)scheduled->fhss_shape=FhssPowerShape(*c.fake_hopping,c.sample_rate,
+                    pattern_pulse_padding_samples(c),code.symbol_samples());
+            }
+            amplitude_geometry=pattern_amplitude_geometry(c,search);
+            if(!amplitude_geometry.supported)throw Error(amplitude_geometry.reason);
+            amplitude_scratch_reservation=amplitude_geometry.fft_samples*2*sizeof(Complex)+sizeof(detail::search_fft::DoublePlan)+
+                (amplitude_geometry.bin_count+1)*sizeof(long double);
+            amplitude_scratch_limit=amplitude_scratch_reservation;
+            const auto frontend_bytes=static_cast<long double>(amplitude_geometry.fft_samples)*sizeof(float)+amplitude_scratch_reservation;
+            require(frontend_bytes<budget,"amplitude frontend exceeds DSP workspace");
+            search.hypotheses.clear();search.frequency_offsets_hz.clear();search.clock_errors_ppm={0};
+            search.couple_clock_to_carrier=false;search.expand_clock_search=false;
+            search.drift_tolerant=false;search.differential_window_seconds=0;
+            // A single energy frontend covers every declared carrier position.
+            // Its rate bank still covers the entire original clock interval.
+            search.hypotheses.push_back({0,0});
+            for(std::size_t j=1;j<=(amplitude_geometry.clock_hypotheses-1)/2;++j) {
+                const auto ppm=static_cast<double>(j)*amplitude_geometry.clock_step_ppm;
+                search.hypotheses.push_back({0,-ppm});search.hypotheses.push_back({0,ppm});
+            }
+            amplitude_pcm.resize(amplitude_geometry.fft_samples);
+            const auto remainder=search.input_sample_origin%amplitude_geometry.fft_samples;
+            amplitude_processed=remainder?amplitude_geometry.fft_samples-remainder:0;
+        }
         require(!options.measure_affine_work || search.worker_threads==1,
                 "detailed affine work timing requires one scoring worker");
         drift_sections=detail::drift_section_count(c,search.drift_tolerant);
@@ -231,16 +327,16 @@ struct PatternCorrelator::Impl {
             block_samples=32;
         }
         const std::size_t point_capacity=search.compact_clock_search?64:2048;
-        phase_step=canonical_phase_step(c);
+        phase_step=scheduled_map()?amplitude_geometry.receiver_phase_step_samples:canonical_phase_step(c);
         const auto phase_upper=search.search_stream_phases && (c.scramble || c.dsss)?
-            (std::min(code.symbol_samples(),static_cast<std::uint64_t>(c.sample_rate))-1)/phase_step*phase_step:
+            (canonical_phase_extent(c)-1)/phase_step*phase_step:
             c.stream_phase_samples;
         const auto phase_lower=search.search_stream_phases && (c.scramble || c.dsss)?0:c.stream_phase_samples;
-        if(phase_lower<phase_upper)alternate_groups=c.fake_hopping&&c.fake_hopping->matched_gaps?
+        if(!scheduled_map() && phase_lower<phase_upper)alternate_groups=c.fake_hopping&&c.fake_hopping->matched_gaps?
             (phase_upper-phase_lower)/phase_step:(code.symbol_samples()>=c.sample_rate?1:2);
         shaped=pattern_pulse_enabled(c);
         require(c.pattern_symbols,"streaming pattern correlator requires binary pattern transport");
-        require(!deferred_symbols(c),"deferred FHSS requires the calendar-aware FFT receiver workspace");
+        require(scheduled_map() || !deferred_symbols(c),"deferred FHSS requires the calendar-aware FFT receiver workspace");
         require(search.start_offset_seconds && std::isfinite(*search.start_offset_seconds) &&
                 std::isfinite(search.start_uncertainty_seconds) && search.start_uncertainty_seconds>=0,
                 "long pattern correlation requires a finite system-clock start window");
@@ -304,18 +400,106 @@ struct PatternCorrelator::Impl {
         const auto lower=(static_cast<long double>(*search.start_offset_seconds)-search.start_uncertainty_seconds)*c.sample_rate;
         const auto upper=(static_cast<long double>(*search.start_offset_seconds)+search.start_uncertainty_seconds)*c.sample_rate;
         origin_lower=lower;
+        if(scheduled_map()) {
+            scheduled->timing_radius=lower<upper?code.chip_samples()/(4.L*amplitude_geometry.receiver_timing_subdivisions):0;
+            scheduled->clock_radius=(amplitude_geometry.clock_hypotheses>1?
+                amplitude_geometry.clock_step_ppm/2:amplitude_geometry.clock_half_width_ppm)*1e-6L;
+        }
         require(std::isfinite(lower) && std::isfinite(upper) && std::abs(lower)<1e15L && std::abs(upper)<1e15L,
                 "clock start window exceeds precise sample-coordinate range");
         const auto step=std::max(1.L,std::floor(static_cast<long double>(code.chip_samples())/(2*highest_rate)));
         const auto pair_count=paired?search.hypotheses.size():search.frequency_offsets_hz.size()*search.clock_errors_ppm.size();
         const auto origin_step=[&](long double ratio) {
-            return paired?static_cast<long double>(code.chip_samples())/(2*ratio):step;
+            const auto original=paired?static_cast<long double>(code.chip_samples())/(2*ratio):step;
+            return scheduled_map()?original/amplitude_geometry.receiver_timing_subdivisions:original;
         };
+        const auto phase_bounds=[&](long double origin,long double previous,long double next) {
+            auto lo=phase_lower,hi=phase_upper;
+            if(qualified) {
+                const auto cell_lower=(previous+origin)/2,cell_upper=(origin+next)/2;
+                const auto pad=64*std::numeric_limits<long double>::epsilon()*
+                    std::max({1.L,std::abs(cell_lower),std::abs(cell_upper),
+                        std::abs(qualified->epoch_origin_samples),qualified->half_width_samples});
+                auto a=(cell_lower-qualified->epoch_origin_samples-qualified->half_width_samples-pad)/qualified->phase_scale;
+                auto b=(cell_upper-qualified->epoch_origin_samples+qualified->half_width_samples+pad)/qualified->phase_scale;
+                const auto cell_width=search.search_stream_phases?
+                    (scheduled_map()?amplitude_geometry.receiver_phase_step_samples-1:
+                        canonical_phase_cell_upper(config,phase_upper)-phase_upper):0;
+                a-=cell_width;
+                if(a>phase_upper || b<phase_lower)return std::optional<PhaseGroup>{};
+                a=std::clamp(a,static_cast<long double>(phase_lower),static_cast<long double>(phase_upper));
+                b=std::clamp(b,static_cast<long double>(phase_lower),static_cast<long double>(phase_upper));
+                const auto first=std::ceil((a-phase_lower)/phase_step),last=std::floor((b-phase_lower)/phase_step);
+                if(first>last)return std::optional<PhaseGroup>{};
+                lo=phase_lower+static_cast<std::uint64_t>(first)*phase_step;
+                hi=phase_lower+static_cast<std::uint64_t>(last)*phase_step;
+            }
+            return std::optional<PhaseGroup>{{lo,hi}};
+        };
+        std::vector<PhaseGroup> scheduled_phases;
+        if(scheduled_calendar()) {
+            // The transmitter may begin only at exact global packed slots.
+            // Guard offsets need not align with the old cipher-address gcd.
+            // Enumerate actual starts, never every sample or elapsed frame.
+            std::size_t size=0;
+            scheduled_calendar()->for_each_phase_in_epoch(config.stream_epoch,[&](std::uint64_t phase) {
+                if(phase>=phase_lower && phase<=phase_upper)++size;
+            });
+            require(size<=bytes/sizeof(PhaseGroup),"scheduled packed phase list exceeds DSP workspace");
+            scheduled_phases.reserve(size);
+            scheduled_calendar()->for_each_phase_in_epoch(config.stream_epoch,[&](std::uint64_t phase) {
+                if(phase>=phase_lower && phase<=phase_upper)scheduled_phases.push_back({phase,phase});
+            });
+        } else if(scheduled_map()) {
+            scheduled_phases.reserve(8);
+            auto cursor=SchedHopCoordinate{scheduled->epoch_sample,0}.add_samples(phase_lower);
+            const auto last=SchedHopCoordinate{scheduled->epoch_sample,0}.add_samples(phase_upper);
+            while(cursor.distance(last)<=0) {
+                const auto group=scheduled_map()->locate(cursor);
+                if(!group.active) {
+                    const auto next=scheduled_map()->source_to_physical(group.source,false);
+                    if(next.distance(cursor)<=0)throw Error("scheduled phase inverse did not advance");
+                    cursor=next;if(cursor.distance(last)>0)break;
+                    continue;
+                }
+                const auto low=std::max<std::uint64_t>(phase_lower,group.physical_begin>scheduled->epoch_sample?
+                    group.physical_begin-scheduled->epoch_sample:0);
+                const auto high=std::min<std::uint64_t>(phase_upper,group.physical_end-1-scheduled->epoch_sample);
+                const auto first=phase_lower+(low-phase_lower+phase_step-1)/phase_step*phase_step;
+                const auto end=phase_lower+(high-phase_lower)/phase_step*phase_step;
+                if(first<=end) {
+                    require(scheduled_phases.size()<8,"scheduled active phase union exceeds bounded capacity");
+                    scheduled_phases.push_back({first,end});
+                }
+                cursor={group.physical_end,0};
+            }
+        }
         long double total=0;
         for(std::size_t pair=0;pair<pair_count;++pair) {
             const auto ppm=paired?search.hypotheses[pair].clock_error_ppm:
                 search.clock_errors_ppm[pair/search.frequency_offsets_hz.size()];
-            total+=std::ceil((upper-lower)/origin_step(1+static_cast<long double>(ppm)*1e-6L))+1;
+            const auto step=origin_step(1+static_cast<long double>(ppm)*1e-6L);
+            const auto origins=std::ceil((upper-lower)/step)+1;
+            if(!scheduled_map()){total+=origins;continue;}
+            // A sparse warp can move two canonical phases across different
+            // source-symbol boundaries. Retain independent phase state rather
+            // than incorrectly sharing one index through a null plateau.
+            require(origins<=10000000,"scheduled timing preflight exceeds its bounded enumeration");
+            if(!qualified) {
+                for(std::size_t g=0;g<scheduled_phases.size();++g)
+                    total+=origins*((scheduled_phases[g].upper-scheduled_phases[g].lower)/phase_step+1);
+                continue;
+            }
+            for(std::uint64_t i=0;i<origins;++i) {
+                const auto at=std::min(upper,lower+i*step);
+                const auto previous=i?std::min(upper,lower+(i-1)*step):lower;
+                const auto next=i+1<origins?std::min(upper,lower+(i+1)*step):upper;
+                if(const auto phases=phase_bounds(at,previous,next))for(std::size_t g=0;g<scheduled_phases.size();++g) {
+                    const auto lo=std::max(phases->lower,scheduled_phases[g].lower);
+                    const auto hi=std::min(phases->upper,scheduled_phases[g].upper);
+                    if(lo<=hi)total+=(hi-lo)/phase_step+1;
+                }
+            }
         }
         const auto bank_count=c.spreading_mode==SpreadingMode::tone?2*pair_count:search.frequency_offsets_hz.size();
         long double fixed=sizeof(PatternCorrelator)+sizeof(Impl)+code.working_bytes()+
@@ -324,6 +508,27 @@ struct PatternCorrelator::Impl {
             static_cast<long double>(search.candidate_limit)*sizeof(PatternEvidence)+search.track_limit*(sizeof(PatternBurst)+sizeof(Emission))+
             (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double)+
             search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis);
+        if(options.amplitude_only) {
+            fixed+=amplitude_pcm.capacity()*sizeof(float)+amplitude_scratch_reservation;
+            if(scheduled_map())fixed+=sizeof(ScheduledState)+scheduled_map()->working_bytes()+total*(sizeof(SchedHopCoordinate)+sizeof(long double)+sizeof(std::uint64_t))+
+                scheduled_phases.capacity()*sizeof(PhaseGroup)+(scheduled_calendar()?scheduled_calendar()->working_bytes()+total*sizeof(std::uint64_t):0);
+            // Band selection is detector geometry, not a reward for smaller
+            // storage. Preserve the preceding unfactored moment allowance;
+            // otherwise the same workspace changes band widths/trial charges.
+            // Production also supplies the original planner's explicit cap.
+            const auto per_channel=total*(alternate_groups+1)*sizeof(std::array<detail::EnvelopeFit,2>)+sizeof(PatternAmplitudeChannel);
+            const auto retention=2*total+2*search.track_limit+2;
+            const auto available=std::floor((bytes-fixed-retention)/per_channel);
+            require(available>=1,"complete amplitude timing coverage exceeds DSP workspace");
+            const auto selected=static_cast<std::size_t>(std::min(available,static_cast<long double>(amplitude_geometry.channel_count)));
+            if(selected<amplitude_geometry.channel_count)amplitude_geometry.reason="coarse amplitude channels widened to preserve complete coverage within workspace";
+            amplitude_geometry.channel_count=selected;
+            amplitude_channels.reserve(selected);
+            for(std::size_t j=0;j<selected;++j)amplitude_channels.push_back(pattern_amplitude_channel(amplitude_geometry,j));
+            fixed+=total*(alternate_groups+1)*sizeof(detail::EnvelopeTemplateFit)+total*sizeof(AmplitudePhaseEntry)+
+                total*(alternate_groups+1)*selected*sizeof(decltype(amplitude_fits)::value_type)+amplitude_channels.capacity()*sizeof(PatternAmplitudeChannel);
+            require(fixed+retention<bytes,"selected amplitude bands exceed actual factored workspace");
+        }
         // A symbol at least six seconds long cannot form an unconfirmed
         // multi-symbol acquisition chain before physical absence expires it.
         guard_chains=config.spreading_mode==SpreadingMode::pattern && (c.scramble || c.dsss) &&
@@ -367,7 +572,7 @@ struct PatternCorrelator::Impl {
         // pulse. Two half-chip origin parities share each projection. Affine
         // spans below cover partial chips or unaffordable shared-cell kernels;
         // unsupported legacy fractional grids retain the raw reference path.
-        const bool pulse_geometry=!options.raw_reference && shaped && code.symbol_samples()>=16ULL*c.sample_rate &&
+        const bool pulse_geometry=!options.amplitude_only && !options.raw_reference && shaped && code.symbol_samples()>=16ULL*c.sample_rate &&
             // Historical low-level compact banks promise a sub-64-KiB idle
             // footprint. Application oscillator banks provide explicit pairs;
             // retain the bounded raw fallback for legacy long-chip callers.
@@ -389,7 +594,7 @@ struct PatternCorrelator::Impl {
         const auto affine_capacity=std::tuple_size_v<decltype(Bank::affine_lengths)>;
         const auto segment_extra=bank_count*((block_samples+1)*sizeof(Complex)+
             affine_capacity*sizeof(detail::CorrelationCarrierMoments))+total*sizeof(std::uint64_t);
-        pulse_segmented=!options.raw_reference && shaped && paired &&
+        pulse_segmented=!options.amplitude_only && !options.raw_reference && shaped && paired &&
             code.symbol_samples()>=16ULL*c.sample_rate &&
             code.chip_samples()>=1024 &&
             !pulse_enabled &&
@@ -411,7 +616,8 @@ struct PatternCorrelator::Impl {
                 coefficient_count<=std::numeric_limits<std::size_t>::max() &&
                 fixed+coefficient_extra+denominator<=bytes)
             affine_coefficients.resize(static_cast<std::size_t>(coefficient_count));
-        hypotheses.reserve(count);emissions.reserve(search.track_limit);banks.resize(bank_count);
+        hypotheses.reserve(count);if(scheduled_map()){scheduled->anchors.reserve(count);scheduled->observed_begin.resize(count);scheduled->last_accepted.resize(count);if(scheduled_calendar())scheduled->source_starts.resize(count);}
+        emissions.reserve(search.track_limit);banks.resize(bank_count);
         for(auto& bank:banks) {
             bank.prefix.resize(block_samples+1);
             if(pulse_segmented || (pulse_enabled && code.chip_samples()>4096))bank.first_moment.resize(block_samples+1);
@@ -420,6 +626,11 @@ struct PatternCorrelator::Impl {
         require(!alternate_groups || count<=std::numeric_limits<std::size_t>::max()/alternate_groups,
                 "pattern phase fits exceed address space");
         alternate_fits.resize(count*alternate_groups);
+        if(options.amplitude_only) {
+            amplitude_fits.resize(count*(alternate_groups+1)*amplitude_channels.size());
+            amplitude_templates.resize(count*(alternate_groups+1));
+            amplitude_phases.resize(count);
+        }
         if(differential_window)differential_fits.resize(count*(alternate_groups+1));
         if(drift_sections>1) {
             require(count<=std::numeric_limits<std::size_t>::max()/(alternate_groups+1),
@@ -471,7 +682,8 @@ struct PatternCorrelator::Impl {
                     // Intersect every physical phase represented by the exact
                     // cipher cell; do not instantiate a template per sample.
                     const auto cell_width=search.search_stream_phases?
-                        canonical_phase_cell_upper(config,phase_upper)-phase_upper:0;
+                        (scheduled_map()?amplitude_geometry.receiver_phase_step_samples-1:
+                        canonical_phase_cell_upper(config,phase_upper)-phase_upper):0;
                     lo-=cell_width;
                     if(lo>phase_upper || hi<phase_lower)continue;
                     lo=std::clamp(lo,static_cast<long double>(phase_lower),static_cast<long double>(phase_upper));
@@ -489,24 +701,140 @@ struct PatternCorrelator::Impl {
                     } else {address.lattice=lattice_base+i%2;address.shift=static_cast<std::int64_t>(i/2);}
                     pulse_addresses.push_back(address);
                 }
-                const auto elapsed=std::max(0.L,-h.origin)*ratio;
-                const auto index=std::floor(elapsed/code.symbol_samples());
-                require(index<std::numeric_limits<std::uint64_t>::max(),"clock hint exceeds stream symbol counter");
-                h.index=static_cast<std::uint64_t>(index);hypotheses.push_back(std::move(h));
+                if(scheduled_map()) {
+                    for(const auto& group:scheduled_phases) {
+                        const auto lo=std::max(h.phase_lower,group.lower),hi=std::min(h.phase_upper,group.upper);
+                        if(lo>hi)continue;
+                        for(auto phase=lo;;phase+=phase_step) {
+                            auto lane=h;lane.phase_lower=lane.phase_upper=phase;
+                            const auto location=scheduled_map()->locate(SchedHopCoordinate{scheduled->epoch_sample,0}.add_samples(phase));
+                            if(!location.active){if(phase==hi)break;else continue;}
+                            const auto anchor=location.source;
+                            const auto tick=SchedHopCoordinate{scheduled->epoch_sample,0}.add_samples(phase).add_signed(-h.origin*ratio);
+                            const auto elapsed=std::max(0.L,scheduled_map()->locate(tick).source.distance(anchor));
+                            if(scheduled_calendar())lane.index=scheduled_index_at(phase,elapsed,false);
+                            else {
+                                const auto index=std::floor(elapsed/code.symbol_samples());
+                                require(index<std::numeric_limits<std::uint64_t>::max(),"scheduled clock hint exceeds stream symbol counter");
+                                lane.index=static_cast<std::uint64_t>(index);
+                            }
+                            hypotheses.push_back(std::move(lane));
+                            scheduled->anchors.push_back(anchor);
+                            if(scheduled_calendar())scheduled->source_starts[hypotheses.size()-1]=scheduled_calendar()->offset_source(
+                                config.stream_epoch,phase,hypotheses.back().index);
+                            scheduled->observed_begin[hypotheses.size()-1]=scheduled_map()->locate(tick).source.distance(anchor);
+                            if(phase==hi)break;
+                        }
+                    }
+                } else {
+                    const auto elapsed=std::max(0.L,-h.origin)*ratio;
+                    const auto index=std::floor(elapsed/code.symbol_samples());
+                    require(index<std::numeric_limits<std::uint64_t>::max(),"clock hint exceeds stream symbol counter");
+                    h.index=static_cast<std::uint64_t>(index);hypotheses.push_back(std::move(h));
+                }
             }
         }
         require(!hypotheses.empty(),"qualified UTC interval does not intersect the existing search lattice");
         if(pulse_segmented)for(auto& bank:banks)
             bank.prepare_carrier(block_samples,code.chip_samples()/(256*lowest_rate),c.sample_rate);
-        accounted_bytes=working_bytes()+drift_reserved;
+        accounted_bytes=working_bytes()+drift_reserved+amplitude_scratch_reservation;
         require(sizeof(PatternCorrelator)+accounted_bytes<=budget,"clock-search state exceeds DSP workspace");
-        work.backend=pulse_segmented?PatternCorrelationBackend::pulse_segments:pulse_lattices.empty()?PatternCorrelationBackend::raw:
+        work.backend=options.amplitude_only?PatternCorrelationBackend::amplitude:pulse_segmented?PatternCorrelationBackend::pulse_segments:pulse_lattices.empty()?PatternCorrelationBackend::raw:
             code.chip_samples()>4096?PatternCorrelationBackend::pulse_moments:PatternCorrelationBackend::pulse;
         work.hypotheses=hypotheses.size();work.lattices=pulse_lattices.size();work.phase_groups=alternate_groups+1;
         work.affine_coefficient_cache_entries=affine_coefficients.size();
+        work.amplitude_bins=amplitude_geometry.bin_count;work.amplitude_fft_samples=amplitude_geometry.fft_samples;
+        work.amplitude_channels=amplitude_channels.size();
         work.peak_workspace_bytes=sizeof(PatternCorrelator)+accounted_bytes;
     }
+    std::uint64_t scheduled_cell_width(const Hypothesis& h) const {
+        if(scheduled_calendar())return 0;
+        return search.search_stream_phases?pattern_amplitude_phase_cell_upper(config,amplitude_geometry,h.phase_lower)-h.phase_lower:0;
+    }
+    std::uint64_t scheduled_index_at(std::uint64_t phase,long double position,bool fully_observed) const {
+        if(!scheduled_calendar()) {
+            const auto index=fully_observed?std::ceil(std::max(0.L,position)/code.symbol_samples()):
+                std::floor(std::max(0.L,position)/code.symbol_samples());
+            require(index<std::numeric_limits<std::uint64_t>::max(),"scheduled source index overflow");
+            return static_cast<std::uint64_t>(index);
+        }
+        const auto sample=std::ceil(std::max(0.L,position));
+        require(sample<=std::numeric_limits<std::uint64_t>::max(),"scheduled source coordinate overflow");
+        auto index=scheduled_calendar()->lower_bound_source(config.stream_epoch,phase,static_cast<std::uint64_t>(sample));
+        if(!fully_observed && index) {
+            const auto previous=scheduled_calendar()->offset_source(config.stream_epoch,phase,index-1);
+            if(static_cast<long double>(previous)+code.symbol_samples()>position)--index;
+        }
+        return index;
+    }
+    long double scheduled_source_start(const Hypothesis& h,std::uint64_t index) const {
+        if(scheduled_calendar()) {
+            if(index==h.index)return scheduled->source_starts[static_cast<std::size_t>(&h-hypotheses.data())];
+            return scheduled_calendar()->offset_source(config.stream_epoch,h.phase_lower,index);
+        }
+        return static_cast<long double>(index)*code.symbol_samples();
+    }
+    long double scheduled_uncertainty(const Hypothesis& h,long double physical) const {
+        return scheduled->timing_radius+std::abs(physical-h.origin)*scheduled->clock_radius;
+    }
+    SchedHopCoordinate scheduled_tick(const Hypothesis& h,long double physical) const {
+        return SchedHopCoordinate{scheduled->epoch_sample,0}.add_samples(h.phase_lower).add_signed((physical-h.origin)*h.rate);
+    }
+    long double source_position(const Hypothesis& h,long double physical) const {
+        if(!scheduled_map())return (physical-symbol_start(h))*h.rate+static_cast<long double>(h.index)*code.symbol_samples();
+        const auto at=scheduled_map()->locate(scheduled_tick(h,physical)).source;
+        return at.distance(scheduled->anchors[static_cast<std::size_t>(&h-hypotheses.data())]);
+    }
+    long double scheduled_boundary(const Hypothesis& h,long double source,bool end) const {
+        const auto index=static_cast<std::size_t>(&h-hypotheses.data());
+        const auto target=scheduled->anchors[index].add_signed(source);
+        const auto physical=scheduled_map()->source_to_physical(target,end);
+        const auto anchor=SchedHopCoordinate{scheduled->epoch_sample,0}.add_samples(h.phase_lower);
+        const auto distance=physical.distance(anchor);
+        const auto slow=h.rate-scheduled->clock_radius,fast=h.rate+scheduled->clock_radius;
+        auto result=h.origin+distance/h.rate;
+        if(end)result=h.origin+scheduled->timing_radius/h.rate+std::max(distance/slow,distance/fast);
+        const auto width=scheduled_cell_width(h);
+        if(end && width) {
+            // Left inverse is discontinuous at a source-group boundary. Wait
+            // for the latest endpoint in the represented canonical phase cell;
+            // those boundary observations are omitted below, never reassigned.
+            const auto upper_anchor=anchor.add_samples(width);
+            const auto upper_source=scheduled_map()->locate(upper_anchor).source.add_signed(source);
+            const auto upper_physical=scheduled_map()->source_to_physical(upper_source,true);
+            const auto delta=upper_physical.distance(upper_anchor);
+            result=std::max(result,h.origin+scheduled->timing_radius/h.rate+std::max(delta/slow,delta/fast));
+        }
+        return result;
+    }
+    bool scheduled_flat(const Hypothesis& h,std::uint64_t first,std::uint64_t end) const {
+        if(!scheduled_map())return true;
+        const auto width=scheduled_cell_width(h);
+        const auto left=scheduled_tick(h,first).add_signed(-scheduled_uncertainty(h,first));
+        const auto right=scheduled_tick(h,end).add_samples(width).add_signed(scheduled_uncertainty(h,end));
+        const auto a=scheduled_map()->locate(left),b=scheduled_map()->locate(right.add_signed(-1e-9L));
+        if(!a.active || !b.active || a.frame_index!=b.frame_index ||
+           left.distance(SchedHopCoordinate{a.flat_begin,0})<0 ||
+           right.distance(SchedHopCoordinate{a.flat_end,0})>0)return false;
+        if(scheduled->fhss_shape.enabled) {
+            // Use the transmitter's rounded guard/support and the same UTC
+            // phase calculation. Recomputing unrounded seconds could admit
+            // nearly two samples that still lie inside the final power ramp.
+            const auto two=2.L*config.sample_rate;
+            const auto local=std::fmod(static_cast<long double>(left.sample%(2ULL*config.sample_rate))+
+                left.fraction+scheduled->fhss_shape.lag_center,two);
+            const auto period=two/5;
+            const auto position=local-std::floor(local*5/two)*period;
+            const auto length=right.distance(left);
+            const auto radius=scheduled->fhss_shape.affected_radius();
+            if(position<radius || position+length>period-radius)return false;
+        }
+        return true;
+    }
     long double clock_boundary(const Hypothesis& h,std::uint64_t within=0) const {
+        if(scheduled_map())return scheduled_boundary(h,scheduled_source_start(h,h.index)+within,
+            within!=0);
+
         if(pulse_lattices.empty() && search.hypotheses.empty()) {
             if(within==code.symbol_samples())return h.origin+(static_cast<long double>(h.index)+1)*code.symbol_samples()/h.rate;
             return h.origin+static_cast<long double>(h.index)*code.symbol_samples()/h.rate+within/h.rate;
@@ -567,10 +895,11 @@ struct PatternCorrelator::Impl {
             auto& drift=section_fits(i,group);const auto& whole=fits(hypotheses[i],i,group);
             for(unsigned bit=0;bit<2;++bit)drift[bit].active=whole[bit];
         }
-        drift_reserved=0;accounted_bytes=working_bytes();
+        drift_reserved=0;accounted_bytes=working_bytes()+amplitude_scratch_reservation;
         room_for(0);
     }
     void prepare_workers() {
+        if(options.amplitude_only)return;
         if(!pulse_lattices.empty())return;
         if(!worker_codes.empty())return;
         const auto concurrency=std::min(hypotheses.size(),detail::search_concurrency(search.worker_threads));
@@ -579,7 +908,7 @@ struct PatternCorrelator::Impl {
             std::vector<PatternCode> prepared;prepared.reserve(workers);
             for(std::size_t worker=0;worker<workers;++worker)prepared.emplace_back(config,config.stream_epoch);
             worker_codes=std::move(prepared);
-            accounted_bytes=working_bytes()+drift_reserved;
+            accounted_bytes=working_bytes()+drift_reserved+amplitude_scratch_reservation;
             require(sizeof(PatternCorrelator)+accounted_bytes<=budget,"parallel pattern caches exceed DSP workspace");
             work.peak_workspace_bytes=std::max(work.peak_workspace_bytes,sizeof(PatternCorrelator)+accounted_bytes);
         }
@@ -601,12 +930,19 @@ struct PatternCorrelator::Impl {
         value+=pulse_addresses.capacity()*sizeof(PulseAddress);
         value+=affine_counts.capacity()*sizeof(std::uint64_t);
         value+=affine_coefficients.capacity()*sizeof(AffineCoefficients);
+        value+=amplitude_fits.capacity()*sizeof(decltype(amplitude_fits)::value_type)+amplitude_pcm.capacity()*sizeof(float);
+        value+=amplitude_templates.capacity()*sizeof(decltype(amplitude_templates)::value_type);
+        value+=amplitude_phases.capacity()*sizeof(AmplitudePhaseEntry)+amplitude_scratch.working_bytes();
+        value+=amplitude_channels.capacity()*sizeof(PatternAmplitudeChannel);
         // Kernel preparation has bounded wide polynomial scratch. Retain its
         // reservation across workspace changes and payload allocation too.
         if(!pulse_lattices.empty())value+=detail::correlation_pulse_scratch_bytes;
         for(const auto& lattice:pulse_lattices)value+=lattice.cells.capacity()*sizeof(detail::CorrelationPulseCell);
         for(const auto& h:hypotheses)value+=h.burst.bits.capacity();
         for(const auto& burst:bursts)value+=burst.bits.capacity();
+        if(scheduled_map())value+=sizeof(ScheduledState)+scheduled_map()->working_bytes()+
+            scheduled->anchors.capacity()*sizeof(SchedHopCoordinate)+scheduled->observed_begin.capacity()*sizeof(long double)+scheduled->last_accepted.capacity()*sizeof(std::uint64_t)+
+            scheduled->source_starts.capacity()*sizeof(std::uint64_t)+(scheduled_calendar()?scheduled_calendar()->working_bytes():0);
         for(const auto& bank:banks)value+=bank.prefix.capacity()*sizeof(Projection)+bank.first_moment.capacity()*sizeof(Complex)+
             bank.affine_carrier.capacity()*sizeof(detail::CorrelationCarrierMoments);
         value+=worker_bytes();
@@ -618,6 +954,14 @@ struct PatternCorrelator::Impl {
         // dropped by room_for(); promised detectors are reserved separately.
         constexpr auto maximum=std::numeric_limits<std::size_t>::max();
         if(input_samples>std::numeric_limits<std::uint64_t>::max()-sample)return maximum;
+        // Partial amplitude FFT input only fills its already-reserved PCM
+        // array. With no pending publication/timing work, neither the push nor
+        // its next drain can grow payload, timing or output storage. Avoid the
+        // per-hypothesis long-double forecast for every small audio callback.
+        // Equality can complete a block and must retain the original bound.
+        // Initial lattice discard only makes this test more conservative.
+        if(options.amplitude_only && !amplitude_publication_dirty && !timing_dirty && bursts.empty() &&
+           input_samples<amplitude_geometry.fft_samples-amplitude_partial)return 0;
         std::size_t total=0,transient=0,output=0;
         const auto add=[&](std::size_t n){total=n>maximum-total?maximum:total+n;};
         const auto product=[&](std::size_t a,std::size_t b){return a && b>maximum/a?maximum:a*b;};
@@ -706,17 +1050,9 @@ struct PatternCorrelator::Impl {
         if(history.size()==search.candidate_limit)history.erase(history.begin());
         history.push_back(evidence);
     }
-    struct PhaseGroup {std::uint64_t lower=0,upper=0;};
-    struct PhaseGroups {
-        std::array<PhaseGroup,3> small{};
-        std::uint64_t first=0,step=0;
-        PhaseGroup operator[](std::size_t index) const {
-            if(step){const auto phase=first+index*step;return {phase,phase};}
-            return small.at(index);
-        }
-    };
     PhaseGroups phase_groups(const Hypothesis& h,std::size_t& count)const {
         PhaseGroups groups;count=0;
+        if(scheduled_map()){groups.small[0]={h.phase_lower,h.phase_upper};count=1;return groups;}
         if(config.fake_hopping && config.fake_hopping->matched_gaps && h.phase_lower<=h.phase_upper) {
             groups.first=h.phase_lower;groups.step=phase_step;
             count=(h.phase_upper-h.phase_lower)/phase_step+1;return groups;
@@ -818,7 +1154,9 @@ struct PatternCorrelator::Impl {
             result.frequency_hz=carrier_estimate(h,stream);result.stream_phase_samples=h.burst.stream_phase_samples;
             result.bits.assign(h.burst.bits.begin(),h.burst.bits.begin()+static_cast<std::ptrdiff_t>(count));
             result.complete=complete && count==h.committed;
-            result.end_sample=count==h.committed?h.committed_end:
+            result.end_sample=count==h.committed?h.committed_end:scheduled_map()?
+                static_cast<std::uint64_t>(std::max(0.L,std::ceil(scheduled_boundary(h,
+                    scheduled_source_start(h,result.first_stream_symbol+count-1)+code.symbol_samples(),true)))):
                 result.first_sample+static_cast<std::uint64_t>(count*code.symbol_samples()/h.rate);
             result.score=h.burst.score;
             result.support_samples=h.burst.support_samples;
@@ -943,12 +1281,14 @@ struct PatternCorrelator::Impl {
                 }
             }
         }
-        const auto address=symbol_stream_address(config.stream_epoch,evidence.stream_phase_samples,h.index,
-            code.symbol_samples(),config.sample_rate);
+        const auto address=scheduled_map()?symbol_stream_address(config,config.stream_epoch,evidence.stream_phase_samples,h.index):
+            symbol_stream_address(config.stream_epoch,evidence.stream_phase_samples,h.index,code.symbol_samples(),config.sample_rate);
         state.decisions[h.index%2]={h.index,address.epoch,address.ordinal,evidence.score,accepted,
             static_cast<long double>(h.observed_start)==std::ceil(symbol_start(h)) &&
             static_cast<long double>(evidence.end_sample)==std::ceil(clock_boundary(h,code.symbol_samples())) &&
-            fits(h,hypothesis,selected)[evidence.bit].count==evidence.end_sample-h.observed_start,
+            (scheduled_map()?fits(h,hypothesis,selected)[evidence.bit].count>=
+                static_cast<std::uint64_t>(std::floor(code.symbol_samples()/h.rate)):
+                fits(h,hypothesis,selected)[evidence.bit].count==evidence.end_sample-h.observed_start),
             static_cast<std::uint8_t>(evidence.bit)};
         if(accepted){state.last_accepted=h.index;state.pending_terminal=false;}
     }
@@ -1003,6 +1343,7 @@ struct PatternCorrelator::Impl {
         }
     }
     void complete(Hypothesis& h,std::size_t hypothesis,std::uint64_t end,std::stop_token stop) {
+        if(options.amplitude_only)amplitude_publication_dirty=true;
         std::size_t group_count=0;
         const auto groups=phase_groups(h,group_count);
         PatternEvidence e;e.score=-1;std::size_t selected=0;
@@ -1010,7 +1351,16 @@ struct PatternCorrelator::Impl {
         trials+=group_count;
         for(std::size_t group=0;group<group_count;++group) {
             const auto& fit=fits(h,hypothesis,group);
-            auto a=fit[0].score(),b=fit[1].score();
+            double a=0,b=0;std::array<std::size_t,2> selected_channel{};
+            if(options.amplitude_only) {
+                const auto penalty=std::log(static_cast<double>(amplitude_channels.size()));
+                for(std::size_t channel=0;channel<amplitude_channels.size();++channel) {
+                    const auto& envelope=amplitude_fits[(hypothesis*(alternate_groups+1)+group)*amplitude_channels.size()+channel];
+                    const auto zero=std::max(0.,envelope.score(amplitude_templates[hypothesis*(alternate_groups+1)+group],0,amplitude_channels[channel].bin_count)-penalty),one=std::max(0.,envelope.score(amplitude_templates[hypothesis*(alternate_groups+1)+group],1,amplitude_channels[channel].bin_count)-penalty);
+                    if(zero>a){a=zero;selected_channel[0]=channel;}
+                    if(one>b){b=one;selected_channel[1]=channel;}
+                }
+            } else {a=fit[0].score();b=fit[1].score();}
             if(drift_sections>1) {
                 const auto& drift=section_fits(hypothesis,group);
                 a=detail::combine_drift_evidence(a,drift[0].score(fit[0],drift_sections,code.chip_samples()),drift_sections);
@@ -1022,7 +1372,9 @@ struct PatternCorrelator::Impl {
                 b=detail::combine_differential_evidence(b,local[1].score(code.symbol_samples(),differential_window),true);
             }
             if(std::max(a,b)>e.score) {
-                e={h.observed_start,end,h.index,config.carrier_hz+search.frequency_offsets_hz[h.frequency],
+                const auto frequency=options.amplitude_only?amplitude_channels[selected_channel[b>a?1:0]].center_hz:
+                    config.carrier_hz+search.frequency_offsets_hz[h.frequency];
+                e={h.observed_start,end,h.index,frequency,
                     std::max(a,b),std::min(a,b),b>a?1U:0U,groups[group].lower};
                 selected=group;
             }
@@ -1039,10 +1391,25 @@ struct PatternCorrelator::Impl {
                 fits(h,hypothesis,selected)[e.bit],threshold());
         }
         const auto presence=!e.outer_presence_active || e.outer_presence_score>=threshold();
+        const auto standalone=e.score>=threshold() && presence;
+        if(scheduled_map() && h.admitted && !standalone &&
+           scheduled->observed_begin[hypothesis]<=scheduled_source_start(h,h.index)) {
+            const auto& coverage=amplitude_templates[hypothesis*(alternate_groups+1)+selected];
+            const bool whole=coverage.whole.observations>=64;
+            bool quarters=true;
+            for(const auto& quarter:coverage.quarters)quarters=quarters && quarter.observations!=0;
+            // Clock-cell uncertainty grows from the original timing reference,
+            // never from a restarted per-bit budget. The finite grid cannot
+            // promise indefinite flat support. An unavailable observation is
+            // not a failed valid-pattern test and must never end a stream.
+            // Strong evidence can still admit through the unchanged statistic;
+            // a truncated first acquisition symbol is not an absence claim.
+            if(!whole || !quarters)throw Error("scheduled amplitude timing coverage exhausted; cannot classify observed absence (retained FFT observations="+
+                std::to_string(coverage.whole.observations)+", required=64; every quarter must be observed)");
+        }
         remember(e);
         const auto symbol_support=pattern_symbol_support(
             static_cast<double>(fits(h,hypothesis,selected)[e.bit].count),e.score,code.chip_samples());
-        const auto standalone=e.score>=threshold() && presence;
         // Unknown slots never select a private phase. Keep the existing clock
         // until an independently confident later symbol resolves the schedule.
         const auto pending_count=h.burst.bits.size()-h.committed;
@@ -1113,8 +1480,14 @@ struct PatternCorrelator::Impl {
             } else {publish(h);clear(h);}
         }
         timing_decision(h,hypothesis,e,selected);
-        if(h.admitted && static_cast<long double>(end-h.committed_end)>=
-            static_cast<long double>(pattern_absence_seconds)*config.sample_rate) {
+        if(scheduled_map() && h.admitted && h.committed_end==end)scheduled->last_accepted[hypothesis]=h.index+1;
+        // Only integer, fully scored failed source symbols count. A conservative
+        // latest-cell END can include a few samples from the next active group;
+        // those must not round an incomplete six-second failure run upward.
+        const auto failed_duration=scheduled_map()?
+            static_cast<long double>(h.index+1-scheduled->last_accepted[hypothesis])*code.symbol_samples()/h.rate:
+            static_cast<long double>(end-h.committed_end);
+        if(h.admitted && failed_duration>=static_cast<long double>(pattern_absence_seconds)*config.sample_rate) {
             if(!timing_enabled){publish(h,true);clear(h);}
             else {auto& state=*timing_state(hypothesis);state.pending_terminal=true;state.terminal_index=h.index;publish(h,false,false);}
         } else publish(h,false,false);
@@ -1122,6 +1495,11 @@ struct PatternCorrelator::Impl {
             affine_coefficients[hypothesis*(alternate_groups+1)+group].invalidate();
         h.affine_groups=0;
         h.fits={};
+        if(options.amplitude_only)for(std::size_t group=0;group<=alternate_groups;++group) {
+            amplitude_templates[hypothesis*(alternate_groups+1)+group]={};
+            for(std::size_t channel=0;channel<amplitude_channels.size();++channel)
+                amplitude_fits[(hypothesis*(alternate_groups+1)+group)*amplitude_channels.size()+channel]={};
+        }
         if(outer_presence)for(std::size_t group=0;group<=alternate_groups;++group)
             (*outer_evidence)[hypothesis*(alternate_groups+1)+group]={};
         if(!chip_evidence.empty())for(std::size_t group=0;group<=alternate_groups;++group)
@@ -1133,11 +1511,318 @@ struct PatternCorrelator::Impl {
         if(differential_window)for(std::size_t group=0;group<=alternate_groups;++group)
             local_fits(hypothesis,group)={};
         require(h.index<std::numeric_limits<std::uint64_t>::max(),"pattern stream symbol counter overflow");++h.index;
+        if(scheduled_calendar())scheduled->source_starts[hypothesis]=scheduled_calendar()->offset_source(
+            config.stream_epoch,h.phase_lower,h.index);
     }
     std::uint64_t initial_cursor(const Hypothesis& h,std::uint64_t end) const {
         if(h.origin>static_cast<long double>(sample))
             return static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(h.origin)));
         return sample;
+    }
+    // The same deterministic node/tap order serves ordinary and mapped sparse
+    // observations. The caller supplies source-time coordinates; FFT sample
+    // coordinates remain physical and are never concatenated across gaps.
+    std::array<double,2> amplitude_weights(std::uint64_t start_chip,std::uint64_t phase,
+            std::span<const double> coordinates,std::stop_token stop) {
+        const auto quadrature=static_cast<unsigned>(coordinates.size());
+        require(quadrature>=8 && quadrature<=17,"amplitude quadrature exceeds its bounded chip support");
+        std::array<double,2> weight{};
+        const auto amplitude=std::sqrt(2*nominal_signal_power)*(scheduled_map()?outer_dsss_transmit_gain(config):1.);
+        code.set_stream_phase_samples(phase);code.prepare_symbol(start_chip,stop);
+        if(config.search_arithmetic!=SearchArithmetic::fp64) {
+            ++work.amplitude_float_envelopes;
+            // Independently generated original coefficients are
+            // packed once per neighborhood, not once per tap.
+            // Four real lanes preserve both I/Q and both bits;
+            // each lane retains original tap order, without FMA.
+            // Pulse coordinates/table and final limiter/norm
+            // remain FP64. FP64 force uses the original branch.
+            std::array<std::array<float,4>,32> packed{};
+            std::array<std::uint64_t,32> tags;tags.fill(std::numeric_limits<std::uint64_t>::max());
+            for(unsigned node=0;node<quadrature;++node) {
+                const auto coordinate=coordinates[node];
+                std::array<float,4> values{};
+                pattern_pulse_each(coordinate,code.symbol_samples(),code.chip_samples(),
+                    [&](std::uint64_t local,double coefficient) {
+                        const auto slot=local%tags.size();
+                        if(tags[slot]!=local) {
+                            require(local<=std::numeric_limits<std::uint64_t>::max()-start_chip,"amplitude chip address overflow");
+                            const auto original=code.values(start_chip+local,0);
+                            packed[slot]={static_cast<float>(original[0].real()),static_cast<float>(original[0].imag()),
+                                static_cast<float>(original[1].real()),static_cast<float>(original[1].imag())};
+                            tags[slot]=local;
+                        }
+                        const float pulse=static_cast<float>(coefficient);
+        #if defined(__SSE2__)
+                        const auto product=_mm_mul_ps(_mm_set1_ps(pulse),_mm_loadu_ps(packed[slot].data()));
+                        _mm_storeu_ps(values.data(),_mm_add_ps(_mm_loadu_ps(values.data()),product));
+        #else
+                        for(unsigned lane=0;lane<4;++lane)values[lane]+=pulse*packed[slot][lane];
+        #endif
+                    });
+                for(unsigned bit=0;bit<2;++bit) {
+                    const Complex value{static_cast<double>(values[2*bit]),static_cast<double>(values[2*bit+1])};
+                    weight[bit]+=std::norm(pattern_limit_pcm(amplitude*value))/quadrature;
+                }
+            }
+        } else {
+        std::array<std::array<Complex,2>,32> coefficients{};
+        std::array<std::uint64_t,32> tags;tags.fill(std::numeric_limits<std::uint64_t>::max());
+        for(unsigned node=0;node<quadrature;++node) {
+            const auto coordinate=coordinates[node];
+            std::array<Complex,2> values{};
+            pattern_pulse_each(coordinate,code.symbol_samples(),code.chip_samples(),
+                [&](std::uint64_t local,double coefficient) {
+                const auto slot=local%tags.size();
+                if(tags[slot]!=local) {
+                    require(local<=std::numeric_limits<std::uint64_t>::max()-start_chip,"amplitude chip address overflow");
+                    coefficients[slot]=code.values(start_chip+local,0);
+                    tags[slot]=local;
+                }
+                for(unsigned bit=0;bit<2;++bit)values[bit]+=coefficient*coefficients[slot][bit];
+            });
+            for(unsigned bit=0;bit<2;++bit)weight[bit]+=std::norm(pattern_limit_pcm(
+                amplitude*values[bit]))/quadrature;
+        }
+        }
+        return weight;
+    }
+    bool scheduled_block_needed(std::uint64_t first,std::uint64_t end) const {
+        return std::any_of(hypotheses.begin(),hypotheses.end(),[&](const auto& h){return scheduled_flat(h,first,end);});
+    }
+    void amplitude_scheduled_progress(std::uint64_t first,std::uint64_t end,
+            const std::array<double,32>* energy,std::stop_token stop) {
+        const auto total=code.symbol_samples();
+        for(std::size_t hypothesis=0;hypothesis<hypotheses.size();++hypothesis) {
+            cancelled(stop);auto& h=hypotheses[hypothesis];
+            const auto source_first=source_position(h,first),source_end=source_position(h,end);
+            const auto flat=energy && scheduled_flat(h,first,end);
+            while(source_end>scheduled_source_start(h,h.index)) {
+                const auto begin=scheduled_source_start(h,h.index),next=begin+total;
+                const auto observed_begin=std::max(source_first,begin),observed_end=std::min(source_end,next);
+                if(!h.fits[0].count && observed_end>observed_begin) {
+                    h.observed_start=static_cast<std::uint64_t>(std::max(static_cast<long double>(first),
+                        std::max(0.L,std::ceil(scheduled_boundary(h,observed_begin,false)))));
+                }
+                // scheduled_flat includes the WHOLE represented physical phase
+                // cell. Both that cell and its active source anchor are affine:
+                // U(q+delta)-U(P+delta) == U(q)-U(P). Thus source symbol and
+                // quarter ownership are identical throughout the cell. Do not
+                // discard that width again here. Keep physical flat guards and
+                // latest-END waiting: the inverse can jump across a null.
+                const auto quarter_first=std::floor(4*(source_first-begin)/total);
+                const auto quarter_last=std::ceil(4*(source_end-begin)/total)-1;
+                if(flat && source_first>=begin && source_end<=next && quarter_first==quarter_last) {
+                    require(h.index<=std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol(),
+                        "scheduled amplitude pattern chip coordinate overflow");
+                    const auto quadrature=std::max(8U,static_cast<unsigned>(std::ceil(
+                        8*static_cast<long double>(amplitude_geometry.fft_samples)*h.rate/code.chip_samples())));
+                    require(quadrature<=17,"scheduled amplitude quadrature exceeds its bounded support");
+                    std::array<double,17> coordinates{};
+                    for(unsigned node=0;node<quadrature;++node) {
+                        const auto physical=static_cast<long double>(first)+
+                            (node+.5L)*amplitude_geometry.fft_samples/quadrature;
+                        // Proven active-flat interiors have exactly affine U.
+                        // No private calendar construction is repeated per node.
+                        coordinates[node]=static_cast<double>(source_first+(physical-first)*h.rate-begin);
+                    }
+                    const bool measured=options.measure_affine_work && (work.amplitude_observations%64==0);
+                    WorkTimer timer(measured,work.affine_prepare_seconds,work.affine_prepare_cpu_seconds,64);
+                    const auto weight=amplitude_weights(h.index*code.chips_per_symbol(),h.phase_lower,
+                        std::span<const double>(coordinates).first(quadrature),stop);
+                    ++work.affine_preparations;timer.finish();
+                    const auto quarter=static_cast<unsigned>(std::clamp(quarter_first,0.L,3.L));
+                    const auto independent=2*static_cast<double>(amplitude_geometry.fft_samples*h.rate/code.chip_samples());
+                    amplitude_templates[hypothesis].add(weight,quarter,independent);
+                    for(std::size_t channel=0;channel<amplitude_channels.size();++channel)
+                        amplitude_fits[hypothesis*amplitude_channels.size()+channel].add((*energy)[channel],weight,quarter);
+                    work.amplitude_channel_updates+=amplitude_channels.size();++work.amplitude_observations;
+                }
+                // This is physical eligible duration, not elapsed null time.
+                // Incomplete FFT windows are omitted by the same fixed rule as
+                // ordinary quarter/pulse boundaries; no synthetic energy enters.
+                const auto retained_begin=std::max(begin,scheduled->observed_begin[hypothesis]);
+                const auto count=std::max(0.L,std::floor((observed_end-retained_begin)/h.rate+1e-9L));
+                require(count<=std::numeric_limits<std::uint64_t>::max(),"scheduled observation count overflow");
+                for(auto& fit:h.fits)fit.count=static_cast<std::uint64_t>(count);
+                if(source_end<next)break;
+                const auto boundary=static_cast<std::uint64_t>(std::max(0.L,std::ceil(scheduled_boundary(h,next,true))));
+                if(end<boundary)break;
+                complete(h,hypothesis,boundary,stop);
+            }
+        }
+    }
+    void amplitude_block(std::span<const float> input,std::stop_token stop,detail::CorrelationProjectionCache* cache,
+                         AmplitudeScratch& scratch,std::vector<long double>& local_spectrum) {
+        const auto first=amplitude_processed;
+        const auto end=first+amplitude_geometry.fft_samples;
+        if(scheduled_map() && !scheduled_block_needed(first,end)) {
+            ++work.scheduled_omitted_fft_blocks;
+            amplitude_scheduled_progress(first,end,nullptr,stop);
+            amplitude_processed=end;settle_timing();room_for(0);return;
+        }
+        std::array<double,32> energy{};
+        {
+            WorkTimer frontend_timer(options.measure_work,work.frontend_seconds,work.frontend_cpu_seconds);
+            const bool requested_float=config.search_arithmetic!=SearchArithmetic::fp64;
+            const auto compute=[&](std::span<long double> out) {
+                // The same immutable PCM uniquely determines this fallback.
+                // Do not rescan it in every keyed bank on a shared cache hit;
+                // forced FP64 needs no range scan. This policy is part of the
+                // spectrum identity, independently of template arithmetic.
+                double peak=0;
+                if(requested_float)for(auto x:amplitude_pcm)peak=std::max(peak,std::abs(static_cast<double>(x)));
+                const bool use_float=requested_float && (peak==0 || (peak>=1e-12 && peak<=1e12));
+                ++work.amplitude_transforms;
+                if(use_float)++work.amplitude_float_transforms;
+                else if(requested_float)++work.amplitude_precision_fallbacks;
+                // The push-scoped cohort shares immutable spectra below.
+                // Use this bank's persistent plan on a miss; recreating a
+                // shared plan at every push costs more than these short FFTs.
+                // Local API callers and exhausted shared scratch retain an
+                // exact bounded fallback. The reservation is charged to this
+                // bank. Plans and native buffers persist across pushes;
+                // allocated bytes replace, rather than add to, its reservation.
+                out[0]=0;long double total=0;
+                if(use_float) {
+                    if(!scratch.float_plan) {
+                        scratch.plan.reset();std::vector<Complex>{}.swap(scratch.pcm);
+                        scratch.float_plan=std::make_unique<detail::search_fft::FloatPlan>(amplitude_geometry.fft_samples,stop);
+                        scratch.float_pcm.resize(amplitude_geometry.fft_samples);
+                    }
+                    for(std::size_t j=0;j<amplitude_pcm.size();++j)scratch.float_pcm[j]={amplitude_pcm[j],0};
+                    detail::search_fft::fft(scratch.float_pcm,false,*scratch.float_plan,stop);
+                    for(std::size_t j=1;j<out.size();++j) {
+                        const Complex z=scratch.float_pcm[amplitude_geometry.first_bin+j-1];
+                        total+=std::norm(z);out[j]=total;
+                    }
+                } else {
+                    if(!scratch.plan) {
+                        scratch.float_plan.reset();std::vector<std::complex<float>>{}.swap(scratch.float_pcm);
+                        scratch.plan=std::make_unique<detail::search_fft::DoublePlan>(amplitude_geometry.fft_samples,stop);
+                        scratch.pcm.resize(amplitude_geometry.fft_samples);
+                    }
+                    for(std::size_t j=0;j<amplitude_pcm.size();++j)scratch.pcm[j]={amplitude_pcm[j],0};
+                    detail::search_fft::fft(scratch.pcm,false,*scratch.plan,stop);
+                    for(std::size_t j=1;j<out.size();++j){total+=std::norm(scratch.pcm[amplitude_geometry.first_bin+j-1]);out[j]=total;}
+                }
+            };
+            require(first<=std::numeric_limits<std::uint64_t>::max()-search.input_sample_origin,
+                "amplitude capture coordinate overflow");
+            const auto prior=cache?cache->spectrum_hits():0;
+            const auto view=cache?cache->spectrum(input,search.input_sample_origin+first,amplitude_geometry.fft_samples,
+                amplitude_geometry.first_bin,amplitude_geometry.bin_count,config.sample_rate,compute,stop,requested_float):detail::CorrelationProjectionCache::SpectrumView{};
+            std::span<const long double> prefix;
+            if(view)prefix=view.prefix;
+            else {local_spectrum.resize(amplitude_geometry.bin_count+1);compute(local_spectrum);prefix=local_spectrum;}
+            if(cache)work.amplitude_cache_hits+=cache->spectrum_hits()-prior;
+            for(std::size_t j=0;j<amplitude_channels.size();++j) {
+                const auto& channel=amplitude_channels[j];const auto at=channel.first_bin-amplitude_geometry.first_bin;
+                energy[j]=static_cast<double>(std::max(0.L,prefix[at+channel.bin_count]-prefix[at]));
+                require(std::isfinite(energy[j]),"nonfinite amplitude energy projection");
+            }
+        }
+        const auto allocated=amplitude_scratch.working_bytes();
+        require(allocated<=amplitude_scratch_limit,"amplitude FFT scratch exceeded its reservation");
+        amplitude_scratch_reservation=amplitude_scratch_limit-allocated;
+        accounted_bytes=working_bytes()+amplitude_scratch_reservation;
+        WorkTimer search_timer(options.measure_work,work.search_seconds,work.search_cpu_seconds);
+        if(scheduled_map()) {
+            amplitude_scheduled_progress(first,end,&energy,stop);
+            amplitude_processed=end;settle_timing();room_for(0);return;
+        }
+        for(std::size_t hypothesis=0;hypothesis<hypotheses.size();++hypothesis) {
+            cancelled(stop);auto& h=hypotheses[hypothesis];
+            auto cursor=first;
+            if(h.origin>static_cast<long double>(cursor))cursor=static_cast<std::uint64_t>(
+                std::min(static_cast<long double>(end),std::ceil(h.origin)));
+            while(cursor<end) {
+                const auto symbol_first=symbol_start(h);
+                const auto boundary=static_cast<std::uint64_t>(std::ceil(clock_boundary(h,code.symbol_samples())));
+                if(cursor>=boundary){complete(h,hypothesis,boundary,stop);continue;}
+                const auto until=std::min(end,boundary);
+                if(!h.fits[0].count)h.observed_start=cursor;
+                auto& phase=amplitude_phases[hypothesis];
+                if(phase.index!=h.index || phase.lower!=h.phase_lower || phase.upper!=h.phase_upper) {
+                    phase.groups=phase_groups(h,phase.count);phase.index=h.index;
+                    phase.lower=h.phase_lower;phase.upper=h.phase_upper;
+                }
+                const auto group_count=phase.count;const auto& groups=phase.groups;
+                // A fixed frontend coordinate belongs to at most one symbol
+                // in a track. Boundary-straddling blocks are omitted rather
+                // than counted twice or filled with invented observations.
+                const auto within_first=(static_cast<long double>(first)-symbol_first)*h.rate;
+                const auto within_last=(static_cast<long double>(end)-symbol_first)*h.rate;
+                const auto first_quarter=std::floor(4*within_first/code.symbol_samples());
+                const auto last_quarter=std::ceil(4*within_last/code.symbol_samples())-1;
+                if(static_cast<long double>(first)>=symbol_first && end<=boundary && first_quarter==last_quarter) {
+                    const auto within=(static_cast<long double>(first)+.5L*amplitude_geometry.fft_samples-symbol_first)*h.rate;
+                    const auto quarter=static_cast<unsigned>(std::clamp(std::floor(4*within/code.symbol_samples()),0.L,3.L));
+                    for(std::size_t group=0;group<group_count;++group) {
+                        // Sample fine scopes: timing every small reduction
+                        // costs more than the operation. These component fields
+                        // are 64x systematic-sample estimates, not exact totals.
+                        const bool measured=options.measure_affine_work && (work.amplitude_observations%64==0);
+                        WorkTimer preparation_timer(measured,work.affine_prepare_seconds,work.affine_prepare_cpu_seconds,64);
+                        require(h.index<=std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol(),
+                            "amplitude pattern chip coordinate overflow");
+                        const auto start_chip=h.index*code.chips_per_symbol();
+                        std::array<double,2> weight{};
+                        // Deterministic quadrature of the ORIGINAL finite
+                        // shaped and radially limited envelope. Approximation
+                        // affects sensitivity, never its null distribution.
+                        const auto quadrature=std::max(8U,static_cast<unsigned>(std::ceil(
+                            8*static_cast<long double>(amplitude_geometry.fft_samples)*h.rate/code.chip_samples())));
+                        require(quadrature<=17,"amplitude quadrature exceeds its bounded chip support");
+                        ++work.affine_preparations;
+                        code.set_stream_phase_samples(groups[group].lower);code.prepare_symbol(start_chip,stop);
+                        // Load each original chip coefficient once for the
+                        // compact quadrature neighborhood. Accumulate pulse
+                        // taps in exactly the original node/tap order.
+                        std::array<double,17> coordinates{};
+                        for(unsigned node=0;node<quadrature;++node)coordinates[node]=static_cast<double>(
+                            (static_cast<long double>(first)+(node+.5L)*amplitude_geometry.fft_samples/quadrature-symbol_first)*h.rate);
+                        weight=amplitude_weights(start_chip,groups[group].lower,
+                            std::span<const double>(coordinates).first(quadrature),stop);
+                        const auto independent=2*static_cast<double>(amplitude_geometry.fft_samples*h.rate/code.chip_samples());
+                        preparation_timer.finish();
+                        WorkTimer reduction_timer(measured,work.affine_fit_seconds,work.affine_fit_cpu_seconds,64);
+                        amplitude_templates[hypothesis*(alternate_groups+1)+group].add(weight,quarter,independent);
+                        for(std::size_t channel=0;channel<amplitude_channels.size();++channel) {
+                            auto& envelope=amplitude_fits[(hypothesis*(alternate_groups+1)+group)*amplitude_channels.size()+channel];
+                            envelope.add(energy[channel],weight,quarter);
+                        }
+                        work.amplitude_channel_updates+=amplitude_channels.size();
+                        ++work.amplitude_observations;
+                    }
+                }
+                for(std::size_t group=0;group<group_count;++group)for(auto& fit:fits(h,hypothesis,group))
+                    fit.count+=until-cursor;
+                cursor=until;
+                if(cursor>=boundary)complete(h,hypothesis,boundary,stop);
+            }
+        }
+        amplitude_processed=end;settle_timing();room_for(0);
+    }
+    void push_amplitude(std::span<const float> input,std::stop_token stop,detail::CorrelationProjectionCache* cache) {
+        work.samples+=input.size();
+
+        for(std::size_t offset=0;offset<input.size();) {
+            cancelled(stop);
+            // All banks use one absolute block lattice, including banks
+            // admitted midstream. An initial partial coordinate is observed
+            // only for timing coverage and is never padded into an FFT.
+            if(sample<amplitude_processed) {
+                const auto skip=std::min<std::uint64_t>(input.size()-offset,amplitude_processed-sample);
+                sample+=skip;offset+=static_cast<std::size_t>(skip);continue;
+            }
+            const auto count=std::min(amplitude_geometry.fft_samples-amplitude_partial,input.size()-offset);
+            std::copy_n(input.begin()+offset,count,amplitude_pcm.begin()+amplitude_partial);
+            amplitude_partial+=count;offset+=count;sample+=count;
+            if(amplitude_partial==amplitude_geometry.fft_samples) {
+                amplitude_block(input,stop,cache,amplitude_scratch,amplitude_scratch.spectrum);amplitude_partial=0;
+            }
+        }
     }
     void fit_affine_piece(const Bank& bank,std::size_t left,std::uint64_t piece_count,
                           const std::array<Complex,2>& value,const std::array<Complex,2>& slope,
@@ -1761,6 +2446,7 @@ void PatternCorrelator::push(std::span<const float> samples,std::stop_token stop
         if(s.options.raw_reference || !cache || !cache->covers(samples))
             for(auto value:samples)require(std::isfinite(value),"nonfinite pattern sample");
     }
+    if(s.options.amplitude_only){s.push_amplitude(samples,stop,cache);return;}
     // Idle epochs keep their original footprint so parallel scratch cannot
     // displace other clock/key hypotheses from a shared receiver bank.
     struct ReleaseWorkers {
@@ -1777,22 +2463,97 @@ void PatternCorrelator::push(std::span<const float> samples,std::stop_token stop
         offset+=count;
     }
 }
+bool PatternCorrelator::try_skip_unobserved(std::uint64_t count,std::stop_token stop) {
+    auto& s=*impl_;cancelled(stop);require(!s.finished,"pattern capture already finished");
+    if(!s.scheduled_map() || !s.options.amplitude_only)return false;
+    require(count<=std::numeric_limits<std::uint64_t>::max()-s.sample,"pattern sample counter overflow");
+    const auto end=s.sample+count;
+    for(const auto& h:s.hypotheses) {
+        const auto first=s.scheduled_map()->locate(s.scheduled_tick(h,s.sample).add_signed(-s.scheduled_uncertainty(h,s.sample))).source;
+        const auto last=s.scheduled_map()->locate(s.scheduled_tick(h,end).add_samples(s.scheduled_cell_width(h)).add_signed(s.scheduled_uncertainty(h,end))).source;
+        if(first.distance(last)!=0)return false;
+    }
+    // U is monotone; equal endpoints prove every interior sample excluded for
+    // every retained lane. An unfinished FFT now straddles a known null and
+    // cannot become a valid observation. First settle its ALREADY RECEIVED
+    // prefix, so a completed bit is not held through the entire quiet group.
+    // Skipped samples themselves supply no fit, count or observed absence.
+    if(s.amplitude_partial && s.amplitude_processed<s.sample)
+        s.amplitude_scheduled_progress(s.amplitude_processed,s.sample,nullptr,stop);
+    const auto begin=s.sample;
+    s.amplitude_scheduled_progress(begin,end,nullptr,stop);
+    s.sample=end;s.amplitude_partial=0;
+    const auto remainder=(s.search.input_sample_origin%s.amplitude_geometry.fft_samples+
+        end%s.amplitude_geometry.fft_samples)%s.amplitude_geometry.fft_samples;
+    const auto tail=remainder?s.amplitude_geometry.fft_samples-remainder:0;
+    require(tail<=std::numeric_limits<std::uint64_t>::max()-end,"amplitude block coordinate overflow");
+    s.amplitude_processed=end+tail;s.work.scheduled_null_samples+=count;
+    return true;
+}
+std::optional<ScheduledCaptureEnvelope> PatternCorrelator::scheduled_capture_envelope(std::uint64_t sample) const {
+    const auto& s=*impl_;if(!s.scheduled_map() || !s.options.amplitude_only || s.hypotheses.empty())return std::nullopt;
+    ScheduledCaptureEnvelope result;result.reference_sample=sample;
+    bool first=true;
+    for(const auto& h:s.hypotheses) {
+        const auto center=s.scheduled_tick(h,sample),lower=center.add_signed(-s.scheduled_uncertainty(h,sample));
+        const auto upper=center.add_samples(s.scheduled_cell_width(h)).add_signed(s.scheduled_uncertainty(h,sample));
+        if(first || lower.distance(result.lower)<0)result.lower=lower;
+        if(first || upper.distance(result.upper)>0)result.upper=upper;
+        if(first || h.rate-s.scheduled->clock_radius<result.minimum_rate)result.minimum_rate=h.rate-s.scheduled->clock_radius;
+        if(first || h.rate+s.scheduled->clock_radius>result.maximum_rate)result.maximum_rate=h.rate+s.scheduled->clock_radius;
+        first=false;
+    }
+    return result;
+}
+std::optional<std::uint64_t> PatternCorrelator::unobserved_end_from(std::uint64_t sample) const {
+    const auto& s=*impl_;if(!s.scheduled_map() || !s.options.amplitude_only)return std::nullopt;
+    auto end=std::numeric_limits<std::uint64_t>::max();
+    for(const auto& h:s.hypotheses) {
+        const auto center=s.scheduled_tick(h,sample),lower=center.add_signed(-s.scheduled_uncertainty(h,sample));
+        const auto upper=center.add_samples(s.scheduled_cell_width(h)).add_signed(s.scheduled_uncertainty(h,sample));
+        const auto a=s.scheduled_map()->locate(lower),b=s.scheduled_map()->locate(upper);
+        if(a.active || b.active || a.source.distance(b.source)!=0)return std::nullopt;
+        const auto next=s.scheduled_map()->source_to_physical(a.source,false);
+        const auto duration=std::max(0.L,std::floor(next.distance(upper)/(h.rate+s.scheduled->clock_radius)));
+        if(duration>=static_cast<long double>(std::numeric_limits<std::uint64_t>::max()-sample))continue;
+        end=std::min(end,sample+static_cast<std::uint64_t>(duration));
+    }
+    if(end<=sample || end==std::numeric_limits<std::uint64_t>::max())return std::nullopt;
+    return end;
+}
 void PatternCorrelator::finish(std::stop_token stop) {
     auto& s=*impl_;cancelled(stop);if(s.finished)return;
+    s.amplitude_publication_dirty=true;
     s.settle_timing();
     for(auto& h:s.hypotheses) {s.publish(h);s.clear(h);}
     s.finished=true;
 }
 std::vector<PatternBurst> PatternCorrelator::take_bursts(){
     auto& s=*impl_;
+    // Amplitude evidence changes only at scored symbol boundaries. Partial
+    // FFT input cannot accept a bit or resolve timing. Retain the empty queue
+    // and avoid scanning every rolling-bank hypothesis on such polls.
+    if(s.options.amplitude_only && !s.amplitude_publication_dirty && !s.timing_dirty && s.bursts.empty()) {
+        ++s.work.amplitude_unchanged_polls;return {};
+    }
     // A consumer drain is also a presentation boundary. Publish every
     // accepted decision available now, even when a whole message is much
     // shorter than chunk_bits or each symbol takes hours. Draining does not
     // admit weak decisions, release the clock, or imply physical completion.
     s.settle_timing();
     for(auto& h:s.hypotheses)s.publish(h,false,true,true);
+    if(s.options.amplitude_only) {
+        ++s.work.amplitude_publication_polls;
+        // A full output queue can leave committed bits for the next poll.
+        // Keep that work pending even without further PCM, including EOF.
+        s.amplitude_publication_dirty=s.timing_dirty || std::any_of(s.hypotheses.begin(),s.hypotheses.end(),
+            [](const auto& h){return h.committed!=0;});
+        if(s.bursts.empty()) {
+            s.accounted_bytes=s.working_bytes()+s.drift_reserved+s.amplitude_scratch_reservation;return {};
+        }
+    }
     auto result=std::move(s.bursts);s.bursts={};s.bursts.reserve(s.search.track_limit);
-    s.accounted_bytes=s.working_bytes()+s.drift_reserved;return result;
+    s.accounted_bytes=s.working_bytes()+s.drift_reserved+s.amplitude_scratch_reservation;return result;
 }
 PatternBurst PatternCorrelator::provisional()const {
     const auto& h=impl_->hypotheses;
@@ -1820,7 +2581,10 @@ bool PatternCorrelator::initial_search_complete()const {
         // capture start. Wait for the next full symbol in that hypothesis's
         // own rate. index advances only after complete() scores every phase;
         // clearing noise candidates or flushing EOF never advances it.
-        const auto first_full=std::ceil(std::max(0.L,-h.origin)*h.rate/s.code.symbol_samples());
+        const auto remainder=s.options.amplitude_only?s.search.input_sample_origin%s.amplitude_geometry.fft_samples:0;
+        const auto first_observation=remainder?s.amplitude_geometry.fft_samples-remainder:0;
+        const auto first_full=s.scheduled_map()?s.scheduled_index_at(h.phase_lower,s.source_position(h,first_observation),true):
+            std::ceil(std::max(0.L,static_cast<long double>(first_observation)-h.origin)*h.rate/s.code.symbol_samples());
         return static_cast<long double>(h.index)>first_full;
     });
 }
@@ -1835,16 +2599,16 @@ void PatternCorrelator::set_workspace_bytes(std::size_t bytes) {
     if(impl_->differential_window && bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes) {
         decltype(impl_->differential_fits)().swap(impl_->differential_fits);
         impl_->differential_window=0;
-        impl_->accounted_bytes=impl_->working_bytes()+impl_->drift_reserved;
+        impl_->accounted_bytes=impl_->working_bytes()+impl_->drift_reserved+impl_->amplitude_scratch_reservation;
     }
     if(impl_->drift_sections>1 && bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes) {
         // Whole-symbol coherent fits have always been retained; reducing an
         // optional detector's reservation never resets physical reception.
         decltype(impl_->drift_fits)().swap(impl_->drift_fits);
         impl_->drift_reserved=0;impl_->drift_sections=1;
-        impl_->accounted_bytes=impl_->working_bytes();
+        impl_->accounted_bytes=impl_->working_bytes()+impl_->amplitude_scratch_reservation;
     }
-    require(bytes>=working_bytes(),"DSP workspace is smaller than streaming pattern state");impl_->budget=bytes;
+    require(bytes>=working_bytes()+impl_->amplitude_scratch_reservation,"DSP workspace is smaller than streaming pattern state");impl_->budget=bytes;
 }
 Diagnostics PatternCorrelator::diagnostics()const {
     const auto burst=provisional();Diagnostics result;result.bit_rate=static_cast<double>(impl_->config.sample_rate)/static_cast<double>(impl_->code.symbol_samples());

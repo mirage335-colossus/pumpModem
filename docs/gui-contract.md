@@ -401,6 +401,20 @@ follows audio-device availability during transmission. Robust routing changes
 preserve the running receiver, pending bits, plots and airtime estimate and apply
 to the next playback. Simulated samples and exported WAV framing remain unchanged.
 
+The Robust key/DSSS/FHSS row also contains **Sched_Hop**, followed by **Freq
+search**. Sched_Hop offers **disabled**, **10**, **100**, **1k** and **10k** and
+requires a selected encryption key. An enabled factor schedules one active
+0.4-second hop per frame of that many total hops. Developer mode adds **Sched_Hop
+Dilution** beside the receiver controls at the bottom of the persistent Link
+planner: it groups `G` consecutive active hops within the same `M`-hop frame.
+For example, two active hops in ten mean effective 5× airtime. The frequency
+multiplier is enabled only with Sched_Hop; it widens oscillator frequency
+uncertainty while preserving clock-rate coverage and workspace limits. Saved
+and exported settings retain these preferences when inactive. Unsupported
+split-symbol decoding remains visible rather than silently dropping coverage.
+See [scheduled bursts](scheduled-hops.md) for source/physical timing, energy,
+recording and qualification limits.
+
 Each modem also has a lower-right **TX volume** dropdown beside **Exclusive**.
 Volume starts at **100%** and multiplies the existing playback PCM only after
 rate conversion; unity gain retains the original sample conversion exactly.
@@ -1042,6 +1056,21 @@ rows one per backing pixel; taller plots scale that bounded history to fill the
 available height. Startup history remains bottom-aligned with blank space for
 unobserved rows. Resizing does not clear or add measurements.
 
+Clicking the Robust Console waterfall opens a shared full-window overlay of the
+configured receive search-band union. A second click or Escape dismisses it;
+**Clear waterfall** retains its separate history-clearing action. Adjacent
+columns show amplitude on the left and wrapped inter-row phase on the right,
+after nominal FFT-bin rotation is removed. Both use the same native bin selected
+by power pooling. At very small widths, adjacent amplitude/phase panels are used.
+Missing phase remains black, including startup, partial/power-only data and
+capture discontinuities. Noise phase is arbitrary and never feeds admission.
+The detail retains native bins from the existing environmental FFT, adds no
+second transform and cannot exceed its frequency resolution. Captions disclose
+clipped search extents and outward bin rounding. The configured band is not a
+coverage certificate for an unsupported receiver. The bounded history and
+immutable snapshots must be included in total display-memory accounting; see
+[detail storage and limits](scheduled-hops.md#fullscreen-configured-searched-spectrum).
+
 The live oscilloscope uses a fixed environmental timebase, independently of
 the expected carrier. Its default spans up to 2,048 captured samples, capped
 at half a second for low-rate streams. Missing startup time remains blank;
@@ -1138,8 +1167,8 @@ flags, including `--simulation`, `--self-check` and the smoke options.
 
 ## Editing full-window views from shared code
 
-`screen_overlay.hpp` defines the expanded QR view. `OverlayDefinition` contains
-ordinary `Control` declarations. Both backends instantiate them through the
+`screen_overlay.hpp` defines the expanded QR and searched-spectrum views.
+`OverlayDefinition` contains ordinary `Control` declarations. Both backends instantiate them through the
 same factory used for desktop controls. For example, adding a brightness choice
 requires only shared definition changes:
 

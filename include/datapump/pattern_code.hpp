@@ -104,9 +104,27 @@ public:
     // finish protected cover and finite tails. A stopped read token remains immediate abort.
     void request_finish();
     std::uint64_t original_total_samples() const;
+    std::uint64_t original_source_total_samples() const;
     bool finished() const;
     std::uint64_t total_samples() const;
     std::uint64_t samples_emitted() const;
+    // Physical UTC origin and elapsed endpoint of all still-valid payload
+    // pulse contributions. Scheduled null time never advances the source.
+    std::uint64_t physical_output_origin() const;
+    std::uint64_t physical_valid_payload_end() const;
+    // Nonmutating forecast at a supplied physical PCM frontier, including
+    // already-generated samples; excludes the independent suppression drain.
+    std::uint64_t predicted_physical_valid_payload_end(std::uint64_t frontier) const;
+    std::uint64_t predicted_physical_stop_end(std::uint64_t frontier) const;
+    std::uint64_t source_total_samples() const;
+    std::uint64_t source_samples_emitted() const;
+    std::uint64_t source_valid_payload_end() const;
+    // Conservative latest payload epoch whose pulse support may have entered
+    // generated output. Uses retained immutable geometry/maps, excludes cover
+    // and never reconstructs protected-tail policy on a realtime read callback.
+    // Before payload exposure returns the initial epoch (existing conservative
+    // key-lock policy), rather than implying the temporary root was unused.
+    std::uint64_t emitted_payload_epoch() const;
     double bit_rate() const;
     std::size_t working_bytes() const;
     void copy_transmit_trace(TransmitTrace&, std::uint64_t begun_chips) const;
@@ -123,7 +141,13 @@ class NoiseTransmitter {
 public:
     using ChipObserver = PatternTransmitter::ChipObserver;
     static constexpr std::uint64_t sample_target = 1ULL << 48;
+    // Common live scheduling prepares the fresh temporary secrets BEFORE
+    // selecting the keyed burst origin. The tag is an explicit internal
+    // boundary; never pass a communication-key configuration through it.
+    struct PreparedTemporaryKeys {};
+    static Config prepare_config(Config config);
     explicit NoiseTransmitter(Config config, std::uint64_t symbols = 0);
+    NoiseTransmitter(Config config, PreparedTemporaryKeys, std::uint64_t symbols = 0);
     ~NoiseTransmitter();
     NoiseTransmitter(NoiseTransmitter&&) noexcept;
     NoiseTransmitter& operator=(NoiseTransmitter&&) noexcept;
@@ -136,9 +160,25 @@ public:
     // finish protected cover and finite tails. A stopped read token remains immediate abort.
     void request_finish();
     std::uint64_t original_total_samples() const;
+    std::uint64_t original_source_total_samples() const;
     bool finished() const;
     std::uint64_t total_samples() const;
     std::uint64_t samples_emitted() const;
+    std::uint64_t physical_output_origin() const;
+    std::uint64_t physical_valid_payload_end() const;
+    // Nonmutating forecast at a supplied physical PCM frontier, including
+    // already-generated samples; excludes the independent suppression drain.
+    std::uint64_t predicted_physical_valid_payload_end(std::uint64_t frontier) const;
+    std::uint64_t predicted_physical_stop_end(std::uint64_t frontier) const;
+    std::uint64_t source_total_samples() const;
+    std::uint64_t source_samples_emitted() const;
+    std::uint64_t source_valid_payload_end() const;
+    // Conservative latest payload epoch whose pulse support may have entered
+    // generated output. Uses retained immutable geometry/maps, excludes cover
+    // and never reconstructs protected-tail policy on a realtime read callback.
+    // Before payload exposure returns the initial epoch (existing conservative
+    // key-lock policy), rather than implying the temporary root was unused.
+    std::uint64_t emitted_payload_epoch() const;
     std::size_t working_bytes() const;
     void copy_transmit_trace(TransmitTrace&, std::uint64_t begun_chips) const;
 private:

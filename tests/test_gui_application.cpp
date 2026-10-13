@@ -331,6 +331,15 @@ void developer_mode_presentation() {
     }
     app.navigate(P::planner);
     check(app.page()==P::planner&&app.control(toggle).visible,"Link planner or its persistent developer toggle became unavailable");
+    for(const auto field:{F::search_arithmetic,F::receiver_strategy,F::receiver_cpu_budget,F::sched_hop_dilution})
+        check(!app.control(control(field)).visible,"Developer planner control exposed before Developer mode");
+    app.toggle(toggle,true);
+    for(const auto field:{F::search_arithmetic,F::receiver_strategy,F::receiver_cpu_budget,F::sched_hop_dilution})
+        check(app.control(control(field)).visible,"Developer planner control missing on Link planner");
+    app.navigate(P::console);
+    for(const auto field:{F::search_arithmetic,F::receiver_strategy,F::receiver_cpu_budget,F::sched_hop_dilution})
+        check(!app.control(control(field)).visible,"Document-only planner control leaked onto Console");
+    app.navigate(P::planner);app.toggle(toggle,false);
     for(const auto page:{P::compression,P::flow,P::transmission}) {
         app.navigate(page);check(app.page()==P::planner,"Stale navigation opened a hidden developer tab");
         app.select_page(page);check(app.page()==P::planner,"Programmatic navigation exposed a hidden developer tab");
@@ -850,6 +859,35 @@ void expanded_preview() {
     check(!app.overlay(),"Returning to the console reopened a dismissed expanded preview");
     press();app.close();press();
     check(!app.overlay()&&!app.enabled(qr.click),"Closing the application retained or reopened expanded view");
+}
+void expanded_spectrum() {
+    using C=ui::Command;using B=ui::Bitmap;using F=ui::Field;
+    Application app({.simulation=true});
+    const auto& declarations=ui::console_screen();
+    const auto& compact=*std::find_if(declarations.begin(),declarations.end(),[](const auto& c){return c.bitmap==B::waterfall;});
+    check(compact.click==C::toggle_waterfall_expanded&&!app.overlay(),"waterfall click did not declare expansion");
+    const auto rate=app.field(F::bandwidth).text,carrier=app.field(F::carrier).text;
+    app.gesture(compact,compact.click);
+    auto view=app.overlay();
+    check(view&&view->controls.size()==1&&view->controls.front().bitmap==B::waterfall_detail,
+          "waterfall expansion did not reuse the shared overlay vocabulary");
+    const auto stale=view->controls.front();
+    const auto geometry=app.control_layout(stale,1000,760,view->controls);
+    check(geometry.frame.x==0&&geometry.frame.y==0&&geometry.frame.w==1000&&geometry.frame.h==760,
+          "expanded spectrum did not occupy the viewport");
+    check(app.field(F::bandwidth).text==rate&&app.field(F::carrier).text==carrier,
+          "opening a display changed receiver sample geometry");
+    check(app.overlay_key({ui::Key::escape})&&!app.overlay()&&!app.closing(),"Escape did not restore the compact waterfall");
+    app.gesture(compact,compact.click);const auto current=app.overlay();
+    check(current&&current->generation!=view->generation,"expanded spectrum reused a stale callback surface");
+    app.gesture(stale,C::dismiss_overlay);
+    check(app.overlay()==current,"stale expanded click dismissed a newer spectrum view");
+    app.gesture(current->controls.front(),C::dismiss_overlay);
+    check(!app.overlay(),"expanded spectrum click did not restore its original view");
+    app.gesture(compact,compact.click);app.toggle(F::developer_mode,true);app.select_page(ui::Page::flow);
+    check(!app.overlay()&&!app.enabled(C::toggle_waterfall_expanded),"page change left fullscreen spectrum active");
+    app.select_page(ui::Page::console);app.gesture(compact,compact.click);app.close();
+    check(!app.overlay()&&!app.enabled(C::toggle_waterfall_expanded),"application shutdown retained expanded spectrum");
 }
 void menu_bindings() {
     Application app({.simulation=true});
@@ -1597,6 +1635,10 @@ void smoke_shutdown_does_not_resume_workflow() {
 }
 }
 int main(int argc,char** argv) {
+    if(argc==2&&std::string(argv[1])=="--expanded-spectrum") {
+        try {expanded_spectrum();std::cout<<"Expanded spectrum application passed\n";return 0;}
+        catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
+    }
 #ifndef _WIN32
     if(argc==2&&std::string(argv[1])=="--watchdog-fixture") {
         std::vector<std::string> arguments{"gui","--debug","--debug-timeout","10","--keyfile","synthetic.keys","--tx-key","named"};
@@ -1608,6 +1650,6 @@ int main(int argc,char** argv) {
         });
     }
 #endif
-    try {physical_debug_workflow();verbose_diagnostics();probe_fixture::run();fhss_developer_editor();fast_default_console();developer_mode_presentation();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();planner_clock_details();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();smoke_shutdown_does_not_resume_workflow();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {physical_debug_workflow();verbose_diagnostics();probe_fixture::run();fhss_developer_editor();fast_default_console();developer_mode_presentation();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();expanded_spectrum();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();planner_clock_details();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();smoke_shutdown_does_not_resume_workflow();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

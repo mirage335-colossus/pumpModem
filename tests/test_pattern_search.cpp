@@ -357,6 +357,45 @@ void check_independent_cell_coverage(const modem::Config& config,const modem::Os
         }
     }
 }
+void microwave_tiny_clock_domain() {
+    const auto oscillator=tuning::oscillator_model(tuning::parse_oscillator_preset("gpsdo-ocxo"));
+    for(const auto seconds:{128.,256.,512.,8192.}) {
+        auto config=tuning::resolve(1,-3.0720996964786846,
+            tuning::PatternMode::auto_pattern,false,1500).config;
+        config.integration_seconds=seconds;
+        config.oscillator_search=modem::OscillatorSearchConfig{
+            oscillator,oscillator,5.8e9,3,modem::OscillatorReference::independent_audio};
+        const auto bank=modem::oscillator_pattern_search(config);
+        const auto expected=seconds==128?1783U:seconds==256?3565U:4097U;
+        check(bank.frequency.count==expected && bank.hypotheses.size()==expected,
+              "microwave RF uncertainty must not duplicate a tiny physical clock domain");
+        check(near(bank.frequency.requested_half_width_hz,1.74000045) &&
+              near(bank.requested_clock_half_width_ppm,.0003) &&
+              bank.frequency.step_hz<=.25/seconds,
+              "microwave optimization preserves frequency and clock bounds and resolution");
+        check(bank.clock_step_ppm<=std::nextafter(4*bank.requested_clock_half_width_ppm,
+                  std::numeric_limits<double>::infinity()),
+              "clipped cell radius exceeds the whole physical clock domain bound");
+        check(bank.limited==(seconds>256),"complete and capped microwave coverage must remain explicit");
+        if(!bank.limited)check_independent_cell_coverage(config,bank);
+        else check(bank.frequency.half_width_hz<bank.frequency.requested_half_width_hz,
+                   "frequency cap must not silently claim full coverage");
+        const auto correction=modem::utc_transmit_rate_limit(config);
+        const auto steered=modem::oscillator_pattern_search(config,correction);
+        if(seconds==128) {
+            check(steered.transmit_rate_correction==correction && !steered.timing_correction_unavailable &&
+                  !steered.limited && std::equal(bank.hypotheses.begin(),bank.hypotheses.end(),
+                      steered.hypotheses.begin()),
+                  "supported microwave UTC union retains every original lane");
+        } else {
+            // At 256 seconds the base domain now fits, but the original and
+            // expanded frequency lattices together still exceed the cap.
+            check(steered.transmit_rate_correction==0 && steered.timing_correction_unavailable &&
+                  steered.hypotheses==bank.hypotheses && steered.limited==bank.limited,
+                  "clock-row sharing must not silently enable an incomplete UTC union");
+        }
+    }
+}
 void thin_independent_regions() {
     auto config=oscillator_config();config.sample_rate=6000;config.carrier_hz=1490;
     auto& policy=*config.oscillator_search;policy.rf_shift_hz=10;
@@ -446,6 +485,63 @@ void invalid_oscillator_policies() {
     config.oscillator_search.reset();
     rejects([&]{modem::oscillator_pattern_search(config);},"missing policy unexpectedly changes low-level defaults");
 }
+void frequency_only_expansion() {
+    auto config=oscillator_config();config.integration_seconds=1.28;
+    const auto original=modem::oscillator_pattern_search(config);
+    const auto physical=modem::oscillator_effects(config);
+    for(auto multiplier:{2.,4.,32.}) {
+        config.frequency_search_multiplier=multiplier;
+        const auto bank=modem::oscillator_pattern_search(config);
+        check(!bank.limited && bank.frequency.half_width_hz==bank.frequency.requested_half_width_hz &&
+              near(bank.frequency.requested_half_width_hz,multiplier*original.frequency.requested_half_width_hz),
+              "frequency-only widening lost its complete requested frequency endpoints");
+        check(bank.requested_clock_half_width_ppm==original.requested_clock_half_width_ppm &&
+              bank.frequency.step_hz==original.frequency.step_hz &&
+              std::equal(original.hypotheses.begin(),original.hypotheses.end(),bank.hypotheses.begin()),
+              "frequency-only widening changed clock bounds, spacing, or an original exact pair");
+        for(const auto lane:bank.hypotheses)
+            check(std::abs(lane.clock_error_ppm)<=bank.requested_clock_half_width_ppm,
+                  "frequency-only widening inflated physical sample-clock bounds");
+        const auto offsets=modem::default_pattern_frequency_offsets(config);
+        check(offsets.size()==bank.frequency.count && offsets.front()==0 &&
+              std::abs(offsets.back())==bank.frequency.half_width_hz,
+              "expanded offset API reconstructed a false uniform lattice");
+        const auto effects=modem::oscillator_effects(config);
+        check(effects.clock_error_ppm==physical.clock_error_ppm &&
+              effects.frequency_offset_hz==physical.frequency_offset_hz &&
+              effects.physical_rf_hz==physical.physical_rf_hz,
+              "receiver-only widening altered physical oscillator truth");
+    }
+    config.frequency_search_multiplier=2;
+    config.oscillator_search->reference=modem::OscillatorReference::shared_radio;
+    config.oscillator_search->rf_shift_hz=1e6;
+    config.oscillator_search->rf.accuracy_ppm=.001;
+    for(auto sideband:{modem::OscillatorSideband::upper,modem::OscillatorSideband::lower}) {
+        config.oscillator_search->sideband=sideband;
+        auto base=config;base.frequency_search_multiplier=1;
+        const auto original_shared=modem::oscillator_pattern_search(base);
+        const auto expanded_shared=modem::oscillator_pattern_search(config);
+        check(!expanded_shared.limited &&
+              expanded_shared.requested_clock_half_width_ppm==original_shared.requested_clock_half_width_ppm &&
+              std::equal(original_shared.hypotheses.begin(),original_shared.hypotheses.end(),
+                  expanded_shared.hypotheses.begin()),
+              "shared-radio frequency expansion lost original clock/frequency relation");
+    }
+    config=oscillator_config();config.integration_seconds=86400;
+    const auto capped_original=modem::oscillator_pattern_search(config);
+    config.frequency_search_multiplier=32;const auto capped=modem::oscillator_pattern_search(config);
+    check(capped.limited && capped.hypotheses.size()<=modem::maximum_pattern_frequency_rate_hypotheses &&
+          std::equal(capped_original.hypotheses.begin(),capped_original.hypotheses.end(),capped.hypotheses.begin()) &&
+          near(capped.frequency.requested_half_width_hz,32*capped_original.frequency.requested_half_width_hz),
+          "capped widening discarded original lanes or claimed unsupported complete coverage");
+    for(auto multiplier:{0.,.99,33.,std::numeric_limits<double>::infinity()}) {
+        config.frequency_search_multiplier=multiplier;
+        rejects([&]{modem::validate(config);},"invalid frequency expansion accepted");
+    }
+    config=oscillator_config();config.oscillator_search.reset();config.frequency_search_multiplier=2;
+    rejects([&]{modem::validate(config);},"frequency expansion silently invented a clock policy");
+}
+
 void joint_passband_and_quantized_tones() {
     auto config=oscillator_config();config.sample_rate=400;config.carrier_hz=168.65;
     auto& policy=*config.oscillator_search;
@@ -520,7 +616,8 @@ void compare_enumerated_independent_bank(const modem::Config& config) {
     const auto rate_step=static_cast<double>(static_cast<long double>(clock_bound)/requested_rates);
     const auto timing_step=.25*static_cast<double>(modem::pattern_chip_samples(config))/
         static_cast<double>(modem::symbol_sample_count(config))*1e6;
-    if(clock_bound<=10000 && (static_cast<long double>(step)+2.L*rf_bound)/config.carrier_hz*1e6L<timing_step) {
+    if(clock_bound<=10000 && std::min((static_cast<long double>(step)+2.L*rf_bound)/
+        config.carrier_hz*1e6L,4.L*clock_bound)<timing_step) {
         check(actual.hypotheses.size()==actual.frequency.count,"thin independent oracle cases use one timing lane per frequency");
         if(!actual.limited)check_independent_cell_coverage(config,actual);
         return;
@@ -630,6 +727,25 @@ void utc_correction_coverage() {
         check(modem::oscillator_effects(config).clock_error_ppm==effects.clock_error_ppm,
             "UTC correction changed the physical oscillator model");
     }
+    {
+        auto config=tuning::resolve(1,-3.0720996964786846,
+            tuning::PatternMode::auto_pattern,false,10).config;
+        const auto oscillator=tuning::oscillator_model(tuning::parse_oscillator_preset("gpsdo-ocxo"));
+        config.oscillator_search=modem::OscillatorSearchConfig{
+            oscillator,oscillator,5.8e9,3,modem::OscillatorReference::independent_audio};
+        const auto original=modem::oscillator_pattern_search(config);
+        const auto effects=modem::oscillator_effects(config);
+        const auto correction=modem::utc_transmit_rate_limit(config);
+        const auto adjusted=modem::oscillator_pattern_search(config,correction);
+        check(correction>0 && adjusted.transmit_rate_correction==correction &&
+              !adjusted.limited && !adjusted.timing_correction_unavailable &&
+              adjusted.hypotheses.size()<=modem::maximum_pattern_frequency_rate_hypotheses &&
+              adjusted.frequency.count<=modem::maximum_pattern_frequency_hypotheses &&
+              std::equal(original.hypotheses.begin(),original.hypotheses.end(),adjusted.hypotheses.begin()),
+              "newly eligible thin UTC union must fit and preserve all original hypotheses");
+        check(modem::oscillator_effects(config).clock_error_ppm==effects.clock_error_ppm,
+              "thin UTC coverage must not change the physical oscillator model");
+    }
     auto config=oscillator_config();config.integration_seconds=86400;
     const auto original=modem::oscillator_pattern_search(config);
     const auto fallback=modem::oscillator_pattern_search(config,.001);
@@ -650,8 +766,8 @@ int main() {
         tones_and_invalid_configurations();projected_bin_coverage();
         oscillator_bounds_and_phase();exact_declared_lattice_endpoints();shared_radio_frequency_mapping();zero_shift_uses_only_baseband();independent_reference_geometry();
         short_and_bounded_oscillator_searches();invalid_oscillator_policies();
-        joint_passband_and_quantized_tones();thin_independent_regions();bounded_independent_construction();
-        utc_correction_coverage();
+        joint_passband_and_quantized_tones();thin_independent_regions();microwave_tiny_clock_domain();bounded_independent_construction();
+        utc_correction_coverage();frequency_only_expansion();
     }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
     std::cout<<"pattern search tests passed\n";
 }

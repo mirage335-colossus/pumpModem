@@ -11,12 +11,37 @@ namespace {
 struct Waveform { std::vector<float> samples; modem::Config config; double zoom; bool environment=false; };
 struct Constellation { std::vector<std::complex<double>> points; bool symbols; };
 struct PatternScores { std::vector<PatternScore> scores; bool enabled; };
-struct Waterfall { SpectrumHistory history; bool overview; };
+struct Waterfall { std::shared_ptr<const SpectrumHistory> history; bool overview; };
+struct SpectrumDetail { std::shared_ptr<const SpectrumHistory> history; std::optional<std::pair<double,double>> band; };
 struct Qr { std::optional<QrCode> code; QrBrightness brightness; };
 struct Pattern { inspection::PatternSpace model; std::size_t first, count; enum Kind { chips, distances, evidence } kind; };
 struct Codeword { std::size_t data, parity; };
 using Rgb = theme::Rgb;
 Rgb gray(unsigned char value) { return {value, value, value}; }
+Rgb phase_color(double degrees) {
+    // Cyclic phase palette: -180 and +180 have the same red endpoint.
+    const auto hue=(std::clamp(degrees,-180.,180.)+180.)/60.;
+    const auto sector=static_cast<unsigned>(hue)%6;
+    const auto up=static_cast<unsigned char>(255*(hue-std::floor(hue))),down=static_cast<unsigned char>(255-up);
+    switch(sector) {
+    case 0:return {255,up,0};case 1:return {down,255,0};case 2:return {0,255,up};
+    case 3:return {0,down,255};case 4:return {up,0,255};default:return {255,0,down};
+    }
+}
+std::pair<double,double> detail_band(const SpectrumDetail& data) {
+    const auto edge=data.history->max_hz();
+    auto band=data.band?std::pair{std::clamp(data.band->first,0.,edge),
+                                 std::clamp(data.band->second,0.,edge)}:std::pair{0.,edge};
+    if(!(band.second>band.first) || data.history->detail_rows().empty())return band;
+    const auto count=data.history->detail_rows().back().db.size();
+    if(count<2 || !(edge>0))return band;
+    const auto spacing=edge/(count-1);
+    // The displayed endpoints are retained bin centers. Round outward so a
+    // narrow configured interval cannot silently discard an admitted edge.
+    band.first=std::max(0.,std::floor(band.first/spacing)*spacing);
+    band.second=std::min(edge,std::ceil(band.second/spacing)*spacing);
+    return band;
+}
 
 template<class Sample>
 void rows(const BitmapRequest& request, const BitmapSink& sink, bool rgb, Sample sample) {
@@ -79,7 +104,7 @@ double pattern_distance(const inspection::PatternSpace& model, std::size_t a, st
 }
 }
 struct PlotSnapshot::Data {
-    std::variant<std::monostate, Waveform, Constellation, PatternScores, Waterfall, Qr, Pattern, Codeword> value;
+    std::variant<std::monostate, Waveform, Constellation, PatternScores, Waterfall, SpectrumDetail, Qr, Pattern, Codeword> value;
     template<class Value> explicit Data(Value value_) : value(std::move(value_)) {}
 };
 PlotSnapshot::PlotSnapshot() : data_(std::make_shared<Data>(std::monostate{})) {}
@@ -112,7 +137,18 @@ PlotSnapshot PlotSnapshot::pattern_scores(std::vector<PatternScore> scores, bool
     return PlotSnapshot(std::make_shared<Data>(PatternScores{std::move(scores), enabled}));
 }
 PlotSnapshot PlotSnapshot::waterfall(SpectrumHistory history, bool overview) {
-    return PlotSnapshot(std::make_shared<Data>(Waterfall{std::move(history), overview}));
+    return waterfall_shared(std::make_shared<const SpectrumHistory>(std::move(history)),overview);
+}
+PlotSnapshot PlotSnapshot::waterfall_shared(std::shared_ptr<const SpectrumHistory> history,bool overview) {
+    if(!history)throw Error("missing waterfall history");
+    return PlotSnapshot(std::make_shared<Data>(Waterfall{std::move(history),overview}));
+}
+PlotSnapshot PlotSnapshot::waterfall_detail(std::shared_ptr<const SpectrumHistory> history,
+    std::optional<std::pair<double,double>> band) {
+    if(!history)throw Error("missing detailed waterfall history");
+    if(band && (!std::isfinite(band->first) || !std::isfinite(band->second) || band->first>band->second))
+        throw Error("invalid searched spectrum band");
+    return PlotSnapshot(std::make_shared<Data>(SpectrumDetail{std::move(history),band}));
 }
 PlotSnapshot PlotSnapshot::qr(std::optional<QrCode> code, QrBrightness brightness) {
     return PlotSnapshot(std::make_shared<Data>(Qr{std::move(code), brightness}));
@@ -299,7 +335,7 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
                 return gray(0);
             });
         } else if constexpr (std::is_same_v<Type, Waterfall>) {
-            const auto& history = data.history.rows();
+            const auto& history = data.history->rows();
             // Keep the recent one-row-per-pixel view in short plots. Beyond
             // retention capacity, scale that same time window to the available
             // height instead of leaving history in a fixed strip at the bottom.
@@ -317,7 +353,7 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
                         const auto last=std::min(row.size(),std::max(first+1,static_cast<std::size_t>(x+1)*row.size()/request.width));
                         peak=std::max(peak,*std::max_element(row.begin()+static_cast<std::ptrdiff_t>(first),row.begin()+static_cast<std::ptrdiff_t>(last)));
                     }
-                    const auto intensity=static_cast<unsigned char>(data.history.intensity(peak)*255);
+                    const auto intensity=static_cast<unsigned char>(data.history->intensity(peak)*255);
                     return color?theme::waterfall_palette[intensity]:gray(intensity);
                 }
                 const auto source = data.overview ? static_cast<std::ptrdiff_t>(static_cast<std::size_t>(y) * history.size() / request.height) :
@@ -328,8 +364,42 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
                 const auto first = static_cast<std::size_t>(x) * row.size() / request.width;
                 const auto last = std::max(first + 1, static_cast<std::size_t>(x + 1) * row.size() / request.width);
                 const auto peak = *std::max_element(row.begin() + static_cast<std::ptrdiff_t>(first), row.begin() + static_cast<std::ptrdiff_t>(last));
-                const auto intensity = static_cast<unsigned char>(data.history.intensity(peak) * 255);
+                const auto intensity = static_cast<unsigned char>(data.history->intensity(peak) * 255);
                 return color ? theme::waterfall_palette[intensity] : gray(intensity);
+            });
+        } else if constexpr (std::is_same_v<Type, SpectrumDetail>) {
+            const auto& history=data.history->detail_rows();
+            const auto [low,high]=detail_band(data);
+            const auto visible_rows=std::min<std::size_t>(request.height,SpectrumHistory::capacity);
+            const bool panels=request.width<64;
+            const auto columns=std::max(1U,request.width/2);
+            rows(request,sink,color,[&](unsigned x,unsigned y) {
+                if(history.empty() || !(high>low) || !(data.history->max_hz()>0))return gray(0);
+                const auto source=static_cast<std::ptrdiff_t>(history.size())-static_cast<std::ptrdiff_t>(visible_rows)+
+                    static_cast<std::ptrdiff_t>(static_cast<std::size_t>(y)*visible_rows/request.height);
+                if(source<0 || static_cast<std::size_t>(source)>=history.size())return gray(0);
+                const auto& row=history[static_cast<std::size_t>(source)];
+                if(row.db.empty())return gray(0);
+                const bool phase=panels?x>=columns:x%2!=0;
+                const auto column=std::min(columns-1,panels?(phase?x-columns:x):x/2);
+                const auto coordinate=[&](double hz) {return hz/data.history->max_hz()*(row.db.size()-1);};
+                const auto begin=std::min(row.db.size()-1,static_cast<std::size_t>(std::llround(coordinate(low))));
+                const auto end=std::min(row.db.size(),static_cast<std::size_t>(std::llround(coordinate(high)))+1);
+                // Partition the retained indices exactly. Downsampling never
+                // repeats a peak in the adjacent bucket; upsampling repeats a
+                // bin explicitly without implying finer frequency resolution.
+                const auto first=begin+static_cast<std::size_t>(column)*(end-begin)/columns;
+                const auto last=std::min(end,std::max(first+1,begin+static_cast<std::size_t>(column+1)*(end-begin)/columns));
+                const auto best=static_cast<std::size_t>(std::max_element(row.db.begin()+static_cast<std::ptrdiff_t>(first),
+                    row.db.begin()+static_cast<std::ptrdiff_t>(last))-row.db.begin());
+                if(phase) {
+                    const auto degrees=row.phase_degrees[best];
+                    if(!std::isfinite(degrees))return gray(0);
+                    if(color)return phase_color(degrees);
+                    return gray(static_cast<unsigned char>(std::clamp((degrees+180.)/360.,0.,1.)*254+1));
+                }
+                const auto intensity=static_cast<unsigned char>(data.history->intensity(row.db[best])*255);
+                return color?theme::waterfall_palette[intensity]:gray(intensity);
             });
         } else if constexpr (std::is_same_v<Type, Qr>) {
             const unsigned char level = request.monochrome || data.brightness == QrBrightness::normal ? 255 : data.brightness == QrBrightness::dim ? 64 :
@@ -455,10 +525,23 @@ std::string PlotSnapshot::caption(unsigned width) const {
                 out << "; diagonal = equal scores";
             }
         } else if constexpr (std::is_same_v<Type, Waterfall>) {
-            out << "0.." << data.history.max_hz() << " Hz / ";
-            if (data.history.simulation_reference()) out << std::fixed << std::setprecision(1);
-            out << data.history.lower_db() << ".." << data.history.upper_db()
-                << (data.history.simulation_reference() ? " dB sim. ref." : " dBFS peak");
+            out << "0.." << data.history->max_hz() << " Hz / ";
+            if (data.history->simulation_reference()) out << std::fixed << std::setprecision(1);
+            out << data.history->lower_db() << ".." << data.history->upper_db()
+                << (data.history->simulation_reference() ? " dB sim. ref." : " dBFS peak");
+        } else if constexpr (std::is_same_v<Type, SpectrumDetail>) {
+            const auto [low,high]=detail_band(data);
+            const auto count=data.history->detail_rows().empty()?0:data.history->detail_rows().back().db.size();
+            const auto spacing=count>1?data.history->max_hz()/(count-1):data.history->bin_hz();
+            out << std::setprecision(6) << low << ".." << high << " Hz / retained " << spacing << " Hz/bin; ";
+            out << data.history->lower_db() << ".." << data.history->upper_db()
+                << (data.history->simulation_reference()?" dB sim. ref.\n":" dBFS peak\n");
+            out << (width<64?"left amplitude, right phase":"paired columns: amplitude left, phase right");
+            out << "; wrapped phase -180..180 deg relative to bin rotation; black=unavailable, noise phase arbitrary";
+            if(!data.band)out << "; search band unavailable: full capture";
+            else if(data.band->first<0 || data.band->second>data.history->max_hz())out << "; searched band clipped by capture Nyquist";
+            if(data.band && (low!=std::clamp(data.band->first,0.,data.history->max_hz()) ||
+                             high!=std::clamp(data.band->second,0.,data.history->max_hz())))out << "; display rounded outward to retained FFT grid";
         } else if constexpr (std::is_same_v<Type, Qr>) {
             if (data.brightness == QrBrightness::off) return "QR preview off";
             return data.code ? "QR preview" : "No QR message";

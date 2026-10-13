@@ -51,6 +51,10 @@ SignalPlots signal_plots(std::span<const float> samples,const modem::Config& con
     if(view!=SignalView::constellation) {
         const auto waveform=samples.last(std::min(samples.size(),signal_window_size));
         result.waveform.assign(waveform.begin(),waveform.end());
+        if(samples.size()-waveform.size()>std::numeric_limits<std::uint64_t>::max()-first_sample)
+            throw Error("signal spectrum sample clock overflow");
+        result.spectrum_start_sample=first_sample+(samples.size()-waveform.size());
+        result.spectrum_sample_count=waveform.size();
         std::vector<std::complex<double>> bins(signal_window_size);
         double weight=0;
         for (std::size_t i=0;i<waveform.size();++i) {
@@ -59,9 +63,11 @@ SignalPlots signal_plots(std::span<const float> samples,const modem::Config& con
         }
         fft(bins);
         result.spectrum.reserve(signal_window_size/2+1);
+        result.spectrum_complex.reserve(signal_window_size/2+1);
         for (std::size_t i=0;i<=signal_window_size/2;++i) {
             const double factor=(i==0 || i==signal_window_size/2)?1.:2.;
             result.spectrum.push_back(20*std::log10(std::max(1e-12,std::abs(bins[i])*factor/std::max(1.,weight))));
+            result.spectrum_complex.emplace_back(bins[i]*factor/std::max(1.,weight));
         }
     }
     if(view==SignalView::environment)return result;

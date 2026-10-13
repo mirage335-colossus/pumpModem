@@ -157,9 +157,33 @@ void entire_refresh_frame() {
     for (const auto point:restarted.constellation)
         check(std::abs(point-next_symbol)<1e-6,"reset did not preserve absolute carrier phase across the refresh frame");
 }
+void native_spectrum_phase() {
+    modem::Config config;config.sample_rate=8192;config.carrier_hz=512;
+    constexpr std::uint64_t start=900137;constexpr std::size_t delta=137,bin=128;
+    const auto a=live::detail::signal_plots(tone(start,2048,config),config,start,live::detail::SignalView::environment);
+    const auto b=live::detail::signal_plots(tone(start+delta,2048,config),config,start+delta,live::detail::SignalView::environment);
+    check(a.spectrum_complex.size()==1025 && a.spectrum_sample_count==2048 && a.spectrum_start_sample==start &&
+          b.spectrum_start_sample==start+delta,"native FFT lost its original sample interval");
+    check(std::abs(std::abs(a.spectrum_complex[bin])-.7)<1e-6,"native FFT amplitude normalization changed");
+    const auto phase=std::arg(std::complex<double>(b.spectrum_complex[bin])*std::conj(std::complex<double>(a.spectrum_complex[bin])));
+    check(std::abs(std::remainder(phase-2*std::numbers::pi*bin*delta/2048,2*std::numbers::pi))<1e-6,
+          "native FFT phase does not follow the original sample clock");
+    live::detail::SignalWindow window(config);window.reset(start);
+    window.push(tone(start,333,config));window.push(tone(start+333,1715,config));
+    const auto fragmented=window.frame(config,live::detail::SignalView::environment);
+    check(fragmented.spectrum_complex==a.spectrum_complex && fragmented.spectrum_start_sample==start &&
+          fragmented.spectrum_sample_count==2048,"native FFT metadata depends on callback fragmentation");
+    window.reset(start);window.push(tone(start,137,config));
+    const auto partial=window.frame(config,live::detail::SignalView::environment);
+    check(partial.spectrum_sample_count==137 && partial.spectrum_start_sample==start,
+          "startup zero padding was reported as observed phase samples");
+    const auto iq=window.frame(config,live::detail::SignalView::constellation);
+    check(iq.spectrum_complex.empty() && !iq.spectrum_sample_count,"I/Q-only publication performed an extra display FFT");
+}
 }
 int main() {
     try {
+        native_spectrum_phase();
         fractional_carrier_capture();
         actual_default_clock_carrier();
         refresh_capacity_bounds();

@@ -1,4 +1,5 @@
 #include "datapump/modem.hpp"
+#include "datapump/sched_hop.hpp"
 #include "datapump/fhss_schedule.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "datapump/streaming_modem.hpp"
@@ -107,6 +108,15 @@ void validate(const Config& c) {
           "INT4 search operands are not implemented on the CPU");
     check(static_cast<unsigned>(c.search_arithmetic)<=static_cast<unsigned>(SearchArithmetic::fp64),
           "unknown search arithmetic");
+    check(static_cast<unsigned>(c.receiver_strategy)<=static_cast<unsigned>(ReceiverStrategy::amplitude_only),
+          "unknown receiver strategy");
+    check(std::isfinite(c.receiver_cpu_budget)&&c.receiver_cpu_budget>0,
+          "receiver CPU budget must be finite and positive");
+    check(std::isfinite(c.frequency_search_multiplier) && c.frequency_search_multiplier>=1 &&
+          c.frequency_search_multiplier<=32,"carrier search expansion must be finite and within 1..32x");
+    check(c.frequency_search_multiplier==1 || c.oscillator_search.has_value(),
+          "carrier search expansion requires an explicit oscillator search policy");
+    if(c.scheduled_hopping)c.scheduled_hopping->validate();
     if(c.oscillator_search)validate_oscillator_search(*c.oscillator_search);
     check(c.pattern_symbols && c.constellation_bits==1,
           "APSK transport has been removed; use one-bit pattern transport");
@@ -152,7 +162,8 @@ void validate(const Config& c) {
             static_cast<long double>(c.carrier_hz)*policy.lf.accuracy_ppm+
                 static_cast<long double>(policy.rf_shift_hz)*policy.rf.accuracy_ppm;
         const auto bound=accuracy*policy.margin*1e-6L;
-        check(std::isfinite(bound) && bound<=std::numeric_limits<double>::max(),
+        check(std::isfinite(bound) && bound<=std::numeric_limits<double>::max() &&
+              bound*c.frequency_search_multiplier<=std::numeric_limits<double>::max(),
             "oscillator frequency search allowance exceeds numeric range");
         const auto phase=shared?policy.rf.phase_noise_degrees_per_sqrt_second:
             policy.rf_shift_hz==0?policy.lf.phase_noise_degrees_per_sqrt_second:
@@ -194,10 +205,176 @@ bool private_cover_enabled(const Config& c) {
     // Scrambler-or-inner-DSSS path. A factor alone does not enable that path.
     return c.spreading_mode==SpreadingMode::pattern && (c.scramble || (c.dsss && c.data_key));
 }
+namespace {
+std::pair<std::uint64_t,std::uint64_t> scheduled_flat_capacity(const Config& c) {
+    const auto& outer=*c.scheduled_hopping;
+    const auto group=symbol_schedule_detail::multiply(2ULL*c.sample_rate/5,outer.group_hops);
+    const auto bound=static_cast<long double>(c.sample_rate)*outer.relative_clock_region_seconds();
+    const auto left=static_cast<std::uint64_t>(std::ceil(bound));
+    const auto right=static_cast<std::uint64_t>(std::ceil(bound+static_cast<long double>(c.sample_rate)*outer.audio_error_seconds));
+    const auto ramp=static_cast<std::uint64_t>(std::ceil(static_cast<long double>(c.sample_rate)*outer.ramp_seconds));
+    check(left<group && right<group-left && ramp<(group-left-right+1)/2,
+          "scheduled guards leave no full-power source interval");
+    auto good=group-left-right-2*ramp;
+    if(c.fake_hopping) {
+        const FhssPowerShape shape(*c.fake_hopping,c.sample_rate,pattern_pulse_padding_samples(c),symbol_sample_count(c));
+        check(!shape.enabled||shape.smooth,"scheduled cover requires production smooth FHSS ramps");
+        if(shape.enabled) {
+            const auto& plan=*c.scheduled_hopping;
+            const auto left=static_cast<std::uint64_t>(std::ceil(c.sample_rate*plan.relative_clock_region_seconds()))+
+                static_cast<std::uint64_t>(std::ceil(c.sample_rate*plan.ramp_seconds));
+            const auto right=static_cast<std::uint64_t>(std::ceil(c.sample_rate*(plan.relative_clock_region_seconds()+plan.audio_error_seconds)))+
+                static_cast<std::uint64_t>(std::ceil(c.sample_rate*plan.ramp_seconds));
+            good=std::numeric_limits<std::uint64_t>::max();
+            // Five rational residues repeat after exactly two seconds. Sum
+            // full-power integer samples with a five-window prefix, rather
+            // than walking G hops for every template/calendar construction.
+            const auto cycle=2ULL*c.sample_rate;
+            std::array<std::pair<std::uint64_t,std::uint64_t>,5> windows{};
+            std::uint64_t cycle_good=0;
+            for(unsigned h=0;h<5;++h) {
+                const auto lo=std::ceil(h*(2.L*c.sample_rate)/5+shape.quiet+shape.support-shape.lag_center)+1;
+                const auto hi=std::floor((h+1)*(2.L*c.sample_rate)/5-shape.quiet-shape.support-shape.lag_center);
+                check(lo>=0 && lo<=cycle && hi>=0 && hi<=cycle,"invalid scheduled FHSS flat window");
+                windows[h]={static_cast<std::uint64_t>(lo),static_cast<std::uint64_t>(std::max(lo,hi))};
+                cycle_good+=windows[h].second-windows[h].first;
+            }
+            const auto before=[&](std::uint64_t tick) {
+                auto count=symbol_schedule_detail::multiply(tick/cycle,cycle_good);
+                const auto remainder=tick%cycle;
+                for(const auto& [a,b]:windows)if(remainder>a)
+                    count=symbol_schedule_detail::add(count,std::min<std::uint64_t>(remainder,b)-a);
+                return count;
+            };
+            for(unsigned residue=0;residue<5;++residue) {
+                const auto begin=SchedHopSchedule::sample_boundary(residue,c.sample_rate,true);
+                const auto flat_begin=symbol_schedule_detail::add(begin,left);
+                const auto flat_end=symbol_schedule_detail::add(begin,group-right);
+                good=std::min(good,before(flat_end)-before(flat_begin));
+            }
+        }
+    }
+    check(good!=0,"scheduled/FHSS guards leave no useful cover samples");
+    return {group,good};
+}
+}
+namespace {
+long double scheduled_minimum_flat_count(const Config& c,std::uint64_t duration) {
+    const auto [group,good]=scheduled_flat_capacity(c);
+    if(!duration)return 0;
+    // Minimum overlap with a periodic single flat interval. Whole periods
+    // contribute F; a remainder can first occupy the entire P-F quiet part.
+    const auto retained=[&](std::uint64_t period,std::uint64_t flat) {
+        return static_cast<long double>(duration/period)*flat+
+            (duration%period>period-flat?duration%period-(period-flat):0);
+    };
+    long double count=0;
+    if(!c.fake_hopping || !c.fake_hopping->power_ramps) count=retained(group,good);
+    else if(c.scheduled_hopping->group_hops==1) {
+        // Every group contains a single joint flat. Five rounding residues
+        // differ by at most one sample at either endpoint; reserve both
+        // endpoint samples and retain their common
+        // subset so arbitrary relative placement cannot gain a hidden gap.
+        count=retained(group,good>2?good-2:0);
+    } else if(c.sample_rate%5==0) {
+        const auto& plan=*c.scheduled_hopping;
+        const auto outer_loss=static_cast<std::uint64_t>(std::ceil(c.sample_rate*plan.relative_clock_region_seconds()))+
+            static_cast<std::uint64_t>(std::ceil(c.sample_rate*(plan.relative_clock_region_seconds()+plan.audio_error_seconds)))+
+            2*static_cast<std::uint64_t>(std::ceil(c.sample_rate*plan.ramp_seconds));
+        const FhssPowerShape shape(*c.fake_hopping,c.sample_rate,pattern_pulse_padding_samples(c),symbol_sample_count(c));
+        const auto period=2ULL*c.sample_rate/5;
+        const auto lo=std::ceil(shape.quiet+shape.support-shape.lag_center)+1;
+        const auto hi=std::floor(shape.period-shape.quiet-shape.support-shape.lag_center);
+        const auto inner=hi>lo?static_cast<std::uint64_t>(hi-lo):0;
+        // Exact D-periodicity in source time when Fs is divisible by five.
+        // Union bound for the two independent excluded sets, no G-sized scan.
+        count=std::max(0.L,retained(group,group-outer_loss)+retained(period,inner)-duration);
+    } else {
+        const auto touched=symbol_schedule_detail::add(1,1+(duration-1)/group);
+        count=std::max(0.L,static_cast<long double>(duration)-static_cast<long double>(touched)*(group-good));
+        const auto& plan=*c.scheduled_hopping;
+        const auto outer_loss=static_cast<std::uint64_t>(std::ceil(c.sample_rate*plan.relative_clock_region_seconds()))+
+            static_cast<std::uint64_t>(std::ceil(c.sample_rate*(plan.relative_clock_region_seconds()+plan.audio_error_seconds)))+
+            2*static_cast<std::uint64_t>(std::ceil(c.sample_rate*plan.ramp_seconds));
+        const FhssPowerShape shape(*c.fake_hopping,c.sample_rate,pattern_pulse_padding_samples(c),symbol_sample_count(c));
+        const auto period=2ULL*c.sample_rate;std::uint64_t inner_good=0;
+        for(unsigned h=0;h<5;++h) {
+            const auto lo=std::ceil(h*(2.L*c.sample_rate)/5+shape.quiet+shape.support-shape.lag_center)+1;
+            const auto hi=std::floor((h+1)*(2.L*c.sample_rate)/5-shape.quiet-shape.support-shape.lag_center);
+            if(hi>lo)inner_good+=static_cast<std::uint64_t>(hi-lo);
+        }
+        // Five fractional hop residues repeat after exactly 2*Fs samples.
+        // Each source-group piece has arbitrary FHSS phase, but loses at most
+        // one cycle's quiet budget beyond its duty-average loss. Sum over the
+        // bounded number of pieces, then subtract outer edge guards. This
+        // avoids an O(G) scan or a whole-G wait when G is very large.
+        const auto piece_loss=symbol_schedule_detail::add(period-inner_good,outer_loss);
+        const auto periodic=static_cast<long double>(duration)*inner_good/period-
+            static_cast<long double>(touched)*piece_loss;
+        count=std::max(count,periodic);
+    }
+    return std::clamp(count,0.L,static_cast<long double>(duration));
+}
+}
+double scheduled_minimum_flat_fraction(const Config& c,std::uint64_t source_samples) {
+    if(!scheduled_bursts(c))return 1.;
+    const auto duration=source_samples?source_samples:symbol_sample_count(c);
+    if(!duration)return 0.;
+    return static_cast<double>(scheduled_minimum_flat_count(c,duration)/duration);
+}
+bool packed_scheduled_symbols(const Config& c) {
+    // Geometry only; never instantiate a keyed calendar from validate(). Long
+    // symbols retain split source time, while potentially mostly-muted short
+    // symbols require complete full-gain slots with both pulse shoulders.
+    if(!scheduled_bursts(c))return false;
+    const auto hop=2ULL*c.sample_rate/5;
+    const auto gate_period=c.fake_hopping && c.fake_hopping->power_ramps?hop:
+        symbol_schedule_detail::multiply(hop,c.scheduled_hopping->group_hops);
+    // A long symbol necessarily spans guards and must remain splittable even
+    // when their overall duty costs substantial energy. Whole-slot deferral is
+    // only meaningful for a bit shorter than the applicable gate period.
+    return symbol_sample_count(c)<gate_period && scheduled_minimum_flat_fraction(c)<.5;
+}
+double waveform_gate_bandwidth_allowance_hz(const Config& c) {
+    // Additional FULL nominal occupied-bandwidth allowance. This is an
+    // engineering rolloff scale, not compact support or a regulatory mask.
+    // Independent cascaded gates convolve spectra, so add their scales.
+    double extra=0;
+    if(scheduled_bursts(c))extra+=2/c.scheduled_hopping->ramp_seconds;
+    if(c.fake_hopping && c.fake_hopping->power_ramps && c.fake_hopping->smooth_ramps)
+        extra+=2/c.fake_hopping->ramp_seconds;
+    return extra;
+}
 std::uint64_t protected_cover_span_samples(const Config& c) {
     const auto useful=static_cast<std::uint64_t>(c.sample_rate)*3;
-    if(!c.fake_hopping)return useful;
-    return FhssPowerShape(*c.fake_hopping,c.sample_rate,pattern_pulse_padding_samples(c),symbol_sample_count(c)).protected_span(useful);
+    if(!scheduled_bursts(c)) {
+        if(!c.fake_hopping)return useful;
+        return FhssPowerShape(*c.fake_hopping,c.sample_rate,pattern_pulse_padding_samples(c),symbol_sample_count(c)).protected_span(useful);
+    }
+    // The logical shaper clock pauses during nulls. Reserve enough COMPLETE
+    // active groups to retain three full-power seconds, plus one group for an
+    // arbitrary initial partial group. This is intermittent masking; its wall
+    // duration is the secret calendar's exact inverse, not three wall seconds.
+    const auto [group,good]=scheduled_flat_capacity(c);
+    const auto groups=symbol_schedule_detail::add(1,1+(useful-1)/good);
+    auto high=symbol_schedule_detail::multiply(groups,group);
+    const auto certified=[&](std::uint64_t span) {
+        const auto count=scheduled_minimum_flat_count(c,span);
+        const auto rounding=std::max(1.L,8*std::numeric_limits<long double>::epsilon()*span);
+        return count-rounding>=useful;
+    };
+    // Large G must not force a cancellation to wait through an entire active
+    // group. Every adopted endpoint has its own conservative >=3s certificate.
+    // The lower bound need not be monotone: replacing HIGH only on a proved
+    // endpoint preserves correctness; a nonmonotone bound can merely be less
+    // economical. Retain the independent full-group proof as the fallback.
+    if(!certified(high))return high;
+    std::uint64_t low=0;
+    while(high-low>1) {
+        const auto middle=low+(high-low)/2;
+        if(certified(middle))high=middle;else low=middle;
+    }
+    return high;
 }
 std::uint64_t suppression_sample_count(const Config& c) {
     const auto useful=protected_cover_span_samples(c);
@@ -214,8 +391,74 @@ std::uint64_t transmit_stop_sample_count(const Config& c) {
     check(pending<=std::numeric_limits<std::uint64_t>::max()-tail,"stop duration overflow");
     return pending+tail;
 }
+std::uint64_t scheduled_physical_span_samples(const Config& c,std::uint64_t source_samples) {
+    if(!source_samples || !scheduled_bursts(c))return source_samples;
+    const auto group=symbol_schedule_detail::multiply(2ULL*c.sample_rate/5,c.scheduled_hopping->group_hops);
+    check(group!=0,"scheduled source group has no samples");
+    const auto groups=symbol_schedule_detail::add(1,1+(source_samples-1)/group);
+    const auto frame=(2ULL*c.sample_rate*c.scheduled_hopping->time_multiplier+4)/5;
+    return symbol_schedule_detail::multiply(groups,frame);
+}
+Config scheduled_estimate_config(Config c) {
+    if(!scheduled_bursts(c))return c;
+    check(c.data_key.has_value(),"scheduled estimate requires its immutable encryption key");
+    const SchedHopSourceMap map(*c.scheduled_hopping,*c.data_key,c.sample_rate);
+    const auto prefix=symbol_schedule_detail::add(training_sample_count(c),pattern_pulse_padding_samples(c));
+    const auto anchor=symbol_schedule_detail::add(symbol_schedule_detail::multiply(c.stream_epoch,c.sample_rate),c.stream_phase_samples);
+    const auto at=map.locate(anchor);
+    std::optional<ScheduledSymbolCalendar> calendar;
+    if(packed_scheduled_symbols(c))calendar.emplace(c);
+    if(at.active && at.source.sample>=prefix && (!calendar ||
+       calendar->source_slot(calendar->first_rank_source(at.source.sample))==at.source.sample))return c;
+    constexpr std::uint64_t representative_epoch=1710000000;
+    const auto request=symbol_schedule_detail::multiply(std::max(c.stream_epoch,representative_epoch),c.sample_rate);
+    const auto output=map.source_to_physical(map.locate(request).source);
+    auto source=map.locate(output).source.add_samples(prefix);
+    if(calendar)source={calendar->source_slot(calendar->first_rank_source(source.sample)),0};
+    const auto payload=map.source_to_physical(source);
+    check(payload.fraction==0,"representative payload anchor must be an integer sample");
+    c.stream_epoch=payload.sample/c.sample_rate;c.stream_phase_samples=payload.sample%c.sample_rate;
+    return c;
+}
+std::uint64_t pattern_transmission_source_sample_count(const Config& c,std::uint64_t symbols,bool surrounding_noise) {
+    check(symbols!=0,"waveform requires at least one payload symbol");
+    const auto duration=symbol_sample_count(c);
+    const auto payload=packed_scheduled_symbols(c)?symbol_schedule_detail::add(
+        ScheduledSymbolCalendar(c).offset_source(c.stream_epoch,c.stream_phase_samples,symbols-1),duration):
+        (scheduled_bursts(c)?symbol_schedule_detail::multiply(symbols,duration):
+        symbol_schedule_detail::add(scheduled_symbol_offset(c,c.stream_epoch,c.stream_phase_samples,symbols-1),duration));
+    const auto prefix=surrounding_noise?training_sample_count(c):0;
+    const auto padding=pattern_pulse_padding_samples(c);
+    auto total=symbol_schedule_detail::add(symbol_schedule_detail::add(payload,prefix),symbol_schedule_detail::multiply(2,padding));
+    if(surrounding_noise)total=symbol_schedule_detail::add(total,suppression_sample_count(c));
+    return total;
+}
+std::uint64_t pattern_transmission_sample_count(const Config& c,std::uint64_t symbols,bool surrounding_noise) {
+    const auto total=pattern_transmission_source_sample_count(c,symbols,surrounding_noise);
+    if(!scheduled_bursts(c))return total;
+    check(c.data_key.has_value(),"scheduled duration requires its immutable encryption key");
+    const SchedHopSourceMap map(*c.scheduled_hopping,*c.data_key,c.sample_rate);
+    const auto anchor=symbol_schedule_detail::add(symbol_schedule_detail::multiply(c.stream_epoch,c.sample_rate),c.stream_phase_samples);
+    const auto payload=map.locate(anchor).source;
+    const auto prefix=symbol_schedule_detail::add(surrounding_noise?training_sample_count(c):0,pattern_pulse_padding_samples(c));
+    check(payload.sample>=prefix,"scheduled prefix precedes the representable source clock");
+    const auto source_origin=payload.sample-prefix;
+    const auto begin=map.source_to_physical({source_origin});
+    const auto end=map.source_to_physical({symbol_schedule_detail::add(source_origin,total)},true);
+    check(begin.fraction==0 && end.fraction==0 && end.sample>=begin.sample,"invalid scheduled waveform extent");
+    return end.sample-begin.sample;
+}
 double symbol_seconds(const Config& c) { validate(c); return c.integration_seconds>0?c.integration_seconds:2.*c.spreading_factor/c.bandwidth_hz; }
 double bit_rate(const Config& c) {
+    if(scheduled_bursts(c)) {
+        if(packed_scheduled_symbols(c)) {
+            const ScheduledSymbolCalendar slots(c);
+            return c.constellation_bits*static_cast<double>(slots.slots_per_group())/(.4*c.scheduled_hopping->time_multiplier);
+        }
+        const auto source_group=static_cast<long double>(2ULL*c.sample_rate/5)*c.scheduled_hopping->group_hops;
+        const auto physical_frame=2.L*c.sample_rate*c.scheduled_hopping->time_multiplier/5;
+        return c.constellation_bits/symbol_seconds(c)*static_cast<double>(source_group/physical_frame);
+    }
     if(deferred_symbols(c)) {
         const FhssSymbolCalendar slots(*c.fake_hopping,c.sample_rate,pattern_pulse_padding_samples(c),symbol_sample_count(c));
         return c.constellation_bits*static_cast<double>(slots.per_hop)/c.fake_hopping->dwell_seconds;
@@ -230,18 +473,9 @@ std::size_t waveform_sample_count(std::size_t wire_bytes,const Config& c) {
     validate(c);
     check(wire_bytes>0,"waveform requires at least one payload byte");
     const auto count=payload_symbol_count(wire_bytes,c);
-    const auto duration=symbol_sample_count(c);
-    check(duration<=std::numeric_limits<std::size_t>::max(),"symbol duration exceeds platform sample counter");
-    const auto payload=symbol_schedule_detail::add(scheduled_symbol_offset(c,c.stream_epoch,c.stream_phase_samples,count-1),duration);
-    const auto padding=pattern_pulse_padding_samples(c);
-    const auto training=training_sample_count(c);
-    check(payload<=std::numeric_limits<std::size_t>::max()-training,"modem sample count overflow");
-    const auto content=payload+static_cast<std::size_t>(training);
-    check(padding<=(std::numeric_limits<std::size_t>::max()-content)/2,"pulse tail sample count overflow");
-    const auto shaped=content+2*static_cast<std::size_t>(padding);
-    const auto suppression=suppression_sample_count(c);
-    check(suppression<=std::numeric_limits<std::size_t>::max()-shaped,"suppression sample count overflow");
-    return shaped+static_cast<std::size_t>(suppression);
+    const auto samples=pattern_transmission_sample_count(c,count);
+    check(samples<=std::numeric_limits<std::size_t>::max(),"modem sample count exceeds platform address space");
+    return static_cast<std::size_t>(samples);
 }
 bool memory_supported(std::size_t wire_bytes,std::size_t preamble_bytes,const Config& c) {
     validate(c);

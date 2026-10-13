@@ -3,6 +3,7 @@
 #include "fhss_profile.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/clock_sync.hpp"
+#include "datapump/sched_hop.hpp"
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -68,6 +69,12 @@ double number(std::string_view text,std::string_view flag,double low,double high
     if(value<low||value>high||(positive&&value<=0))
         invalid(std::string(flag)+" is outside its supported range.");
     return value==0?0:value;
+}
+double sched_frequency_search(std::string_view text) {
+    const auto value=number(text,"--sched-frequency-search",1,32);
+    if(value!=1&&value!=2&&value!=4&&value!=8&&value!=16&&value!=32)
+        invalid("--sched-frequency-search must be 1, 2, 4, 8, 16, or 32.");
+    return value;
 }
 unsigned workspace(std::string_view text) {
     if(!text.empty()&&text.back()=='%')text.remove_suffix(1);
@@ -138,7 +145,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             flag=="--rate"||flag=="--bw"||flag=="--carrier"||flag=="--dsp-workspace"||flag=="--pattern"||
             flag=="--rf-oscillator"||flag=="--shift"||flag=="--rf-shift"||flag=="--rf-carrier"||flag=="--search-margin"||
             flag=="--reference"||flag=="--sideband"||flag=="--lf-reference"||
-            flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--dsss-mode"||flag=="--search-arithmetic"||flag=="--doppler"||flag=="--fhss"||flag=="--fhss-list"||flag=="--fhss-list-file"||flag=="--live-duplex"||
+            flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--dsss-mode"||flag=="--search-arithmetic"||flag=="--receiver-strategy"||flag=="--receiver-cpu-budget"||flag=="--doppler"||flag=="--fhss"||flag=="--sched-hop"||flag=="--sched-hop-dilution"||flag=="--sched-frequency-search"||flag=="--fhss-list"||flag=="--fhss-list-file"||flag=="--live-duplex"||
             flag=="--keyfile"||flag=="--key-name"||flag=="--tx-key";
         if(!known)invalid("Unknown launch option: "+std::string(flag));
         std::string_view value;
@@ -182,6 +189,18 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         else if(flag=="--dsss-version")result.dsss_version=tuning::outer_dsss_version_id(tuning::parse_outer_dsss_version(value));
         else if(flag=="--doppler")result.doppler=tuning::parse_doppler(value).canonical;
         else if(flag=="--search-arithmetic")result.search_arithmetic=tuning::search_arithmetic_id(tuning::parse_search_arithmetic(value));
+        else if(flag=="--receiver-strategy")result.receiver_strategy=tuning::receiver_strategy_id(tuning::parse_receiver_strategy(value));
+        else if(flag=="--receiver-cpu-budget") {
+            result.receiver_cpu_budget=number(value,flag,0,std::numeric_limits<double>::max());
+            tuning::validate_receiver_cpu_budget(*result.receiver_cpu_budget);
+        }
+        else if(flag=="--sched-hop")result.sched_hop=modem::sched_hop_multiplier(value);
+        else if(flag=="--sched-frequency-search")result.sched_frequency_search=sched_frequency_search(value);
+        else if(flag=="--sched-hop-dilution") {
+            const auto dilution=number(value,flag,1,10000);
+            if(std::floor(dilution)!=dilution)invalid("--sched-hop-dilution must be an integer.");
+            result.sched_hop_dilution=static_cast<unsigned>(dilution);
+        }
         else if(flag=="--live-duplex") {
             if(value!="yes"&&value!="no")invalid("--live-duplex must be yes or no.");
             result.full_duplex=value=="yes";
@@ -221,6 +240,8 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             invalid("--carrier and --rf-carrier must specify the same absolute frequency.");
         result.carrier_hz=carrier_alias;
     }
+    if(result.sched_hop&&*result.sched_hop>1&&result.sched_hop_dilution&&*result.sched_hop_dilution>*result.sched_hop)
+        invalid("Sched_Hop dilution cannot exceed its enabled multiplier.");
     if(result.fhss_list&&result.fhss_list_file)invalid("Use only one of --fhss-list and --fhss-list-file.");
     // Omitted Doppler preserves the destination value. Validate a complete
     // triplet here; the controller validates every partial patch against the
@@ -276,7 +297,15 @@ std::string format(const Patch& settings) {
     if(settings.dsss_factor)add("--dsss-factor",std::to_string(*settings.dsss_factor));
     if(settings.dsss_version)add("--dsss-version",std::string(tuning::outer_dsss_version_id(tuning::parse_outer_dsss_version(*settings.dsss_version))));
     if(settings.search_arithmetic)add("--search-arithmetic",std::string(tuning::search_arithmetic_id(tuning::parse_search_arithmetic(*settings.search_arithmetic))));
+    if(settings.receiver_strategy)add("--receiver-strategy",std::string(tuning::receiver_strategy_id(tuning::parse_receiver_strategy(*settings.receiver_strategy))));
+    if(settings.receiver_cpu_budget) {
+        tuning::validate_receiver_cpu_budget(*settings.receiver_cpu_budget);
+        add("--receiver-cpu-budget",numeric(*settings.receiver_cpu_budget));
+    }
     if(settings.full_duplex)add("--live-duplex",*settings.full_duplex?"yes":"no");
+    if(settings.sched_hop_dilution)add("--sched-hop-dilution",std::to_string(*settings.sched_hop_dilution));
+    if(settings.sched_hop)add("--sched-hop",std::string(modem::sched_hop_id(*settings.sched_hop)));
+    if(settings.sched_frequency_search)add("--sched-frequency-search",numeric(sched_frequency_search(numeric(*settings.sched_frequency_search))));
     if(settings.fhss)add("--fhss",std::string(fhss::id(fhss::parse(*settings.fhss))));
     if(settings.fhss_list)add("--fhss-list",fhss::list_text(fhss::parse_list(*settings.fhss_list)));
     if(settings.fhss_list_file)arguments.push_back("--fhss-list-file="+*settings.fhss_list_file);

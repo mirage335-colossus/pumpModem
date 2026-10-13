@@ -18,6 +18,35 @@ template<class Function> void rejects(Function function,const std::string& messa
     throw std::runtime_error(message);
 }
 void parsing_and_formatting() {
+    for(const auto* multiplier:{"disabled","10","100","1k","10k"}) {
+        const auto patch=launch_command::parse(std::string("--sched-hop ")+multiplier+" --sched-frequency-search 8 --sched-hop-dilution 2");
+        check(patch.sched_hop.has_value()&&patch.sched_frequency_search==8&&patch.sched_hop_dilution==2&&
+            launch_command::parse(launch_command::format(patch))==patch,
+            "Scheduled bursts must retain total-time multiplier and frequency expansion in parameter lists");
+    }
+    check(launch_command::parse("--sched-hop 1000").sched_hop==1000&&
+        launch_command::parse("--sched-hop 1").sched_hop==1, "Numeric scheduled-burst aliases changed meaning");
+    check(!launch_command::parse("--rate 1200").sched_hop&&
+        !launch_command::parse("--rate 1200").sched_frequency_search&&
+        !launch_command::parse("--rate 1200").sched_hop_dilution,
+        "Older partial commands must leave scheduled burst settings omitted");
+    for(const auto* bad:{"--sched-hop 2","--sched-hop 0","--sched-hop nan","--sched-frequency-search 3",
+        "--sched-frequency-search 0","--sched-frequency-search 64","--sched-frequency-search nan",
+        "--sched-hop-dilution 0","--sched-hop-dilution 10001","--sched-hop-dilution 1.5",
+        "--sched-hop-dilution nan","--sched-hop 10 --sched-hop-dilution 20"})
+        rejects([&]{launch_command::parse(bad);},"Unsupported scheduled-burst setting accepted");
+    for(const auto* strategy:{"auto","existing","complex","amplitude"}) {
+        const auto patch=launch_command::parse(std::string("--receiver-strategy ")+strategy+" --receiver-cpu-budget 0.37");
+        check(patch.receiver_strategy==strategy&&patch.receiver_cpu_budget==.37&&
+            launch_command::parse(launch_command::format(patch))==patch,
+            "receiver strategy/budget must survive parameter-list round trips");
+    }
+    check(!launch_command::parse("--rate 1200").receiver_strategy&&
+        !launch_command::parse("--rate 1200").receiver_cpu_budget,
+        "older partial commands must leave receiver controls omitted");
+    for(const auto* invalid:{"--receiver-strategy unknown","--receiver-cpu-budget 0",
+        "--receiver-cpu-budget -0.1","--receiver-cpu-budget inf","--receiver-cpu-budget nan"})
+        rejects([&]{launch_command::parse(invalid);},"invalid receiver policy accepted");
     for(const auto* mode:{"off","interleave"}) {
         const auto patch=launch_command::parse(std::string("--dsss-mode ")+mode+" --dsss-factor 100 --dsss-version interleave");
         check(patch.dsss_mode==mode&&patch.dsss_factor==100&&
@@ -250,10 +279,12 @@ void startup() {
         "--carrier","30001500","--doppler","0.000000c","--dsp-workspace","50%",
         "--clock-sync","default","--audio-error","default","--dsss-mode","interleave",
         "--dsss-factor","10","--dsss-version","interleave","--search-arithmetic","default",
+        "--receiver-strategy","complex","--receiver-cpu-budget","0.37",
         "--live-duplex","yes","--fhss","fake-fcc","--keyfile=/synthetic/not-opened",
         "--key-name=Default","--tx-key","named"},[&](Launch launch) {
             manual_started=true;check(launch.settings&&launch.settings->audio_timing_error_seconds==.05&&
-                launch.settings->clock_sync=="default"&&launch.settings->fhss=="fake-fcc",
+                launch.settings->clock_sync=="default"&&launch.settings->fhss=="fake-fcc"&&
+                launch.settings->receiver_strategy=="complex"&&launch.settings->receiver_cpu_budget==.37,
                 "manual launcher did not resolve its actual options");return 73;
         })==73&&manual_started,"manual launcher failed before GUI startup");
     unsigned called=0;

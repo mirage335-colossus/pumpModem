@@ -73,6 +73,11 @@ void receiver_health_indicator() {
 void search_arithmetic_controls() {
     using F=ui::Field;using A=modem::SearchArithmetic;
     Controller controller;
+    const auto& strategy=controller.field(F::receiver_strategy);
+    check(strategy.options.size()==4&&strategy.selected=="auto"&&
+        strategy.options[1].id=="existing"&&strategy.options[2].id=="complex"&&
+        strategy.options[3].id=="amplitude"&&controller.field(F::receiver_cpu_budget).text=="0.6",
+        "receiver strategy/budget defaults or force choices changed");
     const auto& state=controller.field(F::search_arithmetic);
     check(state.options.size()==3&&state.selected=="default"&&
         state.options[0].label=="Default — automatic"&&
@@ -90,6 +95,11 @@ void search_arithmetic_controls() {
     check(controller.settings().transfer.modem.search_arithmetic==A::fp32&&
         controller.revision()>before&&controller.field(F::short_bits).text=="001",
         "arithmetic selection retained stale advisory identity or changed raw bits");
+    controller.select(F::receiver_strategy,"complex");controller.edit(F::receiver_cpu_budget,"0.37");
+    check(controller.settings().transfer.modem.receiver_strategy==modem::ReceiverStrategy::complex_only&&
+        controller.settings().transfer.modem.receiver_cpu_budget==.37&&
+        controller.settings().transfer.modem.search_arithmetic==A::fp32&&controller.field(F::short_bits).text=="001",
+        "algorithm controls lost precision independence or changed source bits");
     controller.close();controller.select(F::search_arithmetic,"fp64-force");
     check(!controller.field(F::search_arithmetic).enabled&&
         controller.settings().transfer.modem.search_arithmetic==A::fp32,
@@ -1077,6 +1087,8 @@ void fake_hop_display() {
             if(std::string_view(preference)=="fake-list") {
                 check(*hop.rf_shift_hz==1000000||*hop.rf_shift_hz==1010000||*hop.rf_shift_hz==1033000,"List display invented a uniform intermediate frequency");
                 check(!controller.field(F::fhss_list).enabled&&!controller.enabled(C::fhss_apply),"List remained editable during TX");
+                check(!controller.field(F::sched_hop).enabled&&!controller.field(F::sched_frequency_search).enabled&&
+                    !controller.field(F::sched_hop_dilution).enabled,"Scheduled burst policy remained editable during TX");
             }
             const auto exported=launch_command::parse(controller.field(F::planner_command).text);
             check(exported.carrier_hz&&exported.rf_shift_hz&&
@@ -3155,10 +3167,16 @@ void bitmap_source_checks() {
     check(render(sources.get(ui::Bitmap::qr)).pixels()[0] == 255, "QR brightness did not update its quiet zone");
     controller.activate(ui::Command::zoom_in);
     const auto zoom = sources.update(controller);
-    check(contains(zoom, ui::Bitmap::waveform) && !contains(zoom, ui::Bitmap::waterfall),
+    check(contains(zoom, ui::Bitmap::waveform) && !contains(zoom, ui::Bitmap::waterfall) &&
+          !contains(zoom, ui::Bitmap::waterfall_detail),
           "Waveform zoom appended/replaced waterfall history");
+    const auto waterfall_version=sources.version(ui::Bitmap::waterfall);
+    const auto detail_version=sources.version(ui::Bitmap::waterfall_detail);
     controller.activate(ui::Command::clear_waterfall);
-    check(sources.update(controller) == std::vector{ui::Bitmap::waterfall}, "Clear waterfall did not target only its named source");
+    check(sources.update(controller) == std::vector{ui::Bitmap::waterfall,ui::Bitmap::waterfall_detail} &&
+          sources.version(ui::Bitmap::waterfall)==waterfall_version+1 &&
+          sources.version(ui::Bitmap::waterfall_detail)==detail_version+1,
+          "Clear waterfall must invalidate only its compact and detailed views of the same history");
     check(sources.update(controller).empty(), "Bitmap mapping consumed one-shot invalidation more than once");
     const auto before_clear_version = sources.version(ui::Bitmap::pattern_scores);
     const auto before_clear_revision = controller.revision();

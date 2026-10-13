@@ -1594,6 +1594,70 @@ void independent_cover_runtime() {
     }
     std::cout<<"Independent-cover playback identical PCM and late timing rejection passed\n";
 }
+void scheduled_payload_runtime() {
+    // Physical PCM time includes quiet schedule gaps. The exact endpoint must
+    // therefore be supplied in physical coordinates, rather than subtracting
+    // a virtual cover duration from the total source extent.
+    constexpr unsigned rate=48000;
+    const long double origin=std::ceil(std::chrono::duration<long double>(
+        std::chrono::system_clock::now().time_since_epoch()).count())+5;
+    std::vector<std::int16_t> reference;
+    for(unsigned scenario=0;scenario<7;++scenario) {
+        f::reset();f::state.available={"default"};f::state.supported_rates={rate};f::state.write_limit=137;
+        std::size_t cursor=0,forecast_calls=0,at_failure=0;bool injected=false;
+        std::uint64_t prior_frontier=0;
+        a::Options options;options.follow_system_clock=true;options.maximum_utc_error_seconds=.025;
+        options.maximum_timing_rate_correction=.0003;options.maximum_timing_slew_per_second=1e-14;
+        options.timing_stop_duration_seconds=3.2;options.timing_independent_cover_seconds=3.;
+        options.timing_source_end=[] {return std::optional<std::uint64_t>{rate*4};};
+        options.timing_protected_stop=[](const auto&){throw datapump::Error("unexpected scheduled forecast stop");};
+        if(scenario)options.timing_protected_payload_end=[&](std::uint64_t frontier)->std::optional<std::uint64_t> {
+            ++forecast_calls;
+            // Each current query includes every already generated input
+            // sample. The next query includes conservative read/FIR prefetch.
+            if(forecast_calls%2)check(frontier==cursor,"scheduled forecast omitted supplied PCM");
+            else check(frontier>=cursor && frontier>=prior_frontier,
+                "scheduled forecast omitted next-block source prefetch");
+            prior_frontier=frontier;
+            if(scenario==2)return std::nullopt;
+            if(scenario==3)return rate*4+1;
+            if(scenario==4)return forecast_calls%2?rate:rate-1;
+            if(scenario==5)throw datapump::Error("synthetic exact forecast failure");
+            // Virtual source support can be parked across a physical null:
+            // a later source frontier moves the valid endpoint from 1s to 3s.
+            // Independent cover remains outside both endpoints and drains
+            // unchanged to the immutable four-second total.
+            return frontier<rate/2?rate:rate*3;
+        };
+        options.frame_timestamp=[&](std::uint64_t frames,bool capture) {
+            check(!capture,"scheduled payload fixture queried capture");
+            const long double elapsed=static_cast<long double>(frames)/rate;
+            const bool bad=scenario==6 && elapsed>1.625L;
+            if(bad&&!injected){injected=true;at_failure=cursor;}
+            return a::FrameTimestamp{static_cast<long double>(frames),origin+elapsed+(bad?.04L:0),
+                elapsed+(bad?.04L:0),1e-7,1e-7,a::TimingQuality::bounded,718};
+        };
+        std::string failure;
+        try {a::playback(rate,"default",[&](std::span<float> out) {
+            const auto count=std::min<std::size_t>(out.size(),rate*4-cursor);
+            for(std::size_t i=0;i<count;++i) {
+                const auto n=cursor+i;
+                out[i]=n>=rate && n<rate*2?0.f:static_cast<float>(.1*std::sin(n*.08));
+            }
+            cursor+=count;return count;
+        },{},[&](const auto&){a::schedule_output(static_cast<double>(origin+.125L));},a::ChannelMode::left_mono,options);}
+        catch(const datapump::Error& e){failure=e.what();}
+        if(scenario==0) {check(failure.empty(),"scheduled reference PCM fixture failed");reference=f::state.played;}
+        else if(scenario==1)check(failure.empty() && forecast_calls>20 && cursor==rate*4 &&
+            f::state.played==reference,"exact physical payload forecasts changed PCM or independent cover drain");
+        else if(scenario<6)check(!failure.empty() && !cursor && forecast_calls>0 &&
+            f::state.recovered_errors.empty(),"invalid scheduled payload forecast generated or replayed private PCM");
+        else check(injected && !failure.empty() && cursor==at_failure && cursor>rate && cursor<rate*4 &&
+            f::state.recovered_errors.empty(),"scheduled cover bypassed actual UTC block checks");
+        check(!f::state.live,"scheduled payload timing fixture leaked device");
+    }
+    std::cout<<"Scheduled physical-payload endpoint forecasts and strict UTC cover checks passed\n";
+}
 void protected_timing_playback() {
     f::reset();f::state.available={"default"};f::state.supported_rates={48000};f::state.write_limit=137;
     const auto epoch=std::ceil(std::chrono::duration<long double>(std::chrono::system_clock::now().time_since_epoch()).count())+6;
@@ -2404,6 +2468,7 @@ int main(int argc,char** argv){try{
     if(argc==3&&std::string(argv[1])=="--trace-utc") {
         verbose=std::make_unique<datapump::audio::trace::Scope>(argv[2]);argv[1]=const_cast<char*>("--utc-runtime");argc=2;
     }
+    if(argc==2 && std::string(argv[1])=="--scheduled-payload") {scheduled_payload_runtime();return 0;}
     if(argc==2 && std::string(argv[1])=="--pipewire") {native_pipewire_dated_observations();independent_cover_runtime();std::cout<<"Native PipeWire dated observations passed\n";return 0;}
     if(argc==2 && std::string(argv[1])=="--live-debug") {native_source_endpoint_contract();shared_server_timing_fallback();native_prepared_positive_pointer();native_prepared_delay_readiness();return 0;}
     if(argc==2 && std::string(argv[1])=="--absolute-rate") {native_absolute_clock_not_steering_limit();return 0;}
@@ -2411,7 +2476,7 @@ int main(int argc,char** argv){try{
     if(argc==2 && std::string(argv[1])=="--native-frontier") {native_playback_frontiers();return 0;}
     if(argc==2 && std::string(argv[1])=="--utc-runtime") {
         native_pipewire_dated_observations();native_source_endpoint_contract();shared_server_timing_fallback();native_prepared_positive_pointer();native_absolute_clock_not_steering_limit();native_running_pointer_intervals();native_slow_query_recovers();native_playback_frontiers();native_audio_error_model();native_period_refinement();native_protected_period_reserve();
-        independent_cover_runtime();bounded_clock_provider();protected_timing_playback();native_queued_dsss_playback(true);
+        independent_cover_runtime();scheduled_payload_runtime();bounded_clock_provider();protected_timing_playback();native_queued_dsss_playback(true);
         std::cout<<"Native runtime UTC timing passed\n";return 0;
     }
     if(argc==2 && std::string(argv[1])=="--period") {native_period_refinement();native_protected_period_reserve();std::cout<<"Native period refinement passed\n";return 0;}
@@ -2539,7 +2604,7 @@ int main(int argc,char** argv){try{
     bounded_clock_provider();
     zero_audio_error_requests();
     playback_discontinuity_observer();
-    independent_cover_runtime();protected_timing_playback();
+    independent_cover_runtime();scheduled_payload_runtime();protected_timing_playback();
     native_queued_dsss_playback();
     std::cout<<"ALSA default resolution and streaming tests passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

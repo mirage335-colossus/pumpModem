@@ -44,6 +44,11 @@ public:
     StreamingTransmitter(RawBits bits, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024,
                          TransmitTrace trace = {});
     StreamingTransmitter(Noise, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024);
+    // Fresh temporary roots must be prepared once BEFORE UTC burst scheduling.
+    struct PreparedTemporaryKeys {};
+    static Config prepare_noise_config(Config config);
+    StreamingTransmitter(Noise, Config config, PreparedTemporaryKeys,
+                         std::size_t workspace_bytes = 8 * 1024 * 1024);
     ~StreamingTransmitter();
     StreamingTransmitter(StreamingTransmitter&&) noexcept;
     StreamingTransmitter& operator=(StreamingTransmitter&&) noexcept;
@@ -58,9 +63,21 @@ public:
     // finish protected cover and finite tails. A stopped read token remains immediate abort.
     void request_finish();
     std::uint64_t original_total_samples() const;
+    std::uint64_t original_source_total_samples() const;
     bool finished() const;
     std::uint64_t total_samples() const;
     std::uint64_t samples_emitted() const;
+    std::uint64_t physical_output_origin() const;
+    std::uint64_t physical_valid_payload_end() const;
+    // Nonmutating forecast at a supplied physical PCM frontier, including
+    // already-generated samples; excludes the independent suppression drain.
+    std::uint64_t predicted_physical_valid_payload_end(std::uint64_t frontier) const;
+    std::uint64_t predicted_physical_stop_end(std::uint64_t frontier) const;
+    std::uint64_t source_total_samples() const;
+    std::uint64_t source_samples_emitted() const;
+    std::uint64_t source_valid_payload_end() const;
+    // Transmitter-owned exact exposure accounting; no profile/calendar setup.
+    std::uint64_t emitted_payload_epoch() const;
     // Retained transmitter state, independent of streamed waveform duration.
     std::size_t working_bytes() const;
     // Actual payload points whose transmission has begun, oldest first.
@@ -103,6 +120,11 @@ public:
     // incomplete unless sampled search absence already established stream end.
     // No synthetic tail samples or bits are inserted.
     Bytes finish(std::stop_token stop = {});
+    // Advance only physical intervals excluded by every scheduled hypothesis;
+    // rejected skips leave state untouched and must be fed as ordinary PCM.
+    bool try_skip_unobserved(std::uint64_t samples, std::stop_token stop = {});
+    std::optional<std::uint64_t> unobserved_end_from(std::uint64_t local_sample) const;
+    std::optional<ScheduledCaptureEnvelope> scheduled_capture_envelope(std::uint64_t local_sample) const;
     bool synchronized() const;
     // Complete sampled acquisition coverage of the original finite start
     // window, independent of admission and physical message completion.

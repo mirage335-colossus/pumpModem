@@ -62,6 +62,7 @@ set(_prerequisites_native_relocation ${datapump_executables})
 # Keep this list aligned with docs/development.md. Calibration stays included:
 # a cheap smoke selection must never replace the preservation contract.
 set(_contract
+  sched_hop scheduled_symbol_calendar sched_hop_transmit sched_hop_receiver sched_capture
   live_profiles live_receptions live live_resources live_transmit_lock compression_short transfer
   stream_codec stream_receive recovery attachment pattern_correlator pattern_receiver
   pattern_drift pattern_differential receiver_differential pattern_fft_batch search_fft search_arithmetic

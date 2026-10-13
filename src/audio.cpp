@@ -98,6 +98,26 @@ public:
         converter_.set_output_gain(std::move(gain));
     }
     Resampler& converter() {return converter_;}
+    std::uint64_t supplied_samples() const noexcept {return supplied_;}
+    // read() may prefetch one complete input block after satisfying the
+    // converter's future input/support demand. Bound that source generation
+    // before asking a scheduled source for a protected-stop endpoint.
+    std::uint64_t next_source_frontier(std::size_t frames,std::uint32_t logical,
+            std::uint32_t hardware,double maximum_rate) const {
+        const auto future=std::ceil((converter_.source_seconds()+
+            static_cast<long double>(frames)*(1+maximum_rate)/hardware+
+            converter_.source_lookahead_seconds())*logical)+input_.size()+1.L;
+        if(!std::isfinite(future) || future<0 || future>std::numeric_limits<std::uint64_t>::max())
+            throw Error("audio protected-stop source frontier overflow");
+        return std::max(supplied_,static_cast<std::uint64_t>(future));
+    }
+    std::uint64_t protected_payload_end(const Options& options,std::uint64_t frontier) const {
+        const auto end=options.timing_protected_payload_end(frontier);
+        if(!end)throw Error("audio protected-stop payload forecast unavailable after scheduling");
+        if(declared_end_ && *end>*declared_end_)
+            throw Error("audio protected-stop payload forecast exceeds the declared source endpoint");
+        return *end;
+    }
     std::optional<std::uint64_t> observe_end(const Options& options) {
         if(!options.timing_source_end)return std::nullopt;
         const auto end=options.timing_source_end();
@@ -1012,8 +1032,31 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                 // Protect enough FUTURE media for all committed valid pulse tails,
                 // converter lookahead and one source/output block. Known queued
                 // output is already included by predict(accepted+leading).
-                const auto stop_horizon=((options->timing_stop_duration_seconds-options->timing_independent_cover_seconds)+.05+
+                auto stop_horizon=((options->timing_stop_duration_seconds-options->timing_independent_cover_seconds)+.05+
                     source.converter().source_lookahead_seconds())/(1-(graph?.001:options->maximum_timing_rate_correction));
+                std::optional<std::array<long double,2>> payload_frontiers;
+                std::optional<std::uint64_t> next_source_frontier;
+                const auto absolute_end=source.observe_end(*options);
+                if(options->timing_protected_payload_end) {
+                    const auto current_end=source.protected_payload_end(*options,source.supplied_samples());
+                    next_source_frontier=source.next_source_frontier(samples.size()-leading,rate,
+                        stream.hardware_rate,graph?.001:options->maximum_timing_rate_correction);
+                    const auto next_end=source.protected_payload_end(*options,*next_source_frontier);
+                    if(next_end<current_end)
+                        throw Error("audio protected-stop payload forecast shrank for a later source frontier");
+                    const auto frames_to=[&](std::uint64_t end) {
+                        const auto remaining=std::max(0.L,static_cast<long double>(end)/rate-
+                            source.converter().source_seconds());
+                        return std::ceil((remaining+source.converter().source_lookahead_seconds()+1.L/rate)*
+                            stream.hardware_rate/(1-(graph?.001:options->maximum_timing_rate_correction)));
+                    };
+                    payload_frontiers=std::array{frames_to(current_end),frames_to(next_end)};
+                    stop_horizon=static_cast<double>((*payload_frontiers)[0]/stream.hardware_rate);
+                    trace::record("payload_stop_forecast",[&](auto& t){t.add("timeline",timing->trace_id());
+                        t.add("supplied",source.supplied_samples());t.add("next_frontier",*next_source_frontier);
+                        t.add("valid_end",current_end);t.add("next_valid_end",next_end);
+                        t.add("stop_frames",(*payload_frontiers)[0]);t.add("next_stop_frames",(*payload_frontiers)[1]);});
+                }
                 const auto mean=at_source.seconds_per_frame*stream.hardware_rate-1;
                 auto lower=mean-at_source.rate_uncertainty_fraction,upper=mean+at_source.rate_uncertainty_fraction;
                 if(options->maximum_timing_rate_correction>0 && !timing->native_playback()) {
@@ -1041,9 +1084,19 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                 const auto drift=std::max(std::abs(lower-reference_rate),std::abs(upper-reference_rate));
                 auto action=protected_timing_action(corrected.error_seconds,at_source.uncertainty_seconds,drift,
                     stop_horizon,static_cast<double>(samples.size())/stream.hardware_rate,.01/rate,timing_error);
+                std::optional<std::array<double,4>> dynamic_bounds;
+                if(payload_frontiers) {
+                    const auto current=std::abs(corrected.error_seconds)+at_source.uncertainty_seconds+.02/rate;
+                    dynamic_bounds=std::array{current,
+                        current+drift*static_cast<double>(samples.size()-leading)/stream.hardware_rate,
+                        current+drift*static_cast<double>((*payload_frontiers)[0])/stream.hardware_rate,
+                        current+drift*static_cast<double>((*payload_frontiers)[1])/stream.hardware_rate};
+                    action=protected_timing_frontiers((*dynamic_bounds)[0],(*dynamic_bounds)[1],
+                        (*dynamic_bounds)[2],(*dynamic_bounds)[3],timing_error);
+                }
                 // Retain the already evaluated frontiers for a failure-only
                 // diagnostic. Formatting must not add work to ordinary blocks.
-                std::optional<std::array<double,4>> native_frontiers;
+                std::optional<std::array<double,4>> native_frontiers=dynamic_bounds;
                 if(timing->native_playback()) {
                     // Forecast actual timestamp intervals at both the next
                     // output edge and the last committed valid-pulse frontier BEFORE
@@ -1064,8 +1117,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                     const auto next=static_cast<long double>(samples.size()-leading);
                     const auto ending=std::ceil(stop_horizon*stream.hardware_rate);
                     auto terminal=std::numeric_limits<long double>::infinity();
-                    const auto absolute_end=source.observe_end(*options);
-                    if(const auto end=absolute_end) {
+                    if(const auto end=absolute_end; end && !payload_frontiers) {
                         // Absolute endpoint minus OUTPUT coordinate includes
                         // any source PCM already prefetched; independent cover is
                         // not valid payload. Every cover block still undergoes
@@ -1077,7 +1129,13 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                         terminal=std::ceil((remaining+source.converter().source_lookahead_seconds()+1.L/rate)*
                             stream.hardware_rate/(1-(graph?.001:options->maximum_timing_rate_correction)));
                     }
-                    native_frontiers=std::array{bound(0),bound(std::min(next,terminal)),
+                    if(payload_frontiers) {
+                        // These are exact physical endpoints, not a renewed
+                        // virtual-duration horizon. Quiet schedule time and all
+                        // already supplied PCM remain in the absolute map.
+                        native_frontiers=std::array{bound(0),bound(std::min(next,(*payload_frontiers)[1])),
+                            bound((*payload_frontiers)[0]),bound((*payload_frontiers)[1])};
+                    } else native_frontiers=std::array{bound(0),bound(std::min(next,terminal)),
                         bound(std::min(static_cast<long double>(ending),terminal)),
                         bound(std::min(ending+next,terminal))};
                     const auto& f=*native_frontiers;
@@ -1125,7 +1183,9 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
                 source.converter().set_rate_correction(plan?plan->target:corrected.rate_fraction,options->maximum_timing_slew_per_second);
                 source.converter().begin_timing_block();
                 count+=source.read(std::span(samples).subspan(leading));
-                if(timing->native_playback())source.observe_end(*options); // Validate a newly shortened stop before submission.
+                if(next_source_frontier && source.supplied_samples()>*next_source_frontier)
+                    throw Error("audio generated source PCM beyond its protected-stop forecast");
+                if(timing->native_playback() || payload_frontiers)source.observe_end(*options); // Validate a newly shortened stop before submission.
                 if(plan) {
                     const auto actual=source.converter().timing_block();
                     affine_timing->verify(*plan,{source.converter().source_seconds(),actual.frames,source.converter().rate_correction()},actual.minimum,actual.maximum);
@@ -1481,7 +1541,7 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
             "Windows audio provider has no UTC capture timestamps; full search retained"});
         check_cancelled(stop);
         auto ordinary=*options;ordinary.follow_system_clock=false;ordinary.maximum_timing_rate_correction=0;
-        ordinary.timing_stop_duration_seconds=0;ordinary.timing_independent_cover_seconds=0;ordinary.reported_xrun_budget_seconds=0;ordinary.reported_xrun_window_seconds=0;ordinary.estimated_timing.reset();ordinary.allow_timing_fallback=false;
+        ordinary.timing_stop_duration_seconds=0;ordinary.timing_independent_cover_seconds=0;ordinary.timing_protected_payload_end={};ordinary.reported_xrun_budget_seconds=0;ordinary.reported_xrun_window_seconds=0;ordinary.estimated_timing.reset();ordinary.allow_timing_fallback=false;
         capture_device(rate,device,on_chunk,stop,std::move(on_format),monitor,discontinuity,&ordinary);return;
     }
     if(!on_chunk) throw Error("capture callback is required");
@@ -1538,7 +1598,7 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
         options.timing_status({false,options.maximum_utc_error_seconds,e.uncertainty,e.what()});
         check_cancelled(stop);
         options.follow_system_clock=false;options.maximum_timing_rate_correction=0;
-        options.timing_stop_duration_seconds=0;options.timing_independent_cover_seconds=0;options.reported_xrun_budget_seconds=0;options.reported_xrun_window_seconds=0;options.estimated_timing.reset();options.timing_status={};
+        options.timing_stop_duration_seconds=0;options.timing_independent_cover_seconds=0;options.timing_protected_payload_end={};options.reported_xrun_budget_seconds=0;options.reported_xrun_window_seconds=0;options.estimated_timing.reset();options.timing_status={};
         options.allow_timing_fallback=false;
         playback_device(rate,selected_endpoint(device,false,options.exclusive),next_samples,stop,
             std::move(on_format),channels,options.transmit_gain,&options);

@@ -14,7 +14,8 @@ enum class StreamDomain : std::uint8_t {
     Payload, Preamble, Suppression, PatternZeroV2, PatternOneV2,
     OuterDsss10V1, OuterDsss100V1, OuterDsss1000V1, FakeFhssV1,
     OuterDsss10RotationV2, OuterDsss100RotationV2, OuterDsss1000RotationV2,
-    OuterDsss10PermutationV2, OuterDsss100PermutationV2, OuterDsss1000PermutationV2, FhssCycleV2, CoverPreambleV1, CoverSuppressionV1, FhssUtcV3, CoverWaitV1
+    OuterDsss10PermutationV2, OuterDsss100PermutationV2, OuterDsss1000PermutationV2, FhssCycleV2, CoverPreambleV1, CoverSuppressionV1, FhssUtcV3, CoverWaitV1,
+    SchedHopKeyV1, SchedHopUtcV1
 };
 
 // A 256-bit shared secret with independently derived stream and MAC keys.
@@ -42,6 +43,10 @@ public:
     // CoverPreambleV1/ CoverSuppressionV1 use "cv-pre01"/"cv-sup01" to
     // derive child cover secrets; CoverWaitV1 uses "cv-wai01" for calendar waits.
     // No payload or FHSS byte range is reused.
+    // SchedHopKeyV1 ("sh-key01") derives a geometry-specific child root using
+    // epoch=group hops and offset=32*time multiplier. SchedHopUtcV1 ("sh-utc01")
+    // uses that child root's FHSS purpose and epoch=UTC frame index. Both require
+    // FHSS purpose; neither reuses channel-hop, DSSS, pattern or Data addresses.
     Bytes stream(StreamPurpose purpose, std::uint64_t timestamp,
                  std::uint64_t offset, std::size_t count,
                  StreamDomain domain = StreamDomain::Payload) const;

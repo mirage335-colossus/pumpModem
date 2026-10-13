@@ -31,6 +31,10 @@ public:
     // upper range for strong signals. T and 2T are fixed score references.
     static PlotSnapshot pattern_scores(std::vector<PatternScore> scores, bool enabled = true);
     static PlotSnapshot waterfall(SpectrumHistory history, bool overview = false);
+    static PlotSnapshot waterfall_shared(std::shared_ptr<const SpectrumHistory> history, bool overview = false);
+    // Expansion crops retained native bins before pooling; no additional FFT.
+    static PlotSnapshot waterfall_detail(std::shared_ptr<const SpectrumHistory> history,
+        std::optional<std::pair<double,double>> searched_band_hz = {});
     static PlotSnapshot qr(std::optional<QrCode> code, QrBrightness brightness = QrBrightness::dark);
     static PlotSnapshot pattern_chips(inspection::PatternSpace model, std::size_t first = 0, std::size_t count = 32);
     static PlotSnapshot pattern_distances(inspection::PatternSpace model);

@@ -3,6 +3,7 @@
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_correlator.hpp"
 #include "datapump/pattern_search.hpp"
+#include "datapump/receiver_strategy.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "search_parallel.hpp"
 #include "pattern_fft_batch.hpp"
@@ -55,6 +56,7 @@ struct PatternReceiver::Impl {
     // the phase-bank binary searches or per-track address comparisons.
     std::optional<FhssSymbolCalendar> symbol_calendar;
     std::unique_ptr<PatternCorrelator> fallback;
+    bool frequency_axis_selected=false;
     std::size_t budget=0,fixed_reservation=0,arithmetic_reservation=0,configured_bit_limit=0,bin_samples=0,length=0,transform=0,hop=0;
     std::vector<Complex> ring,work,spectrum,product,reference;
     std::vector<detail::FftDriftAccumulator> drift_scratch;
@@ -160,6 +162,19 @@ struct PatternReceiver::Impl {
         if((search.start_offset_seconds&&!std::isfinite(*search.start_offset_seconds)) ||
            !std::isfinite(search.start_uncertainty_seconds) || search.start_uncertainty_seconds<0)
             throw Error("invalid pattern system-clock window");
+        const auto strategy=resolve_receiver_strategy(config,search,bytes);
+        if(!strategy.supported)throw Error(strategy.reason);
+        if(strategy.backend==ReceiverBackend::amplitude_energy) {
+            const auto wrapper=wrapper_bytes();
+            search.amplitude_channel_limit=strategy.amplitude_channels;
+            if(wrapper>=bytes)throw Error("pattern workspace cannot retain amplitude control state");
+            fallback=std::make_unique<PatternCorrelator>(config,search,bytes-wrapper,
+                PatternCorrelatorOptions{.amplitude_only=true});
+            return;
+        }
+        if(strategy.backend==ReceiverBackend::frequency_axis) {
+            frequency_axis_selected=true;search.compact_clock_search=false;
+        }
         if(c.oscillator_search && search.hypotheses.empty() && search.frequency_offsets_hz.empty() &&
            search.clock_errors_ppm==std::vector<double>{0} && !search.couple_clock_to_carrier)
             search.hypotheses=oscillator_pattern_search(c).hypotheses;
@@ -258,7 +273,7 @@ struct PatternReceiver::Impl {
             // Keep the original short FFT phase groups and retirement grid.
             // Qualified work selection never changes their coordinates.
             fft_workload->timing_window=PatternFftWindowStatus::unsupported_geometry;
-            if(!long_symbol && (c.scramble||c.dsss) && c.spreading_mode==SpreadingMode::pattern &&
+            if((!long_symbol || frequency_axis_selected) && (c.scramble||c.dsss) && c.spreading_mode==SpreadingMode::pattern &&
                !search.hypotheses.empty() && !search.couple_clock_to_carrier && search.start_offset_seconds) {
                 fft_workload->timing_window=detail::pattern_fft_window_finite(*search.qualified_start_window,phase_upper)?
                     PatternFftWindowStatus::active:PatternFftWindowStatus::invalid_numerics;
@@ -1161,6 +1176,56 @@ struct PatternReceiver::Impl {
         }
         bits.push_back(bit);
     }
+    bool tracking_frequency_axis(std::uint64_t start,std::uint64_t index,std::uint64_t observed_before,
+                                 std::span<std::array<double,2>> scores,std::stop_token stop) {
+        if(!frequency_axis_selected || drift_sections!=4 || differential_window || sample_fit)return false;
+        const auto skip=static_cast<std::size_t>(observed_before>start?
+            std::min<std::uint64_t>(length,observed_before-start):0);
+        if(skip==length)return false;
+        const auto job_bytes=templates.size()*sizeof(detail::FftSearchJob);
+        const auto output_bytes=templates.size()*sizeof(detail::FftSearchScore);
+        const auto used=std::max(working_bytes(),fixed_reservation+cache_reservation+scoring_reservation);
+        if(used>=budget || job_bytes>=budget-used)return false;
+        std::vector<detail::FftSearchJob> jobs(templates.size());
+        for(std::size_t f=0;f<jobs.size();++f) {
+            jobs[f]={index,active_stream_phase,f,search.frequency_offsets_hz[f]};jobs[f].clock_ratio=clock_ratio(f);
+        }
+        detail::FftSearchBatch batch;batch.geometry=scoring_geometry();
+        batch.geometry.search_arithmetic=static_cast<std::uint32_t>(SearchArithmetic::fp64);
+        batch.geometry.evidence_count=evidence_count(length-skip);
+        batch.observation_skip=skip;batch.starts=batch.score_stride=1;batch.first_bin=start;
+        batch.retain_floor=search.retain_score;batch.refine_threshold=threshold();
+        batch.refine_threshold_max=-std::log(search.false_alarm_probability)+
+            2*std::log(static_cast<long double>(trials)+templates.size()+1)+
+            std::log(2.*static_cast<double>(templates.size()*search.initial_stream_symbols));
+        const auto requirements=detail::frequency_axis::choose_geometry(batch.geometry,jobs,1,1,
+            budget-used-job_bytes,detail::search_concurrency(search.worker_threads),false,skip);
+        if(!requirements.supported() || !cache_fits(budget,job_bytes+output_bytes+requirements.scratch_bytes)) {
+            ++fft_workload->frequency_axis_tracking_fallbacks;return false;
+        }
+        // Reuse idle acquisition storage for one original PCM interval. Skip
+        // only evidence already charged to the preceding symbol; retain the
+        // source phase and original physical quarter boundaries.
+        energy_prefix[0]=0;
+        for(std::size_t i=0;i<length;++i) {
+            if((i&4095U)==0)cancelled(stop);
+            work[i]=i<skip?Complex{}:at(start+i);
+            energy_prefix[i+1]=energy_prefix[i]+std::norm(work[i]);
+        }
+        batch.observations=std::span(work).first(length);batch.energy_prefix=std::span(energy_prefix).first(length+1);
+        const auto before=arithmetic_reservation;
+        struct Reservation {std::size_t& value;std::size_t before;~Reservation(){value=before;}} reservation{arithmetic_reservation,before};
+        arithmetic_reservation+=job_bytes+output_bytes+requirements.scratch_bytes;
+        std::vector<detail::FftSearchScore> output(jobs.size());detail::frequency_axis::Work measured;
+        if(!detail::frequency_axis::execute(batch,jobs,requirements,output,code,&measured,stop))
+            throw Error("tracking frequency-axis execution left its preflight domain");
+        for(std::size_t f=0;f<scores.size();++f)scores[f]={output[f].zero,output[f].one};
+        ++fft_workload->frequency_axis_tracking_batches;
+        fft_workload->frequency_axis_transforms+=measured.forward_transforms+measured.inverse_transforms;
+        fft_workload->frequency_axis_refinements+=measured.refined_cells;
+        fft_workload->frequency_axis_peak_bytes=std::max(fft_workload->frequency_axis_peak_bytes,job_bytes+measured.peak_bytes);
+        return true;
+    }
     void continue_tracks(std::stop_token stop,bool final=false,
                          std::uint64_t latest_start=std::numeric_limits<std::uint64_t>::max()) {
         for(auto it=tracks.begin();it!=tracks.end();) {
@@ -1205,7 +1270,12 @@ struct PatternReceiver::Impl {
                 };
                 std::size_t jobs=0;
                 for(std::size_t f=0;f<templates.size();++f)if(f!=track.frequency && eligible(f))++jobs;
-                auto* workers=prepare_tracking(jobs);
+                const bool axis=jobs>=1023 && jobs*5>=templates.size()*4 &&
+                    tracking_frequency_axis(chosen,track.index,track.burst.end_sample/bin_samples,frequency_scores,stop);
+                auto* workers=axis?nullptr:prepare_tracking(jobs);
+                double axis_max=best.score;
+                if(axis)for(std::size_t f=0;f<templates.size();++f)if(eligible(f))
+                    axis_max=std::max({axis_max,frequency_scores[f][0],frequency_scores[f][1]});
                 if(workers) {
                     // Only disjoint score slots and private pattern caches are
                     // writable while the ring and carrier phases are shared.
@@ -1225,12 +1295,18 @@ struct PatternReceiver::Impl {
                     if(!eligible(f))continue;
                     auto fit=timing_fit;
                     if(f!=track.frequency) {
-                        if(workers) {
+                        if(axis || workers) {
                             const auto zero=frequency_scores[f][0],one=frequency_scores[f][1];
                             fit={chosen*bin_samples,(chosen+length)*bin_samples,track.index,
                                 config.carrier_hz+search.frequency_offsets_hz[f],std::max(zero,one),std::min(zero,one),
                                 one>zero?1U:0U,active_stream_phase};
                             fit.frequency_hypothesis=static_cast<std::uint32_t>(f);
+                            // Original arithmetic decides the strongest carrier
+                            // and near ties, independently of transform rounding.
+                            if(axis && fit.score>=axis_max-1e-5*std::max(1.,axis_max)) {
+                                fit=measure(chosen,track.index,f,track.burst.end_sample/bin_samples,carrier_phases(chosen),stop);
+                                ++fft_workload->frequency_axis_refinements;
+                            }
                         } else fit=measure(chosen,track.index,f,track.burst.end_sample/bin_samples,carrier_phases(chosen),stop);
                     }
                     if(f!=track.frequency)++trials;
@@ -1992,8 +2068,126 @@ struct PatternReceiver::Impl {
             }
         }
     }
+    bool score_frequency_axis(std::size_t count,std::stop_token stop) {
+        if(!frequency_axis_selected || drift_sections!=4 || differential_window || sample_fit)return false;
+        detail::FftSearchBatch original;original.geometry=scoring_geometry();
+        // The supported CZT implementation currently uses native FP64 at all
+        // policy settings. Do not silently route Default/FP32 back to broad FFT.
+        original.geometry.search_arithmetic=static_cast<std::uint32_t>(SearchArithmetic::fp64);
+        original.observations=work;original.energy_prefix=energy_prefix;
+        original.first_bin=next_start;original.starts=count;original.score_stride=count;
+        original.retain_floor=search.retain_score;original.refine_threshold=threshold();
+        const auto final_trials=static_cast<long double>(trials)+acquisition_trials(count)+1;
+        original.refine_threshold_max=-std::log(search.false_alarm_probability)+2*std::log(final_trials)+
+            std::log(2.*static_cast<double>(templates.size()*search.initial_stream_symbols));
+        const auto job_bytes=templates.size()*sizeof(detail::FftSearchJob);
+        if(!cache_fits(budget,job_bytes))return false;
+        std::vector<detail::FftSearchJob> jobs(templates.size());
+        for(std::size_t f=0;f<jobs.size();++f) {
+            jobs[f]={0,0,f,search.frequency_offsets_hz[f]};jobs[f].clock_ratio=clock_ratio(f);
+        }
+        bool spectrum_ready=false;
+        for(std::size_t index=0;index<search.initial_stream_symbols;++index) {
+            std::size_t group_count=0;
+            const auto groups=phase_groups(index,search.search_stream_phases?0:config.stream_phase_samples,phase_upper,group_count);
+            for(std::size_t g=0;g<group_count;++g) {
+                const auto selected=select_starts(index,groups[g],count);
+                if(!selected.selected_count) {
+                    if(!acquisition_prepaid) {
+                        const auto skipped=static_cast<std::uint64_t>(count)*jobs.size();
+                        trials+=skipped;fft_workload->skipped_start_trials+=skipped;
+                        fft_workload->skipped_template_jobs+=jobs.size();
+                    }
+                    continue;
+                }
+                stream_phase(groups[g].lower);
+                for(auto& job:jobs){job.symbol=index;job.phase=groups[g].lower;}
+                const std::array<detail::FftStartRange,1> full_range{{{0,count}}};
+                const auto ranges=selected.full?std::span<const detail::FftStartRange>(full_range):
+                    std::span<const detail::FftStartRange>(selected.ranges).first(selected.range_count);
+                std::array<detail::frequency_axis::Requirements,64> requirements{};
+                const auto descriptor_bytes=sizeof(requirements)+sizeof(full_range);
+                const auto used=std::max(working_bytes(),fixed_reservation+cache_reservation+scoring_reservation);
+                const auto output_bytes=selected.selected_count*jobs.size()*sizeof(detail::FftSearchScore);
+                bool eligible=used<budget && descriptor_bytes<budget-used &&
+                    job_bytes<budget-used-descriptor_bytes && output_bytes<budget-used-descriptor_bytes-job_bytes;
+                auto fallback_status=detail::frequency_axis::Status::workspace;
+                std::size_t ri=0;
+                std::size_t scratch=0;
+                if(eligible)for(const auto& range:ranges) {
+                    auto part=detail::frequency_axis::choose_geometry(original.geometry,jobs,range.count,range.count,
+                        budget-used-descriptor_bytes-job_bytes-output_bytes+range.count*jobs.size()*sizeof(detail::FftSearchScore),
+                        detail::search_concurrency(search.worker_threads));
+                    if(!part.supported()){eligible=false;fallback_status=part.status;break;}
+                    scratch=std::max(scratch,part.scratch_bytes);requirements[ri++]=part;
+                }
+                eligible=eligible && cache_fits(budget,descriptor_bytes+job_bytes+output_bytes+scratch);
+                if(eligible) {
+                    const auto before=arithmetic_reservation;
+                    struct Reservation {std::size_t& current;std::size_t before;~Reservation(){current=before;}} reservation{arithmetic_reservation,before};
+                    arithmetic_reservation+=descriptor_bytes+job_bytes+output_bytes+scratch;
+                    std::vector<detail::FftSearchScore> outputs(selected.selected_count*jobs.size());
+                    std::size_t offset=0;
+                    for(std::size_t r=0;r<ranges.size();++r) {
+                        const auto& range=ranges[r];detail::FftSearchBatch batch;
+                        batch.geometry=original.geometry;batch.observations=original.observations.subspan(range.first);
+                        batch.energy_prefix=original.energy_prefix.subspan(range.first);
+                        batch.first_bin=next_start+range.first;batch.starts=batch.score_stride=range.count;
+                        batch.retain_floor=original.retain_floor;batch.refine_threshold=original.refine_threshold;
+                        batch.refine_threshold_max=original.refine_threshold_max;
+                        detail::frequency_axis::Work measured;
+                        if(!detail::frequency_axis::execute(batch,jobs,requirements[r],
+                            std::span(outputs).subspan(offset,requirements[r].score_count),code,&measured,stop))
+                            throw Error("frequency-axis execution left its preflight domain");
+                        ++fft_workload->frequency_axis_batches;
+                        fft_workload->frequency_axis_transforms+=measured.forward_transforms+measured.inverse_transforms;
+                        fft_workload->frequency_axis_refinements+=measured.refined_cells;
+                        fft_workload->frequency_axis_peak_bytes=std::max(fft_workload->frequency_axis_peak_bytes,
+                            descriptor_bytes+job_bytes+output_bytes+measured.peak_bytes-requirements[r].score_bytes);
+                        offset+=requirements[r].score_count;
+                    }
+                    // Preserve original job/start order even across disjoint
+                    // arrival cells. Only compact selected scores are stored.
+                    for(std::size_t f=0;f<jobs.size();++f) {
+                        collect_selected(selected,count,index,groups[g].lower,f,[&](std::size_t j) {
+                            std::size_t base=0;
+                            for(const auto& range:ranges) {
+                                if(j>=range.first && j-range.first<range.count) {
+                                    const auto& score=outputs[base+f*range.count+j-range.first];
+                                    return Complex{score.zero,score.one};
+                                }
+                                base+=jobs.size()*range.count;
+                            }
+                            throw Error("frequency-axis selected start has no score");
+                        });
+                    }
+                } else {
+                    // A measured crossover or workspace bound can retain the
+                    // existing FFT operator for this cohort. It scores the same
+                    // admitted starts and keeps the original trial accounting.
+                    ++fft_workload->frequency_axis_fallback_batches;
+                    if(fallback_status==detail::frequency_axis::Status::crossover)++fft_workload->frequency_axis_crossover_fallbacks;
+                    else if(fallback_status==detail::frequency_axis::Status::workspace || fallback_status==detail::frequency_axis::Status::score_limit)++fft_workload->frequency_axis_workspace_fallbacks;
+                    fft_workload->frequency_axis_fallback_starts+=count*jobs.size();
+                    if(!spectrum_ready){spectrum=work;pattern_fft(spectrum,false,stop,SearchArithmetic::fp64);++fft_workload->input_transforms;spectrum_ready=true;}
+                    original.spectrum=spectrum;
+                    for(std::size_t f=0;f<jobs.size();++f) {
+                        detail::execute_drift_search_job(original,jobs[f],drift_scores,product,drift_scratch,code,stop,differential_scratch);
+                        ++fft_workload->fft_jobs;
+                        collect_selected(selected,count,index,groups[g].lower,f,[&](std::size_t j) {
+                            return Complex{drift_scores[j].zero,drift_scores[j].one};
+                        });
+                    }
+                }
+                fft_workload->template_jobs+=jobs.size();
+                fft_workload->retained_start_trials+=selected.selected_count*jobs.size();
+                fft_workload->scored_start_trials+=selected.selected_count*jobs.size();
+            }
+        }
+        return true;
+    }
     void continue_observed_tracks(std::stop_token stop) {
-        if(long_symbol){continue_tracks(stop);return;}
+        if(long_symbol && !fft_workload->restricted_timing_active){continue_tracks(stop);return;}
         if(!fft_workload->restricted_timing_active || !search.early_qualified_fft || tracks.empty())return;
         if(component_hop) {
             const auto first=logical_hop_begin+(*timing_components)[timing_component_index].first;
@@ -2239,7 +2433,7 @@ struct PatternReceiver::Impl {
             }
             if(early)++fft_workload->early_batches;
             peaks.clear();
-            if(!score_bounded(count,observed,stop) && !score_native_whole(count,stop)) {
+            if(!score_frequency_axis(count,stop) && !score_bounded(count,observed,stop) && !score_native_whole(count,stop)) {
             if(acquisition_arithmetic()==SearchArithmetic::fp32) {
                 // A mixed cohort may reject both bounded execution and the
                 // native whole path. Original operands must be rebuilt before
@@ -2428,6 +2622,7 @@ std::uint64_t pattern_absence_samples(const Config& config) {
 }
 std::uint64_t pattern_absence_capture_samples(const Config& config) {
     const auto eligible=pattern_absence_samples(config);
+    if(scheduled_bursts(config))return scheduled_physical_span_samples(config,eligible);
     if(deferred_symbols(config)) {
         const auto count=eligible/symbol_sample_count(config),symbol=symbol_sample_count(config);
         const FhssSymbolCalendar calendar(*config.fake_hopping,config.sample_rate,pattern_pulse_padding_samples(config),symbol);
@@ -2490,6 +2685,17 @@ void PatternReceiver::push(std::span<const float> input,std::span<const std::com
         if(++s.partial==s.bin_samples){s.bin(s.sum/static_cast<double>(s.partial),stop);s.sum={};s.partial=0;}
     }
     s.continue_observed_tracks(stop);
+}
+bool PatternReceiver::try_skip_unobserved(std::uint64_t count,std::stop_token stop) {
+    cancelled(stop);
+    if(impl_->finished)throw Error("pattern capture already finished");
+    return impl_->fallback && impl_->fallback->try_skip_unobserved(count,stop);
+}
+std::optional<std::uint64_t> PatternReceiver::unobserved_end_from(std::uint64_t sample) const {
+    return impl_->fallback?impl_->fallback->unobserved_end_from(sample):std::nullopt;
+}
+std::optional<ScheduledCaptureEnvelope> PatternReceiver::scheduled_capture_envelope(std::uint64_t sample) const {
+    return impl_->fallback?impl_->fallback->scheduled_capture_envelope(sample):std::nullopt;
 }
 void PatternReceiver::finish(std::stop_token stop) {
     auto& s=*impl_;if(s.finished)return;cancelled(stop);

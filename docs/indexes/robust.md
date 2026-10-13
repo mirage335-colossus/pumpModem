@@ -47,6 +47,7 @@ it does not settle which implementation will perform best.
 | [Weak-signal operation](../weak-signal.md) | Reference and models: integration energy, bandwidth, clock/carrier search, coherence and implemented limits. |
 | [Throughput](../throughput.md) | Reference and models: high-SNR chip-count planning, gross throughput and detection-confidence limits. |
 | [Link Planner](../link-planner.md) | Controls, command import/export and interpretation of modeled estimates. |
+| [Frequency-search cost and amplitude alternatives](../eme-amplitude-receiver.md) | EME/ordinary RF limits, measured clock-cell fix, exact frequency-axis prototype, conditional envelope/segment tradeoffs and CPU-policy prerequisites. |
 | [Extreme weak-link planning](../weak-link-planning.md) | Statistical reference detectors and `analyze-link` models; separate from production-receiver measurements. |
 | [1.2 kHz weak-link case study](../1200hz-weak-link-planning.md) | Modeled 170–230 dB attenuation cases, hypothetical detectors and historical compute limits; recorded runtime estimates predate current detector branches. |
 | [Oscillator models](../oscillator-models.md) | Illustrative crystal/GPSDO impairment and coherence assumptions, not hardware measurements. |
@@ -54,3 +55,5 @@ it does not settle which implementation will perform best.
 
 Supporting measurements, raw samples and reproduction methods are linked in
 the documents and the [evidence index](evidence.md#robust-and-receive-processing).
+
+- [Receiver strategy and CPU budget](../receiver-strategies.md): local complex frequency-axis and amplitude-only implementations, controls and qualification limits.

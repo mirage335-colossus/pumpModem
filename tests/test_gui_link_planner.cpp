@@ -9,6 +9,7 @@
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_search.hpp"
 #include "datapump/simulation_estimate.hpp"
+#include "datapump/symbol_schedule.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -458,6 +459,7 @@ void narrow_band_differential_model() {
     inputs.tx_dbm=0;inputs.path_loss_db=200;inputs.noise_density_dbm_hz=-164;
     inputs.target_db_hz=-38.092699609758306;
     inputs.options.modem=tuning::resolve(.01,inputs.target_db_hz,inputs.mode,false,1500).config;
+    inputs.options.modem.receiver_strategy=modem::ReceiverStrategy::existing_only;
     inputs.options.dsp_workspace_bytes=2ULL*1024*1024*1024;
     inputs.channel.clock_error_ppm=.0001;
     inputs.channel.phase_noise_degrees_per_sqrt_second=.005;
@@ -468,8 +470,15 @@ void narrow_band_differential_model() {
     check(!contains_text(planner_page::build(shorter,900,false,false),"local differential geometry not eligible")&&
           contains_text(planner_page::build(shorter,900,true,false),"local differential geometry not eligible"),
           "The shorter command must explain why local comparisons are absent from its estimate");
+    auto automatic_inputs=inputs;
+    automatic_inputs.options.modem.receiver_strategy=modem::ReceiverStrategy::automatic;
+    const auto automatic=planner::build(automatic_inputs);
+    check(automatic.receiver_geometry.receiver_strategy_selected=="amplitude energy" &&
+          !automatic.confidence_available && automatic.receiver_geometry.receiver_strategy_experimental,
+          "automatic amplitude fallback must not borrow the older coherent probability");
     inputs.target_db_hz=-44.25748830262745;
     inputs.options.modem=tuning::resolve(.01,inputs.target_db_hz,inputs.mode,false,1500).config;
+    inputs.options.modem.receiver_strategy=modem::ReceiverStrategy::existing_only;
     inputs.channel.phase_noise_degrees_per_sqrt_second=.05;
     const auto longer=planner::build(inputs);
     near(longer.bit_seconds,3276800,"The TCXO narrow-band command changed exact bit duration");
@@ -638,6 +647,22 @@ void quantization_fixed_modes_and_limits() {
     check(!fixed.fast_target&&!fixed.day_target&&!fixed.clock_target,
           "A fixed-length mode must not offer target-dependent timing milestones");
     near(fixed.bit_seconds,128./14400,"Fixed pattern length was replaced by automatic integration");
+    auto scheduled_inputs=inputs;scheduled_inputs.options.key.emplace(Bytes(32,0x41));
+    auto schedule=std::make_shared<modem::SchedHopPlan>();schedule->time_multiplier=10;
+    scheduled_inputs.options.modem.scheduled_hopping=schedule;
+    const auto scheduled=planner::build(scheduled_inputs);
+    check(scheduled.available,"supported scheduled planner lost its passband inspection");
+    check(!scheduled_inputs.options.modem.data_key,
+          "scheduled planner mutated the caller while binding its immutable key");
+    auto unkeyed=scheduled_inputs;unkeyed.options.modem.data_key=unkeyed.options.key;
+    unkeyed.options.key.reset();
+    check(!planner::build(unkeyed).available,
+          "scheduled planner accepted a stale Config key after encryption was disabled");
+    near(scheduled.gate_bandwidth_allowance_hz,200,"scheduled smooth ramp allowance disappeared");
+    near(scheduled.occupied_bandwidth_hz,fixed.occupied_bandwidth_hz+200,
+         "scheduled shaping changed inner bandwidth or omitted final gate rolloff");
+    near(scheduled.low_audio_hz,fixed.low_audio_hz-100,"scheduled ramp lower allowance changed units");
+    near(scheduled.high_audio_hz,fixed.high_audio_hz+100,"scheduled ramp upper allowance changed units");
     inputs=example();
     const auto bounded=planner::build(inputs);
     check(!bounded.points.empty()&&bounded.points.size()<=1024,"Planner sweep must use bounded storage");
@@ -742,6 +767,7 @@ void persistent_worker_curve_cache() {
     };
     input.options.dsp_workspace_bytes/=2;verify_support_change("workspace");
     input.options.modem.oscillator_search=modem::OscillatorSearchConfig{};verify_support_change("oscillator");
+    input.options.modem.frequency_search_multiplier=2;verify_support_change("frequency expansion");
     input.options.key.emplace(std::array<std::uint8_t,32>{});verify_support_change("key");
     input.mode=tuning::PatternMode::auto_keystream;verify_support_change("mode");
 }
@@ -1634,6 +1660,9 @@ void estimate_warning_thresholds() {
           "Hidden details must explain both thresholds and the limits of the listening guideline");
 }
 void sustained_listening_plan_document() {
+    // Retain the original geometry and a genuinely overloaded RF search.
+    // Tiny-clock sharing can legitimately make the former fit in realtime.
+    for(const auto shift:{3e7,1e8}) {
     auto inputs=example();inputs.target_db_hz=8;inputs.mode=tuning::PatternMode::auto_keystream;
     inputs.channel.clock_error_ppm=0;inputs.channel.phase_noise_degrees_per_sqrt_second=0;
     inputs.options.modem=tuning::resolve(360,8,inputs.mode,true,1500,10,
@@ -1642,12 +1671,12 @@ void sustained_listening_plan_document() {
     inputs.options.dsp_workspace_bytes=std::size_t{1024}*1024*1024;
     modem::OscillatorSearchConfig oscillator;
     oscillator.lf=tuning::oscillator_model(tuning::parse_oscillator_preset("gpsdo-xo"));
-    oscillator.rf=oscillator.lf;oscillator.rf_shift_hz=30935300;oscillator.margin=3;
+    oscillator.rf=oscillator.lf;oscillator.rf_shift_hz=shift+935300;oscillator.margin=3;
     oscillator.reference=modem::OscillatorReference::independent_audio;
     inputs.options.modem.oscillator_search=oscillator;
     inputs.options.clock_sync=clock_sync::Policy{.01,.01,0};inputs.options.audio_timing_error_seconds=.05;
     modem::FhssPlan hops;hops.channels=200;hops.dwell_seconds=.4;
-    for(unsigned i=0;i<200;++i)hops.shifts[i]=3e7+4700*i;
+    for(unsigned i=0;i<200;++i)hops.shifts[i]=shift+4700*i;
     inputs.options.modem.fake_hopping=transfer::transmit_hopping(hops,inputs.options);
     inputs.receiver_work_mode=simulation::ReceiverWorkMode::hardware_fallback;
     planner::Cache cache;std::stop_source stop;std::optional<planner::Model> selected;
@@ -1655,7 +1684,9 @@ void sustained_listening_plan_document() {
         selected=current;stop.request_stop();
     });}catch(const estimate_detail::Cancelled&){}
     check(selected&&selected->available&&selected->hardware_sustained_modeled&&
-          selected->finite_cpu_realtime_ratio<.1&&selected->cpu_realtime_ratio>1,
+          selected->finite_cpu_realtime_ratio<.1&&
+          selected->cpu_realtime_ratio>selected->finite_cpu_realtime_ratio&&
+          (shift<1e8||selected->cpu_realtime_ratio>1),
           "one-bit startup before the first FFT must not advertise sustained realtime headroom");
     near(selected->cpu_realtime_ratio,selected->hardware_sustained_realtime_ratio,
          "visible hardware CPU ratio lost the sustained rolling allowance");
@@ -1664,6 +1695,7 @@ void sustained_listening_plan_document() {
     check(!contains_text(planner_page::build(*selected,900,false,false),"Sustained rolling acquisition allowance")&&
           contains_text(planner_page::build(*selected,900,true,false),"Sustained rolling acquisition allowance"),
           "sustained geometry explanation belongs under Model limits and references");
+    }
 }
 void rolling_epoch_selected_plan_document() {
     auto inputs=example();inputs.target_db_hz=40;inputs.mode=tuning::PatternMode::auto_keystream;
@@ -1794,10 +1826,35 @@ void search_arithmetic_document_and_cache() {
     check(app.field(F::search_arithmetic).selected=="fp64-force","hiding advanced controls reset arithmetic");
     app.select_page(P::console);check(!app.control(*declaration).visible,"planner arithmetic control leaked onto Console");
     app.close();
+    for(const auto field:{F::receiver_strategy,F::receiver_cpu_budget}) {
+        const auto found=std::find_if(screen.begin(),screen.end(),[&](const auto& c){return c.field==field;});
+        check(found!=screen.end()&&found->document_only&&found->developer_only&&!found->persistent&&
+            found->page==P::planner&&found->slot==ui::Slot::none,
+            "receiver strategy/budget must be developer-only planner controls");
+        Application controls({});controls.select(F::fast_mode,"robust");controls.select_page(P::planner);
+        check(!controls.control(*found).visible,"receiver control leaked outside developer mode");
+        controls.toggle(F::developer_mode,true);check(controls.control(*found).visible,
+            "developer mode failed to reveal receiver controls");
+        controls.select_page(P::console);check(!controls.control(*found).visible,
+            "receiver control leaked onto Console");controls.close();
+    }
     planner::Model model;model.inputs=example();model.available=true;
     auto& g=model.receiver_geometry;g.sample_rate=6000;g.fine_chip_seconds=.001;g.inner_chip_seconds=.001;
     g.symbol_seconds=1;g.arithmetic_backend="CPU test matrix";g.arithmetic_operands="INT8";
     g.arithmetic_accumulation="INT32; FP64 verification";g.arithmetic_limit="Broad FFT retains FP64 fallback";
+    g.receiver_strategy_requested="auto";g.receiver_strategy_selected="amplitude energy";
+    g.receiver_strategy_reason="Existing search exceeds the CPU budget";
+    g.receiver_strategy_experimental=true;g.receiver_cpu_budget=.6;
+    g.existing_processing_ratio=1.2;g.frequency_axis_processing_ratio=.4;g.amplitude_processing_ratio=.2;
+    g.scheduled=true;g.scheduled_active_hops=2;g.scheduled_frame_hops=10;
+    g.scheduled_effective_multiplier=5;g.scheduled_active_seconds=.8;g.scheduled_frame_seconds=4;
+    g.scheduled_minimum_quiet_seconds=1.6;g.scheduled_flat_duty=.18;g.scheduled_recording_union_upper=1;
+    g.scheduled_fft_union_upper=.22;g.scheduled_interval_width_seconds=.08;
+    g.scheduled_fft_seconds=.016;g.scheduled_timing_positions=3;g.scheduled_full_timing_positions=300;
+    g.scheduled_mean_processing_ratio=.2;g.scheduled_deadline_processing_ratio=.4;
+    g.scheduled_capture_frame_bytes_upper=1048576;g.scheduled_limit="Uncalibrated split-symbol fixture";
+    model.scheduled_duration_representative=true;
+    model.gate_bandwidth_allowance_hz=200;
     for(const auto width:{220.f,900.f}) {
         const auto page=planner_page::build(model,width,false,false);const auto flat=nodes(page);
         const auto choice=std::find_if(flat.begin(),flat.end(),[](const auto* n) {
@@ -1808,13 +1865,36 @@ void search_arithmetic_document_and_cache() {
         });
         check(choice!=flat.end()&&toggle!=flat.end()&&choice<toggle&&
             !contains_text(page,"Arithmetic model:")&&
-            !contains_text(page,"Broad FFT retains FP64 fallback")&&!contains_text(page,"Receiver geometry:"),
-            "planner footer lost arithmetic widths/fallback or left detailed geometry expanded");
+            !contains_text(page,"Broad FFT retains FP64 fallback")&&!contains_text(page,"Receiver geometry:")&&
+            contains_text(page,"Modeled receiver: amplitude energy · experimental")&&
+            !contains_text(page,"Existing search exceeds the CPU budget")&&!contains_text(page,"Strategy work model:"),
+            "planner footer lost controls/resolved strategy or left detailed geometry expanded");
+        for(const auto field:{F::receiver_strategy,F::receiver_cpu_budget,F::sched_hop_dilution}) {
+            const auto control=std::find_if(flat.begin(),flat.end(),[&](const auto* n){return n->control&&n->control->field==field;});
+            check(control!=flat.end()&&control<toggle&&(*control)->width>0,
+                "receiver strategy/budget footer lost responsive controls before Model limits");
+        }
         const auto detailed=planner_page::build(model,width,true,false);
         check(contains_text(detailed,"Model limits")&&contains_text(detailed,"Receiver geometry: 6000 samples/s")&&
             contains_text(detailed,"Arithmetic model: CPU test matrix; operands INT8; accumulation INT32; FP64 verification")&&
-            contains_text(detailed,"Broad FFT retains FP64 fallback"),
+            contains_text(detailed,"Broad FFT retains FP64 fallback")&&
+            contains_text(detailed,"Receiver strategy: requested auto; selected amplitude energy; CPU budget 0.6")&&
+            contains_text(detailed,"Existing search exceeds the CPU budget")&&
+            contains_text(detailed,"Exact complex optimizations use their crossover independently of the CPU budget")&&
+            contains_text(detailed,"In complex frequency-axis search, individual batches may retain the existing complex backend")&&
+            contains_text(detailed,"Strategy work model: existing 1.2 s/s; complex frequency-axis 0.4 s/s; amplitude-only 0.2 s/s"),
             "hiding geometry discarded required receiver diagnostics");
+        check(!contains_text(page,"Scheduled engineering CPU:")&&
+            contains_text(detailed,"Sched_Hop: 2 active / 10 frame hops; 5")&&
+            contains_text(detailed,"guaranteed drain-window allowance 0.4")&&
+            contains_text(detailed,"Raw recording demand per frame")&&
+            contains_text(detailed,"conservative raw recording 100%")&&
+            contains_text(detailed,"current-cohort FFT-union allowance 22%")&&
+            contains_text(detailed,"representative valid keyed UTC anchor")&&
+            !contains_text(page,"Smooth-gate bandwidth allowance:")&&
+            contains_text(detailed,"Smooth-gate bandwidth allowance: 200 Hz")&&
+            contains_text(detailed,"not a strict spectral cutoff"),
+            "scheduled geometry/duty/deadline/memory detail escaped its hideable section or was discarded");
         model.available=false;const auto invalid=planner_page::build(model,width,false,false);model.available=true;
         const auto invalid_nodes=nodes(invalid);
         check(std::any_of(invalid_nodes.begin(),invalid_nodes.end(),[](const auto* n) {
@@ -1831,6 +1911,22 @@ void search_arithmetic_document_and_cache() {
         check(selected&&selected->available&&selected->inputs.options.modem.search_arithmetic==arithmetic&&
             selected->receiver_geometry.search_arithmetic==arithmetic,
             "planner cache returned diagnostics for a previous arithmetic request");
+    }
+    for(const auto strategy:{modem::ReceiverStrategy::existing_only,modem::ReceiverStrategy::complex_only,
+                             modem::ReceiverStrategy::amplitude_only,modem::ReceiverStrategy::automatic}) {
+        input.options.modem.receiver_strategy=strategy;
+        for(const double budget:{.2,.8}) {
+            input.options.modem.receiver_cpu_budget=budget;
+            std::optional<planner::Model> selected;std::stop_source stop;
+            try {planner::build(input,cache,stop.get_token(),[&](const auto& current) {
+                selected=current;stop.request_stop();
+            });}catch(const estimate_detail::Cancelled&){}
+            check(selected&&selected->inputs.options.modem.receiver_strategy==strategy&&
+                selected->inputs.options.modem.receiver_cpu_budget==budget&&
+                selected->receiver_geometry.receiver_strategy_requested==tuning::receiver_strategy_id(strategy)&&
+                selected->receiver_geometry.receiver_cpu_budget==budget,
+                "planner cache returned diagnostics for a previous receiver strategy/budget request");
+        }
     }
 }
 void document_semantics_layout_and_plots() {

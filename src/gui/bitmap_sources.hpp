@@ -24,7 +24,9 @@ public:
         const bool append=update.append_waterfall && (leaving_replay || snapshot.simulation_replay || !snapshot.spectrum_revision ||
             !spectrum_revision_ || *spectrum_revision_!=snapshot.spectrum_revision);
         if (append) history_.push(snapshot.spectrum_db, snapshot.spectrum_bin_hz,
-                                                 snapshot.simulation_spectrum_gain_db);
+            snapshot.simulation_spectrum_gain_db,snapshot.spectrum_complex,
+            snapshot.spectrum_start_sample,snapshot.spectrum_sample_count,
+            snapshot.simulation_replay?0:snapshot.spectrum_segment);
         if(append)spectrum_revision_=snapshot.spectrum_revision;
         const auto zoom = controller.waveform_zoom();
         if (update.update_plots || zoom_ != zoom)
@@ -51,8 +53,14 @@ public:
         }
         pattern_enabled_ = pattern_enabled;
         pattern_rx_paused_ = pattern_rx_paused;
-        if (update.clear_waterfall || append)
-            put(ui::Bitmap::waterfall, plots::PlotSnapshot::waterfall(history_));
+        const auto band=controller.spectrum_search_band();
+        if (update.clear_waterfall || append) {
+            frozen_history_=std::make_shared<const plots::SpectrumHistory>(history_);
+            put(ui::Bitmap::waterfall,plots::PlotSnapshot::waterfall_shared(frozen_history_));
+        }
+        if(update.clear_waterfall || append || band!=searched_band_ || !frames_.contains(ui::Bitmap::waterfall_detail))
+            put(ui::Bitmap::waterfall_detail,plots::PlotSnapshot::waterfall_detail(frozen_history_,band));
+        searched_band_=band;
         const auto& bytes = controller.message_bytes();
         const std::string text(bytes.begin(), bytes.end());
         const auto& brightness = controller.field(ui::Field::qr_brightness).selected;
@@ -98,7 +106,7 @@ public:
                 "Horizontal P0 / vertical P1: waiting for retained evidence from complete pattern windows";
         }
         auto result = get(id).caption(width);
-        if(id==ui::Bitmap::waveform || id==ui::Bitmap::waterfall)
+        if(id==ui::Bitmap::waveform || id==ui::Bitmap::waterfall || id==ui::Bitmap::waterfall_detail)
             result+=environment_monitor_?" / input monitor":simulation_?" / simulated stream":" / modem stream";
         if (id == ui::Bitmap::constellation && constellation_dropped_)
             result += " / " + std::to_string(constellation_dropped_) + " omitted";
@@ -109,6 +117,7 @@ public:
         switch (id) {
         case ui::Bitmap::waveform: return replaying_ ? "Simulation replay / waveform" : "Live waveform";
         case ui::Bitmap::waterfall: return replaying_ ? "Replay spectrum" : "Spectrum";
+        case ui::Bitmap::waterfall_detail: return replaying_ ? "Replay / configured searched spectrum" : "Configured searched spectrum";
         case ui::Bitmap::constellation:
             return constellation_source_ == live::ConstellationSource::received ? "Received constellation" :
                 constellation_source_ == live::ConstellationSource::transmitted ? "Transmitted constellation" : "Receiver input I/Q";
@@ -121,6 +130,8 @@ private:
     std::map<ui::Bitmap, std::uint64_t> versions_;
     plots::PlotSnapshot empty_;
     plots::SpectrumHistory history_;
+    std::shared_ptr<const plots::SpectrumHistory> frozen_history_=std::make_shared<const plots::SpectrumHistory>();
+    std::optional<std::pair<double,double>> searched_band_;
     std::optional<std::uint64_t> spectrum_revision_;
     PatternScoreView pattern_view_;
     std::vector<plots::PatternScore> pattern_scores_;

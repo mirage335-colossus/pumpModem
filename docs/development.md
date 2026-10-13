@@ -205,6 +205,11 @@ and decoder could otherwise change the codebook together without a test failing.
 | Fixed interval geometry, zero/trailing-byte preservation, errors/erasures, bounded post-end RS alignment search and ambiguity rejection, source decode only after physical end | `stream_codec`, `stream_receive`, `attachment` |
 | Exhaustive hard-bit assignments, deterministic worker coverage, timeout/cancellation resumption, unchanged evidence and original missing-bit accounting | `recovery` |
 | Actual sampled four-hour symbols draining one bit at a time with bounded memory; absence vs EOF and partial silence | `pattern_correlator`; complementary FFT reception checks in `pattern_receiver` |
+| Purpose-separated keyed active/null calendar vectors, bounded draws, rational sample boundaries, nonwrapping source/physical inverses and dilution/quiet bounds | `sched_hop` |
+| Joint Sched_Hop/FHSS full-gain short-bit slots, complete pulse support, five-residue capacity, exact rank/phase inverses and bounded long-history lookup | `scheduled_symbol_calendar` |
+| Split-source waveform continuity, physical carrier/FHSS time, independent full-DSSS wait/cover construction, actual-UTC private addressing, continuous-mode compatibility and protected/immediate stopping | `sched_hop_transmit` |
+| Shared flat-safe timing/phase/clock geometry, native arithmetic policy, whole-FFT eligibility, sparse/full input equivalence, latest-cell endpoints, next-poll bits and source-symbol absence | `sched_hop_receiver` |
+| Complete key/epoch/timing/rate capture unions, rolling-admission fences, current revision identity, future-envelope bounds and fail-closed null skipping | `sched_capture` |
 | Bounded carrier/clock search, sub-Hz configuration, exact weak sampled reception and noise-only rejection | `pattern_search`, `tuning`, `simulation_estimate`, `weak_signal`; coupled-clock and streamed-template checks in `pattern_receiver` |
 | Whole-bit section fitting under phase and gain changes, conservative evidence, isolated-tail rejection, exact pending prefixes and bounded memory | `pattern_drift`, `pattern_fft_batch`, `pattern_correlator_batch` |
 | Local differential products, geometry boundaries, noise-only and isolated-fragment controls, scalar/batch equivalence, sampled full-bit admission and unchanged pending/completion behavior | `pattern_differential`, `receiver_differential`, `pattern_fft_batch`, `pattern_correlator_batch` |
@@ -212,6 +217,26 @@ and decoder could otherwise change the codebook together without a test failing.
 | Competing RX target orders and geometries, immediate revisions, obsolete-content withdrawal, independent later receptions and bounded arbitration | `live_profiles`, `live_receptions`, `live`, `live_resources`, `cli` |
 | In-memory per-key TX lock, pulse lookahead, cancellation/profile changes, clock corrections and one-transmission override | `live_transmit_lock` |
 | Pending prefixes and row identity, restricted completed copy/paste, short/raw compose edits and transmission inspection | `gui_application`, `gui_controller`, `gui_inspection`, `gui_binary_editor` |
+
+Scheduled bursts retain payload bit positions while source time pauses through
+null hops. Protected short bits use the same joint full-gain slot calendar at
+both ends; long symbols remain split across active groups. Waiting positions
+contain independent cover, not additional payload or missing-bit decisions.
+Only fully scored failed source-symbol durations count toward the existing
+six-second absence requirement. Null wall time, source waits, EOF and skipped
+capture cannot supply that evidence. Observe the latest admitted timing/phase/
+clock-cell endpoint before deciding a symbol; it can require a subsequent active
+group beyond the nominal endpoint. Publish each accepted bit on the next poll
+after that decision, without batching behind later bits.
+
+Discard capture only with a current, complete certificate covering every
+consumer, including possible rolling admissions. A zero-gain guard is not a
+paused source interval. Stale, partial, out-of-range or unavailable proofs retain
+the samples; neither a favorable duty estimate nor exhausted workspace permits
+silent hypothesis loss. See [scheduled hops](scheduled-hops.md) for experimental
+eligibility and arithmetic limits. These preservation fixtures and isolated
+successful receptions do not establish full-bank sensitivity, real-time hardware
+performance or broader qualification.
 
 During diagnosis, start with the smallest relevant case or group. Once a fix or
 feature is complete, run the full applicable regression coverage; do not use
@@ -224,7 +249,9 @@ the repository root, build and run the complete preservation-contract coverage:
 ```
 
 The `contract` CTest label and `datapump-tests-contract` build target select
-these same 30 suites (the CLI suite is included when Python is available).
+up to 39 suites, including the five scheduled-hop suites and supporting FFT,
+search-arithmetic, arrival-grid and GUI timing-advice coverage. The CLI suite is
+included when Python is available.
 See [the build guide](building.md) for direct CMake commands and other groups.
 
 The long-symbol regression generates sampled PCM with four-hour coordinates; it

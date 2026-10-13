@@ -138,6 +138,11 @@ struct Snapshot {
     std::uint32_t waveform_sample_rate = 0;
     bool environment_monitor = false;
     std::vector<double> spectrum_db;
+    // Native monitor FFT bins for display only. Phase is meaningful only for
+    // complete windows within the same uninterrupted sample segment.
+    std::vector<std::complex<float>> spectrum_complex;
+    std::uint64_t spectrum_start_sample=0, spectrum_segment=0;
+    std::size_t spectrum_sample_count=0;
     std::uint64_t spectrum_revision = 0;
     double spectrum_bin_hz = 0;
     // Captured with spectrum_db, including startup noise-bandwidth correction
@@ -172,6 +177,10 @@ struct Snapshot {
     bool simulation = false;
     std::uint64_t sequence = 0;
     std::uint64_t samples_received = 0;
+    // Hardware capture disposition in the current input revision. These count
+    // actual copied PCM and proof-certified coordinate-only nulls, not modeled
+    // duty cycle or per-candidate FFT omissions.
+    std::uint64_t capture_recorded_samples = 0, capture_certified_null_samples = 0;
     std::size_t buffered_samples = 0;
     // PCM currently being scored outside the capture queue. Together with
     // buffered_samples, distinguishes an idle decoder from a popped work block.

@@ -28,6 +28,26 @@ struct ReceiverTimingModel {
 // Source-derived geometry/work diagnostics. These are planning references,
 // never execution counters, observed latency or calibrated sensitivity.
 struct ReceiverSearchDiagnostics {
+    std::string receiver_strategy_requested,receiver_strategy_selected,receiver_strategy_reason;
+    bool receiver_strategy_experimental=false;
+    double receiver_cpu_budget=0,existing_processing_ratio=0,frequency_axis_processing_ratio=0,amplitude_processing_ratio=0;
+    // Receiver-only residual carrier expansion; oscillator clock bounds stay fixed.
+    double frequency_search_multiplier=1;
+    bool scheduled=false,scheduled_cost_calibrated=false,scheduled_timing_qualified=false;
+    unsigned scheduled_frame_hops=1;
+    std::uint64_t scheduled_active_hops=1;
+    double scheduled_effective_multiplier=1,scheduled_active_seconds=0,scheduled_frame_seconds=0;
+    double scheduled_minimum_quiet_seconds=0,scheduled_flat_duty=1;
+    double scheduled_recording_union_upper=1,scheduled_fft_seconds=0;
+    double scheduled_fft_union_upper=1,scheduled_interval_width_seconds=0;
+    // Upper raw PCM demand for one frame's admitted interval union, before
+    // concurrent decoding/reuse. Not a measured peak or a hard allocation.
+    double scheduled_capture_frame_bytes_upper=0;
+    std::size_t scheduled_canonical_phases=0;
+    double scheduled_timing_positions=0,scheduled_full_timing_positions=0;
+    double scheduled_mean_processing_ratio=0,scheduled_deadline_processing_ratio=0;
+    double scheduled_guaranteed_recovery_seconds=0;
+    std::string scheduled_limit;
     std::uint32_t sample_rate=0;
     unsigned dsss_factor=1;
     modem::OuterDsssVersion outer_dsss_version=modem::OuterDsssVersion::legacy_v1;
@@ -63,6 +83,7 @@ struct ReceiverSearchDiagnostics {
 };
 
 struct Estimate {
+    bool gpu_work_supported=true;
     // Engineering estimates, not measurements or calibrated probabilities.
     // Idealized success conditional on completing receiver computation: the
     // supplied draft survives reception/correction. This is not a deadline or

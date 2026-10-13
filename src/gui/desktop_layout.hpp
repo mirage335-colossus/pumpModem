@@ -4,8 +4,8 @@
 #include <cstddef>
 
 namespace datapump::gui::ui {
-inline constexpr int default_width = 1180, default_height = 1072;
-inline constexpr int min_width = 1130, min_height = 992;
+inline constexpr int default_width = 1380, default_height = 1072;
+inline constexpr int min_width = 1330, min_height = 992;
 // Preserve established body sizing when the header requires a wider minimum.
 inline constexpr int body_growth_width = 1030;
 inline constexpr int oscillator_row_height = 48;
@@ -36,7 +36,7 @@ enum class Slot {
     fast_correction, fast_auth, fast_detail, fast_history, fast_status, fast_volume, fast_exclusive,
     fast_waveform, fast_waterfall, fast_constellation_plot, fast_airtime, fast_diagnostics, fast_snr, fast_files, fast_use_text, fast_copy_signal, fast_paste_signal, fast_qr, fast_qr_brightness,
     legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_transmit, legacy_waterfall, legacy_status, legacy_device, legacy_volume, legacy_exclusive, legacy_mono,
-    count
+    sched_hop, sched_frequency_search, count
 };
 inline constexpr bool persistent_slot(Slot slot) {
     switch (slot) {
@@ -46,7 +46,7 @@ inline constexpr bool persistent_slot(Slot slot) {
     case Slot::simulation_confidence: case Slot::simulation_cpu_time: case Slot::simulation_gpu_time:
     case Slot::simulation_oscillator: case Slot::rf_oscillator:
     case Slot::search_margin: case Slot::clock_accuracy: case Slot::clock_region: case Slot::clock_offset: case Slot::audio_error:
-    case Slot::dsss_factor: case Slot::dsss_version: case Slot::fhss:
+    case Slot::dsss_factor: case Slot::dsss_version: case Slot::fhss: case Slot::sched_hop: case Slot::sched_frequency_search:
     case Slot::key_actions: case Slot::key_path: case Slot::key:
     case Slot::device: case Slot::mono: case Slot::live_duplex: case Slot::volume: case Slot::exclusive: case Slot::bandwidth: case Slot::carrier: case Slot::rf_shift: case Slot::doppler: case Slot::snr: case Slot::long_snr: case Slot::receive_snr: case Slot::pattern:
     case Slot::fec: case Slot::dsp_workspace: case Slot::diagnostics: case Slot::status: return true;
@@ -156,7 +156,9 @@ struct DesktopLayout {
         out[Slot::key_path] = {366, 92, width - 382, 18};
         out[Slot::dsss_version] = {466, 62, 165, field_height};
         out[Slot::dsss_factor] = {641, 62, 90, field_height};
-        out[Slot::fhss] = {741, 62, width - 999, field_height};
+        out[Slot::fhss] = {741, 62, width - 1194, field_height};
+        out[Slot::sched_hop] = {width - 443, 62, 80, field_height};
+        out[Slot::sched_frequency_search] = {width - 353, 62, 95, field_height};
         out[Slot::key] = {width - 248, 62, 232, field_height};
         // Link assumptions and RX success stay beside the compact Simulation
         // Yes/No choice in both modes. Simulation-only computation estimates

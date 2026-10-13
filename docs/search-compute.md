@@ -925,3 +925,59 @@ or acquisition/sensitivity qualification. The receiver itself is unchanged by
 this estimator repair; it does not restore real-time execution for this case.
 See [sustained listening](simulation-estimates.md#sustained-listening-versus-a-finite-draft)
 for scope, accounting, partial-run status and evidence references.
+
+
+## Amplitude-only arithmetic and bounded streaming work
+
+The amplitude receiver's short spectral FFT is distinct from timing-axis
+correlation. Broad and qualified narrow searches both retain their admitted
+half-chip timing cells, all required clock/canonical-phase/epoch alternatives,
+and original whole-symbol observation and six-second absence rules. Narrowing
+an arrival interval reduces candidate work until the coverage-cell/clock floor;
+it cannot remove observation duration or independently keyed rolling epochs.
+See [receiver strategies](receiver-strategies.md) for eligibility and measurement
+scope. Unsupported probability and GPU estimates remain unavailable.
+
+Default and FP32 minimum use the same demonstrated native FP32 FFT and packed
+four-lane envelope contraction on this CPU. FFT plans/scratch persist within
+their existing workspace reservation. Shared immutable spectral prefixes are
+keyed by original absolute PCM coordinates, FFT/bin geometry and arithmetic
+policy; deterministic range fallback is checked only on a miss. FP64 force
+uses original FP64 transforms and original FP64 envelope construction. Exact
+canonical phase-group reuse is independent of precision; no approximate
+interpolation is introduced. Pulse geometry/private coefficient generation,
+limiter and node powers remain FP64; statistical moments and final scoring
+retain wider arithmetic. FP64 force still uses the existing finite-node envelope
+quadrature, so it is not an exact spectral-energy integration reference.
+
+The work model prices frontend transforms, setup amortization, independent
+per-lane envelope construction, factored per-channel moments and rolling-bank
+lifetime separately. It charges frontend work per bank conservatively even when
+a shared spectrum hits, and never divides this serial path by hardware thread
+count. Local paired execution informs its rounded coefficients; it is not a
+reservation or a universal calibrated CPU ceiling. Full-bank setup, cache
+exhaustion, mixed cohorts and host overhead can dominate the arithmetic ratio.
+A single-bank speedup must not be multiplied across the entire Live estimate.
+
+The amplitude model does not have the audio callback size as an input. Its
+per-input-block Live bookkeeping and epoch construction/retirement costs are
+therefore not calibrated, and are explicitly labeled in the model limits.
+Changing callback cadence can change total cost without changing its numerical
+estimate. Exact empty-poll reuse and partial-FFT allocation preflight reduce
+that overhead: a clean push too short to finish an FFT only fills reserved PCM,
+so it cannot create evidence or allocations. Full FFT blocks, unsettled timing
+and pending output retain the original conservative allocation forecast. Do not
+interpret the resulting model ratio as a demonstrated hardware real-time ceiling.
+
+
+A native AVX2 temporal-convolution prototype gives a useful but unfinished
+crossover: for 1024 observations and 25 starts, direct reduction takes 35.18 µs
+versus 193.32 µs for fresh FP32 kernels/plans/transforms. At 385 starts, direct
+486.77 µs versus convolution 182.70 µs reverses that result (FP64: 519.38 versus
+242.52 µs). These are prototype costs, not a production backend or end-to-end
+speedup. Grouping exact fractional timing families, quarter guards and streaming
+publication still requires implementation. Envelope construction can also be
+shared by an exact shift family, so a reductions-only fraction does not bound
+this opportunity. Current production retains direct streaming statistics;
+large broad timing families and repeated public templates are explicit remaining
+optimization targets, rather than dismissed on the strength of small-bank tests.

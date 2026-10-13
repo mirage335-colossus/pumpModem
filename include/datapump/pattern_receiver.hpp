@@ -1,6 +1,7 @@
 #pragma once
 #include "datapump/modem.hpp"
 #include "datapump/pattern_search.hpp"
+#include "datapump/sched_hop.hpp"
 #include <algorithm>
 #include <memory>
 
@@ -69,7 +70,38 @@ inline constexpr std::uint64_t pattern_absence_seconds = 6;
 struct PatternStartWindow {
     long double epoch_origin_samples=0,phase_scale=1,half_width_samples=0;
 };
+// Immutable affine envelope of every retained scheduled arrival lane at one
+// physical input coordinate. A Live generation/future-admission fence belongs
+// to the caller; the receiver cannot certify not-yet-admitted banks.
+struct ScheduledCaptureEnvelope {
+    std::uint64_t reference_sample=0;
+    SchedHopCoordinate lower,upper;
+    long double minimum_rate=1,maximum_rate=1;
+};
 struct PatternSearch {
+    // Live supplies the entire simultaneous key/profile/epoch cohort for the
+    // shared CPU-budget policy. These are scheduling inputs, never wire data.
+    std::size_t receiver_bank_count=1;
+    // Independent schedule keys, not rolling epochs sharing those keys.
+    // Used only for conservative scheduled capture-union cost accounting.
+    std::size_t receiver_schedule_key_count=1;
+    // Per-bank share reserved for a complete rolling cohort. Zero lets an
+    // isolated/offline receiver use its supplied workspace. No coverage change.
+    std::size_t receiver_strategy_workspace_bytes=0;
+    // Internal resolved coarse-channel cap. Zero leaves geometry selection to
+    // the amplitude constructor; reducing the cap widens cells, not coverage.
+    std::size_t amplitude_channel_limit=0;
+    // Absolute capture coordinate for exact shared input statistics. Separate
+    // bank-local origins must not make different PCM blocks alias in a cache.
+    std::uint64_t input_sample_origin=0;
+    // Original declared domain, before a finite complex-bank cap. Applications
+    // include qualified UTC steering here; a phase-insensitive alternative must
+    // cover it in full rather than inherit the clipped coherent endpoints.
+    std::optional<double> admitted_frequency_half_width_hz,admitted_clock_half_width_ppm;
+    // Coverage provenance from the same policy that produced authoritative
+    // pairs (including UTC steering). Endpoints alone cannot certify holes or
+    // joint clock/frequency coverage; absent certificates stay conservative.
+    std::optional<bool> complex_frequency_coverage,complex_clock_coverage;
     // Long pattern symbols also fit four fixed sections with independent
     // complex gains. Full-symbol evidence includes the extra noise degrees
     // and detector-choice penalty; the waveform and completion rule stay fixed.
@@ -216,6 +248,13 @@ struct PatternFftWork {
     // trigger one event. Compact mode reports its FP64 template-job count.
     std::uint64_t arithmetic_fallback_jobs=0;
     std::uint64_t native_fp32_transforms=0,tabulated_fp64_transforms=0;
+    // Batch counts distinguish acquisition/continuation; transform/refinement
+    // totals and peak transient bytes include both stages.
+    std::uint64_t frequency_axis_batches=0,frequency_axis_transforms=0,frequency_axis_refinements=0;
+    std::uint64_t frequency_axis_tracking_batches=0,frequency_axis_tracking_fallbacks=0;
+    std::size_t frequency_axis_peak_bytes=0;
+    std::uint64_t frequency_axis_fallback_batches=0,frequency_axis_fallback_starts=0;
+    std::uint64_t frequency_axis_crossover_fallbacks=0,frequency_axis_workspace_fallbacks=0;
     std::uint64_t fp32_retry_fp64_transforms=0;
     std::size_t native_scratch_peak_bytes=0;
     // Lane jobs offered the cache; a numerical retry can bypass its values.
@@ -232,6 +271,11 @@ public:
     PatternReceiver(PatternReceiver&&) noexcept;
     PatternReceiver& operator=(PatternReceiver&&) noexcept;
     void push(std::span<const float>, std::stop_token = {});
+    // Scheduled nulls only; never fabricates received absence. A false return
+    // leaves all state unchanged and requires the original input samples.
+    bool try_skip_unobserved(std::uint64_t samples, std::stop_token = {});
+    std::optional<std::uint64_t> unobserved_end_from(std::uint64_t local_sample) const;
+    std::optional<ScheduledCaptureEnvelope> scheduled_capture_envelope(std::uint64_t local_sample) const;
     // Shared per-sample carrier projection for a bank with one carrier/clock.
     // projected[i] is raw[i] * exp(-j*carrier_phase[i]); an arbitrary fixed
     // projection phase is fitted by the pattern score. Both spans must match.

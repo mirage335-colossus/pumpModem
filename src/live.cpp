@@ -1,5 +1,6 @@
 #include "datapump/live.hpp"
 #include "datapump/fhss_schedule.hpp"
+#include "datapump/sched_hop.hpp"
 #include "datapump/execution.hpp"
 #include "datapump/audio.hpp"
 #include "datapump/channel.hpp"
@@ -8,11 +9,14 @@
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_search.hpp"
+#include "datapump/receiver_strategy.hpp"
+#include "datapump/pattern_correlator.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "signal_view.hpp"
 #include "live_pattern_scores.hpp"
 #include "live_receptions.hpp"
 #include "live_scheduling.hpp"
+#include "sched_capture.hpp"
 #include "transmit_timing.hpp"
 #include "transmit_epoch_guard.hpp"
 #include "pattern_projection_cache.hpp"
@@ -102,6 +106,7 @@ std::string display_text(const Message& message) {
 }
 constexpr std::size_t minimum_workspace = 512 * 1024;
 std::size_t plot_workspace(const Settings& value) { return plot_size * (sizeof(float) + sizeof(double)) +
+                                       2 * (plot_size/2+1) * sizeof(std::complex<float>) +
                                        constellation_limit(value) * 3 * sizeof(std::complex<double>) +
                                        detail::SignalWindow::sample_capacity(value.transfer.modem) * 2 * sizeof(float) +
                                        pattern_score_limit * (4 * (sizeof(std::complex<double>) + sizeof(PatternScoreObservation)) + sizeof(modem::PatternEvidence)) +
@@ -109,7 +114,9 @@ std::size_t plot_workspace(const Settings& value) { return plot_size * (sizeof(f
                                        sizeof(detail::SignalWindow) + modem::SampledSimulationChannel::workspace_bound +
                                        plot_size * (sizeof(float)+sizeof(std::complex<double>)) +
                                        sizeof(modem::TransmitTrace) + trace_prefix_workspace + replay_workspace(value) +
-                                       maximum_events * reception_alias_bytes; }
+                                       maximum_events * reception_alias_bytes +
+                                       ((value.transfer.modem.scheduled_hopping && value.transfer.modem.scheduled_hopping->enabled() &&
+                                         !value.transfer.modem.scheduled_hopping->continuous()) ? value.dsp_workspace_bytes/64 : 0); }
 std::size_t audio_reserve(const Settings& value) {
     return value.simulation ? 0 : std::min<std::size_t>(5 * 1024 * 1024, value.dsp_workspace_bytes / 8);
 }
@@ -257,6 +264,34 @@ struct Session::Impl {
         double observed_epoch;
         Clock::time_point queued_at;
         std::optional<audio::TimePrediction> timing;
+        std::uint64_t sample_origin=0, skipped_samples=0;
+    };
+    struct CaptureQuietProof {
+        std::uint64_t revision=0, begin=0, end=0;
+        double utc_second=0;
+    };
+    struct CaptureFutureProof {
+        detail::SchedCaptureIdentity identity;
+        std::uint64_t begin=0,end=0,admissions=0;
+        long double utc_seconds=0;
+        std::uint32_t rate=0;
+        std::vector<std::unique_ptr<modem::SchedHopSourceMap>> calendars;
+        std::vector<detail::SchedCaptureBound> bounds;
+        bool timestamp_valid(std::uint64_t first,std::uint64_t count,double observed_epoch,
+                             long double seconds_per_frame) const {
+            // Interior decoder admissions follow the actual callback slope.
+            // Both endpoints must remain in the original affine UTC cone;
+            // a valid first timestamp alone cannot certify a whole callback.
+            return detail::checkedCaptureTimestamp(begin,first,count,rate,utc_seconds,
+                                                   observed_epoch,seconds_per_frame);
+        }
+        bool excludes(std::uint64_t first,std::uint64_t count,double observed_epoch,
+                      long double seconds_per_frame,detail::SchedCaptureIdentity current) const {
+            if(first<begin || first>end || count>end-first ||
+               !timestamp_valid(first,count,observed_epoch,seconds_per_frame))return false;
+            detail::SchedCaptureCertificate proof{identity,begin,end,bounds,true,true,true,true};
+            return proof.excludes(first,count,current);
+        }
     };
     struct RecoveryTask {
         transfer::Received result;
@@ -274,6 +309,7 @@ struct Session::Impl {
         double admitted_at = 0;
         bool prefer_streamed_templates = false;
         bool clock_window_modeled = false;
+        std::size_t amplitude_fft_samples=0;
         double last_confident_at = 0;
         std::uint64_t last_confident_end = 0;
         std::uint64_t sample_origin = 0, family = 0;
@@ -335,6 +371,7 @@ struct Session::Impl {
     execution::StopCondition changed;
     Settings settings;
     Snapshot current;
+    std::uint64_t spectrum_segment_serial=0, spectrum_source=0;
     std::uint64_t generation = 0, decoder_generation = 0, tx_serial = 0, receive_revision = 0, next_signal = 1, next_event = 1;
     // Material identity, independent of a keyfile name or selected profile.
     // Deliberately lives only as long as this Session; never written to disk.
@@ -357,6 +394,10 @@ struct Session::Impl {
     std::shared_ptr<Prepared> ready;
     std::deque<AudioBlock> input;
     std::size_t input_bytes = 0, decoding_bytes = 0, received_bytes = 0, receiver_bytes = 0;
+    std::uint64_t capture_samples=0;
+    std::optional<CaptureQuietProof> capture_quiet;
+    std::shared_ptr<CaptureFutureProof> capture_future;
+    bool capture_future_revoked=false;
     std::size_t audio_bytes = 0,capture_audio_bytes=0,playback_audio_bytes=0;
     std::string capture_timing_status,playback_timing_status;
     // Duplex capture can restart after output fails. Keep the TX failure until
@@ -455,13 +496,15 @@ struct Session::Impl {
         if(value.simulation || key.empty())return 0;
         const auto used=transmit_epochs.find(key);
         if(used==transmit_epochs.end())return 0;
+        auto keyed=config;
+        if(keyed.scheduled_hopping && keyed.scheduled_hopping->enabled())keyed.data_key=value.transfer.key;
         if(value.transfer.timestamp) {
             if(value.transfer.timestamp>used->second)return 0;
             // An explicit timestamp must be changed or deliberately forced;
             // passage of time alone cannot make that fixed address unused.
-            return std::max(1.,datapump::detail::transmit_epoch_lock_seconds(config,used->second,current_epoch()));
+            return std::max(1.,datapump::detail::transmit_epoch_lock_seconds(keyed,used->second,current_epoch()));
         }
-        return datapump::detail::transmit_epoch_lock_seconds(config,used->second,current_epoch());
+        return datapump::detail::transmit_epoch_lock_seconds(keyed,used->second,current_epoch());
     }
     void enqueue(Transmission transmission, bool force = false,std::shared_ptr<const modem::FhssPlan> hopping = {}, bool noise_long_profile = false) {
         if(capture_suspended)throw Error("Audio is reserved by the other mode");
@@ -563,6 +606,7 @@ struct Session::Impl {
         result.simulation_replay = true; result.replay_frame_index = index; result.replay_frame_count = replay.size();
         result.simulation_sample_fraction = frame.fraction;
         result.waveform = frame.waveform; result.spectrum_db.assign(frame.spectrum.begin(), frame.spectrum.end());
+        result.spectrum_complex.clear();result.spectrum_sample_count=0;result.spectrum_segment=0;
         result.waveform_sample_rate = static_cast<std::uint32_t>(replay_bin_hz * (plot_size / 4));
         result.environment_monitor = false;
         result.simulation_spectrum_gain_db = frame.simulation_spectrum_gain_db;
@@ -593,6 +637,8 @@ struct Session::Impl {
         replay_omitted = 0;
         ++generation; ++tx_serial; ++receive_revision;
         queued.clear(); ready.reset(); tx_busy = false; input.clear(); input_bytes = 0;
+        capture_samples=0;capture_quiet.reset();capture_future.reset();capture_future_revoked=false;
+        current.capture_recorded_samples=current.capture_certified_null_samples=0;
         const auto unavailable=unavailable_recovery_events();invalidate_recoveries();
         for(auto event:unavailable)append_signal(std::move(event));
         capture_stop.request_stop(); tx_stop.request_stop(); decode_stop.request_stop(); changed.notify_all();
@@ -604,6 +650,8 @@ struct Session::Impl {
         capture_stop.request_stop(); tx_stop.request_stop(); decode_stop.request_stop();
         decode_stop = std::stop_source{};
         settings = std::move(value); ++generation; ++tx_serial; ++receive_revision;
+        capture_samples=0;capture_quiet.reset();capture_future.reset();capture_future_revoked=false;
+        current.capture_recorded_samples=current.capture_certified_null_samples=0;
         selected_transmit_key=key;
         receive_pending=false;
         queued.clear(); ready.reset(); tx_busy = false; input.clear();
@@ -663,6 +711,19 @@ struct Session::Impl {
         if(!capture)current.transmit_clock_following=status.following_system_clock;
         ++current.sequence;
     }
+    // Called under mutex; no receiver state or FFT work depends on this display
+    // identity. A restart, source switch or capture gap invalidates phase pairs.
+    void publish_spectrum_metadata(detail::SignalPlots& frame,double bin_hz,std::uint64_t source) {
+        if(current.spectrum_complex.empty() || source!=spectrum_source ||
+           frame.spectrum_start_sample<=current.spectrum_start_sample || bin_hz!=current.spectrum_bin_hz) {
+            ++spectrum_segment_serial;
+            if(!spectrum_segment_serial)++spectrum_segment_serial;
+        }
+        spectrum_source=source;current.spectrum_segment=spectrum_segment_serial;
+        current.spectrum_complex=std::move(frame.spectrum_complex);
+        current.spectrum_start_sample=frame.spectrum_start_sample;
+        current.spectrum_sample_count=frame.spectrum_sample_count;
+    }
     void publish(const detail::SignalWindow& window, const modem::Config& config, std::uint64_t version,
                  Clock::time_point& last_plot, bool force = false,
                  modem::StreamingTransmitter* transmitter = nullptr, std::uint64_t serial = 0,
@@ -679,6 +740,8 @@ struct Session::Impl {
         if (transmitter && tx_serial != serial) return;
         if (pattern_scores && tx_serial != serial) return;
         if(!preserve_monitor) {
+            publish_spectrum_metadata(measured,static_cast<double>(config.sample_rate)/plot_size,
+                transmitter?serial+1:0);
             current.waveform = std::move(measured.waveform); current.spectrum_db = std::move(measured.spectrum);
             current.waveform_sample_rate = config.sample_rate; current.environment_monitor = false;
             current.simulation_spectrum_gain_db = settings.simulation ?
@@ -713,6 +776,8 @@ struct Session::Impl {
         auto measured=window.frame(config,detail::SignalView::environment);
         std::lock_guard lock(mutex);
         if(!current.running || generation!=version)return;
+        publish_spectrum_metadata(measured,static_cast<double>(config.sample_rate)/plot_size,
+            std::numeric_limits<std::uint64_t>::max());
         current.waveform=std::move(measured.waveform);current.spectrum_db=std::move(measured.spectrum);
         current.waveform_sample_rate=config.sample_rate;current.environment_monitor=true;
         current.spectrum_bin_hz=static_cast<double>(config.sample_rate)/plot_size;
@@ -761,7 +826,22 @@ struct Session::Impl {
                        std::optional<audio::TimePrediction> timing={}) {
         std::lock_guard lock(mutex);
         if (!current.running || generation != version || capture_suspended) return;
-        const auto bytes = samples.size_bytes();
+        if(samples.size()>std::numeric_limits<std::uint64_t>::max()-capture_samples)
+            throw Error("capture sample counter exhausted");
+        const auto seconds_per_frame=timing?static_cast<long double>(timing->seconds_per_frame):
+            1.L/settings.transfer.modem.sample_rate;
+        if(capture_future && !capture_future->timestamp_valid(capture_samples,samples.size(),observed_epoch,seconds_per_frame)) {
+            capture_future.reset();capture_future_revoked=true;
+        }
+        const bool ahead=capture_future && capture_future->excludes(capture_samples,samples.size(),
+            observed_epoch,seconds_per_frame,{generation,receive_revision});
+        const auto quiet=ahead || (capture_quiet && capture_quiet->revision==receive_revision &&
+            capture_samples>=capture_quiet->begin && capture_samples+samples.size()<=capture_quiet->end &&
+            detail::checkedCaptureFence(observed_epoch,samples.size(),
+                timing?static_cast<long double>(timing->seconds_per_frame):1.L/settings.transfer.modem.sample_rate,
+                capture_quiet->utc_second));
+        auto bytes = quiet?std::size_t{}:samples.size_bytes();
+        bool discard=quiet;
         const auto queue_limit = settings.dsp_workspace_bytes / 8;
         const auto retained=queue_storage_bytes()+decoding_bytes+sizeof(AudioBlock);
         const auto block_bytes=bytes+sizeof(AudioBlock);
@@ -770,16 +850,30 @@ struct Session::Impl {
             count_dropped(current.receiver_health.dropped_samples,input_bytes/sizeof(float));
             // Every gap, including an oversized callback, invalidates the old
             // acquisition. Never concatenate later samples across missing PCM.
-            reset_input_locked();
+            reset_input_locked();discard=false;bytes=samples.size_bytes();
             current.status = "Audio receiver overrun; restarting acquisition";
-            if (block_bytes > queue_limit || decoding_bytes+sizeof(AudioBlock) > queue_limit-block_bytes) {
+            const auto restart_bytes=bytes+sizeof(AudioBlock);
+            if (restart_bytes > queue_limit || decoding_bytes+sizeof(AudioBlock) > queue_limit-restart_bytes) {
                 count_dropped(current.receiver_health.dropped_samples,samples.size());
-                if(block_bytes>queue_limit)current.error="audio callback exceeds streaming workspace";
+                if(restart_bytes>queue_limit)current.error="audio callback exceeds streaming workspace";
                 return;
             }
         }
-        input.push_back({std::vector<float>(samples.begin(), samples.end()), receive_revision, observed_epoch, Clock::now(),timing});
-        input_bytes += bytes; current.buffered_samples = input_bytes / sizeof(float);
+        if(discard && !input.empty() && input.back().skipped_samples &&
+           input.back().revision==receive_revision &&
+           input.back().sample_origin+input.back().skipped_samples==capture_samples &&
+           std::floor(input.back().observed_epoch)==std::floor(observed_epoch)) {
+            input.back().skipped_samples+=samples.size();
+        } else {
+            AudioBlock block{{},receive_revision,observed_epoch,Clock::now(),timing,capture_samples,0};
+            if(discard)block.skipped_samples=samples.size();
+            else block.samples.assign(samples.begin(),samples.end());
+            input_bytes+=block.samples.size()*sizeof(float);
+            input.push_back(std::move(block));
+        }
+        if(discard)count_dropped(current.capture_certified_null_samples,samples.size());
+        else count_dropped(current.capture_recorded_samples,samples.size());
+        capture_samples+=samples.size(); current.buffered_samples = input_bytes / sizeof(float);
         current.dsp_buffered_bytes = queue_storage_bytes() + decoding_bytes + receiver_bytes + audio_bytes + plot_workspace(settings)+(tx_busy?settings.dsp_workspace_bytes/4:0);
         changed.notify_all();
     }
@@ -787,6 +881,8 @@ struct Session::Impl {
     // marking a fault; overload/device failures additionally latch health.
     void reset_input_locked() {
         input.clear(); input_bytes = 0; ++receive_revision;
+        capture_samples=0;capture_quiet.reset();capture_future.reset();capture_future_revoked=false;
+        current.capture_recorded_samples=current.capture_certified_null_samples=0;
         current.clock_window_modeled=false;current.receiver_timing.reset();
         current.receiver_instances=current.peak_receiver_instances=0;
         current.receiver_admissions=current.receiver_retirements=0;
@@ -819,20 +915,20 @@ struct Session::Impl {
         if(!value.transfer.clock_sync || value.simulation || !bank.timing ||
            bank.timing->quality==audio::TimingQuality::unavailable ||
            bank.timing->uncertainty_seconds>clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds) || !search.start_offset_seconds ||
-           !(search.compact_clock_search ||
+           !((config.scheduled_hopping && config.scheduled_hopping->enabled() && !config.scheduled_hopping->continuous()) ||
+             search.compact_clock_search ||
              (modem::symbol_sample_count(config)<16ULL*config.sample_rate && (config.scramble||config.dsss) &&
               config.spreading_mode==modem::SpreadingMode::pattern && !search.hypotheses.empty() &&
               !search.couple_clock_to_carrier)) ||
            !config.oscillator_search || (config.oscillator_search->reference==modem::OscillatorReference::shared_radio &&
              config.oscillator_search->rf_shift_hz!=0))return false;
         const auto& stamp=*bank.timing;
-        const auto symbol=modem::symbol_sample_count(config);
         auto minimum_phase=config.stream_phase_samples,maximum_phase=config.stream_phase_samples;
         if(search.search_stream_phases && (config.scramble || config.dsss)) {
             const auto step=modem::canonical_phase_step(config);
             minimum_phase=0;
             maximum_phase=modem::canonical_phase_cell_upper(config,
-                (std::min<std::uint64_t>(symbol,config.sample_rate)-1)/step*step);
+                (modem::canonical_phase_extent(config)-1)/step*step);
         }
         if(modem::deferred_symbols(config)) {
             minimum_phase+=modem::scheduled_symbol_offset(config,epoch,minimum_phase,0);
@@ -855,6 +951,8 @@ struct Session::Impl {
     }
     Bank make_bank(const Settings& value) { return make_bank(value, Bank{}); }
     Bank make_bank(const Settings& value, Bank bank) {
+        std::string forced_strategy_error;
+        bool scheduled_quiet_only=false;
         {std::lock_guard lock(mutex);bank.revision=receive_revision;}
         bank.limited=!bank.oscillator_limit.empty();
         if(!bank.source_quota)bank.source_quota=std::make_shared<transfer::ReceiveStorageQuota>(
@@ -890,7 +988,39 @@ struct Session::Impl {
                 for(unsigned age=value.transfer.search_seconds+1;age<=value.transfer.search_seconds+settling;++age)
                     if(center>=age)epochs.push_back(center-age);
             }
+            // No payload can begin in a scheduled null hop. Prune only these
+            // impossible epoch alternatives; retained receivers and their
+            // outstanding full-symbol observations remain alive across nulls.
+            std::optional<modem::SchedHopSchedule> schedule;
+            if(key && profile.scheduled_hopping && profile.scheduled_hopping->enabled() && !profile.scheduled_hopping->continuous())
+                schedule.emplace(*profile.scheduled_hopping,*key);
+            // Policy eligibility does not depend on whether this UTC second
+            // happens to contain a keyed start. Otherwise an unsupported mode
+            // can appear healthy throughout a long null frame.
+            if(schedule && (profile.receiver_strategy==modem::ReceiverStrategy::existing_only ||
+                            profile.receiver_strategy==modem::ReceiverStrategy::complex_only)) {
+                forced_strategy_error=profile.receiver_strategy==modem::ReceiverStrategy::complex_only?
+                    "scheduled split symbols have no implemented complex decoder; Complex only prohibits amplitude decoding":
+                    "scheduled split symbols require the experimental amplitude decoder; new decoders are disabled";
+                bank.limited=bank.coverage_limited=true;continue;
+            }
+            auto scheduled_profile=profile;
+            scheduled_profile.data_key=key;
+            const bool packed_schedule=schedule && modem::packed_scheduled_symbols(scheduled_profile);
             for (const auto epoch : epochs) {
+                if(schedule) {
+                    if(epoch>std::numeric_limits<std::uint64_t>::max()/profile.sample_rate-1)
+                        throw Error("scheduled receive epoch exceeds sample range");
+                    const auto first=modem::SchedHopSchedule::hop_containing_sample(epoch*profile.sample_rate,profile.sample_rate);
+                    const auto last=modem::SchedHopSchedule::hop_containing_sample((epoch+1)*profile.sample_rate-1,profile.sample_rate);
+                    if(schedule->first_active_at_or_after(first)>last ||
+                       (packed_schedule && !modem::packed_scheduled_phase_count(scheduled_profile,epoch))) {
+                        // Short slots may start after this second even when an
+                        // active hop overlaps it. Their exact joint calendar,
+                        // not merely active-hop membership, admits epochs.
+                        scheduled_quiet_only=true;continue;
+                    }
+                }
                 const auto tag = key ? key->mac(Bytes{'D','P','-','R','X','-','B','A','N','K'}) : Bytes{};
                 const auto existing = std::find_if(bank.receivers.begin(), bank.receivers.end(), [&](const auto& receiver) {
                     const auto& c=receiver.options.modem;
@@ -900,6 +1030,8 @@ struct Session::Impl {
                         (c.dsss_factor==1 || c.outer_dsss_version==profile.outer_dsss_version) &&
                         c.scramble==profile.scramble && c.spreading_mode==profile.spreading_mode &&
                         c.search_arithmetic==profile.search_arithmetic &&
+                        c.scheduled_hopping==profile.scheduled_hopping && c.frequency_search_multiplier==profile.frequency_search_multiplier &&
+                        c.receiver_strategy==profile.receiver_strategy && c.receiver_cpu_budget==profile.receiver_cpu_budget &&
                         c.pulse_shaping==profile.pulse_shaping && c.oscillator_search==profile.oscillator_search;
                 });
                 if (existing != bank.receivers.end()) continue;
@@ -920,9 +1052,19 @@ struct Session::Impl {
                 const auto config = transfer::seeded_config(receiver.options, epoch);
                 try {
                     modem::PatternSearch search;
+                    std::optional<modem::OscillatorPatternSearch> declared_search;
+                    search.receiver_schedule_key_count=keys.size();
+                    search.receiver_bank_count=modem::receiver_strategy_bank_count(config,value.transfer.search_seconds,keys.size(),profiles.size());
+                    const auto cohort_share=capacity/std::max<std::size_t>(1,search.receiver_bank_count);
+                    search.receiver_strategy_workspace_bytes=cohort_share>control_margin?cohort_share-control_margin:1;
+                    search.input_sample_origin=receiver.sample_origin;
                     if(config.oscillator_search) {
                         auto oscillator_search=modem::oscillator_pattern_search(config,value.transfer.clock_sync?modem::utc_transmit_rate_limit(config):0);
-                        note_oscillator_coverage(bank,oscillator_search);
+                        declared_search=oscillator_search;
+                        search.admitted_frequency_half_width_hz=oscillator_search.frequency.requested_half_width_hz;
+                        search.admitted_clock_half_width_ppm=oscillator_search.requested_clock_half_width_ppm;
+                        search.complex_frequency_coverage=!oscillator_search.frequency.limited;
+                        search.complex_clock_coverage=oscillator_search.clock_half_width_ppm>=oscillator_search.requested_clock_half_width_ppm;
                         search.hypotheses=std::move(oscillator_search.hypotheses);
                     }
                     else search.expand_clock_search=true;
@@ -938,9 +1080,19 @@ struct Session::Impl {
                             static_cast<double>(modem::pattern_pulse_padding_samples(config)))/config.sample_rate;
                     search.start_uncertainty_seconds=value.transfer.search_seconds+1.;
                     receiver.clock_window_modeled=modeled_start_window(search,config,epoch,bank,value,receiver.sample_origin);
+                    const auto selection=modem::resolve_receiver_strategy(config,search,
+                        std::min(value.dsp_workspace_bytes/2,capacity-bank.working_bytes-control_margin));
+                    receiver.amplitude_fft_samples=selection.backend==modem::ReceiverBackend::amplitude_energy?
+                        modem::pattern_amplitude_geometry(config,search).fft_samples:0;
+                    if(declared_search && !(selection.supported && selection.full_frequency_coverage && selection.full_clock_coverage))
+                        note_oscillator_coverage(bank,*declared_search);
+                    const auto allocation=std::min(value.dsp_workspace_bytes/2,capacity-bank.working_bytes-control_margin);
                     receiver.modem = std::make_unique<modem::StreamingReceiver>(config,
-                        std::min(value.dsp_workspace_bytes / 2, capacity - bank.working_bytes - control_margin),search);
-                } catch(const Error&) {
+                        selection.backend==modem::ReceiverBackend::existing_complex?allocation:
+                            std::min(allocation,search.receiver_strategy_workspace_bytes),search);
+                } catch(const Error& error) {
+                    if(config.receiver_strategy==modem::ReceiverStrategy::amplitude_only)
+                        forced_strategy_error=error.what();
                     bank.limited=bank.coverage_limited=true;continue;
                 }
                 bank.coverage_limited |= receiver.modem->local_clock_fallback();
@@ -955,7 +1107,9 @@ struct Session::Impl {
             }
         }
         bank.created_at = now;
-        if(bank.receivers.empty())throw Error("no receive profile fits the configured DSP workspace");
+        if(bank.receivers.empty() && !(scheduled_quiet_only && !bank.coverage_limited))throw Error(forced_strategy_error.empty()?
+            "no receive profile fits the configured DSP workspace":
+            "requested receiver strategy unavailable: "+forced_strategy_error);
         return bank;
     }
     void refresh_bank(Bank& bank, const Settings& value) {
@@ -1245,10 +1399,10 @@ struct Session::Impl {
         const auto moment_receivers=std::count_if(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver){
             const auto& config=receiver.options.modem;
             const auto chip=modem::pattern_chip_samples(config),symbol=modem::symbol_sample_count(config);
-            return config.oscillator_search && modem::pattern_pulse_enabled(config) &&
-                (chip>4096 || (chip>=1024 && symbol>=16ULL*config.sample_rate));
+            return receiver.amplitude_fft_samples || (config.oscillator_search && modem::pattern_pulse_enabled(config) &&
+                (chip>4096 || (chip>=1024 && symbol>=16ULL*config.sample_rate)));
         });
-        if(moment_receivers>1 && bank.working_bytes<=capacity &&
+        if(!samples.empty() && moment_receivers>1 && bank.working_bytes<=capacity &&
            std::all_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver){return receiver.modem->clock_windowed();})) {
             auto reserved=bank.working_bytes;
             bool fits=true;
@@ -1261,8 +1415,10 @@ struct Session::Impl {
                 reserved+=extra+headroom;projection.remaining_headroom+=headroom;projection.deferred_detectors+=extra;
             }
             if(fits) {
-                const auto allowance=std::min<std::size_t>(256*1024,capacity-reserved);
-                projection.cache=std::make_unique<modem::detail::CorrelationProjectionCache>(samples,allowance);
+                std::size_t fft_samples=0;
+                for(const auto& receiver:bank.receivers)fft_samples=std::max(fft_samples,receiver.amplitude_fft_samples);
+                const auto allowance=std::min<std::size_t>(256*1024+64*fft_samples,capacity-reserved);
+                projection.cache=std::make_unique<modem::detail::CorrelationProjectionCache>(samples,allowance,fft_samples);
                 if(projection.cache->enabled()) {
                     projection.charged=projection.cache->working_bytes();bank.working_bytes+=projection.charged;
                 } else projection.cache.reset();
@@ -1425,14 +1581,44 @@ struct Session::Impl {
                             if(current.running && generation==version) {
                                 current.error=error.what();
                                 current.receiver_health.receiver_reset=true;
+                                // Reconstructed lanes have new origins even when the epoch is unchanged.
+                                capture_future.reset();capture_quiet.reset();
+                                if(value.transfer.modem.scheduled_hopping &&
+                                   value.transfer.modem.scheduled_hopping->enabled() &&
+                                   !value.transfer.modem.scheduled_hopping->continuous()) {
+                                    // Queued sparse markers were proved against
+                                    // the original bank. Reconstruction must not
+                                    // consume them under different affine origins.
+                                    // Keep the failure visible and restart capture;
+                                    // this is loss/reset, never observed absence.
+                                    count_dropped(current.receiver_health.dropped_samples,
+                                        input_bytes/sizeof(float)+decoding_remaining_samples);
+                                    reset_input_locked();
+                                    bank.limited=true;
+                                    return;
+                                }
                             }
                         }
                         bank.limited=true;
                         modem::PatternSearch search;
+                        std::optional<modem::OscillatorPatternSearch> declared_search;
+                        search.receiver_bank_count=modem::receiver_strategy_bank_count(receiver.options.modem,value.transfer.search_seconds,
+                            std::max<std::size_t>(1,value.receive_keys.size()+static_cast<std::size_t>(value.transfer.key.has_value())),
+                            std::max<std::size_t>(1,value.transfer.receive_targets_db_hz.size()));
+                        const auto cohort_share=capacity/std::max<std::size_t>(1,search.receiver_bank_count);
+                        const auto compact=receiver.options.key &&
+                            modem::symbol_sample_count(receiver.options.modem)>=60ULL*receiver.options.modem.sample_rate;
+                        const auto control_margin=(compact?8192U:65536U)+sizeof(Receiver);
+                        search.receiver_strategy_workspace_bytes=cohort_share>control_margin?cohort_share-control_margin:1;
+                        search.input_sample_origin=bank.samples+sample_count;
                         if(receiver.options.modem.oscillator_search) {
                             auto oscillator_search=modem::oscillator_pattern_search(receiver.options.modem,receiver.options.clock_sync?
                                 modem::utc_transmit_rate_limit(receiver.options.modem):0);
-                            note_oscillator_coverage(bank,oscillator_search);
+                            declared_search=oscillator_search;
+                            search.admitted_frequency_half_width_hz=oscillator_search.frequency.requested_half_width_hz;
+                            search.admitted_clock_half_width_ppm=oscillator_search.requested_clock_half_width_ppm;
+                            search.complex_frequency_coverage=!oscillator_search.frequency.limited;
+                            search.complex_clock_coverage=oscillator_search.clock_half_width_ppm>=oscillator_search.requested_clock_half_width_ppm;
                             search.hypotheses=std::move(oscillator_search.hypotheses);
                         }
                         else search.expand_clock_search=true;
@@ -1454,8 +1640,15 @@ struct Session::Impl {
                         const auto other=bank.working_bytes-accounted,overhead=accounted-receiver.modem->working_bytes();
                         if(other>capacity || overhead>capacity-other)throw;
                         const auto remaining=capacity-other-overhead;
+                        const auto selection=modem::resolve_receiver_strategy(receiver.options.modem,search,remaining);
+                        receiver.amplitude_fft_samples=selection.backend==modem::ReceiverBackend::amplitude_energy?
+                            modem::pattern_amplitude_geometry(receiver.options.modem,search).fft_samples:0;
+                        if(declared_search && !(selection.supported && selection.full_frequency_coverage && selection.full_clock_coverage))
+                            note_oscillator_coverage(bank,*declared_search);
                         receiver.modem.reset();
-                        receiver.modem=std::make_unique<modem::StreamingReceiver>(transfer::seeded_config(receiver.options,receiver.epoch),remaining,search);
+                        receiver.modem=std::make_unique<modem::StreamingReceiver>(transfer::seeded_config(receiver.options,receiver.epoch),
+                            selection.backend==modem::ReceiverBackend::existing_complex?remaining:
+                                std::min(remaining,search.receiver_strategy_workspace_bytes),search);
                         bank.coverage_limited |= receiver.modem->local_clock_fallback();
                         receiver.content=std::make_unique<transfer::StreamReceiver>(receiver.options,receiver.epoch,bank.source_quota);
                         receiver.admitted_at=observation_epoch(bank,value,bank.samples+sample_count);
@@ -1561,6 +1754,153 @@ struct Session::Impl {
             current.dsp_buffered_bytes = receiver_bytes + queue_storage_bytes() + decoding_bytes + audio_bytes + plot_workspace(value) + (tx_busy ? value.dsp_workspace_bytes / 4 : 0);
         }
     }
+    void publish_capture_future(const Bank& bank,const Settings& value,std::uint64_t version) {
+        const auto& nominal=value.transfer.modem;
+        if(value.simulation || value.transfer.timestamp || bank.coverage_limited ||
+           !nominal.scheduled_hopping || !nominal.scheduled_hopping->enabled() || nominal.scheduled_hopping->continuous())return;
+        {
+            std::lock_guard lock(mutex);
+            if(capture_future_revoked || generation!=version || receive_revision!=bank.revision)return;
+            if(capture_future && capture_future->admissions==bank.admissions &&
+               bank.samples<capture_future->end-nominal.sample_rate)return;
+        }
+        const auto profiles=value.transfer.automatic_receive_profiles?
+            tuning::receive_profiles(nominal,value.transfer.receive_targets_db_hz,value.transfer.receive_pattern_mode,true):
+            std::vector<modem::Config>{nominal};
+        const auto key_count=value.receive_keys.size()+static_cast<std::size_t>(value.transfer.key.has_value());
+        // Reserve enough for old + building certificates, allocator overhead and
+        // temporary keys/profiles. Bound allocation before constructing calendars.
+        const auto per_bound=sizeof(modem::SchedHopSourceMap)+sizeof(detail::SchedCaptureBound)+128;
+        const auto budget=value.dsp_workspace_bytes/256;
+        if(budget<=sizeof(CaptureFutureProof) || !key_count ||
+           key_count>(budget-sizeof(CaptureFutureProof))/per_bound/std::max<std::size_t>(1,profiles.size()))return;
+        const auto future_count=key_count*profiles.size();
+        const auto bound_limit=(budget-sizeof(CaptureFutureProof))/per_bound;
+        auto proof=std::make_shared<CaptureFutureProof>();
+        const auto reserve_count=std::min(bound_limit,bank.receivers.size()+future_count);
+        proof->calendars.reserve(reserve_count);
+        proof->bounds.reserve(reserve_count);
+        struct CalendarIdentity {Bytes key_tag;const modem::SchedHopPlan* plan;};
+        std::vector<CalendarIdentity> calendar_ids;calendar_ids.reserve(reserve_count);
+        proof->identity={version,bank.revision};proof->begin=bank.samples;proof->admissions=bank.admissions;
+        proof->rate=nominal.sample_rate;proof->utc_seconds=observation_epoch(bank,value,bank.samples);
+        const auto horizon=60ULL*nominal.sample_rate;
+        if(horizon>std::numeric_limits<std::uint64_t>::max()-bank.samples)return;
+        proof->end=bank.samples+horizon;
+        const auto add=[&](const modem::Config& c,const Crypto& key,const Bytes& tag,modem::ScheduledCaptureEnvelope envelope) {
+            // The source calendar depends only on this key, immutable plan and
+            // sample rate, not payload epoch/bit. Union affine bounds at the
+            // same physical reference; never share private pattern templates.
+            for(std::size_t i=0;i<calendar_ids.size();++i)if(calendar_ids[i].key_tag==tag &&
+                calendar_ids[i].plan==c.scheduled_hopping.get()) {
+                auto& b=proof->bounds[i].envelope;
+                if(envelope.lower.distance(b.lower)<0)b.lower=envelope.lower;
+                if(envelope.upper.distance(b.upper)>0)b.upper=envelope.upper;
+                b.minimum_rate=std::min(b.minimum_rate,envelope.minimum_rate);
+                b.maximum_rate=std::max(b.maximum_rate,envelope.maximum_rate);
+                return true;
+            }
+            if(proof->bounds.size()>=bound_limit)return false;
+            proof->calendars.push_back(std::make_unique<modem::SchedHopSourceMap>(*c.scheduled_hopping,key,c.sample_rate));
+            proof->bounds.push_back({proof->calendars.back().get(),envelope});
+            calendar_ids.push_back({tag,c.scheduled_hopping.get()});return true;
+        };
+        // Resident bounds retain their ORIGINAL epochs and affine origins, no
+        // matter how old a split symbol is. New admission never resets that age.
+        for(const auto& receiver:bank.receivers) {
+            const auto envelope=receiver.modem->scheduled_capture_envelope(bank.samples-receiver.sample_origin);
+            if(!envelope || !receiver.options.key)return;
+            auto bound=*envelope;bound.reference_sample=bank.samples;
+            if(!add(receiver.options.modem,*receiver.options.key,receiver.key_tag,bound))return;
+        }
+        std::vector<Crypto> keys;
+        if(value.permits_plaintext())return;
+        if(value.transfer.key)keys.push_back(*value.transfer.key);
+        keys.insert(keys.end(),value.receive_keys.begin(),value.receive_keys.end());
+        if(keys.empty())return;
+        for(const auto& key:keys) {
+            const auto tag=key.mac(Bytes{'D','P','-','R','X','-','B','A','N','K'});
+            for(const auto& c:profiles) {
+                if(!c.scheduled_hopping || !c.scheduled_hopping->enabled() || c.scheduled_hopping->continuous() ||
+                   c.sample_rate!=nominal.sample_rate)return;
+                detail::SchedCaptureFuture future;
+                future.reference_sample=bank.samples;future.horizon_samples=horizon;future.sample_rate=c.sample_rate;
+                const auto ticks=proof->utc_seconds*c.sample_rate;
+                if(ticks<0 || ticks>=static_cast<long double>(std::numeric_limits<std::uint64_t>::max()))return;
+                future.utc_at_reference={static_cast<std::uint64_t>(std::floor(ticks)),ticks-std::floor(ticks)};
+                future.utc_rate_lower=.999L;future.utc_rate_upper=1.001L;
+                future.timestamp_radius_samples=c.sample_rate+2.L;
+                // The amplitude geometry refuses a declared clock domain above
+                // 10,000 ppm. Include that entire domain, not its selected grid
+                // or the requested tight GPS prior. A later wider backend must
+                // extend this certificate before it can use discarded capture.
+                // Include the full outer clock cell, not merely its center lane.
+                future.minimum_rate=.979999L;future.maximum_rate=1.020001L;
+                future.propagation_samples=value.transfer.clock_sync?value.transfer.clock_sync->offset_seconds*c.sample_rate:0;
+                future.epoch_rounding_radius_samples=(value.transfer.search_seconds+1.L)*c.sample_rate;
+                future.start_uncertainty_samples=(value.transfer.search_seconds+1.L)*c.sample_rate+
+                    static_cast<long double>(modem::pattern_chip_samples(c))/4/future.minimum_rate;
+                future.maximum_phase_samples=c.sample_rate-1;
+                const auto envelope=detail::sched_capture_future_envelope(future);
+                if(!envelope)return;
+                if(!add(c,key,tag,*envelope))return;
+            }
+        }
+        // Control certificates share the existing DSP reservation. No PCM
+        // matrix or symbol-sized buffer is allocated here.
+        const auto bytes=sizeof(CaptureFutureProof)+proof->calendars.capacity()*(sizeof(modem::SchedHopSourceMap)+sizeof(void*)+128)+
+            proof->bounds.capacity()*sizeof(detail::SchedCaptureBound);
+        if(bytes>budget)return;
+        std::lock_guard lock(mutex);
+        if(current.running && generation==version && receive_revision==bank.revision && !capture_future_revoked)
+            capture_future=std::move(proof);
+    }
+    void publish_capture_quiet(const Bank& bank,const Settings& value,std::uint64_t version) {
+        if(value.simulation)return;
+        {
+            std::lock_guard lock(mutex);
+            // Reuse an exact current-cohort proof only within its original UTC
+            // admission fence. A broad ahead proof may retain every sample;
+            // it must not suppress this independently useful shorter proof.
+            if(capture_quiet && capture_quiet->revision==bank.revision && bank.samples<capture_quiet->end &&
+               capture_quiet->utc_second==std::floor(bank.created_at))return;
+        }
+        std::optional<CaptureQuietProof> proof;
+        const auto& config=value.transfer.modem;
+        if(config.scheduled_hopping && config.scheduled_hopping->enabled() &&
+           !config.scheduled_hopping->continuous() && !bank.coverage_limited) {
+            auto end=std::numeric_limits<std::uint64_t>::max();
+            bool valid=true;
+            for(const auto& receiver:bank.receivers) {
+                const auto local=bank.samples-receiver.sample_origin;
+                const auto limit=receiver.modem->unobserved_end_from(local);
+                if(!limit || *limit>std::numeric_limits<std::uint64_t>::max()-receiver.sample_origin){valid=false;break;}
+                end=std::min(end,receiver.sample_origin+*limit);
+            }
+            // An empty bank is valid only after make_bank proved every current
+            // epoch impossible. Expire before the next rolling-admission fence.
+            if(valid && end>bank.samples)
+                proof=CaptureQuietProof{bank.revision,bank.samples,end,std::floor(bank.created_at)};
+        }
+        std::lock_guard lock(mutex);
+        if(current.running && generation==version && receive_revision==bank.revision)
+            capture_quiet=proof;
+    }
+    void feed_unobserved(Bank& bank,std::uint64_t count,const Settings& value,std::uint64_t version,std::stop_token stop) {
+        // A capture certificate has already proved no retained lane can consume
+        // this interval. Advance physical coordinates only, never absent fits.
+        feed_bank(bank,value,version,stop,{},[&](auto& receiver,auto*) {
+            if(!receiver.try_skip_unobserved(count,stop))
+                throw Error("scheduled capture certificate no longer covers the receiver bank");
+        });
+        if(stop.stop_requested())return; // an error reset invalidated the old bank/proof
+        if(count>std::numeric_limits<std::uint64_t>::max()-bank.samples)
+            throw Error("scheduled capture coordinate exhausted");
+        bank.samples+=count;
+        bank.mixer*=std::polar(1.,-2*std::numbers::pi*std::remainder(
+            static_cast<double>(count)*value.transfer.modem.carrier_hz/value.transfer.modem.sample_rate,1.));
+        bank.mixer/=std::abs(bank.mixer);
+    }
     void feed_samples(Bank& bank,std::span<const float> samples,const Settings& value,std::uint64_t version,
                       std::stop_token stop,Prepared* wave=nullptr,std::stop_token receive_stop={}) {
         if(receive_stop.stop_possible()) {
@@ -1579,7 +1919,8 @@ struct Session::Impl {
             }
             bank.mixer/=std::abs(bank.mixer);
             const auto raw=samples.subspan(offset,count);const auto mixed=std::span(projected).first(count);
-            feed_bank(bank,value,version,stop,raw,[&](auto& receiver,auto* cache){return receiver.push(raw,mixed,stop,cache);},wave);
+            feed_bank(bank,value,version,stop,raw,[&](auto& receiver,auto* cache){if(receiver.try_skip_unobserved(raw.size(),stop))return;
+                receiver.push(raw,mixed,stop,cache);},wave);
             offset+=count;
         }
     }
@@ -1646,7 +1987,9 @@ struct Session::Impl {
     }
     void retain_emitted_epoch(const Prepared& wave) {
         if(!wave.protected_epoch || !wave.transmitter->samples_emitted())return;
-        const auto epoch=datapump::detail::exposed_transmit_epoch(wave.modem,*wave.protected_epoch,
+        const auto scheduled=wave.modem.scheduled_hopping && wave.modem.scheduled_hopping->enabled();
+        const auto epoch=scheduled?wave.transmitter->emitted_payload_epoch():
+            datapump::detail::exposed_transmit_epoch(wave.modem,*wave.protected_epoch,
             wave.transmitter->original_total_samples(),wave.transmitter->samples_emitted());
         std::lock_guard lock(mutex);
         auto& retained=transmit_epochs[wave.protected_key];
@@ -1827,12 +2170,24 @@ struct Session::Impl {
                     output_options.presentation_lag_seconds=clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds);
                     output_options.timing_stop_duration_seconds=wave->timing_stop_seconds;
                     if(wave->timing_stop_seconds>0 && modem::private_cover_enabled(transmit_modem)) {
-                        // total_samples - suppression_sample_count is the last
-                        // valid pulse endpoint, also after request_finish().
-                        // The independent cover still uses the same controller
-                        // and is validated before every device submission.
-                        output_options.timing_independent_cover_seconds=static_cast<double>(
-                            modem::suppression_sample_count(transmit_modem))/transmit_modem.sample_rate;
+                        // Reserve the same PHYSICAL clock for both terms. A
+                        // source-time cover duration cannot be subtracted from
+                        // a paused physical stopping horizon: that would label
+                        // most null/cover time as outstanding valid payload.
+                        // The runtime callback below uses the exact keyed end.
+                        const auto stop_source=modem::transmit_stop_sample_count(transmit_modem);
+                        const auto cover_source=modem::suppression_sample_count(transmit_modem);
+                        const auto valid_wall=static_cast<double>(modem::scheduled_physical_span_samples(
+                            transmit_modem,stop_source-cover_source))/transmit_modem.sample_rate;
+                        output_options.timing_independent_cover_seconds=modem::scheduled_bursts(transmit_modem)?
+                            std::max(0.,wave->timing_stop_seconds-valid_wall):
+                            static_cast<double>(cover_source)/transmit_modem.sample_rate;
+                    }
+                    if(transmit_modem.scheduled_hopping && transmit_modem.scheduled_hopping->enabled() && !transmit_modem.scheduled_hopping->continuous()) {
+                        output_options.timing_protected_payload_end=[&](std::uint64_t frontier)->std::optional<std::uint64_t> {
+                            if(!wave->transmitter)return std::nullopt;
+                            return wave->transmitter->predicted_physical_valid_payload_end(frontier);
+                        };
                     }
                     output_options.timing_source_end=[&]() -> std::optional<std::uint64_t> {
                         // Identical termination accounting for message/noise.
@@ -1845,8 +2200,9 @@ struct Session::Impl {
                             modem::pattern_pulse_padding_samples(transmit_modem),modem::symbol_sample_count(transmit_modem));
                         output_options.playback_output_gain=[&,shape](long double seconds) {
                             const auto& c=wave->modem;
-                            const auto origin=static_cast<long double>(c.stream_phase_samples)-
-                                modem::training_sample_count(c)-modem::pattern_pulse_padding_samples(c);
+                            const auto origin=c.scheduled_hopping && c.scheduled_hopping->enabled() && !c.scheduled_hopping->continuous()?
+                                static_cast<long double>(wave->transmitter->physical_output_origin())-static_cast<long double>(c.stream_epoch)*c.sample_rate:
+                                static_cast<long double>(c.stream_phase_samples)-modem::training_sample_count(c)-modem::pattern_pulse_padding_samples(c);
                             return shape.gain(c.stream_epoch,origin+seconds*c.sample_rate,c.sample_rate);
                         };
                     }
@@ -1964,7 +2320,12 @@ struct Session::Impl {
             try {
                 {
                     std::lock_guard lock(mutex);
-                    if (generation == version && !tx_busy) { current.status = idle_status(); current.error.clear(); }
+                    if (generation == version) {
+                        if (!tx_busy) { current.status = idle_status(); current.error.clear(); }
+                        // A device reopen starts a new observation segment even
+                        // when its first plotted absolute coordinate increases.
+                        current.spectrum_complex.clear();current.spectrum_sample_count=0;
+                    }
                 }
                 plot_window.reset();
                 std::optional<detail::SignalWindow> monitor_window;
@@ -2004,6 +2365,14 @@ struct Session::Impl {
                 };
                 capture_options.capture_discontinuity=[&]{
                     input_interrupted(version,capture_token);
+                    plot_window.reset();
+                    if(monitor_window)monitor_window->reset();
+                    monitor_seen=false;
+                    {std::lock_guard lock(mutex);
+                        if(current.running && generation==version && !capture_suspended && !capture_token.stop_requested()) {
+                            current.spectrum_complex.clear();current.spectrum_sample_count=0;
+                        }
+                    }
                     raw_seconds=logical_seconds=0;raw_end_epoch.reset();logical_origin.reset();timed_chunk.reset();
                 };
                 capture_options.capture_monitor=[&](std::span<const float> raw,std::uint32_t rate) {
@@ -2127,7 +2496,8 @@ struct Session::Impl {
                     throw Error("UTC transmission cannot override the key epoch reuse guard");
                 auto prepared = std::make_shared<Prepared>();
                 prepared->modem = value.transfer.modem;
-                prepared->timing_stop_seconds=static_cast<double>(modem::transmit_stop_sample_count(value.transfer.modem))/value.transfer.modem.sample_rate;
+                prepared->timing_stop_seconds=static_cast<double>(modem::scheduled_physical_span_samples(value.transfer.modem,
+                    modem::transmit_stop_sample_count(value.transfer.modem)))/value.transfer.modem.sample_rate;
                 prepared->output_gain=value.transmit_gain;
                 prepared->output_channels=audio::output_channels(value.mono,value.channel_mode);
                 prepared->generation = version; prepared->serial = serial;prepared->receive_clear_generation=clear_generation; prepared->stop = token;
@@ -2142,7 +2512,8 @@ struct Session::Impl {
                         if(prepared->timing_rate_fraction>0) {
                             // Same immutable geometry and stopping horizon for
                             // finite messages and open-ended temporary-key noise.
-                            prepared->timing_stop_seconds=static_cast<double>(modem::transmit_stop_sample_count(value.transfer.modem))/value.transfer.modem.sample_rate;
+                            prepared->timing_stop_seconds=static_cast<double>(modem::scheduled_physical_span_samples(value.transfer.modem,
+                    modem::transmit_stop_sample_count(value.transfer.modem)))/value.transfer.modem.sample_rate;
                         }
                     }
                     prepared->prepare_hardware=[this,transmission=std::move(transmission),
@@ -2162,11 +2533,15 @@ struct Session::Impl {
                         auto options=value.transfer;
                         if(options.clock_sync && options.timestamp)
                             throw Error("UTC hardware transmission requires a freshly scheduled epoch");
-                        const auto make=[&](std::uint64_t epoch) {
-                            options.timestamp=epoch;wave.modem.stream_epoch=epoch;
+                        if(wave.noise) options.modem=modem::StreamingTransmitter::prepare_noise_config(options.modem);
+                        else if(options.modem.scheduled_hopping && options.modem.scheduled_hopping->enabled())
+                            options.modem=transfer::seeded_config(options,options.timestamp);
+                        const auto make=[&](std::uint64_t epoch,std::uint32_t phase=0) {
+                            options.timestamp=epoch;options.modem.stream_epoch=epoch;options.modem.stream_phase_samples=phase;
+                            wave.modem=options.modem;
                             if(wave.noise) {
                                 auto config=options.modem;config.stream_epoch=epoch;
-                                return std::make_unique<modem::StreamingTransmitter>(modem::Noise{},config,value.dsp_workspace_bytes/4);
+                                return std::make_unique<modem::StreamingTransmitter>(modem::Noise{},config,modem::StreamingTransmitter::PreparedTemporaryKeys{},value.dsp_workspace_bytes/4);
                             }
                             return wave.binary?transfer::binary_transmitter(std::get<Bytes>(transmission),options):
                                 transfer::message_transmitter(std::get<Message>(transmission),options);
@@ -2190,7 +2565,7 @@ struct Session::Impl {
                             if(!key.empty())wave.protected_epoch=scheduled.epoch;
                             audio::schedule_output(scheduled.playback_epoch,wave.stop);
                         } else {
-                            wave.transmitter=make(options.timestamp);
+                            wave.transmitter=make(options.timestamp,options.modem.stream_phase_samples);
                             if(!key.empty())wave.protected_epoch=options.timestamp;
                         }
                         wave.protected_key=key;
@@ -2267,16 +2642,26 @@ struct Session::Impl {
             try {
                 if (!bank) {
                     Bank initial;initial.observed_epoch=block.observed_epoch;initial.timing=block.timing;
+                    initial.samples=initial.observed_sample=block.sample_origin;
                     bank=make_bank(value,std::move(initial));
                 } else {
                     bank->observed_epoch=block.observed_epoch;bank->observed_sample=bank->samples;bank->timing=block.timing;
                 }
-                feed_samples(*bank,block.samples,value,version,token);
+                if(bank->samples!=block.sample_origin)
+                    throw Error("scheduled capture sample history is not contiguous");
+                if(block.skipped_samples)feed_unobserved(*bank,block.skipped_samples,value,version,token);
+                else feed_samples(*bank,block.samples,value,version,token);
+                publish_capture_future(*bank,value,version);
+                publish_capture_quiet(*bank,value,version);
             } catch (const std::exception& exception) {
                 std::lock_guard lock(mutex);
                 if (current.running && generation == version && !token.stop_requested()) {
                     current.error = exception.what();
                     current.receiver_health.receiver_reset=true;
+                    if(value.transfer.modem.scheduled_hopping && value.transfer.modem.scheduled_hopping->enabled()) {
+                        count_dropped(current.receiver_health.dropped_samples,input_bytes/sizeof(float));
+                        reset_input_locked();
+                    }
                     current.clock_window_modeled=false;current.receiver_timing.reset();
                     current.receiver_instances=current.peak_receiver_instances=0;
                     current.receiver_admissions=current.receiver_retirements=0;
@@ -2480,7 +2865,8 @@ Snapshot Session::snapshot() {
         pending_seconds=(static_cast<double>(impl_->input_bytes)/sizeof(float)+impl_->decoding_remaining_samples)/
             impl_->settings.transfer.modem.sample_rate;
         auto oldest=impl_->decoding_remaining_samples?impl_->decoding_queued_at:std::nullopt;
-        if(!impl_->input.empty() && (!oldest || impl_->input.front().queued_at<*oldest))oldest=impl_->input.front().queued_at;
+        const auto pending=std::find_if(impl_->input.begin(),impl_->input.end(),[](const auto& block){return !block.samples.empty();});
+        if(pending!=impl_->input.end() && (!oldest || pending->queued_at<*oldest))oldest=pending->queued_at;
         if(oldest)oldest_seconds=std::max(0.,std::chrono::duration<double>(Clock::now()-*oldest).count());
     }
     impl_->current.receiver_backlog_seconds=pending_seconds;

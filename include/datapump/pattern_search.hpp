@@ -57,6 +57,9 @@ void validate_oscillator_search(const OscillatorSearchConfig&);
 OscillatorEffects oscillator_effects(const Config&);
 // Finite static search from the declared effective-link oscillator bounds.
 // Requires Config::oscillator_search; no simulated truth is used by this bank.
+// Config::frequency_search_multiplier expands only residual frequency bounds.
+// Original exact frequency/clock pairs remain retained, including when finite
+// caps prevent complete widening; limited then describes the expanded request.
 OscillatorPatternSearch oscillator_pattern_search(const Config&,double transmit_rate_correction=0);
 // Candidate steering range for independent audio clocks. The search builder
 // admits it only when the complete expanded domain AND every original lane fit.

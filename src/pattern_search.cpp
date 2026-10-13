@@ -116,23 +116,37 @@ static OscillatorPatternSearch oscillator_pattern_search_domain(const Config& co
     const bool shared=policy.reference==OscillatorReference::shared_radio && policy.rf_shift_hz!=0;
     const auto clock_bound=bounded_value(static_cast<long double>(policy.margin)*
         (shared?policy.rf.accuracy_ppm:policy.lf.accuracy_ppm),"oscillator clock allowance exceeds numeric range");
-    const auto rf_bound=shared?0.:bounded_value(static_cast<long double>(policy.margin)*
+    const auto oscillator_rf_bound=shared?0.:bounded_value(static_cast<long double>(policy.margin)*
         policy.rf_shift_hz*policy.rf.accuracy_ppm*1e-6L,"RF search allowance exceeds numeric range");
     // The sign is in delivered real-tone coordinates; lower-sideband mixing
     // reverses the RF clock contribution while preserving the symbol rate.
     const auto coupling=shared && policy.rf_shift_hz!=0?sideband_sign(policy)*physical:config.carrier_hz;
-    const auto frequency_bound=bounded_value(std::abs(static_cast<long double>(coupling))*clock_bound*1e-6L+rf_bound,
+    const auto base_frequency_bound=bounded_value(std::abs(static_cast<long double>(coupling))*clock_bound*1e-6L+oscillator_rf_bound,
         "oscillator frequency allowance exceeds numeric range");
+    // Sched_Hop frequency widening adds only residual carrier uncertainty. It
+    // does not invent a less accurate sample clock or alter simulated truth.
+    const auto extra_frequency_bound=bounded_value(static_cast<long double>(base_frequency_bound)*
+        (config.frequency_search_multiplier-1),"expanded carrier allowance exceeds numeric range");
+    const auto rf_bound=bounded_value(static_cast<long double>(oscillator_rf_bound)+extra_frequency_bound,
+        "expanded residual carrier allowance exceeds numeric range");
+    const auto frequency_bound=bounded_value(static_cast<long double>(base_frequency_bound)+extra_frequency_bound,
+        "expanded oscillator frequency allowance exceeds numeric range");
     OscillatorPatternSearch result;
     auto& frequency=result.frequency;
     const auto maximum_frequency_step=.25*config.sample_rate/static_cast<double>(symbol_sample_count(config));
-    const auto requested_frequency_steps=frequency_bound==0?0.L:
-        std::ceil(static_cast<long double>(frequency_bound)/maximum_frequency_step);
+    const auto base_frequency_steps=base_frequency_bound==0?0.L:
+        std::ceil(static_cast<long double>(base_frequency_bound)/maximum_frequency_step);
+    const auto base_frequency_step=base_frequency_bound==0?maximum_frequency_step:
+        static_cast<double>(static_cast<long double>(base_frequency_bound)/base_frequency_steps);
+    const auto requested_frequency_steps=config.frequency_search_multiplier==1?base_frequency_steps:
+        (frequency_bound==0?0.L:std::ceil(static_cast<long double>(frequency_bound)/base_frequency_step));
     // Refine the lattice to reach the declared bound. Rounding a tiny GPSDO
     // region up to the usual phase bin would invent a much larger clock error,
     // particularly for short symbols and low PCM carriers.
-    frequency.step_hz=frequency_bound==0?maximum_frequency_step:
-        static_cast<double>(static_cast<long double>(frequency_bound)/requested_frequency_steps);
+    frequency.step_hz=config.frequency_search_multiplier==1?
+        (frequency_bound==0?maximum_frequency_step:
+            static_cast<double>(static_cast<long double>(frequency_bound)/requested_frequency_steps)):
+        base_frequency_step;
     frequency.requested_half_width_hz=frequency_bound;
     result.requested_clock_half_width_ppm=clock_bound;
     const auto half_band=occupied_half_band(config);
@@ -178,7 +192,7 @@ static OscillatorPatternSearch oscillator_pattern_search_domain(const Config& co
             std::min(std::abs(offset/coupling*1e6),clock_bound);
         return std::copysign(magnitude,offset/coupling);
     };
-    const bool correlated=shared || rf_bound==0 || clock_bound==0;
+    const bool correlated=(shared && extra_frequency_bound==0) || rf_bound==0 || clock_bound==0;
     // An independent conversion error describes a strip around the sampling
     // clock relation, not necessarily a separately resolved timing dimension.
     // For f=c*epsilon*1e-6+r, choosing epsilon_i=clamp(f_i/c*1e6,-A,A)
@@ -189,17 +203,24 @@ static OscillatorPatternSearch oscillator_pattern_search_domain(const Config& co
         static_cast<double>(symbol_sample_count(config))*1e6;
     auto thin_clock_step=std::numeric_limits<double>::infinity();
     const auto strip_clock_step=(static_cast<long double>(frequency.step_hz)+2.L*rf_bound)/
-        config.carrier_hz*1e6L;
-    if(!correlated && clock_bound<=10000 && strip_clock_step<=maximum_clock_step) {
+        std::abs(coupling)*1e6L;
+    // Both the selected rate and every physical rate lie in [-A,A]. Their
+    // distance is at most 2A, so twice the clipped cell radius is at most 4A.
+    // A large independent RF error must not bypass the exact test below when
+    // the entire sampling-clock domain is tiny (notably microwave GPSDO links).
+    // This only broadens eligibility for that test; its outward-rounded result
+    // still has to satisfy the original quarter-chip coverage requirement.
+    const auto clipped_clock_step_bound=std::min(strip_clock_step,4.L*clock_bound);
+    if(!correlated && clock_bound<=10000 && clipped_clock_step_bound<=maximum_clock_step) {
         long double radius=0;
-        const auto clock_scale=1e6L/config.carrier_hz;
+        const auto clock_scale=1e6L/coupling;
         const auto frequency_radius=static_cast<long double>(frequency.step_hz)/2+rf_bound;
         for(const auto offset:offsets_for(steps)) {
             const auto rate=correlated_rate(offset);
-            const auto lower=std::max(-static_cast<long double>(clock_bound),
-                (static_cast<long double>(offset)-frequency_radius)*clock_scale);
-            const auto upper=std::min(static_cast<long double>(clock_bound),
-                (static_cast<long double>(offset)+frequency_radius)*clock_scale);
+            const auto a=(static_cast<long double>(offset)-frequency_radius)*clock_scale;
+            const auto b=(static_cast<long double>(offset)+frequency_radius)*clock_scale;
+            const auto lower=std::max(-static_cast<long double>(clock_bound),std::min(a,b));
+            const auto upper=std::min(static_cast<long double>(clock_bound),std::max(a,b));
             radius=std::max({radius,std::abs(lower-rate),std::abs(upper-rate)});
         }
         // Bound the actual rounded public lane coordinates, including the
@@ -239,7 +260,7 @@ static OscillatorPatternSearch oscillator_pattern_search_domain(const Config& co
         // Trim impossible corners of the independent-reference rectangle.
         // Include half a rate cell and one frequency cell for conservative
         // outward rounding; neither allowance is a new physical uncertainty.
-        const auto frequency_radius=rf_bound+config.carrier_hz*result.clock_step_ppm*.5e-6+frequency.step_hz;
+        const auto frequency_radius=rf_bound+std::abs(coupling)*result.clock_step_ppm*.5e-6+frequency.step_hz;
         // At a fixed rate both tests describe one interval in increasing
         // frequency order. Find its exact integer boundaries once, instead
         // of repeatedly scanning the whole rate/frequency rectangle while
@@ -262,7 +283,7 @@ static OscillatorPatternSearch oscillator_pattern_search_domain(const Config& co
             return lower;
         };
         for(auto rate:rates) {
-            const auto center=config.carrier_hz*rate*1e-6;
+            const auto center=coupling*rate*1e-6;
             const auto support=static_cast<long double>(half_band)*(1+static_cast<long double>(rate)*1e-6L);
             const auto first=first_true([&](double offset) {
                 return offset-center>=-frequency_radius &&
@@ -343,6 +364,43 @@ static OscillatorPatternSearch oscillator_pattern_search_domain(const Config& co
     return result;
 }
 
+namespace {
+OscillatorPatternSearch expanded_oscillator_pattern_search(const Config& config) {
+    if(config.frequency_search_multiplier==1)return oscillator_pattern_search_domain(config);
+    auto base_config=config;base_config.frequency_search_multiplier=1;
+    auto base=oscillator_pattern_search_domain(base_config);
+    auto expanded=oscillator_pattern_search_domain(config);
+    std::set<std::pair<double,double>> pairs;
+    std::set<double> frequencies;
+    for(const auto lane:base.hypotheses) {
+        pairs.emplace(lane.frequency_offset_hz,lane.clock_error_ppm);
+        frequencies.insert(lane.frequency_offset_hz);
+    }
+    auto retained=base.hypotheses;
+    for(const auto lane:expanded.hypotheses) {
+        if(!pairs.emplace(lane.frequency_offset_hz,lane.clock_error_ppm).second)continue;
+        frequencies.insert(lane.frequency_offset_hz);
+        if(retained.size()==maximum_pattern_frequency_rate_hypotheses ||
+           frequencies.size()>maximum_pattern_frequency_hypotheses) {
+            // A wider request must never discard a required original lane to
+            // fit the finite bank. Keep its exact original coverage and expose
+            // the unsuccessful widening instead of coarsening either grid.
+            base.frequency.requested_half_width_hz=expanded.frequency.requested_half_width_hz;
+            base.frequency.limited=base.limited=true;
+            return base;
+        }
+        retained.push_back(lane);
+    }
+    expanded.hypotheses=std::move(retained);
+    expanded.frequency.count=frequencies.size();
+    expanded.clock_half_width_ppm=std::max(expanded.clock_half_width_ppm,base.clock_half_width_ppm);
+    expanded.clock_step_ppm=std::max(expanded.clock_step_ppm,base.clock_step_ppm);
+    // Frequency/clock lanes are an explicit union; count is not a promise of a
+    // uniformly spaced lattice after exact original endpoints are retained.
+    return expanded;
+}
+}
+
 double utc_transmit_rate_limit(const Config& config) {
     if(!config.oscillator_search)return 0;
     const auto& policy=*config.oscillator_search;
@@ -354,7 +412,7 @@ double utc_transmit_rate_limit(const Config& config) {
 OscillatorPatternSearch oscillator_pattern_search(const Config& config,double correction) {
     if(!std::isfinite(correction) || correction<0 || correction>.001)
         throw Error("invalid transmit timing correction search allowance");
-    auto original=oscillator_pattern_search_domain(config);
+    auto original=expanded_oscillator_pattern_search(config);
     if(correction==0)return original;
     const auto fallback=[&] {
         original.timing_correction_unavailable=true;
@@ -373,7 +431,7 @@ OscillatorPatternSearch oscillator_pattern_search(const Config& config,double co
     if(ppm>10000)return fallback();
     adjusted.oscillator_search->lf.accuracy_ppm=std::nextafter(static_cast<double>(ppm),
         std::numeric_limits<double>::infinity());
-    auto result=oscillator_pattern_search_domain(adjusted);
+    auto result=expanded_oscillator_pattern_search(adjusted);
     if(result.limited)return fallback();
     std::set<std::pair<double,double>> pairs;
     std::set<double> frequencies;
@@ -440,8 +498,16 @@ PatternFrequencySearch default_pattern_frequency_search(const Config& config) {
 
 std::vector<double> default_pattern_frequency_offsets(const Config& config) {
     if(config.oscillator_search) {
-        const auto geometry=oscillator_pattern_search(config).frequency;
-        return lattice(geometry.step_hz,geometry.count/2,geometry.half_width_hz,true);
+        const auto search=oscillator_pattern_search(config);
+        if(config.frequency_search_multiplier==1)
+            return lattice(search.frequency.step_hz,search.frequency.count/2,search.frequency.half_width_hz,true);
+        std::set<double> unique;
+        for(const auto lane:search.hypotheses)unique.insert(lane.frequency_offset_hz);
+        std::vector<double> offsets(unique.begin(),unique.end());
+        std::sort(offsets.begin(),offsets.end(),[](double a,double b) {
+            return std::abs(a)<std::abs(b) || (std::abs(a)==std::abs(b) && a<b);
+        });
+        return offsets;
     }
     const auto geometry=default_pattern_frequency_search(config);
     std::vector<double> result;

@@ -15,7 +15,11 @@ struct Patch {
     // Shift; the configured Carrier and Shift are saved unchanged.
     std::optional<double> rf_shift_hz,search_margin;
     std::optional<std::string> oscillator,rf_oscillator,reference,pattern;
-    std::optional<std::string> clock_sync,fhss,dsss_version,dsss_mode,search_arithmetic,doppler;
+    std::optional<std::string> clock_sync,fhss,dsss_version,dsss_mode,search_arithmetic,receiver_strategy,doppler;
+    std::optional<double> receiver_cpu_budget;
+    // Nominal UTC frame cells and consecutive active cells; multiplier one disables.
+    std::optional<unsigned> sched_hop,sched_hop_dilution;
+    std::optional<double> sched_frequency_search;
     // Inline list contents or a file reference; parser never opens files.
     std::optional<std::string> fhss_list,fhss_list_file;
     // File references and named selection only; never serialize key material.

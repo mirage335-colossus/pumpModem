@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <deque>
+#include <limits>
 #include <numbers>
 #include <optional>
 #include <span>
@@ -100,17 +101,33 @@ inline std::vector<Column> waveform_columns(std::span<const float> samples, std:
 class SpectrumHistory {
 public:
     static constexpr std::size_t capacity = 160;
-    void clear() { rows_.clear(); upper_db_ = max_hz_ = 0; simulation_reference_ = false; }
+    static constexpr std::size_t native_bins = 1025;
+    static constexpr std::size_t fft_samples = 2048;
+    struct DetailRow {
+        std::vector<float> db, phase_degrees; // NaN phase means unavailable.
+        std::uint64_t start_sample=0, segment=0;
+        std::size_t sample_count=0;
+    };
+    void clear() {
+        rows_.clear();detail_rows_.clear();previous_complex_.clear();
+        upper_db_ = max_hz_ = bin_hz_ = 0; simulation_reference_ = false;
+        previous_segment_=previous_start_=0;
+    }
     void push(std::span<const double> bins, double bin_hz,
-              std::optional<double> simulation_gain_db = {}) {
+              std::optional<double> simulation_gain_db = {},
+              std::span<const std::complex<float>> complex_bins = {},
+              std::uint64_t start_sample = 0, std::size_t sample_count = 0,
+              std::uint64_t segment = 0) {
         if (bins.empty()) return;
         if (!(bin_hz > 0) || !std::isfinite(bin_hz)) throw Error("invalid spectrum frequency scale");
         if (simulation_gain_db && !std::isfinite(*simulation_gain_db)) throw Error("invalid simulation spectrum reference");
         const auto edge = bin_hz * static_cast<double>(bins.size() - 1);
-        if (!rows_.empty() && (std::abs(edge - max_hz_) > 1e-9 * std::max(1., edge) ||
+        if(!std::isfinite(edge))throw Error("invalid spectrum frequency extent");
+        if (!rows_.empty() && (bin_hz != bin_hz_ || std::abs(edge - max_hz_) > 1e-9 * std::max(1., edge) ||
             simulation_reference_ != simulation_gain_db.has_value())) clear();
         simulation_reference_ = simulation_gain_db.has_value();
         max_hz_ = edge;
+        bin_hz_ = bin_hz;
         // At the fixed -164 dBm/Hz reference noise, a complete 2,048-sample
         // Hann FFT at 6 kHz has mean noise near -45.7 dB sim. ref.; pooling
         // four bins puts typical columns near -43.5 dB. Start at -50 dB so
@@ -131,16 +148,50 @@ public:
         }
         if (rows_.size() == capacity) rows_.pop_front();
         rows_.push_back(std::move(row));
+        // Retain native detail separately from the compact environmental view.
+        // Larger foreign diagnostic arrays are bounded by peak pooling; their
+        // phase is unavailable because those bins no longer have native identity.
+        DetailRow detail;
+        const auto count=std::min(native_bins,bins.size());
+        detail.db.assign(count,-240.f);
+        detail.phase_degrees.assign(count,std::numeric_limits<float>::quiet_NaN());
+        detail.start_sample=start_sample;detail.sample_count=sample_count;detail.segment=segment;
+        for(std::size_t i=0;i<count;++i) {
+            const auto first=i*bins.size()/count,last=(i+1)*bins.size()/count;
+            for(auto k=first;k<last;++k)if(std::isfinite(bins[k]))
+                detail.db[i]=std::max(detail.db[i],static_cast<float>(bins[k]+simulation_gain_db.value_or(0)));
+        }
+        const bool native=segment && sample_count==fft_samples && bins.size()==native_bins &&
+                          complex_bins.size()==native_bins;
+        if(native && previous_segment_==segment && previous_complex_.size()==native_bins && start_sample>previous_start_) {
+            const auto delta=(start_sample-previous_start_)%fft_samples;
+            for(std::size_t k=1;k+1<native_bins;++k) {
+                const auto a=std::complex<double>(complex_bins[k]),b=std::complex<double>(previous_complex_[k]);
+                if(!std::isfinite(a.real()) || !std::isfinite(a.imag()) ||
+                   !std::isfinite(b.real()) || !std::isfinite(b.imag()) || std::norm(a)<1e-24 || std::norm(b)<1e-24)continue;
+                const auto angle=std::arg(a*std::conj(b))-2*std::numbers::pi*k*delta/fft_samples;
+                detail.phase_degrees[k]=static_cast<float>(std::remainder(angle,2*std::numbers::pi)*180/std::numbers::pi);
+            }
+        }
+        if(native)previous_complex_.assign(complex_bins.begin(),complex_bins.end());else previous_complex_.clear();
+        previous_start_=start_sample;previous_segment_=native?segment:0;
+        if(detail_rows_.size()==capacity)detail_rows_.pop_front();
+        detail_rows_.push_back(std::move(detail));
     }
     double intensity(double db) const { return std::clamp((db - lower_db()) / (simulation_reference_ ? 40. : 100.), 0., 1.); }
     double lower_db() const { return simulation_reference_ ? simulation_lower_db_ : upper_db_ - 100; }
     double upper_db() const { return simulation_reference_ ? simulation_lower_db_ + 40 : upper_db_; }
     double max_hz() const { return max_hz_; }
+    double bin_hz() const { return bin_hz_; }
     bool simulation_reference() const { return simulation_reference_; }
     const std::deque<std::vector<double>>& rows() const { return rows_; }
+    const std::deque<DetailRow>& detail_rows() const { return detail_rows_; }
 private:
     std::deque<std::vector<double>> rows_;
-    double upper_db_ = 0, max_hz_ = 0;
+    std::deque<DetailRow> detail_rows_;
+    std::vector<std::complex<float>> previous_complex_;
+    std::uint64_t previous_start_=0,previous_segment_=0;
+    double upper_db_ = 0, max_hz_ = 0, bin_hz_=0;
     double simulation_lower_db_ = -50;
     bool simulation_reference_ = false;
 };

@@ -76,6 +76,7 @@ struct Model {
     bool one_bit_reference_available=false;
     double bit_seconds=0;
     double send_seconds=0;
+    bool scheduled_duration_representative=false;
     // Earliest modeled finish: whole burst plus fully scored absent symbols.
     double finish_seconds=0;
     double observer_ratio=0;
@@ -129,6 +130,9 @@ struct Model {
     std::string receiver_work_assumptions;
     double fallback_cpu_realtime_ratio=0,fallback_timing_hypotheses=0;
     double occupied_bandwidth_hz=0;
+    // Additional full nominal engineering rolloff allowance for smooth gates;
+    // finite burst envelopes have tails beyond this scale.
+    double gate_bandwidth_allowance_hz=0;
     double low_audio_hz=0;
     double high_audio_hz=0;
     std::string receiver_status;

@@ -164,6 +164,30 @@ comment. Cannot be combined with --fhss-list. Files are validated before setting
 change. Launch and parameter-list exports save the applied frequencies inline,
 independent of the source file. Hiding Developer mode retains the active list.
 .TP
+.BI \-\-sched-hop " disabled|10|100|1k|10k"
+Enable keyed active/null burst scheduling; default disabled. Requires a selected
+encryption key and matching peer settings. Each frame contains the selected
+number of 0.4-second base hops, normally with one active hop. Long symbols split
+across active groups while waveform source time pauses during null hops.
+The schedule is independent of Fake FHSS. Null intervals allow receiver work;
+they do not count as observed absence or guarantee real-time processing.
+The GUI places Sched_Hop after FHSS. Aliases off/1, 1000 and 10000 are accepted.
+.TP
+.BI \-\-sched-hop-dilution " N"
+Consecutive active hops per frame; default 1, no greater than the enabled frame
+size. This control appears only in Developer mode at the bottom of Link planner.
+Two active hops in a ten-hop frame give effective 5x airtime. The frame is not
+expanded. An inactive preference is saved; invalid imported combinations fail.
+.TP
+.BI \-\-sched-frequency-search " 1|2|4|8|16|32"
+Widen oscillator frequency uncertainty by this factor while Sched_Hop is enabled;
+default 1. The GUI Freq search dropdown is disabled otherwise. This does not
+widen the oscillator clock-rate bound or increase RAM/captured bandwidth.
+Required hypotheses must fit coverage and workspace limits. Unsupported
+scheduled decoder geometry remains explicit; RX probability is uncalibrated.
+All three scheduled preferences round-trip through launch commands and parameter
+lists. Older settings use disabled, dilution 1 and frequency multiplier 1.
+.TP
 .BI \-\-search\-margin " N"
 Multiply declared frequency and clock accuracy bounds; default 3, minimum 1.
 .TP
@@ -296,6 +320,14 @@ It contains no key bytes; all ring entries remain receive keys. Missing files or
 key names leave the previous settings unchanged.
 Its Launch command can be copied for reuse; Load applies validated settings
 without executing a shell command or starting a transmission.
+.PP
+Click the Robust Console waterfall for a full-window view cropped to the
+configured receive search bands. Adjacent columns show amplitude on the left
+and wrapped line-to-line phase on the right, relative to nominal FFT-bin
+rotation. Black phase is unavailable; noise phase is arbitrary. This view
+reuses the environmental FFT and does not improve its native frequency
+resolution or certify receiver coverage. Click again or press Escape to return.
+Clear waterfall continues to clear history separately.
 .SH FILES
 Keyfiles and attachment paths are chosen through the interface.
 Received content is kept in bounded RAM, with no receive cache or temporary

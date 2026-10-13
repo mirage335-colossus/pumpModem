@@ -14,6 +14,7 @@
 
 namespace datapump::modem {
 struct FhssPlan;
+struct SchedHopPlan;
 namespace detail { class CorrelationProjectionCache; }
 inline constexpr double nominal_signal_power = 0.153125;
 inline constexpr double minimum_bandwidth_hz = 0.001;
@@ -24,6 +25,9 @@ enum class OuterDsssVersion : std::uint8_t { legacy_v1 = 1, interleaved_v2 = 2 }
 // identity. Public policies are Default, FP32 minimum and FP64 force. The integer
 // enum values remain stable for internal experiments and old-value migration.
 enum class SearchArithmetic : std::uint8_t { default_mode, matrix4, matrix8, int8, fp32, fp64 };
+// Receiver-local algorithm permission. Neither this policy nor its processing
+// budget changes transmitted samples, private stream addresses or framing.
+enum class ReceiverStrategy : std::uint8_t { automatic, existing_only, complex_only, amplitude_only };
 inline bool search_arithmetic_is_int8(SearchArithmetic value) {
     // Explicit internal diagnostics only. No geometry currently demonstrates a
     // complete-execution benefit sufficient to enable INT8 automatically.
@@ -54,6 +58,15 @@ struct Config {
     // Pattern transport conveys one bit per independently detectable waveform.
     // Obsolete multi-bit APSK profiles are rejected explicitly.
     bool pattern_symbols = true;
+    // Keep small receiver policy fields together: Config is copied into several
+    // bounded streaming states, including the multi-hour transmitter path.
+    SearchArithmetic search_arithmetic = SearchArithmetic::default_mode;
+    ReceiverStrategy receiver_strategy = ReceiverStrategy::automatic;
+    // Explicit wire version; low-level callers retain existing V1 vectors.
+    // Ignored when outer spreading is Off. V2 permutes complete fine chips
+    // within each symbol and reserves additional digital headroom.
+    OuterDsssVersion outer_dsss_version = OuterDsssVersion::legacy_v1;
+    unsigned spreading_factor = 64;
     // Whole second and sample phase of symbol zero. Each later pattern uses
     // its own start second; an epoch never changes inside a pattern symbol.
     std::uint64_t stream_epoch = 0;
@@ -65,9 +78,11 @@ struct Config {
     // Absent preserves the historical low-level receiver search policy.
     // All external samples remain ordinary real ADC/DAC samples.
     std::optional<OscillatorSearchConfig> oscillator_search;
+    // Receiver-local residual-frequency expansion. Never widens the oscillator
+    // sample-clock hypothesis bank or changes transmitted carrier samples.
+    double frequency_search_multiplier = 1;
     double bandwidth_hz = 1200;
     double training_seconds = 2; // Hardware target; pattern mode rounds to whole symbols.
-    unsigned spreading_factor = 64;
     // Automatic plans can request integration beyond the named chip factors.
     // Zero retains spreading_factor * quantized chip duration.
     double integration_seconds = 0;
@@ -80,11 +95,9 @@ struct Config {
     // Additional outer QPSK spreading. bandwidth_hz remains the inner rate;
     // symbol duration and framing do not change. 1 preserves legacy PCM.
     unsigned dsss_factor = 1;
-    // Explicit wire version; low-level callers retain existing V1 vectors.
-    // Ignored when outer spreading is Off. V2 permutes complete fine chips
-    // within each symbol and reserves additional digital headroom.
-    OuterDsssVersion outer_dsss_version = OuterDsssVersion::legacy_v1;
-    SearchArithmetic search_arithmetic = SearchArithmetic::default_mode;
+    // Estimated elapsed processing seconds per input audio second. This is a
+    // selection target, not permission to omit hypotheses or drop input.
+    double receiver_cpu_budget = .6;
     std::array<std::uint8_t, 32> spreading_seed{};
     std::array<std::uint8_t, 32> dsss_seed{};
     // Same selected key used to encrypt payload data. Preamble bytes use its
@@ -93,6 +106,10 @@ struct Config {
     // Illustrative tuning, with shared TX/RX symbol deferral when selected.
     // Never retunes physical audio/RF; complete private templates stay intact.
     std::shared_ptr<const FhssPlan> fake_hopping;
+    // Secret UTC active/null calendar. The waveform source clock advances only
+    // in active cells; physical carrier/audio time stays continuous. This is a
+    // separately keyed FHSS-purpose schedule, independent of channel hopping.
+    std::shared_ptr<const SchedHopPlan> scheduled_hopping;
     std::size_t memory_limit = default_memory_limit;
 };
 // Low-level Data-only diagnostic captures retain their historical public mask.
@@ -155,6 +172,32 @@ double bit_rate(const Config& config);
 double symbol_seconds(const Config& config);
 std::uint64_t symbol_sample_count(const Config& config);
 std::uint64_t training_sample_count(const Config& config);
+// Logical source extent and exact physical airtime for a fixed payload count.
+// Scheduled null intervals advance only the latter. The configured stream
+// epoch/phase is the actual first payload sample selected before Data masking.
+std::uint64_t pattern_transmission_source_sample_count(const Config& config,
+    std::uint64_t symbols, bool surrounding_noise = true);
+std::uint64_t pattern_transmission_sample_count(const Config& config,
+    std::uint64_t symbols, bool surrounding_noise = true);
+// Conservative wall span for any logical source interval and calendar phase;
+// used for planning/absence coverage, not as observed receiver evidence.
+std::uint64_t scheduled_physical_span_samples(const Config& config,
+    std::uint64_t source_samples);
+// ESTIMATION ONLY: replace an absent/unqualified calendar anchor with a
+// deterministic positive representative. Never apply after payload masking or
+// use it to alter an actual transmission's prepared cryptographic addresses.
+Config scheduled_estimate_config(Config config);
+// Conservative minimum full-gain SAMPLE fraction, not a bound on every keyed
+// waveform's energy. Used to prevent whole short symbols hiding in guards.
+double scheduled_minimum_flat_fraction(const Config& config,
+    std::uint64_t source_samples = 0);
+// A potentially mostly-muted short symbol requires complete joint full-gain
+// slots; long symbols keep their split source clock. Geometry only.
+bool packed_scheduled_symbols(const Config& config);
+// Additional FULL nominal bandwidth engineering rolloff scale from cascaded
+// smooth envelopes. Not compact spectral support or a guaranteed legal mask.
+double waveform_gate_bandwidth_allowance_hz(const Config& config);
+
 // Production private patterns use full, independently keyed cover. Low-level
 // public/DSSS-only diagnostic waveforms retain their historical reference tail.
 bool private_cover_enabled(const Config& config);

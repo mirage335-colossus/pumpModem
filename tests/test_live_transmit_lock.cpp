@@ -1,6 +1,7 @@
 #include "datapump/live.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "../src/transmit_epoch_guard.hpp"
+#include "../src/transmit_timing.hpp"
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -36,7 +37,9 @@ struct Playback {
     std::atomic<unsigned> opened{0},started{0},closed{0},captures{0};
     std::atomic<bool> finish{false},hold_drain{false},draining{false},inject_gap{false};
     std::atomic<double> gain{0},timing_rate{0},timing_stop{0},timing_cover{0},xrun_budget{0},xrun_window{0};
-    std::atomic<bool> protected_hook{false},inject_protected_stop{false};
+    std::atomic<bool> protected_hook{false},payload_forecast_hook{false},inject_protected_stop{false};
+    std::atomic<std::uint64_t> payload_forecast_end{0};
+    std::atomic<bool> emit_capture_once{false};
     std::atomic<bool> exclusive{false};
     bool timed_mock=false,timing_accepted=false;std::atomic<bool> requested_timing{false};
 };
@@ -141,6 +144,49 @@ void tuning_utc() {
         session.cancel_transmit();await([&]{return playback.closed==1;},"UTC source failed immediate abort");session.stop();
     }
 }
+void scheduled_tuning_utc() {
+    if(!audio::utc_follow_supported())return; // Explicit unsupported host branch.
+    // This provider exercises source/physical horizon plumbing only. It does
+    // not qualify a real device's UTC rate cone over a long scheduled gap.
+    for(const unsigned multiplier:{10U,1000U})
+        for(const bool noise:{false,true})for(const bool accepted:{false,true}) {
+            Playback playback;playback.timed_mock=true;playback.timing_accepted=accepted;
+            auto value=slow_settings();value.transfer.timestamp=0;
+            auto& c=value.transfer.modem;
+            c.bandwidth_hz=16;c.integration_seconds=2;
+            value.transfer.clock_sync=clock_sync::Policy{.001,.001,0};
+            modem::OscillatorSearchConfig oscillator;oscillator.lf={.0001,0};oscillator.rf={.0001,0};
+            c.oscillator_search=oscillator;value.transfer.audio_timing_error_seconds=.05;
+            auto plan=std::make_shared<modem::SchedHopPlan>();plan->time_multiplier=multiplier;
+            plan->clock_error_seconds=plan->peer_clock_error_seconds=.001;
+            plan->region_seconds=.001;plan->audio_error_seconds=.05;plan->ramp_seconds=.01;
+            c.scheduled_hopping=plan;
+            const auto stop_source=modem::transmit_stop_sample_count(c);
+            const auto cover_source=modem::suppression_sample_count(c);
+            const auto stop_wall=modem::scheduled_physical_span_samples(c,stop_source);
+            const auto valid_wall=modem::scheduled_physical_span_samples(c,stop_source-cover_source);
+            check(stop_wall>valid_wall && valid_wall>stop_source-cover_source,
+                  "scheduled UTC fixture did not stretch valid support and independent cover");
+            live::Session session([]{return static_cast<double>(epoch);});session.start(value);
+            // One output sample constructs the keyed source and invokes the
+            // forecast without traversing or allocating a long null interval.
+            playback.released=1;
+            if(noise)session.transmit_noise();else session.transmit_bits(Bytes{0,1});
+            await([&]{return playback.delivered==1;},"scheduled UTC source did not emit its bounded prefix");
+            const auto state=session.snapshot();
+            check(playback.timing_stop==static_cast<double>(stop_wall)/c.sample_rate &&
+                  playback.timing_cover==static_cast<double>(stop_wall-valid_wall)/c.sample_rate,
+                  "scheduled UTC preparation subtracted source cover seconds from a physical stopping span");
+            check(playback.protected_hook && playback.payload_forecast_hook &&
+                  playback.payload_forecast_end<=1+valid_wall,
+                  "scheduled message/noise omitted its exact physical valid-payload stop forecast");
+            check(playback.requested_timing && state.transmit_clock_following==accepted &&
+                  state.clock_timing_fallback==!accepted,
+                  "scheduled UTC mock acceptance or visible fallback changed");
+            session.cancel_transmit();await([&]{return playback.closed==1;},"scheduled UTC source failed immediate abort");
+            session.stop();
+        }
+}
 void protected_stop_status() {
     for(const bool noise:{false,true})for(const bool abort:{false,true}) {
         Playback playback;playback.hold_drain=true;
@@ -227,6 +273,184 @@ void boundary_accounting() {
           datapump::detail::exposed_transmit_epoch(config,epoch,total,total)==epoch+2,
           "unshaped fractional-second geometry lost phase, symbol endpoint or tail clamp");
 }
+void scheduled_timing_and_exposure() {
+    // No PCM or whole null interval is allocated: scheduling is random access
+    // on the same keyed map used by the transmitter and receiver.
+    for(const std::uint32_t rate:{64U,6120U})for(const unsigned multiplier:{10U,1000U}) {
+        auto config=slow_settings().transfer.modem;
+        config.sample_rate=rate;config.bandwidth_hz=rate/2.;config.carrier_hz=rate/4.;
+        config.integration_seconds=2;config.pulse_shaping=false;
+        config.data_key.emplace(Bytes(32,0x71));
+        auto plan=std::make_shared<modem::SchedHopPlan>();
+        plan->time_multiplier=multiplier;plan->clock_error_seconds=.001;
+        plan->peer_clock_error_seconds=.001;plan->region_seconds=.001;
+        plan->audio_error_seconds=.01;plan->ramp_seconds=.01;
+        config.scheduled_hopping=plan;
+        check(!modem::packed_scheduled_symbols(config),"long timing fixture unexpectedly selected packed symbols");
+        modem::SchedHopSourceMap map(*plan,*config.data_key,rate);
+        const auto prefix=modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config);
+        const auto now=static_cast<double>(epoch)+.125;
+        std::uint64_t made_epoch=0;std::uint32_t made_phase=0;unsigned calls=0;
+        const auto scheduled=detail::schedule_transmission(config,[&](std::uint64_t e,std::uint32_t phase) {
+            made_epoch=e;made_phase=phase;++calls;
+            return std::unique_ptr<modem::StreamingTransmitter>{};
+        },[&]{return now;},{},epoch+100,.02);
+        check(calls==1 && made_epoch==scheduled.epoch && made_phase==scheduled.phase_samples &&
+              made_epoch>=epoch+100,"scheduled factory lost its reserved physical epoch or exact phase");
+        const auto payload_tick=made_epoch*rate+made_phase;
+        const auto payload=map.locate(payload_tick);
+        check(payload.active && payload.source.sample>=prefix,
+              "scheduled payload origin is not an admitted active source sample");
+        const auto output=map.source_to_physical({payload.source.sample-prefix});
+        check(map.source_to_physical(map.locate(output).source).sample==output.sample &&
+              map.source_to_physical(map.locate(output).source.add_samples(prefix)).sample==payload_tick,
+              "scheduled prefix changed the private source clock or replayed a null interval");
+        const auto output_seconds=static_cast<double>(output.sample/rate)+static_cast<double>(output.sample%rate)/rate;
+        check(scheduled.playback_epoch==output_seconds && scheduled.playback_epoch>now+.02,
+              "scheduled playback did not use the physical source origin or delivery lead");
+        config.stream_phase_samples=made_phase;
+        const auto symbol=modem::symbol_sample_count(config);
+        constexpr std::uint64_t count=12;
+        const auto total=prefix+modem::pattern_pulse_padding_samples(config)+count*symbol+
+            modem::suppression_sample_count(config);
+        const auto valid_end=total-modem::suppression_sample_count(config);
+        const auto expected=[&](std::uint64_t index) {
+            return map.source_to_physical(payload.source.add_samples(index*symbol)).sample/rate;
+        };
+        check(detail::exposed_transmit_source_epoch(config,made_epoch,total,0,0)==made_epoch &&
+              detail::exposed_transmit_source_epoch(config,made_epoch,total,modem::training_sample_count(config),valid_end)==made_epoch,
+              "no-output or settling-only scheduled cancellation exposed a future bit");
+        for(std::uint64_t bit=0;bit<count;++bit)
+            check(detail::exposed_transmit_source_epoch(config,made_epoch,total,
+                modem::training_sample_count(config)+bit*symbol+1,valid_end)==expected(bit),
+                "scheduled pulse exposure used compressed seconds instead of actual keyed symbol time");
+        const auto cutoff=modem::training_sample_count(config)+3*symbol;
+        check(detail::exposed_transmit_source_epoch(config,made_epoch,total,total,cutoff)==expected(2),
+              "scheduled cancellation cover reserved unobserved future payload addresses");
+        check(detail::exposed_transmit_source_epoch(config,made_epoch,total,total,valid_end)==expected(count-1),
+              "scheduled tail extended exposure beyond the original payload");
+        rejected([&]{detail::exposed_transmit_epoch(config,made_epoch,total,total);},
+                 "legacy physical exposure API silently accepted a scheduled source");
+        const auto used=expected(count-1);
+        const auto next_source=map.locate((used+1)*rate).source.sample;
+        const auto lock_origin=map.source_to_physical({next_source-prefix});
+        const auto lock_seconds=static_cast<long double>(lock_origin.sample/rate)+
+            static_cast<long double>(lock_origin.sample%rate)/rate-now;
+        check(std::abs(detail::transmit_epoch_lock_seconds(config,used,now)-
+              static_cast<double>(std::max(0.L,lock_seconds)))<1e-9,
+              "scheduled key lock subtracted compact prefix seconds from physical UTC");
+    }
+    // Short bits are packed into complete flat-power slots. Both the factory
+    // epoch and exposure history must use those deferred positions, including
+    // group crossings and optional inner FHSS guards.
+    for(const std::uint32_t rate:{512U,6120U})for(const bool fhss:{false,true}) {
+        auto config=slow_settings().transfer.modem;
+        config.sample_rate=rate;config.bandwidth_hz=rate/2.;config.carrier_hz=rate/4.;
+        config.integration_seconds=.125;config.data_key.emplace(Bytes(32,0x71));
+        auto plan=std::make_shared<modem::SchedHopPlan>();plan->time_multiplier=10;
+        plan->clock_error_seconds=plan->peer_clock_error_seconds=.01;
+        plan->region_seconds=.001;plan->audio_error_seconds=.05;plan->ramp_seconds=.01;
+        config.scheduled_hopping=plan;
+        if(fhss) {
+            auto hops=std::make_shared<modem::FhssPlan>();hops->channels=2;
+            hops->shifts[0]=30000000;hops->shifts[1]=31000000;hops->dwell_seconds=.4;
+            hops->power_ramps=hops->mandatory_ramps=hops->smooth_ramps=hops->matched_gaps=true;
+            hops->clock_error_seconds=hops->peer_clock_error_seconds=.01;
+            hops->region_seconds=.001;hops->audio_error_seconds=.05;hops->ramp_seconds=.00572;
+            config.fake_hopping=hops;
+        }
+        check(modem::pattern_pulse_padding_samples(config)>0 && modem::packed_scheduled_symbols(config),
+              "short timing fixture did not require complete shaped scheduled slots");
+        modem::SchedHopSourceMap map(*plan,*config.data_key,rate);
+        modem::ScheduledSymbolCalendar calendar(config);
+        const auto now=static_cast<double>(epoch)+.125;
+        std::uint64_t made_epoch=0;std::uint32_t made_phase=0;
+        const auto scheduled=detail::schedule_transmission(config,[&](std::uint64_t e,std::uint32_t phase) {
+            made_epoch=e;made_phase=phase;return std::unique_ptr<modem::StreamingTransmitter>{};
+        },[&]{return now;},{},epoch+100,.02);
+        config.stream_phase_samples=made_phase;
+        const auto rank=calendar.first_rank(made_epoch,made_phase);
+        const auto anchor=made_epoch*rate+made_phase;
+        check(calendar.physical_slot(rank)==anchor && scheduled.epoch==made_epoch &&
+              scheduled.phase_samples==made_phase && scheduled.playback_epoch>now+.02,
+              "scheduler encrypted a short bit before choosing its actual eligible UTC slot");
+        const auto prefix=modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config);
+        const auto symbol=modem::symbol_sample_count(config);
+        const auto count=calendar.slots_per_group()+2;
+        const auto offset=[&](std::uint64_t i){return calendar.offset_source(made_epoch,made_phase,i);};
+        const auto expected=[&](std::uint64_t i){return calendar.physical_slot(rank+i)/rate;};
+        const auto valid_end=prefix+offset(count-1)+symbol+modem::pattern_pulse_padding_samples(config);
+        const auto total=valid_end+modem::suppression_sample_count(config);
+        for(std::uint64_t bit=0;bit<count;++bit)
+            check(detail::exposed_transmit_source_epoch(config,made_epoch,total,
+                modem::training_sample_count(config)+offset(bit)+1,valid_end)==expected(bit),
+                "packed exposure treated independently covered source gaps as payload symbols");
+        const auto cutoff=modem::training_sample_count(config)+offset(count-1);
+        check(detail::exposed_transmit_source_epoch(config,made_epoch,total,total,cutoff)==expected(count-2) &&
+              detail::exposed_transmit_source_epoch(config,made_epoch,total,total,valid_end)==expected(count-1),
+              "packed cancellation or normal cover extended private exposure past its last contributing bit");
+        const auto next_source=map.locate((expected(count-1)+1)*rate).source.sample;
+        const auto next_slot=calendar.source_slot(calendar.first_rank_source(next_source));
+        const auto output=map.source_to_physical({next_slot-prefix});
+        const auto wait=static_cast<long double>(output.sample/rate)+
+            static_cast<long double>(output.sample%rate)/rate-now;
+        check(std::abs(detail::transmit_epoch_lock_seconds(config,expected(count-1),now)-
+              static_cast<double>(std::max(0.L,wait)))<1e-9,
+              "packed key lock ignored eligible slot deferral before the logical prefix");
+        auto unavailable=config;
+        auto blocked=std::make_shared<modem::SchedHopPlan>(*plan);blocked->audio_error_seconds=.25;
+        unavailable.scheduled_hopping=blocked;
+        unsigned rejected_factory_calls=0;
+        rejected([&]{detail::schedule_transmission(unavailable,[&](std::uint64_t,std::uint32_t) {
+            ++rejected_factory_calls;return std::unique_ptr<modem::StreamingTransmitter>{};
+        },[&]{return now;});},"short scheduled symbols silently selected a slot with insufficient shaping support");
+        check(rejected_factory_calls==0,"unsupported scheduled geometry encrypted a payload before rejecting it");
+    }
+    // A continuous diagnostic calendar is the identity, while still using the
+    // explicit two-argument factory and source-accounting interface.
+    auto config=slow_settings().transfer.modem;config.data_key.emplace(Bytes(32,0x71));
+    auto identity=std::make_shared<modem::SchedHopPlan>();identity->time_multiplier=identity->group_hops=10;
+    config.scheduled_hopping=identity;
+    const auto now=static_cast<double>(epoch)+.125;
+    const auto scheduled=detail::schedule_transmission(config,[](std::uint64_t,std::uint32_t) {
+        return std::unique_ptr<modem::StreamingTransmitter>{};
+    },[&]{return now;});
+    check(scheduled.playback_epoch>now && scheduled.phase_samples<config.sample_rate,
+          "continuous scheduled calendar lost its physical identity");
+}
+
+void scheduled_disabled_decoder() {
+    for(const auto strategy:{modem::ReceiverStrategy::existing_only,modem::ReceiverStrategy::complex_only}) {
+        Playback playback;playback.emit_capture_once=true;
+        auto value=slow_settings();value.transfer.timestamp=0;
+        auto& config=value.transfer.modem;
+        config.sample_rate=1000;config.bandwidth_hz=40;config.carrier_hz=250;
+        config.integration_seconds=16;config.data_key=value.transfer.key;
+        config.receiver_strategy=strategy;
+        auto plan=std::make_shared<modem::SchedHopPlan>();plan->time_multiplier=1000;
+        config.scheduled_hopping=plan;
+        const modem::SchedHopSchedule schedule(*plan,*value.transfer.key);
+        std::uint64_t quiet=epoch;
+        for(;quiet<epoch+800;++quiet) {
+            const auto first=modem::SchedHopSchedule::hop_containing_sample(quiet*config.sample_rate,config.sample_rate);
+            const auto last=modem::SchedHopSchedule::hop_containing_sample((quiet+1)*config.sample_rate-1,config.sample_rate);
+            if(schedule.first_active_at_or_after(first)>last)break;
+        }
+        check(quiet<epoch+800,"disabled-decoder fixture found no entirely quiet UTC epoch");
+        live::Session session([&]{return static_cast<double>(quiet)+.125;});session.start(value);
+        await([&]{return !session.snapshot().error.empty();},
+              "quiet scheduled epoch hid a disabled decoder behind healthy listening");
+        const auto state=session.snapshot();
+        const auto reason=strategy==modem::ReceiverStrategy::complex_only?
+            "Complex only prohibits amplitude decoding":"new decoders are disabled";
+        check(state.error.find(reason)!=std::string::npos && state.receiver_instances==0 &&
+              (state.receiver_health.receiver_reset || state.receiver_health.search_limited),
+              "disabled scheduled decoder lacked explicit immediate unavailability");
+        check(state.signals.empty() && state.received.empty(),"disabled decoder invented physical evidence");
+        session.stop();
+    }
+}
+
 void shaped_future_exposure() {
     auto settings=slow_settings();
     const auto& config=settings.transfer.modem;
@@ -478,6 +702,7 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
     script->timing_cover=options.timing_independent_cover_seconds;
     script->xrun_budget=options.reported_xrun_budget_seconds;script->xrun_window=options.reported_xrun_window_seconds;
     script->protected_hook=static_cast<bool>(options.timing_protected_stop);
+    script->payload_forecast_hook=static_cast<bool>(options.timing_protected_payload_end);
     // The deterministic provider accepts schedules without sleeping. Its
     // status callback tests successful and fallback preflight independently
     // of physical device qualification; real provider timing has its own tests.
@@ -501,6 +726,11 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
         }
         const auto n=callback(output);
         supplied+=n;
+        if(options.timing_protected_payload_end) {
+            const auto payload_end=options.timing_protected_payload_end(supplied);
+            check(payload_end.has_value(),"scheduled source omitted a runtime payload endpoint");
+            script->payload_forecast_end=*payload_end;
+        }
         const auto end=options.timing_source_end();
         check(!terminal || (end && *end<=*terminal),"source endpoint was reset/extended during playback");
         check(!end || *end>=supplied,"source endpoint ignored PCM already supplied to converter");
@@ -516,10 +746,14 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
     playback(rate,device,checked,stop,std::move(format),channels);
 }
 std::vector<Device> devices() { return {{"epoch guard test","deterministic output"}}; }
-void capture(std::uint32_t rate,const std::string&,const CaptureCallback&,std::stop_token stop,
+void capture(std::uint32_t rate,const std::string&,const CaptureCallback& callback,std::stop_token stop,
              StreamFormatCallback on_format) {
     if(on_format)on_format({rate,rate,static_cast<double>(rate)/2,0});
     ++script->captures;
+    if(script->emit_capture_once.exchange(false)) {
+        const std::array<float,32> samples{};
+        if(!callback(samples))return;
+    }
     while(!stop.stop_requested())std::this_thread::sleep_for(1ms);
 }
 void playback(std::uint32_t rate,const std::string&,const PlaybackCallback& next,std::stop_token stop,
@@ -555,7 +789,8 @@ std::vector<float> record(double,std::uint32_t,const std::string&,std::size_t,st
 int main(int argc,char** argv) {
     try {
         if(argc==2 && std::string(argv[1])=="--protected-stop") {protected_stop_status();return 0;}
-        protected_stop_status();private_discontinuity();graceful_drain();tuning_profile();tuning_utc();boundary_accounting();shaped_future_exposure();queued_request_rechecks();normal_quiet_override();
+        if(argc==2 && std::string(argv[1])=="--scheduled") {scheduled_timing_and_exposure();scheduled_tuning_utc();scheduled_disabled_decoder();return 0;}
+        protected_stop_status();private_discontinuity();graceful_drain();tuning_profile();tuning_utc();scheduled_tuning_utc();boundary_accounting();scheduled_timing_and_exposure();scheduled_disabled_decoder();shaped_future_exposure();queued_request_rechecks();normal_quiet_override();
         unkeyed_slow_quiet_override();
         std::cout<<"live transmit epoch lock passed\n";
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}

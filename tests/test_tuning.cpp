@@ -132,6 +132,37 @@ void search_arithmetic_modes() {
     rejects([]{tuning::resolve(1200,55,tuning::PatternMode::auto_pattern,false,1500,1,
         modem::OuterDsssVersion::legacy_v1,A::matrix4);},"enum-valued 4-bit arithmetic bypassed validation");
 }
+void receiver_strategy_modes() {
+    using S=modem::ReceiverStrategy;
+    check(tuning::parse_receiver_strategy("automatic")==S::automatic,
+        "automatic receiver strategy alias changed");
+    rejects([]{tuning::parse_receiver_strategy("unknown");},"unknown receiver strategy accepted");
+    rejects([]{tuning::receiver_strategy_id(static_cast<S>(99));},"invalid receiver strategy enum accepted");
+    for(const auto invalid:{0.,-.1,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()})
+        rejects([&]{tuning::validate_receiver_cpu_budget(invalid);},"invalid CPU budget accepted");
+    transfer::Options reference;reference.timestamp=1800000000;reference.search_seconds=0;
+    reference.key.emplace(Bytes(32,0x73));const Bytes bits{0,0,1};
+    for(const auto factor:{1u,10u,100u,1000u}) {
+        reference.modem=tuning::resolve(1200./factor,55,tuning::PatternMode::pattern_16,true,1500,factor,
+            modem::OuterDsssVersion::interleaved_v2).config;
+        const auto pcm=raw_capture(bits,reference);
+        for(const auto strategy:{S::automatic,S::existing_only,S::complex_only,S::amplitude_only}) {
+            check(tuning::parse_receiver_strategy(tuning::receiver_strategy_id(strategy))==strategy,
+                "receiver strategy lost its saved identity");
+            auto options=reference;options.modem.receiver_strategy=strategy;options.modem.receiver_cpu_budget=.37;
+            check(raw_capture(bits,options)==pcm,"receiver strategy/budget changed encrypted transmitted PCM");
+            const auto profiles=tuning::receive_profiles(options.modem,std::array<double,2>{32,55},
+                tuning::PatternMode::auto_keystream,true);
+            check(std::all_of(profiles.begin(),profiles.end(),[&](const auto& profile) {
+                return profile.receiver_strategy==strategy&&profile.receiver_cpu_budget==.37;
+            }),"receive target replacement lost receiver strategy/budget");
+        }
+    }
+    modem::Config invalid;invalid.receiver_strategy=static_cast<S>(99);
+    rejects([&]{modem::validate(invalid);},"invalid low-level receiver strategy accepted");
+    invalid.receiver_strategy=S::automatic;invalid.receiver_cpu_budget=0;
+    rejects([&]{modem::validate(invalid);},"invalid low-level receiver budget accepted");
+}
 void changing_pattern(const modem::Config& config) {
     check(config.spreading_mode==modem::SpreadingMode::pattern,"automatic waveform checks require changing patterns");
     modem::PatternCode code(config);
@@ -636,6 +667,6 @@ void receive_target_lists() {
 }
 }
 int main() {
-    try {doppler_calculator();search_arithmetic_modes();outer_dsss_versions();modes_and_patterns();snr_planning();shannon_capacity();receive_target_lists();automatic_pattern_rates();bandwidth_derived_clocks();nearby_carrier_clocks();sub_hertz_patterns();explicit_carrier_planning();audio_passband_pattern_roundtrips();physical_simulation_presets();oscillator_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
+    try {doppler_calculator();search_arithmetic_modes();receiver_strategy_modes();outer_dsss_versions();modes_and_patterns();snr_planning();shannon_capacity();receive_target_lists();automatic_pattern_rates();bandwidth_derived_clocks();nearby_carrier_clocks();sub_hertz_patterns();explicit_carrier_planning();audio_passband_pattern_roundtrips();physical_simulation_presets();oscillator_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"tuning tests failed: "<<error.what()<<'\n';return 1;}
 }

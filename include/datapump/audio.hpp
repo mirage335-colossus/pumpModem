@@ -83,6 +83,20 @@ struct Options {
     // Once known it may only decrease, never below already supplied PCM. This
     // caps runtime frontiers near drain; it does not alter rate preparation.
     std::function<std::optional<std::uint64_t>()> timing_source_end={};
+    // Optional exact protected-stop forecast for sources whose waveform clock
+    // pauses while physical PCM time continues (Sched_Hop). The argument is an
+    // exclusive PHYSICAL logical-PCM frontier relative to the playback origin,
+    // including already generated/prefetched samples. Return the last valid
+    // payload-pulse endpoint after stopping admission at that frontier, in the
+    // same coordinates; independent cover and drain are excluded. Prediction
+    // must not mutate the source or renew its original timing/affine budget.
+    // Called only on the playback thread after source scheduling. A configured
+    // callback must return an endpoint; nullopt is a runtime qualification loss.
+    // timing_stop_duration_seconds minus timing_independent_cover_seconds still
+    // supplies a conservative PREPARATION horizon before the source exists.
+    // The callback changes only future reservation; every generated payload,
+    // null and cover block retains the same actual UTC and affine checks.
+    std::function<std::optional<std::uint64_t>(std::uint64_t)> timing_protected_payload_end={};
     // Opt-in engineering model for generic native timestamps. Quality remains
     // estimated; the caller must cover maximum_timing_rate_correction in its
     // receiver bank. Preparation emits only silence until its protected-stop horizon
@@ -153,7 +167,7 @@ inline void validate_options(const Options& options) {
        options.maximum_timing_rate_correction<0 || options.maximum_timing_rate_correction>.001)
         throw Error("invalid audio timing rate allowance");
     if(!std::isfinite(options.timing_stop_duration_seconds) || options.timing_stop_duration_seconds<0 ||
-       (options.maximum_timing_rate_correction>0 && options.timing_stop_duration_seconds==0))
+       ((options.maximum_timing_rate_correction>0 || options.timing_protected_payload_end) && options.timing_stop_duration_seconds==0))
         throw Error("audio timing correction requires a protected stop duration");
     if(!std::isfinite(options.timing_independent_cover_seconds) || options.timing_independent_cover_seconds<0 ||
        options.timing_independent_cover_seconds>options.timing_stop_duration_seconds)

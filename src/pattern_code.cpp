@@ -2,6 +2,7 @@
 #include "datapump/fhss_schedule.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/symbol_schedule.hpp"
+#include "datapump/sched_hop.hpp"
 #include "datapump/crypto.hpp"
 #include "pattern_carrier.hpp"
 
@@ -372,7 +373,13 @@ struct PatternCode::Impl {
         }
     };
     std::unique_ptr<TraceStorage> trace;
-    struct AddressCache {SymbolStreamAddress value{};std::uint64_t index=0,phase=0;bool valid=false;FhssPowerShape gate;};
+    struct AddressCache {
+        SymbolStreamAddress value{};std::uint64_t index=0,phase=0;bool valid=false;FhssPowerShape gate;
+        std::unique_ptr<SchedHopSourceMap> scheduled;
+        std::unique_ptr<ScheduledSymbolCalendar> packed;
+        std::uint64_t packed_rank=0,packed_phase=0;
+        bool packed_anchor_valid=false;
+    };
     std::unique_ptr<AddressCache> address_cache;
     Impl(Config value, std::uint64_t start_epoch): config(value), epoch(start_epoch),
         private_patterns(config.spreading_mode == SpreadingMode::pattern && (config.scramble || config.dsss)),
@@ -389,12 +396,22 @@ struct PatternCode::Impl {
         chips = symbol / chip + (symbol % chip != 0);
         const bool version2=config.dsss_factor>1 && config.outer_dsss_version==OuterDsssVersion::interleaved_v2;
         const auto complete=static_cast<std::size_t>(symbol/chip);
-        const auto fixed=sizeof(Impl)+sizeof(PatternCode)+((deferred_symbols(config)||(config.fake_hopping&&config.fake_hopping->matched_gaps))?sizeof(AddressCache):0)+(config.dsss_factor>1?sizeof(StreamCache):0)+
+        const bool scheduled=scheduled_bursts(config);
+        const auto fixed=sizeof(Impl)+sizeof(PatternCode)+((scheduled||deferred_symbols(config)||(config.fake_hopping&&config.fake_hopping->matched_gaps))?sizeof(AddressCache):0)+(config.dsss_factor>1?sizeof(StreamCache):0)+
             (version2?sizeof(Interleaved)+Interleaved::setup_bytes+2*complete*sizeof(std::uint32_t):0);
         require(fixed<=config.memory_limit,"pattern code exceeds memory limit");
-        if(deferred_symbols(config)||(config.fake_hopping&&config.fake_hopping->matched_gaps)) {
+        if(scheduled||deferred_symbols(config)||(config.fake_hopping&&config.fake_hopping->matched_gaps)) {
             address_cache=std::make_unique<AddressCache>();
-            if(config.fake_hopping->matched_gaps)
+            if(scheduled) {
+                require(config.data_key.has_value(),"scheduled hopping requires an encryption key");
+                if(packed_scheduled_symbols(config))
+                    address_cache->packed=std::make_unique<ScheduledSymbolCalendar>(config);
+                else address_cache->scheduled=std::make_unique<SchedHopSourceMap>(*config.scheduled_hopping,*config.data_key,config.sample_rate);
+                const auto calendar_bytes=address_cache->packed?address_cache->packed->working_bytes():address_cache->scheduled->working_bytes();
+                require(fixed<=config.memory_limit && calendar_bytes<=config.memory_limit-fixed,
+                        "scheduled pattern calendar exceeds memory limit");
+            }
+            if(config.fake_hopping && config.fake_hopping->matched_gaps)
                 address_cache->gate=FhssPowerShape(*config.fake_hopping,config.sample_rate,
                     pattern_pulse_padding_samples(config),symbol);
         }
@@ -430,7 +447,23 @@ struct PatternCode::Impl {
         if(!address_cache)return symbol_stream_address(epoch,config.stream_phase_samples,index,symbol,config.sample_rate);
         auto& cache=*address_cache;
         if(!cache.valid || index!=cache.index || cache.phase!=config.stream_phase_samples) {
-            cache.value=symbol_stream_address(config,epoch,config.stream_phase_samples,index);
+            if(cache.packed) {
+                if(!cache.packed_anchor_valid || cache.packed_phase!=config.stream_phase_samples) {
+                    cache.packed_rank=cache.packed->first_rank(epoch,config.stream_phase_samples);
+                    cache.packed_phase=config.stream_phase_samples;cache.packed_anchor_valid=true;
+                }
+                const auto physical=cache.packed->physical_slot(symbol_schedule_detail::add(cache.packed_rank,index));
+                const auto sample=static_cast<std::uint32_t>(physical%config.sample_rate);
+                cache.value={physical/config.sample_rate,sample/symbol,sample};
+            } else if(cache.scheduled) {
+                const auto anchor=symbol_schedule_detail::add(symbol_schedule_detail::multiply(epoch,config.sample_rate),config.stream_phase_samples);
+                const auto origin=cache.scheduled->locate(anchor).source;
+                const auto physical=cache.scheduled->source_to_physical(origin.add_samples(
+                    symbol_schedule_detail::multiply(index,symbol)));
+                require(physical.fraction==0,"scheduled symbol address must have an integer sample origin");
+                const auto sample=static_cast<std::uint32_t>(physical.sample%config.sample_rate);
+                cache.value={physical.sample/config.sample_rate,sample/symbol,sample};
+            } else cache.value=symbol_stream_address(config,epoch,config.stream_phase_samples,index);
             cache.index=index;cache.phase=config.stream_phase_samples;cache.valid=true;
         }
         return cache.value;
@@ -623,7 +656,9 @@ std::uint64_t PatternCode::chip_samples() const { return impl_->chip; }
 std::uint64_t PatternCode::chips_per_symbol() const { return impl_->chips; }
 std::uint64_t PatternCode::symbol_samples() const { return impl_->symbol; }
 std::size_t PatternCode::working_bytes() const {
-    return sizeof(PatternCode) + sizeof(Impl)+(impl_->address_cache?sizeof(Impl::AddressCache):0)+(impl_->trace?sizeof(Impl::TraceStorage):0)+
+    return sizeof(PatternCode) + sizeof(Impl)+(impl_->address_cache?sizeof(Impl::AddressCache):0)+
+        (impl_->address_cache&&impl_->address_cache->scheduled?impl_->address_cache->scheduled->working_bytes():0)+
+        (impl_->address_cache&&impl_->address_cache->packed?impl_->address_cache->packed->working_bytes():0)+(impl_->trace?sizeof(Impl::TraceStorage):0)+
         (impl_->outer?sizeof(StreamCache):0)+(impl_->interleaved?impl_->interleaved->working_bytes():0);
 }
 void PatternCode::enable_transmit_trace(std::uint64_t first_chip) {
@@ -684,6 +719,7 @@ Config cover_config(Config config, std::uint64_t epoch, StreamDomain domain) {
     };
     seed(StreamPurpose::Scrambler,config.spreading_seed);seed(StreamPurpose::Dsss,config.dsss_seed);
     config.fake_hopping.reset(); // The enclosing TX owns the ONE continuous FHSS schedule.
+    config.scheduled_hopping.reset(); // Cover virtual symbols never nest the physical active/null map.
     return config;
 }
 double smooth_edge(double x) {
@@ -747,6 +783,8 @@ struct PatternTransmitter::Impl {
     Bytes bits;
     Config config;
     std::unique_ptr<FhssSchedule> hopping;
+    std::unique_ptr<SchedHopSourceMap> scheduled;
+    std::uint64_t physical_position=0,physical_total=0,physical_origin=0,source_origin=0;
     FhssPowerShape hop_power;
     PatternCode code;
     std::unique_ptr<VirtualCover> cover;
@@ -758,11 +796,12 @@ struct PatternTransmitter::Impl {
     std::size_t retained_prefix_count=0;
     std::size_t cover_bytes=0;
     std::optional<std::uint64_t> stop_at;
-    std::uint64_t original_total=0;
+    std::uint64_t original_total=0,original_source_total=0,useful_cover_span=0;
     std::unique_ptr<StreamCache> generated_data;
     std::unique_ptr<StreamCache> settling, settling_data, settling_pattern, settling_dsss;
     std::unique_ptr<StreamCache> suppression, suppression_data, suppression_pattern, suppression_dsss;
     std::unique_ptr<FhssSymbolCalendar> calendar;
+    std::unique_ptr<ScheduledSymbolCalendar> packed_calendar;
     std::unique_ptr<VirtualCover> waiting_cover;
     std::uint64_t calendar_rank=0,calendar_tick=0;
     std::uint64_t bit_count=0, source_epoch=0, start = 0, position = 0, total = 0, training = 0, padding = 0, content_end = 0, suppression_samples = 0;
@@ -772,7 +811,11 @@ struct PatternTransmitter::Impl {
         bool valid=false,payload=false;
     };
     std::array<SettlingChip,32> settling_chips{};
-    std::array<SettlingChip,32> suppression_chips{};
+    // Private/protected cover uses VirtualCover and never the diagnostic
+    // suppression cache. Allocate the latter only for its actual fallback,
+    // before playback, with its complete size in both workspace accounts.
+    using SuppressionChips=std::array<SettlingChip,32>;
+    std::unique_ptr<SuppressionChips> suppression_chips;
     Impl(Bytes input, Config value, std::uint64_t epoch, std::uint64_t start_chip, bool surrounding_noise,bool trace,
          std::uint64_t generated_count=0):
         bits(std::move(input)), config(value), code(config, epoch),
@@ -795,6 +838,16 @@ struct PatternTransmitter::Impl {
                 "UTC gated transmission must rebase epoch/phase rather than use a nonzero diagnostic first_chip");
         require(bit_count <= std::numeric_limits<std::uint64_t>::max() / code.symbol_samples(),
                 "pattern transmission duration would overflow");
+        if(packed_scheduled_symbols(config)) {
+            packed_calendar=std::make_unique<ScheduledSymbolCalendar>(config);
+            // The key, epoch, phase and geometry are immutable in a TX source.
+            // Do not revisit its initial group on every later PCM sample: a
+            // single keyed-frame cache would thrash between anchor/current.
+            scheduled=std::make_unique<SchedHopSourceMap>(*config.scheduled_hopping,*config.data_key,config.sample_rate);
+            const auto anchor=symbol_schedule_detail::add(symbol_schedule_detail::multiply(epoch,config.sample_rate),config.stream_phase_samples);
+            calendar_rank=packed_calendar->first_rank(epoch,config.stream_phase_samples);
+            calendar_tick=scheduled->locate(anchor).source.sample;
+        }
         if(deferred_symbols(config)) {
             calendar=std::make_unique<FhssSymbolCalendar>(*config.fake_hopping,config.sample_rate,pattern_pulse_padding_samples(config),code.symbol_samples());
             calendar_rank=calendar->first_rank(epoch,config.stream_phase_samples);
@@ -814,10 +867,33 @@ struct PatternTransmitter::Impl {
         total+=2*padding;
         content_end=total;
         suppression_samples=surrounding_noise?suppression_sample_count(config):0;
+        useful_cover_span=surrounding_noise?protected_cover_span_samples(config):0;
         require(suppression_samples<=std::numeric_limits<std::uint64_t>::max()-total,
                 "pattern suppression duration would overflow");
         total+=suppression_samples;
-        original_total=total;
+        physical_total=total;
+        if(scheduled_bursts(config)) {
+            require(config.data_key.has_value(),"scheduled hopping requires an encryption key");
+            require(start==0,"scheduled hopping requires a rebased symbol origin");
+            if(!scheduled)scheduled=std::make_unique<SchedHopSourceMap>(*config.scheduled_hopping,*config.data_key,config.sample_rate);
+            const auto anchor=symbol_schedule_detail::add(symbol_schedule_detail::multiply(epoch,config.sample_rate),config.stream_phase_samples);
+            const auto payload=scheduled->locate(anchor);
+            require(payload.active && payload.source.fraction==0,"scheduled payload must begin within an active sample cell");
+            const auto prefix=symbol_schedule_detail::add(training,padding);
+            require(payload.source.sample>=prefix,"scheduled prefix precedes the representable source clock");
+            source_origin=payload.source.sample-prefix;
+            const auto origin=scheduled->source_to_physical({source_origin});
+            require(origin.fraction==0,"scheduled output origin must have an integer sample coordinate");
+            physical_origin=origin.sample;
+            physical_total=scheduled_end(total);
+            if(hopping) {
+                require(hop_power.smooth,"scheduled hopping requires the production smooth FHSS envelope");
+                const auto second=symbol_schedule_detail::multiply(epoch,config.sample_rate);
+                hopping->source_origin_samples=physical_origin>=second?
+                    static_cast<long double>(physical_origin-second):-static_cast<long double>(second-physical_origin);
+            }
+        }
+        original_total=physical_total;original_source_total=total;
         // Preserve the established DSSS-only diagnostic surrounding waveform:
         // it has neither Data encryption nor private Scrambler. Full-symbol
         // cover in that unsupported GUI geometry exposed an extra prefix
@@ -837,7 +913,9 @@ struct PatternTransmitter::Impl {
         // worst-case map plus derivation scratch even before its lazy allocation.
         if(private_cover && (training || suppression_samples))
             cover_bytes=sizeof(VirtualCover)+code.working_bytes()+sizeof(Config)+2*sizeof(Crypto)+64;
-        if(calendar)cover_bytes+=sizeof(FhssSymbolCalendar)+sizeof(VirtualCover)+code.working_bytes()+sizeof(Config)+2*sizeof(Crypto)+64;
+        if(calendar || packed_calendar)cover_bytes+=sizeof(VirtualCover)+code.working_bytes()+sizeof(Config)+2*sizeof(Crypto)+64;
+        if(calendar)cover_bytes+=sizeof(FhssSymbolCalendar);
+        if(packed_calendar)cover_bytes+=packed_calendar->working_bytes();
         const bool retain_prefix=protected_cover && training && padding;
         if(retain_prefix)cover_bytes+=sizeof(PrefixSnapshot);
         require(bit_count <= std::numeric_limits<std::uint64_t>::max() / code.chips_per_symbol(),
@@ -853,6 +931,7 @@ struct PatternTransmitter::Impl {
              static_cast<unsigned>(config.scramble)+static_cast<unsigned>(config.dsss));
         const auto fixed = sizeof(Impl) + sizeof(PatternTransmitter) + code.working_bytes()+cover_bytes+
             (hopping?sizeof(FhssSchedule)+sizeof(FhssPlan)+hopping->plan->power_fallback_reason.capacity()+1+FhssSchedule::cycle_bytes+sizeof(std::array<unsigned,FhssPlan::capacity>):0)+
+            (scheduled?scheduled->working_bytes():0)+(suppression_samples && !private_cover?sizeof(SuppressionChips):0)+
             (caches+static_cast<unsigned>(generated_data!=nullptr))*sizeof(StreamCache);
         require(fixed <= config.memory_limit && bits.capacity() <= config.memory_limit - fixed,
                 "pattern transmitter exceeds memory limit");
@@ -873,6 +952,7 @@ struct PatternTransmitter::Impl {
                 config.dsss_seed,StreamPurpose::Dsss,epoch,domain);
         }
         if(suppression_samples && !private_cover) {
+            suppression_chips=std::make_unique<SuppressionChips>();
             // A third CTR domain makes the tail independent of both the
             // settling prefix and every valid payload pattern/mask position.
             constexpr auto domain=StreamDomain::Suppression;
@@ -888,23 +968,26 @@ struct PatternTransmitter::Impl {
     ~Impl() {
         if(retained_prefix)OPENSSL_cleanse(retained_prefix->data(),sizeof(*retained_prefix));
         OPENSSL_cleanse(settling_chips.data(),sizeof(settling_chips));
-        OPENSSL_cleanse(suppression_chips.data(),sizeof(suppression_chips));
+        if(suppression_chips)OPENSSL_cleanse(suppression_chips->data(),sizeof(*suppression_chips));
         OPENSSL_cleanse(config.spreading_seed.data(),config.spreading_seed.size());
         OPENSSL_cleanse(config.dsss_seed.data(),config.dsss_seed.size());
     }
     std::uint64_t payload_offset(std::uint64_t symbol) const {
+        if(packed_calendar)return packed_calendar->source_slot(symbol_schedule_detail::add(calendar_rank,symbol))-calendar_tick;
         return calendar?calendar->slot(symbol_schedule_detail::add(calendar_rank,symbol))-calendar_tick:
             symbol_schedule_detail::multiply(symbol,code.symbol_samples());
     }
     std::uint64_t payload_lower_bound(long double position) const {
         if(position<=0)return 0;
+        if(packed_calendar)return packed_calendar->first_rank_source(symbol_schedule_detail::add(calendar_tick,
+            static_cast<std::uint64_t>(std::ceil(position))))-calendar_rank;
         if(!calendar)return static_cast<std::uint64_t>(std::ceil(position/code.symbol_samples()));
         return calendar->lower_bound(source_epoch,config.stream_phase_samples,static_cast<std::uint64_t>(std::ceil(position)));
     }
     // Cover is independent of every valid candidate. Its virtual symbols keep
     // full DSSS permutations; only not-yet-emitted coefficients are selected.
     std::complex<double> wait_sample(std::uint64_t cursor,std::stop_token stop) {
-        if(!calendar || cursor+padding<training+padding || cursor>=content_end)return {};
+        if((!calendar && !packed_calendar) || cursor+padding<training+padding || cursor>=content_end)return {};
         const auto relative=static_cast<long double>(cursor)-padding-training;
         const auto previous=payload_lower_bound(relative+padding+1);
         if(previous && previous<=bit_count && relative-padding>=payload_offset(previous-1) &&
@@ -934,6 +1017,12 @@ struct PatternTransmitter::Impl {
             const auto sample=static_cast<std::uint32_t>(total%config.sample_rate);
             address={symbol_schedule_detail::add(source_epoch,total/config.sample_rate),
                 sample/code.symbol_samples(),sample};
+        } else if(scheduled) {
+            const auto physical=scheduled->source_to_physical({symbol_schedule_detail::add(source_origin,
+                symbol_schedule_detail::add(training+padding,payload_offset(symbol)))});
+            require(physical.fraction==0,"scheduled Data address must have an integer sample origin");
+            const auto sample=static_cast<std::uint32_t>(physical.sample%config.sample_rate);
+            address={physical.sample/config.sample_rate,sample/code.symbol_samples(),sample};
         } else address=symbol_stream_address(source_epoch,config.stream_phase_samples,symbol,
             code.symbol_samples(),config.sample_rate);
         generated_data->select_epoch(address.epoch);
@@ -960,6 +1049,15 @@ struct PatternTransmitter::Impl {
         const auto origin=static_cast<long double>(padding)+training+payload_offset(symbol);
         if(!keep_center(origin+.5L*std::min(code.chip_samples(),code.symbol_samples())))return {};
         code.prepare_symbol(first,stop);
+        if(!padding) {
+            if(within<0 || within>=static_cast<double>(code.symbol_samples()))return {};
+            const auto local=static_cast<std::uint64_t>(within/code.chip_samples());
+            const auto offset=local*code.chip_samples();
+            const auto length=std::min(code.chip_samples(),code.symbol_samples()-offset);
+            const auto center=origin+offset+.5L*length;
+            if(!keep_center(center) || hop_gain(center)==0)return {};
+            return code.shaped_value(first,bit(symbol),within);
+        }
         if(!stop_at&&(!hop_power.enabled||hop_power.smooth))return code.shaped_value(first,bit(symbol),within);
         return pattern_pulse_sum(within,code.symbol_samples(),code.chip_samples(),[&](std::uint64_t local) {
             const auto offset=local*code.chip_samples();
@@ -982,11 +1080,7 @@ struct PatternTransmitter::Impl {
             if(position>=cover_start || padding>=cover_start-position)return; // already committed to this cover; never restart it
             // A coefficient whose support touched output is immutable. Retain
             // the next support radius, then replace only untouched coefficients.
-            auto cut=position+padding;
-            if(!padding) {
-                const auto within=(position>=training?position-training:position)%code.symbol_samples();
-                cut=position+std::min(code.chip_samples()-within%code.chip_samples(),code.symbol_samples()-within);
-            }
+            const auto cut=predicted_cut(position);
             cover_start=std::min(cover_start,cut);
             // Keep the original symbol/partial-chip lattice, even for a
             // fractional-chip stop. The child stream remains role-local.
@@ -1012,7 +1106,7 @@ struct PatternTransmitter::Impl {
                 }
                 cover.reset();
             }
-            const auto useful=protected_cover_span_samples(config);
+            const auto useful=useful_cover_span;
             const auto ramp=std::max<std::uint64_t>(1,config.sample_rate/100);
             cover_end=cover_start+2*padding+useful;
             total=cover_end+(padding?padding+1:ramp);
@@ -1039,10 +1133,11 @@ struct PatternTransmitter::Impl {
         },stop);
     }
     std::complex<double> suppression_sample(std::uint64_t offset,std::stop_token stop) {
+        require(suppression_chips && suppression,"diagnostic suppression state unavailable");
         const auto noise=[&](std::uint64_t chip) {
             if(!keep_center(static_cast<long double>(content_end)-padding+(chip+.5L)*code.chip_samples()))
                 return std::complex<double>{};
-            auto& entry=suppression_chips[chip%suppression_chips.size()];
+            auto& entry=(*suppression_chips)[chip%suppression_chips->size()];
             if(!entry.valid || entry.address!=chip) {
                 entry.value=suppression->noise(chip,suppression_data.get(),suppression_pattern.get(),suppression_dsss.get());
                 entry.address=chip;entry.valid=true;
@@ -1107,7 +1202,7 @@ struct PatternTransmitter::Impl {
         return result;
     }
     template<class Output, class Convert>
-    std::size_t render(std::uint64_t& cursor, std::span<Output> output, Convert convert,
+    std::size_t render_source(std::uint64_t& cursor, std::span<Output> output, Convert convert,
                        std::stop_token stop, const ChipObserver& observer,bool trace=false) {
         struct CaptureGuard {
             PatternCode& code;
@@ -1120,14 +1215,15 @@ struct PatternTransmitter::Impl {
         auto oscillator = std::polar(1., static_cast<double>(angle));
         const auto step = std::polar(1., tau * config.carrier_hz / config.sample_rate);
         const auto amplitude = std::sqrt(2 * nominal_signal_power)*outer_dsss_transmit_gain(config);
-        if(padding) {
+        if(padding || packed_calendar) {
             for(std::size_t i=0;i<count;++i,++cursor) {
                 if((i&4095U)==0)cancelled(stop);
                 const auto baseband=protected_cover?shaped_sample(cursor,stop)+wait_sample(cursor,stop)+protected_sample(cursor,stop):
                     (cursor<content_end?shaped_sample(cursor,stop)+wait_sample(cursor,stop):suppression_sample(cursor-content_end,stop));
-                const auto gain=hop_power.smooth?hop_power.gain(source_epoch,
+                const auto gain=hop_power.smooth&&!scheduled?hop_power.gain(source_epoch,
                     hopping->source_origin_samples+cursor,config.sample_rate):1.;
-                output[i]=convert(gain*oscillator*pattern_limit_pcm(amplitude*baseband));
+                const auto finish_gain=padding?1.:unshaped_finish_gain(cursor);
+                output[i]=convert(finish_gain*gain*oscillator*pattern_limit_pcm(amplitude*baseband));
                 if(observer && cursor>=padding+training && cursor<content_end-padding) {
                     const auto payload=cursor-padding-training;
                     const auto next=payload_lower_bound(payload+1);
@@ -1192,6 +1288,162 @@ struct PatternTransmitter::Impl {
         }
         return count;
     }
+    std::uint64_t scheduled_end(std::uint64_t source_end) const {
+        if(!scheduled)return source_end;
+        if(!source_end)return 0;
+        const auto end=scheduled->source_to_physical({symbol_schedule_detail::add(source_origin,source_end)},true);
+        require(end.fraction==0 && end.sample>=physical_origin,"invalid scheduled output endpoint");
+        return end.sample-physical_origin;
+    }
+    void finish_physical() {
+        finish();
+        physical_total=std::max(physical_position,scheduled_end(total));
+    }
+    std::uint64_t source_frontier(std::uint64_t frontier) const {
+        frontier=std::max(frontier,physical_position);
+        if(frontier>=physical_total)return total;
+        if(!scheduled)return std::min(frontier,total);
+        const auto source=scheduled->locate(symbol_schedule_detail::add(physical_origin,frontier)).source;
+        require(source.sample>=source_origin,"stop forecast moved before its source origin");
+        return std::min(source.sample-source_origin,total);
+    }
+    std::uint64_t predicted_cut(std::uint64_t at) const {
+        if(padding)return symbol_schedule_detail::add(at,padding);
+        if(packed_calendar && at>=training) {
+            const auto relative=at-training;
+            const auto next=std::min(bit_count,payload_lower_bound(static_cast<long double>(relative)+1));
+            if(next) {
+                const auto offset=payload_offset(next-1);
+                if(relative>=offset && relative-offset<code.symbol_samples()) {
+                    const auto within=relative-offset;
+                    return symbol_schedule_detail::add(at,std::min(code.chip_samples()-within%code.chip_samples(),code.symbol_samples()-within));
+                }
+            }
+            return at; // independent wait cover has no valid payload to drain
+        }
+        const auto within=(at>=training?at-training:at)%code.symbol_samples();
+        return symbol_schedule_detail::add(at,std::min(code.chip_samples()-within%code.chip_samples(),code.symbol_samples()-within));
+    }
+    std::uint64_t packed_valid_support_before(std::uint64_t cut) const {
+        if(!packed_calendar)return std::min(content_end,symbol_schedule_detail::add(cut,padding));
+        const auto prefix=symbol_schedule_detail::add(training,padding);
+        if(cut<=prefix)return 0;
+        auto next=std::min(bit_count,payload_lower_bound(static_cast<long double>(cut)-prefix));
+        if(!next)return 0;
+        auto index=next-1;
+        auto origin=symbol_schedule_detail::add(prefix,payload_offset(index));
+        const auto first=.5L*std::min(code.chip_samples(),code.symbol_samples());
+        if(static_cast<long double>(cut)<=origin+first) {
+            if(!index)return 0;
+            origin=symbol_schedule_detail::add(prefix,payload_offset(--index));
+        }
+        // Waiting cover, null frames and untouched future slots do not extend
+        // the valid payload support budget. This is a conservative exclusive
+        // pulse endpoint, never a reset of the immutable timing reference.
+        const auto whole=symbol_schedule_detail::add(origin,symbol_schedule_detail::add(code.symbol_samples(),padding));
+        return std::min({content_end,whole,symbol_schedule_detail::add(cut,padding)});
+    }
+    std::uint64_t valid_source_end() const {
+        if(!total)return 0;
+        const auto first=static_cast<long double>(training)+padding+payload_offset(0)+.5L*std::min(code.chip_samples(),code.symbol_samples());
+        if(stop_at && static_cast<long double>(*stop_at)+padding<=first)return 0;
+        if(packed_calendar && protected_cover)return packed_valid_support_before(cover_start);
+        return protected_cover?std::min(content_end,cover_start+padding):std::min(content_end,total);
+    }
+    std::uint64_t emitted_epoch() const {
+        // Leading pulse support cancels the initial payload padding exactly as
+        // in the independent static exposure reference. Work on source time;
+        // nulls and independent cover never expose a new payload identity.
+        const auto emitted=std::min(position,valid_source_end());
+        if(emitted<=training)return source_epoch;
+        const auto exposed=payload_lower_bound(static_cast<long double>(emitted-training));
+        if(!exposed)return source_epoch;
+        const auto last=std::min(bit_count-1,exposed-1);
+        if(packed_calendar)
+            return packed_calendar->physical_slot(symbol_schedule_detail::add(calendar_rank,last))/config.sample_rate;
+        if(scheduled) {
+            const auto source=symbol_schedule_detail::add(source_origin,
+                symbol_schedule_detail::add(training+padding,payload_offset(last)));
+            const auto physical=scheduled->source_to_physical({source});
+            require(physical.fraction==0,"exposed payload requires an integer physical address");
+            return physical.sample/config.sample_rate;
+        }
+        if(calendar) {
+            const auto elapsed=symbol_schedule_detail::add(config.stream_phase_samples,payload_offset(last));
+            return symbol_schedule_detail::add(source_epoch,elapsed/config.sample_rate);
+        }
+        return symbol_stream_address(source_epoch,config.stream_phase_samples,last,code.symbol_samples(),config.sample_rate).epoch;
+    }
+    std::uint64_t predicted_valid_end(std::uint64_t frontier) const {
+        const auto at=source_frontier(frontier);
+        if(!at)return 0;
+        if(stop_at || at>=total)return scheduled_end(valid_source_end());
+        const auto first=static_cast<long double>(training)+padding+payload_offset(0)+.5L*std::min(code.chip_samples(),code.symbol_samples());
+        if(static_cast<long double>(predicted_cut(at))<=first)return 0;
+        if(protected_cover)return scheduled_end(packed_valid_support_before(predicted_cut(at)));
+        const auto remaining=padding?2*padding+1:std::max<std::uint64_t>(1,config.sample_rate/100);
+        return scheduled_end(std::min(content_end,symbol_schedule_detail::add(at,std::min(remaining,total-at))));
+    }
+    std::uint64_t predicted_stop_end(std::uint64_t frontier) const {
+        const auto at=source_frontier(frontier);
+        if(!at)return std::max(frontier,physical_position);
+        if(stop_at || at>=total || (protected_cover && (at>=cover_start || padding>=cover_start-at)))return physical_total;
+        if(protected_cover) {
+            const auto cut=std::min(cover_start,predicted_cut(at));
+            const auto ending=symbol_schedule_detail::add(symbol_schedule_detail::add(cut,2*padding),
+                symbol_schedule_detail::add(useful_cover_span,padding?padding+1:std::max<std::uint64_t>(1,config.sample_rate/100)));
+            return scheduled_end(ending);
+        }
+        const auto remaining=padding?2*padding+1:std::max<std::uint64_t>(1,config.sample_rate/100);
+        return scheduled_end(symbol_schedule_detail::add(at,std::min(remaining,total-at)));
+    }
+    template<class Output, class Convert>
+    std::size_t render(std::uint64_t& cursor, std::span<Output> output, Convert convert,
+                       std::stop_token stop, const ChipObserver& observer,bool trace=false) {
+        if(!scheduled) {
+            const auto n=render_source(cursor,output,convert,stop,observer,trace);
+            if(trace)position=cursor;
+            return n;
+        }
+        cancelled(stop);
+        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(output.size(),physical_total-cursor));
+        std::size_t emitted=0;
+        while(emitted<count) {
+            cancelled(stop);
+            const auto physical=symbol_schedule_detail::add(physical_origin,cursor);
+            const auto cell=scheduled->locate(physical);
+            if(!cell.active) {
+                const auto next=scheduled->source_to_physical(cell.source);
+                require(next.fraction==0 && next.sample>physical,"scheduled null interval failed to advance");
+                const auto run=static_cast<std::size_t>(std::min<std::uint64_t>({count-emitted,next.sample-physical,4096}));
+                std::fill_n(output.begin()+static_cast<std::ptrdiff_t>(emitted),run,Output{});
+                emitted+=run;cursor+=run;
+                continue;
+            }
+            require(cell.source.fraction==0 && cell.source.sample>=source_origin,
+                    "scheduled source moved before its immutable origin");
+            auto source=cell.source.sample-source_origin;
+            require(source<total,"scheduled output exceeded its source extent");
+            const auto run=static_cast<std::size_t>(std::min<std::uint64_t>({count-emitted,cell.physical_end-physical,total-source}));
+            require(run!=0,"scheduled active interval failed to advance");
+            // q-u is constant throughout this contiguous active run. Keep the
+            // carrier on PHYSICAL sample time without a per-sample conversion.
+            const auto rotation=std::polar(1.,static_cast<double>(tau*(
+                detail::pattern_carrier_cycles(cursor,config.sample_rate,config.carrier_hz)-
+                detail::pattern_carrier_cycles(source,config.sample_rate,config.carrier_hz))));
+            std::uint64_t local=0;
+            const auto written=render_source(source,output.subspan(emitted,run),[&](auto value) {
+                const SchedHopCoordinate tick{physical+local};
+                auto gain=SchedHopSourceMap::gain(cell,tick);
+                if(hop_power.enabled)gain*=hop_power.gain(source_epoch,hopping->source_origin_samples+cursor+local,config.sample_rate);
+                ++local;return convert(gain*rotation*value);
+            },stop,observer,trace);
+            require(written==run,"scheduled source stopped before its validated endpoint");
+            if(trace)position=source;
+            emitted+=written;cursor+=written;
+        }
+        return emitted;
+    }
 };
 
 PatternTransmitter::PatternTransmitter(Bytes bits, Config config, std::uint64_t epoch, std::uint64_t start_chip, bool surrounding_noise,bool trace):
@@ -1202,32 +1454,50 @@ PatternTransmitter::~PatternTransmitter() = default;
 PatternTransmitter::PatternTransmitter(PatternTransmitter&&) noexcept = default;
 PatternTransmitter& PatternTransmitter::operator=(PatternTransmitter&&) noexcept = default;
 std::size_t PatternTransmitter::read(std::span<float> output, std::stop_token stop, const ChipObserver& observer) {
-    return impl_->render(impl_->position, output, [](auto value) { return static_cast<float>(value.real()); }, stop, observer,true);
+    return impl_->render(impl_->physical_position, output, [](auto value) { return static_cast<float>(value.real()); }, stop, observer,true);
 }
 std::size_t PatternTransmitter::read_analytic(std::span<std::complex<double>> output, std::stop_token stop,
                                           const ChipObserver& observer) {
-    return impl_->render(impl_->position, output, [](auto value) { return value; }, stop, observer,true);
+    return impl_->render(impl_->physical_position, output, [](auto value) { return value; }, stop, observer,true);
 }
 void PatternTransmitter::preview_last_analytic(std::span<std::complex<double>> output) const {
     require(output.size() <= analytic_preview_limit, "pattern preview exceeds its bounded sample limit");
-    const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(output.size(), impl_->position));
+    const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(output.size(), impl_->physical_position));
     const auto leading = output.size() - count;
     std::fill_n(output.begin(), leading, std::complex<double>{});
-    auto cursor = impl_->position - count;
+    auto cursor = impl_->physical_position - count;
     impl_->render(cursor, output.subspan(leading), [](auto value) { return value; }, {}, {});
 }
-void PatternTransmitter::request_finish() { impl_->finish(); }
+void PatternTransmitter::request_finish() { impl_->finish_physical(); }
 std::uint64_t PatternTransmitter::original_total_samples() const { return impl_->original_total; }
-bool PatternTransmitter::finished() const { return impl_->position == impl_->total; }
-std::uint64_t PatternTransmitter::total_samples() const { return impl_->total; }
-std::uint64_t PatternTransmitter::samples_emitted() const { return impl_->position; }
+std::uint64_t PatternTransmitter::original_source_total_samples() const { return impl_->original_source_total; }
+bool PatternTransmitter::finished() const { return impl_->physical_position == impl_->physical_total; }
+std::uint64_t PatternTransmitter::total_samples() const { return impl_->physical_total; }
+std::uint64_t PatternTransmitter::samples_emitted() const { return impl_->physical_position; }
+std::uint64_t PatternTransmitter::physical_output_origin() const {
+    if(impl_->scheduled)return impl_->physical_origin;
+    const auto anchor=symbol_schedule_detail::add(symbol_schedule_detail::multiply(impl_->source_epoch,impl_->config.sample_rate),impl_->config.stream_phase_samples);
+    const auto prefix=symbol_schedule_detail::add(impl_->training,impl_->padding);
+    require(anchor>=prefix,"transmit UTC origin precedes the representable sample clock");
+    return anchor-prefix;
+}
+std::uint64_t PatternTransmitter::source_valid_payload_end() const { return impl_->valid_source_end(); }
+std::uint64_t PatternTransmitter::emitted_payload_epoch() const { return impl_->emitted_epoch(); }
+std::uint64_t PatternTransmitter::physical_valid_payload_end() const { return impl_->scheduled_end(source_valid_payload_end()); }
+std::uint64_t PatternTransmitter::predicted_physical_valid_payload_end(std::uint64_t frontier) const { return impl_->predicted_valid_end(frontier); }
+std::uint64_t PatternTransmitter::predicted_physical_stop_end(std::uint64_t frontier) const { return impl_->predicted_stop_end(frontier); }
+std::uint64_t PatternTransmitter::source_total_samples() const { return impl_->total; }
+std::uint64_t PatternTransmitter::source_samples_emitted() const { return impl_->position; }
 double PatternTransmitter::bit_rate() const {
+    if(impl_->packed_calendar)return static_cast<double>(impl_->packed_calendar->slots_per_group())/(.4*impl_->config.scheduled_hopping->time_multiplier);
+    if(impl_->scheduled)return modem::bit_rate(impl_->config);
     if(impl_->calendar)return static_cast<double>(impl_->calendar->per_hop)/impl_->config.fake_hopping->dwell_seconds;
     return static_cast<double>(impl_->config.sample_rate) / static_cast<double>(impl_->code.symbol_samples());
 }
 std::size_t PatternTransmitter::working_bytes() const {
     return sizeof(PatternTransmitter) + sizeof(Impl) + impl_->code.working_bytes() + impl_->cover_bytes + impl_->bits.capacity()+
         (impl_->hopping?sizeof(FhssSchedule)+sizeof(FhssPlan)+impl_->hopping->plan->power_fallback_reason.capacity()+1+FhssSchedule::cycle_bytes+sizeof(std::array<unsigned,FhssPlan::capacity>):0)+
+        (impl_->scheduled?impl_->scheduled->working_bytes():0)+(impl_->suppression_chips?sizeof(Impl::SuppressionChips):0)+
         ((impl_->generated_data?1U:0U)+(impl_->settling?1U:0U)+(impl_->settling_data?1U:0U)+(impl_->settling_pattern?1U:0U)+
          (impl_->settling_dsss?1U:0U)+(impl_->suppression?1U:0U)+(impl_->suppression_data?1U:0U)+
          (impl_->suppression_pattern?1U:0U)+(impl_->suppression_dsss?1U:0U))*sizeof(StreamCache);
@@ -1235,18 +1505,18 @@ std::size_t PatternTransmitter::working_bytes() const {
 void PatternTransmitter::copy_transmit_trace(TransmitTrace& result,std::uint64_t begun_chips) const {
     impl_->code.copy_transmit_trace(result,begun_chips);
     if(const auto& hopping=impl_->hopping) {
-        result.fhss=true;result.fhss_available=impl_->position>0;result.fhss_utc_calendar=hopping->plan->utc_schedule();
+        result.fhss=true;result.fhss_available=impl_->physical_position>0;result.fhss_utc_calendar=hopping->plan->utc_schedule();
         result.fhss_epoch=hopping->plan->utc_schedule()?0:hopping->epoch;result.fhss_channels=hopping->plan->channels;
         result.fhss_dwell_seconds=hopping->plan->dwell_seconds;
         result.fhss_arrival_offset_seconds=hopping->plan->offset_seconds;
         result.fhss_arrival_available=false;
         if(result.fhss_available) {
-            result.fhss_hop=hopping->ordinal(impl_->position-1,impl_->config.sample_rate);
+            result.fhss_hop=hopping->ordinal(impl_->physical_position-1,impl_->config.sample_rate);
             result.fhss_channel=hopping->channel(result.fhss_hop);
             result.fhss_cycle=hopping->cycle;result.fhss_byte_offset=hopping->byte_offset;
             result.fhss_key.assign(hopping->prefix.begin(),hopping->prefix.begin()+hopping->prefix_size);
             result.fhss_shift_hz=hopping->plan->shifts[result.fhss_channel];
-            if(const auto arrival=hopping->arrival_ordinal(impl_->position-1,impl_->config.sample_rate)) {
+            if(const auto arrival=hopping->arrival_ordinal(impl_->physical_position-1,impl_->config.sample_rate)) {
                 result.fhss_arrival_available=true;result.fhss_arrival_hop=*arrival;
                 result.fhss_arrival_channel=hopping->channel(*arrival);
                 result.fhss_arrival_shift_hz=hopping->plan->shifts[result.fhss_arrival_channel];
@@ -1262,23 +1532,14 @@ struct NoiseTransmitter::Impl {
         pattern(config,PatternTransmitter::MaskedZeroBits{count},config.stream_epoch,true) {}
 };
 
-NoiseTransmitter::NoiseTransmitter(Config config,std::uint64_t symbols) {
+Config NoiseTransmitter::prepare_config(Config config) {
     if(config.fake_hopping && (!config.fake_hopping->mandatory_ramps ||
        (config.fake_hopping->power_ramps && !config.fake_hopping->utc_schedule())))
         config.fake_hopping=resolve_fhss_power(*config.fake_hopping,config);
-    // Replace every selected secret before constructing the ordinary modem.
-    // The roots below match transfer::seeded_config: PatternCode then derives
-    // each symbol's normal epoch and position under the purpose-separated key.
+    // Prepare ONE temporary root before choosing its secret physical schedule.
+    // It never enters saved keyfiles, receiver banks, or root-key diagnostics.
     config.data_key=Crypto::random();
     config.scramble=true;config.spreading_mode=SpreadingMode::pattern;
-    // Honor the same scheduled epoch and fractional origin as messages.
-    struct CleanSeeds {
-        Config& value;
-        ~CleanSeeds() {
-            OPENSSL_cleanse(value.spreading_seed.data(),value.spreading_seed.size());
-            OPENSSL_cleanse(value.dsss_seed.data(),value.dsss_seed.size());
-        }
-    } clean{config};
     const auto seed=[&](StreamPurpose purpose,auto& destination) {
         auto bytes=config.data_key->stream(purpose,0,0,destination.size());
         std::copy(bytes.begin(),bytes.end(),destination.begin());
@@ -1286,6 +1547,37 @@ NoiseTransmitter::NoiseTransmitter(Config config,std::uint64_t symbols) {
     };
     seed(StreamPurpose::Scrambler,config.spreading_seed);
     seed(StreamPurpose::Dsss,config.dsss_seed);
+    return config;
+}
+NoiseTransmitter::NoiseTransmitter(Config config,std::uint64_t symbols):
+    NoiseTransmitter([](Config value) {
+        auto fresh=prepare_config(std::move(value));
+        if(scheduled_bursts(fresh)) {
+            const SchedHopSourceMap map(*fresh.scheduled_hopping,*fresh.data_key,fresh.sample_rate);
+            const auto request=symbol_schedule_detail::add(symbol_schedule_detail::multiply(fresh.stream_epoch,fresh.sample_rate),fresh.stream_phase_samples);
+            const auto output=map.source_to_physical(map.locate(request).source);
+            const auto prefix=training_sample_count(fresh)+pattern_pulse_padding_samples(fresh);
+            auto source=map.locate(output).source.add_samples(prefix);
+            if(packed_scheduled_symbols(fresh)) {
+                const ScheduledSymbolCalendar calendar(fresh);
+                source={calendar.source_slot(calendar.first_rank_source(source.sample)),0};
+            }
+            const auto payload=map.source_to_physical(source);
+            fresh.stream_epoch=payload.sample/fresh.sample_rate;fresh.stream_phase_samples=payload.sample%fresh.sample_rate;
+        }
+        return fresh;
+    }(std::move(config)),PreparedTemporaryKeys{},symbols) {}
+NoiseTransmitter::NoiseTransmitter(Config config,PreparedTemporaryKeys,std::uint64_t symbols) {
+    require(config.data_key.has_value(),"prepared tuning source requires its temporary Data key");
+    // Same scheduling and production checks as messages. Do not choose a new
+    // root AFTER scheduling or the active/null calendar would silently change.
+    struct CleanSeeds {
+        Config& value;
+        ~CleanSeeds() {
+            OPENSSL_cleanse(value.spreading_seed.data(),value.spreading_seed.size());
+            OPENSSL_cleanse(value.dsss_seed.data(),value.dsss_seed.size());
+        }
+    } clean{config};
     validate(config);
     require(private_cover_enabled(config),"tuning transmission cannot use diagnostic surrounding waveforms");
     const auto symbol=symbol_sample_count(config);
@@ -1293,7 +1585,22 @@ NoiseTransmitter::NoiseTransmitter(Config config,std::uint64_t symbols) {
     require(overhead<sample_target && symbol<=sample_target-overhead,
             "noise symbol duration exceeds the stream safety limit");
     auto maximum=(sample_target-overhead)/symbol;
-    if(deferred_symbols(config)) {
+    if(scheduled_bursts(config)) {
+        const SchedHopSourceMap map(*config.scheduled_hopping,*config.data_key,config.sample_rate);
+        const auto anchor=symbol_schedule_detail::add(symbol_schedule_detail::multiply(config.stream_epoch,config.sample_rate),config.stream_phase_samples);
+        const auto payload=map.locate(anchor).source;
+        const auto prefix=training_sample_count(config)+pattern_pulse_padding_samples(config);
+        require(payload.sample>=prefix,"tuning prefix precedes the source clock");
+        const auto source_origin=payload.sample-prefix;
+        const auto physical_origin=map.source_to_physical({source_origin});
+        const auto end=map.locate(physical_origin.add_samples(sample_target)).source;
+        const auto available=end.sample-source_origin;
+        require(available>overhead && symbol<=available-overhead,"noise symbol duration exceeds scheduled stream safety limit");
+        if(packed_scheduled_symbols(config)) {
+            const ScheduledSymbolCalendar calendar(config);
+            maximum=calendar.lower_bound_source(config.stream_epoch,config.stream_phase_samples,available-overhead-symbol+1);
+        } else maximum=(available-overhead)/symbol;
+    } else if(deferred_symbols(config)) {
         const FhssSymbolCalendar calendar(*config.fake_hopping,config.sample_rate,pattern_pulse_padding_samples(config),symbol);
         maximum=calendar.lower_bound(config.stream_epoch,config.stream_phase_samples,sample_target-overhead-symbol+1);
     }
@@ -1319,9 +1626,18 @@ void NoiseTransmitter::preview_last_analytic(std::span<std::complex<double>> out
 }
 void NoiseTransmitter::request_finish() { impl_->pattern.request_finish(); }
 std::uint64_t NoiseTransmitter::original_total_samples() const { return impl_->pattern.original_total_samples(); }
+std::uint64_t NoiseTransmitter::original_source_total_samples() const { return impl_->pattern.original_source_total_samples(); }
 bool NoiseTransmitter::finished() const { return impl_->pattern.finished(); }
 std::uint64_t NoiseTransmitter::total_samples() const { return impl_->pattern.total_samples(); }
 std::uint64_t NoiseTransmitter::samples_emitted() const { return impl_->pattern.samples_emitted(); }
+std::uint64_t NoiseTransmitter::physical_output_origin() const { return impl_->pattern.physical_output_origin(); }
+std::uint64_t NoiseTransmitter::physical_valid_payload_end() const { return impl_->pattern.physical_valid_payload_end(); }
+std::uint64_t NoiseTransmitter::predicted_physical_valid_payload_end(std::uint64_t frontier) const { return impl_->pattern.predicted_physical_valid_payload_end(frontier); }
+std::uint64_t NoiseTransmitter::predicted_physical_stop_end(std::uint64_t frontier) const { return impl_->pattern.predicted_physical_stop_end(frontier); }
+std::uint64_t NoiseTransmitter::source_total_samples() const { return impl_->pattern.source_total_samples(); }
+std::uint64_t NoiseTransmitter::source_samples_emitted() const { return impl_->pattern.source_samples_emitted(); }
+std::uint64_t NoiseTransmitter::source_valid_payload_end() const { return impl_->pattern.source_valid_payload_end(); }
+std::uint64_t NoiseTransmitter::emitted_payload_epoch() const { return impl_->pattern.emitted_payload_epoch(); }
 std::size_t NoiseTransmitter::working_bytes() const {
     return sizeof(NoiseTransmitter)+sizeof(Impl)-sizeof(PatternTransmitter)+impl_->pattern.working_bytes();
 }

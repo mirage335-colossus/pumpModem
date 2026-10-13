@@ -62,7 +62,7 @@ struct StreamingTransmitter::Impl {
         pattern=std::make_unique<PatternTransmitter>(std::move(input.bits),config,config.stream_epoch,0,true,trace.active);
         if(pattern->working_bytes()>remaining)throw Error("pattern transmitter workspace is too small");
     }
-    Impl(Noise input,Config config,std::size_t workspace) {
+    Impl(Noise input,Config config,std::size_t workspace,bool prepared=false) {
         trace.temporary_key=true;trace.pattern_available=true;
         trace.pattern_private=true;trace.dsss=config.dsss;trace.data_masked=true;
         trace.outer_dsss_factor=config.dsss_factor;
@@ -70,7 +70,8 @@ struct StreamingTransmitter::Impl {
         chips_per_symbol=pattern_chips_per_symbol(config);
         const auto remaining=initialize_constellation(config,workspace);
         config.memory_limit=remaining;
-        noise=std::make_unique<NoiseTransmitter>(config,input.symbols);
+        noise=prepared?std::make_unique<NoiseTransmitter>(config,NoiseTransmitter::PreparedTemporaryKeys{},input.symbols):
+            std::make_unique<NoiseTransmitter>(config,input.symbols);
         if(noise->working_bytes()>remaining)throw Error("noise transmitter workspace is too small");
     }
     void retain_constellation(Complex value) {
@@ -108,12 +109,42 @@ StreamingTransmitter::StreamingTransmitter(Noise input,Config c,std::size_t work
     c.spreading_mode=SpreadingMode::pattern;c.scramble=true;
     impl_=std::make_unique<Impl>(input,c,workspace);
 }
+Config StreamingTransmitter::prepare_noise_config(Config config) { return NoiseTransmitter::prepare_config(std::move(config)); }
+StreamingTransmitter::StreamingTransmitter(Noise input,Config c,PreparedTemporaryKeys,std::size_t workspace):
+    impl_(std::make_unique<Impl>(input,std::move(c),workspace,true)) {}
 StreamingTransmitter::~StreamingTransmitter()=default;
 StreamingTransmitter::StreamingTransmitter(StreamingTransmitter&&) noexcept=default;
 StreamingTransmitter& StreamingTransmitter::operator=(StreamingTransmitter&&) noexcept=default;
 void StreamingTransmitter::request_finish() { if(impl_->noise)impl_->noise->request_finish();else impl_->pattern->request_finish(); }
 std::uint64_t StreamingTransmitter::original_total_samples()const {
     return impl_->noise?impl_->noise->original_total_samples():impl_->pattern->original_total_samples();
+}
+std::uint64_t StreamingTransmitter::original_source_total_samples()const {
+    return impl_->noise?impl_->noise->original_source_total_samples():impl_->pattern->original_source_total_samples();
+}
+std::uint64_t StreamingTransmitter::physical_output_origin()const {
+    return impl_->noise?impl_->noise->physical_output_origin():impl_->pattern->physical_output_origin();
+}
+std::uint64_t StreamingTransmitter::physical_valid_payload_end()const {
+    return impl_->noise?impl_->noise->physical_valid_payload_end():impl_->pattern->physical_valid_payload_end();
+}
+std::uint64_t StreamingTransmitter::predicted_physical_valid_payload_end(std::uint64_t frontier)const {
+    return impl_->noise?impl_->noise->predicted_physical_valid_payload_end(frontier):impl_->pattern->predicted_physical_valid_payload_end(frontier);
+}
+std::uint64_t StreamingTransmitter::predicted_physical_stop_end(std::uint64_t frontier)const {
+    return impl_->noise?impl_->noise->predicted_physical_stop_end(frontier):impl_->pattern->predicted_physical_stop_end(frontier);
+}
+std::uint64_t StreamingTransmitter::source_total_samples()const {
+    return impl_->noise?impl_->noise->source_total_samples():impl_->pattern->source_total_samples();
+}
+std::uint64_t StreamingTransmitter::source_samples_emitted()const {
+    return impl_->noise?impl_->noise->source_samples_emitted():impl_->pattern->source_samples_emitted();
+}
+std::uint64_t StreamingTransmitter::source_valid_payload_end()const {
+    return impl_->noise?impl_->noise->source_valid_payload_end():impl_->pattern->source_valid_payload_end();
+}
+std::uint64_t StreamingTransmitter::emitted_payload_epoch()const {
+    return impl_->noise?impl_->noise->emitted_payload_epoch():impl_->pattern->emitted_payload_epoch();
 }
 bool StreamingTransmitter::finished()const{return impl_->noise?impl_->noise->finished():impl_->pattern->finished();}
 std::uint64_t StreamingTransmitter::total_samples()const{return impl_->noise?impl_->noise->total_samples():impl_->pattern->total_samples();}
@@ -187,6 +218,15 @@ StreamingReceiver::StreamingReceiver(Config c,std::size_t workspace,PatternSearc
 StreamingReceiver::~StreamingReceiver()=default;
 StreamingReceiver::StreamingReceiver(StreamingReceiver&&) noexcept=default;
 StreamingReceiver& StreamingReceiver::operator=(StreamingReceiver&&) noexcept=default;
+bool StreamingReceiver::try_skip_unobserved(std::uint64_t samples,std::stop_token stop) {
+    return impl_->pattern.try_skip_unobserved(samples,stop);
+}
+std::optional<std::uint64_t> StreamingReceiver::unobserved_end_from(std::uint64_t local_sample)const {
+    return impl_->pattern.unobserved_end_from(local_sample);
+}
+std::optional<ScheduledCaptureEnvelope> StreamingReceiver::scheduled_capture_envelope(std::uint64_t local_sample)const {
+    return impl_->pattern.scheduled_capture_envelope(local_sample);
+}
 bool StreamingReceiver::synchronized()const{return impl_->pattern.synchronized();}
 bool StreamingReceiver::initial_search_complete()const{return impl_->pattern.initial_search_complete();}
 bool StreamingReceiver::clock_windowed()const{return impl_->pattern.clock_windowed();}

@@ -60,6 +60,43 @@ class StreamCLI(unittest.TestCase):
             self.assertEqual(self.run_pump('estimate','--text','e','--audio-error',allowance,*AUDIO).stdout,baseline)
         for allowance in ('-1ms','NaNms','61s','30'):
             self.run_pump('estimate','--text','e','--audio-error',allowance,*AUDIO,ok=False)
+    def test_scheduled_hop_controls(self):
+        helptext=self.run_pump('--help').stdout
+        self.assertIn(b'--sched-hop',helptext)
+        self.assertIn(b'--sched-frequency-search',helptext)
+        self.assertIn(b'--sched-hop-dilution',helptext)
+        baseline=self.run_pump('estimate','--text','e',*AUDIO).stdout
+        self.assertEqual(json.loads(baseline)['sched_hop'],'disabled')
+        self.assertEqual(json.loads(baseline)['sched_frequency_search'],1)
+        self.assertEqual(json.loads(baseline)['sched_hop_dilution'],1)
+        self.assertEqual(self.run_pump('estimate','--text','e','--sched-hop','disabled',
+            '--sched-hop-dilution','37',*AUDIO).stdout,baseline)
+        for expansion in ('1','2','4','8','16','32'):
+            # A saved expansion remains inactive without a scheduled burst.
+            self.assertEqual(self.run_pump('estimate','--text','e','--sched-hop','disabled',
+                '--sched-frequency-search',expansion,*AUDIO).stdout,baseline)
+        for factor in ('10','100','1k','10k'):
+            error=self.run_pump('estimate','--text','e','--sched-hop',factor,*AUDIO,ok=False)
+            self.assertIn(b'keyfile',error.stderr)
+        for flag,value in (('--sched-hop','0'),('--sched-hop','2'),('--sched-hop','nan'),
+                           ('--sched-frequency-search','0'),('--sched-frequency-search','3'),
+                           ('--sched-frequency-search','64'),('--sched-frequency-search','nan'),
+                           ('--sched-hop-dilution','0'),('--sched-hop-dilution','10001'),
+                           ('--sched-hop-dilution','1.5'),('--sched-hop-dilution','nan')):
+            self.run_pump('estimate','--text','e',flag,value,*AUDIO,ok=False)
+        with tempfile.TemporaryDirectory() as directory:
+            key=pathlib.Path(directory)/'scheduled-hop-synthetic.key'
+            self.run_pump('keygen','--output',key)
+            for factor,dilution,expansion in (('10','1','1'),('10','2','4'),('100','37','8'),('1k','1000','16'),('10k','5000','32')):
+                value=json.loads(self.run_pump('estimate','--text','e','--keyfile',key,
+                    '--sched-hop',factor,'--sched-hop-dilution',dilution,'--sched-frequency-search',expansion,
+                    '--clock-sync','GPS_1ms-10ms_region-2564ms_offset','--audio-error','60ms',*AUDIO).stdout)
+                self.assertEqual(value['sched_hop'],factor)
+                self.assertEqual(value['sched_hop_dilution'],int(dilution))
+                self.assertEqual(value['sched_frequency_search'],int(expansion))
+                self.assertEqual(value['wire_bits'],3)
+            self.run_pump('estimate','--text','e','--keyfile',key,'--sched-hop','10',
+                '--sched-hop-dilution','20',*AUDIO,ok=False)
     def test_search_arithmetic(self):
         self.assertIn(b'--search-arithmetic',self.run_pump('--help').stdout)
         fields=('wire_bits','coded_bytes','coded_seconds','total_seconds','sample_rate',
@@ -88,6 +125,37 @@ class StreamCLI(unittest.TestCase):
                 if reference is None:
                     reference=pcm
                 self.assertEqual(pcm,reference,'receiver arithmetic changed transmitted WAV')
+    def test_receiver_strategy(self):
+        helptext=self.run_pump('--help').stdout
+        self.assertIn(b'--receiver-strategy',helptext)
+        self.assertIn(b'--receiver-cpu-budget',helptext)
+        fields=('wire_bits','coded_bytes','coded_seconds','total_seconds','sample_rate',
+                'spreading','carrier_hz','stream_carrier_hz','dsss_factor','dsss_version')
+        for geometry in (AUDIO,('--bw','1000','--target-snr','55','--time','1800000000')):
+            baseline=json.loads(self.run_pump('estimate','--text','e',*geometry).stdout)
+            self.assertEqual(baseline['receiver_strategy'],'auto')
+            self.assertEqual(baseline['receiver_cpu_budget'],.6)
+            for strategy in ('auto','existing','complex','amplitude'):
+                value=json.loads(self.run_pump('estimate','--text','e','--receiver-strategy',strategy,
+                    '--receiver-cpu-budget','.37',*geometry).stdout)
+                self.assertEqual(value['receiver_strategy'],strategy)
+                self.assertEqual(value['receiver_cpu_budget'],.37)
+                for field in fields:
+                    self.assertEqual(value[field],baseline[field],(strategy,field))
+        for flag,value in (('--receiver-strategy','unknown'),('--receiver-cpu-budget','0'),
+                           ('--receiver-cpu-budget','-.1'),('--receiver-cpu-budget','nan'),
+                           ('--receiver-cpu-budget','inf')):
+            self.run_pump('estimate','--text','e',flag,value,*AUDIO,ok=False)
+        with tempfile.TemporaryDirectory() as directory:
+            reference=None
+            for strategy in ('auto','existing','complex','amplitude'):
+                output=pathlib.Path(directory)/(strategy+'.wav')
+                self.run_pump('tx','--text','e','--output',output,'--receiver-strategy',strategy,
+                    '--receiver-cpu-budget','.37',*AUDIO)
+                pcm=output.read_bytes()
+                if reference is None:
+                    reference=pcm
+                self.assertEqual(pcm,reference,'receiver strategy changed transmitted WAV')
     def test_outer_dsss_version(self):
         self.assertIn(b'--dsss-version',self.run_pump('--help').stdout)
         self.assertIn(b'--dsss-mode',self.run_pump('--help').stdout)

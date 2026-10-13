@@ -1,6 +1,7 @@
 #include "../frequency_parse.hpp"
 #include "fhss_profile.hpp"
 #include "datapump/fhss_schedule.hpp"
+#include "datapump/sched_hop.hpp"
 #include "datapump/attachment.hpp"
 #include "datapump/execution.hpp"
 #include <utility>
@@ -21,6 +22,7 @@
 #include "datapump/simulation_estimate.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/pattern_search.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include <array>
 #include <cctype>
 #include <charconv>
@@ -325,8 +327,21 @@ struct Controller::Impl {
         f(UiField::search_arithmetic).options={{"default","Default — automatic"},
             {"fp32-min","FP32 minimum"},{"fp64-force","FP64 force"}};
         f(UiField::search_arithmetic).selected="default";
+        f(UiField::receiver_strategy).options={{"auto","Automatic"},{"existing","Existing only"},
+            {"complex","Complex only"},{"amplitude","Amplitude only"}};
+        f(UiField::receiver_strategy).selected="auto";
+        f(UiField::receiver_cpu_budget).text="0.6";
+        for(const auto* value:{"0.25","0.4","0.6","0.8","1","2"})
+            f(UiField::receiver_cpu_budget).options.push_back({value,std::string(value)+" s / 1 s"});
         f(UiField::fhss).options={{"off","Off"},{"fake-fcc","Fake: FCC"},{"fake-eu","Fake: EU"}};
         f(UiField::fhss).selected="off";
+        f(UiField::sched_hop).options={{"disabled","disabled"},{"10","10"},{"100","100"},{"1k","1k"},{"10k","10k"}};
+        f(UiField::sched_hop).selected="disabled";
+        for(const auto* id:{"1","2","5","10","20","50","100","200","500","1000","2000","5000","10000"})
+            f(UiField::sched_hop_dilution).options.push_back({id,id});
+        f(UiField::sched_hop_dilution).selected="1";
+        f(UiField::sched_frequency_search).options={{"1","1x"},{"2","2x"},{"4","4x"},{"8","8x"},{"16","16x"},{"32","32x"}};
+        f(UiField::sched_frequency_search).selected="1";
         f(UiField::rf_oscillator).options.push_back({"baseband-clock","Baseband clock"});
         for(const auto& preset:tuning::oscillator_presets()) {
             if(preset.id!="ic-7100")f(UiField::simulation_oscillator).options.push_back({std::string(preset.id),std::string(preset.name)});
@@ -630,6 +645,7 @@ struct Controller::Impl {
     }
     bool developer_mode=false;
     std::vector<double> fhss_list;
+    std::optional<std::pair<double,double>> searched_spectrum;
     std::string fhss_list_error;
     static fhss::Profile private_hopping(fhss::Preference preference,const modem::Config& config,
                                         bool keyed,std::span<const double> list) {
@@ -642,6 +658,26 @@ struct Controller::Impl {
         return private_hopping(fhss::parse(f(UiField::fhss).selected),config,
             encrypted()&&selected_key(),fhss_list);
     }
+    static void sample_gate_bandwidth(modem::Config& config) {
+        // This stage adds the new burst gate's sampling requirement. Keep the
+        // preceding FHSS-only sample clock and chip geometry unchanged.
+        if(!config.scheduled_hopping || !config.scheduled_hopping->enabled() ||
+           config.scheduled_hopping->continuous())return;
+        const auto extra=modem::waveform_gate_bandwidth_allowance_hz(config);
+        if(!(extra>0))return;
+        const auto bandwidth=modem::waveform_bandwidth_hz(config);
+        const auto half=(modem::pattern_pulse_enabled(config)?(1+modem::pattern_pulse_rolloff):1)*bandwidth*.5;
+        const auto upper=config.carrier_hz+half+extra*.5;
+        // Keep existing aligned projections whenever their headroom already
+        // covers the extra smooth-gate rolloff scale. Retain ten percent of
+        // Nyquist for transition; the allowance is not compact support.
+        if(upper<=.45*config.sample_rate)return;
+        // Use the original fine-chip bandwidth for rate quantization. Treating
+        // the envelope allowance as a new chip rate can destroy exact compact
+        // projection eligibility without changing the transmitted chip layer.
+        const auto rate=tuning::recommended_sample_rate(bandwidth,upper/(4*.45));
+        config.sample_rate=std::max(config.sample_rate,rate);
+    }
     void fake_planning(planner::Inputs& input,std::string_view preference,
                        std::optional<modem::OscillatorModel> proposed_rf=std::nullopt,
                        std::optional<bool> proposed_shared=std::nullopt,
@@ -651,6 +687,7 @@ struct Controller::Impl {
         input.observer_hopping=input.fake_hopping.observer();
         input.options.modem.fake_hopping=make_fake_plan(input.fake_hopping,input.options,
             proposed_list?*proposed_list:fhss_list);
+        sample_gate_bandwidth(input.options.modem);
         if(!input.fake_hopping.available||!input.options.modem.oscillator_search)return;
         auto& config=input.options.modem;
         const auto& id=f(UiField::rf_oscillator).selected;
@@ -744,6 +781,21 @@ struct Controller::Impl {
             const auto dsss_version=tuning::parse_outer_dsss_version(mode_selection=="legacy"?"legacy":"interleave");
             const auto arithmetic_id=load&&load->search_arithmetic?*load->search_arithmetic:f(UiField::search_arithmetic).selected;
             const auto arithmetic=tuning::parse_search_arithmetic(arithmetic_id);
+            const auto strategy=tuning::parse_receiver_strategy(load&&load->receiver_strategy?
+                *load->receiver_strategy:f(UiField::receiver_strategy).selected);
+            const auto cpu_budget=load&&load->receiver_cpu_budget?*load->receiver_cpu_budget:
+                number(f(UiField::receiver_cpu_budget).text,"Receiver CPU budget");
+            tuning::validate_receiver_cpu_budget(cpu_budget);
+            const auto burst_multiplier=load&&load->sched_hop?*load->sched_hop:
+                modem::sched_hop_multiplier(f(UiField::sched_hop).selected);
+            const auto dilution=load&&load->sched_hop_dilution?*load->sched_hop_dilution:
+                static_cast<unsigned>(number(f(UiField::sched_hop_dilution).selected,"Sched_Hop dilution"));
+            if(!dilution||dilution>10000||(burst_multiplier>1&&dilution>burst_multiplier))
+                throw Error("Sched_Hop dilution must be 1..10000 and cannot exceed its enabled multiplier");
+            const auto frequency_multiplier=load&&load->sched_frequency_search?*load->sched_frequency_search:
+                number(f(UiField::sched_frequency_search).selected,"Scheduled frequency search");
+            if(frequency_multiplier!=1&&frequency_multiplier!=2&&frequency_multiplier!=4&&frequency_multiplier!=8&&
+               frequency_multiplier!=16&&frequency_multiplier!=32)throw Error("Scheduled frequency search must be 1, 2, 4, 8, 16, or 32");
             const auto fhss=std::string(fhss::id(fhss::parse(load&&load->fhss?*load->fhss:f(UiField::fhss).selected)));
             const auto next_fhss_list=load&&load->fhss_list?fhss::parse_list(*load->fhss_list):fhss_list;
             next.transfer.clock_sync=load&&load->clock_sync?clock_sync::parse(*load->clock_sync):clock_policy();
@@ -751,6 +803,26 @@ struct Controller::Impl {
                 *load->audio_timing_error_seconds:clock_sync::is_default(f(UiField::audio_error).text)?
                 clock_sync::default_audio_error_seconds:clock_sync::duration(f(UiField::audio_error).text);
             clock_sync::validate_audio_error(next.transfer.audio_timing_error_seconds);
+            std::shared_ptr<const modem::SchedHopPlan> burst_plan;
+            if(next_encrypted&&burst_multiplier>1) {
+                modem::SchedHopPlan plan{burst_multiplier,dilution};
+                plan.clock_error_seconds=plan.peer_clock_error_seconds=next.transfer.clock_sync?
+                    next.transfer.clock_sync->accuracy_seconds:.01;
+                plan.region_seconds=next.transfer.clock_sync?next.transfer.clock_sync->region_seconds:0;
+                plan.offset_seconds=next.transfer.clock_sync?next.transfer.clock_sync->offset_seconds:0;
+                plan.audio_error_seconds=next.transfer.audio_timing_error_seconds;
+                plan.validate();burst_plan=std::make_shared<const modem::SchedHopPlan>(plan);
+            }
+            const auto receiver_policy=[&](modem::Config& config) {
+                config.receiver_strategy=strategy;config.receiver_cpu_budget=cpu_budget;
+                config.scheduled_hopping=burst_plan;
+                config.frequency_search_multiplier=burst_plan?frequency_multiplier:1;
+                // Short-symbol calendar geometry is keyed even before a
+                // transfer is prepared. Bind the selected immutable key for
+                // inspection/planning, as transfer::effective_options does.
+                // Ordinary encrypted profiles retain their existing binding.
+                if(burst_plan)config.data_key=next.transfer.key;
+            };
             const auto rate=load&&load->rate_hz?*load->rate_hz:frequency(f(UiField::bandwidth).text,"Rate");
             const auto shift=load&&load->rf_shift_hz?*load->rf_shift_hz:frequency(f(UiField::rf_shift).text,"Shift");
             if(!std::isfinite(shift)||shift<0)throw Error("Shift must be finite and nonnegative");
@@ -827,8 +899,18 @@ struct Controller::Impl {
             std::optional<TargetEdit> adjustment;
             const bool automatic=mode==tuning::PatternMode::auto_pattern||
                 mode==tuning::PatternMode::auto_keystream||mode==tuning::PatternMode::auto_tone;
+            // Receiver-local changes must not retune the transmitted bit
+            // duration. In particular a forced unsupported decoder remains a
+            // saved diagnostic request, with RX limitations reported separately.
+            const bool fit_loaded_targets=load&&(load->target_db_hz||load->short_target_db_hz||
+                load->long_target_db_hz||load->rate_hz||load->carrier_hz||load->pattern||load->doppler||
+                load->workspace_percent||load->oscillator||load->rf_oscillator||load->rf_shift_hz||
+                load->search_margin||load->reference||load->clock_sync||load->audio_timing_error_seconds||
+                load->dsss_factor||load->dsss_version||load->dsss_mode||load->fhss||load->fhss_list||
+                load->fhss_list_file||load->keyfile||load->key_name||load->tx_key);
             const auto fit_target=[&](double target,std::span<const double> companions) {
-                if(!automatic)return target;
+                if(!automatic||strategy==modem::ReceiverStrategy::amplitude_only||
+                   (load&&!fit_loaded_targets))return target;
                 auto input=next_planner;input.options=next.transfer;input.mode=mode;input.target_db_hz=target;
                 input.receiver_work_mode=next.simulation?simulation::ReceiverWorkMode::sampled_simulation:
                     simulation::ReceiverWorkMode::hardware_fallback;
@@ -837,6 +919,7 @@ struct Controller::Impl {
                 // profile. nearest_fit_target resolves every actual target;
                 // an artificial weak seed can exceed V2's symbol-map bound.
                 input.options.modem=tuning::resolve(rate,200,mode,next_encrypted,carrier,factor,dsss_version,arithmetic).config;
+                receiver_policy(input.options.modem);
                 input.options.modem.oscillator_search=oscillator_policy;
                 const auto effects=modem::oscillator_effects(input.options.modem);
                 input.channel.clock_error_ppm=effects.clock_error_ppm;
@@ -873,6 +956,7 @@ struct Controller::Impl {
             }
             auto plan=tuning::resolve(rate,short_snr,mode,next_encrypted,carrier,factor,dsss_version,arithmetic);
             auto longer_plan=tuning::resolve(rate,long_snr,mode,next_encrypted,carrier,factor,dsss_version,arithmetic);
+            receiver_policy(plan.config);receiver_policy(longer_plan.config);
             plan.config.oscillator_search=oscillator_policy;longer_plan.config.oscillator_search=oscillator_policy;
             const auto receive_text=!align_receive&&receive_target_edit&&receive_target_edit->requested==f(UiField::receive_snr).text?
                 receive_target_edit->canonical:f(UiField::receive_snr).text;
@@ -907,6 +991,7 @@ struct Controller::Impl {
             auto long_options=next.transfer;long_options.modem=longer_plan.config;
             next.long_message_modem->fake_hopping=make_fake_plan(private_hopping(fhss::parse(fhss),longer_plan.config,
                 next_encrypted,next_fhss_list),long_options,next_fhss_list);
+            sample_gate_bandwidth(next.transfer.modem);sample_gate_bandwidth(*next.long_message_modem);
             const auto effects=modem::oscillator_effects(next.transfer.modem);
             next.simulation_clock_error_ppm=effects.clock_error_ppm;
             next.simulation_frequency_offset_hz=effects.frequency_offset_hz;
@@ -921,11 +1006,40 @@ struct Controller::Impl {
                 <<" Hz (requested "<<search.frequency.requested_half_width_hz<<") | Clock +/-"<<search.clock_half_width_ppm
                 <<" ppm (requested "<<search.requested_clock_half_width_ppm<<") | "<<search.hypotheses.size()<<" paired hypotheses";
             if(search.limited)search_detail<<" | LIMITED COVERAGE";
+            if(const auto allowance=modem::waveform_gate_bandwidth_allowance_hz(next.transfer.modem);allowance>0)
+                search_detail<<" | Ramp bandwidth allowance +"<<allowance<<" Hz";
             if(next.transfer.clock_sync) {
                 if(search.transmit_rate_correction>0)search_detail<<" | UTC steering covered +/-"<<search.transmit_rate_correction*1e6<<" ppm";
                 else search_detail<<" | UTC rate correction unavailable; original bank retained";
             }
             next.transfer.receive_targets_db_hz=targets.values;
+            std::optional<std::pair<double,double>> next_spectrum;
+            for(bool keyed:{false,true}) {
+                if(!keyed&&!next.permits_plaintext())continue;
+                if(keyed&&!next.transfer.key&&next.receive_keys.empty())continue;
+                const auto profiles=next.transfer.automatic_receive_profiles?
+                    tuning::receive_profiles(next.transfer.modem,targets.values,next.transfer.receive_pattern_mode,keyed):
+                    std::vector<modem::Config>{next.transfer.modem};
+                for(const auto& profile:profiles) {
+                    const auto bank=modem::oscillator_pattern_search(profile,next.transfer.clock_sync?
+                        modem::utc_transmit_rate_limit(profile):0);
+                    // Include the complete requested domain for alternate
+                    // detectors; finite coherent-bank limits are reported by
+                    // the receiver separately, never inferred from the plot.
+                    const auto clock=1+bank.requested_clock_half_width_ppm*1e-6;
+                    const auto half=(modem::pattern_pulse_enabled(profile)?
+                        (1+modem::pattern_pulse_rolloff)*profile.sample_rate/(2.*modem::pattern_chip_samples(profile)):
+                        modem::waveform_bandwidth_hz(profile)*.5)*clock+
+                        modem::waveform_gate_bandwidth_allowance_hz(profile)*.5;
+                    const auto width=bank.frequency.requested_half_width_hz;
+                    const auto low=std::max(0.,profile.carrier_hz-width-half);
+                    const auto high=std::min(profile.sample_rate*.5,profile.carrier_hz+width+half);
+                    if(!(high>low))continue;
+                    if(next_spectrum) {next_spectrum->first=std::min(next_spectrum->first,low);
+                        next_spectrum->second=std::max(next_spectrum->second,high);}
+                    else next_spectrum=std::pair{low,high};
+                }
+            }
             if(load) {
                 (void)link_channel(next,next_planner);
                 live::validate_settings(next);
@@ -957,7 +1071,20 @@ struct Controller::Impl {
                 f(UiField::dsss_factor).selected=std::to_string(requested_factor);
                 f(UiField::dsss_version).selected=mode_selection;
                 f(UiField::search_arithmetic).selected=tuning::search_arithmetic_id(arithmetic);
+                f(UiField::receiver_strategy).selected=tuning::receiver_strategy_id(strategy);
+                std::array<char,64> budget_text{};
+                const auto formatted_budget=std::to_chars(budget_text.data(),budget_text.data()+budget_text.size(),cpu_budget);
+                if(formatted_budget.ec!=std::errc{})throw Error("Receiver CPU budget cannot be displayed");
+                f(UiField::receiver_cpu_budget).text.assign(budget_text.data(),formatted_budget.ptr);
                 f(UiField::fhss).selected=fhss;
+                f(UiField::sched_hop).selected=modem::sched_hop_id(burst_multiplier);
+                f(UiField::sched_frequency_search).selected=planner_number(frequency_multiplier);
+                f(UiField::sched_hop_dilution).selected=std::to_string(dilution);
+                auto& dilution_options=f(UiField::sched_hop_dilution).options;
+                if(std::none_of(dilution_options.begin(),dilution_options.end(),[&](const auto& option){return option.id==std::to_string(dilution);})) {
+                    dilution_options.push_back({std::to_string(dilution),std::to_string(dilution)});
+                    std::sort(dilution_options.begin(),dilution_options.end(),[](const auto& a,const auto& b){return std::stoul(a.id)<std::stoul(b.id);});
+                }
                 fhss_list=next_fhss_list;fhss_list_error.clear();
                 f(UiField::fhss_list).text=fhss::list_text(fhss_list,'\n');
                 if(next_tone)f(UiField::key).selected="none";
@@ -971,7 +1098,7 @@ struct Controller::Impl {
             update_link_channel(next);
             if(match_receive_target||align_receive)receive_target_edit=std::move(receive_adjustment);
             if(!receive_target_edit)f(UiField::receive_snr).text=targets.canonical;
-            settings=std::move(next);timing_advice.reset(); settings_valid=true;settings_error.clear();
+            settings=std::move(next);searched_spectrum=next_spectrum;timing_advice.reset(); settings_valid=true;settings_error.clear();
             reset_carrier(rate*factor,shift,false);
             if(target_input_notice) {
                 target_input_notice=false;notice_until={};
@@ -1088,8 +1215,13 @@ struct Controller::Impl {
         if(f(UiField::dsss_version).selected!="legacy")values.dsss_mode=f(UiField::dsss_version).selected;
         values.dsss_version=f(UiField::dsss_version).selected=="legacy"?"legacy":"interleave";
         values.search_arithmetic=f(UiField::search_arithmetic).selected;
+        values.receiver_strategy=tuning::receiver_strategy_id(settings.transfer.modem.receiver_strategy);
+        values.receiver_cpu_budget=settings.transfer.modem.receiver_cpu_budget;
         values.full_duplex=settings.full_duplex;
         values.fhss=f(UiField::fhss).selected;
+        values.sched_hop_dilution=static_cast<unsigned>(number(f(UiField::sched_hop_dilution).selected,"Sched_Hop dilution"));
+        values.sched_hop=modem::sched_hop_multiplier(f(UiField::sched_hop).selected);
+        values.sched_frequency_search=number(f(UiField::sched_frequency_search).selected,"Scheduled frequency search");
         if(!fhss_list.empty())values.fhss_list=fhss::list_text(fhss_list);
         if(!key_path.empty())values.keyfile=path_text(std::filesystem::absolute(key_path).lexically_normal());
         values.tx_key=encrypted()?"named":"none";
@@ -1391,11 +1523,19 @@ struct Controller::Impl {
         f(UiField::planner_target).enabled=!closing;
         f(UiField::planner_command).enabled=!closing;
         sync_launch_command();
-        for(auto id:{UiField::clock_accuracy,UiField::clock_region,UiField::clock_offset,UiField::audio_error,UiField::dsss_factor,UiField::dsss_version,UiField::search_arithmetic,UiField::fhss,UiField::fhss_list,UiField::simulation,UiField::simulation_oscillator,UiField::rf_oscillator,UiField::rf_shift,UiField::doppler,UiField::search_margin,
+        for(auto id:{UiField::clock_accuracy,UiField::clock_region,UiField::clock_offset,UiField::audio_error,UiField::dsss_factor,UiField::dsss_version,UiField::search_arithmetic,UiField::receiver_strategy,UiField::receiver_cpu_budget,UiField::fhss,UiField::sched_hop,UiField::sched_frequency_search,UiField::sched_hop_dilution,UiField::fhss_list,UiField::simulation,UiField::simulation_oscillator,UiField::rf_oscillator,UiField::rf_shift,UiField::doppler,UiField::search_margin,
             UiField::link_power,UiField::link_loss,UiField::link_noise,UiField::key,UiField::device,UiField::mono,UiField::live_duplex,UiField::volume,UiField::exclusive,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
         f(UiField::dsss_factor).enabled=!busy&&encrypted()&&selected_key();
         f(UiField::dsss_version).enabled=!busy&&encrypted()&&selected_key();
         f(UiField::fhss).enabled=!busy&&encrypted()&&selected_key();
+        f(UiField::sched_hop).enabled=!busy&&encrypted()&&selected_key();
+        f(UiField::sched_frequency_search).enabled=f(UiField::sched_hop).enabled&&
+            f(UiField::sched_hop).selected!="disabled";
+        f(UiField::sched_hop_dilution).enabled=f(UiField::sched_frequency_search).enabled;
+        for(auto& option:f(UiField::sched_hop_dilution).options)option.enabled=
+            f(UiField::sched_hop).selected!="disabled"&&number(option.id,"Sched_Hop dilution")<=modem::sched_hop_multiplier(f(UiField::sched_hop).selected);
+        f(UiField::sched_hop).display_text=!encrypted()&&f(UiField::sched_hop).selected!="disabled"?
+            "disabled · key required":"";
         f(UiField::dsss_factor).display_text=!encrypted()&&f(UiField::dsss_version).selected!="off"?f(UiField::dsss_factor).selected+"x (key needed)":"";
         f(UiField::dsss_version).display_text=!encrypted()?"Off · encryption key required":
             f(UiField::dsss_version).selected=="legacy"?"Legacy (diagnostic)":"";
@@ -1654,7 +1794,8 @@ struct Controller::Impl {
                     first_bit_only?"First bit "+probability_text(model.one_bit_success_probability)+" · draft unmodeled":
                     !probability_available?"Outside model range":probability_text(model.success_probability);
                 simulation_estimate_text(confidence,
-                    "~"+seconds_text(model.cpu_seconds),"~"+seconds_text(model.gpu_seconds),
+                    "~"+seconds_text(model.cpu_seconds),model.gpu_work_supported?
+                        "~"+seconds_text(model.gpu_seconds):"Unavailable",
                     model.coherent_reference_only||model.probability_reference_only||first_bit_only,
                     model.profile_matches&&model.carrier_in_search&&model.receiver_workspace_supported&&
                     probability_available&&model.success_probability<.8?ui::TextTone::negative:ui::TextTone::normal);
@@ -2147,7 +2288,7 @@ void Controller::edit(UiField field,std::string text) {
         }
         else if(field==UiField::snr||field==UiField::long_snr) p.configure(true,false,field);
         else if(field==UiField::bandwidth) p.configure(false,true);
-        else if(field==UiField::device||field==UiField::carrier||field==UiField::rf_shift||field==UiField::doppler||field==UiField::search_margin) p.configure();
+        else if(field==UiField::device||field==UiField::carrier||field==UiField::rf_shift||field==UiField::doppler||field==UiField::search_margin||field==UiField::receiver_cpu_budget) p.configure();
         else if(field==UiField::callsign||field==UiField::grid) { if(untouched&&!p.attachment&&!p.file_loading)p.seed_composer(); }
         else p.dirty();
     } catch(const std::exception& e) {
@@ -2203,6 +2344,11 @@ void Controller::select(UiField field,std::string id) {
         if(!available)throw Error("Select an available item");
         const auto previous_selection=state.selected;
         state.selected=std::move(id);
+        if(field==UiField::sched_hop&&state.selected!="disabled") {
+            const auto multiplier=modem::sched_hop_multiplier(state.selected);
+            if(number(p.f(UiField::sched_hop_dilution).selected,"Sched_Hop dilution")>multiplier)
+                p.f(UiField::sched_hop_dilution).selected=std::to_string(multiplier);
+        }
         if(field==UiField::volume) {
             p.settings.transmit_gain=audio_controls::volume_gain(state.selected);
             if(p.started)p.session.set_transmit_gain(p.settings.transmit_gain);
@@ -2224,7 +2370,8 @@ void Controller::select(UiField field,std::string id) {
             p.reset_carrier(3600,frequency(p.f(UiField::rf_shift).text,"Shift"));p.configure();
         }
         else if(field==UiField::simulation||field==UiField::simulation_oscillator||field==UiField::rf_oscillator||
-            field==UiField::fec||field==UiField::dsp_workspace||field==UiField::fhss||field==UiField::dsss_version||field==UiField::search_arithmetic) p.configure();
+            field==UiField::fec||field==UiField::dsp_workspace||field==UiField::fhss||field==UiField::sched_hop||
+            field==UiField::sched_frequency_search||field==UiField::sched_hop_dilution||field==UiField::dsss_version||field==UiField::search_arithmetic||field==UiField::receiver_strategy) p.configure();
         else if(field==UiField::dsss_factor) {
             p.f(UiField::dsss_version).selected="interleave";
             const auto factor=static_cast<unsigned>(number(state.selected,"DSSS factor"));
@@ -2280,6 +2427,7 @@ std::chrono::steady_clock::time_point Controller::presentation_time() const {
     return impl_->options.replay_clock?impl_->options.replay_clock():Clock::now();
 }
 const live::Settings& Controller::settings() const { return impl_->settings; }
+std::optional<std::pair<double,double>> Controller::spectrum_search_band() const { return impl_->settings_valid?impl_->searched_spectrum:std::nullopt; }
 const std::vector<audio::Device>& Controller::audio_devices() const {return impl_->audio_devices;}
 const Inbox& Controller::inbox() const { return impl_->inbox; }
 const Signals& Controller::signals() const { return impl_->signals; }

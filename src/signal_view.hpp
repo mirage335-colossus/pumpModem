@@ -7,6 +7,12 @@ inline constexpr std::size_t signal_window_size=2048;
 struct SignalPlots {
     std::vector<float> waveform;
     std::vector<double> spectrum;
+    // Display-only native bins. These preserve phase without another FFT.
+    // The observed interval is [start,start+count); startup zero padding is
+    // never presented as a complete window. Live supplies stream identity.
+    std::vector<std::complex<float>> spectrum_complex;
+    std::uint64_t spectrum_start_sample=0;
+    std::size_t spectrum_sample_count=0;
     std::vector<std::complex<double>> constellation;
 };
 enum class SignalView { all, environment, constellation };

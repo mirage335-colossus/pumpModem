@@ -3,6 +3,7 @@
 #include "search_parallel.hpp"
 #include "search_arithmetic.hpp"
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <numbers>
 #include <openssl/crypto.h>
@@ -280,7 +281,7 @@ void execute_drift_search_job(const FftSearchBatch& batch,const FftSearchJob& jo
     const auto& g=batch.geometry;
     const auto transform=batch.spectrum.size();
     const auto length=static_cast<std::size_t>(g.bins_per_symbol);
-    if(g.drift_sections!=4 || !transform || (transform&(transform-1)) ||
+    if(batch.observation_skip || g.drift_sections!=4 || !transform || (transform&(transform-1)) ||
        g.bins_per_symbol>std::numeric_limits<std::size_t>::max() || !length || length>transform ||
        !batch.starts || batch.starts>transform-length+1 || batch.energy_prefix.size()<length+batch.starts ||
        !g.bin_samples || !g.pattern.symbol_samples || !g.pattern.chip_samples ||
@@ -430,7 +431,7 @@ void execute_fft_search_cpu(const FftSearchBatch& batch,std::span<const FftSearc
     const auto& geometry=batch.geometry;
     const auto transform=batch.spectrum.size();
     const auto length=static_cast<std::size_t>(geometry.bins_per_symbol);
-    if(workspaces.empty() || !transform || (transform&(transform-1)) ||
+    if(batch.observation_skip || workspaces.empty() || !transform || (transform&(transform-1)) ||
        geometry.bins_per_symbol>std::numeric_limits<std::size_t>::max() ||
        !length || length>transform || !batch.starts ||
        batch.starts>transform-length+1 || batch.score_stride<batch.starts ||
@@ -549,6 +550,366 @@ void execute_fft_search_cpu(const FftSearchBatch& batch,std::span<const FftSearc
 }
 } // namespace datapump::modem::detail
 
+namespace datapump::modem::detail::frequency_axis {
+namespace {
+using Complex=FftComplex;
+constexpr long double long_tau=2*std::numbers::pi_v<long double>;
+constexpr double refinement_margin=1e-5;
+struct IndexedJob {std::size_t original=0;double clock=1,frequency=0;};
+struct Group {
+    std::size_t first=0,count=0;
+    double clock=1,frequency=0,step=0;
+    std::array<std::size_t,5> edges{};
+};
+struct Layout {
+    std::vector<IndexedJob> order;
+    std::vector<Group> groups;
+    std::size_t maximum_transform=0,maximum_group=0,maximum_section=0,plans_bytes=0;
+    double phase_error=0;
+    long double transform_work=0;
+};
+Complex cis(long double phase) {
+    return std::polar(1.,static_cast<double>(std::remainder(phase,long_tau)));
+}
+Status inspect(const FftSearchBatch& batch,std::span<const FftSearchJob> jobs,Layout& l,bool require_observations=true) {
+    const auto& g=batch.geometry;const auto& p=g.pattern;
+    if(g.drift_sections!=4 || g.sample_fit || g.real_rank || g.differential_window_samples ||
+       !p.shaped || p.dsss || p.fhss_matched_gaps ||
+       p.spreading_mode!=static_cast<std::uint32_t>(SpreadingMode::pattern) ||
+       !p.sample_rate || !p.symbol_samples || !p.chip_samples || !p.chips_per_symbol ||
+       g.bins_per_symbol<64 || g.bins_per_symbol>65536 || !g.bin_samples ||
+       !batch.starts || !batch.score_stride || batch.score_stride<batch.starts ||
+       batch.starts>std::numeric_limits<std::size_t>::max()-g.bins_per_symbol ||
+       jobs.empty() || jobs.size()>8194 || !std::isfinite(g.noise_condition) || g.noise_condition<1 ||
+       !std::isfinite(g.evidence_count) || g.evidence_count<4 ||
+       effective_search_arithmetic(g)!=SearchArithmetic::fp64)
+        return Status::unsupported_geometry;
+    const auto length=static_cast<std::size_t>(g.bins_per_symbol);
+    if(batch.observation_skip>=length)return Status::unsupported_geometry;
+    if(require_observations && (batch.observations.size()<length+batch.starts-1 || batch.energy_prefix.size()<length+batch.starts))
+        return Status::incomplete_observations;
+    l.order.reserve(jobs.size());l.groups.reserve(3);
+    for(std::size_t i=0;i<jobs.size();++i) {
+        const auto& j=jobs[i];
+        if(j.symbol!=jobs.front().symbol || j.phase!=jobs.front().phase ||
+           j.prepared_template!=std::numeric_limits<std::uint64_t>::max() ||
+           j.range_count!=std::numeric_limits<std::size_t>::max() ||
+           !std::isfinite(j.clock_ratio) || j.clock_ratio<=0 || !std::isfinite(j.frequency_hz))
+            return Status::mixed_identity;
+        l.order.push_back({i,j.clock_ratio,j.frequency_hz});
+    }
+    std::sort(l.order.begin(),l.order.end(),[](const auto& a,const auto& b) {
+        return a.clock==b.clock?(a.frequency==b.frequency?a.original<b.original:a.frequency<b.frequency):a.clock<b.clock;
+    });
+    for(std::size_t at=0;at<l.order.size();) {
+        auto end=at+1;while(end<l.order.size() && l.order[end].clock==l.order[at].clock)++end;
+        if(l.groups.size()==3)return Status::unsupported_clock_groups;
+        Group group;group.first=at;group.count=end-at;group.clock=l.order[at].clock;
+        group.frequency=l.order[at].frequency;
+        // Fit the mathematical lattice through both rounded endpoints instead
+        // of multiplying a first subtraction's rounding error across the bank.
+        group.step=group.count>1?static_cast<double>((static_cast<long double>(l.order[end-1].frequency)-
+            group.frequency)/(group.count-1)):0;
+        if(group.count>1 && !(group.step>0))return Status::nonuniform_frequency;
+        for(std::size_t k=0;k<group.count;++k) {
+            const auto predicted=static_cast<long double>(group.frequency)+k*static_cast<long double>(group.step);
+            const auto error=std::abs(static_cast<long double>(l.order[at+k].frequency)-predicted);
+            const auto phase=long_tau*error*(static_cast<long double>(length)*g.bin_samples/p.sample_rate);
+            if(phase>1e-11L)return Status::nonuniform_frequency;
+            l.phase_error=std::max(l.phase_error,static_cast<double>(phase));
+        }
+        group.edges[4]=length;
+        std::size_t plan_bytes=0;
+        for(unsigned section=1;section<4;++section) {
+            const auto boundary=static_cast<long double>(drift_boundary(section,p.symbol_samples,4));
+            const auto edge=std::ceil((boundary/group.clock-(g.bin_samples-1)/2.L)/g.bin_samples);
+            group.edges[section]=static_cast<std::size_t>(std::clamp(edge,
+                static_cast<long double>(group.edges[section-1]),static_cast<long double>(length)));
+        }
+        for(unsigned section=0;section<4;++section) {
+            if(group.edges[section+1]==group.edges[section])return Status::unsupported_geometry;
+            const auto low=std::max(group.edges[section],std::min(batch.observation_skip,group.edges[section+1]));
+            const auto n=group.edges[section+1]-low;
+            if(!n)continue;
+            const auto q=std::bit_ceil(n+group.count-1);
+            l.maximum_transform=std::max(l.maximum_transform,q);
+            l.maximum_section=std::max(l.maximum_section,n);
+            plan_bytes+=(n+group.count+q)*sizeof(Complex);
+            if(group.count>1)l.transform_work+=static_cast<long double>(q)*std::log2(static_cast<double>(q));
+        }
+        l.plans_bytes=std::max(l.plans_bytes,plan_bytes);
+        l.maximum_group=std::max(l.maximum_group,group.count);
+        l.groups.push_back(group);at=end;
+    }
+    return Status::supported;
+}
+struct ChirpPlan {
+    std::vector<Complex> pre,post,kernel;
+    ChirpPlan(std::size_t n,std::size_t k,long double first,long double step,std::stop_token stop)
+        :pre(n),post(k),kernel(std::bit_ceil(n+k-1)) {
+        for(std::size_t i=0;i<n;++i) {
+            if((i&4095U)==0)cancelled(stop);
+            pre[i]=cis(-first*i-step*static_cast<long double>(i)*i/2);
+        }
+        for(std::size_t j=0;j<k;++j) {
+            if((j&4095U)==0)cancelled(stop);
+            const auto phase=step*static_cast<long double>(j)*j/2;
+            post[j]=cis(-phase);kernel[j]=cis(phase);
+        }
+        for(std::size_t i=1;i<n;++i)kernel[kernel.size()-i]=cis(step*static_cast<long double>(i)*i/2);
+        if(k>1)pattern_fft(kernel,false,stop);
+    }
+    void run(std::span<const Complex> input,std::span<Complex> output,
+             std::span<Complex> scratch,std::stop_token stop)const {
+        if(post.size()==1) {
+            Complex dot{};for(std::size_t i=0;i<pre.size();++i) {
+                if((i&4095U)==0)cancelled(stop);
+                dot+=input[i]*pre[i];
+            }
+            output[0]=dot;return;
+        }
+        scratch=scratch.first(kernel.size());std::fill(scratch.begin(),scratch.end(),Complex{});
+        for(std::size_t i=0;i<pre.size();++i)scratch[i]=input[i]*pre[i];
+        pattern_fft(scratch,false,stop);
+        for(std::size_t i=0;i<scratch.size();++i)scratch[i]*=kernel[i];
+        pattern_fft(scratch,true,stop);
+        for(std::size_t k=0;k<post.size();++k)output[k]=scratch[k]*post[k];
+    }
+    std::size_t bytes()const{return (pre.capacity()+post.capacity()+kernel.capacity())*sizeof(Complex);}
+};
+struct Worker {
+    std::vector<Complex> input,dots,fft;
+    std::vector<FftDriftAccumulator> accumulation;
+    std::uint64_t refinements=0;
+    Worker(const Layout& l):input(l.maximum_section),dots(l.maximum_group),fft(l.maximum_transform),
+        accumulation(l.maximum_group){}
+    Worker(Worker&&)=default;
+    Worker(const Worker&)=delete;
+    ~Worker() {
+        OPENSSL_cleanse(input.data(),input.size()*sizeof(Complex));
+        OPENSSL_cleanse(dots.data(),dots.size()*sizeof(Complex));
+        OPENSSL_cleanse(fft.data(),fft.size()*sizeof(Complex));
+        OPENSSL_cleanse(accumulation.data(),accumulation.size()*sizeof(FftDriftAccumulator));
+    }
+    std::size_t bytes()const{return (input.capacity()+dots.capacity()+fft.capacity())*sizeof(Complex)+
+        accumulation.capacity()*sizeof(FftDriftAccumulator);}
+};
+double observation_energy(const FftSearchBatch& b,std::size_t start,std::size_t length,std::stop_token stop) {
+    if(!b.observation_skip)return b.energy_prefix[start+length]-b.energy_prefix[start];
+    // Tracking's original operator sums only the retained suffix. Subtracting
+    // two full-history prefixes can erase a weak suffix after a strong excluded
+    // interval. This bounded sum also preserves the original accumulation order.
+    double energy=0;
+    for(auto i=b.observation_skip;i<length;++i) {
+        if((i&4095U)==0)cancelled(stop);
+        energy+=std::norm(b.observations[start+i]);
+    }
+    return energy;
+}
+double reference_score(const FftSearchBatch& b,const FftSearchJob& job,const Group& group,
+        std::span<const std::array<Complex,2>> rows,std::size_t start,unsigned bit,double energy,std::stop_token stop) {
+    const auto& g=b.geometry;FftDriftAccumulator accumulated;double full_norm=0;
+    for(unsigned section=0;section<4;++section) {
+        Complex dot{};double norm=0;
+        for(auto i=std::max(group.edges[section],b.observation_skip);i<group.edges[section+1];++i) {
+            if((i&4095U)==0)cancelled(stop);
+            const auto sample=static_cast<long double>(i)*g.bin_samples+(g.bin_samples-1)/2.L;
+            const auto p=rows[i][bit]*std::polar(1.,tau*job.frequency_hz*static_cast<double>(sample)/g.pattern.sample_rate);
+            norm+=std::norm(p);dot+=b.observations[start+i]*std::conj(p);
+        }
+        accumulated.dot+=dot;
+        const auto explained=pattern_explained(dot,norm,g.noise_condition,false);
+        accumulated.explained+=explained;accumulated.strongest=std::max(accumulated.strongest,explained);
+        full_norm+=norm;
+    }
+    const auto coherent=pattern_evidence(accumulated.dot,energy,full_norm,g.evidence_count,g.noise_condition,false,false);
+    return combine_drift_evidence(coherent,drift_evidence(accumulated.explained-accumulated.strongest,
+        energy,g.evidence_count,4,false),4);
+}
+bool near_decision(FftSearchScore score,const FftSearchBatch& b) {
+    const auto nearby=[](double a,double c){return c>0 && std::abs(a-c)<=refinement_margin;};
+    const auto low=std::min(b.refine_threshold,b.refine_threshold_max>0?b.refine_threshold_max:b.refine_threshold);
+    const auto high=std::max(b.refine_threshold,b.refine_threshold_max);
+    const auto threshold=[&](double s){return low>0 && s>=low-refinement_margin && s<=high+refinement_margin;};
+    const auto retained=std::max(score.zero,score.one)>=std::max(1.,b.retain_floor-refinement_margin);
+    // Near-unit fitted fractions amplify tiny arithmetic perturbations. Keep
+    // those uncommon very strong cells on the original direct calculation.
+    return std::max(score.zero,score.one)>b.geometry.evidence_count ||
+        nearby(score.zero,b.retain_floor)||nearby(score.one,b.retain_floor)||
+        threshold(score.zero)||threshold(score.one)||(retained&&(
+        std::abs(score.zero-score.one)<=refinement_margin||
+        std::abs(std::abs(score.zero-score.one)-1)<=refinement_margin));
+}
+}
+const char* status_name(Status status) {
+    switch(status) {
+    case Status::supported:return "frequency-axis FP64 CZT";
+    case Status::unsupported_geometry:return "frequency-axis geometry unsupported";
+    case Status::incomplete_observations:return "frequency-axis observations incomplete";
+    case Status::mixed_identity:return "frequency-axis jobs have different identity or restricted starts";
+    case Status::unsupported_clock_groups:return "frequency-axis exact clock groups exceed supported count";
+    case Status::nonuniform_frequency:return "frequency-axis carrier lattice is nonuniform";
+    case Status::crossover:return "timing-axis search has lower demonstrated cost";
+    case Status::score_limit:return "frequency-axis score matrix exceeds 64 MiB bound";
+    case Status::workspace:return "frequency-axis workspace unavailable";
+    }
+    return "frequency-axis unsupported";
+}
+static Requirements requirements(const FftSearchBatch& batch,std::span<const FftSearchJob> jobs,
+        std::size_t available,std::size_t requested_workers,bool force,bool require_observations) {
+    Requirements r;Layout l;r.status=inspect(batch,jobs,l,require_observations);if(!r.supported())return r;
+    r.clock_groups=l.groups.size();r.workers=std::min(batch.starts,std::max<std::size_t>(1,requested_workers));
+    if(jobs.size()>maximum_score_bytes/sizeof(FftSearchScore)/batch.score_stride) {
+        r.status=Status::score_limit;return r;
+    }
+    r.score_count=jobs.size()*batch.score_stride;r.score_bytes=r.score_count*sizeof(FftSearchScore);
+    const auto original=std::bit_ceil(static_cast<std::size_t>(batch.geometry.bins_per_symbol)+batch.starts-1);
+    const auto old_work=4.L*jobs.size()*original*std::log2(static_cast<double>(original));
+    r.relative_work=static_cast<double>(batch.starts*l.transform_work/std::max(1.L,old_work));
+    bool large_groups=true;for(const auto& group:l.groups)if(group.count>1 && group.count<128)large_groups=false;
+    // These bounds include the measured 3565-frequency/1024-start case and
+    // exclude the measured losing 21-frequency broad search. For <=4 starts,
+    // existing direct scoring still repeatedly generates public finite pulses;
+    // only banks >=1024 have measured support for this distinct crossover.
+    if(!force && (!large_groups || jobs.size()<128 ||
+       (batch.starts<=4?jobs.size()<1024:r.relative_work>.65))) {
+        r.status=Status::crossover;return r;
+    }
+    const auto fixed=l.order.capacity()*sizeof(IndexedJob)+l.groups.capacity()*sizeof(Group)+
+        l.plans_bytes+4*sizeof(std::optional<ChirpPlan>)+
+        static_cast<std::size_t>(batch.geometry.bins_per_symbol)*sizeof(std::array<Complex,2>);
+    const auto worker=(l.maximum_section+l.maximum_group+l.maximum_transform)*sizeof(Complex)+
+        l.maximum_group*sizeof(FftDriftAccumulator)+sizeof(Worker);
+    if(r.score_bytes>available || fixed>available-r.score_bytes || worker>available-r.score_bytes-fixed) {
+        r.status=Status::workspace;return r;
+    }
+    r.workers=std::min(r.workers,(available-r.score_bytes-fixed)/worker);
+    r.scratch_bytes=fixed+r.workers*worker;r.status=Status::supported;return r;
+}
+Requirements preflight(const FftSearchBatch& batch,std::span<const FftSearchJob> jobs,
+        std::size_t available,std::size_t requested_workers,bool force) {
+    return requirements(batch,jobs,available,requested_workers,force,true);
+}
+Requirements choose_geometry(const FftSearchGeometry& geometry,std::span<const FftSearchJob> jobs,
+        std::size_t starts,std::size_t stride,std::size_t available,std::size_t workers,bool force,
+        std::size_t observation_skip) {
+    FftSearchBatch batch;batch.geometry=geometry;batch.starts=starts;batch.score_stride=stride;
+    batch.observation_skip=observation_skip;
+    return requirements(batch,jobs,available,workers,force,false);
+}
+bool execute(const FftSearchBatch& batch,std::span<const FftSearchJob> jobs,const Requirements& request,
+        std::span<FftSearchScore> scores,PatternCode& code,Work* work,std::stop_token stop) {
+    if(!request.supported() || scores.size()<request.score_count)return false;
+    const auto checked=preflight(batch,jobs,request.score_bytes+request.scratch_bytes,request.workers,true);
+    if(!checked.supported() || checked.score_count!=request.score_count ||
+       checked.scratch_bytes>request.scratch_bytes || checked.workers!=request.workers)return false;
+    cancelled(stop);Layout layout;if(inspect(batch,jobs,layout)!=Status::supported)return false;
+    const auto length=static_cast<std::size_t>(batch.geometry.bins_per_symbol);
+    // Observations, energies and result storage are immutable/nonaliasing input
+    // contracts. Explicit range checks prevent a caller's shared arena from
+    // overwriting PCM while starts execute in parallel.
+    const auto overlaps=[](const void* a,std::size_t an,const void* b,std::size_t bn) {
+        const auto x=reinterpret_cast<std::uintptr_t>(a),y=reinterpret_cast<std::uintptr_t>(b);
+        return an&&bn&&(x<=y?y-x<an:x-y<bn);
+    };
+    if(overlaps(scores.data(),request.score_bytes,batch.observations.data(),batch.observations.size_bytes()) ||
+       overlaps(scores.data(),request.score_bytes,batch.energy_prefix.data(),batch.energy_prefix.size_bytes()) ||
+       overlaps(scores.data(),request.score_bytes,jobs.data(),jobs.size_bytes()))return false;
+    // Leave an ample exponent margin for the unscaled forward transforms and
+    // their products. Ordinary finite PCM is many orders below this bound.
+    const auto input_limit=std::sqrt(std::numeric_limits<double>::max())/
+        (32*static_cast<double>(layout.maximum_transform));
+    for(std::size_t i=batch.observation_skip;i<length+batch.starts-1;++i) {
+        if((i&4095U)==0)cancelled(stop);
+        const auto value=batch.observations[i];
+        if(!std::isfinite(value.real()) || !std::isfinite(value.imag()) ||
+           std::abs(value.real())>input_limit || std::abs(value.imag())>input_limit)return false;
+    }
+    code.set_stream_phase_samples(jobs.front().phase);
+    if(jobs.front().symbol>std::numeric_limits<std::uint64_t>::max()/batch.geometry.pattern.chips_per_symbol)
+        throw Error("pattern stream coordinate overflow");
+    code.prepare_symbol(jobs.front().symbol*batch.geometry.pattern.chips_per_symbol,stop);
+    std::vector<std::array<Complex,2>> rows(length);std::vector<Worker> workers;workers.reserve(request.workers);
+    struct CleanRows {std::vector<std::array<Complex,2>>& rows;
+        ~CleanRows(){OPENSSL_cleanse(rows.data(),rows.size()*sizeof(rows[0]));}} clean_rows{rows};
+    for(std::size_t i=0;i<request.workers;++i)workers.emplace_back(layout);
+    if(work){work->peak_bytes=std::max(work->peak_bytes,request.score_bytes+request.scratch_bytes);
+        work->max_lattice_phase_error=std::max(work->max_lattice_phase_error,layout.phase_error);}
+    for(const auto& group:layout.groups) {
+        cancelled(stop);const auto& nominal=jobs[layout.order[group.first].original];
+        for(std::size_t i=batch.observation_skip;i<length;++i) {
+            if((i&4095U)==0)cancelled(stop);
+            for(unsigned bit=0;bit<2;++bit)rows[i][bit]=template_value(code,batch.geometry,nominal,i,bit,{},false);
+        }
+        if(work)work->row_values+=2*(length-batch.observation_skip);
+        std::array<std::optional<ChirpPlan>,4> plans;
+        std::array<std::array<double,4>,2> norms{};std::array<double,2> full_norm{};
+        for(unsigned section=0;section<4;++section) {
+            const auto low=std::max(group.edges[section],std::min(batch.observation_skip,group.edges[section+1]));
+            const auto n=group.edges[section+1]-low;
+            if(!n)continue;
+            plans[section].emplace(n,group.count,long_tau*group.frequency*batch.geometry.bin_samples/batch.geometry.pattern.sample_rate,
+                long_tau*group.step*batch.geometry.bin_samples/batch.geometry.pattern.sample_rate,stop);
+            for(auto i=low;i<low+n;++i)for(unsigned bit=0;bit<2;++bit)norms[bit][section]+=std::norm(rows[i][bit]);
+            for(unsigned bit=0;bit<2;++bit)full_norm[bit]+=norms[bit][section];
+        }
+        std::size_t actual=layout.order.capacity()*sizeof(IndexedJob)+layout.groups.capacity()*sizeof(Group)+
+            rows.capacity()*sizeof(rows[0])+workers.capacity()*sizeof(Worker)+sizeof(plans);
+        for(const auto& w:workers)actual+=w.bytes();
+        for(const auto& p:plans)if(p)actual+=p->bytes();
+        if(actual>request.scratch_bytes)throw Error("frequency-axis allocation exceeded preflight");
+        parallel_search_ranges(batch.starts,request.workers,1,[&](std::size_t worker,std::size_t begin,std::size_t end) {
+            auto& scratch=workers[worker];
+            for(auto start=begin;start<end;++start) {
+                cancelled(stop);
+                const auto energy=observation_energy(batch,start,length,stop);
+                for(unsigned bit=0;bit<2;++bit) {
+                    std::fill_n(scratch.accumulation.begin(),group.count,FftDriftAccumulator{});
+                    for(unsigned section=0;section<4;++section) {
+                        const auto low=std::max(group.edges[section],std::min(batch.observation_skip,group.edges[section+1]));
+                        const auto n=group.edges[section+1]-low;
+                        if(!n)continue;
+                        for(std::size_t i=0;i<n;++i)scratch.input[i]=batch.observations[start+low+i]*std::conj(rows[low+i][bit]);
+                        plans[section]->run(std::span(scratch.input).first(n),scratch.dots,scratch.fft,stop);
+                        for(std::size_t k=0;k<group.count;++k) {
+                            const auto& job=jobs[layout.order[group.first+k].original];
+                            const auto origin=static_cast<long double>(low)*batch.geometry.bin_samples+(batch.geometry.bin_samples-1)/2.L;
+                            const auto dot=scratch.dots[k]*cis(-long_tau*job.frequency_hz*origin/batch.geometry.pattern.sample_rate);
+                            auto& a=scratch.accumulation[k];a.dot+=dot;
+                            const auto explained=pattern_explained(dot,norms[bit][section],batch.geometry.noise_condition,false);
+                            a.explained+=explained;a.strongest=std::max(a.strongest,explained);
+                        }
+                    }
+                    for(std::size_t k=0;k<group.count;++k) {
+                        const auto original=layout.order[group.first+k].original;auto& out=scores[original*batch.score_stride+start];
+                        const auto& a=scratch.accumulation[k];
+                        const auto coherent=pattern_evidence(a.dot,energy,full_norm[bit],batch.geometry.evidence_count,
+                            batch.geometry.noise_condition,false,false);
+                        const auto value=combine_drift_evidence(coherent,drift_evidence(a.explained-a.strongest,
+                            energy,batch.geometry.evidence_count,4,false),4);
+                        if(bit)out.one=value;else out.zero=value;
+                    }
+                }
+                for(std::size_t k=0;k<group.count;++k) {
+                    const auto original=layout.order[group.first+k].original;auto& out=scores[original*batch.score_stride+start];
+                    if(near_decision(out,batch)) {
+                        out={reference_score(batch,jobs[original],group,rows,start,0,energy,stop),
+                             reference_score(batch,jobs[original],group,rows,start,1,energy,stop)};
+                        ++scratch.refinements;
+                    }
+                }
+            }
+        });
+        if(work && group.count>1) {
+            const auto sections=static_cast<std::uint64_t>(std::count_if(plans.begin(),plans.end(),[](const auto& p){return p.has_value();}));
+            work->forward_transforms+=sections*(1+2*batch.starts);work->inverse_transforms+=sections*2*batch.starts;
+        }
+    }
+    if(work)for(const auto& worker:workers)work->refined_cells+=worker.refinements;
+    cancelled(stop);return true;
+}
+}
+
 namespace datapump::modem::detail::partitioned_paired {
 namespace {
 using Complex=FftComplex;
@@ -562,7 +923,7 @@ std::span<const FftStartRange> selected(const FftSearchBatch& batch,const FftSea
 }
 bool supported(const FftSearchBatch& batch){
     const auto& g=batch.geometry;
-    return !g.sample_fit&&g.drift_sections<=1&&!g.differential_window_samples&&
+    return !batch.observation_skip&&!g.sample_fit&&g.drift_sections<=1&&!g.differential_window_samples&&
         g.bins_per_symbol&&g.bins_per_symbol<=maximum&&g.bin_samples&&g.pattern.chip_samples&&
         g.pattern.chips_per_symbol&&g.pattern.sample_rate&&g.pattern.symbol_samples&&batch.starts&&
         (batch.nominal_reference.empty()||batch.nominal_reference.size()==g.bins_per_symbol);

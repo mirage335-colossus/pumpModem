@@ -6,6 +6,7 @@
 #include "datapump/boundary_sync.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_search.hpp"
+#include "datapump/receiver_strategy.hpp"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -22,6 +23,8 @@ struct RecoverySource {
 namespace {
 Options effective_options(const Options& input) {
     auto result=input;
+    if(result.modem.scheduled_hopping && result.modem.scheduled_hopping->enabled())
+        result.modem.data_key=result.key; // One immutable schedule key before masking and timing.
     if(result.modem.spreading_mode==modem::SpreadingMode::tone) {
         result.key.reset();result.modem.data_key.reset();
         result.modem.scramble=false;result.modem.dsss=false;result.modem.dsss_factor=1;
@@ -51,6 +54,8 @@ void validate(const Options& options) {
         throw Error("invalid capture epoch");
     if((options.modem.scramble || options.modem.dsss) && !options.key)
         throw Error("encrypted spreading requires a symmetric key");
+    if(options.modem.scheduled_hopping && options.modem.scheduled_hopping->enabled() && !options.key)
+        throw Error("scheduled hopping requires a symmetric key");
     (void)interval_parity_bytes(options.fec);
     (void)source_storage_limit(options.content_limit);
     if(options.recovery_options.enabled &&
@@ -202,6 +207,19 @@ Bytes byte_bits(std::span<const std::uint8_t> bytes) {
     for(auto byte:bytes)for(unsigned i=0;i<8;++i)bits.push_back((byte>>(7-i))&1);
     return bits;
 }
+std::uint64_t physical_payload_span(const modem::Config& config,std::uint64_t symbols) {
+    const auto duration=modem::symbol_sample_count(config);
+    if(!modem::scheduled_bursts(config))return modem::symbol_schedule_detail::add(
+        modem::scheduled_symbol_offset(config,config.stream_epoch,config.stream_phase_samples,symbols-1),duration);
+    const modem::SchedHopSourceMap map(*config.scheduled_hopping,*config.data_key,config.sample_rate);
+    const auto anchor=modem::symbol_schedule_detail::add(modem::symbol_schedule_detail::multiply(config.stream_epoch,config.sample_rate),config.stream_phase_samples);
+    const auto source_span=modem::packed_scheduled_symbols(config)?modem::symbol_schedule_detail::add(
+        modem::ScheduledSymbolCalendar(config).offset_source(config.stream_epoch,config.stream_phase_samples,symbols-1),duration):
+        modem::symbol_schedule_detail::multiply(symbols,duration);
+    const auto end=map.source_to_physical(map.locate(anchor).source.add_samples(source_span),true);
+    if(end.fraction!=0 || end.sample<anchor)throw Error("invalid scheduled payload extent");
+    return end.sample-anchor;
+}
 void mask_binary_bits(std::span<std::uint8_t>,const Options&,std::size_t,modem::TransmitTrace*);
 }
 bool uses_raw_message(const Message& message) noexcept {
@@ -272,20 +290,9 @@ Estimate estimate_binary(std::span<const std::uint8_t> bits,const Options& input
     const auto symbol_samples=modem::symbol_sample_count(value.modem);
     if(symbols>std::numeric_limits<std::uint64_t>::max()/symbol_samples)
         throw Error("transmission duration exceeds 64-bit sample counter");
-    const auto content_samples=modem::symbol_schedule_detail::add(modem::scheduled_symbol_offset(
-        value.modem,value.timestamp,value.modem.stream_phase_samples,symbols-1),symbol_samples);
-    const auto hardware_samples=modem::training_sample_count(value.modem);
-    if(hardware_samples>std::numeric_limits<std::uint64_t>::max()-content_samples)
-        throw Error("transmission duration exceeds 64-bit sample counter");
-    const auto padding=modem::pattern_pulse_padding_samples(value.modem);
-    const auto unpadded=hardware_samples+content_samples;
-    if(padding>(std::numeric_limits<std::uint64_t>::max()-unpadded)/2)
-        throw Error("pulse tails exceed 64-bit sample counter");
-    const auto payload_end=unpadded+2*padding;
-    const auto suppression=modem::suppression_sample_count(value.modem);
-    if(suppression>std::numeric_limits<std::uint64_t>::max()-payload_end)
-        throw Error("echo suppression exceeds 64-bit sample counter");
-    const auto samples=payload_end+suppression;
+    const auto resolved=modem::scheduled_estimate_config(seeded_config(value,value.timestamp));
+    const auto content_samples=physical_payload_span(resolved,symbols);
+    const auto samples=modem::pattern_transmission_sample_count(resolved,symbols);
     Estimate result;result.wire_bits=bits.size();
     result.content_bytes=result.coded_bytes=bits.size()/8+(bits.size()%8!=0);
     result.content_seconds=result.coded_seconds=static_cast<double>(content_samples)/value.modem.sample_rate;
@@ -308,7 +315,7 @@ Estimate estimate_binary(std::span<const std::uint8_t> bits,const Options& input
         trace.wire_plain_bits.resize(prefix);
         if(value.key)trace.data_key_bits.resize(prefix);
         modem::StreamingTransmitter probe(modem::RawBits{Bytes(bits.begin(),bits.end())},
-            seeded_config(value,value.timestamp),std::max(value.modem.memory_limit,value.dsp_workspace_bytes/4),
+            resolved,std::max(value.modem.memory_limit,value.dsp_workspace_bytes/4),
             std::move(trace));
         scratch=probe.working_bytes();
         result.memory_supported=scratch<=value.dsp_workspace_bytes/4;
@@ -328,7 +335,7 @@ std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
     const auto options=effective_options(input_options);
     const auto value=binary_options(bits,options);
     const auto production=seeded_config(value,value.timestamp);
-    if((value.key || production.dsss || production.dsss_factor>1 || production.fake_hopping) &&
+    if((value.key || production.dsss || production.dsss_factor>1 || production.fake_hopping || (production.scheduled_hopping&&production.scheduled_hopping->enabled())) &&
        (!value.key || !modem::private_cover_enabled(production)))
         throw Error("production transmission cannot use diagnostic surrounding waveforms");
     modem::RawBits raw{Bytes(bits.begin(),bits.end())};
@@ -354,7 +361,7 @@ Bytes message_wire_bits(const Message& message,const Options& input) {
 std::unique_ptr<modem::StreamingTransmitter> message_transmitter(const Message& message,const Options& input) {
     const auto options=effective_options(input);
     const auto production=seeded_config(options,options.timestamp);
-    if((options.key || production.dsss || production.dsss_factor>1 || production.fake_hopping) &&
+    if((options.key || production.dsss || production.dsss_factor>1 || production.fake_hopping || (production.scheduled_hopping&&production.scheduled_hopping->enabled())) &&
        (!options.key || !modem::private_cover_enabled(production)))
         throw Error("production transmission cannot use diagnostic surrounding waveforms");
     modem::TransmitTrace trace;trace.active=true;trace.short_text=uses_raw_message(message);
@@ -375,8 +382,7 @@ std::unique_ptr<modem::StreamingTransmitter> message_transmitter(const Message& 
     auto context=options;context.content_limit=std::max(context.content_limit,bits.size());
     mask_binary_bits(bits,context,0,&trace);
     if(message.kind==MessageKind::text && message.repeatable && message.data.size()>options.repeat_policy.minimum_payload_bytes &&
-       (static_cast<long double>(modem::scheduled_symbol_offset(options.modem,options.timestamp,options.modem.stream_phase_samples,bits.size()-1))+
-        modem::symbol_sample_count(options.modem))/options.modem.sample_rate>options.repeat_policy.maximum_seconds)
+       static_cast<long double>(physical_payload_span(production,bits.size()))/production.sample_rate>options.repeat_policy.maximum_seconds)
         throw Error("repeatable content exceeds airtime limit");
     return std::make_unique<modem::StreamingTransmitter>(modem::RawBits{std::move(bits)},
         production,options.dsp_workspace_bytes/4,std::move(trace));
@@ -766,7 +772,14 @@ Received receive(std::span<const float> samples, const Options& input_options, P
         try {
         auto value=options;value.modem=profile;
         modem::PatternSearch search;search.allow_local_clock_fallback=true;
-        if(profile.oscillator_search)search.hypotheses=modem::oscillator_pattern_search(profile,options.clock_sync?modem::utc_transmit_rate_limit(profile):0).hypotheses;
+        if(profile.oscillator_search) {
+            const auto declared=modem::oscillator_pattern_search(profile,options.clock_sync?modem::utc_transmit_rate_limit(profile):0);
+            search.hypotheses=declared.hypotheses;
+            search.admitted_frequency_half_width_hz=declared.frequency.requested_half_width_hz;
+            search.admitted_clock_half_width_ppm=declared.requested_clock_half_width_ppm;
+            search.complex_frequency_coverage=!declared.frequency.limited;
+            search.complex_clock_coverage=declared.clock_half_width_ppm>=declared.requested_clock_half_width_ppm;
+        }
         else search.expand_clock_search=true;
         search.start_offset_seconds=static_cast<double>(epoch)-options.capture_epoch.value_or(static_cast<double>(options.timestamp));
         if(!options.capture_epoch)*search.start_offset_seconds+=(static_cast<double>(modem::training_sample_count(profile))+
@@ -774,6 +787,7 @@ Received receive(std::span<const float> samples, const Options& input_options, P
         search.bit_limit=pattern_bit_limit(value.content_limit);
 
         search.search_stream_phases=options.key.has_value();
+        search.receiver_bank_count=modem::receiver_strategy_bank_count(profile,options.search_seconds,1,profiles.size());
         search.start_uncertainty_seconds=options.search_seconds+1.;
         modem::PatternReceiver decoder(seeded_config(value,epoch),options.dsp_workspace_bytes,search);
         StreamReceiver content(value,epoch);
@@ -818,7 +832,14 @@ Received simulate(const Message& message, const Options& input_options, const mo
         // This source supplies fixed-rate simulated PCM, without the hardware
         // UTC resampler. Retain its complete oscillator bank without charging
         // or searching an additional correction that cannot occur here.
-        if(profile.oscillator_search)search.hypotheses=modem::oscillator_pattern_search(profile).hypotheses;
+        if(profile.oscillator_search) {
+            const auto declared=modem::oscillator_pattern_search(profile);
+            search.hypotheses=declared.hypotheses;
+            search.admitted_frequency_half_width_hz=declared.frequency.requested_half_width_hz;
+            search.admitted_clock_half_width_ppm=declared.requested_clock_half_width_ppm;
+            search.complex_frequency_coverage=!declared.frequency.limited;
+            search.complex_clock_coverage=declared.clock_half_width_ppm>=declared.requested_clock_half_width_ppm;
+        }
         else search.expand_clock_search=true;
         search.start_offset_seconds=static_cast<double>(epoch)-static_cast<double>(center)+
             (static_cast<double>(modem::training_sample_count(profile))+
@@ -826,6 +847,7 @@ Received simulate(const Message& message, const Options& input_options, const mo
         search.bit_limit=pattern_bit_limit(value.content_limit);
 
         search.search_stream_phases=options.key.has_value();
+        search.receiver_bank_count=modem::receiver_strategy_bank_count(profile,options.search_seconds,1,profiles.size());
         search.start_uncertainty_seconds=options.search_seconds+1.;
         modem::PatternReceiver decoder(seeded_config(value,epoch),options.dsp_workspace_bytes,search);
         StreamReceiver content(value,epoch);

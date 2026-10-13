@@ -134,9 +134,19 @@ struct FftSearchBatch {
     std::span<const std::array<FftComplex,2>> nominal_reference;
     std::span<const FftStartRange> start_ranges;
     std::size_t starts = 0, score_stride = 0;
+    // Frequency-axis continuation only: omit leading projection bins that
+    // preceded the observed stream. Keep the original template coordinates,
+    // carrier phase origins and clock-scaled quarter boundaries. The caller
+    // supplies evidence_count for the remaining observations; it is not
+    // decremented again. Other batch operators reject a nonzero skip.
+    std::size_t observation_skip = 0;
     // INT8 may reject only certified scores strictly below this retention floor.
     // Zero requests exact reference scores at every selected cell.
     double retain_floor = 0;
+    // Optional caller-supplied interval of adaptive admission thresholds. The
+    // frequency-axis operator refines nearby numeric scores; it owns no trial
+    // accounting or admission policy. Zero leaves this additional check off.
+    double refine_threshold = 0, refine_threshold_max = 0;
     FftQuantizedDirect* quantized_direct = nullptr;
     const FftPrivateTemplate* private_template = nullptr;
 };
@@ -204,6 +214,51 @@ FftComplex pattern_differential_whiten(FftComplex dot,double template_energy,
                                       FftComplex template_square,double projection_image_ratio);
 
 } // namespace datapump::modem::detail
+
+namespace datapump::modem::detail::frequency_axis {
+// Four-quarter acquisition can evaluate a uniform carrier lattice with
+// a chirp-z transform at each original start. All rows and bulk arithmetic are
+// FP64. Public templates, exact clock ratios and original job/start identities
+// are retained, including independent private bit rows. DSSS, real-Gram and
+// differential geometries currently fall back.
+enum class Status {
+    supported, unsupported_geometry, incomplete_observations, mixed_identity,
+    unsupported_clock_groups, nonuniform_frequency, crossover, score_limit,
+    workspace
+};
+const char* status_name(Status);
+struct Requirements {
+    Status status=Status::unsupported_geometry;
+    std::size_t score_count=0,score_bytes=0,scratch_bytes=0,workers=0,clock_groups=0;
+    double relative_work=0;
+    bool supported()const{return status==Status::supported;}
+};
+struct Work {
+    std::uint64_t row_values=0,forward_transforms=0,inverse_transforms=0,refined_cells=0;
+    std::size_t peak_bytes=0;
+    double max_lattice_phase_error=0;
+};
+inline constexpr std::size_t maximum_score_bytes=64*1024*1024;
+// available_bytes includes output scores plus all internal plans, row caches
+// and per-worker scratch. PatternCode is existing caller-owned/budgeted state.
+// requested_workers is an explicit ceiling, not an implicit hardware query.
+// force_crossover is diagnostic: it bypasses cost selection only.
+Requirements preflight(const FftSearchBatch&,std::span<const FftSearchJob>,
+    std::size_t available_bytes,std::size_t requested_workers=1,bool force_crossover=false);
+// Size-only planner equivalent. Uses the same identity, lattice, crossover and
+// workspace checks without fabricating observation pointers or allocating PCM.
+Requirements choose_geometry(const FftSearchGeometry&,std::span<const FftSearchJob>,
+    std::size_t starts,std::size_t score_stride,std::size_t available_bytes,
+        std::size_t requested_workers=1,bool force_crossover=false,
+        std::size_t observation_skip=0);
+// Scores retain batch.score_stride and original job/start indexing; padding is
+// untouched. False means unsupported or changed preflight before score writes.
+// Cancellation/error can leave partial unpublished scores, which caller drops.
+// No cache survives this call: clock, phase, symbol, pattern or PCM changes
+// cannot reuse another transmission's rows or observations.
+bool execute(const FftSearchBatch&,std::span<const FftSearchJob>,const Requirements&,
+    std::span<FftSearchScore>,PatternCode&,Work* = nullptr,std::stop_token = {});
+}
 
 // Bounded paired-template correlation in borrowed FFT scratch.
 namespace datapump::modem::detail::partitioned_paired {

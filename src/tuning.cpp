@@ -363,6 +363,27 @@ std::string_view search_arithmetic_id(modem::SearchArithmetic arithmetic) {
     }
     throw Error("invalid receiver search arithmetic");
 }
+modem::ReceiverStrategy parse_receiver_strategy(std::string_view name) {
+    using S=modem::ReceiverStrategy;
+    if(name=="auto"||name=="automatic")return S::automatic;
+    if(name=="existing")return S::existing_only;
+    if(name=="complex")return S::complex_only;
+    if(name=="amplitude")return S::amplitude_only;
+    throw Error("receiver-strategy must be auto, existing, complex or amplitude");
+}
+std::string_view receiver_strategy_id(modem::ReceiverStrategy strategy) {
+    using S=modem::ReceiverStrategy;
+    switch(strategy) {
+    case S::automatic:return "auto";
+    case S::existing_only:return "existing";
+    case S::complex_only:return "complex";
+    case S::amplitude_only:return "amplitude";
+    }
+    throw Error("invalid receiver strategy");
+}
+void validate_receiver_cpu_budget(double ratio) {
+    if(!std::isfinite(ratio)||ratio<=0)throw Error("receiver CPU budget must be finite and positive");
+}
 Plan resolve(double bandwidth_hz,double target_snr_db_hz,PatternMode mode,bool encryption,
              std::optional<double> carrier_hz,unsigned dsss_factor,modem::OuterDsssVersion version,
              modem::SearchArithmetic arithmetic) {

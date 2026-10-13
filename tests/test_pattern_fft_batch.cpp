@@ -957,9 +957,242 @@ void private_template_interpolation() {
 }
 void run(){score_equivalence();direct_equivalence();fallback_and_cancellation();planner_geometry_equivalence();arithmetic_direct_screening();arithmetic_fft_override();native_partition_precision();private_template_interpolation();private_template_exact_fallback();}
 }
+namespace {
+void frequency_axis_equivalence_and_bounds() {
+    for(bool keyed:{false,true}) {
+    Config config;config.sample_rate=256;config.bandwidth_hz=32;config.carrier_hz=61;
+    config.integration_seconds=16.00390625;config.pulse_shaping=true;config.stream_epoch=1789312671;
+    config.scramble=keyed;config.spreading_seed[2]=91;
+    PatternCode code(config,config.stream_epoch);
+    FftSearchBatch batch;auto& g=batch.geometry;
+    g.pattern={config.stream_epoch,code.chip_samples(),code.chips_per_symbol(),code.symbol_samples(),
+        config.sample_rate,static_cast<std::uint32_t>(config.spreading_mode),1,keyed?1U:0U,0,
+        config.spreading_seed,config.dsss_seed};
+    constexpr std::size_t bin=4,starts=7,frequencies=129;
+    const auto length=static_cast<std::size_t>((code.symbol_samples()+bin-1)/bin+3);
+    g.bins_per_symbol=length;g.bin_samples=bin;g.carrier_hz=config.carrier_hz;
+    g.evidence_count=length;g.noise_condition=1.001;g.drift_sections=4;g.extended_clock_window=1;
+    batch.starts=starts;batch.score_stride=starts+3;batch.first_bin=37;batch.retain_floor=5;
+    const auto transform=std::bit_ceil(length+starts-1);
+    std::vector<FftComplex> input(transform),spectrum;
+    std::vector<double> energy(transform+1);
+    std::mt19937_64 random(81821);std::normal_distribution<double> normal;
+    code.set_stream_phase_samples(7);
+    for(std::size_t i=0;i<input.size();++i) {
+        const auto within=static_cast<double>(i*bin)+(bin-1)/2.;
+        const auto signal=within<code.symbol_samples()?code.shaped_value(3*code.chips_per_symbol(),0,within):FftComplex{};
+        input[i]=.18*FftComplex{normal(random),normal(random)}+signal*std::polar(1.,.31*(i*4/length));
+        energy[i+1]=energy[i]+std::norm(input[i]);
+    }
+    spectrum=input;pattern_fft(spectrum,false,{});
+    batch.spectrum=spectrum;batch.observations=input;batch.energy_prefix=energy;
+    std::vector<FftSearchJob> jobs;
+    for(double rate:{.997,1.,1.003})for(std::size_t f=0;f<frequencies;++f) {
+        FftSearchJob job{3,7,f,.002*(static_cast<double>(f)-64)};job.clock_ratio=rate;
+        if(f+1==frequencies)job.frequency_hz=std::nextafter(job.frequency_hz,1.);
+        jobs.push_back(job);
+    }
+    std::reverse(jobs.begin(),jobs.end());
+    std::vector<FftSearchScore> expected(jobs.size()*batch.score_stride,untouched),actual(expected),parallel(expected);
+    std::vector<FftSearchWorkspace> workspace;workspace.emplace_back(config,transform,true,starts);
+    execute_fft_search_cpu(batch,jobs,expected,workspace);
+    auto requirements=frequency_axis::preflight(batch,jobs,8*1024*1024,1,true);
+    check(requirements.supported(),"frequency-axis test geometry rejected");
+    const auto modeled=frequency_axis::choose_geometry(g,jobs,starts,batch.score_stride,8*1024*1024,1,true);
+    check(modeled.status==requirements.status && modeled.score_count==requirements.score_count &&
+        modeled.score_bytes==requirements.score_bytes && modeled.scratch_bytes==requirements.scratch_bytes &&
+        modeled.workers==requirements.workers && modeled.relative_work==requirements.relative_work,
+        "frequency-axis planner and runtime geometry disagree");
+    frequency_axis::Work work;
+    // Refine an actual candidate through the caller's adaptive threshold interval.
+    const auto maximum=std::max_element(expected.begin(),expected.end(),[](auto a,auto b){return a.zero<b.zero;})->zero;
+    batch.refine_threshold=maximum-.01;
+    batch.refine_threshold_max=maximum+.01;
+    check(frequency_axis::execute(batch,jobs,requirements,actual,code,&work),"frequency-axis execution disagreed with preflight");
+    bool meaningful=false;
+    for(std::size_t f=0;f<jobs.size();++f)for(std::size_t start=0;start<batch.score_stride;++start) {
+        const auto a=actual[f*batch.score_stride+start],b=expected[f*batch.score_stride+start];
+        if(start>=starts)check(equal(a,untouched),"frequency-axis wrote original-job padding");
+        else {
+            meaningful|=std::max(a.zero,a.one)>10;
+            check(std::abs(a.zero-b.zero)<=1e-7*std::max({1.,a.zero,b.zero})&&
+                  std::abs(a.one-b.one)<=1e-7*std::max({1.,a.one,b.one}),
+                  "frequency-axis score differs across clock boundaries, fractional chips or original ordering");
+        }
+    }
+    check(meaningful,"frequency-axis fixture missed meaningful evidence");
+    check(work.row_values==6*length,"frequency-axis did not reuse exact clock rows");
+    check(work.refined_cells>0,"frequency-axis fixture missed threshold refinement");
+    check(work.max_lattice_phase_error>0,"frequency-axis fixture missed rounded endpoint");
+    check(work.peak_bytes==requirements.score_bytes+requirements.scratch_bytes &&
+        work.peak_bytes<=8*1024*1024,"frequency-axis working memory accounting changed");
+    const auto bounded=frequency_axis::preflight(batch,jobs,work.peak_bytes,1,true);
+    check(bounded.supported(),"frequency-axis exact advertised workspace rejected");
+    check(frequency_axis::preflight(batch,jobs,work.peak_bytes-1,1,true).status==frequency_axis::Status::workspace,
+        "frequency-axis accepted one byte below required workspace");
+    auto parallel_requirements=frequency_axis::preflight(batch,jobs,8*1024*1024,3,true);
+    check(frequency_axis::execute(batch,jobs,parallel_requirements,parallel,code),"parallel frequency-axis rejected valid workspace");
+    check(std::equal(actual.begin(),actual.end(),parallel.begin(),equal),"frequency-axis worker count changed exact scores or padding");
+    std::vector<FftSearchScore> rejected(actual.size(),untouched);
+    check(!frequency_axis::execute(batch,jobs,requirements,std::span(rejected).first(rejected.size()-1),code),
+        "frequency-axis accepted truncated output");
+    check(std::all_of(rejected.begin(),rejected.end(),[](auto value){return equal(value,untouched);}),
+        "failed frequency-axis preflight wrote output");
+    std::stop_source stop;stop.request_stop();bool cancelled=false;
+    try{frequency_axis::execute(batch,jobs,requirements,rejected,code,nullptr,stop.get_token());}catch(const Error&){cancelled=true;}
+    check(cancelled,"frequency-axis ignored cancellation");
+    check(std::all_of(rejected.begin(),rejected.end(),[](auto value){return equal(value,untouched);}),
+        "pre-cancelled frequency-axis wrote output");
+    for(const double invalid:{std::numeric_limits<double>::quiet_NaN(),
+                              std::numeric_limits<double>::infinity(),1e300}) {
+        const auto original=input[11];input[11]={invalid,0};
+        check(!frequency_axis::execute(batch,jobs,requirements,rejected,code),
+            "frequency-axis accepted nonfinite or overflowing observations");
+        check(std::all_of(rejected.begin(),rejected.end(),[](auto value){return equal(value,untouched);}),
+            "frequency-axis numeric fallback wrote output");
+        input[11]=original;
+    }
+    const auto excessive_starts=batch.starts;batch.starts=std::numeric_limits<std::size_t>::max();
+    check(!frequency_axis::preflight(batch,jobs,8*1024*1024,1,true).supported(),
+        "frequency-axis accepted overflowing timing extent");batch.starts=excessive_starts;
+    auto changed=jobs;++changed[0].symbol;
+    check(frequency_axis::preflight(batch,changed,8*1024*1024,1,true).status==frequency_axis::Status::mixed_identity,
+        "frequency-axis reused an unrelated symbol");
+    changed=jobs;changed[10].frequency_hz+=.0001;
+    check(frequency_axis::preflight(batch,changed,8*1024*1024,1,true).status==frequency_axis::Status::nonuniform_frequency,
+        "frequency-axis silently rounded a nonuniform lattice");
+    const auto unsupported=[&]{return frequency_axis::preflight(batch,jobs,8*1024*1024,1,true).status==frequency_axis::Status::unsupported_geometry;};
+    g.sample_fit=1;check(unsupported(),"frequency-axis omitted real Gram covariance");g.sample_fit=0;
+    g.pattern.dsss=1;check(unsupported(),"unqualified DSSS geometry entered frequency-axis");g.pattern.dsss=0;
+    g.differential_window_samples=64;check(unsupported(),"frequency-axis omitted differential branch");g.differential_window_samples=0;
+    const auto old_stride=batch.score_stride;batch.score_stride=frequency_axis::maximum_score_bytes/sizeof(FftSearchScore);
+    check(frequency_axis::preflight(batch,jobs,std::numeric_limits<std::size_t>::max(),1,true).status==frequency_axis::Status::score_limit,
+        "frequency-axis exceeded explicit score matrix cap");batch.score_stride=old_stride;
+    check(frequency_axis::preflight(batch,std::span(jobs).first(21),8*1024*1024,1).status==frequency_axis::Status::crossover,
+        "frequency-axis selected unmeasured small frequency bank automatically");
+
+    // Continuation must retain the original source/phase/quarter coordinates,
+    // rather than interpreting the observed suffix as a new shorter symbol.
+    // This oracle independently contracts the original shaped rows and clock
+    // boundaries, omitting only observations that precede the stream.
+    const auto reference=[&](const FftSearchJob& job,std::size_t start,unsigned bit) {
+        code.set_stream_phase_samples(job.phase);
+        code.prepare_symbol(job.symbol*code.chips_per_symbol());
+        FftDriftAccumulator accumulated;double full_norm=0;
+        std::size_t low=0;
+        for(unsigned section=0;section<4;++section) {
+            auto high=length;
+            if(section<3) {
+                const auto boundary=static_cast<long double>(drift_boundary(section+1,code.symbol_samples(),4));
+                const auto edge=std::ceil((boundary/job.clock_ratio-(bin-1)/2.L)/bin);
+                high=static_cast<std::size_t>(std::clamp(edge,static_cast<long double>(low),static_cast<long double>(length)));
+            }
+            FftComplex dot{};double norm=0;
+            for(auto i=std::max(low,batch.observation_skip);i<high;++i) {
+                const auto sample=static_cast<long double>(i)*bin+(bin-1)/2.L;
+                const auto source=sample*job.clock_ratio;
+                const auto value=source>=code.symbol_samples()?FftComplex{}:
+                    code.shaped_value(job.symbol*code.chips_per_symbol(),bit,static_cast<double>(source));
+                const auto rotated=value*std::polar(1.,2*std::numbers::pi*job.frequency_hz*
+                    static_cast<double>(sample)/config.sample_rate);
+                norm+=std::norm(rotated);dot+=input[start+i]*std::conj(rotated);
+            }
+            accumulated.dot+=dot;
+            const auto explained=pattern_explained(dot,norm,g.noise_condition,false);
+            accumulated.explained+=explained;accumulated.strongest=std::max(accumulated.strongest,explained);
+            full_norm+=norm;low=high;
+        }
+        double observed_energy=0;
+        for(auto i=batch.observation_skip;i<length;++i)observed_energy+=std::norm(input[start+i]);
+        const auto coherent=pattern_evidence(accumulated.dot,observed_energy,full_norm,
+            g.evidence_count,g.noise_condition,false,false);
+        return combine_drift_evidence(coherent,drift_evidence(accumulated.explained-accumulated.strongest,
+            observed_energy,g.evidence_count,4,false),4);
+    };
+    const auto nominal_quarter=static_cast<std::size_t>(std::ceil(
+        (static_cast<long double>(drift_boundary(1,code.symbol_samples(),4))-(bin-1)/2.L)/bin));
+    for(const auto skip:{std::size_t{0},std::size_t{1},nominal_quarter-1,nominal_quarter,
+                        nominal_quarter+1,length/2+3,3*length/4+1,length-4}) {
+        batch.observation_skip=skip;g.evidence_count=length-skip;
+        batch.refine_threshold=0;batch.refine_threshold_max=0;
+        const auto suffix=frequency_axis::preflight(batch,jobs,8*1024*1024,1,true);
+        const auto modeled_suffix=frequency_axis::choose_geometry(g,jobs,starts,batch.score_stride,
+            8*1024*1024,1,true,skip);
+        check(suffix.supported() && modeled_suffix.scratch_bytes==suffix.scratch_bytes &&
+            modeled_suffix.relative_work==suffix.relative_work,
+            "frequency-axis continuation planner/runtime geometry differs");
+        std::fill(actual.begin(),actual.end(),untouched);frequency_axis::Work suffix_work;
+        check(frequency_axis::execute(batch,jobs,suffix,actual,code,&suffix_work),
+            "frequency-axis rejected valid partial observation");
+        check(suffix_work.row_values==6*(length-skip),
+            "frequency-axis reconstructed excluded leading template bins");
+        for(const auto job_index:{std::size_t{0},std::size_t{1},std::size_t{128},std::size_t{129},
+                                  std::size_t{193},std::size_t{258},std::size_t{386}})
+            for(std::size_t start=0;start<starts;++start) {
+                const auto value=actual[job_index*batch.score_stride+start];
+                const auto zero=reference(jobs[job_index],start,0),one=reference(jobs[job_index],start,1);
+                check(std::abs(value.zero-zero)<=1e-7*std::max({1.,value.zero,zero}) &&
+                    std::abs(value.one-one)<=1e-7*std::max({1.,value.one,one}),
+                    "frequency-axis continuation reset a clock/phase/quarter origin or changed retained energy/count");
+            }
+        for(std::size_t job=0;job<jobs.size();++job)for(auto start=starts;start<batch.score_stride;++start)
+            check(equal(actual[job*batch.score_stride+start],untouched),
+                "frequency-axis continuation overwrote score padding");
+        if(skip==0)for(std::size_t job=0;job<jobs.size();++job)for(std::size_t start=0;start<starts;++start) {
+            const auto value=actual[job*batch.score_stride+start],old=expected[job*batch.score_stride+start];
+            check(std::abs(value.zero-old.zero)<=1e-7*std::max({1.,value.zero,old.zero}) &&
+                std::abs(value.one-old.one)<=1e-7*std::max({1.,value.one,old.one}),
+                "zero observation skip changed acquisition scores");
+        }
+        // Exercise the same original-coordinate reference refinement used
+        // near admission thresholds, including partially/wholly empty quarters.
+        const auto chosen=reference(jobs[193],0,0);
+        batch.refine_threshold=chosen;batch.refine_threshold_max=chosen;
+        std::fill(parallel.begin(),parallel.end(),untouched);frequency_axis::Work refined_work;
+        check(frequency_axis::execute(batch,jobs,suffix,parallel,code,&refined_work),
+            "frequency-axis continuation refinement failed");
+        check(std::abs(parallel[193*batch.score_stride].zero-chosen)<=1e-12*std::max(1.,chosen),
+            "frequency-axis continuation refinement included excluded observations");
+        if(chosen>0)check(refined_work.refined_cells>0,
+            "frequency-axis continuation missed a near-threshold refinement");
+    }
+    // A strong already-observed prefix must not round a weak suffix's energy
+    // to zero. Original tracking sums only actual retained observations.
+    batch.observation_skip=length-16;batch.starts=batch.score_stride=1;g.evidence_count=16;
+    batch.refine_threshold=batch.refine_threshold_max=0;
+    code.set_stream_phase_samples(jobs[193].phase);
+    for(std::size_t i=0;i<input.size();++i) {
+        const auto source=(static_cast<long double>(i)*bin+(bin-1)/2.L)*jobs[193].clock_ratio;
+        input[i]=i<batch.observation_skip?FftComplex{1e6,-1e6}:source<code.symbol_samples()?
+            1e-6*code.shaped_value(jobs[193].symbol*code.chips_per_symbol(),0,static_cast<double>(source)):FftComplex{};
+        energy[i+1]=energy[i]+std::norm(input[i]);
+    }
+    check(energy[length]-energy[batch.observation_skip]==0,
+        "continuation energy fixture did not exercise prefix cancellation");
+    const auto weak_suffix=frequency_axis::preflight(batch,jobs,8*1024*1024,1,true);
+    check(weak_suffix.supported()&&frequency_axis::execute(batch,jobs,weak_suffix,actual,code),
+        "frequency-axis rejected a weak suffix after strong excluded evidence");
+    const auto weak_reference=reference(jobs[193],0,0);
+    check(weak_reference>10 && std::abs(actual[193].zero-weak_reference)<=1e-9*std::max(1.,weak_reference),
+        "frequency-axis erased weak retained energy through a full-history prefix subtraction");
+    batch.observation_skip=length-1;g.evidence_count=1;
+    check(frequency_axis::preflight(batch,jobs,8*1024*1024,1,true).status==frequency_axis::Status::unsupported_geometry,
+        "frequency-axis continuation accepted insufficient remaining evidence");
+    g.evidence_count=length;batch.observation_skip=length;
+    check(frequency_axis::preflight(batch,jobs,8*1024*1024,1,true).status==frequency_axis::Status::unsupported_geometry,
+        "frequency-axis accepted a wholly unobserved symbol");
+    batch.observation_skip=std::numeric_limits<std::size_t>::max();
+    check(frequency_axis::preflight(batch,jobs,8*1024*1024,1,true).status==frequency_axis::Status::unsupported_geometry,
+        "frequency-axis accepted an overflowing leading observation skip");
+    batch.observation_skip=1;bool old_rejected=false;
+    try{execute_fft_search_cpu(batch,jobs,rejected,workspace);}catch(const Error&){old_rejected=true;}
+    check(old_rejected,"legacy FFT operator silently ignored a leading observation skip");
+    }
+}
+}
 int main() {
     try {paired_regression::run();flat_batch_tiling_and_order();prepared_template_and_cancellation();restricted_coherent_direct_and_fft();public_nominal_reference_exactness();
-        drift_rank_and_partition();drift_direct_fft_and_real_gram();differential_direct_fft_and_real_gram();}
+        drift_rank_and_partition();drift_direct_fft_and_real_gram();differential_direct_fft_and_real_gram();frequency_axis_equivalence_and_bounds();}
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
     std::cout<<"pattern FFT batch tests passed\n";
 }

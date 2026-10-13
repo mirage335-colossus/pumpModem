@@ -508,7 +508,8 @@ void notable_points(Node& root, const planner::Model& model) {
     const bool fits = model.low_audio_hz >= 300 && model.high_audio_hz <= 2700 && model.occupied_bandwidth_hz > 0;
     paragraph(passband, model.shaped_band ? (fits ? "Fits 300–2700 Hz" : "Outside 300–2700 Hz") :
         "Check radio passband", 12, Tone::text, true, 4);
-    paragraph(passband, model.shaped_band ? "Ideal signal: " + band_span(model.low_audio_hz, model.high_audio_hz) :
+    paragraph(passband, model.shaped_band ? (model.gate_bandwidth_allowance_hz>0?"Signal + ramp allowance: ":"Ideal signal: ") +
+        band_span(model.low_audio_hz, model.high_audio_hz) :
         "Nominal rate: " + frequency(model.inputs.options.modem.bandwidth_hz),
         11, Tone::muted, false, 0);
     values.push_back(std::move(passband));
@@ -561,16 +562,27 @@ void link_budget(Node& root, const planner::Model& model) {
             "  ·  Whole-bit phase loss: " + (model.phase_coherence_loss_db < .1 ? "<0.1" : number(model.phase_coherence_loss_db)) +
             " dB", 11, Tone::muted, false, 0);
     } else paragraph(n, "Link estimate unavailable", 13, Tone::text, true, 0);
+    const auto& geometry=model.receiver_geometry;
+    if(!geometry.receiver_strategy_selected.empty())
+        paragraph(n,"Modeled receiver: "+geometry.receiver_strategy_selected+
+            (geometry.receiver_strategy_experimental?" · experimental":""),11,Tone::muted,false,0);
     root.children.push_back(std::move(n));
 }
 void planner_footer(Node& root,const planner::Model& model,bool show_details) {
     const auto& declarations=ui::console_screen();
-    const auto declaration=std::find_if(declarations.begin(),declarations.end(),[](const auto& c) {
-        return c.field==ui::Field::search_arithmetic;
-    });
-    auto choice=column(std::min(root.width,480.f));choice.kind=Kind::control;
-    choice.control=*declaration;choice.height=ui::label_height+28;choice.bottom=4;
-    root.children.push_back(std::move(choice));
+    const bool horizontal=root.width>=720;
+    auto controls=horizontal?row(root.width):column(root.width);
+    const float width=horizontal?(root.width-24)/4:std::min(root.width,480.f);
+    for(const auto field:{ui::Field::search_arithmetic,ui::Field::receiver_strategy,ui::Field::receiver_cpu_budget,ui::Field::sched_hop_dilution}) {
+        const auto declaration=std::find_if(declarations.begin(),declarations.end(),[&](const auto& c) {
+            return c.field==field;
+        });
+        auto choice=column(width);choice.kind=Kind::control;
+        choice.control=*declaration;choice.height=ui::label_height+28;choice.bottom=4;
+        if(horizontal&&field!=ui::Field::sched_hop_dilution)choice.right=8;
+        controls.children.push_back(std::move(choice));
+    }
+    root.children.push_back(std::move(controls));
     buttons(root,{{show_details?"Hide details":"Model limits and references",Command::planner_toggle_details}});
 }
 void geometry_details(Node& n,const planner::Model& model) {
@@ -588,12 +600,45 @@ void geometry_details(Node& n,const planner::Model& model) {
             "; symbol "+planner::duration(g.symbol_seconds)+"; DSSS "+std::to_string(g.dsss_factor)+
             "× "+version+". Workspace "+number(g.workspace_bytes/1048576.,4)+" MiB total; "+
             number(g.per_bank_workspace_bytes/1048576.,4)+" MiB per-bank allowance.",11,Tone::muted,false,0);
+        if(model.gate_bandwidth_allowance_hz>0)paragraph(n,"Smooth-gate bandwidth allowance: "+
+            frequency(model.gate_bandwidth_allowance_hz)+" additional full nominal width; independently cascaded ramp scales are added. "
+            "This is an engineering rolloff allowance, not a strict spectral cutoff or a regulatory mask.",11,Tone::muted);
         paragraph(n,"Arrival grid: "+number(g.timing_grid_seconds*1000,6)+" ms; canonical phase spacing "+
             number(g.canonical_phase_step_seconds*1000,6)+" ms × "+std::to_string(g.canonical_phases)+
             (g.arrival_window_available?"; combined admitted timing width "+
                 number(2*g.combined_arrival_half_width_seconds*1000,6)+" ms":"; full timing window")+
             ". Backend: "+g.backend+".",11,Tone::muted,false,0);
-        if(g.first_fft_seconds>0)paragraph(n,"Full-hop first batch: "+
+        if(g.frequency_search_multiplier>1)paragraph(n,"Carrier uncertainty expansion: "+
+            number(g.frequency_search_multiplier,6)+"×; original oscillator clock bounds retained. "
+            "Finite frequency/pair caps, passband and workspace can still limit coverage.",11,Tone::muted,false,0);
+        if(g.scheduled) {
+            if(model.scheduled_duration_representative)paragraph(n,
+                "Scheduled airtime uses a representative valid keyed UTC anchor; actual start placement changes null waits.",
+                11,Tone::muted,false,0);
+            paragraph(n,"Sched_Hop: "+std::to_string(g.scheduled_active_hops)+" active / "+
+                std::to_string(g.scheduled_frame_hops)+" frame hops; "+number(g.scheduled_effective_multiplier,6)+
+                "× effective total time. Active source group "+planner::duration(g.scheduled_active_seconds)+
+                "; frame "+planner::duration(g.scheduled_frame_seconds)+"; guaranteed quiet ≥"+
+                planner::duration(g.scheduled_minimum_quiet_seconds)+". Full-power duty upper "+
+                number(100*g.scheduled_flat_duty,4)+"%; conservative raw recording "+
+                number(100*g.scheduled_recording_union_upper,4)+"%; current-cohort FFT-union allowance "+
+                number(100*g.scheduled_fft_union_upper,4)+"% over "+
+                planner::duration(g.scheduled_interval_width_seconds)+" interval uncertainty. Complete active FFT "+
+                planner::duration(g.scheduled_fft_seconds)+"; "+number(g.scheduled_timing_positions,6)+
+                " / "+number(g.scheduled_full_timing_positions,6)+" timing/phase/clock states retained; "+
+                (g.scheduled_timing_qualified?"qualified arrival window":"full-window timing fallback")+
+                ". "+g.scheduled_limit,11,Tone::muted,false,0);
+            paragraph(n,"Raw recording demand per frame ≤"+number(g.scheduled_capture_frame_bytes_upper/(1024*1024.),5)+
+                " MiB before concurrent decoding/reuse. This conservative union demand is not measured peak memory; "
+                "the configured workspace remains the hard runtime bound.",11,Tone::muted,false,0);
+            paragraph(n,"Scheduled engineering CPU: mean "+number(g.scheduled_mean_processing_ratio,5)+
+                "; guaranteed drain-window allowance "+number(g.scheduled_deadline_processing_ratio,5)+
+                " s processing / s audio. Remaining guaranteed recovery "+
+                planner::duration(g.scheduled_guaranteed_recovery_seconds)+
+                ". The larger ratio drives selection; this is uncalibrated scheduling evidence, not measured feasibility.",
+                11,Tone::muted,false,0);
+        }
+        if(!g.scheduled&&g.first_fft_seconds>0)paragraph(n,"Full-hop first batch: "+
             planner::duration(g.first_fft_seconds)+"; preceding all-selected readiness: "+
             (g.first_qualified_window_seconds>0?planner::duration(g.first_qualified_window_seconds):"unavailable")+
             "; first guarded component: "+
@@ -658,6 +703,29 @@ void details(Node& root,const planner::Model& model) {
     }
     geometry_details(n,model);
     const auto& g=model.receiver_geometry;
+    const auto requested=g.receiver_strategy_requested.empty()?
+        std::string(tuning::receiver_strategy_id(model.inputs.options.modem.receiver_strategy)):
+        g.receiver_strategy_requested;
+    paragraph(n,"Receiver strategy: requested "+requested+"; selected "+
+        (g.receiver_strategy_selected.empty()?"diagnostics pending":g.receiver_strategy_selected)+
+        "; CPU budget "+number(model.inputs.options.modem.receiver_cpu_budget,6)+
+        " s processing per 1 s audio.",11,Tone::muted,false,4);
+    paragraph(n,"Exact complex optimizations use their crossover independently of the CPU budget. Automatic may choose experimental amplitude-only detection above the budget or when full declared coverage is unavailable. Alternative-decoder full-bank sensitivity remains unqualified.",
+        11,Tone::muted,false,4);
+    paragraph(n,"The selected backend is a work-model prediction. In complex frequency-axis search, individual batches may retain the existing complex backend when their crossover or workspace checks require it; execution counters identify actual fallback coverage.",
+        11,Tone::muted,false,4);
+    if(!g.receiver_strategy_reason.empty())
+        paragraph(n,g.receiver_strategy_reason,11,Tone::muted,false,4);
+    if(!g.receiver_strategy_selected.empty()) {
+        const auto ratio=[](double value) {
+            return std::isfinite(value)&&value>0?number(value,6)+" s/s":std::string("unavailable");
+        };
+        paragraph(n,"Strategy work model: existing "+ratio(g.existing_processing_ratio)+
+            "; complex frequency-axis "+ratio(g.frequency_axis_processing_ratio)+
+            "; amplitude-only "+ratio(g.amplitude_processing_ratio)+
+            ". These are estimated total cohort costs, not measurements or probability estimates.",
+            11,Tone::muted,false,4);
+    }
     if(!g.arithmetic_backend.empty()) {
         paragraph(n,"Arithmetic model: "+g.arithmetic_backend+"; operands "+g.arithmetic_operands+
             "; accumulation "+g.arithmetic_accumulation+".",11,Tone::muted,false,4);

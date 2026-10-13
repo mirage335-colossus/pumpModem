@@ -7,6 +7,7 @@
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/pattern_search.hpp"
 #include "datapump/simulation_estimate.hpp"
+#include "datapump/sched_hop.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -29,10 +30,19 @@ bool automatic(tuning::PatternMode mode) {
 }
 modem::Config resolve(const Inputs& inputs,double target) {
     const std::array targets{target};
-    return tuning::receive_profiles(inputs.options.modem,targets,inputs.mode,
+    auto config=inputs.options.modem;
+    // Scheduled geometry can construct the keyed packed-symbol calendar before
+    // transfer::seeded_config runs. Use the same authoritative immutable key
+    // as transfer::effective_options, clearing a stale Config-only key too.
+    if(config.scheduled_hopping&&config.scheduled_hopping->enabled())
+        config.data_key=inputs.options.key;
+    return tuning::receive_profiles(config,targets,inputs.mode,
                                     inputs.options.key.has_value()).front();
 }
 double seconds(const modem::Config& config) {
+    // Source-symbol integration stays unchanged; this quantity is the mean
+    // wall time per bit used by the airtime graph and practical-rate buttons.
+    if(modem::scheduled_bursts(config))return 1/modem::bit_rate(config);
     return static_cast<double>(modem::symbol_sample_count(config))/config.sample_rate;
 }
 std::optional<modem::Config> try_resolve(const Inputs& inputs,double target) {
@@ -405,19 +415,31 @@ std::uint64_t add_samples(std::uint64_t first,std::uint64_t second) {
         throw Error("planned duration exceeds the modem sample counter");
     return first+second;
 }
-transfer::Estimate one_bit_estimate(const modem::Config& config) {
+transfer::Estimate one_bit_estimate(const transfer::Options& options) {
+    const auto config=modem::scheduled_estimate_config(
+        options.key?transfer::seeded_config(options,options.timestamp):options.modem);
     const auto symbol=modem::symbol_sample_count(config);
     auto count=add_samples(modem::training_sample_count(config),symbol);
     count=add_samples(count,modem::scheduled_symbol_offset(config,config.stream_epoch,config.stream_phase_samples,0));
     count=add_samples(count,modem::pattern_pulse_padding_samples(config));
     count=add_samples(count,modem::pattern_pulse_padding_samples(config));
     count=add_samples(count,modem::suppression_sample_count(config));
+    if(modem::scheduled_bursts(config))count=modem::pattern_transmission_sample_count(config,1);
     transfer::Estimate result;
     result.wire_bits=result.coded_bytes=result.content_bytes=1;
     result.content_seconds=result.coded_seconds=seconds(config);
     result.total_seconds=static_cast<double>(count)/config.sample_rate;
     result.waveform_samples=count<=std::numeric_limits<std::size_t>::max()?static_cast<std::size_t>(count):0;
     return result;
+}
+std::uint64_t scheduled_content_samples(const modem::Config& config,std::uint64_t bits) {
+    const modem::SchedHopSourceMap map(*config.scheduled_hopping,*config.data_key,config.sample_rate);
+    const auto anchor=modem::symbol_schedule_detail::add(
+        modem::symbol_schedule_detail::multiply(config.stream_epoch,config.sample_rate),config.stream_phase_samples);
+    const auto end=map.source_to_physical(map.locate(anchor).source.add_samples(
+        modem::symbol_schedule_detail::multiply(bits,modem::symbol_sample_count(config))),true);
+    if(end.sample<anchor)throw Error("planned scheduled payload precedes its arrival anchor");
+    return end.sample-anchor;
 }
 auto curve_key(const transfer::Options& options,const modem::ChannelConfig& channel,
                simulation::ReceiverWorkMode work_mode=simulation::ReceiverWorkMode::sampled_simulation,
@@ -430,7 +452,7 @@ auto curve_key(const transfer::Options& options,const modem::ChannelConfig& chan
     return std::tuple{c.pattern_symbols,c.stream_epoch,c.stream_phase_samples,c.sample_rate,
         c.constellation_bits,c.carrier_hz,c.bandwidth_hz,c.training_seconds,
         modem::symbol_sample_count(c),modem::pattern_chip_samples(c),c.spreading_mode,c.pulse_shaping,c.scramble,c.dsss,modem::legacy_public_pattern(c),
-        c.dsss_factor,c.dsss_factor>1?c.outer_dsss_version:modem::OuterDsssVersion::legacy_v1,c.search_arithmetic,c.spreading_seed,c.dsss_seed,c.memory_limit,options.dsp_workspace_bytes,
+        c.dsss_factor,c.dsss_factor>1?c.outer_dsss_version:modem::OuterDsssVersion::legacy_v1,c.search_arithmetic,c.receiver_strategy,c.receiver_cpu_budget,c.frequency_search_multiplier,c.spreading_seed,c.dsss_seed,c.memory_limit,options.dsp_workspace_bytes,
         options.timestamp,options.search_seconds,options.audio_timing_error_seconds,options.clock_sync.has_value(),
         options.clock_sync.value_or(clock_sync::Policy{}).accuracy_seconds,
         options.clock_sync.value_or(clock_sync::Policy{}).region_seconds,
@@ -446,6 +468,15 @@ auto curve_key(const transfer::Options& options,const modem::ChannelConfig& chan
         c.fake_hopping?c.fake_hopping->peer_clock_error_seconds:0.,
         c.fake_hopping?c.fake_hopping->region_seconds:0.,
         c.fake_hopping?c.fake_hopping->offset_seconds:0.,
+        bool(c.scheduled_hopping),
+        c.scheduled_hopping?c.scheduled_hopping->time_multiplier:1U,
+        c.scheduled_hopping?c.scheduled_hopping->group_hops:std::uint64_t{1},
+        c.scheduled_hopping?c.scheduled_hopping->clock_error_seconds:0.,
+        c.scheduled_hopping?c.scheduled_hopping->peer_clock_error_seconds:0.,
+        c.scheduled_hopping?c.scheduled_hopping->region_seconds:0.,
+        c.scheduled_hopping?c.scheduled_hopping->offset_seconds:0.,
+        c.scheduled_hopping?c.scheduled_hopping->audio_error_seconds:0.,
+        c.scheduled_hopping?c.scheduled_hopping->ramp_seconds:0.,
         c.oscillator_search.has_value(),oscillator.lf.accuracy_ppm,oscillator.lf.phase_noise_degrees_per_sqrt_second,
         oscillator.rf.accuracy_ppm,oscillator.rf.phase_noise_degrees_per_sqrt_second,
         oscillator.rf_shift_hz,oscillator.margin,oscillator.reference,oscillator.sideband,work_mode,
@@ -479,7 +510,7 @@ CurveEntry& curve_entry(CurveCache& cache,const transfer::Options& options,const
     const auto found=std::find_if(entries.begin(),entries.end(),[&](const auto& entry){return entry.key==key;});
     if(found!=entries.end())return *found;
     if(entries.size()==512)entries.erase(entries.begin());
-    entries.push_back({key,simulation::estimate(one_bit_estimate(options.modem),options,true,channel,{},1,false,100,4096,
+    entries.push_back({key,simulation::estimate(one_bit_estimate(options),options,true,channel,{},1,false,100,4096,
         work_mode,timing_model,stop),false});
     return entries.back();
 }
@@ -533,7 +564,7 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one,CurveCa
         if(!entry.probability_computed) {
             // Curve locations are illustrative; the selected estimate uses
             // 4096 draws and exposes its own sampling interval separately.
-            entry.estimate=simulation::estimate(one_bit_estimate(*geometry),options,true,channel,{},1,true,100,512,
+            entry.estimate=simulation::estimate(one_bit_estimate(options),options,true,channel,{},1,true,100,512,
                 inputs.receiver_work_mode,inputs.receiver_timing_model,stop);
             entry.probability_computed=true;
             ++cache.probability_evaluations;
@@ -663,12 +694,18 @@ TargetSteps preview_steps(const Inputs& inputs) {
         const auto transmission=transfer::estimate_binary(one_bit,options);
         const auto symbol=modem::symbol_sample_count(options.modem);
         if(!transmission.waveform_samples||transmission.waveform_samples<symbol)return result;
-        const auto overhead=static_cast<std::uint64_t>(transmission.waveform_samples)-symbol-
-            modem::scheduled_symbol_offset(options.modem,options.timestamp,options.modem.stream_phase_samples,0);
-        if(inputs.wire_bits>(std::numeric_limits<std::uint64_t>::max()-overhead)/symbol)return result;
-        (void)add_samples(add_samples(add_samples(modem::scheduled_symbol_offset(options.modem,options.timestamp,
-            options.modem.stream_phase_samples,inputs.wire_bits-1),symbol),overhead),
-            modem::pattern_absence_capture_samples(options.modem));
+        if(modem::scheduled_bursts(options.modem)) {
+            const auto seeded=modem::scheduled_estimate_config(transfer::seeded_config(options,options.timestamp));
+            (void)add_samples(modem::pattern_transmission_sample_count(seeded,inputs.wire_bits),
+                modem::pattern_absence_capture_samples(seeded));
+        } else {
+            const auto overhead=static_cast<std::uint64_t>(transmission.waveform_samples)-symbol-
+                modem::scheduled_symbol_offset(options.modem,options.timestamp,options.modem.stream_phase_samples,0);
+            if(inputs.wire_bits>(std::numeric_limits<std::uint64_t>::max()-overhead)/symbol)return result;
+            (void)add_samples(add_samples(add_samples(modem::scheduled_symbol_offset(options.modem,options.timestamp,
+                options.modem.stream_phase_samples,inputs.wire_bits-1),symbol),overhead),
+                modem::pattern_absence_capture_samples(options.modem));
+        }
         const auto maximum_seconds=static_cast<long double>(std::numeric_limits<std::uint64_t>::max())/
             (4.L*options.modem.sample_rate);
         const auto minimum=std::max(-200.,tuning::pattern_target_symbol_snr_db-
@@ -712,12 +749,24 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
         const auto single_transmission=transmission;
         if(!transmission.waveform_samples || transmission.waveform_samples<symbol)
             throw Error("planned duration exceeds the platform sample counter");
-        const auto overhead=static_cast<std::uint64_t>(transmission.waveform_samples)-symbol-
-            modem::scheduled_symbol_offset(options.modem,options.timestamp,options.modem.stream_phase_samples,0);
-        if(inputs.wire_bits>(std::numeric_limits<std::uint64_t>::max()-overhead)/symbol)
-            throw Error("planned duration exceeds the modem sample counter");
-        const auto payload=add_samples(modem::scheduled_symbol_offset(config,options.timestamp,config.stream_phase_samples,inputs.wire_bits-1),symbol);
-        const auto waveform=add_samples(payload,overhead);
+        std::uint64_t payload=0,waveform=0;
+        if(modem::scheduled_bursts(config)) {
+            // Nulls depend on the absolute keyed frame, so scaling a one-bit
+            // wall duration would invent airtime and can underflow overhead.
+            const auto original=transfer::seeded_config(options,options.timestamp);
+            const auto seeded=modem::scheduled_estimate_config(original);
+            result.scheduled_duration_representative=seeded.stream_epoch!=original.stream_epoch||
+                seeded.stream_phase_samples!=original.stream_phase_samples;
+            payload=scheduled_content_samples(seeded,inputs.wire_bits);
+            waveform=modem::pattern_transmission_sample_count(seeded,inputs.wire_bits);
+        } else {
+            const auto overhead=static_cast<std::uint64_t>(transmission.waveform_samples)-symbol-
+                modem::scheduled_symbol_offset(options.modem,options.timestamp,options.modem.stream_phase_samples,0);
+            if(inputs.wire_bits>(std::numeric_limits<std::uint64_t>::max()-overhead)/symbol)
+                throw Error("planned duration exceeds the modem sample counter");
+            payload=add_samples(modem::scheduled_symbol_offset(config,options.timestamp,config.stream_phase_samples,inputs.wire_bits-1),symbol);
+            waveform=add_samples(payload,overhead);
+        }
         const auto finish=add_samples(waveform,modem::pattern_absence_capture_samples(config));
         result.send_seconds=static_cast<double>(waveform)/config.sample_rate;
         result.finish_seconds=static_cast<double>(finish)/config.sample_rate;
@@ -732,6 +781,8 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
         result.occupied_bandwidth_hz=result.shaped_band?
             (1+modem::pattern_pulse_rolloff)*config.sample_rate/static_cast<double>(modem::pattern_chip_samples(config)):
             config.bandwidth_hz;
+        result.gate_bandwidth_allowance_hz=modem::waveform_gate_bandwidth_allowance_hz(config);
+        result.occupied_bandwidth_hz+=result.gate_bandwidth_allowance_hz;
         result.low_audio_hz=config.carrier_hz-result.occupied_bandwidth_hz/2;
         result.high_audio_hz=config.carrier_hz+result.occupied_bandwidth_hz/2;
         const auto observer=lpi::estimate(transmission,options,inputs.observer_hopping,stop);

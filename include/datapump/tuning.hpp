@@ -79,6 +79,9 @@ std::string_view outer_dsss_version_id(modem::OuterDsssVersion version);
 // they do not select transmitted patterns, cipher addresses or search coverage.
 modem::SearchArithmetic parse_search_arithmetic(std::string_view name);
 std::string_view search_arithmetic_id(modem::SearchArithmetic arithmetic);
+modem::ReceiverStrategy parse_receiver_strategy(std::string_view name);
+std::string_view receiver_strategy_id(modem::ReceiverStrategy strategy);
+void validate_receiver_cpu_budget(double ratio);
 Plan resolve(double bandwidth_hz, double target_snr_db_hz, PatternMode mode,
              bool encryption, std::optional<double> carrier_hz = std::nullopt, unsigned dsss_factor = 1,
              modem::OuterDsssVersion version = modem::OuterDsssVersion::legacy_v1,
