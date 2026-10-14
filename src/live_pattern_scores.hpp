@@ -13,7 +13,7 @@ class PatternScoreHistory {
     static auto key(const modem::PatternEvidence& candidate) {
         return std::tie(candidate.first_sample, candidate.end_sample, candidate.stream_symbol,
             candidate.stream_phase_samples, candidate.frequency_hz, candidate.bit,
-            candidate.score, candidate.alternative_score);
+            candidate.score, candidate.alternative_score, candidate.frequency_hypothesis);
     }
 public:
     struct Entry {
@@ -23,16 +23,31 @@ public:
     template<class AllocateId>
     void update(std::span<const modem::PatternEvidence> candidates,
                 std::chrono::steady_clock::time_point now, AllocateId allocate_id) {
+        update_observations(candidates,[&](const modem::PatternEvidence& candidate) {
+            return PatternScoreObservation{allocate_id(),now,candidate.admission_threshold};
+        });
+    }
+    // Deferred numerical reconstruction supplies original completion-fence
+    // identity/age. Existing exact candidates still retain their first metadata.
+    template<class Observe>
+    void update_observations(std::span<const modem::PatternEvidence> candidates,Observe observe) {
         const auto retained = candidates.last(std::min(candidates.size(), entries_.size()));
         std::array<Entry, Snapshot::pattern_score_limit> next{};
         std::size_t count = 0;
         for (const auto& candidate : retained) {
-            const auto same = [&](const Entry& entry) { return key(entry.candidate) == key(candidate); };
+            const auto same = [&](const Entry& entry) {
+                // Deferred reconstruction is identified by its original event,
+                // not by an accidental equality of rounded numerical scores.
+                if (candidate.completed_event || entry.candidate.completed_event)
+                    return candidate.completed_event &&
+                        candidate.completed_event == entry.candidate.completed_event;
+                return key(entry.candidate) == key(candidate);
+            };
             const auto previous = std::find_if(entries_.begin(), entries_.begin() + size_, same);
             const auto duplicate = std::find_if(next.begin(), next.begin() + count, same);
             const auto observation = previous != entries_.begin() + size_ ? previous->observation :
                 duplicate != next.begin() + count ? duplicate->observation :
-                PatternScoreObservation{allocate_id(), now, candidate.admission_threshold};
+                observe(candidate);
             next[count++] = {candidate, observation};
         }
         entries_ = next; size_ = count;

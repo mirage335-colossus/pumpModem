@@ -701,6 +701,10 @@ void PatternCode::set_stream_phase_samples(std::uint64_t phase_samples) {
     if(impl_->interleaved && impl_->config.spreading_mode!=SpreadingMode::pattern)
         impl_->interleaved->invalidate();
 }
+SymbolStreamAddress PatternCode::resolved_symbol_address(std::uint64_t first_chip) {
+    require(first_chip%impl_->chips==0,"pattern address requires a symbol-aligned chip origin");
+    return impl_->stream_address(first_chip/impl_->chips);
+}
 std::uint64_t PatternCode::chip_samples() const { return impl_->chip; }
 std::uint64_t PatternCode::chips_per_symbol() const { return impl_->chips; }
 std::uint64_t PatternCode::symbol_samples() const { return impl_->symbol; }

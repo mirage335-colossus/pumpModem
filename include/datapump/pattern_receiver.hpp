@@ -7,6 +7,7 @@
 #include <memory>
 
 namespace datapump::modem {
+namespace detail::scheduled_capture {class SharedScheduledCapture;}
 // Cross-profile presentation weight for one admitted symbol. Native scores
 // have different conservative bounds on different DSP paths; cap each symbol
 // separately so a strong prefix cannot lend its surplus to a weak later fit.
@@ -35,6 +36,9 @@ struct PatternEvidence {
     // Independent outer-code evidence when a structured in-band observation
     // activates the additional presence guard. Diagnostic, not authentication.
     double outer_presence_score = 0;
+    // Receiver-local diagnostic event, created at original completed-window
+    // order, never at presentation query time. Zero denotes legacy history.
+    std::uint64_t completed_event = 0;
 };
 // Internal unknown-slot value; transfer interpretation replaces it with a
 // plaintext zero after advancing the Data mask through the same symbol slot.
@@ -95,6 +99,10 @@ struct PatternSearch {
     // Absolute capture coordinate for exact shared input statistics. Separate
     // bank-local origins must not make different PCM blocks alias in a cache.
     std::uint64_t input_sample_origin=0;
+    // Borrowed cohort owner, charged once by the caller before bank subdivision.
+    // An absent owner retains the complete per-bank original-capture fallback.
+    std::shared_ptr<detail::scheduled_capture::SharedScheduledCapture> scheduled_capture;
+
     // Original declared domain, before a finite complex-bank cap. Applications
     // include qualified UTC steering here; a phase-insensitive alternative must
     // cover it in full rather than inherit the clipped coherent endpoints.
@@ -292,9 +300,22 @@ public:
     // Only a physical absence event marks the stream complete.
     std::vector<PatternBurst> take_bursts();
     PatternBurst provisional() const;
+    // Numerical acquisition may defer diagnostic history; admission/progress never wait for it.
+    // Receiver-worker only: score retained observations with cancellable bounded batching.
+    // Publication polls never perform the deferred search or manufacture input.
+    void process_pending(std::stop_token = {});
+    bool deferred_pattern_history() const noexcept;
+    std::uint64_t diagnostic_history_generation() const noexcept;
+    std::uint64_t diagnostic_history_resolved_through() const noexcept;
+    std::uint64_t oldest_unresolved_diagnostic_event() const noexcept;
+
+    // Receiver-local original completion-event commit frontier. This does not
+    // certify that uncompleted-symbol replay arithmetic has already executed.
+    std::optional<std::uint64_t> delayed_processing_frontier() const noexcept;
     std::vector<PatternEvidence> candidates() const;
     // Latest retained hypotheses in append order, without copying older entries.
     std::vector<PatternEvidence> candidates(std::size_t limit) const;
+    std::vector<PatternEvidence> candidates(std::size_t limit, std::stop_token) const;
     std::vector<std::complex<double>> take_chip_constellation();
     bool acquiring() const;
     bool synchronized() const;

@@ -96,7 +96,7 @@ struct Session::Impl {
         Kind kind;ui::Rect bounds;int index;
     };
     Application& app;
-    Viewport viewport{1200,1048,{8,18}};
+    Viewport viewport{ui::default_width,1048,{8,18}};
     Viewport outer_viewport=viewport;
     bool mfd=true;
     unsigned mfd_buttons=5;
@@ -143,6 +143,7 @@ struct Session::Impl {
     ui::Rect prompt_bounds;
     explicit Impl(Application& application,bool bezel,unsigned buttons):app(application),mfd(bezel),mfd_buttons(buttons) {
         if(buttons!=3&&buttons!=5)throw std::invalid_argument("MFD button count must be 3 or 5");
+        outer_viewport.width=static_cast<int>(default_window_width(outer_viewport.metrics,mfd));
         resize(outer_viewport);
     }
     void resize(Viewport value) {

@@ -8,6 +8,8 @@
 
 namespace datapump::modem {
 
+struct SymbolStreamAddress;
+
 // The pattern waveform carries one meaningful bit per complete pattern. A
 // partial final chip consumes a whole stream position before the next symbol.
 std::uint64_t pattern_chip_samples(const Config& config);
@@ -53,6 +55,9 @@ public:
     // Reuse one bounded template for a different subsecond start hypothesis.
     // This changes only stream addressing and invalidates mapped chip caches.
     void set_stream_phase_samples(std::uint64_t phase_samples);
+    // Exact existing symbol address after current phase/calendar resolution;
+    // source-only caches use this instead of a bank/index approximation.
+    SymbolStreamAddress resolved_symbol_address(std::uint64_t first_chip);
     std::uint64_t chip_samples() const;
     std::uint64_t chips_per_symbol() const;
     std::uint64_t symbol_samples() const;

@@ -48,10 +48,18 @@ public:
     enum class Backend {scalar=0,sse2=1,automatic=2,avx2=3};
     static constexpr bool component_avx2_compiled=
         DATAPUMP_ORDERED_COMPONENT_AVX2_COMPILED && maximum_lanes==1;
+    static constexpr bool candidate_avx2_compiled=
+        DATAPUMP_ORDERED_COMPONENT_AVX2_COMPILED && maximum_lanes>=4 && maximum_lanes%4==0;
     static constexpr std::size_t component_storage_bytes=
         component_avx2_compiled?maximum_coefficients*4*sizeof(double):0;
     static bool component_avx2_available()noexcept {
         if constexpr(component_avx2_compiled)
+            return family_simd::available(family_simd::Backend::avx2);
+        else return false;
+    }
+
+    static bool candidate_avx2_available()noexcept {
+        if constexpr(candidate_avx2_compiled)
             return family_simd::available(family_simd::Backend::avx2);
         else return false;
     }
@@ -317,11 +325,11 @@ private:
         if(requested==Backend::avx2) {
             // Explicit unsupported requests leave existing outputs/bindings
             // untouched; no guard, Scope or arithmetic mutation has started.
-            if(!component_avx2_available())throw Error("ordered pulse AVX2 components unavailable");
+            if(!component_avx2_available() && !candidate_avx2_available())throw Error("ordered pulse AVX2 unavailable");
             return Backend::avx2;
         }
         if(requested!=Backend::automatic)return requested;
-        if(component_avx2_available())return Backend::avx2;
+        if(component_avx2_available() || candidate_avx2_available())return Backend::avx2;
 #if defined(__SSE2__)
         return Backend::sse2;
 #else
@@ -362,6 +370,52 @@ private:
             statistics.shape_terms+=row.nonzero_count;
         }
     }
+    // Optional four-candidate native path. Every independent component keeps
+    // its own original ascending nonzero-tap multiply/add recurrence. No FMA,
+    // horizontal sum, changed source weights or global AVX2 requirement.
+    __attribute__((target("avx2"),noinline))
+    void evaluate_candidates_avx2(const Plan& plan,std::stop_token stop) requires(candidate_avx2_compiled) {
+        for(std::size_t n=0;n<plan.samples;++n) {
+            if(stop.stop_requested())throw Error("ordered pulse candidate AVX2 cancelled");
+            std::size_t lane=0;
+            for(;lane+3<lanes_;lane+=4) {
+                __m256d sum[4]{_mm256_setzero_pd(),_mm256_setzero_pd(),_mm256_setzero_pd(),_mm256_setzero_pd()};
+                const auto& row=plan.rows[n];
+                for(std::size_t p=0;p<row.taps;++p) {
+                    const auto w=row.weight[p];if(w==0)continue;const auto weight=_mm256_set1_pd(w);
+                    for(unsigned plane=0;plane<4;++plane) {
+                        const auto product=_mm256_mul_pd(weight,_mm256_loadu_pd(&coefficient_[plane][row.first_offset+p][lane]));
+                        sum[plane]=_mm256_add_pd(sum[plane],product);
+                    }
+                }
+                for(unsigned plane=0;plane<4;++plane)_mm256_storeu_pd(&output_[n][plane][lane],sum[plane]);
+            }
+            // Two-row tails use the existing SSE2 width; do not turn a
+            // useful two-candidate cohort into an all-scalar AVX2 tail.
+            for(;lane+1<lanes_;lane+=2) {
+                __m128d sum[4]{_mm_setzero_pd(),_mm_setzero_pd(),_mm_setzero_pd(),_mm_setzero_pd()};
+                const auto& row=plan.rows[n];
+                for(std::size_t p=0;p<row.taps;++p) {
+                    const auto w=row.weight[p];if(w==0)continue;const auto weight=_mm_set1_pd(w);
+                    for(unsigned plane=0;plane<4;++plane) {
+                        const auto product=_mm_mul_pd(weight,_mm_loadu_pd(&coefficient_[plane][row.first_offset+p][lane]));
+                        sum[plane]=_mm_add_pd(sum[plane],product);
+                    }
+                }
+                for(unsigned plane=0;plane<4;++plane)_mm_storeu_pd(&output_[n][plane][lane],sum[plane]);
+            }
+            // Incomplete cohorts remain valid and preserve portable arithmetic.
+            for(;lane<lanes_;++lane) {
+                std::array<double,4> sum{};const auto& row=plan.rows[n];
+                for(std::size_t p=0;p<row.taps;++p) {
+                    const auto w=row.weight[p];if(w==0)continue;
+                    for(unsigned plane=0;plane<4;++plane)sum[plane]+=w*coefficient_[plane][row.first_offset+p][lane];
+                }
+                for(unsigned plane=0;plane<4;++plane)output_[n][plane][lane]=sum[plane];
+            }
+            statistics.output_pairs+=lanes_;statistics.shape_terms+=lanes_*plan.rows[n].nonzero_count;
+        }
+    }
 #endif
 public:
     bool evaluate(Backend backend,std::stop_token stop={}) {
@@ -380,13 +434,18 @@ public:
             evaluated_samples_=plan.samples;evaluated_=true;
             evaluated_backend_=Backend::avx2;clear.succeeded=true;return true;
         }
+        if constexpr(candidate_avx2_compiled)if(backend==Backend::avx2) {
+            evaluate_candidates_avx2(plan,stop);
+            evaluated_samples_=plan.samples;evaluated_=true;
+            evaluated_backend_=Backend::avx2;clear.succeeded=true;return true;
+        }
 #endif
         for(std::size_t n=0;n<plan.samples;++n) {
             if(stop.stop_requested())throw Error("ordered pulse evaluate cancelled");
             std::size_t lane=0;
 #if defined(__SSE2__)
             if(backend==Backend::sse2)for(;lane+1<lanes_;lane+=2) {
-                std::array<__m128d,4> sum{_mm_setzero_pd(),_mm_setzero_pd(),_mm_setzero_pd(),_mm_setzero_pd()};
+                __m128d sum[4]{_mm_setzero_pd(),_mm_setzero_pd(),_mm_setzero_pd(),_mm_setzero_pd()};
                 // No horizontal/tap reduction, FMA, frequency rotation or
                 // moments: ORIGINAL ascending nonzero pulse order per lane.
                 for(std::size_t p=0;p<plan.rows[n].taps;++p) {

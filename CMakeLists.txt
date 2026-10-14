@@ -45,7 +45,7 @@ else()
   add_library(Threads::Threads INTERFACE IMPORTED)
 endif()
 include(cmake/VendoredLzma.cmake)
-add_library(datapump src/crypto.cpp src/stream_codec.cpp src/recovery.cpp src/attachment.cpp src/boundary_sync.cpp src/compression_short.cpp src/compression_lzma.cpp src/modem.cpp src/streaming_modem.cpp src/pattern_code.cpp src/pattern_receiver.cpp src/pattern_correlator.cpp src/search_parallel.cpp src/channel.cpp src/runtime.cpp src/resampler.cpp src/qr.cpp src/transfer.cpp src/tuning.cpp src/live.cpp src/signal_view.cpp third_party/qrcodegen/qrcodegen.cpp)
+add_library(datapump src/crypto.cpp src/stream_codec.cpp src/recovery.cpp src/attachment.cpp src/boundary_sync.cpp src/compression_short.cpp src/compression_lzma.cpp src/modem.cpp src/streaming_modem.cpp src/pattern_code.cpp src/pattern_receiver.cpp src/pattern_correlator.cpp src/search_parallel.cpp src/channel.cpp src/runtime.cpp src/resampler.cpp src/qr.cpp src/transfer.cpp src/tuning.cpp src/live.cpp src/live_receiver_layout.cpp src/signal_view.cpp third_party/qrcodegen/qrcodegen.cpp)
 # Scalar, cached and batched receiver paths must preserve identical arithmetic.
 # AArch64 can fuse multiply/add by default where generic x86-64 cannot. Keep
 # separate rounding in both the library and its independent reference tests.
@@ -290,7 +290,7 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       set(_calibration_workers 16)
     endif()
   endif()
-  foreach(component scheduled_fine_curves component_avx2 outer_public_replay temporal_entry_payload fp32_packed_l1 scheduled_r1_export scheduled_flat_export temporal_outer_plan temporal_fp32_adapter cached_pulse_count pattern_coarse_cache shared_temporal_plans certified_ordered_plan temporal_plan_cache borrowed_plan_prepare temporal_pool_consumer temporal_normalization borrowed_ordered_plan temporal_templates fine_cache_preservation rx_cpu_profile timing_continuation physical_moment_cache pattern_shared_source_curve pattern_permutation_integration scheduled_pulse_moments scheduled_float_signal_moments scheduled_float_gram gram_override scheduled_mapped_piece_groups sched_hop scheduled_symbol_calendar sched_hop_transmit sched_hop_receiver sched_hop_complex sched_hop_correlator scheduled_complex_search scheduled_frequency_fusion sched_capture crypto keyring stream_codec recovery attachment stream_receive boundary_sync compression_short compression_lzma modem streaming_modem transmit_cover noise_receive pattern_code pattern_receiver pattern_correlator pattern_drift pattern_differential receiver_differential pattern_fft_batch pattern_correlator_batch pattern_projection_cache pattern_envelope receiver_strategy pattern_search pattern_start_geometry search_parallel search_arithmetic search_fft pulse_shaping pattern_transfer regressions runtime qr transfer tuning simulation_estimate receiver_probability differential_probability differential_receiver_probability lpi_estimate correlation_experiment weak_signal live live_resources live_profiles live_receptions live_transmit_lock resampler clock_sync audio_provider_timing audio_rates signal_view channel)
+  foreach(component scheduled_cold_colored_source_rows scheduled_workspace_accounting scheduled_float_spectral_accumulator scheduled_float_acquisition_tile scheduled_cold_colored_runtime scheduled_cold_colored_proxy_runtime live_workspace_capacity scheduled_acquisition_memory scheduled_capture_layout scheduled_carrier_restart scheduled_cold_colored_certificate scheduled_exact_source_samples scheduled_frequency_postinverse scheduled_lazy_acquisition scheduled_memory_projection scheduled_original_projection_cache scheduled_processing_journal scheduled_acquisition_tile scheduled_acquisition_catalog scheduled_acquisition_quarters shared_scheduled_capture scheduled_certificate_diagnostics scheduled_cancellation_resume scheduled_template_proxy_certificate scheduled_diagnostic_journal scheduled_parallel_preparation scheduled_frequency_piece scheduled_private_batch scheduled_detached_replay scheduled_detached_resume scheduled_fine_curves component_avx2 outer_public_replay temporal_entry_payload fp32_packed_l1 scheduled_r1_export scheduled_flat_export temporal_outer_plan temporal_fp32_adapter cached_pulse_count pattern_coarse_cache shared_temporal_plans certified_ordered_plan temporal_plan_cache borrowed_plan_prepare temporal_pool_consumer temporal_normalization borrowed_ordered_plan temporal_templates fine_cache_preservation rx_cpu_profile timing_continuation physical_moment_cache pattern_shared_source_curve pattern_permutation_integration scheduled_pulse_moments scheduled_float_signal_moments scheduled_float_gram gram_override scheduled_mapped_piece_groups sched_hop scheduled_symbol_calendar sched_hop_transmit sched_hop_receiver sched_hop_complex sched_hop_correlator scheduled_complex_search scheduled_frequency_fusion sched_capture crypto keyring stream_codec recovery attachment stream_receive boundary_sync compression_short compression_lzma modem streaming_modem transmit_cover noise_receive pattern_code pattern_receiver pattern_correlator pattern_drift pattern_differential receiver_differential pattern_fft_batch pattern_correlator_batch pattern_projection_cache pattern_envelope receiver_strategy pattern_search pattern_start_geometry search_parallel search_arithmetic search_fft pulse_shaping pattern_transfer regressions runtime qr transfer tuning simulation_estimate receiver_probability differential_probability differential_receiver_probability lpi_estimate correlation_experiment weak_signal live live_resources live_profiles live_receptions live_transmit_lock resampler clock_sync audio_provider_timing audio_rates signal_view channel)
     add_executable(test_${component} tests/test_${component}.cpp)
     target_link_libraries(test_${component} PRIVATE datapump)
     if(component STREQUAL "differential_receiver_probability")
@@ -300,6 +300,10 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       add_test(NAME ${component} COMMAND test_${component})
     endif()
   endforeach()
+  # The exact-source experiment latches immutable process-level policy. Keep it
+  # in a separate process so ordinary Live cases retain their caller's policy.
+  add_test(NAME live_exact_source COMMAND test_live_profiles exact_source)
+  set_tests_properties(live_exact_source PROPERTIES SKIP_RETURN_CODE 77)
   if(WIN32)
     # The mock Live fixture uses timer APIs without the native audio provider.
     target_link_libraries(test_live_profiles PRIVATE winmm)
@@ -311,9 +315,11 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       target_compile_definitions(${_functional_test} PRIVATE DATAPUMP_INSTRUMENTED_TEST=1)
     endforeach()
   endif()
-  foreach(_plan_pool_test scheduled_fine_curves component_avx2 outer_public_replay temporal_entry_payload fp32_packed_l1 scheduled_r1_export scheduled_flat_export temporal_outer_plan temporal_fp32_adapter cached_pulse_count shared_temporal_plans certified_ordered_plan temporal_plan_cache borrowed_plan_prepare temporal_pool_consumer)
+  foreach(_plan_pool_test scheduled_template_proxy_certificate scheduled_diagnostic_journal scheduled_cold_colored_source_rows scheduled_workspace_accounting scheduled_float_spectral_accumulator scheduled_float_acquisition_tile scheduled_cold_colored_runtime scheduled_cold_colored_proxy_runtime live_workspace_capacity scheduled_acquisition_memory scheduled_capture_layout scheduled_carrier_restart scheduled_cold_colored_certificate scheduled_exact_source_samples scheduled_frequency_postinverse scheduled_lazy_acquisition scheduled_memory_projection scheduled_original_projection_cache scheduled_processing_journal scheduled_acquisition_tile scheduled_acquisition_catalog scheduled_acquisition_quarters shared_scheduled_capture scheduled_certificate_diagnostics scheduled_frequency_piece scheduled_private_batch scheduled_detached_replay scheduled_detached_resume scheduled_fine_curves component_avx2 outer_public_replay temporal_entry_payload fp32_packed_l1 scheduled_r1_export scheduled_flat_export temporal_outer_plan temporal_fp32_adapter cached_pulse_count shared_temporal_plans certified_ordered_plan temporal_plan_cache borrowed_plan_prepare temporal_pool_consumer)
     target_include_directories(test_${_plan_pool_test} PRIVATE src)
   endforeach()
+  # This fixture intentionally tests forced implicit acquisition; unset is automatic.
+  set_property(TEST scheduled_memory_projection APPEND PROPERTY ENVIRONMENT "DATAPUMP_SCHED_LAZY_ACQUISITION=1")
   set_tests_properties(scheduled_fine_curves PROPERTIES ENVIRONMENT "DATAPUMP_SCHED_FINE_CURVES=1;DATAPUMP_SCHED_FINE_CURVE_DIVISIONS=256")
   add_test(NAME scheduled_fine_curves_65 COMMAND test_scheduled_fine_curves)
   set_tests_properties(scheduled_fine_curves_65 PROPERTIES ENVIRONMENT "DATAPUMP_SCHED_FINE_CURVES=1;DATAPUMP_SCHED_FINE_CURVE_DIVISIONS=64")
@@ -419,6 +425,13 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_executable(test_gui_timing_advice tests/test_gui_timing_advice.cpp)
   target_link_libraries(test_gui_timing_advice PRIVATE datapump_gui_application datapump)
   add_test(NAME gui_timing_advice COMMAND test_gui_timing_advice)
+  add_executable(test_gui_scheduled_cold_start tests/test_gui_scheduled_cold_start.cpp)
+  target_link_libraries(test_gui_scheduled_cold_start PRIVATE datapump_gui_application datapump)
+  if(DATAPUMP_SANITIZERS AND NOT MSVC)
+    target_compile_definitions(test_gui_scheduled_cold_start PRIVATE DATAPUMP_INSTRUMENTED_TEST=1)
+  endif()
+  add_test(NAME gui_scheduled_cold_start COMMAND test_gui_scheduled_cold_start)
+  set_tests_properties(gui_scheduled_cold_start PROPERTIES TIMEOUT 150 RUN_SERIAL TRUE)
   add_executable(test_gui_controller tests/test_gui_controller.cpp)
   target_include_directories(test_gui_controller PRIVATE src/gui)
   target_link_libraries(test_gui_controller PRIVATE datapump_gui_application datapump)
@@ -499,7 +512,7 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
     endif()
   endif()
   set_tests_properties(gui_layout gui_contract gui_link_boundary gui_document_layout gui_interactions gui_services gui_bindings gui_record_reconciliation gui_document_presentation gui_chrome gui_inspection gui_pattern_space
-    gui_plots gui_bitmaps gui_inspection_page gui_binary_editor gui_controller gui_timing_advice gui_profile_reference gui_link_planner link_planner_curves gui_launch_command gui_launch_settings gui_application gui_overlay gui_adapter_boundary gui_boundary_regression gui_native_policy
+    gui_plots gui_bitmaps gui_inspection_page gui_binary_editor gui_controller gui_timing_advice gui_scheduled_cold_start gui_profile_reference gui_link_planner link_planner_curves gui_launch_command gui_launch_settings gui_application gui_overlay gui_adapter_boundary gui_boundary_regression gui_native_policy
     PROPERTIES LABELS "gui")
   if(UNIX)
     add_library(alsa_stub SHARED tests/alsa_stub.cpp)
@@ -592,7 +605,7 @@ endif()
 # before declaring the browser-audio targets. Objects avoid static archive
 # ordering when Application introduces audio references through another archive.
 if(NOT DATAPUMP_BUILD_WASM)
-  set(_datapump_mock_audio_tests test_gui_timing_advice test_legacy_session test_live_profiles
+  set(_datapump_mock_audio_tests test_gui_scheduled_cold_start test_gui_timing_advice test_legacy_session test_live_profiles
     test_fast_session test_live_transmit_lock test_fast_telemetry
     test_gui_legacy_live test_gui_fast_live)
   set(_datapump_direct_audio_tests test_alsa_audio test_windows_audio)
@@ -617,6 +630,15 @@ if(NOT DATAPUMP_BUILD_WASM)
       target_link_libraries(${_target} PRIVATE datapump_audio_native)
     endif()
   endforeach()
+endif()
+# This regression intentionally links only the common archive. Declare it
+# AFTER native-audio composition so a provider object cannot mask accidental
+# Session dependencies from pure allocation/planning consumers.
+if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
+  add_executable(test_live_planning_link tests/test_live_planning_link.cpp)
+  target_link_libraries(test_live_planning_link PRIVATE datapump)
+  add_test(NAME live_planning_link COMMAND test_live_planning_link)
+  set_tests_properties(live_planning_link PROPERTIES LABELS "contract;regular")
 endif()
 include(cmake/WebFrontends.cmake)
 add_custom_target(datapump-apps DEPENDS ${datapump_executables} ${datapump_app_dependencies})

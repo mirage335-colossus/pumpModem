@@ -127,8 +127,11 @@ than one additional symbol explicitly exhausts supported coverage. Timing budget
 do not restart at bursts, symbols or rolling admissions, and observed absence
 still requires fully scored source symbols totaling six seconds.
 
-Mapped physical projections, I/Q products, real Gram terms, covariance and scoring
-retain FP64 under all public arithmetic choices. Default and FP32 minimum may use
+Dense mapped and original-refinement physical projections, I/Q products, real
+Gram terms, covariance and scoring retain FP64 under all public arithmetic
+choices. The separate bounded-acquisition path uses
+[native timing FFTs](scheduled-hops.md#october-14-bounded-acquisition-manual-checkpoint)
+where eligible. Default and FP32 minimum may use
 bounded 512-sample carrier moments and an eight-row source-chip curve cache for
 eligible long fine chips. Both candidate rows remain independent. Curve identity
 uses resolved physical epoch/ordinal/local chip and matched-FHSS phase, under the
@@ -141,7 +144,9 @@ while retaining exact worker/chip/calendar reuse.
 Native FP32 curve storage/interpolation was implemented and inspected, but its
 complete local pair used 5.1% more CPU for 1.78 MB less DSP memory. It remains an
 internal override; no narrower automatic path is selected solely for its type.
-Fine-frequency fusion remains a kernel prototype, not an integrated gain.
+Fine-frequency fusion for this dense mapped representation remains a kernel
+prototype, not an integrated gain; bounded acquisition has separate family
+execution and retained original fallbacks.
 The later shared candidate adds exact-seed public moment reuse, leased L2 private
 source curves and complete DSSS permutation snapshots; these do not change
 arithmetic policy. Bounded common-family sharing is now enabled with an eight-phase
@@ -634,3 +639,12 @@ because a kernel is narrower or faster. See the [measured scope and gap](schedul
 
 
 The latest [shared-execution and fine-chip checkpoint](scheduled-hops.md#shared-execution-and-fine-chip-follow-up-13-october-2026) records complete-prefix CPU measurements, actual arithmetic, cache identities, numerical scope and unresolved full-bank work. Native FP32, fine source tables and borrowing experiments receive no automatic planner/simulation speed discount from operand width or kernel timing. Default/FP32 minimum mapped arithmetic remains partial FP64 coverage; FP64 force retains original templates and bypasses approximate interpolation.
+
+
+The [calendar acquisition continuation](scheduled-hops.md#calendar-acquisition-continuation-13-october-2026) identifies the rate36/DSSS10 broad-search state cliff, actual combined timing uncertainty, default-off shared frequency/private experiments and remaining tiled-acquisition work. Prefix gains do not establish a rescued continuous link. Scheduled CPU remains uncalibrated where complete execution is unsupported; neither native tile kernels nor narrower operand labels receive a blanket model discount.
+
+The October14 bounded scheduled representation is an availability fallback, not
+a measured fastest-backend selection. Dense representation remains selected
+where its necessary state can fit the immutable per-bank share. CPU and RX
+probability for the new complete rolling bank remain unavailable; see the
+[partial checkpoint](scheduled-hops.md#october-14-bounded-acquisition-manual-checkpoint).

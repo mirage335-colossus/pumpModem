@@ -1,6 +1,7 @@
 #pragma once
 #include "fhss_profile.hpp"
 #include "datapump/transfer.hpp"
+#include "datapump/live.hpp"
 #include "datapump/lpi_estimate.hpp"
 #include "datapump/simulation_estimate.hpp"
 #include <memory>
@@ -27,6 +28,9 @@ struct Inputs {
     unsigned dsp_workspace_percent=0;
     simulation::ReceiverWorkMode receiver_work_mode=simulation::ReceiverWorkMode::sampled_simulation;
     simulation::ReceiverTimingModel receiver_timing_model;
+    // Current immutable frontend/cohort reservations plus candidate-profile
+    // necessary fit; no full post-Use-target allocation or runtime guarantee.
+    std::optional<live::Settings> receiver_settings; // Never a Session/capture owner.
 };
 struct Point {
     double target_db_hz=0;

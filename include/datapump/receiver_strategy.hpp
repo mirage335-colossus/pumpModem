@@ -20,6 +20,9 @@ struct ReceiverStrategyPlan {
     double amplitude_frequency_half_width_hz=0,amplitude_clock_half_width_ppm=0;
     std::size_t estimated_workspace_bytes=0,amplitude_channels=0;
     bool scheduled=false,scheduled_cost_calibrated=false;
+    bool scheduled_implicit_acquisition=false;
+    std::size_t scheduled_bank_required_bytes=0,scheduled_local_capture_bytes=0,scheduled_shared_capture_bytes=0,scheduled_optional_tile_bytes=0;
+
     unsigned scheduled_frame_hops=1;
     std::uint64_t scheduled_active_hops=1;
     double scheduled_effective_multiplier=1,scheduled_active_seconds=0,scheduled_frame_seconds=0;
@@ -37,6 +40,13 @@ struct ReceiverStrategyPlan {
 // estimates for the supplied cohort, not measured throughput or probabilities.
 // Neither this policy nor its estimates may change the transmitted waveform.
 ReceiverStrategyPlan resolve_receiver_strategy(const Config&,const PatternSearch&,std::size_t workspace_bytes);
+// Planning only: expected layout, never a runtime owner/availability grant.
+// Use the SAME cohort capacity as Live (after capture/TX/plot/audio reserves),
+// with the actual configured hard consumer allocation and a conservative or
+// exact control margin. No measured CPU/probability is implied by fitting RAM.
+ReceiverStrategyPlan plan_receiver_strategy(const Config&,const PatternSearch&,std::size_t per_bank_allowance,
+    std::size_t cohort_workspace,std::size_t maximum_capture_consumers,
+    std::size_t receiver_control_margin);
 const char* receiver_backend_name(ReceiverBackend);
 std::size_t receiver_strategy_bank_count(const Config&,unsigned epoch_radius,std::size_t keys,std::size_t profiles);
 }

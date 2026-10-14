@@ -1,5 +1,11 @@
 #include "datapump/audio.hpp"
 #include "../src/signal_view.hpp"
+#include "../src/audio_trace.hpp"
+#include "../src/scheduled_exact_source_samples.hpp"
+#include "../src/scheduled_acquisition_certificate.hpp"
+#include "datapump/sched_hop.hpp"
+#include <fstream>
+#include <cstdlib>
 #include <numbers>
 #include "cpu_work_budget.hpp"
 #include "datapump/live.hpp"
@@ -15,6 +21,7 @@
 #include <optional>
 #include <random>
 #include <set>
+#include <stdexcept>
 #include <thread>
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -382,6 +389,9 @@ void receiver_backlog_before_overflow(bool clear=false) {
     };
     const auto active=await([&](const auto& x){return entered && x.decoding_samples==64 && !x.buffered_samples;});
     check(!active.receiver_health.failed(),"stalled decoder falsely reported dropped samples");
+    check(active.processed_physical_samples==0 && active.decoding_physical_samples==64 &&
+          active.queued_physical_samples==0,
+          "popped work advanced the physical decoder frontier before scoring");
     const auto aged=await([](const auto& x){return x.receiver_behind;});
     check(aged.buffered_samples==0 && aged.decoding_samples==64 && aged.receiver_oldest_input_seconds>=1. &&
           aged.receiver_backlog_seconds<1. && !aged.receiver_health.failed(),
@@ -390,9 +400,16 @@ void receiver_backlog_before_overflow(bool clear=false) {
     const auto queued=await([&](const auto& x){return x.buffered_samples==capture.samples.size()-64;});
     check(queued.receiver_backlog_seconds==3. && queued.receiver_behind && !queued.receiver_health.failed(),
           "queued hardware backlog changed sample accounting or claimed input loss");
+    check(queued.processed_physical_samples==0 && queued.decoding_physical_samples==64 &&
+          queued.queued_physical_samples==capture.samples.size()-64,
+          "queued capture and committed physical decoder coordinates were conflated");
     if(clear) {
         session.clear_received();
         const auto cleared=session.snapshot();
+        check(cleared.receiver_input_revision>queued.receiver_input_revision &&
+              cleared.processed_physical_samples==0 && cleared.queued_physical_samples==0 &&
+              cleared.decoding_physical_samples==0,
+              "Clear received retained the old physical processing frontier");
         check(!cleared.receiver_behind && cleared.receiver_backlog_seconds==0 &&
               cleared.receiver_oldest_input_seconds==0 && !cleared.buffered_samples && !cleared.decoding_samples &&
               !cleared.receiver_health.failed() && !cleared.receiver_timing && cleared.signals.empty() && cleared.received.empty(),
@@ -400,9 +417,19 @@ void receiver_backlog_before_overflow(bool clear=false) {
     }
     released=true;
     const auto drained=await([](const auto& x){return !x.buffered_samples && !x.decoding_samples;});
+    check(drained.processed_physical_samples==(clear?0:capture.samples.size()) &&
+          drained.queued_physical_samples==0 && drained.decoding_physical_samples==0,
+          "drain published an ingress coordinate instead of completed receiver work");
     check(!drained.receiver_behind && drained.receiver_backlog_seconds==0 && drained.receiver_oldest_input_seconds==0 &&
           !drained.receiver_health.failed() && drained.signals.empty() && drained.received.empty(),
           "drained backlog latched a failure or manufactured completion");
+    await([&](const auto&){return session.try_suspend_capture();});
+    session.resume_capture();
+    const auto resumed=session.snapshot();
+    check(resumed.receiver_input_revision>drained.receiver_input_revision &&
+          resumed.processed_physical_samples==0 && resumed.queued_physical_samples==0 &&
+          resumed.decoding_physical_samples==0,
+          "capture resume relabeled a stale physical decoder frontier");
     session.stop();
 }
 
@@ -702,6 +729,58 @@ void simulated_long_fft_single_bit(double duration = 40, double snr = 30, std::u
     check(session.snapshot().simulation_compute_seconds == 0 && !session.snapshot().simulation_receiving_tail,
           "reconfiguration retained the completed simulation's elapsed time or stage");
     session.stop();
+}
+
+// A failed, popped block must invalidate its physical input revision. It
+// cannot remain phantom queued work or be advertised as successfully scored.
+void receiver_exception_frontier() {
+    for(const bool queue_more:{false,true}) {
+        CaptureScript capture;capture.rate=modem_config(55,{}).sample_rate;
+        capture.monitor_rate=capture.rate;capture.monitor_samples.resize(64);capture.monitor_released=64;
+        capture.samples.resize(5*capture.rate);capture.released=0;capture_script=&capture;
+        const auto main_thread=std::this_thread::get_id();std::thread::id capture_thread;
+        std::atomic<bool> armed{false},entered{false},released{false};
+        capture.after_monitor=[&]{capture_thread=std::this_thread::get_id();armed=true;};
+        live::Session session([]{return double(epoch);},[&]{
+            if(armed && std::this_thread::get_id()!=main_thread && std::this_thread::get_id()!=capture_thread && !entered.exchange(true)) {
+                while(!released.load())std::this_thread::sleep_for(1ms);
+                // Bypass feed_bank's ordinary per-receiver Error handling to
+                // exercise the outer decoder exception boundary specifically.
+                throw std::runtime_error("injected receiver frontier failure");
+            }
+            return std::chrono::steady_clock::now();
+        });
+        struct Release {std::atomic<bool>& flag;~Release(){flag=true;}} release{released};
+        const auto await=[&](auto condition) {
+            const auto deadline=std::chrono::steady_clock::now()+10s;
+            do {auto snapshot=session.snapshot();if(condition(snapshot))return snapshot;std::this_thread::sleep_for(1ms);}
+            while(std::chrono::steady_clock::now()<deadline);
+            throw Error("receiver exception frontier fixture did not reach checkpoint");
+        };
+        session.start(settings({55}));const auto initial_revision=session.snapshot().receiver_input_revision;
+        capture.released=64;
+        await([&](const auto& x){return entered && x.decoding_samples==64 && !x.buffered_samples;});
+        const auto discarded=queue_more?3*capture.rate:64U;
+        capture.released=discarded;
+        await([&](const auto& x){return capture.delivered==discarded && x.buffered_samples==discarded-64;});
+        released=true;
+        const auto failed=await([&](const auto& x){return x.receiver_health.receiver_reset && !x.decoding_samples;});
+        check(failed.receiver_input_revision>initial_revision && failed.processed_physical_samples==0 &&
+              failed.queued_physical_samples==0 && failed.decoding_physical_samples==0 && !failed.buffered_samples,
+              "failed removed PCM remained phantom queued work or advanced the scored frontier");
+        check(failed.error=="injected receiver frontier failure" && failed.receiver_health.dropped_samples==discarded,
+              "receiver exception lost its error or abandoned-PCM accounting");
+        check(failed.signals.empty() && failed.received.empty(),"receiver failure manufactured completion");
+        capture.released=capture.samples.size();
+        const auto drained=await([&](const auto& x){return capture.delivered==capture.samples.size() &&
+            !x.buffered_samples && !x.decoding_samples;});
+        check(drained.processed_physical_samples==capture.samples.size()-discarded &&
+              drained.queued_physical_samples==0 && drained.decoding_physical_samples==0 &&
+              drained.receiver_health.receiver_reset && drained.receiver_health.dropped_samples==discarded,
+              "fresh receiver revision conflated lost PCM with newly completed work");
+        check(drained.signals.empty() && drained.received.empty(),"post-failure quiet input manufactured completion");
+        session.stop();capture_script=nullptr;
+    }
 }
 
 void receiver_loss_health() {
@@ -1019,6 +1098,155 @@ void outer_version_profile_identity() {
     live::validate_settings(value); // Version has no effect when outer DSSS is Off.
 }
 
+// Functional instrument, not a sustained/headroom or sensitivity benchmark.
+// It drives the real Live capture queue with bounded original scheduled PCM,
+// proves the native Pool is actually reached and checks its joined teardown.
+bool live_exact_source_pool(const std::filesystem::path& requested_trace={}) {
+    namespace xs=modem::detail::scheduled_source_samples;
+#if defined(__GLIBC__) && defined(__GNUC__) && __GNUC__>=14 && defined(__x86_64__) && !defined(__FAST_MATH__)
+    const auto native_qualified=xs::environment() && modem::detail::scheduled_acquisition_certificate::coordinate_environment();
+#else
+    const auto native_qualified=false;
+#endif
+    if(!native_qualified){std::cout<<"OMITTED: native exact-source positive-hit coverage; unqualified native-screen environment\n";return false;} // Numeric qualification has a separate fallback unit.
+    struct FixtureEnvironment {
+        const char* name;std::optional<std::string> previous;
+        FixtureEnvironment(const char* key,const char* value):name(key) {
+            if(const auto* old=std::getenv(name))previous=old;
+#if defined(_WIN32) && !defined(__linux__)
+            check(_putenv_s(name,value)==0,"could not set exact source fixture environment");
+#else
+            check(setenv(name,value,1)==0,"could not set exact source fixture environment");
+#endif
+        }
+        ~FixtureEnvironment() {
+#if defined(_WIN32) && !defined(__linux__)
+            const auto result=_putenv_s(name,previous?previous->c_str():"");
+#else
+            const auto result=previous?setenv(name,previous->c_str(),1):unsetenv(name);
+#endif
+            // Restoration failure must not silently contaminate subsequent cases.
+            if(result!=0)std::terminate();
+        }
+        FixtureEnvironment(const FixtureEnvironment&)=delete;
+        FixtureEnvironment& operator=(const FixtureEnvironment&)=delete;
+    };
+    const FixtureEnvironment lazy("DATAPUMP_SCHED_LAZY_ACQUISITION","1"),
+        source("DATAPUMP_SCHED_EXACT_SOURCE_TILES","1"),batch("DATAPUMP_SCHED_LAZY_BATCH","auto"),
+        origin_classes("DATAPUMP_SCHED_ORIGIN_CLASSES","1");
+    auto value=settings({});value.transfer.automatic_receive_profiles=false;
+    // This isolated instrument has an explicit budget; ordinary cases retain 32 MiB.
+    value.dsp_workspace_bytes=value.transfer.dsp_workspace_bytes=128U*1024U*1024U;
+    value.transfer.key.emplace(Bytes(32,0x73));value.receive_keys.clear();
+    auto& c=value.transfer.modem;c.sample_rate=512;c.bandwidth_hz=16;c.carrier_hz=128;
+    c.integration_seconds=8;c.spreading_factor=64;c.scramble=true;c.dsss=true;c.dsss_factor=10;
+    c.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+    // This positive integration instrument exercises the native preparation
+    // which consumes exact source rows. FP64-force deliberately bypasses that
+    // approximation; its original-template behavior has separate regressions.
+    c.receiver_strategy=modem::ReceiverStrategy::existing_only;c.search_arithmetic=modem::SearchArithmetic::default_mode;
+    c.oscillator_search.emplace();c.oscillator_search->lf={0,0};c.oscillator_search->rf={0,0};
+    auto plan=std::make_shared<modem::SchedHopPlan>();plan->time_multiplier=10;
+    plan->clock_error_seconds=plan->peer_clock_error_seconds=plan->region_seconds=plan->audio_error_seconds=0;
+    plan->ramp_seconds=.01;c.scheduled_hopping=plan;c.data_key=value.transfer.key;
+    const modem::SchedHopSourceMap calendar(*plan,*value.transfer.key,c.sample_rate);
+    auto selected=epoch;for(;selected<epoch+128;++selected)
+        if(calendar.locate({selected*c.sample_rate,0}).active)break;
+    check(selected<epoch+128,"bounded keyed calendar had no eligible integer epoch");
+    value.transfer.timestamp=selected;c.stream_epoch=selected;c.stream_phase_samples=0;
+    check(!modem::packed_scheduled_symbols(c)&&modem::symbol_sample_count(c)==8ULL*c.sample_rate,
+        "positive Live source fixture lost its split-symbol geometry");
+    auto transmitter=transfer::binary_transmitter(Bytes{0},value.transfer);
+    CaptureScript capture;capture.rate=c.sample_rate;
+    // Endpoint is elapsed PCM; output origin is an absolute UTC sample address.
+    const auto valid_end=transmitter->physical_valid_payload_end();
+    const auto output_origin=transmitter->physical_output_origin();
+    check(valid_end>0 && valid_end<=transmitter->total_samples(),"original scheduled payload endpoint escaped output");
+    check(valid_end<=std::numeric_limits<std::uint64_t>::max()-output_origin,
+        "original scheduled payload endpoint overflowed UTC coordinate");
+    const auto absolute_valid_end=output_origin+valid_end;
+    check(absolute_valid_end>=output_origin,"original scheduled payload endpoint precedes output");
+    // Numeric screening is due only after a complete source symbol. Capture
+    // that bit plus two physical frame lookahead, while retaining an incomplete
+    // reception: no complete absent source symbol is supplied.
+    const auto observed=std::min<std::size_t>(transmitter->total_samples(),valid_end+8ULL*c.sample_rate);
+    check(observed<=std::numeric_limits<std::uint64_t>::max()-output_origin,
+        "partial capture end overflowed UTC coordinate");
+    check(observed<=(2U*1024U*1024U)/sizeof(float) && observed>valid_end &&
+        calendar.locate({output_origin+observed,0}).source.distance(calendar.locate({absolute_valid_end,0}).source)<
+            modem::symbol_sample_count(c),"positive Live instrument supplied a whole absent source symbol or excessive PCM");
+    const auto payload_anchor=selected*static_cast<std::uint64_t>(c.sample_rate);
+    check(payload_anchor>=output_origin && payload_anchor-output_origin<valid_end,
+        "scheduled payload anchor escaped the original capture");
+    const auto skipped=static_cast<std::size_t>(payload_anchor-output_origin);
+    // Explicit-timestamp mock capture begins at the payload UTC anchor. The
+    // scheduled prefix has a physical duration different from its source duration.
+    // Read original PCM without changing transmitter keys, geometry or samples.
+    std::vector<float> original_capture(observed);
+    for(std::size_t at=0;at<observed;){const auto n=transmitter->read(std::span(original_capture).subspan(at));
+        check(n>0,"bounded original transmitter ended before partial capture");at+=n;}
+    capture.samples.assign(original_capture.begin()+skipped,original_capture.end());
+    const auto provided=capture.samples.size();bool accepted_zero=false;
+    capture_script=&capture;
+    const auto path=requested_trace.empty()?std::filesystem::current_path()/
+        ("live-exact-source-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl"):requested_trace;
+    std::shared_ptr<audio::trace::State> trace_state;
+    {
+        audio::trace::Scope trace(path);trace_state=audio::trace::active.load();
+        live::Session session([=]{return static_cast<double>(selected);});session.start(value);
+        testing::CpuWorkBudget budget(30s,"positive Live exact source binding");
+        std::optional<std::chrono::steady_clock::time_point> drained_at;
+        bool drained=false;
+        while(budget.pending()) {
+            const auto snapshot=session.snapshot();
+            check(snapshot.error.empty(),"positive Live source binding failed: "+snapshot.error);
+            check(!snapshot.receiver_health.failed() && snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,
+                "optional exact source Pool caused a receiver reset or workspace overflow");
+            for(const auto& signal:snapshot.signals) {
+                check(!signal.complete && signal.received_bits<=1 &&
+                    (!signal.received_bits || signal.text=="0" || signal.raw_bits=="0"),
+                    "bounded first-bit capture manufactured extra/wrong bits or physical absence");
+                accepted_zero|=signal.received_bits==1 && !signal.complete &&
+                    (signal.text=="0" || signal.raw_bits=="0");
+            }
+            const auto delivered=capture.delivered.load();
+            if(delivered<provided && delivered>=capture.released.load() && !snapshot.buffered_samples)
+                capture.released=delivered+std::min<std::size_t>(std::max<std::size_t>(8,capture.rate/10),provided-delivered);
+            if(delivered>=provided && !snapshot.buffered_samples &&
+               snapshot.processed_physical_samples>=provided && snapshot.receiver_backlog_seconds==0) {
+                if(!drained_at)drained_at=std::chrono::steady_clock::now();
+                if(std::chrono::steady_clock::now()-*drained_at>=250ms){drained=true;break;}
+            } else drained_at.reset();
+            std::this_thread::sleep_for(1ms);
+        }
+        check(drained,"partial Live exact-source fixture did not drain its bounded capture queue");
+        check(accepted_zero,"complete intended source bit never published pending zero in positive Live fixture");
+        session.clear_received();session.stop();
+    }
+    check(bool(trace_state),"positive Live source trace State is missing");
+    {std::lock_guard lock(trace_state->mutex);
+        check(trace_state->done && !trace_state->dropped && !trace_state->io_failed && !trace_state->size_limited,
+            "positive Live source trace is incomplete");}
+    std::ifstream trace(path);check(bool(trace),"positive Live source trace is missing");
+    std::string line;bool allocated=false,queried=false,final=false,footer=false;
+    const auto field=[](const std::string& text,const char* name) {
+        const auto label=std::string("\"")+name+"\":";const auto at=text.find(label);
+        return at==std::string::npos?0ULL:std::stoull(text.substr(at+label.size()));};
+    while(std::getline(trace,line)) {
+        if(line.find("\"event\":\"receiver_exact_source_samples\"")!=std::string::npos) {
+            allocated|=field(line,"rows")>0&&field(line,"bytes")>0;
+            queried|=field(line,"queries")>0&&field(line,"cached_points")>0;
+            final|=line.find("\"final_snapshot\":1")!=std::string::npos;
+        }
+        footer|=line.find("\"event\":\"trace_end\"")!=std::string::npos;
+    }
+    check(allocated&&queried&&final&&footer,"Live optional source Pool was allocated without productive joined native binding or final accounting");
+    check(xs::binding.pool==nullptr && !xs::binding.reclaim,"Live instrument leaked a source binding into caller TLS");
+    capture_script=nullptr;
+    std::cout<<"Live exact source Pool positive partial functional trace: "<<path<<"\n";
+    return true;
+}
+
 int main(int argc, char** argv) {
     std::string context;
     try {
@@ -1026,8 +1254,9 @@ int main(int argc, char** argv) {
         const FixtureTimerResolution timer_resolution;
 #endif
         const std::string suite = argc > 1 ? argv[1] : "all";
-        check(suite == "all" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "arrival_fallback" || suite == "tx_failure",
+        check(suite == "all" || suite == "exact_source" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "frontier_failure" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "arrival_fallback" || suite == "tx_failure",
               "unknown profile test suite");
+        if(suite=="exact_source") {context="positive partial Live exact source binding";if(!live_exact_source_pool(argc>2?std::filesystem::path(argv[2]):std::filesystem::path{}))return 77;}
         if(suite=="all" || suite=="duplex") {
             context="outer DSSS profile identity";outer_version_profile_identity();
             context="single-session hardware duplex loopback";duplex_loopback();
@@ -1043,6 +1272,7 @@ int main(int argc, char** argv) {
         if(suite=="all" || suite=="arrival_fallback") {context="unqualified UTC capture falls back visibly";modeled_arrival_window(true,true);}
         if(suite=="all" || suite=="arrival_time") {context="modeled compact UTC arrival";modeled_arrival_window();}
         if(suite=="arrival_time_baseline") {context="full-window UTC arrival control";modeled_arrival_window(false);}
+        if(suite=="all" || suite=="frontier_failure") {context="receiver exception physical frontier";receiver_exception_frontier();}
         if(suite=="all" || suite=="health") {context="receiver loss health";receiver_loss_health();}
         if(suite=="all" || suite=="monitor") {context="independent environment monitor";independent_environment_monitor();}
         if (suite == "interval_queue") {

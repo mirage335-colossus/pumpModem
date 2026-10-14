@@ -54,6 +54,15 @@ struct Settings {
 // Check exactly the settings accepted by Session without changing a live
 // receiver, opening audio hardware, or starting a transmission.
 void validate_settings(const Settings& settings);
+// Workspace geometry after Session's identical structural/value normalization
+// and reservations. Provider capability acceptance is separate at Session /
+// validate_settings; this provider-free calculation cannot grant audio support.
+// Copies bounded settings metadata, opens no device and allocates no capture
+// owner. It does not grant runtime coverage or reception success.
+std::size_t receiver_workspace_capacity(const Settings& settings);
+// Same complete Receiver/control reservation used by Live admission. The key
+// flag denotes actual keyed receive ownership, not merely a requested mode.
+std::size_t receiver_control_margin(const modem::Config& config,bool keyed);
 struct SignalUpdate {
     std::uint64_t id = 0; // Stable acquisition identity for replacing pending text.
     double frequency_hz = 0;
@@ -183,6 +192,11 @@ struct Snapshot {
     // actual copied PCM and proof-certified coordinate-only nulls, not modeled
     // duty cycle or per-candidate FFT omissions.
     std::uint64_t capture_recorded_samples = 0, capture_certified_null_samples = 0;
+    // Decoder frontier in the current input revision, including certified
+    // coordinate-only nulls after every required consumer has advanced. Capture
+    // ingress and PCM queue sizes are not a substitute for this frontier.
+    std::uint64_t receiver_input_revision = 0, processed_physical_samples = 0;
+    std::uint64_t queued_physical_samples = 0, decoding_physical_samples = 0;
     std::size_t buffered_samples = 0;
     // PCM currently being scored outside the capture queue. Together with
     // buffered_samples, distinguishes an idle decoder from a popped work block.
@@ -283,6 +297,7 @@ public:
     Snapshot snapshot();
     void stop();
 private:
+    friend std::size_t receiver_control_margin(const modem::Config&,bool);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

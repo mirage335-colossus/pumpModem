@@ -2,11 +2,13 @@
 #include "datapump/simulation_estimate.hpp"
 #include "datapump/sched_hop.hpp"
 #include "datapump/boundary_sync.hpp"
+#include "datapump/clock_sync.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/pattern_search.hpp"
 #include "datapump/receiver_strategy.hpp"
+#include "datapump/live.hpp"
 #include "datapump/scheduled_complex_search.hpp"
 #include "../src/receiver_probability.hpp"
 #include "../src/estimate_cancellation.hpp"
@@ -17,6 +19,9 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
+#include <optional>
+#include <string>
 #include <iostream>
 #include <limits>
 #include <numbers>
@@ -144,8 +149,8 @@ void search_arithmetic_model_identity() {
     check(default_cost.gpu_seconds>.1*default_cost.cpu_seconds,
           "hypothetical GPU must retain private construction, plan, frontend and tracking host costs");
 
-    // Complete physical phase cells: the first hop combines a full index0
-    // job with four direct index1 positions. The wide qualified prior is
+    // Complete physical phase cells: the fourth original hop combines a full index0
+    // job with two direct index1 positions. The wide qualified prior is
     // intersected with the original bank. Mixed cohorts must rebuild original
     // FP64 templates regardless of requested precision.
     measured.modem.integration_seconds=std::nextafter(32767./40000.,0.);
@@ -153,7 +158,15 @@ void search_arithmetic_model_identity() {
     measured.modem.oscillator_search->lf={.000001,0};
     measured.modem.oscillator_search->rf={0,0};
     measured.modem.oscillator_search->rf_shift_hz=0;
-    measured.clock_sync=clock_sync::Policy{0,4.,0};measured.audio_timing_error_seconds=0;
+    // With normalized epoch radius4, place the lower boundary halfway
+    // inside its original arrival/selector cell at batch4. Derive timing
+    // roundoff from the real mapper: binary64 and wider long double differ.
+    const auto numerical_map=clock_sync::audio_lag_arrival_map(clock_sync::Policy{0,0,0},
+        1800000000.L,1799999995.L,0,40000,1./40000,0,0,32766,0);
+    check(numerical_map.has_value(),"mixed fixture numerical UTC map unavailable");
+    const auto edge_offset=2.5L+numerical_map->half_width_samples-.5L;
+    measured.clock_sync=clock_sync::Policy{0,static_cast<double>(2*(5.L-(4*32769.L+edge_offset)/40000)),0};
+    measured.audio_timing_error_seconds=0;
     auto mixed_draft=wire(1,measured.modem);mixed_draft.total_seconds=45;
     const auto mixed_price=[&] {return simulation::estimate(mixed_draft,measured,true,clean_channel(),{},1,false,
         100,256,simulation::ReceiverWorkMode::hardware_timing_model,{0,0,1./40000});};
@@ -161,6 +174,7 @@ void search_arithmetic_model_identity() {
     measured.modem.search_arithmetic=modem::SearchArithmetic::fp64;const auto mixed_exact=mixed_price();
     const auto& m=mixed.receiver_geometry;const auto& e=mixed_exact.receiver_geometry;
     check(modem::symbol_sample_count(measured.modem)==32767&&mixed.receiver_workspace_supported&&
+          mixed.epoch_hypotheses==9&&m.arrival_window_available&&m.restricted_fft_modeled&&
           m.paired_fallback_components>0&&m.direct_template_jobs>0&&m.input_fft_transforms>0&&
           m.paired_direct_template_jobs==0,
           "mixed selector fixture must actually combine full and direct jobs before pricing fallback");
@@ -2249,6 +2263,97 @@ void scheduled_packed_complex_model() {
         c.search_arithmetic=modem::SearchArithmetic::default_mode;
     }
 }
+class ScopedPlanningPolicy {
+    std::optional<std::string> previous;
+public:
+    explicit ScopedPlanningPolicy(const char* value) {
+        if(const auto* old=std::getenv("DATAPUMP_SCHED_LAZY_ACQUISITION"))previous=old;
+        set(value);
+    }
+    static void set(const char* value) {
+#ifdef _WIN32
+        if(_putenv_s("DATAPUMP_SCHED_LAZY_ACQUISITION",value?value:"")!=0)throw Error("cannot set planning policy fixture");
+#else
+        if(value?setenv("DATAPUMP_SCHED_LAZY_ACQUISITION",value,1)!=0:unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION")!=0)
+            throw Error("cannot set planning policy fixture");
+#endif
+    }
+    ~ScopedPlanningPolicy() {try {set(previous?previous->c_str():nullptr);}catch(...) {}}
+};
+void scheduled_shared_layout_callers() {
+    ScopedPlanningPolicy policy("1");
+    transfer::Options options;options.timestamp=1800000000;options.search_seconds=6;
+    options.key.emplace(Bytes(32,0x43));options.dsp_workspace_bytes=2609192632ULL;
+    options.audio_timing_error_seconds=0;
+    options.modem=tuning::resolve(36,8,tuning::PatternMode::auto_keystream,true,1500,10,
+        modem::OuterDsssVersion::interleaved_v2).config;
+    options.automatic_receive_profiles=true;options.receive_targets_db_hz={8};
+    options.receive_pattern_mode=tuning::PatternMode::auto_keystream;
+    auto& c=options.modem;c.receiver_strategy=modem::ReceiverStrategy::automatic;c.receiver_cpu_budget=.6;
+    modem::OscillatorSearchConfig oscillator;
+    oscillator.lf=tuning::oscillator_model(tuning::parse_oscillator_preset("gpsdo-xo"));
+    oscillator.rf=oscillator.lf;oscillator.rf_shift_hz=3e7;oscillator.margin=3;
+    oscillator.reference=modem::OscillatorReference::independent_audio;c.oscillator_search=oscillator;
+    auto schedule=std::make_shared<modem::SchedHopPlan>();schedule->time_multiplier=10;schedule->audio_error_seconds=0;
+    c.scheduled_hopping=schedule;
+    check(!modem::packed_scheduled_symbols(c)&&c.sample_rate==6120&&
+        modem::symbol_sample_count(c)==87040,"shared layout fixture changed the requested demanding source geometry");
+    live::Settings settings;settings.transfer=options;settings.dsp_workspace_bytes=options.dsp_workspace_bytes;
+    settings.content_limit=options.content_limit;
+    const auto draft=transfer::estimate_binary(Bytes{0},options);
+    const auto probe=[&](simulation::ReceiverWorkMode mode) {
+        return simulation::estimate_with_receiver_settings(draft,options,true,clean_channel(),settings,{},1,true,100,128,mode);
+    };
+    const auto planned=probe(simulation::ReceiverWorkMode::hardware_fallback);
+    check(planned.profile_matches&&planned.receiver_workspace_supported&&planned.carrier_in_search&&
+        planned.clock_in_search&&!planned.oscillator_search_limited&&
+        planned.receiver_geometry.receiver_strategy_selected==modem::receiver_backend_name(modem::ReceiverBackend::existing_complex),
+        "pure shared layout must preserve useful complex strategy without a fabricated runtime owner");
+    check(planned.receiver_geometry.arrival_window_available&&!planned.timing_window_modeled&&
+        planned.receiver_geometry.combined_arrival_half_width_seconds==7&&planned.timing_hypotheses>100000,
+        "default scheduled layout must show complete fourteen-second combined arrival uncertainty");
+    check(!planned.receiver_work_supported&&!planned.hardware_sustained_modeled&&
+        !std::isfinite(planned.cpu_seconds)&&!std::isfinite(planned.receiver_cpu_seconds)&&
+        !std::isfinite(planned.hardware_sustained_realtime_ratio)&&!planned.gpu_work_supported,
+        "uncalibrated shared execution must not publish DBL_MAX, zero CPU cost or supported GPU work");
+    check(!planned.confidence_available&&!planned.reference_probability_available&&!planned.one_bit_reference_available&&
+        planned.receiver_geometry.backend.find("tiled complex")!=std::string::npos,
+        "memory planning must not manufacture full-bank sensitivity or report amplitude-only dispatch");
+    const auto derived=simulation::estimate(draft,options,true,clean_channel(),{},1,false,100,128,
+        simulation::ReceiverWorkMode::hardware_fallback);
+    check(derived.receiver_workspace_supported==planned.receiver_workspace_supported&&
+        derived.receiver_geometry.receiver_strategy_selected==planned.receiver_geometry.receiver_strategy_selected&&
+        derived.timing_hypotheses==planned.timing_hypotheses,
+        "legacy estimate wrapper and equivalent settings-aware layout must agree on candidate geometry");
+    c.search_arithmetic=modem::SearchArithmetic::fp64;settings.transfer=options;
+    const auto reference=probe(simulation::ReceiverWorkMode::hardware_fallback);
+    check(reference.receiver_workspace_supported&&reference.timing_hypotheses==planned.timing_hypotheses&&
+        reference.frequency_rate_hypotheses==planned.frequency_rate_hypotheses&&
+        reference.receiver_geometry.arithmetic_operands.find("Native FP64")!=std::string::npos&&
+        reference.receiver_geometry.template_reuse.find("no approximate clock interpolation")!=std::string::npos,
+        "FP64 planning must retain original templates and identical admitted geometry");
+    c.search_arithmetic=modem::SearchArithmetic::default_mode;
+    options.clock_sync=clock_sync::Policy{.001,.001,0};options.audio_timing_error_seconds=.001;settings.transfer=options;
+    const auto tight=probe(simulation::ReceiverWorkMode::hardware_timing_model);
+    check(tight.timing_window_modeled&&tight.receiver_workspace_supported&&
+        tight.timing_hypotheses<=planned.timing_hypotheses,
+        "qualified scheduled caller must retain its actual timing prior rather than an ownerless fallback");
+    auto inconsistent=settings;inconsistent.transfer.modem.carrier_hz+=1;
+    bool refused=false;try {
+        (void)simulation::estimate_with_receiver_settings(draft,options,true,clean_channel(),inconsistent,{},1,false,
+            100,128,simulation::ReceiverWorkMode::hardware_fallback);
+    } catch(const Error&) {refused=true;}
+    check(refused,"settings-aware model must reject a contradictory physical frontend instead of borrowing its allowance");
+    auto foreign_rate=options.modem;++foreign_rate.sample_rate;
+    const std::array mixed_rates{options.modem,foreign_rate};refused=false;
+    try {(void)simulation::estimate_with_receiver_settings(draft,options,true,clean_channel(),settings,mixed_rates,1,false,
+        100,128,simulation::ReceiverWorkMode::hardware_fallback);} catch(const Error&) {refused=true;}
+    check(refused,"one shared layout must not mix original physical sample-rate coordinates across scheduled profiles");
+    options.dsp_workspace_bytes=32*1024*1024;settings.transfer=options;settings.dsp_workspace_bytes=options.dsp_workspace_bytes;
+    const auto constrained=probe(simulation::ReceiverWorkMode::hardware_fallback);
+    check(!constrained.receiver_workspace_supported&&!constrained.confidence_available,
+        "pure capture layout must retain honest failure when mandatory owner/bank memory does not fit");
+}
 void scheduled_split_complex_model() {
     transfer::Options options;options.timestamp=1800000000;options.search_seconds=0;
     options.key.emplace(Bytes(32,0x79));options.dsp_workspace_bytes=8ULL*1024*1024*1024;
@@ -2382,6 +2487,7 @@ void projected_pattern_workload() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="--planning-layout-only") {scheduled_shared_layout_callers();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--strategy-only") {receiver_strategy_model();scheduled_strategy_model();scheduled_short_phase_prior_model();scheduled_packed_complex_model();scheduled_split_complex_model();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--sustained-only") {sustained_hardware_acquisition();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--spread-only") {spread_example_reference();return 0;}
@@ -2411,7 +2517,7 @@ int main(int argc,char** argv) {
         if(argc==2&&std::string(argv[1])=="--partial-only") {
             partial_compact_probability();std::cout<<"partial simulation estimate tests passed\n";return 0;
         }
-        receiver_strategy_model();scheduled_strategy_model();scheduled_short_phase_prior_model();scheduled_packed_complex_model();scheduled_split_complex_model();sustained_hardware_acquisition();
+        receiver_strategy_model();scheduled_strategy_model();scheduled_short_phase_prior_model();scheduled_packed_complex_model();scheduled_split_complex_model();scheduled_shared_layout_callers();sustained_hardware_acquisition();
         utc_bank_estimate();clock_dsss_reference();restricted_fft_direct_and_bounded_fallback();guarded_component_workload();versioned_outer_work_and_probability_scope();rolling_fft_epoch_workload();compact_clock_prior_workload();probability_and_framing();workload_and_impairments();receiver_cpu_budget();received_processing_budget();whole_symbol_phase_coherence();partial_compact_probability();spread_example_reference();sub9_probability_model_limits();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
         coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();oscillator_policy_geometry();nearby_shift_workload();equivalent_receive_profiles();affine_coefficient_workload();projected_pattern_workload();
         std::cout<<"simulation estimate tests passed\n";return 0;}

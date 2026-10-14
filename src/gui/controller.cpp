@@ -929,22 +929,17 @@ struct Controller::Impl {
             std::optional<TargetEdit> adjustment;
             const bool automatic=mode==tuning::PatternMode::auto_pattern||
                 mode==tuning::PatternMode::auto_keystream||mode==tuning::PatternMode::auto_tone;
-            // Receiver-local changes must not retune the transmitted bit
-            // duration. In particular a forced unsupported decoder remains a
-            // saved diagnostic request, with RX limitations reported separately.
-            const bool fit_loaded_targets=load&&(load->target_db_hz||load->short_target_db_hz||
-                load->long_target_db_hz||load->rate_hz||load->carrier_hz||load->pattern||load->doppler||
-                load->workspace_percent||load->oscillator||load->rf_oscillator||load->rf_shift_hz||
-                load->search_margin||load->reference||load->clock_sync||load->audio_timing_error_seconds||
-                load->dsss_factor||load->dsss_version||load->dsss_mode||load->fhss||load->fhss_list||
-                load->fhss_list_file||load->keyfile||load->key_name||load->tx_key);
+            // Interactive target edits may seek a representable neighbor.
+            // Explicit launch/parameter imports instead preserve their requested
+            // waveform and report receiver eligibility independently below.
             const auto fit_target=[&](double target,std::span<const double> companions) {
-                if(!automatic||strategy==modem::ReceiverStrategy::amplitude_only||
-                   (load&&!fit_loaded_targets))return target;
+                if(!automatic||strategy==modem::ReceiverStrategy::amplitude_only)return target;
                 auto input=next_planner;input.options=next.transfer;input.mode=mode;input.target_db_hz=target;
                 input.receiver_work_mode=next.simulation?simulation::ReceiverWorkMode::sampled_simulation:
                     simulation::ReceiverWorkMode::hardware_fallback;
                 input.receiver_timing_model={};
+                // The proposed physical profile needs its own candidate layout.
+                input.receiver_settings.reset();
                 // Seed only the carrier/rate geometry with a bounded short
                 // profile. nearest_fit_target resolves every actual target;
                 // an artificial weak seed can exceed V2's symbol-map bound.
@@ -961,23 +956,13 @@ struct Controller::Impl {
                 return *fitted;
             };
             if(load) {
-                // Resolve the complete proposed configuration before changing
-                // any live field or receiver. Import uses the same fit policy
-                // as native target edits, with both receive profiles present.
-                const auto requested_short=short_snr,requested_long=long_snr;
+                // A saved/explicit command is a configuration request, not a
+                // suggestion to change its waveform until RX happens to fit.
+                // Commit valid settings/keys atomically; an unavailable decoder
+                // remains an RX limitation and must not replace the target.
                 if(short_snr< -200||short_snr>200||long_snr< -200||long_snr>200)
                     throw Error("Target SNR must be -200 to 200 dB-Hz");
-                short_snr=fit_target(short_snr,{});long_snr=fit_target(long_snr,{});
-                short_snr=fit_target(requested_short,std::array{long_snr});
-                long_snr=fit_target(requested_long,std::array{short_snr});
-                if(fit_target(short_snr,std::array{long_snr})!=short_snr||
-                   fit_target(long_snr,std::array{short_snr})!=long_snr)
-                    throw Error("No clock/RAM fit found for both targets.");
-                // An unrelated preview target must not reject a valid atomic
-                // key/settings import. Only an explicitly imported common
-                // target changes the planner; actual short/long profiles above
-                // still undergo their complete configured-bank fit checks.
-                if(load->target_db_hz)next_planner.target_db_hz=fit_target(*load->target_db_hz,{});
+                if(load->target_db_hz)next_planner.target_db_hz=*load->target_db_hz;
             }
             if(align_target&&*align_target!=UiField::receive_snr) {
                 auto& target=*align_target==UiField::snr?short_snr:long_snr;
@@ -1146,6 +1131,20 @@ struct Controller::Impl {
             lpi_estimate_status(!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
             plot_policy.reset(); plot_update.clear_waterfall=true;
             if(started) session.configure(settings);
+            if(load)audio::trace::record("gui_settings_committed",[&](auto& fields) {
+                fields.add("preview_target_db_hz",planner_inputs.target_db_hz);
+                fields.add("short_target_db_hz",short_target);fields.add("long_target_db_hz",long_target);
+                fields.add("rate_hz",settings.transfer.modem.bandwidth_hz);
+                fields.add("stream_carrier_hz",settings.transfer.modem.carrier_hz);
+                fields.add("sample_rate",settings.transfer.modem.sample_rate);
+                fields.add("short_symbol_samples",modem::symbol_sample_count(settings.transfer.modem));
+                fields.add("long_symbol_samples",modem::symbol_sample_count(*settings.long_message_modem));
+                fields.add("receive_keys",settings.receive_keys.size());
+                fields.add("dsss_factor",settings.transfer.modem.dsss_factor);
+                fields.add("sched_multiplier",burst_multiplier);fields.add("sched_dilution",dilution);
+                fields.add("receiver_strategy",std::string(tuning::receiver_strategy_id(strategy)));
+                fields.add("search_arithmetic",std::string(tuning::search_arithmetic_id(arithmetic)));
+            });
         } catch(const std::exception& error) {
             if(!load) {
                 settings_valid=false;settings_error=error.what();target_labels();simulation_estimate_status("Invalid settings");lpi_estimate_status("Invalid settings");
@@ -1161,6 +1160,7 @@ struct Controller::Impl {
         if(planner_model)return planner_model;
         auto input=planner_inputs;
         input.options=settings.transfer;
+        input.receiver_settings=settings;
         input.receiver_work_mode=receiver_work_mode();
         input.receiver_timing_model=receiver_timing_model();
         input.dsp_workspace_percent=dsp_workspace_percent;
@@ -1200,6 +1200,7 @@ struct Controller::Impl {
         if(align) {
             if(!settings_valid)throw Error("Fix the modem settings to continue planning.");
             auto input=planner_inputs;input.options=settings.transfer;input.mode=settings.transfer.receive_pattern_mode;
+            input.receiver_settings=settings;
             input.receiver_work_mode=receiver_work_mode();
             input.receiver_timing_model=receiver_timing_model();
             input.target_db_hz=value;input.channel.clock_error_ppm=settings.simulation_clock_error_ppm;
@@ -1238,6 +1239,11 @@ struct Controller::Impl {
         values.search_margin=policy.margin;
         values.reference=policy.reference==modem::OscillatorReference::shared_radio?"shared-radio":"independent";
         values.target_db_hz=planner_inputs.target_db_hz;
+        // Export actual independent TX targets without inventing redundant
+        // overrides of a common target. This preserves reload geometry while
+        // leaving --target-snr useful as the common profile setting.
+        if(short_target!=planner_inputs.target_db_hz)values.short_target_db_hz=short_target;
+        if(long_target!=planner_inputs.target_db_hz)values.long_target_db_hz=long_target;
         values.pattern=f(UiField::pattern).selected;
         values.rate_hz=settings.transfer.modem.bandwidth_hz;
         values.carrier_hz=frequency(f(UiField::carrier).text,"Carrier");
@@ -1743,8 +1749,9 @@ struct Controller::Impl {
                     };
                     if(banks.plaintext)add_profiles(false);
                     for(std::size_t key=0;key<banks.private_keys;++key)add_profiles(true);
-                    value.simulation_estimate=simulation::estimate(value.inspection->estimate,request.options,
-                        value.inspection->binary||transfer::uses_raw_message(request.message),channel,profiles,1,true,100,4096,work_mode,timing_model,stop);
+                    value.simulation_estimate=simulation::estimate_with_receiver_settings(value.inspection->estimate,request.options,
+                        value.inspection->binary||transfer::uses_raw_message(request.message),channel,simulation_settings,
+                        profiles,1,true,100,4096,work_mode,timing_model,stop);
                     audio::trace::record("gui_simulation_advice_result",[&](audio::trace::Fields& fields) {
                         inspection_trace_fields(fields,value.revision,value.advice_revision,request,bool(reusable));
                         const auto& advice=*value.simulation_estimate;
@@ -1875,8 +1882,8 @@ struct Controller::Impl {
                     first_bit_only?"First bit "+probability_text(model.one_bit_success_probability)+" · draft unmodeled":
                     !probability_available?"Outside model range":probability_text(model.success_probability);
                 simulation_estimate_text(confidence,
-                    "~"+seconds_text(model.cpu_seconds),model.gpu_work_supported?
-                        "~"+seconds_text(model.gpu_seconds):"Unavailable",
+                    model.receiver_work_supported&&std::isfinite(model.cpu_seconds)?"~"+seconds_text(model.cpu_seconds):"Unavailable",
+                    model.gpu_work_supported&&std::isfinite(model.gpu_seconds)?"~"+seconds_text(model.gpu_seconds):"Unavailable",
                     model.coherent_reference_only||model.probability_reference_only||first_bit_only,
                     model.profile_matches&&model.carrier_in_search&&model.receiver_workspace_supported&&
                     probability_available&&model.success_probability<.8?ui::TextTone::negative:ui::TextTone::normal);

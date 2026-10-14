@@ -1,4 +1,8 @@
+#include "live_receiver_layout.hpp"
+#include "scheduled_acquisition_policy.hpp"
 #include "datapump/simulation_estimate.hpp"
+#include "datapump/live.hpp"
+#include "shared_scheduled_capture.hpp"
 #include "datapump/boundary_sync.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
@@ -18,6 +22,7 @@
 #include "datapump/sched_hop.hpp"
 #include "datapump/correlation_experiment.hpp"
 #include <algorithm>
+#include <cstdlib>
 #include <array>
 #include <cmath>
 #include <limits>
@@ -265,6 +270,7 @@ long double phase_coherence(long double x) {
     return 2*(1+(std::expm1(-x)/x))/x;
 }
 struct Work {
+    bool cost_available=true;
     long double serial=0,parallel=0,tracking_serial=0,tracking_windows=0,search_trials=1,kernel_serial=0,
         kernel_upper_serial=0,search_serial=0;
     double noise_dimensions=0,coherent_dimensions=0,section_dimensions=0,noise_condition=1;
@@ -750,10 +756,79 @@ std::optional<modem::PatternStartWindow> fft_anchor_window(const transfer::Optio
 // symbols use exact singleton calendar phases; split symbols use original
 // mapped FP64 contraction over a refined physical-aperture bank. Neither null
 // waits nor a canonical address-grid step imply contiguous waveform samples.
+struct ReceiverLayoutContext {
+    std::size_t cohort_capacity=0,maximum_consumers=128;
+    bool shared_capture_reserved=false;
+};
+ReceiverLayoutContext receiver_layout_context(const transfer::Options& options,
+        std::span<const modem::Config> profiles,std::size_t keys,ReceiverWorkMode mode,
+        const live::Settings* actual) {
+    auto settings=actual?*actual:live::Settings{};
+    if(!actual) {
+        settings.transfer=options;settings.content_limit=options.content_limit;
+        settings.dsp_workspace_bytes=options.dsp_workspace_bytes;
+        settings.simulation=mode==ReceiverWorkMode::sampled_simulation;
+    } else {
+        const auto& c=settings.transfer.modem;const auto& n=options.modem;
+        if(c.sample_rate!=n.sample_rate || c.carrier_hz!=n.carrier_hz || c.bandwidth_hz!=n.bandwidth_hz ||
+           c.spreading_mode!=n.spreading_mode || c.dsss_factor!=n.dsss_factor ||
+           (c.dsss_factor>1 && c.outer_dsss_version!=n.outer_dsss_version) ||
+           settings.simulation!=(mode==ReceiverWorkMode::sampled_simulation))
+            throw Error("receiver settings contradict the planned physical waveform/route");
+    }
+    settings=live::detail::normalized_layout(std::move(settings));
+    for(const auto& profile:profiles)
+        if(modem::scheduled_bursts(profile)&&profile.sample_rate!=options.modem.sample_rate)
+            throw Error("scheduled shared-capture planning requires one original PCM sample rate");
+    ReceiverLayoutContext out;out.cohort_capacity=live::receiver_workspace_capacity(settings);
+    if(!modem::detail::scheduled_acquisition_policy::requested())return out;
+    // The span can already contain repeated per-key families (GUI advisory);
+    // keys is the remaining multiplier. Do not also multiply settings' keys.
+    const auto reserve=[&](modem::Config c,std::size_t key_count,std::size_t profile_count,
+                            unsigned radius,const std::optional<Crypto>& key) {
+        if(key)c.data_key=key;
+        if(!modem::scheduled_bursts(c) || !c.data_key || modem::packed_scheduled_symbols(c) ||
+           !modem::pattern_pulse_enabled(c))return;
+        const auto n=modem::symbol_sample_count(c);
+        if(n<6ULL*c.sample_rate || n>=16ULL*c.sample_rate)return;
+        const auto count=modem::receiver_strategy_bank_count(c,radius,key_count,profile_count);
+        if(count>(std::numeric_limits<std::size_t>::max()-128)/2)
+            throw Error("planned shared capture consumer reservation overflow");
+        out.maximum_consumers=std::max(out.maximum_consumers,2*count+128);out.shared_capture_reserved=true;
+    };
+    for(const auto& c:profiles)reserve(c,keys,profiles.size(),options.search_seconds,options.key);
+    if(actual) {
+        // Reserve at least the same complete owner metadata as Live, including
+        // its conservative configured-key count. This is a pure layout; it
+        // never supplies an owner to runtime resolve_receiver_strategy.
+        const auto& base=settings.transfer;
+        const auto family=base.automatic_receive_profiles?
+            tuning::receive_profiles(base.modem,base.receive_targets_db_hz,base.receive_pattern_mode,true):
+            std::vector<modem::Config>{base.modem};
+        const auto count=std::max<std::size_t>(1,settings.receive_keys.size()+std::size_t(base.key.has_value()));
+        for(auto c:family) {
+            if(!c.data_key && !settings.receive_keys.empty())c.data_key=settings.receive_keys.front();
+            reserve(c,count,family.size(),base.search_seconds,base.key);
+        }
+    }
+    return out;
+}
+void receiver_layout_share(modem::PatternSearch& search,const modem::Config& config,
+        const ReceiverLayoutContext& layout,bool keyed) {
+    auto available=layout.cohort_capacity;
+    if(layout.shared_capture_reserved) {
+        const auto capture=modem::detail::scheduled_capture::SharedScheduledCapture::cohort_layout(
+            layout.cohort_capacity,layout.maximum_consumers);
+        available-=capture.reserved_bytes;
+    }
+    const auto share=available/std::max<std::size_t>(1,search.receiver_bank_count);
+    const auto control=live::receiver_control_margin(config,keyed);
+    search.receiver_strategy_workspace_bytes=share>control?share-control:1;
+}
 Work scheduled_complex_receiver_work(modem::Config config,const SearchBank& bank,long double samples,
         const transfer::Options& options,std::size_t profiles,std::size_t keys,
         std::size_t established_stream_bits,double local_window_seconds,ReceiverWorkMode work_mode,
-        const ReceiverTimingModel& timing_model,std::stop_token stop) {
+        const ReceiverTimingModel& timing_model,const ReceiverLayoutContext* layout,std::stop_token stop) {
     estimate_detail::check(stop);
     if(options.key)config.data_key=options.key;
     config.stream_epoch=options.timestamp;
@@ -777,11 +852,10 @@ Work scheduled_complex_receiver_work(modem::Config config,const SearchBank& bank
     search.start_uncertainty_seconds=options.search_seconds+1.;
     search.receiver_bank_count=modem::receiver_strategy_bank_count(config,options.search_seconds,keys,profiles);
     search.receiver_schedule_key_count=keys;
-    const auto usable=options.dsp_workspace_bytes/2>1024*1024?options.dsp_workspace_bytes/2-1024*1024:0;
-    const auto share=usable/std::max<std::size_t>(1,search.receiver_bank_count);
-    search.receiver_strategy_workspace_bytes=share>96*1024?share-96*1024:1;
+    receiver_layout_share(search,config,*layout,options.key.has_value());
     Work result;
     auto& g=result.geometry;
+    g.arrival_window_available=true;g.combined_arrival_half_width_seconds=search.start_uncertainty_seconds;
     std::uint64_t first_phase=config.sample_rate,last_phase=0;
     if(packed)modem::for_each_packed_scheduled_phase(config,config.stream_epoch,[&](std::uint64_t phase) {
         estimate_detail::check(stop);
@@ -810,9 +884,11 @@ Work scheduled_complex_receiver_work(modem::Config config,const SearchBank& bank
             g.combined_arrival_half_width_seconds=static_cast<double>(map->half_width_samples/config.sample_rate);
         }
     }
-    result.strategy=modem::resolve_receiver_strategy(config,search,static_cast<std::size_t>(allowance));
+    result.strategy=modem::plan_receiver_strategy(config,search,static_cast<std::size_t>(allowance),
+        layout->cohort_capacity,layout->maximum_consumers,live::receiver_control_margin(config,options.key.has_value()));
     const auto& p=result.strategy;
-    result.work_supported=p.supported;result.workspace_supported=!p.workspace_limited;
+    result.cost_available=std::isfinite(p.scheduled_mean_processing_ratio) && p.scheduled_mean_processing_ratio>=0;
+    result.work_supported=p.supported&&result.cost_available;result.workspace_supported=!p.workspace_limited;
     result.epoch_hypotheses=epochs;
     result.timing_hypotheses=p.scheduled_timing_positions;
     result.full_timing_hypotheses=p.scheduled_full_timing_positions;
@@ -826,13 +902,13 @@ Work scheduled_complex_receiver_work(modem::Config config,const SearchBank& bank
     // The strategy's complete-cohort engineering allowance is deliberately
     // retained at full physical input rate. Neither a nominal duty discount nor
     // a calibrated precision speedup is invented for this new calendar path.
-    const auto ratio=std::max(0.,p.scheduled_mean_processing_ratio)/profiles;
+    const auto ratio=result.cost_available?std::max(0.,p.scheduled_mean_processing_ratio)/profiles:0.;
     const auto elapsed=samples/config.sample_rate;
     result.serial=ratio*elapsed*serial_operations_per_second;
     const auto frontend=std::min(result.serial,static_cast<long double>(config.sample_rate)*35e-9L*
         search.receiver_bank_count/profiles*elapsed*serial_operations_per_second);
     result.search_serial=result.serial-frontend;
-    result.sustained_modeled=p.supported;
+    result.sustained_modeled=p.supported&&result.cost_available;
     result.sustained_serial=ratio*serial_operations_per_second;
     result.sustained_instances=static_cast<long double>(search.receiver_bank_count)/profiles;
     const auto lifetime_source=modem::symbol_schedule_detail::add(symbol,
@@ -911,17 +987,30 @@ Work scheduled_complex_receiver_work(modem::Config config,const SearchBank& bank
         g.template_reuse=force?"Exact family/source construction and same-frequency fit reuse allowed; original templates at FP64; no approximate interpolation, including close-clock and finite-table curve reuse":
             "Bounded exact family/source construction and same-frequency raw/affine fit reuse; up to eight candidate phase roots per job. Eligible local/shared source-chip curves and finite-table intervals retain identity/support/partial-tail/limiter/gate checks; unsupported or exhausted scratch uses original execution. No close-clock interpolation. Optional caches are reclaimed for required admissions";
     }
+    if(p.scheduled_implicit_acquisition) {
+        const bool force=config.search_arithmetic==modem::SearchArithmetic::fp64;
+        g.backend="Calendar-aware tiled complex screening + original-template refinement";
+        g.scope="Pure bounded shared-capture/cohort layout and implicit admitted-family geometry; runtime requires an actual bound owner, consumer retention and successful allocation. This is not a measured execution counter or a resident-bank proof";
+        g.arithmetic_operands=force?"Native FP64 tile/FFT operands and original FP64 templates":
+            "Native FP32 tile/FFT operands; original FP64 refinement and fallback";
+        g.arithmetic_accumulation="Native tile FFT/products at the selected precision; FP64 sufficient statistics, numerical certificates, real I/Q Gram and original final evidence; precise absolute timing retained";
+        g.arithmetic_backend="Bounded calendar tiles, candidate-family transforms and certified rejection; plausible/unsupported ranges use original complex refinement";
+        g.arithmetic_limit="Partial coverage: original guard refinement and numerical fallback remain FP64. Complete-execution CPU coefficients for this implicit shared-family path are unavailable; no precision or duty-cycle speedup is inferred. GPU execution unavailable";
+        g.template_reuse=force?"Exact family/capture reuse allowed; original FP64 templates and no approximate clock interpolation":
+            "Bounded exact family/capture reuse and certified nearby-clock proxies; unsupported or near-decision evidence uses original templates";
+        g.scheduled_limit+=" Pure shared-owner memory reservation is modeled; actual runtime retention/allocation remain mandatory. Numerical CPU estimates and full-bank sensitivity are unavailable";
+    }
     return result;
 }
 
 Work receiver_work(const modem::Config& config,const SearchBank& bank,long double samples,
                    const transfer::Options& options,std::size_t profiles,std::size_t keys,
                    std::size_t established_stream_bits,double local_window_seconds,ReceiverWorkMode work_mode,
-                   const ReceiverTimingModel& timing_model,std::stop_token stop) {
+                   const ReceiverTimingModel& timing_model,const ReceiverLayoutContext* layout,std::stop_token stop) {
     estimate_detail::check(stop);
     if(modem::scheduled_bursts(config)&&config.receiver_strategy!=modem::ReceiverStrategy::amplitude_only) {
         auto mapped=scheduled_complex_receiver_work(config,bank,samples,options,profiles,keys,
-            established_stream_bits,local_window_seconds,work_mode,timing_model,stop);
+            established_stream_bits,local_window_seconds,work_mode,timing_model,layout,stop);
         if(mapped.strategy.backend==modem::ReceiverBackend::existing_complex)return mapped;
         // Automatic may still select the separate amplitude detector when the
         // complete physical-aperture complex bank/state cannot be represented.
@@ -929,7 +1018,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     }
     const auto symbol=modem::symbol_sample_count(config),chip=modem::pattern_chip_samples(config);
     const auto drift_sections=modem::detail::drift_section_count(config);
-    const auto differential_window=config.pattern_symbols && config.spreading_mode==modem::SpreadingMode::pattern?
+    const auto differential_window=drift_sections>1 && config.pattern_symbols && config.spreading_mode==modem::SpreadingMode::pattern?
         modem::detail::differential_window_samples(symbol,chip,config.sample_rate,
             local_window_seconds):0;
     const auto differential_windows=differential_window?symbol/differential_window:0;
@@ -1808,10 +1897,13 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     strategy_search.receiver_schedule_key_count=keys;
     // Conservative hardware cohort allowance after capture/TX/audio/plot
     // reservations. Live uses its exact bank_capacity and receiver overhead.
-    const auto usable_cohort=options.dsp_workspace_bytes/2>1024*1024?
-        options.dsp_workspace_bytes/2-1024*1024:0;
-    const auto cohort_share=usable_cohort/std::max<std::size_t>(1,strategy_search.receiver_bank_count);
-    strategy_search.receiver_strategy_workspace_bytes=cohort_share>96*1024?cohort_share-96*1024:1;
+    if(layout)receiver_layout_share(strategy_search,config,*layout,options.key.has_value());
+    else {
+        const auto usable_cohort=options.dsp_workspace_bytes/2>1024*1024?
+            options.dsp_workspace_bytes/2-1024*1024:0;
+        const auto cohort_share=usable_cohort/std::max<std::size_t>(1,strategy_search.receiver_bank_count);
+        strategy_search.receiver_strategy_workspace_bytes=cohort_share>96*1024?cohort_share-96*1024:1;
+    }
     auto strategy_config=config;
     // Planning receives unseeded profile geometry; execution attaches the same
     // selected root before constructing its keyed calendar. Never reject a
@@ -1822,8 +1914,10 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         strategy_config.stream_epoch=options.timestamp;
         strategy_config=modem::scheduled_estimate_config(strategy_config);
     }
-    result.strategy=modem::resolve_receiver_strategy(strategy_config,strategy_search,
-        static_cast<std::size_t>(std::max(0.L,allowance)));
+    result.strategy=layout?modem::plan_receiver_strategy(strategy_config,strategy_search,
+        static_cast<std::size_t>(std::max(0.L,allowance)),layout->cohort_capacity,layout->maximum_consumers,
+        live::receiver_control_margin(strategy_config,options.key.has_value())):
+        modem::resolve_receiver_strategy(strategy_config,strategy_search,static_cast<std::size_t>(std::max(0.L,allowance)));
     auto& diagnostic=result.geometry;
     diagnostic.receiver_strategy_requested=tuning::receiver_strategy_id(config.receiver_strategy);
     diagnostic.receiver_strategy_selected=modem::receiver_backend_name(result.strategy.backend);
@@ -1881,10 +1975,16 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         // row construction and frontend, not isolated numeric-kernel rates.
         // Divide out the common profile count before summing profile costs.
         // Startup/rolling lifecycle and component attribution are uncalibrated.
-        const auto tracking_ratio=result.strategy.backend==modem::ReceiverBackend::frequency_axis?
+        const auto tracking_requested=result.strategy.backend==modem::ReceiverBackend::frequency_axis?
             result.strategy.complex_tracking_processing_ratio:0.;
-        const auto mean_ratio=result.strategy.scheduled?result.strategy.scheduled_mean_processing_ratio:
+        const auto mean_requested=result.strategy.scheduled?result.strategy.scheduled_mean_processing_ratio:
             result.strategy.selected_processing_ratio;
+        result.cost_available=std::isfinite(mean_requested)&&mean_requested>=0&&
+            std::isfinite(result.strategy.selected_processing_ratio)&&result.strategy.selected_processing_ratio>=0&&
+            std::isfinite(tracking_requested)&&tracking_requested>=0;
+        const auto tracking_ratio=result.cost_available?tracking_requested:0.;
+        const auto mean_ratio=result.cost_available?mean_requested:0.;
+        const auto selected_ratio=result.cost_available?result.strategy.selected_processing_ratio:0.;
         const auto per_profile=std::max(0.,mean_ratio-tracking_ratio)/profiles;
         const auto aggregate=std::max(0.,per_profile)*samples/config.sample_rate;
         result.serial=aggregate*serial_operations_per_second;
@@ -1896,8 +1996,8 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         result.tracking_serial=tracking_ratio*result.tracking_windows*symbol/config.sample_rate*serial_operations_per_second;
         result.kernel_upper_bound=false;result.fft_cost_split=false;
         result.fft_host_operations=result.fft_gpu_operations=0;
-        result.sustained_modeled=result.strategy.supported;
-        result.sustained_serial=std::max(0.,result.strategy.selected_processing_ratio-tracking_ratio)/profiles*serial_operations_per_second;
+        result.sustained_modeled=result.strategy.supported&&result.cost_available;
+        result.sustained_serial=std::max(0.,selected_ratio-tracking_ratio)/profiles*serial_operations_per_second;
         result.sustained_parallel=0;
         result.sustained_tracking=tracking_ratio*serial_operations_per_second/profiles;
         const auto source_lifetime=modem::symbol_schedule_detail::add(symbol,
@@ -2269,11 +2369,13 @@ std::array<double,2> sampling_interval(double probability,std::size_t trials,dou
 }
 }
 
-Estimate estimate(const transfer::Estimate& transmission,const transfer::Options& options,bool raw_bits,
+static Estimate estimate_impl(const transfer::Estimate& transmission,const transfer::Options& source_options,bool raw_bits,
                   const modem::ChannelConfig& channel,std::span<const modem::Config> profiles,std::size_t keys,
                   bool compute_probability,double local_window_seconds,std::size_t probability_trials,
-                  ReceiverWorkMode work_mode,ReceiverTimingModel timing_model,std::stop_token stop) {
+                  ReceiverWorkMode work_mode,ReceiverTimingModel timing_model,const live::Settings* actual_settings,std::stop_token stop) {
     estimate_detail::check(stop);
+    auto options=source_options;
+    options.search_seconds=live::detail::effective_epoch_search_seconds(options,false);
     modem::validate(options.modem);modem::validate_channel(options.modem,channel);
     if(!std::isfinite(transmission.total_seconds) || transmission.total_seconds<0 || !keys ||
        !std::isfinite(local_window_seconds) || local_window_seconds<0)
@@ -2283,6 +2385,9 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     if(timing_model.capture_seconds_per_frame&&(!std::isfinite(*timing_model.capture_seconds_per_frame)||
         *timing_model.capture_seconds_per_frame<=0))throw Error("invalid receiver capture slope");
     if(profiles.empty())profiles=std::span(&options.modem,1);
+    std::optional<ReceiverLayoutContext> layout;
+    if(std::any_of(profiles.begin(),profiles.end(),[](const auto& c){return modem::scheduled_bursts(c);}))
+        layout=receiver_layout_context(options,profiles,keys,work_mode,actual_settings);
     Estimate result;result.receiver_profiles=profiles.size();result.receiver_work_mode=work_mode;
     result.probability_reference_only=options.clock_sync.has_value()||options.modem.dsss_factor>1;
     result.receiver_work_assumptions=work_mode==ReceiverWorkMode::sampled_simulation?
@@ -2300,7 +2405,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     const auto section_samples=samples_per_symbol/result.drift_sections+
         (samples_per_symbol%result.drift_sections!=0);
     result.drift_section_seconds=static_cast<double>(section_samples)/config.sample_rate;
-    const auto differential_window=config.pattern_symbols && config.spreading_mode==modem::SpreadingMode::pattern?
+    const auto differential_window=result.drift_sections>1 && config.pattern_symbols && config.spreading_mode==modem::SpreadingMode::pattern?
         modem::detail::differential_window_samples(samples_per_symbol,modem::pattern_chip_samples(config),
             config.sample_rate,local_window_seconds):0;
     result.differential_windows=differential_window?samples_per_symbol/differential_window:0;
@@ -2354,7 +2459,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         return banks.size()-1;
     };
     std::size_t matching_bank=0;
-    bool matching_supported=false,all_work_supported=true;
+    bool matching_supported=false,all_work_supported=true,all_cost_available=true;
     bool all_sustained_modeled=true;
     long double sustained_cpu=0,fallback_sustained_cpu=0;
     const auto frequency=channel.frequency_offset_hz+static_cast<long double>(config.carrier_hz)*channel.clock_error_ppm*1e-6L;
@@ -2374,7 +2479,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         });
         const auto work=existing!=work_entries.end()?existing->work:
             receiver_work(profile,candidate_bank,media*profile.sample_rate,options,profiles.size(),keys,
-                          matches?transmission.wire_bits:0,local_window_seconds,work_mode,timing_model,stop);
+                          matches?transmission.wire_bits:0,local_window_seconds,work_mode,timing_model,layout?&*layout:nullptr,stop);
         if(existing==work_entries.end())work_entries.push_back({index,training_samples,work});
         serial+=work.serial;parallel+=work.parallel;all_work_supported&=work.work_supported;
         result.gpu_work_supported&=work.strategy.backend==modem::ReceiverBackend::existing_complex && !work.strategy.scheduled;
@@ -2382,10 +2487,11 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         gpu_numeric+=work.fft_cost_split?work.fft_gpu_operations:work.parallel;
         const auto fallback_work=work.timing_window_modeled?
             receiver_work(profile,candidate_bank,media*profile.sample_rate,options,profiles.size(),keys,
-                matches?transmission.wire_bits:0,local_window_seconds,ReceiverWorkMode::hardware_fallback,timing_model,stop):work;
+                matches?transmission.wire_bits:0,local_window_seconds,ReceiverWorkMode::hardware_fallback,timing_model,layout?&*layout:nullptr,stop):work;
         fallback_serial+=fallback_work.serial;fallback_parallel+=fallback_work.parallel;
         fallback_tracking+=fallback_work.tracking_serial;
         all_sustained_modeled&=work.sustained_modeled&&fallback_work.sustained_modeled;
+        all_cost_available&=work.cost_available&&fallback_work.cost_available;
         sustained_cpu+=(work.sustained_serial+work.sustained_tracking)/serial_operations_per_second+
             work.sustained_parallel/cpu_scoring_operations_per_second;
         fallback_sustained_cpu+=(fallback_work.sustained_serial+fallback_work.sustained_tracking)/serial_operations_per_second+
@@ -2451,6 +2557,16 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     result.gpu_seconds=finite_seconds(.11L+serial_seconds+gpu_host/cpu_scoring_operations_per_second+gpu_numeric/gpu_scoring_operations_per_second+
         samples*sizeof(float)/gpu_transfer_bytes_per_second+processing);
     if(!result.gpu_work_supported)result.gpu_seconds=std::numeric_limits<double>::quiet_NaN();
+    if(!all_cost_available) {
+        const auto unknown=std::numeric_limits<double>::quiet_NaN();
+        result.cpu_seconds=result.receiver_cpu_seconds=result.fallback_receiver_cpu_seconds=unknown;
+        result.gpu_seconds=unknown;result.gpu_work_supported=false;
+        result.hardware_sustained_modeled=false;
+        result.hardware_sustained_realtime_ratio=result.fallback_hardware_sustained_realtime_ratio=unknown;
+        result.receiver_frontend_seconds=result.receiver_search_seconds=unknown;
+        result.receiver_kernel_rebuild_seconds=result.receiver_kernel_rebuild_upper_seconds=unknown;
+        result.receiver_work_supported=false;
+    }
     if(!transmission.wire_bits)return result;
 
     // The simulator's SNR is per Fs/2 noise bandwidth, so Es/N0=snr*Fs*T/2.
@@ -2499,6 +2615,8 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
             "Split mapped complex engineering reference: actual refined physical-aperture frequency/clock alternatives; original private coefficients, eligible bounded source-curve/pulse-moment reuse and real I/Q Gram statistics. "
             "No source-time whole-symbol FFT is priced. Full physical capture remains charged; active/null overlap contraction uses the selected strategy allowance. "
             "Constructors, rolling admissions, DSSS outer-pulse guards, cache exhaustion and complete execution remain uncalibrated outside the documented local scope; no new shared-family or precision speedup is assumed";
+        if(matching_work.strategy.scheduled_implicit_acquisition)
+            result.receiver_work_assumptions="Implicit calendar-aware shared-family complex layout: actual Live frontend/control reservations and bounded shared-capture owner layout; native tile arithmetic follows Search arithmetic with original-template refinement. Required physical frequency/clock/timing families remain admitted. CPU work is unavailable until complete execution is calibrated; no duty-cycle discount or probability is manufactured. Actual allocation, keyed consumer retention and runtime owner binding remain mandatory";
         if(matching_work.timing_window_modeled)result.receiver_work_assumptions+=
             "; selected GPS/audio arrival prior modeled; full-window fallback reported separately";
         else result.receiver_work_assumptions+="; full arrival-window fallback retained";
@@ -2921,5 +3039,17 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     result.success_probability=result.profile_matches?std::clamp(probability,0.,1.):0;
     result.one_bit_confidence_available=result.confidence_available;
     return probability_result();
+}
+Estimate estimate(const transfer::Estimate& transmission,const transfer::Options& options,bool raw_bits,
+        const modem::ChannelConfig& channel,std::span<const modem::Config> profiles,std::size_t keys,
+        bool compute_probability,double window,std::size_t trials,ReceiverWorkMode mode,
+        ReceiverTimingModel timing,std::stop_token stop) {
+    return estimate_impl(transmission,options,raw_bits,channel,profiles,keys,compute_probability,window,trials,mode,timing,nullptr,stop);
+}
+Estimate estimate_with_receiver_settings(const transfer::Estimate& transmission,const transfer::Options& options,bool raw_bits,
+        const modem::ChannelConfig& channel,const live::Settings& settings,std::span<const modem::Config> profiles,std::size_t keys,
+        bool compute_probability,double window,std::size_t trials,ReceiverWorkMode mode,
+        ReceiverTimingModel timing,std::stop_token stop) {
+    return estimate_impl(transmission,options,raw_bits,channel,profiles,keys,compute_probability,window,trials,mode,timing,&settings,stop);
 }
 }

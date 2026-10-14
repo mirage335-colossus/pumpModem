@@ -1258,3 +1258,14 @@ time. See [actual execution](scheduled-hops.md#final-shared-hotcold-measurements
 
 
 The latest [shared-execution and fine-chip checkpoint](scheduled-hops.md#shared-execution-and-fine-chip-follow-up-13-october-2026) records complete-prefix CPU measurements, actual arithmetic, cache identities, numerical scope and unresolved full-bank work. Native FP32, fine source tables and borrowing experiments receive no automatic planner/simulation speed discount from operand width or kernel timing. Default/FP32 minimum mapped arithmetic remains partial FP64 coverage; FP64 force retains original templates and bypasses approximate interpolation.
+
+
+The [calendar acquisition continuation](scheduled-hops.md#calendar-acquisition-continuation-13-october-2026) identifies the rate36/DSSS10 broad-search state cliff, actual combined timing uncertainty, default-off shared frequency/private experiments and remaining tiled-acquisition work. Prefix gains do not establish a rescued continuous link. Scheduled CPU remains uncalibrated where complete execution is unsupported; neither native tile kernels nor narrower operand labels receive a blanket model discount.
+
+Scheduled shared-capture planning now uses the concrete provider-free Live
+layout, normalized automatic epoch radius, configured key/profile cohort and
+immutable per-bank selection share. Necessary memory fit does not certify
+constructor success, sustainable throughput or sensitivity. Unknown scheduled
+CPU and probability remain unavailable, rather than zero/DBL_MAX estimates.
+The graph cache distinguishes automatic, forced bounded and forced dense
+policies. See the [partial checkpoint](scheduled-hops.md#october-14-bounded-acquisition-manual-checkpoint).

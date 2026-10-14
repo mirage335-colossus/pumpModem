@@ -4,6 +4,7 @@
 #include "fhss_profile.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/sched_hop.hpp"
+#include "../src/audio_trace.hpp"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -44,6 +45,58 @@ void load_synthetic_key(Controller& controller) {
         controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     check(controller.settings().transfer.key.has_value(),"Synthetic FHSS key load failed");
+}
+void exact_scheduled_target_import() {
+    const auto trace_path=std::filesystem::temp_directory_path()/
+        ("dp-exact-scheduled-import-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl");
+    auto trace=std::make_unique<audio::trace::Scope>(trace_path);
+    Controller controller({true,false});load_synthetic_key(controller);
+    controller.edit(F::binary,"001");
+    const auto keys=launch_command::parse(controller.field(F::planner_command).text);
+    check(keys.keyfile&&keys.key_name,"Synthetic named key export missing");
+    auto requested=launch_command::parse(
+        "--pattern auto-keystream --tx-dbm 36.020599913279625 --path-loss-db 180 --noise-dbm-hz -164 "
+        "--oscillator gpsdo-xo --rf-oscillator gpsdo-xo --shift 3e7 --search-margin 3 --reference independent "
+        "--target-snr 8 --rate 36 --carrier 30001500 --doppler 0c --dsp-workspace 50% "
+        "--clock-sync default --audio-error 0ms --dsss-mode interleave --dsss-factor 10 --dsss-version interleave "
+        "--search-arithmetic default --receiver-strategy auto --receiver-cpu-budget .6 --live-duplex yes "
+        "--sched-hop-dilution 1 --sched-hop 10 --sched-frequency-search 1 --fhss off --tx-key named");
+    requested.keyfile=keys.keyfile;requested.key_name=keys.key_name;
+    const auto command=launch_command::format(requested);
+    const auto verify=[&](Controller& c) {
+        near(std::stod(c.field(F::snr).text),8,"Explicit scheduled command changed the requested short target");
+        near(std::stod(c.field(F::long_snr).text),8,"Explicit scheduled command changed the requested long target");
+        near(c.link_plan()->inputs.target_db_hz,8,"Explicit scheduled command changed planner target");
+        near(c.settings().transfer.modem.bandwidth_hz,36,"Explicit scheduled command failed to install Rate");
+        check(c.settings().transfer.key&&c.settings().transfer.modem.scheduled_hopping&&
+              c.settings().transfer.modem.scheduled_hopping->time_multiplier==10&&
+              c.settings().transfer.modem.dsss_factor==10&&c.settings().transfer.modem.scramble,
+              "Explicit scheduled command failed to commit the key/calendar/spreading atomically");
+        const auto expected=tuning::resolve(36,8,tuning::PatternMode::auto_keystream,true,1500,10,
+            modem::OuterDsssVersion::interleaved_v2);
+        check(modem::symbol_sample_count(c.settings().transfer.modem)==modem::symbol_sample_count(expected.config)&&
+              c.settings().long_message_modem&&modem::symbol_sample_count(*c.settings().long_message_modem)==modem::symbol_sample_count(expected.config),
+              "Explicit scheduled target was silently fitted to another transmitted waveform");
+        const auto saved=launch_command::parse(c.field(F::planner_command).text);
+        check(saved.target_db_hz==8&&saved.short_target_db_hz.value_or(*saved.target_db_hz)==8&&
+              saved.long_target_db_hz.value_or(*saved.target_db_hz)==8&&
+              saved.sched_hop==10,"Scheduled launch export lost exact target/calendar");
+    };
+    load(controller,command);verify(controller);
+    check(controller.field(F::short_bits).text=="001"&&!controller.snapshot().transmitting,
+          "Loading scheduled settings changed or transmitted the draft");
+    Controller startup({false,false,requested});
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+    while(startup.field(F::key_path).text=="Loading key entries..."&&std::chrono::steady_clock::now()<deadline) {
+        startup.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    verify(startup);startup.close();controller.close();trace.reset();
+    std::ifstream in(trace_path);const std::string records((std::istreambuf_iterator<char>(in)),{});
+    check(records.find("\"event\":\"gui_settings_committed\"")!=std::string::npos&&
+          records.find("\"short_target_db_hz\":8")!=std::string::npos&&
+          records.find("\"long_target_db_hz\":8")!=std::string::npos,
+          "Verbose import trace failed to expose the actually committed targets");
+    std::filesystem::remove(trace_path);
 }
 void generated_and_pasted_settings() {
     Controller controller({true,true});
@@ -126,6 +179,13 @@ void rejected_settings_remain_atomic() {
     near(controller.link_plan()->inputs.target_db_hz,-8,"Explicit TX override replaced independent preview target");
     near(std::stod(controller.field(F::snr).text),32,"Short target override was ignored");
     near(std::stod(controller.field(F::long_snr).text),55,"Long target override was ignored");
+    const auto independent=controller.field(F::planner_command).text;
+    const auto exported=launch_command::parse(independent);
+    check(exported.target_db_hz==-8&&exported.short_target_db_hz==32&&exported.long_target_db_hz==55,
+          "Launch export lost independent short/long targets");
+    load(controller,independent);
+    near(std::stod(controller.field(F::snr).text),32,"Reload replaced independent short target");
+    near(std::stod(controller.field(F::long_snr).text),55,"Reload replaced independent long target");
     load(controller,"--short-target-snr 23");
     near(controller.link_plan()->inputs.target_db_hz,-8,"Short-only import changed an omitted preview target");
     controller.close();
@@ -917,7 +977,7 @@ void fhss_list_settings() {
     controller.close();
 }
 int main(int argc,char** argv) {
-    try {scheduled_hop_settings();if(argc>1&&std::string_view(argv[1])=="--sched-hop"){std::cout<<"Scheduled hop settings passed\n";return 0;}receiver_strategy_settings();if(argc>1&&std::string_view(argv[1])=="--receiver-strategy"){std::cout<<"Receiver strategy settings passed\n";return 0;}fhss_list_settings();if(argc>1&&std::string_view(argv[1])=="--fhss-list"){std::cout<<"FHSS list passed\n";return 0;}fhss_profiles();if(argc>1&&std::string_view(argv[1])=="--fhss-profiles"){std::cout<<"FHSS profiles passed\n";return 0;}doppler_settings();arithmetic_settings();duplex_settings();clock_and_spread_controls();generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();narrow_rate_round_trips();live_validation_is_atomic();real_radio_configuration();invalid_shift_edit_recovers();absolute_carrier_and_shift();zero_shift_legacy_and_shared_round_trip();
+    try {exact_scheduled_target_import();if(argc>1&&std::string_view(argv[1])=="--sched-target-import"){std::cout<<"Exact scheduled target import passed\n";return 0;}scheduled_hop_settings();if(argc>1&&std::string_view(argv[1])=="--sched-hop"){std::cout<<"Scheduled hop settings passed\n";return 0;}receiver_strategy_settings();if(argc>1&&std::string_view(argv[1])=="--receiver-strategy"){std::cout<<"Receiver strategy settings passed\n";return 0;}fhss_list_settings();if(argc>1&&std::string_view(argv[1])=="--fhss-list"){std::cout<<"FHSS list passed\n";return 0;}fhss_profiles();if(argc>1&&std::string_view(argv[1])=="--fhss-profiles"){std::cout<<"FHSS profiles passed\n";return 0;}doppler_settings();arithmetic_settings();duplex_settings();clock_and_spread_controls();generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();narrow_rate_round_trips();live_validation_is_atomic();real_radio_configuration();invalid_shift_edit_recovers();absolute_carrier_and_shift();zero_shift_legacy_and_shared_round_trip();
         std::cout<<"Planner launch setting round trips passed.\n";return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

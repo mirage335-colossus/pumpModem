@@ -254,7 +254,16 @@ Bytes StreamingReceiver::push(std::span<const float> samples,std::span<const Com
                               detail::CorrelationProjectionCache* cache){impl_->pattern.push(samples,projected,stop,cache);return {};}
 PatternBurst StreamingReceiver::provisional_pattern()const{return impl_->pattern.provisional();}
 std::vector<PatternBurst> StreamingReceiver::take_pattern_bursts(){return impl_->pattern.take_bursts();}
+void StreamingReceiver::process_pending(std::stop_token stop){impl_->pattern.process_pending(stop);}
+std::uint64_t StreamingReceiver::diagnostic_history_generation()const noexcept{return impl_->pattern.diagnostic_history_generation();}
+std::uint64_t StreamingReceiver::diagnostic_history_resolved_through()const noexcept{return impl_->pattern.diagnostic_history_resolved_through();}
+std::uint64_t StreamingReceiver::oldest_unresolved_diagnostic_event()const noexcept{return impl_->pattern.oldest_unresolved_diagnostic_event();}
+bool StreamingReceiver::deferred_pattern_history()const noexcept{return impl_->pattern.deferred_pattern_history();}
+std::optional<std::uint64_t> StreamingReceiver::delayed_processing_frontier()const noexcept{return impl_->pattern.delayed_processing_frontier();}
 std::vector<PatternEvidence> StreamingReceiver::pattern_candidates()const{return impl_->pattern.candidates();}
+std::vector<PatternEvidence> StreamingReceiver::pattern_candidates(std::size_t limit,std::stop_token stop)const {
+    return impl_->pattern.candidates(limit,stop);
+}
 std::vector<PatternEvidence> StreamingReceiver::pattern_candidates(std::size_t limit)const{return impl_->pattern.candidates(limit);}
 Bytes StreamingReceiver::finish(std::stop_token stop){impl_->pattern.finish(stop);return {};}
 

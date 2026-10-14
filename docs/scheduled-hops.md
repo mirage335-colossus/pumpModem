@@ -1427,3 +1427,351 @@ obvious regression in its stated prefix scope, not an additional proven speedup.
 The demanding sustained-headroom objective and substantial shared contraction/
 transform opportunities above remain unfinished. This is a local manual checkpoint,
 not overall receiver, security, timing, hardware or platform qualification.
+
+
+## Calendar acquisition continuation (13 October 2026)
+
+This is an **unfinished implementation checkpoint**, not a demonstrated rescue
+of the requested rate 36/DSSS10/target 8 link. The frozen preceding GUI
+`97d92eb573469892ad01f969571a02b6a7fa2210a1455c2b6f5ffbda874c855e`
+and core `05696f6f26bb242b4fe9409af6428e6e055739e41bac456a2e2f912f6eefbdd6`
+remain runnable. Local captures and exact build/source identities are retained
+under `.agent-work/artifacts/sched-calendar-20261013/`. No hosted or platform
+qualification is implied.
+
+The supplied rate 36, target 8, interleaved DSSS10 command resolves at unchanged
+Fs 6,120 to 87,040 source samples/symbol (14.222222 s),34-sample fine chips
+(5.555556 ms) and 340-sample inner chips. Default clock sync does **not** supply
+a qualified narrow prior: Live's start-search interval is 14 s wide, independently
+of the six-second observed-absence rule and of `Audio error=0ms`. With M10/G1,
+the physical aperture is about 145.4224 s. The executed geometry contains
+13 frequency/rate pairs, 18 active canonical phases and 1,179,702 retained
+lanes for the representative active epoch. Its necessary fixed-state lower
+bound alone is 349,191,792 bytes. This is an eager Cartesian-state limitation,
+not a proof that the original observations cannot fit.
+
+At the frozen host 50% workspace of 1,337,640,960 bytes, the current 93-bank planning
+heuristic gives each unconfirmed bank only a small share. The heuristic is
+not a certified maximum residency: a truncated initial symbol can require
+a subsequent fully observed symbol before retirement. Its coefficient was
+not reduced to make the example pass. Complex acquisition still refuses the
+broad geometry; Automatic's amplitude fallback can also exceed workspace.
+Do not solve this by silently removing phase, clock, epoch or frequency lanes.
+
+A bounded dated-PCM acquisition representation is feasible for this finite
+geometry. Analytical retention envelopes are approximately 3.93 MB for one
+source-symbol aperture plus pulse/timing support, or 7.45 MB for a conservative
+truncated-first plus next-full envelope; 60 s extra processing delay adds 1.47 MB.
+These estimates exclude queue metadata, allocation capacities and processing
+scratch, and require enlargement by the actual admitted clock domain. They
+are not a whole-process memory certificate. All physical samples must remain
+unless exclusion is proved for every present and future rolling consumer;
+one candidate's null interval is insufficient. Hours-long configurations
+need a separate bounded representation or explicit fallback.
+
+For fixed rate1, phase and private symbol identity, ordinary 17-sample origin
+steps share a fractional residue and admit translated templates. Bounded
+active-piece convolution can preserve physical carrier phase, real I/Q Gram,
+noise energy and source-chip/quarter projections. Nonzero clock lanes require
+polyphase treatment or certified approximation/refinement. The original
+outer-presence guard is only consequential after colored-excess screening;
+an on-demand engine can replay it conditionally without weakening it, but
+must retain original observations and handle interference refinement storms.
+Production lacks the implicit candidate catalog, retained-observation owner,
+stable lane/pending identity and original completion/trial-order adapter.
+These are implementation gaps, not mathematical impossibility claims.
+
+The new default-off `DATAPUMP_SCHED_FREQUENCY_PIECE=1` experiment shares
+small fine-frequency families through FP64 third-order moments, including
+real Gram and complete outer-pulse contributions. It uses the same source
+preparation, limiter, private/Temporal output, immediate outer tickets and
+certified-flat calendar gain as the preceding common path. Unsupported
+geometry or numerical validation falls back before detector mutation.
+FP64 force bypasses it. Its local error gate is not a final-decision or
+full-bank sensitivity certificate.
+
+The default-off `DATAPUMP_SCHED_PRIVATE_BATCH=4` experiment gathers independent
+private candidates against one exact public pulse plan. `DATAPUMP_SCHED_PRIVATE_GATHER`
+accepts 4 (the preceding policy), 8, 16, 32 or `auto`; automatic gathering preserves
+at least two jobs per worker when widening. This changes dispatch, not
+precision or admitted coordinates. Complete normalized binary64 coordinate
+equality remains required. A bounded census can be enabled with
+`DATAPUMP_SCHED_PRIVATE_CENSUS=1`; it contains public geometry/address metadata,
+not keys or private coefficients. The separate near-coordinate proposal is
+not integrated or automatically selected.
+
+The new Live snapshot fields distinguish capture ingress, queued physical
+coordinates, in-flight work and the committed decoder frontier in one input
+revision. Popping a block is not processing it. Clear/resume invalidate old
+coordinates. These diagnostics neither establish acquisition coverage nor
+manufacture acceptance, absence or completion. Coordinate-only null skips
+commit only after every required consumer advances.
+
+Current Default and FP32 minimum mapped projections, P3 contractions, real
+Gram/energy, guards and scores remain FP64. Temporal source arithmetic is
+independently selected; its native FP32 diagnostic is not silently enabled by
+P3. Absolute coordinates/phase origins retain integer/long-double precision.
+FP64 force retains original templates and bypasses approximate interpolation.
+Exact template reuse and arithmetic policy remain separate.
+
+The standalone native FP32/FP64 translated-tile prototype includes input
+planes, plans, template packing, transforms and reductions, but not private
+construction, full guard continuation or rolling state. Its broad 362-start
+case took 0.056633 s FP32 versus 0.187813 s direct over 20 repetitions; with only
+three starts direct took 0.002112 s versus 0.060940 s FP32. This supports measured
+geometry crossovers, not a complete receiver speedup. Production integration
+remains substantial outstanding work. No planner/simulation discount is
+granted from these operator or incomplete-prefix results.
+
+
+FP64 force currently bypasses exact Temporal plan execution as well as approximate
+interpolation. That is a retained policy/eligibility restriction, not evidence
+that FP64 prevents exact reuse. The existing force64 no-Temporal assertion is
+preserved. A separately controlled correction would need original-template and
+full-state parity, carry/guard/absence checks, and eligible-consumer accounting
+for any independently requested FP32 payload pool. It is outstanding.
+
+
+The completed paired 40-second prefix measurements use the preceding optimized
+manual launch policy on both sides. Frozen/current P3 receiver CPU was
+318.087/235.032 and 318.841/237.106 seconds; session elapsed was 39.727/32.493 and
+39.681/31.178 seconds. This is about 1.35x CPU throughput and 1.25x elapsed throughput
+in a fully drained prefix with 17 banks, no retirement and no complete symbol/bit/END.
+Accounted DSP peak increased 365.39→370.41MB. Independent 1x production of the same
+prefix reduced peak queued audio 5.020→3.608seconds and oldest work age 10.845→4.935
+seconds. Both processed across subsequent active bursts and drained. Neither proves
+sustainable full-bank throughput or the intended continuous-too-slow rescue.
+
+The corresponding optimized continuous three-bit fixture completed pending bits,
+source `e`, physical END and drain at about 19 CPU/7.9 elapsed seconds for 98.933 seconds
+of input. It is already cheap, not a rescued configuration. Full scheduled attempts
+remain failures: the qualified G1 reference was terminated after 232.48 elapsed seconds;
+G9 old/new each failed the original 170-second full-drain assertion, without the
+complete intended message/END. Their keys, seeds, assertions and captures are retained.
+
+A subsequent exact private-family ordering experiment regressed complete-prefix
+execution. Reusing the already constructed public pulse Plan for original outer
+weights removed part of that penalty. This replay verifies per-row normalized
+binary64 coordinates, N/C, ranges, nonzero masks and overflow before callbacks;
+callback exceptions propagate. It cannot accidentally authorize future approximate
+source rows. Actual main/carry Fit, chip and outer-ring state remains bitwise equal
+in focused exact-cohort tests. Final prefix timings were 232.137 CPU/29.891 elapsed
+for P3 alone,308.487/39.430 for ordered private replay, 247.246/34.224 combined.
+Private replay consumed 20,076,900 public rows/78,850 private lanes, including all
+preparation and sorting. Ordering therefore remains off. These are uncontrolled
+prefix measurements, not sensitivity estimates or full-bank qualification.
+
+A 10 ms process-CPU sampler of the P3 prefix covered 236.82 CPU seconds with 23,678
+samples and 5 overruns. Exclusive categories were common raw 41.1%, candidate
+residual 27.6%, public Plan construction 12.4%, export 4.8%, Gram 2.6%, Temporal
+evaluation 2.5%, validation 1.6% and template construction 1.3%. Ideal elimination
+of common raw bounds total gain near 1.70x in this scope; Plan construction alone
+near 1.14x. Residual categories are not isolated kernels and the fractions must not
+be generalized to complete live banks.
+
+The generated four-lane kernel executes native YMM FP64 multiply/add, XMM/scalar
+tails and no FMA. Runtime AVX2 availability includes OSXSAVE/XCR0 checks; the
+baseline dispatcher contains no VEX instruction and ELF remains x86-64-baseline.
+ARM execution is unmeasured. FP32 P3/moment products remain a credible outstanding
+opportunity, not rejected by the earlier slower FP32 source-curve interpolation.
+The native-float translated-tile prototype likewise needs production ownership,
+full guard, numerical-refinement and rolling/trial-order integration before it
+can resolve the eager acquisition cliff. Additional sensitivity loss has not been
+measured in dB; no negligible-loss or full-bank probability claim is made.
+
+The detailed local checkpoint report is
+`.agent-work/artifacts/sched-calendar-20261013/MANUAL-CALENDAR-ACQUISITION.md`,
+with exact identities, strategies, failed captures and launchers. No planner CPU
+coefficient or probability discount is inferred from these partial measurements.
+The requested broad rate 36/DSSS10 example and central sustained-headroom objective
+remain unfinished.
+
+The delivered V7 checkpoint also fixes an ordinary/scheduled outer-exception
+frontier accounting bug: popped uncommitted PCM and queued PCM are counted
+separately, the input revision is invalidated, and neither discarded PCM nor null
+coordinates manufacture physical completion. Its new regression fails on V4 and
+passes after correction. An extra GUI frontier trace was removed after a measured
+267–271CPU-second prefix regression; Snapshot/fixture frontier diagnostics remain.
+The final adjacent frozen/current P3 prefix pair measured322.484/233.596 process
+CPU seconds and40.135/31.080 elapsed seconds (27.6%/22.6% reductions). Another
+current control was243.036/31.741. These are prefix-only experimental results;
+no accepted bit/END or full-bank sensitivity was established. No automatic
+planner discount or central sustained-headroom completion follows from them.
+
+## October 14 bounded-acquisition manual checkpoint
+
+The launch importer now preserves an explicit target such as `8` rather than
+replacing it with the nearest currently supported planner target. Common target
+exports no longer add stale short/long overrides. The real Controller/Live
+cold-start regression loads synthetic named-key settings, checks the selected
+profile and receiver allocation, and closes the full session. It is a startup
+and cancellation check, not a reception or hardware timing qualification.
+
+For coherent private split symbols of at least six source seconds, the bounded
+calendar representation can keep the complete logical arrival/phase/frequency/
+clock catalogue without constructing a resident state for every alternative.
+Automatic selection uses it as an availability fallback when the dense fixed
+state exceeds the immutable per-bank share. It retains the existing dense
+representation where that necessary state can fit; there is no claimed faster
+crossover there. Constructor, resolver and planner use the same selection share,
+separately from temporary legal workspace loans. The internal diagnostic
+`DATAPUMP_SCHED_LAZY_ACQUISITION=1` forces this representation; `0` retains the
+preceding dense reference. Unset and `auto` use the availability policy.
+
+A real shared capture owner, retention subscriptions and processing-fence
+journal remain mandatory at runtime. The planner uses the same concrete Live
+layout and control types; it neither fabricates a runtime owner nor calls an
+audio provider. Automatic epoch-radius expansion now uses the same GPS,
+propagation and causal audio-lag normalization as Live. Explicit epochs keep
+their requested radius; wider pure diagnostic searches retain their bounded
+fallback rather than acquiring Live's 60-second operational restriction.
+Scheduled pure layouts still require an admitted radius of at most60 seconds;
+oversized scheduled diagnostic estimates are excluded.
+
+Eligible acquisition uses bounded native FP32 timing tiles and frequency-family
+moment reuse. Required survivors use original real I/Q, Gram, energy, chip/outer
+guards and trial order. Numerical exclusion is conservative; unknown ownership,
+floating-point environment, history, rank or residual bounds retain original
+replay. FP64 force retains original templates and bypasses displaced/proxy
+screens. Exact original projections and optional original source samples have
+precise key, epoch, bit, phase, coordinate, capture and precision identities.
+No INT8 or GPU execution is claimed. Native spectral accumulation and
+post-inverse experiments remain separately controlled and unqualified.
+
+Original replay now excludes candidate-specific calendar-inactive fences before
+PCM gathering and prefix construction. It uses the accumulator's exact inactive
+jump and completion limit, preserving subsequent original physical oscillator
+restart fences. This does not omit raw capture for other/future consumers, count
+nulls as observations, or change absence. Routine Live history queries also bind
+the same independently keyed permutation pool as acquisition. Accepted bits
+still publish before optional history work.
+
+**Practical processing headroom remains unfinished.** Complete independent
+input production of the rate36/target8/DSSS10/M10/G1 example still exceeded the
+predeclared 120-second backlog bound. The combined default arrival window was
+14 seconds, not merely the capture timestamp radius. The retained initial bank
+had 1,179,702 logical alternatives. The preceding/current partial runs stopped
+near the same 129.807-second processing frontier with no bit or physical END.
+The latest null-exclusion run removed 1.290 billion candidate-null replay
+coordinates and reduced diagnostic original-prefix construction from 734.1 to
+3.37 million samples, but total measured CPU did not improve: about 215.8 versus
+221.0 process seconds at failure, with different amounts of optional exact
+history materialized. These failed partial captures do not establish a speedup.
+A genuinely qualified mocked GPS1ms/region1ms/audio50ms full-capture attempt was
+bounded at180 elapsed seconds before acceptance/END; qualification was active,
+but the reception did not complete. Its combined initial window was105ms.
+
+The preserved optimized continuous three-bit receiver completed98.933 seconds
+of matched input at about19CPU/7.9elapsed seconds at30MHz shift: it was already
+cheap. At4.8GHz shift it completed at856.7CPU/133.58elapsed seconds and independent
+1x input accumulated backlog. No corresponding scheduled rescue has yet been
+demonstrated. Scheduling-vs-scheduling prefix gains are not that demonstration.
+
+Remaining substantial work includes cross-bank aligned input-transform sharing,
+batched chip/Gram/error-plane contraction, exact history-family replay and
+original source/pulse projection at fine-chip geometries. Their concrete
+blockers are complete per-lane crop/owner and original-processing-fence proofs,
+changed reduction certificates, limiter/guard integration, workspace loans and
+measured whole-execution crossovers. Smaller aligned tiles and native bulk
+precision remain credible; neither a sparse large-FFT experiment nor a slower
+source-interpolation prototype rejects those strategies. Owner reservation can
+still conservatively reduce available dense workspace near a memory boundary.
+FHSS-shaped native-family screens, four-quarter/runtime guard acceleration,
+very large multiplier retention, full-bank threshold-region sensitivity, ARM,
+physical hardware and long-duration qualification remain outstanding.
+
+Detailed identities, failed captures, component scope, checks and strategy
+status are recorded in
+`.agent-work/artifacts/sched-finish-20261014/MANUAL-SCHED-FINISH.md`.
+This is a local partial manual-test checkpoint, not completion of the
+Sched_Hop efficiency objective or overall qualification.
+
+### Small capture blocks and the half-sample numerical cliff
+
+A new actual-Live diagnostic found RLE metadata exhaustion after 7,905 samples:
+51-sample provider releases arrived as 10/10/10/10/10/1 samples. The initial
+310-run limit assumed much larger capture cuts. Equal-cut RLE is useful but does
+not bound alternating cuts. The receiver now explicitly grows only an exhausted
+push, processing, difference or original-capture ledger after reserving the full
+replacement alongside its old backing. Allocation/cancellation leaves original
+endpoints and prepared tokens intact. Required metadata remains charged to DSP
+workspace; optional caches yield first, and genuine exhaustion still fails.
+Completed history retirement is published before cancellable growth. Indexed
+half-open run lookup replaces repeated scans without changing recurrence seeds,
+original callbacks, source coordinates or absence. Fixed-cap helper assertions
+remain, alongside alternating-cut, wrapped-ring and cancellation checks.
+
+The same diagnostic exposed a different implementation cliff: seven-sample fine
+chips admit 3.5-sample timing positions. A contiguous integer-FFT cover produced
+0.5-sample displacement and failed the existing 0.25-sample certificate gate.
+The internal `DATAPUMP_SCHED_ORIGIN_CLASSES=1` prototype separates the two
+fractional-origin classes, computes from each original reference, and scatters
+fits and existing chip-guard summaries back into original lane/trial order. It
+retains every origin, real I/Q and per-lane Gram/noise/ownership fields. Merged
+error allowances are conservative; unsupported clocks, history, workspace and
+allocation retain original replay. FP64-force retains original templates and its
+exact-displacement gate. Native preparation and final original scoring remain
+separate. Verbose records expose `integer_origin_class_covers` and actual
+eligibility/environment coverage.
+
+**This prototype is not selected automatically.** Restored raw FFT coverage and
+10.8 million avoided original source calls did not establish a whole-receiver
+benefit: the unbatched complete-Live diagnostic still exhausted 30 seconds, with
+about104 process CPU seconds versus25 on the preceding fallback, and no bit/END.
+Production batching and guard integration also missed the same deadline.
+The bounded identical-PCM full-symbol/END fixture, including the odd-chip case
+and original-template FP64 comparison, passed. That is narrower functional
+agreement, not sustained Live efficiency or full-bank sensitivity. The positive
+Live fixture and all its deadline/admission assertions remain as failing evidence.
+Default therefore retains the preceding execution choice at this cliff. The
+exact rate36/target8 command loads, but its sustained-reception acceptance
+criterion remains unfinished. See the manual report for final local check results.
+
+### October 14 integration regressions and memory reservations
+
+The ordinary compact four-hour fractional receiver increased from65,504 bytes
+in the frozen GUI candidate to65,792 bytes: two capture handles and32 new
+scheduled event ordinals explain the288-byte increase. Moving bounded acquisition
+ownership into scheduled-only state removes additional unrelated cold overhead.
+Ordinary compact source symbols of at least60 seconds now materialize their
+full diagnostic FIFO only on
+first retained evidence. Actual cold storage is smaller; the complete future FIFO
+remains charged to reserved workspace, loan/shrink admission and batch scratch.
+All32 history entries,64 diagnostic points, original hypotheses and public event
+identities remain available. This is a cold-allocation improvement, not permission
+to omit future workspace or a claim that warm diagnostic storage is below64KiB.
+
+Required admitted/timing owners no longer stop at an arbitrary2,048 slots when
+workspace is available. The constructor reserves a catalogue- and workspace-bound
+stable owner ceiling before publishing pointers; correlated carry/guard state
+still grows under its full old/new allocation charge. The original inclusive
+five-slot/2x minimum is preserved. Calendar and map allocations precede owner
+publication, and map nodes are charged before insertion and released consistently.
+Required aliases are not evicted to obtain fit. Genuine budget exhaustion remains
+an explicit error. Larger permitted pools do not establish affordable execution:
+the complete parallel preparation fixture exceeded its360-second diagnostic bound.
+Final exact-candidate outcomes belong to the manual checkpoint report.
+
+The memory-projection fixture explicitly forces its original diagnostic backend;
+separate tests retain automatic-policy coverage. The mixed FFT-cost fixture now
+uses the real UTC mapper to place its arrival edge with half-cell slack under both
+binary64 and wider timing arithmetic, preserving nine epochs and full/direct
+fallback assertions. No receiver search radius or numerical threshold was changed
+for these fixture corrections.
+
+The final rebuilt manual candidate passed175 of178 affected local checks,
+including all39 GUI checks. `scheduled_parallel_preparation` exceeded its
+360-second bound; `live_exact_source` failed its30-second capture-drain assertion;
+`alsa_audio_contract` retained the preceding legacy-DSSS clipping failure.
+The separate Interleave playback check passed. These are unresolved failures,
+not qualification exceptions. Full differential calibration was not rerun on
+this exact binary; earlier continuous evidence remains historical.
+
+The fractional ordinary compact constructor now uses62,720 actual cold bytes,
+with89,792 reserved bytes including future FIFO and drift state. This does not
+establish a64KiB warm-memory or total-reservation bound. Synthetic encrypted
+payload prefixes were byte-identical to the frozen candidate for DSSS
+Off/10/100/1000:4,096 original FP32 samples per factor at512Hz and16Hz occupied
+bandwidth. This prefix comparison excludes Sched_Hop/FHSS/UTC and does not
+qualify complete bursts or sensitivity. Exact source/build identities and the
+remaining practical headroom failure are retained in the manual report above.

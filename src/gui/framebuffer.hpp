@@ -37,7 +37,7 @@ constexpr int mfd_bezel_width(surface::Metrics metrics) {
     return metrics.cell_width*28>192?metrics.cell_width*28:192;
 }
 constexpr unsigned default_window_width(surface::Metrics metrics,bool mfd=true) {
-    return 1200U+(mfd?static_cast<unsigned>(mfd_bezel_width(metrics)):0U);
+    return static_cast<unsigned>(ui::default_width)+(mfd?static_cast<unsigned>(mfd_bezel_width(metrics)):0U);
 }
 struct Config {
     unsigned width=default_window_width({8,18}),height=1048;

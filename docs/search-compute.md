@@ -994,9 +994,10 @@ optimization targets, rather than dismissed on the strength of small-bank tests.
 
 ## Scheduled shared-execution precision and profiling (local candidate)
 
-The mapped split-symbol path has no timing FFT to narrow. Arithmetic choice,
-algorithm choice and exact/approximate reuse remain separate. The current
-precision inventory is:
+The dense mapped split-symbol and original-refinement paths have no timing FFT
+to narrow. Arithmetic choice, algorithm choice and exact/approximate reuse remain
+separate. Their precision inventory is below. Bounded acquisition has separate
+[native FFT coverage](scheduled-hops.md#october-14-bounded-acquisition-manual-checkpoint).
 
 | Stage | Default / FP32 minimum | FP64 force |
 | --- | --- | --- |
@@ -1021,8 +1022,8 @@ outer/differential guard tree. Integer/frequency-fusion kernels likewise require
 complete preparation, packing, fallback/refinement and guard accounting.
 The dropdown never proves which backend executed: inspect resolved backend,
 actual reuse/fallback counters and stage precision in the trace. GPU remains
-deferred. Existing native FP32 FFT paths elsewhere do not accelerate a mapped
-path that executes no FFT.
+deferred. Native FP32 FFT acquisition does not imply reduced precision in the
+dense mapped path or its original numerical refinement.
 
 The integer audit identifies a concrete kernel limit: current affine pieces are
 at most six samples and do not enter the existing temporal AVX2 INT8 loop.
@@ -1122,3 +1123,25 @@ complete measured crossover remain substantive implementation work.
 
 
 The latest [shared-execution and fine-chip checkpoint](scheduled-hops.md#shared-execution-and-fine-chip-follow-up-13-october-2026) records complete-prefix CPU measurements, actual arithmetic, cache identities, numerical scope and unresolved full-bank work. Native FP32, fine source tables and borrowing experiments receive no automatic planner/simulation speed discount from operand width or kernel timing. Default/FP32 minimum mapped arithmetic remains partial FP64 coverage; FP64 force retains original templates and bypasses approximate interpolation.
+
+
+The [calendar acquisition continuation](scheduled-hops.md#calendar-acquisition-continuation-13-october-2026) identifies the rate36/DSSS10 broad-search state cliff, actual combined timing uncertainty, default-off shared frequency/private experiments and remaining tiled-acquisition work. Prefix gains do not establish a rescued continuous link. Scheduled CPU remains uncalibrated where complete execution is unsupported; neither native tile kernels nor narrower operand labels receive a blanket model discount.
+
+The October14 scheduled tiles use actual native FP32 FFT storage, butterflies
+and products, with wider certificates, spectral reductions and original
+survivor guards. FP64-force uses original templates and rejects approximate
+proxy reuse. Runtime counters distinguish requested experiments from executed
+coverage. Complete paced captures still failed; no total-work coefficient or
+real-time ceiling discount follows from kernel or partial-prefix measurements.
+See the [partial scheduled checkpoint](scheduled-hops.md#october-14-bounded-acquisition-manual-checkpoint).
+
+
+The October14 small-provider-cut investigation is recorded in
+[scheduled hops](scheduled-hops.md#small-capture-blocks-and-the-half-sample-numerical-cliff).
+Mandatory fence metadata can grow within the actual workspace reservation;
+indexed lookup preserves all original capture/processing boundaries. A native
+half-sample origin-class prototype restores numerical eligibility but remains
+opt-in because complete Live execution did not demonstrate a crossover. Native
+coverage, cache-hit counts and correlation throughput are not CPU-ceiling models.
+Unsupported complete scheduled execution/probability remains unavailable; no
+planner discount is inferred from these diagnostic counts.

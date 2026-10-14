@@ -1,5 +1,8 @@
+#include "scheduled_acquisition_policy.hpp"
 #include "scheduled_work_profile.hpp"
+#include "shared_scheduled_capture.hpp"
 #include "datapump/live.hpp"
+#include "live_receiver_layout.hpp"
 #include "datapump/fhss_schedule.hpp"
 #include "datapump/sched_hop.hpp"
 #include "datapump/execution.hpp"
@@ -18,10 +21,13 @@
 #include "live_pattern_scores.hpp"
 #include "live_receptions.hpp"
 #include "live_scheduling.hpp"
+#include "live_deferred_input.hpp"
+#include "live_deferred_pattern_history.hpp"
 #include "sched_capture.hpp"
 #include "transmit_timing.hpp"
 #include "transmit_epoch_guard.hpp"
 #include "pattern_projection_cache.hpp"
+#include "scheduled_exact_source_samples.hpp"
 #include "audio_trace.hpp"
 #include <algorithm>
 #include <atomic>
@@ -46,54 +52,30 @@ namespace datapump::live {
 namespace rx_cpu = ::datapump::detail::cpu_profile;
 namespace {
 using Clock = std::chrono::steady_clock;
-constexpr std::size_t plot_size = 2048;
-// Optional monitor fits inside the existing audio reservation. This covers its
-// fixed ring, ordered copy, FFT/result scratch and callback state, including
-// simultaneous logical diagnostic storage. It never reduces the RX bank quota.
+using detail::plot_size;
+using detail::maximum_events;
+using detail::replay_frames;
+using detail::replay_wave_samples;
+using detail::replay_bins;
+using detail::minimum_constellation_limit;
+using detail::pattern_score_limit;
+using detail::replay_text_limit;
+using detail::ReplayFrame;
+using detail::replay_frame_base;
+using detail::replay_result_workspace;
+using detail::constellation_limit;
+using detail::replay_workspace;
+using detail::plot_workspace;
+using detail::audio_reserve;
+using detail::bank_capacity;
+using detail::source_budget;
+using detail::channel_config;
+// Optional monitor remains within the existing audio reservation.
 constexpr std::size_t monitor_workspace = 96 * 1024;
-constexpr std::size_t maximum_events = 64;
 constexpr std::size_t maximum_recovery_jobs = 8;
 constexpr std::size_t recovery_workspace_limit = 16 * 1024 * 1024;
-constexpr std::size_t replay_frames = 60;
-constexpr std::size_t replay_wave_samples = 256;
-constexpr std::size_t replay_bins = 257;
-constexpr std::size_t minimum_constellation_limit = 2048;
-std::size_t constellation_limit(const modem::Config& config) {
-    return std::max({minimum_constellation_limit, detail::SignalWindow::constellation_capacity(config),
-                     modem::StreamingTransmitter::constellation_history_capacity(config)});
-}
-std::size_t constellation_limit(const Settings& settings) {
-    return std::max(constellation_limit(settings.transfer.modem), settings.long_message_modem ?
-        constellation_limit(*settings.long_message_modem) : std::size_t{});
-}
-constexpr std::size_t pattern_score_limit = Snapshot::pattern_score_limit;
 constexpr auto replay_duration = std::chrono::seconds(3);
-constexpr std::size_t replay_text_limit = 4096;
 constexpr std::size_t reception_alias_bytes = detail::ReceptionHistory::capacity * sizeof(std::uint64_t);
-struct ReplayFrame {
-    std::vector<float> waveform, spectrum;
-    std::optional<double> simulation_spectrum_gain_db;
-    std::vector<std::complex<float>> constellation, pattern_scores;
-    std::vector<PatternScoreObservation> pattern_score_observations;
-    std::uint64_t pattern_score_observation_id = 0;
-    ConstellationSource source = ConstellationSource::input;
-    double fraction = 0;
-    std::uint64_t dropped = 0;
-    modem::TransmitTrace transmit_trace;
-};
-constexpr std::size_t trace_prefix_workspace = modem::TransmitTrace::dynamic_storage_limit;
-constexpr std::size_t replay_frame_base = sizeof(ReplayFrame) +
-    (replay_wave_samples + replay_bins) * sizeof(float) +
-    pattern_score_limit * (sizeof(std::complex<float>) + sizeof(PatternScoreObservation)) +
-    sizeof(std::optional<SignalUpdate>) + replay_text_limit + 64 + reception_alias_bytes + trace_prefix_workspace;
-// One verified stream is moved into the receive-content cache at the deadline.
-// Its payload uses the content quota; its diagnostics and caption use DSP space.
-constexpr std::size_t replay_result_workspace = sizeof(transfer::Received) +
-    sizeof(SignalUpdate) + 2*replay_text_limit + 64 + reception_alias_bytes + minimum_constellation_limit * sizeof(std::complex<double>);
-std::size_t replay_workspace(const Settings& value) {
-    return value.simulation ? std::min(value.dsp_workspace_bytes / 8,
-        replay_result_workspace + replay_frames * (replay_frame_base + constellation_limit(value) * sizeof(std::complex<float>))) : 0;
-}
 double epoch_now() {
     return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
@@ -110,105 +92,11 @@ std::string display_text(const Message& message) {
     const auto size = std::min<std::size_t>(message.data.size(), 4096);
     return terminal_text(std::span<const std::uint8_t>(message.data).first(size));
 }
-constexpr std::size_t minimum_workspace = 512 * 1024;
-std::size_t plot_workspace(const Settings& value) { return plot_size * (sizeof(float) + sizeof(double)) +
-                                       2 * (plot_size/2+1) * sizeof(std::complex<float>) +
-                                       constellation_limit(value) * 3 * sizeof(std::complex<double>) +
-                                       detail::SignalWindow::sample_capacity(value.transfer.modem) * 2 * sizeof(float) +
-                                       pattern_score_limit * (4 * (sizeof(std::complex<double>) + sizeof(PatternScoreObservation)) + sizeof(modem::PatternEvidence)) +
-                                       sizeof(detail::PatternScoreHistory) +
-                                       sizeof(detail::SignalWindow) + modem::SampledSimulationChannel::workspace_bound +
-                                       plot_size * (sizeof(float)+sizeof(std::complex<double>)) +
-                                       sizeof(modem::TransmitTrace) + trace_prefix_workspace + replay_workspace(value) +
-                                       maximum_events * reception_alias_bytes +
-                                       ((value.transfer.modem.scheduled_hopping && value.transfer.modem.scheduled_hopping->enabled() &&
-                                         !value.transfer.modem.scheduled_hopping->continuous()) ? value.dsp_workspace_bytes/64 : 0); }
-std::size_t audio_reserve(const Settings& value) {
-    return value.simulation ? 0 : std::min<std::size_t>(5 * 1024 * 1024, value.dsp_workspace_bytes / 8);
-}
-std::size_t bank_capacity(const Settings& value) {
-    // Simulation feeds sampled audio directly; it never allocates
-    // the asynchronous hardware capture queue.
-    const auto capture_queue = value.simulation ? 0 : value.dsp_workspace_bytes / 8;
-    const auto reserved = capture_queue + value.dsp_workspace_bytes / 4 + plot_workspace(value) + audio_reserve(value);
-    if (reserved >= value.dsp_workspace_bytes) throw Error("DSP workspace cannot hold the audio and plot buffers");
-    return value.dsp_workspace_bytes - reserved;
-}
-std::size_t source_budget(std::size_t content) {
-    return transfer::source_storage_limit(content);
-}
-modem::ChannelConfig channel_config(const Settings& settings) {
-    modem::ChannelConfig channel;
-    channel.snr_db = settings.simulation_snr_db;
-    channel.clock_error_ppm = settings.simulation_clock_error_ppm;
-    channel.frequency_offset_hz = settings.simulation_frequency_offset_hz;
-    channel.phase_noise_degrees_per_sqrt_second = settings.simulation_phase_noise_degrees_per_sqrt_second;
-    channel.seed = settings.simulation_seed;
-    return channel;
-}
 Settings normalized(Settings value) {
+    // Capability remains provider-selected and is checked before any mutation,
+    // exactly as before. The pure layout routine shares all remaining checks.
     audio::validate_options({value.transmit_gain,value.exclusive});
-    clock_sync::validate_audio_error(value.transfer.audio_timing_error_seconds);
-    if (value.content_limit == default_memory_limit) value.content_limit = value.transfer.content_limit;
-    if (value.dsp_workspace_bytes == runtime::default_dsp_workspace_bytes()) value.dsp_workspace_bytes = value.transfer.dsp_workspace_bytes;
-    value.transfer.content_limit = value.content_limit;
-    value.transfer.dsp_workspace_bytes = value.dsp_workspace_bytes;
-    if (value.transfer.modem.spreading_mode == modem::SpreadingMode::tone) {
-        value.transfer.key.reset(); value.receive_keys.clear();
-        value.transfer.modem.data_key.reset();
-        value.transfer.modem.scramble = value.transfer.modem.dsss = false;
-        value.transfer.modem.dsss_factor=1;
-        value.transfer.modem.spreading_seed.fill(0); value.transfer.modem.dsss_seed.fill(0);
-        if (value.transfer.automatic_receive_profiles && value.transfer.receive_pattern_mode != tuning::PatternMode::auto_tone &&
-            value.transfer.receive_pattern_mode < tuning::PatternMode::tone_1)
-            value.transfer.receive_pattern_mode = tuning::PatternMode::auto_tone;
-    } else if (value.transfer.key) value.transfer.modem.scramble = true;
-    modem::validate(value.transfer.modem);
-    if(value.transfer.modem.oscillator_search)
-        modem::validate_oscillator_search(*value.transfer.modem.oscillator_search);
-    if (value.long_message_modem) {
-        auto& longer = *value.long_message_modem;
-        const auto& base = value.transfer.modem;
-        if (longer.sample_rate != base.sample_rate || longer.carrier_hz != base.carrier_hz ||
-            longer.dsss_factor != base.dsss_factor ||
-            (base.dsss_factor>1 && longer.outer_dsss_version != base.outer_dsss_version) ||
-            longer.bandwidth_hz != base.bandwidth_hz || longer.spreading_mode != base.spreading_mode)
-            throw Error("short and long transmit profiles must share sample rate, carrier, bandwidth and spreading mode");
-        if (longer.spreading_mode == modem::SpreadingMode::tone) {
-            longer.data_key.reset(); longer.scramble = longer.dsss = false;longer.dsss_factor=1;
-            longer.spreading_seed.fill(0); longer.dsss_seed.fill(0);
-        } else if (value.transfer.key) longer.scramble = true;
-        modem::validate(longer);
-        if ((longer.scramble || longer.dsss) && !value.transfer.key && value.receive_keys.empty())
-            throw Error("encrypted spreading requires a loaded key");
-    }
-    if (!value.simulation && modem::waveform_bandwidth_hz(value.transfer.modem) > 192000)
-        throw Error("This bandwidth requires an SDR frontend; this build supports audio hardware and simulation. Enable simulation for the selected band.");
-    if (!value.content_limit) throw Error("received content cache must have a positive capacity");
-    (void)source_budget(value.content_limit);
-    if (value.dsp_workspace_bytes < minimum_workspace) throw Error("streaming DSP workspace must be at least 512 KiB");
-    (void)bank_capacity(value);
-    if (!std::isfinite(value.simulation_snr_db) || std::abs(value.simulation_snr_db) > 200)
-        throw Error("simulation sample SNR must be finite and between -200 and 200 dB");
-    if (value.simulation_spectrum_gain_db && !std::isfinite(*value.simulation_spectrum_gain_db))
-        throw Error("simulation spectrum display gain must be finite");
-    modem::validate_channel(value.transfer.modem, channel_config(value));
-    if (value.receive_keys.size() > 128) throw Error("continuous receiver supports at most 128 loaded keys");
-    if(value.transfer.clock_sync) {
-        clock_sync::validate(*value.transfer.clock_sync);
-        const auto radius=std::ceil(value.transfer.clock_sync->half_window_seconds()+
-            2*value.transfer.audio_timing_error_seconds+2.);
-        if(radius>60)throw Error("clock region requires more than the supported 60-second epoch radius");
-        // An explicitly selected receive epoch has its own requested search
-        // radius. Only automatic wall-clock admission needs the additional
-        // epoch coverage for the arrival model.
-        if(!value.transfer.timestamp)
-            value.transfer.search_seconds=std::max(value.transfer.search_seconds,static_cast<unsigned>(radius));
-    }
-    if (value.transfer.search_seconds > 60) throw Error("continuous timing search exceeds 60 seconds");
-    if ((value.transfer.modem.scramble || value.transfer.modem.dsss) &&
-        !value.transfer.key && value.receive_keys.empty()) throw Error("encrypted spreading requires a loaded key");
-    return value;
+    return detail::normalized_layout(std::move(value));
 }
 
 using Plots = detail::SignalPlots;
@@ -308,42 +196,29 @@ struct Session::Impl {
         std::size_t reserved_bytes=0, retained_bytes=0;
         bool started=false, obsolete=false;
     };
-    struct Receiver {
-        transfer::Options options;
-        Bytes key_tag;
-        std::uint64_t epoch = 0;
-        double admitted_at = 0;
-        bool prefer_streamed_templates = false;
-        bool clock_window_modeled = false;
-        std::size_t amplitude_fft_samples=0;
-        double last_confident_at = 0;
-        std::uint64_t last_confident_end = 0;
-        std::uint64_t sample_origin = 0, family = 0;
-        detail::PatternScoreHistory pattern_score_history;
-        struct Presentation {
-            std::uint64_t candidate_id=0, signal_id=0, published_revision=0;
-            bool content_reported=false;
-        };
-        // Candidate chunks may interleave. Keep each physical identity until
-        // its actual completion, with the same bound as the content collector.
-        std::map<std::pair<std::uint64_t,std::uint64_t>,Presentation> presentations;
-        std::vector<modem::PatternBurst> bursts;
-        // Immutable capability survives optional arena trims.
-        std::unique_ptr<const modem::detail::SourceFamily> source_curve_family;
-        std::unique_ptr<modem::StreamingReceiver> modem;
-        std::unique_ptr<transfer::StreamReceiver> content;
-    };
+    using Receiver = detail::ReceiverState;
     struct Bank {
         std::shared_ptr<transfer::ReceiveStorageQuota> source_quota;
         std::vector<Receiver> receivers;
         detail::ReceptionHistory receptions;
         std::unique_ptr<modem::detail::SharedSourceCurves<>> source_curves;
+        std::unique_ptr<modem::detail::scheduled_source_samples::Pool> exact_source_samples;
+        std::uint64_t exact_source_generation=0;
+        Clock::time_point next_exact_source_trace{};
         std::unique_ptr<modem::detail::PatternPermutationPools> permutations;
         std::unique_ptr<modem::detail::SharedTemporalPlans> temporal_plans;
+        using SharedCapture=modem::detail::scheduled_capture::SharedScheduledCapture;
+        std::shared_ptr<SharedCapture> shared_capture;
+        std::optional<SharedCapture::Retention> future_capture;
+        detail::DeferredInputFences deferred_input;
+        std::optional<Clock::time_point> input_queued_at;
+        Clock::time_point next_deferred_history_query{};
+        std::size_t deferred_history_cursor=0;
+        bool retirement_pending=false;
         std::uint64_t samples = 0, next_candidate = 1,revision=0;
         std::uint64_t admissions = 0, retirements = 0, builds = 0;
         std::size_t peak_receivers = 0;
-        std::size_t working_bytes = sizeof(detail::ReceptionHistory)+sizeof(source_curves)+sizeof(permutations)+sizeof(temporal_plans);
+        std::size_t working_bytes = sizeof(detail::ReceptionHistory)+sizeof(source_curves)+sizeof(exact_source_samples)+sizeof(exact_source_generation)+sizeof(next_exact_source_trace)+sizeof(permutations)+sizeof(temporal_plans)+sizeof(deferred_input)+sizeof(input_queued_at)+sizeof(shared_capture)+sizeof(future_capture);
         double created_at = 0;
         // UTC for a captured block, independent of when its search runs. Sample
         // coordinates remain continuous; fresh stamps only guide new admission.
@@ -377,6 +252,88 @@ struct Session::Impl {
             f.add("inner_busy",inner.busy);f.add("inner_bypassed",inner.bypassed);
         });
     }
+    static bool exact_source_pool_requested() {
+        static const bool requested=[] {const auto* text=std::getenv("DATAPUMP_SCHED_EXACT_SOURCE_TILES");
+            return text && std::string_view(text)=="1";}();return requested;
+    }
+    static bool exact_source_receiver(const Receiver& receiver) {
+        const auto& c=receiver.options.modem;
+        return receiver.options.key && receiver.modem->deferred_pattern_history() &&
+            modem::scheduled_bursts(c) && !modem::packed_scheduled_symbols(c) && modem::pattern_pulse_enabled(c);
+    }
+    struct ExactSourceSnapshot {
+        modem::detail::scheduled_source_samples::Counts counts;
+        std::size_t bytes=0,rows=0;
+    };
+    static ExactSourceSnapshot exact_source_snapshot(const Bank& bank) {
+        if(!bank.exact_source_samples)return {};
+        return {bank.exact_source_samples->counts(),bank.exact_source_samples->working_bytes(),bank.exact_source_samples->capacity()};
+    }
+    static void trace_exact_source_pool(const Bank& bank,const char* reason,bool final=false,
+                                       std::optional<ExactSourceSnapshot> saved={}) {
+        const auto snapshot=saved?*saved:exact_source_snapshot(bank);
+        if(!snapshot.rows)return; // A tombstone must not overwrite the retired generation's final counts.
+        audio::trace::record("receiver_exact_source_samples",[&](auto& f) {
+            const auto& counts=snapshot.counts;
+            f.add("revision",bank.revision);f.add("sample",bank.samples);f.add("pool_generation",bank.exact_source_generation);
+            f.add("reason",reason);f.add("final_snapshot",final);
+            f.add("counter_scope","one exact-source pool generation; cumulative, do not sum successive snapshots");
+            f.add("bytes",snapshot.bytes);f.add("rows",snapshot.rows);
+            f.add("queries",counts.queries);f.add("cached_points",counts.cached_points);
+            f.add("original_build_calls",counts.original_build_calls);f.add("direct_calls",counts.direct_calls);
+            f.add("net_avoided_original_calls",static_cast<long double>(counts.queries)-counts.original_build_calls-counts.direct_calls);
+            f.add("argument_mismatches",counts.argument_mismatches);f.add("speculative_failures",counts.speculative_failures);
+            f.add("borrows",counts.borrows);f.add("tile_hits",counts.tile_hits);f.add("builds",counts.builds);
+            f.add("failed_builds",counts.failed_builds);f.add("busy",counts.busy);
+            f.add("evictions",counts.evictions);f.add("exhaustions",counts.exhaustions);
+            f.add("source_arithmetic","original FP64 paired q, exact argument bits, no interpolation");
+        });
+    }
+    static std::size_t drop_exact_source_pool(Bank& bank,const char* reason) {
+        if(!bank.exact_source_samples)return 0;
+        const auto old=bank.exact_source_samples->working_bytes();
+        const auto borrowed=modem::detail::scheduled_source_samples::binding;
+        if(borrowed.pool==bank.exact_source_samples.get()) {
+            // An active Scope is a borrowed capability even after its Readers
+            // join. Reclaim backing/restore its loan, but defer owner destruction
+            // until that Scope has restored the previous binding.
+            if(borrowed.reclaim && borrowed.reclaim(borrowed.pressure_context))
+                return old-bank.exact_source_samples->working_bytes();
+            return 0;
+        }
+        // Only joined coordinator barriers may destroy the borrowed object.
+        // If any backing is pinned/in construction it remains fully charged.
+        const auto snapshot=exact_source_snapshot(bank);
+        if(!bank.exact_source_samples->try_reclaim())return 0;
+        trace_exact_source_pool(bank,reason,true,snapshot);
+        if(old>bank.working_bytes)throw Error("exact source pool charge exceeds receiver bank");
+        bank.exact_source_samples.reset();bank.working_bytes-=old;return old;
+    }
+    struct ExactSourceLoan {
+        Bank& bank;Receiver& receiver;std::size_t capacity=0,loan=0;
+        static bool reclaim(void* opaque) {
+            auto& self=*static_cast<ExactSourceLoan*>(opaque);
+            auto& pool=self.bank.exact_source_samples;if(!pool || !pool->capacity())return false;
+            const auto old=pool->working_bytes();
+            const auto snapshot=exact_source_snapshot(self.bank);
+            if(!pool->try_reclaim())return false;
+            trace_exact_source_pool(self.bank,"mandatory_pressure",true,snapshot);
+            // Keep the Pool object alive until this Scope and every
+            // copied worker binding have gone. No source Reader is
+            // pinned when the serial room_for hook requests this.
+            const auto retained=pool->working_bytes();
+            if(retained>old || old-retained>self.bank.working_bytes)
+                throw Error("exact source reclamation charge is inconsistent");
+            const auto freed=old-retained;self.bank.working_bytes-=freed;
+            if(self.loan>self.capacity || freed>self.capacity-self.loan)throw Error("exact source loan restoration exceeds cohort workspace");
+            self.loan+=freed;self.receiver.modem->set_workspace_bytes(self.loan);
+            audio::trace::record("receiver_exact_source_loan_restored",[&](auto& f){
+                f.add("revision",self.bank.revision);f.add("sample",self.bank.samples);
+                f.add("pool_generation",self.bank.exact_source_generation);f.add("freed_bytes",freed);
+                f.add("retained_tombstone_bytes",retained);f.add("receiver_loan",self.loan);});
+            return freed!=0;
+        }
+    };
     static void note_oscillator_coverage(Bank& bank,const modem::OscillatorPatternSearch& search) {
         if(!search.limited)return;
         bank.limited=bank.coverage_limited=true;
@@ -390,11 +347,10 @@ struct Session::Impl {
         // Reserve bounded diagnostic growth and control storage before
         // admitting a receiver, rather than reporting only its idle allocation.
         const auto& config=receiver.options.modem;
-        const auto compact=receiver.options.key && modem::symbol_sample_count(config)>=60ULL*config.sample_rate;
-        const auto margin=compact?8192:65536;
+        const auto margin=receiver_control_margin(config,receiver.options.key.has_value());
         std::size_t burst_bytes=receiver.bursts.capacity()*sizeof(modem::PatternBurst);
         for(const auto& burst:receiver.bursts)burst_bytes+=burst.bits.capacity();
-        return receiver.modem->working_bytes() + margin + sizeof(Receiver) + burst_bytes +
+        return receiver.modem->working_bytes() + margin + burst_bytes +
             receiver.presentations.size()*(sizeof(decltype(receiver.presentations)::value_type)+4*sizeof(void*)) +
             (receiver.content?receiver.content->working_bytes():0) +
             (receiver.source_curve_family?sizeof(modem::detail::SourceFamily):0);
@@ -441,6 +397,10 @@ struct Session::Impl {
     bool capture_timing_fallback=false,playback_timing_fallback=false;
     std::optional<Clock::time_point> decoding_queued_at;
     std::size_t decoding_remaining_samples=0;
+    std::uint64_t decoding_remaining_physical_samples=0;
+    std::uint64_t delayed_processing_pcm_samples=0;
+    std::optional<Clock::time_point> delayed_processing_queued_at;
+    bool delayed_processing_pending=false;
     // At most one coordinator runs; each job owns its bounded parallel search.
     std::deque<std::shared_ptr<RecoveryTask>> recoveries;
     std::shared_ptr<RecoveryTask> active_recovery;
@@ -674,6 +634,8 @@ struct Session::Impl {
         queued.clear(); ready.reset(); tx_busy = false; input.clear(); input_bytes = 0;
         capture_samples=0;capture_quiet.reset();capture_future.reset();capture_future_revoked=false;
         current.capture_recorded_samples=current.capture_certified_null_samples=0;
+        current.processed_physical_samples=0;decoding_remaining_physical_samples=0;
+        delayed_processing_pcm_samples=0;delayed_processing_queued_at.reset();delayed_processing_pending=false;
         const auto unavailable=unavailable_recovery_events();invalidate_recoveries();
         for(auto event:unavailable)append_signal(std::move(event));
         capture_stop.request_stop(); tx_stop.request_stop(); decode_stop.request_stop(); changed.notify_all();
@@ -687,6 +649,8 @@ struct Session::Impl {
         settings = std::move(value); ++generation; ++tx_serial; ++receive_revision;
         capture_samples=0;capture_quiet.reset();capture_future.reset();capture_future_revoked=false;
         current.capture_recorded_samples=current.capture_certified_null_samples=0;
+        current.processed_physical_samples=0;decoding_remaining_physical_samples=0;
+        delayed_processing_pcm_samples=0;delayed_processing_queued_at.reset();delayed_processing_pending=false;
         selected_transmit_key=key;
         receive_pending=false;
         queued.clear(); ready.reset(); tx_busy = false; input.clear();
@@ -883,6 +847,8 @@ struct Session::Impl {
         if (block_bytes > queue_limit || retained > queue_limit-block_bytes) {
             count_dropped(current.receiver_health.input_overruns,1);
             count_dropped(current.receiver_health.dropped_samples,input_bytes/sizeof(float));
+            count_dropped(current.receiver_health.dropped_samples,delayed_processing_pcm_samples);
+            count_dropped(current.receiver_health.dropped_samples,decoding_remaining_samples);
             // Every gap, including an oversized callback, invalidates the old
             // acquisition. Never concatenate later samples across missing PCM.
             reset_input_locked();discard=false;bytes=samples.size_bytes();
@@ -918,6 +884,8 @@ struct Session::Impl {
         input.clear(); input_bytes = 0; ++receive_revision;
         capture_samples=0;capture_quiet.reset();capture_future.reset();capture_future_revoked=false;
         current.capture_recorded_samples=current.capture_certified_null_samples=0;
+        current.processed_physical_samples=0;decoding_remaining_physical_samples=0;
+        delayed_processing_pcm_samples=0;delayed_processing_queued_at.reset();delayed_processing_pending=false;
         current.clock_window_modeled=false;current.receiver_timing.reset();
         current.receiver_instances=current.peak_receiver_instances=0;
         current.receiver_admissions=current.receiver_retirements=0;
@@ -937,6 +905,8 @@ struct Session::Impl {
         if(!current.running || generation!=version || capture_suspended || stop.stop_requested())return;
         current.receiver_health.input_interrupted=true;
         count_dropped(current.receiver_health.dropped_samples,input_bytes/sizeof(float));
+        count_dropped(current.receiver_health.dropped_samples,delayed_processing_pcm_samples);
+        count_dropped(current.receiver_health.dropped_samples,decoding_remaining_samples);
         reset_input_locked();
     }
     double observation_epoch(const Bank& bank,const Settings& value,std::uint64_t sample) const {
@@ -1018,6 +988,43 @@ struct Session::Impl {
         });
         bank.temporal_plans.reset();bank.working_bytes-=bytes;
     }
+    // A shared owner is an actual allocation/retention contract. It is never
+    // inferred from a duty-cycle estimate or an unbound planner reservation.
+    void ensure_shared_capture(Bank& bank,const Settings& value) {
+        if(bank.shared_capture)return;
+        if(!modem::detail::scheduled_acquisition_policy::requested())return;
+        const auto& base=value.transfer.modem;
+        if(!modem::scheduled_bursts(base))return;
+        const Crypto* key=value.transfer.key?&*value.transfer.key:
+            value.receive_keys.empty()?nullptr:&value.receive_keys.front();
+        if(!key)return;
+        auto profiles=value.transfer.automatic_receive_profiles?
+            tuning::receive_profiles(base,value.transfer.receive_targets_db_hz,value.transfer.receive_pattern_mode,true):
+            std::vector<modem::Config>{base};
+        bool eligible=false;std::size_t consumers=128;
+        for(auto c:profiles) {
+            c.data_key=*key;const auto n=modem::symbol_sample_count(c);
+            if(!modem::scheduled_bursts(c) || modem::packed_scheduled_symbols(c) ||
+               n<6ULL*c.sample_rate || n>=16ULL*c.sample_rate || !modem::pattern_pulse_enabled(c))continue;
+            eligible=true;
+            const auto count=modem::receiver_strategy_bank_count(c,value.transfer.search_seconds,
+                std::max<std::size_t>(1,value.receive_keys.size()+std::size_t(value.transfer.key.has_value())),profiles.size());
+            if(count>(std::numeric_limits<std::size_t>::max()-128)/2)throw Error("shared capture consumer reservation overflow");
+            consumers=std::max(consumers,2*count+128);
+        }
+        if(!eligible)return;
+        namespace shared=modem::detail::scheduled_capture;
+        const auto capacity=bank_capacity(value);
+        const auto layout=Bank::SharedCapture::cohort_layout(capacity,consumers);
+        auto owner=std::make_shared<Bank::SharedCapture>(layout.limits,shared::Identity{bank.revision,bank.revision},bank.samples);
+        const auto charge=owner->capacity_reservation();
+        if(charge>capacity-std::min(capacity,bank.working_bytes))throw Error("shared capture capacity exceeds remaining DSP workspace");
+        auto future=owner->subscribe(bank.samples,true);
+        bank.shared_capture=std::move(owner);bank.future_capture.emplace(std::move(future));bank.working_bytes+=charge;
+        audio::trace::record("receiver_shared_capture_reserved",[&](auto& f){
+            f.add("sample",bank.samples);f.add("revision",bank.revision);f.add("capacity",charge);f.add("consumers",consumers);
+        });
+    }
     Bank make_bank(const Settings& value) { return make_bank(value, Bank{}); }
     Bank make_bank(const Settings& value, Bank bank) {
         rx_cpu::Context cpu_context(rx_cpu::Stage::rolling);
@@ -1030,6 +1037,8 @@ struct Session::Impl {
         // cache invalidation. Retry sizing/construction after actual pressure.
         const auto reclaim_scratch=[&] {
             rx_cpu::Scope cpu_reclaim(rx_cpu::Stage::allocation);
+            // This helper updates Bank itself; do not subtract it twice below.
+            const auto source_released=drop_exact_source_pool(bank,"admission_pressure");
             std::size_t released=0;
             if(bank.permutations) {
                 const auto bytes=bank.permutations->working_bytes();
@@ -1051,11 +1060,17 @@ struct Session::Impl {
             if(released)audio::trace::record("receiver_optional_scratch_reclaimed",[&](auto& f) {
                 f.add("sample",bank.samples);f.add("bytes",released);f.add("resident",bank.receivers.size());
             });
-            return released;
+            return released+source_released;
         };
         bool scheduled_quiet_only=false;
         count_dropped(bank.builds,1);
-        {std::lock_guard lock(mutex);bank.revision=receive_revision;}
+        {
+            std::lock_guard lock(mutex);
+            if(bank.revision && bank.revision!=receive_revision)
+                throw Error("receiver admission belongs to an obsolete capture revision");
+            if(!bank.revision)bank.revision=receive_revision;
+        }
+        ensure_shared_capture(bank,value);
         audio::trace::record("receiver_bank_build",[&](auto& f) {
             f.add("revision",bank.revision);f.add("build",bank.builds);f.add("sample",bank.samples);
             f.add("resident",bank.receivers.size());f.add("workspace",bank.working_bytes);
@@ -1133,7 +1148,7 @@ struct Session::Impl {
                     // arbitrary current second is a keyed null. Actual epoch
                     // and prior admission remain unchanged below.
                     ideal=modem::scheduled_estimate_config(ideal);
-                    modem::PatternSearch nominal;nominal.start_offset_seconds=0;
+                    modem::PatternSearch nominal;nominal.scheduled_capture=bank.shared_capture;nominal.input_sample_origin=bank.samples;nominal.start_offset_seconds=0;
                     nominal.start_uncertainty_seconds=0;nominal.hypotheses={{0,0}};
                     if(ideal.oscillator_search) {
                         const auto correction=value.transfer.clock_sync?
@@ -1196,6 +1211,10 @@ struct Session::Impl {
                 // optional precision payloads) BEFORE original sizing/selection.
                 // A matching retained receiver above performs no preparation.
                 drop_shared_temporal_plans(bank,"new_receiver");
+                // Exact source reuse cannot change original constructor sizing.
+                // Required new-bank admissions precede every optional grant.
+                drop_exact_source_pool(bank,"new_receiver");
+                if(bank.exact_source_samples)throw Error("exact source pool still borrowed at receiver admission barrier");
                 // Experimental surplus may not change a new receiver's
                 // original constructor/worker grant. Admission is a joined barrier.
                 if(bank.permutations && (bank.permutations->working_bytes()>256*1024 ||
@@ -1206,7 +1225,7 @@ struct Session::Impl {
                 }
                 const auto capacity = bank_capacity(value);
                 const auto compact=key && modem::symbol_sample_count(profile)>=60ULL*profile.sample_rate;
-                const auto control_margin = (compact?8192:65536) + sizeof(Receiver);
+                const auto control_margin = receiver_control_margin(profile,key.has_value());
                 if(bank.working_bytes>=capacity || capacity-bank.working_bytes<=control_margin)reclaim_scratch();
                 if(bank.working_bytes>=capacity || capacity-bank.working_bytes<=control_margin) {
                     bank.limited=bank.coverage_limited=true;
@@ -1231,9 +1250,10 @@ struct Session::Impl {
                     std::optional<modem::OscillatorPatternSearch> declared_search;
                     search.receiver_schedule_key_count=keys.size();
                     search.receiver_bank_count=modem::receiver_strategy_bank_count(config,value.transfer.search_seconds,keys.size(),profiles.size());
-                    const auto cohort_share=capacity/std::max<std::size_t>(1,search.receiver_bank_count);
+                    const auto owner_charge=bank.shared_capture?bank.shared_capture->capacity_reservation():0;
+                    const auto cohort_share=(capacity-std::min(capacity,owner_charge))/std::max<std::size_t>(1,search.receiver_bank_count);
                     search.receiver_strategy_workspace_bytes=cohort_share>control_margin?cohort_share-control_margin:1;
-                    search.input_sample_origin=receiver.sample_origin;
+                    search.input_sample_origin=receiver.sample_origin;search.scheduled_capture=bank.shared_capture;
                     if(config.oscillator_search) {
                         auto oscillator_search=modem::oscillator_pattern_search(config,value.transfer.clock_sync?modem::utc_transmit_rate_limit(config):0);
                         declared_search=oscillator_search;
@@ -1347,7 +1367,9 @@ struct Session::Impl {
             return receiver.key_tag.empty() && receiver.modem->clock_windowed();
         }))return;
         const auto now = observation_epoch(bank,value,bank.samples);
-        if (std::floor(now)==std::floor(bank.created_at)) return;
+        const bool new_epoch=std::floor(now)!=std::floor(bank.created_at);
+        if (!new_epoch && !bank.retirement_pending) return;
+        bank.retirement_pending=false;
         const auto retired=std::erase_if(bank.receivers,[&](const auto& receiver){
             // Short streams can hold fewer than one output chunk throughout
             // the physical absence window. Their admitted clock must survive
@@ -1368,24 +1390,34 @@ struct Session::Impl {
             // Unconfirmed epochs need one complete symbol plus clock coverage.
             // Retire confirmed receivers only after their physical search has
             // ended the stream using the fixed complete-symbol absence rule.
-            if(receiver.last_confident_end) {
-                return now>receiver.last_confident_at+6.+allowance;
-            }
-            if(receiver.key_tag.empty())
-                return receiver.modem->clock_windowed() && now>receiver.admitted_at+prefix+symbol+allowance;
             const auto propagation=!value.simulation && value.transfer.clock_sync?value.transfer.clock_sync->offset_seconds:0;
-            return !value.transfer.timestamp && now>static_cast<double>(receiver.epoch)+propagation+prefix+symbol+allowance;
+            const bool expired=receiver.last_confident_end?now>receiver.last_confident_at+6.+allowance:
+                receiver.key_tag.empty()?receiver.modem->clock_windowed() && now>receiver.admitted_at+prefix+symbol+allowance:
+                !value.transfer.timestamp && now>static_cast<double>(receiver.epoch)+propagation+prefix+symbol+allowance;
+            if(!expired)return false;
+            if(const auto committed=receiver.modem->delayed_processing_frontier()) {
+                if(receiver.sample_origin>bank.samples || *committed>bank.samples-receiver.sample_origin)
+                    throw Error("delayed receiver retirement frontier exceeds capture ingress");
+                if(*committed<bank.samples-receiver.sample_origin) {
+                    bank.retirement_pending=true;return false;
+                }
+            }
+            return true;
         });
         bank.retirements+=retired;
         if(retired)audio::trace::record("receiver_bank_retired",[&](auto& f) {
             f.add("revision",bank.revision);f.add("sample",bank.samples);f.add("retired",retired);
             f.add("resident",bank.receivers.size());f.add("retirements",bank.retirements);
         });
-        bank.working_bytes=sizeof(detail::ReceptionHistory)+sizeof(bank.source_curves)+sizeof(bank.permutations)+sizeof(bank.temporal_plans)+
-            (bank.source_curves?bank.source_curves->working_bytes():0)+(bank.permutations?bank.permutations->working_bytes():0)+
+        bank.working_bytes=sizeof(detail::ReceptionHistory)+sizeof(bank.source_curves)+sizeof(bank.exact_source_samples)+
+            sizeof(bank.exact_source_generation)+sizeof(bank.next_exact_source_trace)+sizeof(bank.permutations)+sizeof(bank.temporal_plans)+
+            sizeof(bank.deferred_input)+sizeof(bank.input_queued_at)+sizeof(bank.shared_capture)+sizeof(bank.future_capture)+
+            (bank.shared_capture?bank.shared_capture->capacity_reservation():0)+bank.deferred_input.working_bytes()+
+            (bank.source_curves?bank.source_curves->working_bytes():0)+
+            (bank.exact_source_samples?bank.exact_source_samples->working_bytes():0)+(bank.permutations?bank.permutations->working_bytes():0)+
             (bank.temporal_plans?bank.temporal_plans->working_bytes():0);
         for(const auto& receiver:bank.receivers)bank.working_bytes+=receiver_workspace(receiver);
-        bank=make_bank(value,std::move(bank));
+        if(new_epoch)bank=make_bank(value,std::move(bank));
     }
     void append_signal(SignalUpdate event) {
         if (current.signals.size() == maximum_events) {
@@ -1606,14 +1638,57 @@ struct Session::Impl {
         candidate.complete=burst.complete;
         return candidate;
     }
+    static std::uint64_t committed_bank_frontier(const Bank& bank) {
+        auto committed=bank.samples;
+        for(const auto& receiver:bank.receivers) {
+            const detail::DeferredConsumerFrontier consumer{receiver.sample_origin,
+                receiver.modem->delayed_processing_frontier()};
+            committed=std::min(committed,detail::committed_frontier(bank.samples,
+                std::span<const detail::DeferredConsumerFrontier>{&consumer,1}));
+        }
+        return committed;
+    }
+    void record_deferred_input(Bank& bank,std::uint64_t count,bool pcm,const Settings& value) {
+        if(!count || !bank.input_queued_at)return;
+        if(std::none_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver) {
+            return receiver.modem->delayed_processing_frontier().has_value();
+        }))return;
+        if(!bank.deferred_input.working_bytes()) {
+            const auto capacity=bank_capacity(value);
+            if(bank.working_bytes>=capacity)throw Error("receiver timing metadata exceeds configured DSP workspace");
+            const auto allowance=std::min({std::size_t{256*1024},capacity/512,capacity-bank.working_bytes});
+            bank.deferred_input.reserve(allowance);
+            bank.working_bytes+=bank.deferred_input.working_bytes();
+        }
+        bank.deferred_input.record(bank.samples,count,*bank.input_queued_at,pcm);
+    }
+    // Caller holds mutex. The owning decoder has joined every consumer. Do not
+    // read receiver internals on the GUI thread, or publish old-revision work.
+    void publish_processing_frontier(Bank& bank) {
+        const auto committed=committed_bank_frontier(bank);
+        if(committed<current.processed_physical_samples)
+            throw Error("receiver committed frontier regressed within one capture revision");
+        bank.deferred_input.discard_committed(committed);
+        const auto pending=bank.deferred_input.pending(committed,bank.samples);
+        if(committed>capture_samples)throw Error("receiver committed frontier exceeds capture revision ingress");
+        current.processed_physical_samples=committed;
+        // An idle worker owns an internal batch, rather than an ingress block.
+        // Shrink that ownership atomically as the all-consumer frontier commits;
+        // ordinary popped-block remaining work is already a disjoint subset.
+        decoding_remaining_physical_samples=std::min(decoding_remaining_physical_samples,capture_samples-committed);
+        delayed_processing_pcm_samples=pending.pcm_samples;
+        delayed_processing_queued_at=pending.oldest;
+        delayed_processing_pending=committed<bank.samples;
+    }
     template<class Feed> void feed_bank(Bank& bank, const Settings& value, std::uint64_t version,
                                         std::stop_token stop, std::span<const float> samples, Feed feed,
-                                        Prepared* simulation_wave = nullptr) {
+                                        Prepared* simulation_wave = nullptr,bool allow_admission=true,
+                                        bool account_frontier=true,std::optional<std::uint64_t> coordinate_count={}) {
         rx_cpu::Context cpu_context(rx_cpu::Stage::control_residual);
         // Admit the receiver's current clock epoch before consuming this PCM
         // block. A short burst can finish within one block after a second rolls
         // over; refreshing afterward can miss every chip of the new stream.
-        refresh_bank(bank,value);
+        if(allow_admission)refresh_bank(bank,value);
         if(bank.coverage_limited) {
             std::lock_guard lock(mutex);
             if(current.running && generation==version && bank.revision==receive_revision && !stop.stop_requested()) {
@@ -1624,8 +1699,25 @@ struct Session::Impl {
             }
         }
         const auto sample_count=samples.size();
+        // Admission can create the first delayed receiver inside a callback.
+        // Record AFTER admission and BEFORE feed, using the original callback
+        // timestamp for every subdivision. No captured PCM is copied here.
+        if(!value.simulation)record_deferred_input(bank,coordinate_count.value_or(sample_count),!samples.empty(),value);
         if(sample_count>std::numeric_limits<std::uint64_t>::max()-bank.samples)
             throw Error("receive sample clock exceeds its platform range");
+        if(bank.shared_capture && !samples.empty()) {
+            const auto identity=modem::detail::scheduled_capture::Identity{bank.revision,bank.revision};
+            const auto captured=bank.shared_capture->accounting().captured_end;
+            if(captured!=bank.samples)throw Error("shared acquisition capture is not contiguous");
+            for(std::size_t offset=0;offset<samples.size();) {
+                const auto n=std::min<std::size_t>(8192,samples.size()-offset);
+                bank.shared_capture->append_copy(bank.samples+offset,samples.subspan(offset,n),identity);offset+=n;
+            }
+            // Every later admission starts at its admission sample_origin and
+            // never requests pre-local-zero PCM. Current consumers and leases
+            // separately retain all of their replay/guard obligations.
+            bank.future_capture->certify({identity,bank.samples+sample_count,bank.samples+sample_count});
+        }
         const auto capacity = bank_capacity(value);
         // Phase 1 is read-only. Any cold eligible profile forces complete
         // eviction before the first feed can run original worker preparation.
@@ -1692,10 +1784,20 @@ struct Session::Impl {
         // Diagnostic restriction: every receiver must be keyed V2 and already
         // retain its original workers AND Temporal state. Other algorithms and
         // mixed cohorts keep the original 8-row/256KiB optional policy.
+        // Lazy scheduled preparation and queued polling borrow the exact
+        // private pool synchronously, even without an input projection cache.
+        // The real capture owner identifies this cohort; no borrowed binding
+        // survives the joined call. Optional bytes remain in the global loan.
+        const bool independent_permutation=bank.shared_capture && !bank.receivers.empty() &&
+            std::all_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver) {
+                const auto& c=receiver.options.modem;
+                return receiver.modem->deferred_pattern_history() && receiver.options.key && c.dsss_factor>1 &&
+                    c.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2;
+            });
         const bool permutation_workers_retained=std::all_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver) {
             const auto& c=receiver.options.modem;
             if(!receiver.options.key || c.dsss_factor<=1 || c.outer_dsss_version!=modem::OuterDsssVersion::interleaved_v2)return false;
-            const auto workers=receiver.modem->temporal_plan_workers();return workers && *workers;
+            const auto workers=receiver.modem->temporal_plan_workers();return receiver.modem->deferred_pattern_history() || (workers && *workers);
         });
         if(bank.permutations && !permutation_workers_retained &&
            (bank.permutations->working_bytes()>256*1024 || bank.permutations->row_limit()>8)) {
@@ -1703,7 +1805,7 @@ struct Session::Impl {
             trace_permutation_release(bank,"workers_unretained");
             bank.permutations.reset();bank.working_bytes-=bytes;
         }
-        if(projection.cache && permutation_receivers>1 && bank.working_bytes<=capacity) {
+        if((projection.cache || independent_permutation) && permutation_receivers>1 && bank.working_bytes<=capacity) {
             const auto old_bytes=bank.permutations?bank.permutations->working_bytes():0;
             auto reserved=bank.working_bytes-old_bytes;
             const auto reserve=[&](std::size_t bytes) {
@@ -1828,10 +1930,10 @@ struct Session::Impl {
         }
         // Fine L2 uses final surplus after preceding exact/shared grants.
         if(modem::detail::fine_source_curves_requested())prepare_source_curve_pool(true);
-        const auto reclaim_source_curves=[&] {
+        const auto reclaim_source_curves=[&](bool retain_permutations=false) {
             drop_shared_temporal_plans(bank);
             // Every synchronous feed/worker has joined before this callback.
-            if(bank.permutations) {
+            if(bank.permutations && !retain_permutations) {
                 const auto bytes=bank.permutations->working_bytes();
                 trace_permutation_release(bank,"workspace_loan");
                 bank.permutations.reset();bank.working_bytes-=bytes;
@@ -1845,14 +1947,109 @@ struct Session::Impl {
                 receiver.source_curve_family.reset();bank.working_bytes-=sizeof(modem::detail::SourceFamily);
             }
         };
-        const auto release_optimization=[&] {projection.release();reclaim_source_curves();};
+        const auto release_optimization=[&] {projection.release();reclaim_source_curves();drop_exact_source_pool(bank,"optimization_or_error");};
         // An unavailable context cannot use the optional arena and must not
         // let it reduce the original receiver recording/replay allowance.
-        if(!projection.cache)reclaim_source_curves();
+        if(!projection.cache)reclaim_source_curves(independent_permutation);
+        const bool source_requested=exact_source_pool_requested() && modem::detail::scheduled_source_samples::environment();
+        const bool source_cohort=bank.shared_capture && !bank.receivers.empty() &&
+            std::all_of(bank.receivers.begin(),bank.receivers.end(),exact_source_receiver);
+        if(!source_requested || !source_cohort)drop_exact_source_pool(bank,"ineligible_cohort_or_environment");
+        else if(bank.exact_source_samples && !bank.exact_source_samples->capacity())
+            drop_exact_source_pool(bank,"joined_tombstone");
+        if(source_requested && source_cohort && !bank.exact_source_samples &&
+           bank.working_bytes<capacity && bank.exact_source_generation<UINT64_MAX) {
+            auto reserved=bank.working_bytes;
+            const auto add=[&](std::size_t bytes){if(bytes>capacity-reserved)return false;reserved+=bytes;return true;};
+            // Existing projection reservations still win in a mixed future
+            // implementation. Lazy headroom is intentionally not treated as a
+            // zero finite promise: a joined mandatory-pressure callback below
+            // reclaims this reversible grant and restores the original loan.
+            constexpr std::size_t cover=2U*1024U*1024U;
+            if(add(projection.remaining_headroom) && add(projection.deferred_detectors) && add(cover)) {
+                using Pool=modem::detail::scheduled_source_samples::Pool;
+                const auto ceiling=std::min<std::size_t>(8U*1024U*1024U,capacity-reserved);
+                if(ceiling>=Pool::minimum_working_bytes())try {
+                    auto pool=std::make_unique<Pool>(ceiling);
+                    if(pool->capacity()) {
+                        const auto bytes=pool->working_bytes();
+                        if(bytes>ceiling)throw Error("exact source pool exceeds its explicit optional grant");
+                        bank.working_bytes+=bytes;bank.exact_source_samples=std::move(pool);++bank.exact_source_generation;
+                        bank.next_exact_source_trace=Clock::now();
+                        trace_exact_source_pool(bank,"allocated");
+                    }
+                } catch(const std::bad_alloc&) {} // Original q construction remains available.
+            }
+        }
         const bool projection_context_created=static_cast<bool>(projection.cache);
         bool projection_context_used=false;
         std::vector<std::complex<double>> pattern_scores;
         std::vector<PatternScoreObservation> pattern_observations;
+        const auto record_history_generation=[&](Receiver& receiver) {
+            if(!receiver.modem->deferred_pattern_history())return;
+            receiver.history_ordinals.record(receiver.modem->diagnostic_history_generation(),replay_clock(),[&](auto count) {
+                return detail::reserve_pattern_observation_ids(pattern_score_observation_id,count);
+            });
+            // Clear-through sees every reserved completed-event identity even
+            // while another profile or a deferred query is still computing.
+            std::lock_guard lock(mutex);
+            if(current.running && generation==version && bank.revision==receive_revision && !stop.stop_requested()) {
+                const auto id=pattern_score_observation_id.load(std::memory_order_relaxed);
+                current.pattern_score_observation_id=id;
+                if(simulation_wave)simulation_wave->pattern_score_observation_id=id;
+            }
+        };
+        const auto query_history=[&](Receiver& receiver,bool pressure) {
+            const bool deferred=receiver.modem->deferred_pattern_history();
+            const auto generation=receiver.modem->diagnostic_history_generation();
+            if(deferred && !receiver.history_poll.due(generation,Clock::now(),pressure))return;
+            execution::checkpoint();if(stop.stop_requested())return;
+            rx_cpu::Scope cpu_candidates(rx_cpu::Stage::publication);
+            const auto retained=receiver_workspace(receiver),actual=receiver.modem->working_bytes();
+            const auto overhead=retained-actual,other=bank.working_bytes-retained;
+            if(other>capacity || overhead>capacity-other)throw Error("diagnostic replay exceeds exact cohort loan");
+            ExactSourceLoan history_loan{bank,receiver,capacity,capacity-other-overhead};
+            const bool exact_source=exact_source_receiver(receiver) && bank.exact_source_samples;
+            if(exact_source && receiver.family==UINT64_MAX)throw Error("exact source diagnostic key namespace exhausted");
+            // History polls keep warm q tiles. Only actual original room_for
+            // pressure reclaims backing, using the same joined restitution.
+            modem::detail::scheduled_source_samples::Scope history_source_scope(exact_source?bank.exact_source_samples.get():nullptr,
+                exact_source?receiver.family+1:0,exact_source?&history_loan:nullptr,
+                exact_source?&ExactSourceLoan::reclaim:nullptr);
+            if(exact_source)receiver.modem->set_workspace_bytes(history_loan.loan);
+            const auto& c=receiver.options.modem;
+            const bool permutation_eligible=receiver.options.key && c.dsss_factor>1 &&
+                c.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2;
+            const auto permutation_ns=permutation_eligible && receiver.family<UINT64_MAX?receiver.family+1:0;
+            modem::detail::PatternPermutationScope history_permutations(permutation_eligible?bank.permutations.get():nullptr,permutation_ns);
+            const auto accounted=receiver_workspace(receiver);
+            const auto candidates=receiver.modem->pattern_candidates(pattern_score_limit,stop);
+            if(deferred) {
+                if(receiver.modem->diagnostic_history_generation()!=generation)
+                    throw Error("diagnostic history query changed receiver completion events");
+                receiver.pattern_score_history.update_observations(candidates,[&](const auto& candidate) {
+                    return receiver.history_ordinals.observation(candidate.completed_event,candidate.admission_threshold);
+                });
+                receiver.history_poll.completed(generation,Clock::now());
+                receiver.history_ordinals.discard_resolved_through(receiver.modem->diagnostic_history_resolved_through());
+            } else receiver.pattern_score_history.update(candidates,replay_clock(),[&] {
+                return detail::reserve_pattern_observation_ids(pattern_score_observation_id,1);
+            });
+            bank.working_bytes=bank.working_bytes-accounted+receiver_workspace(receiver);
+            if(bank.working_bytes>capacity)throw Error("receive diagnostic history exceeds configured DSP workspace");
+        };
+        const auto prepare_history_fence=[&](Receiver& receiver) {
+            if(!receiver.modem->deferred_pattern_history() ||
+               receiver.history_ordinals.range_count()+2<=detail::DeferredPatternHistoryOrdinals::range_capacity)return;
+            // Pressure resolves OLD completed events before admitting another
+            // fence. Last feed's accepted decisions have already been published.
+            query_history(receiver,true);
+            // Reserve BOTH feed and process_pending completion fences before
+            // either can accept a bit. No numerical diagnostic may intervene
+            // between a new acceptance and ordinary phase0/1 publication.
+            if(receiver.history_ordinals.range_count()+2>detail::DeferredPatternHistoryOrdinals::range_capacity)
+                throw Error("receiver diagnostic provenance remains unresolved at workspace limit");
+        };
         // Observe every profile before publishing any completion. Otherwise a
         // weaker profile processed first could close the shared pending row.
         for(unsigned phase=0;phase<2;++phase) {
@@ -1902,6 +2099,12 @@ struct Session::Impl {
                         // fed can use all remaining shared space for recording and
                         // replay, while later keys see its measured growth.
                         receiver.modem->set_workspace_bytes(capacity - other - overhead);
+                        ExactSourceLoan source_loan{bank,receiver,capacity,capacity-other-overhead};
+                        const bool exact_source=exact_source_receiver(receiver) && bank.exact_source_samples;
+                        if(exact_source && receiver.family==UINT64_MAX)throw Error("exact source key namespace exhausted");
+                        modem::detail::scheduled_source_samples::Scope source_scope(exact_source?bank.exact_source_samples.get():nullptr,
+                            exact_source?receiver.family+1:0,exact_source?&source_loan:nullptr,
+                            exact_source?&ExactSourceLoan::reclaim:nullptr);
                         {
                             auto* context=projection.cache.get();
                             projection_context_used|=context!=nullptr;
@@ -1917,23 +2120,22 @@ struct Session::Impl {
                             } clear{context};
                             if(context && plans)context->bind_temporal_plans(&plans);
                             if(context)context->bind_source_curves(bank.source_curves.get(),receiver.source_curve_family.get());
-                            if(context) {
-                                const auto& c=receiver.options.modem;
-                                const bool eligible=receiver.options.key && c.dsss_factor>1 &&
-                                    c.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2;
-                                const auto ns=eligible && receiver.family<UINT64_MAX?receiver.family+1:0;
-                                context->bind_permutations(eligible?bank.permutations.get():nullptr,ns);
-                            }
+                            const auto& c=receiver.options.modem;
+                            const bool eligible=receiver.options.key && c.dsss_factor>1 &&
+                                c.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2;
+                            const auto ns=eligible && receiver.family<UINT64_MAX?receiver.family+1:0;
+                            modem::detail::PatternPermutationScope permutation_scope(eligible?bank.permutations.get():nullptr,ns);
+                            if(context)context->bind_permutations(eligible?bank.permutations.get():nullptr,ns);
+                            prepare_history_fence(receiver);
+                            // A forced historical fence owns its Bank delta;
+                            // begin new feed accounting from that joined state.
+                            accounted=receiver_workspace(receiver);
                             feed(*receiver.modem,context);
+                            record_history_generation(receiver);
+                            receiver.modem->process_pending(stop);
+                            record_history_generation(receiver);
                         }
                         update_workspace();
-                        {
-                            rx_cpu::Scope cpu_candidates(rx_cpu::Stage::publication);
-                            const auto candidates = receiver.modem->pattern_candidates(pattern_score_limit);
-                            receiver.pattern_score_history.update(candidates, replay_clock(), [&] {
-                                return pattern_score_observation_id.fetch_add(1, std::memory_order_relaxed) + 1;
-                            });
-                        }
                         receiver.bursts=receiver.modem->take_pattern_bursts();
                         update_workspace();
                         if(bank.working_bytes>capacity)throw Error("receive event storage exceeds the configured DSP workspace");
@@ -1950,6 +2152,14 @@ struct Session::Impl {
                     }
                     {
                         rx_cpu::Scope cpu_publish(rx_cpu::Stage::publication);
+                        if(bank.exact_source_samples && std::any_of(receiver.bursts.begin(),receiver.bursts.end(),[](const auto& burst){
+                            return !burst.bits.empty() || burst.missing_slots || burst.complete;})) {
+                            // Accepted events may retain arbitrary allowed content.
+                            // Required presentation/source growth is not bounded by
+                            // the optional preparation cover; release before it.
+                            drop_exact_source_pool(bank,"accepted_publication");
+                            if(bank.exact_source_samples)throw Error("exact source pool still pinned at accepted publication barrier");
+                        }
                         for(auto& burst:receiver.bursts) {
                             if(burst.bits.empty() && !burst.missing_slots && !burst.complete)continue;
                             const auto score=burst.score,frequency=burst.frequency_hz;
@@ -2030,7 +2240,8 @@ struct Session::Impl {
                     {
                         {
                             std::lock_guard lock(mutex);
-                            if(current.running && generation==version) {
+                            if(!current.running || generation!=version || bank.revision!=receive_revision || stop.stop_requested())return;
+                            {
                                 current.error=error.what();
                                 current.receiver_health.receiver_reset=true;
                                 // Reconstructed lanes have new origins even when the epoch is unchanged.
@@ -2044,7 +2255,7 @@ struct Session::Impl {
                                     // Keep the failure visible and restart capture;
                                     // this is loss/reset, never observed absence.
                                     count_dropped(current.receiver_health.dropped_samples,
-                                        input_bytes/sizeof(float)+decoding_remaining_samples);
+                                        input_bytes/sizeof(float)+decoding_remaining_samples+delayed_processing_pcm_samples);
                                     reset_input_locked();
                                     bank.limited=true;
                                     return;
@@ -2057,12 +2268,11 @@ struct Session::Impl {
                         search.receiver_bank_count=modem::receiver_strategy_bank_count(receiver.options.modem,value.transfer.search_seconds,
                             std::max<std::size_t>(1,value.receive_keys.size()+static_cast<std::size_t>(value.transfer.key.has_value())),
                             std::max<std::size_t>(1,value.transfer.receive_targets_db_hz.size()));
-                        const auto cohort_share=capacity/std::max<std::size_t>(1,search.receiver_bank_count);
-                        const auto compact=receiver.options.key &&
-                            modem::symbol_sample_count(receiver.options.modem)>=60ULL*receiver.options.modem.sample_rate;
-                        const auto control_margin=(compact?8192U:65536U)+sizeof(Receiver);
+                        const auto owner_charge=bank.shared_capture?bank.shared_capture->capacity_reservation():0;
+                    const auto cohort_share=(capacity-std::min(capacity,owner_charge))/std::max<std::size_t>(1,search.receiver_bank_count);
+                        const auto control_margin=receiver_control_margin(receiver.options.modem,receiver.options.key.has_value());
                         search.receiver_strategy_workspace_bytes=cohort_share>control_margin?cohort_share-control_margin:1;
-                        search.input_sample_origin=bank.samples+sample_count;
+                        search.input_sample_origin=bank.samples+sample_count;search.scheduled_capture=bank.shared_capture;
                         if(receiver.options.modem.oscillator_search) {
                             auto oscillator_search=modem::oscillator_pattern_search(receiver.options.modem,receiver.options.clock_sync?
                                 modem::utc_transmit_rate_limit(receiver.options.modem):0);
@@ -2107,6 +2317,7 @@ struct Session::Impl {
                         receiver.sample_origin=bank.samples+sample_count;
                         receiver.last_confident_at=0;receiver.last_confident_end=0;
                         receiver.pattern_score_history = {};
+                        receiver.history_ordinals={};receiver.history_poll={};
                         receiver.presentations.clear();
                         receiver.bursts.clear();
                     }
@@ -2138,6 +2349,33 @@ struct Session::Impl {
                     bank.working_bytes=bank.working_bytes-before+receiver_workspace(receiver);
                 }
             }
+        }
+        // Every accepted bit/completion from every profile was published above.
+        // Optional history materialization cannot hold these events behind an
+        // unrelated numerical diagnostic, including during an idle drain.
+        for(auto& receiver:bank.receivers) {
+            execution::checkpoint();if(stop.stop_requested())return;
+            if(!receiver.modem->deferred_pattern_history())query_history(receiver,false);
+        }
+        // A cohort-wide fair budget, rather than 4 Hz multiplied by every key
+        // and rolling epoch. Pressure queries above remain necessary and bypass
+        // only this optional diagnostic cadence, never accepted publication.
+        if(!bank.receivers.empty() && Clock::now()>=bank.next_deferred_history_query) {
+            const auto count=bank.receivers.size();
+            for(std::size_t attempt=0;attempt<count;++attempt) {
+                const auto index=bank.deferred_history_cursor++%count;
+                auto& receiver=bank.receivers[index];
+                if(!receiver.modem->deferred_pattern_history() ||
+                   !receiver.history_poll.due(receiver.modem->diagnostic_history_generation(),Clock::now()))continue;
+                query_history(receiver,false);
+                bank.next_deferred_history_query=Clock::now()+detail::DeferredPatternHistoryPoll::period;
+                break;
+            }
+        }
+        // Advisory cadence runs only after feed, queued processing, publication
+        // and every numerical worker/Reader have joined. Never a per-q hot log.
+        if(bank.exact_source_samples && Clock::now()>=bank.next_exact_source_trace) {
+            trace_exact_source_pool(bank,"joined_poll");bank.next_exact_source_trace=Clock::now()+std::chrono::seconds(1);
         }
         if(bank.source_curves && bank.samples/value.transfer.modem.sample_rate!=
            (bank.samples+sample_count)/value.transfer.modem.sample_rate) {
@@ -2239,7 +2477,11 @@ struct Session::Impl {
                 }
                 current.pattern_score_observation_id = observation_id;
             }
-            if(!value.simulation)decoding_remaining_samples-=std::min(decoding_remaining_samples,samples.size());
+            if(!value.simulation) {
+                decoding_remaining_samples-=std::min(decoding_remaining_samples,samples.size());
+                decoding_remaining_physical_samples-=std::min<std::uint64_t>(decoding_remaining_physical_samples,sample_count);
+                if(account_frontier)publish_processing_frontier(bank);
+            }
             receiver_bytes = bank.working_bytes;
             bank.coverage_limited |=
                 std::any_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver) {
@@ -2263,7 +2505,8 @@ struct Session::Impl {
             current.dsp_buffered_bytes = receiver_bytes + queue_storage_bytes() + decoding_bytes + audio_bytes + plot_workspace(value) + (tx_busy ? value.dsp_workspace_bytes / 4 : 0);
         }
     }
-    void publish_capture_future(const Bank& bank,const Settings& value,std::uint64_t version) {
+    void publish_capture_future(const Bank& bank,const Settings& value,std::uint64_t version,std::stop_token stop={}) {
+        if(stop.stop_requested() || bank.shared_capture)return;
         const auto& nominal=value.transfer.modem;
         if(value.simulation || value.transfer.timestamp || bank.coverage_limited ||
            !nominal.scheduled_hopping || !nominal.scheduled_hopping->enabled() || nominal.scheduled_hopping->continuous())return;
@@ -2361,11 +2604,11 @@ struct Session::Impl {
             proof->bounds.capacity()*sizeof(detail::SchedCaptureBound);
         if(bytes>budget)return;
         std::lock_guard lock(mutex);
-        if(current.running && generation==version && receive_revision==bank.revision && !capture_future_revoked)
+        if(current.running && generation==version && receive_revision==bank.revision && !capture_future_revoked && !stop.stop_requested())
             capture_future=std::move(proof);
     }
-    void publish_capture_quiet(const Bank& bank,const Settings& value,std::uint64_t version) {
-        if(value.simulation)return;
+    void publish_capture_quiet(const Bank& bank,const Settings& value,std::uint64_t version,std::stop_token stop={}) {
+        if(value.simulation || stop.stop_requested())return;
         {
             std::lock_guard lock(mutex);
             // Reuse an exact current-cohort proof only within its original UTC
@@ -2375,6 +2618,7 @@ struct Session::Impl {
                capture_quiet->utc_second==std::floor(bank.created_at))return;
         }
         std::optional<CaptureQuietProof> proof;
+        if(bank.shared_capture)return;
         const auto& config=value.transfer.modem;
         if(config.scheduled_hopping && config.scheduled_hopping->enabled() &&
            !config.scheduled_hopping->continuous() && !bank.coverage_limited) {
@@ -2392,7 +2636,7 @@ struct Session::Impl {
                 proof=CaptureQuietProof{bank.revision,bank.samples,end,std::floor(bank.created_at)};
         }
         std::lock_guard lock(mutex);
-        if(current.running && generation==version && receive_revision==bank.revision)
+        if(current.running && generation==version && receive_revision==bank.revision && !stop.stop_requested())
             capture_quiet=proof;
     }
     void feed_unobserved(Bank& bank,std::uint64_t count,const Settings& value,std::uint64_t version,std::stop_token stop) {
@@ -2401,7 +2645,7 @@ struct Session::Impl {
         feed_bank(bank,value,version,stop,{},[&](auto& receiver,auto*) {
             if(!receiver.try_skip_unobserved(count,stop))
                 throw Error("scheduled capture certificate no longer covers the receiver bank");
-        });
+        },nullptr,true,false,count);
         if(stop.stop_requested())return; // an error reset invalidated the old bank/proof
         if(count>std::numeric_limits<std::uint64_t>::max()-bank.samples)
             throw Error("scheduled capture coordinate exhausted");
@@ -2409,6 +2653,11 @@ struct Session::Impl {
         bank.mixer*=std::polar(1.,-2*std::numbers::pi*std::remainder(
             static_cast<double>(count)*value.transfer.modem.carrier_hz/value.transfer.modem.sample_rate,1.));
         bank.mixer/=std::abs(bank.mixer);
+        std::lock_guard lock(mutex);
+        if(current.running && generation==version && bank.revision==receive_revision && !stop.stop_requested()) {
+            decoding_remaining_physical_samples-=std::min(decoding_remaining_physical_samples,count);
+            publish_processing_frontier(bank);
+        }
     }
     void feed_samples(Bank& bank,std::span<const float> samples,const Settings& value,std::uint64_t version,
                       std::stop_token stop,Prepared* wave=nullptr,std::stop_token receive_stop={}) {
@@ -2950,6 +3199,8 @@ struct Session::Impl {
                 if(current.running && generation==version && !capture_token.stop_requested()) {
                     current.receiver_health.input_interrupted=true;
                     count_dropped(current.receiver_health.dropped_samples,input_bytes/sizeof(float));
+                    count_dropped(current.receiver_health.dropped_samples,delayed_processing_pcm_samples);
+                    count_dropped(current.receiver_health.dropped_samples,decoding_remaining_samples);
                     reset_input_locked();current.error=exception.what();
                     current.status="Audio input unavailable; retrying";
                     changed.wait_for(lock,stop,std::chrono::seconds(2),[this,version] {
@@ -3144,64 +3395,96 @@ struct Session::Impl {
     void decode_loop(std::stop_token stop) {
         detail::configure_decoder_scheduling();
         std::optional<Bank> bank; std::uint64_t local_generation = 0, local_revision = 0;
+        const auto reset_bank=[&](const char* reason) {
+            if(bank)trace_exact_source_pool(*bank,reason,true);
+            bank.reset();
+        };
+        struct FinalSourceSnapshot {
+            std::optional<Bank>& bank;
+            ~FinalSourceSnapshot(){try{if(bank)trace_exact_source_pool(*bank,"decoder_join",true);}catch(...) {}}
+        } final_source_snapshot{bank};
         while (!stop.stop_requested()) {
-            Settings value; AudioBlock block; std::uint64_t version; std::stop_token token;
+            Settings value; AudioBlock block{}; std::uint64_t version; std::stop_token token;bool pending_only=false;
             {
                 std::unique_lock lock(mutex);
-                changed.wait(lock, stop, [this, &local_generation,&local_revision] {
-                    return generation != local_generation || receive_revision != local_revision ||
-                           (current.running && !settings.simulation && !input.empty());
-                });
+                const auto ready=[this,&local_generation,&local_revision] {
+                    return generation!=local_generation || receive_revision!=local_revision ||
+                        (current.running && !settings.simulation && !input.empty());
+                };
+                if(bank && delayed_processing_pending)
+                    changed.wait_for(lock,stop,std::chrono::milliseconds(50),ready);
+                else changed.wait(lock,stop,ready);
                 if (stop.stop_requested()) break;
                 if (local_generation != generation) {
-                    bank.reset(); local_generation = generation; local_revision = receive_revision;
-                    decoding_bytes = decoding_remaining_samples = 0; decoding_queued_at.reset(); decoder_generation = generation; changed.notify_all();
+                    reset_bank("generation_reset"); local_generation = generation; local_revision = receive_revision;
+                    decoding_bytes = decoding_remaining_samples = 0; decoding_remaining_physical_samples=0; decoding_queued_at.reset(); decoder_generation = generation; changed.notify_all();
                 }
                 if(local_revision!=receive_revision) {
-                    bank.reset();local_revision=receive_revision;receiver_bytes=0;
+                    reset_bank("revision_reset");local_revision=receive_revision;receiver_bytes=0;
                 }
-                if (!current.running || settings.simulation || input.empty()) continue;
-                value = settings; version = generation; token = decode_stop.get_token();
-                block = std::move(input.front()); input.pop_front(); input_bytes -= block.samples.size() * sizeof(float);
+                if(!current.running || settings.simulation)continue;
+                if(input.empty()) {
+                    if(!bank || !delayed_processing_pending)continue;
+                    pending_only=true;
+                }
+                value=settings;version=generation;token=decode_stop.get_token();
+                if(!pending_only){block=std::move(input.front());input.pop_front();input_bytes-=block.samples.size()*sizeof(float);}
+                else {block.revision=receive_revision;block.sample_origin=bank->samples;}
                 decoding_bytes = block.samples.size() * sizeof(float);
-                decoding_queued_at=block.queued_at;decoding_remaining_samples=block.samples.size();
+                decoding_queued_at=pending_only?delayed_processing_queued_at:std::optional<Clock::time_point>{block.queued_at};
+                decoding_remaining_samples=block.samples.size();
+                decoding_remaining_physical_samples=pending_only?
+                    bank->samples-std::min(bank->samples,current.processed_physical_samples):
+                    block.skipped_samples?block.skipped_samples:block.samples.size();
                 current.buffered_samples = input_bytes / sizeof(float);
                 if (local_generation != version || local_revision != block.revision) {
-                    local_generation = version; local_revision = block.revision; bank.reset();
+                    local_generation = version; local_revision = block.revision; reset_bank("block_revision_reset");
                 }
             }
             try {
                 if (!bank) {
                     Bank initial;initial.observed_epoch=block.observed_epoch;initial.timing=block.timing;
-                    initial.samples=initial.observed_sample=block.sample_origin;
+                    initial.samples=initial.observed_sample=block.sample_origin;initial.revision=block.revision;
                     bank=make_bank(value,std::move(initial));
-                } else {
+                } else if(!pending_only) {
                     bank->observed_epoch=block.observed_epoch;bank->observed_sample=bank->samples;bank->timing=block.timing;
                 }
                 if(bank->samples!=block.sample_origin)
                     throw Error("scheduled capture sample history is not contiguous");
-                if(block.skipped_samples)feed_unobserved(*bank,block.skipped_samples,value,version,token);
-                else feed_samples(*bank,block.samples,value,version,token);
-                publish_capture_future(*bank,value,version);
-                publish_capture_quiet(*bank,value,version);
+                bank->input_queued_at=pending_only?std::nullopt:std::optional<Clock::time_point>{block.queued_at};
+                if(pending_only) {
+                    // No new capture, epoch or absence is supplied. The callback
+                    // only processes existing delayed input; normal phase0/1
+                    // arbitration immediately publishes any resulting decisions.
+                    feed_bank(*bank,value,version,token,{},[](auto&,auto*){},nullptr,false);
+                } else {
+                    if(block.skipped_samples)feed_unobserved(*bank,block.skipped_samples,value,version,token);
+                    else feed_samples(*bank,block.samples,value,version,token);
+                    publish_capture_future(*bank,value,version,token);
+                    publish_capture_quiet(*bank,value,version,token);
+                }
             } catch (const std::exception& exception) {
                 std::lock_guard lock(mutex);
                 if (current.running && generation == version && !token.stop_requested()) {
                     current.error = exception.what();
                     current.receiver_health.receiver_reset=true;
-                    if(value.transfer.modem.scheduled_hopping && value.transfer.modem.scheduled_hopping->enabled()) {
-                        count_dropped(current.receiver_health.dropped_samples,input_bytes/sizeof(float));
-                        reset_input_locked();
-                    }
+                    // A popped failed block is no longer queued and was not
+                    // committed as scored. Invalidate the physical input domain
+                    // for every decoder, not only scheduled receivers; otherwise
+                    // ingress minus frontier reports permanently phantom work.
+                    count_dropped(current.receiver_health.dropped_samples,input_bytes/sizeof(float));
+                    count_dropped(current.receiver_health.dropped_samples,delayed_processing_pcm_samples);
+                    count_dropped(current.receiver_health.dropped_samples,decoding_remaining_samples);
+                    reset_input_locked();
                     current.clock_window_modeled=false;current.receiver_timing.reset();
                     current.receiver_instances=current.peak_receiver_instances=0;
                     current.receiver_admissions=current.receiver_retirements=0;
                 }
-                bank.reset();
+                reset_bank("receiver_exception");
             }
             {
                 std::lock_guard lock(mutex);
-                decoding_bytes = decoding_remaining_samples = 0;decoding_queued_at.reset();
+                decoding_bytes = decoding_remaining_samples = 0;decoding_remaining_physical_samples=0;decoding_queued_at.reset();
             }
         }
     }
@@ -3233,7 +3516,7 @@ bool Session::try_suspend_capture() {
     if(impl_->settings.simulation)return true;
     if(!impl_->capture_suspended) {
         if(impl_->tx_busy||impl_->current.transmitting||!impl_->queued.empty()||impl_->ready||
-           impl_->receive_pending||impl_->decoding_bytes||!impl_->input.empty())return false;
+           impl_->receive_pending||impl_->decoding_bytes||impl_->delayed_processing_pending||!impl_->input.empty())return false;
         impl_->capture_suspended=true;
         impl_->capture_stop.request_stop();
         impl_->current.status="Regular audio paused while Fast mode owns the device";
@@ -3247,7 +3530,7 @@ void Session::resume_capture() {
     impl_->capture_suspended=false;
     // No admitted reception was suspended. Discontinuous idle samples must not
     // be concatenated into a hypothetical symbol on the next device opening.
-    ++impl_->receive_revision;impl_->receive_pending=false;
+    impl_->reset_input_locked();
     impl_->current.status=impl_->idle_status();++impl_->current.sequence;
     impl_->changed.notify_all();
 }
@@ -3393,9 +3676,12 @@ Snapshot Session::snapshot() {
     // implied: a large configured buffer may retain minutes of delayed PCM.
     double pending_seconds=0,oldest_seconds=0;
     if(impl_->current.running && !impl_->settings.simulation && impl_->decoder_generation==impl_->generation) {
-        pending_seconds=(static_cast<double>(impl_->input_bytes)/sizeof(float)+impl_->decoding_remaining_samples)/
+        pending_seconds=(static_cast<double>(impl_->input_bytes)/sizeof(float)+impl_->decoding_remaining_samples+
+            impl_->delayed_processing_pcm_samples)/
             impl_->settings.transfer.modem.sample_rate;
         auto oldest=impl_->decoding_remaining_samples?impl_->decoding_queued_at:std::nullopt;
+        if(impl_->delayed_processing_queued_at && (!oldest || *impl_->delayed_processing_queued_at<*oldest))
+            oldest=impl_->delayed_processing_queued_at;
         const auto pending=std::find_if(impl_->input.begin(),impl_->input.end(),[](const auto& block){return !block.samples.empty();});
         if(pending!=impl_->input.end() && (!oldest || pending->queued_at<*oldest))oldest=pending->queued_at;
         if(oldest)oldest_seconds=std::max(0.,std::chrono::duration<double>(Clock::now()-*oldest).count());
@@ -3413,6 +3699,13 @@ Snapshot Session::snapshot() {
         if(!result.transmitting)result.status="Transmission failed";
     }
     result.decoding_samples=impl_->decoder_generation==impl_->generation?impl_->decoding_remaining_samples:0;
+    result.receiver_input_revision=impl_->receive_revision;
+    result.decoding_physical_samples=impl_->decoder_generation==impl_->generation?impl_->decoding_remaining_physical_samples:0;
+    // The ingress counter, committed frontier and in-flight remainder are all
+    // protected by this mutex and share one revision. Do not infer progress by
+    // subtracting only stored PCM: coordinate-only null work is queued too.
+    const auto pending_physical=impl_->capture_samples-std::min(impl_->capture_samples,result.processed_physical_samples);
+    result.queued_physical_samples=pending_physical-std::min(pending_physical,result.decoding_physical_samples);
     impl_->replay_snapshot(result, now);
     count_dropped(result.constellation_dropped, impl_->replay_omitted); impl_->replay_omitted = 0;
     return result;

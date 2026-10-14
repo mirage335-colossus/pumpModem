@@ -6,6 +6,8 @@
 #include <string_view>
 #include <stop_token>
 
+namespace datapump::live { struct Settings; }
+
 namespace datapump::simulation {
 inline constexpr std::string_view reference_cpu = "Ryzen 5 PRO 5650U (local acquisition calibration)";
 inline constexpr std::string_view reference_gpu = "RTX 4090 Laptop GPU";
@@ -273,4 +275,20 @@ Estimate estimate(const transfer::Estimate& transmission,
                   ReceiverWorkMode work_mode = ReceiverWorkMode::sampled_simulation,
                   ReceiverTimingModel timing_model = {},
                   std::stop_token stop = {});
+// Same model, using the actual frontend's immutable settings for pure Live
+// workspace reservations plus the explicitly declared candidate profile/key
+// span. It does not predict a complete post-edit cohort or construct Session/
+// capture or grant runtime eligibility. Scheduled profiles share the original
+// input sample rate; application-selected-rate comparisons are separate.
+// Profile/key multiplicities follow estimate's existing convention. Unknown
+// complete execution costs are NaN with receiver_work_supported=false; an
+// unavailable cost/probability does not imply receiver_workspace_supported=false.
+Estimate estimate_with_receiver_settings(const transfer::Estimate& transmission,
+                  const transfer::Options& options,bool raw_bits,
+                  const modem::ChannelConfig& channel,const live::Settings& receiver_settings,
+                  std::span<const modem::Config> receive_profiles = {},
+                  std::size_t receive_key_count = 1,bool compute_probability = true,
+                  double differential_window_seconds = 100,std::size_t probability_trials = 4096,
+                  ReceiverWorkMode work_mode = ReceiverWorkMode::sampled_simulation,
+                  ReceiverTimingModel timing_model = {},std::stop_token stop = {});
 }

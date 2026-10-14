@@ -2944,7 +2944,17 @@ std::vector<PatternBurst> PatternReceiver::take_bursts(){
     s.bursts.clear();return result;
 }
 PatternBurst PatternReceiver::provisional()const{return impl_->fallback?impl_->fallback->provisional():impl_->provisional();}
+void PatternReceiver::process_pending(std::stop_token stop){if(impl_->fallback)impl_->fallback->process_pending(stop);}
+std::uint64_t PatternReceiver::diagnostic_history_generation()const noexcept{return impl_->fallback?impl_->fallback->diagnostic_history_generation():0;}
+std::uint64_t PatternReceiver::diagnostic_history_resolved_through()const noexcept{return impl_->fallback?impl_->fallback->diagnostic_history_resolved_through():0;}
+std::uint64_t PatternReceiver::oldest_unresolved_diagnostic_event()const noexcept{return impl_->fallback?impl_->fallback->oldest_unresolved_diagnostic_event():0;}
+bool PatternReceiver::deferred_pattern_history()const noexcept{return impl_->fallback && impl_->fallback->deferred_pattern_history();}
+std::optional<std::uint64_t> PatternReceiver::delayed_processing_frontier()const noexcept{return impl_->fallback?impl_->fallback->delayed_processing_frontier():std::nullopt;}
 std::vector<PatternEvidence> PatternReceiver::candidates()const{return impl_->fallback?impl_->fallback->candidates():impl_->history;}
+std::vector<PatternEvidence> PatternReceiver::candidates(std::size_t limit,std::stop_token stop)const {
+    if(stop.stop_requested())throw Error("pattern diagnostic query cancelled");
+    return impl_->fallback?impl_->fallback->candidates(limit,stop):candidates(limit);
+}
 std::vector<PatternEvidence> PatternReceiver::candidates(std::size_t limit)const{
     if(impl_->fallback)return impl_->fallback->candidates(limit);
     const auto& history=impl_->history;

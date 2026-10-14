@@ -1,3 +1,4 @@
+#include "../scheduled_acquisition_policy.hpp"
 #include "link_planner_model.hpp"
 #include "../estimate_cancellation.hpp"
 #include "datapump/execution.hpp"
@@ -9,6 +10,7 @@
 #include "datapump/simulation_estimate.hpp"
 #include "datapump/sched_hop.hpp"
 #include <algorithm>
+#include <cstdlib>
 #include <array>
 #include <cmath>
 #include <iomanip>
@@ -61,9 +63,32 @@ struct SupportCache {
 bool search_supported(const simulation::Estimate& estimate) {
     return estimate.carrier_in_search&&estimate.clock_in_search&&!estimate.oscillator_search_limited;
 }
+simulation::Estimate receiver_estimate(const transfer::Estimate& transmission,const transfer::Options& options,
+        bool raw,const modem::ChannelConfig& channel,std::span<const modem::Config> profiles,std::size_t keys,
+        bool probability,double window,std::size_t trials,simulation::ReceiverWorkMode mode,
+        const simulation::ReceiverTimingModel& timing,const live::Settings* settings,std::stop_token stop) {
+    return settings?simulation::estimate_with_receiver_settings(transmission,options,raw,channel,*settings,
+        profiles,keys,probability,window,trials,mode,timing,stop):
+        simulation::estimate(transmission,options,raw,channel,profiles,keys,probability,window,trials,mode,timing,stop);
+}
+const live::Settings* receiver_settings(const Inputs& inputs) {
+    return inputs.receiver_settings?&*inputs.receiver_settings:nullptr;
+}
+auto planning_policy_key() {
+    const auto* batching=std::getenv("DATAPUMP_SCHED_LAZY_BATCH");
+    std::optional<std::size_t> samples;bool invalid=false;
+    if(const auto* value=std::getenv("DATAPUMP_SCHED_LAZY_BATCH_SAMPLES")) {
+        char* end=nullptr;const auto count=std::strtoull(value,&end,10);
+        invalid=end==value||*end!='\0'||count<1||count>8192;
+        if(!invalid)samples=static_cast<std::size_t>(count);
+    }
+    return std::tuple{modem::detail::scheduled_acquisition_policy::mode(),batching&&std::string_view(batching)=="0",samples,invalid};
+}
 simulation::ReceiverWorkMode support_work_mode(const Inputs& inputs) {
-    // Timing pruning changes execution cost, not clock coverage or allocated
-    // full-bank workspace. Avoid enumerating arrival lattices just to ask fit.
+    // Ordinary full-bank fit does not require arrival enumeration. Scheduled
+    // layout is calendar-aware: preserve a genuinely qualified timing prior
+    // instead of replacing it with an ownerless full-window fallback.
+    if(modem::scheduled_bursts(inputs.options.modem))return inputs.receiver_work_mode;
     return inputs.receiver_work_mode==simulation::ReceiverWorkMode::hardware_timing_model?
         simulation::ReceiverWorkMode::hardware_fallback:inputs.receiver_work_mode;
 }
@@ -78,8 +103,9 @@ ReceiverSupport receiver_support(const Inputs& inputs,const modem::Config& confi
     // banks, not payload length. This analytical one-symbol estimate allocates
     // neither a draft, a transfer probe, nor PCM inside the bounded search.
     transfer::Estimate one;one.wire_bits=1;one.total_seconds=seconds(config);
-    const auto estimate=simulation::estimate(one,options,true,channel,profiles,1,false,100,4096,
-        support_work_mode(inputs),{},stop);
+    const auto estimate=receiver_estimate(one,options,true,channel,profiles,1,false,100,4096,
+        support_work_mode(inputs),modem::scheduled_bursts(config)?inputs.receiver_timing_model:simulation::ReceiverTimingModel{},
+        receiver_settings(inputs),stop);
     return {search_supported(estimate),estimate.receiver_workspace_supported};
 }
 
@@ -441,7 +467,7 @@ std::uint64_t scheduled_content_samples(const modem::Config& config,std::uint64_
     if(end.sample<anchor)throw Error("planned scheduled payload precedes its arrival anchor");
     return end.sample-anchor;
 }
-auto curve_key(const transfer::Options& options,const modem::ChannelConfig& channel,
+auto curve_base_key(const transfer::Options& options,const modem::ChannelConfig& channel,
                simulation::ReceiverWorkMode work_mode=simulation::ReceiverWorkMode::sampled_simulation,
                const simulation::ReceiverTimingModel& timing_model={}) {
     const auto c=options.key?transfer::seeded_config(options,options.modem.stream_epoch):options.modem;
@@ -483,13 +509,41 @@ auto curve_key(const transfer::Options& options,const modem::ChannelConfig& chan
         timing_model.capture_error_seconds,timing_model.capture_rate_uncertainty_fraction,
         timing_model.capture_seconds_per_frame};
 }
+auto receiver_layout_key(const transfer::Options& options,const live::Settings* settings) {
+    std::vector<Bytes> keys;
+    const auto add=[&](const Crypto& key) {
+        auto tag=key.mac(Bytes{'D','P','-','R','X','-','B','A','N','K'});
+        if(std::find(keys.begin(),keys.end(),tag)==keys.end())keys.push_back(std::move(tag));
+    };
+    if(settings) {
+        if(settings->transfer.key)add(*settings->transfer.key);
+        for(const auto& key:settings->receive_keys)add(key);
+    }
+    std::sort(keys.begin(),keys.end());
+    return std::tuple{bool(settings),settings?live::receiver_workspace_capacity(*settings):std::size_t{0},
+        live::receiver_control_margin(options.modem,options.key.has_value()),
+        settings?settings->simulation:false,settings?settings->content_limit:std::size_t{0},
+        settings?settings->transfer.content_limit:std::size_t{0},
+        settings?settings->transfer.receive_targets_db_hz:std::vector<double>{},
+        settings?settings->transfer.receive_pattern_mode:tuning::PatternMode::auto_pattern,
+        settings?settings->transfer.automatic_receive_profiles:false,
+        settings?settings->receive_keys.size():std::size_t{0},settings?settings->transfer.key.has_value():false,
+        settings?curve_base_key(settings->transfer,modem::ChannelConfig{}):
+            curve_base_key(transfer::Options{},modem::ChannelConfig{}),keys,planning_policy_key()};
+}
+auto curve_key(const transfer::Options& options,const modem::ChannelConfig& channel,
+               simulation::ReceiverWorkMode work_mode=simulation::ReceiverWorkMode::sampled_simulation,
+               const simulation::ReceiverTimingModel& timing_model={},const live::Settings* settings=nullptr) {
+    return std::tuple{curve_base_key(options,channel,work_mode,timing_model),receiver_layout_key(options,settings)};
+}
 using CurveKey=decltype(curve_key(transfer::Options{},modem::ChannelConfig{}));
 auto support_context(const Inputs& inputs) {
     // Target and payload length do not change support at a given sample count.
     // Explicit key presence selects the public/private profile family, beyond
     // the derived pattern identity already retained by curve_key.
     auto options=inputs.options;options.modem=resolve(inputs,200);
-    return std::tuple{curve_key(options,inputs.channel,support_work_mode(inputs),{}),inputs.mode,
+    return std::tuple{curve_key(options,inputs.channel,support_work_mode(inputs),
+        modem::scheduled_bursts(options.modem)?inputs.receiver_timing_model:simulation::ReceiverTimingModel{},receiver_settings(inputs)),inputs.mode,
         inputs.options.key.has_value(),inputs.tx_dbm,inputs.path_loss_db,inputs.noise_density_dbm_hz};
 }
 using SupportContext=decltype(support_context(Inputs{}));
@@ -503,15 +557,15 @@ struct CurveCache {
     std::size_t probability_evaluations=0,probability_reuses=0;
 };
 CurveEntry& curve_entry(CurveCache& cache,const transfer::Options& options,const modem::ChannelConfig& channel,
-                       simulation::ReceiverWorkMode work_mode,const simulation::ReceiverTimingModel& timing_model,std::stop_token stop) {
+                       simulation::ReceiverWorkMode work_mode,const simulation::ReceiverTimingModel& timing_model,const live::Settings* settings,std::stop_token stop) {
     estimate_detail::check(stop);
     auto& entries=cache.entries;
-    const auto key=curve_key(options,channel,work_mode,timing_model);
+    const auto key=curve_key(options,channel,work_mode,timing_model,settings);
     const auto found=std::find_if(entries.begin(),entries.end(),[&](const auto& entry){return entry.key==key;});
     if(found!=entries.end())return *found;
     if(entries.size()==512)entries.erase(entries.begin());
-    entries.push_back({key,simulation::estimate(one_bit_estimate(options),options,true,channel,{},1,false,100,4096,
-        work_mode,timing_model,stop),false});
+    entries.push_back({key,receiver_estimate(one_bit_estimate(options),options,true,channel,{},1,false,100,4096,
+        work_mode,timing_model,settings,stop),false});
     return entries.back();
 }
 ReceivePoint receive_point(double target,const simulation::Estimate& estimate,bool numerical_range) {
@@ -526,7 +580,7 @@ CpuPoint cpu_point(double target,const simulation::Estimate& estimate) {
     const auto finite=estimate.simulated_seconds>0?estimate.receiver_cpu_seconds/estimate.simulated_seconds:0;
     const auto ratio=std::max(finite,estimate.hardware_sustained_modeled?
         estimate.hardware_sustained_realtime_ratio:0.);
-    return {target,ratio,estimate.receiver_work_supported&&search_supported(estimate)&&estimate.receiver_workspace_supported&&
+    return {target,std::isfinite(ratio)&&ratio>=0?ratio:0.,estimate.receiver_work_supported&&search_supported(estimate)&&estimate.receiver_workspace_supported&&
         std::isfinite(ratio)&&ratio>0};
 }
 void receive_curve(Model& model,const simulation::Estimate& selected_one,CurveCache& cache,std::stop_token stop) {
@@ -549,7 +603,7 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one,CurveCa
         const auto sample_snr=model.actual_cn0_db_hz-10*std::log10(geometry->sample_rate/2.);
         const bool numerical_range=sample_snr>=-300&&sample_snr<=300;
         channel.snr_db=std::clamp(sample_snr,-300.,300.);
-        auto& entry=curve_entry(cache,options,channel,inputs.receiver_work_mode,inputs.receiver_timing_model,stop);
+        auto& entry=curve_entry(cache,options,channel,inputs.receiver_work_mode,inputs.receiver_timing_model,receiver_settings(inputs),stop);
         // Receiver work is already available from the cheap support check;
         // the denser CPU curve adds no statistical trials or sampled audio.
         cpu_output.emplace(target,cpu_point(target,entry.estimate));
@@ -564,8 +618,8 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one,CurveCa
         if(!entry.probability_computed) {
             // Curve locations are illustrative; the selected estimate uses
             // 4096 draws and exposes its own sampling interval separately.
-            entry.estimate=simulation::estimate(one_bit_estimate(options),options,true,channel,{},1,true,100,512,
-                inputs.receiver_work_mode,inputs.receiver_timing_model,stop);
+            entry.estimate=receiver_estimate(one_bit_estimate(options),options,true,channel,{},1,true,100,512,
+                inputs.receiver_work_mode,inputs.receiver_timing_model,receiver_settings(inputs),stop);
             entry.probability_computed=true;
             ++cache.probability_evaluations;
         } else ++cache.probability_reuses;
@@ -586,7 +640,7 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one,CurveCa
                     auto channel=inputs.channel;
                     const auto snr=model.actual_cn0_db_hz-10*std::log10(aligned->config.sample_rate/2.);
                     channel.snr_db=std::clamp(snr,-300.,300.);
-                    const auto& support=curve_entry(cache,options,channel,inputs.receiver_work_mode,inputs.receiver_timing_model,stop).estimate;
+                    const auto& support=curve_entry(cache,options,channel,inputs.receiver_work_mode,inputs.receiver_timing_model,receiver_settings(inputs),stop).estimate;
                     if(snr>=-300&&snr<=300&&search_supported(support)&&support.receiver_workspace_supported) {
                         output.erase(target);cpu_output.erase(target);
                     }
@@ -796,8 +850,8 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
         // strength input does not alter search or workspace checks. Keep
         // confidence unavailable outside the estimator's supported range.
         channel.snr_db=std::clamp(sample_snr,-300.,300.);
-        const auto receiver=simulation::estimate(transmission,options,true,channel,{},1,true,100,4096,
-            inputs.receiver_work_mode,inputs.receiver_timing_model,stop);
+        const auto receiver=receiver_estimate(transmission,options,true,channel,{},1,true,100,4096,
+            inputs.receiver_work_mode,inputs.receiver_timing_model,receiver_settings(inputs),stop);
         result.clock_search_supported=search_supported(receiver);
         result.receiver_workspace_supported=receiver.receiver_workspace_supported;
         result.confidence_available=receiver.confidence_available&&sample_snr>=-300&&sample_snr<=300;
@@ -826,8 +880,8 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
         result.differential_model_available=receiver.differential_model_available;
         result.differential_added_detection_probability=receiver.differential_added_detection_probability;
         auto single_receiver=inputs.wire_bits==1?receiver:
-            simulation::estimate(single_transmission,options,true,channel,{},1,false,100,4096,
-                inputs.receiver_work_mode,inputs.receiver_timing_model,stop);
+            receiver_estimate(single_transmission,options,true,channel,{},1,false,100,4096,
+                inputs.receiver_work_mode,inputs.receiver_timing_model,receiver_settings(inputs),stop);
         // Draft length changes continuation and total work, but acquisition
         // already supplies this one-bit probability without another trial run.
         single_receiver.success_probability=receiver.one_bit_success_probability;
@@ -853,6 +907,14 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
                 single_receiver.receiver_kernel_rebuild_seconds))/single_receiver.simulated_seconds:0;
         result.cpu_realtime_upper_ratio=std::max(result.cpu_realtime_upper_ratio,result.cpu_realtime_ratio);
         result.cpu_per_bit_ratio=single_receiver.cpu_seconds/result.bit_seconds;
+        // Unknown execution cost leaves a graph gap. Keep finite presentation
+        // placeholders without converting an uncalibrated path to zero work.
+        const auto finite_ratio=[](double value) {return std::isfinite(value)&&value>=0?value:0.;};
+        result.finite_cpu_realtime_ratio=finite_ratio(result.finite_cpu_realtime_ratio);
+        result.cpu_realtime_ratio=finite_ratio(result.cpu_realtime_ratio);
+        result.cpu_realtime_upper_ratio=finite_ratio(result.cpu_realtime_upper_ratio);
+        result.cpu_per_bit_ratio=finite_ratio(result.cpu_per_bit_ratio);
+        result.hardware_sustained_realtime_ratio=finite_ratio(result.hardware_sustained_realtime_ratio);
         result.receiver_geometry=single_receiver.receiver_geometry;
         result.frequency_rate_hypotheses=single_receiver.frequency_rate_hypotheses;
         result.epoch_hypotheses=single_receiver.epoch_hypotheses;
@@ -870,6 +932,7 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
             single_receiver.fallback_receiver_cpu_seconds/single_receiver.simulated_seconds:0;
         if(single_receiver.hardware_sustained_modeled)result.fallback_cpu_realtime_ratio=std::max(
             result.fallback_cpu_realtime_ratio,single_receiver.fallback_hardware_sustained_realtime_ratio);
+        result.fallback_cpu_realtime_ratio=finite_ratio(result.fallback_cpu_realtime_ratio);
         result.fallback_timing_hypotheses=single_receiver.fallback_timing_hypotheses;
         result.one_bit_cpu_available=single_receiver.receiver_work_supported&&single_receiver.receiver_workspace_supported&&
             std::isfinite(result.one_bit_cpu_seconds)&&std::isfinite(result.receiver_cpu_seconds)&&
@@ -889,7 +952,7 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
         }
         if(!receiver.receiver_work_supported) {
             if(!result.receiver_status.empty())result.receiver_status+=" · ";
-            result.receiver_status+="Receiver work outside model coverage";
+            result.receiver_status+="CPU estimate unavailable for selected receiver";
         }
         if(result.receiver_status.empty())result.receiver_status="Clock and RAM fit · reception unverified";
 

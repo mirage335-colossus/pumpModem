@@ -1,3 +1,4 @@
+#include "scheduled_acquisition_policy.hpp"
 #include "datapump/receiver_strategy.hpp"
 #include "datapump/pattern_correlator.hpp"
 #include "datapump/scheduled_complex_search.hpp"
@@ -11,7 +12,10 @@
 #include "pattern_fft_batch.hpp"
 #include "pattern_start_geometry.hpp"
 #include "search_parallel.hpp"
+#include "shared_scheduled_capture.hpp"
 #include <array>
+#include <cstdlib>
+#include <string_view>
 #include <cmath>
 #include <limits>
 #include <set>
@@ -40,13 +44,20 @@ std::size_t receiver_strategy_bank_count(const Config& c,unsigned radius,std::si
         // One source lifetime spans at most ceil(L/B)+3 such groups; a group
         // touches at most ceil(.4G)+1 integer epoch intervals. Keep initial
         // timing alternatives and a straddling frame outside that product.
-        // This is a conservative resident-bank bound, not measured occupancy.
+        // Planning heuristic, not a certified resident-bank upper bound. A
+        // negative-origin acquisition may need a truncated symbol followed by
+        // a complete one before retirement (nearly two source symbols). Live
+        // still checks actual required consumers/remaining workspace; neither
+        // this estimate nor wall-clock age authorizes early retirement.
         epochs=2.L*radius+3+(std::ceil(logical/group)+3)*(std::ceil(.4L*plan.group_hops)+1);
     }
     const auto total=epochs*std::max<std::size_t>(1,keys)*std::max<std::size_t>(1,profiles);
     return static_cast<std::size_t>(std::min(total,static_cast<long double>(std::numeric_limits<std::size_t>::max())));
 }
-ReceiverStrategyPlan resolve_receiver_strategy(const Config& c,const PatternSearch& search,std::size_t workspace) {
+namespace {
+struct PlanningCaptureContext {std::size_t cohort_workspace=0,maximum_consumers=0;};
+ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const PatternSearch& search,std::size_t workspace,
+                                                   const PlanningCaptureContext* planning) {
     if(search.receiver_strategy_workspace_bytes)workspace=std::min(workspace,search.receiver_strategy_workspace_bytes);
     ReceiverStrategyPlan p;p.cpu_budget=c.receiver_cpu_budget;
     p.frequency_axis_processing_ratio=p.amplitude_processing_ratio=std::numeric_limits<double>::infinity();
@@ -78,8 +89,24 @@ ReceiverStrategyPlan resolve_receiver_strategy(const Config& c,const PatternSear
         // the real constructor checks complete caches, optional detectors,
         // retention and prefixes against this same cohort workspace share.
         // This avoids an arbitrary 8 KiB-per-lane admission restriction.
-        const auto state=static_cast<long double>(g.workspace_lower_bound_bytes);
-        const bool fits=state<workspace;
+        PatternScheduledAcquisitionPolicy implicit;
+        if(planning) {
+            // Planning NEVER injects a dummy runtime capture owner. The same
+            // mandatory requirements are checked against a pure layout only.
+            const auto projected=pattern_scheduled_acquisition_memory_projection(c,refined.search,g,workspace,
+                planning->cohort_workspace,planning->maximum_consumers);
+            implicit.requested=projected.requested;implicit.supported=projected.projected_fits;
+            implicit.shared_capture=false; // No actual owner is bound here.
+            implicit.per_bank_required_bytes=projected.per_bank_required_bytes;
+            implicit.local_capture_bytes=projected.capture_fence_bytes;
+            implicit.shared_capture_bytes=projected.shared_capture_bytes;
+            implicit.optional_tile_bytes=projected.optional_tile_bytes;
+            implicit.logical_lanes=projected.logical_lanes;implicit.batch_samples=projected.batch_samples;
+            implicit.reason=projected.reason;
+        } else implicit=pattern_scheduled_acquisition_policy(c,refined.search,g,workspace);
+        const auto state=implicit.supported?static_cast<long double>(implicit.per_bank_required_bytes+implicit.local_capture_bytes):
+            static_cast<long double>(g.workspace_lower_bound_bytes);
+        const bool fits=implicit.supported?state<=workspace:state<workspace;
         if(runnable && !g.retained_hypotheses) {
             p.scheduled=p.experimental=true;p.supported=false;p.empty_scheduled_epoch=true;
             p.full_frequency_coverage=p.full_clock_coverage=complete;
@@ -130,7 +157,15 @@ ReceiverStrategyPlan resolve_receiver_strategy(const Config& c,const PatternSear
             p.reason=complete?
                 "calendar-aware split complex; physical I/Q phase; refined physical-aperture bank; FP64 bulk arithmetic with eligible exact source/family reuse; bounded pulse/curve reuse bypassed by FP64 force; original fallback; total cost uncalibrated":
                 "calendar-aware split complex; exact supplied diagnostic candidates; no continuous-domain coverage certificate; FP64 mapped fallback; total cost uncalibrated";
-            if(p.selected_processing_ratio>p.cpu_budget)p.reason+="; estimated processing exceeds budget, no measured cheaper equivalent selected";
+            if(implicit.supported) {
+                p.scheduled_implicit_acquisition=true;p.scheduled_bank_required_bytes=implicit.per_bank_required_bytes;
+                p.scheduled_local_capture_bytes=implicit.local_capture_bytes;p.scheduled_shared_capture_bytes=implicit.shared_capture_bytes;
+                p.scheduled_optional_tile_bytes=implicit.optional_tile_bytes;
+                p.scheduled_mean_processing_ratio=p.existing_processing_ratio=p.selected_processing_ratio=std::numeric_limits<double>::infinity();
+                p.scheduled_deadline_processing_ratio=std::numeric_limits<double>::infinity();
+                p.reason=implicit.reason+"; actual arithmetic/reuse/fallback counters are runtime evidence; CPU estimate unavailable";
+            }
+            if(std::isfinite(p.selected_processing_ratio) && p.selected_processing_ratio>p.cpu_budget)p.reason+="; estimated processing exceeds budget, no measured cheaper equivalent selected";
             if(measured_reuse)p.reason+="; historical matching local pulse/curve crossover included; new shared-family/RAW/affine execution is not separately discounted; absolute model remains engineering";
             return p;
         }
@@ -372,7 +407,8 @@ ReceiverStrategyPlan resolve_receiver_strategy(const Config& c,const PatternSear
         p.selected_processing_ratio=p.existing_processing_ratio;
         p.reason="calendar-aware packed complex FFT; exact keyed singleton starts; full frequency/clock coverage; total cost uncalibrated";
         if(c.receiver_strategy==ReceiverStrategy::existing_only)p.reason+="; alternative decoders disabled";
-        if(p.selected_processing_ratio>p.cpu_budget)p.reason+="; estimated processing still exceeds selected CPU budget";
+        if(std::isfinite(p.selected_processing_ratio) && p.selected_processing_ratio>p.cpu_budget)
+        p.reason+="; estimated processing still exceeds selected CPU budget";
         return p;
     }
     if(scheduled && (c.receiver_strategy==ReceiverStrategy::complex_only ||
@@ -588,7 +624,37 @@ ReceiverStrategyPlan resolve_receiver_strategy(const Config& c,const PatternSear
     }
     if(c.receiver_strategy==ReceiverStrategy::existing_only)
         p.reason="new decoders disabled; original complex reference";
-    if(p.selected_processing_ratio>p.cpu_budget)p.reason+="; estimated processing still exceeds selected CPU budget";
+    if(std::isfinite(p.selected_processing_ratio) && p.selected_processing_ratio>p.cpu_budget)
+        p.reason+="; estimated processing still exceeds selected CPU budget";
     return p;
 }
+} // namespace
+ReceiverStrategyPlan resolve_receiver_strategy(const Config& c,const PatternSearch& s,std::size_t workspace) {
+    return resolve_receiver_strategy_impl(c,s,workspace,nullptr);
 }
+ReceiverStrategyPlan plan_receiver_strategy(const Config& c,const PatternSearch& source,std::size_t workspace,
+        std::size_t cohort_workspace,std::size_t consumers,std::size_t receiver_control_margin) {
+    if(!detail::scheduled_acquisition_policy::requested() || !scheduled_bursts(c) || packed_scheduled_symbols(c) ||
+       source.scheduled_capture || !c.data_key ||
+       detail::drift_section_count(c,source.drift_tolerant)!=1 ||
+       symbol_sample_count(c)<6ULL*c.sample_rate)return resolve_receiver_strategy(c,source,workspace);
+    try {
+        const auto layout=detail::scheduled_capture::SharedScheduledCapture::cohort_layout(cohort_workspace,consumers);
+        auto search=source;
+        const auto available=cohort_workspace-layout.reserved_bytes;
+        const auto share=available/std::max<std::size_t>(1,search.receiver_bank_count);
+        const auto projected_share=share>receiver_control_margin?share-receiver_control_margin:1;
+        // A previously explicit hard cap is not enlarged by planning. Callers
+        // replace obsolete guessed cohort shares before entering this API.
+        search.receiver_strategy_workspace_bytes=source.receiver_strategy_workspace_bytes?
+            std::min(source.receiver_strategy_workspace_bytes,projected_share):projected_share;
+        const PlanningCaptureContext planning{cohort_workspace,consumers};
+        return resolve_receiver_strategy_impl(c,search,workspace,&planning);
+    } catch(const detail::scheduled_capture::Error& error) {
+        ReceiverStrategyPlan out;out.supported=false;out.workspace_limited=true;
+        out.backend=ReceiverBackend::existing_complex;out.scheduled=true;out.experimental=true;
+        out.selected_processing_ratio=std::numeric_limits<double>::infinity();
+        out.reason=std::string("Planning capture layout unavailable: ")+error.what();return out;
+    }
+}
+} // namespace datapump::modem

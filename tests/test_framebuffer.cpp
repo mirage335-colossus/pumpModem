@@ -363,15 +363,25 @@ void mfd_tuning_and_pages() {
 
 void mfd_default_size() {
     Launch launch;launch.smoke=true;Application app(launch);app.select(ui::Field::fast_mode,"fast");
+    for(const bool mfd:{false,true}) {
+        framebuffer::Session initial(app,mfd);initial.tick();
+        const auto expected=framebuffer::default_window_width({8,18},mfd);
+        require(initial.scene().width==static_cast<int>(expected)&&
+                initial.scene().height==static_cast<int>(framebuffer::Config{}.height),
+                "unresized Session disagrees with default framebuffer dimensions");
+        const auto canvas=initial.scene().width-(mfd?framebuffer::mfd_bezel_width({8,18}):0);
+        require(canvas==ui::default_width&&canvas>=ui::min_width,
+                "unresized Session shrank the ordinary GUI canvas");
+    }
     for(unsigned scale=1;scale<=4;++scale) {
         framebuffer::Config config;config.font_scale=scale;
         const auto metrics=framebuffer::Renderer(config).metrics();
         config.width=framebuffer::default_window_width(metrics,true);
         if(scale==2)require(config.width==framebuffer::Config{}.width,"default Config and host width disagree");
-        require(framebuffer::default_window_width(metrics,false)==1200,"plain default lost its canvas width");
+        require(framebuffer::default_window_width(metrics,false)==ui::default_width,"plain default lost its canvas width");
         framebuffer::Session session(app);session.resize({static_cast<int>(config.width),static_cast<int>(config.height),metrics});session.tick();
         const int canvas=static_cast<int>(config.width)-framebuffer::mfd_bezel_width(metrics);
-        require(canvas==1200&&canvas>=ui::min_width,"default bezel shrank GUI below its required width");
+        require(canvas==ui::default_width&&canvas>=ui::min_width,"default bezel shrank GUI below its required width");
         const auto targets=std::count_if(session.scene().primitives.begin(),session.scene().primitives.end(),[&](const auto& p){
             return !p.clip&&p.kind==surface::Primitive::Kind::fill&&p.border&&p.bounds.x>=canvas&&p.bounds.w>=48&&p.bounds.h>=48;
         });

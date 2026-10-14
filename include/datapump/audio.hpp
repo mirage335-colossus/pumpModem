@@ -155,7 +155,9 @@ std::string default_device_description();
 // presentation time at its device. Call only from the active playback callback.
 double minimum_lead_seconds();
 void schedule_output(double epoch_seconds,std::stop_token stop={});
-inline void validate_options(const Options& options) {
+namespace detail {
+template<bool CheckProvider>
+inline void validate_options_impl(const Options& options) {
     if(options.clock_timing)options.clock_timing->validate();
     if(options.allow_timing_fallback && !options.timing_status)
         throw Error("audio timing fallback requires a visible status observer");
@@ -166,8 +168,10 @@ inline void validate_options(const Options& options) {
         throw Error("Audio error must be nonnegative and at most 60 seconds");
     if(!std::isfinite(options.transmit_gain) || options.transmit_gain<0.0001 || options.transmit_gain>1.75)
         throw Error("transmit volume must be between 0.01% and 175%");
-    if(options.exclusive && !exclusive_supported())
-        throw Error("exclusive audio is unavailable with the selected audio provider");
+    if constexpr(CheckProvider) {
+        if(options.exclusive && !exclusive_supported())
+            throw Error("exclusive audio is unavailable with the selected audio provider");
+    }
     if(!std::isfinite(options.maximum_timing_slew_per_second) ||
        options.maximum_timing_slew_per_second<=0 || options.maximum_timing_slew_per_second>1e-3)
         throw Error("invalid audio timing slew allowance");
@@ -191,6 +195,10 @@ inline void validate_options(const Options& options) {
             throw Error("estimated timing requires an explicit correction domain");
     }
 }
+} // namespace detail
+// Pure allocation/value checks cannot establish selected-provider capability.
+inline void validate_option_values(const Options& options) {detail::validate_options_impl<false>(options);}
+inline void validate_options(const Options& options) {detail::validate_options_impl<true>(options);}
 // Compatibility callers can still disable mono with the existing boolean.
 constexpr ChannelMode output_channels(bool mono, ChannelMode selected=ChannelMode::left_mono) {
     return mono ? selected : ChannelMode::stereo;

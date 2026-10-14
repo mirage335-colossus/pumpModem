@@ -1,10 +1,16 @@
+#include "datapump/receiver_strategy.hpp"
 #include "link_planner_model.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/simulation_estimate.hpp"
+#include "datapump/sched_hop.hpp"
+#include "../src/estimate_cancellation.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <optional>
+#include <string>
 #include <iostream>
 
 using namespace datapump;
@@ -180,6 +186,81 @@ void raw_cpu_processing_scope() {
     near(interval_settings_off.cpu_realtime_ratio,model.cpu_realtime_ratio,
          "framed draft settings must preserve one-bit CPU headroom");
 }
+void scheduled_shared_layout_headline() {
+    const auto* old=std::getenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
+    const std::optional<std::string> previous=old?std::optional<std::string>{old}:std::nullopt;
+    const auto set=[](const char* value) {
+#ifdef _WIN32
+        if(_putenv_s("DATAPUMP_SCHED_LAZY_ACQUISITION",value?value:"")!=0)throw Error("cannot set planner policy fixture");
+#else
+        if(value?setenv("DATAPUMP_SCHED_LAZY_ACQUISITION",value,1)!=0:unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION")!=0)
+            throw Error("cannot set planner policy fixture");
+#endif
+    };
+    struct Restore {const std::optional<std::string>& old;decltype(set)& put;
+        ~Restore(){try {put(old?old->c_str():nullptr);}catch(...) {}}} restore{previous,set};
+    set("1");
+    gui::planner::Inputs input;input.mode=tuning::PatternMode::auto_keystream;input.target_db_hz=8;
+    input.options.timestamp=1800000000;input.options.search_seconds=6;input.options.audio_timing_error_seconds=0;
+    input.options.dsp_workspace_bytes=2609192632ULL;input.options.key.emplace(Bytes(32,0x43));
+    input.options.modem=tuning::resolve(36,8,input.mode,true,1500,10,modem::OuterDsssVersion::interleaved_v2).config;
+    input.options.automatic_receive_profiles=true;input.options.receive_pattern_mode=input.mode;
+    input.options.receive_targets_db_hz={8};
+    auto& c=input.options.modem;c.receiver_strategy=modem::ReceiverStrategy::automatic;c.receiver_cpu_budget=.6;
+    modem::OscillatorSearchConfig oscillator;
+    oscillator.lf=tuning::oscillator_model(tuning::parse_oscillator_preset("gpsdo-xo"));oscillator.rf=oscillator.lf;
+    oscillator.rf_shift_hz=3e7;oscillator.margin=3;oscillator.reference=modem::OscillatorReference::independent_audio;
+    c.oscillator_search=oscillator;
+    auto schedule=std::make_shared<modem::SchedHopPlan>();schedule->time_multiplier=10;schedule->audio_error_seconds=0;
+    c.scheduled_hopping=schedule;
+    input.receiver_work_mode=simulation::ReceiverWorkMode::hardware_fallback;
+    input.channel.clock_error_ppm=0; // This synthetic trajectory is consistent with the declared GPSDO.
+    live::Settings settings;settings.transfer=input.options;settings.dsp_workspace_bytes=input.options.dsp_workspace_bytes;
+    settings.content_limit=input.options.content_limit;input.receiver_settings=settings;
+    input.tx_dbm=36.020599913279625;input.path_loss_db=180;input.noise_density_dbm_hz=-164;
+    gui::planner::Cache policy_cache;
+    const auto selected=[&](const gui::planner::Inputs& current) {
+        auto& cache=policy_cache;std::optional<gui::planner::Model> result;std::stop_source stop;
+        try {(void)gui::planner::build(current,cache,stop.get_token(),[&](const auto& model){result=model;stop.request_stop();});}
+        catch(const estimate_detail::Cancelled&) {}
+        check(result.has_value(),"scheduled selected headline must complete before the bounded curve cancellation");
+        return *result;
+    };
+    const auto model=selected(input);
+    check(model.available&&model.receiver_workspace_supported&&model.clock_search_supported&&
+        model.receiver_geometry.receiver_strategy_selected==modem::receiver_backend_name(modem::ReceiverBackend::existing_complex)&&
+        model.receiver_status.find("exceeds RAM")==std::string::npos,
+        "planner must distinguish useful complex memory fit from an unavailable CPU model");
+    check(!model.one_bit_cpu_available&&!model.confidence_available&&!model.reference_probability_available&&
+        std::isfinite(model.cpu_realtime_ratio)&&model.cpu_realtime_ratio==0&&
+        std::isfinite(model.fallback_cpu_realtime_ratio)&&model.fallback_cpu_realtime_ratio==0,
+        "unknown calendar CPU must be an unavailable graph point with finite placeholders");
+    check(model.receiver_geometry.arrival_window_available&&model.receiver_geometry.combined_arrival_half_width_seconds==7&&
+        !model.timing_window_modeled,"default planner must show full fourteen-second combined arrival geometry");
+    for(const auto* value:{static_cast<const char*>(nullptr),"auto"}) {
+        set(value);const auto automatic=selected(input);
+        check(automatic.receiver_workspace_supported&&automatic.receiver_geometry.backend==model.receiver_geometry.backend&&
+            automatic.timing_hypotheses==model.timing_hypotheses&&!automatic.one_bit_cpu_available,
+            "bare/automatic policy must preserve demanding memory-fit geometry without inventing CPU cost");
+    }
+    set("0");const auto dense=selected(input);
+    check(!dense.receiver_workspace_supported,"explicit dense diagnostic must preserve demanding bank workspace failure");
+    set("1");const auto restored=selected(input);
+    check(restored.receiver_workspace_supported&&restored.receiver_geometry.backend==model.receiver_geometry.backend,
+        "reused planner cache must invalidate explicit dense versus bounded representation policy");
+    auto contradictory=input;contradictory.channel.clock_error_ppm=100;
+    const auto outside_clock=selected(contradictory);
+    check(!outside_clock.clock_search_supported&&outside_clock.receiver_workspace_supported,
+        "a trajectory outside declared GPSDO coverage must remain separate from memory fit");
+    input.receiver_settings.reset();const auto inferred=selected(input);
+    check(inferred.receiver_workspace_supported&&inferred.receiver_geometry.receiver_strategy_selected==
+        model.receiver_geometry.receiver_strategy_selected&&inferred.timing_hypotheses==model.timing_hypotheses,
+        "equivalent caller-derived reservations must preserve selected planning geometry");
+    input.options.dsp_workspace_bytes=32*1024*1024;settings.transfer=input.options;settings.dsp_workspace_bytes=input.options.dsp_workspace_bytes;
+    input.receiver_settings=settings;const auto constrained=selected(input);
+    check(!constrained.receiver_workspace_supported&&!constrained.one_bit_cpu_available,
+        "planner pure layout must refuse genuinely insufficient mandatory memory");
+}
 void cache_invalidation() {
     auto input=example();
     input.mode=tuning::PatternMode::auto_keystream;
@@ -224,7 +305,10 @@ void cache_invalidation() {
     same_curve(original,gui::planner::build(input));
 }
 }
-int main() {
-    try {transition_and_cpu();raw_cpu_processing_scope();cache_invalidation();std::cout<<"link planner curve tests passed\n";return 0;}
+int main(int argc,char** argv) {
+    try {
+        if(argc==2&&std::string_view(argv[1])=="--scheduled-layout-only") {scheduled_shared_layout_headline();return 0;}
+        transition_and_cpu();raw_cpu_processing_scope();cache_invalidation();scheduled_shared_layout_headline();
+        std::cout<<"link planner curve tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"link planner curve tests failed: "<<error.what()<<'\n';return 1;}
 }

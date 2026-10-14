@@ -135,8 +135,20 @@ public:
     // six-second search absence sets complete; EOF returns incomplete chunks.
     PatternBurst provisional_pattern() const;
     std::vector<PatternBurst> take_pattern_bursts();
+    // Receiver-worker only: score retained observations with cancellable bounded batching.
+    // Publication polls never perform the deferred search or manufacture input.
+    void process_pending(std::stop_token = {});
+    bool deferred_pattern_history() const noexcept;
+    std::uint64_t diagnostic_history_generation() const noexcept;
+    std::uint64_t diagnostic_history_resolved_through() const noexcept;
+    std::uint64_t oldest_unresolved_diagnostic_event() const noexcept;
+
+    // Receiver-local original completion-event commit frontier. This does not
+    // certify that uncompleted-symbol replay arithmetic has already executed.
+    std::optional<std::uint64_t> delayed_processing_frontier() const noexcept;
     std::vector<PatternEvidence> pattern_candidates() const;
     std::vector<PatternEvidence> pattern_candidates(std::size_t limit) const;
+    std::vector<PatternEvidence> pattern_candidates(std::size_t limit, std::stop_token) const;
     bool clock_windowed() const;
     bool local_clock_fallback() const;
     bool candidate_limited() const;

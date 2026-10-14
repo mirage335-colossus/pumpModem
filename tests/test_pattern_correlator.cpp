@@ -1427,6 +1427,8 @@ void compact_clock_search_preserves_evidence_and_bounds() {
     full.search_stream_phases=true;full.compact_clock_search=true;
     modem::PatternReceiver long_receiver(hours,2*1024*1024,full);
     const auto bytes=long_receiver.working_bytes();
+    check(long_receiver.reserved_workspace_bytes()>=bytes+std::min<std::size_t>(full.candidate_limit,32)*sizeof(modem::PatternEvidence),
+          "cold compact receiver must preserve its full future diagnostic FIFO reservation");
     check(long_receiver.clock_windowed() && bytes<64*1024,
           "four-hour minimum-bandwidth epoch must retain full timing/frequency coverage within 64 KiB");
     std::array<float,4096> noise{};std::mt19937 random(3181);std::normal_distribution<float> distribution(0,.1F);

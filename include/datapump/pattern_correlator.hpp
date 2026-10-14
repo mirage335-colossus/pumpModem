@@ -69,7 +69,7 @@ struct PatternCorrelatorOptions {
     // FP64 force/original-template reference always retain direct construction.
     bool scheduled_temporal_template_experiment=false;
 };
-enum class PatternCorrelationBackend { raw, pulse, pulse_moments, pulse_segments, amplitude };
+enum class PatternCorrelationBackend { raw, pulse, pulse_moments, pulse_segments, amplitude, scheduled_acquisition };
 struct PatternAmplitudeGeometry {
     bool supported=false;
     std::string reason;
@@ -105,7 +105,53 @@ struct PatternScheduledComplexGeometry {
     double admitted_frequency_half_width_hz=0,admitted_clock_half_width_ppm=0;
 };
 PatternScheduledComplexGeometry pattern_scheduled_complex_geometry(const Config&,const PatternSearch&);
+// Experimental bounded-representation policy. Automatic retains dense state
+// when its necessary allocation can fit. Memory scopes remain separate:
+// original capture is local until an actual shared owner is supplied.
+struct PatternScheduledAcquisitionPolicy {
+    bool requested=false,supported=false,shared_capture=false;
+    std::string reason;
+    std::size_t per_bank_required_bytes=0,local_capture_bytes=0,shared_capture_bytes=0,optional_tile_bytes=0;
+    std::size_t logical_lanes=0,batch_samples=0;
+};
+PatternScheduledAcquisitionPolicy pattern_scheduled_acquisition_policy(
+    const Config&,const PatternSearch&,const PatternScheduledComplexGeometry&,std::size_t workspace_bytes);
+
+// Capture-allocation-independent requirements; bounded catalogue/code metadata
+// construction is included. Not a runtime owner/capture certificate.
+// This type does not alter PatternSearch or the actual policy object's layout.
+struct PatternScheduledAcquisitionRequirements {
+    bool requested=false,geometry_supported=false;
+    std::string reason;
+    std::size_t required_history_samples=0,per_bank_required_bytes=0;
+    std::size_t local_capture_bytes=0,capture_fence_bytes=0,optional_tile_bytes=0;
+    std::size_t slot_unit_bytes=0,minimum_slot_admission_bytes=0;
+    std::size_t diagnostic_journal_bytes=0,serial_execution_bytes=0;
+    std::size_t logical_lanes=0,batch_samples=0;
+};
+PatternScheduledAcquisitionRequirements pattern_scheduled_acquisition_requirements(
+    const Config&,const PatternSearch&,const PatternScheduledComplexGeometry&,std::size_t workspace_bytes);
+struct PatternScheduledAcquisitionMemoryProjection {
+    bool requested=false,geometry_supported=false,projected_fits=false;
+    std::string reason;
+    std::size_t required_history_samples=0,per_bank_required_bytes=0,capture_fence_bytes=0;
+    std::size_t shared_capture_bytes=0,guaranteed_history_samples=0,optional_tile_bytes=0;
+    std::size_t logical_lanes=0,batch_samples=0;
+};
+// PLAN ONLY. Bytes do not grant a runtime owner, sample availability,
+// subscription, revision/generation validity or any reclamation authority.
+PatternScheduledAcquisitionMemoryProjection pattern_scheduled_acquisition_memory_projection(
+    const Config&,const PatternSearch&,const PatternScheduledComplexGeometry&,std::size_t per_bank_workspace,
+    std::size_t cohort_workspace,std::size_t maximum_capture_consumers);
+
 struct PatternCorrelatorWork {
+    std::uint64_t implicit_screened_lanes=0,implicit_rejected_lanes=0,implicit_refined_lanes=0;
+    std::uint64_t implicit_input_transforms=0,implicit_template_transforms=0,implicit_inverse_transforms=0;
+    std::uint64_t implicit_eligible_ranges=0,implicit_fallback_ranges=0,implicit_invalid_certificates=0;
+    std::uint64_t implicit_proxy_ranges=0,implicit_fp32_ranges=0,implicit_fp64_ranges=0;
+    std::uint64_t implicit_plan_hits=0,implicit_plan_misses=0;
+    std::uint64_t implicit_replay_samples=0,implicit_processed_samples=0,implicit_queued_samples=0;
+    std::size_t implicit_history_reserved_bytes=0,implicit_resident_slots=0,implicit_peak_prepared_bytes=0;
     PatternCorrelationBackend backend=PatternCorrelationBackend::raw;
     std::size_t hypotheses=0,lattices=0,phase_groups=0,peak_workspace_bytes=0;
     unsigned drift_sections=1;
@@ -201,8 +247,21 @@ public:
     // requires a longer message before a pending symbol becomes visible.
     std::vector<PatternBurst> take_bursts();
     PatternBurst provisional() const;
+    // Numerical acquisition may defer diagnostic history; admission/progress never wait for it.
+    // Receiver-worker only: score retained observations with cancellable bounded batching.
+    // Publication polls never perform the deferred search or manufacture input.
+    void process_pending(std::stop_token = {});
+    bool deferred_pattern_history() const noexcept;
+    std::uint64_t diagnostic_history_generation() const noexcept;
+    std::uint64_t diagnostic_history_resolved_through() const noexcept;
+    std::uint64_t oldest_unresolved_diagnostic_event() const noexcept;
+
+    // Receiver-local original completion-event commit frontier. This does not
+    // certify that uncompleted-symbol replay arithmetic has already executed.
+    std::optional<std::uint64_t> delayed_processing_frontier() const noexcept;
     std::vector<PatternEvidence> candidates() const;
     std::vector<PatternEvidence> candidates(std::size_t limit) const;
+    std::vector<PatternEvidence> candidates(std::size_t limit, std::stop_token) const;
     std::vector<std::complex<double>> take_chip_constellation();
     bool acquiring() const;
     bool synchronized() const;
@@ -229,6 +288,7 @@ public:
 private:
     // Definition exists only in the source-inclusion internal regression.
     friend struct PatternCorrelatorTimingTestAccess;
+    friend struct PatternCorrelatorPolicyAccess;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
