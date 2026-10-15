@@ -62,32 +62,34 @@ class StreamCLI(unittest.TestCase):
             self.run_pump('estimate','--text','e','--audio-error',allowance,*AUDIO,ok=False)
     def test_scheduled_hop_controls(self):
         helptext=self.run_pump('--help').stdout
-        self.assertIn(b'--sched-hop',helptext)
-        self.assertIn(b'--sched-frequency-search',helptext)
-        self.assertIn(b'--sched-hop-dilution',helptext)
+        for flag in (b'--sched-hop',b'--sched-frequency-search',b'--sched-hop-dilution'):
+            self.assertIn(flag,helptext)
         baseline=self.run_pump('estimate','--text','e',*AUDIO).stdout
-        self.assertEqual(json.loads(baseline)['sched_hop'],'disabled')
+        self.assertEqual(json.loads(baseline)['sched_hop'],'0')
         self.assertEqual(json.loads(baseline)['sched_frequency_search'],1)
-        self.assertEqual(json.loads(baseline)['sched_hop_dilution'],1)
-        self.assertEqual(self.run_pump('estimate','--text','e','--sched-hop','disabled',
-            '--sched-hop-dilution','37',*AUDIO).stdout,baseline)
+        self.assertEqual(json.loads(baseline)['sched_hop_dilution'],0)
+        for alias in ('0','off','disabled','1'):
+            self.assertEqual(self.run_pump('estimate','--text','e','--sched-hop',alias,
+                '--sched-hop-dilution','3',*AUDIO).stdout,baseline)
         for expansion in ('1','2','4','8','16','32'):
-            # A saved expansion remains inactive without a scheduled burst.
-            self.assertEqual(self.run_pump('estimate','--text','e','--sched-hop','disabled',
+            self.assertEqual(self.run_pump('estimate','--text','e','--sched-hop','0',
                 '--sched-frequency-search',expansion,*AUDIO).stdout,baseline)
-        for factor in ('10','100','1k','10k'):
+        for factor in ('3','5'):
             error=self.run_pump('estimate','--text','e','--sched-hop',factor,*AUDIO,ok=False)
             self.assertIn(b'keyfile',error.stderr)
-        for flag,value in (('--sched-hop','0'),('--sched-hop','2'),('--sched-hop','nan'),
+        for old in ('10','100','1k','1000','10k','10000'):
+            error=self.run_pump('estimate','--text','e','--sched-hop',old,*AUDIO,ok=False)
+            self.assertIn(b'explicit new choice',error.stderr)
+        for flag,value in (('--sched-hop','2'),('--sched-hop','nan'),
                            ('--sched-frequency-search','0'),('--sched-frequency-search','3'),
                            ('--sched-frequency-search','64'),('--sched-frequency-search','nan'),
-                           ('--sched-hop-dilution','0'),('--sched-hop-dilution','10001'),
-                           ('--sched-hop-dilution','1.5'),('--sched-hop-dilution','nan')):
+                           ('--sched-hop-dilution','2'),('--sched-hop-dilution','37'),
+                           ('--sched-hop-dilution','10001'),('--sched-hop-dilution','1.5'),('--sched-hop-dilution','nan')):
             self.run_pump('estimate','--text','e',flag,value,*AUDIO,ok=False)
         with tempfile.TemporaryDirectory() as directory:
             key=pathlib.Path(directory)/'scheduled-hop-synthetic.key'
             self.run_pump('keygen','--output',key)
-            for factor,dilution,expansion in (('10','1','1'),('10','2','4'),('100','37','8'),('1k','1000','16'),('10k','5000','32')):
+            for factor,dilution,expansion in (('3','0','1'),('5','0','4'),('5','3','8'),('3','3','16')):
                 value=json.loads(self.run_pump('estimate','--text','e','--keyfile',key,
                     '--sched-hop',factor,'--sched-hop-dilution',dilution,'--sched-frequency-search',expansion,
                     '--clock-sync','GPS_1ms-10ms_region-2564ms_offset','--audio-error','60ms',*AUDIO).stdout)
@@ -95,7 +97,10 @@ class StreamCLI(unittest.TestCase):
                 self.assertEqual(value['sched_hop_dilution'],int(dilution))
                 self.assertEqual(value['sched_frequency_search'],int(expansion))
                 self.assertEqual(value['wire_bits'],3)
-            self.run_pump('estimate','--text','e','--keyfile',key,'--sched-hop','10',
+            legacy=json.loads(self.run_pump('estimate','--text','e','--keyfile',key,
+                '--sched-hop','5','--sched-hop-dilution','1',*AUDIO).stdout)
+            self.assertEqual(legacy['sched_hop_dilution'],0)
+            self.run_pump('estimate','--text','e','--keyfile',key,'--sched-hop','5',
                 '--sched-hop-dilution','20',*AUDIO,ok=False)
     def test_search_arithmetic(self):
         self.assertIn(b'--search-arithmetic',self.run_pump('--help').stdout)

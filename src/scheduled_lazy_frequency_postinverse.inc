@@ -14,12 +14,13 @@ template<class T> bool lazy_screen_postinverse_family(std::span<LazyState::DueRa
     rx_cpu::Scope cpu_screen(rx_cpu::Stage::search_residual);
     auto& execution=lazy_execution();auto& pattern=execution.code;auto& cursor=execution.cursor;
     if(ranges.empty())return true;
+    for(auto* range:ranges)if(range)range->exact_observation_mask=false;
     if(!lazy_reference_environment() || !shaped || scheduled->fhss_shape.enabled ||
        config.search_arithmetic==SearchArithmetic::fp64 || drift_sections!=1 || differential_window ||
        static_cast<double>(pattern.symbol_samples())/config.sample_rate<6)return false;
     struct ResetOnFailure {
         std::span<LazyState::DueRange* const> ranges;bool complete=false;
-        ~ResetOnFailure(){if(!complete)for(auto* range:ranges)if(range){tile::wipe(range->screen);range->screen.clear();range->reference.clear();range->colored.clear();}}
+        ~ResetOnFailure(){if(!complete)for(auto* range:ranges)if(range){tile::wipe(range->screen);range->screen.clear();range->reference.clear();range->colored.clear();range->exact_observation_mask=false;}}
     } reset{ranges};
     struct Geometry {
         LazyState::DueRange* range=nullptr;LazyState::Catalog::Lane reference;
@@ -44,6 +45,8 @@ template<class T> bool lazy_screen_postinverse_family(std::span<LazyState::DueRa
     for(auto* range:ranges) {
         cancelled(stop);
         if(!range || range->end<=range->first || range->end-range->first>tile::maximum_start_span)return false;
+        // Optional postinverse prototype has no independent mask certificate.
+        range->exact_observation_mask=false;
         range->colored.clear();range->colored_mode=0;range->colored_gate=1;range->colored_selected=0;range->colored_sample_pairs=0;
         if(range->index==std::numeric_limits<std::uint64_t>::max())return false;
         Geometry item;item.range=range;const auto target=lazy_family_lane(range->family,range->first);item.reference=target;
@@ -104,11 +107,11 @@ template<class T> bool lazy_screen_postinverse_family(std::span<LazyState::DueRa
     const auto first_v=static_cast<std::uint64_t>(std::max(0.L,std::floor(begin+shift)-1));
     const auto until=static_cast<std::uint64_t>(std::max(0.L,std::ceil(central_end+shift)+2));
     const auto amplitude=std::sqrt(2*nominal_signal_power)*outer_dsss_transmit_gain(config);
-    const auto qmax=cert::up(pattern_pcm_radius_limit/amplitude);
+    const auto qmax=cert::mul(cert::up(pattern_pcm_radius_limit/amplitude),detail::scheduled_cold_colored::smooth_gain_upper());
     static const auto pulse_slope=[] {double value=0;for(unsigned i=0;i<2048;++i)value=std::max(value,
         std::abs(pattern_pulse((i+1)/256.)-pattern_pulse(i/256.))*256);return std::nextafter(value*1.000000000001,std::numeric_limits<double>::infinity());}();
     const auto gate_slope=cert::divide(1.875,std::max(1.,std::ceil(config.sample_rate*config.scheduled_hopping->ramp_seconds)));
-    const auto jump=cert::up(4*std::abs(pattern_pulse(8.)));
+    const auto jump=cert::mul(cert::up(4*std::abs(pattern_pulse(8.))),detail::scheduled_cold_colored::smooth_gain_upper());
     lazy_capture_summary();const auto maximum=lazy_state()->summary_maximum,union_energy=lazy_state()->summary_union_energy;
     pattern.set_stream_phase_samples(reference.phase_lower);
     require(index<=std::numeric_limits<std::uint64_t>::max()/pattern.chips_per_symbol(),"implicit family template chip overflow");
@@ -225,7 +228,7 @@ template<class T> bool lazy_screen_postinverse_family(std::span<LazyState::DueRa
                 for(std::size_t t=next;t<next+count;++t) {
                     if(residual_sources[t-next]!=t-next)continue;
                     auto& g=geometry[t];const auto displacement=g.displacement;
-                    const auto smooth=cert::mul(static_cast<double>(displacement),cert::add(cert::divide(34*pulse_slope,pattern.chip_samples()),cert::mul(gate_slope,qmax)));
+                    const auto smooth=cert::mul(static_cast<double>(displacement),cert::add(cert::mul(cert::divide(34*pulse_slope,pattern.chip_samples()),detail::scheduled_cold_colored::smooth_gain_upper()),cert::mul(gate_slope,qmax)));
                     double residual=0;
                     if(gain>0 && source>=0 && source<pattern.symbol_samples()) {
                         residual=smooth;const auto edge=source/pattern.chip_samples()-.5L;

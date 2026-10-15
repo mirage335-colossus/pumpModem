@@ -244,6 +244,7 @@ template<class T> class ResolvedInput {
 public:
     const tile::Plan<T>& plan;
     const tile::Input original; // Actual target oscillator, NEVER mislabeled center.
+    const scheduled_origin_gram::Mode mode;
     std::array<std::span<const Native>,3> spectra;
     std::array<cert::Operand,3> certificates{};
     std::array<long double,3> norms{};
@@ -252,9 +253,12 @@ public:
     std::span<const cert::Interval> certified_energy;
     Work work;
     ResolvedInput(const MomentInput<T>& input,const Coefficients& c,tile::Input target,
-                  const ModelRemainder& remainder,std::size_t budget,std::stop_token stop={})
-        :plan(input.plan),original(target),energy(input.base.energy),count(input.base.count),
+                  const ModelRemainder& remainder,std::size_t budget,std::stop_token stop={},
+                  scheduled_origin_gram::Mode execution_mode=scheduled_origin_gram::Mode::complete)
+        :plan(input.plan),original(target),mode(execution_mode),energy(input.base.energy),count(input.base.count),
          certified_energy(input.base.certified_energy) {
+        if(mode!=scheduled_origin_gram::Mode::complete && mode!=scheduled_origin_gram::Mode::external_gram)
+            throw Error("invalid resolved fine-frequency execution mode");
         compatible(input,c,target,remainder.sampled);
         if(remainder.moment_owner!=&input || !same(remainder.model,c) ||
            (remainder.sampled && remainder.target_oscillator!=target.oscillator.data()))
@@ -266,16 +270,18 @@ public:
             tile::check_stop(stop);
             if(sizeof(*this)>budget)throw Error("resolved fine input exceeds workspace");
             for(unsigned kind=0;kind<3;++kind) {
+                if(!scheduled_origin_gram::active_plane(mode,kind))continue;
                 spectra[kind]=input.base.spectra[kind];certificates[kind]=input.base.certificates[kind];norms[kind]=input.base.norms[kind];
             }
             work.working_bytes=working_bytes();return;
         }
-        auto estimate=tile::add_size(sizeof(*this),tile::multiply_size(2*plan.size,sizeof(Native)));
+        auto estimate=tile::add_size(sizeof(*this),tile::multiply_size((mode==scheduled_origin_gram::Mode::complete?2:1)*plan.size,sizeof(Native)));
         estimate=tile::add_size(estimate,tile::multiply_size(plan.size,sizeof(Complex)));
         if(estimate>budget)throw Error("resolved fine input exceeds workspace");
         try {
             tile::check_stop(stop);before_.resize(plan.size);
             for(unsigned kind=0;kind<2;++kind) {
+                if(!scheduled_origin_gram::active_plane(mode,kind))continue;
                 owned_[kind].resize(plan.size);cert::Operand cast_proof;
                 double propagation=0,products=0,magnitude=0;
                 std::array<Native,maximum_degree+1> native_coefficient{};
@@ -315,10 +321,12 @@ public:
                         cert::mul(cert::root(plan.size),remainder.radius[kind]))):cert::infinity;
                 spectra[kind]=owned_[kind];
             }
-            spectra[2]=input.base.spectra[2];certificates[2]=input.base.certificates[2];norms[2]=input.base.norms[2];
-            certificates[2].forward_radius=remainder.valid?cert::add(certificates[2].forward_radius,
-                cert::mul(cert::root(plan.size),remainder.radius[2])):cert::infinity;
-            work.synthesized_products=2*(input.degree+1)*plan.size;
+            if(mode==scheduled_origin_gram::Mode::complete) {
+                spectra[2]=input.base.spectra[2];certificates[2]=input.base.certificates[2];norms[2]=input.base.norms[2];
+                certificates[2].forward_radius=remainder.valid?cert::add(certificates[2].forward_radius,
+                    cert::mul(cert::root(plan.size),remainder.radius[2])):cert::infinity;
+            }
+            work.synthesized_products=(mode==scheduled_origin_gram::Mode::complete?2:1)*(input.degree+1)*plan.size;
             work.sampled_relation_samples=remainder.sampled?target.pcm.size():0;
             work.working_bytes=working_bytes();
             if(work.working_bytes>budget)throw Error("resolved fine input capacity exceeds workspace");

@@ -20,6 +20,13 @@
 #include <utility>
 
 namespace datapump::modem::detail::scheduled_capture {
+// A complete source symbol is needed for implicit acquisition. Longer symbols
+// are limited by the real capture layout/retention budget, not an arbitrary
+// 16-second switch to duplicated per-bank history.
+inline bool shared_source_duration_eligible(std::uint64_t samples,std::uint32_t rate) noexcept {
+    return rate && samples>=6ULL*rate;
+}
+
 
 class Error: public std::runtime_error { public: using std::runtime_error::runtime_error; };
 inline std::size_t checked_add(std::size_t a,std::size_t b) {

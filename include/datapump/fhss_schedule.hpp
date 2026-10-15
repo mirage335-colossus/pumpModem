@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/crypto.hpp"
+#include "datapump/clock_sync.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -41,7 +42,7 @@ struct FhssPlan {
     }
     std::string power_fallback_reason;
     // Clock accuracy is a +/- bound; Audio error is nonnegative lag [0,A].
-    double clock_error_seconds=.01,audio_error_seconds=.05;
+    double clock_error_seconds=.01,audio_error_seconds=clock_sync::default_audio_error_seconds;
     // Low-level diagnostics may specify an exact peer clock. Production copies
     // the selected per-station accuracy to BOTH bounds, even at Default.
     double peer_clock_error_seconds=0,region_seconds=0,offset_seconds=0;

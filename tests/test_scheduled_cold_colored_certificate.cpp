@@ -16,6 +16,57 @@ void check(bool value,const char* message){if(!value)throw std::runtime_error(me
 void contains(c::Interval value,double x,const char* message){check(value.lo<=x && x<=value.hi,message);}
 g::FitIntervals exact(const d::CorrelationFit& f,bool zero=false){return g::enclose(f,0,0,0,zero);}
 
+void observation_mask_lattice() {
+    check(g::observation_mask_lattice(.5L,0,.001L),"interior physical/source lattice rejected");
+    check(!g::observation_mask_lattice(.5L,0,.5L),"unbounded displacement acquired exact mask");
+    check(!g::observation_mask_lattice(.125L,0,.125L),"equal mask edge margin acquired proof");
+    check(g::observation_mask_lattice(.125L,0,.124L),"strict mask interior lost proof");
+    check(!g::observation_mask_lattice(.5L,.5L,1e-8L),"source edge hidden by physical margin");
+    check(!g::observation_mask_lattice(.5L,0,.001L,.001L),"FHSS equal edge margin acquired proof");
+    check(g::observation_mask_lattice(.5L,0,.001L,.002L),"strict FHSS margin lost proof");
+    check(!g::observation_mask_lattice(0,0,0),"integral arithmetic inferred from zero displacement");
+    check(!g::observation_mask_lattice(.5L,0,-1),"negative displacement acquired mask proof");
+    const auto nan=std::numeric_limits<long double>::quiet_NaN();
+    check(!g::observation_mask_lattice(nan,0,.001L),"nonfinite physical lattice acquired proof");
+    check(!g::observation_mask_lattice(.5L,0,.001L,nan),"unknown FHSS margin acquired proof");
+}
+
+void exact_mask_raw_certificate() {
+    // A global max-PCM mask debit can erase a noise-like window's energy bound.
+    // Exact mask proof restores the SAME original raw upper, without needing a
+    // colored-excess predicate. It must never turn proxy count equality alone
+    // into proof or change the prior fallback when any producer fact is absent.
+    d::CorrelationFit whole;whole.count=128;whole.energy=128;whole.cc=whole.ss=64;
+    whole.xc=4;whole.xs=1;
+    c::FitCertificate tile;tile.valid=true;tile.dot_radius={0,0};tile.gram_radius={0,0};
+    tile.energy_lower=tile.energy_upper=whole.energy;
+    const c::ReferenceErrors original{0,0,0,1e-10,true};
+    g::Summary chips;chips.count=whole.count;chips.owner_set_certified=true;chips.rank=32;
+    chips.projected=c::Interval::point(64);
+    auto stripped=tile;stripped.energy_lower=0;
+    auto inflated=whole;inflated.count+=16;
+    const auto old=c::score_upper(inflated,stripped,0,original);
+    check(!std::isfinite(old),"mask-debit fixture ceased exercising original refinement");
+    const auto unchanged=g::rejection_upper(old,whole,tile,0,original,chips,40,{1e-10,true});
+    check(!std::isfinite(unchanged),"fixture unexpectedly obtained a colored rejection");
+    const auto tight=g::exact_mask_raw_upper(old,whole,tile,0,original,chips,{true,whole.count});
+    check(std::isfinite(tight) && tight<1 && tight>=whole.score(),"exact-mask raw bound missed or excluded original score");
+    check(g::exact_mask_raw_upper(old,whole,tile,0,original,chips)==old,"proxy count equality forged original-mask proof");
+    check(g::exact_mask_raw_upper(old,whole,tile,0,original,chips,{true,whole.count+1})==old,
+          "different original count acquired a zero-strip raw bound");
+    auto wrong=chips;--wrong.count;
+    check(g::exact_mask_raw_upper(old,whole,tile,0,original,wrong,{true,whole.count})==old,
+          "incomplete chip count acquired exact raw evidence");
+    wrong=chips;wrong.owner_set_certified=false;
+    check(g::exact_mask_raw_upper(old,whole,tile,0,original,wrong,{true,whole.count})==old,
+          "unknown owner identity acquired exact raw evidence");
+    wrong=chips;wrong.valid=false;
+    check(g::exact_mask_raw_upper(old,whole,tile,0,original,wrong,{true,whole.count})==old,
+          "invalid chip summary bypassed original fallback");
+    check(g::exact_mask_raw_upper(old,whole,stripped,0,original,chips,{true,whole.count})==old,
+          "nonpositive certified observed energy bypassed original fallback");
+}
+
 void guard_certificate() {
     d::CorrelationFit whole;whole.count=87040;whole.energy=87040;whole.cc=whole.ss=43520;
     whole.xc=std::sqrt(120*whole.cc);
@@ -44,6 +95,32 @@ void guard_certificate() {
     check(!g::guarded_upper(exact(whole),summary,40,math).colored,"coherent signal claimed colored excess");
     summary.projected=c::Interval::point(69632);summary.rank=whole.count-100;
     check(!g::guarded_upper(exact(whole),summary,40,math).colored,"residual lower gate weakened");
+}
+
+void retention_rejection() {
+    // This cold event is already below its ORIGINAL charged admission T,
+    // but its raw score would require deferred exact history at retain=5.
+    // The existing colored proof may resolve that history only if its guarded
+    // upper is also below five; five never replaces T in colored_excess.
+    constexpr double threshold=40,retention=5;
+    d::CorrelationFit whole;whole.count=87040;whole.energy=87040;whole.cc=whole.ss=43520;
+    whole.xc=std::sqrt(60*whole.cc);
+    g::Summary summary;summary.projected=c::Interval::point(69632);summary.rank=5120;summary.count=whole.count;
+    summary.owner_set_certified=true;
+    d::CorrelationChipEvidence original;original.projected_energy=summary.projected.lo;original.projected_rank=summary.rank;
+    const auto raw=whole.score();
+    check(raw>retention && raw<threshold,"retention fixture left the raw-rejected history band");
+    c::FitCertificate tile;tile.valid=true;tile.dot_radius={0,0};tile.gram_radius={0,0};tile.energy_lower=tile.energy_upper=whole.energy;
+    const c::ReferenceErrors reference{0,0,0,1e-10,true};
+    const auto upper=g::rejection_upper(raw,whole,tile,0,reference,summary,threshold,{1e-10,true});
+    check(original.colored_excess(whole,threshold),"retention fixture Original guard inactive at charged T");
+    check(upper<retention && upper>=original.score(whole),"charged-T guard did not safely resolve nonretained history");
+    summary.owner_set_certified=false;
+    check(g::rejection_upper(raw,whole,tile,0,reference,summary,threshold,{1e-10,true})==raw,
+        "missing owner proof resolved deferred history");
+    summary.owner_set_certified=true;summary.projected=c::Interval::point(60);
+    check(g::rejection_upper(raw,whole,tile,0,reference,summary,threshold,{1e-10,true})==raw,
+        "coherent-only evidence resolved deferred history through colored guard");
 }
 
 void rank_and_membership() {
@@ -78,7 +155,15 @@ void rank_and_membership() {
     check(owner.valid && owner.lower==0 && owner.upper==1,"fractional source boundary union failed");
     check(!g::owner_range({-1e-4,1e-4},34,87040).valid,"symbol-edge uncertainty silently accepted");
     check(!g::owner_range({1,200},34,87040).valid,"wide clock displacement silently accepted");
-    cell.count=1;check(!g::projection(exact(cell)).valid,"unbounded rank-one libm branch accepted");
+    cell.count=1;
+    const auto singleton=g::projection(exact(cell));
+    check(singleton.valid && singleton.nested && singleton.rank==1 &&
+        singleton.energy.lo==0 && singleton.energy.hi>=cell.energy,
+        "bounded singleton claimed useful libm energy beyond its full [0,E] clamp");
+    contains(singleton.energy,d::CorrelationChipEvidence::projection(cell).first,
+        "bounded singleton excluded the original rank-one result");
+    auto unbounded=cell;unbounded.xc=1e101;
+    check(!g::projection(exact(unbounded)).valid,"unbounded rank-one libm branch accepted");
     cell={};cell.count=34;cell.energy=34;
     const auto zero=g::projection(exact(cell,true));check(zero.valid && zero.nested && zero.rank==0,"exact absent pulse not retained");
     check(!g::projection(g::enclose(cell,1e-5,1e-5,1e-5)).valid,"zero proxy claimed original zero basis");
@@ -130,7 +215,7 @@ void direct_fragments() {
 
 int main() {
     try {check(c::environment<double>(),"strict FP64 environment required");
-        guard_certificate();rank_and_membership();direct_fragments();
+        observation_mask_lattice();exact_mask_raw_certificate();guard_certificate();retention_rejection();rank_and_membership();direct_fragments();
         std::cout<<"scheduled cold colored certificate checks passed\n";return 0;
     }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

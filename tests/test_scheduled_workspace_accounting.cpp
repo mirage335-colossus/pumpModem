@@ -34,6 +34,34 @@ struct PatternCorrelatorTimingTestAccess {
         check(execution.numeric_bytes()==execution.numeric_bytes_uncached(),
             "joined accounting differs from every retained capacity");
     }
+    static void owner_growth_uses_current_loan() {
+        auto c=configuration(3,10,false);
+        c.sample_rate=14400;c.carrier_hz=1500;c.bandwidth_hz=360;
+        c.stream_epoch=8312;c.stream_phase_samples=0;
+        Capture input;auto s=search(c,input);s.start_uncertainty_seconds=7;
+        s.search_stream_phases=true;s.frequency_offsets_hz.clear();
+        s.qualified_start_window=PatternStartWindow{0,1,.02L*c.sample_rate};
+        for(int j=-9;j<=9;++j)s.hypotheses.push_back({j*.00001,0});
+        PatternCorrelator rx(c,s,23045189);
+        auto& owner=*rx.impl_;auto& state=*owner.lazy_state();
+        const auto initial_capacity=state.capacity;
+        check(initial_capacity<state.catalog->size(),"loan fixture lacks additional logical owners");
+        auto* borrowed=&owner.hypotheses[0];borrowed->burst.bits={1,0,1};
+        const auto old=owner.hypotheses.size();
+        rx.trim_optional_workspace();rx.set_workspace_bytes(rx.reserved_workspace_bytes());
+        bool rejected=false;try{owner.lazy_grow_slots();}catch(const Error&){rejected=true;}
+        check(rejected && owner.hypotheses.size()==old && &owner.hypotheses[0]==borrowed &&
+              borrowed->burst.bits==Bytes({1,0,1}),"insufficient current loan changed required owner state");
+        constexpr std::size_t loan=128*1024*1024;
+        rx.set_workspace_bytes(loan);
+        while(owner.hypotheses.size()<=initial_capacity)owner.lazy_grow_slots();
+        check(&owner.hypotheses[0]==borrowed && borrowed->burst.bits==Bytes({1,0,1}) &&
+              rx.reserved_workspace_bytes()<=loan && rx.working_bytes()<=rx.reserved_workspace_bytes(),
+              "larger current loan did not preserve stable pending owners and complete allocation charge");
+        bool shrink_rejected=false;try{rx.set_workspace_bytes(1);}catch(const Error&){shrink_rejected=true;}
+        check(shrink_rejected && &owner.hypotheses[0]==borrowed && borrowed->burst.bits==Bytes({1,0,1}),
+              "loan retirement discarded required pending evidence");
+    }
     static void numeric_lifecycle() {
         auto c=configuration();Capture input;input.start=0;
         auto s=search(c,input);PatternCorrelator rx(c,s,64*1024*1024);
@@ -130,6 +158,48 @@ struct PatternCorrelatorTimingTestAccess {
         rx.trim_optional_workspace();rx.set_workspace_bytes(16*1024*1024);exact();
     }
 
+    static void cohort_grant_retries() {
+        auto c=configuration();Capture input;input.start=0;
+        auto s=search(c,input);PatternCorrelator rx(c,s,64*1024*1024);
+        auto& owner=*rx.impl_;auto& execution=*owner.lazy_state()->serial_execution;
+        execution.available_bytes=32*1024*1024;
+        (void)owner.lazy_plan<float>({16,32},{});
+        auto* pinned_plan=execution.fp32_plans.front().get();
+        owner.accounted_bytes=owner.working_bytes()+owner.unallocated_history_bytes()+
+            owner.drift_reserved+owner.amplitude_scratch_reservation;
+        const auto retained=sizeof(PatternCorrelator)+owner.accounted_bytes;
+        struct Grant {
+            State& owner;unsigned calls=0,remaining=0;bool progress=true;
+            static bool reclaim(void* context) {
+                auto& self=*static_cast<Grant*>(context);++self.calls;
+                if(!self.remaining)return false;
+                --self.remaining;
+                if(self.progress)self.owner.budget+=256;
+                return true;
+            }
+        } grant{owner,0,8,true};
+        owner.budget=retained+128;
+        {
+            // No source Pool is needed for the joined pressure capability.
+            detail::scheduled_source_samples::Scope scope(nullptr,0,&grant,&Grant::reclaim);
+            owner.room_for(1024);
+        }
+        check(grant.calls==4 && grant.remaining==4 && owner.budget==retained+128+4*256,
+            "actual room_for failed precise multi-grant retry or overreclaimed");
+        check(execution.fp32_plans.size()==1 && execution.fp32_plans.front().get()==pinned_plan,
+            "funded retry unnecessarily evicted active acceleration");
+        same_numeric(execution);
+
+        owner.budget=retained+128;grant.calls=0;grant.remaining=1;grant.progress=false;
+        bool bad_grant=false;
+        try {detail::scheduled_source_samples::Scope scope(nullptr,0,&grant,&Grant::reclaim);owner.room_for(1024);}
+        catch(const Error&){bad_grant=true;}
+        check(bad_grant && grant.calls==1 && execution.fp32_plans.size()==1 &&
+            execution.fp32_plans.front().get()==pinned_plan,
+            "nonprogressing external grant looped or destroyed active acceleration");
+        same_numeric(execution);
+    }
+
     static void helper_failure_capacity() {
         using Cache=State::LazyState::OriginalProjections;
         namespace cache=detail::scheduled_original_projection;
@@ -170,6 +240,8 @@ int main(){try {
     datapump::modem::PatternCorrelatorTimingTestAccess::numeric_lifecycle();
     datapump::modem::PatternCorrelatorTimingTestAccess::projection_store_delta();
     datapump::modem::PatternCorrelatorTimingTestAccess::helper_failure_capacity();
+    datapump::modem::PatternCorrelatorTimingTestAccess::cohort_grant_retries();
+    datapump::modem::PatternCorrelatorTimingTestAccess::owner_growth_uses_current_loan();
     set_environment("DATAPUMP_SCHED_WORKSPACE_ACCOUNTING","0");
     datapump::modem::PatternCorrelatorTimingTestAccess::projection_store_delta();
     std::cout<<"scheduled workspace accounting exact capacity/invalidation tests passed\n";return 0;

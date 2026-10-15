@@ -25,7 +25,9 @@
 namespace datapump::modem::detail::scheduled_spectral_products {
 namespace cert=scheduled_acquisition_certificate;
 using Complex=std::complex<double>;
-inline constexpr std::size_t maximum_transform=16384,block_bins=256,mass_lanes=8;
+// Dynamic operand buffers and per-256-bin error reductions also support
+// bounded multi-dwell partitions. Callers charge the actual transform size.
+inline constexpr std::size_t maximum_transform=1048576,block_bins=256,mass_lanes=8;
 enum class Kernel {automatic,scalar,avx2};
 struct Options {
     Kernel kernel=Kernel::automatic;

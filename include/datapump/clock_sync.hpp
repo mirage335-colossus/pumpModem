@@ -14,7 +14,7 @@ namespace datapump::clock_sync {
 // Native event timestamps retain their FULL reported uncertainty.
 // It constrains UTC timing only when a clock-sync policy is active; the
 // ordinary broad search and underrun-prevention buffers are unchanged.
-inline constexpr double default_audio_error_seconds=.05;
+inline constexpr double default_audio_error_seconds=.07;
 inline void validate_audio_error(double seconds) {
     if(!std::isfinite(seconds) || seconds<0 || seconds>60)
         throw Error("Audio error must be between zero and 60 seconds");
@@ -29,6 +29,15 @@ struct Policy {
     bool operator==(const Policy&) const = default;
     double half_window_seconds() const { return 2 * accuracy_seconds + region_seconds / 2; }
 };
+// Default is an acquisition-policy choice, not an unsynchronized hop clock.
+// A keyed FHSS/Sched_Hop calendar assumes GPS alignment at both stations even
+// when the user leaves that choice at Default. Keep the optional UI/CLI value
+// intact; non-hopping Default retains its broad arrival search.
+inline std::optional<Policy> effective_policy(const std::optional<Policy>& selected,bool hopping) {
+    if(selected)return selected;
+    if(hopping)return Policy{.010,0,0};
+    return std::nullopt;
+}
 struct ArrivalMap {
     long double origin_samples=0,phase_scale=1,half_width_samples=0;
 };
@@ -75,6 +84,19 @@ inline std::optional<ArrivalMap> arrival_map(const Policy& policy,long double ep
 // remain physical-event centers with unmodified radius U; equivalently their
 // upper edge has causal lag [0,2U]. Never add a second center shift to capture.
 inline double audio_lag_radius(double lag) {validate_audio_error(lag);return lag/2;}
+// Calendar dating and strict local Audio qualification are different claims.
+// Retain a provider's full timestamp radius even when it exceeds A/2 (including
+// A=0). This yields a wider, explicitly modeled calendar constraint; it does
+// NOT certify that the local device meets the requested Audio allowance.
+// Known device queues are already compensated by the physical timestamp.
+inline std::optional<ArrivalMap> calendar_arrival_map(const Policy& policy,long double epoch,
+        long double capture_utc,long double capture_sample,std::uint32_t sample_rate,
+        double seconds_per_sample,double rate_uncertainty_fraction,double capture_error_seconds,
+        std::uint64_t maximum_phase_samples,double audio_lag_seconds=default_audio_error_seconds) {
+    const auto radius=audio_lag_radius(audio_lag_seconds);
+    return arrival_map(policy,epoch+radius,capture_utc,capture_sample,sample_rate,
+        seconds_per_sample,rate_uncertainty_fraction,capture_error_seconds,maximum_phase_samples,radius);
+}
 inline std::optional<ArrivalMap> audio_lag_arrival_map(const Policy& policy,long double epoch,
         long double capture_utc,long double capture_sample,std::uint32_t sample_rate,
         double seconds_per_sample,double rate_uncertainty_fraction,double capture_error_seconds,

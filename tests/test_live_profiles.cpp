@@ -514,6 +514,79 @@ void modeled_arrival_window(bool modeled=true,bool fallback=false) {
     session.stop();
 }
 
+void default_hop_calendar(unsigned multiplier) {
+    auto value=settings({});value.transfer.automatic_receive_profiles=false;
+    value.transfer.key.emplace(Bytes(32,0x67));value.receive_keys.clear();
+    value.transfer.clock_sync.reset();value.transfer.audio_timing_error_seconds=0;
+    auto& c=value.transfer.modem;c.sample_rate=128;c.bandwidth_hz=16;c.carrier_hz=32;
+    c.integration_seconds=2;c.spreading_factor=64;c.scramble=true;
+    c.receiver_strategy=modem::ReceiverStrategy::existing_only;
+    c.oscillator_search.emplace();c.oscillator_search->lf={0,0};c.oscillator_search->rf={0,0};
+    auto plan=std::make_shared<modem::SchedHopPlan>();plan->time_multiplier=multiplier;
+    plan->clock_error_seconds=plan->peer_clock_error_seconds=.01;
+    plan->audio_error_seconds=plan->region_seconds=0;plan->ramp_seconds=.01;
+    c.scheduled_hopping=plan;c.data_key=value.transfer.key;
+    const modem::SchedHopSourceMap calendar(*plan,*value.transfer.key,c.sample_rate);
+    auto selected=epoch;
+    for(;selected<epoch+64;++selected)if(calendar.locate({selected*c.sample_rate,0}).active)break;
+    check(selected<epoch+64,"default hop fixture has no active epoch");
+    value.transfer.timestamp=selected;
+    auto tx=transfer::binary_transmitter(Bytes{0,0,1},value.transfer);
+    const auto output=tx->physical_output_origin();
+    const auto anchor=calendar.locate({selected*c.sample_rate,0}).source;
+    const auto symbol=modem::symbol_sample_count(c),failed=(6*c.sample_rate+symbol-1)/symbol;
+    const auto end=calendar.source_to_physical(anchor.add_samples((3+failed)*symbol),true);
+    const auto end_samples=static_cast<std::uint64_t>(std::ceil(end.distance({output,0})));
+    CaptureScript capture;capture.rate=c.sample_rate;capture.monitor_rate=c.sample_rate;
+    capture.samples.resize(std::max<std::uint64_t>(tx->total_samples(),end_samples)+12*c.sample_rate);
+    for(std::size_t at=0;at<tx->total_samples();) {
+        const auto n=tx->read(std::span(capture.samples).subspan(at,tx->total_samples()-at));
+        check(n>0,"scheduled test transmitter stalled");at+=n;
+    }
+    std::mt19937 random(8071);std::normal_distribution<float> noise(0,.01f);
+    for(auto& x:capture.samples)x+=noise(random);
+    // Dates are physical events, independent of the delayed processing clock.
+    // Positive provider uncertainty remains present even with Audio error0.
+    capture.timing=[&](std::size_t sample) {
+        return audio::TimePrediction{(static_cast<long double>(output)+sample)/c.sample_rate,
+            .002,1./c.sample_rate,audio::TimingQuality::estimated,0};
+    };
+    capture_script=&capture;
+    live::Session session([=]{return double(selected)+20;});session.start(value);
+    testing::CpuWorkBudget budget(20s,"Default shared hop calendar");
+    std::set<std::size_t> prefixes;bool complete=false,modeled=false,dated=false;
+    while(budget.pending()) {
+        const auto state=session.snapshot();
+        check(state.error.empty()&&!state.receiver_health.failed(),"Default calendar Live failure: "+state.error);
+        modeled|=state.clock_window_modeled;dated|=state.receiver_timing.has_value();
+        for(const auto& signal:state.signals) {
+            const auto bits=signal.raw_bits.empty()?signal.text:signal.raw_bits;
+            check(signal.received_bits<=3 && bits==std::string("001").substr(0,signal.received_bits),
+                "Default calendar admitted extra or wrong bits");
+            if(signal.received_bits)prefixes.insert(signal.received_bits);
+            if(signal.complete) {
+                check(capture.delivered>=end_samples,"scheduled null/EOF manufactured physical completion");
+                check(signal.received_bits==3,"Default calendar completed a truncated message");complete=true;
+            }
+        }
+        const auto delivered=capture.delivered.load();
+        if(delivered<capture.samples.size() && delivered>=capture.released && !state.buffered_samples)
+            capture.released=delivered+std::min<std::size_t>(16,capture.samples.size()-delivered);
+        if(complete && delivered==capture.samples.size() && !state.buffered_samples)break;
+        std::this_thread::sleep_for(1ms);
+    }
+    if(!(complete&&modeled&&dated)) {
+        const auto state=session.snapshot();
+        std::cerr<<"calendar diagnostic multiplier="<<multiplier<<" delivered="<<capture.delivered
+            <<" total="<<capture.samples.size()<<" sampled="<<state.samples_received
+            <<" buffered="<<state.buffered_samples<<" modeled="<<modeled<<" dated="<<dated
+            <<" prefixes="<<prefixes.size()<<" status="<<state.status<<'\n';
+    }
+    check(complete&&modeled&&dated,"Default calendar did not decode and physically complete with retained provider dates");
+    check(prefixes==std::set<std::size_t>{1,2,3},"Default calendar delayed per-bit publication");
+    session.stop();capture_script=nullptr;
+}
+
 void sequential_profiles(const std::vector<double>& targets, double first_target, double second_target) {
     const auto first = waveform(first_target, "e"), second = waveform(second_target, "hello");
     CaptureScript capture;
@@ -1015,8 +1088,8 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
             }
             begin=script.delivered.load();end=script.released.load();
             if(end>begin) {
-                if(script.timing && (!script.timing_status || script.timing_status->following_system_clock)) {
-                    check(options.follow_system_clock && bool(options.capture_timing),"timed fixture lost its capture callback");
+                if(script.timing && (!script.timing_status || script.timing_status->following_system_clock || options.request_capture_timing)) {
+                    check((options.follow_system_clock || options.request_capture_timing) && bool(options.capture_timing),"timed fixture lost its capture callback");
                     options.capture_timing(script.timing(begin));
                 }
                 if(!callback(std::span(script.samples).subspan(begin,end-begin)))return;script.delivered=end;
@@ -1254,7 +1327,9 @@ int main(int argc, char** argv) {
         const FixtureTimerResolution timer_resolution;
 #endif
         const std::string suite = argc > 1 ? argv[1] : "all";
-        check(suite == "all" || suite == "exact_source" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "frontier_failure" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "arrival_fallback" || suite == "tx_failure",
+        std::optional<audio::trace::Scope> calendar_trace;
+        if(suite=="hop_calendar" && argc>2)calendar_trace.emplace(argv[2]);
+        check(suite == "all" || suite == "hop_calendar" || suite == "exact_source" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "frontier_failure" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "arrival_fallback" || suite == "tx_failure",
               "unknown profile test suite");
         if(suite=="exact_source") {context="positive partial Live exact source binding";if(!live_exact_source_pool(argc>2?std::filesystem::path(argv[2]):std::filesystem::path{}))return 77;}
         if(suite=="all" || suite=="duplex") {
@@ -1271,6 +1346,7 @@ int main(int argc, char** argv) {
         if(suite=="all" || suite=="capture_time") {context="captured private epoch survives decode delay";captured_epoch_survives_delay();}
         if(suite=="all" || suite=="arrival_fallback") {context="unqualified UTC capture falls back visibly";modeled_arrival_window(true,true);}
         if(suite=="all" || suite=="arrival_time") {context="modeled compact UTC arrival";modeled_arrival_window();}
+        if(suite=="all" || suite=="hop_calendar") {context="Default shared hop calendar3/5 Audio0";default_hop_calendar(3);default_hop_calendar(5);}
         if(suite=="arrival_time_baseline") {context="full-window UTC arrival control";modeled_arrival_window(false);}
         if(suite=="all" || suite=="frontier_failure") {context="receiver exception physical frontier";receiver_exception_frontier();}
         if(suite=="all" || suite=="health") {context="receiver loss health";receiver_loss_health();}

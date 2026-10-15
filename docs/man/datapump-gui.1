@@ -115,14 +115,16 @@ paths retain the full search and report their limitation.
 .TP
 .BI \-\-audio\-error " TIME"
 Assumed residual audio timing error per station after reported queue compensation;
-default 50ms. Default in any timing dropdown resets all four timing controls.
-Audio error is total nonnegative lag, zero through the entered value (Default: +50 ms).
+default 70ms. Default in any timing dropdown resets all four timing controls.
+Audio error is total nonnegative lag, zero through the entered value (Default: +70 ms).
 It is not a plus/minus allowance; GPS accuracy keeps its existing plus/minus interpretation.
 Numeric Audio error edits are independent of GPS accuracy,
 propagation and oscillator models. Accepts nonnegative ns/us/ms/s durations up to 60s,
 subject to the Live search-window limit. This does not change buffering or
 establish measured hardware accuracy. It does not change the ordinary search
-when clock sync is Default. Saved parameter lists retain this value.
+when clock sync is Default and hopping is disabled. FHSS and Sched_Hop
+assume a shared GPS calendar at Default, with plus/minus10ms at each station
+and the selected causal audio lag. Saved parameter lists retain explicit values.
 An unsupported allowance visibly falls back to ordinary playback before private
 output; it is not silently enlarged.
 .TP
@@ -164,20 +166,19 @@ comment. Cannot be combined with --fhss-list. Files are validated before setting
 change. Launch and parameter-list exports save the applied frequencies inline,
 independent of the source file. Hiding Developer mode retains the active list.
 .TP
-.BI \-\-sched-hop " disabled|10|100|1k|10k"
-Enable keyed active/null burst scheduling; default disabled. Requires a selected
-encryption key and matching peer settings. Each frame contains the selected
-number of 0.4-second base hops, normally with one active hop. Long symbols split
-across active groups while waveform source time pauses during null hops.
-The schedule is independent of Fake FHSS. Null intervals allow receiver work;
-they do not count as observed absence or guarantee real-time processing.
-The GUI places Sched_Hop after FHSS. Aliases off/1, 1000 and 10000 are accepted.
+.BI \-\-sched-hop " 0|3|5"
+Keyed active/null scheduling; default 0 disables it. Requires a selected
+communication key. Frames contain three or five 0.4-second hops with normally
+one active hop. Long symbols split while source time pauses; physical carrier
+time continues. Nulls provide processing time and never observed absence.
+Disabled aliases off/disabled/1 preserve their meanings. Retired enabled
+multipliers require an explicit new choice and are not silently converted.
 .TP
-.BI \-\-sched-hop-dilution " N"
-Consecutive active hops per frame; default 1, no greater than the enabled frame
-size. This control appears only in Developer mode at the bottom of Link planner.
-Two active hops in a ten-hop frame give effective 5x airtime. The frame is not
-expanded. An inactive preference is saved; invalid imported combinations fail.
+.BI \-\-sched-hop-dilution " 0|3"
+Developer-only consecutive active hops: 0 means one; 3 means three in the
+unchanged frame. 5/3 gives effective 5/3 airtime. 3/3 uses continuous reception,
+retaining applicable FHSS ramps. Legacy dilution 1 maps exactly to 0; other
+retired values fail import. Inactive preferences remain saved.
 .TP
 .BI \-\-sched-frequency-search " 1|2|4|8|16|32"
 Widen oscillator frequency uncertainty by this factor while Sched_Hop is enabled;
@@ -376,7 +377,7 @@ Check an installation without opening a window:
 .fi
 .PP
 Audio error accepts default or a duration; default means total positive lag
-from zero through 50ms. GPS accuracy retains its symmetric per-station bound.
+from zero through 70ms. GPS accuracy retains its symmetric per-station bound.
 Fake FHSS guards include both endpoint clocks and the propagation region.
 Offset delays the nominal receiving hop preview without delaying TX tuning.
 

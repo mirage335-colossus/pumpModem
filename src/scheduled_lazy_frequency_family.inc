@@ -10,15 +10,18 @@ template<class T> bool lazy_screen_family(std::span<LazyState::DueRange* const> 
     rx_cpu::Scope cpu_screen(rx_cpu::Stage::search_residual);
     auto& execution=lazy_execution();auto& pattern=execution.code;auto& cursor=execution.cursor;
     if(ranges.empty())return true;
+    for(auto* range:ranges)if(range)range->exact_observation_mask=false;
     if(lazy_state()->certificate_profile.enabled)execution.certificate_pending={};
-    if(!lazy_reference_environment() || !shaped || scheduled->fhss_shape.enabled)return false;
+    if(!lazy_reference_environment() || !shaped || !lazy_fhss_screen_supported())return lazy_screen_gate("frequency_family",__LINE__);
     struct ResetOnFailure {
         std::span<LazyState::DueRange* const> ranges;bool complete=false;
-        ~ResetOnFailure(){if(!complete)for(auto* range:ranges)if(range){tile::wipe(range->screen);range->screen.clear();range->reference.clear();range->colored.clear();}}
+        ~ResetOnFailure(){if(!complete)for(auto* range:ranges)if(range){tile::wipe(range->screen);range->screen.clear();range->reference.clear();range->colored.clear();range->exact_observation_mask=false;}}
     } reset{ranges};
     struct Geometry {
         LazyState::DueRange* range=nullptr;LazyState::Catalog::Lane reference;
-        long double displacement=0;double residual_square=0,residual_l1=0,residual_gram=0;
+        long double displacement=0,aperture=0;double residual_square=0,residual_l1=0,residual_gram=0;
+        bool exact_observation_mask=false;
+        std::unique_ptr<detail::scheduled_residual_prefix::ResidualRuns> residual_program;
     };
     std::vector<Geometry> geometry;std::vector<std::size_t> starts;
     const auto old_scratch=execution.scratch_reservation;
@@ -34,51 +37,54 @@ template<class T> bool lazy_screen_family(std::span<LazyState::DueRange* const> 
     check(tile::add_size(tile::helper_reservation,tile::add_size(tile::multiply_size(ranges.size(),sizeof(Geometry)),
         tile::multiply_size(tile::maximum_start_span,sizeof(std::size_t)))));
     if(!ranges.front() || ranges.front()->end<=ranges.front()->first ||
-       ranges.front()->end-ranges.front()->first>tile::maximum_start_span)return false;
+       ranges.front()->end-ranges.front()->first>tile::maximum_start_span)return lazy_screen_gate("frequency_family",__LINE__);
     geometry.reserve(ranges.size());starts.reserve(ranges.front()->end-ranges.front()->first);
     for(auto* range:ranges) {
         cancelled(stop);
-        if(!range || range->end<=range->first || range->end-range->first>tile::maximum_start_span)return false;
+        if(!range || range->end<=range->first || range->end-range->first>tile::maximum_start_span)return lazy_screen_gate("frequency_family",__LINE__);
+        range->exact_observation_mask=false;
         range->colored.clear();range->colored_sample_pairs=0;range->colored_selected=0;range->colored_mode=0;range->colored_gate=0;
         range->colored_residual_square=range->colored_residual_l1=range->colored_residual_gram=0;
-        if(range->index==std::numeric_limits<std::uint64_t>::max())return false;
-        Geometry item;item.range=range;const auto target=lazy_family_lane(range->family,range->first);item.reference=target;
-        if(config.search_arithmetic!=SearchArithmetic::fp64)for(std::size_t pair=0;pair<lazy_state()->catalog->pairs().size();++pair) {
-            if(lazy_state()->catalog->pairs()[pair].rate!=1)continue;
-            const auto id=lazy_state()->catalog->rank(pair,target.origin_index,target.phase_lower);if(!id)continue;
-            const auto central=lazy_state()->catalog->describe(*id,cursor);if(central.anchor.distance(target.anchor)!=0)continue;
-            item.reference=central;item.reference.frequency=target.frequency;break;
-        }
+        if(range->index==std::numeric_limits<std::uint64_t>::max())return lazy_screen_gate("frequency_family",__LINE__);
+        Geometry item;item.range=range;item.reference=lazy_screen_reference(*range);
+        // Same immutable reference policy as single-range/class execution.
+        // The compatibility checks below retain actual rate, source anchor,
+        // phase, origin, index and original start-grid identity.
         const auto& reference=item.reference;
         const auto source_first=static_cast<long double>(range->index)*pattern.symbol_samples();
         const auto first=lazy_state()->catalog->boundary(reference,source_first,false,cursor);
         const auto last=lazy_state()->catalog->boundary(reference,source_first+pattern.symbol_samples(),false,cursor);
         const auto aperture=std::max(std::abs(first-reference.origin),std::abs(last-reference.origin))+tile::maximum_start_span+2;
+        item.aperture=aperture;
         std::size_t position=0,previous=0;
         for(auto i=range->first;i<range->end;++i,++position) {
             const auto lane=lazy_family_lane(range->family,i);const auto integer=std::round(lane.origin-reference.origin);
-            if(integer<0 || integer>=tile::maximum_start_span || (position && integer<=previous))return false;
+            if(integer<0 || integer>=tile::maximum_start_span || (position && integer<=previous))return lazy_screen_gate("frequency_family",__LINE__);
             const auto start=static_cast<std::size_t>(integer);previous=start;
-            if(geometry.empty())starts.push_back(start);else if(position>=starts.size() || starts[position]!=start)return false;
+            if(geometry.empty())starts.push_back(start);else if(position>=starts.size() || starts[position]!=start)return lazy_screen_gate("frequency_family",__LINE__);
             const auto rate_difference=std::abs(lane.rate-reference.rate);
             const auto origin_difference=std::abs(lane.rate*(reference.origin-lane.origin)+reference.rate*integer);
             item.displacement=std::max(item.displacement,origin_difference+rate_difference*aperture);
         }
-        if(position!=starts.size())return false;
-        if(item.displacement>0 && config.search_arithmetic==SearchArithmetic::fp64)return false;
+        if(position!=starts.size())return lazy_screen_gate("frequency_family",__LINE__);
+        if(item.displacement>0 && config.search_arithmetic==SearchArithmetic::fp64)return lazy_screen_gate("frequency_family",__LINE__);
         item.displacement+=256*std::numeric_limits<long double>::epsilon()*(1+scheduled->complex_geometry.physical_aperture_samples+
             std::abs(reference.origin)+pattern.symbol_samples());
-        if(item.displacement>.25L)return false;
+        item.displacement+=lazy_fhss_coordinate_radius();
+        // Coefficient and mask certificates use the same current-index reserve.
+        item.displacement+=1024*std::numeric_limits<long double>::epsilon()*
+            (1+aperture+std::abs(reference.origin)+source_first+pattern.symbol_samples());
+        if(item.displacement>.25L)return lazy_screen_gate("frequency_family",__LINE__);
         if(!geometry.empty()) {
             const auto& common=geometry.front();const auto& base=common.reference;
             if(reference.origin!=base.origin || reference.rate!=base.rate || reference.phase_lower!=base.phase_lower ||
                reference.anchor.distance(base.anchor)!=0 || range->index!=common.range->index ||
-               range->first!=common.range->first || range->end!=common.range->end)return false;
+               range->first!=common.range->first || range->end!=common.range->end)return lazy_screen_gate("frequency_family",__LINE__);
         }
         // All final target outputs are precharged by parallel preparation. No
         // worker may allocate/grow them, including the failure/direct fallback.
-        if(range->screen.capacity()<starts.size() || range->reference.capacity()<starts.size())return false;
-        geometry.push_back(item);
+        if(range->screen.capacity()<starts.size() || range->reference.capacity()<starts.size())return lazy_screen_gate("frequency_family",__LINE__);
+        geometry.push_back(std::move(item));
     }
     const auto span=starts.back()+1;const auto shape=detail::scheduled_parallel_preparation::shape(span);
     const auto fragment_samples=shape.maximum_fragment;const auto input_samples=tile::add_size(span,fragment_samples-1);
@@ -96,22 +102,33 @@ template<class T> bool lazy_screen_family(std::span<LazyState::DueRange* const> 
     const auto phase=SchedHopCoordinate{scheduled->epoch_sample,0}.add_samples(reference.phase_lower);
     const auto begin=lazy_state()->catalog->boundary(reference,static_cast<long double>(index)*pattern.symbol_samples(),false,cursor);
     const auto central_end=lazy_state()->catalog->boundary(reference,static_cast<long double>(index+1)*pattern.symbol_samples(),false,cursor);
-    if(static_cast<long double>(lazy_history_first())>std::max(0.L,std::ceil(begin)))return false;
-    const auto first_v=static_cast<std::uint64_t>(std::max(0.L,std::floor(begin+shift)-1));
+    if(static_cast<long double>(lazy_history_first())>std::max(0.L,std::ceil(begin)))return lazy_screen_gate("frequency_family",__LINE__);
+    // Fixed PHYSICAL input tiles let concurrent phase families share their
+    // input transforms. Only conservative template padding is added: every
+    // coordinate still uses the original calendar/mask and physical carrier.
+    const auto aligned=[&](std::uint64_t point) {
+        if(!lazy_state()->shared_inputs)return point;
+        const auto physical=static_cast<long double>(point)-shift;
+        return static_cast<std::uint64_t>(std::max(0.L,
+            std::floor(physical/fragment_samples)*fragment_samples+shift));
+    };
+    const auto first_v=aligned(static_cast<std::uint64_t>(std::max(0.L,std::floor(begin+shift)-1)));
     const auto until=static_cast<std::uint64_t>(std::max(0.L,std::ceil(central_end+shift)+2));
     const auto amplitude=std::sqrt(2*nominal_signal_power)*outer_dsss_transmit_gain(config);
-    const auto qmax=cert::up(pattern_pcm_radius_limit/amplitude);
+    const auto qmax=cert::mul(cert::up(pattern_pcm_radius_limit/amplitude),detail::scheduled_cold_colored::smooth_gain_upper());
     static const auto pulse_slope=[] {double value=0;for(unsigned i=0;i<2048;++i)value=std::max(value,
         std::abs(pattern_pulse((i+1)/256.)-pattern_pulse(i/256.))*256);return std::nextafter(value*1.000000000001,std::numeric_limits<double>::infinity());}();
-    const auto gate_slope=cert::divide(1.875,std::max(1.,std::ceil(config.sample_rate*config.scheduled_hopping->ramp_seconds)));
-    const auto jump=cert::up(4*std::abs(pattern_pulse(8.)));
+    const auto gate_slope=lazy_screen_gate_slope();
+    const auto jump=cert::mul(cert::up(4*std::abs(pattern_pulse(8.))),detail::scheduled_cold_colored::smooth_gain_upper());
     lazy_capture_summary();const auto maximum=lazy_state()->summary_maximum,union_energy=lazy_state()->summary_union_energy;
     pattern.set_stream_phase_samples(reference.phase_lower);
     require(index<=std::numeric_limits<std::uint64_t>::max()/pattern.chips_per_symbol(),"implicit family template chip overflow");
     const auto chip_first=index*pattern.chips_per_symbol();pattern.prepare_symbol(chip_first,stop);
     detail::scheduled_source_samples::Reader source_samples(config,pattern,chip_first,reference.rate);
-    const auto metadata_bytes=[&] {return tile::add_size(tile::helper_reservation,tile::add_size(
-        tile::multiply_size(geometry.capacity(),sizeof(Geometry)),tile::multiply_size(starts.capacity(),sizeof(std::size_t))));};
+    const auto metadata_bytes=[&] {auto bytes=tile::add_size(tile::helper_reservation,tile::add_size(
+        tile::multiply_size(geometry.capacity(),sizeof(Geometry)),tile::multiply_size(starts.capacity(),sizeof(std::size_t))));
+        for(const auto& g:geometry)if(g.residual_program)bytes=tile::add_size(bytes,g.residual_program->working_bytes());return bytes;};
+    ResidualPrefixWork residual_work;
     using Piece=typename LazyState::template TemplatePiece<T>;
     const auto piece_bound=tile::add_size(sizeof(Piece),tile::add_size(tile::multiply_size(fragment_samples,
         sizeof(std::array<Complex,2>)+sizeof(long double)+sizeof(double)+sizeof(std::uint64_t)+3),
@@ -155,7 +172,7 @@ template<class T> bool lazy_screen_family(std::span<LazyState::DueRange* const> 
             (lazy_colored_requested()?tile::multiply_size(count,lazy_colored_scratch(starts.size(),fragment_samples)):0);
         while(tile::add_size(tile::add_size(base_bound,chain_bound()),tile::multiply_size(count,runtime::accumulator_bytes(plan,starts.size(),native_accumulation)))>available()) {
             if(use_moments){use_moments=false;continue;}
-            if(count==1)return false;--count;coarse=choose_coarse();
+            if(count==1)return lazy_screen_gate("frequency_family",__LINE__);--count;coarse=choose_coarse();
         }
         std::vector<std::unique_ptr<tile::Accumulator<T>>> accumulators;accumulators.reserve(count);
         std::vector<float> pcm(input_samples);std::vector<Complex> oscillator(input_samples),target_oscillator;
@@ -164,6 +181,8 @@ template<class T> bool lazy_screen_family(std::span<LazyState::DueRange* const> 
         std::vector<recurrence::Segment> segments;segments.reserve(run_bound);
         std::unique_ptr<Piece> temporary;
         std::unique_ptr<fusion::MomentInput<T>> moment;
+        std::shared_ptr<const detail::scheduled_shared_input::Pool::Entry> shared_moment;
+        const fusion::MomentInput<T>* moment_view=nullptr;
         std::unique_ptr<tile::PreparedInput<T>> original_input;
         std::unique_ptr<fusion::ResolvedInput<T>> resolved;
         std::vector<std::unique_ptr<detail::scheduled_cold_colored::RuntimeDirect>> colored(count);
@@ -201,6 +220,11 @@ template<class T> bool lazy_screen_family(std::span<LazyState::DueRange* const> 
             auto& range=*geometry[t].range;
             const auto exact=lazy_colored_eligible(geometry[t].reference,range,starts);
             const auto fractional=!exact && lazy_colored_proxy_eligible(geometry[t].reference,range,starts,geometry[t].displacement);
+            geometry[t].exact_observation_mask=lazy_screen_exact_observation_mask(geometry[t].reference,
+                range.index,geometry[t].aperture,geometry[t].displacement,exact);
+            range.reference.resize(starts.size());
+            for(auto& error:range.reference)error.conditioned_proxy_dot_upper=
+                lazy_residual_prefix_requested() && geometry[t].exact_observation_mask?0:cert::infinity;
             if(range.colored.capacity()<starts.size() || (!exact && !fractional))continue;
             auto& selection=colored_selection[t-next];selection.starts.reserve(starts.size());selection.positions.reserve(starts.size());
             lazy_colored_select(range,starts,selection.starts,selection.positions);check(live());
@@ -214,7 +238,7 @@ template<class T> bool lazy_screen_family(std::span<LazyState::DueRange* const> 
         }
         for(std::size_t t=0;t<count;++t) {
             const auto reserve=tile::add_size(piece_bound,chain_bound());const auto room=remaining();
-            if(room<=reserve)return false;
+            if(room<=reserve)return lazy_screen_gate("frequency_family",__LINE__);
             accumulators.push_back(std::make_unique<tile::Accumulator<T>>(plan,0,starts,room-reserve,stop,lazy_state()->certificate_profile.enabled,native_accumulation));check(live());
         }
         runtime::add_count(cost.groups,1);if(use_moments)runtime::add_count(cost.moment_groups,1);
@@ -227,7 +251,7 @@ template<class T> bool lazy_screen_family(std::span<LazyState::DueRange* const> 
             const auto real=static_cast<long double>(v)-shift;const auto tick=phase.add_signed((real-reference.origin)*reference.rate);
             const auto location=execution.map.locate(tick);
             if(!location.active){const auto next_tick=execution.map.source_to_physical(location.source,false);
-                const auto target=static_cast<std::uint64_t>(std::max(0.L,std::floor(reference.origin+next_tick.distance(phase)/reference.rate+shift)-1));
+                const auto target=aligned(static_cast<std::uint64_t>(std::max(0.L,std::floor(reference.origin+next_tick.distance(phase)/reference.rate+shift)-1)));
                 if(target>v+1){v=std::min(target,until);continue;}}
             const auto length=static_cast<std::size_t>(std::min<std::uint64_t>(fragment_samples,until-v));
             const typename LazyState::TemplateKey key{&plan,reference.origin,reference.rate,reference.phase_lower,index,v,shift,length};
@@ -241,7 +265,7 @@ template<class T> bool lazy_screen_family(std::span<LazyState::DueRange* const> 
                 for(std::size_t i=0;i<length;++i) {
                     const auto p=static_cast<long double>(v+i)-shift;const auto t=phase.add_signed((p-reference.origin)*reference.rate);
                     const auto l=execution.map.locate(t);const auto source=l.source.distance(reference.anchor)-static_cast<long double>(index)*pattern.symbol_samples();
-                    const auto gain=l.active?SchedHopSourceMap::gain(l,t):0.;piece->source[i]=source;piece->gain[i]=gain;piece->active[i]=l.active;piece->frame[i]=l.frame_index;
+                    const auto gain=lazy_screen_gain(l,t);piece->source[i]=source;piece->gain[i]=gain;piece->active[i]=l.active;piece->frame[i]=l.frame_index;
                     if(gain>0 && source>=0 && source<pattern.symbol_samples()) {
                         const auto q=source_samples.value(source,stop);piece->mask[i]=1;
                         for(unsigned bit=0;bit<2;++bit)piece->rows[i][bit]=gain*pattern_limit_pcm(amplitude*q[bit])/amplitude;
@@ -257,12 +281,27 @@ template<class T> bool lazy_screen_family(std::span<LazyState::DueRange* const> 
                     std::span<const std::uint8_t>(piece->mask).first(length),std::span<std::uint64_t>(colored_owners).first(length)))
                     for(auto& guard:colored)guard.reset();
             }
+            // Residual programs are bounded per current frequency group. They
+            // share one input prefix below; no per-target PCM copies are made.
+            using ResidualRuns=detail::scheduled_residual_prefix::ResidualRuns;
+            for(std::size_t t=next;t<next+count;++t){auto& g=geometry[t];g.residual_program.reset();
+                if(lazy_residual_prefix_requested() && g.exact_observation_mask) {
+                    const auto charge=ResidualRuns::reservation(256);
+                    if(charge<=remaining())try{g.residual_program=std::make_unique<ResidualRuns>(length,256,charge);check(live());}
+                        catch(const std::bad_alloc&){}catch(const detail::scheduled_residual_prefix::Error&){}
+                    if(!g.residual_program){++residual_work.allocation_fallbacks;for(auto& r:g.range->reference)r.conditioned_proxy_dot_upper=cert::infinity;}
+                }
+            }
             for(std::size_t i=0;i<length;++i) {
                 const auto source=piece->source[i];const auto gain=piece->gain[i];const bool active=piece->active[i];
+                // Source rows are shared by every fine-frequency target. A
+                // certified native norm bounds BOTH independent alternatives;
+                // compute it once, before their separate residual allowances.
+                const auto row_norm=std::max(cert::norm(piece->rows[i][0]),cert::norm(piece->rows[i][1]));
                 if(active && piece->frame[i]!=last_group){++groups;last_group=piece->frame[i];}
                 for(std::size_t t=next;t<next+count;++t) {
                     auto& g=geometry[t];const auto displacement=g.displacement;
-                    const auto smooth=cert::mul(static_cast<double>(displacement),cert::add(cert::divide(34*pulse_slope,pattern.chip_samples()),cert::mul(gate_slope,qmax)));
+                    const auto smooth=cert::mul(static_cast<double>(displacement),cert::add(cert::mul(cert::divide(34*pulse_slope,pattern.chip_samples()),detail::scheduled_cold_colored::smooth_gain_upper()),cert::mul(gate_slope,qmax)));
                     double residual=0;
                     if(gain>0 && source>=0 && source<pattern.symbol_samples()) {
                         residual=smooth;const auto edge=source/pattern.chip_samples()-.5L;
@@ -276,9 +315,13 @@ template<class T> bool lazy_screen_family(std::span<LazyState::DueRange* const> 
                         residual=cert::mul(static_cast<double>(displacement),cert::mul(gate_slope,qmax));
                         if(gain>0 && std::min(std::abs(source),std::abs(source-pattern.symbol_samples()))<=displacement+1e-10L)residual=cert::add(residual,qmax);
                     }
+                    // This target has the exact observation-mask proof:
+                    // mask0 contributes neither original nor proxy evidence.
+                    // All usable pulse/window jumps retain their residual.
+                    if(g.residual_program)g.residual_program->append(piece->mask[i]?residual:0);
                     g.residual_square=cert::add(g.residual_square,cert::mul(residual,residual));
                     g.residual_l1=cert::add(g.residual_l1,residual);
-                    g.residual_gram=cert::add(g.residual_gram,cert::add(cert::mul(2*qmax,residual),cert::mul(residual,residual)));
+                    g.residual_gram=cert::add(g.residual_gram,cert::add(cert::mul(2*row_norm,residual),cert::mul(residual,residual)));
                 }
             }
             rx_cpu::Scope cpu_mix(rx_cpu::Stage::mixing);
@@ -335,13 +378,35 @@ template<class T> bool lazy_screen_family(std::span<LazyState::DueRange* const> 
                     require(cert::norm(o)<=2,"original carrier magnitude exceeded family contract");o*=step;}
             },false); // one original PCM copy, no redundant energy-prefix rebuild
             empty_until(input_samples);require(runs.size()==descriptor_count,"implicit family fence identity changed during copy");check(live());
+            bool any_residual=false;
+            for(std::size_t t=next;t<next+count;++t)if(geometry[t].residual_program){
+                if(!geometry[t].residual_program->seal()){geometry[t].residual_program.reset();
+                    for(auto& r:geometry[t].range->reference)r.conditioned_proxy_dot_upper=cert::infinity;}
+                else any_residual=true;
+            }
+            if(any_residual)lazy_condition_residual_fragment(execution,count,[&](std::size_t t){return std::pair{
+                std::span<cert::ReferenceErrors>(geometry[next+t].range->reference),geometry[next+t].residual_program.get()};},
+                starts,pcm,observed,input_first,v,remaining(),residual_work,stop);
+            for(std::size_t t=next;t<next+count;++t)geometry[t].residual_program.reset();check(live());
             const auto first_observed=std::find_if(runs.begin(),runs.end(),[](const auto& run){return run.observed;});
             const bool any_observed=first_observed!=runs.end();
             const tile::Input coarse_input{pcm,oscillator,observed,v};
             if(use_moments) {
-                moment=std::make_unique<fusion::MomentInput<T>>(plan,coarse_input,3,remaining(),stop);check(live());
-                runtime::add_count(execution.input_transforms,moment->work.shared_forward_transforms);
-                runtime::add_count(cost.moment_transforms,moment->work.shared_forward_transforms);
+                bool built=true;
+                if constexpr(std::is_same_v<T,float>)if(lazy_state()->shared_inputs) {
+                    const auto negative=v<shift;
+                    const detail::scheduled_shared_input::Pool::Key input_key{
+                        negative?shift-v:v-shift,v,std::bit_cast<std::uint64_t>(coarse_frequency),
+                        lazy_state()->capture_end,lazy_history_first(),config.sample_rate,
+                        plan.shape.start_span,plan.shape.maximum_fragment,negative};
+                    auto borrowed=lazy_state()->shared_inputs->borrow(input_key,plan,coarse_input,stop);
+                    if(borrowed.entry){built=borrowed.built;shared_moment=std::move(borrowed.entry);
+                        moment_view=shared_moment->moment.get();}
+                }
+                if(!moment_view){moment=std::make_unique<fusion::MomentInput<T>>(plan,coarse_input,3,remaining(),stop);moment_view=moment.get();}
+                check(live());
+                if(built){runtime::add_count(execution.input_transforms,moment_view->work.shared_forward_transforms);
+                    runtime::add_count(cost.moment_transforms,moment_view->work.shared_forward_transforms);}
             }
             cpu_mix.finish();
             for(std::size_t t=next;t<next+count;++t) {
@@ -354,15 +419,15 @@ template<class T> bool lazy_screen_family(std::span<LazyState::DueRange* const> 
                 // Synthesized moments are not physical carrier samples for a
                 // chip fit. Rebuild the exact target from the same original
                 // raw reset descriptors when this target has a colored proof.
-                if(moment && (colored[t-next] || colored_proxy[t-next]) && t!=coarse) {
+                if(moment_view && (colored[t-next] || colored_proxy[t-next]) && t!=coarse) {
                     if(target_oscillator.capacity()<input_samples)
                         check(tile::add_size(live(),tile::multiply_size(input_samples,sizeof(Complex))));
                     target_oscillator.assign(input_samples,Complex{});check(live());
                     for(const auto& run:runs)if(run.observed){auto o=seed(run);
-                        if(recurrence::oscillator_magnitudes(o,target_step,run.end-run.begin).maximum>2)return false;
+                        if(recurrence::oscillator_magnitudes(o,target_step,run.end-run.begin).maximum>2)return lazy_screen_gate("frequency_family",__LINE__);
                         for(auto i=run.begin;i<run.end;++i){target_oscillator[i]=o;o*=target_step;}}
                 }
-                if(moment) {
+                if(moment_view) {
                     segments.clear();for(const auto& run:runs) {
                         require(segments.size()<segments.capacity(),"implicit family descriptor capacity changed");
                         const auto target_seed=run.observed?seed(run):Complex{};
@@ -371,18 +436,19 @@ template<class T> bool lazy_screen_family(std::span<LazyState::DueRange* const> 
                         // This uses its actual seed/step and IEEE operation
                         // bound, without assuming an accuracy bound for polar.
                         if(run.observed && recurrence::oscillator_magnitudes(target_seed,target_step,
-                            run.end-run.begin).maximum>2)return false;
+                            run.end-run.begin).maximum>2)return lazy_screen_gate("frequency_family",__LINE__);
                         segments.push_back({run.begin,run.end,run.coarse_seed,target_seed,run.coarse_step,
                             run.observed?target_step:Complex{},run.block_first,run.block_offset});
                     }check(live());
                     const auto delta=frequency-coarse_frequency;
-                    auto coefficients=any_observed?recurrence::anchored_coefficients(*moment,delta,config.sample_rate,0,
+                    auto coefficients=any_observed?recurrence::anchored_coefficients(*moment_view,delta,config.sample_rate,0,
                         first_observed->begin,first_observed->coarse_seed,seed(*first_observed)):
-                        fusion::coefficients(*moment,delta,config.sample_rate,0);
-                    const tile::Input target{pcm,t==coarse?std::span<const Complex>(oscillator):std::span<const Complex>{},observed,v};
-                    const auto proof=recurrence::certify(*moment,coefficients,target,segments,{true},stop);
-                    if(!proof.remainder.valid || !runtime::capture_origin(proof.capture_origin,v,shift,any_observed))return false;
-                    resolved=std::make_unique<fusion::ResolvedInput<T>>(*moment,coefficients,target,proof.remainder,remaining(),stop);check(live());
+                        fusion::coefficients(*moment_view,delta,config.sample_rate,0);
+                    const auto& original=moment_view->base.original;
+                    const tile::Input target{original.pcm,t==coarse?original.oscillator:std::span<const Complex>{},original.observed,v};
+                    const auto proof=recurrence::certify(*moment_view,coefficients,target,segments,{true},stop);
+                    if(!proof.remainder.valid || !runtime::capture_origin(proof.capture_origin,v,shift,any_observed))return lazy_screen_gate("frequency_family",__LINE__);
+                    resolved=std::make_unique<fusion::ResolvedInput<T>>(*moment_view,coefficients,target,proof.remainder,remaining(),stop);check(live());
                     accumulators[t-next]->add(*resolved,*piece->prepared,stop);
                     runtime::add_count(cost.synthesized_products,resolved->work.synthesized_products);
                     runtime::add_count(cost.recurrence_segments,proof.work.segments);resolved.reset();check(live());
@@ -392,7 +458,7 @@ template<class T> bool lazy_screen_family(std::span<LazyState::DueRange* const> 
                             check(tile::add_size(live(),tile::multiply_size(input_samples,sizeof(Complex))));
                         target_oscillator.assign(input_samples,Complex{});check(live());
                         for(const auto& run:runs)if(run.observed){auto o=seed(run);
-                            if(recurrence::oscillator_magnitudes(o,target_step,run.end-run.begin).maximum>2)return false;
+                            if(recurrence::oscillator_magnitudes(o,target_step,run.end-run.begin).maximum>2)return lazy_screen_gate("frequency_family",__LINE__);
                             for(auto i=run.begin;i<run.end;++i){target_oscillator[i]=o;o*=target_step;}}
                     }
                     const tile::Input target{pcm,t==coarse?std::span<const Complex>(oscillator):std::span<const Complex>(target_oscillator),observed,v};
@@ -419,7 +485,7 @@ template<class T> bool lazy_screen_family(std::span<LazyState::DueRange* const> 
                     }
                 }
             }
-            moment.reset();check(live());runtime::add_count(cost.fragments,1);
+            moment_view=nullptr;moment.reset();shared_moment.reset();check(live());runtime::add_count(cost.fragments,1);
             if(temporary && templates.size()<tile::maximum_fragments) {
                 // No extra private spectrum or backing copy. Publication moves
                 // the same immutable owner after all borrowers have finished.
@@ -455,17 +521,21 @@ template<class T> bool lazy_screen_family(std::span<LazyState::DueRange* const> 
                 range.colored_sample_pairs=colored[t-next]?colored[t-next]->sample_pairs():colored_proxy[t-next]->sample_pairs();
                 range.colored_selected=summaries.size();
             }
-            range.screen_first=range.first;range.mask_difference=4*groups+8;range.maximum=maximum;
+            range.screen_first=range.first;range.mask_difference=lazy_screen_mask_difference(groups);range.maximum=maximum;
             range.proxy_residual_square=g.residual_square;range.proxy_residual_l1=g.residual_l1;range.proxy_residual_gram=g.residual_gram;
             for(std::size_t j=0;j<starts.size();++j) {
+                if(range.mask_difference>std::numeric_limits<std::uint64_t>::max()-range.screen[j].fits[0].count)
+                    return lazy_screen_gate("frequency_family",__LINE__);
                 const auto n=range.screen[j].fits[0].count+range.mask_difference;
-                if(n>(std::numeric_limits<std::size_t>::max()-128*block_samples-128)/128)return false;
+                if(n>(std::numeric_limits<std::size_t>::max()-128*block_samples-128)/128)return lazy_screen_gate("frequency_family",__LINE__);
                 const auto rho=cert::add(cert::gamma(128*static_cast<std::size_t>(n)+128*block_samples+128,std::numeric_limits<double>::epsilon()/2),
                     cert::mul(4*block_samples,cert::gamma(8*block_samples+8,std::numeric_limits<double>::epsilon()/2)));
                 const auto dot=cert::mul(8*rho*qmax,cert::root(cert::mul(static_cast<double>(n),union_energy)));
                 const auto gram=cert::mul(32*rho*n,qmax*qmax);
-                range.reference[j]={dot,gram,cert::mul(4*rho,union_energy),n>2?1e-8/(.5*static_cast<double>(n-2)):0.,true};
+                const auto conditioned=range.reference[j].conditioned_proxy_dot_upper;
+                range.reference[j]={dot,gram,cert::mul(4*rho,union_energy),n>2?1e-8/(.5*static_cast<double>(n-2)):0.,true,conditioned};
             }
+            range.exact_observation_mask=g.exact_observation_mask;
             if constexpr(std::is_same_v<T,float>)++execution.fp32_ranges;else ++execution.fp64_ranges;
             if(g.displacement>1e-9L){++execution.proxy_ranges;range.certificate_cohort=certdiag::cohort<T>(true);}
             else range.certificate_cohort=certdiag::cohort<T>(false);
@@ -476,5 +546,5 @@ template<class T> bool lazy_screen_family(std::span<LazyState::DueRange* const> 
     }
     cancelled(stop);runtime::publish(execution,cost);
     if(lazy_state()->certificate_profile.enabled)execution.certificate_preparation.merge(execution.certificate_pending);
-    reset.complete=true;return true;
+    lazy_trace_residual_prefix(residual_work,geometry.size());reset.complete=true;return true;
 }

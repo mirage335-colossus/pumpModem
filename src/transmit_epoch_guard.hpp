@@ -13,7 +13,7 @@ namespace datapump::detail {
 // is conservative. Never infer exposure from the nominal payload cursor alone.
 inline std::uint64_t exposed_transmit_epoch(const modem::Config& config,
         std::uint64_t epoch, std::uint64_t total_samples, std::uint64_t emitted) {
-    if(config.scheduled_hopping && config.scheduled_hopping->enabled())
+    if(modem::scheduled_bursts(config))
         throw Error("scheduled key exposure requires logical source sample counts");
     const auto training=modem::training_sample_count(config);
     const auto padding=modem::pattern_pulse_padding_samples(config);
@@ -76,7 +76,7 @@ inline std::uint64_t exposed_transmit_source_epoch(const modem::Config& config,
 // Waiting is conservative about preparation lead; no receive timestamp chooses it.
 inline double transmit_epoch_lock_seconds(const modem::Config& config,
         std::uint64_t used_epoch, double now) {
-    if(config.scheduled_hopping && config.scheduled_hopping->enabled()) {
+    if(modem::scheduled_bursts(config)) {
         if(!config.data_key)throw Error("scheduled key lock requires its transmission key");
         if(!std::isfinite(now)||now<0)throw Error("invalid clock for scheduled key lock");
         const auto next=modem::sched_hop_detail::add(used_epoch,1);

@@ -348,7 +348,7 @@ struct Controller::Impl {
         for(const auto* value:{"0.1ms","1ms","10ms"})f(UiField::clock_accuracy).options.push_back({value,value});
         for(const auto* value:{"1ms","10ms","20ms","75ms","150ms","400ms"})f(UiField::clock_region).options.push_back({value,value});
         for(const auto* value:{"0ms","1ms","2ms","3ms","4ms","5ms","2564ms"})f(UiField::clock_offset).options.push_back({value,value});
-        for(const auto* value:{"0ms","1ms","3ms","10ms","20ms","30ms","50ms","100ms","200ms","500ms"})
+        for(const auto* value:{"0ms","1ms","3ms","10ms","20ms","30ms","50ms","70ms","100ms","200ms","500ms"})
             f(UiField::audio_error).options.push_back({value,value});
         f(UiField::dsss_factor).options={{"10","10x"},{"100","100x"},{"1000","1000x"}};
         f(UiField::dsss_factor).selected="10";
@@ -365,11 +365,11 @@ struct Controller::Impl {
             f(UiField::receiver_cpu_budget).options.push_back({value,std::string(value)+" s / 1 s"});
         f(UiField::fhss).options={{"off","Off"},{"fake-fcc","Fake: FCC"},{"fake-eu","Fake: EU"}};
         f(UiField::fhss).selected="off";
-        f(UiField::sched_hop).options={{"disabled","disabled"},{"10","10"},{"100","100"},{"1k","1k"},{"10k","10k"}};
-        f(UiField::sched_hop).selected="disabled";
-        for(const auto* id:{"1","2","5","10","20","50","100","200","500","1000","2000","5000","10000"})
+        f(UiField::sched_hop).options={{"0","0"},{"3","3"},{"5","5"}};
+        f(UiField::sched_hop).selected="0";
+        for(const auto* id:{"0","3"})
             f(UiField::sched_hop_dilution).options.push_back({id,id});
-        f(UiField::sched_hop_dilution).selected="1";
+        f(UiField::sched_hop_dilution).selected="0";
         f(UiField::sched_frequency_search).options={{"1","1x"},{"2","2x"},{"4","4x"},{"8","8x"},{"16","16x"},{"32","32x"}};
         f(UiField::sched_frequency_search).selected="1";
         f(UiField::rf_oscillator).options.push_back({"baseband-clock","Baseband clock"});
@@ -638,8 +638,18 @@ struct Controller::Impl {
             return hint;
         } catch(const std::exception&) {return {};}
     }
+    static bool shared_hop_calendar(const modem::Config& config) {
+        return config.fake_hopping || (config.scheduled_hopping&&config.scheduled_hopping->enabled());
+    }
     simulation::ReceiverWorkMode receiver_work_mode() const {
         if(settings.simulation)return simulation::ReceiverWorkMode::sampled_simulation;
+        if(shared_hop_calendar(settings.transfer.modem)) {
+            if(timing_advice.dated())return simulation::ReceiverWorkMode::hardware_timing_model;
+            if((snapshot.clock_timing_fallback&&!snapshot.receiver_timing)||
+               (snapshot.samples_received&&snapshot.clock_timing_quality==audio::TimingQuality::unavailable))
+                return simulation::ReceiverWorkMode::hardware_fallback;
+            return simulation::ReceiverWorkMode::hardware_calendar_model;
+        }
         return timing_advice.qualified()?simulation::ReceiverWorkMode::hardware_timing_model:
             simulation::ReceiverWorkMode::hardware_fallback;
     }
@@ -819,9 +829,11 @@ struct Controller::Impl {
             const auto burst_multiplier=load&&load->sched_hop?*load->sched_hop:
                 modem::sched_hop_multiplier(f(UiField::sched_hop).selected);
             const auto dilution=load&&load->sched_hop_dilution?*load->sched_hop_dilution:
-                static_cast<unsigned>(number(f(UiField::sched_hop_dilution).selected,"Sched_Hop dilution"));
-            if(!dilution||dilution>10000||(burst_multiplier>1&&dilution>burst_multiplier))
-                throw Error("Sched_Hop dilution must be 1..10000 and cannot exceed its enabled multiplier");
+                modem::sched_hop_active_hops(f(UiField::sched_hop_dilution).selected);
+            (void)modem::sched_hop_id(burst_multiplier);
+            (void)modem::sched_hop_dilution_id(dilution);
+            if(burst_multiplier>1&&dilution>burst_multiplier)
+                throw Error("Sched_Hop active count cannot exceed its multiplier");
             const auto frequency_multiplier=load&&load->sched_frequency_search?*load->sched_frequency_search:
                 number(f(UiField::sched_frequency_search).selected,"Scheduled frequency search");
             if(frequency_multiplier!=1&&frequency_multiplier!=2&&frequency_multiplier!=4&&frequency_multiplier!=8&&
@@ -951,6 +963,19 @@ struct Controller::Impl {
                 input.channel.frequency_offset_hz=effects.frequency_offset_hz;
                 input.channel.phase_noise_degrees_per_sqrt_second=effects.phase_noise_degrees_per_sqrt_second;
                 fake_planning(input,fhss,tuning::oscillator_model(rf_oscillator),shift_oscillator_id=="baseband-clock",&next_fhss_list);
+                if(!next.simulation&&shared_hop_calendar(input.options.modem)) {
+                    input.receiver_work_mode=simulation::ReceiverWorkMode::hardware_calendar_model;
+                    // Reuse observed timing only for the unchanged physical
+                    // route. Advice stores a nominal-centred fractional rate
+                    // envelope, so its period rescales with the proposed DSP Fs.
+                    if(!settings.simulation&&next.device==settings.device&&next.exclusive==settings.exclusive&&
+                       shared_hop_calendar(settings.transfer.modem)) {
+                        input.receiver_work_mode=receiver_work_mode();
+                        input.receiver_timing_model=receiver_timing_model();
+                        if(input.receiver_timing_model.capture_seconds_per_frame)
+                            input.receiver_timing_model.capture_seconds_per_frame=1./input.options.modem.sample_rate;
+                    }
+                }
                 const auto fitted=planner::nearest_fit_target(input,companions,receive_banks(next));
                 if(!fitted)throw Error("No clock/RAM fit found for this target.");
                 return *fitted;
@@ -1018,7 +1043,7 @@ struct Controller::Impl {
             oscillator_detail.str({});oscillator_detail.clear();
             oscillator_detail<<std::setprecision(6)<<"Clock mismatch "<<effects.clock_error_ppm<<" ppm | Phase diffusion "
                 <<effects.phase_noise_degrees_per_sqrt_second<<" deg / sqrt(s)";
-            const auto search=modem::oscillator_pattern_search(next.transfer.modem,next.transfer.clock_sync?
+            const auto search=modem::oscillator_pattern_search(next.transfer.modem,transfer::effective_clock_sync(next.transfer)?
                 modem::utc_transmit_rate_limit(next.transfer.modem):0);
             std::ostringstream search_detail;
             search_detail<<std::setprecision(6)<<"On-air carrier "<<effects.physical_rf_hz<<" Hz | Frequency +/-"<<search.frequency.half_width_hz
@@ -1027,7 +1052,7 @@ struct Controller::Impl {
             if(search.limited)search_detail<<" | LIMITED COVERAGE";
             if(const auto allowance=modem::waveform_gate_bandwidth_allowance_hz(next.transfer.modem);allowance>0)
                 search_detail<<" | Ramp bandwidth allowance +"<<allowance<<" Hz";
-            if(next.transfer.clock_sync) {
+            if(transfer::effective_clock_sync(next.transfer)) {
                 if(search.transmit_rate_correction>0)search_detail<<" | UTC steering covered +/-"<<search.transmit_rate_correction*1e6<<" ppm";
                 else search_detail<<" | UTC rate correction unavailable; original bank retained";
             }
@@ -1040,7 +1065,7 @@ struct Controller::Impl {
                     tuning::receive_profiles(next.transfer.modem,targets.values,next.transfer.receive_pattern_mode,keyed):
                     std::vector<modem::Config>{next.transfer.modem};
                 for(const auto& profile:profiles) {
-                    const auto bank=modem::oscillator_pattern_search(profile,next.transfer.clock_sync?
+                    const auto bank=modem::oscillator_pattern_search(profile,transfer::effective_clock_sync(next.transfer)?
                         modem::utc_transmit_rate_limit(profile):0);
                     // Include the complete requested domain for alternate
                     // detectors; finite coherent-bank limits are reported by
@@ -1098,12 +1123,7 @@ struct Controller::Impl {
                 f(UiField::fhss).selected=fhss;
                 f(UiField::sched_hop).selected=modem::sched_hop_id(burst_multiplier);
                 f(UiField::sched_frequency_search).selected=planner_number(frequency_multiplier);
-                f(UiField::sched_hop_dilution).selected=std::to_string(dilution);
-                auto& dilution_options=f(UiField::sched_hop_dilution).options;
-                if(std::none_of(dilution_options.begin(),dilution_options.end(),[&](const auto& option){return option.id==std::to_string(dilution);})) {
-                    dilution_options.push_back({std::to_string(dilution),std::to_string(dilution)});
-                    std::sort(dilution_options.begin(),dilution_options.end(),[](const auto& a,const auto& b){return std::stoul(a.id)<std::stoul(b.id);});
-                }
+                f(UiField::sched_hop_dilution).selected=modem::sched_hop_dilution_id(dilution);
                 fhss_list=next_fhss_list;fhss_list_error.clear();
                 f(UiField::fhss_list).text=fhss::list_text(fhss_list,'\n');
                 if(next_tone)f(UiField::key).selected="none";
@@ -1259,7 +1279,7 @@ struct Controller::Impl {
         values.receiver_cpu_budget=settings.transfer.modem.receiver_cpu_budget;
         values.full_duplex=settings.full_duplex;
         values.fhss=f(UiField::fhss).selected;
-        values.sched_hop_dilution=static_cast<unsigned>(number(f(UiField::sched_hop_dilution).selected,"Sched_Hop dilution"));
+        values.sched_hop_dilution=modem::sched_hop_active_hops(f(UiField::sched_hop_dilution).selected);
         values.sched_hop=modem::sched_hop_multiplier(f(UiField::sched_hop).selected);
         values.sched_frequency_search=number(f(UiField::sched_frequency_search).selected,"Scheduled frequency search");
         if(!fhss_list.empty())values.fhss_list=fhss::list_text(fhss_list);
@@ -1570,12 +1590,12 @@ struct Controller::Impl {
         f(UiField::fhss).enabled=!busy&&encrypted()&&selected_key();
         f(UiField::sched_hop).enabled=!busy&&encrypted()&&selected_key();
         f(UiField::sched_frequency_search).enabled=f(UiField::sched_hop).enabled&&
-            f(UiField::sched_hop).selected!="disabled";
+            f(UiField::sched_hop).selected!="0";
         f(UiField::sched_hop_dilution).enabled=f(UiField::sched_frequency_search).enabled;
         for(auto& option:f(UiField::sched_hop_dilution).options)option.enabled=
-            f(UiField::sched_hop).selected!="disabled"&&number(option.id,"Sched_Hop dilution")<=modem::sched_hop_multiplier(f(UiField::sched_hop).selected);
-        f(UiField::sched_hop).display_text=!encrypted()&&f(UiField::sched_hop).selected!="disabled"?
-            "disabled · key required":"";
+            f(UiField::sched_hop).selected!="0"&&modem::sched_hop_active_hops(option.id)<=modem::sched_hop_multiplier(f(UiField::sched_hop).selected);
+        f(UiField::sched_hop).display_text=!encrypted()&&f(UiField::sched_hop).selected!="0"?
+            "0 · key required":"";
         f(UiField::dsss_factor).display_text=!encrypted()&&f(UiField::dsss_version).selected!="off"?f(UiField::dsss_factor).selected+"x (key needed)":"";
         f(UiField::dsss_version).display_text=!encrypted()?"Off · encryption key required":
             f(UiField::dsss_version).selected=="legacy"?"Legacy (diagnostic)":"";
@@ -1834,7 +1854,7 @@ struct Controller::Impl {
                         fields.add("schedule_multiplier",result.key_settings->sched_hop.value_or(
                             modem::sched_hop_multiplier(f(UiField::sched_hop).selected)));
                         fields.add("schedule_active_hops",result.key_settings->sched_hop_dilution.value_or(
-                            static_cast<unsigned>(number(f(UiField::sched_hop_dilution).selected,"Sched_Hop dilution"))));
+                            modem::sched_hop_active_hops(f(UiField::sched_hop_dilution).selected)));
                         fields.add("reason",error.what());
                     });
                     key_failed=true;
@@ -1928,10 +1948,12 @@ struct Controller::Impl {
         }
     }
     void accept_snapshot(live::Snapshot next) {
-        const auto observation=!settings.simulation&&next.clock_window_modeled&&!next.clock_timing_fallback?
+        const bool calendar=shared_hop_calendar(settings.transfer.modem);
+        const auto observation=!settings.simulation&&
+            (calendar||(next.clock_window_modeled&&!next.clock_timing_fallback))?
             next.receiver_timing:std::nullopt;
         if(timing_advice.observe(observation,settings.transfer.modem.sample_rate,
-                                 clock_sync::audio_lag_radius(settings.transfer.audio_timing_error_seconds),Clock::now())) {
+                                 clock_sync::audio_lag_radius(settings.transfer.audio_timing_error_seconds),Clock::now(),calendar)) {
             // Only a changed conservative work envelope invalidates advice.
             // Capture's original timing model and admission remain untouched.
             ++advice_revision;planner_model.reset();
@@ -1989,12 +2011,18 @@ struct Controller::Impl {
         else if(next.hardware_sample_rate) diagnostics<<" | Hardware "<<next.hardware_sample_rate/1000.0<<" kHz";
         diagnostics<<" | DSP "<<settings.transfer.modem.sample_rate<<" Hz | Carrier "<<std::defaultfloat<<std::setprecision(6)<<settings.transfer.modem.carrier_hz+settings.transfer.modem.oscillator_search->rf_shift_hz<<" Hz";
         if(settings.transfer.modem.oscillator_search->rf_shift_hz>0)diagnostics<<" | Stream "<<settings.transfer.modem.carrier_hz<<" Hz";
-        if(settings.transfer.clock_sync && !next.simulation) {
-            if(next.clock_timing_fallback)diagnostics<<" | UTC timing fallback; see status";
+        if((settings.transfer.clock_sync||shared_hop_calendar(settings.transfer.modem))&&!next.simulation) {
+            if(next.clock_timing_fallback)diagnostics<<(shared_hop_calendar(settings.transfer.modem)&&next.receiver_timing?
+                " | UTC steering/Audio qualification fallback; dated calendar evidence retained":" | UTC timing fallback; see status");
             else if(next.transmit_clock_following)diagnostics<<" | UTC transmit timing qualified";
             diagnostics<<" | Audio lag 0..+"<<1000*settings.transfer.audio_timing_error_seconds<<" ms per station (assumed)";
-            if(next.clock_window_modeled)
-                diagnostics<<" | UTC arrival window modeled; see Link planner retained positions/backend; audio timing estimated, not hardware calibrated";
+            if(next.clock_window_modeled) {
+                if(shared_hop_calendar(settings.transfer.modem))
+                    diagnostics<<" | Dated UTC hop-calendar model ("<<
+                        (next.clock_timing_quality==audio::TimingQuality::bounded?"bounded":"estimated")<<
+                        " capture, +/-"<<1000*next.clock_backend_uncertainty_seconds<<" ms); peer TX timing remains assumed";
+                else diagnostics<<" | UTC arrival window modeled; see Link planner retained positions/backend; audio timing estimated, not hardware calibrated";
+            }
             else if(next.clock_timing_quality==audio::TimingQuality::estimated)
                 diagnostics<<" | UTC timestamps estimated ("<<std::fixed<<std::setprecision(1)
                     <<1000*next.clock_backend_uncertainty_seconds<<" ms allowance); full search: radio/audio latency uncalibrated";
@@ -2432,11 +2460,6 @@ void Controller::select(UiField field,std::string id) {
         if(!available)throw Error("Select an available item");
         const auto previous_selection=state.selected;
         state.selected=std::move(id);
-        if(field==UiField::sched_hop&&state.selected!="disabled") {
-            const auto multiplier=modem::sched_hop_multiplier(state.selected);
-            if(number(p.f(UiField::sched_hop_dilution).selected,"Sched_Hop dilution")>multiplier)
-                p.f(UiField::sched_hop_dilution).selected=std::to_string(multiplier);
-        }
         if(field==UiField::volume) {
             p.settings.transmit_gain=audio_controls::volume_gain(state.selected);
             if(p.started)p.session.set_transmit_gain(p.settings.transmit_gain);

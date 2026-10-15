@@ -21,7 +21,7 @@ static void paired(unsigned seed) {
     std::array<Moments,2> original{},represented{};
     proxy::ResidualSquares residual;
     long double selected_energy=0,union_energy=0;
-    double maximum=0,residual_l1=0,residual_gram=0;
+    double maximum=0,residual_l1=0,residual_gram=0,local_residual_gram=0;
     std::uint64_t strips=0;
     for(unsigned i=0;i<n;++i) {
         const double x=.17*std::sin((i+3)*(seed+1)*.071)+.04*std::cos(i*.173);
@@ -31,9 +31,11 @@ static void paired(unsigned seed) {
         const std::complex<double> oscillator=std::polar(magnitude,phase);
         maximum=std::max(maximum,std::abs(x));union_energy+=static_cast<long double>(x)*x;
         if(strip)++strips;else selected_energy+=static_cast<long double>(x)*x;
+        double row_norm=0;
         for(unsigned bit=0;bit<2;++bit) {
             const std::complex<double> q=strip?std::complex<double>{}:
                 std::polar((bit?.21:.67)*(1.2+.4*std::sin(i*(bit?.071:.053))),i*(bit?.109:.137));
+            row_norm=std::max(row_norm,cert::norm(q));
             const auto delta=std::polar(.87*e,i*(bit?.151:.193));
             const Wide qo=Wide(q.real(),q.imag())*Wide(oscillator.real(),oscillator.imag());
             const Wide qt=(Wide(q.real(),q.imag())+Wide(delta.real(),delta.imag()))*
@@ -42,6 +44,7 @@ static void paired(unsigned seed) {
         }
         residual.observe(e);residual_l1=cert::add(residual_l1,e);
         residual_gram=cert::add(residual_gram,cert::add(cert::mul(2*1.2,e),cert::mul(e,e)));
+        local_residual_gram=cert::add(local_residual_gram,cert::add(cert::mul(2*row_norm,e),cert::mul(e,e)));
     }
     cert::FitCertificate certificate;certificate.valid=true;
     certificate.energy_upper=cert::up(static_cast<double>(selected_energy));
@@ -57,6 +60,12 @@ static void paired(unsigned seed) {
         const auto a=q.cc-p.cc,b=q.cs-p.cs,c=q.ss-p.ss;
         const auto gram=.5L*(std::abs(a+c)+std::hypot(a-c,2*b));
         CHECK(dot<=bound.dot);CHECK(gram<=bound.gram);
+        // Preserve the original global-cap checks, then require the SAME
+        // perturbations to fit the tighter row-norm Gram cross term. Zero
+        // proxy strip rows retain the full mandatory residual-squared term.
+        const auto local_bound=proxy::errors(fit,certificate,bit,residual.upper,1.0,strips,cert::up(maximum),residual_l1,local_residual_gram);
+        CHECK(local_bound.valid);CHECK(gram<=local_bound.gram);
+        CHECK(local_bound.gram<=bound.gram);CHECK(local_bound.dot==bound.dot);
         CHECK(proxy::union_energy_upper(certificate.energy_upper,strips,cert::up(maximum))>=union_energy);
         CHECK(bound.dot<2*maximum*residual_l1);
         std::cout<<"seed="<<seed<<" bit="<<bit<<" dot="<<static_cast<double>(dot)

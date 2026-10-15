@@ -1,4 +1,6 @@
 #include "datapump/clock_sync.hpp"
+#include "datapump/fhss_schedule.hpp"
+#include "datapump/sched_hop.hpp"
 #include "datapump/utc_timing.hpp"
 #include "datapump/resampler.hpp"
 #include "datapump/pattern_code.hpp"
@@ -641,11 +643,14 @@ void shaped_timing_error(datapump::modem::Config config) {
 }
 int main() {try {
     declared_clock_timing();physical_waveform_rate();bounded_system_utc_phase();
+    require(datapump::modem::FhssPlan{}.audio_error_seconds==datapump::clock_sync::default_audio_error_seconds &&
+        datapump::modem::SchedHopPlan{}.audio_error_seconds==datapump::clock_sync::default_audio_error_seconds,
+        "FHSS and Sched_Hop must share the configured audio-lag default");
     native_timestamp_intervals();native_query_uncertainty();native_frozen_source_timing();
-    require(datapump::clock_sync::parse_audio_error("default")==.05&&
-        datapump::clock_sync::parse_audio_error("Default")==.05&&
+    require(datapump::clock_sync::parse_audio_error("default")==.07&&
+        datapump::clock_sync::parse_audio_error("Default")==.07&&
         datapump::clock_sync::parse_audio_error("50ms")==.05,
-        "CLI Audio Default no longer resolves to50ms total lag");
+        "CLI Audio Default no longer resolves to70ms while preserving explicit50ms");
     rejects([]{datapump::clock_sync::parse_audio_error("50");});
     continuous_guard();
     using namespace datapump::audio;
@@ -693,11 +698,11 @@ int main() {try {
     const auto wide=datapump::clock_sync::arrival_map({},epoch,epoch,0,48000,1./48000,0,.03,0,.08);
     require(narrow && wide && std::abs((wide->half_width_samples-narrow->half_width_samples)/48000-.05)<1e-12,
         "editable audio error did not propagate exactly into arrival coverage");
-    const auto default_audio=datapump::clock_sync::arrival_map({},epoch,epoch,0,48000,1./48000,0,.025,0);
+    const auto default_audio=datapump::clock_sync::arrival_map({},epoch,epoch,0,48000,1./48000,0,datapump::clock_sync::default_audio_error_seconds/2,0);
     const auto zero_audio=datapump::clock_sync::arrival_map({},epoch,epoch,0,48000,1./48000,0,0,0,0);
     require(default_audio && zero_audio &&
-        std::abs((default_audio->half_width_samples-zero_audio->half_width_samples)/48000-.05)<1e-12,
-        "50 ms total per-station audio interval incorrectly used as a radius");
+        std::abs((default_audio->half_width_samples-zero_audio->half_width_samples)/48000-datapump::clock_sync::default_audio_error_seconds)<1e-12,
+        "default total per-station audio interval incorrectly used as a radius");
     const auto positive=datapump::clock_sync::audio_lag_arrival_map({0,0,0},epoch,epoch,0,1000,1./1000,0,.01,0,.05);
     require(positive && std::abs(positive->origin_samples-25)<1e-6 &&
         positive->half_width_samples>=35 && positive->half_width_samples<35.02,
@@ -706,6 +711,29 @@ int main() {try {
         "26 ms timestamp radius qualified inside a 50 ms total lag interval");
     require(datapump::clock_sync::audio_lag_arrival_map({},epoch,epoch,0,1000,1./1000,0,.024,0,.05).has_value(),
         "24 ms timestamp radius rejected a 50 ms total lag interval");
+    // A hop calendar is GPS-aligned at Default. Unknown message start remains
+    // a separate epoch/phase search, never an independent calendar translation.
+    const auto hop_policy=datapump::clock_sync::effective_policy(std::nullopt,true);
+    require(hop_policy && hop_policy->accuracy_seconds==.010 && hop_policy->region_seconds==0 &&
+            hop_policy->offset_seconds==0,"Default hop calendar did not resolve the existing 10 ms station bound");
+    require(!datapump::clock_sync::effective_policy(std::nullopt,false),
+        "ordinary Default unexpectedly gained a narrow timing assumption");
+    const datapump::clock_sync::Policy eme{.003,.04,2.564};
+    require(datapump::clock_sync::effective_policy(eme,true)==eme,
+        "hop default replaced selected accuracy, region or EME offset");
+    for(const auto lag:{0.,.05,.1})for(const auto u:{0.,.012,.2}) {
+        const auto calendar=datapump::clock_sync::calendar_arrival_map(*hop_policy,epoch,epoch,0,
+            1000,1./1000,0,u,1000,lag);
+        require(calendar && std::abs(calendar->origin_samples-lag*500)<1e-6 &&
+                calendar->half_width_samples>=(.02+lag/2+u)*1000 &&
+                calendar->half_width_samples<(.02+lag/2+u)*1000+.02,
+            "calendar conflated provider dating uncertainty with causal Audio lag");
+        for(const auto phase:{0.,333.,1000.})for(const auto endpoint:{-1.,1.}) {
+            const auto actual=phase+lag*500+endpoint*(.02+lag/2+u)*1000;
+            require(std::abs(actual-(calendar->origin_samples+calendar->phase_scale*phase))<=calendar->half_width_samples,
+                "calendar joint arrival/phase map omitted an admitted corner");
+        }
+    }
     TimePrediction boundary{1.015L,.014,1./48000,TimingQuality::bounded,0};
     require(presentation_correction(boundary,1,48000,.03).uncertainty_seconds==.014,
         "valid 30 ms presentation allowance rejected");
@@ -714,10 +742,10 @@ int main() {try {
     require(presentation_correction(boundary,1,48000,.04).uncertainty_seconds==.014,
         "larger selected audio error was ignored");
     datapump::clock_sync::validate_audio_error(0.);
-    require(datapump::clock_sync::default_audio_error_seconds==.05 &&
+    require(datapump::clock_sync::default_audio_error_seconds==.07 &&
         datapump::clock_sync::Policy{}.region_seconds==.001 &&
         datapump::clock_sync::Policy{}.offset_seconds==0,
-        "local clock defaults lost the 50 ms audio allowance or restored the Earth-Moon-Earth preset");
+        "local clock defaults lost the 70 ms audio allowance or restored the Earth-Moon-Earth preset");
     for(const auto error:{-1.,61.,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()})
         rejects([&]{datapump::clock_sync::validate_audio_error(error);});
     for(const auto horizon:{1.,3600.,86400.})for(const auto initial:{-.0001,.0001}) {

@@ -153,20 +153,42 @@ class CaptureSink {
     std::uint32_t logical_,hardware_;
     std::optional<Resampler> converter_;
     std::vector<float> output_;
-    bool timed_=false,timing_reported_=false;
+    bool timed_=false,strict_timing_=false,timing_reported_=false,timing_published_=false;
     const Options* options_=nullptr;
 public:
     CaptureSink(std::uint32_t logical,std::uint32_t hardware,const CaptureCallback& next,std::stop_token stop,const Options* options=nullptr)
         :next_(next),stop_(stop),logical_(logical),hardware_(hardware),
          converter_(std::in_place,hardware,logical),
-         output_(std::min<std::size_t>(4096,logical/20)),timed_(options && options->follow_system_clock),options_(options){}
+         output_(std::min<std::size_t>(4096,logical/20)),
+         timed_(options && (options->follow_system_clock || options->request_capture_timing)),
+         strict_timing_(options && options->follow_system_clock),options_(options){}
     std::size_t workspace_bytes() const {return sizeof(*this)+converter_->workspace_bytes()+output_.capacity()*sizeof(float);}
     bool timed() const {return timed_;}
-    void disable_timing() {timed_=false;}
+    bool strict_timing() const {return strict_timing_;}
+    void disable_timing() {timed_=strict_timing_=false;}
+    void disable_steering() {
+        strict_timing_=false;
+        timed_=options_ && options_->request_capture_timing;
+    }
+    void enable_timing_observation() {timed_=true;strict_timing_=false;timing_published_=false;}
+    void lose_observation(const Error& error) {
+        // Metadata loss is not fabricated sample loss: revoke old timing, but
+        // retain the original fixed-rate converter and every continuous PCM row.
+        if(strict_timing_)throw Error(error.what());
+        if(timing_published_) {
+            if(!options_ || !options_->capture_discontinuity)
+                throw Error(std::string("capture timestamp continuity lost: ")+error.what());
+            options_->capture_discontinuity();check_cancelled(stop_);
+        }
+        disable_timing();
+        if(options_ && options_->timing_status)options_->timing_status({false,options_->maximum_utc_error_seconds,
+            std::numeric_limits<double>::infinity(),std::string("capture timestamps unavailable; ordinary capture retained: ")+error.what()});
+    }
     void discontinuity() {
         // emplace destroys the old filter before allocating its replacement;
         // no doubled filter workspace and no fabricated EOF/absence samples.
         converter_.emplace(hardware_,logical_);
+        timing_published_=false;
     }
     bool write(std::span<const float> input,const UtcTimeline* timeline=nullptr) {
         std::size_t consumed=0;
@@ -180,15 +202,31 @@ public:
                 // the original PCM and noise covariance. The modem's existing
                 // clock hypotheses handle ADC rate error within observations;
                 // cold epoch admission uses the updated system-time mapping.
-                predicted=timeline->predict(converter_->source_seconds()*hardware_);
-                if(options_->timing_status) {
+                try {
+                    predicted=timeline->predict(converter_->source_seconds()*hardware_);
+                    predicted->seconds_per_frame*=static_cast<double>(hardware_)/logical_;
+                    const auto& p=*predicted;
+                    if(!std::isfinite(p.utc_seconds) || p.utc_seconds<0 ||
+                       !std::isfinite(p.seconds_per_frame) || p.seconds_per_frame<=0 ||
+                       !std::isfinite(p.uncertainty_seconds) || p.uncertainty_seconds<0 ||
+                       !std::isfinite(p.rate_uncertainty_fraction) || p.rate_uncertainty_fraction<0 ||
+                       !std::isfinite(p.clock_extrapolation_seconds) || p.clock_extrapolation_seconds<0 ||
+                       !std::isfinite(p.system_clock_phase_uncertainty_seconds) || p.system_clock_phase_uncertainty_seconds<0 ||
+                       !std::isfinite(p.provider_uncertainty_floor_seconds) || p.provider_uncertainty_floor_seconds<0 ||
+                       (p.quality!=TimingQuality::estimated && p.quality!=TimingQuality::bounded))
+                        throw Error("invalid physical capture timestamp prediction");
+                } catch(const Error& error) {
+                    check_cancelled(stop_);lose_observation(error);predicted.reset();
+                }
+                if(timed_ && strict_timing_ && options_->timing_status) {
                     const auto audio_radius=std::max(predicted->provider_uncertainty_floor_seconds,
                         predicted->uncertainty_seconds-predicted->system_clock_phase_uncertainty_seconds);
                     if(audio_radius>options_->maximum_utc_error_seconds) {
                         if(!options_->allow_timing_fallback)throw Error(timing_allowance_reason("capture",audio_radius,options_->maximum_utc_error_seconds));
                         options_->timing_status({false,options_->maximum_utc_error_seconds,audio_radius,
-                            timing_allowance_reason("capture",audio_radius,options_->maximum_utc_error_seconds)+"; full search retained"});
-                        timing_reported_=true;timed_=false;
+                            timing_allowance_reason("capture",audio_radius,options_->maximum_utc_error_seconds)+
+                                (options_->request_capture_timing?"; dated calendar retains actual uncertainty":"; full search retained")});
+                        timing_reported_=true;disable_steering();
                     } else if(!timing_reported_) {
                         options_->timing_status({true,options_->maximum_utc_error_seconds,audio_radius,
                             "Capture timestamp model accepted; peer timing remains assumed"});
@@ -200,10 +238,10 @@ public:
             consumed+=progress.consumed;
             if(progress.produced) {
                 if(timed_ && options_->capture_timing) {
-                    auto logical=*predicted;
-                    logical.seconds_per_frame*=static_cast<double>(hardware_)/logical_;
-                    options_->capture_timing(logical);
+                    options_->capture_timing(*predicted);
+                    timing_published_=true;
                 }
+                check_cancelled(stop_);
                 const bool keep=next_(std::span<const float>(output_.data(),progress.produced));
                 check_cancelled(stop_);
                 if(!keep)return false;
@@ -1331,30 +1369,36 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
     check_cancelled(stop);
     if(!on_chunk) throw Error("capture callback is required");
     Alsa api; Stream stream(api,device,1,rate,stop,true,options);
-    bool timed=options && options->follow_system_clock;
+    const bool observation_requested=options && options->request_capture_timing;
+    bool strict_timing=options && options->follow_system_clock;
+    bool timed=strict_timing || observation_requested;
     std::unique_ptr<AlsaTimeline> timing;
     if(timed) {
         try {timing=std::make_unique<AlsaTimeline>(api,stream,options);}
         catch(const Error& e) {
-            if(!options->allow_timing_fallback)throw;
-            options->timing_status({false,options->maximum_utc_error_seconds,
-                std::numeric_limits<double>::infinity(),e.what()});timed=false;
+            if(strict_timing && !options->allow_timing_fallback)throw;
+            if(options->timing_status)options->timing_status({false,options->maximum_utc_error_seconds,
+                std::numeric_limits<double>::infinity(),e.what()});
+            timed=strict_timing=false;
         }
-        if(timed && options->maximum_utc_error_seconds==0) {
+        if(strict_timing && options->maximum_utc_error_seconds==0) {
             if(!options->allow_timing_fallback)throw Error("zero Audio error cannot be established by native capture");
             options->timing_status({false,0,timing->allowance(),
-                "zero Audio error cannot be established by native capture; actual uncertainty/full search retained"});
-            timed=false;
+                observation_requested?"zero Audio error cannot be established by native capture; dated calendar retains actual uncertainty":
+                    "zero Audio error cannot be established by native capture; actual uncertainty/full search retained"});
+            strict_timing=false;timed=observation_requested;
         }
-        if(timed && options->allow_timing_fallback && !options->frame_timestamp &&
+        if(strict_timing && options->allow_timing_fallback && !options->frame_timestamp &&
                 timing->allowance()+1./stream.hardware_rate>options->maximum_utc_error_seconds) {
             options->timing_status({false,options->maximum_utc_error_seconds,
                 timing->allowance()+1./stream.hardware_rate,
-                timing_allowance_reason("capture",timing->allowance()+1./stream.hardware_rate,options->maximum_utc_error_seconds)+"; full search retained"});
-            timed=false;
+                timing_allowance_reason("capture",timing->allowance()+1./stream.hardware_rate,options->maximum_utc_error_seconds)+
+                    (observation_requested?"; dated calendar retains actual uncertainty":"; full search retained")});
+            strict_timing=false;timed=observation_requested;
         }
     }
     CaptureSink sink(rate,stream.hardware_rate,on_chunk,stop,options);
+    if(!strict_timing)sink.disable_steering();
     if(!timed){sink.disable_timing();timing.reset();}
     std::uint64_t received=0;
     std::vector<std::int16_t> block(4096);
@@ -1363,10 +1407,13 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
     report_format(rate,stream.hardware_rate,sink.workspace_bytes()+block.capacity()*sizeof(std::int16_t)+converted.capacity()*sizeof(float)+
         (timed?sizeof(AlsaTimeline):0),on_format,timed && !options->frame_timestamp,timed?timing->allowance():0);
     unsigned failures=0;
+    const auto lose_observation=[&](const Error& error) {
+        sink.lose_observation(error);timed=false;timing.reset();
+    };
     const auto recover=[&](int error) {
         check_cancelled(stop);
         if(error==-EINTR)return; // Interrupted syscall does not lose the stream.
-        if(timed)throw Error("audio capture UTC continuity lost; restart reception");
+        if(sink.strict_timing())throw Error("audio capture UTC continuity lost; restart reception");
         if(++failures>8 || api.recover(stream.pcm,error,1)<0)throw Error("audio capture recovery failed");
         check_cancelled(stop);
         if(error==-EPIPE || error==-ESTRPIPE) {
@@ -1376,6 +1423,20 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
             discontinuity();
             check_cancelled(stop);
             sink.discontinuity();
+            // The old device/frame/resampler origin is no longer meaningful.
+            // Only a fresh provider timeline may date the next continuous run.
+            received=0;timing.reset();timed=false;
+            if(observation_requested && !options->frame_timestamp) {
+                // Native capture dates use this run's delivered count plus its
+                // actual reported queue. A custom device counter has no such
+                // implicit rebasing contract after recovery.
+                try {
+                    timing=std::make_unique<AlsaTimeline>(api,stream,options);
+                    sink.enable_timing_observation();timed=true;
+                } catch(const Error& e) {lose_observation(e);}
+            } else if(observation_requested) {
+                lose_observation(Error("explicit capture provider requires a fresh stream-coordinate binding after recovery"));
+            }
         }
     };
     while(true) {
@@ -1397,7 +1458,13 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
             if(monitor)monitor(std::span<const float>(converted.data(),static_cast<std::size_t>(n)),stream.hardware_rate);
             check_cancelled(stop);
             received+=static_cast<std::size_t>(n);
-            if(timed)timing->observe(received,true,stop);
+            if(timed) {
+                try {timing->observe(received,true,stop);}
+                catch(const Error& e) {
+                    check_cancelled(stop);
+                    lose_observation(e);
+                }
+            }
             const auto keep=sink.write(std::span<const float>(converted.data(),static_cast<std::size_t>(n)),timed?&timing->timeline():nullptr);
             if(timed && !sink.timed()){timed=false;timing.reset();}
             if(!keep)break;
@@ -1587,6 +1654,10 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
         ordinary.timing_stop_duration_seconds=0;ordinary.timing_independent_cover_seconds=0;ordinary.timing_protected_payload_end={};ordinary.reported_xrun_budget_seconds=0;ordinary.reported_xrun_window_seconds=0;ordinary.estimated_timing.reset();ordinary.allow_timing_fallback=false;
         capture_device(rate,device,on_chunk,stop,std::move(on_format),monitor,discontinuity,&ordinary);return;
     }
+    if(options && options->request_capture_timing && options->timing_status)
+        options->timing_status({false,options->maximum_utc_error_seconds,std::numeric_limits<double>::infinity(),
+            "Windows audio provider has no physical capture timestamps; ordinary capture retained"});
+    check_cancelled(stop);
     if(!on_chunk) throw Error("capture callback is required");
     WaveSession session(true,rate,device);
     CaptureSink sink(rate,session.hardware_rate,on_chunk,stop);

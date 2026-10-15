@@ -41,6 +41,7 @@ public:
         long double rate=1,step=1;
         std::size_t origins=0,frequency=0,rate_index=0,tone_bank_base=0;
         std::size_t family_first=0,family_count=0,lane_first=0,lane_count=0;
+        std::size_t timing_pair=0;
     };
     struct Lane {
         std::size_t id=0,pair=0,origin_index=0,frequency=0,rate_index=0,tone_bank_base=0;
@@ -161,6 +162,22 @@ public:
             require(std::isfinite(origins)&&origins>=1&&origins<static_cast<long double>(std::numeric_limits<std::size_t>::max()),
                 "implicit catalog origin count overflows");
             pair.origins=static_cast<std::size_t>(origins);pair.family_first=families_.size();pair.lane_first=size_;
+            // Timing membership depends on the exact rate, never the carrier
+            // label. Keep every original pair/family/ordinal, but share its
+            // immutable range runs and keyed source anchors. No approximate
+            // rate matching, cross-key reuse or cached admission decision.
+            pair.timing_pair=p;
+            for(std::size_t previous=0;previous<pairs_.size();++previous)
+                if(pairs_[previous].rate==pair.rate && pairs_[previous].step==pair.step &&
+                   pairs_[previous].origins==pair.origins){pair.timing_pair=previous;break;}
+            if(pair.timing_pair!=p) {
+                const auto& shared=pairs_[pair.timing_pair];
+                for(auto f=shared.family_first;f<shared.family_first+shared.family_count;++f) {
+                    auto family=families_[f];family.pair=p;families_.push_back(family);
+                }
+                pair.family_count=shared.family_count;pair.lane_count=shared.lane_count;
+                size_=checked_add(size_,pair.lane_count);pairs_.push_back(pair);continue;
+            }
             for(const auto& range:phases)for(auto phase=range.first;;phase+=phase_step_) {
                 Family family;family.pair=p;family.phase=phase;
                 family.anchor=cursor.map_.locate(SchedHopCoordinate{epoch_sample_,0}.add_samples(phase)).source;

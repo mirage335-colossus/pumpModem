@@ -14,8 +14,10 @@
 namespace datapump::modem::detail::scheduled_diagnostics {
 
 class Error: public std::runtime_error {public:using std::runtime_error::runtime_error;};
+enum class RejectionProvenance : std::uint8_t { original_certified, default_point };
 struct Event {
     std::uint64_t ordinal=0,global_lane=0,source_index=0,original_trials=0,processing_block_end=0;
+    RejectionProvenance provenance=RejectionProvenance::original_certified;
     friend bool operator==(const Event&,const Event&)=default;
 };
 class DeferredEvents;
@@ -49,7 +51,7 @@ class DeferredEvents {
     static Event event_at(const Run& run,std::uint64_t offset) {
         if(offset>=run.count)throw Error("invalid diagnostic run offset");
         return {add(run.first.ordinal,offset),add(run.first.global_lane,product(run.lane_stride,offset)),run.first.source_index,
-                add(run.first.original_trials,offset),run.first.processing_block_end};
+                add(run.first.original_trials,offset),run.first.processing_block_end,run.first.provenance};
     }
     static bool increments(std::uint64_t previous,std::uint64_t next) {
         return previous<std::numeric_limits<std::uint64_t>::max() && previous+1==next;
@@ -58,6 +60,7 @@ class DeferredEvents {
         const auto previous=event_at(run,run.count-1);
         if(!increments(previous.ordinal,next.ordinal) || !increments(previous.original_trials,next.original_trials) ||
            previous.source_index!=next.source_index || previous.processing_block_end!=next.processing_block_end ||
+           previous.provenance!=next.provenance ||
            next.global_lane<=previous.global_lane)return false;
         const auto stride=next.global_lane-previous.global_lane;
         return run.count==1 || stride==run.lane_stride;
@@ -92,6 +95,25 @@ public:
     std::uint64_t last_ordinal()const{return last_ordinal_;}
     std::uint64_t resolved_through()const{return resolved_through_;}
     std::size_t run_count()const{return size_;}
+    std::size_t run_capacity()const{return capacity_;}
+    // Grow only metadata. Both arrays coexist until publication, so the caller
+    // must reserve the COMPLETE replacement, not merely the capacity increment.
+    // Logical run indices (including frozen cursors) survive ring linearization.
+    template<class Reserve> bool grow(std::size_t maximum_runs,Reserve&& reserve,std::stop_token stop={}) {
+        if(stop.stop_requested())return false;
+        if(maximum_runs<=capacity_)throw Error("diagnostic journal growth must increase capacity");
+        const auto replacement_bytes=required_bytes(maximum_runs);
+        reserve(replacement_bytes);
+        if(stop.stop_requested())return false;
+        auto replacement=std::make_unique<Run[]>(maximum_runs);
+        for(std::size_t i=0;i<size_;++i) {
+            if(stop.stop_requested())return false;
+            replacement[i]=at(i);
+        }
+        if(stop.stop_requested())return false;
+        runs_.swap(replacement);capacity_=maximum_runs;head_=0;reserved_bytes_=replacement_bytes;
+        return true;
+    }
     Accounting accounting()const{return {reserved_bytes_,size_,unresolved_,last_ordinal_,resolved_through_};}
     std::optional<Event> oldest()const {
         if(!size_)return {};return at(0).first;
@@ -102,6 +124,8 @@ public:
     // already resolved eagerly or permanently excluded by the original guards.
     // Its chronology still prevents compression across eager/nonretained events.
     void check_append_cold(const Event& event)const {
+        if(event.provenance!=RejectionProvenance::original_certified && event.provenance!=RejectionProvenance::default_point)
+            throw Error("diagnostic rejection provenance invalid");
         if(event.ordinal<=last_ordinal_)throw Error("diagnostic events are not chronological");
         if(unresolved_==std::numeric_limits<std::uint64_t>::max())throw Error("diagnostic event count overflow");
         const bool merge=size_ && continues(at(size_-1),event);

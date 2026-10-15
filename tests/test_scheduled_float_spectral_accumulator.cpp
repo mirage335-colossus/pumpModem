@@ -156,6 +156,6 @@ void failures() {
 }
 int main()try {
     CHECK(f::environment());exact_oracle_checks();
-    reductions(9,65536,0);reductions(257,769,1);reductions(16384,33,2);
+    reductions(9,65536,0);reductions(257,769,1);reductions(16384,33,2);reductions(65536,3,3);
     failures();std::cout<<"native FP32 compensated spectra: exact dyadic long-reduction, boundary, environment and dispatch checks passed\n";
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

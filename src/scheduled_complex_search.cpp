@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <set>
 
 namespace datapump::modem {
@@ -60,6 +61,8 @@ std::vector<Pair> explicit_pairs(const Config& config,const PatternSearch& searc
 
 PatternScheduledComplexSearch scheduled_complex_search(const Config& config,const PatternSearch& input,
                                                        double correction) {
+    if(!std::isfinite(correction) || correction<0 || correction>.001)
+        throw Error("invalid scheduled complex timing correction allowance");
     PatternScheduledComplexSearch out;out.search=input;
     out.geometry=pattern_scheduled_complex_geometry(config,input);
     out.applicable=out.geometry.supported;
@@ -74,7 +77,17 @@ PatternScheduledComplexSearch scheduled_complex_search(const Config& config,cons
         out.reason="explicit diagnostic bank retained; no continuous frequency/clock domain declared";
         return out;
     }
-    if(!input.hypotheses.empty() && out.geometry.frequency_grid_qualified &&
+    // A geometry certificate describes its declared domain, not the UTC
+    // allowance of a later caller. Reusing a finalized bank must revalidate
+    // that policy as well. Keep this coarse plan for refinement if necessary.
+    std::optional<OscillatorPatternSearch> coarse;
+    if(config.oscillator_search)coarse=oscillator_pattern_search(config,correction);
+    const auto same_domain=!coarse || (!coarse->limited && !coarse->timing_correction_unavailable &&
+        covers(out.geometry.admitted_frequency_half_width_hz,coarse->frequency.requested_half_width_hz) &&
+        covers(coarse->frequency.requested_half_width_hz,out.geometry.admitted_frequency_half_width_hz) &&
+        covers(out.geometry.admitted_clock_half_width_ppm,coarse->requested_clock_half_width_ppm) &&
+        covers(coarse->requested_clock_half_width_ppm,out.geometry.admitted_clock_half_width_ppm));
+    if(same_domain && !input.hypotheses.empty() && out.geometry.frequency_grid_qualified &&
        out.geometry.clock_grid_qualified && input.complex_frequency_coverage.value_or(false) &&
        input.complex_clock_coverage.value_or(false)) {
         // Live/strategy/wrapper pass this already prepared immutable bank through
@@ -88,23 +101,32 @@ PatternScheduledComplexSearch scheduled_complex_search(const Config& config,cons
         out.search.complex_frequency_coverage=false;out.search.complex_clock_coverage=false;
         return out;
     };
-    if(!std::isfinite(correction) || correction<0 || correction>.001)
-        throw Error("invalid scheduled complex timing correction allowance");
     std::vector<Pair> original=explicit_pairs(config,input),added;
     double frequency_width=out.geometry.admitted_frequency_half_width_hz;
     double clock_width=out.geometry.admitted_clock_half_width_ppm;
     if(config.oscillator_search) {
-        const auto coarse=oscillator_pattern_search(config,correction);
-        if(original.empty())original=coarse.hypotheses;
+        if(original.empty())original=coarse->hypotheses;
+        // Steering changes the slowest admitted physical clock and therefore
+        // the aperture used for resolution. Derive that geometry BEFORE the
+        // fine bank; a one-step-old aperture can miss a ceil boundary even when
+        // its relative change is tiny. Keep all supplied exact original pairs.
+        auto resolution=input;
+        resolution.admitted_frequency_half_width_hz=std::max(frequency_width,coarse->frequency.requested_half_width_hz);
+        resolution.admitted_clock_half_width_ppm=std::max(clock_width,coarse->requested_clock_half_width_ppm);
+        out.geometry=pattern_scheduled_complex_geometry(config,resolution);
+        if(!out.geometry.supported)return fail("corrected scheduled aperture geometry is unsupported");
         const auto plan=oscillator_pattern_search(config,correction,
             {out.geometry.physical_aperture_samples,out.geometry.clock_step_ppm});
+        // An exhausted refined grid may return the unsteered fallback bank.
+        // Report that limit before comparing its narrower fallback domain with
+        // the caller's legitimate UTC-expanded domain. Neither is admissible.
+        if(plan.limited || plan.timing_correction_unavailable)
+            return fail("physical-aperture oscillator grid exceeds finite hypothesis/passband limits");
         if(!covers(plan.frequency.requested_half_width_hz,frequency_width) ||
            !covers(plan.requested_clock_half_width_ppm,clock_width))
             return fail("scheduled complex declared domain exceeds the supplied oscillator/UTC policy");
         frequency_width=std::max(frequency_width,plan.frequency.requested_half_width_hz);
         clock_width=std::max(clock_width,plan.requested_clock_half_width_ppm);
-        if(plan.limited || plan.timing_correction_unavailable)
-            return fail("physical-aperture oscillator grid exceeds finite hypothesis/passband limits");
         added=plan.hypotheses;
     } else {
         if(original.empty())return fail("declared scheduled complex domain needs an explicit finite reference bank");

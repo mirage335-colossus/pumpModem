@@ -27,8 +27,24 @@
 
 namespace datapump::modem::detail::scheduled_acquisition_certificate {
 inline constexpr double infinity=std::numeric_limits<double>::infinity();
-inline double up(double x){return std::isnan(x)?infinity:std::nextafter(x,infinity);}
-inline double down(double x){return std::isnan(x)?-infinity:std::nextafter(x,-infinity);}
+template<bool Up> inline double neighbor(double x) {
+    if constexpr(std::numeric_limits<double>::is_iec559 &&
+                 std::numeric_limits<double>::radix==2 &&
+                 std::numeric_limits<double>::digits==53 && sizeof(double)==sizeof(std::uint64_t)) {
+        const auto bits=std::bit_cast<std::uint64_t>(x);
+        const auto magnitude=bits&0x7fffffffffffffffULL;
+        // Within the normal finite range this is exactly nextafter, without a
+        // libm call per interval endpoint. Retain libm at both range boundaries,
+        // zeros, subnormals and nonfinite values, including its exception flags.
+        if(magnitude>0x0010000000000000ULL && magnitude<0x7fefffffffffffffULL) {
+            const bool negative=(bits>>63)!=0;
+            return std::bit_cast<double>((Up!=negative)?bits+1:bits-1);
+        }
+    }
+    return std::isnan(x)?(Up?infinity:-infinity):std::nextafter(x,Up?infinity:-infinity);
+}
+inline double up(double x){return neighbor<true>(x);}
+inline double down(double x){return neighbor<false>(x);}
 inline double add(double a,double b){if(a==0)return b;if(b==0)return a;return up(a+b);}
 inline double mul(double a,double b){if(a==0 || b==0)return 0;return up(a*b);}
 inline double root(double a){return a==0?0:up(std::sqrt(a));}
@@ -233,6 +249,10 @@ struct ReferenceErrors {
     // Zero means a mathematical score contract. Unknown defaults to infinity.
     double log_error=infinity;
     bool valid=false;
+    // Optional complete original-order template-proxy dot error, weighted by
+    // the retained original PCM. Infinity means unsupported. This tightens only
+    // proxy.dot; original execution, FFT/cast, Gram and carrier bounds remain.
+    double conditioned_proxy_dot_upper=infinity;
 };
 // Explicitly limited helper for original scalar coefficients, original
 // carrier, real products and ascending sums. It does NOT cover pulse-prefix,

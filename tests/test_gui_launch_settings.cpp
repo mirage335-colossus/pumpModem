@@ -47,6 +47,7 @@ void load_synthetic_key(Controller& controller) {
     check(controller.settings().transfer.key.has_value(),"Synthetic FHSS key load failed");
 }
 void exact_scheduled_target_import() {
+  for(const unsigned multiplier:{3U,5U}) {
     const auto trace_path=std::filesystem::temp_directory_path()/
         ("dp-exact-scheduled-import-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl");
     auto trace=std::make_unique<audio::trace::Scope>(trace_path);
@@ -60,8 +61,9 @@ void exact_scheduled_target_import() {
         "--target-snr 8 --rate 36 --carrier 30001500 --doppler 0c --dsp-workspace 50% "
         "--clock-sync default --audio-error 0ms --dsss-mode interleave --dsss-factor 10 --dsss-version interleave "
         "--search-arithmetic default --receiver-strategy auto --receiver-cpu-budget .6 --live-duplex yes "
-        "--sched-hop-dilution 1 --sched-hop 10 --sched-frequency-search 1 --fhss off --tx-key named");
+        "--sched-hop-dilution 0 --sched-hop 5 --sched-frequency-search 1 --fhss off --tx-key named");
     requested.keyfile=keys.keyfile;requested.key_name=keys.key_name;
+    requested.sched_hop=multiplier;
     const auto command=launch_command::format(requested);
     const auto verify=[&](Controller& c) {
         near(std::stod(c.field(F::snr).text),8,"Explicit scheduled command changed the requested short target");
@@ -69,7 +71,7 @@ void exact_scheduled_target_import() {
         near(c.link_plan()->inputs.target_db_hz,8,"Explicit scheduled command changed planner target");
         near(c.settings().transfer.modem.bandwidth_hz,36,"Explicit scheduled command failed to install Rate");
         check(c.settings().transfer.key&&c.settings().transfer.modem.scheduled_hopping&&
-              c.settings().transfer.modem.scheduled_hopping->time_multiplier==10&&
+              c.settings().transfer.modem.scheduled_hopping->time_multiplier==multiplier&&
               c.settings().transfer.modem.dsss_factor==10&&c.settings().transfer.modem.scramble,
               "Explicit scheduled command failed to commit the key/calendar/spreading atomically");
         const auto expected=tuning::resolve(36,8,tuning::PatternMode::auto_keystream,true,1500,10,
@@ -80,7 +82,7 @@ void exact_scheduled_target_import() {
         const auto saved=launch_command::parse(c.field(F::planner_command).text);
         check(saved.target_db_hz==8&&saved.short_target_db_hz.value_or(*saved.target_db_hz)==8&&
               saved.long_target_db_hz.value_or(*saved.target_db_hz)==8&&
-              saved.sched_hop==10,"Scheduled launch export lost exact target/calendar");
+              saved.sched_hop==multiplier,"Scheduled launch export lost exact target/calendar");
     };
     load(controller,command);verify(controller);
     check(controller.field(F::short_bits).text=="001"&&!controller.snapshot().transmitting,
@@ -97,6 +99,7 @@ void exact_scheduled_target_import() {
           records.find("\"long_target_db_hz\":8")!=std::string::npos,
           "Verbose import trace failed to expose the actually committed targets");
     std::filesystem::remove(trace_path);
+  }
 }
 void generated_and_pasted_settings() {
     Controller controller({true,true});
@@ -378,17 +381,17 @@ void clock_and_spread_controls() {
           controller.field(F::clock_region).text=="Default" && controller.field(F::clock_offset).text=="Default",
           "UTC controls must preserve the existing default search");
     const auto oscillator=controller.settings().transfer.modem.oscillator_search;
-    check(controller.field(F::audio_error).text=="Default" && controller.settings().transfer.audio_timing_error_seconds==.05&&
+    check(controller.field(F::audio_error).text=="Default" && controller.settings().transfer.audio_timing_error_seconds==.07&&
         controller.field(F::audio_error).options.front().id=="Default"&&
         std::any_of(controller.field(F::audio_error).options.begin(),controller.field(F::audio_error).options.end(),
             [](const auto& option){return option.id=="0ms";}),
-        "audio timing needs a 50 ms Default and an independently editable explicit zero allowance");
+        "audio timing needs a 70 ms Default and an independently editable explicit zero allowance");
     controller.edit(F::clock_accuracy,"0.1ms");
     check(controller.field(F::clock_region).text=="1ms"&&controller.field(F::clock_offset).text=="0ms"&&
         controller.settings().transfer.clock_sync->region_seconds==.001&&
         controller.settings().transfer.clock_sync->offset_seconds==0&&
-        controller.settings().transfer.audio_timing_error_seconds==.05 && controller.field(F::audio_error).text=="50ms",
-        "initial custom clock selection must start at a one-ms region, zero offset and 50 ms audio allowance");
+        controller.settings().transfer.audio_timing_error_seconds==.07 && controller.field(F::audio_error).text=="70ms",
+        "initial custom clock selection must start at a one-ms region, zero offset and 70 ms audio allowance");
     controller.edit(F::clock_accuracy,"Default");
     controller.edit(F::audio_error,"12345us");
     check(controller.settings().transfer.audio_timing_error_seconds==.012345 &&
@@ -408,14 +411,14 @@ void clock_and_spread_controls() {
         check(!controller.settings().transfer.clock_sync && controller.field(F::clock_accuracy).text=="Default" &&
               controller.field(F::clock_region).text=="Default" && controller.field(F::clock_offset).text=="Default",
               "Default in any timing editor must reset the complete clock triplet");
-        check(controller.settings().transfer.audio_timing_error_seconds==.05 && controller.field(F::audio_error).text=="Default",
+        check(controller.settings().transfer.audio_timing_error_seconds==.07 && controller.field(F::audio_error).text=="Default",
             "Default timing reset did not reset Audio error");
         load(controller,controller.field(F::planner_command).text);
         check(!controller.settings().transfer.clock_sync && controller.field(F::audio_error).text=="Default" &&
-            controller.settings().transfer.audio_timing_error_seconds==.05,
+            controller.settings().transfer.audio_timing_error_seconds==.07,
             "Default timing launch round-trip changed Audio error");
     }
-    for(const auto duration:{"0ms","30ms"}) {
+    for(const auto duration:{"0ms","30ms","50ms"}) {
         load(controller,std::string("--clock-sync default --audio-error ")+duration);
         const auto allowance=clock_sync::duration(duration);
         check(!controller.settings().transfer.clock_sync && controller.field(F::audio_error).text==duration &&
@@ -576,9 +579,9 @@ void arithmetic_settings() {
 void scheduled_hop_settings() {
     Controller controller;
     const auto& burst=controller.field(F::sched_hop);
-    check(burst.selected=="disabled"&&burst.options.size()==5&&
-        burst.options[0].label=="disabled"&&burst.options[1].id=="10"&&
-        burst.options[2].id=="100"&&burst.options[3].id=="1k"&&burst.options[4].id=="10k",
+    check(burst.selected=="0"&&burst.options.size()==3&&
+        burst.options[0].id=="0"&&burst.options[0].label=="0"&&
+        burst.options[1].id=="3"&&burst.options[2].id=="5",
         "Scheduled burst defaults or exact dropdown choices changed");
     for(const auto field:{F::sched_hop,F::sched_frequency_search}) {
         const auto& declarations=ui::console_screen();
@@ -591,36 +594,38 @@ void scheduled_hop_settings() {
     check(dilution_control!=declarations.end()&&dilution_control->kind==ui::Kind::choice&&
         dilution_control->document_only&&dilution_control->developer_only&&dilution_control->page==ui::Page::planner,
         "Burst dilution must stay a persistent developer-only planner control");
-    check(controller.field(F::sched_hop_dilution).selected=="1"&&!controller.field(F::sched_hop_dilution).enabled,
+    check(controller.field(F::sched_hop_dilution).selected=="0"&&!controller.field(F::sched_hop_dilution).enabled&&
+        controller.field(F::sched_hop_dilution).options.size()==2&&
+        controller.field(F::sched_hop_dilution).options[0].id=="0"&&controller.field(F::sched_hop_dilution).options[1].id=="3",
         "Burst dilution must default to one inactive hop group");
     check(!burst.enabled&&!controller.field(F::sched_frequency_search).enabled&&
         !controller.settings().transfer.modem.scheduled_hopping&&
         controller.settings().transfer.modem.frequency_search_multiplier==1,
         "Unencrypted startup must not enable a keyed burst schedule");
-    load(controller,"--sched-hop 100 --sched-frequency-search 8");
-    check(controller.field(F::sched_hop).selected=="100"&&
+    load(controller,"--sched-hop 5 --sched-frequency-search 8");
+    check(controller.field(F::sched_hop).selected=="5"&&
         controller.field(F::sched_frequency_search).selected=="8"&&
         !controller.settings().transfer.modem.scheduled_hopping&&
         controller.settings().transfer.modem.frequency_search_multiplier==1&&
         !controller.field(F::sched_hop).enabled&&!controller.field(F::sched_frequency_search).enabled,
         "Unkeyed import must retain preference without activating secret scheduling or expanded search");
     load_synthetic_key(controller);
-    load(controller,"--pattern pattern-16 --rate 1200 --carrier 1500 --sched-hop 10 --sched-frequency-search 4 --sched-hop-dilution 2");
+    load(controller,"--pattern pattern-16 --rate 1200 --carrier 1500 --sched-hop 5 --sched-frequency-search 4 --sched-hop-dilution 3");
     check(controller.field(F::pattern).selected=="pattern-16"&&
         controller.settings().transfer.modem.spreading_factor==16&&
         controller.settings().long_message_modem&&controller.settings().long_message_modem->spreading_factor==16,
         "Scheduled control fixture did not load its supported fixed short/long pattern");
-    for(const auto* id:{"10","100","1k","10k"}) {
+    for(const auto* id:{"3","5"}) {
         controller.select(F::sched_hop,id);
         const auto& config=controller.settings().transfer.modem;
         if(!config.scheduled_hopping)throw Error("Scheduled import was not applied: "+controller.field(F::status).text);
         check(config.scheduled_hopping->time_multiplier==modem::sched_hop_multiplier(id)&&
-            config.frequency_search_multiplier==4&&config.scheduled_hopping->group_hops==2&&
+            config.frequency_search_multiplier==4&&config.scheduled_hopping->group_hops==3&&
             controller.settings().long_message_modem&&
             controller.settings().long_message_modem->scheduled_hopping&&
             controller.settings().long_message_modem->scheduled_hopping->time_multiplier==modem::sched_hop_multiplier(id)&&
             controller.settings().long_message_modem->frequency_search_multiplier==4&&
-            controller.settings().long_message_modem->scheduled_hopping->group_hops==2,
+            controller.settings().long_message_modem->scheduled_hopping->group_hops==3,
             "Short/long modem profiles lost scheduled burst or frequency-search policy");
         check(config.scheduled_hopping->clock_error_seconds==.01&&config.scheduled_hopping->peer_clock_error_seconds==.01,
             "Default scheduled plan lost per-endpoint clock bounds");
@@ -631,11 +636,11 @@ void scheduled_hop_settings() {
         const auto& longer=*controller.settings().long_message_modem;
         check(config.data_key&&longer.data_key,
             "Scheduled short/long geometry did not bind its actual immutable key");
-        const auto schedule_seed=controller.settings().transfer.key->stream(StreamPurpose::Fhss,2,
+        const auto schedule_seed=controller.settings().transfer.key->stream(StreamPurpose::Fhss,3,
             32ULL*modem::sched_hop_multiplier(id),32,StreamDomain::SchedHopKeyV1);
-        check(config.data_key->stream(StreamPurpose::Fhss,2,32ULL*modem::sched_hop_multiplier(id),32,
+        check(config.data_key->stream(StreamPurpose::Fhss,3,32ULL*modem::sched_hop_multiplier(id),32,
                 StreamDomain::SchedHopKeyV1)==schedule_seed&&
-            longer.data_key->stream(StreamPurpose::Fhss,2,32ULL*modem::sched_hop_multiplier(id),32,
+            longer.data_key->stream(StreamPurpose::Fhss,3,32ULL*modem::sched_hop_multiplier(id),32,
                 StreamDomain::SchedHopKeyV1)==schedule_seed,
             "Scheduled geometry substituted a nominal key for the selected key");
         check(std::isfinite(modem::bit_rate(config))&&modem::bit_rate(config)>0&&
@@ -645,16 +650,16 @@ void scheduled_hop_settings() {
             controller.field(F::sched_hop_dilution).enabled,
             "Selected encrypted burst mode left frequency expansion disabled");
         const auto saved=launch_command::parse(controller.field(F::planner_command).text);
-        check(saved.sched_hop==modem::sched_hop_multiplier(id)&&saved.sched_frequency_search==4&&saved.sched_hop_dilution==2,
+        check(saved.sched_hop==modem::sched_hop_multiplier(id)&&saved.sched_frequency_search==4&&saved.sched_hop_dilution==3,
             "Burst selections missing from exported launch/parameter-list command");
         load(controller,"--tx-dbm 20");
         check(controller.field(F::sched_hop).selected==id&&
             controller.settings().transfer.modem.frequency_search_multiplier==4,
             "Older partial parameter list reset burst preferences");
     }
-    load(controller,"--sched-hop disabled --rate 1200 --carrier 1500");
+    load(controller,"--sched-hop 0 --rate 1200 --carrier 1500");
     const auto ungated_rate=controller.settings().transfer.modem.sample_rate;
-    load(controller,"--sched-hop 10 --sched-hop-dilution 1");
+    load(controller,"--sched-hop 5 --sched-hop-dilution 0");
     check(controller.settings().transfer.modem.sample_rate==ungated_rate,
         "Gate allowance needlessly discarded an already sufficient aligned sample rate");
     load(controller,"--rate 0.1 --carrier 0.5");
@@ -666,40 +671,41 @@ void scheduled_hop_settings() {
     const auto extent=controller.spectrum_search_band();
     check(extent&&extent->second>=narrow.carrier_hz+gate/2,
         "Searched-spectrum inspection omitted scheduled gate sidebands");
-    load(controller,"--rate 1200 --carrier 1500 --sched-hop 100 --sched-hop-dilution 37 --clock-sync GPS_1ms-10ms_region-2564ms_offset --audio-error 60ms");
+    load(controller,"--rate 1200 --carrier 1500 --sched-hop 5 --sched-hop-dilution 3 --clock-sync GPS_1ms-10ms_region-2564ms_offset --audio-error 60ms");
     const auto& custom=controller.field(F::sched_hop_dilution);
-    check(custom.selected=="37"&&std::any_of(custom.options.begin(),custom.options.end(),[](const auto& option){return option.id=="37";}),
-        "Imported integer dilution must remain visible in the dropdown");
+    check(custom.selected=="3"&&custom.options.size()==2,
+        "Imported dilution added obsolete dropdown choices");
     const auto custom_plan=controller.settings().transfer.modem.scheduled_hopping;
-    check(custom_plan&&custom_plan->group_hops==37&&custom_plan->clock_error_seconds==.001&&
+    check(custom_plan&&custom_plan->group_hops==3&&custom_plan->clock_error_seconds==.001&&
         custom_plan->peer_clock_error_seconds==.001&&custom_plan->region_seconds==.01&&
         custom_plan->offset_seconds==2.564&&custom_plan->audio_error_seconds==.06,
         "Scheduled guard geometry did not retain selected clock/propagation/audio allowances");
-    controller.select(F::sched_hop,"10");
-    check(controller.field(F::sched_hop_dilution).selected=="10"&&
-        controller.settings().transfer.modem.scheduled_hopping->group_hops==10,
-        "Reducing the frame must clamp an oversized dilution to its supported endpoint");
-    load(controller,"--sched-hop-dilution 2 --clock-sync default --audio-error default");
-    controller.select(F::sched_hop,"disabled");
+    controller.select(F::sched_hop,"3");
+    check(controller.field(F::sched_hop_dilution).selected=="3"&&
+        controller.settings().transfer.modem.scheduled_hopping->continuous()&&
+        !modem::scheduled_bursts(controller.settings().transfer.modem),
+        "All-active limit retained split-symbol search or changed dilution");
+    load(controller,"--sched-hop-dilution 3 --clock-sync default --audio-error default");
+    controller.select(F::sched_hop,"0");
     check(!controller.settings().transfer.modem.scheduled_hopping&&
         controller.settings().transfer.modem.frequency_search_multiplier==1&&
         !controller.field(F::sched_frequency_search).enabled&&!controller.field(F::sched_hop_dilution).enabled&&
-        controller.field(F::sched_frequency_search).selected=="4"&&controller.field(F::sched_hop_dilution).selected=="2",
-        "Disabling burst must suspend frequency expansion while retaining its selection");
+        controller.field(F::sched_frequency_search).selected=="4"&&controller.field(F::sched_hop_dilution).selected=="3",
+        "Disabling burst lost inactive frequency/dilution preferences");
     controller.select(F::sched_frequency_search,"32");
     check(controller.field(F::sched_frequency_search).selected=="4",
         "Disabled frequency control accepted an edit");
-    controller.select(F::sched_hop,"10");
+    controller.select(F::sched_hop,"5");
     check(controller.settings().transfer.modem.frequency_search_multiplier==4,
         "Re-enabling burst lost remembered frequency expansion");
     const auto accepted=controller.settings().transfer.modem;
-    load(controller,"--rate 360 --sched-hop 3");
+    load(controller,"--rate 360 --sched-hop 10");
     check(controller.settings().transfer.modem.bandwidth_hz==accepted.bandwidth_hz&&
-        controller.field(F::sched_hop).selected=="10",
+        controller.field(F::sched_hop).selected=="5",
         "Invalid burst import partially applied another setting");
     load(controller,"--rate 360 --sched-hop-dilution 20");
     check(controller.settings().transfer.modem.bandwidth_hz==accepted.bandwidth_hz&&
-        controller.field(F::sched_hop_dilution).selected=="2",
+        controller.field(F::sched_hop_dilution).selected=="3",
         "Dilution outside the current frame partially applied another setting");
     controller.select(F::key,"none");
     check(!controller.settings().transfer.modem.scheduled_hopping&&

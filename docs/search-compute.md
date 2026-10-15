@@ -1145,3 +1145,50 @@ opt-in because complete Live execution did not demonstrate a crossover. Native
 coverage, cache-hit counts and correlation throughput are not CPU-ceiling models.
 Unsupported complete scheduled execution/probability remains unavailable; no
 planner discount is inferred from these diagnostic counts.
+
+
+### Moderate scheduling: coverage, retention and cost
+
+The [3×/5× follow-up](scheduled-hops.md#moderate-schedule-follow-up-14-october)
+keeps complete-bank joint coverage separate from conservative coarse-lane
+clock retention. Updated steering allowances are applied before frequency
+resolution; every original pair/order/trial remains. Constructor metadata
+preparation is charged independently of persistent logical lanes. This is a
+coverage correction, not an advertised computational speedup.
+
+No CPU or simulation coefficient is reduced for the new exact-demand guard.
+Its complete one-bank cost regressed in the tested geometry and it remains
+internal opt-in. Shared capture uses actual capacity instead of a 16-second
+cutoff. Routine history priority changes when optional plots run; mandatory
+retirement/provenance replay and accepted-bit publication remain. Current broad
+Live execution has not demonstrated sustainable moderate-schedule rescue.
+
+The moderate pass also replaces full logical-capacity owner allocation with
+stable, individually allocated materialized tracks and a charged pointer
+directory. Catalogue metadata receives the remaining mandatory-layout budget,
+including its construction peak, rather than a fixed one-eighth share. These
+are real memory corrections; no CPU-model discount follows from them. The dense
+and forced native-tile full-input attempts both failed complete drain. The tile
+trace includes large original-guard replay and workspace-driven refinements;
+transform counts and overlapping worker durations are not component CPU
+fractions. A measured complete-execution crossover remains necessary before
+changing automatic dense/implicit selection.
+
+Calendar translations `phase − rate × origin` offer additional sharing without
+removing logical hypotheses. Calendar/gain and input geometry can share, but
+private pattern identity, source anchors, covariance, original guards and
+physical completion must be partitioned correctly. A 17.2× count reduction in
+one calendar-preparation example is an analytical opportunity bound, not a
+receiver speedup. FHSS gain-aware tiles and smaller owner-wise guard
+convolutions also remain concrete implementation work; earlier unsuitable
+large sparse transforms do not reject those strategies.
+
+The [practical-example pass](scheduled-hops.md#practical-examples-and-shared-preparation-14-october)
+shares exact clock-rate catalog geometry and first-completion work. Its measured
+startup reduction is not a total-receiver coefficient. Actual full-GUI execution
+exposes extensive historical diagnostic replay behind numerical preparation;
+complete cost must include that replay, metadata pressure, guards and refinement.
+Diagnostic RLE growth is workspace-bounded and preserves exact FIFO semantics.
+The optional shared FP32 input-moment pool has no demonstrated automatic
+crossover and remains off. Scheduled CPU/probability estimates stay explicitly
+unqualified where the complete receiver cannot sustain the requested geometry.

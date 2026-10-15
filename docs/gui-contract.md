@@ -508,24 +508,26 @@ has priority. User-requested graceful cancellation does not invent a TX failure.
 
 The editable **Clock accuracy**, **Clock region** and **Clock offset** controls
 describe PC synchronization and propagation independently of oscillator selection.
-The adjacent editable **Audio error** starts at **Default**, resolving to 50 ms
-of nonnegative lag per station (0 to +50 ms), after known queue-delay compensation.
+The adjacent editable **Audio error** starts at **Default**, resolving to 70 ms
+of nonnegative lag per station (0 to +70 ms), after known queue-delay compensation.
 GPS accuracy remains a ± bound. Playback uses a separate positive midpoint target;
 full provider uncertainty must fit within the lag interval. It is independent of GPS/propagation and oscillator
 models and persists through the same parameter-list/command path. Its duration presets and
 custom values do not alter the underrun-prevention buffer or establish measured
 hardware accuracy.
-A first custom selection uses region 1 ms, offset 0 ms and the 50 ms audio default
+A first custom selection uses region 1 ms, offset 0 ms and the 70 ms audio default
 unless an explicit numeric audio allowance is already set. Audio error accepts
-zero as a strict requested bound; actual device uncertainty still forces a visible
-full-window fallback when it cannot fit.
+zero as a strict requested bound. Ordinary non-hopping acquisition visibly falls
+back to the full window when device uncertainty cannot fit. Independently dated
+hopping capture instead retains the full provider uncertainty in its conditional
+calendar bound; that does not establish strict Audio qualification.
 Default in any of the four timing editors resets all four, with the existing
-epoch-search policy and the 50 ms audio default. Numeric audio edits do
+epoch-search policy and the 70 ms audio default. Numeric audio edits do
 not enable GPS timing. A complete reset exports as `--clock-sync default
---audio-error 50ms` and loads back as Default in all four controls. Explicit older
+--audio-error 70ms` and loads back as Default in all four controls. Explicit older
 numeric imports (including 0 ms) remain valid; partial imports preserve omitted
-fields. Without clock sync the audio allowance does not change the search bank or
-CPU work. Explicit region values are total widths centered on the fixed offset. The accuracy menu
+fields. With hopping disabled and clock sync at Default, the audio allowance does not change the search bank or
+CPU work. Enabled hopping uses the shared GPS calendar even at Default. Explicit region values are total widths centered on the fixed offset. The accuracy menu
 contains duration entries, not composite policy strings. Composite command and
 parameter-list imports are split into the three fields; individual fractional
 durations remain editable. A narrow entered value must not silently drop

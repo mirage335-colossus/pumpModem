@@ -1,4 +1,5 @@
 #include "../src/live_receptions.hpp"
+#include "../src/live_deferred_pattern_history.hpp"
 #include "datapump/pattern_receiver.hpp"
 #include <iostream>
 #include <array>
@@ -10,6 +11,44 @@ using History = datapump::live::detail::ReceptionHistory;
 void check(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
 History::Candidate candidate(std::uint64_t id, std::uint64_t first, std::uint64_t end, double score) {
     return {id, 1, first, end, 1500, 10, 6000, score, false};
+}
+void optional_history_priority() {
+    using datapump::live::detail::optional_pattern_history_ready;
+    check(optional_pattern_history_ready(2048,2048,2048,true),"caught-up diagnostics were suppressed");
+    check(!optional_pattern_history_ready(2048,1024,2048,true),"numeric backlog ran optional history");
+    check(!optional_pattern_history_ready(2048,2048,4096,true),"popped block tail was ignored");
+    check(!optional_pattern_history_ready(2048,2048,2048,false),"queued input was ignored");
+    check(optional_pattern_history_ready(8192,8192,8192,true),"prospective null coordinates were treated as old PCM ingress");
+    check(!optional_pattern_history_ready(8192,8192,4096,true),"uncaptured future frontier admitted diagnostics");
+}
+void deferred_provenance_growth() {
+    using O=datapump::live::detail::DeferredPatternHistoryOrdinals;
+    O value;std::uint64_t next_id=1;
+    const auto ids=[&](std::uint64_t n){const auto first=next_id;next_id+=n;return first;};
+    const auto time=O::Clock::time_point{}+std::chrono::seconds(19);
+    for(std::uint64_t i=1;i<=64;++i)value.record(i,time+std::chrono::milliseconds(i),ids);
+    check(!value.can_record() && value.heap_bytes()==0,"inline provenance did not reach original bound");
+    const auto old=value.observation(17,42.);std::size_t charged=0;
+    check(value.grow(128,[&](auto n){charged=n;}),"funded provenance growth failed");
+    check(charged==O::growth_bytes(128) && value.heap_bytes()==charged && value.capacity()==128,
+          "provenance omitted full replacement/retained storage charge");
+    const auto same=value.observation(17,42.);
+    check(same.id==old.id && same.observed_at==old.observed_at && same.admission_threshold==old.admission_threshold,
+          "provenance growth changed original observation identity or time");
+    value.record(67,time+std::chrono::seconds(1),ids);
+    check(value.observation(65,9.).id==65 && value.observation(67,9.).id==67 && next_id==68,
+          "growth rewound IDs or omitted a completed generation");
+    value.discard_resolved_through(65);
+    check(value.oldest_recorded()==66 && value.observation(66,9.).id==66,"partial provenance retirement changed IDs");
+    std::stop_source stop;
+    check(!value.grow(256,[&](auto){stop.request_stop();},stop.get_token()) && value.capacity()==128 &&
+          value.oldest_recorded()==66 && value.observation(67,9.).id==67,"cancelled provenance growth published partial state");
+    bool failed=false;try{value.grow(256,[&](auto){throw std::bad_alloc();});}catch(const std::bad_alloc&){failed=true;}
+    check(failed && value.capacity()==128 && value.observation(67,9.).id==67,"allocation failure damaged provenance");
+    O moved(std::move(value));
+    check(moved.capacity()==128 && moved.observation(67,9.).id==67 && value.capacity()==64 && value.generation()==0,
+          "moving grown provenance left dangling inline storage or invalid source state");
+    moved={};check(moved.heap_bytes()==0 && moved.capacity()==64 && moved.generation()==0,"provenance reset retained heap or generation");
 }
 void immediate_progress_and_physical_completion() {
     History history; std::uint64_t ids = 0;
@@ -390,6 +429,8 @@ void bounded_history_preserves_active_rows() {
 }
 int main() {
     try {
+        optional_history_priority();
+        deferred_provenance_growth();
         immediate_progress_and_physical_completion();
         stronger_profile_replaces_prefix();
         stronger_symbol_after_prefix_completion();

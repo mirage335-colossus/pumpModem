@@ -628,7 +628,10 @@ void geometry_details(Node& n,const planner::Model& model) {
                 planner::duration(g.scheduled_interval_width_seconds)+" interval uncertainty. Complete active FFT "+
                 planner::duration(g.scheduled_fft_seconds)+"; "+number(g.scheduled_timing_positions,6)+
                 " / "+number(g.scheduled_full_timing_positions,6)+" timing/phase/clock states retained; "+
-                (g.scheduled_timing_qualified?"qualified arrival window":"full-window timing fallback")+
+                (g.scheduled_timing_qualified?
+                    (model.inputs.receiver_work_mode==simulation::ReceiverWorkMode::hardware_calendar_model?
+                        "assumed UTC hop-calendar prior":"dated capture calendar prior"):
+                    "capture dating unavailable or unsupported: full-window timing fallback")+
                 ". "+g.scheduled_limit,11,Tone::muted,false,0);
             paragraph(n,"Raw recording demand per frame ≤"+number(g.scheduled_capture_frame_bytes_upper/(1024*1024.),5)+
                 " MiB before concurrent decoding/reuse. This conservative union demand is not measured peak memory; "

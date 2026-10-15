@@ -276,15 +276,20 @@ Search epochs within N seconds on either side, nearest first;
 0\(en32768, default 6.
 .TP
 .BI \-\-clock\-sync " SPEC"
-Default preserves the existing search policy. An explicit value such as
+Default preserves the receiver search policy. With FHSS or Sched_Hop enabled,
+the shared GPS hop calendar uses default accuracy of +/-10ms per station;
+unknown payload start and symbol alignment remain separate search quantities.
+An explicit value such as
 GPS_1ms-400ms_region-2564ms_offset describes per-station system-clock accuracy,
 total propagation region width centered on a fixed offset. Durations accept
 ns/us/ms/s units. This does not select an oscillator or establish audio latency.
 Unsupported timing paths keep the full search.
 .TP
 .BI \-\-audio\-error " TIME"
-Per-station residual audio timing allowance after reported queue compensation;
-default 30ms. Accepts positive ns/us/ms/s durations up to 60s. Separate from GPS
+Per-station causal audio lag allowance [0,TIME] after reported queue compensation;
+Default resolves to 70ms. Accepts Default or nonnegative ns/us/ms/s durations
+up to 60s. Explicit numeric values, including older 50ms settings, are preserved.
+Separate from GPS
 accuracy, propagation and oscillator models; does not change the audio buffer.
 Insufficient timing allowance visibly falls back to ordinary playback before
 private output, without clipping provider uncertainty or enlarging the setting.

@@ -37,7 +37,7 @@ ScheduledTransmission schedule_transmission(const modem::Config& config, Factory
             return make(epoch);
         }
     };
-    if (config.scheduled_hopping && config.scheduled_hopping->enabled()) {
+    if (modem::scheduled_bursts(config)) {
         if (!config.data_key) throw Error("scheduled transmission requires an encryption key");
         const auto rate=config.sample_rate;
         if (!rate) throw Error("invalid scheduled transmit sample rate");

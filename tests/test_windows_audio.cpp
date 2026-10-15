@@ -121,8 +121,31 @@ void audio_options() {
     fake::reset();rejects([&]{audio::record(.01,48000,"default",1024*1024,{},{},{1.,true});});
     require(fake::state.open_calls==0,"unsupported exclusive capture opened shared audio");
 }
+void passive_capture_is_explicitly_unavailable() {
+    constexpr unsigned logical=16000;
+    const auto setup=[] {
+        fake::reset();fake::state.supported_rates={48000};
+        fake::state.sample=[](std::size_t n,unsigned){return static_cast<std::int16_t>((n*37)%19001-9500);};
+    };
+    setup();const auto ordinary=audio::record(.05,logical,"7",1024*1024);clean();
+    setup();audio::Options options;options.request_capture_timing=true;options.maximum_utc_error_seconds=0;
+    unsigned statuses=0,dates=0,queries=0;bool formatted=false;
+    options.timing_status=[&](const auto& value) {
+        require(!value.following_system_clock && value.requested_error_seconds==0 &&
+            !std::isfinite(value.modeled_uncertainty_seconds),"WinMM passive request invented a timing bound");++statuses;
+    };
+    options.capture_timing=[&](const auto&){++dates;};
+    options.frame_timestamp=[&](std::uint64_t,bool) {++queries;return audio::FrameTimestamp{};};
+    const auto captured=audio::record(.05,logical,"7",1024*1024,{},[&](const auto& value) {
+        formatted=true;require(value.timing_quality==audio::TimingQuality::unavailable,
+            "WinMM passive format invented provider timestamp support");
+    },options);
+    require(captured==ordinary && formatted && statuses==1 && !dates && !queries,
+        "unsupported passive timing changed WinMM PCM or emitted fabricated evidence");clean();
+}
 int main() {
     try {
+        passive_capture_is_explicitly_unavailable();
         channel_routing();audio_options();
         std::vector<float> samples(30000);
         for(std::size_t i=0;i<samples.size();++i)samples[i]=static_cast<float>(i%1000)/1000;

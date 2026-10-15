@@ -143,6 +143,85 @@ void explicit_diagnostics_and_rectangle() {
               "explicit paired flattening must match original receiver clock/coupling arithmetic");
     }
 }
+void finalized_bank_correction_identity() {
+    auto c=configuration(3);c.sample_rate=6120;c.carrier_hz=1500;c.bandwidth_hz=36;c.dsss_factor=10;
+    auto schedule=std::make_shared<modem::SchedHopPlan>(*c.scheduled_hopping);
+    schedule->group_hops=1;c.scheduled_hopping=schedule;
+    c.oscillator_search->rf_shift_hz=30000000;
+    const auto initial=modem::scheduled_complex_search(c,search(c),0);
+    check(initial.complete_coverage,"correction-identity fixture lacks a finalized bank");
+    const auto same=modem::scheduled_complex_search(c,initial.search,0);
+    check(same.complete_coverage && same.search.hypotheses==initial.search.hypotheses && !same.refined,
+          "same-domain finalized bank unnecessarily rebuilt its hypotheses");
+    const auto changed=modem::scheduled_complex_search(c,initial.search,.0003);
+    const auto expected=modem::oscillator_pattern_search(c,.0003);
+    check(changed.complete_coverage && changed.refined &&
+          *changed.search.admitted_frequency_half_width_hz>=expected.frequency.requested_half_width_hz &&
+          *changed.search.admitted_clock_half_width_ppm>=expected.requested_clock_half_width_ppm &&
+          std::equal(initial.search.hypotheses.begin(),initial.search.hypotheses.end(),changed.search.hypotheses.begin()),
+          "finalized bank silently reused coverage for a larger UTC correction domain");
+    const auto omitted=modem::scheduled_complex_search(c,changed.search,0);
+    check(omitted.limited && !omitted.complete_coverage && omitted.search.hypotheses==changed.search.hypotheses,
+          "finalized bank silently accepted an omitted UTC correction allowance");
+    for(const auto invalid:{-.0001,.002,std::numeric_limits<double>::quiet_NaN()}) {
+        bool rejected=false;try{(void)modem::scheduled_complex_search(c,initial.search,invalid);}catch(const Error&){rejected=true;}
+        check(rejected,"finalized-bank shortcut bypassed correction validation");
+    }
+}
+void final_joint_clock_cells() {
+    for(const auto multiplier:{3U,5U}) for(const auto group:{1U,3U}) {
+        if(multiplier==3 && group==3)continue;
+        auto c=configuration(multiplier);c.sample_rate=6120;c.carrier_hz=1500;c.bandwidth_hz=36;
+        c.spreading_factor=256;c.dsss_factor=10;
+        auto schedule=std::make_shared<modem::SchedHopPlan>(*c.scheduled_hopping);schedule->group_hops=group;
+        c.scheduled_hopping=schedule;c.oscillator_search->lf.accuracy_ppm=100;
+        c.oscillator_search->rf_shift_hz=30000000;
+        const auto original=search(c);
+        const auto plan=modem::scheduled_complex_search(c,original);
+        check(plan.complete_coverage,"moderate final joint bank lost declared complete coverage");
+        const auto bounded=modem::pattern_scheduled_complex_geometry(c,plan.search,512);
+        check(!bounded.supported && bounded.reason.find("preparation exceeds DSP workspace")!=std::string::npos,
+              "joint metadata silently exceeded its constructor allowance");
+        auto step=std::numeric_limits<double>::infinity();
+        for(const auto pair:plan.search.hypotheses)if(pair.frequency_offset_hz>0)step=std::min(step,pair.frequency_offset_hz);
+        // Independent physical truth: a frequency just below the first cell
+        // edge, RF residual -9mHz, hence the required LF clock at center0.
+        const auto truth=(step/2-1e-6+.009)/1500*1e6;
+        check(truth>0 && truth<*plan.search.admitted_clock_half_width_ppm &&
+              truth<=plan.geometry.clock_cell_radius_ppm,
+              "joint strip truth is outside the scheduled null/END clock certificate");
+        const auto expanded=modem::scheduled_complex_search(c,original,.0003);
+        check(expanded.complete_coverage,"moderate UTC-expanded joint union lost complete coverage");
+        const auto old=*std::max_element(original.hypotheses.begin(),original.hypotheses.end(),
+            [](const auto& a,const auto& b){return a.frequency_offset_hz<b.frequency_offset_hz;});
+        auto next=std::numeric_limits<double>::infinity();
+        for(const auto pair:expanded.search.hypotheses)if(pair.frequency_offset_hz>old.frequency_offset_hz)
+            next=std::min(next,pair.frequency_offset_hz);
+        check(std::isfinite(next),"UTC test lacks its neighboring refined frequency");
+        const auto physical=(old.frequency_offset_hz+next)/2-1e-10;
+        const auto actual_clock=(physical+.009)/1500*1e6;
+        auto nearest=std::numeric_limits<double>::infinity();
+        for(const auto pair:expanded.search.hypotheses)
+            if(std::abs(pair.frequency_offset_hz-physical)<=expanded.geometry.frequency_step_hz/2)
+                nearest=std::min(nearest,std::abs(actual_clock-pair.clock_error_ppm));
+        check(actual_clock<=*expanded.search.admitted_clock_half_width_ppm &&
+              nearest<=expanded.geometry.clock_coverage_radius_ppm &&
+              std::abs(actual_clock-old.clock_error_ppm)<=expanded.geometry.clock_cell_radius_ppm,
+              "UTC-expanded joint union received an invalid inherited clock certificate");
+    }
+    // A blanket max(old,new) would unnecessarily reject these nested grids.
+    for(const auto multiplier:{3U,5U}) {
+        auto c=configuration(multiplier);c.sample_rate=6000;c.carrier_hz=50;c.bandwidth_hz=120;
+        c.spreading_factor=960;c.oscillator_search->margin=2;c.oscillator_search->rf_shift_hz=0;
+        auto schedule=std::make_shared<modem::SchedHopPlan>(*c.scheduled_hopping);schedule->group_hops=1;c.scheduled_hopping=schedule;
+        const auto original=search(c);const auto plan=modem::scheduled_complex_search(c,original);
+        check(plan.complete_coverage && plan.geometry.clock_cell_radius_ppm<100 &&
+              plan.geometry.clock_cell_radius_ppm<=plan.geometry.clock_step_ppm/2*(1+1e-12),
+              "exact nested3/5 grid retained the obsolete larger clock cell");
+        check(std::equal(original.hypotheses.begin(),original.hypotheses.end(),plan.search.hypotheses.begin()),
+              "joint recertification changed original pair ordering");
+    }
+}
 void very_low_carrier_timing_resolution() {
     auto c=configuration(10);c.carrier_hz=.005;c.bandwidth_hz=.001;c.sample_rate=64;c.spreading_factor=8;
     const auto original=search(c);
@@ -155,7 +234,7 @@ void very_low_carrier_timing_resolution() {
 }
 int main() {
     try {original_overload_is_unchanged();physical_resolution_and_caps();coupled_rf_and_utc();
-        explicit_diagnostics_and_rectangle();very_low_carrier_timing_resolution();
+        explicit_diagnostics_and_rectangle();finalized_bank_correction_identity();final_joint_clock_cells();very_low_carrier_timing_resolution();
         std::cout<<"scheduled complex search tests passed\n";return 0;
     } catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

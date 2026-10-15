@@ -773,7 +773,7 @@ Received receive(std::span<const float> samples, const Options& input_options, P
         auto value=options;value.modem=profile;
         modem::PatternSearch search;search.allow_local_clock_fallback=true;
         if(profile.oscillator_search) {
-            const auto declared=modem::oscillator_pattern_search(profile,options.clock_sync?modem::utc_transmit_rate_limit(profile):0);
+            const auto declared=modem::oscillator_pattern_search(profile,effective_clock_sync(options)?modem::utc_transmit_rate_limit(profile):0);
             search.hypotheses=declared.hypotheses;
             search.admitted_frequency_half_width_hz=declared.frequency.requested_half_width_hz;
             search.admitted_clock_half_width_ppm=declared.requested_clock_half_width_ppm;

@@ -23,7 +23,7 @@
 namespace datapump::modem::detail::scheduled_moment_synthesis {
 namespace cert=scheduled_acquisition_certificate;
 using Complex=std::complex<double>;
-inline constexpr std::size_t maximum_terms=7,maximum_transform=16384,check_bins=256;
+inline constexpr std::size_t maximum_terms=7,maximum_transform=1048576,check_bins=256;
 enum class Kernel {automatic,scalar,avx2};
 struct Options {Kernel kernel=Kernel::automatic;bool allow_avx2=true;};
 struct Result {bool arithmetic_eligible=false;Kernel executed=Kernel::scalar;std::size_t products=0;};

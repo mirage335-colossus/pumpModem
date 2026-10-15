@@ -1,5 +1,6 @@
 #include "datapump/scheduled_complex_search.hpp"
 #include "datapump/tuning.hpp"
+#include "datapump/clock_sync.hpp"
 #include "../src/scheduled_acquisition_catalog.hpp"
 
 #include <iostream>
@@ -137,6 +138,21 @@ long double original_boundary(const Config& c,const PatternSearch& s,const Patte
 void compare(Config c,PatternSearch s,bool nonempty=true) {
     const auto g=active(c,s);Catalog catalog(c,s,g,2*1024*1024);auto cursor=catalog.make_cursor();
     if(nonempty)check(catalog.size()>0,"catalog oracle case accidentally has no retained lane");
+    // Carrier labels may differ while their timing/calendars are identical.
+    // Verify shared metadata as well as every independent original lane below.
+    for(std::size_t p=0;p<catalog.pairs().size();++p) {
+        const auto& pair=catalog.pairs()[p];const auto& shared=catalog.pairs()[pair.timing_pair];
+        check(pair.timing_pair<=p && pair.rate==shared.rate && pair.step==shared.step &&
+            pair.origins==shared.origins && pair.family_count==shared.family_count &&
+            pair.lane_count==shared.lane_count,"exact-rate timing representative changed its domain");
+        for(std::size_t f=0;f<pair.family_count;++f) {
+            const auto& a=catalog.families()[pair.family_first+f];
+            const auto& b=catalog.families()[shared.family_first+f];
+            check(a.pair==p && a.phase==b.phase && a.range_first==b.range_first &&
+                a.range_count==b.range_count && a.anchor.distance(b.anchor)==0,
+                "frequency siblings duplicated or changed immutable calendar membership");
+        }
+    }
     const auto count=original(c,s,g,[&](std::size_t id,const Original& expected) {
         const auto lane=catalog.describe(id,cursor);
         check(lane.id==id&&lane.pair==expected.pair&&lane.origin_index==expected.origin_index&&lane.frequency==expected.frequency&&
@@ -214,6 +230,34 @@ void user36() {
     check(count==catalog.size()&&checked==samples.size(),"user36 independent full enumerator count mismatch");
     std::cout<<"user36 lanes="<<catalog.size()<<" metadata="<<catalog.working_bytes()<<" cursor="<<cursor.working_bytes()<<'\n';
 }
+void shared_default_calendar() {
+    for(const auto multiplier:{3u,5u}) {
+        auto c=small();auto plan=std::make_shared<SchedHopPlan>(*c.scheduled_hopping);
+        plan->time_multiplier=multiplier;c.scheduled_hopping=plan;
+        auto s=search();s.start_offset_seconds=0;s.start_uncertainty_seconds=7;
+        const auto broad_geometry=active(c,s);Catalog broad(c,s,broad_geometry);
+        const auto policy=*clock_sync::effective_policy(std::nullopt,true);
+        const auto map=clock_sync::calendar_arrival_map(policy,c.stream_epoch,c.stream_epoch,0,
+            c.sample_rate,1./c.sample_rate,.00001,.003,c.sample_rate-1,0);
+        check(map.has_value(),"Default calendar mapping unavailable");
+        s.qualified_start_window=PatternStartWindow{map->origin_samples,map->phase_scale,map->half_width_samples};
+        const auto narrow_geometry=pattern_scheduled_complex_geometry(c,s);
+        Catalog narrow(c,s,narrow_geometry);
+        check(s.start_uncertainty_seconds==7 && narrow.pairs().size()==broad.pairs().size() &&
+            narrow.families().size()==broad.families().size(),
+            "shared calendar removed message phases or oscillator hypotheses");
+        check(narrow.size()>0 && narrow.size()<broad.size()/10,
+            "payload origin still translates the calendar independently across 14 seconds");
+        // The independent original enumerator retains original indices, clipped
+        // cells and boundaries. This checks the diagonal, not a replaced grid.
+        compare(c,s);
+        auto cursor=narrow.make_cursor();
+        narrow.for_each(0,narrow.size(),cursor,[&](const auto& lane) {
+            check(lane.origin>=-7.L*c.sample_rate && lane.origin<=7.L*c.sample_rate,
+                "calendar prior enlarged the original message-origin domain");
+        });
+    }
+}
 }
 int main() {
     try {
@@ -269,6 +313,6 @@ int main() {
         const auto exact_lane=exact_catalog.describe(0,exact_cursor);
         check(exact_lane.observed_begin==symbol_sample_count(exact)&&exact_lane.index==1&&exact_lane.first_full_index==1,
             "exact whole-source-symbol boundary changed floor/ceil ownership");
-        user36();std::cout<<"scheduled acquisition catalog passed\n";return 0;
+        user36();shared_default_calendar();std::cout<<"scheduled acquisition catalog passed\n";return 0;
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

@@ -2,6 +2,7 @@
 
 #include "scheduled_acquisition_tile.hpp"
 #include <algorithm>
+#include <charconv>
 #include <complex>
 #include <cstddef>
 #include <cstdlib>
@@ -18,7 +19,17 @@ inline scheduled_acquisition_tile::Shape shape(std::size_t span) {
     if(const auto* mode=std::getenv("DATAPUMP_SCHED_LAZY_FRAGMENT")) {
         const std::string_view value(mode);
         if(value=="512")maximum=512;else if(value=="1024")maximum=1024;else if(value=="2048")maximum=2048;
-        else throw Error("implicit numeric fragment selector requires 512, 1024 or 2048");
+        else {
+            // Explicit bounded diagnostic pieces can fill a transform without
+            // the artificial next-power-of-two fragment doubling. Automatic
+            // selection remains separate until complete-cost crossover data.
+            std::size_t fragment=0;
+            const auto parsed=std::from_chars(value.data(),value.data()+value.size(),fragment);
+            if(parsed.ec==std::errc{} && parsed.ptr==value.data()+value.size() &&
+               fragment>2048 && fragment<=tile::maximum_fragment_samples && fragment%512==0)
+                return {span,fragment};
+            throw Error("implicit numeric fragment requires 512,1024,2048 or a512-sample multiple through524288");
+        }
     }
     for(auto fragment=maximum;fragment>=512;fragment/=2) {
         const tile::Shape candidate{span,fragment};

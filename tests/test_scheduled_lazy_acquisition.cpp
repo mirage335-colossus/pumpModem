@@ -1,7 +1,9 @@
 #include "datapump/pattern_correlator.hpp"
+#include "datapump/receiver_strategy.hpp"
 #include "../src/family_simd.hpp"
 #include "../src/shared_scheduled_capture.hpp"
 #include "../src/scheduled_exact_source_samples.hpp"
+#include "../src/stable_owner_store.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/sched_hop.hpp"
@@ -16,10 +18,52 @@
 #include <ctime>
 #include <cstdlib>
 #include <bit>
+#include <array>
+#include <limits>
 
 using namespace datapump;
 namespace {
 void check(bool value,const char* text){if(!value)throw Error(text);}
+struct ThrowingOwnerValue {
+    static inline int constructions_before_failure=-1;
+    ThrowingOwnerValue(){if(constructions_before_failure==0)throw Error("injected owner construction failure");
+        if(constructions_before_failure>0)--constructions_before_failure;}
+};
+void stable_owner_storage() {
+    struct Value {std::vector<int> payload;int value=0;};
+    using Store=::datapump::detail::StableOwnerStore<Value>;
+    Store dense;dense.reserve(8);dense.resize(2);dense[0].value=17;
+    const auto* original=&dense[0];dense.push_back(Value{{1,2},19});
+    check(&dense[0]==original && dense.index(dense[2])==2 &&
+          dense.storage_bytes()==dense.capacity()*sizeof(Value),"dense owner layout/accounting changed");
+    check(dense.data()==original && std::as_const(dense).data()==original,"dense diagnostic payload identity changed");
+    Store sparse;sparse.use_indirect();sparse.resize(5);
+    bool noncontiguous=false;try{(void)sparse.data();}catch(const std::logic_error&){noncontiguous=true;}
+    check(noncontiguous,"sparse owner directory exposed a false contiguous payload");
+    check(sparse.storage_bytes()<=5*Store::indirect_slot_bound,"sparse minimum owners exceeded their reservation");
+    std::array<const Value*,5> borrowed{};
+    for(std::size_t i=0;i<5;++i){borrowed[i]=&sparse[i];sparse[i].value=static_cast<int>(i+1);}
+    const auto peak=sparse.storage_bytes()+sparse.growth_peak_bytes(4097);
+    sparse.resize(4097);
+    check(sparse.storage_bytes()<=peak && sparse.size()==4097,"sparse owner growth exceeded charged peak or imposed old slot cap");
+    for(std::size_t i=0;i<5;++i)check(&sparse[i]==borrowed[i] && sparse.index(*borrowed[i])==i &&
+        borrowed[i]->value==static_cast<int>(i+1),"owner address or slot changed while growing sparse directory");
+    sparse[3]={};check(sparse.index(sparse[3])==3,"base reset erased sparse owner identity");
+    const Store& read=sparse;std::size_t visited=0;
+    for(const auto& v:read){check(read.index(v)==visited,"sparse range iterator changed logical order");++visited;}
+    check(visited==4097,"sparse range omitted materialized owners");
+    sparse.resize(5);check(&sparse[0]==borrowed[0] && sparse.size()==5,"rollback resize invalidated a retained owner");
+    bool overflow=false;try{(void)sparse.growth_peak_bytes(std::numeric_limits<std::size_t>::max());}
+    catch(const std::length_error&){overflow=true;}
+    check(overflow,"sparse growth charge accepted overflow");
+    ::datapump::detail::StableOwnerStore<ThrowingOwnerValue> failing;failing.use_indirect();failing.resize(3);
+    const auto* retained=&failing[1];const auto failure_peak=failing.storage_bytes()+failing.growth_peak_bytes(9);
+    ThrowingOwnerValue::constructions_before_failure=2;bool threw=false;
+    try{failing.resize(9);}catch(const Error&){threw=true;}
+    ThrowingOwnerValue::constructions_before_failure=-1;
+    check(threw && failing.size()==3 && &failing[1]==retained && failing.index(*retained)==1 &&
+          failing.storage_bytes()<=failure_peak,"failed owner growth invalidated published owners or exceeded its reservation");
+}
 modem::Config configuration(unsigned multiplier=10,unsigned factor=1,bool fhss=false) {
     modem::Config c;c.sample_rate=512;c.carrier_hz=128;c.bandwidth_hz=8;
     c.spreading_factor=64;c.scramble=true;c.dsss=factor>1;c.dsss_factor=factor;
@@ -41,7 +85,7 @@ modem::Config configuration(unsigned multiplier=10,unsigned factor=1,bool fhss=f
 }
 struct Capture {std::vector<float> pcm;double start=0;std::uint64_t last=0,absent_end=0;};
 Capture capture(const modem::Config& c,const Bytes& bits,bool absence,double clock=0,double frequency=0,double diffusion=0,double quarter_phase=0,
-                std::uint64_t local_phase_window=0,double local_phase_step=0) {
+                std::uint64_t local_phase_window=0,double local_phase_step=0,double arrival_delay=3.375) {
     modem::PatternTransmitter tx(bits,c,c.stream_epoch,0,false);
     check(tx.total_samples()<2*1024*1024,"bounded split capture exceeded fixture limit");
     std::vector<std::complex<double>> analytic(tx.total_samples());
@@ -53,7 +97,7 @@ Capture capture(const modem::Config& c,const Bytes& bits,bool absence,double clo
     const modem::SchedHopCoordinate origin{c.stream_epoch*c.sample_rate+c.stream_phase_samples,0};
     const auto source=map.locate(origin).source;const auto symbol=modem::symbol_sample_count(c);
     const auto failed=(6ULL*c.sample_rate+symbol-1)/symbol;
-    const auto ratio=1+clock*1e-6;constexpr double delay=3.375;
+    const auto ratio=1+clock*1e-6;const double delay=arrival_delay;
     Capture out;out.start=static_cast<double>(origin.sample-tx.physical_output_origin())/ratio+delay;
     out.last=static_cast<std::uint64_t>(std::ceil((map.source_to_physical(source.add_samples(bits.size()*symbol),true).sample-tx.physical_output_origin())/ratio+delay));
     out.absent_end=static_cast<std::uint64_t>(std::ceil((map.source_to_physical(source.add_samples((bits.size()+failed)*symbol),true).sample-tx.physical_output_origin())/ratio+delay));
@@ -210,6 +254,33 @@ void paired(unsigned factor,bool fhss,bool broad,bool clocks) {
         <<" hypotheses="<<actual.work.hypotheses<<" peak="<<actual.peak<<"\n";
 }
 
+void smooth_fhss_native_parity() {
+    // Same original PCM and complete dense scorer, including full guards and
+    // observed END. Scheduling changes no source waveform in this test.
+    for(const auto multiplier:{3U,5U}) {
+        auto c=configuration(multiplier,10,true);const Bytes bits{0,1};
+        const auto pcm=capture(c,bits,true);
+        auto s=search(c,pcm);s.start_uncertainty_seconds=4.*modem::pattern_chip_samples(c)/c.sample_rate;
+        s.clock_errors_ppm={-0.0003,0,0.0003};s.retain_score=5;s.candidate_limit=128;s.chunk_bits=1;
+        for(const auto noise_only:{false,true}) {
+            auto input=pcm;
+            if(noise_only){std::mt19937_64 rng(7719);std::normal_distribution<float> noise(0,.2F);for(auto& x:input.pcm)x=noise(rng);}
+            setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","0",1);setenv("DATAPUMP_SCHED_LAZY_BATCH","0",1);
+            const auto original=receive(c,input,s,257);
+            setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);
+            const auto native=receive(c,input,s,257);
+            unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");compare(original,native);
+            check(native.work.implicit_screened_lanes>0 && native.work.implicit_fp32_ranges>0,
+                "smooth FHSS never executed its native physical-calendar template screen");
+            if(noise_only)check(native.bits.empty()&&!native.complete,"smooth FHSS screen manufactured noise bits or END");
+            else check(native.bits==bits && native.complete && native.completed>=pcm.absent_end,
+                "smooth FHSS native acquisition lost payload or physical END");
+            std::cout<<"FHSS_NATIVE multiplier="<<multiplier<<" noise="<<noise_only
+                <<" screened="<<native.work.implicit_screened_lanes<<" rejected="<<native.work.implicit_rejected_lanes
+                <<" original_refined="<<native.work.implicit_refined_lanes<<" fp32="<<native.work.implicit_fp32_ranges<<'\n';
+        }
+    }
+}
 void original_push_fences() {
     auto c=configuration(10,10,true);const Bytes bits{0,1};const auto pcm=capture(c,bits,true);
     auto s=search(c,pcm);s.start_uncertainty_seconds=static_cast<double>(modem::pattern_chip_samples(c))/2/c.sample_rate;
@@ -270,6 +341,35 @@ void screened_noise_and_payload() {
     check(shared.peak<local.peak,"bound shared capture retained duplicated bank PCM/energy history");
 
 }
+void exact_guard_demand_parity() {
+    auto c=configuration(3,10,false);c.integration_seconds=8;
+    const Bytes bits{0,1};const auto pcm=capture(c,bits,true,0,0,0,0,0,0,4.);
+    auto s=search(c,pcm);s.chunk_bits=1;s.retain_score=0;s.candidate_limit=4096;
+    s.start_uncertainty_seconds=17.*modem::pattern_chip_samples(c)/c.sample_rate;
+    setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);
+    setenv("DATAPUMP_SCHED_LAZY_BATCH","0",1);
+    setenv("DATAPUMP_SCHED_COLORED_EXACT_DEMAND","0",1);
+    const auto ref_cpu=std::clock();const auto ref_wall=std::chrono::steady_clock::now();
+    const auto reference=receive(c,pcm,s,113,false,false,false,false,false,false,true);
+    const auto reference_cpu=double(std::clock()-ref_cpu)/CLOCKS_PER_SEC;
+    const auto reference_wall=std::chrono::duration<double>(std::chrono::steady_clock::now()-ref_wall).count();
+    setenv("DATAPUMP_SCHED_COLORED_EXACT_DEMAND","1",1);
+    const auto new_cpu=std::clock();const auto new_wall=std::chrono::steady_clock::now();
+    const auto actual=receive(c,pcm,s,113,false,false,false,false,false,false,true);
+    const auto actual_cpu=double(std::clock()-new_cpu)/CLOCKS_PER_SEC;
+    const auto actual_wall=std::chrono::duration<double>(std::chrono::steady_clock::now()-new_wall).count();
+    compare(reference,actual);
+    check(actual.bits==bits && actual.complete,"exact demand lost payload or observed END");
+    check(actual.work.implicit_exact_guard_queries>0,"exact demand branch never completed an original-owner query");
+    std::cout<<"EXACT_DEMAND completed="<<actual.work.implicit_exact_guard_queries
+        <<" reference_cpu="<<reference_cpu<<" actual_cpu="<<actual_cpu
+        <<" reference_wall="<<reference_wall<<" actual_wall="<<actual_wall
+        <<" reference_peak="<<reference.peak<<" actual_peak="<<actual.peak
+        <<" physical_seconds="<<double(pcm.pcm.size())/c.sample_rate
+        <<" publication_sample="<<actual.first<<" completion_sample="<<actual.completed
+        <<" scope=complete_single_bank_not_live_cohort"<<'\n';
+    unsetenv("DATAPUMP_SCHED_COLORED_EXACT_DEMAND");unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
+}
 void original_projection_cache_parity() {
     auto c=configuration(10,10,false);const Bytes bits{0,1};const auto pcm=capture(c,bits,true);
     auto s=search(c,pcm,true);s.chunk_bits=1;s.retain_score=0;s.candidate_limit=4096;
@@ -323,8 +423,85 @@ void exact_source_binding_parity(bool odd_chips=false) {
     unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
     if(odd_chips)unsetenv("DATAPUMP_SCHED_ORIGIN_CLASSES");
 }
+void automatic_dense_footprint() {
+    constexpr std::size_t budget=23045189;
+    // An implicit eligibility exclusion is not a rejection of affordable
+    // original complex/drift reception, even under the diagnostic override.
+    for(const auto* mode:{"auto","1"}) {
+        setenv("DATAPUMP_SCHED_LAZY_ACQUISITION",mode,1);
+        auto c=configuration(3,1,false);c.integration_seconds=16;
+        c.receiver_strategy=modem::ReceiverStrategy::complex_only;
+        auto s=modem::PatternSearch{};s.start_offset_seconds=0;s.start_uncertainty_seconds=0;
+        s.drift_tolerant=true;s.frequency_offsets_hz={0};s.clock_errors_ppm={0};
+        const auto g=modem::pattern_scheduled_complex_geometry(c,s);
+        const auto policy=modem::pattern_scheduled_acquisition_policy(c,s,g,budget);
+        check(!policy.requested,"unsupported implicit drift geometry displaced original dense fallback");
+        const auto selected=modem::resolve_receiver_strategy(c,s,budget);
+        check(selected.supported && selected.backend==modem::ReceiverBackend::existing_complex,
+            "automatic memory policy made an affordable dense drift receiver unavailable");
+    }
+    for(const auto multiplier:{3U,5U})for(const auto precision:{modem::SearchArithmetic::default_mode,
+            modem::SearchArithmetic::fp32,modem::SearchArithmetic::fp64}) {
+        auto c=configuration(multiplier,10,false);
+        c.sample_rate=14400;c.carrier_hz=1500;c.bandwidth_hz=360;c.spreading_factor=64;
+        c.search_arithmetic=precision;c.stream_epoch=8312;c.stream_phase_samples=0;
+        auto s=modem::PatternSearch{};s.start_offset_seconds=0;s.start_uncertainty_seconds=7;
+        s.search_stream_phases=true;s.drift_tolerant=false;s.frequency_offsets_hz.clear();
+        s.worker_threads=1;s.receiver_strategy_workspace_bytes=budget;
+        s.qualified_start_window=modem::PatternStartWindow{0,1,.02L*c.sample_rate};
+        for(int j=-9;j<=9;++j)s.hypotheses.push_back({j*.00001,0});
+        const auto g=modem::pattern_scheduled_complex_geometry(c,s);
+        check(g.supported && g.retained_hypotheses>10000 && g.workspace_lower_bound_bytes<budget,
+            "calendar footprint fixture no longer exposes the cheap-bound gap");
+        unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
+        const auto policy=modem::pattern_scheduled_acquisition_policy(c,s,g,budget);
+        check(policy.requested && policy.supported,
+            "automatic used the cheap fit-only bound instead of complete mandatory eager state");
+        modem::PatternCorrelator rx(c,s,budget);
+        check(rx.work().backend==modem::PatternCorrelationBackend::scheduled_acquisition &&
+              rx.work().hypotheses==g.retained_hypotheses && rx.working_bytes()<=budget,
+            "automatic constructor and planner disagree or lose logical lanes/rolling workspace");
+    }
+}
+
+void short_split_lifecycle_parity() {
+    const Bytes bits{0,1,0,1,1,0};
+    for(const auto multiplier:{3U,5U})for(const bool fhss:{false,true}) {
+        auto c=configuration(multiplier,10,fhss);
+        c.sample_rate=14400;c.carrier_hz=1500;c.bandwidth_hz=360;c.spreading_factor=64;
+        auto plan=std::make_shared<modem::SchedHopPlan>(*c.scheduled_hopping);
+        plan->clock_error_seconds=plan->peer_clock_error_seconds=.01;
+        c.scheduled_hopping=plan;
+        const modem::SchedHopSourceMap map(*plan,*c.data_key,c.sample_rate);
+        const auto start=map.source_to_physical(map.locate(8312ULL*c.sample_rate).source);
+        c.stream_epoch=start.sample/c.sample_rate;c.stream_phase_samples=start.sample%c.sample_rate;
+        check(modem::symbol_sample_count(c)==5120&&modem::pattern_chip_samples(c)==8,
+            "short Spread lifecycle changed waveform geometry");
+        check(!modem::packed_scheduled_symbols(c),"short Spread fixture did not exercise split-source lifecycle");
+        const auto pcm=capture(c,bits,true);
+        auto s=search(c,pcm);s.chunk_bits=1;s.retain_score=0;s.candidate_limit=4096;
+        setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","0",1);
+        const auto reference=receive(c,pcm,s,113,false,false,false,false,false,false,true);
+        setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);
+        const auto actual=receive(c,pcm,s,113,false,false,false,false,false,false,true);
+        unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
+        compare(reference,actual);
+        check(actual.work.backend==modem::PatternCorrelationBackend::scheduled_acquisition,
+            "short-symbol fixture silently retained dense fallback");
+        check(reference.bits==bits&&reference.complete&&reference.completed>=pcm.absent_end,
+            "original short fixture did not finish intended bits after full observed absence");
+        check(actual.bits==bits&&actual.complete&&actual.completed>=pcm.absent_end,
+            "implicit short fixture lost bits or manufactured END");
+    }
+}
+
+
 }
 int main(){try {
-    paired(1,false,false,false);paired(10,true,true,false);paired(10,false,true,true);original_push_fences();screened_noise_and_payload();original_projection_cache_parity();exact_source_binding_parity();exact_source_binding_parity(true);
+    stable_owner_storage();
+    smooth_fhss_native_parity();
+    automatic_dense_footprint();
+    short_split_lifecycle_parity();
+    paired(1,false,false,false);paired(10,true,true,false);paired(10,false,true,true);original_push_fences();screened_noise_and_payload();original_projection_cache_parity();exact_guard_demand_parity();exact_source_binding_parity();exact_source_binding_parity(true);
     std::cout<<"scheduled implicit acquisition lifecycle tests passed\n";return 0;
 } catch(const std::exception& error){unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");std::cerr<<error.what()<<'\n';return 1;}}

@@ -1229,7 +1229,7 @@ void utc_bank_estimate() {
     modem::OscillatorSearchConfig policy;policy.lf={10,.05};policy.rf={.01,.005};policy.margin=3;
     options.modem.oscillator_search=policy;
     const auto baseline=simulation::estimate(wire(3,options.modem),options,true,clean_channel(),{},1,false);
-    check(options.audio_timing_error_seconds==.05,"default transfer audio allowance must be 50 ms");
+    check(options.audio_timing_error_seconds==.07,"default transfer audio allowance must be 70 ms");
     // Audio uncertainty is relevant only to qualified clock-sync arrivals.
     // With the ordinary search, even an explicit large allowance must not add
     // epochs, timing/frequency trials, work or a fictitious arrival prior.
@@ -2155,6 +2155,67 @@ void scheduled_strategy_model() {
           dual.hardware_sustained_receiver_instances>=qualified.hardware_sustained_receiver_instances,
           "additional independent schedule key reduced resident or recording work");
 }
+void default_hop_calendar_model() {
+    transfer::Options options;options.timestamp=1800000000;options.search_seconds=6;
+    options.key.emplace(Bytes(32,0x61));options.dsp_workspace_bytes=1024ULL*1024*1024;
+    auto& c=options.modem;c.sample_rate=2048;c.bandwidth_hz=64;c.carrier_hz=512;
+    c.pattern_symbols=true;c.constellation_bits=1;c.spreading_factor=512;c.scramble=true;
+    c.receiver_strategy=modem::ReceiverStrategy::automatic;
+    modem::OscillatorSearchConfig oscillator;oscillator.lf={0,0};oscillator.rf={0,0};c.oscillator_search=oscillator;
+    auto schedule=std::make_shared<modem::SchedHopPlan>();schedule->time_multiplier=3;
+    schedule->clock_error_seconds=schedule->peer_clock_error_seconds=.01;
+    schedule->audio_error_seconds=0;c.scheduled_hopping=schedule;
+    options.clock_sync.reset();options.audio_timing_error_seconds=0;
+    auto draft=wire(2,c);draft.total_seconds=180;
+    const auto probe=[&](simulation::ReceiverWorkMode mode,simulation::ReceiverTimingModel timing={}) {
+        return simulation::estimate(draft,options,true,clean_channel(),{},1,false,100,128,mode,timing);
+    };
+    const auto fallback=probe(simulation::ReceiverWorkMode::hardware_fallback);
+    const auto assumed=probe(simulation::ReceiverWorkMode::hardware_calendar_model);
+    check(assumed.timing_window_modeled&&!fallback.timing_window_modeled&&
+          assumed.epoch_hypotheses==fallback.epoch_hypotheses&&
+          assumed.frequency_rate_hypotheses==fallback.frequency_rate_hypotheses&&
+          assumed.receiver_geometry.scheduled_timing_positions<=fallback.receiver_geometry.scheduled_timing_positions,
+          "Default hop calendar lost its narrow joint prior or changed payload/oscillator coverage");
+    check(assumed.receiver_geometry.combined_arrival_half_width_seconds>=.02&&
+          assumed.receiver_geometry.combined_arrival_half_width_seconds<.021&&
+          assumed.receiver_work_assumptions.find("assumed UTC hop-calendar prior")!=std::string::npos,
+          "Default hop calendar lost endpoint GPS bounds or assumed provenance");
+    const auto dated=probe(simulation::ReceiverWorkMode::hardware_timing_model,{.03,0,1./c.sample_rate});
+    const auto wider=probe(simulation::ReceiverWorkMode::hardware_timing_model,{.06,0,1./c.sample_rate});
+    check(dated.timing_window_modeled&&wider.timing_window_modeled&&
+          dated.receiver_geometry.combined_arrival_half_width_seconds>=.05&&
+          wider.receiver_geometry.combined_arrival_half_width_seconds>=dated.receiver_geometry.combined_arrival_half_width_seconds&&
+          dated.receiver_work_assumptions.find("dated capture calendar prior")!=std::string::npos,
+          "Audio0 rejected or truncated real provider uncertainty in the hop calendar model");
+    const auto unavailable=probe(simulation::ReceiverWorkMode::hardware_fallback,{.03,0,1./c.sample_rate});
+    check(!unavailable.timing_window_modeled&&
+          unavailable.receiver_geometry.scheduled_timing_positions==fallback.receiver_geometry.scheduled_timing_positions,
+          "unavailable capture dating silently selected the assumed calendar model");
+    bool invalid_rejected=false;
+    try { (void)probe(simulation::ReceiverWorkMode::hardware_timing_model,
+        {std::numeric_limits<double>::quiet_NaN(),0,1./c.sample_rate}); }
+    catch(const Error&) {invalid_rejected=true;}
+    check(invalid_rejected,"invalid provider uncertainty authorized calendar pruning");
+    c.search_arithmetic=modem::SearchArithmetic::fp64;
+    const auto reference=probe(simulation::ReceiverWorkMode::hardware_calendar_model);
+    check(reference.timing_hypotheses==assumed.timing_hypotheses&&reference.epoch_hypotheses==assumed.epoch_hypotheses,
+          "Search arithmetic changed admitted hop-calendar timing coverage");
+    schedule->group_hops=3;
+    check(!options.clock_sync,"continuous Default calendar fixture lost Default selection");
+    const auto continuous_limit=probe(simulation::ReceiverWorkMode::hardware_timing_model,{.03,0,1./c.sample_rate});
+    c.scheduled_hopping.reset();
+    options.clock_sync=clock_sync::Policy{.01,0,0};
+    const auto ordinary_clocked=probe(simulation::ReceiverWorkMode::hardware_timing_model,{0,0,1./c.sample_rate});
+    check(!continuous_limit.receiver_geometry.scheduled&&
+          continuous_limit.frequency_rate_hypotheses==ordinary_clocked.frequency_rate_hypotheses&&
+          continuous_limit.receiver_geometry.symbol_samples==ordinary_clocked.receiver_geometry.symbol_samples,
+          "multiplier3/dilution3 needlessly selected a split-symbol bank or changed oscillator coverage");
+    options.clock_sync.reset();
+    const auto ordinary=probe(simulation::ReceiverWorkMode::hardware_calendar_model);
+    check(!ordinary.timing_window_modeled,
+          "calendar planning mode invented an arrival prior for unscheduled Default reception");
+}
 void scheduled_short_phase_prior_model() {
     transfer::Options options;options.timestamp=8;options.search_seconds=0;
     Bytes key(32);for(std::size_t i=0;i<key.size();++i)key[i]=static_cast<std::uint8_t>(i);
@@ -2488,7 +2549,7 @@ void projected_pattern_workload() {
 int main(int argc,char** argv) {
     try {
         if(argc==2&&std::string_view(argv[1])=="--planning-layout-only") {scheduled_shared_layout_callers();return 0;}
-        if(argc==2&&std::string_view(argv[1])=="--strategy-only") {receiver_strategy_model();scheduled_strategy_model();scheduled_short_phase_prior_model();scheduled_packed_complex_model();scheduled_split_complex_model();return 0;}
+        if(argc==2&&std::string_view(argv[1])=="--strategy-only") {receiver_strategy_model();scheduled_strategy_model();default_hop_calendar_model();scheduled_short_phase_prior_model();scheduled_packed_complex_model();scheduled_split_complex_model();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--sustained-only") {sustained_hardware_acquisition();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--spread-only") {spread_example_reference();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--sub9-only") {sub9_probability_model_limits();return 0;}
@@ -2517,7 +2578,7 @@ int main(int argc,char** argv) {
         if(argc==2&&std::string(argv[1])=="--partial-only") {
             partial_compact_probability();std::cout<<"partial simulation estimate tests passed\n";return 0;
         }
-        receiver_strategy_model();scheduled_strategy_model();scheduled_short_phase_prior_model();scheduled_packed_complex_model();scheduled_split_complex_model();scheduled_shared_layout_callers();sustained_hardware_acquisition();
+        receiver_strategy_model();scheduled_strategy_model();default_hop_calendar_model();scheduled_short_phase_prior_model();scheduled_packed_complex_model();scheduled_split_complex_model();scheduled_shared_layout_callers();sustained_hardware_acquisition();
         utc_bank_estimate();clock_dsss_reference();restricted_fft_direct_and_bounded_fallback();guarded_component_workload();versioned_outer_work_and_probability_scope();rolling_fft_epoch_workload();compact_clock_prior_workload();probability_and_framing();workload_and_impairments();receiver_cpu_budget();received_processing_budget();whole_symbol_phase_coherence();partial_compact_probability();spread_example_reference();sub9_probability_model_limits();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
         coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();oscillator_policy_geometry();nearby_shift_workload();equivalent_receive_profiles();affine_coefficient_workload();projected_pattern_workload();
         std::cout<<"simulation estimate tests passed\n";return 0;}

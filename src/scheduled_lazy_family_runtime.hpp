@@ -12,10 +12,10 @@ namespace recurrence=scheduled_frequency_recurrence;
 inline std::size_t fragment_size(std::size_t span,bool experimental) {
     return experimental?scheduled_parallel_preparation::shape(span).maximum_fragment:512;
 }
-template<class T> std::size_t input_bytes(const tile::Plan<T>& plan) {
+template<class T> std::size_t input_bytes(const tile::Plan<T>& plan,scheduled_origin_gram::Mode mode=scheduled_origin_gram::Mode::complete) {
     const auto length=tile::add_size(plan.shape.start_span,plan.shape.maximum_fragment-1);
     auto bytes=tile::add_size(sizeof(tile::PreparedInput<T>),tile::helper_reservation);
-    bytes=tile::add_size(bytes,tile::multiply_size(3*plan.size,sizeof(std::complex<T>)));
+    bytes=tile::add_size(bytes,tile::multiply_size((mode==scheduled_origin_gram::Mode::complete?3:1)*plan.size,sizeof(std::complex<T>)));
     return tile::add_size(bytes,tile::multiply_size(length+1,sizeof(long double)+sizeof(std::uint64_t)+
         sizeof(scheduled_acquisition_certificate::Interval)));
 }
@@ -25,16 +25,17 @@ template<class T> std::size_t moment_bytes(const tile::Plan<T>& plan,unsigned de
     bytes=tile::add_size(bytes,tile::multiply_size(2*degree*plan.size,sizeof(std::complex<T>)));
     return tile::add_size(bytes,tile::multiply_size(length,sizeof(std::array<double,moments::maximum_degree+1>)));
 }
-template<class T> std::size_t resolved_bytes(const tile::Plan<T>& plan) {
+template<class T> std::size_t resolved_bytes(const tile::Plan<T>& plan,scheduled_origin_gram::Mode mode=scheduled_origin_gram::Mode::complete) {
     // Includes the separately released optional SIMD synthesis before-cast
     // plane; the scalar header currently leaves these reserved bytes unused.
     return tile::add_size(sizeof(moments::ResolvedInput<T>),tile::multiply_size(plan.size,
-        2*sizeof(std::complex<T>)+sizeof(std::complex<double>)));
+        (mode==scheduled_origin_gram::Mode::complete?2:1)*sizeof(std::complex<T>)+sizeof(std::complex<double>)));
 }
-template<class T> std::size_t accumulator_bytes(const tile::Plan<T>& plan,std::size_t starts,bool native_float_accumulation=false) {
+template<class T> std::size_t accumulator_bytes(const tile::Plan<T>& plan,std::size_t starts,bool native_float_accumulation=false,
+        scheduled_origin_gram::Mode mode=scheduled_origin_gram::Mode::complete) {
     if(native_float_accumulation && !std::is_same_v<T,float>)throw Error("native float accumulator reservation conflicts with requested precision");
     auto bytes=tile::add_size(sizeof(tile::Accumulator<T>),tile::helper_reservation);
-    bytes=tile::add_size(bytes,tile::multiply_size(12*plan.size,native_float_accumulation?sizeof(std::complex<float>):sizeof(std::complex<double>)));
+    bytes=tile::add_size(bytes,tile::multiply_size((mode==scheduled_origin_gram::Mode::complete?12:4)*plan.size,native_float_accumulation?sizeof(std::complex<float>):sizeof(std::complex<double>)));
     bytes=tile::add_size(bytes,tile::multiply_size(plan.size,sizeof(std::complex<T>)));
     return tile::add_size(bytes,tile::multiply_size(starts,sizeof(long double)+sizeof(std::uint64_t)+
         sizeof(tile::Value)+sizeof(scheduled_acquisition_certificate::Interval)+sizeof(std::array<double,2>)));

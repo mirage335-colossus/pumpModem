@@ -1645,6 +1645,7 @@ struct PatternReceiver::Impl {
                 // so an earlier timing correction never counts evidence twice.
                 const auto bound=track.pending_score>count?track.pending_score-count-count*std::log(track.pending_score/count)-track.penalty:0;
                 if(bound>=threshold() || standalone) {
+                    const auto prior_confirmed=track.confirmed;
                     for(std::size_t f=0;f<templates.size();++f)
                         track.frequency_scores[f]+=frequency_scores[f][best.bit];
                     const auto winner=static_cast<std::size_t>(std::max_element(track.frequency_scores.begin(),
@@ -1656,6 +1657,16 @@ struct PatternReceiver::Impl {
                     track.confirmed=track.burst.bits.size();track.confirmed_end=best.end_sample;
                     track.confirmed_score=track.total_score;track.pending_score=0;track.penalty=0;
                     track.confirmed_support=track.total_support;
+                    audio::trace::record("pattern_confirmation",[&](auto& f) {
+                        f.add("phase","continuation");f.add("epoch",config.stream_epoch);f.add("input_samples",sample);
+                        f.add("stream_first_sample",track.burst.stream_first_sample);f.add("stream_first_symbol",track.burst.stream_first_symbol);
+                        f.add("sample_rate",config.sample_rate);f.add("input_sample_origin",search.input_sample_origin);
+                        f.add("stream_phase_samples",track.burst.stream_phase_samples);f.add("frequency_hz",track.burst.frequency_hz);
+                        f.add("chunk_first_symbol",track.burst.first_stream_symbol);f.add("prior_confirmed",prior_confirmed);
+                        f.add("confirmed",track.confirmed);f.add("newly_confirmed",track.confirmed-prior_confirmed);
+                        f.add("end_sample",track.confirmed_end);f.add("standalone",standalone);f.add("joint_chain",!standalone);
+                        f.add("scope","original detector confirmation before public drain, not shared Live selection");
+                    });
                 }
                 advance_track(track,(!packed_calendar || bound>=threshold() || standalone)?
                     std::optional<std::uint64_t>{chosen}:std::nullopt);
@@ -1766,6 +1777,15 @@ struct PatternReceiver::Impl {
         if(track.admitted){track.confirmed=1;track.confirmed_end=item.end_sample;track.confirmed_score=item.score;track.penalty=0;
             track.confirmed_support=track.total_support;}
         else track.pending_score=chain_score;
+        if(track.admitted)audio::trace::record("pattern_confirmation",[&](auto& f) {
+            f.add("phase","acquisition");f.add("epoch",config.stream_epoch);f.add("input_samples",sample);
+            f.add("stream_first_sample",track.burst.stream_first_sample);f.add("stream_first_symbol",track.burst.stream_first_symbol);
+            f.add("sample_rate",config.sample_rate);f.add("input_sample_origin",search.input_sample_origin);
+                        f.add("stream_phase_samples",track.burst.stream_phase_samples);f.add("frequency_hz",track.burst.frequency_hz);
+                        f.add("chunk_first_symbol",track.burst.first_stream_symbol);f.add("prior_confirmed",0);f.add("confirmed",1);f.add("newly_confirmed",1);
+            f.add("end_sample",track.confirmed_end);f.add("standalone",true);f.add("joint_chain",false);
+            f.add("scope","original detector confirmation before public drain, not shared Live selection");
+        });
         tracks.push_back(std::move(track));publish(tracks.back(),false);
     }
     void collect_score(double a,double b,std::size_t j,std::uint64_t index,std::uint64_t phase,std::size_t f) {

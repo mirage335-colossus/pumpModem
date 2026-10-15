@@ -63,6 +63,7 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
     p.frequency_axis_processing_ratio=p.amplitude_processing_ratio=std::numeric_limits<double>::infinity();
     const auto symbol=symbol_sample_count(c),chip=pattern_chip_samples(c);
     const auto seconds=static_cast<double>(symbol)/c.sample_rate;
+    std::string scheduled_complex_failure;
     // Streaming mapped contraction is independent of a symbol-sized FFT.
     // Resolve it before any transform sizing, including hours-long symbols.
     if(scheduled_bursts(c) && !packed_scheduled_symbols(c) &&
@@ -106,7 +107,10 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
         } else implicit=pattern_scheduled_acquisition_policy(c,refined.search,g,workspace);
         const auto state=implicit.supported?static_cast<long double>(implicit.per_bank_required_bytes+implicit.local_capture_bytes):
             static_cast<long double>(g.workspace_lower_bound_bytes);
-        const bool fits=implicit.supported?state<=workspace:state<workspace;
+        // Once the complete mandatory eager layout requires implicit
+        // storage, a failed implicit layout cannot fall back to the smaller
+        // fit-only geometry bound and claim that eager construction fits.
+        const bool fits=implicit.requested?implicit.supported && state<=workspace:state<workspace;
         if(runnable && !g.retained_hypotheses) {
             p.scheduled=p.experimental=true;p.supported=false;p.empty_scheduled_epoch=true;
             p.full_frequency_coverage=p.full_clock_coverage=complete;
@@ -174,10 +178,12 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
             p.full_frequency_coverage=p.full_clock_coverage=complete;
             p.selected_processing_ratio=std::numeric_limits<double>::infinity();
             p.reason=runnable?"complete split complex state exceeds rolling workspace share":refined.reason;
+            if(implicit.requested && !implicit.supported)p.reason+="; implicit acquisition: "+implicit.reason;
             return p;
         }
         // Automatic may consider the separately validated energy detector only
         // when complete complex geometry/grid/state cannot be represented.
+        if(implicit.requested && !implicit.supported)scheduled_complex_failure=implicit.reason;
     }
     auto hypotheses=search.hypotheses;
     bool limited=false;
@@ -626,6 +632,8 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
         p.reason="new decoders disabled; original complex reference";
     if(std::isfinite(p.selected_processing_ratio) && p.selected_processing_ratio>p.cpu_budget)
         p.reason+="; estimated processing still exceeds selected CPU budget";
+    if(!p.supported && !scheduled_complex_failure.empty())
+        p.reason+="; complex implicit acquisition: "+scheduled_complex_failure;
     return p;
 }
 } // namespace

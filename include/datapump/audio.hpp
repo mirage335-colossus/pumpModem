@@ -145,6 +145,18 @@ struct Options {
     // consistency; it is not a measurement or hardware discipline command.
     // Absence preserves the generic diagnostic timing envelope.
     std::optional<ClockTimingPolicy> clock_timing={};
+    // Independently date existing capture samples without enabling UTC rate
+    // steering or qualifying maximum_utc_error_seconds. The fixed converter,
+    // PCM and full provider uncertainty are unchanged, even for Audio error=0.
+    // Capture timestamps may therefore exceed the requested Audio allowance;
+    // they are evidence, not permission to prune to that smaller allowance.
+    // Unsupported providers continue ordinary capture with unavailable format
+    // quality and no dated callbacks. Loss of published timing calls the
+    // capture_discontinuity observer before any later undated/new-generation
+    // PCM; without that observer capture stops. An explicit timestamp provider
+    // stays undated after device recovery until a new capture call establishes
+    // its stream-coordinate binding. Playback ignores this request.
+    bool request_capture_timing=false;
 };
 // Capabilities belong to the selected audio provider, not the UI or target OS.
 bool exclusive_supported();

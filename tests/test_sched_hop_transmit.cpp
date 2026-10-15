@@ -91,10 +91,23 @@ void split_waveform() {
 }
 void continuous_reference() {
     for(const unsigned factor:{1U,10U,100U,1000U}) {
-        auto c=configuration(factor,10,10);c.stream_phase_samples=17;
-        auto original=c;original.scheduled_hopping.reset();
-        modem::PatternTransmitter a(Bytes{0,1},c,c.stream_epoch),b(Bytes{0,1},original,original.stream_epoch);
-        check(capture(a)==capture(b),"continuous dilution changed the preceding waveform");
+        for(const auto multiplier:{3U,10U}) for(const auto fs_delta:{0U,1U}) for(const bool fhss:{false,true}) {
+            auto c=configuration(factor,multiplier,multiplier);c.stream_phase_samples=17;
+            c.sample_rate+=fs_delta;
+            if(fhss) {
+                auto hopping=std::make_shared<modem::FhssPlan>();hopping->channels=2;hopping->dwell_seconds=.4;
+                hopping->shifts[0]=30000000;hopping->shifts[1]=30100000;
+                hopping->power_ramps=hopping->mandatory_ramps=hopping->smooth_ramps=true;
+                hopping->clock_error_seconds=hopping->peer_clock_error_seconds=.01;
+                hopping->audio_error_seconds=.05;hopping->region_seconds=.001;hopping->ramp_seconds=.01;
+                c.fake_hopping=std::move(hopping);
+            }
+            auto original=c;original.scheduled_hopping.reset();
+            modem::PatternTransmitter a(Bytes{0,1},c,c.stream_epoch),b(Bytes{0,1},original,original.stream_epoch);
+            check(capture(a)==capture(b),"continuous dilution changed the preceding waveform/FHSS ramps");
+            check(modem::canonical_phase_step(c)==modem::canonical_phase_step(original),
+                  "continuous dilution introduced scheduled canonical-phase cells");
+        }
     }
 }
 void temporary_noise_and_finish() {

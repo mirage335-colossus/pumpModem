@@ -68,7 +68,7 @@ void policy_and_epoch_normalization() {
         put(value);const bool enabled=!value||std::string_view(value)!="0";
         check(policy::requested()==enabled&&policy::select(1000,100)==enabled,"automatic/legacy policy disagreement");
         check(policy::select(10,100)==(value&&std::string_view(value)=="1"),
-            "automatic must retain existing dense acceleration where its necessary state fits");
+            "automatic must retain existing dense acceleration where its complete mandatory state fits");
     }
     transfer::Options options;options.search_seconds=6;options.audio_timing_error_seconds=0;
     options.clock_sync=clock_sync::Policy{.01,10,0};

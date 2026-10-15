@@ -1,6 +1,7 @@
 #pragma once
 
 #include "datapump/crypto.hpp"
+#include "datapump/clock_sync.hpp"
 
 #include <algorithm>
 #include <array>
@@ -15,22 +16,33 @@
 namespace datapump::modem {
 
 inline unsigned sched_hop_multiplier(std::string_view value) {
-    if (value == "disabled" || value == "off" || value == "1") return 1;
-    if (value == "10") return 10;
-    if (value == "100") return 100;
-    if (value == "1k" || value == "1000") return 1000;
-    if (value == "10k" || value == "10000") return 10000;
-    throw Error("scheduled-hop multiplier must be disabled, 10, 100, 1k or 10k");
+    // External 0 and historical disabled/off/1 all mean the same identity map.
+    // Retired enabled multipliers are rejected, never rounded to another calendar.
+    if (value == "0" || value == "disabled" || value == "off" || value == "1") return 1;
+    if (value == "3") return 3;
+    if (value == "5") return 5;
+    throw Error("Sched_Hop accepts 0, 3 or 5; retired enabled multipliers require an explicit new choice");
 }
 inline std::string_view sched_hop_id(unsigned multiplier) {
     switch (multiplier) {
-    case 1: return "disabled";
-    case 10: return "10";
-    case 100: return "100";
-    case 1000: return "1k";
-    case 10000: return "10k";
+    case 1: return "0";
+    case 3: return "3";
+    case 5: return "5";
     default: throw Error("invalid scheduled-hop time multiplier");
     }
+}
+
+// Public controls use 0 for the undiluted schedule; internal group_hops stays
+// one. Historical 1 has exactly that meaning and exports canonically as 0.
+inline unsigned sched_hop_active_hops(std::string_view value) {
+    if (value == "0" || value == "1") return 1;
+    if (value == "3") return 3;
+    throw Error("Sched_Hop dilution accepts 0 or 3; unsupported legacy dilution requires an explicit new choice");
+}
+inline std::string_view sched_hop_dilution_id(unsigned active_hops) {
+    if (active_hops == 1) return "0";
+    if (active_hops == 3) return "3";
+    throw Error("unsupported public Sched_Hop dilution");
 }
 
 // Public geometry for a secret UTC active/null calendar. This primitive neither
@@ -42,7 +54,7 @@ struct SchedHopPlan {
     // Clock bounds are +/- per endpoint; region is total width, Audio error
     // is nonnegative lag [0,A], and offset delays the receiver's calendar only.
     double clock_error_seconds = .01, peer_clock_error_seconds = .01;
-    double region_seconds = 0, offset_seconds = 0, audio_error_seconds = .05;
+    double region_seconds = 0, offset_seconds = 0, audio_error_seconds = clock_sync::default_audio_error_seconds;
     double ramp_seconds = .01;
 
     bool enabled() const { return time_multiplier != 1; }
@@ -51,7 +63,10 @@ struct SchedHopPlan {
         return clock_error_seconds + peer_clock_error_seconds + region_seconds/2;
     }
     void validate() const {
-        if (time_multiplier != 1 && time_multiplier != 10 && time_multiplier != 100 &&
+        // Legacy numerical plans remain valid for frozen diagnostic fixtures.
+        // Public CLI/GUI parsing above exposes only the moderate calendars.
+        if (time_multiplier != 1 && time_multiplier != 3 && time_multiplier != 5 &&
+            time_multiplier != 10 && time_multiplier != 100 &&
             time_multiplier != 1000 && time_multiplier != 10000)
             throw Error("invalid scheduled-hop time multiplier");
         if (!group_hops || group_hops > time_multiplier)

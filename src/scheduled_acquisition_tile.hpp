@@ -10,6 +10,7 @@
 #include "scheduled_acquisition_certificate.hpp"
 #include "scheduled_spectral_products.hpp"
 #include "scheduled_float_spectral_accumulator.hpp"
+#include "scheduled_origin_gram_contract.hpp"
 #include <openssl/crypto.h>
 #include <algorithm>
 #include <array>
@@ -27,7 +28,9 @@
 namespace datapump::modem::detail::scheduled_acquisition_tile {
 
 inline constexpr std::size_t maximum_start_span=8192;
-inline constexpr std::size_t maximum_fragment_samples=2048;
+// A bounded numerical fragment may span several active/null cycles. It is
+// independent of the original capture/carrier-reset fence (at most 512).
+inline constexpr std::size_t maximum_fragment_samples=524288;
 inline constexpr std::size_t maximum_fragments=65536;
 inline constexpr std::size_t helper_reservation=8192;
 
@@ -98,6 +101,7 @@ struct Work {
     std::uint64_t fragments=0,spectral_products=0,prefix_queries=0,energy_refinements=0;
     std::uint64_t direct_sample_pairs=0;
     std::uint64_t trace_inverse_reuses=0,trace_reuse_fallbacks=0;
+    std::uint64_t origin_gram_inverse_reuses=0,origin_gram_fallbacks=0;
     std::size_t working_bytes=0,transform=0;
 };
 struct Run {std::size_t first=0,end=0;};
@@ -177,6 +181,7 @@ public:
     using Complex=std::complex<T>;
     const Plan<T>& plan;
     const Input original;
+    const scheduled_origin_gram::Mode mode;
     std::array<std::vector<Complex>,3> spectra;
     std::vector<long double> energy;
     std::vector<scheduled_acquisition_certificate::Interval> certified_energy;
@@ -184,20 +189,23 @@ public:
     std::vector<std::uint64_t> count;
     std::array<long double,3> norms{};
     Work work;
-    PreparedInput(const Plan<T>& p,Input input,std::size_t budget,std::stop_token stop={})
-        :plan(p),original(input) {
+    PreparedInput(const Plan<T>& p,Input input,std::size_t budget,std::stop_token stop={},
+                  scheduled_origin_gram::Mode execution_mode=scheduled_origin_gram::Mode::complete)
+        :plan(p),original(input),mode(execution_mode) {
+        if(mode!=scheduled_origin_gram::Mode::complete && mode!=scheduled_origin_gram::Mode::external_gram)
+            throw Error("invalid scheduled input execution mode");
         const auto length=add_size(plan.shape.start_span,plan.shape.maximum_fragment-1);
         if(input.pcm.size()!=length || input.oscillator.size()!=length ||
            (!input.observed.empty() && input.observed.size()!=length))
             throw Error("scheduled acquisition input tile has wrong shape");
         add_coordinate(input.physical_first,length);
         auto estimate=add_size(sizeof(*this),helper_reservation);
-        estimate=add_size(estimate,multiply_size(3*plan.size,sizeof(Complex)));
+        estimate=add_size(estimate,multiply_size((mode==scheduled_origin_gram::Mode::complete?3:1)*plan.size,sizeof(Complex)));
         estimate=add_size(estimate,multiply_size(length+1,sizeof(long double)+sizeof(std::uint64_t)+sizeof(scheduled_acquisition_certificate::Interval)));
         if(estimate>budget)throw Error("scheduled acquisition input exceeds workspace");
         try {
             check_stop(stop);
-            for(auto& plane:spectra)plane.resize(plan.size);
+            for(unsigned plane=0;plane<3;++plane)if(scheduled_origin_gram::active_plane(mode,plane))spectra[plane].resize(plan.size);
             energy.resize(length+1);count.resize(length+1);certified_energy.resize(length+1);
             std::array<double,3> peaks{};
             for(std::size_t i=0;i<length;++i) {
@@ -209,11 +217,13 @@ public:
                 if(!present(input,i))continue;
                 const auto x=static_cast<double>(input.pcm[i]);
                 const auto o=input.oscillator[i];
-                const std::array<std::complex<double>,3> values{x*o,o*o,std::complex<double>{std::norm(o),0}};
+                std::array<std::complex<double>,3> values{x*o,{},{}};
+                if(mode==scheduled_origin_gram::Mode::complete){values[1]=o*o;values[2]={std::norm(o),0};}
                 energy[i+1]+=static_cast<long double>(x)*x;++count[i+1];
                 certified_energy[i+1]=scheduled_acquisition_certificate::plus(certified_energy[i+1],
                     scheduled_acquisition_certificate::pcm_square(input.pcm[i]));
                 for(unsigned plane=0;plane<3;++plane) {
+                    if(!scheduled_origin_gram::active_plane(mode,plane))continue;
                     spectra[plane][i]=cast<T>(values[plane]);
                     const auto preparation=plane==0?scheduled_acquisition_certificate::complex_preproduct_radius({x,0},o):
                         (plane==1?scheduled_acquisition_certificate::complex_preproduct_radius(o,o):
@@ -224,6 +234,7 @@ public:
                 }
             }
             for(unsigned plane=0;plane<3;++plane) {
+                if(!scheduled_origin_gram::active_plane(mode,plane))continue;
                 range<T>(peaks[plane],plan.size);transform(spectra[plane],false,plan,stop);++work.input_transforms;
                 norms[plane]=std::sqrt(norms[plane]);
                 certificates[plane].finish<T>(plan.certificate,std::span<const Complex>(spectra[plane]));
@@ -253,25 +264,29 @@ public:
     using Complex=std::complex<T>;
     const Plan<T>& plan;
     const Fragment original;
+    const scheduled_origin_gram::Mode mode;
     std::array<std::vector<Complex>,6> spectra;
     std::vector<Run> runs;
     std::array<long double,6> norms{};
     std::array<scheduled_acquisition_certificate::Operand,6> certificates;
     Work work;
-    PreparedFragment(const Plan<T>& p,Fragment fragment,std::size_t budget,std::stop_token stop={})
-        :plan(p),original(fragment) {
+    PreparedFragment(const Plan<T>& p,Fragment fragment,std::size_t budget,std::stop_token stop={},
+                     scheduled_origin_gram::Mode execution_mode=scheduled_origin_gram::Mode::complete)
+        :plan(p),original(fragment),mode(execution_mode) {
+        if(mode!=scheduled_origin_gram::Mode::complete && mode!=scheduled_origin_gram::Mode::external_gram)
+            throw Error("invalid scheduled template execution mode");
         const auto length=fragment.rows.size();
         if(!length || length>plan.shape.maximum_fragment ||
            (!fragment.mask.empty() && fragment.mask.size()!=length))
             throw Error("scheduled acquisition fragment has wrong shape");
         add_coordinate(fragment.physical_offset,length);
         auto estimate=add_size(sizeof(*this),helper_reservation);
-        estimate=add_size(estimate,multiply_size(6*plan.size,sizeof(Complex)));
+        estimate=add_size(estimate,multiply_size((mode==scheduled_origin_gram::Mode::complete?6:2)*plan.size,sizeof(Complex)));
         estimate=add_size(estimate,multiply_size((length+1)/2,sizeof(Run)));
         if(estimate>budget)throw Error("scheduled acquisition template exceeds workspace");
         try {
             check_stop(stop);
-            for(auto& plane:spectra)plane.resize(plan.size);
+            for(unsigned plane=0;plane<6;++plane)if(scheduled_origin_gram::active_plane(mode,plane))spectra[plane].resize(plan.size);
             runs.reserve((length+1)/2);
             std::array<double,6> peaks{};
             bool active=false;
@@ -284,9 +299,11 @@ public:
                 if(!active){runs.push_back({i,i+1});active=true;}else runs.back().end=i+1;
                 for(unsigned bit=0;bit<2;++bit) {
                     const auto q=fragment.rows[i][bit];
-                    const std::array<std::complex<double>,3> values{q,q*q,std::complex<double>{std::norm(q),0}};
+                    std::array<std::complex<double>,3> values{q,{},{}};
+                    if(mode==scheduled_origin_gram::Mode::complete){values[1]=q*q;values[2]={std::norm(q),0};}
                     for(unsigned plane=0;plane<3;++plane) {
                         const auto at=3*bit+plane;
+                        if(!scheduled_origin_gram::active_plane(mode,at))continue;
                         // Every fragment produces its valid result at D+s,
                         // regardless of its length.  Circular wrap reaches
                         // only indices <D, so those outputs are linear/exact.
@@ -301,6 +318,7 @@ public:
                 }
             }
             for(unsigned plane=0;plane<6;++plane) {
+                if(!scheduled_origin_gram::active_plane(mode,plane))continue;
                 range<T>(peaks[plane],plan.size);transform(spectra[plane],false,plan,stop);++work.template_transforms;
                 norms[plane]=std::sqrt(norms[plane]);
                 certificates[plane].finish<T>(plan.certificate,std::span<const Complex>(spectra[plane]));
@@ -355,6 +373,7 @@ template<class T> class Accumulator {
     std::array<std::vector<std::complex<double>>,6> sums_,corrections_;
     std::array<std::vector<std::complex<float>>,6> native_sums_,native_corrections_;
     bool native_float_=false;
+    scheduled_origin_gram::Mode mode_=scheduled_origin_gram::Mode::complete;
     std::vector<Complex> scratch_;
     std::vector<long double> energy_;
     std::vector<scheduled_acquisition_certificate::Interval> certified_energy_;
@@ -363,7 +382,7 @@ template<class T> class Accumulator {
     std::vector<std::array<double,2>> trace_values_;
     std::array<long double,6> roundoff_{};
     std::array<double,6> convolution_radius_{},residual_mass_upper_{};
-    bool failed_=false,finished_=false;
+    bool failed_=false,finished_=false,origin_gram_finished_=false;
     bool certificate_diagnostics_=false;
     scheduled_certificate_diagnostics::NativeProfile certificate_profile_;
     Work work_;
@@ -375,8 +394,11 @@ public:
     // may be separate objects with identical shape; their spectra are public-API
     // values, not handles to the accumulator. No whole-symbol PCM is retained.
     Accumulator(const Plan<T>& plan,std::uint64_t physical_origin,std::span<const std::size_t> starts,
-                std::size_t budget,std::stop_token stop={},bool certificate_diagnostics=false,bool native_float_accumulation=false)
-        :plan_(plan),origin_(physical_origin),starts_(starts),native_float_(native_float_accumulation),certificate_diagnostics_(certificate_diagnostics) {
+                std::size_t budget,std::stop_token stop={},bool certificate_diagnostics=false,bool native_float_accumulation=false,
+                scheduled_origin_gram::Mode execution_mode=scheduled_origin_gram::Mode::complete)
+        :plan_(plan),origin_(physical_origin),starts_(starts),native_float_(native_float_accumulation),mode_(execution_mode),certificate_diagnostics_(certificate_diagnostics) {
+        if(mode_!=scheduled_origin_gram::Mode::complete && mode_!=scheduled_origin_gram::Mode::external_gram)
+            throw Error("invalid scheduled accumulator execution mode");
         if(native_float_ && (!std::is_same_v<T,float> || !scheduled_float_spectral_accumulator::environment()))
             throw Error("scheduled native float accumulator unsupported for requested precision/environment");
         if(starts.size()>maximum_start_span)throw Error("scheduled acquisition start count exceeds bound");
@@ -386,7 +408,7 @@ public:
         add_coordinate(origin_,plan.shape.start_span-1);
         auto estimate=add_size(sizeof(*this),helper_reservation);
         if(!starts.empty()) {
-            estimate=add_size(estimate,multiply_size(12*plan.size,native_float_?sizeof(std::complex<float>):sizeof(std::complex<double>)));
+            estimate=add_size(estimate,multiply_size((mode_==scheduled_origin_gram::Mode::complete?12:4)*plan.size,native_float_?sizeof(std::complex<float>):sizeof(std::complex<double>)));
             estimate=add_size(estimate,multiply_size(plan.size,sizeof(Complex)));
             estimate=add_size(estimate,multiply_size(starts.size(),sizeof(long double)+sizeof(std::uint64_t)+sizeof(Value)+sizeof(scheduled_acquisition_certificate::Interval)+sizeof(std::array<double,2>)));
         }
@@ -396,11 +418,11 @@ public:
             // An empty admitted set does not allocate/execute FFT work.
             if(!starts.empty()) {
                 if(native_float_) {
-                    for(auto& plane:native_sums_)plane.resize(plan.size);
-                    for(auto& plane:native_corrections_)plane.resize(plan.size);
+                    for(unsigned plane=0;plane<6;++plane)if(scheduled_origin_gram::active_plane(mode_,plane))native_sums_[plane].resize(plan.size);
+                    for(unsigned plane=0;plane<6;++plane)if(scheduled_origin_gram::active_plane(mode_,plane))native_corrections_[plane].resize(plan.size);
                 } else {
-                    for(auto& plane:sums_)plane.resize(plan.size);
-                    for(auto& plane:corrections_)plane.resize(plan.size);
+                    for(unsigned plane=0;plane<6;++plane)if(scheduled_origin_gram::active_plane(mode_,plane))sums_[plane].resize(plan.size);
+                    for(unsigned plane=0;plane<6;++plane)if(scheduled_origin_gram::active_plane(mode_,plane))corrections_[plane].resize(plan.size);
                 }
                 scratch_.resize(plan.size);
                 energy_.resize(starts.size());count_.resize(starts.size());values_.resize(starts.size());certified_energy_.resize(starts.size());trace_values_.resize(starts.size());
@@ -432,7 +454,9 @@ public:
         if(failed_ || finished_)throw Error("scheduled acquisition accumulator is no longer writable");
         try {
             check_stop(stop);
-            if(input.plan.size!=plan_.size || fragment.plan.size!=plan_.size ||
+            const auto input_mode=[&] {if constexpr(requires {input.mode;})return input.mode;
+                else return scheduled_origin_gram::Mode::complete;}();
+            if(input_mode!=mode_ || fragment.mode!=mode_ || input.plan.size!=plan_.size || fragment.plan.size!=plan_.size ||
                input.plan.shape.start_span!=plan_.shape.start_span ||
                fragment.plan.shape.start_span!=plan_.shape.start_span ||
                input.plan.shape.maximum_fragment!=plan_.shape.maximum_fragment ||
@@ -443,6 +467,7 @@ public:
             last_end_=add_coordinate(fragment.original.physical_offset,fragment.original.rows.size());
             if(starts_.empty())return;
             for(unsigned plane=0;plane<6;++plane) {
+                if(!scheduled_origin_gram::active_plane(mode_,plane))continue;
                 const auto input_plane=plane%3;
                 scheduled_spectral_products::Result accumulation;
                 if constexpr(std::is_same_v<T,float>) {
@@ -494,11 +519,11 @@ public:
                 energy_[at]+=energy;count_[at]+=count;
                 certified_energy_[at]=scheduled_acquisition_certificate::plus(certified_energy_[at],bounded_energy);
             }
-            ++work_.fragments;work_.spectral_products+=6*plan_.size;
+            ++work_.fragments;work_.spectral_products+=(mode_==scheduled_origin_gram::Mode::complete?6:2)*plan_.size;
         } catch(...) {failed_=true;throw;}
     }
     TraceReuse<T> trace_reuse()const {
-        if(!finished_ || failed_ || !plan_.certificate.valid || !scheduled_acquisition_certificate::environment<T>())return {};
+        if(mode_!=scheduled_origin_gram::Mode::complete || !finished_ || failed_ || origin_gram_finished_ || !plan_.certificate.valid || !scheduled_acquisition_certificate::environment<T>())return {};
         TraceReuse<T> result;result.plan=&plan_;result.origin=origin_;result.starts=starts_;
         result.native_float=native_float_;
         if(native_float_) {
@@ -508,7 +533,7 @@ public:
         return result;
     }
     bool same_trace(const TraceReuse<T>& reuse)const {
-        if(reuse.native_float!=native_float_ || reuse.plan!=&plan_ || reuse.origin!=origin_ || reuse.starts.size()!=starts_.size() ||
+        if(mode_!=scheduled_origin_gram::Mode::complete || reuse.native_float!=native_float_ || reuse.plan!=&plan_ || reuse.origin!=origin_ || reuse.starts.size()!=starts_.size() ||
            reuse.trace.size()!=starts_.size() || !scheduled_acquisition_certificate::environment<T>())return false;
         if(!std::equal(starts_.begin(),starts_.end(),reuse.starts.begin()))return false;
         for(unsigned bit=0;bit<2;++bit) {
@@ -537,16 +562,32 @@ public:
         }
         return true;
     }
-    std::span<const Value> finish(std::stop_token stop={},const TraceReuse<T>* reuse=nullptr) {
+    bool accepts_origin_gram(const scheduled_origin_gram::Override& token,
+                             const scheduled_origin_gram::Binding& current)const {
+        if(failed_ || finished_ || !token.valid_for(origin_,starts_,current))return false;
+        for(std::size_t at=0;at<starts_.size();++at)if(token.rows[at][0].count!=count_[at])return false;
+        return true;
+    }
+    std::span<const Value> finish(std::stop_token stop={},const TraceReuse<T>* reuse=nullptr,
+                                  const scheduled_origin_gram::Override* origin_gram=nullptr,
+                                  const scheduled_origin_gram::Binding* origin_gram_binding=nullptr) {
         if(failed_ || finished_)throw Error("scheduled acquisition accumulator cannot finish");
         try {
             check_stop(stop);
             if(starts_.empty()){finished_=true;return values_;}
-            const bool shared_trace=reuse && same_trace(*reuse);
-            if(reuse && !shared_trace)++work_.trace_reuse_fallbacks;
+            const bool shared_origin_gram=origin_gram&&origin_gram_binding&&accepts_origin_gram(*origin_gram,*origin_gram_binding);
+            if(origin_gram&&!shared_origin_gram)++work_.origin_gram_fallbacks;
+            if(mode_==scheduled_origin_gram::Mode::external_gram && !shared_origin_gram)
+                throw Error("scheduled reduced Gram mode requires original-path replay: invalid external certificate");
+            // A transported Gram is not the old spectral trace inverse and
+            // cannot be exported under that inverse's different certificate.
+            origin_gram_finished_=shared_origin_gram;
+            const bool shared_trace=!shared_origin_gram && reuse && same_trace(*reuse);
+            if(reuse && !shared_trace && !shared_origin_gram)++work_.trace_reuse_fallbacks;
             std::array<double,6> certified_radii{};
             const bool native_environment=!native_float_ || scheduled_float_spectral_accumulator::environment();
             for(unsigned plane=0;plane<6;++plane) {
+                if(shared_origin_gram && plane%3!=0){++work_.origin_gram_inverse_reuses;continue;}
                 scheduled_acquisition_certificate::Operand inverse_operand;
                 double final_roundoff_l1=0;
                 for(std::size_t i=0;i<plan_.size;++i) {
@@ -571,7 +612,12 @@ public:
                     scheduled_acquisition_certificate::root(inverse_operand.native_square_upper),
                     scheduled_acquisition_certificate::root(inverse_operand.radius_square_upper),true);
                 const auto u=std::numeric_limits<double>::epsilon()/2;
-                const auto mass_terms=2*plan_.size*static_cast<std::size_t>(work_.fragments);
+                // Sizes are bounded, but their product may exceed32bit
+                // size_t. Form the count outward in FP64, never wrap a native
+                // integer and silently shrink the gradual-underflow bound.
+                const auto mass_terms=scheduled_acquisition_certificate::mul(
+                    scheduled_acquisition_certificate::mul(2,static_cast<double>(plan_.size)),
+                    static_cast<double>(work_.fragments));
                 // Each helper block has already enclosed the exact residual
                 // mass; outward merges cover their own rounding. Correction,
                 // underflow, final-add/cast/inverse bounds remain unchanged.
@@ -607,7 +653,9 @@ public:
                     (!native_float_ || scheduled_float_spectral_accumulator::environment()) && scheduled_acquisition_certificate::environment<T>() &&
                     std::isfinite(value.certificate.energy_lower) && std::isfinite(value.certificate.energy_upper);
                 for(unsigned bit=0;bit<2;++bit) {
-                    auto& fit=value.fits[bit];fit.energy=static_cast<double>(energy_[at]);fit.count=count_[at];
+                    auto& fit=value.fits[bit];
+                    if(shared_origin_gram){const auto& g=origin_gram->rows[at][bit];fit.cc=g.cc;fit.ss=g.ss;fit.cs=g.cs;}
+                    fit.energy=static_cast<double>(energy_[at]);fit.count=count_[at];
                     if(!fit.count)fit={};
                     if(!finite(fit) || fit.energy<0)throw Error("scheduled acquisition result overflow");
                     const auto determinant=fit.cc*fit.ss-fit.cs*fit.cs;
@@ -618,13 +666,15 @@ public:
                         scheduled_acquisition_certificate::add(scheduled_acquisition_certificate::mul(2,
                             scheduled_acquisition_certificate::ulp(fit.cs)),scheduled_acquisition_certificate::mul(6,
                             std::numeric_limits<double>::denorm_min())));
-                    value.certificate.gram_radius[bit]=scheduled_acquisition_certificate::add(reconstruction,
-                        scheduled_acquisition_certificate::mul(.5,scheduled_acquisition_certificate::add(
-                            certified_radii[3*bit+1],certified_radii[3*bit+2])));
+                    value.certificate.gram_radius[bit]=shared_origin_gram?origin_gram->rows[at][bit].radius:
+                        scheduled_acquisition_certificate::add(reconstruction,
+                            scheduled_acquisition_certificate::mul(.5,scheduled_acquisition_certificate::add(
+                                certified_radii[3*bit+1],certified_radii[3*bit+2])));
                     value.certificate.valid=value.certificate.valid &&
                         std::isfinite(value.certificate.dot_radius[bit]) && std::isfinite(value.certificate.gram_radius[bit]);
                     value.dot_roundoff[bit]=static_cast<double>(roundoff_[3*bit]);
-                    value.gram_roundoff[bit]=static_cast<double>(roundoff_[3*bit+1]+roundoff_[3*bit+2]);
+                    value.gram_roundoff[bit]=shared_origin_gram?value.certificate.gram_radius[bit]:
+                        static_cast<double>(roundoff_[3*bit+1]+roundoff_[3*bit+2]);
                     const auto trace=fit.cc+fit.ss;
                     const auto minimum=.5*(trace-std::hypot(fit.cc-fit.ss,2*fit.cs));
                     const auto scale=std::sqrt(std::max(0.,fit.energy)*std::max(0.,trace));

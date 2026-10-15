@@ -105,11 +105,11 @@ Modem:
                         Legacy integer IDs migrate to Default; no GPU receiver is implemented
   --receiver-strategy MODE  auto, existing, complex, amplitude (receiver only)
   --receiver-cpu-budget N  Estimated processing seconds per audio second (default 0.6)
-  --sched-hop MODE     disabled, 10, 100, 1k, 10k nominal total-time multiplier (requires keyfile)
-  --sched-hop-dilution N  Consecutive active hops per frame (1..MODE; developer control)
+  --sched-hop MODE     0, 3, 5 nominal total-time multiplier (requires keyfile)
+  --sched-hop-dilution N  0 = one active hop, 3 = three consecutive active hops (developer control)
   --sched-frequency-search N  Frequency uncertainty multiplier 1, 2, 4, 8, 16, 32; active with Sched_Hop
   --clock-sync SPEC     default or GPS_1ms-400ms_region-2564ms_offset
-  --audio-error TIME    Per-station audio lag 0..+TIME; default or duration (50ms)
+  --audio-error TIME    Per-station audio lag 0..+TIME; default or duration (70ms)
   --fec 20|60|off        Reed-Solomon parity overhead, default60
   --no-compression      Diagnostic override; both peers must select the same source codec
   --memory-mb N         Legacy batch PCM workspace budget, default256 MiB
@@ -369,10 +369,10 @@ modem::Config config(const Args& a) {
     c.receiver_strategy=tuning::parse_receiver_strategy(a.get("receiver-strategy","auto"));
     c.receiver_cpu_budget=a.number("receiver-cpu-budget",.6);
     tuning::validate_receiver_cpu_budget(c.receiver_cpu_budget);
-    const auto burst_multiplier=modem::sched_hop_multiplier(a.get("sched-hop","disabled"));
-    const auto dilution=a.integer("sched-hop-dilution",1);
-    if(dilution<1||dilution>10000||(burst_multiplier>1&&dilution>burst_multiplier))
-        throw Error("sched-hop-dilution must be 1..10000 and cannot exceed its enabled multiplier");
+    const auto burst_multiplier=modem::sched_hop_multiplier(a.get("sched-hop","0"));
+    const auto dilution=modem::sched_hop_active_hops(a.get("sched-hop-dilution","0"));
+    if(burst_multiplier>1&&dilution>burst_multiplier)
+        throw Error("sched-hop-dilution active count cannot exceed its multiplier");
     const auto frequency_multiplier=a.number("sched-frequency-search",1);
     if(frequency_multiplier!=1&&frequency_multiplier!=2&&frequency_multiplier!=4&&frequency_multiplier!=8&&
        frequency_multiplier!=16&&frequency_multiplier!=32)throw Error("sched-frequency-search must be 1, 2, 4, 8, 16, or 32");
@@ -1122,7 +1122,7 @@ int main(int argc,char** argv) {
                 <<",\"receiver_strategy\":\""<<tuning::receiver_strategy_id(c.receiver_strategy)<<'"'
                 <<",\"receiver_cpu_budget\":"<<c.receiver_cpu_budget
                 <<",\"sched_hop\":\""<<modem::sched_hop_id(c.scheduled_hopping?c.scheduled_hopping->time_multiplier:1)<<'"'
-                <<",\"sched_hop_dilution\":"<<(c.scheduled_hopping?c.scheduled_hopping->group_hops:1)
+                <<",\"sched_hop_dilution\":"<<modem::sched_hop_dilution_id(c.scheduled_hopping?c.scheduled_hopping->group_hops:1)
                 <<",\"sched_frequency_search\":"<<c.frequency_search_multiplier
                 <<",\"constellation_bits\":"<<c.constellation_bits
                 <<",\"sample_rate\":"<<c.sample_rate<<",\"carrier_hz\":"<<modem::oscillator_effects(c).physical_rf_hz

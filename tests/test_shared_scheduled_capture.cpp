@@ -32,6 +32,13 @@ std::vector<float> copy(const SharedScheduledCapture::RangeLease& lease) {
     });
     require(first==lease.end(),"borrow range incomplete");return result;
 }
+void duration_boundaries() {
+    constexpr std::uint32_t fs=6120;
+    require(!shared_source_duration_eligible(6ULL*fs-1,fs),"incomplete short source entered implicit capture");
+    for(const auto n:{6ULL*fs,16ULL*fs-1,16ULL*fs,16ULL*fs+1,142ULL*fs})
+        require(shared_source_duration_eligible(n,fs),"arbitrary symbol-duration cutoff disabled shared capture");
+    require(!shared_source_duration_eligible(1,0),"zero-rate duration admitted");
+}
 void small_feeds_shared_and_pinned() {
     SharedScheduledCapture owner(limits(),identity,100);
     auto input=samples(1000,100);
@@ -266,7 +273,7 @@ void opted_fence_growth() {
 }
 int main() {
     try {
-        small_feeds_shared_and_pinned();future_certificate_and_workspace();
+        duration_boundaries();small_feeds_shared_and_pinned();future_certificate_and_workspace();
         discontinuity_revision_and_cancellation();overflow_and_transactional_cross_grid();
         original_fences_and_physical_carrier();concurrent_committed_prefix();
         opted_fence_growth();

@@ -16,7 +16,10 @@ inline constexpr std::string_view reference_gpu = "RTX 4090 Laptop GPU";
 // Hardware keeps the configured peer's oscillator/correction coverage even
 // when local capture timing falls back to the full arrival window.
 // hardware_timing_model is an explicit planning assumption, not device evidence.
-enum class ReceiverWorkMode { sampled_simulation, hardware_fallback, hardware_timing_model };
+enum class ReceiverWorkMode { sampled_simulation, hardware_fallback, hardware_timing_model,
+    // Shared UTC hop calendar with declared bounds before dated capture exists.
+    // This is a planning assumption, never evidence of hardware qualification.
+    hardware_calendar_model };
 struct ReceiverTimingModel {
     // Omitted fields use the explicitly selected planning assumptions. A
     // caller with capture metadata must supply its larger uncertainty rather

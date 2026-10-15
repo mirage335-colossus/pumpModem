@@ -228,6 +228,16 @@ void exact_raw_masking_and_scheduling() {
     const auto queued=detail::schedule_transmission(value.modem,[&](std::uint64_t epoch){++builds;value.timestamp=epoch;now+=builds==1?2.:.125;return transfer::binary_transmitter(Bytes{0,1},value);},[&]{return now;},{},0,.5);
     check(builds==2 && queued.playback_epoch>now+.5 && std::abs(queued.playback_epoch+prefix-static_cast<double>(queued.epoch))<1e-6,"prepared source leaves the audio delivery margin before its actual epoch");
     rejects([&]{detail::schedule_transmission(value.modem,[](std::uint64_t){return std::unique_ptr<modem::StreamingTransmitter>{};},[&]{return now;},{},0,-1);},"negative audio delivery margin rejected");
+    auto continuous=value.modem;continuous.data_key=value.key;
+    continuous.scheduled_hopping=std::make_shared<const modem::SchedHopPlan>(modem::SchedHopPlan{3,3});
+    now=1800000000.375;
+    std::uint32_t phase=99;
+    const auto identity=detail::schedule_transmission(continuous,[&](std::uint64_t,std::uint32_t p) {
+        phase=p;return std::unique_ptr<modem::StreamingTransmitter>{};
+    },[&]{return now;});
+    check(phase==0&&identity.phase_samples==0&&identity.playback_epoch>now&&
+          std::abs(identity.playback_epoch+prefix-static_cast<double>(identity.epoch))<1e-6,
+          "all-active3/3 preparation lost ordinary whole-second private origins");
 }
 void protection_and_cancellation() {
     auto value=options(true);value.modem.dsss=true;const auto config=transfer::seeded_config(value,value.timestamp);

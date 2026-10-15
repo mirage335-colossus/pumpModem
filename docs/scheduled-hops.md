@@ -17,18 +17,18 @@ separate evidence.
 
 ## Controls and timing
 
-The Console places **Sched_Hop** after FHSS. Its choices are **disabled**, **10**,
-**100**, **1k** and **10k**. With the ordinary dilution of one, these mean one
-active hop per 10, 100, 1,000 or 10,000 total hops. Each base hop is 0.4 seconds;
-the setting is a nominal total-time multiplier, not an added frequency spread.
+The Console places **Sched_Hop** after FHSS. Its selectable values are exactly
+**0**, **3** and **5**. Zero disables scheduling. With ordinary dilution, 3 and 5
+mean one active hop per three or five total hops. Each base hop is 0.4 seconds;
+the setting is a nominal total-time multiplier, not additional frequency spread.
 
 Developer mode exposes **Sched_Hop Dilution** beside the receiver controls at the
-bottom of the persistent Link planner. It sets the number `G` of consecutive
-active hops inside a frame of `M` total hops. Two active hops in a ten-hop frame
-therefore give an effective 5× multiplier. They do not make a twenty-hop frame.
-Changing to a smaller `M` clamps the GUI dilution to that frame's size. Imported
-settings with `G > M` are rejected; disabling scheduling retains the preference.
-`G = M` is continuous transmission and uses the ordinary source-time map.
+bottom of the persistent Link planner, with exactly **0** and **3**. Zero means
+one active hop (`G=1` internally); three means three consecutive active hops
+(`G=3`) in the unchanged `M`-hop frame. Thus 5/3 has effective 5/3 airtime, and
+3/3 is continuous. The latter uses the ordinary acquisition/source map and
+whole-second preparation origin, while applicable FHSS ramps remain active.
+Disabling scheduling retains the inactive dilution and frequency preferences.
 
 The keyed group start is chosen in the first `floor((M-G)/2)+1` positions of
 each UTC frame. Restricting that range guarantees a processing interval even
@@ -42,13 +42,20 @@ when adjacent keyed choices are unfavorable:
 | Minimum null interval | `0.4 ceil((M-G)/2)` seconds |
 | Maximum null interval | `0.4 ((M-G)+floor((M-G)/2))` seconds |
 
-For `M=10, G=1`, this is a 4-second frame, 0.4-second active group, and 2 through
-5.2 seconds of null time between groups. For `M=10, G=2`, the group is 0.8 seconds
-and the null interval is 1.6 through 4.8 seconds. These are calendar bounds, not
-measured processing deadlines. Multiple receive keys, arrival uncertainty and
-clock hypotheses can require recording overlapping groups and consume the quiet
-interval. A broad several-second prior can erase most of the recording benefit
-of 10× scheduling. A tighter qualified prior can make that union much smaller.
+For `M=3, G=1`, the frame is 1.2 seconds and null intervals range from
+0.4 through 1.2 seconds. For `M=5, G=1`, the frame is two seconds and nulls
+range from 0.8 through 2.4 seconds. For `M=5, G=3`, active groups last
+1.2 seconds and nulls range from 0.4 through 1.2 seconds. These are calendar
+bounds, not measured processing deadlines. Multiple receive keys, arrival
+uncertainty and clock hypotheses can require recording overlapping groups.
+Default assumes a GPS-aligned calendar (±10 ms at each station), independently
+of the several-second unknown message-epoch search. Dated capture constrains
+arrival and canonical source phase jointly; it does not shift the calendar
+independently for each possible message start. Actual timestamp uncertainty,
+selected causal audio lag and propagation offset/region remain in that relation.
+Unavailable dates retain a visible conservative fallback. A modeled calendar is
+not a hardware timing qualification, and does not by itself authorize dropping
+raw capture required by another key, epoch or clock hypothesis.
 The planner selects using estimated sustainable mean work. It also displays the
 more stringent work-to-next-active-group ratio as a diagnostic, not a mandatory
 per-hop clearance deadline. Split-DSSS weight construction and setup remain
@@ -79,17 +86,88 @@ retain their assumptions and fallback labels.
 CLI and launch/parameter-list representations are:
 
 ```text
---sched-hop disabled|10|100|1k|10k
---sched-hop-dilution N
+--sched-hop 0|3|5
+--sched-hop-dilution 0|3
 --sched-frequency-search 1|2|4|8|16|32
 ```
 
-The parser also accepts `off` or `1` for disabled, and `1000`/`10000` for
-`1k`/`10k`. Older configurations default to disabled, dilution one and frequency
-multiplier one. Launch commands and parameter lists preserve all three
-preferences, including inactive ones. The active schedule still requires the
-selected communication key; a receive-only keyfile does not enable the TX
-control.
+Compatibility is explicit. Legacy disabled spellings `disabled`, `off` and `1`
+still disable scheduling; old dilution `1` still means one active hop and exports
+as `0`. Missing fields retain those same disabled/one-active-hop defaults.
+Retired enabled multipliers (`10`, `100`, `1k`/`1000`, `10k`/`10000`) and other
+old dilution values fail import with an explanation: choose a new calendar
+explicitly. They are never silently converted to 3 or 5. Public controls,
+launch commands and parameter lists use the reduced policy. Internal numerical
+plans retain older/arbitrary groups for diagnostic fixtures and preserved
+references; this does not make them selectable product settings.
+
+The active schedule requires a selected communication key. A receive-only
+keyfile does not enable TX. Public frame geometry and bursts remain observable.
+
+## Moderate-schedule follow-up (14 October)
+
+The public policy is now the moderate 3×/5× policy above. Earlier 10× and larger
+captures below are preserved historical diagnostics, not selectable defaults.
+
+The corrected joint-bank preflight distinguishes existential coverage from
+conservative per-candidate clock cells. It checks all frequency-eligible clock
+alternatives across the declared coupled strip; adding an exact coarse plane
+cannot erase coverage supplied by a finer plane. Original coarse candidates,
+ordering and trial charges remain. Their wider runtime cells still govern
+flat/null/END retention. UTC steering expands the physical aperture **before**
+fine-grid resolution, preventing a rounding/ceil boundary from leaving an
+uncovered frequency interval. Transient scans, pair copies, interval endpoints
+and ordered-rate metadata are preflighted against the constructor's remaining
+DSP workspace.
+
+Shared original capture no longer switches off at a 16-second source symbol.
+The real owner capacity must cover every eligible profile's physical history
+horizon; otherwise the preceding local-history path remains. This does not
+promise that arbitrarily long symbols fit the workspace. Routine diagnostic
+plots yield to pending captured work, including certified-null physical
+coordinates and popped-block tails. Provenance/journal/PCM-retirement pressure
+queries remain mandatory. Fair idle queries preserve observation IDs, original
+ages and thresholds; accepted bits and physical END publish before them.
+
+An exact-owner on-demand guard branch has been implemented for integral,
+rate-one candidates. It remains an internal diagnostic option
+`DATAPUMP_SCHED_COLORED_EXACT_DEMAND=1`: the complete one-bank measurement was
+slower, so Default does not select it merely because it avoids a fallback.
+FP64-force retains original templates and bypasses this screen, as before.
+
+Cold implicit owners now allocate only materialized stable tracks. The directory
+may grow without moving published owners; its replacement peak, allocation
+overhead and guard arrays remain charged. A preserved 87,219-alternative case
+reduced one cold bank's reservation from 32,302,632 to 1,608,328 bytes with the
+same logical alternatives and owner ceiling. This is an allocation correction,
+not a measured reception speedup or permission to omit future consumers.
+
+Catalogue preparation uses the checked remaining workspace after capture,
+journals, control/search vectors, physical views, minimum stable tracks and
+external temporary metadata. The former arbitrary one-eighth limit is removed.
+Its own cursor/range/vector-growth peak is still charged. Descriptive memory
+requirements and pure shared-layout projections do not bind a runtime capture
+owner: actual execution still validates, subscribes and charges a real owner.
+Failure diagnostics retain the implicit acquisition reason.
+
+Full independent-input 5/3 attempts at fixed target8/rate36/DSSS10/Fs6120 did
+not drain. The 30-MHz dense execution scored 31.51 of 137.73 physical seconds
+within its 280-second bound. Forcing the existing native-FP32 tiled engine scored
+23.51 seconds; its lower partial CPU total is not a complete speedup. The latter
+run screened 9,500 lanes but required 3,338 refinements and 454.08 million replay
+coordinates. All 1,085 colored-demand failures reported source-workspace
+pressure. Optional tile retention, shrinking rolling-bank loans and original
+guard replay remain consequential implementation gaps. Native-FP32 execution
+alone does not establish practical processing headroom.
+
+The maintained status is **partial implementation**. No matched, independently
+produced continuous-too-slow → 3×/5× rescue has yet passed. The preceding
+3× broad fixture failed its 170-second full-drain bound after only a prefix;
+that is not whole-reception throughput or sensitivity evidence. Numerical
+parity in full one-bank captures and successful GUI startup do not resolve
+that limitation. Current measurements, identities, launchers and outstanding
+strategies are recorded in the local
+[manual checkpoint](../.agent-work/artifacts/sched-moderate-20261014/MANUAL-SCHED-MODERATE.md).
 
 ## Split symbols and cryptographic coordinates
 
@@ -177,7 +255,7 @@ bound, region is total width, and `A` is nonnegative audio lag `[0,A]`. An activ
 group reserves `B` at its beginning and `B+A` at its end, plus one ramp of duration
 `R` at each end, rounded outward to samples. Default scheduling uses ±10 ms at
 each station, no additional region, and the selected Audio error (hidden default
-0..50 ms). A custom clock policy supplies both endpoint clock bounds, its region
+0..70 ms). A custom clock policy supplies both endpoint clock bounds, its region
 and its fixed arrival offset. The offset shifts receiver arrival timing; it does
 not select different secret groups or stretch the uncertainty interval.
 
@@ -1775,3 +1853,244 @@ Off/10/100/1000:4,096 original FP32 samples per factor at512Hz and16Hz occupied
 bandwidth. This prefix comparison excludes Sched_Hop/FHSS/UTC and does not
 qualify complete bursts or sensitivity. Exact source/build identities and the
 remaining practical headroom failure are retained in the manual report above.
+
+### Practical examples and shared preparation, 14 October
+
+The next local pass preserves the preceding runnable GUI and all716 source
+inputs under `.agent-work/artifacts/sched-practical-20261014/baseline/`. Acceptance
+fixtures and exact build identities are recorded in the parent artifact directory's
+`MANUAL-SCHED-PRACTICAL.md`. **Practical scheduled-reception rescue remains
+unfinished.** The approximately0.54 processing-seconds ratio reported for the
+Spread example is an engineering planner estimate, not a measured Live result.
+
+Exact clock siblings now share immutable catalog timing ranges, keyed calendar
+anchors and aggregate first-completion searches. Joint geometry counts each
+distinct exact rate once and adds its count separately for every original
+frequency/rate pair. Logical lanes, order, coordinates, pair multiplicity and
+trial charges remain unchanged. The independent full-catalog oracle checks
+every lane. A repeated high-RF cold-admission prefix reduced measured exclusive
+setup plus rolling CPU from about24.90 seconds to0.584 seconds. The new run
+reached substantially more numerical work; these prefixes do **not** establish a
+whole-receiver speedup or a rescued link.
+
+The actual GUI rate36/target8/DSSS10/M3 command loaded the requested controls and
+used complex implicit reception. It completed transmission, but failed the
+180-second receive deadline with about150.5 seconds of backlog and no accepted
+stream. The first traced bank performed24,570 screens and four admission
+refinements. Historical diagnostic projection work covered about276.65 million
+sample coordinates, versus246,942 acquisition coordinates. These are executed
+work counts, not component CPU fractions. The exact diagnostic FIFO is production
+work even though it cannot admit bits or END.
+
+That first bank's replay was triggered by fixed1,024-run diagnostic metadata
+pressure, before PCM retirement or an optional GUI history query. The journal
+now grows geometrically up to65,536 runs when the actual workspace can fund the
+complete replacement alongside the old array. It retains original event/trial
+identities, frozen query ceilings and exact last-C selection; genuine pressure
+still resolves original scores before history retirement. Growth does not permit
+dropping diagnostic events, required raw capture or receiver hypotheses. The
+repeated actual-audio test still missed its120-second receive deadline. Its
+different physical noise/calendar and shorter deadline prohibit a paired total
+CPU speedup claim; metadata growth has not established practical rescue.
+
+An internal `DATAPUMP_SCHED_SHARED_INPUT=1` experiment shares owning native-FP32
+moment inputs across concurrently prepared exact physical tiles. Identity covers
+physical and virtual origins, capture/history endpoints, sample rate, plan
+geometry, coarse frequency and bitwise PCM/oscillator/mask equality. Borrowed
+entries and in-flight construction are charged to a bounded preparation loan.
+FP64-force bypasses this experiment. A small complete identical-PCM comparison
+had zero cache hits, identical396 diagnostic scores and publication/END
+coordinates, and essentially identical1.82-second CPU cost. It remains disabled
+automatically; a cache alone does not establish useful acceleration. Later
+physical-grid alignment adds conservative template padding without changing
+observations; its complete-execution crossover remains unestablished.
+
+A clipped final timing-grid endpoint is now prepared separately from its regular
+numeric range. It remains the same original hypothesis. This avoids allowing one
+irregular last translation to invalidate all other translations. The existing
+half-sample origin-class prototype remains separately opt-in. New first-failure
+traces identify numerical eligibility stage and source line; automatic selection
+does not change solely because numerical coverage is possible.
+
+The full-GUI Spread/M3 case fails before transmission: its355.56ms symbols cannot
+use the current six-source-second implicit lifecycle. This is an implementation
+gap. Safely extending it requires pending weak-chain/chip statistics, source-time
+retirement protection, charged stable owners and multi-completion handling.
+Enabled FHSS is a second independent cold-screen exclusion: existing proofs omit
+the additional gain edges and their displacement/ownership bounds. Removing the
+eligibility checks alone would either change detection or force expensive replay.
+Neither limitation is a mathematical impossibility proof. Both remain outstanding,
+as do bounded shared diagnostic replay and fully integrated gain/guard tiles.
+
+No planner/simulation CPU discount or supported probability estimate is inferred
+from the setup improvement, cache prototype or work counts. The report separates
+actual sound-card execution, bounded synthetic fixtures and outstanding full-bank
+sensitivity, encrypted EME, long-duration, ARM and broader qualification.
+
+The final affected local run completed172/175 checks successfully, including all39
+GUI checks. The retained failures were `live_exact_source` (30-second drain),
+`alsa_audio_contract` (legacy-DSSS clipping), and
+`scheduled_parallel_preparation` (360-second timeout). Assertions and failing
+captures remain intact. These results do not establish practical scheduled
+headroom or overall qualification.
+
+### FFT and guard integration follow-up, 15 October (in progress)
+
+The short-symbol implicit lifecycle and smooth FHSS gain exclusions described
+in the preceding practical checkpoint have since been corrected and covered by
+focused tests. Their removal did **not** establish practical scheduling headroom.
+The exact current frozen source and numerical captures are under
+`.agent-work/artifacts/sched-fft-rescue-20261014/`; `source24-manifest.json` and
+`binary24.json` identify the latest frozen intermediate build. The original
+failing captures remain intact. These intermediate FFT paths are opt-in
+experiments, not an automatically selected or qualified receiver.
+
+The full independent-input continuous Spread example now passes its intended
+001 reception, observed-absence completion and selected-commit/next-poll audit.
+At14400 samples/s, receiver CPU was15.382 seconds over52.314 physical seconds;
+peak backlog was0.249 seconds, RSS69,992KiB and charged workspace52,982,789 bytes.
+This is synthetic Live execution, not physical-audio or sensitivity qualification.
+The separate earlier fixture requiring distinct0,00,001 snapshots remains a
+recorded failure; the new trace checks actual acceptance/publication boundaries.
+
+A retry of native FFT at the original clock rate removed the Spread3x numerical
+eligibility fallback, but smaller certified timing tiles increased preparation
+and the same24-second backlog limit still failed. That retry remains explicitly
+experimental (`DATAPUMP_SCHED_CLOCK_NATIVE_FFT=1`), not an automatic optimization.
+Failed prefixes with different completed work are not normalized whole-receiver
+speed comparisons. Required timing lanes remain unchanged.
+
+The target8/rate36/DSSS10 first-bank diagnostic uses multi-dwell template-family
+FFT correlation, with physical-time projections retained across nulls. In the
+frozen22 run, whole-correlation preparation/execution consumed7.797 of25.062 CPU
+seconds and detailed guards consumed17.122 seconds. The frozen23 captured-bulk
+experiment reduced the former to6.324 seconds but increased the latter to18.612;
+the processed frontier stayed218,790 samples in both bounded runs. Sampled
+working storage increased from14.8MB to136.8MB. This is a failed efficiency
+tradeoff, not a complete-receiver speedup. Both runs stopped intentionally after
+25 seconds and had neither decoded bits nor physical completion.
+
+The traces identify two further costs. Serial phase-interleaved event order
+evicts a prepared family guard archive before subsequent events reuse it.
+Separately, unresolved diagnostic events can trigger Original sample-by-sample
+replay when history retires or a caller requests evidence. The bounded prefixes
+stop before that retirement cost. Complete measurements must include it; a
+fast screening prefix does not establish sustained throughput. Family-local
+numerical preparation with serial event commits, compact pending template
+storage, and explicitly identified chosen-operator diagnostic evidence are
+under investigation. No planner discount or supported probability is inferred.
+
+Twenty fixed paired conditional scenarios at each of two interpolation densities
+passed with frozen23 on identical PCM, including fractional starts, clock
+boundaries, clipping, a tone and wrong private keys. Each density had eight
+Original-positive cases, with no lost acceptance or changed accepted bit. This
+small conditional statistic check does not establish full-bank sensitivity,
+BER, a false-acceptance rate or negligible additional loss. Practical3x/5x
+sustained rescue remains unfinished.
+
+
+## Shared GPS calendar reconciliation (15 October 2026)
+
+Default still selects acquisition policy, but FHSS and Sched_Hop now resolve an
+implicit ±10 ms GPS bound at each station. Message epoch search and symbol-phase
+search remain independent unknowns. They no longer authorize an additional
+independent translation of the hop calendar through the full payload-start scan.
+The original joint arrival map intersects all original epoch/phase/clock lanes;
+no FFT/direct crossover or Search arithmetic choice is forced by the narrower
+calendar uncertainty. Existing tiled and native execution remains eligible.
+
+Capture dating is separate from strict local Audio qualification. A passive
+request preserves the fixed-rate PCM and reports the complete provider radius,
+including Audio error0. Lost dating revokes the old mapping before further PCM.
+The planner labels its pre-capture calendar as assumed, actual supplied dates as
+modeled, and unavailable dates as broad fallback. Neither is a claim of measured
+GPS/radio discipline. Default hopping enters the existing UTC playback policy;
+zero Audio allowance remains unqualified on ordinary devices. Local fallback
+and peer timing assumptions must remain visible.
+
+A fixed diagnostic message epoch previously centered the broad bank using an
+unscheduled source-prefix duration even when its capture was physically dated.
+For a regression fixture, the prefix was3 source seconds but9.8125 physical
+seconds after null insertion. Dated hopping now derives that origin from the
+physical capture date, including scheduled prefix support. Simulation and
+undated legacy diagnostic construction keep their previous interpretation.
+
+The frozen preceding candidate is `datapump-gui-integrated25` and its exact
+source/build references remain under
+`.agent-work/artifacts/sched-fft-rescue-20261014/`. A calendar-only comparison
+against that same frozen receiver core used identical original PCM
+(hash4107871339971228541), synthetic key, target8/rate36/DSSS10/M3 and a14-second
+message-origin domain. An exact synthetic capture date with Audio0 and the
+±10 ms endpoint bounds reduced retained joint alternatives226863→1035, keeping
+the same9 canonical phases and5 oscillator pairs. It completed all three bits
+and scored absence, with144.482 CPU seconds /144.102 elapsed processing seconds
+for212.533 physical capture seconds. The prior broad-calendar complete attempt
+exhausted its180-second bound. These are one-bank experimental-path results,
+not a full Live rescue or a general speedup ratio. Peak charged workspace was
+40007704 bytes; peakRSS99840KiB. Guards still consumed110.073 CPU seconds,
+shared frontend21.714, and residual scheduled search12.047. New production
+Default also retains the UTC correction-domain lanes, which can increase its
+oscillator count; that required coverage was not removed to match this experiment.
+
+The new functional Live3/5 tests cover positive provider uncertainty with
+Audio0, unchanged001 payload, individual bit publication, fully scored absence
+and drain. They use controlled input, not throughput proof. Full independent
+paced fixed-fixture results and final source identity belong to the local manual
+checkpoint report. Full-bank sensitivity, hardware discipline, ARM and broader
+qualification remain outstanding. The earlier records with a14-second calendar
+translation are retained as historical evidence, not the intended Default model.
+
+### Audio 70 ms and current workspace loans
+
+The internal default Audio lag is now 70 ms per station, shared by transfer,
+FHSS and Sched_Hop plans. Explicit numeric 50 ms settings stay 50 ms. Default's
+causal interval is [0,70 ms], not ±70 ms; GPS, region and offset interpretations
+remain unchanged. Existing measurements explicitly using Audio 0 or 50 ms retain
+those values. This is a policy allowance, not hardware timing qualification.
+
+The following allocation corrections remove implementation cliffs without
+changing hypotheses or detector rules. Implicit selection now charges mandatory
+candidate/carry and both chip-guard arrays, rather than selecting eager storage
+from a fit-only lower bound. Split constructors respect the admitted rolling-bank
+share. Stable owner growth checks its full allocation overlap against the current
+workspace loan, rather than permanently retaining the smaller constructor-time
+ceiling. Pending reliable chains remain intact, including unadmitted chains;
+insufficient actual memory still fails explicitly. Regression coverage checks
+small-loan rejection, successful growth after a loan, stable owner addresses,
+preserved pending evidence and rejection of a destructive loan reduction.
+
+The measured frozen29 and rebuilt30 GUI/core/source identities and results are in
+`.agent-work/artifacts/sched-fft-rescue-20261014/CALENDAR-CHECKPOINT.md` and its
+linked identities. **Practical scheduling rescue remains unmet.** The full
+continuous Spread fixture completes at 0.104642 CPU seconds per physical second
+(5.474223 CPU seconds over 52.313958 seconds, synthetic dated input). The 3x/5x
+scheduled repeats pass the former initial allocation and stale owner ceilings,
+but still fail their original 24-second backlog bound. They execute FFTs; extensive
+candidate preparation, numerical fallback and original replay remain. The 3x
+failed prefix's exclusive profile attributes 17.388 of 25.541 CPU seconds to the
+coarse candidate-residual category, not exclusively to a correlation kernel or
+the separately timed guard code. Successful one-bank calendar evidence must not
+be presented as a full rolling Live rescue. No planner discount or sensitivity
+qualification follows from these corrections.
+
+Candidate30 additionally preserves the correct finite-grid failure reason when
+UTC refinement returns an unexpanded fallback. Both rejection checks remain;
+supported numerical execution is unchanged. Its full GUI group passes 39 tests.
+The reconciled non-calibration regular scope has 203 passes, three retained failures
+(short shaped-symbol fit at the new audio default, Live exact-source drain and
+fractional DSSS audio clipping), and one incomplete
+360-second parallel-preparation run. The original detached batching assertions
+pass after explicitly selecting that diagnostic backend; automatic screening
+precedence is also checked. The bounded rank-one certificate now has explicit
+containment/rank checks, while an unsafe unbounded input still must reject.
+Full production cover checks include the 70 ms default. These are partial
+manual-checkpoint results, not overall qualification.
+
+The short-symbol failure is a real eligibility boundary introduced by the larger
+default: the fixture's 256 ms symbol plus 64 ms of pulse support needs a 320 ms
+full-power slot, but the 70 ms allowance leaves only 270 ms. At 50 ms that geometry
+selected the split path; at 70 ms its conservative worst-position energy bound
+selects whole-symbol deferral, which cannot fit. Neither discarding the pulse
+shoulders nor silently accepting a mostly-muted short bit is a verified fix.
+The original failing fixture remains. This boundary is separate from the
+target-8 and Spread examples' measured acquisition/backlog bottleneck.

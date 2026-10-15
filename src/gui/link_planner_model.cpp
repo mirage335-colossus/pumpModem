@@ -88,7 +88,9 @@ simulation::ReceiverWorkMode support_work_mode(const Inputs& inputs) {
     // Ordinary full-bank fit does not require arrival enumeration. Scheduled
     // layout is calendar-aware: preserve a genuinely qualified timing prior
     // instead of replacing it with an ownerless full-window fallback.
-    if(modem::scheduled_bursts(inputs.options.modem))return inputs.receiver_work_mode;
+    if(inputs.options.modem.fake_hopping||
+       (inputs.options.modem.scheduled_hopping&&inputs.options.modem.scheduled_hopping->enabled()))
+        return inputs.receiver_work_mode;
     return inputs.receiver_work_mode==simulation::ReceiverWorkMode::hardware_timing_model?
         simulation::ReceiverWorkMode::hardware_fallback:inputs.receiver_work_mode;
 }
@@ -104,7 +106,8 @@ ReceiverSupport receiver_support(const Inputs& inputs,const modem::Config& confi
     // neither a draft, a transfer probe, nor PCM inside the bounded search.
     transfer::Estimate one;one.wire_bits=1;one.total_seconds=seconds(config);
     const auto estimate=receiver_estimate(one,options,true,channel,profiles,1,false,100,4096,
-        support_work_mode(inputs),modem::scheduled_bursts(config)?inputs.receiver_timing_model:simulation::ReceiverTimingModel{},
+        support_work_mode(inputs),(config.fake_hopping||(config.scheduled_hopping&&config.scheduled_hopping->enabled()))?
+            inputs.receiver_timing_model:simulation::ReceiverTimingModel{},
         receiver_settings(inputs),stop);
     return {search_supported(estimate),estimate.receiver_workspace_supported};
 }
@@ -341,7 +344,7 @@ public:
             if(reference) {
                 const auto requested=base.oscillator_search?
                     static_cast<long double>(modem::oscillator_pattern_search(reference->config,
-                        inputs.options.clock_sync&&inputs.receiver_work_mode!=simulation::ReceiverWorkMode::sampled_simulation?
+                        transfer::effective_clock_sync(inputs.options)&&inputs.receiver_work_mode!=simulation::ReceiverWorkMode::sampled_simulation?
                         modem::utc_transmit_rate_limit(reference->config):0).frequency.requested_half_width_hz):
                     base.carrier_hz*modem::default_clock_uncertainty_ppm*1e-6L;
                 const auto headroom=static_cast<long double>(modem::pattern_frequency_offset_limit(reference->config));

@@ -3,6 +3,7 @@
 #include "../src/gui/receiver_timing_advice.hpp"
 #include "datapump/audio.hpp"
 #include "datapump/crypto.hpp"
+#include "datapump/pattern_correlator.hpp"
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -94,7 +95,7 @@ void check_scheduled_initial_unavailability() {
     const auto before=controller.settings().transfer.modem;
     const auto before_long=*controller.settings().long_message_modem;
     controller.select(F::receiver_strategy,"amplitude");
-    controller.select(F::sched_hop,"10");
+    controller.select(F::sched_hop,"5");
     wait([&]{return controller.snapshot().receiver_health.failed()&&
         controller.snapshot().error.find("requires64 retained whole FFT observations")!=std::string::npos;},
         "unsupported scheduled geometry was hidden");
@@ -132,18 +133,18 @@ void check_scheduled_initial_unavailability() {
           modem::symbol_sample_count(after)==modem::symbol_sample_count(before)&&
           modem::symbol_sample_count(*controller.settings().long_message_modem)==modem::symbol_sample_count(before_long),
           "scheduling silently altered transmitter geometry to fit its receiver");
-    controller.select(F::sched_hop,"10k");
-    wait([&]{return controller.snapshot().receiver_bank_builds>0&&controller.snapshot().receiver_health.search_limited;},
-         "long scheduled null frame hid unsupported geometry");
-    // Keeping the declared free-running clock domain in preflight exposes
-    // this stronger restriction over the 10k physical aperture before the
-    // short-symbol FFT-count check. Neither domain may be cleared to make
-    // quiet-epoch diagnostics agree with the optimistic nominal model.
-    check(!controller.snapshot().receiver_health.receiver_reset&&
-          controller.snapshot().error.find("amplitude decoder full clock domain requires more than 65 lanes")!=std::string::npos,
-          ("long null frame lost the geometry error or restarted input: "+controller.snapshot().error).c_str());
+    // Retain the old 10k full-clock-domain assertion as an INTERNAL diagnostic.
+    // The retired calendar must no longer appear as a selectable public value.
+    auto legacy=before;
+    legacy.data_key=controller.settings().transfer.key;
+    legacy.scheduled_hopping=std::make_shared<const modem::SchedHopPlan>(modem::SchedHopPlan{10000,1});
+    modem::PatternSearch legacy_search;legacy_search.start_offset_seconds=0;
+    const auto legacy_geometry=modem::pattern_amplitude_geometry(legacy,legacy_search);
+    check(!controller.snapshot().receiver_health.receiver_reset&&!legacy_geometry.supported&&
+          legacy_geometry.reason.find("amplitude decoder full clock domain requires more than 65 lanes")!=std::string::npos,
+          ("legacy null-frame diagnostic lost its full-clock restriction: "+legacy_geometry.reason).c_str());
     controller.select(F::receiver_strategy,"auto");
-    controller.select(F::sched_hop,"disabled");
+    controller.select(F::sched_hop,"0");
     wait([&]{return controller.snapshot().samples_received>0&&controller.snapshot().receiver_admissions>0;},
          "ordinary receiver did not recover after disabling scheduling");
     check(!controller.snapshot().receiver_health.failed()&&controller.snapshot().error.empty(),
@@ -167,7 +168,7 @@ void check_scheduled_defaults_and_keyed_estimate() {
     } key;
     create_keyring(key.path,{"Default"});
     Controller::Options options;
-    options.launch_settings=launch_command::parse("--pattern auto-keystream --sched-hop 10");
+    options.launch_settings=launch_command::parse("--pattern auto-keystream --sched-hop 5");
     options.launch_settings->keyfile=key.path.string();options.launch_settings->key_name="Default";
     options.launch_settings->tx_key="named";
     Controller controller(options);controller.start();controller.edit(F::binary,"0");
@@ -234,6 +235,47 @@ void check_advice_envelope() {
         static_cast<long double>(*cache.model().capture_rate_uncertainty_fraction)/48000;
     check(lower<=p.seconds_per_frame,"outward rounding lost a sub-ulp slope endpoint");
 }
+void check_calendar_advice_envelope() {
+    ReceiverTimingAdvice cache;auto now=ReceiverTimingAdvice::Clock::now();
+    audio::TimePrediction p;p.utc_seconds=1800000000;p.quality=audio::TimingQuality::estimated;
+    p.uncertainty_seconds=.030;p.seconds_per_frame=1./48000;p.rate_uncertainty_fraction=2e-6;
+    check(!cache.observe(p,48000,0,now)&&!cache.dated(),
+          "ordinary Audio0 admitted an over-budget timestamp");
+    check(cache.observe(p,48000,0,now,true)&&cache.dated()&&!cache.qualified(),
+          "dated hop calendar was rejected or mislabeled strict Audio-qualified");
+    check(*cache.model().capture_error_seconds>=p.uncertainty_seconds&&
+          *cache.model().capture_error_seconds<.063,
+          "calendar advice lost the full timestamp radius or used a seconds-scale bound");
+    const auto initial=cache.model();
+    for(unsigned i=0;i<100;++i) {
+        p.uncertainty_seconds=i%2?.0299:.0301;
+        check(!cache.observe(p,48000,0,now+std::chrono::milliseconds(i*10),true)&&cache.model()==initial,
+              "small provider jitter repeatedly rebuilt calendar advice");
+    }
+    p.uncertainty_seconds=.065;
+    check(cache.observe(p,48000,0,now+2s,true)&&
+          *cache.model().capture_error_seconds>=.065&&!cache.qualified(),
+          "calendar advice failed to widen immediately with timestamp uncertainty");
+    check(cache.observe(std::nullopt,48000,0,now+3s,true)&&!cache.dated(),
+          "lost dated evidence retained a narrow calendar advice model");
+    p.quality=audio::TimingQuality::unavailable;
+    check(!cache.observe(p,48000,0,now+4s,true)&&!cache.dated(),
+          "unavailable provider quality authorized a calendar model");
+    p.quality=audio::TimingQuality::bounded;p.uncertainty_seconds=.002;
+    check(cache.observe(p,48000,.025,now+5s,true)&&cache.qualified()&&cache.dated()&&
+          cache.model().capture_error_seconds==.025,
+          "bounded calendar advice lost the selected causal Audio radius");
+    p.uncertainty_seconds=.060;cache.observe(p,48000,0,now+6s,true);
+    p.uncertainty_seconds=.030;
+    check(!cache.observe(p,48000,0,now+7s,true)&&
+          !cache.observe(p,48000,0,now+8s,true)&&*cache.model().capture_error_seconds>=.060,
+          "calendar advice tightened its timestamp radius without settled evidence");
+    check(cache.observe(p,48000,0,now+9s,true)&&
+          *cache.model().capture_error_seconds>=.030&&*cache.model().capture_error_seconds<.060,
+          "settled provider evidence did not tighten calendar advice");
+    check(cache.observe(p,48000,0,now+10s,false)&&!cache.dated()&&!cache.qualified(),
+          "switching to strict Audio0 retained over-budget calendar evidence");
+}
 void check_stale_plan(const Launch& launch) {
     Application app(launch);app.start();app.edit(ui::Field::message,"quick brown");
     std::string text;const auto deadline=std::chrono::steady_clock::now()+8s;
@@ -260,6 +302,7 @@ int main(int argc,char** argv) {
     check_scheduled_defaults_and_keyed_estimate();
     if(argc>1&&std::string_view(argv[1])=="--sched-hop"){std::cout<<"Scheduled initial availability passed\n";return 0;}
     check_advice_envelope();
+    check_calendar_advice_envelope();
     using F=ui::Field;using C=ui::Command;const bool probe=argc>1;
     struct KeyFixture {
         std::filesystem::path path=std::filesystem::temp_directory_path()/("datapump-advice-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));

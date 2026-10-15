@@ -1,9 +1,12 @@
 #include "scheduled_lazy_test_fixture.hpp"
 #include "../src/scheduled_resume_state.hpp"
+#include "../src/scheduled_acquisition_certificate.hpp"
 #include "../src/pattern_permutation_cache.hpp"
 #include <stop_token>
 #include <span>
 #include <string>
+#include <cstdlib>
+#include <optional>
 
 namespace {
 namespace resume=modem::detail::scheduled_resume;
@@ -22,6 +25,15 @@ void clear_mode(const char* key) {
     unsetenv(key);
 #endif
 }
+struct ScopedMode {
+    const char* key;
+    std::optional<std::string> previous;
+    ScopedMode(const char* name,const char* value):key(name) {
+        if(const auto* old=std::getenv(key))previous=old;
+        set_mode(key,value);
+    }
+    ~ScopedMode() {if(previous)set_mode(key,previous->c_str());else clear_mode(key);}
+};
 struct Gate {
     resume::Boundary target=resume::Boundary::captured;
     unsigned after=0,seen=0;bool fired=false;
@@ -128,6 +140,10 @@ void receipt_boundaries() {
     check(!receipt.active(),"completed receipt retained original input");
 }
 void detached_original_order() {
+    // Smooth FHSS is now eligible for on-demand screening, which correctly
+    // precedes speculative Original replay. Select the detached backend for
+    // this parity/cancellation fixture instead of relying on its old exclusion.
+    const ScopedMode original_backend("DATAPUMP_SCHED_COLD_COLORED_ON_DEMAND","0");
     auto c=configuration(10,10,true);const Bytes bits{0,1};const auto pcm=capture(c,bits,true);
     auto s=search(c,pcm);s.start_uncertainty_seconds=2.*modem::pattern_chip_samples(c)/c.sample_rate;
     s.clock_errors_ppm={-.0003,0,.0003};s.chunk_bits=1;s.retain_score=0;s.candidate_limit=16384;s.track_limit=32;
@@ -148,6 +164,21 @@ void detached_original_order() {
         same_events(original,committed_stop);
     }
     clear_mode("DATAPUMP_SCHED_REPLAY_BATCH");
+    {
+        const ScopedMode colored_backend("DATAPUMP_SCHED_COLD_COLORED","1");
+        const ScopedMode automatic_backend("DATAPUMP_SCHED_COLD_COLORED_ON_DEMAND","1");
+        const auto automatic=run(c,pcm,s,resume::Boundary::captured,0);
+        const ScopedMode speculative("DATAPUMP_SCHED_REPLAY_BATCH","4");
+        std::uint64_t prepared=0;
+        const auto selected=run(c,pcm,s,resume::Boundary::captured,0,false,false,nullptr,false,&prepared);
+#if defined(__GLIBC__) && defined(__GNUC__) && __GNUC__>=14 && defined(__x86_64__) && !defined(__FAST_MATH__)
+        if(modem::detail::scheduled_acquisition_certificate::coordinate_environment())
+            check(prepared==0,"eligible automatic screening did not precede speculative detached replay");
+#endif
+        same_events(automatic,selected);
+        check(selected.bits==bits&&selected.complete,
+            "automatic screening precedence lost payload or observed physical END");
+    }
 }
 
 }

@@ -18,23 +18,30 @@ template<class Function> void rejects(Function function,const std::string& messa
     throw std::runtime_error(message);
 }
 void parsing_and_formatting() {
-    for(const auto* multiplier:{"disabled","10","100","1k","10k"}) {
-        const auto patch=launch_command::parse(std::string("--sched-hop ")+multiplier+" --sched-frequency-search 8 --sched-hop-dilution 2");
-        check(patch.sched_hop.has_value()&&patch.sched_frequency_search==8&&patch.sched_hop_dilution==2&&
+    for(const auto* multiplier:{"0","3","5"}) for(const auto* dilution:{"0","3"}) {
+        const auto patch=launch_command::parse(std::string("--sched-hop ")+multiplier+
+            " --sched-frequency-search 8 --sched-hop-dilution "+dilution);
+        check(patch.sched_hop.has_value()&&patch.sched_frequency_search==8&&
+            patch.sched_hop_dilution==(std::string_view(dilution)=="0"?1U:3U)&&
             launch_command::parse(launch_command::format(patch))==patch,
-            "Scheduled bursts must retain total-time multiplier and frequency expansion in parameter lists");
+            "Moderate schedule/dilution lost exact parameter-list semantics");
     }
-    check(launch_command::parse("--sched-hop 1000").sched_hop==1000&&
-        launch_command::parse("--sched-hop 1").sched_hop==1, "Numeric scheduled-burst aliases changed meaning");
+    for(const auto* disabled:{"disabled","off","1"})
+        check(launch_command::parse(std::string("--sched-hop ")+disabled).sched_hop==1,
+              "Legacy disable alias changed meaning");
+    const auto ordinary=launch_command::parse("--sched-hop 5 --sched-hop-dilution 1");
+    check(ordinary.sched_hop_dilution==1&&launch_command::format(ordinary).find("--sched-hop-dilution 0")!=std::string::npos,
+          "Legacy ordinary dilution did not export canonical zero");
     check(!launch_command::parse("--rate 1200").sched_hop&&
         !launch_command::parse("--rate 1200").sched_frequency_search&&
         !launch_command::parse("--rate 1200").sched_hop_dilution,
         "Older partial commands must leave scheduled burst settings omitted");
-    for(const auto* bad:{"--sched-hop 2","--sched-hop 0","--sched-hop nan","--sched-frequency-search 3",
+    for(const auto* bad:{"--sched-hop 2","--sched-hop 10","--sched-hop 100","--sched-hop 1k","--sched-hop 1000",
+        "--sched-hop 10k","--sched-hop 10000","--sched-hop nan","--sched-frequency-search 3",
         "--sched-frequency-search 0","--sched-frequency-search 64","--sched-frequency-search nan",
-        "--sched-hop-dilution 0","--sched-hop-dilution 10001","--sched-hop-dilution 1.5",
-        "--sched-hop-dilution nan","--sched-hop 10 --sched-hop-dilution 20"})
-        rejects([&]{launch_command::parse(bad);},"Unsupported scheduled-burst setting accepted");
+        "--sched-hop-dilution 2","--sched-hop-dilution 37","--sched-hop-dilution 10001",
+        "--sched-hop-dilution 1.5","--sched-hop-dilution nan"})
+        rejects([&]{launch_command::parse(bad);},"Unsupported/retired scheduled setting accepted");
     for(const auto* strategy:{"auto","existing","complex","amplitude"}) {
         const auto patch=launch_command::parse(std::string("--receiver-strategy ")+strategy+" --receiver-cpu-budget 0.37");
         check(patch.receiver_strategy==strategy&&patch.receiver_cpu_budget==.37&&
@@ -96,11 +103,11 @@ void parsing_and_formatting() {
             "unsupported or unimplemented search arithmetic accepted");
     launch_command::Patch unsupported;unsupported.search_arithmetic="matrix4";
     rejects([&]{launch_command::format(unsupported);},"programmatic export silently enabled unimplemented 4-bit arithmetic");
-    for(const auto* value:{"default","Default","50ms"}) {
+    for(const auto* value:{"default","Default","70ms","50ms"}) {
         const auto p=launch_command::parse(std::string("--clock-sync GPS_1ms-1ms_region-0ms_offset --audio-error ")+value);
-        check(p.audio_timing_error_seconds==.05&&p.clock_sync=="GPS_1ms-1ms_region-0ms_offset"&&
+        check(p.audio_timing_error_seconds==(std::string_view(value)=="50ms"?.05:.07)&&p.clock_sync=="GPS_1ms-1ms_region-0ms_offset"&&
             launch_command::parse(launch_command::format(p))==p,
-            "Audio Default must resolve50ms without losing explicit clock policy or saved round trip");
+            "Audio Default must resolve70ms and explicit50ms must remain50ms without losing explicit clock policy or saved round trip");
     }
     const auto clock=launch_command::parse("--clock-sync GPS_0.1ms-400ms_region-2564ms_offset --audio-error 30ms --dsss-factor 1000 --fhss fake-0.4s-200 --live-duplex yes");
     check(clock.fhss=="fake-fcc"&&launch_command::format(clock).find("--fhss fake-fcc")!=std::string::npos,
@@ -282,7 +289,7 @@ void startup() {
         "--receiver-strategy","complex","--receiver-cpu-budget","0.37",
         "--live-duplex","yes","--fhss","fake-fcc","--keyfile=/synthetic/not-opened",
         "--key-name=Default","--tx-key","named"},[&](Launch launch) {
-            manual_started=true;check(launch.settings&&launch.settings->audio_timing_error_seconds==.05&&
+            manual_started=true;check(launch.settings&&launch.settings->audio_timing_error_seconds==.07&&
                 launch.settings->clock_sync=="default"&&launch.settings->fhss=="fake-fcc"&&
                 launch.settings->receiver_strategy=="complex"&&launch.settings->receiver_cpu_budget==.37,
                 "manual launcher did not resolve its actual options");return 73;

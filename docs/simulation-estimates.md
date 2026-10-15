@@ -1269,3 +1269,11 @@ constructor success, sustainable throughput or sensitivity. Unknown scheduled
 CPU and probability remain unavailable, rather than zero/DBL_MAX estimates.
 The graph cache distinguishes automatic, forced bounded and forced dense
 policies. See the [partial checkpoint](scheduled-hops.md#october-14-bounded-acquisition-manual-checkpoint).
+
+
+The [moderate scheduled follow-up](scheduled-hops.md#moderate-schedule-follow-up-14-october)
+uses exact0/3/5 and dilution0/3 settings, including the continuous3/3 limit.
+Existing unsupported scheduled probability/complete-cost labels remain: source
+or duty-cycle geometry alone does not prove real-time processing. No automatic
+simulation/CPU speed coefficient is assigned to the slower diagnostic exact
+on-demand guard, a favorable kernel, or a partial Live prefix.

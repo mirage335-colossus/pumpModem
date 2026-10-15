@@ -37,14 +37,21 @@ Bytes from_hex(std::string_view text) {
     return result;
 }
 void test_policy() {
-    for (const auto multiplier : {1U, 10U, 100U, 1000U, 10000U})
+    for (const auto multiplier : {1U, 3U, 5U})
         check(sched_hop_multiplier(sched_hop_id(multiplier)) == multiplier,
               "scheduled-hop identifiers do not round trip");
-    for (const auto id : {"off", "disabled", "1"})
+    for (const auto id : {"0", "off", "disabled", "1"})
         check(sched_hop_multiplier(id) == 1, "disabled alias changed");
-    check(sched_hop_multiplier("1000") == 1000 && sched_hop_multiplier("10000") == 10000,
-          "numeric multiplier alias changed");
-    for (const auto id : {"0", "2", "100k", "", "ten"})
+    for (const auto legacy : {"10", "100", "1k", "1000", "10k", "10000"})
+        rejects([&] { (void)sched_hop_multiplier(legacy); }, "retired multiplier silently remapped");
+    // Frozen numerical/calendar vectors remain valid independently of public controls.
+    for (const auto legacy : {10U,100U,1000U,10000U}) SchedHopPlan{legacy,1}.validate();
+    check(sched_hop_active_hops("0")==1 && sched_hop_active_hops("1")==1 &&
+          sched_hop_active_hops("3")==3 && sched_hop_dilution_id(1)=="0" &&
+          sched_hop_dilution_id(3)=="3", "ordinary/legacy dilution changed semantics");
+    for (const auto invalid : {"2","5","37","","-1"})
+        rejects([&] { (void)sched_hop_active_hops(invalid); }, "unsupported dilution silently remapped");
+    for (const auto id : {"2", "100k", "", "ten"})
         rejects([&] { (void)sched_hop_multiplier(id); }, "invalid multiplier accepted");
     rejects([] { (void)sched_hop_id(2); }, "invalid exported multiplier accepted");
     rejects([] { SchedHopPlan{10,0}.validate(); }, "empty active group accepted");

@@ -1346,6 +1346,195 @@ void bounded_timing_preflight_and_post_start_failure() {
         else check(generated==20003 && error.empty(),"accurate bounded 1 ms provider failed strict playback");
     }
 }
+// Observation is deliberately independent of the requested UTC steering cap.
+// All comparisons drive the real native capture adapter and fixed converter.
+void passive_capture_timing_preserves_pcm() {
+    constexpr unsigned hardware=48000,logical=16000;
+    constexpr long double epoch=1800000000.L;
+    const auto setup=[] {
+        f::reset();f::state.available={"default"};f::state.supported_rates={hardware};
+        f::state.read_limit=511;
+        f::state.sample=[](std::size_t n,unsigned){return static_cast<std::int16_t>((n*43)%17011-8500);};
+    };
+    const auto run=[&](unsigned mode) {
+        setup();a::Options options;options.maximum_utc_error_seconds=0;
+        options.request_capture_timing=mode!=0;options.follow_system_clock=mode==2;
+        options.allow_timing_fallback=mode==2;
+        unsigned queries=0,dates=0,statuses=0,callbacks=0;std::size_t delivered=0;
+        options.frame_timestamp=[&](std::uint64_t frames,bool capture) {
+            check(capture,"passive observation queried playback");++queries;
+            const auto elapsed=static_cast<long double>(frames)/hardware;
+            return a::FrameTimestamp{static_cast<long double>(frames),epoch+elapsed,elapsed,.037,2e-9,
+                a::TimingQuality::bounded,397};
+        };
+        options.timing_status=[&](const a::TimingStatus& status) {
+            ++statuses;check(mode==2 && !status.following_system_clock && status.requested_error_seconds==0,
+                "passive observation was promoted to UTC steering or lost strict fallback");
+        };
+        options.capture_timing=[&](const a::TimePrediction& date) {
+            ++dates;check(date.quality==a::TimingQuality::bounded && date.uncertainty_seconds>=.037 &&
+                std::abs(date.seconds_per_frame*logical-1)<.002001 &&
+                std::abs(date.utc_seconds-(epoch+static_cast<long double>(delivered)/logical))<
+                    1e-6L+64*std::numeric_limits<long double>::epsilon()*epoch,
+                "passive date lost full provider uncertainty or actual converter source coordinate");
+        };
+        std::vector<float> output;
+        a::capture(logical,"default",[&](auto samples) {
+            ++callbacks;check(!mode || dates==callbacks,"PCM callback preceded its own passive date");
+            output.insert(output.end(),samples.begin(),samples.end());delivered+=samples.size();return output.size()<5000;
+        },{},{},options);
+        check(!f::state.live && !f::state.period_requests && f::state.recovered_errors.empty(),
+            "passive dates changed device periods, recovery or lifetime");
+        check(mode?(queries>1 && dates==callbacks && statuses==(mode==2?1u:0u)):
+            (!queries && !dates && !statuses),"passive/strict/ordinary observation paths were not distinct");
+        return output;
+    };
+    const auto ordinary=run(0);
+    check(run(1)==ordinary && run(2)==ordinary,"passive dates or strict fallback changed fixed-rate PCM");
+
+    // Native pointer evidence includes a compensated one-second queue. Audio0
+    // neither shrinks its period/codec radius nor triggers period negotiation.
+    std::vector<float> plain;
+    setup();a::capture(logical,"default",[&](auto samples){plain.assign(samples.begin(),samples.end());return false;});
+    setup();f::state.buffer_frames=2*hardware;f::state.period_frames=480;f::state.delay_frames=hardware;
+    const auto before=std::chrono::duration<long double>(std::chrono::system_clock::now().time_since_epoch()).count();
+    const auto expected_native=.01+.001+std::max(.002,.001+18./hardware);
+    a::Options native;native.request_capture_timing=true;native.maximum_utc_error_seconds=0;
+    unsigned dates=0,statuses=0;bool formatted=false;
+    native.timing_status=[&](const auto&){++statuses;};
+    native.capture_timing=[&](const a::TimePrediction& date) {
+        ++dates;check(date.quality==a::TimingQuality::estimated && date.uncertainty_seconds>=expected_native &&
+            date.utc_seconds<before-.99L && date.utc_seconds>before-1.1L,
+            "passive native date erased real uncertainty or counted known queue as error");
+    };
+    std::vector<float> observed;
+    a::capture(logical,"default",[&](auto samples){check(dates==1,"native PCM preceded passive date");
+        observed.assign(samples.begin(),samples.end());return false;},{},[&](const auto& format) {
+        formatted=true;check(format.timing_quality==a::TimingQuality::estimated &&
+            std::abs(format.timing_uncertainty_seconds-expected_native)<1e-12,"passive format falsely qualified Audio0");
+    },native);
+    check(formatted && dates==1 && !statuses && observed==plain && f::state.delay_calls==1 &&
+        !f::state.period_requests && !f::state.live,"passive native capture altered PCM/configuration");
+}
+void passive_capture_timing_loss() {
+    constexpr unsigned hardware=48000,logical=16000;
+    const auto setup=[] {
+        f::reset();f::state.available={"default"};f::state.supported_rates={hardware};f::state.read_limit=511;
+        f::state.sample=[](std::size_t n,unsigned){return static_cast<std::int16_t>((n*37)%19001-9500);};
+    };
+    const auto collect=[&](a::Options options) {
+        std::vector<float> output;a::capture(logical,"default",[&](auto samples) {
+            output.insert(output.end(),samples.begin(),samples.end());return output.size()<5000;
+        },{},{},options);return output;
+    };
+    setup();const auto ordinary=collect({});
+    for(const bool fail_before_first:{false,true}) {
+        setup();a::Options options;options.request_capture_timing=true;options.maximum_utc_error_seconds=0;
+        unsigned queries=0,dates=0,gaps=0,statuses=0;
+        options.frame_timestamp=[&](std::uint64_t frames,bool capture) {
+            check(capture,"passive failure queried playback");++queries;
+            if(fail_before_first || queries==2)throw datapump::Error("passive provider date unavailable");
+            const auto elapsed=static_cast<long double>(frames)/hardware;
+            return a::FrameTimestamp{static_cast<long double>(frames),1800000000.L+elapsed,elapsed,.02,2e-9,
+                a::TimingQuality::bounded,401};
+        };
+        options.capture_timing=[&](const auto&){++dates;};
+        options.capture_discontinuity=[&]{check(dates==1 && !gaps,"old passive evidence not revoked once");++gaps;};
+        options.timing_status=[&](const auto& status) {
+            check(!status.following_system_clock && status.modeled_uncertainty_seconds>0,
+                "lost dates falsely qualified timing");++statuses;
+        };
+        check(collect(options)==ordinary && !f::state.live && statuses==1 && queries==(fail_before_first?1u:2u) &&
+            dates==(fail_before_first?0u:1u) && gaps==(fail_before_first?0u:1u),
+            "lost dates reset/filter-shifted PCM or silently retained a timing certificate");
+    }
+    setup();a::Options invalid;invalid.request_capture_timing=true;unsigned invalid_dates=0,invalid_status=0;
+    invalid.frame_timestamp=[](std::uint64_t,bool) {
+        return a::FrameTimestamp{50000,0,1,.02,2e-9,a::TimingQuality::bounded,405};
+    };
+    invalid.capture_timing=[&](const auto&){++invalid_dates;};
+    invalid.timing_status=[&](const auto& status){check(!status.following_system_clock,"invalid date qualified UTC");++invalid_status;};
+    check(collect(invalid)==ordinary && !invalid_dates && invalid_status==1,
+        "invalid extrapolated UTC date escaped as evidence or altered PCM");
+    // A published date cannot be revoked silently if the caller omitted the
+    // observer. Stop before the next PCM callback rather than reuse stale time.
+    setup();a::Options no_observer;no_observer.request_capture_timing=true;unsigned queries=0,callbacks=0,dates=0;
+    no_observer.frame_timestamp=[&](std::uint64_t frames,bool) {
+        if(++queries==2)throw datapump::Error("passive date lost without observer");
+        const auto elapsed=static_cast<long double>(frames)/hardware;
+        return a::FrameTimestamp{static_cast<long double>(frames),1800000000.L+elapsed,elapsed,.02,2e-9,a::TimingQuality::bounded,407};
+    };
+    no_observer.capture_timing=[&](const auto&){++dates;};
+    rejects([&]{a::capture(logical,"default",[&](auto){++callbacks;return true;},{},{},no_observer);});
+    check(queries==2 && callbacks==1 && dates==1,"lost passive clock emitted undated PCM without revocation");
+
+    // Unsupported native timestamp capability preserves ordinary PCM and an
+    // explicitly unavailable format; no synthetic callback dates are emitted.
+    setup();f::state.buffer_frames=0;f::state.period_frames=0;
+    a::Options unsupported;unsupported.request_capture_timing=true;unsigned missing=0,stamps=0;bool format=false;
+    unsupported.timing_status=[&](const auto& value){check(!value.following_system_clock,"unsupported provider qualified timing");++missing;};
+    unsupported.capture_timing=[&](const auto&){++stamps;};std::vector<float> output;
+    a::capture(logical,"default",[&](auto samples){output.insert(output.end(),samples.begin(),samples.end());return output.size()<5000;},
+        {},[&](const auto& value){format=true;check(value.timing_quality==a::TimingQuality::unavailable,"unsupported passive format invented timing");},unsupported);
+    check(output==ordinary && format && missing==1 && !stamps && !f::state.live,"unsupported passive timestamps changed audio");
+}
+void passive_capture_discontinuity_and_cancel() {
+    constexpr unsigned hardware=48000,logical=16000;
+    const auto setup=[] {
+        f::reset();f::state.available={"default"};f::state.supported_rates={hardware};f::state.read_limit=511;
+        f::state.sample=[](std::size_t n,unsigned){return static_cast<std::int16_t>((n*29)%17011-8500);};
+    };
+    setup();const auto reference=a::record(.1,logical,"default",1024*1024);
+    setup();f::state.read_results={511,-EPIPE};f::state.recover_result=0;
+    bool after_gap=false;unsigned gaps=0,before_dates=0,after_dates=0;
+    f::state.after_recover=[&]{after_gap=true;f::state.captured=0;};
+    a::Options options;options.request_capture_timing=true;options.maximum_utc_error_seconds=0;
+    options.capture_discontinuity=[&]{check(after_gap && before_dates && !gaps,"gap failed to revoke dated generation");++gaps;};
+    options.frame_timestamp=[&](std::uint64_t frames,bool capture) {
+        check(capture && !after_gap,"explicit provider counter was silently rebound after recovery");
+        const auto elapsed=static_cast<long double>(frames)/hardware;
+        return a::FrameTimestamp{static_cast<long double>(frames),1800000000.L+elapsed,
+            elapsed,.02,2e-9,a::TimingQuality::bounded,413};
+    };
+    options.capture_timing=[&](const auto&) {if(after_gap)++after_dates;else ++before_dates;};
+    std::vector<float> post;
+    a::capture(logical,"default",[&](auto chunk) {
+        if(after_gap) {const auto count=std::min(chunk.size(),reference.size()-post.size());
+            post.insert(post.end(),chunk.begin(),chunk.begin()+count);}
+        return post.size()<reference.size();
+    },{},{},options);
+    check(gaps==1 && before_dates==1 && after_dates==0 && post==reference && !f::state.live &&
+        f::state.recovered_errors==std::vector<int>{-EPIPE},"passive recovery bridged a lost frame/filter generation");
+    // Native delivered+available counters can bind a NEW contiguous run after
+    // notification; unlike an arbitrary provider counter they are local here.
+    setup();std::vector<float> one;
+    a::capture(logical,"default",[&](auto samples){one.assign(samples.begin(),samples.end());return false;});
+    setup();f::state.read_results={511,-EPIPE};f::state.recover_result=0;
+    bool native_after=false;unsigned native_gaps=0,native_dates=0;
+    f::state.after_recover=[&]{native_after=true;f::state.captured=0;};
+    a::Options native;native.request_capture_timing=true;native.maximum_utc_error_seconds=0;
+    native.capture_discontinuity=[&]{check(native_after && native_dates==1,"native gap date ordering changed");++native_gaps;};
+    native.capture_timing=[&](const auto& date) {
+        if(native_after)check(native_gaps==1,"native date reused the old capture generation");
+        check(date.quality==a::TimingQuality::estimated && date.uncertainty_seconds>0,
+            "native recovery invented exact timing");++native_dates;
+    };
+    std::vector<float> native_post;
+    a::capture(logical,"default",[&](auto samples) {
+        if(native_after)native_post.assign(samples.begin(),samples.end());return !native_after;
+    },{},{},native);
+    check(native_gaps==1 && native_dates==2 && native_post==one && !f::state.live,
+        "native fresh-run dating lost notification, PCM or its new frame origin");
+    setup();std::stop_source stop;unsigned clock_queries=0,dates=0,pcm=0;
+    a::Options cancelled;cancelled.request_capture_timing=true;
+    cancelled.frame_timestamp=[&](std::uint64_t frames,bool) {
+        ++clock_queries;stop.request_stop();const auto elapsed=static_cast<long double>(frames)/hardware;
+        return a::FrameTimestamp{static_cast<long double>(frames),1800000000.L+elapsed,elapsed,.02,2e-9,a::TimingQuality::bounded,421};
+    };
+    cancelled.capture_timing=[&](const auto&){++dates;};
+    rejects([&]{a::capture(logical,"default",[&](auto){++pcm;return false;},stop.get_token(),{},cancelled);});
+    check(clock_queries==1 && !dates && !pcm,"passive dating published after cancellation");
+}
 void capture_timing_fallback_preserves_pcm() {
     constexpr unsigned rate=48000;
     const auto run=[&](bool timed) {
@@ -2522,6 +2711,10 @@ int main(int argc,char** argv){try{
     if(argc==3&&std::string(argv[1])=="--trace-utc") {
         verbose=std::make_unique<datapump::audio::trace::Scope>(argv[2]);argv[1]=const_cast<char*>("--utc-runtime");argc=2;
     }
+    if(argc==2 && std::string(argv[1])=="--passive-capture") {
+        passive_capture_timing_preserves_pcm();passive_capture_timing_loss();passive_capture_discontinuity_and_cancel();
+        std::cout<<"Independent passive capture timing passed\n";return 0;
+    }
     if(argc==2 && std::string(argv[1])=="--scheduled-payload") {scheduled_payload_runtime();return 0;}
     if(argc==2 && std::string(argv[1])=="--sparse-clock") {native_sparse_clock_policy();return 0;}
     if(argc==2 && std::string(argv[1])=="--pipewire") {native_pipewire_dated_observations();independent_cover_runtime();std::cout<<"Native PipeWire dated observations passed\n";return 0;}
@@ -2653,6 +2846,7 @@ int main(int argc,char** argv){try{
     native_delay_failures();
     native_prepared_delay_readiness();
     bounded_timing_preflight_and_post_start_failure();
+    passive_capture_timing_preserves_pcm();passive_capture_timing_loss();passive_capture_discontinuity_and_cancel();
     capture_timing_fallback_preserves_pcm();
     capture_uncertainty_downgrade_preserves_filter();
     timed_drain();

@@ -1,3 +1,5 @@
+#include "../src/scheduled_shared_input.hpp"
+#include <future>
 #include "scheduled_acquisition_tile.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include <iostream>
@@ -14,6 +16,45 @@ using C=std::complex<double>;
 #define CHECK(condition) do {if(!(condition))throw std::runtime_error("check failed: " #condition);} while(false)
 constexpr std::size_t budget=32*1024*1024;
 constexpr double tau=2*std::numbers::pi;
+
+void outward_neighbors() {
+    namespace cert=d::scheduled_acquisition_certificate;
+    const auto compare=[](double x,bool upward) {
+        const auto direction=upward?cert::infinity:-cert::infinity;
+        std::feclearexcept(FE_ALL_EXCEPT);
+        volatile double input=x;
+        const auto expected=std::isnan(input)?direction:std::nextafter(input,direction);
+        const auto expected_flags=std::fetestexcept(FE_ALL_EXCEPT);
+        std::feclearexcept(FE_ALL_EXCEPT);
+        const auto actual=upward?cert::up(input):cert::down(input);
+        const auto actual_flags=std::fetestexcept(FE_ALL_EXCEPT);
+        CHECK(std::bit_cast<std::uint64_t>(actual)==std::bit_cast<std::uint64_t>(expected));
+        CHECK(actual_flags==expected_flags);
+    };
+    const auto original_rounding=std::fegetround();
+    for(const auto mode:{FE_TONEAREST,FE_DOWNWARD,FE_UPWARD,FE_TOWARDZERO}) {
+      CHECK(std::fesetround(mode)==0);
+      for(const auto magnitude:std::array<std::uint64_t,17>{0,1,2,0x000ffffffffffffeULL,
+            0x000fffffffffffffULL,0x0010000000000000ULL,0x0010000000000001ULL,
+            0x3fefffffffffffffULL,0x3ff0000000000000ULL,0x3ff0000000000001ULL,
+            0x7feffffffffffffeULL,0x7fefffffffffffffULL,0x7ff0000000000000ULL,
+            0x7ff8000000000000ULL,0x7ff8000000000037ULL,0x7ff0000000000001ULL,0x7ff0000000000037ULL})
+        for(const auto sign:{0ULL,0x8000000000000000ULL})for(const auto up:{false,true})
+            compare(std::bit_cast<double>(magnitude|sign),up);
+      for(std::uint64_t exponent=1;exponent<2047;++exponent)
+        for(const auto delta:{-1,0,1})for(const auto sign:{0ULL,0x8000000000000000ULL})
+          for(const auto up:{false,true})compare(std::bit_cast<double>(((exponent<<52)+delta)|sign),up);
+      CHECK(std::fegetround()==mode);
+    }
+    CHECK(std::fesetround(original_rounding)==0);
+    std::mt19937_64 random(0x5c4edU);
+    for(unsigned i=0;i<10000;++i) {
+        const auto bits=random();
+        if((bits&0x7ff0000000000000ULL)==0x7ff0000000000000ULL)continue;
+        for(const auto up:{false,true})compare(std::bit_cast<double>(bits),up);
+    }
+    std::feclearexcept(FE_ALL_EXCEPT);
+}
 
 bool near(double a,double b,double relative,double absolute) {
     return std::abs(a-b)<=absolute+relative*std::max(std::abs(a),std::abs(b));
@@ -308,8 +349,65 @@ void singular_and_energy_subtraction() {
     const auto rank_result=ra.finish();
     CHECK(rank_result[0].requires_refinement[0] && rank_result[0].requires_refinement[1]);
 }
+void shared_input_ownership() {
+    namespace shared=d::scheduled_shared_input;
+    const tile::Shape shape{9,32};const tile::Plan<float> plan(shape);
+    auto f=fixture(shape,32,17,3,128,811,true);const auto input=f.input();
+    const shared::Pool::Key key{20,input.physical_first,std::bit_cast<std::uint64_t>(128.),
+        10000,0,6120,shape.start_span,shape.maximum_fragment,false};
+    shared::Pool pool(budget);const auto a=pool.borrow(key,plan,input);
+    CHECK(a.entry && a.built && a.entry->matches(input));
+    const auto b=pool.borrow(key,plan,input);
+    CHECK(b.entry==a.entry && !b.built && pool.statistics().builds==1 && pool.statistics().hits==1);
+    d::scheduled_frequency_moments::MomentInput<float> original(plan,input,3,budget);
+    for(unsigned kind=0;kind<2;++kind)for(unsigned degree=0;degree<=3;++degree) {
+        const auto x=original.spectrum(kind,degree),y=a.entry->moment->spectrum(kind,degree);
+        CHECK(x.size()==y.size() && std::equal(x.begin(),x.end(),y.begin()));
+    }
+    CHECK(a.entry->moment->base.energy==original.base.energy &&
+          a.entry->moment->base.count==original.base.count && a.entry->moment->base.norms==original.base.norms);
+    // A different capture bit or fence-derived oscillator cannot reuse a
+    // same-named tile. Signed physical and virtual coordinates are distinct.
+    f.pcm[3]=std::nextafter(f.pcm[3],1.F);
+    CHECK(!pool.borrow(key,plan,f.input()).entry && pool.statistics().mismatches==1);
+    auto moved=key;++moved.capture_end;CHECK(pool.borrow(moved,plan,f.input()).built);
+    moved=key;++moved.history_first;CHECK(pool.borrow(moved,plan,input).built);
+    moved=key;++moved.virtual_first;auto dated=input;dated.physical_first=moved.virtual_first;
+    CHECK(pool.borrow(moved,plan,dated).built);
+    // Exercise owned spans through the actual recurrence certificate,
+    // resolved spectral products, I/Q Gram and sensitive energy reductions.
+    auto recurrent=fixture(shape,32,17,3,128,813);
+    auto phase=C{.8,.6};const auto step=std::polar(1.,.07);
+    for(auto& value:recurrent.oscillator){value=phase;phase*=step;}
+    auto recurrent_key=key;++recurrent_key.frequency_bits;
+    const auto owned=pool.borrow(recurrent_key,plan,recurrent.input());CHECK(owned.entry);
+    const auto& moments=*owned.entry->moment;const auto actual=moments.base.original;
+    const d::scheduled_frequency_recurrence::Segment segment{0,recurrent.pcm.size(),
+        recurrent.oscillator.front(),recurrent.oscillator.front(),step,step,20,0};
+    const auto coefficients=d::scheduled_frequency_recurrence::anchored_coefficients(moments,0,6120,0,0,
+        recurrent.oscillator.front(),recurrent.oscillator.front());
+    const auto certificate=d::scheduled_frequency_recurrence::certify(moments,coefficients,actual,
+        std::span(&segment,1),{true});CHECK(certificate.remainder.valid);
+    d::scheduled_frequency_moments::ResolvedInput<float> resolved(moments,coefficients,actual,certificate.remainder,budget);
+    const std::array<std::size_t,3> starts{0,4,8};
+    tile::PreparedFragment<float> fragment(plan,{recurrent.rows,recurrent.mask,0},budget);
+    tile::Accumulator<float> shared_sum(plan,20,starts,budget),original_sum(plan,20,starts,budget);
+    shared_sum.add(resolved,fragment);original_sum.add(moments.base,fragment);
+    const auto shared_values=shared_sum.finish(),original_values=original_sum.finish();
+    for(std::size_t i=0;i<starts.size();++i)for(unsigned bit=0;bit<2;++bit)
+        compare(shared_values[i].fits[bit],original_values[i].fits[bit],5e-5);
+    shared::Pool tiny(sizeof(shared::Pool));CHECK(!tiny.borrow(key,plan,input).entry);
+    std::stop_source stop;stop.request_stop();rejects([&]{pool.borrow(key,plan,input,stop.get_token());});
+    shared::Pool concurrent(budget);
+    std::array<std::future<shared::Pool::Borrow>,4> jobs;
+    for(auto& job:jobs)job=std::async(std::launch::async,[&]{return concurrent.borrow(key,plan,input);});
+    std::shared_ptr<const shared::Pool::Entry> first;
+    for(auto& job:jobs){const auto value=job.get();CHECK(value.entry);if(!first)first=value.entry;CHECK(value.entry==first);}
+    CHECK(concurrent.statistics().builds==1 && concurrent.statistics().hits==3 &&
+          concurrent.statistics().peak<=budget);
+}
 int main() {
-    hand_oracles();paired_fragments<float>();paired_fragments<double>();
+    outward_neighbors();shared_input_ownership();hand_oracles();paired_fragments<float>();paired_fragments<double>();
     reuse_and_empty<float>();reuse_and_empty<double>();validation_and_recovery();singular_and_energy_subtraction();
     dense_tile_and_long_reduction<float>();dense_tile_and_long_reduction<double>();
     one_sample_and_partial_chip<float>();one_sample_and_partial_chip<double>();

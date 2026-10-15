@@ -501,6 +501,9 @@ void hop_power_boundaries() {
         c.bandwidth_hz=4096./factor;c.training_seconds=2;
         auto plan=std::make_shared<modem::FhssPlan>();plan->channels=3;plan->dwell_seconds=.4;
         plan->shifts[0]=10;plan->shifts[1]=20;plan->shifts[2]=30;
+        // Preserve the original coefficient-omission diagnostic at its explicit
+        // 50 ms lag. Production Default uses smooth ramps and is checked below.
+        plan->audio_error_seconds=.05;
         plan->power_ramps=true;c.fake_hopping=plan;
         const auto h=modem::pattern_pulse_padding_samples(c),symbol=modem::symbol_sample_count(c);
         modem::FhssPowerShape shape(*plan,c.sample_rate,h,symbol);
@@ -558,11 +561,17 @@ void hop_arrival_timing() {
     transfer::Options o;o.modem=configuration(10,.8);o.modem.sample_rate=8192;
     o.modem.carrier_hz=2048;o.modem.bandwidth_hz=409.6;
     modem::FhssPlan p;p.channels=3;p.dwell_seconds=.4;p.shifts[0]=10;p.shifts[1]=20;p.shifts[2]=30;
-    // Production Default counts BOTH endpoint clocks, even without GPS mode.
+    // Production hopping Default uses the shared GPS calendar at BOTH endpoints.
     auto default_plan=transfer::transmit_hopping(p,o);
     check(default_plan->clock_error_seconds==.01&&default_plan->peer_clock_error_seconds==.01&&
-        default_plan->audio_error_seconds==.05&&default_plan->relative_clock_region_seconds()==.02,
+        default_plan->audio_error_seconds==.07&&default_plan->relative_clock_region_seconds()==.02,
         "default FHSS dropped an endpoint clock or changed causal audio lag");
+    modem::FhssPowerShape default_shape(*default_plan,o.modem.sample_rate,
+        modem::pattern_pulse_padding_samples(o.modem),modem::symbol_sample_count(o.modem));
+    check(default_shape.enabled&&default_shape.smooth&&
+        std::abs(default_shape.quiet/o.modem.sample_rate-.055L)<=1.L/o.modem.sample_rate&&
+        std::abs(default_shape.lag_center/o.modem.sample_rate-.035L)<1e-12,
+        "production FHSS Default did not retain both GPS endpoints and causal 70 ms lag");
     o.clock_sync=clock_sync::Policy{.001,.02,2.564};o.audio_timing_error_seconds=.01;
     const auto plan=transfer::transmit_hopping(p,o);
     check(plan->power_ramps&&plan->clock_error_seconds==.001&&plan->peer_clock_error_seconds==.001&&
@@ -923,7 +932,7 @@ void smooth_envelope() {
     // Short scoring intervals retain unity gain for EVERY sample, including
     // source phases near a hop. A long finite pulse tail cannot force a mostly
     // muted bit merely because the tail would not fit inside one dwell.
-    for(const auto rate:{1003U,2048U})for(const auto audio:{0.,.01,.05}) {
+    for(const auto rate:{1003U,2048U})for(const auto audio:{0.,.01,.05,.07}) {
         modem::FhssPlan plan;plan.channels=2;plan.shifts[1]=1;plan.dwell_seconds=.4;
         plan.power_ramps=plan.smooth_ramps=true;plan.ramp_seconds=.01;
         plan.clock_error_seconds=.01;plan.peer_clock_error_seconds=.01;

@@ -47,6 +47,12 @@ struct Options {
     // Receiver-only hard-bit search after physical completion. No wire fields.
     RecoveryOptions recovery_options;
 };
+inline bool shared_hop_calendar(const modem::Config& config) {
+    return bool(config.fake_hopping) || (config.scheduled_hopping && config.scheduled_hopping->enabled());
+}
+inline std::optional<clock_sync::Policy> effective_clock_sync(const Options& options) {
+    return clock_sync::effective_policy(options.clock_sync,shared_hop_calendar(options.modem));
+}
 // Freeze the same production hop-power policy for message/noise, estimation and
 // playback. Default clock error is a local 10 ms assumption, not UTC qualification.
 // Audio error is nonnegative residual lag [0,A], not symmetric uncertainty.

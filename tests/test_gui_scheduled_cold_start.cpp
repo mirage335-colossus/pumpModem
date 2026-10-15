@@ -63,13 +63,13 @@ void targets(const Controller& controller) {
         std::stod(controller.field(F::planner_target).text)==8,"startup replaced the persistent target8 controls");
     check(s.transfer.receive_targets_db_hz==std::vector<double>{8},"startup replaced/doubled exact receive target8");
     check(c.bandwidth_hz==36&&c.sample_rate==6120&&modem::symbol_sample_count(c)==87040&&
-        c.dsss_factor==10&&c.scheduled_hopping&&c.scheduled_hopping->time_multiplier==10&&
-        c.scheduled_hopping->group_hops==1,"cold-start geometry differs from exact user36/target8/D10/M10");
+        c.dsss_factor==10&&c.scheduled_hopping&&c.scheduled_hopping->time_multiplier==5&&
+        c.scheduled_hopping->group_hops==1,"cold-start geometry differs from exact user36/target8/D10/M5");
     check(!s.simulation&&s.full_duplex&&c.receiver_strategy==modem::ReceiverStrategy::automatic&&c.receiver_cpu_budget==.6&&
         s.transfer.search_seconds==6&&s.transfer.audio_timing_error_seconds==0,
         "cold-start altered automatic CPU policy, timing window or Audio0");
     const auto exported=launch_command::parse(controller.field(F::planner_command).text);
-    check(exported.target_db_hz==8&&exported.rate_hz==36&&exported.dsss_factor==10&&exported.sched_hop==10&&
+    check(exported.target_db_hz==8&&exported.rate_hz==36&&exported.dsss_factor==10&&exported.sched_hop==5&&
         exported.receiver_strategy=="auto"&&exported.receiver_cpu_budget==.6&&exported.audio_timing_error_seconds==0&&
         exported.full_duplex==true&&exported.key_name=="GUI cold-start synthetic"&&exported.tx_key=="named",
         "canonical export lost target8 or exact keyed receiver controls");
@@ -107,7 +107,8 @@ void trace_evidence(const Files& files) {
             check(integer(line,"supported")==1&&value(line,"backend")=="existing complex"&&integer(line,"scheduled")==1&&
                 integer(line,"packed")==0&&integer(line,"dsss_factor")==10&&integer(line,"timing_qualified")==0&&integer(line,"full_frequency_coverage")==1&&
                 integer(line,"full_clock_coverage")==1&&integer(line,"workspace_share")>0&&
-                integer(line,"frequency_rate_pairs")==13&&value(line,"start_radius")=="7",
+                integer(line,"frequency_rate_pairs")==13&&integer(line,"shared_hop_calendar")==1&&
+                integer(line,"calendar_default_policy")==1&&value(line,"start_radius")=="7",
                 "actual automatic user36 cold-start selection lost useful full complex coverage/memory fit");
             selections.push_back({integer(line,"revision"),integer(line,"epoch"),integer(line,"family")});
         }
@@ -150,7 +151,7 @@ int main(){try {
     {
         audio::trace::Scope trace(files.trace);state=audio::trace::active.load();
         Controller::Options options;options.simulation=false;options.smoke=false;
-        options.launch_settings=launch_command::parse("--pattern auto-keystream --rate 36 --target-snr 8 --carrier 30.0015MHz --shift 30MHz --oscillator gpsdo-xo --rf-oscillator gpsdo-xo --reference independent --clock-sync default --audio-error 0ms --dsss-mode interleave --dsss-factor 10 --sched-hop 10 --receiver-strategy auto --receiver-cpu-budget 0.6 --live-duplex yes --dsp-workspace 50%");
+        options.launch_settings=launch_command::parse("--pattern auto-keystream --rate 36 --target-snr 8 --carrier 30.0015MHz --shift 30MHz --oscillator gpsdo-xo --rf-oscillator gpsdo-xo --reference independent --clock-sync default --audio-error 0ms --dsss-mode interleave --dsss-factor 10 --sched-hop 5 --receiver-strategy auto --receiver-cpu-budget 0.6 --live-duplex yes --dsp-workspace 50%");
         options.launch_settings->keyfile=files.key.string();options.launch_settings->key_name="GUI cold-start synthetic";options.launch_settings->tx_key="named";
         {
         testing::CpuWorkBudget key_budget(10s,"GUI cold-start synthetic key preparation");

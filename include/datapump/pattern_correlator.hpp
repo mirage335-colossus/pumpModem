@@ -1,5 +1,6 @@
 #pragma once
 #include <optional>
+#include <limits>
 #include "datapump/pattern_receiver.hpp"
 #include <string>
 
@@ -102,9 +103,14 @@ struct PatternScheduledComplexGeometry {
     // full_hypotheses precedes qualified-prior pruning; retained is exact.
     std::size_t retained_hypotheses=0,full_hypotheses=0;
     double frequency_step_hz=0,clock_step_ppm=0,clock_cell_radius_ppm=0;
+    // Complete joint-bank coverage; distinct from conservative runtime-cell
+    // retention/END uncertainty when exact coarse and refined pairs coexist.
+    double clock_coverage_radius_ppm=0;
     double admitted_frequency_half_width_hz=0,admitted_clock_half_width_ppm=0;
 };
-PatternScheduledComplexGeometry pattern_scheduled_complex_geometry(const Config&,const PatternSearch&);
+// Optional constructor allowance bounds transient joint-cell metadata too.
+PatternScheduledComplexGeometry pattern_scheduled_complex_geometry(const Config&,const PatternSearch&,
+    std::size_t preparation_allowance=std::numeric_limits<std::size_t>::max());
 // Experimental bounded-representation policy. Automatic retains dense state
 // when its necessary allocation can fit. Memory scopes remain separate:
 // original capture is local until an actual shared owner is supplied.
@@ -149,6 +155,7 @@ struct PatternCorrelatorWork {
     std::uint64_t implicit_input_transforms=0,implicit_template_transforms=0,implicit_inverse_transforms=0;
     std::uint64_t implicit_eligible_ranges=0,implicit_fallback_ranges=0,implicit_invalid_certificates=0;
     std::uint64_t implicit_proxy_ranges=0,implicit_fp32_ranges=0,implicit_fp64_ranges=0;
+    std::uint64_t implicit_exact_guard_queries=0; // completed original-owner cold guard evaluations
     std::uint64_t implicit_plan_hits=0,implicit_plan_misses=0;
     std::uint64_t implicit_replay_samples=0,implicit_processed_samples=0,implicit_queued_samples=0;
     std::size_t implicit_history_reserved_bytes=0,implicit_resident_slots=0,implicit_peak_prepared_bytes=0;

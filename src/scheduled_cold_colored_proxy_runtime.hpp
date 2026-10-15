@@ -19,6 +19,11 @@ inline bool fractional_membership_margin(long double source,long double displace
 }
 
 class RuntimeProxy {
+public:
+    // Indices in the current q fragment, independent of the lane input start.
+    // An empty domains span retains the historical full-fragment contract.
+    struct Domain {std::size_t first=0,end=0;};
+private:
     struct Cell {
         Direct::Errors fields{{{0,0,0,0,true},{0,0,0,0,true}}};
         std::array<double,2> ordinary_dot{},ordinary_gram{};
@@ -122,11 +127,17 @@ public:
     std::uint64_t sample_pairs()const{return direct_.sample_pairs;}
     void add(scheduled_acquisition_tile::Input input,scheduled_acquisition_tile::Fragment fragment,
              std::span<const std::size_t> starts,std::span<const ProxyRow> geometry,std::stop_token stop={},
-             std::span<const std::array<double,2>> norm_bounds={}) {
+             std::span<const std::array<double,2>> norm_bounds={},std::span<const Domain> domains={}) {
         namespace tile=scheduled_acquisition_tile;
         if(finished_)throw Error("original colored proxy appended after finish");
         tile::validate(input,fragment,starts,stop);
         if(starts.size()!=direct_.lanes.size() || geometry.size()!=fragment.rows.size())throw Error("original colored proxy extent mismatch");
+        if(!domains.empty()) {
+            if(domains.size()!=starts.size())throw Error("original colored domain extent mismatch");
+            for(const auto domain:domains)if(domain.first>domain.end || domain.end>fragment.rows.size())
+                throw Error("original colored domain invalid");
+        }
+        const auto inside=[&](std::size_t j,std::size_t i){return domains.empty() || (domains[j].first<=i && i<domains[j].end);};
         // Optional norms must bound these EXACT stored native q rows. The
         // immutable SourceRows producer computes them once with cert::norm.
         if(!norm_bounds.empty() && norm_bounds.size()!=fragment.rows.size())throw Error("original colored norm extent mismatch");
@@ -139,6 +150,21 @@ public:
             const auto& row=geometry[i];if(row.owner==no_owner)continue;
             if(!std::isfinite(row.residual) || row.residual<0 || row.membership>15)throw Error("invalid original colored proxy row");
             const auto selected=tile::selected(fragment,i);
+            const std::array<double,2> row_norm{norm(i,0),norm(i,1)};
+            // These are the SAME row expressions formerly evaluated for every
+            // start. Preserve their FP64 product association before reduction.
+            const auto ordinary_e=carrier_magnitude_*row.residual;
+            const auto outward_e=bounded_error_planes_?0:cert::mul(carrier_magnitude_,row.residual);
+            std::array<double,2> row_gram{};
+            for(unsigned bit=0;bit<2;++bit) {
+                if(bounded_error_planes_) {
+                    const auto m=carrier_magnitude_*row_norm[bit];
+                    row_gram[bit]=(2*m)*ordinary_e+ordinary_e*ordinary_e;
+                } else {
+                    const auto m=cert::mul(carrier_magnitude_,row_norm[bit]);
+                    row_gram[bit]=cert::add(cert::mul(2*m,outward_e),cert::mul(outward_e,outward_e));
+                }
+            }
             if(owner_!=row.owner) {
                 if(owner_!=no_owner && row.owner<owner_)throw Error("original colored proxy source reversed");
                 // The first central row of the next chip may instead belong
@@ -146,38 +172,39 @@ public:
                 // old cell. Window endpoints are never interior transfers.
                 if(owner_!=no_owner && row.owner==owner_+1 && (row.membership&ProxyRow::transfer)) {
                     for(std::size_t j=0;j<starts.size();++j) {
+                        if(!inside(j,i))continue;
                         const auto at=i+starts[j];if(!tile::present(input,at)){invalidate(j);continue;}
                         member(j,fragment,input,i,at,row.residual);
                     }
-                    for(unsigned bit=0;bit<2;++bit)qmax_[bit]=std::max(qmax_[bit],cert::add(norm(i,bit),row.residual));
+                    for(unsigned bit=0;bit<2;++bit)qmax_[bit]=std::max(qmax_[bit],cert::add(row_norm[bit],row.residual));
                 }
                 flush();owner_=row.owner;for(auto& lane:direct_.lanes)lane.owner=owner_;
             }
-            for(unsigned bit=0;bit<2;++bit)qmax_[bit]=std::max(qmax_[bit],cert::add(norm(i,bit),row.residual));
+            for(unsigned bit=0;bit<2;++bit)qmax_[bit]=std::max(qmax_[bit],cert::add(row_norm[bit],row.residual));
             for(std::size_t j=0;j<starts.size();++j) {
+                if(!inside(j,i))continue;
                 const auto at=i+starts[j];
                 if(!tile::present(input,at)){if(selected || row.membership)invalidate(j);continue;}
                 if(row.membership)member(j,fragment,input,i,at,row.residual);
                 if(!selected)continue;
                 const auto x=static_cast<double>(input.pcm[at]);const auto o=input.oscillator[at];
+                const auto x2=x*x,absolute_x=std::abs(x);
                 if(bounded_error_planes_) {
                     auto& cell=cells_[j];++cell.ordinary_terms;
                     if(carrier_magnitude_>2 || row.residual>32 || !std::isfinite(x))cell.ordinary_valid=false;
                 }
                 for(unsigned bit=0;bit<2;++bit) {
                     const auto q=fragment.rows[i][bit];const auto a=q.real(),b=q.imag(),c=a*o.real()-b*o.imag(),s=b*o.real()+a*o.imag();
-                    auto& f=direct_.lanes[j].cell[bit];f.xc+=x*c;f.xs+=x*s;f.cc+=c*c;f.ss+=s*s;f.cs+=c*s;f.energy+=x*x;++f.count;
+                    auto& f=direct_.lanes[j].cell[bit];f.xc+=x*c;f.xs+=x*s;f.cc+=c*c;f.ss+=s*s;f.cs+=c*s;f.energy+=x2;++f.count;
                     auto& field=cells_[j].fields[bit];
-                    const auto qnorm=norm(i,bit);
+                    const auto qnorm=row_norm[bit];
                     if(bounded_error_planes_) {
                         auto& cell=cells_[j];if(qnorm>32)cell.ordinary_valid=false;
-                        const auto e=carrier_magnitude_*row.residual,m=carrier_magnitude_*qnorm;
-                        cell.ordinary_dot[bit]+=std::abs(x)*e;
-                        cell.ordinary_gram[bit]+=(2*m)*e+e*e;
+                        cell.ordinary_dot[bit]+=absolute_x*ordinary_e;
+                        cell.ordinary_gram[bit]+=row_gram[bit];
                     } else {
-                        const auto e=cert::mul(carrier_magnitude_,row.residual),m=cert::mul(carrier_magnitude_,qnorm);
-                        field.dot=cert::add(field.dot,cert::mul(std::abs(x),e));
-                        field.gram=cert::add(field.gram,cert::add(cert::mul(2*m,e),cert::mul(e,e)));
+                        field.dot=cert::add(field.dot,cert::mul(absolute_x,outward_e));
+                        field.gram=cert::add(field.gram,row_gram[bit]);
                     }
                 }
                 ++direct_.sample_pairs;

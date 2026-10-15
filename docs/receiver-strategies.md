@@ -648,3 +648,50 @@ a measured fastest-backend selection. Dense representation remains selected
 where its necessary state can fit the immutable per-bank share. CPU and RX
 probability for the new complete rolling bank remain unavailable; see the
 [partial checkpoint](scheduled-hops.md#october-14-bounded-acquisition-manual-checkpoint).
+
+
+## Moderate scheduled support and remaining cliffs
+
+Sched_Hop exposes 0/3/5 and developer dilution0/3, with exact compatibility
+handling in [scheduled hops](scheduled-hops.md#controls-and-timing). Three active
+hops in a three-hop frame use continuous acquisition and preparation; FHSS ramps
+remain separate. Scheduling does not force amplitude-only decoding. Explicit
+receiver overrides and arithmetic policy remain independent.
+
+The current implementation retains implicit catalogues, bounded native-FP32
+acquisition tiles, frequency-family execution, exact source/projection reuse,
+shared dated capture and multi-cycle queues where eligible. Original refinements
+still use wider real-I/Q statistics and guards. The moderate follow-up removes
+a fixed 16-second sharing cutoff, repairs steering-resolution order and separates
+joint coverage from runtime clock cells. It does not qualify full-bank
+sensitivity or establish sustained rescue.
+
+Lazy owner payload is now proportional to materialized tracks, not all logical
+alternatives; published owner addresses remain stable. Metadata admission uses
+the same remaining-budget layout in planning and runtime, with local history,
+pure shared projections and actual shared owners kept distinct. These changes
+do not select another detector or remove hypotheses. Actual native FP32 tiles
+were observed in a complete-input 5/3 attempt, but expensive original guard
+refinement and source-workspace fallbacks prevented full drain. The automatic
+availability policy therefore remains uncalibrated as an algorithm crossover;
+forcing that path is a diagnostic, not a promised rescue.
+
+Consequential outstanding cliffs include gain-aware FHSS tile eligibility,
+calendar-translation family sharing, odd/fractional origin certificates and
+cost-based dense/implicit crossovers. GCD changes must be compared against
+continuous reception: Fs6120/N87040 gives continuous680 versus scheduled136;
+changing only Fs to6121 makes both1. Conversely N=14×Fs at Fs6121 has
+continuous6121 versus scheduled1, a scheduling-specific expansion. These are
+analytical geometry examples, not measured receiver performance.
+
+The [practical-example follow-up](scheduled-hops.md#practical-examples-and-shared-preparation-14-october)
+retains complex selection for the exact target8/rate36/DSSS10 command and removes
+repeated exact-rate calendar preparation. Full-GUI transmission succeeded, but
+reception did not meet either bounded deadline. The Spread example exposes a
+separate short-symbol implicit-lifecycle gap and an FHSS gain-aware cold-screen
+gap. They remain explicit limitations; scheduling does not mathematically require
+amplitude-only reception. Internal input-moment sharing remains opt-in without a
+demonstrated complete-execution gain. FP64-force still uses original templates
+and bypasses approximate clock interpolation; exact calendar reuse is permitted
+at every precision. The original diagnostic FIFO, guards, admission thresholds
+and physical-completion requirements remain intact.

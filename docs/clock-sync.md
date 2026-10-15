@@ -10,8 +10,13 @@ Clock accuracy, region and offset describe arrival time. They do not select an
 oscillator model or imply GPS discipline of an ADC, DAC or radio oscillator.
 Conversely, a GPSDO oscillator does not establish synchronization of PC clocks.
 
-`Default` preserves the existing six-second epoch search setting and its complete
-receiver bank. Selecting Default in any timing field resets all four controls. An explicit
+`Default` preserves the existing six-second **message-epoch** search setting.
+When FHSS or Sched_Hop is enabled, it also assumes a shared GPS-aligned hop
+calendar with **±10 ms at each station**, the selected causal Audio lag, and
+the configured propagation region/offset (zero at Default). Unknown message
+start and source phase do not independently translate that calendar by seconds.
+Without hopping, Default retains ordinary broad arrival search.
+Selecting Default in any timing field resets all four controls. An explicit
 policy such as `GPS_1ms-400ms_region-2564ms_offset` means:
 
 * Each station's system-clock error allowance is 1 ms; the link allowance is 2 ms.
@@ -26,37 +31,42 @@ policy strings. Composite `--clock-sync` values remain supported for commands
 and parameter lists, and are split into the three editable controls.
 The first custom selection starts with a 1 ms region and zero offset.
 Entering a smaller number cannot improve the timing evidence of an audio device.
-Zero Audio error is a strict requested allowance: ordinary native device uncertainty
-then forces the visible ordinary-playback/full-search fallback, not fictitious exact timing.
+Zero Audio error is a strict requested allowance that ordinary native devices
+cannot certify. Playback reports its existing unqualified fallback. Capture can
+still supply independently dated samples with their full positive provider
+uncertainty; a modeled hop-calendar constraint is not proof of meeting Audio0.
 
 The adjacent editable **Audio error** dropdown has a **Default** entry, resolving
-to **0 through +50 ms of audio lag per station**, after compensating the
-driver-reported queue. It is neither ±50 ms nor an extra allowance on top of
+to **0 through +70 ms of audio lag per station**, after compensating the
+driver-reported queue. It is neither ±70 ms nor an extra allowance on top of
 provider error. GPS accuracy keeps its original ± bound. It is
-saved/exported as `--audio-error 50ms`; fractional ns/us/ms/s values from
+saved/exported as `--audio-error 70ms`; fractional ns/us/ms/s values from
 zero and up to 60 seconds are accepted. Live's finite epoch-radius limit can
 reject a larger combined window. Choosing Default in any of the four timing
-editors resets all four and restores ordinary playback/search behavior. A numeric
+editors resets all four; enabled hopping still uses the shared calendar. A numeric
 Audio error edit remains independent: it does not enable GPS timing or change
 oscillator models. Existing explicit numeric imports remain valid; a partial
 command that omits Audio error preserves its value. Both peers must satisfy
 the selected assumption; it is not a measured device specification. This control
 does not change the audio buffer used to prevent underruns. The first custom clock
-selection uses 50 ms unless an explicit numeric audio allowance is already set.
-With clock sync at Default, the audio allowance does not widen or narrow the
-ordinary search, add oscillator hypotheses or change its modeled CPU cost. With
-custom timing, playback targets the midpoint +25 ms while retaining the immutable
+selection uses 70 ms unless an explicit numeric audio allowance is already set.
+With clock sync at Default and hopping disabled, the audio allowance does not
+widen or narrow ordinary search. Hopping uses its effective calendar policy for
+dated playback and reception even at Default. Playback targets the midpoint +35 ms while retaining the immutable
 cryptographic epoch and source coordinates. Its audio-lag interval must fit
-between zero and +50 ms; the separate GPS phase allowance is included once in
+between zero and +70 ms; the separate GPS phase allowance is included once in
 the full true-UTC check described below. Provider uncertainty is NEVER halved.
 Capture retains its physical-event timestamp center and audio uncertainty U.
 Equivalently its upper timestamp edge has a causal lag from zero to 2U; 2U must
-fit the selected Audio error. The search map adds only the TX +25 ms center,
-with TX radius 25 ms plus capture U (conservatively the declared 25 ms), then
+fit the selected Audio error. The search map adds only the TX +35 ms center,
+with TX radius 35 ms plus capture U (conservatively the declared 35 ms), then
 unchanged GPS, propagation and rate allowances. Do not add the capture midpoint
 a second time. This representation covers both endpoints without treating lag
 as a symmetric offset. Insufficient evidence retains the visible full-search
-fallback. Default broad search remains unchanged.
+fallback for ordinary strict timing. For hopping, a valid dated capture instead
+uses its full `max(U,A/2)` radius even when this exceeds the requested local
+Audio allowance. Missing/unbounded dates retain an explicit broad fallback.
+The message-epoch search remains broad in either case.
 The default is a configurable assumption, not a loopback measurement or proof
 of a particular sound card's accuracy.
 
@@ -71,7 +81,7 @@ the complete coherent symbol duration, rather than an audio callback's duration.
 For long symbols this can make convergence very slow; safe waveform continuity
 does not imply that arbitrary clock corrections can be followed promptly.
 
-Custom-clock native Linux playback uses an explicitly **estimated** device model.
+Custom-clock and shared-hop-calendar native Linux playback use an explicitly **estimated** device model.
 Reported queued frames are compensated as an offset. Residual driver uncertainty
 is modeled as one negotiated period plus 1 ms of query jitter and a rate-aware
 codec/USB component, `max(2 ms, 1 ms + 18 / hardware_rate)`. The period and query
@@ -86,7 +96,7 @@ start threshold stay unchanged. No samples exist yet: the adapter saves hardware
 and software parameters, frees the installed configuration, negotiates fresh
 constraints, and restores both snapshots on rejection. Failed restoration closes
 the stream and reports an error. Optional API absence or an unsupported period
-retains the ordinary visible fallback. Already sufficient geometries, Default
+retains the ordinary visible fallback. Already sufficient geometries, non-hopping Default
 clock mode and explicit timestamp providers keep their existing configuration.
 
 Protected playback additionally considers the stop horizon when selecting the
@@ -98,7 +108,7 @@ It requests **5 ms** instead of 10 ms when that setup estimate requires it. This
 is a configuration heuristic, not a timing certificate: actual resampler
 lookahead, queue position, full observation intervals and every existing runtime
 frontier check remain authoritative. Periods below 5 ms are not requested.
-Capture, explicit timestamp providers and Default clock mode keep their preceding
+Capture, explicit timestamp providers and non-hopping Default clock mode keep their preceding
 policies. Drivers may reject or round the request; successful negotiation uses
 the actual period, and rejected negotiation restores the original configuration.
 The native period appears in a protected-stop failure diagnostic.
@@ -372,7 +382,7 @@ a successful send; its cancellation flag also remains set. A later explicit TX
 request clears the old failure. The diagnostic includes current/next-block,
 cover-end and cover-after-next-block error bounds plus the allowed radius and
 cover horizon. These are conservative timing bounds, not measured physical lag.
-Default clock mode does not impose this qualified UTC limit, so absence of this
+Non-hopping Default clock mode does not impose this qualified UTC limit, so absence of this
 stop in Default does not qualify the device for a tight arrival window.
 Clock steps, missed starts,
 uncertainty/domain failures and output discontinuities never trigger a silent
@@ -406,7 +416,7 @@ effective-link bound A and correction cap C, the bank covers A+C+AC and retains
 every original lane. If its complete union cannot fit the existing bank/passband
 bounds, steering stays zero and the original bank remains. Shared RF-clock
 topologies, Windows and hosted timing adapters retain their documented fallback.
-Default clock mode preserves existing playback. A recovered native output underrun
+Non-hopping Default clock mode preserves existing playback. A recovered native output underrun
 or suspension during a message now fails visibly rather than silently continuing
 a private transmission across a gap. The failure survives capture restart and
 Clear received; a new transmit request clears it. Generated private epochs remain
@@ -450,10 +460,12 @@ selection places the TX midpoint at +15 ms and gives a conservative link audio
 half-width of 30 ms (15 ms TX plus 15 ms capture), separately from GPS and
 propagation. Inverse-slope corner bounds cover the complete initial phase
 interval. The GUI explicitly calls this an **estimated audio/radio model**, even
-when capture timestamps themselves are bounded. Capture uncertainty U with
-2U greater than the selected Audio error disables pruning and retains the full
-search. Both stations must satisfy the selected
-timing assumptions. A capture
+when capture timestamps themselves are bounded. For ordinary non-hopping strict
+Audio qualification, capture uncertainty U with 2U greater than the selected
+Audio error disables pruning and retains the full search. A dated shared hop
+calendar instead retains the full U in its conditional arrival bound, including
+Audio error0; it does not claim that the local Audio allowance was qualified.
+Both stations must satisfy the selected timing assumptions. A capture
 timestamp alone cannot establish the peer's timing behavior.
 
 The map narrows compact and eligible short FFT acquisition; unsupported paths and missing/invalid timing
@@ -561,7 +573,7 @@ The normal50ms generation blocks remain. End-of-input declares an exact final
 frame frontier: only its final partial buffer is allowed, then all prepared audio
 and server buffers drain. Unexpected starvation remains a visible discontinuity;
 it does not restart private audio. Repeated starts/reset/drain in one process
-are tested. Default clock mode continues using ordinary playback.
+are tested. Non-hopping Default clock mode continues using ordinary playback.
 
 The scheduling request remains512/48kHz (10.667ms), independently of the ring
 capacity and generation-block size. A256/48kHz prototype lowered reported
@@ -789,10 +801,10 @@ promise indefinite tracking of arbitrary clock wander. See
 
 ## FHSS transmitter and arrival timing
 
-`--audio-error default` and `--audio-error Default` now resolve to50ms in GUI
+`--audio-error default` and `--audio-error Default` now resolve to70ms in GUI
 launch commands, parameter-list imports and the CLI. They retain an explicitly
 selected Clock sync policy; the GUI dropdown's reset-all action remains separate.
-Exports use the stable numeric50ms form. Unitless nonzero durations remain errors,
+Exports use the stable numeric70ms form. Unitless nonzero durations remain errors,
 now identifying Audio error. GUI `--self-check` validates the supplied launch
 settings before running, so the self-check shortcut cannot hide a bad launcher.
 
@@ -813,16 +825,19 @@ Smooth-envelope RX shares original templates and treats the ramps as fading.
 Qualified arrival timing retains complete physical phase cells for each exact
 cipher representative. A qualified prior is intersected with the existing bank's
 original domain; it need not be wholly contained there. This does not enlarge
-that domain or promise coverage outside it. An unavailable/disjoint model retains
-the broad fallback. Default retains its broad search. Physical absence still
+that domain or promise coverage outside it. An unavailable model retains the
+broad fallback. A valid shared-calendar model with an empty intersection instead
+leaves that scheduled epoch empty; it must not recreate a broad shifted calendar.
+Default retains its broad message-epoch domain. Physical absence still
 requires complete failed-symbol observations, never just the quiet interval.
 
 
 For automatically deferred FHSS bits, both peers additionally share the immutable
 UTC slot calendar and its timing allowances. The qualified arrival prior covers
 canonical slot starts rather than pretending that logical bits remain contiguous.
-Default still retains its broad six-second acquisition policy. Hop guard defaults
-remain ±10ms at EACH endpoint and audio lag0..50ms. The slot calendar is not a
+Default retains the six-second message-epoch policy while bounding the joint
+arrival/phase relation against the shared calendar. Hop guard defaults
+remain ±10ms at EACH endpoint and audio lag0..70ms. The slot calendar is not a
 clock-tracking algorithm, and scheduled holes cannot supply observed absence.
 See [deferred whole symbols](spread-spectrum-controls.md#deferred-whole-symbols-local-manual-candidate)
 for the exact rounding, fit limits, work/airtime and interoperability requirements.
@@ -1110,3 +1125,9 @@ required receiver compatibility. Capture is also fixed-ratio: correcting only
 TX can remove shared-card ADC/DAC cancellation and expose ADC drift. A certified
 hardware-to-UTC controller and corresponding capture discipline remain separate
 work; the present change addresses bounded presentation interruptions.
+
+The internal Audio Default was raised to70ms on15 October2026. FHSS and
+Sched_Hop default plans reference the same constant; explicit saved numeric
+50ms remains50ms, while Default exports70ms. This is a configured per-station
+causal lag bound, not a new measurement or a change to provider timestamps, GPS
+accuracy, compensated queue size, or historical captures.

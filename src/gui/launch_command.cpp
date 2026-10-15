@@ -197,9 +197,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         else if(flag=="--sched-hop")result.sched_hop=modem::sched_hop_multiplier(value);
         else if(flag=="--sched-frequency-search")result.sched_frequency_search=sched_frequency_search(value);
         else if(flag=="--sched-hop-dilution") {
-            const auto dilution=number(value,flag,1,10000);
-            if(std::floor(dilution)!=dilution)invalid("--sched-hop-dilution must be an integer.");
-            result.sched_hop_dilution=static_cast<unsigned>(dilution);
+            result.sched_hop_dilution=modem::sched_hop_active_hops(value);
         }
         else if(flag=="--live-duplex") {
             if(value!="yes"&&value!="no")invalid("--live-duplex must be yes or no.");
@@ -303,7 +301,7 @@ std::string format(const Patch& settings) {
         add("--receiver-cpu-budget",numeric(*settings.receiver_cpu_budget));
     }
     if(settings.full_duplex)add("--live-duplex",*settings.full_duplex?"yes":"no");
-    if(settings.sched_hop_dilution)add("--sched-hop-dilution",std::to_string(*settings.sched_hop_dilution));
+    if(settings.sched_hop_dilution)add("--sched-hop-dilution",std::string(modem::sched_hop_dilution_id(*settings.sched_hop_dilution)));
     if(settings.sched_hop)add("--sched-hop",std::string(modem::sched_hop_id(*settings.sched_hop)));
     if(settings.sched_frequency_search)add("--sched-frequency-search",numeric(sched_frequency_search(numeric(*settings.sched_frequency_search))));
     if(settings.fhss)add("--fhss",std::string(fhss::id(fhss::parse(*settings.fhss))));

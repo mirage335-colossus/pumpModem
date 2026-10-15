@@ -440,7 +440,7 @@ and adds a small power cost. Its source coordinate follows the same timing map.
 
 For TX boundary N, endpoint errors ±Gtx and ±Grx, total region R and lag [0,A],
 let B=Gtx+Grx+R/2. Quiet is `[N-A-B,N+B]`, plus a ramp on either side. Default is
-90 ms quiet (±10 ms each endpoint and 0..50 ms audio). GPS1ms/Region1ms/Audio10ms
+110 ms quiet (±10 ms each endpoint and 0..70 ms audio). GPS1ms/Region1ms/Audio10ms
 is 15 ms. Fixed offset O delays the nominal receive-hop schedule without widening
 TX silence. All selected allowances are retained. If full remote uncertainty
 occupies the dwell, Fake uses a LOCAL guard with B=Gtx and explicitly reports
@@ -508,11 +508,17 @@ propagation offset O and total region R, the receiving RF schedule follows the
 same keyed hop at **N+O**. The conservative source quiet interval is
 **[N−A−2G−R/2, N+2G+R/2]**. Production resolves both endpoint clocks from the
 selected accuracy, or ±10 ms each at Default; Audio error is always the selected
-causal lag (Default 0..50 ms). A custom clock policy contributes its full region
+causal lag (Default 0..70 ms). A custom clock policy contributes its full region
 and offset. Default has no modeled propagation region/offset; its six-second
-acquisition bank is not a physical delay bound or a hopping timing certificate.
+message-epoch bank is not hop-calendar uncertainty. Whenever either hopping mode
+is enabled the receiver assumes the shared GPS calendar with these same endpoint
+bounds. Dated capture intersects each message epoch and source phase with that
+calendar instead of translating it independently through every payload-start
+alternative. Actual provider uncertainty remains in the joint bound, even when
+Audio error is zero; this is an explicit timing model, not hardware certification.
+Missing dates retain the broad fallback. See [clock synchronization](clock-sync.md).
 
-Default therefore requests a90 ms source quiet interval (70 ms before N through
+Default therefore requests a110 ms source quiet interval (90 ms before N through
 20 ms after), before pulse support. GPS1ms/Region1ms/Audio50ms requests55ms
 (52.5ms before through2.5ms after). Offset does not widen that interval: it shifts
 the receiver's nominal hop timeline, not TX hop order, crypto epoch or emitted

@@ -18,6 +18,25 @@ namespace cert=scheduled_acquisition_certificate;
 using cert::Interval;
 inline constexpr auto no_owner=std::numeric_limits<std::uint64_t>::max();
 
+// MASK-ONLY proof. For rate-one source templates, integer physical start
+// translations and integral calendar edges, every active source coordinate
+// has fraction frac(physical_fraction-anchor_fraction). A strict common
+// displacement bound preserves Sched/FHSS membership and [0,symbol) ownership.
+// Caller separately proves lattice/translation identity, bounds all executed
+// coordinate rounding at the CURRENT symbol index, and uses the same observed
+// PCM mask. No chip contraction/owner-set Summary is needed here.
+inline bool observation_mask_lattice(long double physical_fraction,long double anchor_fraction,
+        long double displacement,long double fhss_margin=std::numeric_limits<long double>::infinity()) {
+    if(!std::isfinite(physical_fraction) || physical_fraction<0 || physical_fraction>=1 ||
+       !std::isfinite(anchor_fraction) || anchor_fraction<0 || anchor_fraction>=1 ||
+       !std::isfinite(displacement) || displacement<0 || displacement>=.25L ||
+       std::isnan(fhss_margin) || fhss_margin<0)return false;
+    auto source_fraction=physical_fraction-anchor_fraction;
+    source_fraction-=std::floor(source_fraction);
+    return std::min(physical_fraction,1-physical_fraction)>displacement &&
+        std::min(source_fraction,1-source_fraction)>displacement && fhss_margin>displacement;
+}
+
 struct FitIntervals {
     Interval xc,xs,cc,ss,cs,energy;
     std::uint64_t count=0;
@@ -70,6 +89,20 @@ inline Projection projection(const FitIntervals& f) {
     if(!f.count_upper || trace.hi<=1e-30)return {{},0,true,f.zero_basis || !f.count_upper};
     if(f.zero_basis)return {{},0,true,true};
     if(trace.lo<=1e-30)return {};
+    // An exact singleton spans a rank-one physical observation subspace.
+    // Original's leading-eigenvector branch is bounded by its final [0,E]
+    // clamp; no libm angle approximation is claimed as useful energy evidence.
+    // This lower bound0 is safe and avoids making one ordinary ramp edge
+    // invalidate every otherwise certified complete-owner prefix.
+    if(f.count_lower==1 && f.count_upper==1){
+        // This API also accepts arbitrary interval callers. Bound every
+        // ORIGINAL rank1 libm/product/division intermediate, independently of
+        // the normal float-PCM/q32/carrier2 producer domain. With |fields|
+        // <=1e100 and trace>1e-30, dot^2/lambda<=8e230 is finite.
+        const auto safe=[](Interval x){return std::max(std::abs(x.lo),std::abs(x.hi))<=1e100;};
+        if(!safe(f.xc)||!safe(f.xs)||!safe(f.cc)||!safe(f.ss)||!safe(f.cs)||!safe(f.energy))return {};
+        return {{0,f.energy.hi},1,true,true};
+    }
     const auto det=determinant(f);
     // trace*trace follows the ORIGINAL branch, not the looser coherent cutoff.
     const auto cutoff=cert::times(cert::times(Interval::point(1e-12),trace),trace);
@@ -330,6 +363,28 @@ public:
         finished=true;return result;
     }
 };
+
+// Independent proof supplied by the strict zero-count-radius producer. An
+// owner-set flag or equal proxy counts ALONE cannot establish original masks:
+// generic RuntimeProxy permits membership/count uncertainty. No inference is
+// made here from labels, FHSS settings, equal energies or a small displacement.
+struct ExactMaskContract {
+    bool original_observation_mask_equal=false;
+    std::uint64_t original_count=0;
+};
+// A raw coherent score bounds every supported existing guard from above. Once
+// ORIGINAL observations are proved identical, the synthetic mask-strip energy
+// debit/count charge is unnecessary. Reuse the UNDEBITED tile certificate and
+// the separately enclosed original-template/carrier/reduction field errors.
+// This remains REJECTION ONLY and does not install any fitted/absence state.
+inline double exact_mask_raw_upper(double previous,const CorrelationFit& whole,
+        const cert::FitCertificate& tile,unsigned bit,const cert::ReferenceErrors& original,
+        const Summary& chips,ExactMaskContract proof={}) {
+    if(!proof.original_observation_mask_equal || !chips.valid || !chips.nested ||
+       !chips.owner_set_certified || proof.original_count!=whole.count || chips.count!=whole.count)
+        return previous;
+    return std::min(previous,cert::score_upper(whole,tile,bit,original));
+}
 
 // Minimal rejection adapter: first prove the ORIGINAL colored predicate, then
 // bound the ORIGINAL guarded score. Never propagate the colored predicate or

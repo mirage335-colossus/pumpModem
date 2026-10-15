@@ -74,6 +74,9 @@ void reservation_policy() {
         sizing::shape(1).maximum_fragment==512,"numeric fragment selection expanded the FFT or physical geometry");
     set_test_env("DATAPUMP_SCHED_LAZY_FRAGMENT","512",1);
     check(sizing::shape(6120).maximum_fragment==512,"numeric fragment diagnostic selector was ignored");
+    set_test_env("DATAPUMP_SCHED_LAZY_FRAGMENT","32768",1);
+    check(sizing::shape(6120).maximum_fragment==32768 && sizing::shape(6120).transform_size()==65536,
+        "multi-dwell fragment did not retain its actual transform/workspace geometry");
     unset_test_env("DATAPUMP_SCHED_LAZY_FRAGMENT");
     auto c=configuration();modem::PatternCode code(c,c.stream_epoch);
     const modem::SchedHopSourceMap map(*c.scheduled_hopping,*c.data_key,c.sample_rate);

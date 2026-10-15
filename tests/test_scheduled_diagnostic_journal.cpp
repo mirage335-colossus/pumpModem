@@ -222,12 +222,50 @@ void endpoint_and_increment_overflow() {
     sd::DeferredEvents empty(2);rejects([&]{empty.append_cold(event(0));},"ordinal zero was accepted as a completed event");
     auto none=empty.newest_first();check(!empty.next(none),"empty journal manufactured an unresolved event");
 }
+void growth_preserves_ring_snapshots_and_rollback() {
+    sd::DeferredEvents j(3);
+    for(std::uint64_t i=1;i<=3;++i)j.append_cold(event(i,10+i,i,20+i));
+    j.discard_resolved_through(1);j.append_cold(event(4,14,4,24));
+    const auto expected=read(j);const auto before=j.accounting();auto cursor=j.newest_first();
+    const auto bytes=sd::DeferredEvents::required_bytes(7);std::size_t reservation=0;
+    check(j.grow(7,[&](auto n){reservation=n;}),"funded journal growth failed");
+    check(reservation==bytes && j.working_bytes()==bytes && j.run_capacity()==7 && read(j)==expected,
+        "growth changed chronology or failed to reserve full replacement");
+    std::vector<sd::Event> old;while(const auto e=j.next(cursor))old.push_back(*e);
+    check(old==expected && j.accounting().last_ordinal==before.last_ordinal &&
+        j.accounting().resolved_through==before.resolved_through,"growth invalidated original query ceiling");
+    auto cancelled=j.newest_first();std::stop_source stop;
+    check(!j.grow(14,[&](auto){stop.request_stop();},stop.get_token()) && j.run_capacity()==7 && read(j)==expected,
+        "cancelled growth partially published replacement");
+    check(j.peek(cancelled)==std::optional(expected.front()),"cancelled growth changed pending event");
+    bool rejected=false;try{j.grow(14,[&](auto){throw std::bad_alloc();});}catch(const std::bad_alloc&){rejected=true;}
+    check(rejected && j.run_capacity()==7 && read(j)==expected,"failed allocation reservation damaged journal");
+    rejects([&]{j.grow(7,[](auto){});},"nonincreasing growth accepted");
+}
+}
+void rejection_provenance_survives_runs() {
+    sd::DeferredEvents journal(8);
+    auto a=event(1,10,3,7),b=event(2,11,3,8),c=event(3,12,3,9),d=event(4,13,3,10);
+    b.provenance=c.provenance=sd::RejectionProvenance::default_point;
+    journal.append_cold(a);journal.append_cold(b);journal.append_cold(c);journal.append_cold(d);
+    check(journal.run_count()==3,"diagnostic run crossed rejection provenance");
+    const std::vector<sd::Event> expected{d,c,b,a};
+    check(read(journal)==expected,"RLE lost rejection provenance");
+    auto cursor=journal.newest_first();auto tagged=*journal.peek(cursor);
+    tagged.provenance=sd::RejectionProvenance::default_point;
+    rejects([&]{journal.advance(cursor,tagged);},"changed rejection provenance advanced diagnostic cursor");
+    journal.discard_resolved_through(2);
+    const std::vector<sd::Event> remaining{d,c};
+    check(read(journal)==remaining,"partial run retirement lost rejection provenance");
+    auto invalid=event(5,14,3,11);invalid.provenance=static_cast<sd::RejectionProvenance>(99);
+    rejects([&]{journal.append_cold(invalid);},"unknown rejection provenance bypassed diagnostic contract");
 }
 int main() {
     try {
-        compression_exact_fields_and_gaps();snapshots_cancellation_and_resume();positive_lane_stride_and_mixed_order();
+        rejection_provenance_survives_runs();compression_exact_fields_and_gaps();snapshots_cancellation_and_resume();positive_lane_stride_and_mixed_order();
         exact_last_k_merge_and_partial_query();
         fewer_than_k_requires_all_cold();pressure_retirement_ring_and_workspace();endpoint_and_increment_overflow();
+        growth_preserves_ring_snapshots_and_rollback();
         std::cout<<"scheduled diagnostic journal source cases passed\n";return 0;
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

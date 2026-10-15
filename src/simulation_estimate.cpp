@@ -33,6 +33,37 @@
 
 namespace datapump::simulation {
 namespace {
+bool shared_hop_calendar(const modem::Config& config) {
+    return config.fake_hopping || (config.scheduled_hopping&&config.scheduled_hopping->enabled());
+}
+std::optional<clock_sync::Policy> arrival_policy(const transfer::Options& options,const modem::Config& config) {
+    return clock_sync::effective_policy(options.clock_sync,shared_hop_calendar(config));
+}
+bool arrival_model_available(const transfer::Options& options,const modem::Config& config,
+        ReceiverWorkMode mode,const ReceiverTimingModel& timing) {
+    const bool calendar=shared_hop_calendar(config);
+    if((timing.capture_error_seconds&&(!std::isfinite(*timing.capture_error_seconds)||*timing.capture_error_seconds<0))||
+       (timing.capture_rate_uncertainty_fraction&&(!std::isfinite(*timing.capture_rate_uncertainty_fraction)||*timing.capture_rate_uncertainty_fraction<0))||
+       (timing.capture_seconds_per_frame&&(!std::isfinite(*timing.capture_seconds_per_frame)||*timing.capture_seconds_per_frame<=0)))return false;
+    if(mode!=ReceiverWorkMode::hardware_timing_model&&
+       !(calendar&&mode==ReceiverWorkMode::hardware_calendar_model))return false;
+    if(!arrival_policy(options,config))return false;
+    // An unavailable timestamp provider stays the full-window comparator.
+    // Dated calendar evidence carries its full U independently of Audio lag.
+    return calendar||!timing.capture_error_seconds||
+        *timing.capture_error_seconds<=clock_sync::audio_lag_radius(options.audio_timing_error_seconds);
+}
+std::optional<clock_sync::ArrivalMap> receiver_arrival_map(const transfer::Options& options,
+        const modem::Config& config,long double epoch,long double capture_utc,long double capture_sample,
+        double seconds_per_sample,double rate_uncertainty,double capture_error,std::uint64_t phase_upper) {
+    const auto policy=arrival_policy(options,config);if(!policy)return std::nullopt;
+    if(shared_hop_calendar(config))return clock_sync::calendar_arrival_map(*policy,epoch,capture_utc,
+        capture_sample,config.sample_rate,seconds_per_sample,rate_uncertainty,capture_error,
+        phase_upper,options.audio_timing_error_seconds);
+    return clock_sync::audio_lag_arrival_map(*policy,epoch,capture_utc,capture_sample,config.sample_rate,
+        seconds_per_sample,rate_uncertainty,capture_error,phase_upper,options.audio_timing_error_seconds);
+}
+
 // Fixed, deliberately rounded engineering assumptions for the named laptop.
 // These are neither device peaks nor measured application throughput.
 constexpr long double serial_operations_per_second = 1.5e9L;
@@ -733,12 +764,13 @@ std::optional<modem::PatternStartWindow> fft_anchor_window(const transfer::Optio
     constexpr auto epoch=1800000000.L;
     std::optional<modem::PatternStartWindow> result;
     for(const auto sign:{-1,1}) {
-        const auto map=clock_sync::audio_lag_arrival_map(*options.clock_sync,epoch,
-            epoch+options.clock_sync->offset_seconds-origin_seconds+sign*anchor_half_width,
-            0,config.sample_rate,timing.capture_seconds_per_frame.value_or(1./config.sample_rate),
+        const auto policy=arrival_policy(options,config);if(!policy)return std::nullopt;
+        const auto map=receiver_arrival_map(options,config,epoch,
+            epoch+policy->offset_seconds-origin_seconds+sign*anchor_half_width,
+            0,timing.capture_seconds_per_frame.value_or(1./config.sample_rate),
             timing.capture_rate_uncertainty_fraction.value_or(static_cast<double>(rate_uncertainty)),
             std::max(clock_sync::audio_lag_radius(options.audio_timing_error_seconds),timing.capture_error_seconds.value_or(clock_sync::audio_lag_radius(options.audio_timing_error_seconds))),
-            phase_upper,options.audio_timing_error_seconds);
+            phase_upper);
         if(!map)return std::nullopt;
         const modem::PatternStartWindow next{map->origin_samples,map->phase_scale,map->half_width_samples};
         if(!result)result=next;
@@ -862,20 +894,20 @@ Work scheduled_complex_receiver_work(modem::Config config,const SearchBank& bank
         first_phase=std::min(first_phase,phase);last_phase=std::max(last_phase,phase);
     });
     else {first_phase=0;last_phase=modem::canonical_phase_extent(config)-1;}
-    if(first_phase<config.sample_rate&&work_mode==ReceiverWorkMode::hardware_timing_model&&
-       options.clock_sync&&config.oscillator_search&&
-       (!timing_model.capture_error_seconds||
-        *timing_model.capture_error_seconds<=clock_sync::audio_lag_radius(options.audio_timing_error_seconds))&&
-       !(config.oscillator_search->reference==modem::OscillatorReference::shared_radio&&
-         config.oscillator_search->rf_shift_hz!=0)) {
+    if(first_phase<config.sample_rate&&arrival_model_available(options,config,work_mode,timing_model)&&
+       (shared_hop_calendar(config)||(config.oscillator_search&&
+        !(config.oscillator_search->reference==modem::OscillatorReference::shared_radio&&
+          config.oscillator_search->rf_shift_hz!=0)))) {
         constexpr auto epoch=1800000000.L;
         const auto radius=options.search_seconds+1.L;
-        const auto capture_error=clock_sync::audio_lag_radius(options.audio_timing_error_seconds);
-        const auto map=clock_sync::audio_lag_arrival_map(*options.clock_sync,epoch,
-            epoch+options.clock_sync->offset_seconds-radius,0,config.sample_rate,
+        const auto policy=arrival_policy(options,config);
+        const auto capture_error=std::max(clock_sync::audio_lag_radius(options.audio_timing_error_seconds),
+            timing_model.capture_error_seconds.value_or(clock_sync::audio_lag_radius(options.audio_timing_error_seconds)));
+        const auto map=receiver_arrival_map(options,config,epoch,
+            epoch+policy->offset_seconds-radius,0,
             timing_model.capture_seconds_per_frame.value_or(1./config.sample_rate),
             timing_model.capture_rate_uncertainty_fraction.value_or(static_cast<double>(maximum_clock_ratio)),
-            capture_error,last_phase,options.audio_timing_error_seconds);
+            capture_error,last_phase);
         if(map&&map->origin_samples+map->phase_scale*last_phase+map->half_width_samples>=0&&
            map->origin_samples+map->phase_scale*first_phase-map->half_width_samples<=2*radius*config.sample_rate) {
             search.qualified_start_window=modem::PatternStartWindow{
@@ -955,8 +987,8 @@ Work scheduled_complex_receiver_work(modem::Config config,const SearchBank& bank
         "Keyed waits and null intervals are not failed symbols. Broad capture remains fully charged; six-second absence requires fully scored valid calendar slots":
         "Split complex decoding is experimental; mapped pulse/covariance work, constructors, rolling setup and complete live-bank CPU are uncalibrated. "
         "Null time is not observed absence; physical aperture includes every null interval. No symbol-sized FFT or source-time frequency grid is assumed";
-    if(options.clock_sync&&!result.timing_window_modeled)
-        g.fallback_reason="Full arrival-window work: timing metadata or shared-reference geometry is unsupported";
+    if(arrival_policy(options,config)&&!result.timing_window_modeled)
+        g.fallback_reason="Full arrival-window work: capture dating, timing metadata or shared-reference geometry is unsupported";
     g.search_arithmetic=config.search_arithmetic;
     g.arithmetic_experimental=config.search_arithmetic!=modem::SearchArithmetic::fp64;
     const auto transform=p.scheduled_fft_seconds*config.sample_rate/result.bin_samples;
@@ -1121,15 +1153,13 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     // complete excluded batches, retaining every mixed batch. The lattice count
     // uses a representative anchor with supplied capture metadata or explicit
     // selected bounds; it is not an actual running bank's hypothesis count.
-    if(((correlator&&symbol>=60.L*config.sample_rate)||
-        (!correlator&&!coupled&&symbol<16.L*config.sample_rate)||
-        (config.scheduled_hopping&&config.scheduled_hopping->enabled()&&!config.scheduled_hopping->continuous()))&&
-       work_mode==ReceiverWorkMode::hardware_timing_model&&options.clock_sync&&
-       (!timing_model.capture_error_seconds||
-        *timing_model.capture_error_seconds<=clock_sync::audio_lag_radius(options.audio_timing_error_seconds))&&
-       private_pattern&&config.spreading_mode==modem::SpreadingMode::pattern&&config.oscillator_search&&
-       !(config.oscillator_search->reference==modem::OscillatorReference::shared_radio&&
-         config.oscillator_search->rf_shift_hz!=0)) {
+    if((shared_hop_calendar(config)||(correlator&&symbol>=60.L*config.sample_rate)||
+        (!correlator&&!coupled&&symbol<16.L*config.sample_rate))&&
+       arrival_model_available(options,config,work_mode,timing_model)&&
+       private_pattern&&config.spreading_mode==modem::SpreadingMode::pattern&&
+       (shared_hop_calendar(config)||(config.oscillator_search&&
+        !(config.oscillator_search->reference==modem::OscillatorReference::shared_radio&&
+          config.oscillator_search->rf_shift_hz!=0)))) {
         const auto phase_step=modem::canonical_phase_step(config);
         const auto phase_upper=(modem::canonical_phase_extent(config)-1)/phase_step*phase_step;
         auto minimum_phase=std::uint64_t{0},maximum_phase=modem::canonical_phase_cell_upper(config,phase_upper);
@@ -1141,11 +1171,12 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         constexpr auto epoch=1800000000.L;
         const auto capture_error=std::max(clock_sync::audio_lag_radius(options.audio_timing_error_seconds),
             timing_model.capture_error_seconds.value_or(clock_sync::audio_lag_radius(options.audio_timing_error_seconds)));
-        const auto map=clock_sync::audio_lag_arrival_map(*options.clock_sync,epoch,
-            epoch+options.clock_sync->offset_seconds-radius,0,config.sample_rate,
+        const auto policy=arrival_policy(options,config);
+        const auto map=receiver_arrival_map(options,config,epoch,
+            epoch+policy->offset_seconds-radius,0,
             timing_model.capture_seconds_per_frame.value_or(1./config.sample_rate),
             timing_model.capture_rate_uncertainty_fraction.value_or(static_cast<double>(maximum_clock_ratio)),capture_error,
-            maximum_phase,options.audio_timing_error_seconds);
+            maximum_phase);
         // Match Live: intersect a qualified prior with the original bank; do
         // not require its edge cells to be wholly contained in that bank.
         if(map&&map->origin_samples+map->phase_scale*maximum_phase+map->half_width_samples>=0&&
@@ -1259,7 +1290,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     if(fft_prior) {
         result.geometry.arrival_window_available=true;
         result.geometry.combined_arrival_half_width_seconds=static_cast<double>(fft_prior->half_width_samples/config.sample_rate);
-    } else if(options.clock_sync&&result.geometry.fallback_reason.empty())result.geometry.fallback_reason=result.timing_window_modeled?
+    } else if(arrival_policy(options,config)&&result.geometry.fallback_reason.empty())result.geometry.fallback_reason=result.timing_window_modeled?
         "Compact representative lattice; rolling compact admissions remain unmodeled":
         "Full arrival-window work: timing metadata or backend geometry is unsupported";
     const bool compact_hint=private_pattern&&symbol>=60.L*config.sample_rate;
@@ -2389,12 +2420,14 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
     if(std::any_of(profiles.begin(),profiles.end(),[](const auto& c){return modem::scheduled_bursts(c);}))
         layout=receiver_layout_context(options,profiles,keys,work_mode,actual_settings);
     Estimate result;result.receiver_profiles=profiles.size();result.receiver_work_mode=work_mode;
-    result.probability_reference_only=options.clock_sync.has_value()||options.modem.dsss_factor>1;
+    result.probability_reference_only=arrival_policy(options,options.modem).has_value()||options.modem.dsss_factor>1;
     result.receiver_work_assumptions=work_mode==ReceiverWorkMode::sampled_simulation?
         "Sampled simulation startup and settling epochs; original oscillator bank":
         work_mode==ReceiverWorkMode::hardware_fallback?
         "Hardware initial epochs; full arrival-window fallback, configured peer UTC correction bank retained":
-        "Hardware timing model assumed; admitted UTC correction bank, full arrival-window fallback";
+        work_mode==ReceiverWorkMode::hardware_calendar_model?
+        "Assumed UTC hop-calendar model; declared endpoint/Audio/propagation bounds, nominal capture slope; not hardware timing evidence":
+        "Supplied capture timing model; admitted UTC correction bank, full arrival-window fallback";
     const auto& config=options.modem;
     const auto samples_per_symbol=modem::symbol_sample_count(config);
     const auto seconds=static_cast<long double>(samples_per_symbol)/config.sample_rate;
@@ -2454,7 +2487,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         if(found!=banks.end())return static_cast<std::size_t>(found-banks.begin());
         auto keyed_profile=profile;
         if(options.key)keyed_profile.data_key=options.key;
-        banks.push_back({&profile,search_bank(keyed_profile,options.clock_sync.has_value()&&
+        banks.push_back({&profile,search_bank(keyed_profile,arrival_policy(options,keyed_profile).has_value()&&
             work_mode!=ReceiverWorkMode::sampled_simulation)});
         return banks.size()-1;
     };
@@ -2620,13 +2653,20 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         if(matching_work.timing_window_modeled)result.receiver_work_assumptions+=
             "; selected GPS/audio arrival prior modeled; full-window fallback reported separately";
         else result.receiver_work_assumptions+="; full arrival-window fallback retained";
-    } else if(work_mode==ReceiverWorkMode::hardware_timing_model) {
+    } else if(work_mode==ReceiverWorkMode::hardware_timing_model||work_mode==ReceiverWorkMode::hardware_calendar_model) {
         result.receiver_work_assumptions=matching_work.timing_window_modeled&&!matching_work.compact?
             (matching_work.geometry.restricted_fft_modeled?
             "Restricted FFT acquisition work allowance: original per-phase start cells and empty template jobs are omitted under selected GPS/audio bounds; input FFTs per guarded component, repeated private template dispatches, continuation and original logical-hop trial/threshold charges retained. Initial epochs use a one-second anchor envelope; uncertain partition/selector geometry uses full-job component-count allowances. Fresh cohorts use bounded acquisition-lifetime allowances. Paired direct and partitioned convolution use shared geometry selectors; uncertain anchors retain full-cohort fallback or a translation-independent eligible-option allowance. Borrowed-row initialization, repeated group input caches and component observation preparation are included; native FFT pipeline/plan and the measured V2 template family use bounded local calibration, while other operation coefficients and rolling admission allowances remain engineering assumptions. Full-window fallback is reported separately":
             "FFT acquisition work allowance: whole excluded batches skipped under selected GPS/audio bounds; mixed batches, frontend, continuation and original threshold charges retained. Full-window fallback is reported separately"):matching_work.timing_window_modeled?
             "Compact bank engineering reference: exact lattice count at a representative anchor under selected GPS/audio bounds and supplied capture metadata (nominal slope and full bank rate allowance when omitted). Full-window fallback is reported separately":
             "Full arrival-window bank; timing prior is unavailable for this backend or model geometry. Configured peer UTC correction lanes are retained";
+    }
+    if(shared_hop_calendar(config)&&work_mode!=ReceiverWorkMode::sampled_simulation) {
+        if(work_mode==ReceiverWorkMode::hardware_calendar_model)
+            result.receiver_work_assumptions+="; assumed UTC hop-calendar prior, not measured capture or peer TX qualification";
+        else if(work_mode==ReceiverWorkMode::hardware_timing_model&&matching_work.timing_window_modeled)
+            result.receiver_work_assumptions+="; dated capture calendar prior includes supplied timestamp/rate uncertainty; peer TX timing remains assumed";
+        else result.receiver_work_assumptions+="; capture dating unavailable or geometry unsupported: full-window fallback";
     }
     if(!matching_work.compact&&!scheduled_complex) {
         std::ostringstream diagnostic;
@@ -2766,7 +2806,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
             result.confidence_available=false;result.one_bit_confidence_available=false;
             result.probability_interval_available=false;
             std::string scope="Conditional matched-template AWGN reference";
-            if(options.clock_sync)scope+="; UTC device timing and steering failures are not modeled";
+            if(arrival_policy(options,config))scope+="; UTC device timing and steering failures are not modeled";
             if(config.dsss_factor>1)scope+="; outer DSSS code-presence rejection is not modeled";
             if(!result.probability_model_limit.empty())scope+="; "+result.probability_model_limit;
             result.probability_model_limit=std::move(scope);
