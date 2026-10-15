@@ -15,6 +15,10 @@ real-time reception. The [receiver strategies](receiver-strategies.md),
 and [transmit cover](transmit-cover.md) describe the underlying paths and their
 separate evidence.
 
+The [practical processing implementation runbook](sched-hop-implementation-runbook.md)
+specifies the next local development attempt from the calendar30 baseline. It is
+a planning document, not evidence of an implemented optimization or sustained rescue.
+
 ## Controls and timing
 
 The Console places **Sched_Hop** after FHSS. Its selectable values are exactly
