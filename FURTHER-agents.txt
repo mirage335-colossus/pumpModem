@@ -112,123 +112,1163 @@ linked investigations before choosing another algorithm or cache design.
 
 
 
-2026-10-14 / Codex side conversation: practical moderate Sched_Hop and efficient search
-====================================================================================
 
-Future TODO, to take up after intervening development. Reinspect the then-current
-source, maintained documentation, investigations and exact runnable references.
-Some work below may already be complete: preserve, verify and reuse it rather
-than overlooking, replacing or repeating it. This prompt is not an exhaustive
-algorithm prescription; investigate additional corrections or better approaches
-when current evidence calls for them.
 
-Finish the remaining work that prevents Sched_Hop from making an otherwise useful,
-extensively optimized receiver practical when it is slightly too slow for
-continuous real-time reception. Scheduling must retain useful complex decoding
-and much of its acceleration while adding processing time. Do not conceal a
-scheduling-induced CPU, memory or sensitivity cliff with lower planner estimates,
-an amplitude-only substitution or a substantially weaker target SNR.
 
-Keep everything local. Follow AGENTS.md, coordination and the development contract.
-Preserve other agents' work, frozen runnable candidates, diagnostic references,
-assertions and failing evidence. Serialize heavy measurements. Do not push,
-publish, dispatch hosted CI, add GPU work or start hours-long platform/SDK
-qualification. Deliver a rebuilt GUI at a manual-testing checkpoint.
 
-1. Reduce the scheduling choices first.
+2026-10-15 — Future prompt: Astra planning, then Sol implementation of practical Sched_Hop
+=========================================================
 
-The Sched_Hop dropdown must contain exactly: 0, 3, 5.
-0 disables scheduling; 3 and 5 retain the total-time-multiplier interpretation.
-Remove 10, 100, 1k and 10k from the selectable dropdown.
+This is a future development request, not evidence that the work below has been
+implemented, tested or qualified. Preserve preceding entries and evidence.
 
-The developer dilution dropdown must contain exactly: 0, 3.
-0 means the ordinary undiluted schedule, with one active hop per frame; 3 means
-three consecutive active hops per frame, preserving the existing dilution
-interpretation. Thus multiplier5/dilution3 has effective5/3 airtime, and
-multiplier3/dilution3 has no scheduled null hops. Handle that continuous limit
-without unnecessary split-symbol search, while preserving applicable FHSS ramps.
+REQUEST TO GPT-6 ASTRA
 
-Integrate these choices with CLI handling, launch-command import/export,
-parameter-list persistence and estimates. Define explicit compatibility handling
-for older values; never silently reinterpret an old multiplier or dilution.
+Act as the stronger planning model for one more tightly directed attempt to make
+Sched_Hop useful. Your output will be executed later by GPT-6.1 Sol, which the
+user designates as the less capable implementation model for this task. Do not
+assume that Sol will independently recover the mathematics, identify hidden
+fallbacks, distinguish historical findings or invent a sound architecture from
+general instructions. Supply an unusually extensive, concrete implementation
+runbook: exact code paths, interfaces, algorithms, invariants, implementation
+order, test recipes, numerical controls, measurements and conditional decisions.
+This describes the intended division of work, not a claim about unpublished
+model parameter counts.
 
-These moderate settings are the practical optimization targets. Do not depend
-on100x-or-greater null time to compensate for inefficient acquisition, large
-physical-aperture uncertainty or accumulation of excessive recorded history.
+During this planning pass, inspect the then-current repository and recorded
+evidence. Produce a plan, not unrequested runtime changes. Clearly separate
+facts established from source/measurements, hypotheses and proposed changes.
+The subsequent implementation pass must use the plan, revalidate its baseline,
+carry out authorized changes, and report any concrete obstacle instead of
+silently simplifying the requested detector. A substantial unresolved design
+decision must be resolved by Astra or explicitly bounded; do not hand Sol an
+unprioritized list of research ideas and call it an implementation plan.
 
-2. After reducing Sched_Hop, make one further measured optimization pass.
+The acceptance criterion is practical processing headroom. Take an existing,
+useful, optimized continuous complex-reception configuration and hold target
+SNR, waveform geometry, input rate, workers and workspace fixed. Scheduling
+must provide extra physical processing time while retaining useful decoding
+and enough existing acceleration that its overhead does not consume that time.
+Do not substitute amplitude-only decoding, weaken target SNR, drop hypotheses,
+weaken guards or lower planner coefficients to make the result appear feasible.
+Extending continuous reception into previously unsupported territory is not the
+primary task. Encrypted EME is a separate investigation, not a replacement for
+fixing the two ordinary scheduling regressions.
 
-Reconcile docs/scheduled-hops.md, docs/receiver-strategies.md,
-docs/search-compute.md, docs/search-arithmetic.md and timing documentation with
-current source and their linked captures; use docs/README.md to locate renamed
-or superseding topics. Retain completed implicit catalogs, shared dated capture,
-tiled/native-FP32 execution, frequency-family sharing, exact reuse, queued
-processing and guarded refinement wherever they are valid and beneficial.
+Keep implementation local. Follow AGENTS.md, docs/agent-coordination.md and
+docs/development.md. Preserve runnable baselines, original diagnostic paths,
+failing fixtures, measurements, assertions and other sessions' changes. Claim
+files, build trees, measurement resources and audio devices before using them;
+use tested registry transactions and coordinate shared invariants. Serialize
+heavy measurements. Do not push, publish, dispatch hosted CI, add GPU work or
+start hours-long platform/SDK qualification. Deliver a rebuilt GUI and normal
+and verbose/debug launchers at a manual-testing checkpoint. No claim of complete
+Sched_Hop is justified without the matched sustained-reception rescue.
 
-Attempt to restore the efficient shared timing search achieved by the continuous
-FFT receiver for3x and5x schedules. Many timing positions are correlation outputs,
-not necessarily independent full computations or persistent decoder objects.
-Audit the required timing/phase/frequency/clock/epoch set, its joint dependencies,
-canonical/GCD boundaries and any unnecessarily conservative Cartesian expansion.
-Do not assume the existing enumeration is minimal, or drop required coverage
-without evidence. Distinguish extra coverage genuinely required by physical
-aperture from an avoidable implementation restriction.
+A. START FROM THE ACTUAL BASELINE, NOT FROM THE ACCUMULATED CONVERSATION
 
-Evaluate appropriate calendar-aware tiles or partitioned convolutions, shared
-pulse/IQ/Gram statistics, cross-bank preprocessing, frequency-family execution
-and bounded batching. Retain cheaper direct paths for sparse banks. Include
-plans, private templates, packing, allocation, certificate construction, original
-guard replay, numerical refinement and publication in total measured cost.
-A fast screen with expensive survivor/fallback processing is unfinished efficiency
-work. Investigate repeated mixing and replay, interference-driven refinement
-storms, cache exhaustion and excess ownership/history reservations explicitly.
+The read-only investigation that prepared this prompt inspected checkout:
+  /home/user/___quick/p/_cur/dataPump/pumpModem
+  branch codex/pulse-moments
+  HEAD a0143115e26b1fcaf4c50a44621f6c4071d223fb
+  subject: DRAFT - another failed attempt to achieve the reduced CPU usage of Sched_Hop.
+The worktree/index were clean before this text-only addition. These facts are
+navigation anchors, not permission to reset a newer checkout. Reinspect current
+HEAD, dirty hashes, coordination records and actual runnable identities first.
+If any source has changed, identify which conclusions remain applicable.
 
-Processing may span multiple cycles. Keep physical capture time separate from
-processing time; source coordinates pause during nulls and carrier phase does
-not. Bound memory and latency without forcing unconditional per-hop clearance,
-whole-symbol PCM buffering or enormous mostly-null transforms. Preserve all
-required guards, usable-sample/noise accounting and rolling consumers.
+Read docs/README.md, then the current maintained topics and their latest linked
+captures: docs/scheduled-hops.md, docs/receiver-strategies.md,
+docs/search-compute.md, docs/search-arithmetic.md, docs/clock-sync.md,
+docs/building.md and docs/development.md. Resolve renamed topics through the
+index. Many sections describe earlier candidates; label findings with their
+source/build identity instead of combining them into an imaginary current run.
 
-3. Demonstrate practical headroom and investigate remaining cliffs.
+High-value evidence already present locally:
+  .agent-work/artifacts/sched-fft-rescue-20261014/CALENDAR-CHECKPOINT.md
+  .agent-work/artifacts/sched-fft-rescue-20261014/baseline/identity.json
+  .agent-work/artifacts/sched-fft-rescue-20261014/source30-validation-manifest.json
+  .agent-work/artifacts/sched-fft-rescue-20261014/source30-validation-amendment/
+  .agent-work/artifacts/sched-fft-rescue-20261014/calendar30-delivery-checks.json
+  .agent-work/artifacts/sched-practical-20261013/EFFICIENCY-FOLLOWUP.md
+  .agent-work/artifacts/sched-moderate-20261014/fixture/user36-multicycle.cpp
+  .agent-work/artifacts/sched-fft-rescue-20261014/firstbank-calendar26.cpp
+  .agent-work/artifacts/sched-fft-rescue-20261014/firstbank-full-profile.cpp
+Use the reports to find exact commands, binaries, raw logs, manifests and older
+optimized continuous/raw references. Do not ingest entire historical trees or
+run old scripts indiscriminately. Some scripts compile, mutate or overwrite
+artifacts. Read them before reuse; use a newly claimed output namespace.
 
-Compare the current optimized continuous receiver, the frozen preceding scheduled
-receiver and the corrected moderate schedule. Keep configuration, target SNR,
-input rate, worker availability and workspace matched. Receiver-only changes use
-identical original PCM; scheduled/continuous waveforms use matched synthetic keys,
-payloads and channel/noise seeds with stated active-power/energy constraints.
+The calendar30 report identifies GUI SHA256:
+  d52cd0847e1ab6e287613328c92ab85844ca644ea0ccd597ad793ce59981d009
+and core SHA256:
+  28336ea8491d53e2eb92f115c35d00a5284977ef5e082abcbf9049b86aaebccd
+Verify these against retained artifacts. Before implementation, freeze the
+then-current executable, runtime dependencies, source inputs, build flags,
+compiler, environment overrides and fixture recipes. A Git commit alone is not
+a build identity. Do not overwrite any earlier runnable reference.
 
-Predeclare a demanding useful case that is slightly too slow continuously, and
-show sustainable independent input, bounded backlog over multiple cycles, full
-drain, useful complex decoding and prompt per-bit publication with3x or5x.
-Measure CPU per source and physical second, wall throughput, component costs,
-peak memory, queue age and acquisition/publication latency. Startup, a short
-prefix or producer backpressure does not establish this result.
+Completed work to preserve rather than rediscover:
+1. Bounded pulse moments, source-curve reuse and exact private permutation reuse.
+2. Implicit acquisition catalogs and stable lazy owners instead of eagerly
+   allocating one full decoder per logical hypothesis.
+3. Shared dated capture, processing journals, original fences, multi-cycle
+   queued processing, exact history/owner accounting and eviction protections.
+4. Native-FP32 acquisition tiles, frequency-family work and several bounded
+   exact/approximate template representations, where actually eligible.
+5. Separate payload-start/calendar timing and the recent joint arrival bounds.
+6. Public choices 0/3/5 and dilution 0/3, with explicit legacy handling and a
+   continuous multiplier3/dilution3 limit.
+7. Default causal audio lag [0,70 ms] and explicit Audio0/50/other values.
+8. Profile-loading, launch-command, persistent target-SNR and CLI fixes already
+   present in the latest candidate. Verify them rather than presume absence.
 
-Cover default and genuinely qualified tighter timing, dilution0/3, short and long
-split symbols, DSSS Off/10/100/1000, FHSS off/on, oscillator uncertainty, nearby
-sample-count/rate boundaries, fractional timing, multiple keys/rolling epochs and
-workspace limits wherever the continuous configuration is supported. Distinguish
-pre-existing continuous cliffs from ones introduced by scheduling. Preserve
-explicit decoder overrides and the Search arithmetic policy, including the
-original-template FP64-force reference and truthful executed-path diagnostics.
+What the recorded tests establish, and what they do not:
+- The earlier complete scheduled fixture improved from about923.544 to457.735
+  aggregate CPU seconds, roughly2.02x, with wall118.884 to65.709 seconds. It used
+  M10/G1, about348 physical seconds and a particular54-bank workload. Sustained
+  queued processing across later active hops was demonstrated. This establishes
+  useful implementation progress, not efficiency relative to continuous FFTs.
+- A preceding native-FP32 curve-interpolation variant was about5.1% slower. That
+  rejects that variant in that fixture, not FP32 moments/products/transforms.
+- Later complete fixed-bank FP32 packed-Gram and combined signal/Gram variants
+  cost about9.8% and21.4% more CPU, respectively, and retained strict statistic
+  differences. These are important negative results for those implementations;
+  do not repeat them unchanged or generalize them to every batched FP32 design.
+- A sparse large-FFT operation comparison does not reject smaller active tiles,
+  polyphase families or dense multi-dwell processing. A43x prepared frequency
+  kernel result does not establish complete receiver speedup.
+- A small shared-input experiment obtained zero hits and no complete gain.
+  It does not reject sharing when rolling consumers are deliberately aligned to
+  immutable capture tiles; it does reject claiming benefit merely from a cache.
+- The latest Spread example continuous fixture, Fs14400, decoded001 and END
+  over52.313958 physical seconds:5.474223 CPU seconds,0.104642 CPU/physical
+  second. Its paced52.568066 wall seconds include input waiting. This is n=1,
+  and the formerly cited0.54 was an estimate, not this execution measurement.
+- The corresponding latest full-Live scheduled attempts still failed the
+  original24-second backlog bound: Spread M3 roughly27.11 CPU/24.45 wall and M5
+  roughly28.96 CPU/24.61 wall at failure. These are failed prefixes, not complete
+  throughput results. User36 M3/M5 also failed, with about268/339 CPU seconds.
+- A one-bank user36 experiment after calendar correction reduced hypotheses
+  from226863 to1035 while retaining9 canonical phases and5 paired hypotheses.
+  It completed001/absence/drain using144.482248 CPU seconds over212.533 physical
+  seconds, about0.680 CPU/physical second. It enabled diagnostic whole-point
+  FFT/Q4/bulk/compact/archive paths. It is neither production Auto nor full Live.
+- That one-bank profile attributed about110.073 CPU seconds to guards,21.714
+  to frontend and12.047 to residual work. Do not transfer those fractions to Live.
+- A production Spread M3 profile attributed17.388322 of25.541081 exclusive CPU
+  seconds to candidate residual work, about68.1%; setup2.959761, rolling2.091771,
+  templates0.924223, tagged guards0.747178, search0.796221. The residual bucket
+  includes calendar traversal, original construction, projection and guards;
+  it is not evidence that one arithmetic kernel consumes68.1%.
+- Latest Spread runs performed tens of millions of original replay coordinates,
+  thousands of materialized owners and many refinements, with zero ordinary
+  curve hits/pulse spans/temporal attempts/common mapped pairs in the reported
+  path. Nine preparation workers were actually used; a stale single-worker
+  limit is not the established explanation. Much post-preparation replay is
+  ordered serial work. Parallelizing it safely needs an execution/state split.
 
-Preserve payload bits, framing, waveform construction, cryptographic addressing,
-independent candidates, thresholds, trial accounting, cancellation and pending
-identity. Nulls, EOF, flushing and queue retirement never manufacture observed
-absence or physical completion. Validate statistic/decision agreement and
-threshold-region sensitivity where feasible; report uncertainty and unqualified
-scope separately from measured loss.
+Existing testing has NOT ruled out a successful practical implementation.
+It has identified execution gaps and rejected specific prototypes. The plan must
+not assert impossibility until an applicable strategy has a defensible complete
+cost/accuracy bound. Conversely, do not promise that an FFT automatically solves
+all private-template, guard, clock and phase dimensions.
 
-4. Close the pass honestly.
+B. FIRST DEFINE THE SCHEDULE, TIMING VARIABLES AND RESCUE MATH
 
-For major applicable strategies, record implemented/measured, rejected with
-complete-execution evidence, quantitatively bounded out for a precise scope, or
-outstanding with a concrete blocker. A slower unsuitable prototype does not
-reject an entire strategy. Additional work outside this list may be necessary.
+Public controls remain Sched_Hop0/3/5 and developer dilution0/3 unless separately
+justified and authorized. Public dilution0 means internal group_hops=1; it does
+not mean zero active hops. Public3 means three consecutive active hops per frame.
+The total-time multiplier is M; nominal active fraction is G/M before ramps,
+deferrals and actual keyed interval effects. M3/G3 is continuous and must avoid
+split-symbol machinery while preserving applicable FHSS power guards.
 
-Run focused checks, then complete affected local test groups. Rebuild the GUI
-and provide normal and verbose/debug launchers. Report practical3x/5x rescue
-results, cost relative to continuous reception, boundary/cliff coverage,
-sensitivity scope and remaining hardware, long-duration, ARM and broader
-qualification. If sustained rescue or consequential-cliff correction remains
-unmet, describe the manual checkpoint as partial and identify the limiting work.
+Briefly evaluate internal M5/G3 and M5/G4 as diagnostic strategies. Current facts:
+- include/datapump/sched_hop.hpp parsers accept public0/3/5 and dilution0/3;
+  explicit old incompatible values reject rather than silently change meaning.
+- SchedHopPlan::validate permits programmatic group_hops in1..M, so a bounded
+  test can useG4 without changing the public dropdown or persistence format.
+- SchedHopSchedule uses jitter=(M-G)/2 with integer division. M5/G3 has jitter1,
+  three contiguous active hops(1.2s), and1..3 quiet hops between active groups.
+  M5/G4 has jitter0: four active hops(1.6s) and exactly one quiet hop(0.4s).
+  Its keyed choice has only one possible placement. It is not an unpredictable
+  placement schedule, despite deriving a key. Report that limitation explicitly.
+- M5/G4 can diagnose whether longer contiguous FFT windows recover efficiency.
+  It has only1.25x nominal time, so it demands much lower execution overhead.
+  Do not silently ship it as satisfying the original secret-calendar objective.
+  If later promoted, specify exact CLI/UI/serialization compatibility and any
+  versioned schedule redesign separately; do not casually alter key addressing.
+
+Let C0 be measured CPU per source second continuously, k the scheduled/continuous
+CPU ratio per source second for equivalent payload work, d=G/M, and I the extra
+cost per physical second. Approximately Cs=C0*k*d+I. Use actual measured active
+energy, schedule and listening/tail costs in final results; this is a diagnostic
+budget, not a replacement for full execution. For C0=1.1 and I=0, M5/G3 requires
+k<1.515, while M5/G4 requires k<1.136 just to average below1 CPU second/physical
+second. A margin below the limit is needed. Aggregate CPU is not wall service
+capacity on multiple workers; derive and measure both independently. A serial
+bottleneck can fail even when aggregate utilization is modest.
+
+Use three distinct time/coordinate concepts throughout the plan:
+1. Physical capture/sample time: continuous through nulls; determines carrier
+   phase, audio presentation, discontinuities and timestamp uncertainty.
+2. Source/pattern position: advances in admitted active regions and pauses
+   during nulls; determines symbol/chip positions and cryptographic addresses.
+3. Processing/publication time: may lag and cross several cycles. Processing
+   delay does not change the phase of recorded samples.
+
+FHSS or Sched_Hop assumes a GPS-aligned shared calendar even with Clock sync
+Default. Default selects acquisition policy; it does not permit moving the hop
+calendar independently through several seconds for every message-start guess.
+Default accuracy remains +/-10ms per station. Audio error is causal[0,A], now
+A=70ms when Default; retain explicitly selected0ms and other values. Include
+propagation offset/region, both stations' clock bounds, actual provider timestamp
+radius/rate uncertainty and qualified correction. Known queued latency is
+compensated, not automatically added as uncertainty. Report the combined arrival
+interval, not capture radius alone. A declared GPSDO is not measured discipline.
+
+For every candidate variable write its units, identity, allowed set and dependency:
+  key/profile; stream epoch; payload phase/canonical phase cell; arrival origin;
+  calendar displacement; source index; frequency/clock pair; fractional sample;
+  provider correction/continuity generation; waveform and schedule revision.
+Draw the dependency relation, not an assumed Cartesian product. Determine which
+dimensions identify genuinely different private rows, which are correlation
+outputs, which merely view the same captured samples and which are equivalent.
+Prove any catalog reduction by equivalence/coverage, preserving original trial
+charges and chronology. An eligibility check or low survivor count is not proof.
+
+C. CURRENT CODE MAP — VERIFY THESE PATHS BEFORE DESIGNING THE REPLACEMENT
+
+The file/symbol map below was checked at a014311. Line numbers are deliberately
+secondary to symbols because the implementation is moving. Astra must convert
+this into a current call graph and execution table for each acceptance fixture.
+For each row state: called or bypassed, why, input/output identity, arithmetic,
+workspace lifetime, thread ownership and observed counts. Existence is not use.
+
+C1. Configuration, examples, geometry and truthful planning
+
+- include/datapump/sched_hop.hpp:
+  sched_hop_multiplier, sched_hop_active_hops, sched_hop_id,
+  sched_hop_dilution_id, SchedHopPlan, SchedHopSchedule, SchedHopCoordinate,
+  SchedHopSourceMap::locate/source_to_physical/gain/minimum_flat_samples.
+  Inspect keyed frame generation, unbiased choices, source endpoints, ramps,
+  cache identities, integer overflow and continuous(). Do not rederive the
+  calendar separately in a faster receiver with different endpoint rounding.
+- include/datapump/scheduled_symbol_calendar.hpp: ScheduledSymbolCalendar,
+  source slots, flat/pulse-support placement and packed short-bit deferral.
+- include/datapump/symbol_schedule.hpp: scheduled_bursts,
+  packed_scheduled_symbols, symbol_stream_address, canonical phase and
+  scheduled_symbol_offset/physical-span helpers. Check both continuous-limit
+  bypass and the short-symbol minimum-energy-to-packed transition.
+- src/main.cpp and src/gui/launch_command.cpp: CLI parsing and import/export;
+  src/gui/application.cpp: actual GUI startup/help/debug/verbose parsing;
+  src/gui/controller.cpp: update/resolve order, selected keys, targets, schedule
+  settings, examples, live restarts and timing mode; src/gui/screen_console.cpp
+  and src/gui/link_planner_page.cpp: controls and actual displayed state;
+  src/gui/link_planner_model.cpp: estimate inputs and caches.
+- src/receiver_strategy.cpp: receiver_strategy_bank_count and
+  resolve_receiver_strategy_impl. Split complex is evaluated before amplitude;
+  inspect implicit-memory projection, supported/empty-epoch states, existing
+  complex overrides, CPU-budget fallback and current infinite/unavailable
+  estimates for uncalibrated implicit paths. Preserve that honesty.
+  Frequency-axis eligibility presently explicitly excludes noncontinuous
+  scheduling and also restricts DSSS/FHSS/geometry. Classify each exclusion;
+  do not enable it blindly or treat it as a mathematical impossibility.
+- src/simulation_estimate.cpp, src/pattern_search.cpp, src/tuning.cpp and
+  include/datapump/scheduled_complex_search.hpp / src/scheduled_complex_search.cpp:
+  actual sample rate/symbol/chip geometry, oscillator pair coverage, physical
+  aperture, refinement/caps and model availability. Locate the actual owners
+  rather than assume one global planner coefficient controls execution.
+
+C2. Continuous complex reference and the principal scheduling fork
+
+- src/pattern_receiver.cpp, PatternReceiver::Impl constructor:
+  resolve strategy; amplitude routes to PatternCorrelator(amplitude_only);
+  scheduled_bursts&&!packed_scheduled_symbols calls scheduled_complex_search,
+  constructs PatternCorrelator and returns BEFORE normal continuous FFT setup.
+  This is a current representation/dispatch restriction. It does not prove that
+  split-symbol correlation cannot share work over timing outputs.
+- In the continuous path inspect transform/overlap/hop selection, sample_fit,
+  variable_clock, streamed_templates, native_private_rows, worker selection,
+  score_native_whole_impl, private_acquisition_template, restricted direct and
+  partitioned execution, template cache, phase_groups/select_starts, tracking,
+  trial collection order and final publication.
+- src/pattern_fft_batch.cpp, src/pattern_correlator_batch.cpp and their headers;
+  src/search_fft.hpp, src/search_fft.cpp, src/search_arithmetic.hpp and
+  src/search_arithmetic.cpp:
+  reusable native FloatPlan/DoublePlan, partitioned/direct cost selection,
+  source templates, energy/Gram normalization, arithmetic fallback and exact
+  versus interpolated private-template reuse. Use maintained implementation,
+  not a new conversion-heavy FFT or an all-direct matrix expansion.
+- Continuous whole native FFT already shares an input transform, can stream
+  private rows and can reuse scores for exactly repeated canonical addresses
+  within immutable batches. Determine which ideas transfer to fixed calendar
+  families, and which assumptions depend on ordinary shift invariance.
+
+C3. Split complex catalog and lazy selection
+
+- src/pattern_correlator.cpp constructor:
+  schedule/source-map/optional packed calendar, FHSS shape, geometry,
+  canonical phase step, drift/differential sections and original pairs.
+  The lazy-selection branch calls initialize_lazy and returns before ordinary
+  mapped pulse/curve/worker preparation. This is central to the observed loss.
+- src/scheduled_acquisition_policy.hpp:
+  automatic currently selects lazy when dense mandatory state does not fit,
+  not from a measured complete-cost crossover. Colored demand defaults and
+  explicit exact/proxy overrides have independent precedence. Capture the
+  environment exactly; do not compare different hidden diagnostic policies.
+- src/scheduled_acquisition_catalog.hpp:
+  Family/OriginRange/Pair/Lane/Cursor, exact-rate families, describe/due/source
+  mapping, joint qualified-start intersection and chronological lane identity.
+  Catalog entries are metadata, not necessarily independent full computations.
+  Audit canonical/GCD phase expansion and phase-cell padding at boundaries.
+- src/scheduled_acquisition_memory.hpp and pattern_scheduled_acquisition_*
+  functions: shared/local capture, mandatory state, stable owner growth, transient
+  peaks and current bank loans. Do not fix speed by reserving all optional
+  scratch permanently or denying required banks space.
+- PatternCorrelator initialize_lazy, lazy_due_ranges/lazy_for_each_due,
+  lazy_plan, lazy_prepare_screens, lazy_cold_upper, lazy_materialize,
+  lazy_replay_to, lazy_prepare_detached/lazy_adopt_detached, flush_lazy,
+  push_lazy, lazy_grow_slots, lazy_ensure_slot and lazy_release_slot.
+  Inspect lazy_prepare_detached's early return when colored demand is enabled:
+  a requested batching mode can be preempted before it performs any work.
+
+C4. The original hot replay and existing mapped accelerations
+
+- PatternCorrelator::accumulate_scheduled walks actual active intervals,
+  computes source position/physical carrier, applies schedule/FHSS gain, tracks
+  next-symbol carry, obtains paired shaped values and updates all fit/guard
+  state. It may use a row cache, source curves, affine spans or Temporal outputs;
+  otherwise it reconstructs and contracts per observed sample/candidate.
+  A null skip is candidate-local and does not authorize global capture omission.
+- Trace prepare_scheduled_families, prepare_scheduled_common_shape,
+  prepare_scheduled_frequency_piece, prepare_scheduled_outer_public_replay,
+  prepare_scheduled_temporal_templates, prepare_scheduled_temporal_fp32,
+  prepare_fine_curves, prepare_workers, fit_mapped_piece,
+  fit_affine_piece and the main push dispatch. Establish which lazy paths never
+  bind these resources. Ordinary preparation is not safe to insert wholesale:
+  scratch ownership, source references, cache mutability and loans differ.
+- src/scheduled_pulse_moments.hpp, scheduled_mapped_piece_groups.hpp,
+  scheduled_ordered_pulse_candidates.hpp, scheduled_frequency_piece.hpp,
+  scheduled_private_batch.hpp, scheduled_outer_public_replay.hpp,
+  scheduled_r1_export.hpp, scheduled_flat_export.hpp,
+  scheduled_temporal_templates.hpp, scheduled_temporal_normalization.hpp,
+  scheduled_temporal_plan_cache.hpp, scheduled_shared_temporal_plans.hpp,
+  scheduled_borrowed_plan_prepare.hpp, scheduled_temporal_fp32_execution.hpp,
+  scheduled_fp32_pulse_tile.hpp and source-curve/projection-cache helpers:
+  retain certified pieces, valid original guards and exact reuse. Extend them
+  to lazy families only after explicit eligibility/lifetime proofs.
+- Fine public geometry matters: the reported Spread case has short fine chips,
+  not the large-chip regime that makes the original C>=1024 mapped shortcut
+  profitable/eligible. A future plan must cover C8/C34 and partial chips rather
+  than present a long-chip microbenchmark as the ordinary-example fix.
+
+C5. Existing acquisition transforms, proxies and point/guard experiments
+
+- src/scheduled_acquisition_tile.hpp, scheduled_parallel_preparation.hpp,
+  scheduled_shared_input.hpp, scheduled_spectral_products.hpp,
+  scheduled_float_spectral_accumulator.hpp, scheduled_residual_prefix.hpp,
+  scheduled_frequency_recurrence.hpp, scheduled_carrier_restart.hpp,
+  scheduled_frequency_fusion.hpp and scheduled_frequency_postinverse.hpp.
+  Numerical fragment size can exceed original512-sample processing fences;
+  do not confuse those concepts or force one dwell per transform.
+- Included execution fragments in pattern_correlator.cpp:
+  scheduled_lazy_frequency_family.inc, scheduled_lazy_frequency_postinverse.inc,
+  scheduled_lazy_linear_grid.inc, scheduled_lazy_fractional_basis.inc,
+  scheduled_lazy_fractional_family.inc, scheduled_lazy_owned_proxy.inc,
+  scheduled_lazy_owned_moments.inc, scheduled_lazy_polynomial_chip.inc and
+  scheduled_lazy_polynomial_chip_fft.inc. Identify exact selection precedence.
+- src/scheduled_cold_colored_source_rows.hpp,
+  scheduled_cold_colored_runtime.hpp, scheduled_cold_colored_proxy_runtime.hpp,
+  scheduled_cold_colored_certificate.hpp, scheduled_partial_colored*.hpp,
+  scheduled_original_projection_cache.hpp, scheduled_original_boundary_partition.hpp,
+  scheduled_origin_gram*.hpp, scheduled_owned_moment*.hpp,
+  scheduled_sparse_owned_spans.hpp, scheduled_owned_field_errors.hpp,
+  scheduled_pulse_chord_certificate.hpp,
+  scheduled_pulse_derivative_chord_certificate.hpp,
+  scheduled_gain_chord_certificate.hpp, scheduled_linear_native_bound.hpp,
+  scheduled_template_proxy_certificate.hpp and scheduled_acquisition_certificate.hpp.
+  These encode different exactness/certificate scopes. Classify, do not mix
+  incompatible bounds or treat a raw-dot certificate as a whole-detector proof.
+- Current Default point route:
+  scheduled_lazy_default_linear.inc, scheduled_default_linear_runtime.hpp,
+  scheduled_default_linear_cellstats.hpp, scheduled_default_linear_events.hpp,
+  scheduled_linear_family.hpp, scheduled_linear_gain_cells.hpp,
+  scheduled_linear_grid_fft.hpp and scheduled_linear_fragment.hpp;
+  scheduled_lazy_default_point_fft.inc / scheduled_default_point_fft.hpp /
+  scheduled_default_point_fft_runtime.hpp;
+  scheduled_lazy_default_point_bulk.inc / scheduled_default_point_bulk.hpp;
+  scheduled_default_point_family.hpp / scheduled_default_point_observation.hpp;
+  scheduled_default_point_template_cache.hpp / scheduled_point_source_nodes.hpp
+  and scheduled_lazy_point_source_nodes.inc;
+  scheduled_default_point_guard_archive*.hpp and its lazy include;
+  scheduled_default_point_guard_strip.hpp / guard_summary.hpp;
+  scheduled_default_prepared_events.hpp, scheduled_default_compact_chords.hpp,
+  scheduled_default_point_reference_recipe.hpp;
+  scheduled_lazy_default_point_guard_prepass.inc and scheduled_default_guard_cohort.hpp.
+  The point FFT already has native float/double buffers, multiple product planes,
+  compensated FP64 spectral accumulation and runtime-dispatched AVX2 products.
+  It is not merely a dot-product FFT. It also is not automatically selected in
+  production: DATAPUMP_SCHED_DEFAULT_POINT_FFT and its prerequisites are opt-in,
+  and current code restricts it to Default plus supported geometry. FP32-minimum
+  does not automatically gain that path just because it uses FP32 operands.
+  Audit these policy restrictions separately from arithmetic validity.
+
+C6. State/guards/publication — immutable numerical work versus ordered mutation
+
+- PatternCorrelator::complete, timing_decision, settle_timing, publish,
+  output_stream and next-symbol carry ownership; fit.score(), chip colored
+  excess/projection, drift/quarter ranks, differential windows, outer presence,
+  threshold(), trials, short-chain retain/reliable-bit rules and pending owner.
+  A numerical batch can be parallel, but original event/trial/threshold and
+  publication order must remain correct. Do not call complete concurrently.
+- src/scheduled_processing_journal.hpp, scheduled_resume_state.hpp,
+  scheduled_diagnostic_journal.hpp, scheduled_default_point_diagnostics.hpp
+  and scheduled_lazy_default_point_diagnostics.inc:
+  original physical fences, deferred diagnostics, processing frontier, resume,
+  cancellation and retirement. A diagnostic-history query must not manufacture
+  or change reception events. Account its cost separately but retain it.
+- src/shared_scheduled_capture.hpp:
+  dated immutable original capture, subscribers, retained ranges, fence metadata,
+  exclusion certificates, pins and generation identity. Shared bytes do not
+  imply that preprocessing or guards are also shared.
+
+C7. Whole Live rolling execution, not just one PatternCorrelator
+
+- src/live.cpp Bank/Receiver and receiver_workspace/bank_capacity; profile/key
+  construction, shared capture creation, exact source pools and rolling admits.
+  Inspect update/admission near qualified_start_window and scheduled_complex_search,
+  then feed/process_pending/take_pattern_bursts and retirement. Include all keys,
+  epoch windows and automatic profiles in actual counts.
+- qualify_start_window and timing preparation in src/live.cpp;
+  include/datapump/clock_sync.hpp effective_policy, arrival_map,
+  calendar_arrival_map, audio_lag_arrival_map; transfer::shared_hop_calendar and
+  associated audio timestamp/correction route. Preserve the recent joint model.
+- Live optional CorrelationProjectionCache, PatternPermutationPools,
+  SharedSourceCurves, temporal plan borrow, exact_source_samples Pool and
+  ExactSourceLoan. Some sharing is scoped to one synchronous feed call while
+  replay is deferred to a different call. Record actual overlapping identities,
+  hits, miss reasons and lost reuse; zero hits cannot be called shared execution.
+- Live currently feeds receivers with exclusive current loans and ordered
+  state updates. A new parallel cohort must reserve all simultaneous scratch
+  before launch. It cannot give every worker the whole remaining loan.
+- Future-capture proof construction and exclusion in Live: raw recording may
+  be omitted only if all relevant keys, epochs, timing/clock cells, profiles and
+  future rolling consumers prove null. A lane's null interval is insufficient.
+- src/live_receptions.hpp and downstream transfer/stream receive paths:
+  preserve next-poll prefixes, stable pending identities, all-stream inspection,
+  cancellation and six seconds of fully scored absent valid-symbol duration.
+  Do not equate six physical seconds containing nulls to six observed seconds.
+
+C8. Instrumentation and inspection needed for decisions
+
+- src/scheduled_work_profile.hpp and src/scheduled_template_cpu_attribution.hpp;
+  include/datapump/pattern_correlator.hpp work counters; src/audio_trace.hpp;
+  live admission/history/loan/processing events; GUI startup/terminal errors.
+- DATAPUMP_RX_CPU_PROFILE=coarse|fine|sampled and
+  DATAPUMP_RX_CPU_SAMPLE_US=10000 exist. Fine scopes have previously materially
+  disturbed throughput. Prefer existing exclusive coarse scopes plus bounded
+  sampling, verify observer overhead and compare an unprofiled control.
+- Collect actual backend eligibility/fallback reasons, template generation,
+  original-coordinate replay, shared-family sizes, transforms, native precision,
+  refinements, source-cache behavior, owner growth and history-query replay.
+  Counters and overlapping worker wall times are not CPU component fractions.
+
+D. DECISIVE INITIAL EXPERIMENTS — ESTABLISH THE BOTTLENECK BEFORE MORE CODE
+
+Have Astra specify exact bounded commands from the current harness; Sol must
+not improvise a different fixture. Reuse matching captures/results when source
+and settings match. Serialize timing runs; do not run a build during a benchmark.
+Record CPU model, affinity/cpuset, available worker count, load, compiler flags,
+input rate, workspace bytes, all env overrides and trace/profiler overhead.
+
+D1. Freeze and predeclare these captures, including synthetic keys/seeds:
+F1: Built-in Spread-Spectrum DSSS FHSS Example, unchanged except M0 thenM3 thenM5,
+    dilution0. Current recipe: target40dB-Hz/rate360/DSSS10/private,
+    crystal baseband, GPSDO-XO RF,30MHz shift, Carrier30001500, FCC fakeFHSS,
+    Audio0, default clock,4W/path60/noise-164. Re-extract exact current recipe.
+F2: User36: target8dB-Hz/rate36/DSSS10/private, bothGPSDO-XO independent,
+    Carrier30001500/Shift30000000, margin3, Default arithmetic, Auto receiver,
+    budget0.6, default clock,Audio0,FHSSoff,M3/dilution0,frequency-search1,
+    workspace50%,live-duplex. Compare M0/M3/M5 at a fixed6120 input rate first,
+    then separately application-selected/hardware rates. Preserve target8.
+F3: A current useful continuous configuration measured slightly slower than
+    real time under independent input. The earlier4.8GHz fixture is a lead,
+    not a certified current choice. Establish its continuous success/coverage
+    and backlog first; then hold everything fixed for scheduling.
+F4: M3/G3 continuous-limit control, with FHSSoff and applicable FHSSon.
+F5: M5/G3 and internal M5/G4 diagnostic variants of F1/F2/F3, with honest duty,
+    randomness, ramp/deferral, energy and extra clock/frequency coverage reports.
+F6: Built-in EME unchanged and then encrypted using synthetic keys; extract
+    exact current rate/target, oscillator, offset and FHSS settings. Separately
+    assess public reuse, private row creation and physical aperture. Do not
+    delay F1/F2/F3 fixes while extending an unsupported EME configuration.
+    At the inspected revision the recipe is --auto-pattern, --tx-key none,
+    target-3.0720996964786846dB-Hz, rate1, Carrier5800001500, Shift5800000000,
+    bothgpsdo-ocxo, path220dB, power36.020599913279625dBm, Audio0,
+    DSSSoff, fake-fcc, default clock and independent references. The common
+    example patch supplies no explicit EME propagation offset. Verify the
+    loaded result and distinguish an offset correction from an encryption
+    comparison; do not silently change both at once.
+
+Representative F2 GUI round-trip command (use a local synthetic keyfile, not a
+developer's real secret; CLI argument order must not alter the loaded profile):
+./datapump-gui --pattern auto-keystream --tx-dbm 36.020599913279625 --path-loss-db 180 --noise-dbm-hz -164 --oscillator gpsdo-xo --rf-oscillator gpsdo-xo --shift 30000000 --search-margin 3 --reference independent --target-snr 8 --rate 36 --carrier 30001500 --doppler 0c --dsp-workspace 50% --clock-sync default --audio-error 0ms --dsss-mode interleave --dsss-factor 10 --dsss-version interleave --search-arithmetic default --receiver-strategy auto --receiver-cpu-budget 0.6 --live-duplex yes --sched-hop-dilution 0 --sched-hop 3 --sched-frequency-search 1 --fhss off --keyfile=/absolute/synthetic-keyfile --key-name=Default --tx-key named
+
+D2. Capture a path census for F1/F2 before timing: GUI-loaded parameters, runtime
+    config, symbol/chip counts, canonical step, paired clock/frequency set,
+    phase cells/origin intervals, combined arrival bounds, epochs, required
+    owners, actual mode(continuous FFT/dense mapped/lazy/packed/other), precise
+    flags and which shortcuts really execute. Verify target/load/save/export
+    round trips and that a failed import does not leave a partial profile.
+D3. Profile one complete bounded relevant run or preserve the original failed
+    deadline, then obtain a separately labeled diagnostic drain if useful.
+    Split the residual bucket into calendar/map, source/crypto/DSSS creation,
+    carrier mixing, Gram/dots, guard updates, allocation/owner growth and replay
+    traversal. Do not sum nested timers. Cross-check exclusive CPU against the
+    process total with unassigned/overhead explicitly reported.
+D4. Give each rejection/refinement an exclusive reason: certificate unavailable,
+    clipping, pulse/fractional/ownership edge, near threshold, colored excess,
+    quarter/differential/outer requirement, numerical range/rank, cache/loan
+    failure, unsupported family, original override or actual detected signal.
+    Report costs of rejected lanes as well as survivors, repeated work per
+    physical tile, and per-bank duplication. Measure hostile interference and
+    strong wrong-key input early enough to expose refinement storms.
+D5. Compare production Auto with the existing whole-point experimental path on
+    identical PCM. Verify positive counters for every intended accelerator and
+    include guard archive/rebuild, diagnostics and exact fallbacks. If flags
+    preempt each other, resolve the selection rather than label a no-op slower.
+D6. Brief dilution sweep M3/G1, M5/G1, M5/G3, M5/G4, M3/G3. Use the exact same
+    source settings and matched active-power constraints. G4 requires the
+    internal fixture's argument validation to be explicitly extended, not a
+    nonexistent public CLI option. Explain source/physical work and exposure
+    differences. Do not accept only the favorable dilution while hidingG1.
+
+Use the resulting fractions to state Amdahl bounds. If fractionp is improved by
+s, total gain is1/((1-p)+p/s). Include setup, cold/rolling and refinements in p.
+The prior68.1% residual bound is an opportunity indicator, not permission to
+assume infinite speedup for that bucket. Conversely, frontend-only gains cannot
+solve a run dominated by original guard replay. Identify the smallest coherent
+vertical implementation that attacks the measured dominant work.
+
+E. REQUIRE ASTRA TO CHOOSE AND SPECIFY A PRACTICAL SHARED REPRESENTATION
+
+The following are design obligations and concrete candidate approaches, not
+claims that every proposed interface already exists. Astra must inspect the
+current implementations, select the strongest applicable route, derive its
+identities, and turn it into ordered edit cards. It may choose a better route
+with evidence. Do not simply tell Sol to "use FFTs" or "improve caching."
+
+E1. Establish a common immutable numerical event description
+
+Define or reuse a descriptor sufficient for numerical work without mutating a
+Hypothesis or PatternCode shared with another worker. It must identify:
+- Capture owner/revision/continuity generation; original physical sample range,
+  original processing fence and timestamp/correction map.
+- Key/profile namespace, schedule identity, stream epoch/canonical phase,
+  independent bit-candidate addresses, source-symbol index and carry ownership.
+- Exact clock/rate and frequency family; physical carrier restart/origin and
+  source affine mapping on each active piece. Store precise coordinates in the
+  existing integer/long-double representation; do not use floats for epochs.
+- Admitted timing outputs/ranges and any fractional residues; explicit valid
+  sample mask, schedule/FHSS gain, finite pulse support, clipping/limiter state.
+- Guard partitions: current/adjacent symbol, source chip, quarter/drift section,
+  differential window and outer-presence pulse basis. Include partial end chips.
+- Arithmetic/template policy, approximation/error model, immutable template
+  family identity, workspace reservation and cancellation generation.
+
+Prefer adapting existing Catalog::Family, original boundary partition, prepared
+events and shared capture types over creating duplicate calendars. Document
+which fields are necessary for identity and which are merely diagnostics.
+No pointer address alone may stand in for content/revision identity across
+reuse, eviction, cancellation or reconstruction. Sensitive template values must
+retain the current lifetime/cleansing policy; never log keys or plaintext PCM.
+
+E2. Separate preparation, numerical contraction and ordered commit
+
+Specify a three-stage execution pipeline, including exact signatures or proposed
+types, ownership and error paths in Astra's plan:
+1. On the coordinator: enumerate the next bounded due family from immutable
+   catalog/physical fences; reserve all input/template/guard/worker/output bytes;
+   acquire leases; prepare immutable event descriptors. Do not advance trials,
+   processed frontiers or acceptance state yet.
+2. Workers: compute reusable projections and candidate sufficient statistics
+   using private execution scratch and PatternCode instances or immutable
+   already-generated rows. No shared LRU mutation, owner creation, room_for,
+   whole-bank loan changes, pending publication or complete() in workers.
+3. On the coordinator after join: visit results in the original chronological
+   logical order, apply the correct current trial charge/threshold, refine
+   unsupported/error-sensitive results, commit complete/timing/pending/absence
+   state and publish on the next poll. Advance the processing journal only over
+   committed fences. Keep successful earlier commits on cancellation and resume
+   uncommitted work exactly once without double-counting observations or trials.
+
+Make numerical results threshold-independent where practical. If a screen needs
+a threshold, bound it against all possible thresholds during the ordered batch
+or defer the decision until commit. Do not use a later threshold to retroactively
+reject an earlier weak-chain candidate. Clarify short-chain retain thresholds,
+reliable-bit thresholds and ordinary final admission separately.
+
+The current lazy early return cannot be fixed safely just by moving normal
+prepare_workers above it. Identify precisely which numerical resources can be
+factored into a lazy execution context, how each is charged and how contexts are
+borrowed across banks. Existing normal dense and raw paths remain controls.
+Do not confuse parallel candidate replay with shared execution: thread-level
+parallelism alone can hide wall latency while aggregate CPU remains wasteful.
+
+E3. Multi-dwell FFT processing with correct physical carrier time
+
+Investigate processing several active dwells/cycles in a bounded numerical
+batch, not necessarily an entire long symbol and not one FFT per0.4s dwell.
+For a fixed family, write the actual statistic before transforming it. A useful
+real-input form is:
+  b = sum over observed n of y[n] * v[n]
+  G = sum over observed n of v[n] v[n]^T
+  E = sum over observed n of y[n]^2
+  N = the actual admitted sample/degrees count
+where v contains the actual real I/Q template basis after physical carrier,
+source mapping, pulse shaping, gain and limiting. Signs/conjugation/normalization
+must follow existing Fit and Gram code, not this schematic notation.
+Keep bit0/bit1 statistics independent. Guard-specific sufficient statistics
+have additional partitions; whole-fit agreement alone is insufficient.
+
+On each active interval, source position is piecewise affine in physical time.
+Derive whether timing candidates share the same input/gain/mapping family and
+differ only by a template shift. Where they do, correlation outputs can replace
+independent candidate reconstructions. At changes of mask, source ownership,
+clock slope, pulse support, fractional residue or limiter behavior, partition
+or use an explicit edge fallback. Count the edge work in complete cost.
+
+Two candidate organizations to compare, with measured crossovers:
+(a) Active physical tiles with overlap-save/add or partitioned convolutions.
+    Transform each reusable input/projection plane once per tile/frequency group;
+    transform source/template/Gram planes once per true identity; produce many
+    timing outputs and accumulate them over dwells into bounded candidate state.
+    Preserve physical offsets for phase and partial source-chip ownership.
+(b) A compact active-source representation after appropriate physical-time
+    mixing, with a segment table carrying original physical timestamps, mapping,
+    weights, gap phase, source coordinate and boundary/covariance information.
+    Use larger source-domain FFTs only where the mapping makes this legitimate.
+    If input resampling is introduced, explicitly derive its noise correlation,
+    effective observations/Gram and template interpolation; it is not an exact
+    refactor merely because its output looks contiguous.
+
+Chopping null PCM out and applying an ordinary FFT is NOT generally exact.
+For physical frequency f, each captured segment retains its exp(-i2pi*f*t)
+phase. Source time pauses but t does not. A per-segment phase factor is enough
+only after proving the within-segment rate/clock mapping and candidate family.
+Residual frequency uncertainty still accumulates over physical aperture; an
+error delta-f incurs phase about2pi*delta-f*Tphysical. Compact storage does not
+erase that need. Explain how a coarse physical DDC, fine-family recurrence or
+frequency transform supplies the segment phases without repeating all raw mixing.
+
+Do not allocate a symbol-long physical FFT mostly containing nulls. Bound tile
+length, overlap, transformed planes, active pieces and retained outputs by the
+configured workspace. A logical symbol lasting hours must be processed in
+bounded pieces. Tile size should respond to density, output count, reuse and
+latency; narrow timing need not mean direct execution if a small FFT is cheaper.
+
+Explicitly inspect the existing point FFT's8 input planes/16 output planes,
+streaming accumulation and paired template cache before reinventing them. Ask
+whether expensive guard replay can consume its prepared events/statistics;
+whether it currently recomputes a family per lane/fence; whether multiple
+frequencies or epochs can borrow input planes; and whether its prefix update
+causes repeated transforms. Keep valid implementation rather than start anew.
+Its current StreamingEngine::append already permits a disjoint template interval
+to cross several physical dwells; it does not remove physical gaps. Thus "make
+the FFT multi-dwell" is not sufficient diagnosis by itself. Inspect the caller's
+actual tiling, padding, reuse and replay. The current reservation contains
+T*(10*sizeof(complex<Tscalar>)+32*sizeof(complex<double>)) plus outputs and
+overhead: about592 bytes per transform point for float, before other pools.
+For131072 points that term alone is about74MiB. Native float operands therefore
+do not make unlimited simultaneous full-Gram transforms cheap. Evaluate streamed
+planes, frequency/timing tiling and valid reuse using complete memory traffic
+and synchronization cost; do not discard required Gram planes to save bytes.
+
+E4. Integrate energy, real Gram and guards instead of accelerating only dots
+
+For each original detector component, provide an exact additive-state table:
+input data, template identity, sufficient statistics, boundary events, final
+nonlinear function, numerical requirements and conditions for sharing. Include:
+- Real I/Q correlation vector and complete2x2 Gram, including cross term and
+  rank/conditioning. Do not silently assume circular complex noise/orthogonality.
+- Raw observation energy/count and projected/noise energy without counting nulls
+  or artificially zero-filled samples. Masks can differ at timing boundaries.
+- Per-source-chip projections/energies/ranks and structured colored excess.
+- Quarter/drift section active fits, explained sums, largest section, boundary
+  ranks and phase-cell coverage. A missing quarter cannot become zero evidence
+  that is classified as a fully observed absent symbol.
+- Differential-window state and expected counts; preserve all current windows.
+- DSSS outer-presence/public-pulse guard state, finite support and complete ring
+  of prior pulse contributions, with current/carry symbol ownership distinct.
+- Partial final chips, fractional sample starts, limiter transitions, FHSS ramps,
+  schedule ramps and overlap across the payload/cover boundary.
+- Weak-chain state, timing-neighbor comparisons, admission trials, pending
+  identity and observed-absence counters, which generally remain ordered state.
+
+Final scores are nonlinear, but their input sufficient statistics can often be
+accumulated over pieces. Determine which guard statistics can be reconstructed
+from shared prefix/moment/convolution planes and which need bounded original
+edge replay. Do not simply certify a high raw score and replay the entire symbol
+again for every candidate. Measure how much Original replay remains afterward.
+
+For a lower-cost Default approximation, define the approximation explicitly,
+which guards it changes numerically, its range/conditioning checks and fallback.
+Use current authorized interpolation and measured accuracy constraints, not an
+accidental requirement that every Default intermediate be bit-identical FP64.
+Conversely, a loose interval bound that admits everything is not useful screening.
+If certificate construction is more expensive than direct family computation,
+select direct shared computation for that geometry. If strong interference
+forces most lanes to refine, make the fallback family-wise and bounded rather
+than a catastrophic return to independent full-symbol replay.
+
+E5. Frequency-family work must include the full detector
+
+Within a common clock/source/mask family, reuse baseband projections across
+frequency alternatives with the existing recurrence/fusion/transform machinery
+where appropriate. Include frequency-dependent real Gram and guard products,
+not just the signal dot. Derive coarse/fine split, phase origin, recurrence
+restart interval, residual error bounds, exact endpoints and clock coupling.
+Any Taylor/chord approximation needs complete accumulated error/rank bounds;
+the admissible physical aperture can be much longer than a numerical tile.
+
+Do not prune finer frequencies required by scheduled physical aperture. Measure
+the actual added count separately from cost per hypothesis. Audit duplicated
+equal-rate pairs, canonical phase multiplicity and common anchor/source rows.
+Share exact identical data without merging distinct trials or private identities.
+Quantify whether a2D timing/frequency transform, polyphase grouping or direct
+vectorized contraction is cheaper for the actual family sizes, including all
+normalization/guard planes and batch preparation. Do not infer crossover from
+one large sparse FFT,43x dot kernel or theoretical instruction throughput.
+
+E6. Cross-rolling-bank sharing and bounded batching
+
+Use stable immutable physical tiles as the unit of key-independent validation,
+mixing and moments when banks request overlapping history. Key-dependent maps
+and templates remain separate. A bank's relative sample origin must not defeat
+reuse when the absolute captured interval and processing recipe are identical.
+Identity must include capture revision/continuity, absolute range, input rate,
+carrier frequency/recurrence convention, clock transform, precision, gain/mask
+dependencies and any interpolation revision. Cache only statistics actually
+independent of key/epoch/candidate; unweighted physical projections may be shared
+more broadly than candidate-specific gain-weighted moments.
+
+Align compatible consumers to common tiles without delaying accepted-bit
+publication. Establish whether retaining projections, original PCM, source rows
+or partially reduced fits is cheapest for the next consumers. Exact source
+sample caches need both independent bit values and precise crypto/pulse identity.
+Whole-symbol DSSS permutation reuse can be exact, but must not imply reuse of
+private source samples at different cryptographic addresses.
+
+Allow batches to span multiple cycles within a byte/age/latency budget. Trigger
+computation on sufficient reusable work, approaching memory/age limits, due
+publication/completion events or cancellation. Do not wait for an entire long
+symbol, another message, or a fixed large batch merely to get a favorable FFT.
+Define fairness across keys/epochs/profiles and pressure-triggered progress.
+The producer must remain independent; a blocking ingest call cannot throttle
+test input and disguise an unsustainable queue.
+
+Document mandatory storage versus optional acceleration, peak old+new buffers
+during growth, active leases/pins, parallel scratch, transforms, metadata,
+guard archives, deferred diagnostics and queued input. Optional-cache eviction
+must not discard required observations or cause OOM before cold admission.
+Add reasoned fallback when reuse is unavailable; count fallback storms and
+whether one large bank starves later banks. Preserve future-consumer proofs.
+
+E7. Productive arithmetic, not labels
+
+Default automatic chooses measured fastest eligible execution. FP32 minimum
+forbids narrower operands but may use necessary FP64 state. FP64 force uses
+original templates, unquantized FP64 search operands and no approximate template
+interpolation; exact reuse and efficient FFT/vector algorithms remain allowed.
+Algorithm, arithmetic and reuse policy must remain independent.
+
+Create a current stage table for input, mixing, transforms, spectral products,
+source coefficients, interpolation, dots, Gram/energy, reductions, guards,
+scoring, timestamps and refinement. Record storage, multiplication and
+accumulation separately. A float FFT followed by FP64 original replay is partial
+coverage. Do not present an environment name or dropdown as executed precision.
+
+Use native FP32 buffers/plans/products where total cost and accuracy support them.
+Retain double/compensated or wider accumulation and sensitive subtraction/rank
+tests where needed. Inspect generated instructions and runtime dispatch for the
+executed hot code; preserve portable binaries and do not globally require AVX2.
+Existing point FFT's compensated FP64 accumulation and real Gram policy provide
+a concrete starting point. Measure conversions, packing and plan setup too.
+
+Revisit narrower integer/mixed arithmetic only if the changed batching creates
+enough long regular work to overcome preparation. Preserve I/Q, scales, zero
+points, saturation/overflow bounds and refinement. Current tiny pieces and
+weighted moment widths are valid scope-specific obstacles, not universal bans.
+Quantitatively bound likely total gains using current fractions. Do not spend
+the pass emulating FP8/INT8 or repeating already-slower fixed-bank prototypes.
+
+E8. Consolidate selection only after an integrated gain
+
+Inventory experimental environment controls and precedence. Specify a small
+internal strategy decision that chooses dense, implicit direct, tiled family,
+point/guard or exact fallback from actual geometry and charged resources. Keep
+diagnostic overrides for reproducing evidence. Production Auto must select the
+demonstrated route in the acceptance fixtures; an opt-in-only success does not
+finish the product. FP32 minimum should share the same supported efficient
+algorithm when precision permits, rather than accidentally fall back because
+an experimental entry point checks onlydefault_mode.
+
+Do not delete old references/failing fixtures or collapse independent numerical
+policies merely to make code uniform. Remove redundant new machinery only after
+its consumers, identities and evidence have been reconciled. The plan should
+reduce accidental policy interactions, not add another mutually preempted flag.
+
+F. SPECIFIC CLIFFS AND FAILURES THE PLAN MUST HANDLE
+
+F1. Canonical phase and GCD boundaries. Existing documented examples include
+Fs6120/N87040: continuous canonical step680 versus scheduled136; Fs6121 makes
+both1. Conversely N=14*Fs at Fs6121 has continuous6121 versus scheduled1.
+These are geometry examples, not measured costs. Explain each extra dimension
+and whether a shift-equivalent family representation can absorb it. Compare
+neighboring N, Fs and fractional final chips with exactly matched coverage.
+Do not improve a benchmark by rounding rate/N to a specially favorable GCD.
+
+F2. Shared-calendar canonical-cell approximation. Current canonical phase also
+selects a central hop mask. Padding the payload phase cell is not necessarily
+extra hop-calendar error. Use non-grid message starts, opposite timing edges,
+fractional starts and near-ramp observations to test the joint approximation.
+If central-mask handling is inadequate, repair the representation or partition
+edge cases; do not erase required timing ranges to obtain a smaller catalog.
+
+F3. Default70 short-symbol availability regression. The latest report retains a
+failure in scheduled_point_source_nodes: Fs8000/C32/N2048 gives0.256s symbol and
+0.032s pulse support per side, totaling0.320s, while the default70 schedule's
+flat interval is about0.270s. The conservative energy predicate switches to
+packed placement, then discovers full support cannot fit. Explicit50 stayed
+split. Inspect packed_scheduled_symbols and ScheduledSymbolCalendar together.
+Do not pin the test to50 or truncate already-supported pulses to hide this.
+Derive whether a supported split placement satisfies the intended minimum usable
+energy, or whether the genuine geometry needs an honest error. Preserve short
+bit deferral when a bit would be mostly/all quiet, and measure actual shaped
+energy across possible starts rather than assuming flat-power duration alone.
+Any waveform/scheduling change needs separate explicit justification and paired
+capture tests; this optimization request is not blanket waveform-change authority.
+
+F4. Existing latest failures must remain visible: live_exact_source exceeded its
+30s drain bound; alsa_audio_contract's fractional DSSS clipping case had peak
+about1.00944 and63 clipped samples, with energy fraction2.47619e-8 above its
+1e-8 assertion; parallel preparation hit an external360s timeout and is incomplete.
+The latest report counted203 regular passes/3 failures/1 incomplete plus39 GUI
+passes. Verify exact current membership/results. Do not claim all groups passed
+or silently relax deadlines/assertions. Diagnose whether any new work fixes or
+regresses these; preserve unrelated failures honestly with baseline evidence.
+
+F5. Short symbols, outer-presence and guard-rich DSSS. The lazy route's
+drift_sections==1/no-differential eligibility and the mapped route's outer guard
+requirements leave important geometries on different paths. Make a table for
+DSSSoff/10/100/1000, fine-chip size, pulse count, partial chip, drift/differential,
+public/private, FHSS gain and packed/split state. Extend exact/shared processing
+where valid; do not claim blanket support from the easiest geometry.
+
+F6. Cold admission and empty epochs. distinguish a proved-empty active epoch,
+unsupported coverage, insufficient mandatory state, optional-cache pressure and
+too-slow processing. No required key/profile/epoch may be omitted to start faster.
+Avoid allocating rows or rebuilding transforms for epochs whose admitted start
+set is provably empty. Preserve original trial semantics for surviving sets.
+
+F7. Interference and strong signals. A fast noise-only screen may fail badly when
+all lanes survive or colored guards activate. Predeclare a strong unrelated key,
+tonal/narrowband interference, clipping and near-threshold intended signal.
+Report tail CPU/peak queue/memory, not just clean weak-signal averages. Bound the
+fallback cost or route whole families to an efficient original computation.
+
+F8. Diagnostic replay/publication. Determine whether visible scope/history polling
+replays old candidates repeatedly and whether this competes with decoder work.
+Preserve actual diagnostic results and next-poll publication; share immutable
+results or defer noncritical presentation work within the documented policy,
+never suppress required decoder evidence. Keep first causal terminal error.
+
+F9. Workspace sharing cliffs. Compare generous and tight valid budgets, one/many
+keys, rolling admissions, growing owner pools, cache eviction and concurrent
+scratch. A bank may fit alone yet fail under the complete cohort loan. Planner
+and runtime must use the same mandatory-byte model. Fast optional caches must
+not be treated as necessary to admit required coverage.
+
+G. MEASUREMENT, CORRECTNESS AND SENSITIVITY PLAN
+
+G1. Three references for every receiver-only change:
+  current optimized continuous receiver;
+  frozen preceding scheduled receiver;
+  proposed scheduled receiver.
+Receiver-only comparisons use identical original PCM/hash, input rate, keys,
+seeds, hypotheses and worker/workspace settings. Scheduling changes captures;
+match source payload, cryptographic configuration, channel/noise seeds and
+active transmit power, report received energy/ramp loss and actual durations.
+Do not call differently sampled/generated captures identical PCM. Keep public
+and private/template addresses explicit in fixture metadata without secrets.
+
+G2. Independent sustained producer. Use the existing multicycle harness after
+verifying its queueing and deadlines. Producer timestamps must not depend on
+decoder return, lock contention or queue backpressure. Record intended versus
+actual production cadence, dropped input, queue capacity and saturation.
+Measure multiple cycles, full intended payload, full scored absence and drain.
+Include a bounded accelerated-input experiment separately from physical1x input.
+An accelerated fixture's service ratio is not automatically a hardware result.
+
+G3. Report all of:
+- Aggregate process/thread CPU and elapsed compute/service separately from
+  producer waiting, TX synthesis, trace overhead and GUI presentation.
+- CPU per source/active second and per physical second; continuous-relative
+  overheadk, actual duty and scheduling headroom; work due to extra hypotheses
+  separated from avoidable per-hypothesis work.
+- Exclusive component CPU with setup/rolling/template/guard/replay included;
+  counts and coverage for each selected/fallback algorithm and precision.
+- Peak/steady memory including producer queue, retained PCM, shared projections,
+  owners, transforms, caches, metadata, guard archives and simultaneous scratch.
+- Queue age/backlog slope, peak backlog, startup delay, first acquisition,
+  each accepted bit's score/completion time and publication latency, final drain.
+- Rejection/refinement counts and reasons, cache hit/miss/eviction, batch sizes,
+  bank density, selected workers, idle waiting and serialized critical sections.
+Use at least paired/order-controlled repeats where affordable; report n/range
+and uncertainty instead of overprecise universal claims from a single run.
+
+G4. A rescue passes only if the useful preferred complex strategy remains,
+continuous independent input is demonstrably slightly too slow at fixed settings,
+scheduled input is sustainably processed with meaningful margin over multiple
+cycles, memory/queue are bounded, all required data drain, intended bits are
+received, and physical completion/prompt publication remain correct. Do not
+impose per-hop clearance, but do not excuse monotonically growing backlog with
+"more buffering." Do not count a short prefix, startup, a planner estimate,
+one-bank success or throughput diluted by excessive empty listening as rescue.
+
+G5. Numerical agreement and detector tests:
+- Compare Original FP64 inputs and sufficient statistics per bit/family/piece,
+  then final evidence and decisions; Default may use authorized approximations
+  with declared tolerances and sensitivity evidence, not silent threshold moves.
+- Include zero/near-rank-deficient Gram, weak/strong amplitude, clipping,
+  fractional/partial samples, pulse boundaries, clock/frequency bank endpoints,
+  phase diffusion, schedule/FHSS edges and non-grid canonical starts.
+- Check current/carry symbol ownership, independent0/1 rows, DSSS permutation/
+  rotations, public/private addressing, two keys, multiple epochs and continuity
+  generations. Cache changes must not change TX bytes/waveforms or addresses.
+- Check raw energy, real covariance, projected-chip noise degrees, quarter/
+  differential/outer evidence and trial charges; no valid absent symbol may be
+  scored from scheduled nulls, artificial zeros or an incomplete observation.
+- Cancellation mid-preparation, mid-transform, mid-replay and mid-commit must
+  preserve accepted prefixes, leases and resumption without double scoring.
+- EOF, queue retirement, successful decoding, draining and cancellation cannot
+  manufacture six seconds of physical observed absence. Inspect every received
+  stream, not just the longest correct one; count extra admissions/completions.
+
+G6. Bounded threshold-region paired trials on identical PCM for receiver-only
+changes, plus wrong-key/noise/interference controls. State trial count, observed
+BER/detection difference and uncertainty. Clean decoding and a loose statistic
+bound do not establish negligible sensitivity loss. Existing amplitude-only
+penalties are unrelated to this complex-optimization loss. Separate measured
+additional loss, inconclusive evidence and full-bank unqualified scope.
+
+G7. Boundary matrix, staged to avoid wasting the pass:
+First F1/F2 + one exact original comparison + interference + M3/G3. Then selected
+nearby Ns/Fs/GCD boundaries, default vs genuinely qualified tight timing,
+audio0/default70/explicit values, M3/G1/M5/G1/M5/G3/internalG4, FHSSoff/on,
+DSSSoff/10/100/1000 where continuous is supported, Default/FP32-min/FP64-force,
+oscillator widths, workspace pressure, multiple keys and rolling admissions.
+Use pairwise/high-risk combinations, plus a few interaction cases, instead of
+an unbounded Cartesian test campaign. Label partial extreme observations.
+The plan must specify which dimensions were not exercised and why.
+
+G8. Full GUI validation after the receiver is stable. Verify the two actual
+example profiles load and round-trip unchanged, start TX, retain the intended
+receiver strategy, show real backend/estimate status, publish bits and physically
+complete. Use existing --debug/--debug-bits/--debug-timeout and --verbose facilities
+from src/gui/application.cpp; honor their actual limits rather than assume
+unlimited debug duration. A full text message may need a different bounded
+driver than a1-bit debug transmission. Preserve first causal failure in trace.
+Run the coordinated sound-card path if available; mock success is not hardware
+success. Do not change mixer routing/driver configuration without authorization.
+Distinguish acoustic path, timing discontinuity and processing backlog failures.
+
+H. TESTS AND BUILD INTEGRATION TO MAKE EXPLICIT IN THE RUNBOOK
+
+Use ./build.sh and a claimed explicit build directory. Read docs/building.md and
+cmake/TestGroups.cmake to resolve current groups/filters. A typical local pattern
+is ./build.sh test GROUP --build-dir CLAIMED-DIR --build-jobs 2 --jobs 1, using the
+actual supported spelling from the wrapper. Do not blindly copy a historical
+build directory owned by another session or run24 builds at once. Narrow tests
+first, then complete affected local groups. No hosted CI/platform marathon.
+
+Tests to map to proposed changes (retain original assertions and references):
+1. Schedule/timing/geometry:
+   tests/test_sched_hop.cpp, test_scheduled_symbol_calendar.cpp,
+   test_sched_hop_transmit.cpp, test_scheduled_complex_search.cpp,
+   test_scheduled_acquisition_catalog.cpp, test_scheduled_clock_reference.cpp,
+   test_clock_sync.cpp, test_pattern_start_geometry.cpp.
+2. Split numerical/guard coverage:
+   test_sched_hop_complex.cpp, test_sched_hop_correlator.cpp,
+   test_scheduled_pulse_moments.cpp, test_scheduled_mapped_piece_groups.cpp,
+   test_scheduled_frequency_fusion.cpp, test_scheduled_frequency_piece.cpp,
+   test_scheduled_origin_gram*.cpp, test_scheduled_acquisition_quarters.cpp,
+   test_scheduled_fractional_basis*.cpp, test_scheduled_linear_grid_original.cpp,
+   test_scheduled_default_linear_original.cpp,
+   test_scheduled_default_linear_fhss*.cpp,
+   test_scheduled_default_point_fft*.cpp,
+   test_scheduled_default_point_bulk_original.cpp,
+   test_scheduled_default_point_guard_edges*.cpp,
+   test_scheduled_default_point_guard_archive*.cpp,
+   test_scheduled_default_point_reference_recipe.cpp,
+   test_scheduled_point_guard_prepass*.cpp,
+   test_scheduled_point_source_nodes.cpp.
+3. Reuse/concurrency/workspace:
+   test_shared_scheduled_capture.cpp, test_scheduled_exact_source_samples.cpp,
+   test_scheduled_private_batch.cpp, test_scheduled_parallel_preparation.cpp,
+   test_scheduled_processing_journal.cpp, test_scheduled_cancellation_resume.cpp,
+   test_scheduled_detached_replay.cpp, test_scheduled_detached_resume.cpp,
+   test_scheduled_acquisition_memory.cpp, test_scheduled_memory_projection.cpp,
+   test_scheduled_workspace_accounting.cpp, test_live_resources.cpp,
+   test_scheduled_diagnostic_journal.cpp, test_scheduled_certificate_diagnostics.cpp.
+4. Whole execution/progress:
+   test_sched_hop_receiver.cpp, test_scheduled_lazy_acquisition.cpp,
+   test_scheduled_physical_multidwell.cpp, test_live.cpp,
+   test_live_profiles.cpp, test_live_receptions.cpp,
+   test_gui_scheduled_cold_start.cpp and current independent-producer fixtures.
+5. Continuous/arithmetic regressions:
+   test_pattern_receiver.cpp, test_pattern_correlator.cpp,
+   test_pattern_fft_batch.cpp, test_pattern_correlator_batch.cpp,
+   test_receiver_strategy.cpp, test_search_arithmetic.cpp, test_search_fft.cpp,
+   test_pattern_drift.cpp, test_pattern_differential.cpp,
+   test_receiver_differential.cpp and relevant maintained contract vectors.
+6. Configuration/estimates/UI:
+   test_gui_launch_command.cpp, test_gui_launch_settings.cpp,
+   test_gui_controller.cpp, test_gui_link_planner.cpp,
+   test_link_planner_curves.cpp, test_simulation_estimate.cpp,
+   test_gui_application.cpp and existing CLI/persistence tests.
+
+Read each test's actual scope before claiming coverage. Several current original
+comparisons use exit77 for unsupported geometry and CMake SKIP_RETURN_CODE77.
+A skipped expensive original comparator is NOT a numeric agreement pass.
+Record executed paths and skip reasons, and add a bounded valid original case
+where needed. External timeout, a non-drained queue or incomplete assertion
+coverage is not a pass either. A many-file green count does not prove that the
+production dispatch or full rolling cohort exercised the optimization.
+
+The final local contract/gui/receiver group selection must follow the actual
+changed files and development contract. Preserve1..16-byte short-message codes,
+raw partial-bit endpoints, fixed long framing, no extra wire metadata and every
+next-poll/physical-end assertion. Do not alter transmitter construction to make
+receiver-only comparisons easier. Broader hardware, long-duration, ARM, SDK and
+platform qualification remain explicitly deferred at this manual checkpoint.
+
+I. ASTRA'S REQUIRED OUTPUT: AN EXECUTABLE RUNBOOK FOR SOL
+
+Do not finish with general recommendations. Produce all of the following:
+
+I1. A concise diagnosis answering: why does backlog still grow, which observed
+code path loses continuous acceleration, what evidence is decisive, and what is
+still unknown? Distinguish startup/preparation, sustained computation, diagnostic
+replay and audio timing. Explain why previous tests do or do not reject each
+credible strategy. Name exact current source/build and fixture identities.
+
+I2. A current call/dispatch graph for F1/F2/F3 plus M3/G3. For every transition,
+state the controlling predicate and fallback reason. Include explicit audit of
+public versus private source rows, dense versus implicit, FFT/partitioned/direct,
+point-screen versus original guard replay, normal versus lazy preparation,
+native precision and cross-bank sharing. Add a table of obsolete findings that
+must not be repeated as current limitations.
+
+I3. A mathematical specification for the chosen shared representation:
+coordinates, mapping equations, family equivalence, masks, sampling/FFT indexing,
+phase/conjugation, sufficient statistics, Gram/noise/guard definitions, error
+bounds, partial-chip/carry rules, threshold/trial ordering and completion.
+Derive any new approximation and its permitted fallback; label changed detector
+statistics separately and keep them out of the main exact/refactoring claim.
+
+I4. Ordered implementation cards, each small enough for Sol to execute without
+redesign. Every card must contain:
+  - Purpose and prerequisite cards; baseline source hash/invariant dependencies.
+  - Exact files/symbols to read and edit; file/resource claims and allowed scope.
+  - Existing APIs to reuse; proposed structs/fields/function signatures if new.
+  - Detailed algorithm/pseudocode, loops/order, indexing/units and exceptions.
+  - Thread ownership, cancellation/resume and atomic publication boundaries.
+  - Exact cache identity, invalidation, pin/eviction and byte-accounting rules.
+  - Precision per operation; numerical checks and fallback reason codes.
+  - Required tests/fixtures, positive-path counters and expected invariants.
+  - Measurement recipe, acceptance/rejection gate and what to do on failure.
+  - Rollback/reference control that preserves prior runnable behavior.
+  - Integration order and independent review questions at that boundary.
+Avoid cards such as "implement efficient FFT" with the crucial mathematics left
+unspecified. Do not split tightly coupled APIs across agents without an explicit
+integration owner. If parallelism is used later, analysis/review can be parallel;
+source/build/timing ownership and shared invariants require coordination.
+
+I5. A short critical path to definitive answers, followed by contingent branches.
+Suggested priority, to revise if current evidence contradicts it:
+  1. Freeze/census and reproduce F1/F2 + M3/G3, verify loading/current clocks.
+  2. Attribute remaining serial original replay and its family duplication.
+  3. Decide whether to promote/extend existing integrated point+guard work or
+     bridge lazy numerical replay to reusable pulse/FFT family statistics.
+  4. Implement one complete vertical route including guards/ordered commit.
+  5. Demonstrate F2 full drain and F1 useful overhead at fixed settings.
+  6. Brief M5/G3/G4 probes; demonstrate actual F3 rescue and pressure behavior.
+  7. Extend consequential nearby boundaries and full affected local groups.
+Do not spend the whole pass adding timers/caches/microbenchmarks while leaving
+the dominant original replay unmodified. Conversely, do not replace architecture
+before the path census shows which implementation already exists and executes.
+
+For each experiment specify a small bounded initial workload, what result would
+change the architectural choice, and the next experiment if inconclusive.
+Reuse existing complete measurements where applicable. Do not turn "quick" into
+skipping decisive tests; make experiments answer specific questions and stop
+repeating already-negative variants. If a required prototype cannot be bounded,
+explain the resource blocker and derive a scope-specific upper/lower bound.
+
+I6. A decision matrix for every serious strategy:
+  implemented and measured;
+  prototyped and rejected with complete execution evidence;
+  quantitatively bounded out for a precisely stated scope;
+  outstanding with concrete blocker and next decisive action.
+Mandatory rows: shared temporal outputs, multi-dwell partitioning/compaction,
+integrated guards, original-refinement family batching, frequency-family work,
+cross-rolling input reuse, exact private reuse, native arithmetic, moderate
+dilution, dense/implicit crossover, boundary/limiter handling and diagnostics.
+A slower unsuitable microprototype does not reject the whole row. Another
+bottleneck is not a reason to leave an inexpensive material opportunity untried.
+An unattempted major applicable strategy with no bound/blocker means the
+implementation objective remains open, regardless of a manual checkpoint.
+
+I7. Sol-facing stop/escalation rules:
+- Re-read the plan's relevant source and invariant before editing; if HEAD/API
+  differs, reconcile rather than force an outdated patch.
+- Do not replace the fixed fixture, lower target SNR, discard hypotheses, enable
+  amplitude silently, increase workspace beyond its limit or weaken assertions.
+- A no-op accelerator, skipped oracle, incomplete drain or hidden producer
+  backpressure fails its gate. Capture the reason and follow the stated branch.
+- Do not invent a performance claim from a changed estimate, faster kernel,
+  one-bank run or a test with extra silence in the denominator.
+- Preserve first causal error, failed PCM/seed/config and actual selected path.
+- If the design's mathematical prerequisite is false, stop that branch and use
+  the specified exact fallback; ask for stronger-model review of the concrete
+  issue rather than silently simplify the detector.
+- Keep source arithmetic, timing, crypto, guard and publication responsibilities
+  explicit. No unsolicited wire-format or TX-waveform changes.
+- Finish authorized local implementation/checks and rebuild; no publish/CI/GPU/
+  broad qualification. Do not describe an unmet sustained rescue as complete.
+
+I8. Final artifact/report template for the implementation pass:
+- Source/build hashes, frozen references, launcher paths and exact commands.
+- F1/F2/F3 load/TX/RX/END/drain results, all streams and first failures.
+- Current continuous versus preceding scheduled versus new scheduled complete
+  CPU/wall, source/physical ratios, actual duty/energy and overheadk.
+- M3/M5/G3/internalG4 outcomes, randomness limitation and selected backend.
+- Component fractions, refinement/coverage counts, cache and bank behavior.
+- Queue age/slope/peak, memory, first acquisition/per-bit latency/cancellation.
+- Statistic agreement, paired sensitivity uncertainty, skipped/unqualified scope.
+- Default/FP32-min/FP64-force actual execution and fallback precision.
+- Specific remaining cliffs, encrypted EME status and strategy dispositions.
+- Complete affected local tests, retained failures/incomplete coverage, and
+  deferred hardware/long-duration/ARM/platform qualification.
+
+Do not promise mathematical impossibility has been proved for all possible
+receivers. A definitive negative conclusion must identify the scoped coverage,
+accuracy/workspace constraints, measured limiting work, strategies actually
+tested, defensible bounds and concrete remaining blockers. The requested
+positive outcome is practical moderate-schedule CPU rescue, not merely cleaner
+code or more exhaustive notes about another failed attempt.
+
+End of future Astra planning prompt. Do not execute these instructions merely
+because this file is being read for an unrelated task.
