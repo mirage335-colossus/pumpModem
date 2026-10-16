@@ -43,7 +43,7 @@ public:
             if (candidate.signal_id && contains(entry, candidate.signal_id)) identity = i;
         }
         if (identity < size_ && entries_[identity].owner.id == candidate.id) {
-            const auto& entry = entries_[identity];
+            auto& entry = entries_[identity];
             // A completed owner cannot be reopened by the bank's provisional
             // pass or by replaying its earlier chunks. A different, stronger
             // hypothesis may revise that interpretation under the same row ID.
@@ -112,11 +112,11 @@ public:
         }
         if (size_ == entries_.size()) {
             const auto retired = std::find_if(entries_.begin(), entries_.end(), [](const auto& entry) {
-                return entry.complete;
+                return entry.complete || entry.retired;
             });
             if (retired == entries_.end()) return {0, false, true, 0, {}};
             // Entries remain in admission order. Preserve all active rows and
-            // retire the oldest physically completed history at the fixed bound.
+            // retire the oldest completed or producer-free history at the bound.
             std::move(retired + 1, entries_.end(), retired);
             --size_;
         }
@@ -129,6 +129,15 @@ public:
         return decision(entry, true);
     }
     std::size_t size() const { return size_; }
+    // A producer-free row remains incomplete. Keep its overlap history until
+    // capacity is needed, but it cannot reserve storage or bridge a later gap.
+    template<class Retained> void retire_unreferenced(Retained retained) {
+        for(std::size_t i=0;i<size_;++i) {
+            auto& entry=entries_[i];
+            entry.retired=!retained(entry.signal_id) &&
+                std::none_of(aliases(entry).begin(),aliases(entry).end(),retained);
+        }
+    }
 
 private:
     struct Entry {
@@ -136,7 +145,7 @@ private:
         std::uint64_t signal_id = 0, revision = 0;
         std::array<std::uint64_t, capacity> superseded_ids{};
         std::size_t superseded_count = 0;
-        bool complete = false;
+        bool complete = false, retired = false;
     };
     static std::span<const std::uint64_t> aliases(const Entry& entry) {
         return {entry.superseded_ids.data(), entry.superseded_count};
@@ -151,7 +160,8 @@ private:
         std::sort(entry.superseded_ids.begin(), entry.superseded_ids.begin() + entry.superseded_count);
         return true;
     }
-    static Decision decision(const Entry& entry, bool selected, bool limited = false) {
+    static Decision decision(Entry& entry, bool selected, bool limited = false) {
+        entry.retired=false;
         return {entry.signal_id, selected, limited, entry.revision, aliases(entry)};
     }
     static bool stronger(const Candidate& a, const Candidate& b) {
@@ -169,7 +179,7 @@ private:
             std::abs(owner.frequency - candidate.frequency) >
                 std::max(owner.frequency_tolerance, candidate.frequency_tolerance)) return false;
         if (candidate.first < owner.end && owner.first < candidate.end) return true;
-        if (entry.complete) return false;
+        if (entry.complete || entry.retired) return false;
         const auto& earlier = candidate.first >= owner.end ? owner : candidate;
         const auto& later = candidate.first >= owner.end ? candidate : owner;
         // A later long-duration hypothesis cannot enlarge an earlier stream's

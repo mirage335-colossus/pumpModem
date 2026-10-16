@@ -363,6 +363,74 @@ void run_case(const std::vector<double>& targets, double target, const std::stri
     session.stop();
 }
 
+void retired_public_streams_release_presentations(const std::vector<double>& targets) {
+    constexpr unsigned repetitions=36;
+    const auto expected=waveform(55,"the quick brown fox jumps over the lazy dog");
+    auto c=modem_config(55,{});c.stream_epoch=epoch;
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    const auto stride=4*symbol+symbol/3;
+    check(repetitions*stride<6*c.sample_rate,
+          "retirement fixture permits physical absence between its starts");
+    modem::PatternTransmitter transmitter(Bytes{1,0},c,epoch,0,false);
+    std::vector<std::complex<double>> analytic(static_cast<std::size_t>(transmitter.total_samples()));
+    transmitter.read_analytic(analytic);
+    const auto padding=static_cast<std::size_t>(modem::pattern_pulse_padding_samples(c));
+    check(analytic.size()==2*symbol+2*padding,"retirement fixture payload geometry changed");
+    const auto last_end=(repetitions-1)*stride+2*symbol;
+    const auto phrase_origin=last_end+8*c.sample_rate;
+    CaptureScript capture;capture.rate=c.sample_rate;capture.samples.resize(phrase_origin);
+    const auto rotation=std::polar(1.,.73);
+    for(unsigned i=0;i<repetitions;++i)
+        for(std::size_t sample=0;sample<2*symbol;++sample)
+            capture.samples[i*stride+sample]=static_cast<float>((analytic[padding+sample]*rotation).real());
+    capture.samples.insert(capture.samples.end(),expected.samples.begin(),expected.samples.end());
+    capture_script=&capture;
+    auto value=settings(targets);
+    check(!value.transfer.key && value.receive_keys.empty(),"public lifetime fixture retained receive keys");
+    live::Session session([]{return static_cast<double>(epoch);});session.start(value);
+    std::set<std::uint64_t> pending;
+    const auto advance_prefix=[&] {
+        testing::CpuWorkBudget budget(30s,"retired public stream identities");
+        std::optional<std::chrono::steady_clock::time_point> drained;
+        while(budget.pending()) {
+            const auto state=session.snapshot();
+            check(state.error.empty(),"public retirement fixture failed: "+state.error);
+            check(!state.receiver_health.failed(),"retired public streams exhausted receive coverage");
+            check(state.dsp_buffered_bytes<=value.dsp_workspace_bytes,"retired public streams exceeded workspace");
+            for(const auto& signal:state.signals) {
+                if(!signal.complete) {
+                    check(signal.binary && !signal.validated && signal.received_bits,
+                          "retired stream acquired completed source semantics");
+                    pending.insert(signal.id);
+                } else check(state.samples_received>=last_end+6*c.sample_rate,
+                             "stream retirement manufactured physical completion");
+            }
+            for(const auto& result:state.received)
+                check(state.samples_received>=last_end+6*c.sample_rate && result.stream_complete,
+                      "stream retirement interpreted source before physical absence");
+            const auto delivered=capture.delivered.load();
+            if(delivered<phrase_origin && delivered>=capture.released.load() &&
+               !state.buffered_samples && !state.decoding_samples)
+                capture.released=delivered+std::min<std::size_t>(capture.rate/50,phrase_origin-delivered);
+            if(capture.delivered>=phrase_origin && !state.buffered_samples && !state.decoding_samples) {
+                if(!drained)drained=std::chrono::steady_clock::now();
+                if(std::chrono::steady_clock::now()-*drained>=250ms)return;
+            } else drained.reset();
+            std::this_thread::sleep_for(1ms);
+        }
+        throw Error("retired public stream fixture did not drain");
+    };
+    advance_prefix();
+    check(pending.size()>=repetitions,"retirement fixture did not exceed the bounded candidate table");
+    Observations observed;
+    receive_wave(session,capture,expected,phrase_origin,observed);
+    const auto final=session.snapshot();
+    check(!final.receiver_health.failed() && final.error.empty(),"public interval after retirement lost receive coverage");
+    session.stop();capture_script=nullptr;
+    std::cout<<"retired public streams RX "<<targets[0]<<','<<targets[1]<<": "<<pending.size()
+             <<" pending identities, exact interval and physical end passed\n";
+}
+
 // Queue processing time must not select the private epoch for already captured
 // PCM. Delay the logical callback after the raw monitor callback, avoiding any
 // dependency on CPU speed or scheduler sleeps in this timestamp regression.
@@ -1341,8 +1409,14 @@ int main(int argc, char** argv) {
         const std::string suite = argc > 1 ? argv[1] : "all";
         std::optional<audio::trace::Scope> calendar_trace;
         if(suite=="hop_calendar" && argc>2)calendar_trace.emplace(argv[2]);
-        check(suite == "all" || suite == "hop_calendar" || suite == "exact_source" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "frontier_failure" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "arrival_fallback" || suite == "tx_failure",
+        check(suite == "retired" || suite == "all" || suite == "hop_calendar" || suite == "exact_source" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "frontier_failure" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "arrival_fallback" || suite == "tx_failure",
               "unknown profile test suite");
+        if(suite=="all" || suite=="retired") {
+            context="retired public reception identities";
+            retired_public_streams_release_presentations({32,55});
+            retired_public_streams_release_presentations({55,32});
+            if(suite=="retired")return 0;
+        }
         if(suite=="exact_source") {context="positive partial Live exact source binding";if(!live_exact_source_pool(argc>2?std::filesystem::path(argv[2]):std::filesystem::path{}))return 77;}
         if(suite=="all" || suite=="duplex") {
             context="outer DSSS profile identity";outer_version_profile_identity();

@@ -546,7 +546,7 @@ struct StreamReceiver::Impl {
         const auto id=std::pair{burst.stream_first_sample,burst.stream_first_symbol};
         auto it=states.find(id);
         if(it==states.end()) {
-            if(states.size()>=16) {
+            if(states.size()>=StreamReceiver::candidate_limit) {
                 Received unavailable;unavailable.error="receiver content candidate quota exhausted";
                 unavailable.stream_complete=burst.complete;return unavailable;
             }
@@ -675,6 +675,12 @@ StreamReceiver::~StreamReceiver()=default;
 StreamReceiver::StreamReceiver(StreamReceiver&&) noexcept=default;
 StreamReceiver& StreamReceiver::operator=(StreamReceiver&&) noexcept=default;
 Received StreamReceiver::push(modem::PatternBurst burst,modem::Diagnostics diagnostics) {return impl_->push(std::move(burst),std::move(diagnostics));}
+void StreamReceiver::discard(std::uint64_t first_sample,std::uint64_t first_symbol) {
+    auto& s=*impl_;const auto it=s.states.find({first_sample,first_symbol});
+    if(it==s.states.end())return;
+    s.quota->used-=it->second->stored;s.quota->reserved-=it->second->source.capacity();
+    s.states.erase(it);
+}
 std::size_t StreamReceiver::working_bytes()const {
     auto bytes=sizeof(StreamReceiver)+sizeof(Impl)+impl_->options.receive_targets_db_hz.capacity()*sizeof(double);
     for(const auto& [id,state]:impl_->states) {

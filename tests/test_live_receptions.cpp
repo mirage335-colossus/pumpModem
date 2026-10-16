@@ -402,6 +402,37 @@ void pending_fragments_must_share_the_long_symbol_clock() {
           completed.size() == 1 && known_overlap.superseded_ids.size() == 1,
           "an actually accepted next long symbol failed to merge the overlapping completed prefix");
 }
+void retired_history_preserves_active_aliases() {
+    History history;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
+    const auto first=history.observe(candidate(1,100,1100,80),allocate).signal_id;
+    const auto alias=history.observe(candidate(2,10100,11100,90),allocate).signal_id;
+    auto bridge=candidate(3,100,11100,300);
+    check(history.observe(bridge,allocate).signal_id==first && first!=alias,"alias retention fixture did not merge histories");
+    // A losing profile may still publish later under a superseded alias.
+    history.retire_unreferenced([&](auto id){return id==alias;});
+    auto continuation=candidate(4,12100,13100,400);
+    check(history.observe(continuation,allocate).signal_id==first,"active losing alias lost pending gap continuity");
+    history.retire_unreferenced([](auto){return false;});
+    auto later=candidate(5,14100,15100,500);
+    check(history.observe(later,allocate).signal_id!=first,"retired evidence bridged an unrelated later gap");
+
+    History overlap;std::uint64_t next=0;const auto new_id=[&]{return ++next;};
+    const auto original=overlap.observe(candidate(10,100,1100,100),new_id).signal_id;
+    overlap.retire_unreferenced([](auto){return false;});
+    check(overlap.observe(candidate(11,200,1000,50),new_id).signal_id==original,
+          "retired overlap lost its existing row identity");
+    check(overlap.observe(candidate(12,2100,3100,200),new_id).signal_id==original,
+          "losing overlap observation failed to reactivate its group");
+
+    History bounded;std::uint64_t allocated=0;const auto alloc=[&]{return ++allocated;};
+    const auto active=bounded.observe(candidate(1,100,1100,80),alloc).signal_id;
+    for(std::uint64_t i=2;i<=3*History::capacity;++i) {
+        bounded.retire_unreferenced([&](auto id){return id==active;});
+        check(bounded.observe(candidate(i,i*20000,i*20000+1000,90),alloc).selected && bounded.size()<=History::capacity,
+              "abandoned incomplete history exhausted the bounded table");
+    }
+    check(bounded.observe(candidate(1,100,1100,80),alloc).signal_id==active,"retirement evicted an active pending row");
+}
 void bounded_history_preserves_active_rows() {
     History history; std::uint64_t ids = 0;
     const auto allocate = [&] { return ++ids; };
@@ -444,6 +475,7 @@ int main() {
         sample_clock_and_long_absence();
         pending_fragments_must_share_the_long_symbol_clock();
         bounded_history_preserves_active_rows();
+        retired_history_preserves_active_aliases();
         std::cout << "live reception arbitration tests passed\n";
         return 0;
     } catch (const std::exception& error) {

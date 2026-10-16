@@ -254,6 +254,9 @@ Bytes StreamingReceiver::push(std::span<const float> samples,std::span<const Com
                               detail::CorrelationProjectionCache* cache){impl_->pattern.push(samples,projected,stop,cache);return {};}
 PatternBurst StreamingReceiver::provisional_pattern()const{return impl_->pattern.provisional();}
 std::vector<PatternBurst> StreamingReceiver::take_pattern_bursts(){return impl_->pattern.take_bursts();}
+bool StreamingReceiver::retains_pattern_stream(std::uint64_t first_sample,std::uint64_t first_symbol)const {
+    return impl_->pattern.retains_stream(first_sample,first_symbol);
+}
 void StreamingReceiver::process_pending(std::stop_token stop){impl_->pattern.process_pending(stop);}
 std::uint64_t StreamingReceiver::diagnostic_history_generation()const noexcept{return impl_->pattern.diagnostic_history_generation();}
 std::uint64_t StreamingReceiver::diagnostic_history_resolved_through()const noexcept{return impl_->pattern.diagnostic_history_resolved_through();}

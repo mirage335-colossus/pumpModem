@@ -2930,6 +2930,17 @@ std::vector<PatternBurst> PatternReceiver::take_bursts(){
     s.bursts.clear();return result;
 }
 PatternBurst PatternReceiver::provisional()const{return impl_->fallback?impl_->fallback->provisional():impl_->provisional();}
+bool PatternReceiver::retains_stream(std::uint64_t first_sample,std::uint64_t first_symbol)const {
+    const auto& s=*impl_;
+    if(s.fallback)return s.fallback->retains_stream(first_sample,first_symbol);
+    const auto same=[&](const auto& burst) {
+        return burst.stream_first_sample==first_sample && burst.stream_first_symbol==first_symbol;
+    };
+    // Acquisition peaks have all been consumed at this boundary; future batches
+    // advance past their starts. Diagnostic history/latest are not producers.
+    return std::any_of(s.tracks.begin(),s.tracks.end(),[&](const auto& track){return same(track.burst);}) ||
+        std::any_of(s.bursts.begin(),s.bursts.end(),same);
+}
 void PatternReceiver::process_pending(std::stop_token stop){if(impl_->fallback)impl_->fallback->process_pending(stop);}
 std::uint64_t PatternReceiver::diagnostic_history_generation()const noexcept{return impl_->fallback?impl_->fallback->diagnostic_history_generation():0;}
 std::uint64_t PatternReceiver::diagnostic_history_resolved_through()const noexcept{return impl_->fallback?impl_->fallback->diagnostic_history_resolved_through():0;}

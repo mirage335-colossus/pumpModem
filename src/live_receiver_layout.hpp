@@ -38,8 +38,8 @@ struct ReceiverState {
         std::uint64_t candidate_id=0, signal_id=0, published_revision=0;
         bool content_reported=false;
     };
-    // Candidate chunks may interleave. Keep each physical identity until
-    // its actual completion, with the same bound as the content collector.
+    // Candidate chunks may interleave. Retain an identity while a detector or
+    // queued chunk can publish it; abandonment never implies physical END.
     std::map<std::pair<std::uint64_t,std::uint64_t>,Presentation> presentations;
     std::vector<modem::PatternBurst> bursts;
     // Immutable capability survives optional arena trims.

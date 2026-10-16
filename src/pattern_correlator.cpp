@@ -9413,7 +9413,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
                 source_end=std::min(source_end,static_cast<long double>(std::min(code.symbol_samples(),(window+1)*differential_window)));
             }
             const auto active_count=std::max(1.L,std::ceil(SchedHopCoordinate{location.physical_end,0}.distance(tick)/first.rate));
-            auto count=static_cast<std::uint64_t>(std::min<long double>({block_size,limit-probe,active_count,
+            auto count=static_cast<std::uint64_t>(std::min<long double>({block_size,static_cast<long double>(limit-probe),active_count,
                 std::max(1.L,std::ceil((source_end-within)/first.rate))}));
             const auto same_owner=[&](std::uint64_t offset) {
                 const auto at=within+offset*first.rate;const auto physical=tick.add_signed(offset*first.rate);
@@ -9573,7 +9573,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
                 source_end=std::min(source_end,static_cast<long double>(std::min(code.symbol_samples(),(window+1)*differential_window)));
             }
             const auto active_count=std::max(1.L,std::ceil(SchedHopCoordinate{location.physical_end,0}.distance(tick)/first.rate));
-            auto count=static_cast<std::uint64_t>(std::min<long double>({block_size,limit-observed,active_count,
+            auto count=static_cast<std::uint64_t>(std::min<long double>({block_size,static_cast<long double>(limit-observed),active_count,
                 std::max(1.L,std::ceil((source_end-within)/first.rate))}));
             const auto same_owner=[&](std::uint64_t offset) {
                 const auto at=within+offset*first.rate;const auto physical=tick.add_signed(offset*first.rate);
@@ -11952,6 +11952,17 @@ std::vector<PatternBurst> PatternCorrelator::take_bursts(){
     }
     auto result=std::move(s.bursts);s.bursts={};s.bursts.reserve(s.search.track_limit);
     s.accounted_bytes=s.working_bytes()+s.unallocated_history_bytes()+s.drift_reserved+s.amplitude_scratch_reservation;return result;
+}
+bool PatternCorrelator::retains_stream(std::uint64_t first_sample,std::uint64_t first_symbol)const {
+    const auto& s=*impl_;
+    if(std::any_of(s.bursts.begin(),s.bursts.end(),[&](const auto& burst) {
+        return burst.stream_first_sample==first_sample && burst.stream_first_symbol==first_symbol;
+    }))return true;
+    // Emissions own immutable public identities across timing-guide changes.
+    // A cleared individual hypothesis does not necessarily release its emission.
+    return !s.finished && std::any_of(s.emissions.begin(),s.emissions.end(),[&](const auto& stream) {
+        return !stream.ended && stream.stream_first_sample==first_sample && stream.first_symbol==first_symbol;
+    });
 }
 PatternBurst PatternCorrelator::provisional()const {
     const Impl::Hypothesis* best=nullptr;

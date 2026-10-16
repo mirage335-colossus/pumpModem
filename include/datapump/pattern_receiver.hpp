@@ -299,6 +299,10 @@ public:
     // Drain accepted decisions, including a final short chunk, as pending.
     // Only a physical absence event marks the stream complete.
     std::vector<PatternBurst> take_bursts();
+    // Receiver-worker boundary only, after push/process_pending/take_bursts.
+    // Retained tracks and queued accepted chunks can still publish this identity.
+    // False permits releasing its local state, never declaring physical END.
+    bool retains_stream(std::uint64_t first_sample, std::uint64_t first_symbol) const;
     PatternBurst provisional() const;
     // Numerical acquisition may defer diagnostic history; admission/progress never wait for it.
     // Receiver-worker only: score retained observations with cancellable bounded batching.

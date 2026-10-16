@@ -138,12 +138,18 @@ struct ReceiveStorageQuota {
 };
 class StreamReceiver {
 public:
+    // Live's sixteen retained detector streams plus sixteen queued old prefixes.
+    // These are locally bounded candidates, independent of received lengths.
+    static constexpr std::size_t candidate_limit = 32;
     StreamReceiver(Options, std::uint64_t timestamp,
                    std::shared_ptr<ReceiveStorageQuota> = {});
     ~StreamReceiver();
     StreamReceiver(StreamReceiver&&) noexcept;
     StreamReceiver& operator=(StreamReceiver&&) noexcept;
     Received push(modem::PatternBurst, modem::Diagnostics = {});
+    // Only after the detector releases this identity and all its chunks drain.
+    // Releases source quota without interpreting source or fabricating END.
+    void discard(std::uint64_t first_sample, std::uint64_t first_symbol);
     std::size_t working_bytes() const;
     std::size_t source_buffer_bytes() const;
 private:

@@ -505,6 +505,27 @@ void shared_quota_cleanup_and_identity() {
           a.content.message.local_id!=b.content.message.local_id && aa.content_validated && bb.content_validated,
           "interleaved physical chunks must retain separate stable receive identities");
 }
+void retired_candidates_release_source_without_completion() {
+    auto value=options();value.fec=FecMode::off;
+    const auto wire=transfer::message_wire_bits(message(17),value);
+    auto quota=std::make_shared<transfer::ReceiveStorageQuota>(transfer::ReceiveStorageQuota{256,0});
+    transfer::StreamReceiver receiver(value,value.timestamp,quota);
+    const auto kept=receiver.push(chunk(wire,0,100));
+    const auto baseline=receiver.working_bytes(),reserved=quota->reserved;
+    for(std::uint64_t id=1000;id<1070;++id) {
+        const auto pending=receiver.push(chunk(wire,0,id));
+        check(pending.raw_bits==wire && !pending.stream_complete && !pending.content_validated &&
+              !pending.short_text_decoded && !pending.recovery && pending.content.message.data.empty() && quota->used==256,
+              "retired candidate decoded source or failed to retain accepted bits");
+        receiver.discard(id,0);receiver.discard(id,0);
+        check(quota->used==128 && quota->reserved==reserved && receiver.working_bytes()==baseline,
+              "discarded candidate leaked source quota or damaged an active candidate");
+    }
+    const auto complete=receiver.push(chunk({},wire.size(),100,true));
+    check(complete.stream_complete && complete.content_validated && complete.content.message.local_id==kept.content.message.local_id &&
+          complete.content.message.data==message(17).data && !quota->used && !quota->reserved,
+          "retiring other candidates changed a surviving physical reception");
+}
 void retain_widest_validated_source() {
     auto value=options();value.fec=FecMode::rs20;
     const auto full=message(180),suffix=message(20);
@@ -712,7 +733,7 @@ int main() {
          late_acquisition_preserves_error_correction();late_acquisition_authenticates_actual_coordinates();
          marker_preserves_recovery_when_all_parity_is_absent();
          exhaustive_recovery_preserves_physical_end_and_source();
-         shared_quota_cleanup_and_identity();retain_widest_validated_source();diagnostics_accounting();few_bits_remain_visible_until_physical_end();dictionary_interpretation_is_bounded_and_post_end();
+         shared_quota_cleanup_and_identity();retired_candidates_release_source_without_completion();retain_widest_validated_source();diagnostics_accounting();few_bits_remain_visible_until_physical_end();dictionary_interpretation_is_bounded_and_post_end();
          dictionary_interpretation_preserves_timed_coordinates();std::cout<<"stream receive integration passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

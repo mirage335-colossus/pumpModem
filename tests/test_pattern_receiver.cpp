@@ -1553,6 +1553,42 @@ void noise_hidden_chips() {
     std::size_t off_axis=0;for(auto point:result.points)off_axis+=std::abs(point.imag())>.25*std::abs(point);
     check(!result.points.empty() && off_axis>result.points.size()/2,"reported chip observations were snapped to legal points");
 }
+void retired_stream_identity_is_not_physical_end() {
+    auto c=config(64);c.pulse_shaping=false;
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    const auto start=4*symbol+symbol/3;
+    auto samples=waveform(c,{0,0,1},start,3*symbol,.73);
+    const auto earlier=waveform(c,{1,0},0,0,.37);
+    std::copy(earlier.begin(),earlier.end(),samples.begin());
+    for(const auto chunk:{std::size_t{37},samples.size()}) {
+        modem::PatternReceiver receiver(c);
+        std::vector<modem::PatternBurst> streams;
+        for(std::size_t offset=0;offset<samples.size();) {
+            const auto count=std::min(chunk,samples.size()-offset);
+            receiver.push(std::span(samples).subspan(offset,count));offset+=count;
+            if(chunk==samples.size())
+                check(receiver.retains_stream(0,0),"queued old prefix lost its detector ownership before drain");
+            for(auto& burst:receiver.take_bursts()) {
+                check(!burst.complete,"replacement fabricated physical absence");
+                auto prior=std::find_if(streams.begin(),streams.end(),[&](const auto& item) {
+                    return item.stream_first_sample==burst.stream_first_sample && item.stream_first_symbol==burst.stream_first_symbol;
+                });
+                if(prior==streams.end())streams.push_back(std::move(burst));
+                else prior->bits.insert(prior->bits.end(),burst.bits.begin(),burst.bits.end());
+            }
+        }
+        check(streams.size()==2 && streams.front().bits==Bytes({1,0}) && streams.back().bits==Bytes({0,0,1}),
+              "retirement changed a queued accepted prefix");
+        check(!receiver.retains_stream(streams.front().stream_first_sample,streams.front().stream_first_symbol),
+              "replaced incomplete identity still retained a producer");
+        check(receiver.retains_stream(streams.back().stream_first_sample,streams.back().stream_first_symbol),
+              "independent active stream was retired with the old identity");
+        receiver.finish();
+        for(const auto& burst:receiver.take_bursts())check(!burst.complete,"EOF manufactured physical end during retirement");
+        check(!receiver.retains_stream(streams.back().stream_first_sample,streams.back().stream_first_symbol) &&
+              receiver.take_bursts().empty(),"drained retired stream regained output ownership");
+    }
+}
 void wrong_key_and_background() {
     const auto c=config(256,true);const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
     const auto samples=waveform(c,{0,0,1},131,3*symbol,1.29,.5);constexpr std::array<std::size_t,2> chunks{613,79};
@@ -2427,6 +2463,7 @@ int main(int argc,char** argv) {
     run("pending tail joint confidence",pending_tail_requires_joint_confidence);
     run("unconfirmed tail and later start",unconfirmed_tail_cannot_veto_later_start);
     run("timed gap and independent start",timed_gap_cannot_veto_independent_start);
+    run("retired stream identity",retired_stream_identity_is_not_physical_end);
     run("noise-hidden chip observations",noise_hidden_chips);run("wrong keys and finite noise captures",wrong_key_and_background);
     run("multiple bursts",multiple_bursts);run("memory limits and cancellation",bounds_and_cancellation);
     run("fractional symbol timing",fractional_symbol_timing);run("keyed capture missing first symbol",keyed_capture_missing_first_symbol);

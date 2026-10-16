@@ -220,7 +220,7 @@ struct Session::Impl {
         std::optional<Clock::time_point> input_queued_at;
         Clock::time_point next_deferred_history_query{};
         std::size_t deferred_history_cursor=0;
-        bool retirement_pending=false;
+        bool retirement_pending=false, reception_history_dirty=false;
         std::uint64_t samples = 0, next_candidate = 1,revision=0;
         std::uint64_t admissions = 0, retirements = 0, builds = 0;
         std::size_t peak_receivers = 0;
@@ -1557,6 +1557,7 @@ struct Session::Impl {
             return true;
         });
         bank.retirements+=retired;
+        bank.reception_history_dirty|=retired!=0;
         if(retired)audio::trace::record("receiver_bank_retired",[&](auto& f) {
             f.add("revision",bank.revision);f.add("sample",bank.samples);f.add("retired",retired);
             f.add("resident",bank.receivers.size());f.add("retirements",bank.retirements);
@@ -1774,6 +1775,32 @@ struct Session::Impl {
     void admit_received(std::size_t bytes, std::size_t limit) {
         make_receive_room(bytes, limit);
         received_bytes += bytes;
+    }
+    static bool discard_retired_presentations(Receiver& receiver) {
+        bool retired=false;
+        for(auto it=receiver.presentations.begin();it!=receiver.presentations.end();) {
+            const auto id=it->first;
+            // take_pattern_bursts moved accepted chunks out of the detector.
+            // Protect all of them until the entire external batch is published.
+            const auto queued=std::any_of(receiver.bursts.begin(),receiver.bursts.end(),[&](const auto& burst) {
+                return burst.stream_first_sample==id.first && burst.stream_first_symbol==id.second;
+            });
+            if(queued || receiver.modem->retains_pattern_stream(id.first,id.second)) {++it;continue;}
+            receiver.content->discard(id.first,id.second);
+            it=receiver.presentations.erase(it);retired=true;
+        }
+        return retired;
+    }
+    static void retire_unreferenced_receptions(Bank& bank) {
+        if(!bank.reception_history_dirty)return;
+        bank.receptions.retire_unreferenced([&](std::uint64_t id) {
+            return std::any_of(bank.receivers.begin(),bank.receivers.end(),[&](const auto& receiver) {
+                return std::any_of(receiver.presentations.begin(),receiver.presentations.end(),[&](const auto& item) {
+                    return item.second.signal_id==id;
+                });
+            });
+        });
+        bank.reception_history_dirty=false;
     }
     static detail::ReceptionHistory::Candidate reception_candidate(
         const Receiver& receiver,const modem::PatternBurst& burst,const Receiver::Presentation& display) {
@@ -2492,11 +2519,16 @@ struct Session::Impl {
                                     display.content_reported=true;
                                 }
                             }
-                            if(complete)receiver.presentations.erase(presentation);
+                            if(complete) {
+                                receiver.presentations.erase(presentation);bank.reception_history_dirty=true;
+                            }
                             update_workspace();
                             if(bank.working_bytes>capacity)throw Error("receive presentation state exceeds the configured DSP workspace");
                         }
-                        receiver.bursts.clear();update_workspace();
+                        receiver.bursts.clear();
+                        bank.reception_history_dirty|=discard_retired_presentations(receiver);
+                        retire_unreferenced_receptions(bank);
+                        update_workspace();
                         continue;
                     }
                 } catch (const Error& error) {
@@ -2587,6 +2619,7 @@ struct Session::Impl {
                         receiver.pattern_score_history = {};
                         receiver.history_ordinals={};receiver.history_poll={};
                         receiver.presentations.clear();
+                        bank.reception_history_dirty=true;
                         receiver.bursts.clear();
                     }
                     update_workspace();
@@ -2598,12 +2631,22 @@ struct Session::Impl {
                 if(!current.running || generation!=version || bank.revision!=receive_revision || stop.stop_requested())return;
                 for(auto& receiver:bank.receivers) {
                     const auto before=receiver_workspace(receiver);
+                    bank.reception_history_dirty|=discard_retired_presentations(receiver);
+                    bank.working_bytes=bank.working_bytes-before+receiver_workspace(receiver);
+                }
+                retire_unreferenced_receptions(bank);
+                for(auto& receiver:bank.receivers) {
+                    const auto before=receiver_workspace(receiver);
                     for(const auto& burst:receiver.bursts) {
                         if(burst.bits.empty() && !burst.missing_slots && !burst.complete)continue;
                         const auto physical_id=std::pair{burst.stream_first_sample,burst.stream_first_symbol};
                         auto presentation=receiver.presentations.find(physical_id);
                         if(presentation==receiver.presentations.end()) {
-                            if(receiver.presentations.size()>=16){bank.limited=bank.coverage_limited=true;continue;}
+                            // Current detector tracks plus drained queued old
+                            // prefixes: both are bounded at sixteen in Live.
+                            if(receiver.presentations.size()>=transfer::StreamReceiver::candidate_limit) {
+                                bank.limited=bank.coverage_limited=true;continue;
+                            }
                             presentation=receiver.presentations.emplace(physical_id,
                                 Receiver::Presentation{bank.next_candidate++}).first;
                         }

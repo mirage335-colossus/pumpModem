@@ -253,6 +253,7 @@ public:
     // Publish accepted decisions at each drain; chunk capacity never
     // requires a longer message before a pending symbol becomes visible.
     std::vector<PatternBurst> take_bursts();
+    bool retains_stream(std::uint64_t first_sample, std::uint64_t first_symbol) const;
     PatternBurst provisional() const;
     // Numerical acquisition may defer diagnostic history; admission/progress never wait for it.
     // Receiver-worker only: score retained observations with cancellable bounded batching.

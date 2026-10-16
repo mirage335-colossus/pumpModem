@@ -135,6 +135,7 @@ public:
     // six-second search absence sets complete; EOF returns incomplete chunks.
     PatternBurst provisional_pattern() const;
     std::vector<PatternBurst> take_pattern_bursts();
+    bool retains_pattern_stream(std::uint64_t first_sample, std::uint64_t first_symbol) const;
     // Receiver-worker only: score retained observations with cancellable bounded batching.
     // Publication polls never perform the deferred search or manufacture input.
     void process_pending(std::stop_token = {});
