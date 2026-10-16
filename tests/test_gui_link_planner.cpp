@@ -100,7 +100,7 @@ void selected_plan_progress_and_support_equivalence() {
 void independent_reference_values() {
     const auto inputs=example();
     const auto short_bit=planner::build(inputs);
-    check(short_bit.available&&short_bit.automatic_mode&&short_bit.observer_available,
+    check(short_bit.available&&short_bit.automatic_mode&&!short_bit.observer_available&&short_bit.observer_hypothetical,
           "The 3.6 kHz / 1.5 kHz short-bit example must be available");
     // Independent sampled anchors: ceil(10^((18-C/N0)/10)*14400) samples.
     // No training symbol fits here; the waveform adds 128 tail samples and
@@ -108,7 +108,10 @@ void independent_reference_values() {
     near(short_bit.bit_seconds,398.1072222222222,"-8 dB-Hz bit duration changed");
     near(short_bit.send_seconds,401.1161111111111,"One-bit example acquired framing or lost waveform tails");
     near(short_bit.finish_seconds,799.2233333333334,"One full absent symbol must follow the short-bit burst");
-    near(short_bit.observer_ratio,2928.958076042251,"Short-bit observer/receiver time anchor changed");
+    auto private_inputs=inputs;private_inputs.options.key.emplace(Bytes(32,0x37));
+    const auto private_short=planner::build(private_inputs);
+    check(private_short.observer_available&&!private_short.observer_hypothetical,"Private observer model unavailable");
+    near(private_short.observer_ratio,2928.958076042251,"Short-bit observer/receiver time anchor changed");
     near(short_bit.occupied_bandwidth_hz,2250,"Shaped bandwidth must use the sampled chip rate");
     near(short_bit.low_audio_hz,375,"SSB lower edge changed");
     near(short_bit.high_audio_hz,2625,"SSB upper edge changed");
@@ -117,28 +120,34 @@ void independent_reference_values() {
     near(short_bit.margin_db,5,"Actual-link margin must compare against the selected target");
     auto weak_inputs=inputs;weak_inputs.target_db_hz=-23;
     const auto weak=planner::build(weak_inputs);
-    check(weak.available&&weak.observer_available,"The weak example must retain its analytical estimate");
+    check(weak.available&&!weak.observer_available&&weak.observer_hypothetical,"The weak example must retain its analytical estimate");
     near(weak.bit_seconds,12589.254166666668,"-23 dB-Hz must take approximately 3.5 hours per bit");
     near(weak.send_seconds,12592.263055555557,"Weak example did not preserve its exact one-bit endpoint");
     near(weak.finish_seconds,25181.517222222225,"Weak example completed without a whole absent symbol");
-    near(weak.observer_ratio,92617.28706819766,"Weak observer/receiver time anchor changed");
+    private_inputs.target_db_hz=-23;
+    near(planner::build(private_inputs).observer_ratio,92617.28706819766,"Weak observer/receiver time anchor changed");
     check(short_bit.receiver_status!=weak.receiver_status,"Free-running crystal limit did not distinguish the two examples");
     auto lpi_inputs=inputs;lpi_inputs.target_db_hz=23;
     const auto lpi_example=planner::build(lpi_inputs);
-    check(lpi_example.available&&lpi_example.observer_available,"Positive 23 dB LPI example must be available");
+    check(lpi_example.available&&!lpi_example.observer_available&&lpi_example.observer_hypothetical,"Positive 23 dB LPI example must be available");
     // At +23 dB the automatic profile is 1024 chips; settling uses four
     // additional symbols and absence uses eleven complete failed symbols.
     near(lpi_example.bit_seconds,.5688888888888889,"Positive LPI example must retain its subsecond bit");
     near(lpi_example.send_seconds,5.8533333333333335,"Positive LPI example lost its complete waveform overhead");
     near(lpi_example.finish_seconds,12.11111111111111,"Positive LPI example lost its complete-symbol silence check");
-    near(lpi_example.observer_ratio,4.333069879228238,"Positive LPI observer/receiver time anchor changed");
+    private_inputs.target_db_hz=23;
+    near(planner::build(private_inputs).observer_ratio,4.333069879228238,"Positive LPI observer/receiver time anchor changed");
 }
 void exact_geometry_and_physical_finish() {
     auto inputs=example();const auto one=planner::build(inputs);
     inputs.wire_bits=3;const auto three=planner::build(inputs);
     check(three.available,"Exact three-bit draft must be plannable");
     near(three.send_seconds-one.send_seconds,2*one.bit_seconds,"Three bits were padded to a byte or given per-bit overhead");
-    near(three.observer_ratio,one.observer_ratio,"Draft size must not change normalized observer time");
+    auto private_inputs=inputs;private_inputs.options.key.emplace(Bytes(32,0x37));
+    const auto private_three=planner::build(private_inputs);private_inputs.wire_bits=1;
+    const auto private_one=planner::build(private_inputs);
+    check(private_three.observer_available&&private_one.observer_available,"private draft observer model unavailable");
+    near(private_three.observer_ratio,private_one.observer_ratio,"Draft size must not change normalized observer time");
     inputs.wire_bits=1216;const auto interval=planner::build(inputs);
     check(interval.available,"Existing 192+1024-bit fixed interval geometry must remain plannable");
     near(interval.send_seconds-one.send_seconds,1215*one.bit_seconds,"Current-draft interval bits were changed by planning");
@@ -620,19 +629,31 @@ void gpsdo_phase_does_not_change_clock_coverage() {
           "An explicitly larger residual clock offset must still expose the actual finite frequency-search limit");
 }
 void separate_link_budget_and_observer_model() {
-    auto inputs=example();const auto reference=planner::build(inputs);
+    auto public_inputs=example();const auto public_model=planner::build(public_inputs);
+    check(public_model.available&&!public_model.observer_available&&public_model.observer_hypothetical&&
+          public_model.observer_ratio==0&&std::all_of(public_model.points.begin(),public_model.points.end(),
+              [](const auto& p){return !p.observer_available&&p.observer_ratio==0;}),
+          "Public planner retained a numerical observer curve");
+    for(const auto mode:{tuning::PatternMode::auto_pattern,tuning::PatternMode::auto_tone}) {
+        auto input=public_inputs;input.mode=mode;input.target_db_hz=23;
+        input.options.modem=tuning::resolve(3600,23,mode,false,mode==tuning::PatternMode::auto_tone?2700:1500).config;
+        const auto model=planner::build(input);
+        const auto page=planner_page::build(model,900,false,false);
+        check(contains_text(page,"Not applicable: no encrypted private pattern"),"Public planner omitted applicability");
+        for(const auto* node:nodes(page))check(node->plot_name!="planner/observer-time","Public planner drew private observer axes");
+    }
+    auto inputs=public_inputs;inputs.options.key.emplace(Bytes(32,0x37));
+    const auto reference=planner::build(inputs);
     inputs.tx_dbm=50;inputs.path_loss_db=200;inputs.noise_density_dbm_hz=-170;
     const auto different_link=planner::build(inputs);
     check(different_link.available,"A changed illustrative link budget should remain available");
     near(different_link.actual_cn0_db_hz,20,"Power/path/noise arithmetic is not independent of the timing target");
     near(different_link.observer_ratio,reference.observer_ratio,"Actual power must not change the normalized time comparison");
     near(different_link.bit_seconds,reference.bit_seconds,"Power/path/noise edits must not silently retune the preview");
-    check(reference.observer_hypothetical,"Public patterns need a hypothetical private-pattern observer estimate");
-    inputs.options.key.emplace(Bytes(32,0x37));
-    const auto keyed=planner::build(inputs);
+    inputs.options.key.emplace(Bytes(32,0x38));const auto keyed=planner::build(inputs);
     check(keyed.available&&!keyed.observer_hypothetical,"A private-pattern preview must recognize its configured key");
     near(keyed.observer_ratio,reference.observer_ratio,"Key material must not change the normalized observer time");
-    check(!reference.inputs.options.key,"Planner build must not mutate the caller's encryption settings");
+    check(!public_inputs.options.key,"Planner build must not mutate the caller's encryption settings");
 }
 void quantization_fixed_modes_and_limits() {
     auto inputs=example();
@@ -778,6 +799,35 @@ void prepare_plan(Application& app) {
     }
     check(app.enabled(ui::Command::planner_apply_short),"Application planner worker did not complete");
 }
+void removing_key_withdraws_cached_observer() {
+    using F=ui::Field;using P=ui::Page;
+    struct Keys {
+        std::filesystem::path path=std::filesystem::temp_directory_path()/
+            ("datapump-observer-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        ~Keys(){std::error_code ignored;std::filesystem::remove(path,ignored);}
+    } keys;
+    create_keyring(keys.path,{"observer"});
+    Launch launch{.simulation=true};launch.settings=launch_command::Patch{};
+    launch.settings->keyfile=keys.path.string();
+    Application app(launch);app.select_page(P::planner);
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+    while(app.field(F::key).selected!="key:observer"&&std::chrono::steady_clock::now()<deadline) {
+        app.tick();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(app.field(F::key).selected=="key:observer","observer fixture key did not load");
+    app.edit(F::planner_target,"-8");prepare_plan(app);
+    const auto private_page=app.document(P::planner,900);
+    const auto private_nodes=nodes(*private_page);
+    check(std::any_of(private_nodes.begin(),private_nodes.end(),[](const auto* node) {
+        return node->plot_name=="planner/observer-time";
+    }),"private observer plot missing before key removal");
+    app.select(F::key,"none");
+    const auto pending=app.document(P::planner,900);const auto pending_nodes=nodes(*pending);
+    check(contains_text(*pending,"Not applicable: no encrypted private pattern")&&
+          std::none_of(pending_nodes.begin(),pending_nodes.end(),[](const auto* node){return node->plot_name=="planner/observer-time";}),
+          "pending public plan retained a cached private observer plot");
+    app.close();
+}
 void stable_planner_navigation_document() {
     using F=ui::Field;using C=ui::Command;using P=ui::Page;
     Application app({.simulation=true});app.select_page(P::planner);
@@ -799,7 +849,7 @@ void stable_planner_navigation_document() {
         visit(visit,document,layout.root,0,0);rectangles.emplace("document",layout.root.bounds);return rectangles;
     };
     const auto baseline=geometry(*original);
-    check(baseline.size()==6,"Navigation fixture must contain both native editors and all three plots");
+    check(baseline.size()==5,"Public navigation fixture must contain both editors and only the receiver plots");
     app.activate(C::planner_stronger);
     const auto pending=app.document(P::planner,900);
     check(pending!=original&&contains_text(*pending,"Updating · previous plan")&&
@@ -1613,7 +1663,7 @@ void receiver_overlay_and_cpu_status() {
 void estimate_warning_thresholds() {
     planner::Model model;model.inputs=example();model.available=true;
     model.clock_search_supported=model.receiver_workspace_supported=true;
-    model.confidence_available=model.one_bit_confidence_available=model.observer_available=true;
+    model.observer_hypothetical=false;model.confidence_available=model.one_bit_confidence_available=model.observer_available=true;
     model.bit_seconds=model.send_seconds=60;model.finish_seconds=120;
     const auto tone_for=[&](const ui::DocumentNode& page,std::string_view prefix) {
         const auto flat=nodes(page);
@@ -1838,7 +1888,7 @@ void search_arithmetic_document_and_cache() {
     check(app.field(F::search_arithmetic).selected=="fp64-force","hiding advanced controls reset arithmetic");
     app.select_page(P::console);check(!app.control(*declaration).visible,"planner arithmetic control leaked onto Console");
     app.close();
-    for(const auto field:{F::receiver_strategy,F::receiver_cpu_budget}) {
+    for(const auto field:{F::receiver_strategy,F::receiver_cpu_budget,F::sched_hop,F::sched_hop_dilution,F::sched_frequency_search}) {
         const auto found=std::find_if(screen.begin(),screen.end(),[&](const auto& c){return c.field==field;});
         check(found!=screen.end()&&found->document_only&&found->developer_only&&!found->persistent&&
             found->page==P::planner&&found->slot==ui::Slot::none,
@@ -1881,13 +1931,15 @@ void search_arithmetic_document_and_cache() {
             contains_text(page,"Modeled receiver: amplitude energy · experimental")&&
             !contains_text(page,"Existing search exceeds the CPU budget")&&!contains_text(page,"Strategy work model:"),
             "planner footer lost controls/resolved strategy or left detailed geometry expanded");
-        for(const auto field:{F::receiver_strategy,F::receiver_cpu_budget}) {
+        for(const auto field:{F::receiver_strategy,F::receiver_cpu_budget,F::sched_hop,F::sched_hop_dilution,F::sched_frequency_search}) {
             const auto control=std::find_if(flat.begin(),flat.end(),[&](const auto* n){return n->control&&n->control->field==field;});
             check(control!=flat.end()&&control<toggle&&(*control)->width>0,
                 "receiver strategy/budget footer lost responsive controls before Model limits");
         }
-        check(std::none_of(flat.begin(),flat.end(),[](const auto* n){return n->control&&n->control->field==F::sched_hop_dilution;}),
-            "Planner duplicated the persistent header dilution control");
+        const auto scheduler=std::find_if(flat.begin(),flat.end(),[](const auto* n){return n->control&&n->control->field==F::sched_hop;});
+        const auto dilution=std::find_if(flat.begin(),flat.end(),[](const auto* n){return n->control&&n->control->field==F::sched_hop_dilution;});
+        const auto frequency=std::find_if(flat.begin(),flat.end(),[](const auto* n){return n->control&&n->control->field==F::sched_frequency_search;});
+        check(scheduler<dilution&&dilution<frequency&&frequency<toggle,"Scheduler footer control order changed");
         const auto detailed=planner_page::build(model,width,true,false);
         check(contains_text(detailed,"Model limits")&&contains_text(detailed,"Receiver geometry: 6000 samples/s")&&
             contains_text(detailed,"Arithmetic model: CPU test matrix; operands INT8; accumulation INT32; FP64 verification")&&
@@ -1944,7 +1996,9 @@ void search_arithmetic_document_and_cache() {
     }
 }
 void document_semantics_layout_and_plots() {
-    const auto model=planner::build(example());
+    auto input=example();input.options.key.emplace(Bytes(32,0x37));
+    input.target_db_hz=23; // Exercise layout with an affordable private RX reference.
+    const auto model=planner::build(input);
     for(const float width:{220.f,460.f,720.f,740.f,900.f,1200.f}) {
         const auto document=planner_page::build(model,width,false,false);
         const auto flat=nodes(document);
@@ -2111,6 +2165,11 @@ void document_semantics_layout_and_plots() {
 int main(int argc,char** argv) {
     try {
         cancelled_planner_and_inspection();
+        if(argc==2&&std::string_view(argv[1])=="--observer-only") {
+            independent_reference_values();exact_geometry_and_physical_finish();separate_link_budget_and_observer_model();
+            removing_key_withdraws_cached_observer();estimate_warning_thresholds();document_semantics_layout_and_plots();
+            std::cout<<"Observer applicability passed\n";return 0;
+        }
         if(argc==2&&std::string_view(argv[1])=="--sustained-only") {sustained_listening_plan_document();std::cout<<"Sustained listening planner passed\n";return 0;}
         if(argc==2&&std::string_view(argv[1])=="--search-arithmetic") {search_arithmetic_document_and_cache();std::cout<<"Search arithmetic document/cache passed\n";return 0;}
         if(argc==2&&std::string_view(argv[1])=="--progressive-only") {selected_plan_progress_and_support_equivalence();std::cout<<"Progressive planner and support invariants passed\n";return 0;}
@@ -2129,7 +2188,7 @@ int main(int argc,char** argv) {
         nearest_usable_targets();bounded_navigation_preview();nearest_target_shares_receiver_budget();
         narrow_band_differential_model();phase_loss_and_receiver_confidence();gpsdo_phase_does_not_change_clock_coverage();
         separate_link_budget_and_observer_model();quantization_fixed_modes_and_limits();
-        persistent_worker_curve_cache();stable_planner_navigation_document();
+        persistent_worker_curve_cache();removing_key_withdraws_cached_observer();stable_planner_navigation_document();
         asynchronous_planner_edits();current_draft_and_modem_isolation();application_prompt_roundtrips();all_target_dropdowns_and_native_planner_editor();
         controller_checked_navigation();
         controller_target_alignment();

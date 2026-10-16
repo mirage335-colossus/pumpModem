@@ -9,6 +9,7 @@
 #include <random>
 #include <array>
 #include "../src/pattern_envelope.hpp"
+#include "../src/pattern_observation_layout.hpp"
 using namespace datapump;
 using namespace datapump::modem;
 namespace {
@@ -17,6 +18,56 @@ Config geometry() {
     Config c;c.sample_rate=512;c.bandwidth_hz=4;c.carrier_hz=128;
     c.pattern_symbols=true;c.constellation_bits=1;c.spreading_factor=512;
     c.scramble=true;c.spreading_seed[0]=91;return c;
+}
+void fractional_clock_fft_boundary() {
+    Config c;c.sample_rate=131072;c.bandwidth_hz=65536;c.carrier_hz=32768;
+    c.pattern_symbols=true;c.spreading_factor=16384;c.integration_seconds=.5;c.constellation_bits=1;
+    c.receiver_strategy=ReceiverStrategy::existing_only;
+    PatternSearch search;search.frequency_offsets_hz={0};search.clock_errors_ppm={1};
+    search.worker_threads=1;search.search_stream_phases=false;
+    const auto fast=resolve_receiver_strategy(c,search,128U*1024*1024);
+    search.clock_errors_ppm={-1};
+    const auto slow=resolve_receiver_strategy(c,search,128U*1024*1024);
+    // Runtime retains a 131072-point transform on both sides of this boundary.
+    // One extra observed bin must not double the predicted FFT work.
+    check(std::abs(slow.existing_processing_ratio/fast.existing_processing_ratio-1)<.001,
+          "fractional clock coverage doubled the estimated FFT at a power-of-two boundary");
+    c.sample_rate=1024;c.bandwidth_hz=128;c.carrier_hz=256;
+    c.spreading_factor=1;c.integration_seconds=204.8125;
+    search.clock_errors_ppm={0};search.hypotheses={{0,0}};
+    const auto nominal=resolve_receiver_strategy(c,search,128U*1024*1024);
+    search.hypotheses={{0,100}};
+    const auto positive=resolve_receiver_strategy(c,search,128U*1024*1024);
+    const auto bin=detail::pattern_observation_bin_samples(c,0);
+    check(detail::pattern_observation_layout(c,bin,1).transform==65536 &&
+          detail::pattern_observation_layout(c,bin,1.0001).transform==32768,
+          "positive-only clock fixture no longer crosses the runtime transform boundary");
+    check(positive.existing_processing_ratio<.997*nominal.existing_processing_ratio,
+          "positive-only clock bank invented a slower nominal hypothesis in its FFT estimate");
+    // Legacy coupled nominal clocks retain the runtime's symmetric aperture;
+    // explicit positive pairs retain their shorter actual-clock aperture.
+    c.search_arithmetic=SearchArithmetic::fp64;
+    search.hypotheses.clear();search.frequency_offsets_hz={.0256};
+    search.couple_clock_to_carrier=true;search.uncoupled_frequency_count=0;
+    search.drift_tolerant=false;
+    const auto coupled=resolve_receiver_strategy(c,search,128U*1024*1024);
+    auto paired=search;paired.hypotheses={{.0256,-100}};
+    const auto conservative=resolve_receiver_strategy(c,paired,128U*1024*1024);
+    check(std::abs(coupled.existing_processing_ratio-conservative.existing_processing_ratio)<1e-12,
+          "legacy coupled nominal-clock estimate omitted the runtime's conservative FFT aperture");
+    paired.hypotheses={{.0256,100}};
+    const auto explicit_positive=resolve_receiver_strategy(c,paired,128U*1024*1024);
+    check(explicit_positive.existing_processing_ratio<.997*coupled.existing_processing_ratio,
+          "legacy coupling fields overrode an authoritative positive-only pair");
+    PatternReceiver runtime(c,128U*1024*1024,search);
+    std::vector<float> silence(210760,0);runtime.push(silence);
+    check(runtime.fft_work().input_transforms==0,"legacy FFT acquisition ran before its full aperture");
+    const std::array<float,8> bin_silence{};runtime.push(bin_silence);
+    check(runtime.fft_work().input_transforms==1,"legacy FFT acquisition aperture changed");
+    silence.assign(104856,0);runtime.push(silence);
+    check(runtime.fft_work().input_transforms==1,"legacy FFT second acquisition ran before its full hop");
+    runtime.push(bin_silence);
+    check(runtime.fft_work().input_transforms==2,"legacy FFT acquisition hop changed");
 }
 void amplitude_band_geometry_survives_factoring() {
     auto c=geometry();c.sample_rate=2048;c.carrier_hz=512;c.receiver_strategy=ReceiverStrategy::amplitude_only;
@@ -303,7 +354,7 @@ void frequency_axis_preserves_long_private_progress() {
     check(candidate.fft_work().frequency_axis_fallback_batches==0,"qualified fixture retained broad numerical work");
 }
 }
-int main(){try {amplitude_band_geometry_survives_factoring();scheduled_strategy_geometry();packed_defaults_use_complex_evidence();scheduled_packed_phase_model();scheduled_short_split_late_phase_model();scheduled_long_chip_receiver_grid_model();
+int main(int argc,char** argv){try {fractional_clock_fft_boundary();if(argc>1&&std::string_view(argv[1])=="--fft-geometry")return 0;amplitude_band_geometry_survives_factoring();scheduled_strategy_geometry();packed_defaults_use_complex_evidence();scheduled_packed_phase_model();scheduled_short_split_late_phase_model();scheduled_long_chip_receiver_grid_model();
     auto c=geometry();PatternSearch s;s.start_offset_seconds=0;s.start_uncertainty_seconds=7;
     s.worker_threads=1;s.compact_clock_search=true;s.search_stream_phases=true;
     for(int i=-100;i<=100;++i)s.hypotheses.push_back({i*.05,0});

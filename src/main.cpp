@@ -418,13 +418,12 @@ void play_transmission(const Args& a, transfer::Options& options, Factory make) 
     std::unique_ptr<modem::StreamingTransmitter> source;
     bool protected_stop=false;
     audio::Options output;
+    const auto clock_policy=transfer::effective_clock_sync(options);
     output.maximum_utc_error_seconds=clock_sync::audio_lag_radius(options.audio_timing_error_seconds);
     output.presentation_lag_seconds=clock_sync::audio_lag_radius(options.audio_timing_error_seconds);
     auto timing_config=options.modem;
     if(options.key)timing_config.scramble=true;
-    output.timing_stop_duration_seconds=static_cast<double>(modem::transmit_stop_sample_count(timing_config))/timing_config.sample_rate;
-    if(modem::private_cover_enabled(timing_config))
-        output.timing_independent_cover_seconds=static_cast<double>(modem::suppression_sample_count(timing_config))/timing_config.sample_rate;
+    detail::configure_transmit_timing_protection(output,timing_config,[&]{return source.get();});
     output.timing_source_end=[&]() -> std::optional<std::uint64_t> {
         return source?std::optional<std::uint64_t>(source->total_samples()):std::nullopt;
     };
@@ -438,7 +437,7 @@ void play_transmission(const Args& a, transfer::Options& options, Factory make) 
             return shape.gain(options.timestamp,origin+seconds*c.sample_rate,c.sample_rate);
         };
     }
-    output.follow_system_clock=options.clock_sync && audio::utc_follow_supported() &&
+    output.follow_system_clock=clock_policy && audio::utc_follow_supported() &&
         (!options.modem.oscillator_search || options.modem.oscillator_search->reference==modem::OscillatorReference::independent_audio);
     if(output.follow_system_clock && options.modem.oscillator_search) {
         const auto& declared=*options.modem.oscillator_search;
@@ -446,9 +445,9 @@ void play_transmission(const Args& a, transfer::Options& options, Factory make) 
             declared.rf:declared.lf;
         // Operational consistency declaration, not a per-device calibration.
         // Receiver link-domain/margin accounting remains unchanged.
-        output.clock_timing=audio::ClockTimingPolicy{reference.accuracy_ppm*1e-6,.001,options.clock_sync->accuracy_seconds};
+        output.clock_timing=audio::ClockTimingPolicy{reference.accuracy_ppm*1e-6,.001,clock_policy->accuracy_seconds};
     }
-    output.allow_timing_fallback=options.clock_sync.has_value();
+    output.allow_timing_fallback=clock_policy.has_value();
     if(output.follow_system_clock) {
         const auto symbol_seconds=static_cast<double>(modem::symbol_sample_count(timing_config))/timing_config.sample_rate;
         output.reported_xrun_budget_seconds=std::min(.1,.01*symbol_seconds);
@@ -457,7 +456,7 @@ void play_transmission(const Args& a, transfer::Options& options, Factory make) 
     output.timing_status=[](const audio::TimingStatus& status) {
         std::cerr<<(status.following_system_clock?"UTC timing: ":"UTC timing fallback: ")<<status.reason<<"\n";
     };
-    if(options.clock_sync && a.has("time"))throw Error("UTC hardware transmission requires a freshly scheduled epoch");
+    if(clock_policy && a.has("time"))throw Error("UTC hardware transmission requires a freshly scheduled epoch");
     if(output.follow_system_clock && options.modem.oscillator_search) {
         const auto bank=modem::oscillator_pattern_search(options.modem,modem::utc_transmit_rate_limit(options.modem));
         output.maximum_timing_rate_correction=bank.transmit_rate_correction;
@@ -479,10 +478,7 @@ void play_transmission(const Args& a, transfer::Options& options, Factory make) 
         audio_passband_guard(options.modem)(format);
         if(a.has("time"))return;
         const auto clock=[] {return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();};
-        options.modem.stream_phase_samples=0;
-        auto scheduled=detail::schedule_transmission(options.modem,[&](std::uint64_t epoch) {
-            options.timestamp=epoch;return make(options);
-        },clock,{},0,audio::minimum_lead_seconds());
+        auto scheduled=detail::schedule_transfer_transmission(options,make,clock,{},0,audio::minimum_lead_seconds());
         source=std::move(scheduled.transmitter);
         audio::schedule_output(scheduled.playback_epoch);
     },a.has("no-mono")?audio::ChannelMode::stereo:a.has("right-mono")?audio::ChannelMode::right_mono:audio::ChannelMode::left_mono,output);
@@ -812,7 +808,7 @@ void analyze_link(const Args& a,transfer::Options options) {
     const auto profiles=options.automatic_receive_profiles?tuning::receive_profiles(c,
         options.receive_targets_db_hz,options.receive_pattern_mode,options.key.has_value()):std::vector<modem::Config>{c};
     const auto current=simulation::estimate(transmission,options,raw,channel,profiles);
-    const auto oscillator_search=modem::oscillator_pattern_search(c,options.clock_sync?modem::utc_transmit_rate_limit(c):0);
+    const auto oscillator_search=modem::oscillator_pattern_search(c,transfer::effective_clock_sync(options)?modem::utc_transmit_rate_limit(c):0);
     const auto& geometry=oscillator_search.frequency;
     const auto phase=static_cast<long double>(channel.phase_noise_degrees_per_sqrt_second)*std::numbers::pi_v<long double>/180;
     const auto rho=std::pow(10.L,static_cast<long double>(link.snr_db_hz)/10);

@@ -976,7 +976,7 @@
             const auto disabled_rgb=theme::widget_rgb(theme::WidgetRole::disabled_text,launch.color);
             if(!resolved_matches(choice->dropdownText,disabled?disabled_rgb:expected)||
                !resolved_matches(choice->options[1],disabled?disabled_rgb:expected)||
-               !resolved_matches(choice->options[0],disabled?disabled_rgb:theme::data_rgb(launch.color))||
+               !resolved_matches(choice->options[0],disabled?disabled_rgb:theme::widget_rgb(theme::WidgetRole::data,launch.color))||
                !resolved_matches(choice->options.back(),disabled_rgb)||choice->options[1]!=retained||
                choice->params.value!=state.options[1].id||changes!=3)
                 throw std::runtime_error("Rev choice failed own/ancestor disabled precedence or restoration");

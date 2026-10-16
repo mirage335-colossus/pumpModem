@@ -842,10 +842,12 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
         result.occupied_bandwidth_hz+=result.gate_bandwidth_allowance_hz;
         result.low_audio_hz=config.carrier_hz-result.occupied_bandwidth_hz/2;
         result.high_audio_hz=config.carrier_hz+result.occupied_bandwidth_hz/2;
-        const auto observer=lpi::estimate(transmission,options,inputs.observer_hopping,stop);
-        result.observer_available=observer.status==lpi::Status::available;
-        result.observer_hypothetical=observer.hypothetical_encryption;
-        result.observer_ratio=observer.equivalent_symbols;
+        result.observer_hypothetical=!options.key || config.spreading_mode!=modem::SpreadingMode::pattern;
+        if(!result.observer_hypothetical) {
+            const auto observer=lpi::estimate(transmission,options,inputs.observer_hopping,stop);
+            result.observer_available=observer.status==lpi::Status::available;
+            result.observer_ratio=observer.equivalent_symbols;
+        }
 
         auto channel=inputs.channel;
         const auto sample_snr=result.actual_cn0_db_hz-10*std::log10(config.sample_rate/2.);
@@ -1008,9 +1010,11 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
             auto point_options=inputs.options;point_options.modem=*geometry;
             Point point;point.target_db_hz=target;point.bit_seconds=seconds(*geometry);
             transfer::Estimate one;one.wire_bits=1;one.total_seconds=point.bit_seconds;
-            const auto estimate=lpi::estimate(one,point_options,inputs.observer_hopping,stop);
-            point.observer_available=estimate.status==lpi::Status::available;
-            point.observer_ratio=estimate.equivalent_symbols;
+            if(!result.observer_hypothetical) {
+                const auto estimate=lpi::estimate(one,point_options,inputs.observer_hopping,stop);
+                point.observer_available=estimate.status==lpi::Status::available;
+                point.observer_ratio=estimate.equivalent_symbols;
+            }
             result.points.push_back(point);
         }
         receive_curve(result,single_receiver,cache.impl_->curves,stop);

@@ -7,6 +7,9 @@
 #include "datapump/transfer.hpp"
 #include "datapump/tuning.hpp"
 #include <bit>
+#include <array>
+#include <optional>
+#include <span>
 #include <random>
 #include <algorithm>
 #include <cmath>
@@ -55,7 +58,7 @@ struct Fixture {
     std::uint64_t source_start(std::uint64_t index) const {
         return calendar?calendar->offset_source(config.stream_epoch,config.stream_phase_samples,index):index*code.symbol_samples();
     }
-    float sample(std::uint64_t at,const Bytes& bits) {
+    float sample(std::uint64_t at,const Bytes& bits,std::span<const double> noise_scales={}) {
         const auto physical=origin.add_samples(at);const auto cell=map.locate(physical);
         const auto position=cell.source.distance(source);const auto symbol=code.symbol_samples();
         std::complex<double> shaped{};
@@ -72,7 +75,8 @@ struct Fixture {
             shaped*=modem::SchedHopSourceMap::gain(cell,physical);
         }
         const auto carrier=std::polar(1.,2*std::numbers::pi*config.carrier_hz*static_cast<double>(at)/config.sample_rate);
-        return static_cast<float>((carrier*shaped).real()+noise_at(at));
+        const auto scale=index<noise_scales.size()?noise_scales[static_cast<std::size_t>(index)]:1.;
+        return static_cast<float>((carrier*shaped).real()+scale*noise_at(at));
     }
     std::uint64_t boundary(std::uint64_t symbols,bool end=true)const {
         const auto offset=symbols?source_start(symbols-1)+code.symbol_samples():0;
@@ -235,6 +239,97 @@ void packed_short_slots_and_absence() {
     auto diagnostic=c;diagnostic.scramble=false;
     check(!modem::pattern_amplitude_geometry(diagnostic,search(diagnostic)).supported,
         "shared-envelope legacy public diagnostic must not silently enter amplitude acquisition");
+}
+void weak_amplitude_chain() {
+    auto c=configuration();c.sample_rate=16384;c.carrier_hz=4096;c.bandwidth_hz=2048;c.spreading_factor=256;
+    auto guarded=std::make_shared<modem::SchedHopPlan>(*c.scheduled_hopping);
+    guarded->clock_error_seconds=guarded->peer_clock_error_seconds=.05;guarded->audio_error_seconds=.1;
+    c.scheduled_hopping=guarded;
+    check(modem::packed_scheduled_symbols(c),"weak-chain fixture must use packed short symbols");
+    modem::ScheduledSymbolCalendar calendar(c);
+    const auto start=calendar.physical_slot(calendar.first_rank(c.stream_epoch,c.stream_phase_samples));
+    c.stream_epoch=start/c.sample_rate;c.stream_phase_samples=start%c.sample_rate;
+    auto query=search(c);query.chunk_bits=1;query.track_limit=8;query.bit_limit=64;query.candidate_limit=64;
+    const auto geometry=modem::pattern_amplitude_geometry(c,query);
+    check(geometry.supported,"weak-chain amplitude geometry unavailable");
+    const Bytes expected{0,1,1,0};Fixture timing(c);const auto symbol=timing.code.symbol_samples();
+    const auto failures=(6ULL*c.sample_rate+symbol-1)/symbol;
+    const auto prefix_end=timing.boundary(expected.size())+2*geometry.fft_samples;
+    const auto absence_end=timing.boundary(expected.size()+failures),capture_end=absence_end+2*geometry.fft_samples;
+    check(symbol<c.sample_rate&&prefix_end<absence_end&&capture_end<2*1024*1024,"weak-chain capture escaped bound");
+    const auto make_pcm=[&](const std::array<double,4>& scales,std::uint64_t end) {
+        Fixture source(c);std::vector<float> pcm(static_cast<std::size_t>(end));
+        for(std::uint64_t at=0;at<end;++at)pcm[static_cast<std::size_t>(at)]=source.sample(at,expected,scales);
+        return pcm;
+    };
+    struct Evidence {std::array<modem::PatternEvidence,4> values{};std::array<bool,4> present{};};
+    const auto observe=[&](std::span<const float> pcm) {
+        modem::PatternCorrelator rx(c,query,16*1024*1024,{.amplitude_only=true});
+        check(rx.work().hypotheses==1,"weak-chain requires one exact timing/rate hypothesis");
+        for(std::size_t at=0;at<pcm.size();) {
+            const auto n=std::min<std::size_t>(211,pcm.size()-at);rx.push(pcm.subspan(at,n));at+=n;(void)rx.take_bursts();
+        }
+        Evidence result;
+        for(const auto& e:rx.candidates()) {
+            if(e.stream_symbol>=expected.size())continue;
+            const auto i=static_cast<std::size_t>(e.stream_symbol);
+            check(!result.present[i],"weak-chain probe returned duplicate exact-lane evidence");
+            result.present[i]=true;result.values[i]=e;
+        }
+        return result;
+    };
+    // Fixed deterministic channel noise puts each symbol near score 12,
+    // below admission, while the complete four-symbol chain is sufficient.
+    // Assert that evidence below; never tune receiver thresholds for the test.
+    constexpr double target=12.;
+    constexpr std::array<double,4> scales{354.031494140625,306.191162109375,
+        310.993408203125,277.803466796875};
+    const auto pcm=make_pcm(scales,capture_end);const auto e=observe(std::span(pcm).first(prefix_end));
+    for(std::size_t i=0;i<4;++i) {
+        check(e.present[i],"weak-chain evidence was not retained");const auto& v=e.values[i];
+        check(v.bit==expected[i]&&v.score-v.alternative_score>=1.,"weak-chain symbol lost its correct distinct winner");
+        check(std::abs(v.score-target)<.05&&v.score>=query.retain_score&&v.score+1<v.admission_threshold,
+              "weak-chain symbols must be individually below unchanged admission threshold");
+    }
+    const auto joint=[&](std::size_t count) {double sum=0;for(std::size_t i=0;i<count;++i)sum+=e.values[i].score;
+        const auto n=static_cast<double>(count);return sum>n?sum-n-n*std::log(sum/n)-n*std::log(2.):0.;};
+    for(std::size_t count=1;count<4;++count)check(joint(count)<e.values[count-1].admission_threshold,"weak prefix meets joint admission");
+    check(joint(4)>e.values.back().admission_threshold+1.,"four-symbol chain lacks joint evidence");
+    modem::PatternCorrelator rx(c,query,16*1024*1024,{.amplitude_only=true});
+    Bytes received;bool complete=false;std::size_t consumed=0;
+    std::optional<std::pair<std::uint64_t,std::uint64_t>> identity;
+    const auto drain=[&] {
+        for(const auto& burst:rx.take_bursts()) {
+            check(!burst.missing_slots,"weak chain manufactured missing slots");
+            const auto id=std::pair{burst.stream_first_sample,burst.stream_first_symbol};if(!identity)identity=id;
+            check(*identity==id&&burst.first_stream_symbol==received.size(),"weak chain lost identity/order");
+            check(!complete||burst.bits.empty(),"completed weak chain gained payload");
+            received.insert(received.end(),burst.bits.begin(),burst.bits.end());check(received.size()<=4,"weak chain added payload");
+            if(burst.complete){check(!complete&&consumed>=absence_end,"weak chain completed before scored absence");complete=true;}
+        }
+    };
+    const auto feed=[&](std::uint64_t end) {
+        check(end<=pcm.size(),"weak-chain feed escaped frozen PCM");
+        while(consumed<end){const auto n=std::min<std::size_t>(211,static_cast<std::size_t>(end)-consumed);
+            rx.push(std::span(pcm).subspan(consumed,n));consumed+=n;drain();}
+    };
+    for(std::size_t count=1;count<=4;++count) {
+        feed(timing.boundary(count)+2*geometry.fft_samples);check(!complete,"payload prefix completed weak chain");
+        check(count<4?received.empty():received==expected,"weak joint admission did not publish exact prefix promptly");
+    }
+    feed(absence_end-1);check(!complete,"partial absent symbol completed weak chain");
+    feed(capture_end);check(received==expected&&complete,"weak chain lost payload/physical completion");rx.finish();drain();
+    const auto reject=[&](const modem::Config& config,std::span<const float> input) {
+        modem::PatternCorrelator other(config,query,16*1024*1024,{.amplitude_only=true});
+        const auto poll=[&]{for(const auto& b:other.take_bursts())check(b.bits.empty()&&!b.complete&&!b.missing_slots,"wrong key/noise admitted weak chain");};
+        for(std::size_t at=0;at<input.size();){const auto n=std::min<std::size_t>(211,input.size()-at);other.push(input.subspan(at,n));at+=n;poll();}
+        other.finish();poll();
+    };
+    for(unsigned seed=1;seed<=16;++seed){auto wrong=c;wrong.spreading_seed[0]^=static_cast<std::uint8_t>(seed);
+        wrong.spreading_seed[17]^=static_cast<std::uint8_t>(37*seed);reject(wrong,std::span(pcm).first(prefix_end));}
+    std::vector<float> noise(pcm.size());for(std::size_t at=0;at<noise.size();++at)
+        noise[at]=static_cast<float>(Fixture::noise_at(static_cast<std::uint64_t>(at)^0xa0761d6478bd642fULL));
+    reject(c,noise);
 }
 void null_is_not_absence_and_rejected_skip() {
     auto c=configuration(100);Fixture fixture(c);const auto s=search(c);
@@ -473,6 +568,6 @@ void finite_timing_coverage_is_not_absence() {
     inspect();receiver.finish();inspect();
 }
 }
-int main(){try{geometry_and_sparse_semantics();arithmetic_and_outer_geometry();canonical_cell_end_and_following_bit();long_chip_flat_safe_geometry();packed_short_slots_and_absence();null_is_not_absence_and_rejected_skip();broad_short_profile_and_phase_cancellation();short_split_late_utc_phase();finite_timing_coverage_is_not_absence();
+int main(int argc,char** argv){try{weak_amplitude_chain();if(argc>1&&std::string_view(argv[1])=="--weak-chain")return 0;geometry_and_sparse_semantics();arithmetic_and_outer_geometry();canonical_cell_end_and_following_bit();long_chip_flat_safe_geometry();packed_short_slots_and_absence();null_is_not_absence_and_rejected_skip();broad_short_profile_and_phase_cancellation();short_split_late_utc_phase();finite_timing_coverage_is_not_absence();
     std::cout<<"scheduled receiver tests passed\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

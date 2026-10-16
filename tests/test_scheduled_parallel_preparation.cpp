@@ -102,7 +102,8 @@ void identical_pcm() {
     auto c=configuration();const Bytes bits{0,1};const auto pcm=capture(c,bits,true);
     auto s=search(c,pcm,true);s.search_stream_phases=true;
     s.start_uncertainty_seconds=.5*modem::pattern_chip_samples(c)/c.sample_rate;
-    s.clock_errors_ppm={-.0003,0,.0003};s.chunk_bits=1;s.retain_score=0;s.candidate_limit=65536;
+    s.clock_errors_ppm={-.0003,0,.0003};s.admitted_clock_half_width_ppm=.0003;
+    s.chunk_bits=1;s.retain_score=0;s.candidate_limit=65536;
     for(const auto arithmetic:{modem::SearchArithmetic::default_mode,modem::SearchArithmetic::fp32,modem::SearchArithmetic::fp64}) {
         c.search_arithmetic=arithmetic;
         std::cerr<<"parallel preparation fixture: arithmetic="<<static_cast<int>(arithmetic)<<" serial/parallel pair beginning\n";

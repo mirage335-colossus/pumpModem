@@ -294,7 +294,7 @@ void developer_mode_presentation() {
         check(!app.field(F::shellcode_mode).checked,"Stale Shellcode declaration bypassed visibility");
     }
     constexpr std::array advanced_fields{F::pattern,F::fec,F::dsp_workspace,F::receive_snr,
-        F::profile_reference,F::callsign,F::grid,F::repeatable,F::sched_hop,F::sched_hop_dilution};
+        F::profile_reference,F::callsign,F::grid,F::repeatable};
     for(const auto field:advanced_fields)
         check(!app.control(control(field)).visible,"An advanced control is visible before developer mode is enabled");
     for(const auto field:{F::message,F::binary,F::simulation,F::bandwidth,F::carrier,F::snr,F::long_snr})
@@ -336,16 +336,16 @@ void developer_mode_presentation() {
     }
     app.navigate(P::planner);
     check(app.page()==P::planner&&app.control(toggle).visible,"Link planner or its persistent developer toggle became unavailable");
-    for(const auto field:{F::search_arithmetic,F::receiver_strategy,F::receiver_cpu_budget})
+    for(const auto field:{F::search_arithmetic,F::receiver_strategy,F::receiver_cpu_budget,F::sched_hop,F::sched_hop_dilution,F::sched_frequency_search})
         check(!app.control(control(field)).visible,"Developer planner control exposed before Developer mode");
     app.toggle(toggle,true);
-    for(const auto field:{F::search_arithmetic,F::receiver_strategy,F::receiver_cpu_budget})
+    for(const auto field:{F::search_arithmetic,F::receiver_strategy,F::receiver_cpu_budget,F::sched_hop,F::sched_hop_dilution,F::sched_frequency_search})
         check(app.control(control(field)).visible,"Developer planner control missing on Link planner");
     app.navigate(P::console);
-    for(const auto field:{F::search_arithmetic,F::receiver_strategy,F::receiver_cpu_budget})
+    for(const auto field:{F::search_arithmetic,F::receiver_strategy,F::receiver_cpu_budget,F::sched_hop,F::sched_hop_dilution,F::sched_frequency_search})
         check(!app.control(control(field)).visible,"Document-only planner control leaked onto Console");
-    check(app.control(control(F::sched_hop)).visible&&app.control(control(F::sched_hop_dilution)).visible,
-          "Developer scheduled controls failed to persist on Console");
+    for(const auto field:{F::sched_hop,F::sched_hop_dilution,F::sched_frequency_search})
+        check(!app.control(control(field)).visible,"Developer scheduler leaked onto Console");
     app.navigate(P::planner);app.toggle(toggle,false);
     for(const auto page:{P::compression,P::flow,P::transmission}) {
         app.navigate(page);check(app.page()==P::planner,"Stale navigation opened a hidden developer tab");

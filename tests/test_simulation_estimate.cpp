@@ -741,7 +741,8 @@ void drift_receiver_estimate() {
     options.modem.spreading_mode=modem::SpreadingMode::pattern;
     options.modem.sample_rate=128;options.modem.carrier_hz=4;
     options.modem.bandwidth_hz=4;options.modem.integration_seconds=64;
-    options.modem.scramble=true;options.dsp_workspace_bytes=1024*1024;
+    // Cover shared frontend reserves but leave the extra section state unaffordable.
+    options.modem.scramble=true;options.dsp_workspace_bytes=4*1024*1024;
     channel=clean_channel();channel.snr_db=-10;
     const auto fallback=simulation::estimate(wire(1,options.modem),options,true,channel);
     check(fallback.confidence_available && fallback.coherent_reference_only && !fallback.drift_model_available &&
@@ -1101,7 +1102,7 @@ void streamed_template_workload() {
     options.modem=tuning::resolve(1,32,tuning::PatternMode::auto_pattern,false).config;
     options.modem.integration_seconds=120;
     const auto sparse_transmission=wire(3,options.modem);
-    options.dsp_workspace_bytes=2*1024*1024;
+    options.dsp_workspace_bytes=8*1024*1024;
     const auto sparse_streamed=simulation::estimate(sparse_transmission,options,true,channel);
     options.dsp_workspace_bytes=64*1024*1024;
     const auto sparse_retained=simulation::estimate(sparse_transmission,options,true,channel);
@@ -1951,7 +1952,33 @@ void affine_coefficient_workload() {
         64*sizeof(std::complex<double>)+sizeof(modem::PatternFrequencyRateHypothesis)+
         (block+1)*sizeof(std::complex<double>)+4*sizeof(modem::detail::CorrelationCarrierMoments)+
         lanes*groups*sizeof(std::uint64_t);
-    const auto admitted=2*static_cast<std::size_t>(std::ceil(fixed+80*lanes*groups+2*lanes+34));
+    const auto required=static_cast<std::size_t>(std::ceil(fixed+80*lanes*groups+2*lanes+34));
+    // Include the same shared frontend reservation as a sampled Live session.
+    // The constructor can use the remaining cohort up to its half-budget cap;
+    // an exact per-receiver threshold is not half the total DSP budget.
+    const auto usable=[&](std::size_t total) {
+        live::Settings settings;settings.transfer=options;settings.simulation=true;
+        settings.dsp_workspace_bytes=settings.transfer.dsp_workspace_bytes=total;
+        try {
+            const auto capacity=live::receiver_workspace_capacity(settings);
+            const auto control=live::receiver_control_margin(options.modem,true);
+            return std::min(total/2,capacity>control?capacity-control:0);
+        } catch(const Error&) {return std::size_t{0};}
+    };
+    // Capacity can dip at an eight-byte boundary as two rounded reservations
+    // grow together. Search monotone block peaks, then scan the first block.
+    std::size_t low_block=0,high_block=options.dsp_workspace_bytes/8;
+    check(usable(8*high_block+7)>=required,"optional cache boundary exceeds fixture budget");
+    while(low_block<high_block) {
+        const auto middle=low_block+(high_block-low_block)/2;
+        if(usable(8*middle+7)>=required)high_block=middle;
+        else low_block=middle+1;
+    }
+    auto admitted=8*low_block;
+    while(usable(admitted)<required)++admitted;
+    check(admitted>0 && usable(admitted-1)>=static_cast<std::size_t>(std::ceil(fixed)) &&
+          usable(admitted-1)<required && usable(admitted)>=required,
+          "optional cache boundary must preserve the mandatory receiver state");
     options.dsp_workspace_bytes=admitted-1;
     const auto low=simulation::estimate(draft,options,true,clean_channel(),{},1,false);
     options.dsp_workspace_bytes=admitted;

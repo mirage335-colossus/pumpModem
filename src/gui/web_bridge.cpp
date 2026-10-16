@@ -183,7 +183,7 @@ struct Bridge::Impl {
             out<<"{\"id\":"<<json_string(option.id)<<",\"label\":"<<json_string(option.label)
                <<",\"enabled\":"<<(option.enabled?"true":"false")
                <<",\"tone\":"<<static_cast<int>(option.text_tone)
-               <<",\"foreground\":"<<json_string(foreground(option.text_tone==ui::TextTone::normal?ui::TextTone::data:option.text_tone,
+               <<",\"foreground\":"<<json_string(foreground(option.text_tone,
                     inherited_enabled&&state.enabled&&option.enabled))<<'}';
         }
         out<<']';

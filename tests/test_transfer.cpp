@@ -239,6 +239,56 @@ void exact_raw_masking_and_scheduling() {
           std::abs(identity.playback_epoch+prefix-static_cast<double>(identity.epoch))<1e-6,
           "all-active3/3 preparation lost ordinary whole-second private origins");
 }
+void scheduled_playback_adapters() {
+    for(const unsigned multiplier:{3U,5U}) {
+        auto value=options(true);value.modem.scramble=true;value.modem.integration_seconds=2;
+        value.modem.data_key=value.key;
+        auto plan=std::make_shared<modem::SchedHopPlan>();plan->time_multiplier=multiplier;
+        value.modem.scheduled_hopping=plan;
+        check(!value.clock_sync&&transfer::effective_clock_sync(value).has_value(),
+              "shared calendar lost its default clock policy");
+        modem::StreamingTransmitter* source=nullptr;audio::Options playback;
+        detail::configure_transmit_timing_protection(playback,value.modem,[&]{return source;});
+        const auto stop=modem::transmit_stop_sample_count(value.modem);
+        const auto cover=modem::suppression_sample_count(value.modem);
+        const auto valid=static_cast<double>(modem::scheduled_physical_span_samples(value.modem,stop-cover))/value.modem.sample_rate;
+        check(playback.timing_stop_duration_seconds>static_cast<double>(stop)/value.modem.sample_rate&&
+              std::abs(playback.timing_stop_duration_seconds-playback.timing_independent_cover_seconds-valid)<1e-12,
+              "scheduled preparation mixed physical and source clocks");
+        check(playback.timing_protected_payload_end&&!playback.timing_protected_payload_end(0),
+              "scheduled source must be bound after preparation");
+        double now=1800000000.125;bool fractional=false;
+        for(unsigned i=0;i<20;++i,now+=.137) {
+            const auto probe=detail::schedule_transmission(value.modem,
+                [](std::uint64_t,std::uint32_t){return std::unique_ptr<modem::StreamingTransmitter>{};},[&]{return now;});
+            if(probe.phase_samples){fractional=true;break;}
+        }
+        check(fractional,"scheduled fixture needs a fractional private origin");
+        const auto scheduled=detail::schedule_transfer_transmission(value,
+            [](const transfer::Options& selected){return transfer::binary_transmitter(Bytes{0,1,0},selected);},[&]{return now;});
+        source=scheduled.transmitter.get();
+        check(source&&scheduled.phase_samples&&value.timestamp==scheduled.epoch&&
+              value.modem.stream_phase_samples==scheduled.phase_samples,
+              "CLI transfer adapter lost the private fractional origin");
+        const auto actual_origin=static_cast<double>(source->physical_output_origin()/value.modem.sample_rate)+
+            static_cast<double>(source->physical_output_origin()%value.modem.sample_rate)/value.modem.sample_rate;
+        check(std::abs(actual_origin-scheduled.playback_epoch)<1e-6,
+              "scheduled private source does not start at its playback epoch");
+        for(const auto frontier:{std::uint64_t{0},source->total_samples()/2,source->total_samples()})
+            check(playback.timing_protected_payload_end(frontier)==source->predicted_physical_valid_payload_end(frontier),
+                  "audio protection ignored the physical payload endpoint");
+    }
+    for(const bool encrypted:{false,true}) {
+        auto value=options(encrypted);value.modem.scramble=encrypted;
+        const auto ordinary=detail::transmit_timing_protection(value.modem);
+        check(ordinary.stop_seconds==static_cast<double>(modem::transmit_stop_sample_count(value.modem))/value.modem.sample_rate&&
+              ordinary.independent_cover_seconds==(encrypted?static_cast<double>(modem::suppression_sample_count(value.modem))/value.modem.sample_rate:0.),
+              "ordinary playback timing changed");
+        audio::Options playback;detail::configure_transmit_timing_protection(playback,value.modem,
+            []()->modem::StreamingTransmitter*{return nullptr;});
+        check(!playback.timing_protected_payload_end,"ordinary playback acquired a scheduled endpoint callback");
+    }
+}
 void protection_and_cancellation() {
     auto value=options(true);value.modem.dsss=true;const auto config=transfer::seeded_config(value,value.timestamp);
     check(config.scramble && config.data_key && config.spreading_seed!=config.dsss_seed,"private patterns retain purpose separation");
@@ -552,4 +602,4 @@ void transmission_generation_trace() {
           "trace-aware memory admission must allow the actual bounded TX without changing airtime or wire geometry");
 }
 }
-int main(){try{representable_pattern_ceiling();fixed_pipeline_and_local_metadata();short_text_uses_exact_dictionary_bits();keys_and_unknown_slots();content_limits_and_streaming_storage();exact_raw_masking_and_scheduling();protection_and_cancellation();transmission_generation_trace();spreading_generation_trace();fresh_hopping_schedule();std::cout<<"stream transfer passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{representable_pattern_ceiling();fixed_pipeline_and_local_metadata();short_text_uses_exact_dictionary_bits();keys_and_unknown_slots();content_limits_and_streaming_storage();exact_raw_masking_and_scheduling();scheduled_playback_adapters();protection_and_cancellation();transmission_generation_trace();spreading_generation_trace();fresh_hopping_schedule();std::cout<<"stream transfer passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

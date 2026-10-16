@@ -1211,6 +1211,10 @@ bool live_exact_source_pool(const std::filesystem::path& requested_trace={}) {
     // This isolated instrument has an explicit budget; ordinary cases retain 32 MiB.
     value.dsp_workspace_bytes=value.transfer.dsp_workspace_bytes=128U*1024U*1024U;
     value.transfer.key.emplace(Bytes(32,0x73));value.receive_keys.clear();
+    // The synthetic generator and capture share an exact clock and no device
+    // lag. Supply that evidence when cropping away the physical TX prefix.
+    value.transfer.clock_sync=clock_sync::Policy{0,0,0};
+    value.transfer.audio_timing_error_seconds=0;
     auto& c=value.transfer.modem;c.sample_rate=512;c.bandwidth_hz=16;c.carrier_hz=128;
     c.integration_seconds=8;c.spreading_factor=64;c.scramble=true;c.dsss=true;c.dsss_factor=10;
     c.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
@@ -1259,6 +1263,13 @@ bool live_exact_source_pool(const std::filesystem::path& requested_trace={}) {
     for(std::size_t at=0;at<observed;){const auto n=transmitter->read(std::span(original_capture).subspan(at));
         check(n>0,"bounded original transmitter ended before partial capture");at+=n;}
     capture.samples.assign(original_capture.begin()+skipped,original_capture.end());
+    capture.monitor_rate=c.sample_rate;
+    std::atomic<std::size_t> timing_observations{0};
+    capture.timing=[&,selected,rate=c.sample_rate](std::size_t sample) {
+        ++timing_observations;
+        return audio::TimePrediction{static_cast<long double>(selected)+static_cast<long double>(sample)/rate,
+            0,1./rate,audio::TimingQuality::bounded,0};
+    };
     const auto provided=capture.samples.size();bool accepted_zero=false;
     capture_script=&capture;
     const auto path=requested_trace.empty()?std::filesystem::current_path()/
@@ -1293,6 +1304,7 @@ bool live_exact_source_pool(const std::filesystem::path& requested_trace={}) {
             std::this_thread::sleep_for(1ms);
         }
         check(drained,"partial Live exact-source fixture did not drain its bounded capture queue");
+        check(timing_observations>0,"cropped exact-source fixture lost its physical sample timestamps");
         check(accepted_zero,"complete intended source bit never published pending zero in positive Live fixture");
         session.clear_received();session.stop();
     }

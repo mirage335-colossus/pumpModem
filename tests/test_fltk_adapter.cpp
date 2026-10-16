@@ -129,7 +129,7 @@ void menus() {
             "Discouraged native option lost its tone or became unselectable");
         styled.picked(styled.menu()+1);require(styled.value()==1,"Discouraged native option did not retain selection identity");
         styled.textcolor(theme::fltk_color(theme::discouraged_rgb(color)));
-        require(styled.menu()[0].labelcolor()==theme::fltk_color(theme::data_rgb(color)),
+        require(styled.menu()[0].labelcolor()==theme::fltk_color(theme::widget_rgb(theme::WidgetRole::data,color)),
             "Ordinary popup option inherited the discouraged selected foreground");
         Fl_Image_Surface surface(220,30);Fl_Surface_Device::push_current(&surface);
         fl_color(FL_BLACK);fl_rectf(0,0,220,30);styled.menu()[1].draw(0,0,220,30,&styled,1);

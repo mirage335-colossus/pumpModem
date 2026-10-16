@@ -62,6 +62,9 @@ static Config pattern_config(unsigned factor){
     const auto d=c.data_key->stream(datapump::StreamPurpose::Dsss,0,0,32);
     std::copy(p.begin(),p.end(),c.spreading_seed.begin());std::copy(d.begin(),d.end(),c.dsss_seed.begin());
     auto plan=std::make_shared<datapump::modem::SchedHopPlan>();plan->time_multiplier=3;plan->group_hops=1;
+    // This tests exact cache identity, not uncertain-clock slot admission.
+    // Leave enough full-gain support for the symbol and both pulse shoulders.
+    plan->clock_error_seconds=plan->peer_clock_error_seconds=plan->region_seconds=plan->audio_error_seconds=0;
     c.scheduled_hopping=plan;c.stream_epoch=1800000000;return c;
 }
 static void actual_private_patterns(unsigned factor){

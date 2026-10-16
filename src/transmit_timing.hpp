@@ -1,5 +1,7 @@
 #pragma once
 #include "datapump/execution.hpp"
+#include "datapump/audio.hpp"
+#include "datapump/transfer.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/sched_hop.hpp"
@@ -11,6 +13,7 @@
 #include <limits>
 #include <thread>
 #include <type_traits>
+#include <utility>
 
 namespace datapump::detail {
 struct ScheduledTransmission {
@@ -19,6 +22,36 @@ struct ScheduledTransmission {
     std::uint32_t phase_samples = 0;
     double playback_epoch = 0;
 };
+
+struct TransmitTimingProtection {
+    double stop_seconds=0,independent_cover_seconds=0;
+};
+inline TransmitTimingProtection transmit_timing_protection(const modem::Config& config) {
+    const auto stop=modem::transmit_stop_sample_count(config);
+    TransmitTimingProtection result;
+    result.stop_seconds=static_cast<double>(modem::scheduled_physical_span_samples(config,stop))/config.sample_rate;
+    if(modem::private_cover_enabled(config)) {
+        const auto cover=modem::suppression_sample_count(config);
+        const auto valid=static_cast<double>(modem::scheduled_physical_span_samples(config,stop-cover))/config.sample_rate;
+        result.independent_cover_seconds=modem::scheduled_bursts(config)?
+            std::max(0.,result.stop_seconds-valid):static_cast<double>(cover)/config.sample_rate;
+    }
+    return result;
+}
+template<class Source>
+void configure_transmit_timing_protection(audio::Options& output,const modem::Config& config,Source source) {
+    const auto protection=transmit_timing_protection(config);
+    output.timing_stop_duration_seconds=protection.stop_seconds;
+    output.timing_independent_cover_seconds=protection.independent_cover_seconds;
+    output.timing_protected_payload_end={};
+    if(modem::scheduled_bursts(config)) {
+        output.timing_protected_payload_end=[source=std::move(source)](std::uint64_t frontier)->std::optional<std::uint64_t> {
+            const auto* transmitter=source();
+            if(!transmitter)return std::nullopt;
+            return transmitter->predicted_physical_valid_payload_end(frontier);
+        };
+    }
+}
 
 // Call after opening the output device, before requesting its first samples.
 // The prefix precedes the whole-second payload origin. Preparation may take
@@ -115,6 +148,17 @@ ScheduledTransmission schedule_transmission(const modem::Config& config, Factory
         lead = std::max(2 * lead, ready - now + delivery_margin_seconds + .05);
     }
     throw Error("could not prepare transmission before its scheduled whole second");
+}
+
+// Bind both parts of the private origin before encoding or masking any bits.
+template<class Factory,class EpochClock>
+ScheduledTransmission schedule_transfer_transmission(transfer::Options& options,Factory make,
+        EpochClock clock,std::stop_token stop={},std::uint64_t minimum_epoch=0,
+        double delivery_margin_seconds=0) {
+    return schedule_transmission(options.modem,[&](std::uint64_t epoch,std::uint32_t phase) {
+        options.timestamp=epoch;options.modem.stream_phase_samples=phase;
+        return make(options);
+    },std::move(clock),stop,minimum_epoch,delivery_margin_seconds);
 }
 
 template<class EpochClock>

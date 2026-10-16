@@ -40,6 +40,14 @@ std::string lpi_ratio(double value) {
     return "~"+output.str()+"×";
 }
 void lpi_presentation(Inspection& result,const transfer::Options& options,std::optional<lpi::Hopping> hopping,std::stop_token stop) {
+    estimate_detail::check(stop);
+    if(!options.key || options.modem.spreading_mode!=modem::SpreadingMode::pattern) {
+        result.lpi_estimate={};result.lpi_estimate.hypothetical_encryption=true;
+        result.lpi_summary="Observer / receiver time: not applicable";
+        result.lpi_description="This estimate requires an encrypted private pattern. Public patterns and tones do not use this observer model.";
+        result.fields.push_back({"LPI scenario","Not applicable: no encrypted private pattern"});
+        return;
+    }
     result.lpi_estimate=lpi::estimate(result.estimate,options,hopping,stop);
     const auto& model=result.lpi_estimate;
     const auto reference="RX 1 bit at "+number(lpi::receiver_reference_symbol_snr_db)+" dB Es/N0 design reference";

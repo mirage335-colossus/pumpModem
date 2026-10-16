@@ -481,6 +481,16 @@ class StreamCLI(unittest.TestCase):
             '--trials','100','--bw','100','--target-snr','-36',data=b'a',timeout=10).stdout)
         self.assertEqual(preset['link'],slow['link'])
         self.assertEqual(preset['transmission']['wire_bits'],3)
+    def test_link_analysis_default_calendar_clock_policy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            key=pathlib.Path(directory)/'calendar.key'
+            self.run_pump('keygen','--output',key)
+            args=('analyze-link','--bits','0','--keyfile',key,'--sched-hop','3',
+                  '--pattern','auto-keystream','--bw','900','--target-snr','32',
+                  '--oscillator','crystal','--trials','100','--tx-dbm','3','--attenuation-db','-170')
+            default=json.loads(self.run_pump(*args,timeout=10).stdout)
+            explicit=json.loads(self.run_pump(*args,'--clock-sync','GPS_10ms-0ms_region-0ms_offset',timeout=10).stdout)
+            self.assertEqual(default['oscillator_search'],explicit['oscillator_search'])
     def test_link_analysis_rejects_invalid_and_misplaced_options(self):
         args=('analyze-link','--text','a','--tx-dbm','3','--attenuation-db','-200','--trials','10')
         for extra in (('--symbol-seconds','0'),('--symbol-seconds','-1'),('--symbol-seconds','1e308'),

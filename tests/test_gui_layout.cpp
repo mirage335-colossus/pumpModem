@@ -15,31 +15,31 @@ bool contains(Rect outer, Rect inner) {
 }
 void established_default() {
     const DesktopLayout layout;
-    check(DesktopLayout::default_width == 1380 && DesktopLayout::default_height == 1072 &&
-          DesktopLayout::min_width == 1330 && DesktopLayout::min_height == 992,
+    check(DesktopLayout::default_width == 1180 && DesktopLayout::default_height == 1072 &&
+          DesktopLayout::min_width == 1130 && DesktopLayout::min_height == 992,
           "desktop default or minimum size changed");
-    check(layout[Slot::tabs] == Rect{16, 257, 1348, 656}, "header must reserve a separate row for simulation computation estimates");
-    check(layout[Slot::page] == Rect{16, 289, 1348, 624}, "page viewport must start below every persistent header control");
-    check(layout[Slot::message] == Rect{16, 315, 985, 78}, "compact message composition size changed");
-    check(layout[Slot::paste_previous] == Rect{761, 293, 240, 20}, "previous-message button moved");
-    check(layout[Slot::binary] == Rect{1015, 315, 220, 78}, "binary editor moved");
-    check(layout[Slot::qr] == Rect{1249, 315, 115, 115}, "QR preview must span the editor and action rows");
-    check(layout[Slot::transmit_scope] == Rect{16, 452, 1348, 206}, "generation scope size changed");
-    check(layout[Slot::profile_reference] == Rect{1084, 814, 280, 91}, "profile reference must share the plot row at the right edge");
-    check(layout[Slot::signals] == Rect{16, 681, 1082, 110}, "received signals size changed");
-    check(layout[Slot::files] == Rect{1112, 681, 252, 74}, "received files size changed");
-    check(layout[Slot::waterfall] == Rect{16, 814, 253, 91}, "header must preserve usable plot height");
-    check(layout[Slot::device] == Rect{16, 937, 240, 27}, "persistent modem controls moved");
-    check(layout[Slot::bandwidth] == Rect{266, 937, 147, 27} &&
-          layout[Slot::carrier] == Rect{423, 937, 170, 27} &&
-          layout[Slot::rf_shift] == Rect{603, 937, 155, 27}, "Rate, Carrier and Shift editors lost their reserved widths");
+    check(layout[Slot::tabs] == Rect{16, 257, 1148, 656}, "header must reserve a separate row for simulation computation estimates");
+    check(layout[Slot::page] == Rect{16, 289, 1148, 624}, "page viewport must start below every persistent header control");
+    check(layout[Slot::message] == Rect{16, 315, 785, 78}, "compact message composition size changed");
+    check(layout[Slot::paste_previous] == Rect{561, 293, 240, 20}, "previous-message button moved");
+    check(layout[Slot::binary] == Rect{815, 315, 220, 78}, "binary editor moved");
+    check(layout[Slot::qr] == Rect{1049, 315, 115, 115}, "QR preview must span the editor and action rows");
+    check(layout[Slot::transmit_scope] == Rect{16, 452, 1148, 206}, "generation scope size changed");
+    check(layout[Slot::profile_reference] == Rect{884, 814, 280, 91}, "profile reference must share the plot row at the right edge");
+    check(layout[Slot::signals] == Rect{16, 681, 882, 110}, "received signals size changed");
+    check(layout[Slot::files] == Rect{912, 681, 252, 74}, "received files size changed");
+    check(layout[Slot::waterfall] == Rect{16, 814, 205, 91}, "header must preserve usable plot height");
+    check(layout[Slot::device] == Rect{16, 937, 200, 27}, "persistent modem controls moved");
+    check(layout[Slot::bandwidth] == Rect{226, 937, 127, 27} &&
+          layout[Slot::carrier] == Rect{363, 937, 150, 27} &&
+          layout[Slot::rf_shift] == Rect{523, 937, 135, 27}, "Rate, Carrier and Shift editors lost their reserved widths");
     check(layout[Slot::snr] == Rect{16, 980, 260, 27} &&
           layout[Slot::long_snr] == Rect{286, 980, 260, 27} &&
           layout[Slot::receive_snr] == Rect{556, 980, 180, 27}, "separate transmit targets lost their persistent row");
-    check(layout[Slot::doppler]==Rect{768,937,220,27}&&layout[Slot::dsp_workspace]==Rect{998,937,366,27}&&
-        layout[Slot::pattern]==Rect{746,980,140,27}&&layout[Slot::fec]==Rect{896,980,468,27},
+    check(layout[Slot::doppler]==Rect{668,937,220,27}&&layout[Slot::dsp_workspace]==Rect{898,937,266,27}&&
+        layout[Slot::pattern]==Rect{746,980,140,27}&&layout[Slot::fec]==Rect{896,980,268,27},
         "Doppler or advanced controls lost their separate usable row widths");
-    check(layout[Slot::status] == Rect{16, 1041, 1076, 24}, "persistent status must reserve the volume controls");
+    check(layout[Slot::status] == Rect{16, 1041, 876, 24}, "persistent status must reserve the volume controls");
 }
 void document_widths() {
     for(const auto viewport:{480,1000,1400}) {
@@ -91,6 +91,9 @@ void supported_sizes() {
         for (std::size_t index = 1; index < static_cast<std::size_t>(Slot::count); ++index) {
             const auto slot = static_cast<Slot>(index);
             const auto rect = layout[slot];
+            if(slot==Slot::sched_hop||slot==Slot::sched_hop_dilution||slot==Slot::sched_frequency_search) {
+                check(!persistent_slot(slot)&&rect==Rect{},"Developer scheduler must not reserve header geometry");continue;
+            }
             check(rect.w > 0 && rect.h > 0 && contains(size, rect), "desktop slot falls outside supported window");
             if (persistent_slot(slot)) {
                 const auto page = layout[Slot::page];
@@ -173,13 +176,6 @@ void supported_sizes() {
               key_action.y==key.y&&key_path.y>=key.y+key.h&&
               key_path.y+key_path.h<simulation.y-label_height&&key_path.w>=648,
               "Moving Simulation must preserve the key controls and expose more of the key path");
-        const auto hopping=layout[Slot::fhss],burst=layout[Slot::sched_hop],dilution=layout[Slot::sched_hop_dilution],expansion=layout[Slot::sched_frequency_search];
-        check(persistent_slot(Slot::sched_hop)&&persistent_slot(Slot::sched_hop_dilution)&&persistent_slot(Slot::sched_frequency_search)&&
-              hopping.y==burst.y&&burst.y==dilution.y&&dilution.y==expansion.y&&expansion.y==key.y&&
-              hopping.x+hopping.w+10==burst.x&&burst.x+burst.w+10==dilution.x&&
-              dilution.x+dilution.w+10==expansion.x&&expansion.x+expansion.w+10==key.x&&
-              layout[Slot::dsss_version].w>=150&&hopping.w>=130&&burst.w>=80&&dilution.w>=70&&expansion.w>=95,
-              "Dilution must follow Sched_Hop without overlapping FHSS, key or frequency controls");
         const auto message = layout[Slot::message], binary = layout[Slot::binary], qr = layout[Slot::qr];
         check(message.y == binary.y && binary.y == qr.y &&
               message.h == binary.h && qr.h >= 87 && qr.w == qr.h &&
@@ -308,6 +304,9 @@ void hidden_scope_reclaims_space() {
         for(std::size_t index=1;index<static_cast<std::size_t>(Slot::count);++index) {
             const auto slot=static_cast<Slot>(index);
             const auto rect=hidden[slot];
+            if(slot==Slot::sched_hop||slot==Slot::sched_hop_dilution||slot==Slot::sched_frequency_search) {
+                check(!persistent_slot(slot)&&rect==Rect{},"Hidden scope reserved scheduler header geometry");continue;
+            }
             const bool collapsed=slot==Slot::transmit_scope||slot==Slot::transmit_scope_caption;
             check(rect.w>0&&(collapsed?rect.h==0:rect.h>0)&&contains(size,rect),
                   "Hiding the scope left reserved height, invalid geometry or an offscreen control");

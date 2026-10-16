@@ -31,12 +31,12 @@ private scrambling for every keyed non-tone transmission, including callers
 whose original configuration left Scrambler off. Data masking by itself would
 not make a public acquisition pattern private.
 
-With encryption disabled, the estimate still shows the hypothetical encrypted
-case for experimentation. The GUI displays **Warning: encryption off;
-hypothetical only**, and CLI results mark `hypothetical_encryption: true`.
-The warning remains when the weak-signal or numerical limits prevent a numeric
-result. Actual public patterns and tones can be easier to detect; these figures
-do not describe their detection performance.
+The GUI only shows numerical observer comparisons for an encrypted private
+pattern. With encryption disabled or a tone selected, it shows **Observer /
+receiver time: not applicable** and omits the observer graph and numerical fields.
+The standalone API and CLI retain the explicit hypothetical calculation for
+experimentation, marked `hypothetical_encryption: true`. Actual public patterns
+and tones can be easier to detect; those figures do not describe them.
 
 This hypothetical calculation keeps the current sample, chip and symbol timing
 and uses the same normalized one-symbol reference. For a tone, it uses the
@@ -235,7 +235,7 @@ These examples use automatic shaped patterns and the normalized 18 dB
 one-symbol reference at both listeners. The TX target selects symbol geometry;
 reference C/N0 is then calculated from the actual sampled duration. They give
 the same numbers with simulation enabled or disabled, regardless of its preset.
-With no key, the same numbers carry the hypothetical-encryption warning.
+In the API and CLI, no-key examples carry the hypothetical-encryption flag; the GUI does not display those numbers.
 
 | Nominal Rate | TX target, dB-Hz | Reference C/N0, dB-Hz | Assumed B | Actual seconds/symbol | Observer : receiver | Additional bit durations |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -249,8 +249,8 @@ including rounding for the third row. These calculations omit no symbol
 rounding and do not assert that the intended receiver can sustain the required
 coherence or acquire the waveform.
 
-The GUI initially selects no key, so its default estimate is explicitly
-hypothetical. A short profile can put the normalized in-band SNR outside the
+The GUI initially selects no key, so its observer estimate is initially not
+applicable. A short profile can put the normalized in-band SNR outside the
 weak-signal model, with or without a key. Changing simulated attenuation cannot
 make that profile eligible: the relative reference does not use the channel's
 power. A longer symbol or wider observation band can lower its normalized SNR.

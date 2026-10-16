@@ -78,7 +78,7 @@ void option_presentation() {
     const auto snapshot=bridge.snapshot(1380,1072);
     check(snapshot.find("\"label\":\"Generic experiment\",\"enabled\":true,\"tone\":5,\"foreground\":\"rgb(156,100,94)\"")!=std::string::npos,
         "Web option styling lost its resolved foreground or selectability");
-    check(snapshot.find("\"label\":\"Ordinary\",\"enabled\":true,\"tone\":0,\"foreground\":\"rgb(144,192,184)\"")!=std::string::npos,
+    check(snapshot.find("\"label\":\"Ordinary\",\"enabled\":true,\"tone\":0,\"foreground\":\"\"")!=std::string::npos,
         "Ordinary web option inherited the discouraged selected foreground");
     state=saved;app.close();
 }

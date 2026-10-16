@@ -246,6 +246,12 @@ public:
             [](std::size_t index,const Pair& p){return index<p.lane_first+p.lane_count;});
         require(it!=pairs_.end(),"implicit catalog pair index is invalid");
         const auto p=static_cast<std::size_t>(it-pairs_.begin());const auto local=id-it->lane_first;
+        if(!qualified_) {
+            // Every origin retains every family in the unqualified lattice.
+            // Its original origin-major/family-minor order is rectangular.
+            const auto family=checked_add(it->family_first,local%it->family_count);
+            return make_lane(id,p,local/it->family_count,families_[family],cursor);
+        }
         const auto origin_end=first_true(it->origins,[&](std::size_t i){return prefix(*it,i+1)>local;});
         require(origin_end<it->origins,"implicit catalog origin rank is invalid");
         auto residual=local-prefix(*it,origin_end);
@@ -268,6 +274,34 @@ public:
         }
         return std::nullopt;
     }
+    // Logical neighbors can belong to different phases. Timing continuation
+    // needs the nearest retained arrival origin of this exact pair and phase,
+    // including across holes in a qualified start window.
+    std::optional<std::size_t> adjacent_origin(const Lane& lane,bool later)const {
+        require(lane.pair<pairs_.size(),"implicit catalog neighbor pair out of range");
+        const auto& pair=pairs_[lane.pair];
+        require(lane.origin_index<pair.origins && lane.phase_lower==lane.phase_upper,
+            "implicit catalog neighbor lane is invalid");
+        const auto first=families_.begin()+pair.family_first,last=first+pair.family_count;
+        const auto family=std::lower_bound(first,last,lane.phase_lower,
+            [](const Family& f,std::uint64_t phase){return f.phase<phase;});
+        require(family!=last && family->phase==lane.phase_lower,"implicit catalog neighbor phase is absent");
+        const auto begin=ranges_.begin()+family->range_first,end=begin+family->range_count;
+        auto range=std::upper_bound(begin,end,lane.origin_index,
+            [](std::size_t origin,const OriginRange& r){return origin<r.end;});
+        require(range!=end && range->first<=lane.origin_index,"implicit catalog neighbor origin is excluded");
+        std::size_t origin;
+        if(later) {
+            if(lane.origin_index+1<range->end)origin=lane.origin_index+1;
+            else {if(++range==end)return std::nullopt;origin=range->first;}
+        } else {
+            if(lane.origin_index>range->first)origin=lane.origin_index-1;
+            else {if(range==begin)return std::nullopt;origin=(--range)->end-1;}
+        }
+        const auto id=rank(lane.pair,origin,lane.phase_lower);
+        require(id.has_value(),"implicit catalog retained neighbor has no rank");
+        return id;
+    }
     // Family traversal already knows the pair and phase. Recover its original
     // logical ordinal directly rather than rank() followed by a second binary
     // inversion through the complete lattice. Qualified holes remain checked.
@@ -277,6 +311,11 @@ public:
         const auto& family=families_[family_index];const auto& pair=pairs_[family.pair];
         require(origin_index<pair.origins && contains(family,origin_index),
             "implicit catalog family contains an excluded origin");
+        if(!qualified_) {
+            const auto ordinal=checked_add(checked_product(origin_index,pair.family_count),
+                family_index-pair.family_first);
+            return make_lane(checked_add(pair.lane_first,ordinal),family.pair,origin_index,family,cursor);
+        }
         auto id=checked_add(pair.lane_first,prefix(pair,origin_index));
         for(auto f=pair.family_first;f<family_index;++f)
             if(contains(families_[f],origin_index))id=checked_add(id,1);
@@ -405,6 +444,7 @@ private:
         return next;
     }
     std::size_t prefix(const Pair& pair,std::size_t origins)const {
+        if(!qualified_)return checked_product(std::min(origins,pair.origins),pair.family_count);
         std::size_t result=0;
         for(std::size_t f=pair.family_first;f<pair.family_first+pair.family_count;++f) {
             const auto& family=families_[f];

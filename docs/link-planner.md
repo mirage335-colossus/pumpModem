@@ -272,7 +272,9 @@ filtering, amplitude limiting or burst gating, and the signal adds energy.
 The ratio assumes a noise-like private waveform from the outset; it does not
 inspect the generated samples or test how random they are. Its increase with
 bandwidth and bit duration is not evidence of a new statistical regime at 8×.
-With encryption off, it continues to describe a hypothetical private pattern.
+Without an encrypted private pattern, the GUI reports this comparison as not
+applicable and omits its numerical estimate and graph. The standalone LPI API
+and CLI retain their explicitly labeled hypothetical private-pattern model.
 
 Rate, carrier, filtering, level and the listener also affect sound quality;
 actual tone modes still transmit tones. A noise-like sound does not establish

@@ -9,7 +9,7 @@ namespace datapump::modem {
 struct PatternCorrelatorTimingTestAccess {
     using State=PatternCorrelator::Impl;
     static void check(bool ok,const char* why) {if(!ok)throw Error(why);}
-    static PatternCorrelator make(std::size_t limit,std::size_t chunk) {
+    static PatternCorrelator make(std::size_t limit,std::size_t chunk,bool all_phases=false) {
         Config c;c.sample_rate=64;c.carrier_hz=16;c.bandwidth_hz=3.2;c.integration_seconds=6;
         c.spreading_factor=64;c.scramble=true;c.dsss=true;c.dsss_factor=10;
         c.outer_dsss_version=OuterDsssVersion::interleaved_v2;c.data_key.emplace(Bytes(32,0x73));
@@ -19,17 +19,20 @@ struct PatternCorrelatorTimingTestAccess {
         plan->ramp_seconds=.01;c.scheduled_hopping=plan;c.stream_epoch=8312;
         PatternSearch search;search.start_offset_seconds=.125;search.start_uncertainty_seconds=2./64;
         search.frequency_offsets_hz={0};search.clock_errors_ppm={0};search.worker_threads=1;
+        search.search_stream_phases=all_phases;
         search.bit_limit=limit;search.chunk_bits=chunk;search.track_limit=8;search.candidate_limit=64;
         PatternCorrelator rx(c,search,8*1024*1024);
         auto& s=*rx.impl_;check(s.timing_enabled && !s.scheduled_calendar() && s.code.symbol_samples()==384,
             "controlled test lost six-second split-symbol geometry");
-        check(s.hypotheses.size()>=2,"controlled test lacks adjacent timing lanes");
-        check(s.hypotheses[0].origin<s.hypotheses[1].origin &&
-              s.hypotheses[0].frequency==s.hypotheses[1].frequency &&
-              s.hypotheses[0].rate==s.hypotheses[1].rate &&
-              s.hypotheses[0].phase_lower==s.hypotheses[1].phase_lower &&
-              s.hypotheses[0].phase_upper==s.hypotheses[1].phase_upper,
-              "controlled guide/owner must have identical private geometry");
+        if(!all_phases) {
+            check(s.hypotheses.size()>=2,"controlled test lacks adjacent timing lanes");
+            check(s.hypotheses[0].origin<s.hypotheses[1].origin &&
+                  s.hypotheses[0].frequency==s.hypotheses[1].frequency &&
+                  s.hypotheses[0].rate==s.hypotheses[1].rate &&
+                  s.hypotheses[0].phase_lower==s.hypotheses[1].phase_lower &&
+                  s.hypotheses[0].phase_upper==s.hypotheses[1].phase_upper,
+                  "controlled guide/owner must have identical private geometry");
+        }
         return rx;
     }
     static std::uint64_t end(State& s,std::size_t lane,std::uint64_t ordinal) {
@@ -181,7 +184,89 @@ struct PatternCorrelatorTimingTestAccess {
         bool threw=false;try{accepted(o,0,2,0,100);}catch(const Error&){threw=true;}
         check(threw && !pending.terminals,"retention quota exhaustion was silent or became completion");
     }
-    static void run() {earlier_guide_suffix();terminal_waits_for_all_promotions();impossible_handoff_reclaims_suffix();mismatching_prefix_never_lends_suffix();unusable_best_guide_does_not_hide_valid_neighbor();minimum_budget_and_explicit_exhaustion();}
+    struct LazySelection {
+        std::optional<std::string> previous;
+        explicit LazySelection(bool enabled) {
+            if(const auto* value=std::getenv("DATAPUMP_SCHED_LAZY_ACQUISITION"))previous=value;
+            set(enabled?"1":"0");
+        }
+        static void set(const char* value) {
+#if defined(_WIN32)
+            _putenv_s("DATAPUMP_SCHED_LAZY_ACQUISITION",value?value:"");
+#else
+            if(value)setenv("DATAPUMP_SCHED_LAZY_ACQUISITION",value,1);
+            else unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
+#endif
+        }
+        ~LazySelection(){set(previous?previous->c_str():nullptr);}
+    };
+    static void same_phase_timing_neighbors() {
+        for(const bool lazy:{false,true}) {
+            LazySelection selection(lazy);
+            auto rx=make(2,2,true);auto& s=*rx.impl_;
+            check(bool(s.lazy_state())==lazy,"timing-neighbor fixture did not select requested storage");
+            std::vector<std::size_t> matching;bool other_phase=false;
+            if(lazy) {
+                auto& catalog=*s.lazy_state()->catalog;auto cursor=catalog.make_cursor();
+                const auto first=catalog.describe(0,cursor);
+                for(std::size_t id=0;id<catalog.size();++id) {
+                    const auto lane=catalog.describe(id,cursor);
+                    if(lane.pair==first.pair && lane.phase_lower==first.phase_lower)matching.push_back(id);
+                    if(lane.pair==first.pair && lane.phase_lower!=first.phase_lower)other_phase=true;
+                }
+            } else {
+                const auto& first=s.hypotheses[0];
+                for(std::size_t id=0;id<s.hypotheses.size();++id) {
+                    const auto& lane=s.hypotheses[id];
+                    if(lane.tone_bank_base==first.tone_bank_base && lane.phase_lower==first.phase_lower &&
+                       lane.phase_upper==first.phase_upper && lane.frequency==first.frequency && lane.rate==first.rate)matching.push_back(id);
+                    if(lane.tone_bank_base==first.tone_bank_base && lane.phase_lower!=first.phase_lower)other_phase=true;
+                }
+            }
+            check(matching.size()>=3 && other_phase,"timing-neighbor fixture lost its multiphase origin lattice");
+            const auto owner=lazy?s.lazy_ensure_slot(matching[1],0):matching[1];
+            auto& h=s.hypotheses[owner];h.admitted=true;h.burst.stream_first_symbol=0;
+            h.committed_end=end(s,owner,0);
+            PatternEvidence evidence;evidence.end_sample=h.committed_end;evidence.score=80;
+            evidence.stream_phase_samples=h.phase_lower;
+            s.timing_decision(h,owner,evidence,0);
+            const auto& state=*s.timing_state(owner);
+            for(unsigned side=0;side<2;++side) {
+                const auto neighbor=state.relations[side].neighbor;
+                check(neighbor!=std::numeric_limits<std::size_t>::max() &&
+                    s.logical_id(neighbor)==matching[side?2:0],
+                    "timing relation selected another phase instead of neighboring origin");
+            }
+        }
+    }
+    static void incompatible_guide_cannot_delay_absence() {
+        for(unsigned reason=0;reason<2;++reason) {
+            LazySelection selection(false);
+            auto rx=make(2,2);auto& s=*rx.impl_;auto got=prime(rx);
+            auto& owner=*s.timing_state(1);auto& guide=*s.timing_state(0);
+            owner.relations[0]={0,1,std::numeric_limits<std::uint64_t>::max(),80,200,false};
+            const auto address=symbol_stream_address(s.config,s.config.stream_epoch,s.hypotheses[1].phase_lower,1);
+            guide.decisions[1]={1,address.epoch,address.ordinal,100,true,true,1};
+            if(reason==0) {++s.hypotheses[0].phase_lower;++s.hypotheses[0].phase_upper;}
+            else s.clear(s.hypotheses[0]);
+            failed(s,1,1);s.settle_timing();got.drain(rx);
+            check(got.bits==Bytes({0}) && got.terminals==1,
+                "incompatible or retired guide suppressed fully scored physical absence");
+            rx.finish();got.drain(rx);check(got.terminals==1,"finished input duplicated physical completion");
+        }
+    }
+    static void compatible_guide_retains_its_absence_boundary() {
+        LazySelection selection(false);
+        auto rx=make(2,2);auto& s=*rx.impl_;auto got=prime(rx);
+        accepted(s,2,0,0,100);
+        s.timing_state(1)->relations[1]={2,1,std::numeric_limits<std::uint64_t>::max(),80,100,false};
+        failed(s,1,1);s.settle_timing();got.drain(rx);
+        check(got.bits==Bytes({0}) && !got.terminals,"compatible guide lost its own unscored absence boundary");
+        failed(s,2,1);s.settle_timing();got.drain(rx);
+        check(got.bits==Bytes({0}) && got.terminals==1,"compatible guide did not finish after its full absence");
+        rx.finish();got.drain(rx);check(got.terminals==1,"compatible guide duplicated physical completion at EOF");
+    }
+    static void run() {same_phase_timing_neighbors();incompatible_guide_cannot_delay_absence();compatible_guide_retains_its_absence_boundary();earlier_guide_suffix();terminal_waits_for_all_promotions();impossible_handoff_reclaims_suffix();mismatching_prefix_never_lends_suffix();unusable_best_guide_does_not_hide_valid_neighbor();minimum_budget_and_explicit_exhaustion();}
 };
 }
 int main() {

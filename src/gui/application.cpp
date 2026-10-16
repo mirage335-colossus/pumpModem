@@ -385,7 +385,8 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
     if(!declaration.surface&&!declaration.persistent&&!page_visible(declaration.page))view.visible=false;
     if(!declaration.surface&&(declaration.field==ui::Field::planner_target||declaration.field==ui::Field::planner_command||
                              declaration.field==ui::Field::search_arithmetic||declaration.field==ui::Field::receiver_strategy||
-                             declaration.field==ui::Field::receiver_cpu_budget))
+                             declaration.field==ui::Field::receiver_cpu_budget||declaration.field==ui::Field::sched_hop||
+                             declaration.field==ui::Field::sched_hop_dilution||declaration.field==ui::Field::sched_frequency_search))
         view.visible=view.visible&&page()==ui::Page::planner;
     if(declaration.surface) {
         view.visible=view.visible&&impl_->overlay&&impl_->overlay->generation==declaration.surface;
@@ -592,6 +593,12 @@ std::shared_ptr<const ui::DocumentNode> Application::document(ui::Page page,int 
                 // while navigation always belongs to the current inputs.
                 auto current_actions=std::make_shared<planner::Model>(*cached.previous);
                 current_actions->calculating=true;
+                if(!model->inputs.options.key ||
+                   model->inputs.options.modem.spreading_mode!=modem::SpreadingMode::pattern) {
+                    current_actions->observer_hypothetical=true;
+                    current_actions->observer_available=false;current_actions->observer_ratio=0;
+                    for(auto& point:current_actions->points){point.observer_available=false;point.observer_ratio=0;}
+                }
                 current_actions->stronger_fit_target=model->stronger_fit_target;
                 current_actions->weaker_fit_target=model->weaker_fit_target;
                 displayed=std::move(current_actions);

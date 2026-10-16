@@ -4,6 +4,90 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Sched_Hop regression review — local unreleased candidate, 16 October 2026
+
+The [complete review](sched-hop-regression-review.md) covers all eleven commits
+from `52ace0a` through `2a0f3dd142c97909f206145cd4f4eecb1cc72dcf`, followed by
+local corrections. It preserves earlier wire, timing, capture and pending-bit
+fixes and keeps backend-specific behavior inside the GUI adapters. Corrections
+cover FFT/workspace estimates, weak amplitude-chain admission, lazy timing
+lookup, scheduled same-phase continuation, CLI physical/calendar timing,
+observer applicability, layout and native/web choice presentation.
+
+The final 787-file runtime/test/build inventory is `final-source-inputs-v4.json`,
+SHA-256 `ea36e4aa19b9a159b867927b7150f8cf5f3283827189807f1a7938857c818ca4`.
+All following final runs use that exact inventory. Logs, source/binary hashes,
+comparison captures and earlier diagnostic outcomes are retained locally under
+`.agent-work/artifacts/sched-regression-review-20261016/`.
+
+| Final scope | Result |
+| --- | --- |
+| Host estimator, simulation and Live-planning focus | 3/3 pass |
+| Host complementary general tests | 156/157 pass in 640.93 s; inherited ALSA clipping failure |
+| Prepared Linux SDK contract | 187/187 pass: serial Live 2/2, remaining contract 185/185 |
+| Complete SDK calibration | Pass, all sections and fixed seeds, 815.16 s |
+| Exhaustive SDK serial/parallel preparation | Pass, 1,651.46 s |
+| SDK scheduled GUI cold start | Pass, 0.42 s |
+| Final general-test inventory across host and SDK | 343/344 pass; no omitted, extra or overlapping case names |
+| Rev native | Adapter, platform and both coordinate scales pass (4/5); inherited workflow failure |
+| SDK FLTK native | Adapter/document pass (2/3); inherited workflow failure |
+| Host FLTK native | Adapter/document pass (2/3); inherited workflow failure |
+| Both backend TGZ/ZIP pairs | Standard inventory, isolated commands, frontends and ABI checks pass |
+| Additional GUI checks of all four extracted archives | Same inherited workflow failure; separate ABI audits pass |
+| Rebuilt root GUI | Self-check and help pass; original executable backed up |
+
+SDK Live tests took 52.58 and 152.63 seconds; the remaining contract run took
+2,499.13 seconds. The host and SDK case-name sets together equal all 344 cases
+of the original general suite, with no gaps or duplicate counting. Native
+adapter conformance took 110.87 seconds for Rev, 87.82 seconds for SDK FLTK and
+89.01 seconds for host FLTK. Both native palettes, disabled precedence,
+scrolling, popup callbacks and shared service behavior retain their assertions.
+The packaged ELF audits report a highest glibc requirement of 2.36.
+
+Identical-budget before/after model comparisons cover the requested defaults,
+keyed −8 dB launch and four named examples. The final build reproduces all
+1,664 broad-model rows and 40 startup-model rows byte-for-byte. Default 32/55 dB,
+weak-signal and sub-9 kHz profiles retain their feasibility; EME improves.
+The keyed −8 dB preview was already unsupported, and the old importer silently
+changed its target. Spread's higher broad-fallback cost accounts for previously
+omitted UTC steering candidates; the detailed review distinguishes that basis
+from the current GUI's narrower startup-calendar estimate.
+
+Negative-before/positive-after regressions cover FFT sizing, shared workspace
+admission, weak amplitude-chain publication, scheduled timing neighbors and
+retired/incompatible guides. The legacy coupled-clock test also checks actual
+FFT input fences at samples 210,768 and 315,632. Weak-chain reception retains
+its evidence thresholds, rejects 16 wrong roots and noise, publishes the pending
+prefix, and waits for fully scored physical absence. The catalog oracle retains
+its original enumeration, including the 1,179,702-lane case. Fixture corrections
+preserve the received samples and assertions; private native warning checks
+create their key through the shared GUI service API after checking public N/A.
+
+The one general failure is the independently pre-Sched ALSA clipping assertion:
+peak 1.00944, 63 clipped samples and distortion-energy fraction 2.47619e-8.
+The exact unmodified `52ace0a` GUI also fails its first text replay with
+`FAIL: receiver search limited | Simulation replay 0%`. Before/current
+diagnostics confirm no TX failure or input loss. The first current coverage
+loss is Live's existing 16-entry presentation limit, not a modem candidate
+quota. The warning and failing smoke assertion are preserved. Final workflow
+runs fail at that same phase after 62.29 seconds (Rev), 48.46 seconds (SDK FLTK)
+and 47.57 seconds (host FLTK). The
+[review](sched-hop-regression-review.md#inherited-native-coverage-failure)
+explains the separate pending-identity lifetime repair this requires.
+
+Earlier evidence remains distinct: an initial complete host run passed 342/344
+in 2,847.76 seconds, including calibration in 908.04 seconds. Its generic
+1,500-second preparation timeout was followed by a complete same-binary pass
+in 1,988.05 seconds using the maintained 3,600-second allowance. An intermediate
+SDK run was stopped when final review found the legacy coupled-clock defect;
+its partial results are not counted as a pass. The final SDK run above completed
+every case. No assertion, physical deadline or seed set was weakened.
+
+The local root executable is rebuilt with SHA-256
+`055bf7b158666acf2722c86b83264c389e0843dfe6967306ee22a98df7272095`.
+The two inherited failures prevent full native qualification. This work does
+not certify a release or claim Windows, macOS or physical-device coverage.
+
 ## Forward presentation repair and larger preparation — local candidate, 12 October 2026
 
 This follow-up addresses the recorded failure of the preceding bounded-xrun

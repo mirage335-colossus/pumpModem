@@ -1864,7 +1864,9 @@ struct PatternCorrelator::Impl {
         }
         // A symbol at least six seconds long cannot form an unconfirmed
         // multi-symbol acquisition chain before physical absence expires it.
-        guard_chains=config.spreading_mode==SpreadingMode::pattern && (c.scramble || c.dsss) &&
+        // Amplitude evidence has its own joint intensity test; it cannot
+        // satisfy the coherent chip-evidence guard used by short symbols.
+        guard_chains=!options.amplitude_only && config.spreading_mode==SpreadingMode::pattern && (c.scramble || c.dsss) &&
             static_cast<long double>(code.symbol_samples())/highest_rate<pattern_absence_seconds*c.sample_rate;
         const bool chip_guard=guard_chains || (scheduled_map() && !options.amplitude_only);
         if(chip_guard)fixed+=total*((alternate_groups+1)*sizeof(decltype(chip_evidence)::value_type)+sizeof(double)+
@@ -2569,19 +2571,26 @@ struct PatternCorrelator::Impl {
         if(first==end)return;
         if(lazy_state()->shared_capture)lazy_state()->capture_fences->visit(first,end-first,[&](const auto& fence){
             consume(LazyCaptureFence{fence.original_first,fence.original_count});});
-        else for(const auto& b:lazy_state()->capture){if(b.first+b.pcm.size()<=first)continue;
-            if(b.first>=end)break;consume(LazyCaptureFence{b.first,b.pcm.size()});}
+        else {
+            const auto& capture=lazy_state()->capture;
+            // Blocks are appended at capture_end and retired only from the
+            // front. Replaying each fence must not rescan its entire prefix.
+            auto it=std::lower_bound(capture.begin(),capture.end(),first,
+                [](const auto& block,std::uint64_t sample){return block.first+block.pcm.size()<=sample;});
+            for(;it!=capture.end() && it->first<end;++it)
+                consume(LazyCaptureFence{it->first,it->pcm.size()});
+        }
     }
     template<class Consumer> void lazy_visit_blocks(std::uint64_t first,std::uint64_t end,Consumer consume,bool energy_needed=true) const {
         require(first<=end && first>=lazy_history_first() && end<=lazy_state()->capture_end,
             "implicit original block interval is outside retained capture");
         if(first==end)return;
         if(!lazy_state()->shared_capture) {
-            for(const auto& b:lazy_state()->capture) {
-                if(b.first+b.pcm.size()<=first)continue;
-                if(b.first>=end)break;
-                consume(LazyBlockView{b.first,b.pcm,b.energy,b.maximum});
-            }
+            const auto& capture=lazy_state()->capture;
+            auto it=std::lower_bound(capture.begin(),capture.end(),first,
+                [](const auto& block,std::uint64_t sample){return block.first+block.pcm.size()<=sample;});
+            for(;it!=capture.end() && it->first<end;++it)
+                consume(LazyBlockView{it->first,it->pcm,it->energy,it->maximum});
             return;
         }
         std::array<float,scheduled_block_size> pcm;
@@ -7929,10 +7938,10 @@ struct PatternCorrelator::Impl {
     }
     TimingState* timing_state(std::size_t hypothesis) {
         if(!timing)return nullptr;
-        if(lazy_state()){const auto it=std::find_if(timing->begin(),timing->end(),[&](const auto& e){return e.hypothesis==hypothesis;});
-            return it==timing->end()?nullptr:&it->state;}
-        const auto it=std::lower_bound(timing->begin(),timing->end(),hypothesis,
-            [](const TimingEntry& entry,std::size_t index){return entry.hypothesis<index;});
+        // Subscription order is the stable logical ID, including when lazy
+        // slots are recycled. A subscribed slot cannot be released.
+        const auto it=std::lower_bound(timing->begin(),timing->end(),logical_id(hypothesis),
+            [&](const TimingEntry& entry,std::size_t index){return logical_id(entry.hypothesis)<index;});
         return it!=timing->end() && it->hypothesis==hypothesis?&it->state:nullptr;
     }
     void subscribe_timing(std::size_t hypothesis) {
@@ -7952,18 +7961,41 @@ struct PatternCorrelator::Impl {
             [&](const TimingEntry& entry,std::size_t index){return logical_id(entry.hypothesis)<index;});
         timing->insert(it,TimingEntry{hypothesis,{}});
     }
+    std::optional<std::size_t> timing_neighbor(std::size_t hypothesis,bool later) {
+        const auto id=logical_id(hypothesis);
+        if(scheduled_map() && !options.amplitude_only) {
+            if(lazy_state()) {
+                const auto lane=lazy_state()->catalog->describe(id,*lazy_state()->cursor);
+                return lazy_state()->catalog->adjacent_origin(lane,later);
+            }
+            // Dense scheduled order is pair, origin, phase. Walk within this
+            // pair to the nearest retained origin with the same private phase.
+            const auto& h=hypotheses[hypothesis];auto neighbor=hypothesis;
+            for(;;) {
+                if((!later && !neighbor) || (later && neighbor+1==hypotheses.size()))return std::nullopt;
+                neighbor=later?neighbor+1:neighbor-1;
+                const auto& other=hypotheses[neighbor];
+                if(other.tone_bank_base!=h.tone_bank_base)return std::nullopt;
+                if(other.frequency==h.frequency && other.rate==h.rate &&
+                   other.phase_lower==h.phase_lower && other.phase_upper==h.phase_upper)return neighbor;
+            }
+        }
+        if((!later && !id) || (later && id+1==logical_count()))return std::nullopt;
+        return later?id+1:id-1;
+    }
     void timing_decision(Hypothesis& h,std::size_t hypothesis,const PatternEvidence& evidence,std::size_t selected) {
         if(!timing_enabled)return;
         if(h.admitted) {
             subscribe_timing(hypothesis);
             for(unsigned side=0;side<2;++side) {
                 const auto id=logical_id(hypothesis);
-                if((!side && !id) || (side && id+1==logical_count()))continue;
-                const auto neighbor_id=side?id+1:id-1;
+                const auto adjacent=timing_neighbor(hypothesis,side!=0);if(!adjacent)continue;
+                const auto neighbor_id=*adjacent;
                 auto j=neighbor_id;
                 if(lazy_state()){
                     const auto descriptor=lazy_state()->catalog->describe(neighbor_id,*lazy_state()->cursor);
                     if(h.frequency!=descriptor.frequency || h.rate!=descriptor.rate ||
+                       h.phase_lower!=descriptor.phase_lower || h.phase_upper!=descriptor.phase_upper ||
                        std::abs(h.origin-descriptor.origin)>=static_cast<long double>(code.symbol_samples())/h.rate)continue;
                     // An earlier unsubscribed lane has already had its original
                     // completion opportunity. Materialize its current index,
@@ -7973,6 +8005,8 @@ struct PatternCorrelator::Impl {
                 }
                 const auto& neighbor=hypotheses[j];
                 if(h.frequency==neighbor.frequency && h.rate==neighbor.rate &&
+                    (!scheduled_map() || options.amplitude_only ||
+                        (h.phase_lower==neighbor.phase_lower && h.phase_upper==neighbor.phase_upper)) &&
                     std::abs(h.origin-neighbor.origin)<static_cast<long double>(code.symbol_samples())/h.rate) {
                     subscribe_timing(j);timing_state(hypothesis)->relations[side].neighbor=j;
                 }
@@ -8010,19 +8044,22 @@ struct PatternCorrelator::Impl {
             static_cast<std::uint8_t>(evidence.bit)};
         if(accepted){state.last_accepted=h.index;state.pending_terminal=false;}
     }
+    bool compatible_timing_guide(const Hypothesis& owner,const TimingState& state,const TimingRelation& proof) {
+        if(proof.invalid || proof.neighbor==std::numeric_limits<std::size_t>::max())return false;
+        const auto& guide=hypotheses[proof.neighbor];
+        const auto* guide_state=timing_state(proof.neighbor);
+        return guide.admitted && guide_state && guide_state->tracking &&
+            guide_state->first==state.first && guide.burst.stream_first_symbol==state.first &&
+            guide.frequency==owner.frequency && guide.rate==owner.rate &&
+            guide.phase_lower==owner.phase_lower && guide.phase_upper==owner.phase_upper;
+    }
     bool continue_timing(Hypothesis& owner,const TimingState& state,const TimingRelation& proof) {
         // Continuation is a private, same-clock proof. Never replace an emitted
         // bit, infer an old prefix from a matching suffix, or cross a key/phase
         // address. The relation has checked every full admitted prefix decision.
-        if(!scheduled_map() || options.amplitude_only || proof.invalid ||
-           proof.neighbor==std::numeric_limits<std::size_t>::max() ||
+        if(!scheduled_map() || options.amplitude_only || !compatible_timing_guide(owner,state,proof) ||
            proof.next<=state.last_accepted || proof.guide_score<=proof.owner_score)return false;
         auto& guide=hypotheses[proof.neighbor];
-        const auto* guide_state=timing_state(proof.neighbor);
-        if(!guide.admitted || !guide_state || !guide_state->tracking ||
-           guide_state->first!=state.first || guide.burst.stream_first_symbol!=state.first ||
-           guide.frequency!=owner.frequency || guide.rate!=owner.rate ||
-           guide.phase_lower!=owner.phase_lower || guide.phase_upper!=owner.phase_upper)return false;
         for(auto& stream:emissions) {
             if(stream.ended || stream.published_unknown || stream.owner!=&owner || stream.first_symbol!=state.first ||
                stream.last_symbol>proof.next || stream.last_symbol>proof.first_unaccepted ||
@@ -8112,12 +8149,14 @@ struct PatternCorrelator::Impl {
             bool has_guide=false;
             for(const auto& relation:state.relations)
                 has_guide=has_guide || (!relation.invalid && relation.neighbor!=std::numeric_limits<std::size_t>::max() &&
-                    relation.next>state.last_accepted && relation.guide_score>relation.owner_score);
+                    relation.next>state.last_accepted && relation.guide_score>relation.owner_score &&
+                    (!scheduled_map() || options.amplitude_only || compatible_timing_guide(owner,state,relation)));
             if(has_guide) {
                 bool ready=true,accepted=false;
                 for(const auto& relation:state.relations) {
                     if(relation.invalid || relation.neighbor==std::numeric_limits<std::size_t>::max() ||
-                        relation.next<=state.last_accepted || relation.guide_score<=relation.owner_score)continue;
+                        relation.next<=state.last_accepted || relation.guide_score<=relation.owner_score ||
+                        (scheduled_map() && !options.amplitude_only && !compatible_timing_guide(owner,state,relation)))continue;
                     const auto& proof=timing_state(relation.neighbor)->decisions[state.terminal_index%2];
                     const auto& own=state.decisions[state.terminal_index%2];
                     if(proof.index!=state.terminal_index || !proof.full || own.index!=state.terminal_index ||

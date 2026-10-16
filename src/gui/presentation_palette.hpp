@@ -18,6 +18,13 @@ inline constexpr Rgb text_rgb(ui::TextTone tone, bool use_color, bool enabled=tr
     }
     return text_rgb(use_color);
 }
+// Normal choice text keeps the native data role; explicit semantic tones remain
+// shared with document/record presentation. Disabled state takes precedence.
+inline constexpr Rgb choice_text_rgb(ui::TextTone tone, bool use_color, bool enabled=true) {
+    if(!enabled)return widget_rgb(WidgetRole::disabled_text,use_color);
+    if(tone==ui::TextTone::normal)return widget_rgb(WidgetRole::data,use_color);
+    return text_rgb(tone,use_color);
+}
 inline constexpr Rgb text_rgb(ui::DocumentTone tone, bool use_color, bool enabled=true) {
     if(!enabled)return widget_rgb(WidgetRole::disabled_text,use_color);
     switch(tone) {

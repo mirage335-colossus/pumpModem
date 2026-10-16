@@ -11,6 +11,7 @@
 #include "pattern_differential.hpp"
 #include "pattern_fft_batch.hpp"
 #include "pattern_start_geometry.hpp"
+#include "pattern_observation_layout.hpp"
 #include "search_parallel.hpp"
 #include "shared_scheduled_capture.hpp"
 #include <array>
@@ -186,7 +187,7 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
         if(implicit.requested && !implicit.supported)scheduled_complex_failure=implicit.reason;
     }
     auto hypotheses=search.hypotheses;
-    bool limited=false;
+    bool limited=false,legacy_coupled_nominal_bank=false;
     if(!hypotheses.empty()) {
         // Explicit pairs are authoritative. A Config-only bank would omit UTC
         // steering or invent Cartesian alternatives not present in this bank.
@@ -218,6 +219,7 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
                 search.clock_errors_ppm==std::vector<double>{0};
             if(coupled) {uncoupled=offsets.size();const auto copy=offsets;offsets.insert(offsets.end(),copy.begin(),copy.end());}
         } else p.full_frequency_coverage=p.full_clock_coverage=true;
+        legacy_coupled_nominal_bank=coupled && search.clock_errors_ppm==std::vector<double>{0};
         for(auto clock:search.clock_errors_ppm)for(std::size_t i=0;i<offsets.size();++i) {
             const auto scale=coupled&&i>=uncoupled?1+offsets[i]/c.carrier_hz:1.;
             const auto ppm=scale==1?clock:(scale*(1+clock*1e-6)-1)*1e6;
@@ -235,14 +237,15 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
     if(search.admitted_clock_half_width_ppm && actual_clock<*search.admitted_clock_half_width_ppm)
         p.full_clock_coverage=false;
     limited=!p.full_frequency_coverage||!p.full_clock_coverage;
-    double maximum=0,minimum_rate=1;
+    double maximum=0,minimum_rate=hypotheses.empty()?1:1+hypotheses.front().clock_error_ppm*1e-6;
     std::set<double> clocks;
     for(const auto& h:hypotheses){maximum=std::max(maximum,std::abs(h.frequency_offset_hz));minimum_rate=std::min(minimum_rate,1+h.clock_error_ppm*1e-6);clocks.insert(h.clock_error_ppm);}
-    const auto bin=pattern_projection_bin_samples(c,maximum);
-    const auto n=std::max<std::size_t>(4,static_cast<std::size_t>(std::ceil(static_cast<long double>(symbol)/bin/minimum_rate)));
-    auto transform=pow2(2*n);
-    if(seconds>=16) {const auto small=pow2(n+4);if(small-n+1>=std::max<std::size_t>(4,n/4))transform=std::min(transform,small);}
-    const auto hop=seconds>=16?std::min(transform-n+1,std::max<std::size_t>(1,n/2)):transform-n+1;
+    // Legacy coupled banks retain the decoder's conservative symmetric aperture.
+    // Explicit pairs and independent nonzero clocks use their actual slowest rate.
+    if(legacy_coupled_nominal_bank)minimum_rate=1-maximum/c.carrier_hz;
+    const auto bin=detail::pattern_observation_bin_samples(c,maximum);
+    const auto observation=detail::pattern_observation_layout(c,bin,minimum_rate);
+    const auto n=observation.length,transform=observation.transform,hop=observation.hop;
     const auto hop_seconds=static_cast<double>(hop)*static_cast<double>(bin)/c.sample_rate;
     const auto banks=std::max<std::size_t>(1,search.receiver_bank_count);
     const auto workers=detail::search_concurrency(search.worker_threads);

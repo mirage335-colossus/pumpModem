@@ -4,6 +4,7 @@
 #include "../src/scheduled_acquisition_catalog.hpp"
 
 #include <iostream>
+#include <map>
 #include <set>
 #include <vector>
 
@@ -153,8 +154,19 @@ void compare(Config c,PatternSearch s,bool nonempty=true) {
                 "frequency siblings duplicated or changed immutable calendar membership");
         }
     }
+    std::map<std::pair<std::size_t,std::uint64_t>,std::size_t> previous;
     const auto count=original(c,s,g,[&](std::size_t id,const Original& expected) {
         const auto lane=catalog.describe(id,cursor);
+        const auto key=std::pair{expected.pair,expected.phase};
+        const auto prior=previous.find(key);
+        if(prior==previous.end())check(!catalog.adjacent_origin(lane,false),"first original phase lane has an earlier neighbor");
+        else {
+            check(catalog.adjacent_origin(lane,false)==std::optional<std::size_t>{prior->second},
+                "catalog earlier neighbor differs from independent original phase order");
+            check(catalog.adjacent_origin(catalog.describe(prior->second,cursor),true)==std::optional<std::size_t>{id},
+                "catalog later neighbor differs from independent original phase order");
+        }
+        previous[key]=id;
         check(lane.id==id&&lane.pair==expected.pair&&lane.origin_index==expected.origin_index&&lane.frequency==expected.frequency&&
             lane.rate_index==expected.rate_index&&lane.tone_bank_base==expected.tone_bank_base&&lane.origin==expected.origin&&
             lane.rate==expected.rate&&lane.phase_lower==expected.phase&&lane.phase_upper==expected.phase,"catalog changed original logical lane identity");
@@ -187,6 +199,8 @@ void compare(Config c,PatternSearch s,bool nonempty=true) {
         }
     });
     check(count==catalog.size()&&count==g.retained_hypotheses,"catalog changed complete retained lane count");
+    for(const auto& [key,id]:previous)
+        check(!catalog.adjacent_origin(catalog.describe(id,cursor),true),"last original phase lane has a later neighbor");
     std::size_t visited=0;catalog.for_each(0,catalog.size(),cursor,[&](const auto& lane){check(lane.id==visited++,"catalog range reordered lanes");});
     if(catalog.size()>3) {
         std::size_t next=1;catalog.for_each(1,catalog.size()-2,cursor,[&](const auto& lane){check(lane.id==next++,"catalog partial range reordered lanes");});

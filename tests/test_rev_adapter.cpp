@@ -45,7 +45,11 @@ int run_native_probes(std::string_view selected={}) {
         RevApp probe(windows,launch);probe.verify_fast_mode_visibility();probe.verify_developer_mode_visibility();
     }
     {
-        RevApp probe(windows,launch);probe.verify_document_editor_scrolling();probe.verify_launch_command_editor();probe.verify_inline_document_editor();
+        RevApp probe(windows,launch);probe.verify_document_editor_scrolling();probe.verify_launch_command_editor();
+    }
+    {
+        // The command-editor probe expands details; keep this fixture's initial state independent.
+        RevApp probe(windows,launch);probe.verify_inline_document_editor();
     }
     {
         auto declarations=test::extension_controls();

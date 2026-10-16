@@ -333,7 +333,7 @@ scheduling stops playback without recovery or replay of private output. RUNNING
 playback, capture and established delay observations retain their error behavior.
 
 The tab uses one general LPI warning: **LPI is not guaranteed. See model limits.**
-Its private-pattern hypothetical state is a short qualifier. The current-draft
+Without an encrypted private pattern, the observer comparison is explicitly not applicable. The current-draft
 LPI advisory remains in Flow and Transmission inspection, separate from this
 preview; no standalone header LPI row is retained.
 
@@ -401,9 +401,9 @@ follows audio-device availability during transmission. Robust routing changes
 preserve the running receiver, pending bits, plots and airtime estimate and apply
 to the next playback. Simulated samples and exported WAV framing remain unchanged.
 
-The Robust key/DSSS/FHSS row contains **Sched_Hop**, **Dilution** immediately to
-its right, then **Freq search**. Sched_Hop and Dilution are visible only in
-Developer mode; hiding them retains their saved settings. Sched_Hop offers
+The Developer Link planner footer contains **Sched_Hop**, **Dilution** immediately
+to its right, then **Freq search**. All three controls are hidden in ordinary use;
+hiding them retains their saved settings. Sched_Hop offers
 **0**, **3** and **5** and requires a selected encryption key. Zero disables it;
 the enabled choices schedule one active 0.4-second hop per three or five total
 hops. Choices above 1x are dimmed red, or muted in monochrome, while remaining
@@ -594,13 +594,12 @@ the existing uncalibrated pattern-planning reference. A ratio of N:1 means N
 total observer bit durations versus one receiver duration; additional durations
 are `max(0, N - 1)`. This does not mean one accepted bit out of N transmissions
 and does not establish a calibrated reception threshold. Keyed
-pattern transmission enables the private pattern. With encryption off, including
-tone experiments, the same advisory assumes encrypted private patterns at the
-current sample, chip and symbol timing at that normalized reference. The advisory
-includes
-**Warning: encryption off; hypothetical only**, including when numerical results
-are unavailable. Actual public patterns and tones can be easier to detect and
-are not described by these figures. No key or waveform setting is changed.
+pattern transmission enables the private pattern. Without an encrypted private
+pattern, including tone modes, the GUI shows **Observer / receiver time: not
+applicable** and omits numerical observer fields and graph axes. The standalone
+analytical API and CLI can still explicitly model a hypothetical private waveform;
+that model does not describe actual public patterns or tones. No key or waveform
+setting is changed.
 Numerical estimates apply only at normalized in-band SNR of -10 dB or lower.
 The model assumes equal C/N0 for both listeners, a known band and on-air window,
 and stationary Gaussian noise of known power. Reference C/N0 is derived as
@@ -613,9 +612,8 @@ Transmission fields show the receiver reference, observation bandwidth,
 reference in-band SNR and noise rise, total and additional observer bit durations,
 and full draft airtime relative to the normalized detection duration, including
 settling, pulse tails and suppression. This exposure ratio is neither an actual
-link-budget estimate, a probability nor a safe traffic quota. Hypothetical
-exposure uses the current draft's duration; it does not select an encrypted
-automatic profile or re-encode for authentication.
+link-budget estimate, a probability nor a safe traffic quota. It does not select
+a different automatic profile or re-encode the draft for authentication.
 The scenario is also explicit in inspection fields and model details.
 Ratios retain fractional durations because an energy detector can accumulate
 evidence within a modem symbol. Repeated traffic accumulates exposure, encryption

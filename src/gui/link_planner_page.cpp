@@ -332,6 +332,10 @@ Node target_axis(const Chart& chart,float inner,float plot_width,float label_wid
 Node graph(const planner::Model& model, bool observer, float width) {
     auto n = card(width); n.padding = 8; const float inner = width - 2 * n.padding;
     paragraph(n, observer ? "Observer / receiver time" : "Time per bit", 14, Tone::text, true, 4);
+    if(observer && model.observer_hypothetical) {
+        paragraph(n,"Not applicable: no encrypted private pattern",13,Tone::muted,true,0);
+        return n;
+    }
     paragraph(n, observer ? (model.calculating ? "Updating observer estimate..." :
         model.observer_available ? ratio(model.observer_ratio) : "Outside model range") :
         planner::duration(model.bit_seconds) + " per bit", 13,
@@ -573,18 +577,21 @@ void link_budget(Node& root, const planner::Model& model) {
 void planner_footer(Node& root,const planner::Model& model,bool show_details) {
     const auto& declarations=ui::console_screen();
     const bool horizontal=root.width>=720;
-    auto controls=horizontal?row(root.width):column(root.width);
     const float width=horizontal?(root.width-16)/3:std::min(root.width,480.f);
-    for(const auto field:{ui::Field::search_arithmetic,ui::Field::receiver_strategy,ui::Field::receiver_cpu_budget}) {
-        const auto declaration=std::find_if(declarations.begin(),declarations.end(),[&](const auto& c) {
-            return c.field==field;
-        });
-        auto choice=column(width);choice.kind=Kind::control;
-        choice.control=*declaration;choice.height=ui::label_height+28;choice.bottom=4;
-        if(horizontal&&field!=ui::Field::receiver_cpu_budget)choice.right=8;
-        controls.children.push_back(std::move(choice));
+    for(const auto fields:{std::array{ui::Field::search_arithmetic,ui::Field::receiver_strategy,ui::Field::receiver_cpu_budget},
+                           std::array{ui::Field::sched_hop,ui::Field::sched_hop_dilution,ui::Field::sched_frequency_search}}) {
+        auto controls=horizontal?row(root.width):column(root.width);
+        for(const auto field:fields) {
+            const auto declaration=std::find_if(declarations.begin(),declarations.end(),[&](const auto& c) {
+                return c.field==field;
+            });
+            auto choice=column(width);choice.kind=Kind::control;
+            choice.control=*declaration;choice.height=ui::label_height+28;choice.bottom=4;
+            if(horizontal&&field!=fields.back())choice.right=8;
+            controls.children.push_back(std::move(choice));
+        }
+        root.children.push_back(std::move(controls));
     }
-    root.children.push_back(std::move(controls));
     buttons(root,{{show_details?"Hide details":"Model limits and references",Command::planner_toggle_details}});
 }
 void geometry_details(Node& n,const planner::Model& model) {
@@ -798,7 +805,7 @@ void details(Node& root,const planner::Model& model) {
     paragraph(n, "Clock/RAM gaps. At some bit durations, the receiver can average more samples and use less RAM. Even a tiny duration change can lose that saving. Stronger and Weaker select timings that fit, usually about 1 dB apart. Labels are rounded; selections keep the exact value when applied.");
     paragraph(n, "Observer. Energy-only listener; private waveform; equal signal and noise at both receivers. 90% detection, 1% false alarm; known band, window and stationary noise. Numeric range: at most −10 dB in-band SNR. Each point holds bit energy relative to noise at 18 dB; longer bits use lower power. Repeated traffic, location, noise uncertainty and other detectors change the comparison.");
     paragraph(n, "Red indicators. RX estimates below 80% and observer / receiver times below 8× are red. Observer results outside the model range, unavailable results and errors are also red; calculating is neutral. The 8× cutoff is a listening guideline, not a validated acoustic threshold.");
-    paragraph(n, "Sound and structure. A steadier, less abruptly changing sound may reflect less conspicuous envelope or spectral structure, as well as less frequent repetition. Longer pseudorandom patterns can change that texture even without encryption; pulse shaping, rate, filtering and level also matter. A public noise-like pattern remains predictable to a correlating observer. Private patterns can withhold that template, but even genuinely random signals can reveal energy and modulation structure. The ratio assumes a noise-like private waveform; it does not measure randomness, sound quality or interference complaints. With encryption off it remains hypothetical. Tone modes still transmit tones.");
+    paragraph(n, "Sound and structure. A steadier, less abruptly changing sound may reflect less conspicuous envelope or spectral structure, as well as less frequent repetition. Longer pseudorandom patterns can change that texture even without encryption; pulse shaping, rate, filtering and level also matter. A public noise-like pattern remains predictable to a correlating observer. Private patterns can withhold that template, but even genuinely random signals can reveal energy and modulation structure. The ratio assumes a noise-like private waveform; it does not measure randomness, sound quality or interference complaints. Without an encrypted private pattern the observer estimate is not applicable. Tone modes still transmit tones.");
     paragraph(n, "Voice bandwidth. The ideal shaped signal must fit the radio's passband. At 3.6 kHz rate and 1.5 kHz carrier, the automatic shaped pattern spans 375–2625 Hz. DSSS 10×, 100× and 1000× selections start at inner rates of 360, 36 and 3.6 Hz with the same outer bandwidth and stream carrier. Radio filtering and spectral tails still matter.");
     paragraph(n, "FT8 reference. −8 dB in 1 Hz converts to about −42 dB on the 2500 Hz reporting scale: 21 dB below the published −21 dB reference threshold. This is a scale conversion, not tested sensitivity.");
     paragraph(n, "Quick references", 15, Tone::text, true, 8);
@@ -857,7 +864,7 @@ ui::DocumentNode build(const planner::Model& model, float width, bool show_detai
     }
     paragraph(root, model.automatic_mode ? "Each 10 dB weaker needs about 10× longer. Finish includes a full silence check." :
         "Fixed pattern: target changes leave bit duration unchanged. Finish includes a full silence check.", 11, Tone::muted, false, 4);
-    paragraph(root, std::string(model.observer_hypothetical ? "Hypothetical private pattern. " : "Private pattern. ") +
+    paragraph(root, std::string(model.observer_hypothetical ? "No encrypted private pattern. " : "Private pattern. ") +
         "LPI is not guaranteed. See model limits.", 11, Tone::muted, false, 8);
     notable_points(root, model);
     planner_footer(root,model,show_details);

@@ -808,11 +808,13 @@ ReceiverLayoutContext receiver_layout_context(const transfer::Options& options,
            settings.simulation!=(mode==ReceiverWorkMode::sampled_simulation))
             throw Error("receiver settings contradict the planned physical waveform/route");
     }
-    settings=live::detail::normalized_layout(std::move(settings));
+    if(actual)settings=live::detail::normalized_layout(std::move(settings));
+    else if(settings.transfer.key && settings.transfer.modem.spreading_mode==modem::SpreadingMode::pattern)
+        settings.transfer.modem.scramble=true;
     for(const auto& profile:profiles)
         if(modem::scheduled_bursts(profile)&&profile.sample_rate!=options.modem.sample_rate)
             throw Error("scheduled shared-capture planning requires one original PCM sample rate");
-    ReceiverLayoutContext out;out.cohort_capacity=live::receiver_workspace_capacity(settings);
+    ReceiverLayoutContext out;out.cohort_capacity=live::detail::available_bank_capacity(settings);
     if(!modem::detail::scheduled_acquisition_policy::requested())return out;
     // The span can already contain repeated per-key families (GUI advisory);
     // keys is the remaining multiplier. Do not also multiply settings' keys.
@@ -1107,9 +1109,14 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         4096*16+4096*sizeof(modem::PatternEvidence)+(drift_sections>1?48*hop:0)+
         (differential_window?hop*sizeof(modem::detail::DifferentialAccumulator):0);
     const auto fft_bytes=fft_core_bytes+2*frequencies*transform*16;
-    // Live reserves at least half of the total for peer receivers, transmit
-    // work and plots even when there is only one requested receive bank.
-    const auto allowance=static_cast<long double>(options.dsp_workspace_bytes)/std::max(2.L,banks*profiles);
+    // Existing-complex constructors can use the remaining cohort up to half
+    // the total budget. Even an empty cohort must first reserve shared frontend
+    // and receiver-control state. Keep the multi-bank estimate's legacy cap;
+    // an equal strategy share is not the existing constructor's allocation.
+    const auto control=live::receiver_control_margin(config,options.key.has_value());
+    const auto available=layout->cohort_capacity>control?layout->cohort_capacity-control:0;
+    const auto allowance=std::min(static_cast<long double>(available),
+        static_cast<long double>(options.dsp_workspace_bytes)/std::max(2.L,banks*profiles));
     // Two uint32 maps plus a rounded fixed allowance for the two bounded
     // coarse/rotation caches and metadata (currently below 64 KiB).
     const auto outer_map_bytes=interleaved?
@@ -1312,7 +1319,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         candidate_count*sizeof(modem::PatternEvidence)+points*sizeof(std::complex<double>)+
         frequencies*sizeof(modem::PatternFrequencyRateHypothesis);
     result.workspace_supported=correlator?
-        (!config.oscillator_search||compact_required<=allowance):fft_core_bytes+outer_map_bytes<=allowance;
+        compact_required<=allowance:fft_core_bytes+outer_map_bytes<=allowance;
     const auto real_rank=static_cast<long double>(bin)-image<=1e-10L*bin;
     const auto count=static_cast<double>(length);
     result.noise_dimensions=correlator?static_cast<double>(symbol)/2:count*(real_rank?.5:1.);
@@ -1926,15 +1933,9 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     strategy_search.receiver_bank_count=modem::receiver_strategy_bank_count(config,
         options.search_seconds,keys,profiles);
     strategy_search.receiver_schedule_key_count=keys;
-    // Conservative hardware cohort allowance after capture/TX/audio/plot
-    // reservations. Live uses its exact bank_capacity and receiver overhead.
+    // Both actual and inferred settings use Live's exact reservation arithmetic.
+    // Analytical inputs need not satisfy Live device/route admission rules.
     if(layout)receiver_layout_share(strategy_search,config,*layout,options.key.has_value());
-    else {
-        const auto usable_cohort=options.dsp_workspace_bytes/2>1024*1024?
-            options.dsp_workspace_bytes/2-1024*1024:0;
-        const auto cohort_share=usable_cohort/std::max<std::size_t>(1,strategy_search.receiver_bank_count);
-        strategy_search.receiver_strategy_workspace_bytes=cohort_share>96*1024?cohort_share-96*1024:1;
-    }
     auto strategy_config=config;
     // Planning receives unseeded profile geometry; execution attaches the same
     // selected root before constructing its keyed calendar. Never reject a
@@ -2417,8 +2418,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         *timing_model.capture_seconds_per_frame<=0))throw Error("invalid receiver capture slope");
     if(profiles.empty())profiles=std::span(&options.modem,1);
     std::optional<ReceiverLayoutContext> layout;
-    if(std::any_of(profiles.begin(),profiles.end(),[](const auto& c){return modem::scheduled_bursts(c);}))
-        layout=receiver_layout_context(options,profiles,keys,work_mode,actual_settings);
+    layout=receiver_layout_context(options,profiles,keys,work_mode,actual_settings);
     Estimate result;result.receiver_profiles=profiles.size();result.receiver_work_mode=work_mode;
     result.probability_reference_only=arrival_policy(options,options.modem).has_value()||options.modem.dsss_factor>1;
     result.receiver_work_assumptions=work_mode==ReceiverWorkMode::sampled_simulation?
@@ -2556,7 +2556,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
             }
         }
     }
-    result.receiver_workspace_supported=matching_profile&&matching_work.workspace_supported;
+    result.receiver_workspace_supported=matching_profile&&matching_work.workspace_supported&&layout->cohort_capacity>0;
     result.receiver_work_supported=matching_profile&&all_work_supported;
     result.hardware_sustained_modeled=matching_profile&&all_sustained_modeled;
     if(result.hardware_sustained_modeled) {

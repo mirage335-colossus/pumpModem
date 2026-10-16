@@ -21,8 +21,9 @@ a planning document, not evidence of an implemented optimization or sustained re
 
 ## Controls and timing
 
-Developer mode places **Sched_Hop** after FHSS, with **Dilution** immediately to
-its right. Both controls are hidden in ordinary use. Its selectable values are exactly
+Developer mode places **Sched_Hop** in the Link planner footer, with **Dilution**
+immediately to its right and **Freq search** next. All three controls are hidden
+in ordinary use. Its selectable values are exactly
 **0**, **3** and **5**. Zero disables scheduling. With ordinary dilution, 3 and 5
 mean one active hop per three or five total hops. Each base hop is 0.4 seconds;
 the setting is a nominal total-time multiplier, not additional frequency spread.

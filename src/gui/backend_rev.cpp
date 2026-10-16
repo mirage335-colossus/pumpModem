@@ -407,8 +407,7 @@ struct ChoiceView : re::Dropdown {
         if(!display_text.empty())dropdownText->content=display_text;
         dropdownText->style->text.size=Px(font_size);
         const auto foreground=[](ui::TextTone tone,bool enabled) {
-            return theme::rev_color(theme::text_rgb(tone==ui::TextTone::normal?ui::TextTone::data:tone,
-                theme::rev_color_enabled,enabled));
+            return theme::rev_color(theme::choice_text_rgb(tone,theme::rev_color_enabled,enabled));
         };
         // Children are computed before Rev resolves inherited flags this frame.
         // Match its disabled cascade from current intent, including overlays.

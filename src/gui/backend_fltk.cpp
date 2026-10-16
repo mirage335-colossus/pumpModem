@@ -114,8 +114,7 @@ void populate(Fl_Menu_& menu,const std::vector<ui::Option>& options) {
     auto* items=const_cast<Fl_Menu_Item*>(menu.menu_end());
     for(std::size_t i=0;i<options.size();++i) {
         items[i].labeltype(literal_label_type(true,!options[i].enabled,options[i].text_tone));
-        const auto tone=options[i].text_tone==ui::TextTone::normal?ui::TextTone::data:options[i].text_tone;
-        items[i].labelcolor(theme::fltk_color(theme::text_rgb(tone,theme::color_enabled,options[i].enabled)));
+        items[i].labelcolor(theme::fltk_color(theme::choice_text_rgb(options[i].text_tone,theme::color_enabled,options[i].enabled)));
     }
 }
 // FLTK owns its popup loop, monitor fitting and selected-row positioning; the
@@ -938,7 +937,7 @@ private:
         if(b.choice&&!Fl::grab()) {const auto index=b.presentation.option_index(state.selected);if(b.choice->value()!=index)b.choice->value(index);}
         if(b.choice) {
             const auto tone=ui::choice_text_tone(state);
-            b.choice->textcolor(text_color(tone==ui::TextTone::normal?ui::TextTone::data:tone,view.enabled));
+            b.choice->textcolor(theme::fltk_color(theme::choice_text_rgb(tone,theme::color_enabled,view.enabled)));
             b.choice->apply_display(state.display_text);
         }
         if(b.toggle) {

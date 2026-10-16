@@ -69,6 +69,9 @@ std::size_t constellation_limit(const Settings& settings);
 std::size_t replay_workspace(const Settings& settings);
 std::size_t plot_workspace(const Settings& settings);
 std::size_t audio_reserve(const Settings& settings);
+// Reservation arithmetic alone, also usable for analytical non-Live inputs.
+// Exhausted budgets have no receiver capacity; live admission throws separately.
+std::size_t available_bank_capacity(const Settings& settings);
 std::size_t bank_capacity(const Settings& normalized_settings);
 std::size_t source_budget(std::size_t content);
 modem::ChannelConfig channel_config(const Settings& settings);

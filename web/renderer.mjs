@@ -235,8 +235,8 @@ export class Renderer {
     options(select,options,prompt=null) {
         const key=JSON.stringify([prompt,options]);if(select.optionKey===key)return;select.optionKey=key;
         const nodes=[];
-        if(prompt!==null){const item=element(this.doc,'option',prompt);item.value='';nodes.push(item);}
-        for(const option of options){const item=element(this.doc,'option',option.label);item.value=option.id;item.disabled=!option.enabled;item.style.color=option.foreground||'';nodes.push(item);}
+        if(prompt!==null){const item=element(this.doc,'option',prompt);item.value='';item.style.color='CanvasText';nodes.push(item);}
+        for(const option of options){const item=element(this.doc,'option',option.label);item.value=option.id;item.disabled=!option.enabled;item.style.color=option.foreground||(option.enabled?'CanvasText':'GrayText');nodes.push(item);}
         children(select,nodes);
     }
     makeControl(c) {

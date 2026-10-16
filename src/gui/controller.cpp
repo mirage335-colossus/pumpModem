@@ -1884,8 +1884,8 @@ struct Controller::Impl {
             if(!current_advice)result.simulation_estimate.reset();
             if(planner_draft&&draft_changed)planner_model.reset();
             f(UiField::lpi_estimate).text=inspection->lpi_summary;
-            f(UiField::lpi_estimate).text_tone=inspection->lpi_estimate.status==lpi::Status::available&&
-                inspection->lpi_estimate.equivalent_symbols>=8?ui::TextTone::normal:ui::TextTone::negative;
+            f(UiField::lpi_estimate).text_tone=(inspection->lpi_estimate.hypothetical_encryption ||
+                (inspection->lpi_estimate.status==lpi::Status::available&&inspection->lpi_estimate.equivalent_symbols>=8))?ui::TextTone::normal:ui::TextTone::negative;
             if(receive_targets_due||!finished||!current_advice)refresh_advice_status();
             else if(!estimate->memory_supported)simulation_estimate_status("Budget exceeded");
             else if(!estimate->wire_bits)simulation_estimate_status("Enter a message");

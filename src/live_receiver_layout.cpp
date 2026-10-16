@@ -48,13 +48,17 @@ std::size_t plot_workspace(const Settings& value) { return plot_size * (sizeof(f
 std::size_t audio_reserve(const Settings& value) {
     return value.simulation ? 0 : std::min<std::size_t>(5 * 1024 * 1024, value.dsp_workspace_bytes / 8);
 }
-std::size_t bank_capacity(const Settings& value) {
+std::size_t available_bank_capacity(const Settings& value) {
     // Simulation feeds sampled audio directly; it never allocates
     // the asynchronous hardware capture queue.
     const auto capture_queue = value.simulation ? 0 : value.dsp_workspace_bytes / 8;
     const auto reserved = capture_queue + value.dsp_workspace_bytes / 4 + plot_workspace(value) + audio_reserve(value);
-    if (reserved >= value.dsp_workspace_bytes) throw Error("DSP workspace cannot hold the audio and plot buffers");
-    return value.dsp_workspace_bytes - reserved;
+    return reserved >= value.dsp_workspace_bytes ? 0 : value.dsp_workspace_bytes - reserved;
+}
+std::size_t bank_capacity(const Settings& value) {
+    const auto available=available_bank_capacity(value);
+    if (!available) throw Error("DSP workspace cannot hold the audio and plot buffers");
+    return available;
 }
 std::size_t source_budget(std::size_t content) {
     return transfer::source_storage_limit(content);

@@ -4,8 +4,8 @@
 #include <cstddef>
 
 namespace datapump::gui::ui {
-inline constexpr int default_width = 1380, default_height = 1072;
-inline constexpr int min_width = 1330, min_height = 992;
+inline constexpr int default_width = 1180, default_height = 1072;
+inline constexpr int min_width = 1130, min_height = 992;
 // Preserve established body sizing when the header requires a wider minimum.
 inline constexpr int body_growth_width = 1030;
 inline constexpr int oscillator_row_height = 48;
@@ -46,7 +46,7 @@ inline constexpr bool persistent_slot(Slot slot) {
     case Slot::simulation_confidence: case Slot::simulation_cpu_time: case Slot::simulation_gpu_time:
     case Slot::simulation_oscillator: case Slot::rf_oscillator:
     case Slot::search_margin: case Slot::clock_accuracy: case Slot::clock_region: case Slot::clock_offset: case Slot::audio_error:
-    case Slot::dsss_factor: case Slot::dsss_version: case Slot::fhss: case Slot::sched_hop: case Slot::sched_hop_dilution: case Slot::sched_frequency_search:
+    case Slot::dsss_factor: case Slot::dsss_version: case Slot::fhss:
     case Slot::key_actions: case Slot::key_path: case Slot::key:
     case Slot::device: case Slot::mono: case Slot::live_duplex: case Slot::volume: case Slot::exclusive: case Slot::bandwidth: case Slot::carrier: case Slot::rf_shift: case Slot::doppler: case Slot::snr: case Slot::long_snr: case Slot::receive_snr: case Slot::pattern:
     case Slot::fec: case Slot::dsp_workspace: case Slot::diagnostics: case Slot::status: return true;
@@ -154,13 +154,10 @@ struct DesktopLayout {
         out[Slot::repeatable] = {238, 61, 119, 28};
         out[Slot::key_actions] = {366, 62, 92, field_height};
         out[Slot::key_path] = {366, 92, width - 382, 18};
-        out[Slot::dsss_version] = {466, 62, 150, field_height};
-        out[Slot::dsss_factor] = {626, 62, 80, field_height};
-        out[Slot::fhss] = {716, 62, width - 1194, field_height};
-        out[Slot::sched_hop] = {width - 468, 62, 80, field_height};
-        out[Slot::sched_hop_dilution] = {width - 378, 62, 70, field_height};
-        out[Slot::sched_frequency_search] = {width - 298, 62, 95, field_height};
-        out[Slot::key] = {width - 193, 62, 177, field_height};
+        out[Slot::dsss_version] = {466, 62, 165, field_height};
+        out[Slot::dsss_factor] = {641, 62, 90, field_height};
+        out[Slot::fhss] = {741, 62, width - 999, field_height};
+        out[Slot::key] = {width - 248, 62, 232, field_height};
         // Link assumptions and RX success stay beside the compact Simulation
         // Yes/No choice in both modes. Simulation-only computation estimates
         // have a separate row so they never displace the editable inputs.

@@ -480,32 +480,17 @@ void lpi_estimate_controls() {
     };
     controller.edit(F::message,"e");controller.edit(F::snr,"0");
     controller.select(F::simulation,"3dBm -170dB");prepare(controller);
-    check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
-          controller.inspection()->lpi_estimate.hypothetical_encryption&&
-          text().find("hypothetical")!=std::string::npos&&
-          text().find("Observer / receiver")!=std::string::npos&&
-          text().find("18 dB")==std::string::npos&&text().find('\n')==std::string::npos&&
-          controller.inspection()->lpi_description.find("pattern design reference")!=std::string::npos&&
-          controller.estimate()->wire_bits==3&&!controller.settings().transfer.key&&
+    const auto no_observer=[&] {
+        check(controller.inspection()->lpi_estimate.status!=lpi::Status::available&&
+              controller.inspection()->lpi_estimate.hypothetical_encryption&&
+              text()=="Observer / receiver time: not applicable"&&
+              controller.field(F::lpi_estimate).text_tone==ui::TextTone::normal,
+              "Public waveform retained numerical private observer advice or warning color");
+    };
+    no_observer();
+    check(controller.estimate()->wire_bits==3&&!controller.settings().transfer.key&&
           !controller.settings().transfer.modem.scramble&&!controller.settings().transfer.modem.dsss,
-          "Unkeyed GUI must show a warned relative estimate while preserving its public waveform and exact short endpoint");
-    check(controller.field(F::lpi_estimate).text_tone==ui::TextTone::normal,
-          "An available observer ratio above 8x must retain the normal foreground");
-    controller.edit(F::snr,"23");prepare(controller);
-    check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
-          controller.inspection()->lpi_estimate.equivalent_symbols<8&&
-          controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
-          "An available observer ratio below 8x must be red even when hypothetical");
-    controller.edit(F::short_bits,"001x");
-    check(controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative&&text().ends_with("Unavailable"),
-          "Unavailable observer estimate must be red");
-    controller.edit(F::message,"e");prepare(controller);
-    check(controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
-          "A restored low observer estimate lost its warning color");
-    controller.edit(F::snr,"0");
-    check(controller.field(F::lpi_estimate).text_tone==ui::TextTone::normal&&text().ends_with("Calculating..."),
-          "Pending observer estimate retained the previous warning color");
-    prepare(controller);
+          "Observer applicability changed the public waveform or exact short endpoint");
     struct TemporaryKeyring {
         std::filesystem::path path=std::filesystem::temp_directory_path()/
             ("datapump-lpi-keys-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -521,6 +506,21 @@ void lpi_estimate_controls() {
         controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     check(controller.settings().transfer.key.has_value()&&controller.estimate().has_value(),"LPI fixture keyfile failed to load");
+    controller.edit(F::snr,"23");prepare(controller);
+    check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
+          controller.inspection()->lpi_estimate.equivalent_symbols<8&&
+          controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
+          "An available private observer ratio below 8x must be red");
+    controller.edit(F::short_bits,"001x");
+    check(controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative&&text().ends_with("Unavailable"),
+          "Unavailable observer estimate must be red");
+    controller.edit(F::message,"e");prepare(controller);
+    check(controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
+          "A restored low observer estimate lost its warning color");
+    controller.edit(F::snr,"0");
+    check(controller.field(F::lpi_estimate).text_tone==ui::TextTone::normal&&text().ends_with("Calculating..."),
+          "Pending observer estimate retained the previous warning color");
+    prepare(controller);
     controller.select(F::simulation,"3dBm -170dB");prepare(controller);
     const auto reference=controller.inspection();
     check(reference->lpi_estimate.status==lpi::Status::available&&
@@ -586,27 +586,20 @@ void lpi_estimate_controls() {
           text().find("×")==std::string::npos&&controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
           "Short symbol geometry outside the normalized weak-signal model must show a red status without unsupported numbers");
     controller.select(F::key,"none");prepare(controller);
-    check(controller.inspection()->lpi_estimate.status==lpi::Status::outside_weak_signal_model&&
-          controller.inspection()->lpi_estimate.hypothetical_encryption&&
-          text().find("hypothetical")!=std::string::npos&&
-          !controller.settings().transfer.key&&controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
-          "Turning encryption off must restore the hypothetical warning even outside the relative weak-signal model");
+    no_observer();
+    check(!controller.settings().transfer.key,"Turning encryption off retained the selected key");
     controller.edit(F::long_snr,"0");prepare(controller);
-    check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
-          text().find("hypothetical")!=std::string::npos&&controller.field(F::lpi_estimate).text_tone==ui::TextTone::normal,
-          "Public experiments must retain numerical relative estimates after encryption is turned off");
+    no_observer();
     controller.select(F::key,"key:LPI estimate");prepare(controller);
     check(!controller.inspection()->lpi_estimate.hypothetical_encryption&&text().find("hypothetical")==std::string::npos,
           "Restoring encryption must clear the hypothetical warning");
     controller.edit(F::short_bits,"001");controller.edit(F::carrier,"2.7 kHz");
     controller.select(F::pattern,"auto-tone");prepare(controller);
-    check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
-          controller.inspection()->lpi_estimate.hypothetical_encryption&&
-          text().find("hypothetical")!=std::string::npos&&
-          controller.estimate()->wire_bits==3&&!controller.settings().transfer.key&&
+    no_observer();
+    check(controller.estimate()->wire_bits==3&&!controller.settings().transfer.key&&
           controller.settings().transfer.modem.spreading_mode==modem::SpreadingMode::tone&&
           !controller.settings().transfer.modem.scramble&&!controller.settings().transfer.modem.dsss,
-          "Tone selection must restore the hypothetical warning without enabling encryption or changing exact bits");
+          "Observer applicability changed tone or exact bits");
     controller.select(F::pattern,"pattern-16");prepare(controller);
     const auto fixed_geometry=controller.inspection();
     controller.edit(F::snr,"55");prepare(controller);
@@ -3222,6 +3215,7 @@ void bitmap_source_checks() {
 
 int main(int argc,char** argv) {
     try {
+        if(argc>1&&std::string_view(argv[1])=="--observer-only") {lpi_estimate_controls();std::cout<<"Observer controls passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--planner-examples") {planner_examples();std::cout<<"Planner examples passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--search-arithmetic") {search_arithmetic_controls();std::cout<<"Search arithmetic controls passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--fake-hop-display") {fake_hop_display();std::cout<<"Fake hop display passed\n";return 0;}
