@@ -4,12 +4,15 @@
 // shaped_values result at its recorded binary64 argument. Calendar masks,
 // limiter/gain, carrier phase, fits, noise, and thresholds stay with callers.
 #include "pattern_shared_source_curve.hpp"
+#include "scheduled_source_binding_types.hpp"
 #include <bit>
 #include <cfenv>
 #include <limits>
 #if defined(__x86_64__) || (defined(__i386__) && defined(__SSE__))
 #include <xmmintrin.h>
 #endif
+
+namespace datapump::modem::detail::scheduled_source_points {class PointPool;}
 
 namespace datapump::modem::detail::scheduled_source_samples {
 using Pair=std::array<std::complex<double>,2>;
@@ -164,14 +167,35 @@ public:
 };
 // Borrowed only until all synchronous processing/worker joins. No pointer or
 // namespace is persisted by PatternCode, Execution, or a receiver.
-struct Binding {Pool* pool=nullptr;std::uint64_t key_namespace=0;void* pressure_context=nullptr;bool (*reclaim)(void*)=nullptr;};
+struct Binding {
+    Pool* pool=nullptr;std::uint64_t key_namespace=0;
+    void* pressure_context=nullptr;bool (*reclaim)(void*)=nullptr;
+    scheduled_source_points::PointPool* points=nullptr;
+    PointFamilyToken point_family;
+    std::uint64_t consumer=UINT64_MAX;
+    Purpose purpose=Purpose::acquisition;
+    bool point_requested=false,point_cache=false;
+};
+// Workers receive copied numerical capabilities, never Live's mutation hook.
+inline Binding worker_binding(Binding value,Purpose purpose)noexcept {
+    value.pressure_context=nullptr;value.reclaim=nullptr;value.purpose=purpose;return value;
+}
 inline thread_local Binding binding;
 class Scope {
     Binding previous_;
 public:
     Scope(Pool* p,std::uint64_t k,void* context=nullptr,bool (*reclaim)(void*)=nullptr)noexcept:previous_(binding){binding={p,k,context,reclaim};}
+    explicit Scope(Binding value)noexcept:previous_(binding){binding=value;}
     ~Scope(){binding=previous_;}
     Scope(const Scope&)=delete;Scope& operator=(const Scope&)=delete;
+};
+// Purpose changes do not change pool ownership or inherit new callbacks.
+class PurposeScope {
+    Purpose previous_;
+public:
+    explicit PurposeScope(Purpose purpose)noexcept:previous_(binding.purpose){binding.purpose=purpose;}
+    ~PurposeScope(){binding.purpose=previous_;}
+    PurposeScope(const PurposeScope&)=delete;PurposeScope& operator=(const PurposeScope&)=delete;
 };
 // One reader per exact source family/symbol preparation. Tile leases avoid a
 // shared mutex per source sample. Failed bit validation uses the original call.

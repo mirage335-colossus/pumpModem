@@ -1,5 +1,6 @@
 #include "application.hpp"
 #include "binding_state.hpp"
+#include "presentation_palette.hpp"
 #include "text_policy.hpp"
 #include "rev_platform.hpp"
 #include "theme.hpp"
@@ -398,12 +399,33 @@ struct ChoiceView : re::Dropdown {
         dropdownArrow->styles.add(&theme::rev_disabled_text);
     }
     std::string display_text;
+    std::vector<ui::Option> option_presentations;
+    ui::TextTone selected_tone=ui::TextTone::normal;
     int font_size=13;
     void computeChildren(re::Event& event) override {
         re::Dropdown::computeChildren(event);
         if(!display_text.empty())dropdownText->content=display_text;
         dropdownText->style->text.size=Px(font_size);
-        for(auto* option:options)option->style->text.size=Px(font_size);
+        const auto foreground=[](ui::TextTone tone,bool enabled) {
+            return theme::rev_color(theme::text_rgb(tone==ui::TextTone::normal?ui::TextTone::data:tone,
+                theme::rev_color_enabled,enabled));
+        };
+        // Children are computed before Rev resolves inherited flags this frame.
+        // Match its disabled cascade from current intent, including overlays.
+        const auto enabled=[](const re::Element* element) {
+            while(element) {
+                if(element->targetFlags.disabled)return false;
+                if(element->parent==element)break;
+                element=element->parent;
+            }
+            return true;
+        };
+        dropdownText->style->text.color=foreground(selected_tone,enabled(dropdownText));
+        for(std::size_t i=0;i<options.size();++i) {
+            options[i]->style->text.size=Px(font_size);
+            const auto tone=i<option_presentations.size()?option_presentations[i].text_tone:ui::TextTone::normal;
+            options[i]->style->text.color=foreground(tone,enabled(options[i]));
+        }
     }
 };
 
@@ -1262,9 +1284,11 @@ public:
                 for(auto* menu:{b.choice,b.suggestions,b.menu})if(menu) {
                     menu->params.options.clear();
                     for(const auto& option:b.presentation.options())menu->params.options.push_back({option.label,option.id,!option.enabled});
+                    menu->option_presentations=b.presentation.options();
                 }
             }
-            if(b.choice) {b.choice->params.value=value.selected;b.choice->display_text=value.display_text;if(!view.popup_allowed())b.choice->closeMenu();}
+            if(b.choice) {b.choice->params.value=value.selected;b.choice->display_text=value.display_text;
+                b.choice->selected_tone=ui::choice_text_tone(value);if(!view.popup_allowed())b.choice->closeMenu();}
             if(b.suggestions) {
                 b.suggestions->style->visibility=view.suggestions_visible?Visibility::Visible:Visibility::Hidden;
                 if(!view.suggestions_allowed())b.suggestions->closeMenu();

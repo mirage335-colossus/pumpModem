@@ -7,6 +7,7 @@
 #include "datapump/sched_hop.hpp"
 #include "datapump/crypto.hpp"
 #include "pattern_carrier.hpp"
+#include "scheduled_original_pulse_row.hpp"
 
 #include <openssl/crypto.h>
 #include <algorithm>
@@ -258,6 +259,7 @@ struct PatternCode::Impl {
     std::uint64_t chip = 0, symbol = 0, chips = 0, epoch = 0;
     bool shaped = false;
     bool private_patterns = false;
+    detail::OriginalPulseRow original_pulse_row;
     StreamCache pattern, dsss, pattern_one, dsss_one;
     std::unique_ptr<StreamCache> outer;
     struct InnerChip {
@@ -629,18 +631,24 @@ struct PatternCode::Impl {
         if(bit && !distinct)result*=bit_mask[static_cast<std::size_t>((absolute%chips)%bit_mask.size())];
         return result;
     }
-    std::array<std::complex<double>,2> shaped_values(std::uint64_t first_chip,double within) {
+    std::array<std::complex<double>,2> shaped_values(std::uint64_t first_chip,double within,
+                                                   detail::OriginalPulseRow* exported=nullptr) {
+        original_pulse_row.complete=false;
         require(std::isfinite(within),"pattern sample coordinate must be finite");
         if(!shaped)return {shaped_value(first_chip,0,within),shaped_value(first_chip,1,within)};
+        if(exported)exported->begin(within,symbol,chip);
         std::array<std::complex<double>,2> result{};
         pattern_pulse_each(within,symbol,chip,[&](std::uint64_t local,double coefficient) {
             require(local<=std::numeric_limits<std::uint64_t>::max()-first_chip,"pattern chip address would overflow");
             const auto chip_values=values(first_chip+local,0);
             result[0]+=coefficient*chip_values[0];result[1]+=coefficient*chip_values[1];
+            if(exported)exported->append(local,coefficient);
         });
+        if(exported)exported->finish();
         return result;
     }
     std::complex<double> shaped_value(std::uint64_t first_chip,unsigned bit,double within) {
+        original_pulse_row.complete=false;
         require(bit<=1,"pattern symbol must be a zero or one bit");
         require(std::isfinite(within),"pattern sample coordinate must be finite");
         if(!shaped) {
@@ -676,6 +684,14 @@ std::complex<double> PatternCode::shaped_value(std::uint64_t first_chip,unsigned
 std::array<std::complex<double>,2> PatternCode::shaped_values(std::uint64_t first_chip,double within) {
         rx_cpu::Scope cpu_scope(rx_cpu::Stage::template_build,true);
     return impl_->shaped_values(first_chip,within);
+}
+std::array<std::complex<double>,2> PatternCode::shaped_values(std::uint64_t first_chip,double within,
+        const detail::OriginalPulseRow*& exported) {
+    rx_cpu::Scope cpu_scope(rx_cpu::Stage::template_build,true);
+    exported=nullptr;
+    auto result=impl_->shaped_values(first_chip,within,&impl_->original_pulse_row);
+    if(impl_->original_pulse_row.complete)exported=&impl_->original_pulse_row;
+    return result;
 }
 void PatternCode::prepare_symbol(std::uint64_t first_chip,std::stop_token stop) {
         rx_cpu::Scope cpu_scope(rx_cpu::Stage::template_build,true);

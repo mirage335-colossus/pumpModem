@@ -47,6 +47,7 @@ theme::Rgb foreground(surface::Tone tone,bool color,bool enabled) {
     case surface::Tone::positive:return color?theme::positive_tint:theme::text_rgb(false);
     case surface::Tone::caution:return color?theme::caution_tint:theme::text_rgb(false);
     case surface::Tone::negative:return color?theme::negative_tint:theme::text_rgb(false);
+    case surface::Tone::discouraged:return theme::discouraged_rgb(color);
     case surface::Tone::inverse:return theme::grayscale(theme::background);
     case surface::Tone::normal:return theme::text_rgb(color);
     }

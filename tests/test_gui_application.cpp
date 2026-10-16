@@ -268,7 +268,7 @@ void fhss_developer_editor() {
 void developer_mode_presentation() {
     using F=ui::Field;using P=ui::Page;
     Launch launch;
-    launch.settings=launch_command::parse("--pattern auto-tone --dsp-workspace 25% --rate 2400 --carrier 1500");
+    launch.settings=launch_command::parse("--pattern auto-tone --dsp-workspace 25% --rate 2400 --carrier 1500 --sched-hop 5 --sched-hop-dilution 3");
     Application app(launch);
     const auto& toggle=control(F::developer_mode);
     check(toggle.kind==ui::Kind::toggle&&toggle.persistent&&app.control(toggle).visible&&
@@ -294,7 +294,7 @@ void developer_mode_presentation() {
         check(!app.field(F::shellcode_mode).checked,"Stale Shellcode declaration bypassed visibility");
     }
     constexpr std::array advanced_fields{F::pattern,F::fec,F::dsp_workspace,F::receive_snr,
-        F::profile_reference,F::callsign,F::grid,F::repeatable};
+        F::profile_reference,F::callsign,F::grid,F::repeatable,F::sched_hop,F::sched_hop_dilution};
     for(const auto field:advanced_fields)
         check(!app.control(control(field)).visible,"An advanced control is visible before developer mode is enabled");
     for(const auto field:{F::message,F::binary,F::simulation,F::bandwidth,F::carrier,F::snr,F::long_snr})
@@ -302,6 +302,11 @@ void developer_mode_presentation() {
     check(app.field(F::pattern).selected=="auto-tone"&&app.field(F::dsp_workspace).selected=="ram-25"&&
           app.field(F::bandwidth).text=="2.4 kHz",
           "Hidden advanced controls failed to retain command-line overrides");
+    check(app.field(F::sched_hop).selected=="5"&&app.field(F::sched_hop_dilution).selected=="3",
+          "Hidden scheduled controls discarded imported settings");
+    app.select(control(F::sched_hop),"0");app.select(control(F::sched_hop_dilution),"0");
+    check(app.field(F::sched_hop).selected=="5"&&app.field(F::sched_hop_dilution).selected=="3",
+          "Hidden scheduled declarations accepted stale callbacks");
     for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},
                          ui::Rect{0,0,ui::default_width,ui::default_height}}) {
         std::vector<ui::ControlLayout> hidden;
@@ -331,14 +336,16 @@ void developer_mode_presentation() {
     }
     app.navigate(P::planner);
     check(app.page()==P::planner&&app.control(toggle).visible,"Link planner or its persistent developer toggle became unavailable");
-    for(const auto field:{F::search_arithmetic,F::receiver_strategy,F::receiver_cpu_budget,F::sched_hop_dilution})
+    for(const auto field:{F::search_arithmetic,F::receiver_strategy,F::receiver_cpu_budget})
         check(!app.control(control(field)).visible,"Developer planner control exposed before Developer mode");
     app.toggle(toggle,true);
-    for(const auto field:{F::search_arithmetic,F::receiver_strategy,F::receiver_cpu_budget,F::sched_hop_dilution})
+    for(const auto field:{F::search_arithmetic,F::receiver_strategy,F::receiver_cpu_budget})
         check(app.control(control(field)).visible,"Developer planner control missing on Link planner");
     app.navigate(P::console);
-    for(const auto field:{F::search_arithmetic,F::receiver_strategy,F::receiver_cpu_budget,F::sched_hop_dilution})
+    for(const auto field:{F::search_arithmetic,F::receiver_strategy,F::receiver_cpu_budget})
         check(!app.control(control(field)).visible,"Document-only planner control leaked onto Console");
+    check(app.control(control(F::sched_hop)).visible&&app.control(control(F::sched_hop_dilution)).visible,
+          "Developer scheduled controls failed to persist on Console");
     app.navigate(P::planner);app.toggle(toggle,false);
     for(const auto page:{P::compression,P::flow,P::transmission}) {
         app.navigate(page);check(app.page()==P::planner,"Stale navigation opened a hidden developer tab");

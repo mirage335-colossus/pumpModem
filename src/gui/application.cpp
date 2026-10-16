@@ -385,7 +385,7 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
     if(!declaration.surface&&!declaration.persistent&&!page_visible(declaration.page))view.visible=false;
     if(!declaration.surface&&(declaration.field==ui::Field::planner_target||declaration.field==ui::Field::planner_command||
                              declaration.field==ui::Field::search_arithmetic||declaration.field==ui::Field::receiver_strategy||
-                             declaration.field==ui::Field::receiver_cpu_budget||declaration.field==ui::Field::sched_hop_dilution))
+                             declaration.field==ui::Field::receiver_cpu_budget))
         view.visible=view.visible&&page()==ui::Page::planner;
     if(declaration.surface) {
         view.visible=view.visible&&impl_->overlay&&impl_->overlay->generation==declaration.surface;

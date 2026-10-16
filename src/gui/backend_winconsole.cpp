@@ -257,11 +257,14 @@ private:
             if(primitive.tone==Tone::positive)color=10;
             if(primitive.tone==Tone::caution)color=11;
             if(primitive.tone==Tone::negative)color=9;
+            if(primitive.tone==Tone::discouraged)color=1;
         }
         if(!primitive.enabled||primitive.tone==Tone::muted)color=8;
-        if(primitive.focused||primitive.bold)color|=8;
+        if(!colors_&&primitive.tone==Tone::discouraged)color=8;
+        if((primitive.focused||primitive.bold)&&primitive.tone!=Tone::discouraged)color|=8;
         auto result=color_attribute(color);
-        if(primitive.focused||primitive.selected||primitive.tone==Tone::inverse)result=reverse_attribute(result);
+        if(primitive.tone==Tone::inverse||
+           ((primitive.focused||primitive.selected)&&primitive.tone!=Tone::discouraged))result=reverse_attribute(result);
         return result;
     }
     template<class Send> void mouse(const MOUSE_EVENT_RECORD& native,Send send) {

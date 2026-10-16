@@ -9,6 +9,7 @@
 namespace datapump::modem {
 
 struct SymbolStreamAddress;
+namespace detail { struct OriginalPulseRow; }
 
 // The pattern waveform carries one meaningful bit per complete pattern. A
 // partial final chip consumes a whole stream position before the next symbol.
@@ -48,6 +49,11 @@ public:
     // each output keeps shaped_value's within-bit accumulation order.
     std::array<std::complex<double>,2> shaped_values(std::uint64_t first_chip,
                                                    double within_symbol);
+    // Internal Original receiver capability: borrow the exact public pulse
+    // traversal used for this pair. Null means unavailable. The borrowed row
+    // expires at the next shaping operation on this PatternCode.
+    std::array<std::complex<double>,2> shaped_values(std::uint64_t first_chip,
+        double within_symbol,const detail::OriginalPulseRow*& exported);
     // Optional cancellable V2 setup before scoring/generating a symbol. Two
     // neighboring symbol maps are retained for finite-pulse overlap. Other
     // versions need no setup; ordinary seek methods remain lazy and bounded.

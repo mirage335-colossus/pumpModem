@@ -60,6 +60,25 @@ void disabled_editor_presentation() {
     check(state.text=="1500 Hz","Terminal withdrawing presentation changed configured text");
     state=saved;app.close();
 }
+void option_presentation() {
+    Application app({});auto control=declaration(ui::Field::fast_mode);control.label="Generic option presentation";
+    auto& state=const_cast<ui::FieldState&>(app.field(control.field));
+    check(state.options.size()>=2,"Choice presentation fixture requires two options");
+    const auto expected=state.options[1].id;
+    state.selected=state.options[0].id;state.options[0].label="Ordinary";
+    state.options[1].label="Experimental";state.options[1].text_tone=ui::TextTone::discouraged;
+    ui::OverlayDefinition overlay;overlay.controls={control};show_overlay(app,std::move(overlay));
+    terminal::Session session(app);session.resize({80,24,{1,1}});
+    editor_focus(session,"Generic option presentation");session.input(key(terminal::Key::down));
+    const auto row=find(session,"Experimental"),cue=find(session,"> ");
+    check(row.tone==terminal::Tone::discouraged&&row.enabled&&row.focused&&row.selected&&
+          cue.tone==terminal::Tone::normal&&cue.focused&&cue.selected&&
+          cue.bounds.y==row.bounds.y&&cue.bounds.x+cue.bounds.w==row.bounds.x,
+          "Discouraged popup option lost its semantic foreground or independent focus cue");
+    session.input(key(terminal::Key::enter));
+    check(app.field(control.field).selected==expected,"Styled popup changed the selected option identity");
+    app.close();
+}
 void shared_layout_changes() {
     Application app({});auto editor=declaration(ui::Field::fast_text);editor.label="Layout editor";editor.placement={16,18,0,0,300,72};
     auto toggle=declaration(ui::Field::developer_mode);toggle.label="Layout toggle";toggle.placement={350,18,0,0,200,27};
@@ -423,6 +442,6 @@ void path_dialog_policy() {
 }
 }
 int main() {
-    try {shared_record_layout();record_scrolling();shared_layout_changes();disabled_editor_presentation();editing_and_security();editable_presets();focus_choices_and_scroll();focus_boundaries();incremental_page_scroll();document_resize_scroll();draft_submit_shortcuts();path_dialog_policy();plot_expansion();overlay_focus_policy();popup_binding_identity();empty_record_placeholder();std::cout<<"Terminal UI interaction checks passed\n";return 0;}
+    try {shared_record_layout();record_scrolling();shared_layout_changes();disabled_editor_presentation();option_presentation();editing_and_security();editable_presets();focus_choices_and_scroll();focus_boundaries();incremental_page_scroll();document_resize_scroll();draft_submit_shortcuts();path_dialog_policy();plot_expansion();overlay_focus_policy();popup_binding_identity();empty_record_placeholder();std::cout<<"Terminal UI interaction checks passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

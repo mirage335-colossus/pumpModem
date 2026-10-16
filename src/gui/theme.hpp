@@ -24,8 +24,12 @@ inline constexpr Rgb comparison_tint{192, 168, 224};
 inline constexpr Rgb positive_tint{144, 200, 152};
 inline constexpr Rgb caution_tint{224, 196, 128};
 inline constexpr Rgb negative_tint{224, 144, 136};
+inline constexpr Rgb discouraged_tint{156, 100, 94};
 
 inline constexpr Rgb grayscale(std::uint8_t level) { return {level, level, level}; }
+inline constexpr Rgb discouraged_rgb(bool use_color) {
+    return use_color?discouraged_tint:grayscale(muted);
+}
 inline constexpr Rgb text_rgb(bool use_color, std::uint8_t fallback = text) {
     return grayscale(use_color && fallback > color_text ? color_text : fallback);
 }

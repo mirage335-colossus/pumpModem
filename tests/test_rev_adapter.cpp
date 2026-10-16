@@ -14,6 +14,13 @@ int run_native_probes(std::string_view selected={}) {
     // the real datapump-gui executable through gui_workflow.
     Launch launch;launch.color=false;launch.simulation=true;launch.page=ui::pages().front().id;
     configure_theme(launch.color);std::vector<void*> windows;
+    if(selected=="--choice-presentation") {
+        for(bool color:{false,true}) {
+            launch.color=color;configure_theme(color);
+            RevApp probe(windows,launch);probe.verify_choice_contract();probe.verify_developer_mode_visibility();
+        }
+        return 0;
+    }
     if(selected=="--inline-document") {
         RevApp probe(windows,launch);probe.verify_inline_document_editor();return 0;
     }

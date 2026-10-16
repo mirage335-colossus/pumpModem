@@ -68,6 +68,8 @@ set(_prerequisites_native_relocation ${datapump_executables})
 # Keep this list aligned with docs/development.md. Calibration stays included:
 # a cheap smoke selection must never replace the preservation contract.
 set(_contract
+  scheduled_native_coherent_prefit scheduled_native_cohort
+  scheduled_original_pulse_row scheduled_exact_source_points
   scheduled_cold_colored_source_rows
   live_planning_link
   scheduled_workspace_accounting

@@ -32,9 +32,11 @@ void disabled_editor_presentation() {
     state.text="1500 Hz";state.display_text="choice label";state.disabled_text="201.5 kHz \"hop\"";state.enabled=false;
     auto snapshot=bridge.snapshot(1200,1048);const auto carrier=id(snapshot,"Carrier");
     const auto object=[&](const std::string& json) {
-        const auto begin=json.find("{\"id\":\""+std::to_string(carrier)+"\"");
+        const auto begin=json.find("{\"id\":\""+std::to_string(carrier)+"\",\"kind\":\"text\",\"label\":\"Carrier\"",json.find("\"controls\":["));
         check(begin!=std::string::npos,"Carrier target disappeared");
-        return json.substr(begin,json.find(",\"options\":",begin)-begin);
+        const auto end=json.find(",\"options\":",begin);
+        check(end!=std::string::npos,"Carrier target lost its options delimiter");
+        return json.substr(begin,end-begin);
     };
     const auto fields=object(snapshot);
     check(fields.find("\"enabled\":false")!=std::string::npos&&
@@ -68,6 +70,17 @@ void pixel_runs() {
         }
         check(rgb_runs(pixels)==expected,"Bounded RGB run vector differs");
     }
+}
+void option_presentation() {
+    Application app({});app.select(ui::Field::fast_mode,"robust");web::Bridge bridge(app);
+    auto& state=const_cast<ui::FieldState&>(app.field(ui::Field::bandwidth));const auto saved=state;
+    state.selected="custom";state.enabled=true;state.options={{"plain","Ordinary",true},{"custom","Generic experiment",true,ui::TextTone::discouraged}};
+    const auto snapshot=bridge.snapshot(1380,1072);
+    check(snapshot.find("\"label\":\"Generic experiment\",\"enabled\":true,\"tone\":5,\"foreground\":\"rgb(156,100,94)\"")!=std::string::npos,
+        "Web option styling lost its resolved foreground or selectability");
+    check(snapshot.find("\"label\":\"Ordinary\",\"enabled\":true,\"tone\":0,\"foreground\":\"rgb(144,192,184)\"")!=std::string::npos,
+        "Ordinary web option inherited the discouraged selected foreground");
+    state=saved;app.close();
 }
 void bitmap_history() {
     // The HTML backend must preserve the native producer's startup time
@@ -229,7 +242,7 @@ void shared_geometry_and_stable_snapshots() {
 }
 void measured_document_geometry() {
     Launch launch;launch.page=ui::Page::planner;Application app(launch);web::Bridge bridge(app);
-    constexpr int width=1200,height=1000;
+    constexpr int width=ui::min_width,height=1000;
     auto snapshot=bridge.snapshot(width,height);
     const std::regex request("\\\"measure\\\":\\{\\\"id\\\":\\\"([0-9]+)\\\",\\\"width\\\":([0-9]+),\\\"height\\\":(-?[0-9]+)\\}");
     std::map<std::uint64_t,int> requests;
@@ -269,7 +282,7 @@ void measured_document_geometry() {
 int main(int argc,char** argv) {
     try {
         if(argc==2&&std::string(argv[1])=="--snapshot") {Application app({});web::Bridge bridge(app);std::cout<<bridge.snapshot(360,640);app.close();return 0;}
-        pixel_runs();bitmap_history();disabled_editor_presentation();envelopes_and_edits();layers_and_services();document_withdrawal();service_completion_routing();shared_submit_policy();shared_geometry_and_stable_snapshots();measured_document_geometry();
+        pixel_runs();bitmap_history();disabled_editor_presentation();option_presentation();envelopes_and_edits();layers_and_services();document_withdrawal();service_completion_routing();shared_submit_policy();shared_geometry_and_stable_snapshots();measured_document_geometry();
         std::cout<<"web bridge envelopes, literal text, declarations, generations, layers and services passed\n";return 0;
     } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

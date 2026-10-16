@@ -120,6 +120,28 @@ void menus() {
     effective.picked(effective.menu()+1);
     require(effective.value()==1&&changes==1,"Enabled effective choice did not allow selecting another saved option");
     effective.apply_display("");require(effective.value()==1,"Clearing effective text changed the selected ID");
+    for(bool color:{false,true}) {
+        theme::apply_palette(color);
+        Fl_Choice styled(0,0,220,30);
+        const std::vector<ui::Option> rows{{"plain","Ordinary",true},{"experimental","Experimental",true,ui::TextTone::discouraged}};
+        populate(styled,rows);
+        require(!(styled.mode(1)&FL_MENU_INACTIVE)&&styled.menu()[1].labeltype()==literal_label_type(true,false,ui::TextTone::discouraged),
+            "Discouraged native option lost its tone or became unselectable");
+        styled.picked(styled.menu()+1);require(styled.value()==1,"Discouraged native option did not retain selection identity");
+        styled.textcolor(theme::fltk_color(theme::discouraged_rgb(color)));
+        require(styled.menu()[0].labelcolor()==theme::fltk_color(theme::data_rgb(color)),
+            "Ordinary popup option inherited the discouraged selected foreground");
+        Fl_Image_Surface surface(220,30);Fl_Surface_Device::push_current(&surface);
+        fl_color(FL_BLACK);fl_rectf(0,0,220,30);styled.menu()[1].draw(0,0,220,30,&styled,1);
+        Fl_Surface_Device::pop_current();std::unique_ptr<Fl_RGB_Image> image(surface.image());
+        const auto expected=theme::discouraged_rgb(color);bool found=false;
+        for(int y=0;y<image->data_h();++y)for(int x=0;x<image->data_w();++x) {
+            const auto* pixel=image->array+(y*image->data_w()+x)*image->d();
+            found|=pixel[0]==expected.red&&pixel[1]==expected.green&&pixel[2]==expected.blue;
+        }
+        require(found,"Selected native popup row brightened or lost its shared discouraged foreground");
+    }
+    theme::apply_palette();
 }
 void generic_gestures_and_bitmaps() {
     const auto& declaration=datapump::gui::test::extension_controls().front();
@@ -1726,6 +1748,9 @@ void clipboard() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="--choice-presentation") {
+            theme::apply_palette();menus();developer_mode_visibility();return 0;
+        }
         if(argc==2&&std::string_view(argv[1])=="--disabled-text") {
             theme::apply_palette();disabled_editor_presentation();return 0;
         }

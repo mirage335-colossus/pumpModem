@@ -3,6 +3,7 @@
 #include "datapump/streaming_modem.hpp"
 #include "live_pattern_scores.hpp"
 #include "live_deferred_pattern_history.hpp"
+#include "scheduled_source_binding_types.hpp"
 #include <complex>
 #include <cstddef>
 #include <cstdint>
@@ -28,6 +29,8 @@ struct ReceiverState {
     double last_confident_at = 0;
     std::uint64_t last_confident_end = 0;
     std::uint64_t sample_origin = 0, family = 0;
+    modem::detail::scheduled_source_samples::PointFamilyToken point_family;
+    std::uint64_t point_consumer=UINT64_MAX;
     PatternScoreHistory pattern_score_history;
     DeferredPatternHistoryOrdinals history_ordinals;
     DeferredPatternHistoryPoll history_poll;

@@ -41,6 +41,7 @@ Tone tone(ui::TextTone value) {
     switch(value) {
     case ui::TextTone::muted:return Tone::muted;case ui::TextTone::data:return Tone::data;
     case ui::TextTone::inverse:return Tone::inverse;case ui::TextTone::negative:return Tone::negative;
+    case ui::TextTone::discouraged:return Tone::discouraged;
     default:return Tone::normal;
     }
 }
@@ -306,7 +307,7 @@ struct Session::Impl {
         case ui::Kind::choice: {
             std::string value=state.display_text.empty()?state.selected:state.display_text;
             for(const auto& option:state.options)if(option.id==state.selected&&state.display_text.empty())value=option.label;
-            fill(r,Tone::muted,false,selected);text(r,value+" v",tone(state.text_tone),selected,false,item.enabled);break;
+            fill(r,Tone::muted,false,selected);text(r,value+" v",tone(ui::choice_text_tone(state)),selected,false,item.enabled);break;
         }
         case ui::Kind::text: {
             if(!state.options.empty()&&!c.read_only&&r.w>3) {text({r.x+r.w-3,r.y,3,1},"[v]",Tone::accent,selected);r.w-=3;}
@@ -382,7 +383,13 @@ struct Session::Impl {
         const ui::Rect r{1,y,std::max(1,columns()-2),height};fill(r,Tone::inverse);
         for(int n=popup_scroll;n<std::min(static_cast<int>(options.size()),popup_scroll+height);++n) {
             auto row=ui::Rect{r.x,y+n-popup_scroll,r.w,1};hits.push_back({Hit::Kind::option,row,n});
-            text(row,options[n].label,Tone::normal,n==popup_selected,n==popup_selected,options[n].enabled);
+            if(n==popup_selected&&options[n].text_tone==ui::TextTone::discouraged) {
+                // Keep the semantic foreground; highlight a separate focus cue.
+                const int cue=std::min(2,std::max(0,row.w-1));
+                if(cue)text({row.x,row.y,cue,1},"> ",Tone::normal,true,true);
+                row.x+=cue;row.w-=cue;
+            }
+            text(row,options[n].label,tone(options[n].text_tone),n==popup_selected,n==popup_selected,options[n].enabled);
         }
         scene.caret.reset();
     }

@@ -9,6 +9,7 @@
 #include "search_parallel.hpp"
 #include "pattern_fft_batch.hpp"
 #include "pattern_fft_window.hpp"
+#include "pattern_observation_layout.hpp"
 #include "pattern_correlator_batch.hpp"
 #include "pattern_drift.hpp"
 #include "audio_trace.hpp"
@@ -26,14 +27,6 @@ constexpr double tau = 2 * std::numbers::pi;
 void cancelled(std::stop_token stop) { if(stop.stop_requested()) throw Error("pattern search cancelled"); }
 using detail::pattern_fft;
 using detail::pattern_evidence;
-std::size_t power_two(std::size_t value) {
-    std::size_t result=1;
-    while(result<value) {
-        if(result>std::numeric_limits<std::size_t>::max()/2)throw Error("pattern transform size overflow");
-        result*=2;
-    }
-    return result;
-}
 std::vector<double> local_frequency_offsets(const Config& config) {
     const auto step=.25*config.sample_rate/static_cast<double>(symbol_sample_count(config));
     std::vector<double> result{0,-step,step,-2*step,2*step};
@@ -377,7 +370,7 @@ struct PatternReceiver::Impl {
         // Chip and symbol boundaries must fall on bin boundaries. Rounding a
         // symbol to whole bins would accumulate timing drift and count edges
         // of adjacent symbols twice, especially with partial final chips.
-        bin_samples=static_cast<std::size_t>(pattern_projection_bin_samples(c,maximum_offset));
+        bin_samples=detail::pattern_observation_bin_samples(c,maximum_offset);
         const auto omega=tau*c.carrier_hz/c.sample_rate;
         const auto sine=std::sin(omega);
         const auto bin_image=[&](std::size_t count) {
@@ -388,44 +381,19 @@ struct PatternReceiver::Impl {
         // Short nonorthogonal/singular private bins need exact sample fits
         // to avoid a high-SNR confidence ceiling. Public short patterns keep
         // their existing sample-resolution timing behavior.
-        if(symbols<=256 && ((!c.scramble && !c.dsss) || bin_image(bin_samples)>1e-10*static_cast<double>(bin_samples)))
-            bin_samples=1;
         sample_fit=bin_samples==1 && (symbols<=256 || (!c.scramble && !c.dsss));
         const auto image=bin_image(bin_samples);
         projection_image_ratio=detail::pattern_projection_image_ratio(bin_samples,c.carrier_hz,c.sample_rate);
         const auto small=static_cast<double>(bin_samples)-image;
         real_rank=small<=1e-10*static_cast<double>(bin_samples);
         if(!real_rank)noise_condition=(static_cast<double>(bin_samples)+image)/small;
-        if(symbols/bin_samples>std::numeric_limits<std::size_t>::max()-2)throw Error("pattern integration exceeds address space");
         double minimum_rate=search.couple_clock_to_carrier?1-maximum_offset/c.carrier_hz:1.;
         if(!search.hypotheses.empty()) {
             minimum_rate=clock_ratio(0);
             for(std::size_t f=1;f<search.hypotheses.size();++f)minimum_rate=std::min(minimum_rate,clock_ratio(f));
         }
-        const auto observation_samples=static_cast<long double>(symbols)/minimum_rate;
-        if(observation_samples/bin_samples>std::numeric_limits<std::size_t>::max()-2)
-            throw Error("pattern clock integration exceeds address space");
-        length=static_cast<std::size_t>(std::ceil(observation_samples/bin_samples));
-        if(length<4)length=4;
-        if(length>std::numeric_limits<std::size_t>::max()/4)throw Error("pattern integration exceeds address space");
-        const auto nominal_length=static_cast<std::size_t>(symbols/bin_samples+(symbols%bin_samples!=0));
-        transform=power_two(2*std::max<std::size_t>(4,nominal_length));
-        while(transform<length) {
-            if(transform>std::numeric_limits<std::size_t>::max()/2)throw Error("pattern transform size overflow");
-            transform*=2;
-        }
-        if(long_symbol) {
-            // A full 2N transform can postpone the first decision until well
-            // after both a long bit and its absent successor have arrived.
-            // Use a smaller overlap-save transform when it still covers a
-            // useful range of new starts; avoid near-zero hops at powers of two.
-            // Tracking's five timing fits also need four bins of scratch.
-            const auto compact=power_two(length+4);
-            if(compact-length+1>=std::max<std::size_t>(4,length/4))
-                transform=std::min(transform,compact);
-        }
-        hop=transform-length+1;
-        if(long_symbol)hop=std::min(hop,std::max<std::size_t>(1,nominal_length/2));
+        const auto observation_layout=detail::pattern_observation_layout(c,bin_samples,minimum_rate);
+        length=observation_layout.length;transform=observation_layout.transform;hop=observation_layout.hop;
         required_tracking_reference=variable_clock || transform<2*length;
         // Transform and baseband history allocations are checked before any
         // allocation. The RAM dropdown is a ceiling, not an allocation target.
@@ -1559,10 +1527,8 @@ struct PatternReceiver::Impl {
                 if(!track.unconfirmed_symbols)track.absent_samples=0;
                 track.absent_samples+=static_cast<long double>(code.symbol_samples())/clock_ratio(track.frequency);
                 ++track.unconfirmed_symbols;
-                const auto gap_expired=variable_clock?
-                    track.absent_samples>=pattern_absence_seconds*config.sample_rate:
-                    static_cast<long double>(track.unconfirmed_symbols)*code.symbol_samples()>=
-                        static_cast<long double>(pattern_absence_seconds)*config.sample_rate;
+                const auto gap_expired=detail::fft_failed_duration_complete(track.absent_samples,
+                    track.unconfirmed_symbols,code.symbol_samples(),config.sample_rate,variable_clock);
                 if(!presence || best.score<search.retain_score || best.score-best.alternative_score<1 || (group_count>1 && !standalone) ||
                    (track.pending_gap && !standalone)) {
                     if(track.admitted && !gap_expired) {

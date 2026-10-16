@@ -583,17 +583,24 @@ void scheduled_hop_settings() {
         burst.options[0].id=="0"&&burst.options[0].label=="0"&&
         burst.options[1].id=="3"&&burst.options[2].id=="5",
         "Scheduled burst defaults or exact dropdown choices changed");
+    check(burst.options[0].text_tone==ui::TextTone::normal&&
+        burst.options[1].text_tone==ui::TextTone::discouraged&&burst.options[1].enabled&&
+        burst.options[2].text_tone==ui::TextTone::discouraged&&burst.options[2].enabled,
+        "Experimental burst choices must be discouraged without disabling selection");
     for(const auto field:{F::sched_hop,F::sched_frequency_search}) {
         const auto& declarations=ui::console_screen();
         const auto control=std::find_if(declarations.begin(),declarations.end(),[&](const auto& c){return c.field==field;});
-        check(control!=declarations.end()&&control->kind==ui::Kind::choice&&control->persistent&&!control->developer_only,
-            "Burst controls must be ordinary persistent dropdowns");
+        check(control!=declarations.end()&&control->kind==ui::Kind::choice&&control->persistent&&
+            control->developer_only==(field==F::sched_hop),
+            "Only Sched_Hop must be a developer-only persistent dropdown");
     }
     const auto& declarations=ui::console_screen();
     const auto dilution_control=std::find_if(declarations.begin(),declarations.end(),[](const auto& c){return c.field==F::sched_hop_dilution;});
     check(dilution_control!=declarations.end()&&dilution_control->kind==ui::Kind::choice&&
-        dilution_control->document_only&&dilution_control->developer_only&&dilution_control->page==ui::Page::planner,
-        "Burst dilution must stay a persistent developer-only planner control");
+        !dilution_control->document_only&&dilution_control->persistent&&dilution_control->developer_only&&
+        dilution_control->page==ui::Page::console&&dilution_control->slot==ui::Slot::sched_hop_dilution&&
+        std::string_view(dilution_control->label)=="Dilution",
+        "Burst dilution must be a persistent developer-only header control");
     check(controller.field(F::sched_hop_dilution).selected=="0"&&!controller.field(F::sched_hop_dilution).enabled&&
         controller.field(F::sched_hop_dilution).options.size()==2&&
         controller.field(F::sched_hop_dilution).options[0].id=="0"&&controller.field(F::sched_hop_dilution).options[1].id=="3",

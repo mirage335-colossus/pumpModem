@@ -44,6 +44,20 @@ for(const count of [1,255,256,257,640*320]) {
     assert.throws(()=>r.paint(canvas,{width:1,height:1,rgb:'AAAA',rgbRuns:'AAECAw=='}),RangeError);
     assert.throws(()=>r.paint(canvas,{width:641,height:320,rgbRuns:'AAECAw=='}),RangeError);
 }
+{
+    const events=[],r=new Renderer(doc.root,e=>events.push(e));
+    const choice={id:'9',kind:'choice',label:'Generic choice',enabled:true,selected:'experimental',foreground:'rgb(156,100,94)',
+        options:[{id:'ordinary',label:'Ordinary',enabled:true,foreground:'rgb(144,192,184)'},{id:'experimental',label:'Experimental',enabled:true,foreground:'rgb(156,100,94)'}]};
+    const base={version:1,generation:'1',ack:'0',title:'Fixture',tabs:[],controls:[choice],overlay:[],document:null,service:null,
+        layers:{showBackground:true,enableBackground:true,showOverlay:false,enableOverlay:false}};
+    r.apply(base);const select=r.views.get('9').input;
+    assert.equal(select.style.color,'rgb(156,100,94)');assert.equal(select.children[1].style.color,'rgb(156,100,94)');
+    assert.equal(select.children[0].style.color,'rgb(144,192,184)','Ordinary option inherited selected red');
+    assert.equal(select.children[1].disabled,false);select.value='experimental';select.dispatch('change');
+    assert.equal(events.at(-1).value,'experimental','Presentation changed option callback identity');
+    r.apply({...base,controls:[{...choice,foreground:'',options:choice.options.map(o=>({...o,foreground:''}))}]});
+    assert.equal(select.style.color,'');assert.equal(select.children[1].style.color,'');r.destroy();
+}
 const sent=[];const renderer=new Renderer(doc.root,event=>sent.push(event));
 const control={id:'1',kind:'text',label:'Generic extension',help:'<img src=x>',enabled:true,stretch:1,multiline:true,readOnly:false,byteLimit:128,history:'0',cursorEnd:'0',text:'<script>literal</script>',options:[],submitEnter:false,submitCtrlEnter:true};
 const snapshot={version:1,generation:'1',ack:'0',title:'Fixture',tabs:[],controls:[control],overlay:[],document:null,service:null,layers:{showBackground:true,enableBackground:true,showOverlay:false,enableOverlay:false}};

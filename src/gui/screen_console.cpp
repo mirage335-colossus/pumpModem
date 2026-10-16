@@ -16,7 +16,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     case Slot::search_margin: case Slot::clock_accuracy: case Slot::clock_region: case Slot::clock_offset: case Slot::audio_error:
         control.purpose=ControlPurpose::planning;break;
     case Slot::device:case Slot::mono:case Slot::live_duplex:case Slot::exclusive:case Slot::key:case Slot::key_actions:
-    case Slot::dsss_factor:case Slot::dsss_version:case Slot::fhss:case Slot::sched_hop:case Slot::sched_frequency_search:
+    case Slot::dsss_factor:case Slot::dsss_version:case Slot::fhss:case Slot::sched_hop:case Slot::sched_hop_dilution:case Slot::sched_frequency_search:
     case Slot::pattern:case Slot::fec:case Slot::dsp_workspace:case Slot::receive_snr:
     case Slot::developer_mode:case Slot::shellcode_mode:case Slot::send_key:
         control.purpose=ControlPurpose::setup;break;
@@ -80,7 +80,10 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::dsss_version)control.help="Off preserves ordinary private patterns. Interleave spreads their coefficients using the independent DSSS key, then shapes the fine chips. Spreading selects 10x, 100x or 1000x. Imported legacy commands remain an explicit diagnostic waveform. Enter actual average radio power in the link budget; interleaving includes digital headroom before limiting.";
     if(slot==Slot::fhss)control.help="Requires a selected encryption key. Fake FCC/EU illustrate band-specific hopping. Below 800 MHz both use narrow experimental spacing; this is a product convention. Carrier/Shift animate during TX; physical audio frequency and radio tuning stay fixed. Supported geometries shape audio power down at hop boundaries; unsupported ramps are reported. Planner uses the highest illustrated RF. Band/access limits and unsupported profiles appear under Model limits and references. No compliance claim or automatic channel-count gain.";
 
-    if(slot==Slot::sched_hop)control.help="Requires a selected encryption key. Secret UTC active/null bursts add 3x or 5x total time; 0 disables scheduling; developer dilution can group more active hops per frame. Payload time pauses during null hops, allowing receiver work to catch up. Capture guards, workspace and decoder limits are included in planning; tight clock sync reduces extra recording.";
+    if(slot==Slot::sched_hop) {
+        control.developer_only=true;
+        control.help="Experimental developer control. The 3x and 5x choices have not demonstrated a practical receiver CPU-ceiling improvement and are dimmed red. Requires a selected encryption key. Secret UTC active/null bursts add 3x or 5x total time; 0 disables scheduling. Dilution can group more active hops per frame. Capture guards, workspace and decoder limits still apply.";
+    }
     if(slot==Slot::sched_frequency_search)control.help="Widen the complete oscillator frequency uncertainty by this factor while Sched_Hop is enabled. The planner and receiver retain the resulting hypotheses or report unsupported coverage/workspace; burst idle time does not increase available RAM.";
 
     if(slot==Slot::mode)control.help="Receiver failures stay visible until restart or reconfiguration. Dropped input means the capture queue discarded audio; interrupted input means device continuity was lost or uncertain. Search limited means required coverage or candidates were omitted by a resource limit; restarted means an error reset acquisition. Normal weak-candidate rejection and slow lossless simulation are not failures. See Status for details.";
@@ -157,7 +160,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     }
     if(control.field==Field::planner_target) {control.document_only=true;control.help="Preview target only: typing or choosing a preset selects a clock/RAM fit for one matching receiver profile, preferring an equal or weaker target. The edit buffer is retained; Enter or a preset shows the exact accepted value. Apply a planner target explicitly to change short or long transmission settings.";}
     if(control.field==Field::sched_hop_dilution) {
-        control.document_only=true;control.developer_only=true;control.purpose=ControlPurpose::setup;
+        control.developer_only=true;control.purpose=ControlPurpose::setup;
         control.help="0 keeps one active hop per frame; 3 groups three consecutive active hops. Effective time multiplier is M divided by the active count: 5 with dilution 3 gives 5/3x, and 3 with dilution 3 has no scheduled null hops. Memory and processing limits are included in planning. Requires Sched_Hop and an encryption key.";
     }
     if(control.field==Field::search_arithmetic) {
@@ -229,7 +232,6 @@ const std::vector<Control>& console_screen() {
         placed({Kind::choice,Field::search_arithmetic,Command::none,Bitmap::none,Page::planner,4,"Search arithmetic"}, Slot::none),
         placed({Kind::choice,Field::receiver_strategy,Command::none,Bitmap::none,Page::planner,4,"Receiver strategy"}, Slot::none),
         placed({Kind::text,Field::receiver_cpu_budget,Command::none,Bitmap::none,Page::planner,4,"CPU budget (s / 1 s)",1,false,64}, Slot::none),
-        placed({Kind::choice,Field::sched_hop_dilution,Command::none,Bitmap::none,Page::planner,4,"Sched_Hop Dilution"}, Slot::none),
         placed({Kind::action,Field::count,Command::open_keyfile,Bitmap::none,Page::console,2,"Open keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::generate_keyfile,Bitmap::none,Page::console,2,"Generate keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::show_key_folder,Bitmap::none,Page::console,2,"Show key folder"}, Slot::key_actions, Menu::keyfile),
@@ -238,6 +240,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::choice,Field::dsss_version,Command::none,Bitmap::none,Page::console,3,"DSSS"}, Slot::dsss_version),
         placed({Kind::choice,Field::fhss,Command::none,Bitmap::none,Page::console,3,"FHSS"}, Slot::fhss),
         placed({Kind::choice,Field::sched_hop,Command::none,Bitmap::none,Page::console,3,"Sched_Hop"}, Slot::sched_hop),
+        placed({Kind::choice,Field::sched_hop_dilution,Command::none,Bitmap::none,Page::console,3,"Dilution"}, Slot::sched_hop_dilution),
         placed({Kind::choice,Field::sched_frequency_search,Command::none,Bitmap::none,Page::console,3,"Freq search"}, Slot::sched_frequency_search),
         placed({Kind::choice,Field::key,Command::none,Bitmap::none,Page::console,3,"Encryption key entry"}, Slot::key),
         placed({Kind::label,Field::key_path,Command::none,Bitmap::none,Page::console,3,""}, Slot::key_path),

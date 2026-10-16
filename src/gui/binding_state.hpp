@@ -92,7 +92,7 @@ private:
     std::vector<ui::Option> options_;
     static bool same_options(const std::vector<ui::Option>& a,const std::vector<ui::Option>& b) {
         return a.size()==b.size()&&std::equal(a.begin(),a.end(),b.begin(),[](const auto& x,const auto& y){
-            return x.id==y.id&&x.label==y.label&&x.enabled==y.enabled;
+            return x.id==y.id&&x.label==y.label&&x.enabled==y.enabled&&x.text_tone==y.text_tone;
         });
     }
 };

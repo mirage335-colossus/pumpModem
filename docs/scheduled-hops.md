@@ -21,13 +21,17 @@ a planning document, not evidence of an implemented optimization or sustained re
 
 ## Controls and timing
 
-The Console places **Sched_Hop** after FHSS. Its selectable values are exactly
+Developer mode places **Sched_Hop** after FHSS, with **Dilution** immediately to
+its right. Both controls are hidden in ordinary use. Its selectable values are exactly
 **0**, **3** and **5**. Zero disables scheduling. With ordinary dilution, 3 and 5
 mean one active hop per three or five total hops. Each base hop is 0.4 seconds;
 the setting is a nominal total-time multiplier, not additional frequency spread.
+The choices above 1x are dimmed red (muted in monochrome) but remain selectable
+for development. They have not demonstrated a practically useful improvement to
+the receiver CPU ceiling near the decoding limit; the code is retained for
+future development.
 
-Developer mode exposes **Sched_Hop Dilution** beside the receiver controls at the
-bottom of the persistent Link planner, with exactly **0** and **3**. Zero means
+The adjacent **Dilution** control offers exactly **0** and **3**. Zero means
 one active hop (`G=1` internally); three means three consecutive active hops
 (`G=3`) in the unchanged `M`-hop frame. Thus 5/3 has effective 5/3 airtime, and
 3/3 is continuous. The latter uses the ordinary acquisition/source map and

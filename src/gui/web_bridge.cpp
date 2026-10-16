@@ -2,6 +2,7 @@
 #include "web_pixels.hpp"
 #include "control_interactions.hpp"
 #include "document_presentation.hpp"
+#include "presentation_palette.hpp"
 #include "service_queue.hpp"
 #include "text_policy.hpp"
 #include <algorithm>
@@ -169,13 +170,21 @@ struct Bridge::Impl {
         else if(!service_id||request->id!=old)service_id=fresh();
         app.set_service_active(request!=nullptr);
     }
-    void options(std::ostream& out,const ui::FieldState& state) {
+    std::string foreground(ui::TextTone tone,bool enabled) const {
+        if(tone==ui::TextTone::normal)return {};
+        const auto rgb=theme::text_rgb(tone,app.launch.color,enabled);
+        return "rgb("+std::to_string(rgb.red)+","+std::to_string(rgb.green)+","+std::to_string(rgb.blue)+")";
+    }
+    void options(std::ostream& out,const ui::FieldState& state,bool inherited_enabled) {
         out<<"[";bool first=true;
         for(const auto& option:state.options) {
             if(!first)out<<',';
             first=false;
             out<<"{\"id\":"<<json_string(option.id)<<",\"label\":"<<json_string(option.label)
-               <<",\"enabled\":"<<(option.enabled?"true":"false")<<'}';
+               <<",\"enabled\":"<<(option.enabled?"true":"false")
+               <<",\"tone\":"<<static_cast<int>(option.text_tone)
+               <<",\"foreground\":"<<json_string(foreground(option.text_tone==ui::TextTone::normal?ui::TextTone::data:option.text_tone,
+                    inherited_enabled&&state.enabled&&option.enabled))<<'}';
         }
         out<<']';
     }
@@ -203,6 +212,7 @@ struct Bridge::Impl {
            <<",\"disabledText\":"<<json_string(s.disabled_text)
            <<",\"selected\":"<<json_string(s.selected)<<",\"checked\":"<<(s.checked?"true":"false")
            <<",\"tone\":"<<static_cast<int>(s.text_tone)<<",\"history\":"<<identifier(s.text_history_revision)
+           <<",\"foreground\":"<<json_string(foreground(ui::choice_text_tone(s),p.enabled&&inherited_enabled))
            <<",\"cursorEnd\":"<<identifier(s.text_cursor_end_revision)
            <<",\"fontSize\":"<<c.font_size<<",\"rowHeight\":"<<c.list_row_height
            <<",\"emptyText\":"<<json_string(c.empty_text)<<",\"geometry\":";
@@ -220,7 +230,7 @@ struct Bridge::Impl {
                    <<",\"enabled\":"<<(presented.enabled&&inherited_enabled?"true":"false")<<'}';
             }
             out<<']';
-        } else options(out,s);
+        } else options(out,s,p.enabled&&inherited_enabled);
         out<<",\"records\":[";bool first=true;
         for(const auto& record:s.records) {
             if(!first)out<<',';

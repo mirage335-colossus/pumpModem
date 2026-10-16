@@ -365,7 +365,8 @@ struct Controller::Impl {
             f(UiField::receiver_cpu_budget).options.push_back({value,std::string(value)+" s / 1 s"});
         f(UiField::fhss).options={{"off","Off"},{"fake-fcc","Fake: FCC"},{"fake-eu","Fake: EU"}};
         f(UiField::fhss).selected="off";
-        f(UiField::sched_hop).options={{"0","0"},{"3","3"},{"5","5"}};
+        f(UiField::sched_hop).options={{"0","0"},
+            {"3","3",true,ui::TextTone::discouraged},{"5","5",true,ui::TextTone::discouraged}};
         f(UiField::sched_hop).selected="0";
         for(const auto* id:{"0","3"})
             f(UiField::sched_hop_dilution).options.push_back({id,id});

@@ -401,13 +401,16 @@ follows audio-device availability during transmission. Robust routing changes
 preserve the running receiver, pending bits, plots and airtime estimate and apply
 to the next playback. Simulated samples and exported WAV framing remain unchanged.
 
-The Robust key/DSSS/FHSS row also contains **Sched_Hop**, followed by **Freq
-search**. Sched_Hop offers **disabled**, **10**, **100**, **1k** and **10k** and
-requires a selected encryption key. An enabled factor schedules one active
-0.4-second hop per frame of that many total hops. Developer mode adds **Sched_Hop
-Dilution** beside the receiver controls at the bottom of the persistent Link
-planner: it groups `G` consecutive active hops within the same `M`-hop frame.
-For example, two active hops in ten mean effective 5× airtime. The frequency
+The Robust key/DSSS/FHSS row contains **Sched_Hop**, **Dilution** immediately to
+its right, then **Freq search**. Sched_Hop and Dilution are visible only in
+Developer mode; hiding them retains their saved settings. Sched_Hop offers
+**0**, **3** and **5** and requires a selected encryption key. Zero disables it;
+the enabled choices schedule one active 0.4-second hop per three or five total
+hops. Choices above 1x are dimmed red, or muted in monochrome, while remaining
+selectable for development. They have not demonstrated a practical receiver CPU
+ceiling improvement near the decoding limit. Dilution offers **0** (one active
+hop) and **3** (three consecutive active hops in the same frame). For example,
+three active hops in five mean effective 5/3× airtime. The frequency
 multiplier is enabled only with Sched_Hop; it widens oscillator frequency
 uncertainty while preserving clock-rate coverage and workspace limits. Saved
 and exported settings retain these preferences when inactive. Unsupported
@@ -749,7 +752,11 @@ to accept input across page changes.
 
 `FieldState` carries authoritative text/selection/boolean values, visibility,
 eligibility, options and records. Options have IDs, literal labels and enabled
-flags. `display_text` optionally shows an effective value without replacing a
+flags, plus a semantic text tone independent of eligibility. `discouraged` uses
+a dim red foreground in color mode and muted gray in monochrome. Popup rows and
+the selected value honor it; disabled presentation takes precedence. Adapters
+translate this generic role without field-specific application policy.
+`display_text` optionally shows an effective value without replacing a
 saved selection or disabling an otherwise enabled choice. For example, the
 selected Reed-Solomon preset (60% by default) remains saved
 while a tiny message reports `Off (short dictionary)`.

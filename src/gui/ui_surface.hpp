@@ -23,7 +23,7 @@ struct Event {
     int x=0,y=0,wheel=0;
     bool double_click=false,paste=false;
 };
-enum class Tone { normal,muted,accent,positive,caution,negative,data,inverse };
+enum class Tone { normal,muted,accent,positive,caution,negative,data,inverse,discouraged };
 enum class Icon { chevron_down,check };
 enum class Fill { surface,canvas,hover,selection,disabled };
 struct Primitive {

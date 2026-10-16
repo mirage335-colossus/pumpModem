@@ -1,5 +1,7 @@
 #include "scheduled_acquisition_policy.hpp"
+#include "pattern_observation_layout.hpp"
 #include "scheduled_exact_source_samples.hpp"
+#include "scheduled_exact_source_points.hpp"
 #include "scheduled_work_profile.hpp"
 #include "scheduled_acquisition_catalog.hpp"
 #include "scheduled_acquisition_tile.hpp"
@@ -43,6 +45,7 @@
 #include "scheduled_processing_journal.hpp"
 #include "scheduled_carrier_restart.hpp"
 #include "scheduled_original_projection_cache.hpp"
+#include "scheduled_original_pulse_row.hpp"
 #include <cfenv>
 #include <deque>
 #include <map>
@@ -67,6 +70,8 @@
 #include "scheduled_mapped_piece_groups.hpp"
 #include "scheduled_temporal_templates.hpp"
 #include "scheduled_private_batch.hpp"
+#include "scheduled_fp32_coherent_prefit.hpp"
+#include "scheduled_native_cohort.hpp"
 #include "scheduled_r1_export.hpp"
 #include "scheduled_flat_export.hpp"
 #include "pattern_projection_cache.hpp"
@@ -161,10 +166,16 @@ struct CoreWork {
     std::uint64_t scheduled_carry_samples=0;
     std::uint64_t scheduled_colored_guard_activations=0,scheduled_quarter_guard_fallbacks=0;
     std::uint64_t scheduled_template_constructions=0,scheduled_template_cache_hits=0;
+    std::uint64_t scheduled_original_pulse_rows=0,scheduled_original_pulse_reuses=0,scheduled_original_pulse_bulk_rows=0;
     std::size_t scheduled_template_cache_peak_bytes=0;
     std::uint64_t amplitude_publication_polls=0,amplitude_unchanged_polls=0;
 };
 struct ScheduledExtraWork {
+    // qcalls, first-seen, repeated, untracked, invalid/unbound, disabled.
+    std::array<std::array<std::uint64_t,6>,detail::scheduled_source_samples::purpose_count> point_census{};
+    // Scalar requests, enabled-pool lookups, actual Original calls, direct
+    // fallbacks, absent/reclaimed pool requests, copied hits. Cache mode only.
+    std::array<std::array<std::uint64_t,6>,detail::scheduled_source_samples::purpose_count> point_cache{};
     std::uint64_t scheduled_float_moment_prepared_samples=0;
     std::uint64_t scheduled_float_moment_preparations=0;
     std::uint64_t scheduled_float_moment_prepare_fallbacks=0;
@@ -1373,12 +1384,23 @@ struct PatternCorrelator::Impl {
         std::uint64_t colored_demand_batches=0,colored_demand_lanes=0,colored_demand_cache_hits=0,colored_demand_input_rows=0;
         bool colored_source_active=false;
         std::uint64_t eligible_ranges=0,fallback_ranges=0,invalid_certificates=0,proxy_ranges=0,fp32_ranges=0,fp64_ranges=0,origin_class_covers=0;
+        bool coherent_prefit_enabled=true,native_prefit_enabled=false,native_cohort_enabled=false;
+        std::unique_ptr<detail::scheduled_native_cohort::Batch> native_cohort;
+        std::uint64_t cohort_preparations=0,cohort_batches=0,cohort_members=0,cohort_inspected=0;
+        std::uint64_t cohort_request_rows=0,cohort_unique_rows=0,cohort_dedup_reuses=0,cohort_hash_collisions=0;
+        std::uint64_t cohort_native_rows=0,cohort_native_tiles=0,cohort_plan_splits=0,cohort_prefixes=0;
+        std::uint64_t cohort_completed=0,cohort_queries=0,cohort_rejections=0,cohort_fallbacks=0,cohort_budget_fallbacks=0;
+        std::uint64_t native_prefit_queries=0,native_prefit_completed=0,native_prefit_rejections=0;
+        std::uint64_t native_prefit_rows=0,native_prefit_tiles=0,native_prefit_fallbacks=0;
+        std::uint64_t coherent_prefit_queries=0,coherent_prefit_completed=0,coherent_prefit_rejections=0;
+        std::uint64_t coherent_prefit_samples=0,coherent_prefit_colored=0;
         std::size_t peak_prepared_bytes=0;
         std::size_t working_bytes()const {
             auto n=sizeof(*this)+sizeof(detail::scheduled_resume::Binding)+(catalog?catalog->working_bytes():0)+
                 (cursor?Catalog::cursor_reservation_bytes():0)+
                 logical.capacity()*sizeof(std::size_t)+replayed.capacity()*sizeof(std::uint64_t)+occupied.capacity();
             if(detached_replay)n+=detached_replay->working_bytes();
+            if(native_cohort)n+=native_cohort->working_bytes();
             if(default_linear_cache)n+=default_linear_cache->working_bytes();
             if(point_source_nodes)n+=detail::scheduled_point_source_nodes::Pool::metadata_bytes()+point_source_nodes->working_bytes();
             n+=default_fft_pool.working_bytes()+default_fft_templates.working_bytes();
@@ -2289,6 +2311,22 @@ struct PatternCorrelator::Impl {
             projection_limit=static_cast<std::size_t>(limit);
         }
         lazy_state()->projection_cache_limit=projection_limit;
+        if(const auto* value=std::getenv("DATAPUMP_SCHED_COHERENT_PREFIT")) {
+            require(std::string_view(value)=="0" || std::string_view(value)=="1",
+                "Original coherent prefit selector requires 0 or 1");
+            lazy_state()->coherent_prefit_enabled=std::string_view(value)=="1";
+        }
+        if(const auto* value=std::getenv("DATAPUMP_SCHED_NATIVE_COHERENT_PREFIT")) {
+            require(std::string_view(value)=="0" || std::string_view(value)=="1",
+                "native coherent prefit selector requires 0 or 1");
+            lazy_state()->native_prefit_enabled=std::string_view(value)=="1";
+        }
+        if(const auto* value=std::getenv("DATAPUMP_SCHED_NATIVE_COHORT")) {
+            require(std::string_view(value)=="0" || std::string_view(value)=="1","native cohort selector requires 0 or 1");
+            lazy_state()->native_cohort_enabled=std::string_view(value)=="1";
+        }
+        require(!lazy_state()->native_cohort_enabled || !lazy_state()->native_prefit_enabled,
+            "native cohort and one-event native prefit selectors are mutually exclusive");
         lazy_state()->catalog=std::make_unique<LazyState::Catalog>(config,search,scheduled->complex_geometry,layout.catalog_limit);
         require(lazy_state()->catalog->size()==scheduled->complex_geometry.retained_hypotheses,
             "implicit layout and catalogue disagree on admitted alternatives");
@@ -2745,7 +2783,10 @@ struct PatternCorrelator::Impl {
         }
         cancelled(stop);
     }
-    void lazy_replay_to(std::size_t slot,std::uint64_t end,std::stop_token stop) {
+    enum class ScheduledAccumulationMode { full, coherent_prefit, native_prefit };
+    void lazy_replay_to(std::size_t slot,std::uint64_t end,std::stop_token stop,
+                        ScheduledAccumulationMode mode=ScheduledAccumulationMode::full,
+                        detail::scheduled_fp32_prefit::Scratch* native_proxy=nullptr) {
         rx_cpu::Scope cpu_refine(rx_cpu::Stage::scheduled_candidate_residual);
         const auto saved_sample=sample;struct Restore {Impl& self;std::uint64_t old;~Restore(){self.sample=old;}} restore{*this,saved_sample};
         auto& h=hypotheses[slot];const auto first=lazy_state()->replayed[slot];
@@ -2762,9 +2803,12 @@ struct PatternCorrelator::Impl {
             // One original <=512 fence is an indivisible detector contraction.
             // Mutation and replay cursor publication never observe stop midway.
             try {
-                lazy_prepare_block(block,h.frequency,lazy_state()->logical[slot],slot==0);
-                cursor=accumulate_scheduled(h,slot,cursor,limit,code,{});
+                lazy_prepare_block(block,h.frequency,lazy_state()->logical[slot],
+                    slot==0 && mode==ScheduledAccumulationMode::full);
+                cursor=accumulate_scheduled(h,slot,cursor,limit,code,{},nullptr,mode,native_proxy);
             } catch(...) {if(slot!=0)lazy_state()->commit_fault=std::current_exception();throw;}
+            if(mode==ScheduledAccumulationMode::coherent_prefit)
+                lazy_state()->coherent_prefit_samples+=cursor-lazy_state()->replayed[slot];
             lazy_state()->replay_samples+=cursor-lazy_state()->replayed[slot];lazy_state()->replayed[slot]=cursor;
             detail::scheduled_resume::checkpoint(detail::scheduled_resume::Boundary::replay_fence,cursor);
         },[&](const auto& fence) {
@@ -2790,6 +2834,8 @@ struct PatternCorrelator::Impl {
             if(count<static_cast<long double>(limit-cursor))return false;
             const auto old_cursor=cursor;
             cursor=limit;lazy_state()->replay_samples+=cursor-lazy_state()->replayed[slot];lazy_state()->replayed[slot]=cursor;
+            if(mode==ScheduledAccumulationMode::coherent_prefit)
+                lazy_state()->coherent_prefit_samples+=cursor-old_cursor;
             ++lazy_state()->null_replay_fences;lazy_state()->null_replay_samples+=cursor-old_cursor;
             detail::scheduled_resume::checkpoint(detail::scheduled_resume::Boundary::replay_fence,cursor);
             return true;
@@ -4505,7 +4551,8 @@ struct PatternCorrelator::Impl {
                     struct JobPin {std::atomic<std::size_t>& count;~JobPin(){count.fetch_sub(1);}} job_pin{active_jobs};
                     detail::PatternPermutationScope permutation_scope(permutation_binding.pools,
                         permutation_binding.key_namespace);
-                    detail::scheduled_source_samples::Scope source_scope(source_binding.pool,source_binding.key_namespace);
+                    detail::scheduled_source_samples::Scope source_scope(detail::scheduled_source_samples::worker_binding(
+                        source_binding,detail::scheduled_source_samples::Purpose::preparation));
                     auto& execution=*lazy_state()->executions[worker];
                     auto& view=worker_lazy_view();const auto previous=view;
                     auto& map=worker_map_view();const auto previous_map=map;
@@ -5564,6 +5611,301 @@ struct PatternCorrelator::Impl {
         return upper;
     }
 
+    void lazy_clear_diagnostic_scratch() noexcept {
+        constexpr std::size_t slot=0;
+        hypotheses[slot]={};chip_evidence[slot]={};
+        scheduled->scheduled_carry[slot]={};scheduled->scheduled_carry_chips[slot]={};
+        if(outer_presence){(*outer_evidence)[slot]={};scheduled->scheduled_carry_outer[slot]={};}
+        scheduled->symbol_ends[slot]=std::numeric_limits<long double>::infinity();
+        scheduled->template_uncached[slot]=0;lazy_state()->replayed[slot]=0;
+        lazy_state()->occupied[slot]=1;lazy_state()->logical[slot]=std::numeric_limits<std::size_t>::max();
+    }
+    struct LazyDiagnosticScratch {
+        Impl& state;
+        ~LazyDiagnosticScratch(){state.lazy_clear_diagnostic_scratch();}
+    };
+    struct CoherentPrefit {
+        double raw=std::numeric_limits<double>::infinity(),upper=raw;
+        bool ready=false;
+    };
+    bool lazy_native_cohort_environment() {
+        namespace cohort=detail::scheduled_native_cohort;
+        return lazy_state() && lazy_state()->native_cohort_enabled && !options.raw_reference &&
+            config.search_arithmetic!=SearchArithmetic::fp64 && drift_sections==1 && !differential_window &&
+            !alternate_groups && !options.amplitude_only && !code.transmit_trace_enabled() && outer_presence && shaped &&
+            lazy_reference_environment() && cohort::environment() && !scheduled_affine && !scheduled->moments_eligible &&
+            scheduled->moments.empty() && !scheduled->curves && !scheduled->float_curves && !scheduled_temporal_templates();
+    }
+    detail::scheduled_native_cohort::Identity lazy_native_cohort_identity() {
+        namespace cohort=detail::scheduled_native_cohort;
+        if(!lazy_state()->committing_block)return {};
+        return {*lazy_state()->committing_block,lazy_state()->catalog.get(),
+            lazy_state()->shared_capture?static_cast<const void*>(lazy_state()->shared_capture.get()):static_cast<const void*>(lazy_state()),
+            &code,lazy_state()->projection_pcm_generation,search.input_sample_origin,cohort::environment()};
+    }
+    void lazy_drop_native_cohort() {
+        if(!lazy_state() || !lazy_state()->native_cohort)return;
+        lazy_state()->native_cohort.reset();
+        accounted_bytes=working_bytes()+unallocated_history_bytes()+drift_reserved+amplitude_scratch_reservation;
+    }
+    bool lazy_native_cohort_member(const LazyState::Catalog::Lane& lane,std::uint64_t index) {
+        return lazy_native_cohort_environment() && !resident_slot(lane.id) && !physical_view(lane.frequency) &&
+            !lazy_detached_event(lane.id,index);
+    }
+    void lazy_prepare_native_cohort(std::size_t id,std::uint64_t index,std::stop_token stop) {
+        namespace cohort=detail::scheduled_native_cohort;
+        if(!lazy_native_cohort_environment() || !lazy_state()->committing_block){lazy_drop_native_cohort();return;}
+        const auto identity=lazy_native_cohort_identity();const auto key=std::pair{id,index};
+        if(lazy_state()->native_cohort){const auto& old=*lazy_state()->native_cohort;
+            if(old.identity==identity && std::pair{old.from_id,old.from_index}<=key &&
+               key<=std::pair{old.through_id,old.through_index})return;
+            lazy_drop_native_cohort();}
+        accounted_bytes=working_bytes()+unallocated_history_bytes()+drift_reserved+amplitude_scratch_reservation;
+        constexpr auto batch_charge=sizeof(cohort::Batch)+cohort::allocator_allowance+cohort::Batch::caller_bytes;
+        constexpr auto build_charge=sizeof(cohort::Build)+cohort::allocator_allowance+cohort::Build::callee_bytes;
+        constexpr auto charge=batch_charge+build_charge;
+        if(sizeof(PatternCorrelator)>budget || accounted_bytes>budget-sizeof(PatternCorrelator) ||
+           charge>budget-sizeof(PatternCorrelator)-accounted_bytes){++lazy_state()->cohort_budget_fallbacks;return;}
+        struct Reservation {
+            Impl& self;std::size_t amount;
+            Reservation(Impl& s,std::size_t n):self(s),amount(n){self.lazy_state()->transient_reservation+=n;refresh();}
+            void refresh(){self.accounted_bytes=self.working_bytes()+self.unallocated_history_bytes()+self.drift_reserved+self.amplitude_scratch_reservation;
+                self.work.peak_workspace_bytes=std::max(self.work.peak_workspace_bytes,sizeof(PatternCorrelator)+self.accounted_bytes);}
+            void release(std::size_t n){amount-=n;self.lazy_state()->transient_reservation-=n;refresh();}
+            ~Reservation(){self.lazy_state()->transient_reservation-=amount;self.accounted_bytes=self.working_bytes()+self.unallocated_history_bytes()+self.drift_reserved+self.amplitude_scratch_reservation;}
+        } reservation{*this,charge};
+        std::unique_ptr<cohort::Batch> owner;std::unique_ptr<cohort::Build> build;
+        try {cohort::checkpoint(cohort::Phase::allocation,charge,stop);
+            owner=std::make_unique<cohort::Batch>();build=std::make_unique<cohort::Build>();}
+        catch(const std::bad_alloc&){cancelled(stop);++lazy_state()->cohort_fallbacks;return;}
+        struct NativeWork {Impl& self;const cohort::Build& source;
+            ~NativeWork(){self.lazy_state()->cohort_native_rows+=source.raw.native_rows;
+                self.lazy_state()->cohort_native_tiles+=source.raw.native_tiles;self.lazy_state()->cohort_plan_splits+=source.raw.splits;}
+        } native_work{*this,*build};
+        const auto saved_sample=sample;
+        struct Restore {Impl& self;std::uint64_t old;~Restore(){self.sample=old;
+            if(self.lazy_state()->prefix_frequency<self.banks.size())self.banks[self.lazy_state()->prefix_frequency].shared_prefix={};
+            self.lazy_state()->prefix_frequency=std::numeric_limits<std::size_t>::max();}} restore{*this,saved_sample};
+        constexpr std::size_t slot=0;
+        require(lazy_state()->occupied[slot] && lazy_state()->logical[slot]==std::numeric_limits<std::size_t>::max(),
+            "native cohort diagnostic scratch is in use");
+        LazyDiagnosticScratch diagnostic{*this};++lazy_state()->cohort_preparations;
+        owner->identity=identity;owner->from_id=id;owner->from_index=index;owner->through_id=id;owner->through_index=index;
+        try {
+            struct Peek {std::size_t range=0,first=0,id=0;};
+            std::array<Peek,cohort::events> cursors{};std::size_t cursor_count=0;std::optional<std::size_t> previous_id;
+            for(std::size_t inspected=0;inspected<cohort::events;++inspected){
+                std::size_t selected=lazy_state()->due_ranges.size(),selected_cursor=cursor_count,selected_first=0,selected_id=0;
+                for(std::size_t r=0;r<lazy_state()->due_ranges.size();++r){const auto& range=lazy_state()->due_ranges[r];
+                    auto first=range.first,candidate=range.id;auto existing=cursor_count;
+                    for(std::size_t j=0;j<cursor_count;++j)if(cursors[j].range==r){first=cursors[j].first;candidate=cursors[j].id;existing=j;break;}
+                    if(first==range.end)continue;
+                    if(selected==lazy_state()->due_ranges.size() || candidate<selected_id ||
+                       (candidate==selected_id && range.index<lazy_state()->due_ranges[selected].index)){
+                        selected=r;selected_cursor=existing;selected_first=first;selected_id=candidate;}}
+                if(selected==lazy_state()->due_ranges.size())break;
+                const auto& range=lazy_state()->due_ranges[selected];const auto event_index=range.index;
+                const auto lane=lazy_family_lane(range.family,selected_first);
+                ++owner->inspected;++lazy_state()->cohort_inspected;owner->through_id=lane.id;owner->through_index=event_index;
+                cohort::checkpoint(cohort::Phase::enumeration,owner->inspected,stop);
+                // The repeated ID is inspected and covered by through_key, but
+                // never prepared: its earlier lifecycle/carry is not yet known.
+                if(previous_id && *previous_id==lane.id)break;previous_id=lane.id;
+                if(selected_cursor==cursor_count)cursors[cursor_count++]={selected,selected_first,selected_id};
+                auto& cursor=cursors[selected_cursor];++cursor.first;
+                if(cursor.first<range.end)cursor.id=lazy_family_lane(range.family,cursor.first).id;
+                if(!lazy_native_cohort_member(lane,event_index))continue;
+                lazy_reset_slot(slot,lane,event_index,false);const auto& h=hypotheses[slot];
+                auto& member=build->member[owner->count];auto& context=member.context;
+                context.lane=lane;context.index=event_index;context.first=lazy_state()->replayed[slot];
+                context.end=lazy_state()->catalog->due(lane,event_index,*lazy_state()->cursor);
+                context.limit=static_cast<std::uint64_t>(std::min(static_cast<long double>(context.end),std::ceil(clock_boundary(h,code.symbol_samples()))));
+                context.symbol_source=scheduled_source_start(h,event_index);context.epoch_sample=scheduled->epoch_sample;
+                if(context.first>context.end || context.limit!=context.end || context.first<lazy_history_first() ||
+                   context.end>identity.block.first+identity.block.count || context.end>lazy_state()->capture_end)continue;
+                if(event_index>=std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol())continue;
+                code.set_stream_phase_samples(lane.phase_lower);
+                context.address[0]=code.resolved_symbol_address(event_index*code.chips_per_symbol());
+                context.address[1]=code.resolved_symbol_address((event_index+1)*code.chips_per_symbol());
+                owner->event[owner->count].context=context;++owner->count;
+            }
+            auto first=std::numeric_limits<std::uint64_t>::max(),end=std::uint64_t{0};
+            for(std::size_t i=0;i<owner->count;++i){first=std::min(first,build->member[i].context.first);end=std::max(end,build->member[i].context.end);}
+            if(first<end)lazy_visit_processing(first,end,[&](const auto& block){
+                const auto block_end=block.first+block.pcm.size();
+                for(std::size_t i=0;i<owner->count;++i){auto& member=build->member[i];const auto& context=member.context;
+                    const auto begin=std::max(context.first,block.first),limit=std::min(context.end,block_end);
+                    member.fence_active=context.first<context.end && block.first<context.end && block_end>context.first;
+                    member.exporter.begin(begin,std::max(begin,limit));}
+                for(auto window_first=block.first;window_first<block_end;window_first+=cohort::physical_rows){
+                    const auto window_end=std::min(block_end,window_first+cohort::physical_rows);auto& window=build->window;window.reset();
+                    if(!lazy_native_cohort_environment() || !(lazy_native_cohort_identity()==identity))throw detail::scheduled_fp32_prefit::Unavailable{};
+                    for(std::size_t i=0;i<owner->count;++i){auto& member=build->member[i];member.request_first=window.count;
+                        if(member.valid && member.fence_active && !member.exporter.visit(member.context,*scheduled_map(),window_end,code.symbol_samples(),code.chip_samples(),code.chips_per_symbol(),
+                            [&](double gain,const auto& physical){if(scheduled->fhss_shape.enabled)gain*=scheduled->fhss_shape.gain(0,
+                                physical.sample%(2ULL*config.sample_rate)+physical.fraction,config.sample_rate);return gain;},
+                            [&](const auto& row){return window.add(i,member.context,row,code.symbol_samples(),code.chip_samples());}))member.valid=false;
+                        member.request_end=window.count;}
+                    lazy_state()->cohort_request_rows+=window.count;lazy_state()->cohort_unique_rows+=window.unique_count;
+                    lazy_state()->cohort_dedup_reuses+=window.reuses;lazy_state()->cohort_hash_collisions+=window.collisions;
+                    cohort::checkpoint(cohort::Phase::exported,window.count,stop);if(!window.count)continue;
+                    std::array<std::size_t,cohort::events> active{};std::size_t count=0;
+                    for(std::size_t i=0;i<owner->count;++i)if(build->member[i].valid && build->member[i].request_first<build->member[i].request_end)active[count++]=i;
+                    std::sort(active.begin(),active.begin()+count,[&](auto a,auto b){return build->member[a].context.lane.frequency<build->member[b].context.lane.frequency;});
+                    for(std::size_t group=0;group<count;){const auto frequency=build->member[active[group]].context.lane.frequency;
+                        auto until=group+1;while(until<count && build->member[active[until]].context.lane.frequency==frequency)++until;
+                        lazy_prepare_block(block,frequency,build->member[active[group]].context.lane.id,false,until-group);++lazy_state()->cohort_prefixes;
+                        for(auto j=group;j<until;++j){auto& member=build->member[active[j]];
+                            const auto observations=banks[frequency].observations(physical_view(frequency));
+                            for(auto r=member.request_first;r<member.request_end;++r){auto& row=window.row[r];const auto at=row.observed-block.first;
+                                row.p=observations[at+1]-observations[at];}}
+                        group=until;
+                    }
+                    {rx_cpu::Scope cpu_native_source(rx_cpu::Stage::template_build,true);
+                        if(!build->raw.evaluate(window,code,config,stop))throw detail::scheduled_fp32_prefit::Unavailable{};}
+                    const auto amplitude=std::sqrt(2*nominal_signal_power)*outer_dsss_transmit_gain(config);
+                    for(std::size_t i=0;i<owner->count;++i){auto& member=build->member[i];
+                        if(member.valid && !cohort::scatter(member,window,amplitude,stop))member.valid=false;}
+                }
+                for(std::size_t i=0;i<owner->count;++i){auto& member=build->member[i];
+                    const auto expected=std::max(member.context.first,std::min(member.context.end,block_end));
+                    if(member.valid && member.fence_active && member.exporter.observed!=expected)member.valid=false;}
+            });
+            for(std::size_t i=0;i<owner->count;++i)if(build->member[i].valid){owner->event[i].frozen=detail::scheduled_fp32_prefit::freeze(build->member[i].state);
+                if(owner->event[i].frozen.ready)++lazy_state()->cohort_completed;}
+            if(!lazy_native_cohort_environment() || !(lazy_native_cohort_identity()==identity))throw detail::scheduled_fp32_prefit::Unavailable{};
+            cohort::checkpoint(cohort::Phase::ready,owner->count,stop);
+            // READY and inclusive through_key publish together. Retained proof
+            // never borrows PCM/prefix/DueRange/State or a threshold decision.
+            lazy_state()->native_cohort=std::move(owner);reservation.release(batch_charge);
+            ++lazy_state()->cohort_batches;lazy_state()->cohort_members+=lazy_state()->native_cohort->count;
+        } catch(...) {if(stop.stop_requested())throw;++lazy_state()->cohort_fallbacks;return;}
+    }
+    CoherentPrefit lazy_native_cohort_prefit(const LazyState::Catalog::Lane& lane,std::uint64_t index,
+                                            double threshold,std::stop_token stop) {
+        namespace cohort=detail::scheduled_native_cohort;namespace proxy=detail::scheduled_fp32_prefit;
+        if(!lazy_state()->native_cohort || !lazy_native_cohort_member(lane,index))return {};
+        if(!(lazy_state()->native_cohort->identity==lazy_native_cohort_identity())){lazy_drop_native_cohort();return {};}
+        // Copy capability before any future eviction-capable call. Evaluation
+        // itself does no allocation and cannot adopt approximate state.
+        for(std::size_t i=0;i<lazy_state()->native_cohort->count;++i){auto& event=lazy_state()->native_cohort->event[i];
+            if(event.context.lane.id==lane.id && event.context.index==index &&
+            !event.consumed && cohort::lane_equal(event.context.lane,lane)){
+            const auto frozen=event.frozen;if(!frozen.ready)return {};
+            cohort::checkpoint(cohort::Phase::consume,index,stop);event.consumed=true;
+            ++lazy_state()->cohort_queries;
+            const auto n=frozen.whole[0].count;
+            const auto log_error=n>2?proxy::cert::divide(1e-8,.5*static_cast<double>(n-2)):0.;
+            const auto result=proxy::evaluate(frozen,threshold,{log_error,true},options.scheduled_raw_score_reference);
+            if(!result.ready)return {};return {result.raw,result.upper,true};}}
+        return {};
+    }
+    CoherentPrefit lazy_native_coherent_prefit(const LazyState::Catalog::Lane& lane,std::uint64_t index,
+                                             double original_threshold,std::stop_token stop) {
+        namespace proxy=detail::scheduled_fp32_prefit;
+        if(!lazy_state()->native_prefit_enabled || options.raw_reference || config.search_arithmetic==SearchArithmetic::fp64 ||
+           resident_slot(lane.id) || drift_sections!=1 || differential_window || alternate_groups ||
+           options.amplitude_only || code.transmit_trace_enabled() || !outer_presence || !shaped || !lazy_reference_environment() ||
+           !proxy::Scratch::Native::supported() || scheduled_affine || scheduled->moments_eligible ||
+           !scheduled->moments.empty() || physical_view(lane.frequency) || scheduled->curves ||
+           scheduled->float_curves || scheduled_temporal_templates() || lazy_detached_event(lane.id,index))return {};
+        accounted_bytes=working_bytes()+unallocated_history_bytes()+drift_reserved+amplitude_scratch_reservation;
+        constexpr auto charge=sizeof(proxy::Scratch)+proxy::Scratch::callee_bytes;
+        if(sizeof(PatternCorrelator)>budget || accounted_bytes>budget-sizeof(PatternCorrelator))return {};
+        const auto used=sizeof(PatternCorrelator)+accounted_bytes;
+        if(charge>budget-used)return {};
+        struct Reservation {
+            Impl& self;std::size_t amount;
+            Reservation(Impl& x,std::size_t n):self(x),amount(n) {
+                self.lazy_state()->transient_reservation+=n;
+                self.accounted_bytes=self.working_bytes()+self.unallocated_history_bytes()+self.drift_reserved+self.amplitude_scratch_reservation;
+                self.work.peak_workspace_bytes=std::max(self.work.peak_workspace_bytes,sizeof(PatternCorrelator)+self.accounted_bytes);
+            }
+            ~Reservation(){self.lazy_state()->transient_reservation-=amount;
+                self.accounted_bytes=self.working_bytes()+self.unallocated_history_bytes()+self.drift_reserved+self.amplitude_scratch_reservation;}
+        } reservation{*this,charge};
+        std::unique_ptr<proxy::Scratch> owner;
+        try {owner=std::make_unique<proxy::Scratch>();}catch(const std::bad_alloc&){return {};}
+        constexpr std::size_t slot=0;
+        require(lazy_state()->occupied[slot] && lazy_state()->logical[slot]==std::numeric_limits<std::size_t>::max(),
+            "native prefit diagnostic scratch is in use");
+        LazyDiagnosticScratch scratch{*this};++lazy_state()->native_prefit_queries;
+        struct NativeWork {
+            Impl& self;const proxy::Scratch& source;
+            ~NativeWork(){self.lazy_state()->native_prefit_rows+=source.native_rows;
+                self.lazy_state()->native_prefit_tiles+=source.native_tiles;}
+        } native_work{*this,*owner};
+        try {
+            cancelled(stop);lazy_reset_slot(slot,lane,index,false);
+            const auto end=lazy_state()->catalog->due(lane,index,*lazy_state()->cursor);
+            lazy_replay_to(slot,end,stop,ScheduledAccumulationMode::native_prefit,owner.get());
+            cancelled(stop);
+            if(!lazy_reference_environment()){++lazy_state()->native_prefit_fallbacks;return {};}
+            // Inherit the existing GCC14/glibc Original score contract, with
+            // the same absolute1e-8 score allowance as lazy_screen_range.
+            const auto n=owner->state.current.whole.fit[0].count;
+            const auto log_error=n>2?detail::scheduled_acquisition_certificate::divide(1e-8,.5*static_cast<double>(n-2)):0.;
+            const auto result=proxy::finish(owner->state,original_threshold,{log_error,true},options.scheduled_raw_score_reference);
+            if(!result.ready){++lazy_state()->native_prefit_fallbacks;return {};}
+            ++lazy_state()->native_prefit_completed;return {result.raw,result.upper,true};
+        } catch(const proxy::Unavailable&) {
+            ++lazy_state()->native_prefit_fallbacks;return {};
+        } catch(...) {
+            if(stop.stop_requested())throw;
+            ++lazy_state()->native_prefit_fallbacks;return {};
+        }
+    }
+
+    CoherentPrefit lazy_coherent_prefit(const LazyState::Catalog::Lane& lane,std::uint64_t index,
+                                      double original_threshold,std::stop_token stop) {
+        if(!lazy_state()->coherent_prefit_enabled || resident_slot(lane.id) ||
+           drift_sections!=1 || differential_window || alternate_groups || options.amplitude_only ||
+           !outer_presence || !shaped || !lazy_reference_environment() || scheduled_affine ||
+           scheduled->moments_eligible || !scheduled->moments.empty() || physical_view(lane.frequency) ||
+           scheduled->curves || scheduled->float_curves || scheduled_temporal_templates())return {};
+        const auto score_slot=[&](std::size_t slot) {
+            CoherentPrefit result;result.raw=0;result.upper=0;
+            for(unsigned bit=0;bit<2;++bit) {
+                const auto& fit=hypotheses[slot].fits[bit];const auto raw=fit.score();
+                if(!std::isfinite(raw) || raw<0)return CoherentPrefit{};
+                const auto& chips=chip_evidence[slot][bit];
+                const bool colored=!options.scheduled_raw_score_reference && chips.colored_excess(fit,original_threshold);
+                const auto score=colored?std::min(raw,chips.score(fit)):raw;
+                if(!std::isfinite(score) || score<0)return CoherentPrefit{};
+                result.raw=std::max(result.raw,raw);result.upper=std::max(result.upper,score);
+                if(colored)++lazy_state()->coherent_prefit_colored;
+            }
+            ++lazy_state()->coherent_prefit_completed;result.ready=true;return result;
+        };
+        const auto end=lazy_state()->catalog->due(lane,index,*lazy_state()->cursor);
+        if(const auto* detached=lazy_detached_event(lane.id,index)) {
+            const auto slot=detached->slot;const auto& h=hypotheses[slot];
+            require(lazy_state()->occupied[slot] && lazy_state()->logical[slot]==lane.id &&
+                h.index==index && detached->end==end && lazy_state()->replayed[slot]==end &&
+                scheduled->symbol_ends[slot]==end,
+                "Original coherent prefit detached identity changed");
+            cancelled(stop);++lazy_state()->coherent_prefit_queries;
+            // Full detached accumulation owns the same coherent/chip state.
+            // Leave its ownership and template accounting to normal adoption
+            // or rejection cleanup; only the original threshold is applied here.
+            return score_slot(slot);
+        }
+        constexpr std::size_t slot=0;
+        require(lazy_state()->occupied[slot] && lazy_state()->logical[slot]==std::numeric_limits<std::size_t>::max(),
+            "Original coherent prefit diagnostic scratch is in use");
+        cancelled(stop);lazy_reset_slot(slot,lane,index,false);
+        LazyDiagnosticScratch scratch{*this};
+        ++lazy_state()->coherent_prefit_queries;
+        lazy_replay_to(slot,end,stop,ScheduledAccumulationMode::coherent_prefit);
+        cancelled(stop);
+        const auto result=score_slot(slot);
+        // This is the literal coherent score at the original charged T. The
+        // omitted outer gate is an additional AND; it cannot promote evidence.
+        // No state, source index, trial or observed absence is adopted here.
+        work.scheduled_template_constructions+=scheduled->template_uncached[slot];
+        return result;
+    }
+
     // Pure historical diagnostic scoring for a completed cold coherent lane.
     // Replay uses a distinct unregistered scratch owner. It never completes a
     // receiver symbol, changes trial charges, admits a bit, subscribes timing,
@@ -5579,15 +5921,7 @@ struct PatternCorrelator::Impl {
         require(lazy_state()->occupied[slot] && lazy_state()->logical[slot]==std::numeric_limits<std::size_t>::max(),
             "implicit reserved diagnostic scratch is in use");
         lazy_reset_slot(slot,lane,index,false);
-        struct Scratch {
-            Impl& s;std::size_t slot;
-            ~Scratch(){s.hypotheses[slot]={};s.chip_evidence[slot]={};
-                s.scheduled->scheduled_carry[slot]={};s.scheduled->scheduled_carry_chips[slot]={};
-                if(s.outer_presence){(*s.outer_evidence)[slot]={};s.scheduled->scheduled_carry_outer[slot]={};}
-                s.scheduled->symbol_ends[slot]=std::numeric_limits<long double>::infinity();
-                s.scheduled->template_uncached[slot]=false;s.lazy_state()->replayed[slot]=0;
-                s.lazy_state()->occupied[slot]=1;s.lazy_state()->logical[slot]=std::numeric_limits<std::size_t>::max();}
-        } scratch{*this,slot};
+        LazyDiagnosticScratch scratch{*this};
         const auto end=lazy_state()->catalog->due(lane,index,*lazy_state()->cursor);
         lazy_replay_to(slot,end,stop);
         return lazy_finish_diagnostic(slot,index,event,original_trials,end,stop,provenance);
@@ -5927,6 +6261,8 @@ struct PatternCorrelator::Impl {
         });
     }
     void flush_lazy(std::stop_token stop) {
+        struct CohortCancel {Impl& self;std::stop_token stop;
+            ~CohortCancel(){if(stop.stop_requested())self.lazy_drop_native_cohort();}} cohort_cancel{*this,stop};
         if(lazy_state()->commit_fault)std::rethrow_exception(lazy_state()->commit_fault);
         if(lazy_state()->processed==lazy_state()->capture_end)return;
         const auto saved_capture=lazy_state()->capture_end;
@@ -6037,7 +6373,29 @@ struct PatternCorrelator::Impl {
                             return;
                         }
                         double raw_upper=detail::scheduled_acquisition_certificate::infinity;
-                        const auto upper=lazy_cold_upper(lane,range,probe,admission_threshold,&raw_upper,stop);
+                        auto upper=lazy_cold_upper(lane,range,probe,admission_threshold,&raw_upper,stop);
+                        const auto rejection_floor=!timing_enabled?
+                            std::min(admission_threshold,search.retain_score):admission_threshold;
+                        if(!(upper<rejection_floor)) {
+                            // Prepare only when the earlier certificate cannot
+                            // reject this still-uncommitted actual due event.
+                            if(lazy_state()->native_cohort_enabled)
+                                lazy_prepare_native_cohort(lane.id,index,stop);
+                            const auto native=lazy_state()->native_cohort_enabled?
+                                lazy_native_cohort_prefit(lane,index,admission_threshold,stop):
+                                lazy_native_coherent_prefit(lane,index,admission_threshold,stop);
+                            if(native.ready){upper=std::min(upper,native.upper);raw_upper=std::min(raw_upper,native.raw);
+                                if(native.upper<rejection_floor){if(lazy_state()->native_cohort_enabled)++lazy_state()->cohort_rejections;
+                                    else ++lazy_state()->native_prefit_rejections;}}
+                        }
+                        if(!(upper<rejection_floor)) {
+                            const auto prefit=lazy_coherent_prefit(lane,index,admission_threshold,stop);
+                            if(prefit.ready) {
+                                upper=std::min(upper,prefit.upper);raw_upper=std::min(raw_upper,prefit.raw);
+                                if(prefit.upper<rejection_floor)++lazy_state()->coherent_prefit_rejections;
+                                if(probe){probe->raw_upper=raw_upper;probe->guarded_bound=upper<raw_upper;}
+                            }
+                        }
                         if(!std::isfinite(upper))++lazy_state()->invalid_certificates;
                         if(probe){probe->upper=upper;probe->threshold=admission_threshold;auto& diagnostic=lazy_state()->certificate_profile.at(probe->cohort);
                             certdiag::add(diagnostic.attempts,1,diagnostic.saturated);diagnostic.observe(certdiag::Metric::cold_upper,upper);}
@@ -6046,8 +6404,6 @@ struct PatternCorrelator::Impl {
                         // reliable-bit floor can discard an unowned lane here.
                         // Keep the charged admission threshold in the guard
                         // proof; it controls the original colored predicate.
-                        const auto rejection_floor=!timing_enabled?
-                            std::min(admission_threshold,search.retain_score):admission_threshold;
                         if(upper<rejection_floor) {
                             require(lazy_state()->history_generation<std::numeric_limits<std::uint64_t>::max(),"implicit diagnostic ordinal overflow");
                             const auto event=lazy_state()->history_generation+1;
@@ -6095,7 +6451,7 @@ struct PatternCorrelator::Impl {
                     ++lazy_state()->cold_completions;lazy_state()->replayed[slot]=fence;lazy_release_cold(slot);
                 });
                 // No stop separates the final consumer from its block frontier.
-                lazy_drop_detached_replay();
+                lazy_drop_detached_replay();lazy_drop_native_cohort();
                 try {settle_timing();lazy_state()->processing->advance(*prepared);}
                 catch(...) {lazy_state()->commit_fault=std::current_exception();throw;}
                 lazy_state()->processed=block_end;lazy_state()->next_due=lazy_state()->committing_next_due;
@@ -7255,6 +7611,8 @@ struct PatternCorrelator::Impl {
         if(lazy_state() && lazy_state()->detached_replay && !lazy_state()->detached_replay->numeric_active &&
            (sizeof(PatternCorrelator)+accounted_bytes>budget ||
             extra>budget-sizeof(PatternCorrelator)-accounted_bytes))lazy_drop_detached_replay();
+        if(lazy_state() && lazy_state()->native_cohort && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
+           extra>budget-sizeof(PatternCorrelator)-accounted_bytes))lazy_drop_native_cohort();
         if(lazy_state() && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
            extra>budget-sizeof(PatternCorrelator)-accounted_bytes))drop_lazy_projections();
         if(lazy_state() && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
@@ -7996,7 +8354,7 @@ struct PatternCorrelator::Impl {
         const auto failed_duration=scheduled_map()?
             static_cast<long double>(h.index+1-scheduled->last_accepted[hypothesis])*code.symbol_samples()/h.rate:
             static_cast<long double>(end-h.committed_end);
-        if(h.admitted && failed_duration>=static_cast<long double>(pattern_absence_seconds)*config.sample_rate) {
+        if(h.admitted && detail::absence_duration_complete(failed_duration,config.sample_rate)) {
             if(!timing_enabled){publish(h,true);clear(h);}
             else {auto& state=*timing_state(hypothesis);state.pending_terminal=true;state.terminal_index=h.index;publish(h,false,false);}
         } else publish(h,false,false);
@@ -9650,8 +10008,21 @@ template<class Source,class Pulses,class Gain,class Prepare>
 
     std::uint64_t accumulate_scheduled(Hypothesis& h,std::size_t hypothesis,std::uint64_t cursor,
             std::uint64_t end,PatternCode& pattern,std::stop_token stop,
-            const detail::ScheduledPrivateBatchView* precomputed=nullptr) {
+            const detail::ScheduledPrivateBatchView* precomputed=nullptr,
+            ScheduledAccumulationMode mode=ScheduledAccumulationMode::full,
+            detail::scheduled_fp32_prefit::Scratch* native_proxy=nullptr) {
         rx_cpu::Scope cpu_scope(rx_cpu::Stage::scheduled_candidate_residual);
+        struct PulseWork {
+            std::uint64_t rows=0,reuses=0,bulk=0;
+            std::uint64_t& total_rows;
+            std::uint64_t& total_reuses;
+            std::uint64_t& total_bulk;
+            ~PulseWork() {
+                std::atomic_ref(total_rows).fetch_add(rows,std::memory_order_relaxed);
+                std::atomic_ref(total_reuses).fetch_add(reuses,std::memory_order_relaxed);
+                std::atomic_ref(total_bulk).fetch_add(bulk,std::memory_order_relaxed);
+            }
+        } pulse_work{0,0,0,work.scheduled_original_pulse_rows,work.scheduled_original_pulse_reuses,work.scheduled_original_pulse_bulk_rows};
         const auto symbol_source=scheduled_source_start(h,h.index);
         const auto symbol_end=clock_boundary(h,code.symbol_samples());
         const auto limit=static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(symbol_end)));
@@ -9659,10 +10030,22 @@ template<class Source,class Pulses,class Gain,class Prepare>
             "pattern chip coordinate overflow");
         bool pattern_ready=false;
         auto prepared_chip=std::numeric_limits<std::uint64_t>::max();
+        const auto point_binding=detail::scheduled_source_samples::binding;
+        const auto point_purpose=mode==ScheduledAccumulationMode::coherent_prefit?
+            detail::scheduled_source_samples::Purpose::prefit:point_binding.purpose;
+        const auto purpose_index=static_cast<std::size_t>(point_purpose);
+        struct PointWork {
+            std::array<std::uint64_t,6> local{};
+            std::array<std::uint64_t,6>& total;
+            ~PointWork(){for(std::size_t i=0;i<local.size();++i)if(local[i])
+                std::atomic_ref(total[i]).fetch_add(local[i],std::memory_order_relaxed);}
+        } point_work{{},scheduled->extra_work.point_census.at(purpose_index)},
+          point_cache_work{{},scheduled->extra_work.point_cache.at(purpose_index)};
+        detail::scheduled_source_points::PointPool::SymbolHandle point_symbol;
         auto* cache=scheduled_template_cache();
         auto* temporal=scheduled_temporal_templates();
         if(temporal)temporal->begin(hypothesis,sample);
-        auto* current_row=cache?&cache->row(h.origin,h.rate,h.phase_lower,h.index,sample):nullptr;
+        auto* current_row=cache && !native_proxy?&cache->row(h.origin,h.rate,h.phase_lower,h.index,sample):nullptr;
         ScheduledTemplateCache::Row* next_row=nullptr;
         auto& fit=h.fits;
         auto* drift=drift_fits.empty()?nullptr:&section_fits(hypothesis,0);
@@ -9716,12 +10099,54 @@ template<class Source,class Pulses,class Gain,class Prepare>
                 if(scheduled->fhss_shape.enabled)gain*=scheduled->fhss_shape.gain(0,
                     physical.sample%(2ULL*config.sample_rate)+physical.fraction,config.sample_rate);
                 if(gain==0)continue;
+                if(native_proxy) {
+                    namespace proxy=detail::scheduled_fp32_prefit;
+                    // Export exactly the Original anchored expression/cast,
+                    // gain mask, private target and long-double chip owner.
+                    // Every native tile has ONE current/carry private symbol.
+                    if(observed>=native_proxy->tile_end || native_proxy->target_chip!=target_chip) {
+                        native_proxy->count=0;native_proxy->next_row=0;
+                        auto future=observed;
+                        for(;future<piece_end && native_proxy->count<native_proxy->coordinates.size();++future) {
+                            auto at=source+static_cast<long double>(future-piece_first)*h.rate;
+                            if(at<0)continue;
+                            if(at>=2.L*code.symbol_samples())throw proxy::Unavailable{};
+                            const bool future_next=at>=code.symbol_samples();
+                            if(future_next!=next)break;
+                            if(future_next)at-=code.symbol_samples();
+                            const auto physical_at=tick.add_signed(static_cast<long double>(future-piece_first)*h.rate);
+                            auto future_gain=SchedHopSourceMap::gain(location,physical_at);
+                            if(scheduled->fhss_shape.enabled)future_gain*=scheduled->fhss_shape.gain(0,
+                                physical_at.sample%(2ULL*config.sample_rate)+physical_at.fraction,config.sample_rate);
+                            if(future_gain==0)continue;
+                            const auto i=native_proxy->count++;
+                            native_proxy->coordinates[i]=static_cast<double>(at);
+                            native_proxy->gain[i]=future_gain;native_proxy->observed[i]=future;
+                            native_proxy->owner[i]=static_cast<std::uint64_t>(at/code.chip_samples());
+                            native_proxy->carry[i]=future_next;
+                        }
+                        native_proxy->tile_end=future;native_proxy->target_chip=target_chip;
+                        {rx_cpu::Scope cpu_native_source(rx_cpu::Stage::template_build,true);
+                        if(!native_proxy->count || !native_proxy->evaluate(native_proxy->count,pattern,config,
+                                h.phase_lower,target_chip,amplitude,stop))throw proxy::Unavailable{};}
+                    }
+                    const auto i=native_proxy->next_row++;
+                    if(i>=native_proxy->count || native_proxy->observed[i]!=observed || native_proxy->carry[i]!=next)
+                        throw proxy::Unavailable{};
+                    const auto p=banks[h.frequency].observations(physical_view(h.frequency))[observed-sample+1]-
+                        banks[h.frequency].observations(physical_view(h.frequency))[observed-sample];
+                    native_proxy->state.append(next,p,native_proxy->q[i],native_proxy->final_upper,
+                        native_proxy->final_radius,native_proxy->owner[i]);
+                    if(!native_proxy->state.current.valid || !native_proxy->state.carry.valid)throw proxy::Unavailable{};
+                    continue; // No proxy template/cache/Fit/carry/outer adoption.
+                }
                 auto& carry=scheduled->scheduled_carry[hypothesis];
                 auto& target_fit=next?carry.fits:fit;
                 auto* target_drift=next?(drift?&scheduled->scheduled_carry_drift[hypothesis]:nullptr):drift;
                 auto* target_differential=next?(differential?&scheduled->scheduled_carry_differential[hypothesis]:nullptr):differential;
                 auto* target_chips=chip_evidence.empty()?nullptr:next?&scheduled->scheduled_carry_chips[hypothesis]:&chip_evidence[hypothesis];
-                auto* target_outer=outer_presence?(next?&scheduled->scheduled_carry_outer[hypothesis]:&(*outer_evidence)[hypothesis]):nullptr;
+                auto* target_outer=outer_presence && mode==ScheduledAccumulationMode::full?
+                    (next?&scheduled->scheduled_carry_outer[hypothesis]:&(*outer_evidence)[hypothesis]):nullptr;
                 // Only source-symbol ownership changes temporarily. The fixed
                 // physical timing reference, phase and rate never reset.
                 struct RestoreIndex {std::uint64_t& index;std::uint64_t value;~RestoreIndex(){index=value;}} restore_index{h.index,current_index};
@@ -9734,10 +10159,16 @@ template<class Source,class Pulses,class Gain,class Prepare>
                 auto* row=next?next_row:current_row;
                 const auto left=static_cast<std::size_t>(observed-sample);
                 const auto valid=row && (row->valid[left/64]&(1ULL<<(left%64)));
+                const detail::OriginalPulseRow* original_pulses=nullptr;
                 const auto prepare=[&] {
                     rx_cpu::Scope cpu_prepare(rx_cpu::Stage::template_build,true);
                     if(!pattern_ready){pattern.set_stream_phase_samples(h.phase_lower);pattern_ready=true;}
-                    if(target_chip!=prepared_chip){pattern.prepare_symbol(target_chip,stop);prepared_chip=target_chip;}
+                    if(target_chip!=prepared_chip){
+                        pattern.prepare_symbol(target_chip,stop);prepared_chip=target_chip;
+                        point_symbol=point_binding.point_requested && point_binding.points?
+                            point_binding.points->prepare(point_binding.point_family,pattern,target_chip):
+                            detail::scheduled_source_points::PointPool::SymbolHandle{};
+                    }
                 };
                 const auto shape=[&](long double at) {
                     rx_cpu::Scope cpu_shape(rx_cpu::Stage::template_build,true);
@@ -9773,9 +10204,49 @@ template<class Source,class Pulses,class Gain,class Prepare>
                         };
                         if(scheduled->float_curves?use(scheduled->float_curves,float_curve):use(scheduled->curves,curve))return result;
                     }
-                    return pattern.shaped_values(target_chip,static_cast<double>(at));
+                    // Only genuine final scalar requests reach this seam. The
+                    // exact binary64 argument is shared by lookup and Original.
+                    // Earlier precomputed/curve producers keep their precedence.
+                    const auto argument=static_cast<double>(at);
+                    const auto original=[&] {
+                        if(point_binding.point_cache)++point_cache_work.local[2];
+                        if(target_outer) {
+                            auto q=pattern.shaped_values(target_chip,argument,original_pulses);
+                            if(original_pulses)++pulse_work.rows;
+                            return q;
+                        }
+                        return pattern.shaped_values(target_chip,argument);
+                    };
+                    if(point_binding.point_cache) {
+                        ++point_cache_work.local[0];
+                        original_pulses=nullptr; // A copied hit owns no pulse row.
+                        if(!point_binding.points || !point_binding.points->enabled()) {
+                            ++point_cache_work.local[3];++point_cache_work.local[4];return original();
+                        }
+                        ++point_cache_work.local[1];
+                        using Pool=detail::scheduled_source_points::PointPool;
+                        auto kind=Pool::ResultKind::direct;
+                        auto q=point_binding.points->get_or_build(point_symbol,argument,
+                            {point_binding.consumer,lazy_state()?lazy_state()->logical[hypothesis]:hypothesis},
+                            original,stop,&kind);
+                        if(kind==Pool::ResultKind::direct)++point_cache_work.local[3];
+                        else if(kind==Pool::ResultKind::hit)++point_cache_work.local[5];
+                        return q;
+                    }
+                    // Census mode observes without replacing Original calls.
+                    if(point_binding.point_requested) {
+                        ++point_work.local[0];
+                        auto observed=detail::scheduled_source_points::Observation::invalid;
+                        if(point_binding.points)observed=point_binding.points->observe(point_symbol,
+                            static_cast<double>(at),{point_binding.consumer,lazy_state()?lazy_state()->logical[hypothesis]:hypothesis});
+                        using O=detail::scheduled_source_points::Observation;
+                        const auto metric=observed==O::first?1U:observed==O::repeat?2U:
+                            observed==O::untracked?3U:observed==O::invalid?4U:5U;
+                        ++point_work.local[metric];
+                    }
+                    return original();
                 };
-                if(piece_flat) {
+                if(mode==ScheduledAccumulationMode::full && piece_flat) {
                     const auto chip=code.chip_samples(),symbol=code.symbol_samples();
                     const auto local=static_cast<std::uint64_t>(within/chip);
                     auto source_end=std::min<long double>(symbol,(local+1)*chip);
@@ -9829,7 +10300,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
                     } else if(!target_outer && contract(count,nullptr))fitted_count=count;
                     if(fitted_count){++affine_counts[hypothesis];observed+=fitted_count-1;continue;}
                 }
-                if(!valid || target_outer)prepare();
+                if(!valid || target_outer || mode==ScheduledAccumulationMode::coherent_prefit)prepare();
                 const auto projection=banks[h.frequency].observations(physical_view(h.frequency))[left+1]-banks[h.frequency].observations(physical_view(h.frequency))[left];
                 std::array<Complex,2> phases{};bool temporal_copied=false;
                 if(valid){phases=row->value[left];++cache->hits;}
@@ -9952,7 +10423,16 @@ template<class Source,class Pulses,class Gain,class Prepare>
                     const bool private_reused=precomputed && precomputed->outer_pulses(observed,within,consume);
                     const bool reused=private_reused || (temporal_copied && temporal && temporal->outer_pulses(hypothesis,sample,
                         h.phase_lower,target_chip,observed,left,static_cast<double>(within),consume));
-                    if(!reused)pattern_pulse_each(static_cast<double>(within),code.symbol_samples(),code.chip_samples(),consume);
+                    if(!reused) {
+                        if(original_pulses && original_pulses->accumulate_outer(static_cast<double>(within),
+                                code.symbol_samples(),code.chip_samples(),target_chip,*target_outer,gain,
+                                Complex{projection.xc,projection.xs},
+                                [&](std::uint64_t position){return pattern.values(target_chip+position);})) {
+                            ++pulse_work.reuses;++pulse_work.bulk;
+                        } else if(original_pulses && original_pulses->consume(static_cast<double>(within),
+                                code.symbol_samples(),code.chip_samples(),consume))++pulse_work.reuses;
+                        else pattern_pulse_each(static_cast<double>(within),code.symbol_samples(),code.chip_samples(),consume);
+                    }
                 }
                 rx_cpu::Scope cpu_direct_gram(rx_cpu::Stage::gram,true);
                 for(unsigned bit=0;bit<2;++bit) {
@@ -10564,8 +11044,10 @@ template<class Source,class Pulses,class Gain,class Prepare>
         auto private_batch=certified_null?std::unique_ptr<PrivateBatchOwner>{}:prepare_private_batch_owner(input.size());
         const auto* family_plan=scheduled?scheduled->families.get():nullptr;
         const bool accumulation_ahead=parallel || family_plan || private_batch;
+        const auto source_binding=detail::scheduled_source_samples::binding;
         const auto accumulate_one=[&](std::size_t worker,std::size_t hypothesis,
                 const detail::ScheduledPrivateBatchView* precomputed=nullptr) {
+            detail::scheduled_source_samples::Scope source_scope(detail::scheduled_source_samples::worker_binding(source_binding,source_binding.purpose));
             detail::PatternPermutationScope permutation_scope(cache?cache->permutations():nullptr,
                 cache?cache->permutation_namespace():0);
             auto& view=worker_map_view();const auto previous=view;
@@ -10603,6 +11085,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
             };
             const auto jobs=(items+group-1)/group;
             detail::parallel_search(jobs,private_batch->workers.size(),[&](std::size_t worker,std::size_t job) {
+                detail::scheduled_source_samples::Scope source_scope(detail::scheduled_source_samples::worker_binding(source_binding,source_binding.purpose));
                 detail::PatternPermutationScope permutation_scope(cache?cache->permutations():nullptr,
                     cache?cache->permutation_namespace():0);
                 auto& view=worker_map_view();const auto previous=view;
@@ -10636,6 +11119,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
             scheduled->extra_work.scheduled_family_lanes+=family_plan->members.size();
             detail::parallel_search(family_plan->ends.size()-1,std::max<std::size_t>(1,worker_codes.size()),
                 [&](std::size_t worker,std::size_t family) {
+                    detail::scheduled_source_samples::Scope source_scope(detail::scheduled_source_samples::worker_binding(source_binding,source_binding.purpose));
                     detail::PatternPermutationScope permutation_scope(cache?cache->permutations():nullptr,
                         cache?cache->permutation_namespace():0);
                     const auto members=std::span<const std::size_t>{family_plan->members}.subspan(
@@ -10856,6 +11340,21 @@ PatternCorrelator::~PatternCorrelator(){
             f.add("detached_replay_prefixes",x.detached_prefixes);f.add("detached_replay_blocks",x.detached_blocks);
             f.add("detached_private_lanes",x.detached_private_lanes);f.add("detached_private_rows",x.detached_private_rows);
             f.add("cold_completions",x.cold_completions);f.add("promotions",x.promotions);
+            f.add("coherent_prefit_enabled",x.coherent_prefit_enabled);
+            f.add("native_cohort_enabled",x.native_cohort_enabled);
+            f.add("cohort_preparations",x.cohort_preparations);f.add("cohort_batches",x.cohort_batches);f.add("cohort_members",x.cohort_members);
+            f.add("cohort_inspected",x.cohort_inspected);f.add("cohort_completed",x.cohort_completed);f.add("cohort_queries",x.cohort_queries);
+            f.add("cohort_rejections",x.cohort_rejections);f.add("cohort_request_rows",x.cohort_request_rows);f.add("cohort_unique_rows",x.cohort_unique_rows);
+            f.add("cohort_dedup_reuses",x.cohort_dedup_reuses);f.add("cohort_hash_collisions",x.cohort_hash_collisions);
+            f.add("cohort_native_rows",x.cohort_native_rows);f.add("cohort_native_tiles",x.cohort_native_tiles);f.add("cohort_plan_splits",x.cohort_plan_splits);
+            f.add("cohort_prefixes",x.cohort_prefixes);f.add("cohort_fallbacks",x.cohort_fallbacks);f.add("cohort_budget_fallbacks",x.cohort_budget_fallbacks);
+            f.add("native_prefit_enabled",x.native_prefit_enabled);
+            f.add("native_prefit_queries",x.native_prefit_queries);f.add("native_prefit_completed",x.native_prefit_completed);
+            f.add("native_prefit_rejections",x.native_prefit_rejections);f.add("native_prefit_rows",x.native_prefit_rows);
+            f.add("native_prefit_tiles",x.native_prefit_tiles);f.add("native_prefit_fallbacks",x.native_prefit_fallbacks);
+            f.add("coherent_prefit_queries",x.coherent_prefit_queries);f.add("coherent_prefit_completed",x.coherent_prefit_completed);
+            f.add("coherent_prefit_rejections",x.coherent_prefit_rejections);f.add("coherent_prefit_samples",x.coherent_prefit_samples);
+            f.add("coherent_prefit_colored",x.coherent_prefit_colored);
             f.add("colored_rejections",x.colored_rejections);f.add("colored_on_demand_queries",x.colored_demand_queries);f.add("colored_exact_demand_queries",x.colored_exact_demand_queries);
             f.add("colored_on_demand_sample_pairs",x.colored_demand_pairs);f.add("colored_on_demand_fallbacks",x.colored_demand_fallbacks);
             f.add("colored_general_queries",x.colored_general_queries);f.add("colored_general_completed",x.colored_general_completed);
@@ -11134,6 +11633,23 @@ PatternCorrelator::~PatternCorrelator(){
             f.add("r1_export_process_attempts",r1_counts.attempts);
             f.add("r1_export_process_rows",r1_counts.rows);
             f.add("r1_export_process_samples",r1_counts.samples);
+            if(impl_->scheduled) {
+                constexpr std::array purposes{"acquisition","prefit","diagnostic","preparation"};
+                constexpr std::array metrics{"qcalls","first","repeat","untracked","invalid","disabled"};
+                for(std::size_t purpose=0;purpose<purposes.size();++purpose)
+                    for(std::size_t metric=0;metric<metrics.size();++metric) {
+                        const auto name=std::string("point_census_")+purposes[purpose]+"_"+metrics[metric];
+                        f.add(name.c_str(),impl_->scheduled->extra_work.point_census[purpose][metric]);
+                    }
+                f.add("point_census_scope","census mode only; per-correlator cumulative actual Original scheduled scalar q calls; first/repeat attribution against pool first-seen keys; includes absent-pool/invalid calls; excludes precomputed/curve/FFT/temporal/common-shape producers; census does not replace q");
+                constexpr std::array cache_metrics{"qcalls","lookup_queries","original_calls","direct_fallbacks","unavailable","hits"};
+                for(std::size_t purpose=0;purpose<purposes.size();++purpose)
+                    for(std::size_t metric=0;metric<cache_metrics.size();++metric) {
+                        const auto name=std::string("point_cache_")+purposes[purpose]+"_"+cache_metrics[metric];
+                        f.add(name.c_str(),impl_->scheduled->extra_work.point_cache[purpose][metric]);
+                    }
+                f.add("point_cache_scope","cache mode only; cumulative final scalar requests and actual Original builder invocations; unavailable is a subset of direct_fallbacks; copied hits avoid q construction but retain exact outer fallback; excludes earlier precomputed/curve/FFT/temporal/common-shape producers");
+            }
             f.add("temporal_fp32_requested",impl_->temporal_fp32_policy().requested);
             f.add("temporal_fp32_component_limit",impl_->temporal_fp32_policy().limit);
             f.add("temporal_fp32_entry_payload_requested",detail::ScheduledTemporalFp32Execution::payload_requested());
@@ -11152,6 +11668,9 @@ PatternCorrelator::~PatternCorrelator(){
             f.add("temporal_plan_cache_exceptions",plan_cache.exceptions);f.add("temporal_plan_cache_hash_words",plan_cache.hash_words);
             f.add("temporal_plan_cache_compared_words",plan_cache.compared_words);
             f.add("template_cache_hits",w.scheduled_template_cache_hits);f.add("carry_samples",w.scheduled_carry_samples);
+            f.add("original_pulse_rows",impl_->work.scheduled_original_pulse_rows);
+            f.add("original_pulse_reuses",impl_->work.scheduled_original_pulse_reuses);
+            f.add("original_pulse_bulk_rows",impl_->work.scheduled_original_pulse_bulk_rows);
             f.add("colored_guard_activations",w.scheduled_colored_guard_activations);
             f.add("quarter_guard_fallbacks",w.scheduled_quarter_guard_fallbacks);f.add("pulse_spans",w.segments);
             f.add("counter_scope","per-sample template pairs; span endpoints/worker setup are separate");
@@ -11460,6 +11979,8 @@ void PatternCorrelator::set_workspace_bytes(std::size_t bytes) {
     if(bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)impl_->drop_lazy_colored_sources();
     if(impl_->lazy_state() && impl_->lazy_state()->detached_replay && !impl_->lazy_state()->detached_replay->numeric_active &&
        bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)impl_->lazy_drop_detached_replay();
+    if(impl_->lazy_state() && impl_->lazy_state()->native_cohort &&
+       bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)impl_->lazy_drop_native_cohort();
     if(bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)
         impl_->drop_lazy_projections(Impl::LazyState::ProjectionDrop::workspace_shrink);
     if(bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)impl_->drop_lazy_plans();
@@ -11495,7 +12016,7 @@ void PatternCorrelator::set_workspace_bytes(std::size_t bytes) {
     }
     require(bytes>=working_bytes()+impl_->unallocated_history_bytes()+impl_->amplitude_scratch_reservation,"DSP workspace is smaller than streaming pattern state");impl_->budget=bytes;
 }
-void PatternCorrelator::trim_optional_workspace(){impl_->drop_lazy_colored_sources();if(impl_->lazy_state() && impl_->lazy_state()->detached_replay && !impl_->lazy_state()->detached_replay->numeric_active)impl_->lazy_drop_detached_replay();impl_->drop_lazy_projections(Impl::LazyState::ProjectionDrop::explicit_trim);impl_->drop_lazy_plans();impl_->drop_scheduled_families();impl_->drop_scheduled_curves();impl_->drop_scheduled_moments();impl_->drop_workers();}
+void PatternCorrelator::trim_optional_workspace(){impl_->lazy_drop_native_cohort();impl_->drop_lazy_colored_sources();if(impl_->lazy_state() && impl_->lazy_state()->detached_replay && !impl_->lazy_state()->detached_replay->numeric_active)impl_->lazy_drop_detached_replay();impl_->drop_lazy_projections(Impl::LazyState::ProjectionDrop::explicit_trim);impl_->drop_lazy_plans();impl_->drop_scheduled_families();impl_->drop_scheduled_curves();impl_->drop_scheduled_moments();impl_->drop_workers();}
 Diagnostics PatternCorrelator::diagnostics()const {
     const auto burst=provisional();Diagnostics result;result.bit_rate=static_cast<double>(impl_->config.sample_rate)/static_cast<double>(impl_->code.symbol_samples());
     result.sample_offset=static_cast<std::size_t>(burst.first_sample);result.pattern_score=burst.score;return result;

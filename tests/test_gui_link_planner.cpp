@@ -1881,11 +1881,13 @@ void search_arithmetic_document_and_cache() {
             contains_text(page,"Modeled receiver: amplitude energy · experimental")&&
             !contains_text(page,"Existing search exceeds the CPU budget")&&!contains_text(page,"Strategy work model:"),
             "planner footer lost controls/resolved strategy or left detailed geometry expanded");
-        for(const auto field:{F::receiver_strategy,F::receiver_cpu_budget,F::sched_hop_dilution}) {
+        for(const auto field:{F::receiver_strategy,F::receiver_cpu_budget}) {
             const auto control=std::find_if(flat.begin(),flat.end(),[&](const auto* n){return n->control&&n->control->field==field;});
             check(control!=flat.end()&&control<toggle&&(*control)->width>0,
                 "receiver strategy/budget footer lost responsive controls before Model limits");
         }
+        check(std::none_of(flat.begin(),flat.end(),[](const auto* n){return n->control&&n->control->field==F::sched_hop_dilution;}),
+            "Planner duplicated the persistent header dilution control");
         const auto detailed=planner_page::build(model,width,true,false);
         check(contains_text(detailed,"Model limits")&&contains_text(detailed,"Receiver geometry: 6000 samples/s")&&
             contains_text(detailed,"Arithmetic model: CPU test matrix; operands INT8; accumulation INT32; FP64 verification")&&

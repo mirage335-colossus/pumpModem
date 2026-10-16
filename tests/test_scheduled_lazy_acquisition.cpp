@@ -3,6 +3,7 @@
 #include "../src/family_simd.hpp"
 #include "../src/shared_scheduled_capture.hpp"
 #include "../src/scheduled_exact_source_samples.hpp"
+#include "../src/scheduled_exact_source_points.hpp"
 #include "../src/stable_owner_store.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
@@ -147,16 +148,24 @@ modem::PatternSearch search(const modem::Config& c,const Capture& input,bool ban
     return s;
 }
 struct PollEvent {std::size_t poll=0;modem::PatternBurst burst;};
-struct Result {std::vector<PollEvent> events;Bytes bits;bool complete=false;std::uint64_t first=0,completed=0;std::size_t peak=0;modem::PatternCorrelatorWork work;std::vector<modem::PatternEvidence> evidence;modem::detail::scheduled_source_samples::Counts source_counts;std::size_t source_bytes=0;};
+struct Result {std::vector<PollEvent> events;Bytes bits;bool complete=false;std::uint64_t first=0,completed=0;std::size_t peak=0;modem::PatternCorrelatorWork work;std::vector<modem::PatternEvidence> evidence;modem::detail::scheduled_source_samples::Counts source_counts;std::size_t source_bytes=0;modem::detail::scheduled_source_points::PointPool::Snapshot point_snapshot;std::size_t point_bytes=0;};
 Result receive(const modem::Config& c,const Capture& input,modem::PatternSearch s,std::size_t block=113,bool cache_reference=false,bool spans=false,bool trim=false,bool moment_reference=false,bool float_curve=false,bool family=false,bool all_evidence=false,
-               std::span<const std::size_t> cuts={},bool raw_score=false,bool common=false,bool simd=false,bool affine_reuse=true,bool shared=false,bool exact_source=false) {
+               std::span<const std::size_t> cuts={},bool raw_score=false,bool common=false,bool simd=false,bool affine_reuse=true,bool shared=false,bool exact_source=false,bool exact_points=false,bool parity_events=false) {
     if(all_evidence){s.retain_score=0;s.candidate_limit=4096;}
     constexpr std::size_t budget=8*1024*1024;
     namespace xs=modem::detail::scheduled_source_samples;
     std::unique_ptr<xs::Pool> source_pool;
     if(exact_source)source_pool=std::make_unique<xs::Pool>(512U*1024U);
-    const auto source_bytes=source_pool?source_pool->working_bytes():0;
-    check(source_bytes<budget,"source pool displaced all original receiver workspace");
+    namespace xp=modem::detail::scheduled_source_points;
+    std::unique_ptr<xp::PointPool> point_pool;
+    if(exact_points) {
+        const xp::PointPool::Limits limits{16384,64,1024,0};
+        point_pool=std::make_unique<xp::PointPool>(xp::PointPool::required_bytes(limits),limits);
+        check(point_pool->enabled(),"point parity arena unavailable");
+    }
+    const auto point_bytes=point_pool?point_pool->working_bytes():0;
+    const auto source_bytes=(source_pool?source_pool->working_bytes():0)+point_bytes;
+    check(source_bytes<budget,"source pools displaced all original receiver workspace");
     const auto receiver_budget=budget-source_bytes;
     namespace owner=modem::detail::scheduled_capture;
     std::shared_ptr<owner::SharedScheduledCapture> shared_capture;
@@ -166,7 +175,10 @@ Result receive(const modem::Config& c,const Capture& input,modem::PatternSearch 
         s.scheduled_capture=shared_capture;
     }
     modem::PatternCorrelator rx(c,s,receiver_budget,{.measure_work=true,.scheduled_template_cache_reference=cache_reference,.scheduled_raw_score_reference=raw_score,.scheduled_affine_experiment=spans,.scheduled_moment_reference=moment_reference,.scheduled_float_curve_experiment=float_curve,.scheduled_family_experiment=family,.scheduled_common_shape_experiment=common || family,.scheduled_common_affine_reuse=affine_reuse,.scheduled_common_simd_experiment=simd});Result out;
-    xs::Scope source_scope(source_pool.get(),source_pool?1:0);
+    xs::Binding binding;binding.pool=source_pool.get();binding.key_namespace=source_pool || point_pool?1:0;
+    binding.points=point_pool.get();binding.point_requested=exact_points;binding.point_cache=exact_points;binding.consumer=1;
+    if(point_pool)binding.point_family=point_pool->bind(modem::detail::source_family(c,1));
+    xs::Scope source_scope(binding);
     const auto geometry=modem::pattern_scheduled_complex_geometry(c,s);
     check(geometry.retained_hypotheses==rx.work().hypotheses,"cheap scheduled geometry differs from actual retained lane count");
     check(!rx.try_skip_unobserved(1),"mapped complex must retain raw capture until an omission certificate exists");
@@ -182,7 +194,7 @@ Result receive(const modem::Config& c,const Capture& input,modem::PatternSearch 
         if(trim)rx.trim_optional_workspace();
         out.peak=std::max(out.peak,rx.working_bytes()+source_bytes);check(out.peak<=budget,"mapped complex workspace overflow");
         for(const auto& burst:rx.take_bursts()) {
-            if(all_evidence)out.events.push_back({at,burst});
+            if(all_evidence || parity_events)out.events.push_back({at,burst});
             check(!burst.missing_slots,"calendar null manufactured missing symbols");
             if(!burst.bits.empty()){if(!out.first)out.first=at;out.bits.insert(out.bits.end(),burst.bits.begin(),burst.bits.end());}
             if(burst.complete){out.complete=true;out.completed=at;}
@@ -191,6 +203,7 @@ Result receive(const modem::Config& c,const Capture& input,modem::PatternSearch 
     const auto complete=out.complete;rx.finish();for(const auto& burst:rx.take_bursts())check(complete || !burst.complete,"EOF manufactured source absence");
     out.work=rx.work();
     if(rx.deferred_pattern_history()) {
+        xs::PurposeScope diagnostics(xs::Purpose::diagnostic);
         const auto generation=rx.diagnostic_history_generation();
         const auto unresolved=rx.oldest_unresolved_diagnostic_event();
         const auto before=rx.provisional();
@@ -211,8 +224,12 @@ Result receive(const modem::Config& c,const Capture& input,modem::PatternSearch 
             "complete diagnostic query left unresolved historical events");
     } else out.evidence=rx.candidates();
     if(all_evidence)check(out.evidence.size()<s.candidate_limit,"complete-evidence fixture truncated its lane history");
-    if(source_pool){out.source_counts=source_pool->counts();out.source_bytes=source_bytes;
+    if(source_pool){out.source_counts=source_pool->counts();out.source_bytes=source_bytes-point_bytes;
         check(source_pool->try_reclaim(),"joined acquisition left a source Reader or tile builder alive");}
+    if(point_pool) {
+        out.point_snapshot=point_pool->snapshot();out.point_bytes=point_bytes;
+        check(point_pool->try_reclaim(),"joined acquisition left an exact point builder alive");
+    }
     return out;
 }
 
@@ -393,6 +410,61 @@ void original_projection_cache_parity() {
     }
     unsetenv("DATAPUMP_SCHED_ORIGINAL_PROJECTION_CACHE_BYTES");unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
 }
+void coherent_prefit_parity() {
+    for(const bool short_symbol:{false,true}) {
+        auto c=configuration(3,10,false);c.sample_rate=600;c.carrier_hz=150;
+        c.integration_seconds=std::nextafter(9600./c.sample_rate,0.);
+        if(short_symbol) {c.sample_rate=14400;c.carrier_hz=1500;c.bandwidth_hz=360;c.integration_seconds=0;
+            auto plan=std::make_shared<modem::SchedHopPlan>(*c.scheduled_hopping);
+            plan->clock_error_seconds=plan->peer_clock_error_seconds=.01;c.scheduled_hopping=plan;}
+        const modem::SchedHopSourceMap map(*c.scheduled_hopping,*c.data_key,c.sample_rate);
+        const auto anchor=map.source_to_physical(map.locate(8312ULL*c.sample_rate).source);
+        c.stream_epoch=anchor.sample/c.sample_rate;c.stream_phase_samples=anchor.sample%c.sample_rate;
+        const Bytes expected{0,1};const auto input=capture(c,expected,true);
+        auto s=search(c,input);s.chunk_bits=1;s.retain_score=5;s.candidate_limit=4096;
+        s.clock_errors_ppm=short_symbol?std::vector<double>{0}:std::vector<double>{-12,0,12};
+        s.start_uncertainty_seconds=short_symbol?0:modem::pattern_chip_samples(c)/2./c.sample_rate;
+        setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);setenv("DATAPUMP_SCHED_LAZY_BATCH","0",1);
+        setenv("DATAPUMP_SCHED_COHERENT_PREFIT","0",1);
+        const auto original=receive(c,input,s,113);
+        setenv("DATAPUMP_SCHED_COHERENT_PREFIT","1",1);
+        const auto actual=receive(c,input,s,113);
+        compare(original,actual);
+        check(actual.bits==expected&&actual.complete,"coherent prefit lost exact pending payload or scored absence");
+        for(std::size_t i=0;i<original.evidence.size();++i) {
+            const auto& a=original.evidence[i];const auto& b=actual.evidence[i];
+            check(std::bit_cast<std::uint64_t>(a.score)==std::bit_cast<std::uint64_t>(b.score)&&
+                  std::bit_cast<std::uint64_t>(a.alternative_score)==std::bit_cast<std::uint64_t>(b.alternative_score)&&
+                  a.outer_presence_score==b.outer_presence_score&&a.outer_presence_active==b.outer_presence_active,
+                  "coherent prefit changed exact retained diagnostic evidence");
+        }
+        unsetenv("DATAPUMP_SCHED_COHERENT_PREFIT");unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
+    }
+    // Wide clock/timing cells reach Original fallbacks that the prepared cold
+    // screen cannot certify. Use noise only to test exact additional rejection
+    // independently of useful-payload settlement in the narrower cases above.
+    auto c=configuration(3,10,false);c.sample_rate=600;c.carrier_hz=150;
+    c.integration_seconds=std::nextafter(9600./c.sample_rate,0.);
+    const modem::SchedHopSourceMap map(*c.scheduled_hopping,*c.data_key,c.sample_rate);
+    const auto anchor=map.source_to_physical(map.locate(8312ULL*c.sample_rate).source);
+    c.stream_epoch=anchor.sample/c.sample_rate;c.stream_phase_samples=anchor.sample%c.sample_rate;
+    auto input=capture(c,Bytes{0,1},true);std::mt19937_64 random(72119);
+    std::normal_distribution<double> noise(0,.002);
+    for(auto& value:input.pcm)value=static_cast<float>(noise(random));
+    auto s=search(c,input);s.chunk_bits=1;s.retain_score=5;s.candidate_limit=4096;
+    s.clock_errors_ppm={-600,0,600};s.start_uncertainty_seconds=2.*modem::pattern_chip_samples(c)/c.sample_rate;
+    setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);setenv("DATAPUMP_SCHED_LAZY_BATCH","0",1);
+    setenv("DATAPUMP_SCHED_COHERENT_PREFIT","0",1);const auto original=receive(c,input,s,113);
+    setenv("DATAPUMP_SCHED_COHERENT_PREFIT","1",1);const auto actual=receive(c,input,s,113);
+    compare(original,actual);check(actual.bits.empty()&&!actual.complete,"coherent prefit admitted noise");
+    std::cout<<"COHERENT_PREFIT original_rejected="<<original.work.implicit_rejected_lanes
+        <<" prefit_rejected="<<actual.work.implicit_rejected_lanes<<" original_refined="<<original.work.implicit_refined_lanes
+        <<" prefit_refined="<<actual.work.implicit_refined_lanes<<"\n";
+    check(actual.work.implicit_rejected_lanes>original.work.implicit_rejected_lanes,
+          "qualifying coherent prefit fixture executed no new exact rejection");
+    unsetenv("DATAPUMP_SCHED_COHERENT_PREFIT");unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
+
+}
 void exact_source_binding_parity(bool odd_chips=false) {
     namespace xs=modem::detail::scheduled_source_samples;
     if(!xs::environment()){std::cout<<"OMITTED: native exact-source positive-hit coverage; unqualified numeric environment\n";return;} // The independently tested original fallback remains valid.
@@ -422,6 +494,63 @@ void exact_source_binding_parity(bool odd_chips=false) {
         <<" bytes="<<cached.source_bytes<<" peak_combined="<<cached.peak<<"\n";
     unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
     if(odd_chips)unsetenv("DATAPUMP_SCHED_ORIGIN_CLASSES");
+}
+void exact_point_cache_parity() {
+    namespace xp=modem::detail::scheduled_source_points;
+    namespace xs=modem::detail::scheduled_source_samples;
+    auto c=configuration(3,10,false);c.sample_rate=600;c.carrier_hz=150;
+    // End inside a flat active group so the conservative completion fence
+    // includes real observations owned by the adjacent source symbol.
+    c.integration_seconds=std::nextafter(9630./c.sample_rate,0.);
+    const modem::SchedHopSourceMap map(*c.scheduled_hopping,*c.data_key,c.sample_rate);
+    const auto anchor=map.source_to_physical(map.locate(8312ULL*c.sample_rate).source);
+    c.stream_epoch=anchor.sample/c.sample_rate;c.stream_phase_samples=anchor.sample%c.sample_rate;
+    const Bytes expected{0,1};const auto input=capture(c,expected,true);
+    auto s=search(c,input,true);s.chunk_bits=1;s.retain_score=5;s.candidate_limit=4096;
+    s.clock_errors_ppm={-12,0,12};s.admitted_clock_half_width_ppm=12;s.worker_threads=2;
+    s.start_uncertainty_seconds=modem::pattern_chip_samples(c)/2./c.sample_rate;
+    setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);setenv("DATAPUMP_SCHED_LAZY_BATCH","0",1);
+    // Same full receiver, PCM, guards and process fences. Only the explicitly
+    // injected exact q arena differs; no ambient Live environment flag is used.
+    const auto original=receive(c,input,s,113,false,false,false,false,false,false,false,{},false,false,false,true,false,false,false,true);
+    const auto cached=receive(c,input,s,113,false,false,false,false,false,false,false,{},false,false,false,true,false,false,true,true);
+    compare(original,cached);
+    check(original.bits==expected&&original.complete&&cached.bits==expected&&cached.complete,
+        "exact point cache lost full payload or observed physical absence");
+    check(cached.work.scheduled_carry_samples>0,"exact point cache fixture did not exercise current/carry ownership");
+    const auto same=[](double a,double b){return std::bit_cast<std::uint64_t>(a)==std::bit_cast<std::uint64_t>(b);};
+    for(std::size_t i=0;i<original.evidence.size();++i) {
+        const auto& a=original.evidence[i];const auto& b=cached.evidence[i];
+        check(a.first_sample==b.first_sample&&a.end_sample==b.end_sample&&a.stream_symbol==b.stream_symbol&&
+            a.stream_phase_samples==b.stream_phase_samples&&a.bit==b.bit&&a.frequency_hypothesis==b.frequency_hypothesis&&
+            a.completed_event==b.completed_event&&a.outer_presence_active==b.outer_presence_active&&
+            same(a.frequency_hz,b.frequency_hz)&&same(a.score,b.score)&&same(a.alternative_score,b.alternative_score)&&
+            same(a.admission_threshold,b.admission_threshold)&&same(a.outer_presence_score,b.outer_presence_score),
+            "exact point cache changed bitwise full diagnostic evidence or ordering");
+    }
+    check(original.events.size()==cached.events.size(),"exact point cache changed progressive event count");
+    for(std::size_t i=0;i<original.events.size();++i) {
+        const auto& x=original.events[i];const auto& y=cached.events[i];const auto& a=x.burst;const auto& b=y.burst;
+        check(x.poll==y.poll&&a.bits==b.bits&&a.complete==b.complete&&a.first_sample==b.first_sample&&a.end_sample==b.end_sample&&
+            a.first_stream_symbol==b.first_stream_symbol&&a.stream_phase_samples==b.stream_phase_samples&&
+            a.stream_first_sample==b.stream_first_sample&&a.stream_first_symbol==b.stream_first_symbol&&a.missing_slots==b.missing_slots&&
+            same(a.frequency_hz,b.frequency_hz)&&same(a.score,b.score)&&same(a.support_samples,b.support_samples),
+            "exact point cache changed progressive payload publication or physical END");
+    }
+    const auto& counts=cached.point_snapshot.counts;
+    // Every builder/direct reservation in this successfully completed fixture
+    // invokes exactly one Original callback. Hits invoke none.
+    const auto original_calls=counts.cache_build_calls+counts.direct_calls;
+    check(cached.point_bytes>0&&cached.peak<=8U*1024U*1024U,"exact point cache exceeded combined fixture quota");
+    if(xp::environment()) {
+        check(counts.hits>0&&counts.cache_build_calls>0&&original_calls>0&&original_calls<counts.queries,
+            "exact point cache did not positively avoid actual Original calls");
+        check(counts.queries==counts.hits+original_calls,"successful cache query denominator mismatch");
+    } else check(counts.hits==0&&counts.builds==0,"unqualified environment served exact cached q");
+    check(!xs::binding.points&&!xs::binding.point_cache,"joined exact point fixture leaked TLS binding");
+    std::cout<<"exact point cache queries="<<counts.queries<<" hits="<<counts.hits<<" original_calls="<<original_calls
+        <<" bytes="<<cached.point_bytes<<" peak="<<cached.peak<<" carry="<<cached.work.scheduled_carry_samples<<"\n";
+    unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
 }
 void automatic_dense_footprint() {
     constexpr std::size_t budget=23045189;
@@ -501,7 +630,7 @@ int main(){try {
     stable_owner_storage();
     smooth_fhss_native_parity();
     automatic_dense_footprint();
-    short_split_lifecycle_parity();
+    short_split_lifecycle_parity();coherent_prefit_parity();exact_point_cache_parity();
     paired(1,false,false,false);paired(10,true,true,false);paired(10,false,true,true);original_push_fences();screened_noise_and_payload();original_projection_cache_parity();exact_guard_demand_parity();exact_source_binding_parity();exact_source_binding_parity(true);
     std::cout<<"scheduled implicit acquisition lifecycle tests passed\n";return 0;
 } catch(const std::exception& error){unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");std::cerr<<error.what()<<'\n';return 1;}}

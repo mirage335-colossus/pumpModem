@@ -409,15 +409,17 @@ private:
         if(memory_) {std::fclose(memory_);memory_=nullptr;}
     }
     int attributes(const Primitive& primitive) const {
-        int result=primitive.focused||primitive.selected||primitive.tone==Tone::inverse?A_REVERSE:A_NORMAL;
-        if(!primitive.enabled||primitive.tone==Tone::muted)result|=A_DIM;
-        if(primitive.focused||primitive.bold)result|=A_BOLD;
+        int result=primitive.tone==Tone::inverse||
+            ((primitive.focused||primitive.selected)&&primitive.tone!=Tone::discouraged)?A_REVERSE:A_NORMAL;
+        if(!primitive.enabled||primitive.tone==Tone::muted||primitive.tone==Tone::discouraged)result|=A_DIM;
+        if((primitive.focused||primitive.bold)&&primitive.tone!=Tone::discouraged)result|=A_BOLD;
         if(colors_) {
             int pair=1;
             if(primitive.tone==Tone::accent||primitive.tone==Tone::data)pair=2;
             if(primitive.tone==Tone::positive)pair=3;
             if(primitive.tone==Tone::caution)pair=4;
             if(primitive.tone==Tone::negative)pair=5;
+            if(primitive.tone==Tone::discouraged&&primitive.enabled)pair=5;
             result|=COLOR_PAIR(pair);
         }
         return result;

@@ -1,4 +1,5 @@
 #include "../src/scheduled_exact_source_samples.hpp"
+#include "../src/scheduled_exact_source_points.hpp"
 #include <atomic>
 #include <iostream>
 #include <thread>
@@ -184,5 +185,38 @@ void joined_binding_pressure_lifetime() {
     check(xs::binding.pool==previous.pool&&xs::binding.key_namespace==previous.key_namespace&&
           xs::binding.reclaim==previous.reclaim&&xs::binding.pressure_context==previous.pressure_context,"parent Scope lost complete prior binding");
 }
-int main(){try{exact_original_rows();canonical_identity_and_retirement();cancellation_and_exhaustion();concurrent_writer_and_owner_lifetime();retirement_during_build_and_environment();independent_sse_rounding_fallback();joined_binding_pressure_lifetime();
+void point_only_binding_worker_and_tombstone() {
+    namespace xp=modem::detail::scheduled_source_points;
+    const xp::PointPool::Limits limits{0,2,8,8};xp::PointPool points(xp::PointPool::required_bytes(limits),limits);
+    auto c=config(10,false,modem::SearchArithmetic::fp64);const auto family=points.bind(modem::detail::source_family(c,7));
+    const auto symbol=points.prepare(family,modem::SymbolStreamAddress{1800000000,0,0});
+    struct Loan {xp::PointPool& points;std::size_t released=0;unsigned calls=0;
+        static bool reclaim(void* p){auto& self=*static_cast<Loan*>(p);++self.calls;const auto old=self.points.working_bytes();
+            if(!self.points.try_reclaim())return false;self.released+=old-self.points.working_bytes();return self.released!=0;}} loan{points};
+    const auto previous=xs::binding;xs::Binding full;full.key_namespace=7;full.points=&points;full.point_family=family;
+    full.consumer=42;full.purpose=xs::Purpose::diagnostic;full.point_requested=true;full.point_cache=true;full.pressure_context=&loan;full.reclaim=&Loan::reclaim;
+    {
+        xs::Scope parent(full);check(!xs::binding.pool&&xs::binding.points==&points&&xs::binding.reclaim,"point-only scope lost owner/pressure capability");
+        {xs::PurposeScope prefit(xs::Purpose::prefit);check(xs::binding.purpose==xs::Purpose::prefit,"prefit purpose not installed");}
+        check(xs::binding.purpose==xs::Purpose::diagnostic,"nested purpose leaked");
+        std::exception_ptr failure;const auto borrowed=xs::binding;
+        std::thread worker([&]{try {
+            check(!xs::binding.points,"worker inherited unrelated TLS point owner");
+            xs::Scope scope(xs::worker_binding(borrowed,xs::Purpose::preparation));
+            check(xs::binding.points==&points&&xs::binding.point_family.id==family.id&&xs::binding.consumer==42&&
+                xs::binding.key_namespace==7&&xs::binding.point_requested&&xs::binding.point_cache&&xs::binding.purpose==xs::Purpose::preparation&&
+                !xs::binding.reclaim&&!xs::binding.pressure_context,"worker source binding lost immutable fields or gained pressure mutation");
+            if(xp::environment())check(points.observe(symbol,.125,{42,1})==xp::Observation::first,"worker census identity mismatch");
+        }catch(...){failure=std::current_exception();}});worker.join();if(failure)std::rethrow_exception(failure);
+        check(loan.calls==0,"worker invoked coordinator reclaim");
+        check(xs::binding.reclaim(xs::binding.pressure_context)&&loan.calls==1&&loan.released>0,"joined point backing failed restitution");
+        check(xs::binding.points==&points&&!points.enabled(),"point pressure destroyed borrowed owner instead of retaining tombstone");
+        modem::PatternCode a(c,1800000000),b(c,1800000000);a.prepare_symbol(0);b.prepare_symbol(0);
+        {xs::Reader original(c,b,0);check(equal_bits(original.value(37.125L),a.shaped_values(0,37.125)),"point-only tombstone changed Original source fallback");}
+    }
+    check(xs::binding.pool==previous.pool&&xs::binding.points==previous.points&&xs::binding.point_family.id==previous.point_family.id&&
+        xs::binding.consumer==previous.consumer&&xs::binding.purpose==previous.purpose&&xs::binding.point_requested==previous.point_requested&&xs::binding.point_cache==previous.point_cache&&
+        xs::binding.pressure_context==previous.pressure_context&&xs::binding.reclaim==previous.reclaim,"extended source scope lost prior binding");
+}
+int main(){try{point_only_binding_worker_and_tombstone();exact_original_rows();canonical_identity_and_retirement();cancellation_and_exhaustion();concurrent_writer_and_owner_lifetime();retirement_during_build_and_environment();independent_sse_rounding_fallback();joined_binding_pressure_lifetime();
     std::cout<<"exact source sample tiles passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

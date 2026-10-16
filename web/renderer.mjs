@@ -192,6 +192,7 @@ export class Renderer {
             this.options(view.presets,c.options||[],'▾');view.presets.hidden=!c.options?.length;view.presets.disabled=!enabled;
         } else if(c.kind==='choice'||c.kind==='menu') {
             this.options(view.input,c.options||[],c.kind==='menu'?c.label:null);view.input.value=c.kind==='menu'?'':c.selected;
+            view.input.style.color=c.foreground||'';
         } else if(c.kind==='toggle')view.input.checked=Boolean(c.checked);
         else if(c.kind==='action')text(view.input,c.label);
         else if(c.kind==='label')text(view.value,c.displayText||c.text||c.label);
@@ -235,7 +236,7 @@ export class Renderer {
         const key=JSON.stringify([prompt,options]);if(select.optionKey===key)return;select.optionKey=key;
         const nodes=[];
         if(prompt!==null){const item=element(this.doc,'option',prompt);item.value='';nodes.push(item);}
-        for(const option of options){const item=element(this.doc,'option',option.label);item.value=option.id;item.disabled=!option.enabled;nodes.push(item);}
+        for(const option of options){const item=element(this.doc,'option',option.label);item.value=option.id;item.disabled=!option.enabled;item.style.color=option.foreground||'';nodes.push(item);}
         children(select,nodes);
     }
     makeControl(c) {

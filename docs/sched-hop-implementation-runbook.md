@@ -2277,3 +2277,293 @@ Maintained local navigation: [Sched_Hop](scheduled-hops.md),
 [build/test guide](building.md), [development contract](development.md).
 Earlier entries and raw captures remain evidence with their own identities;
 this runbook supersedes no measurement and claims no new receiver result.
+
+
+## October 15 implementation amendment: bounded lower F3 selection
+
+This is an explicit implementation-phase design amendment reviewed by Astra
+(`f3_gate_review`). The original selector, baseline identities and failed
+measurements above remain unchanged. Interpolation does not itself establish
+production support or practical rescue.
+
+The separate startup-qualified three-cycle fixture retains the original strict
+prefix, poll, source-address, END, all-stream and drain assertions. Its common
+21-second startup input comes from the matched M0 canonical predecessor and
+production admission/FFT metadata. Gross CPU and service wall include all startup
+work; the comparison physical exposure excludes that added quiet input. The
+original fixture and its first-prefix failure remain retained separately.
+
+On frozen cache5, the 0.6 GHz M0 control completed correctly: 435.004599 CPU and
+87.487316 service wall seconds over 308.498039 comparison physical seconds.
+Its elapsed ratio is approximately 0.284, so it is not F3. The 4.8 GHz lead failed
+the unchanged 360-second workload drain deadline (2057.28 CPU, 361.249 wall at
+cleanup). Its independent paced control failed the unchanged 24-second backlog
+cap at 74.8136 wall seconds, with post-startup backlog growth. Neither failed run
+qualifies the complete service control. The conditional 6/9.6 GHz wider branch
+therefore remains closed.
+
+Use only this finite downward branch, predeclared before scheduled F3 timing:
+
+1. Try **2.4 GHz, then 3.0 GHz only**, with frozen cache5 binaries and unchanged
+   target, waveform, complete search coverage, workers/affinity, memory, input
+   recipe and all other physical settings. No additional adaptive grid.
+2. Before timing a point, require the complete production support/domain, memory,
+   startup, private-address and exact timeline/PCM preflight for **all M0/M3/M5**.
+   Any failed variant, including the unchanged 900-second physical scope, stops
+   selection before M0 service timing. Investigate an adapter defect without
+   treating its failure as proof that the detector is unsupported. M3-only
+   evidence remains partial and cannot establish the required matched rescue.
+3. At 2.4 GHz, any strict semantic failure, incomplete drain or original workload
+   deadline failure stops selection. A strict complete elapsed-service/comparison-
+   exposure ratio below 1.05 permits the final 3.0 GHz point. Only a strict
+   complete ratio within [1.05,1.25] is eligible for a paced deficit check.
+4. An eligible point needs independent paced post-startup positive backlog
+   growth, with no preceding semantic/provider/trace failure. A 24-second cap
+   failure may be deficit evidence; it remains a failed paced run, never a pass.
+   Absence of a demonstrated deficit stops selection rather than adding a point.
+5. Apply the same gates at 3.0 GHz, then stop. Failure, an out-of-band result or
+   no actual deficit leaves F3 unselected. Preserve every cycle, waveform,
+   recurrence, observation/absence fence and deadline; add no tail or padding.
+6. Only after selection perform the existing scheduled comparison and repeat
+   gates. Selection itself does not establish rescue.
+
+The 360-second workload deadline and approximately 308.5-second comparison
+exposure limit an observable completing ratio to roughly 1.167. The reachable
+selection band is therefore approximately 1.05–1.16; do not extend the deadline
+or reinterpret a slower incomplete run as a complete measurement.
+
+Evidence is retained under `.agent-work/artifacts/sched-cohorts-20261015/`,
+including `f3-startup/selection-amendment.json`, frozen identities, plans and raw
+service/paced failures. At this amendment checkpoint M0's 2.4 GHz metadata plan
+passed, while M3/M5 preflight failed with an audit coordinate error. Selection
+is stopped pending diagnosis; no 2.4 GHz service or scheduled F3 timing is claimed.
+
+
+## October 15–16 implementation checkpoint: performance objective unfinished
+
+This checkpoint supersedes the earlier amendment's **current-status** sentence;
+it preserves that sentence and every earlier failed attempt as historical
+evidence. It reports local implementation and bounded experiments. It does not
+claim practical sustained rescue, impossibility, platform/SDK qualification or a
+published release. No commit, push or CI dispatch was performed.
+
+The implementation now includes exact Original pulse-row reuse, exact source
+address/layout helpers, a rejection-only coherent prefit, optional exact-point
+reuse, an optional one-event FP32 rejection prefit and an optional fixed-cap
+native cohort rejection prefit. Approximate prefit results do not become
+authoritative receiver state. Surviving work returns to the Original numerical
+path. The cache, FP32 prefit and native cohort remain off by default. The exact
+coherent prefit retains its scalar fallback and is enabled by default.
+
+The final native8 demand-gated cohort inspects at most 32 actual due events,
+retains 64-physical-sample windows and exact identity for shared q values, and consumes
+each event summary at its original serial position. It shares only rejection
+work. Eleven focused final-candidate tests passed, including positive execution
+of sharing/rejection, cancellation/resume, exact addressing and accounting.
+Those focused results are separate from the broader qualification below.
+
+### Final bounded F1 crossover: failed with the feature off and on
+
+Exactly one same-binary, unprofiled off/on comparison ran at the unchanged
+24-second backlog limit, with no simultaneous builds or heavy tests. The
+1002944-sample PCM hash was 12248683145429340985 in both runs; all fixed input
+fields matched. The frozen core SHA256 is
+`fa8d0e309f61239e4ce3755143f57b3cfbc82832055b2f6839a14699525248bb` and
+the F1 fixture SHA256 is
+`a698e28299afd0e486ce6ad863818bc242a01865e16f2a969330f7365532cd53`.
+
+| Native cohort | Result | Wall seconds | CPU seconds |
+| --- | --- | ---: | ---: |
+| Off | Original sustained-backlog failure |24.456884077|26.832387|
+| On | Original sustained-backlog failure |24.515332181|27.121572|
+
+Neither run hit an external watchdog. Both traces finalized completely with zero
+drops; the maximum work record was 15592 bytes, below 16 KiB. These are failed
+prefixes, so their CPU and count differences are not throughput ratios.
+
+At the receiver epoch 1799999995 snapshot, the off run processed 2048 samples with
+6144 queued; the on run processed 1536 with 6656 queued. The on snapshot recorded
+765 batches, 24415 inspected members, 20789 queries and 14378 rejections.
+There were 18001727 requests, 17207279 unique rows and 794448 reuses, approximately
+4.4% reuse. Its 185527191 hash collisions are measured probe work; their CPU
+contribution was not measured, so they do not establish a dominant bottleneck.
+These are per-receiver snapshots, not whole-Live totals. The much higher reuse in
+the small three-carrier correctness test did not predict production sharing.
+
+The bounded cohort branch is **closed, default off**. No larger cap, alternative
+hash/cache grid or additional native parameter variants were run after this
+negative result. Earlier point-cache and one-event prefit experiments also failed
+the unchanged backlog gate. They remain retained evidence, not rescue results.
+Final native8 F2 performance and complete matched M0/M3/M5 qualification were
+not run; GUI preset preparation does not establish either result.
+
+### Lower F3 selector: CLOSED_UNSELECTED
+
+The earlier M3/M5 coordinate/audit defect was diagnosed without relaxing the
+complete-domain, private-address, source, physical-scope or 8 MiB plan assertions.
+The lossless audit codec retained every ordered context, multiplicity and alias.
+All M0/M3/M5 metadata and actual INITIAL-constructor gates subsequently passed at
+2.4 GHz and 3.0 GHz. INITIAL gates establish constructor admission only; they do not
+qualify rolling coverage or service. The frozen cache5 core was used for this
+selector, independently of the later native8 crossover.
+
+The strict 2.4 GHz M0 three-cycle service control passed every required pending
+poll, distinct-message and END/source guard. Gross service wall was 308.066314365
+seconds over 308.498039216 comparison physical seconds, ratio 0.998600559.
+This complete fast control did not establish the required continuous deficit;
+the explicit amendment permitted its sole final 3.0 GHz point.
+
+The 3.0 GHz M0 service control failed the unchanged 360-second drain deadline
+(approximately 1947.14 CPU/360.954 program wall seconds). It did not finish the
+input; its trace was incomplete with 636 dropped records. No complete service
+ratio, paced deficit check or scheduled F3 rescue follows from that failure.
+The finite selector is **CLOSED_UNSELECTED**. No additional RF point, cropped
+stream, padded tail or deadline extension was used.
+
+The 3.0 GHz metadata wrapper's formatter error occurred after all three guarded
+PLAN_COMPLETE emissions. The reviewed recovery retained the exact plans/PCM
+hashes and source/emission proof, explicitly marking child exit codes as not
+retained; it was not a timing claim. The first INITIAL wrapper's local variable
+shadowing failure was also retained, then only its unexecuted M3/M5 variants were
+resumed. Neither wrapper failure was reclassified as an original successful run.
+
+### Remaining major route
+
+Cards 3–6 remain incomplete: extract the literal complete Original current/carry
+numerical state with a synchronous event interface, demonstrate field-by-field
+equality at actual processing fences, then adopt full results in serial order
+without a second numerical replay for survivors. Rejection-only capsules do not
+discharge those gates. Cross-bank projection leases/full costs and complete C8/C34
+temporal/frequency execution, including guards, preparation, correction and
+adoption, remain unqualified. Choose the next specialization from complete cost
+attribution. A Default point-operator replacement remains contingent on its own
+proof; these failed filters do not justify changing the Original reference.
+
+Evidence lives under `.agent-work/artifacts/sched-cohorts-20261015/`, especially
+`candidates/native8/`, `native8-f1-crossover.json`,
+`native8-focused-summary.json`, `f3-initial/rf2400-service-summary.json` and
+`f3-rf3000/final-selector-summary.json`. Compact notes preserve failed attempts,
+scope and recheck conditions. The delivery GUI SHA256 is
+`063b1c5cbfb896b1c17286639446847f4dc42e9530326596b9aec9d36d171a6b`.
+Normal, verbose and debug launchers use explicit preserved F1/F2 presets, verify
+binary/key hashes and remove inherited experiment variables. Physical audio is
+separate and has not been exercised.
+
+The compiled stack review measured 9600 bytes for cohort preparation and 560 for
+consumption, with scoped evidence for the principal numerical callees and their
+declared allowances. OpenSSL, libm, allocator and unwind transitive stack use was
+not fully measured. This is not a formal complete-callee stack proof; retain that
+qualification limit alongside workspace accounting and sanitizer results.
+
+### Final local validation
+
+This is a **manual checkpoint with failed validation**, not a qualified release.
+All test assertions, physical deadlines and existing workload limits were
+retained. Application source and delivered core/GUI hashes stayed fixed across
+the final checks. The normal Release run used `devfast=false`, three build jobs
+and serial tests. Its complete calibration cases passed, including the
+762.75-second differential receiver probability case. Real-time fast session and
+GUI fast Live cases also passed in Release.
+
+| Scope | Actual result | Qualification |
+| --- | --- | --- |
+| Initial full Release | 320 passed, 9 failed; all 329 cases executed | Failed; original result retained |
+| Selected ASan/UBSan/LeakSanitizer | 11 passed, 1 failed; all 12 selected cases executed | Failed; scoped coverage only |
+| Full local native GUI | 1 passed, 2 failed; all 3 cases executed | Failed; no native case omitted |
+
+Four Release test/workload failures remain unresolved:
+
+- `scheduled_point_source_nodes` failed during calendar construction: no complete
+  shaped symbol fits the scheduled-hop/FHSS full-power windows. Its subsequent
+  numerical assertions were not reached.
+- `scheduled_parallel_preparation` hit the existing global CTest timeout at
+  1500.11 seconds during its first arithmetic serial/parallel pair. Later cases
+  were not executed. The earlier 360-second externally interrupted attempt is
+  incomplete evidence, not a successful or matching 1500-second baseline. A
+  bounded source audit found advancing loops but does not establish the live
+  cause; no deadline was extended.
+- `live_exact_source` failed its partial bounded-capture-queue drain check at
+  30.02 seconds. Its trace finalized completely with zero dropped records,
+  1,544,507 exact-point queries, 8,192 Original row builds and no capacity,
+  address-mismatch or exhaustion failures. At the last relevant receiver record,
+  41,187 samples were processed and 469 queued. The binding was exercised; these
+  failed-prefix counts are not a throughput measurement. Later pending-zero and
+  caller-TLS assertions were not reached.
+- `alsa_audio_contract` failed the deterministic injected-stub clipping check:
+  peak 1.00944, 63 clipped samples and distortion 2.47619e-8 above 1e-8. This is a
+  software test failure, not an accepted hardware-absence exception.
+
+The selected sanitizer kernel work overlapped general Release work on three
+logical CPUs, including approximately the final 50 seconds of the preparation
+timeout. That scheduling fact is retained with the failure; these regressions
+were not performance comparisons.
+
+The other five initial failures were socket/signing fixture setup failures.
+Focused local retries passed `build_preview`, `build_ci_apt`,
+`build_arch_release`, `build_gentoo_sync` and `build_apt_release`. Their original
+failures remain unchanged in the full-run receipt. The four signing scripts
+reported 17, 12, 12 and 16 nested unittest cases respectively; the Arch total
+includes two native pacman cases skipped by the existing disposable-root/
+container/tool guard. Those two cases did not pass and were not exercised.
+
+The retry also disproved an infrastructure assumption: installed GnuPG 2.4.7's
+`gpgconf --dry-run --list-dirs` can create its runtime child directory. Two
+guarded attempts stopped before real GPG work; their five empty child
+directories were recovered with fresh exact claims and verified inode/UID/
+emptiness checks. The corrected retry derived and claimed each exact child
+before invoking the query, then required the actual socket path to match.
+Three retained home/path pairs verified the derivation against the upstream
+[GnuPG 2.4.7 implementation](https://raw.githubusercontent.com/gpg/gnupg/gnupg-2.4.7/common/homedir.c).
+The final four-case retry passed with 201
+accepted GPG preflights. Its subreaper stopped and joined all owned descendants,
+removed 88 exact disposable runtime directories, released those claims and
+removed its temporary namespace. Unrelated user GPG socket entries were
+preserved. No key publication or host package installation occurred.
+
+The selected sanitizer replacement kernel run passed all eleven cases. The
+remaining instrumented `live_exact_source` failed the same partial-queue drain
+assertion at 91.01 seconds under its existing 30-second normal/90-second
+instrumented work allowance; its trace was complete with zero drops. **No
+sanitizer finding was observed in this scope**, but the Live assertion failed
+and its later assertions were not reached. The initial restricted launch's
+LeakSanitizer process-inspection errors and subsequent cancellation remain
+recorded separately; they were not passes. Replacement process access retained
+leak detection and all ASan/UBSan options. This was not full sanitizer regression
+or instrumented native GUI qualification.
+
+Native GUI testing used an authenticated private software Xwayland display with
+the existing 600-second smoke setting. Document conformance passed in 0.04
+seconds. Workflow smoke failed at 50.03 seconds because its replay-mode label did
+not identify displayed frames; preceding replay frame/fraction checks passed.
+This is a shared GUI state/label assertion with unresolved cause, not the
+accepted Rev cadence warning or an established Xwayland limitation. Adapter
+conformance failed at 79.17 seconds: an empty editor retained focus or hid its
+allocated preset button. Subsequent assertions in both failed cases were not
+executed. The full three-case inventory and all outcomes were captured; owned
+test descendants were absent at completion. The display manager stopped and
+joined, and its exact lock/socket outputs were absent before claim release.
+
+The delivered GUI passed version reporting, its headless shared-GUI self-check
+and library resolution. It is the exact tested native8 binary with verified
+normal, verbose and debug launchers, preserved F1/F2 presets and a synthetic key.
+Physical sound-card operation was not exercised. Cross-platform, SDK,
+copied-package, full sanitizer and instrumented native GUI qualification were
+not performed; no release was published or certified. No test failure here has
+been proved inherited or a new regression solely by resemblance to earlier
+logs. The sustained-reception objective and complete Original extraction/
+adoption route remain open.
+
+Exact commands, source identities, original failures, focused retry results,
+internal skips and cleanup receipts are retained under
+`.agent-work/artifacts/sched-cohorts-20261015/final-release-all/`,
+`final-release-infra/`, `final-release-infra-attempt2/`,
+`final-release-infra-attempt3/`, `final-sanitize/` and `final-native/`.
+
+The original passing `build_source_sdk` CTest script reported 28 nested unittest
+cases with three skips. Its `HostCxxRuntimeIntegrationTests` did not run because
+`patchelf` is absent on this host. The omitted cases cover relocated private C++
+runtimes/deep plugins, missing target-runtime rejection and unpreserved host-
+library rejection. The other 25 nested cases executed; the three omitted cases
+are not passes. This is additional omitted SDK fixture coverage, independent of
+the two native pacman skips in the signing retry and the broader untested SDK
+qualification scope.

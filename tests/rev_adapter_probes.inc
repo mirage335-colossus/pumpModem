@@ -921,7 +921,10 @@
     }
     void verify_choice_contract() {
         const auto state=test::effective_choice();
-        auto* choice=new ChoiceView(this,{.label="",.value=state.selected});
+        auto* parent=new theme::RevBox(this);
+        auto* choice=new ChoiceView(parent,{.label="",.value=state.selected});
+        place(parent,{20,200,400,320});parent->style->zIndex=20;
+        place(choice,{0,0,360,48});compact_dropdown(choice);
         for(const auto& option:state.options)choice->params.options.push_back({option.label,option.id,!option.enabled});
         re::Event event;choice->font_size=19;choice->display_text=state.display_text;choice->computeChildren(event);
         if(choice->params.value!=state.selected||choice->dropdownText->content.get()!=state.display_text||choice->targetFlags.disabled)
@@ -935,7 +938,56 @@
         choice->display_text.clear();choice->computeChildren(event);
         if(choice->params.value!=state.options[1].id||choice->dropdownText->content.get()!=state.options[1].label)
             throw std::runtime_error("Rev smoke: clearing effective choice text did not restore the saved option");
-        delete choice;
+        choice->option_presentations=state.options;
+        choice->option_presentations[1].text_tone=ui::TextTone::discouraged;
+        choice->selected_tone=ui::TextTone::discouraged;choice->computeChildren(event);
+        const auto expected=theme::discouraged_rgb(launch.color);
+        const auto matches=[&](auto* text) {
+            const auto color=text->style->text.color;
+            return color.r==expected.red/255.f&&color.g==expected.green/255.f&&color.b==expected.blue/255.f;
+        };
+        if(!matches(choice->options[1])||!matches(choice->dropdownText)||choice->params.options[1].disabled)
+            throw std::runtime_error("Rev discouraged popup/selected value lost its foreground or selectability");
+        choice->options[0]->click(event);choice->options[1]->click(event);
+        if(choice->params.value!=state.options[1].id||changes!=3)
+            throw std::runtime_error("Rev discouraged option changed callback identity");
+        choice->params.options.push_back({"Unavailable experiment","disabled",true});
+        choice->option_presentations.push_back({"disabled","Unavailable experiment",false,ui::TextTone::discouraged});
+        choice->computeChildren(event);choice->openMenu();
+        const auto settle=[&] {for(unsigned frame=0;frame<3;++frame)native_frame();};
+        settle();
+        auto* retained=choice->options[1];
+        const auto resolved_matches=[](const auto* text,theme::Rgb rgb) {
+            const auto color=text->resolved.style.text.color;
+            return color.r==rgb.red/255.f&&color.g==rgb.green/255.f&&color.b==rgb.blue/255.f;
+        };
+        for(const bool ancestor_disabled:{false,true,false})for(const bool own_disabled:{false,true,false}) {
+            const std::array draws{choice->options[0]->draws,choice->options[1]->draws,choice->options[2]->draws};
+            parent->setDisabled(ancestor_disabled);choice->setDisabled(own_disabled);settle();
+            if(!choice->open||choice->optionsContainer->resolved.hidden)
+                throw std::runtime_error("Rev choice presentation fixture did not retain its visible popup");
+            for(std::size_t i=0;i<choice->options.size();++i) {
+                const auto* row=choice->options[i];const auto rect=row->rect;
+                if(row->resolved.hidden||rect.w<=0||rect.h<=0||rect.x<0||rect.y<0||
+                   rect.x+rect.w>details.size.width||rect.y+rect.h>details.size.height||row->draws<=draws[i])
+                    throw std::runtime_error("Rev choice presentation row was not visibly rendered inside the client");
+            }
+            const bool disabled=ancestor_disabled||own_disabled;
+            const auto disabled_rgb=theme::widget_rgb(theme::WidgetRole::disabled_text,launch.color);
+            if(!resolved_matches(choice->dropdownText,disabled?disabled_rgb:expected)||
+               !resolved_matches(choice->options[1],disabled?disabled_rgb:expected)||
+               !resolved_matches(choice->options[0],disabled?disabled_rgb:theme::data_rgb(launch.color))||
+               !resolved_matches(choice->options.back(),disabled_rgb)||choice->options[1]!=retained||
+               choice->params.value!=state.options[1].id||changes!=3)
+                throw std::runtime_error("Rev choice failed own/ancestor disabled precedence or restoration");
+        }
+        choice->options[0]->click(event);choice->options[1]->click(event);
+        if(choice->params.value!=state.options[1].id||changes!=5)
+            throw std::runtime_error("Rev styled choice lost native callbacks after disabled restoration");
+        choice->option_presentations[1].text_tone=ui::TextTone::normal;
+        choice->selected_tone=ui::TextTone::normal;choice->computeChildren(event);
+        if(matches(choice->dropdownText))throw std::runtime_error("Rev retained withdrawn option styling");
+        delete parent;
     }
     void verify_record_contract() {
         ui::Control declaration{ui::Kind::list};declaration.list_row_height=54;declaration.activate_on_select=true;

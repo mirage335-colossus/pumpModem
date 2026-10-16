@@ -51,6 +51,7 @@ Tone tone(ui::TextTone value) {
     switch(value) {
     case ui::TextTone::muted:return Tone::muted;case ui::TextTone::data:return Tone::data;
     case ui::TextTone::inverse:return Tone::inverse;case ui::TextTone::negative:return Tone::negative;
+    case ui::TextTone::discouraged:return Tone::discouraged;
     default:return Tone::normal;
     }
 }
@@ -332,7 +333,7 @@ struct Session::Impl {
         case ui::Kind::choice: {
             std::string value=state.display_text;
             for(const auto& option:state.options)if(option.id==state.selected&&state.display_text.empty())value=option.label;
-            dropdown(geometry.widget,value.empty()?ui::choice_placeholder:value,focused,item.enabled,field_tone(state.text_tone));break;
+            dropdown(geometry.widget,value.empty()?ui::choice_placeholder:value,focused,item.enabled,field_tone(ui::choice_text_tone(state)));break;
         }
         case ui::Kind::text: {
             render_editor(editor(item),geometry.widget,focused,item.enabled,c.multiline,field_tone(state.text_tone));
@@ -408,7 +409,7 @@ struct Session::Impl {
             const bool chosen=!current_id.empty()&&options[n].id==current_id;
             if(chosen||n==popup_selected)fill(row,chosen,false,false,true,Fill::hover);
             if(chosen)icon({row.x+3,row.y+(row_height-10)/2,10,10},Icon::check,options[n].enabled);
-            line_text({row.x+check_width,row.y,std::max(0,row.w-check_width-4),row.h},options[n].label,Tone::normal,options[n].enabled);
+            line_text({row.x+check_width,row.y,std::max(0,row.w-check_width-4),row.h},options[n].label,tone(options[n].text_tone),options[n].enabled);
             hit(Hit::Kind::option,row,n);
         }
         if(scrolling) {

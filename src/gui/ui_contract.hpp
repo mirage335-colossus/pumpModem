@@ -55,7 +55,7 @@ enum class Kind { label, action, toggle, choice, text, list, bitmap };
 // Renderers may offer subsets without recognizing application fields or labels.
 enum class ControlPurpose { auxiliary, operating_parameter, operation, setup, content, planning, presentation };
 enum class Menu { none, keyfile, recovery };
-enum class TextTone { normal, muted, data, inverse, negative };
+enum class TextTone { normal, muted, data, inverse, negative, discouraged };
 enum class BitmapCaption { footer, overlay_error };
 inline constexpr char transmit_volume_help[] = "Transmit audio gain relative to the modem's existing output. 100% preserves the original level. Values above 100% can clip. Does not change system volume or received audio.";
 inline constexpr char exclusive_audio_help[] = "Off prefers shared audio without silently falling back to direct hardware. If System default is unavailable, advertised PipeWire/PulseAudio routes are tried. Explicit device choices retain their routing. On selects exclusive direct hardware and may prevent other instances from using that device; the default hardware card can differ from the system's default audio route. Exclusive access is unavailable with the Windows WinMM backend.";
@@ -142,7 +142,11 @@ struct PageDefinition {
 };
 const std::vector<PageDefinition>& pages();
 const char* window_title();
-struct Option { std::string id, label; bool enabled = true; };
+struct Option {
+    std::string id, label;
+    bool enabled = true;
+    TextTone text_tone = TextTone::normal; // Presentation never changes selectability.
+};
 struct FieldState {
     std::string text;
     std::string display_text; // Optional effective-value label; does not replace the saved selection.
@@ -163,6 +167,12 @@ struct FieldState {
     // without changing the configured text or the choice/label display_text.
     std::string disabled_text;
 };
+inline TextTone choice_text_tone(const FieldState& state) {
+    if(state.display_text.empty())
+        for(const auto& option:state.options)
+            if(option.id==state.selected&&option.text_tone!=TextTone::normal)return option.text_tone;
+    return state.text_tone;
+}
 inline const std::string& editor_text(const FieldState& state,bool enabled) {
     return !enabled&&!state.disabled_text.empty()?state.disabled_text:state.text;
 }

@@ -3,6 +3,7 @@
 #include "shared_scheduled_capture.hpp"
 #include "datapump/live.hpp"
 #include "live_receiver_layout.hpp"
+#include "live_receiver_admission.hpp"
 #include "datapump/fhss_schedule.hpp"
 #include "datapump/sched_hop.hpp"
 #include "datapump/execution.hpp"
@@ -28,6 +29,8 @@
 #include "transmit_epoch_guard.hpp"
 #include "pattern_projection_cache.hpp"
 #include "scheduled_exact_source_samples.hpp"
+#include "scheduled_exact_source_points.hpp"
+#include <charconv>
 #include "audio_trace.hpp"
 #include <algorithm>
 #include <atomic>
@@ -204,6 +207,9 @@ struct Session::Impl {
         std::unique_ptr<modem::detail::SharedSourceCurves<>> source_curves;
         std::unique_ptr<modem::detail::scheduled_source_samples::Pool> exact_source_samples;
         std::uint64_t exact_source_generation=0;
+        std::unique_ptr<modem::detail::scheduled_source_points::PointPool> exact_source_points;
+        std::uint64_t point_source_generation=0,next_point_consumer=1;
+        Clock::time_point next_point_source_trace{};
         Clock::time_point next_exact_source_trace{};
         std::unique_ptr<modem::detail::PatternPermutationPools> permutations;
         std::unique_ptr<modem::detail::SharedTemporalPlans> temporal_plans;
@@ -218,7 +224,7 @@ struct Session::Impl {
         std::uint64_t samples = 0, next_candidate = 1,revision=0;
         std::uint64_t admissions = 0, retirements = 0, builds = 0;
         std::size_t peak_receivers = 0;
-        std::size_t working_bytes = sizeof(detail::ReceptionHistory)+sizeof(source_curves)+sizeof(exact_source_samples)+sizeof(exact_source_generation)+sizeof(next_exact_source_trace)+sizeof(permutations)+sizeof(temporal_plans)+sizeof(deferred_input)+sizeof(input_queued_at)+sizeof(shared_capture)+sizeof(future_capture);
+        std::size_t working_bytes = sizeof(detail::ReceptionHistory)+sizeof(source_curves)+sizeof(exact_source_samples)+sizeof(exact_source_generation)+sizeof(next_exact_source_trace)+sizeof(exact_source_points)+sizeof(point_source_generation)+sizeof(next_point_consumer)+sizeof(next_point_source_trace)+sizeof(permutations)+sizeof(temporal_plans)+sizeof(deferred_input)+sizeof(input_queued_at)+sizeof(shared_capture)+sizeof(future_capture);
         double created_at = 0;
         // UTC for a captured block, independent of when its search runs. Sample
         // coordinates remain continuous; fresh stamps only guide new admission.
@@ -260,6 +266,86 @@ struct Session::Impl {
         const auto& c=receiver.options.modem;
         return receiver.options.key && receiver.modem->deferred_pattern_history() &&
             modem::scheduled_bursts(c) && !modem::packed_scheduled_symbols(c) && modem::pattern_pulse_enabled(c);
+    }
+    enum class PointMode {off,census,cache};
+    static PointMode point_mode() {
+        static const auto mode=[] {
+            const auto flag=[](const char* name) {
+                const auto* value=std::getenv(name);if(!value)return false;
+                if(std::string_view(value)!="0" && std::string_view(value)!="1")throw Error(std::string(name)+" requires 0 or 1");
+                return std::string_view(value)=="1";
+            };
+            const bool census=flag("DATAPUMP_SCHED_EXACT_SOURCE_POINT_CENSUS");
+            const bool cache=flag("DATAPUMP_SCHED_EXACT_SOURCE_POINT_CACHE");
+            if(census && cache)throw Error("source point census and cache are mutually exclusive");
+            return cache?PointMode::cache:census?PointMode::census:PointMode::off;
+        }();return mode;
+    }
+    static std::size_t point_rows(PointMode mode) {
+        const auto parse=[](const char* name,std::size_t maximum) {
+            std::size_t n=131072;const auto* value=std::getenv(name);
+            if(value) {const std::string_view text(value);const auto result=std::from_chars(text.data(),text.data()+text.size(),n);
+                if(result.ec!=std::errc{} || result.ptr!=text.data()+text.size())throw Error(std::string("invalid ")+name);}
+            if(n<4096 || n>maximum || (n&(n-1)))throw Error(std::string(name)+" requires a power of two in the supported range");
+            return n;
+        };
+        // Only the selected mode's row setting is evaluated. Both remain fixed
+        // for this process; this option cannot resize a borrowed arena.
+        if(mode==PointMode::cache) {
+            static const auto rows=parse("DATAPUMP_SCHED_EXACT_SOURCE_POINT_CACHE_ROWS",524288);return rows;
+        }
+        static const auto rows=parse("DATAPUMP_SCHED_EXACT_SOURCE_POINT_CENSUS_ROWS",1048576);return rows;
+    }
+    using PointSnapshot=modem::detail::scheduled_source_points::PointPool::Snapshot;
+    static PointSnapshot point_snapshot(const Bank& bank) {
+        return bank.exact_source_points?bank.exact_source_points->snapshot():PointSnapshot{};
+    }
+    static void trace_point_pool(const Bank& bank,const char* reason,bool final=false,
+                                 std::optional<PointSnapshot> saved={}) {
+        const auto snapshot=saved?*saved:point_snapshot(bank);
+        if(!snapshot.point_rows && !snapshot.census_rows)return;
+        audio::trace::record(snapshot.point_rows?"receiver_exact_source_point_cache":"receiver_exact_source_point_census",[&](auto& f) {
+            const auto& c=snapshot.counts;
+            f.add("revision",bank.revision);f.add("sample",bank.samples);f.add("generation",bank.point_source_generation);
+            f.add("pool_identity",snapshot.pool);f.add("reason",reason);f.add("final_snapshot",final);
+            f.add("bytes",snapshot.bytes);f.add("census_rows",snapshot.census_rows);f.add("point_rows",snapshot.point_rows);
+            f.add("bound_families",snapshot.bound_families);f.add("bound_symbols",snapshot.bound_symbols);
+            f.add("queries",c.queries);f.add("census_queries",c.census_queries);
+            f.add("unique_lower_bound",c.census_unique_lower_bound);f.add("repeats",c.census_repeats);
+            f.add("untracked",c.census_untracked);f.add("saturated",c.census_saturated);
+            f.add("eligible_unique_exact",snapshot.eligible_unique_count_exact());f.add("all_pool_queries_unique_exact",snapshot.unique_count_exact());
+            f.add("same_consumer_repeats",c.census_relations.same_consumer);f.add("cross_lane_repeats",c.census_relations.cross_lane);
+            f.add("cross_bank_repeats",c.census_relations.cross_bank);f.add("unknown_repeats",c.census_relations.unknown);
+            f.add("invalid_handles",c.invalid_handles);f.add("environment_bypasses",c.environment_bypasses);
+            f.add("family_registry_full",c.family_registry_full);f.add("symbol_registry_full",c.symbol_registry_full);
+            f.add("address_failures",c.address_failures);f.add("trace_bypasses",c.trace_bypasses);
+            f.add("hits",c.hits);f.add("misses",c.misses);f.add("cache_build_calls",c.cache_build_calls);f.add("builds",c.builds);
+            f.add("direct_calls",c.direct_calls);f.add("busy",c.busy);f.add("exhaustions",c.exhaustions);f.add("evictions",c.evictions);
+            f.add("build_failures",c.build_failures);f.add("cancelled",c.cancelled);f.add("retired_builds",c.retired_builds);
+            f.add("nonfinite_results",c.nonfinite_results);f.add("invalid_arguments",c.invalid_arguments);
+            f.add("same_consumer_hits",c.cache_relations.same_consumer);f.add("cross_lane_hits",c.cache_relations.cross_lane);
+            f.add("cross_bank_hits",c.cache_relations.cross_bank);f.add("unknown_hits",c.cache_relations.unknown);
+            f.add("scope",snapshot.point_rows?
+                "one cumulative exact point cache generation; scalar q requests only; copied hits avoid Original q calls; cache_build_calls reserves actual one-point builders; direct_calls use Original fallback; no unique-cardinality claim; do not sum successive snapshots":
+                "one cumulative census generation; actual Original scheduled scalar replay qcalls only; no q replacement; unique counts become lower bounds after saturation; perpurpose invalid counters include absent/reclaimed pools; do not sum successive snapshots or generation unique counts");
+        });
+    }
+    static std::size_t drop_point_pool(Bank& bank,const char* reason) {
+        if(!bank.exact_source_points)return 0;
+        const auto old=bank.exact_source_points->working_bytes();
+        const auto borrowed=modem::detail::scheduled_source_samples::binding;
+        if(borrowed.points==bank.exact_source_points.get()) {
+            if(!bank.exact_source_points->enabled())return 0;
+            const auto release=borrowed.reclaim==&ExactSourceLoan::reclaim_cohort?
+                &ExactSourceLoan::reclaim_points:borrowed.reclaim;
+            if(release && release(borrowed.pressure_context))return old-bank.exact_source_points->working_bytes();
+            return 0;
+        }
+        const auto saved=point_snapshot(bank);
+        if(!bank.exact_source_points->try_reclaim())return 0;
+        trace_point_pool(bank,reason,true,saved);
+        if(old>bank.working_bytes)throw Error("point pool charge exceeds receiver bank");
+        bank.exact_source_points.reset();bank.working_bytes-=old;return old;
     }
     struct ExactSourceSnapshot {
         modem::detail::scheduled_source_samples::Counts counts;
@@ -344,12 +430,25 @@ struct Session::Impl {
                 f.add("retained_tombstone_bytes",retained);f.add("receiver_loan",self.loan);});
             return freed!=0;
         }
+        static bool reclaim_points(void* opaque) {
+            auto& self=*static_cast<ExactSourceLoan*>(opaque);auto& pool=self.bank.exact_source_points;
+            if(!pool || !pool->enabled())return false;
+            const auto old=pool->working_bytes();const auto saved=point_snapshot(self.bank);
+            if(!pool->try_reclaim())return false;
+            const auto retained=pool->working_bytes();
+            if(retained>old || old-retained>self.bank.working_bytes)throw Error("point pool reclamation charge inconsistent");
+            const auto freed=old-retained;
+            if(self.loan>self.capacity || freed>self.capacity-self.loan)throw Error("point pool loan exceeds cohort workspace");
+            self.bank.working_bytes-=freed;self.loan+=freed;self.receiver.modem->set_workspace_bytes(self.loan);
+            trace_point_pool(self.bank,"mandatory_pressure",true,saved);return freed!=0;
+        }
         // Owner-thread only: all other receivers have joined at this serial
         // feed/history barrier. Reclaim caches, never peers, captured PCM,
         // original processing journals, prepared decisions or admitted aliases.
         static bool reclaim_cohort(void* opaque) {
             auto& self=*static_cast<ExactSourceLoan*>(opaque);
             if(self.stop.stop_requested())return false;
+            if(reclaim_points(opaque))return true;
             if(!self.receiver.modem->deferred_pattern_history())return reclaim(opaque);
             // One positive grant per request. The caller retests its precise
             // need before another idle peer loses its warm acceleration.
@@ -388,6 +487,29 @@ struct Session::Impl {
             return changed;
         }
     };
+    static modem::detail::scheduled_source_samples::Binding source_binding(Bank& bank,Receiver& receiver,
+            void* pressure,bool (*reclaim)(void*),modem::detail::scheduled_source_samples::Purpose purpose) {
+        namespace source=modem::detail::scheduled_source_samples;
+        source::Binding result;const auto eligible=exact_source_receiver(receiver);
+        result.pool=eligible?bank.exact_source_samples.get():nullptr;
+        result.points=eligible?bank.exact_source_points.get():nullptr;
+        result.point_requested=point_mode()!=PointMode::off && eligible;
+        result.point_cache=point_mode()==PointMode::cache && eligible;
+        if((result.pool || result.point_requested) && receiver.family==UINT64_MAX)throw Error("source key namespace exhausted");
+        result.key_namespace=eligible?receiver.family+1:0;
+        result.pressure_context=pressure;result.reclaim=reclaim;result.consumer=receiver.point_consumer;result.purpose=purpose;
+        if(result.points && result.points->enabled()) {
+            const auto saved=result.points->snapshot();
+            if(receiver.point_family.pool!=saved.pool || receiver.point_family.generation!=saved.generation) {
+                try{const auto config=transfer::seeded_config(receiver.options,receiver.epoch);
+                    receiver.point_family=result.points->bind(modem::detail::source_family(config,result.key_namespace));}
+                catch(const Error&){receiver.point_family={};} // Speculative identity failure cannot reject Original q.
+                catch(const std::bad_alloc&){receiver.point_family={};}
+            }
+            result.point_family=receiver.point_family;
+        }
+        return result;
+    }
     static void note_oscillator_coverage(Bank& bank,const modem::OscillatorPatternSearch& search) {
         if(!search.limited)return;
         bank.limited=bank.coverage_limited=true;
@@ -972,48 +1094,8 @@ struct Session::Impl {
     }
     bool modeled_start_window(modem::PatternSearch& search,const modem::Config& config,
             std::uint64_t epoch,const Bank& bank,const Settings& value,std::uint64_t origin) {
-        const bool calendar=transfer::shared_hop_calendar(config);
-        const auto policy=clock_sync::effective_policy(value.transfer.clock_sync,calendar);
-        if(!policy || value.simulation || !bank.timing ||
-           bank.timing->quality==audio::TimingQuality::unavailable ||
-           (!calendar && bank.timing->uncertainty_seconds>clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds)) || !search.start_offset_seconds ||
-           !(calendar ||
-             search.compact_clock_search ||
-             (modem::symbol_sample_count(config)<16ULL*config.sample_rate && (config.scramble||config.dsss) &&
-              config.spreading_mode==modem::SpreadingMode::pattern && !search.hypotheses.empty() &&
-              !search.couple_clock_to_carrier)) ||
-           (!calendar && (!config.oscillator_search || (config.oscillator_search->reference==modem::OscillatorReference::shared_radio &&
-             config.oscillator_search->rf_shift_hz!=0))))return false;
-        const auto& stamp=*bank.timing;
-        auto minimum_phase=config.stream_phase_samples,maximum_phase=config.stream_phase_samples;
-        if(search.search_stream_phases && (config.scramble || config.dsss)) {
-            const auto step=modem::canonical_phase_step(config);
-            minimum_phase=0;
-            maximum_phase=modem::canonical_phase_cell_upper(config,
-                (modem::canonical_phase_extent(config)-1)/step*step);
-        }
-        if(modem::deferred_symbols(config)) {
-            minimum_phase+=modem::scheduled_symbol_offset(config,epoch,minimum_phase,0);
-            maximum_phase+=modem::scheduled_symbol_offset(config,epoch,maximum_phase,0);
-        }
-        const auto map=(calendar?clock_sync::calendar_arrival_map:clock_sync::audio_lag_arrival_map)(*policy,epoch,stamp.utc_seconds,
-            static_cast<long double>(bank.observed_sample)-origin,config.sample_rate,stamp.seconds_per_frame,
-            stamp.rate_uncertainty_fraction,std::max(stamp.uncertainty_seconds,clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds)),
-            maximum_phase,value.transfer.audio_timing_error_seconds);
-        if(!map)return false;
-        const auto lower=(*search.start_offset_seconds-search.start_uncertainty_seconds)*config.sample_rate;
-        const auto upper=(*search.start_offset_seconds+search.start_uncertainty_seconds)*config.sample_rate;
-        // Qualify the intersection with the existing bank, not containment of
-        // the entire prior. Edge cells may extend past this bank's original
-        // domain; the acquisition selectors retain the original bounds/cells.
-        if(!calendar && (map->origin_samples+map->phase_scale*maximum_phase+map->half_width_samples<lower ||
-           map->origin_samples+map->phase_scale*minimum_phase-map->half_width_samples>upper))return false;
-        // For a dated hop calendar an empty intersection is an empty epoch,
-        // not permission to translate that calendar through the broad domain.
-        // All original message epochs, phase cells and oscillator lanes remain
-        // present; the catalog intersects their JOINT arrival relation.
-        search.qualified_start_window=modem::PatternStartWindow{map->origin_samples,map->phase_scale,map->half_width_samples};
-        return true;
+        detail::ReceiverAdmissionContext context;context.timing=bank.timing;context.observed_sample=bank.observed_sample;
+        return detail::modeled_receiver_start_window(search,config,epoch,context,value,origin);
     }
     static bool crossbank_temporal_plans_requested() {
         // Internal experiment: OFF by default; row capacity is independently
@@ -1121,7 +1203,7 @@ struct Session::Impl {
         const auto reclaim_scratch=[&] {
             rx_cpu::Scope cpu_reclaim(rx_cpu::Stage::allocation);
             // This helper updates Bank itself; do not subtract it twice below.
-            const auto source_released=drop_exact_source_pool(bank,"admission_pressure");
+            const auto source_released=drop_exact_source_pool(bank,"admission_pressure")+drop_point_pool(bank,"admission_pressure");
             std::size_t released=0;
             if(bank.permutations) {
                 const auto bytes=bank.permutations->working_bytes();
@@ -1298,6 +1380,8 @@ struct Session::Impl {
                 // Required new-bank admissions precede every optional grant.
                 drop_exact_source_pool(bank,"new_receiver");
                 if(bank.exact_source_samples)throw Error("exact source pool still borrowed at receiver admission barrier");
+                drop_point_pool(bank,"new_receiver");
+                if(bank.exact_source_points)throw Error("point pool still borrowed at receiver admission barrier");
                 // Experimental surplus may not change a new receiver's
                 // original constructor/worker grant. Admission is a joined barrier.
                 if(bank.permutations && (bank.permutations->working_bytes()>256*1024 ||
@@ -1321,6 +1405,8 @@ struct Session::Impl {
                 }
                 Receiver receiver;
                 receiver.sample_origin=bank.samples;receiver.family=family;
+                if(bank.next_point_consumer==UINT64_MAX)throw Error("point pool consumer identity exhausted");
+                receiver.point_consumer=bank.next_point_consumer++;
                 receiver.prefer_streamed_templates=keys.size()>1 || profiles.size()>1 || epochs.size()>1;
                 receiver.options = value.transfer; receiver.options.modem=profile;receiver.options.key = key; receiver.epoch = epoch;
                 if(value.transfer.modem.fake_hopping && key)
@@ -1329,47 +1415,18 @@ struct Session::Impl {
                 receiver.key_tag = tag;
                 const auto config = transfer::seeded_config(receiver.options, epoch);
                 try {
-                    modem::PatternSearch search;
-                    std::optional<modem::OscillatorPatternSearch> declared_search;
-                    search.receiver_schedule_key_count=keys.size();
-                    search.receiver_bank_count=modem::receiver_strategy_bank_count(config,value.transfer.search_seconds,keys.size(),profiles.size());
-                    const auto owner_charge=bank.shared_capture?bank.shared_capture->capacity_reservation():0;
-                    const auto cohort_share=(capacity-std::min(capacity,owner_charge))/std::max<std::size_t>(1,search.receiver_bank_count);
-                    search.receiver_strategy_workspace_bytes=cohort_share>control_margin?cohort_share-control_margin:1;
-                    search.input_sample_origin=receiver.sample_origin;search.scheduled_capture=bank.shared_capture;
-                    if(config.oscillator_search) {
-                        auto oscillator_search=modem::oscillator_pattern_search(config,transfer::effective_clock_sync(value.transfer)?modem::utc_transmit_rate_limit(config):0);
-                        declared_search=oscillator_search;
-                        search.admitted_frequency_half_width_hz=oscillator_search.frequency.requested_half_width_hz;
-                        search.admitted_clock_half_width_ppm=oscillator_search.requested_clock_half_width_ppm;
-                        search.complex_frequency_coverage=!oscillator_search.frequency.limited;
-                        search.complex_clock_coverage=oscillator_search.clock_half_width_ppm>=oscillator_search.requested_clock_half_width_ppm;
-                        search.hypotheses=std::move(oscillator_search.hypotheses);
-                    }
-                    else search.expand_clock_search=true;
-                    search.prefer_streamed_templates=receiver.prefer_streamed_templates;
-                    search.allow_local_clock_fallback=true;
-                    search.compact_clock_search=compact;
-                    search.search_stream_phases=key.has_value();
-                    search.bit_limit=transfer::pattern_bit_limit(value.content_limit);
-                    // A fixed diagnostic message epoch does not replace a dated
-                    // capture origin. Scheduled settling can span null hops;
-                    // adding its unscheduled source duration would move this
-                    // bank away from the actual physical calendar intersection.
-                    const bool dated_calendar=!value.simulation && transfer::shared_hop_calendar(config) && bank.timing;
-                    search.start_offset_seconds=static_cast<double>(epoch)-
-                        (value.transfer.timestamp && !dated_calendar?static_cast<double>(value.transfer.timestamp):now);
-                    if(!value.simulation && (!value.transfer.timestamp || dated_calendar)) *search.start_offset_seconds+=propagation;
-                    if(value.simulation || (value.transfer.timestamp && !dated_calendar))
-                        *search.start_offset_seconds+=(static_cast<double>(modem::training_sample_count(config))+
-                            static_cast<double>(modem::pattern_pulse_padding_samples(config)))/config.sample_rate;
-                    search.start_uncertainty_seconds=value.transfer.search_seconds+1.;
-                    receiver.clock_window_modeled=modeled_start_window(search,config,epoch,bank,value,receiver.sample_origin);
-                    if(schedule && !packed_schedule && config.receiver_strategy!=modem::ReceiverStrategy::amplitude_only) {
-                        auto refined=modem::scheduled_complex_search(config,search,
-                            transfer::effective_clock_sync(value.transfer)?modem::utc_transmit_rate_limit(config):0);
-                        if(refined.complete_coverage)search=std::move(refined.search);
-                    }
+                    detail::ReceiverAdmissionContext admission;
+                    admission.sample_origin=receiver.sample_origin;admission.observed_sample=bank.observed_sample;
+                    admission.timing=bank.timing;admission.now=now;admission.propagation=propagation;
+                    admission.key_count=keys.size();admission.profile_count=profiles.size();admission.capacity=capacity;
+                    admission.capture_owner_bytes=bank.shared_capture?bank.shared_capture->capacity_reservation():0;
+                    admission.control_margin=control_margin;admission.keyed=key.has_value();
+                    admission.prefer_streamed_templates=receiver.prefer_streamed_templates;admission.compact_clock_search=compact;
+                    modem::PatternSearch initial_search;initial_search.scheduled_capture=bank.shared_capture;
+                    auto prepared=detail::prepare_receiver_search(config,value,epoch,admission,std::move(initial_search));
+                    auto search=std::move(prepared.search);
+                    auto declared_search=std::move(prepared.declared_search);
+                    receiver.clock_window_modeled=prepared.clock_window_modeled;
                     auto selection=modem::resolve_receiver_strategy(config,search,
                         std::min(value.dsp_workspace_bytes/2,capacity-bank.working_bytes-control_margin));
                     if(!selection.supported && !selection.empty_scheduled_epoch && reclaim_scratch())selection=modem::resolve_receiver_strategy(config,search,
@@ -1505,11 +1562,13 @@ struct Session::Impl {
             f.add("resident",bank.receivers.size());f.add("retirements",bank.retirements);
         });
         bank.working_bytes=sizeof(detail::ReceptionHistory)+sizeof(bank.source_curves)+sizeof(bank.exact_source_samples)+
-            sizeof(bank.exact_source_generation)+sizeof(bank.next_exact_source_trace)+sizeof(bank.permutations)+sizeof(bank.temporal_plans)+
+            sizeof(bank.exact_source_generation)+sizeof(bank.next_exact_source_trace)+sizeof(bank.exact_source_points)+
+            sizeof(bank.point_source_generation)+sizeof(bank.next_point_consumer)+sizeof(bank.next_point_source_trace)+sizeof(bank.permutations)+sizeof(bank.temporal_plans)+
             sizeof(bank.deferred_input)+sizeof(bank.input_queued_at)+sizeof(bank.shared_capture)+sizeof(bank.future_capture)+
             (bank.shared_capture?bank.shared_capture->capacity_reservation():0)+bank.deferred_input.working_bytes()+
             (bank.source_curves?bank.source_curves->working_bytes():0)+
-            (bank.exact_source_samples?bank.exact_source_samples->working_bytes():0)+(bank.permutations?bank.permutations->working_bytes():0)+
+            (bank.exact_source_samples?bank.exact_source_samples->working_bytes():0)+
+            (bank.exact_source_points?bank.exact_source_points->working_bytes():0)+(bank.permutations?bank.permutations->working_bytes():0)+
             (bank.temporal_plans?bank.temporal_plans->working_bytes():0);
         for(const auto& receiver:bank.receivers)bank.working_bytes+=receiver_workspace(receiver);
         if(new_epoch)bank=make_bank(value,std::move(bank));
@@ -2043,7 +2102,7 @@ struct Session::Impl {
                 receiver.source_curve_family.reset();bank.working_bytes-=sizeof(modem::detail::SourceFamily);
             }
         };
-        const auto release_optimization=[&] {projection.release();reclaim_source_curves();drop_exact_source_pool(bank,"optimization_or_error");};
+        const auto release_optimization=[&] {projection.release();reclaim_source_curves();drop_exact_source_pool(bank,"optimization_or_error");drop_point_pool(bank,"optimization_or_error");};
         // An unavailable context cannot use the optional arena and must not
         // let it reduce the original receiver recording/replay allowance.
         if(!projection.cache)reclaim_source_curves(independent_permutation);
@@ -2077,6 +2136,46 @@ struct Session::Impl {
                 } catch(const std::bad_alloc&) {} // Original q construction remains available.
             }
         }
+        const auto points_mode=point_mode();
+        const bool points_requested=points_mode!=PointMode::off && modem::detail::scheduled_source_points::environment();
+        // Source-only identities and copied q/census keys do not borrow PCM.
+        // Short split profiles deliberately retain local capture; they may use
+        // this optional owner under the SAME joined loan/pressure accounting.
+        const bool point_cohort=!bank.receivers.empty() &&
+            std::all_of(bank.receivers.begin(),bank.receivers.end(),exact_source_receiver);
+        if(!points_requested || !point_cohort)drop_point_pool(bank,"ineligible_cohort_or_environment");
+        else if(bank.exact_source_points && !bank.exact_source_points->enabled())drop_point_pool(bank,"joined_tombstone");
+        if(points_requested && point_cohort && !bank.exact_source_points && bank.working_bytes<capacity &&
+           bank.point_source_generation<UINT64_MAX) {
+            auto reserved=bank.working_bytes;
+            const auto add=[&](std::size_t bytes){if(bytes>capacity-reserved)return false;reserved+=bytes;return true;};
+            constexpr std::size_t cover=2U*1024U*1024U;
+            if(add(projection.remaining_headroom) && add(projection.deferred_detectors) && add(cover)) {
+                using Pool=modem::detail::scheduled_source_points::PointPool;
+                const Pool::Limits limits{points_mode==PointMode::cache?point_rows(points_mode):0,64,1024,
+                    points_mode==PointMode::census?point_rows(points_mode):0};
+                const auto ceiling=std::min<std::size_t>(64U*1024U*1024U,capacity-reserved);
+                if(Pool::required_bytes(limits)<=ceiling)try {
+                    auto owner=std::make_unique<Pool>(ceiling,limits);
+                    if(owner->enabled()) {
+                        const auto bytes=owner->working_bytes();if(bytes>ceiling)throw Error("point pool exceeds optional grant");
+                        bank.working_bytes+=bytes;bank.exact_source_points=std::move(owner);++bank.point_source_generation;
+                        bank.next_point_source_trace=Clock::now();trace_point_pool(bank,"allocated");
+                    }
+                }catch(const std::bad_alloc&) {} // Original q calls and original loan remain.
+            }
+        }
+        if(points_mode!=PointMode::off && !bank.exact_source_points && Clock::now()>=bank.next_point_source_trace) {
+            audio::trace::record("receiver_exact_source_point_unavailable",[&](auto& f) {
+                f.add("revision",bank.revision);f.add("sample",bank.samples);f.add("environment_qualified",points_requested);
+                f.add("eligible_cohort",point_cohort);f.add("shared_capture",bool(bank.shared_capture));
+                f.add("bank_bytes",bank.working_bytes);f.add("capacity",capacity);
+                f.add("remaining_headroom",projection.remaining_headroom);f.add("deferred_detectors",projection.deferred_detectors);
+                f.add("mode",points_mode==PointMode::cache?"cache":"census");f.add("requested_rows",point_rows(points_mode));
+                f.add("scope","requested optional source point arena absent; Original q retained; perpurpose counters include these omissions");
+            });
+            bank.next_point_source_trace=Clock::now()+std::chrono::seconds(1);
+        }
         const bool projection_context_created=static_cast<bool>(projection.cache);
         bool projection_context_used=false;
         std::vector<std::complex<double>> pattern_scores;
@@ -2109,9 +2208,9 @@ struct Session::Impl {
             if(exact_source && receiver.family==UINT64_MAX)throw Error("exact source diagnostic key namespace exhausted");
             // History polls keep warm q tiles. Joined allocation/guard
             // pressure reclaims optional backing and restores this core loan.
-            modem::detail::scheduled_source_samples::Scope history_source_scope(exact_source?bank.exact_source_samples.get():nullptr,
-                exact_source?receiver.family+1:0,deferred?&history_loan:nullptr,
-                deferred?&ExactSourceLoan::reclaim_cohort:nullptr);
+            modem::detail::scheduled_source_samples::Scope history_source_scope(source_binding(bank,receiver,
+                deferred?&history_loan:nullptr,deferred?&ExactSourceLoan::reclaim_cohort:nullptr,
+                modem::detail::scheduled_source_samples::Purpose::diagnostic));
             if(deferred)receiver.modem->set_workspace_bytes(history_loan.loan);
             const auto& c=receiver.options.modem;
             const bool permutation_eligible=receiver.options.key && c.dsss_factor>1 &&
@@ -2245,9 +2344,9 @@ struct Session::Impl {
                         const bool exact_source=exact_source_receiver(receiver) && bank.exact_source_samples;
                         if(exact_source && receiver.family==UINT64_MAX)throw Error("exact source key namespace exhausted");
                         const bool deferred_pressure=receiver.modem->deferred_pattern_history();
-                        modem::detail::scheduled_source_samples::Scope source_scope(exact_source?bank.exact_source_samples.get():nullptr,
-                            exact_source?receiver.family+1:0,deferred_pressure?&source_loan:nullptr,
-                            deferred_pressure?&ExactSourceLoan::reclaim_cohort:nullptr);
+                        modem::detail::scheduled_source_samples::Scope source_scope(source_binding(bank,receiver,
+                            deferred_pressure?&source_loan:nullptr,deferred_pressure?&ExactSourceLoan::reclaim_cohort:nullptr,
+                            modem::detail::scheduled_source_samples::Purpose::acquisition));
                         {
                             auto* context=projection.cache.get();
                             projection_context_used|=context!=nullptr;
@@ -2307,17 +2406,19 @@ struct Session::Impl {
                     }
                     {
                         rx_cpu::Scope cpu_publish(rx_cpu::Stage::publication);
-                        if(bank.exact_source_samples && std::any_of(receiver.bursts.begin(),receiver.bursts.end(),[](const auto& burst){
+                        if((bank.exact_source_samples || bank.exact_source_points) && std::any_of(receiver.bursts.begin(),receiver.bursts.end(),[](const auto& burst){
                             return !burst.bits.empty() || burst.missing_slots || burst.complete;})) {
                             // Accepted events may retain arbitrary allowed content.
                             // Required presentation/source growth is not bounded by
                             // the optional preparation cover; release before it.
-                            drop_exact_source_pool(bank,"accepted_publication");
+                            drop_exact_source_pool(bank,"accepted_publication");drop_point_pool(bank,"accepted_publication");
+                            if(bank.exact_source_points)throw Error("point pool still pinned at accepted publication barrier");
                             if(bank.exact_source_samples)throw Error("exact source pool still pinned at accepted publication barrier");
                         }
                         for(auto& burst:receiver.bursts) {
                             if(burst.bits.empty() && !burst.missing_slots && !burst.complete)continue;
                             const auto score=burst.score,frequency=burst.frequency_hz;
+                            const auto stream_phase_samples=burst.stream_phase_samples;
                             const auto physical_id=std::pair{burst.stream_first_sample,burst.stream_first_symbol};
                             if(burst.end_sample>receiver.last_confident_end) {
                                 receiver.last_confident_end=burst.end_sample;
@@ -2375,6 +2476,7 @@ struct Session::Impl {
                                     f.add("captured_samples",current.samples_received);f.add("input_revision",bank.revision);f.add("epoch",receiver.epoch);f.add("family",receiver.family);
                                     f.add("signal_id",event.id);f.add("revision",event.revision);f.add("received_bits",event.received_bits);
                                     f.add("physical_first",candidate.first);f.add("physical_end",candidate.end);f.add("first_stream_symbol",physical_id.second);
+                                    f.add("stream_phase_samples",stream_phase_samples);
                                     f.add("missing",event.missing_symbols);f.add("complete",event.complete);f.add("simulation",bool(simulation_wave));
                                     f.add("superseded_count",event.superseded_ids.size());
                                     f.add("scope","selected shared Live decision under snapshot mutex; next poll must expose this or a later prefix");
@@ -2559,6 +2661,9 @@ struct Session::Impl {
         // and every numerical worker/Reader have joined. Never a per-q hot log.
         if(bank.exact_source_samples && Clock::now()>=bank.next_exact_source_trace) {
             trace_exact_source_pool(bank,"joined_poll");bank.next_exact_source_trace=Clock::now()+std::chrono::seconds(1);
+        }
+        if(bank.exact_source_points && Clock::now()>=bank.next_point_source_trace) {
+            trace_point_pool(bank,"joined_poll");bank.next_point_source_trace=Clock::now()+std::chrono::seconds(1);
         }
         if(bank.source_curves && bank.samples/value.transfer.modem.sample_rate!=
            (bank.samples+sample_count)/value.transfer.modem.sample_rate) {
@@ -2940,6 +3045,14 @@ struct Session::Impl {
     void source_loop(std::stop_token stop) {
         std::uint64_t local_generation = 0;
         std::optional<Bank> simulation_bank;
+        const auto reset_simulation_bank=[&](const char* reason) {
+            if(simulation_bank){trace_exact_source_pool(*simulation_bank,reason,true);trace_point_pool(*simulation_bank,reason,true);}
+            simulation_bank.reset();
+        };
+        struct FinalSimulationSourceSnapshot {
+            std::optional<Bank>& bank;
+            ~FinalSimulationSourceSnapshot(){try{if(bank){trace_exact_source_pool(*bank,"simulation_join",true);trace_point_pool(*bank,"simulation_join",true);}}catch(...) {}}
+        } final_simulation_source_snapshot{simulation_bank};
         std::unique_ptr<modem::SampledSimulationChannel> simulation_channel;
         std::shared_ptr<Prepared> wave;
         detail::SignalWindow plot_window;
@@ -2956,14 +3069,14 @@ struct Session::Impl {
                 if (stop.stop_requested()) break;
                 advance_replay(replay_clock());
                 value = settings; version = generation; processing_token = decode_stop.get_token();
-                if(simulation_bank && simulation_bank->revision!=receive_revision)simulation_bank.reset();
+                if(simulation_bank && simulation_bank->revision!=receive_revision)reset_simulation_bank("simulation_revision");
                 if(wave && wave->receive_clear_generation!=receive_clear_generation) {
                     wave->received.reset();wave->verified.reset();
                     for(auto& event:wave->signals)event.reset();
                     wave->receive_clear_generation=receive_clear_generation;
                 }
                 if (local_generation != version) {
-                    local_generation = version; wave.reset(); simulation_bank.reset(); simulation_channel.reset();
+                    local_generation = version; wave.reset(); reset_simulation_bank("simulation_generation"); simulation_channel.reset();
                     last_plot = {};
                     plot_window = detail::SignalWindow(value.transfer.modem);
                     idle_fraction = 0;
@@ -3236,7 +3349,7 @@ struct Session::Impl {
                 }
             } catch (const std::exception& exception) {
                 const auto cancelled_transmission = wave && wave->stop.stop_requested();
-                if (!cancelled_transmission) simulation_bank.reset();
+                if (!cancelled_transmission) reset_simulation_bank("simulation_error");
                 if (wave) { complete_tx(*wave, wave->stop.stop_requested() ? "" : exception.what()); wave.reset(); }
                 std::unique_lock lock(mutex);
                 if (current.running && generation == version && !processing_token.stop_requested() && !cancelled_transmission) {
@@ -3585,12 +3698,12 @@ struct Session::Impl {
         detail::configure_decoder_scheduling();
         std::optional<Bank> bank; std::uint64_t local_generation = 0, local_revision = 0;
         const auto reset_bank=[&](const char* reason) {
-            if(bank)trace_exact_source_pool(*bank,reason,true);
+            if(bank){trace_exact_source_pool(*bank,reason,true);trace_point_pool(*bank,reason,true);}
             bank.reset();
         };
         struct FinalSourceSnapshot {
             std::optional<Bank>& bank;
-            ~FinalSourceSnapshot(){try{if(bank)trace_exact_source_pool(*bank,"decoder_join",true);}catch(...) {}}
+            ~FinalSourceSnapshot(){try{if(bank){trace_exact_source_pool(*bank,"decoder_join",true);trace_point_pool(*bank,"decoder_join",true);}}catch(...) {}}
         } final_source_snapshot{bank};
         while (!stop.stop_requested()) {
             Settings value; AudioBlock block{}; std::uint64_t version; std::stop_token token;bool pending_only=false;

@@ -574,14 +574,14 @@ void planner_footer(Node& root,const planner::Model& model,bool show_details) {
     const auto& declarations=ui::console_screen();
     const bool horizontal=root.width>=720;
     auto controls=horizontal?row(root.width):column(root.width);
-    const float width=horizontal?(root.width-24)/4:std::min(root.width,480.f);
-    for(const auto field:{ui::Field::search_arithmetic,ui::Field::receiver_strategy,ui::Field::receiver_cpu_budget,ui::Field::sched_hop_dilution}) {
+    const float width=horizontal?(root.width-16)/3:std::min(root.width,480.f);
+    for(const auto field:{ui::Field::search_arithmetic,ui::Field::receiver_strategy,ui::Field::receiver_cpu_budget}) {
         const auto declaration=std::find_if(declarations.begin(),declarations.end(),[&](const auto& c) {
             return c.field==field;
         });
         auto choice=column(width);choice.kind=Kind::control;
         choice.control=*declaration;choice.height=ui::label_height+28;choice.bottom=4;
-        if(horizontal&&field!=ui::Field::sched_hop_dilution)choice.right=8;
+        if(horizontal&&field!=ui::Field::receiver_cpu_budget)choice.right=8;
         controls.children.push_back(std::move(choice));
     }
     root.children.push_back(std::move(controls));

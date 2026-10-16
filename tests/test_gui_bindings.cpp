@@ -18,17 +18,24 @@ void deferred_options() {
         "Closing a native popup did not apply its retained latest options");
     check(!retained.option_id(-1)&&!retained.option_id(1)&&!retained.update_options(replacement),
         "Invalid indices or unchanged options triggered a native update");
+    auto styled=replacement;styled[0].text_tone=ui::TextTone::discouraged;
+    check(retained.update_options(styled)&&retained.option_id(0)=="b"&&retained.options()[0].enabled,
+        "A presentation-only option change was lost or disabled its stable ID");
+    ui::FieldState choice;choice.options=styled;choice.selected="b";
+    check(ui::choice_text_tone(choice)==ui::TextTone::discouraged,"Selected choice lost its option tone");
+    choice.display_text="Effective override";
+    check(ui::choice_text_tone(choice)==choice.text_tone,"An effective override inherited an inactive option tone");
     check(retained.update_options({})&&!retained.option_id(0),"Removing options retained stale callback identity");
 }
 void resolved_roles() {
-    ui::FieldState state;state.options={{"a","Enabled",true},{"b","Disabled",false}};
+    ui::FieldState state;state.options={{"a","Enabled",true,ui::TextTone::discouraged},{"b","Disabled",false}};
     ui::Control control{ui::Kind::text};control.label="Editor";
     ui::ControlLayout geometry;
     geometry.frame=geometry.widget={1,2,100,30};geometry.label={1,0,100,2};
     geometry.suggestions={78,2,23,30};geometry.has_label=geometry.has_suggestions=true;
     const auto active=resolve_binding(control,{state,"Editor",true,true},geometry);
     check(active.visible&&active.label_visible&&active.popup_allowed()&&active.suggestions_allowed()&&
-          active.options[0].enabled&&!active.options[1].enabled,"Shared control roles lost availability or optional native areas");
+          active.options[0].enabled&&active.options[0].text_tone==ui::TextTone::discouraged&&!active.options[1].enabled,"Shared control roles lost availability, tone or optional native areas");
     const auto disabled=resolve_binding(control,{state,"Editor",false,true},geometry);
     check(disabled.visible&&!disabled.popup_allowed()&&!disabled.suggestions_allowed()&&!disabled.options[0].enabled,
         "Disabled controls left native menu choices enabled");

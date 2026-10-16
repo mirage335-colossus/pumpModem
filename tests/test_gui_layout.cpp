@@ -173,12 +173,13 @@ void supported_sizes() {
               key_action.y==key.y&&key_path.y>=key.y+key.h&&
               key_path.y+key_path.h<simulation.y-label_height&&key_path.w>=648,
               "Moving Simulation must preserve the key controls and expose more of the key path");
-        const auto hopping=layout[Slot::fhss],burst=layout[Slot::sched_hop],expansion=layout[Slot::sched_frequency_search];
-        check(persistent_slot(Slot::sched_hop)&&persistent_slot(Slot::sched_frequency_search)&&
-              hopping.y==burst.y&&burst.y==expansion.y&&expansion.y==key.y&&
-              hopping.x+hopping.w+10==burst.x&&burst.x+burst.w+10==expansion.x&&
-              expansion.x+expansion.w+10==key.x&&hopping.w>=130&&burst.w>=80&&expansion.w>=95,
-              "Scheduled bursts and frequency expansion must fit after FHSS without overlapping key or DSSS controls");
+        const auto hopping=layout[Slot::fhss],burst=layout[Slot::sched_hop],dilution=layout[Slot::sched_hop_dilution],expansion=layout[Slot::sched_frequency_search];
+        check(persistent_slot(Slot::sched_hop)&&persistent_slot(Slot::sched_hop_dilution)&&persistent_slot(Slot::sched_frequency_search)&&
+              hopping.y==burst.y&&burst.y==dilution.y&&dilution.y==expansion.y&&expansion.y==key.y&&
+              hopping.x+hopping.w+10==burst.x&&burst.x+burst.w+10==dilution.x&&
+              dilution.x+dilution.w+10==expansion.x&&expansion.x+expansion.w+10==key.x&&
+              layout[Slot::dsss_version].w>=150&&hopping.w>=130&&burst.w>=80&&dilution.w>=70&&expansion.w>=95,
+              "Dilution must follow Sched_Hop without overlapping FHSS, key or frequency controls");
         const auto message = layout[Slot::message], binary = layout[Slot::binary], qr = layout[Slot::qr];
         check(message.y == binary.y && binary.y == qr.y &&
               message.h == binary.h && qr.h >= 87 && qr.w == qr.h &&
