@@ -27,6 +27,7 @@ coverage and decoded-message reliability are related but distinct quantities.
 | Document | Context and contents |
 | --- | --- |
 | [Batched iterative search](../search-compute.md) | Implementation reference: FFT acquisition, long-symbol CPU batching, workers, memory boundaries and reproducible workloads. |
+| [Symbol_Burst implementation handoff](../symbol-burst-implementation-plan.md) | Proposed whole-symbol UTC scheduling, acquisition and backlog-draining policy, integration stages, planner preservation and validation; not an implemented feature. |
 | [Pulse-moment qualification](../pulse-moment-validation.md) | Paired raw-PCM performance, conditional sensitivity statistics, numerical equivalence and coverage limits for high-chip iterative search. |
 | [Transmitter cover waveform](../transmit-cover.md) | Tuning/message common construction, full DSSS surroundings, separate secrets, graceful stop, spectra and qualification limits. |
 | [DSSS follow-up evidence](../dsss-followup-validation.md) | Local manual checkpoint: coherent outer-code guard, timing-neighbor completion, duplex, paired regressions and conditional sensitivity limits. |
