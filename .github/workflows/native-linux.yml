@@ -60,7 +60,7 @@ jobs:
     # Preserve the portable application's glibc 2.35 baseline in every shard.
     container: ubuntu:22.04
     # Standard runners need room for the full instrumented suite after compilation.
-    # Individual test limits and physical deadlines remain unchanged.
+    # Explicit test limits and physical deadlines remain unchanged.
     timeout-minutes: ${{ inputs.build_type == 'Debug' && inputs.scope == 'core' && 240 || 120 }}
     defaults:
       run:
@@ -155,7 +155,7 @@ jobs:
           fi
           jobs=2
           if [ "$CI_SCOPE" = live ] || [ "$CI_SCOPE" = frontends ] || [ "$CI_SCOPE" = web ]; then jobs=1; fi
-          python3 tools/run-ci-tests.py --build-dir build --scope "$CI_SCOPE" --jobs "$jobs" --report build/ci-test-report.json "${options[@]}"
+          python3 tools/run-ci-tests.py --build-dir build --scope "$CI_SCOPE" --jobs "$jobs" --timeout "${{ inputs.build_type == 'Debug' && inputs.scope == 'core' && 7200 || 3600 }}" --report build/ci-test-report.json "${options[@]}"
       - name: Record partial capture scope
         if: inputs.calibration_shard != ''
         run: |
