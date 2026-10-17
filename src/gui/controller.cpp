@@ -1822,7 +1822,10 @@ struct Controller::Impl {
                     value.simulation_estimate.reset();
                 }
             },std::move(result));
-        } else if(pending_planner) {
+        } else if(pending_planner&&!(settings_valid&&!estimate&&estimated_revision!=revision)) {
+            // Initial airtime inspection owns the worker even during its edit
+            // debounce. An optional sweep must not delay transmit readiness.
+            // A failed inspection records this revision, allowing error plans.
             auto request=std::move(*pending_planner);pending_planner.reset();
             result.kind=PrepKind::planner;result.planner_pending=std::move(request.pending);
             start_worker([this,input=std::move(request.inputs),cache=planner_cache](Prepared& value,std::stop_token stop) {

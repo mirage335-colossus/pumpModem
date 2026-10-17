@@ -124,10 +124,9 @@ ReceiverSupport receiver_support(const Inputs& inputs,const modem::Config& confi
             receiver_settings(inputs),stop);
         return {search_supported(estimate),estimate.receiver_workspace_supported};
     } catch(const Error&) {
-        // A checked calendar overflow at an illustrative target is a support
+        // A checked geometry/address overflow at an illustrative target is a support
         // gap. The selected target is still estimated directly and reports its
         // own error; do not erase it because a graph extreme is unrepresentable.
-        if(!config.symbol_burst.enabled())throw;
         return {};
     }
 }
@@ -600,7 +599,7 @@ CurveEntry& curve_entry(CurveCache& cache,const transfer::Options& options,const
         estimate=receiver_estimate(one_bit_estimate(options),options,true,channel,{},1,false,100,4096,
             work_mode,timing_model,settings,stop);
     } catch(const Error&) {
-        if(!options.modem.symbol_burst.enabled())throw;
+        // An unrepresentable illustrative point must not erase a valid selection.
         estimate.carrier_in_search=estimate.clock_in_search=false;
         estimate.receiver_workspace_supported=estimate.receiver_work_supported=false;
     }
