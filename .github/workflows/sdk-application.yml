@@ -1,6 +1,26 @@
 name: SDK application qualification scope
 
 on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: 'Run one complete SDK scope without repeating its other producers and consumers'
+        type: choice
+        options: [tests, packages, frontends, web]
+        default: tests
+      backend:
+        type: choice
+        options: [fltk, rev]
+        default: fltk
+      image:
+        description: 'Match the original scope container for comparable qualification'
+        type: choice
+        options: [debian:bookworm-slim, ubuntu:24.04]
+        default: debian:bookworm-slim
+      linux_runner:
+        type: choice
+        options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
+        default: ubuntu-24.04
   workflow_call:
     inputs:
       scope:
@@ -146,10 +166,19 @@ jobs:
           {
             # The preceding build/packaging groups configured this exact SDK
             # tree. Keep the full contract while isolating functional Live work.
+            printf 'source_sha=%s\n' "$GITHUB_SHA"
             build/sdk/bin/cmake -S . -B build/sdk-application -DDART_TESTING_TIMEOUT=3600
             build/sdk/bin/cmake --build build/sdk-application --target datapump-tests-contract --parallel "$(python3 -B tools/build_capacity.py)"
-            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -R '^(live|live_profiles)$' --parallel 1
-            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --output-on-failure --stop-on-failure --no-tests=error -L '^contract$' -LE native_gui -E '^(live|live_profiles)$' --parallel 2
+            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --show-only=json-v1 -L '^contract$' -LE native_gui -R '^(live|live_profiles)$' > "$SDK_LOG_DIR/contract-live-inventory.json"
+            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --show-only=json-v1 -L '^contract$' -LE native_gui -E '^(live|live_profiles)$' > "$SDK_LOG_DIR/contract-general-inventory.json"
+            # Complete every selected case even when another group fails.
+            # The combined result remains fatal; no failure is converted to a pass.
+            live_status=0
+            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --output-on-failure --no-tests=error -L '^contract$' -LE native_gui -R '^(live|live_profiles)$' --parallel 1 --output-junit "$SDK_LOG_DIR/contract-live.xml" || live_status=$?
+            contract_status=0
+            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --output-on-failure --no-tests=error -L '^contract$' -LE native_gui -E '^(live|live_profiles)$' --parallel 2 --output-junit "$SDK_LOG_DIR/contract-general.xml" || contract_status=$?
+            printf 'Contract group exits: live=%s remaining=%s\n' "$live_status" "$contract_status"
+            if [ "$live_status" -ne 0 ] || [ "$contract_status" -ne 0 ]; then exit 1; fi
           } 2>&1 | tee "$SDK_LOG_DIR/contract.log"
       - name: Run Rev native conformance separately under a private display
         if: inputs.scope == 'tests' && inputs.backend == 'rev'
@@ -194,6 +223,8 @@ jobs:
           name: DataPump-SDK-${{ inputs.scope }}-${{ inputs.backend }}-qualification-logs
           path: |
             ${{ env.SDK_LOG_DIR }}/*.log
+            ${{ env.SDK_LOG_DIR }}/*.xml
+            ${{ env.SDK_LOG_DIR }}/*.json
             build/sdk-application/Testing/Temporary/*.log
             build/sdk-frontends/Testing/Temporary/*.log
             build/sdk-web/Testing/Temporary/*.log
