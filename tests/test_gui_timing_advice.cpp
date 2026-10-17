@@ -277,23 +277,48 @@ void check_calendar_advice_envelope() {
           "switching to strict Audio0 retained over-budget calendar evidence");
 }
 void check_stale_plan(const Launch& launch) {
+    const auto begin=std::chrono::steady_clock::now();
+    const auto timing_before=timing_observations.load(),captures_before=capture_opens.load();
     Application app(launch);app.start();app.edit(ui::Field::message,"quick brown");
-    std::string text;const auto deadline=std::chrono::steady_clock::now()+8s;
-    do {app.tick();text=all_text(*app.document(ui::Page::planner,1080));std::this_thread::sleep_for(5ms);}
-    while((text.find("15×")==std::string::npos||text.find("Calculating graphs...")==std::string::npos)&&
-          std::chrono::steady_clock::now()<deadline);
-    check(text.find("15×")!=std::string::npos&&text.find("Calculating graphs...")!=std::string::npos,
-          "stale-result fixture missed selected publication before full curves");
+    std::string text;bool saw_preview=false,saw_complete=false;
+    const auto diagnose=[&](const char* phase) {
+        std::cerr<<"stale-plan phase="<<phase<<" elapsed="
+            <<std::chrono::duration<double>(std::chrono::steady_clock::now()-begin).count()
+            <<" revision="<<app.revision()<<" polls="<<app.poll_count()
+            <<" transmit_ready="<<app.enabled(ui::Command::transmit)
+            <<" selected="<<(text.find("15×")!=std::string::npos)
+            <<" saw_preview="<<saw_preview<<" saw_complete="<<saw_complete
+            <<" timing_delta="<<timing_observations.load()-timing_before
+            <<" capture_delta="<<capture_opens.load()-captures_before
+            <<" status="<<app.field(ui::Field::status).text
+            <<" airtime="<<app.field(ui::Field::airtime).text
+            <<" observer="<<app.field(ui::Field::lpi_estimate).text<<" plan="<<text<<'\n';
+    };
+    const auto deadline=std::chrono::steady_clock::now()+8s;
+    do {
+        app.tick();text=all_text(*app.document(ui::Page::planner,1080));
+        if(text.find("15×")!=std::string::npos) {
+            if(text.find("Calculating graphs...")!=std::string::npos)saw_preview=true;
+            else saw_complete=true;
+        }
+        std::this_thread::sleep_for(5ms);
+    } while(text.find("15×")==std::string::npos&&std::chrono::steady_clock::now()<deadline);
+    // A tick may accept selected and completed results together. Either contains
+    // the selected plan; the progressive-model test checks publication ordering.
+    if(text.find("15×")==std::string::npos)diagnose("selected wait");
+    check(text.find("15×")!=std::string::npos,"stale-result fixture missed a ready selected plan");
     app.edit(ui::Field::carrier,"500 Hz"); // Below the configured 1MHz shift.
     const auto until=std::chrono::steady_clock::now()+1s;
     do {
         app.tick();text=all_text(*app.document(ui::Page::planner,1080));
+        if(text.find("Fix the modem settings")==std::string::npos)diagnose("stale publication");
         check(text.find("Fix the modem settings")!=std::string::npos,
               "obsolete partial/final plan replaced current invalid settings");
         std::this_thread::sleep_for(5ms);
     } while(std::chrono::steady_clock::now()<until);
     app.close();const auto closing=std::chrono::steady_clock::now()+2s;
     while(!app.finished()&&std::chrono::steady_clock::now()<closing){app.tick();std::this_thread::sleep_for(5ms);}
+    if(!app.finished())diagnose("close");
     check(app.finished(),"obsolete planner was requeued after invalidation");
 }
 int main(int argc,char** argv) {

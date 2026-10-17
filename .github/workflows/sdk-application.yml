@@ -45,7 +45,8 @@ jobs:
     name: SDK ${{ inputs.scope }} / ${{ inputs.backend }} / ${{ inputs.image }}
     runs-on: ${{ inputs.linux_runner }}
     container: ${{ inputs.image }}
-    timeout-minutes: 120
+    # Full FLTK contracts include calibration after the ordinary regressions.
+    timeout-minutes: ${{ inputs.scope == 'tests' && inputs.backend == 'fltk' && 180 || 120 }}
     env:
       DATAPUMP_CI_SMOKE_WARNINGS_DIR: ${{ github.workspace }}/build/ci-smoke-results
       DATAPUMP_CI_SMOKE_RUNNER: ${{ github.workspace }}/tools/run-gui-smoke.py
@@ -170,15 +171,20 @@ jobs:
             build/sdk/bin/cmake -S . -B build/sdk-application -DDART_TESTING_TIMEOUT=3600
             build/sdk/bin/cmake --build build/sdk-application --target datapump-tests-contract --parallel "$(python3 -B tools/build_capacity.py)"
             build/sdk/bin/ctest --test-dir build/sdk-application -C Release --show-only=json-v1 -L '^contract$' -LE native_gui -R '^(live|live_profiles)$' > "$SDK_LOG_DIR/contract-live-inventory.json"
-            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --show-only=json-v1 -L '^contract$' -LE native_gui -E '^(live|live_profiles)$' > "$SDK_LOG_DIR/contract-general-inventory.json"
+            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --show-only=json-v1 -L '^contract$' -LE native_gui -E '^(live|live_profiles|differential_receiver_probability)$' > "$SDK_LOG_DIR/contract-general-inventory.json"
+            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --show-only=json-v1 -L '^contract$' -LE native_gui -R '^differential_receiver_probability$' > "$SDK_LOG_DIR/contract-calibration-inventory.json"
             # Complete every selected case even when another group fails.
             # The combined result remains fatal; no failure is converted to a pass.
             live_status=0
             build/sdk/bin/ctest --test-dir build/sdk-application -C Release --output-on-failure --no-tests=error -L '^contract$' -LE native_gui -R '^(live|live_profiles)$' --parallel 1 --output-junit "$SDK_LOG_DIR/contract-live.xml" || live_status=$?
             contract_status=0
-            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --output-on-failure --no-tests=error -L '^contract$' -LE native_gui -E '^(live|live_profiles)$' --parallel 2 --output-junit "$SDK_LOG_DIR/contract-general.xml" || contract_status=$?
-            printf 'Contract group exits: live=%s remaining=%s\n' "$live_status" "$contract_status"
-            if [ "$live_status" -ne 0 ] || [ "$contract_status" -ne 0 ]; then exit 1; fi
+            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --output-on-failure --no-tests=error -L '^contract$' -LE native_gui -E '^(live|live_profiles|differential_receiver_probability)$' --parallel 2 --output-junit "$SDK_LOG_DIR/contract-general.xml" || contract_status=$?
+            # Only the complete calibration receives extra computation time.
+            # Its fixed captures, statistical gates and explicit limits remain.
+            calibration_status=0
+            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --output-on-failure --no-tests=error -L '^contract$' -LE native_gui -R '^differential_receiver_probability$' --parallel 1 --timeout 7200 --output-junit "$SDK_LOG_DIR/contract-calibration.xml" || calibration_status=$?
+            printf 'Contract group exits: live=%s remaining=%s calibration=%s\n' "$live_status" "$contract_status" "$calibration_status"
+            if [ "$live_status" -ne 0 ] || [ "$contract_status" -ne 0 ] || [ "$calibration_status" -ne 0 ]; then exit 1; fi
           } 2>&1 | tee "$SDK_LOG_DIR/contract.log"
       - name: Run Rev native conformance separately under a private display
         if: inputs.scope == 'tests' && inputs.backend == 'rev'
