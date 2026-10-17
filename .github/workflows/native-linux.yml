@@ -61,7 +61,7 @@ jobs:
     container: ubuntu:22.04
     # Standard runners need room for the full instrumented suite after compilation.
     # Explicit test limits and physical deadlines remain unchanged.
-    timeout-minutes: ${{ inputs.build_type == 'Debug' && inputs.scope == 'core' && 240 || 120 }}
+    timeout-minutes: ${{ inputs.build_type == 'Debug' && (inputs.scope == 'core' || inputs.scope == 'calibration') && 240 || 120 }}
     defaults:
       run:
         shell: bash
@@ -157,7 +157,17 @@ jobs:
           fi
           jobs=2
           if [ "$CI_SCOPE" = live ] || [ "$CI_SCOPE" = frontends ] || [ "$CI_SCOPE" = web ]; then jobs=1; fi
-          python3 tools/run-ci-tests.py --build-dir build --scope "$CI_SCOPE" --jobs "$jobs" --timeout "${{ inputs.build_type == 'Debug' && inputs.scope == 'core' && 7200 || 3600 }}" --report build/ci-test-report.json "${options[@]}"
+          # Instrumented calibration needs compute headroom on standard runners.
+          # A complete shaped run retains all fixed seeds and statistical gates.
+          test_timeout=3600
+          if [ "$DATAPUMP_SANITIZERS" = ON ]; then
+            if [ "$CI_SCOPE" = core ]; then test_timeout=7200; fi
+            if [ "$CI_SCOPE" = calibration ]; then
+              test_timeout=7200
+              if [ -z "${{ inputs.calibration_shard }}" ]; then test_timeout=10800; fi
+            fi
+          fi
+          python3 tools/run-ci-tests.py --build-dir build --scope "$CI_SCOPE" --jobs "$jobs" --timeout "$test_timeout" --report build/ci-test-report.json "${options[@]}"
       - name: Record partial capture scope
         if: inputs.calibration_shard != ''
         run: |
