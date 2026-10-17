@@ -1,3 +1,4 @@
+#include "test_environment.hpp"
 #include "../src/pattern_correlator.cpp"
 #define main scheduled_lazy_previous_main
 #include "test_scheduled_lazy_acquisition.cpp"
@@ -73,9 +74,9 @@ namespace proxy=datapump::modem::detail::scheduled_fp32_prefit;
 namespace resume=datapump::modem::detail::scheduled_resume;
 using Access=modem::PatternCorrelatorTimingTestAccess;
 constexpr std::size_t cohort_loan=32*1024*1024;
-void cohort_modes(bool enabled){setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);setenv("DATAPUMP_SCHED_LAZY_BATCH","0",1);
-    setenv("DATAPUMP_SCHED_COHERENT_PREFIT","1",1);setenv("DATAPUMP_SCHED_NATIVE_COHERENT_PREFIT","0",1);
-    setenv("DATAPUMP_SCHED_NATIVE_COHORT",enabled?"1":"0",1);}
+void cohort_modes(bool enabled){datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","1");datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_BATCH","0");
+    datapump::testing::set_environment("DATAPUMP_SCHED_COHERENT_PREFIT","1");datapump::testing::set_environment("DATAPUMP_SCHED_NATIVE_COHERENT_PREFIT","0");
+    datapump::testing::set_environment("DATAPUMP_SCHED_NATIVE_COHORT",enabled?"1":"0");}
 modem::Config cohort_config(){auto c=configuration(3,10,false);c.sample_rate=600;c.carrier_hz=150;
     c.integration_seconds=std::nextafter(9630./600,0.);const modem::SchedHopSourceMap map(*c.scheduled_hopping,*c.data_key,c.sample_rate);
     const auto anchor=map.source_to_physical(map.locate(8312ULL*c.sample_rate).source);c.stream_epoch=anchor.sample/c.sample_rate;c.stream_phase_samples=anchor.sample%c.sample_rate;return c;}
@@ -204,9 +205,9 @@ void exact_parity(const Result& a,const Result& b){compare(a,b);check(a.events.s
             "cohort changed exact retained diagnostics/charged trial threshold");}
 }
 void actual_runtime_tests(){cohort_modes(true);auto c=cohort_config();const Bytes bits{0,1};const auto input=capture(c,bits,true);auto s=cohort_search(c,input);
-    setenv("DATAPUMP_SCHED_NATIVE_COHERENT_PREFIT","1",1);bool exclusive=false;
+    datapump::testing::set_environment("DATAPUMP_SCHED_NATIVE_COHERENT_PREFIT","1");bool exclusive=false;
     try{modem::PatternCorrelator invalid(c,s,cohort_loan);}catch(const Error&){exclusive=true;}
-    setenv("DATAPUMP_SCHED_NATIVE_COHERENT_PREFIT","0",1);check(exclusive,"native one-event/cohort selector ambiguity was accepted");
+    datapump::testing::set_environment("DATAPUMP_SCHED_NATIVE_COHERENT_PREFIT","0");check(exclusive,"native one-event/cohort selector ambiguity was accepted");
     auto noise=input;std::mt19937_64 rng(771921);std::normal_distribution<double> normal(0,.002);for(auto& x:noise.pcm)x=static_cast<float>(normal(rng));
     actual_capability_tests(c,noise,s);
     const auto no=run_cohort(c,input,s,false),yes=run_cohort(c,input,s,true);exact_parity(no.result,yes.result);
@@ -340,6 +341,6 @@ int main(){try{if(!cohort::environment() || !Access::qualified()){std::cout<<"qu
     dedup_numeric(8);dedup_numeric(34);capacity_and_splits();exporter_fences();actual_runtime_tests();
     std::cout<<"native cohort Original preservation passed sizeofBuild="<<sizeof(cohort::Build)<<" sizeofBatch="<<sizeof(cohort::Batch)
         <<" builderCallee="<<cohort::Build::callee_bytes<<" savedCaller="<<cohort::Batch::caller_bytes<<'\n';
-    unsetenv("DATAPUMP_SCHED_NATIVE_COHORT");unsetenv("DATAPUMP_SCHED_NATIVE_COHERENT_PREFIT");unsetenv("DATAPUMP_SCHED_COHERENT_PREFIT");
-    unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");unsetenv("DATAPUMP_SCHED_LAZY_BATCH");return 0;
+    datapump::testing::set_environment("DATAPUMP_SCHED_NATIVE_COHORT",nullptr);datapump::testing::set_environment("DATAPUMP_SCHED_NATIVE_COHERENT_PREFIT",nullptr);datapump::testing::set_environment("DATAPUMP_SCHED_COHERENT_PREFIT",nullptr);
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION",nullptr);datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_BATCH",nullptr);return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

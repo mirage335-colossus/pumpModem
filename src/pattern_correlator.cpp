@@ -3358,11 +3358,7 @@ struct PatternCorrelator::Impl {
         return result;
     }
     static bool lazy_reference_environment() {
-#if defined(__GLIBC__) && defined(__GNUC__) && __GNUC__>=14 && defined(__x86_64__) && !defined(__FAST_MATH__)
-        return detail::scheduled_acquisition_certificate::coordinate_environment();
-#else
-        return false; // Local GCC14/glibc reference contract; unsupported host refines.
-#endif
+        return detail::scheduled_acquisition_certificate::original_reference_environment();
     }
     void drop_lazy_projections(LazyState::ProjectionDrop reason=LazyState::ProjectionDrop::allocation_pressure) {
         if(!lazy_state())return;

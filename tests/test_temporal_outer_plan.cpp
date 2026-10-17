@@ -131,9 +131,9 @@ int main() {
     rows(c,2,0,135.5,false); // default transient helper/API and disabled outer path
     rows(c,2,1,690.5);rows(c,2,2,690.5); // exact public weights remain original under both numeric routes
     for(const double bandwidth:{12.,30.}) {
-        auto small=c;small.bandwidth_hz=bandwidth;PatternCode geometry(small,small.stream_epoch);
+        auto small_chip_config=c;small_chip_config.bandwidth_hz=bandwidth;PatternCode geometry(small_chip_config,small_chip_config.stream_epoch);
         check(geometry.chip_samples()==(bandwidth==12.?10U:4U),"small-chip fixture geometry changed");
-        rows(small,2,0,.25);rows(small,2,0,32768.); // unnormalized edge and translated public Plan
+        rows(small_chip_config,2,0,.25);rows(small_chip_config,2,0,32768.); // unnormalized edge and translated public Plan
     }
     auto partial=c;partial.integration_seconds=std::nextafter(16.0005,0.);PatternCode p(partial,partial.stream_epoch);
     check(p.symbol_samples()%p.chip_samples()!=0,"partial-tail fixture lost extent");

@@ -1,3 +1,4 @@
+#include "test_environment.hpp"
 // Actual receiver internals plus the independent existing capture/poll helpers.
 // This target runs only the new cases below; the original suite stays intact.
 #include "../src/pattern_correlator.cpp"
@@ -136,7 +137,7 @@ void domain_and_cancellation() {
 }
 struct Runtime {Result result;std::array<std::uint64_t,6> counts{};};
 Runtime runtime_receive(const modem::Config& c,const Capture& input,modem::PatternSearch s,bool native) {
-    setenv("DATAPUMP_SCHED_NATIVE_COHERENT_PREFIT",native?"1":"0",1);
+    datapump::testing::set_environment("DATAPUMP_SCHED_NATIVE_COHERENT_PREFIT",native?"1":"0");
     modem::PatternCorrelator rx(c,s,8*1024*1024,{.measure_work=true});Runtime out;
     for(std::size_t at=0;at<input.pcm.size();) {
         const auto n=std::min<std::size_t>(113,input.pcm.size()-at);rx.push(std::span(input.pcm).subspan(at,n));at+=n;rx.process_pending();
@@ -150,8 +151,8 @@ Runtime runtime_receive(const modem::Config& c,const Capture& input,modem::Patte
     out.result.evidence=rx.candidates();out.result.work=rx.work();out.counts=modem::PatternCorrelatorTimingTestAccess::native(rx);return out;
 }
 void exact_runtime_parity() {
-    setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);setenv("DATAPUMP_SCHED_LAZY_BATCH","0",1);
-    setenv("DATAPUMP_SCHED_COHERENT_PREFIT","1",1);
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","1");datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_BATCH","0");
+    datapump::testing::set_environment("DATAPUMP_SCHED_COHERENT_PREFIT","1");
     auto c=configuration(3,10,false);c.sample_rate=600;c.carrier_hz=150;c.integration_seconds=std::nextafter(9630./600,0.);
     const modem::SchedHopSourceMap map(*c.scheduled_hopping,*c.data_key,c.sample_rate);
     const auto anchor=map.source_to_physical(map.locate(8312ULL*c.sample_rate).source);c.stream_epoch=anchor.sample/c.sample_rate;c.stream_phase_samples=anchor.sample%c.sample_rate;
@@ -175,8 +176,8 @@ void exact_runtime_parity() {
           yes.counts[3]>0 && yes.counts[4]>0,"qualified native runtime executed no native probe/rejection");
     std::cout<<"native probe queries="<<yes.counts[0]<<" completed="<<yes.counts[1]<<" rejected="<<yes.counts[2]
         <<" rows="<<yes.counts[3]<<" tiles="<<yes.counts[4]<<" fallback="<<yes.counts[5]<<'\n';
-    unsetenv("DATAPUMP_SCHED_NATIVE_COHERENT_PREFIT");unsetenv("DATAPUMP_SCHED_COHERENT_PREFIT");
-    unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");unsetenv("DATAPUMP_SCHED_LAZY_BATCH");
+    datapump::testing::set_environment("DATAPUMP_SCHED_NATIVE_COHERENT_PREFIT",nullptr);datapump::testing::set_environment("DATAPUMP_SCHED_COHERENT_PREFIT",nullptr);
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION",nullptr);datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_BATCH",nullptr);
 }
 }
 int main(){try {

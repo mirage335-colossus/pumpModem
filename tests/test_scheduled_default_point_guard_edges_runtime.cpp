@@ -97,10 +97,10 @@ struct PatternCorrelatorTimingTestAccess {
         s.lazy_state()->history_generation,s.history.size(),s.emissions.size(),s.bursts.size()};}
 
     static bool qualified(){return State::lazy_reference_environment();}
-    static void near(double a,double b,const char* m){check(std::isfinite(a)&&std::isfinite(b)&&std::abs(a-b)<=2e-8*(1+std::abs(a)+std::abs(b)),m);}
+    static void check_near(double a,double b,const char* m){check(std::isfinite(a)&&std::isfinite(b)&&std::abs(a-b)<=2e-8*(1+std::abs(a)+std::abs(b)),m);}
     static void same_fit(const detail::CorrelationFit& a,const detail::CorrelationFit& b){
-        check(a.count==b.count,"end-strip actual count changed");near(a.xc,b.xc,"end-strip xc changed");near(a.xs,b.xs,"end-strip xs changed");
-        near(a.cc,b.cc,"end-strip cc changed");near(a.ss,b.ss,"end-strip ss changed");near(a.cs,b.cs,"end-strip cs changed");near(a.energy,b.energy,"end-strip energy changed");
+        check(a.count==b.count,"end-strip actual count changed");check_near(a.xc,b.xc,"end-strip xc changed");check_near(a.xs,b.xs,"end-strip xs changed");
+        check_near(a.cc,b.cc,"end-strip cc changed");check_near(a.ss,b.ss,"end-strip ss changed");check_near(a.cs,b.cs,"end-strip cs changed");check_near(a.energy,b.energy,"end-strip energy changed");
     }
     static void policy() {
         mode("DATAPUMP_SCHED_DEFAULT_LINEAR","1");mode("DATAPUMP_SCHED_DEFAULT_POINT_FFT","1");
@@ -186,14 +186,14 @@ struct PatternCorrelatorTimingTestAccess {
         check(ordinary.ready&&state.default_linear_cache,"ordinary fullguard fallback unavailable");
         const auto& reference=state.default_linear_cache->result.events.front();
         for(unsigned bit=0;bit<2;++bit){same_fit(approximate.whole[bit],reference.whole[bit]);
-            near(approximate.chips[bit].projected_energy,reference.chips[bit].projected_energy,"actual chip guard changed");
+            check_near(approximate.chips[bit].projected_energy,reference.chips[bit].projected_energy,"actual chip guard changed");
             check(approximate.chips[bit].projected_rank==reference.chips[bit].projected_rank&&
                 approximate.chips[bit].nested==reference.chips[bit].nested,"actual chip projection rank changed");
             same_fit(approximate.chips[bit].cell,reference.chips[bit].cell);
-            near(detailed.scores.score[bit],ordinary.scores.score[bit],"actual complete guard score changed");
-            near(approximate.outer.dot[bit].real(),reference.outer.dot[bit].real(),"actual outer real dot changed");
-            near(approximate.outer.dot[bit].imag(),reference.outer.dot[bit].imag(),"actual outer imaginary dot changed");
-            near(approximate.outer.variance[bit],reference.outer.variance[bit],"actual outer variance changed");}
+            check_near(detailed.scores.score[bit],ordinary.scores.score[bit],"actual complete guard score changed");
+            check_near(approximate.outer.dot[bit].real(),reference.outer.dot[bit].real(),"actual outer real dot changed");
+            check_near(approximate.outer.dot[bit].imag(),reference.outer.dot[bit].imag(),"actual outer imaginary dot changed");
+            check_near(approximate.outer.variance[bit],reference.outer.variance[bit],"actual outer variance changed");}
         check(detector(s)==before&&pcm_identity(s)==pcm&&!state.transient_reservation&&!state.default_point_guard_archive.borrowed()&&
             !state.serial_execution->screen_active,"edge preparation mutated detector/PCM or leaked workspace pin");
         check(sizeof(PatternCorrelator)+s.accounted_bytes<=s.budget,"edge caller exceeded charged workspace");

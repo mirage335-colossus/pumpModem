@@ -69,7 +69,7 @@ struct ExactSum {
 };
 C rounded_product(C a,C b) {
     volatile float ac=a.real()*b.real(),bd=a.imag()*b.imag(),ad=a.real()*b.imag(),bc=a.imag()*b.real();
-    volatile float re=ac-bd,im=ad+bc;return {re,im};
+    volatile float re=ac-bd,im=ad+bc;return {static_cast<float>(re),static_cast<float>(im)};
 }
 bool bit_equal(C a,C b) {
     return std::bit_cast<std::uint32_t>(a.real())==std::bit_cast<std::uint32_t>(b.real()) &&

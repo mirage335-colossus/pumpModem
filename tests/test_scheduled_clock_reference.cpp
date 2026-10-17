@@ -107,13 +107,13 @@ struct PatternCorrelatorTimingTestAccess {
             "bounded exact-clock range still lost its useful numerical cover");
         if(arithmetic!=SearchArithmetic::fp64) {
             check(!s.lazy_screen_numeric_cover_fits(broad),"broad off-rate range unexpectedly fits a single translated tile");
-            auto near=range(s,family_for(s,1.000001L),8);
-            const auto near_selected=s.lazy_screen_reference(near);
-            check(near_selected.rate==1 && s.lazy_screen_translation_fits(near,near_selected),
+            auto nearby_range=range(s,family_for(s,1.000001L),8);
+            const auto near_selected=s.lazy_screen_reference(nearby_range);
+            check(near_selected.rate==1 && s.lazy_screen_translation_fits(nearby_range,near_selected),
                 "certified close-clock reuse was disabled along with unsupported broad reuse");
         } else {
-            auto near=range(s,family_for(s,1.000001L),8);
-            check(s.lazy_screen_reference(near).rate==s.lazy_family_lane(near.family,near.first).rate,
+            auto nearby_range=range(s,family_for(s,1.000001L),8);
+            check(s.lazy_screen_reference(nearby_range).rate==s.lazy_family_lane(nearby_range.family,nearby_range.first).rate,
                 "FP64 force selected approximate clock interpolation");
         }
         s.lazy_state()->due_ranges={broad};

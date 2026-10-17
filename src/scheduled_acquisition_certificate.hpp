@@ -84,6 +84,15 @@ inline bool coordinate_environment() {
     volatile long double changed=one+epsilon;
     return changed>one;
 }
+// Keep the ORIGINAL receiver's established compiler contract distinct from the
+// portable certified kernels that also use coordinate_environment().
+inline bool original_reference_environment() {
+#if defined(__GLIBC__) && defined(__GNUC__) && __GNUC__>=14 && defined(__x86_64__) && !defined(__FAST_MATH__)
+    return coordinate_environment();
+#else
+    return false; // Local GCC14/glibc reference contract; unsupported host refines.
+#endif
+}
 struct Interval {
     double lo=0,hi=0;
     static Interval point(double x){return {x,x};}

@@ -346,6 +346,7 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
     target_include_directories(test_${_plan_pool_test} PRIVATE src)
   endforeach()
   set_tests_properties(scheduled_linear_grid_original scheduled_default_linear_original scheduled_default_linear_fhss scheduled_default_linear_fhss_original scheduled_default_point_guard_edges_runtime scheduled_default_point_fhss scheduled_default_point_reference_recipe scheduled_default_point_compact_runtime scheduled_point_guard_prepass_runtime scheduled_default_point_diagnostics PROPERTIES SKIP_RETURN_CODE 77)
+  set_tests_properties(scheduled_default_point_bulk_original scheduled_clock_reference PROPERTIES SKIP_RETURN_CODE 77)
   set_tests_properties(scheduled_fractional_basis_original PROPERTIES SKIP_RETURN_CODE 77)
   set_tests_properties(scheduled_origin_gram_original PROPERTIES SKIP_RETURN_CODE 77)
   # This fixture intentionally tests forced implicit acquisition; unset is automatic.

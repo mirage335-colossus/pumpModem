@@ -97,14 +97,14 @@ struct PatternCorrelatorTimingTestAccess {
     static auto detector(const State& s){return std::tuple{s.trials,s.sample,s.lazy_state()->processed,
         s.lazy_state()->history_generation,s.history.size(),s.emissions.size(),s.bursts.size()};}
 
-    static void near(double a,double b,const char* m) {
+    static void check_near(double a,double b,const char* m) {
         check(std::isfinite(a) && std::isfinite(b) && std::abs(a-b)<=2e-8*(1+std::abs(a)+std::abs(b)),m);
     }
     static void same_fit(const detail::CorrelationFit& a,const detail::CorrelationFit& b) {
         check(a.count==b.count,"same-chord count changed");
-        near(a.xc,b.xc,"same-chord xc changed");near(a.xs,b.xs,"same-chord xs changed");
-        near(a.cc,b.cc,"same-chord cc changed");near(a.ss,b.ss,"same-chord ss changed");
-        near(a.cs,b.cs,"same-chord cs changed");near(a.energy,b.energy,"same-chord energy changed");
+        check_near(a.xc,b.xc,"same-chord xc changed");check_near(a.xs,b.xs,"same-chord xs changed");
+        check_near(a.cc,b.cc,"same-chord cc changed");check_near(a.ss,b.ss,"same-chord ss changed");
+        check_near(a.cs,b.cs,"same-chord cs changed");check_near(a.energy,b.energy,"same-chord energy changed");
     }
     static void sum(detail::CorrelationFit& a,const detail::CorrelationFit& b) {
         a.xc+=b.xc;a.xs+=b.xs;a.cc+=b.cc;a.ss+=b.ss;a.cs+=b.cs;a.energy+=b.energy;a.count+=b.count;
@@ -203,21 +203,21 @@ struct PatternCorrelatorTimingTestAccess {
             a.last_section==b.last_section && a.last_window==b.last_window,"same-chord Original crop/ownership changed");
         for(unsigned bit=0;bit<2;++bit) {
             same_fit(a.whole[bit],b.whole[bit]);same_fit(a.chips[bit].cell,b.chips[bit].cell);
-            near(a.chips[bit].projected_energy,b.chips[bit].projected_energy,"same-chord chip projection changed");
+            check_near(a.chips[bit].projected_energy,b.chips[bit].projected_energy,"same-chord chip projection changed");
             check(a.chips[bit].projected_rank==b.chips[bit].projected_rank && a.chips[bit].cell_index==b.chips[bit].cell_index &&
                 a.chips[bit].nested==b.chips[bit].nested,"same-chord chip ownership/rank/nesting changed");
             if(g.outer) {
-                near(static_cast<double>(a.outer.dot[bit].real()),static_cast<double>(b.outer.dot[bit].real()),"same-chord outer real dot changed");
-                near(static_cast<double>(a.outer.dot[bit].imag()),static_cast<double>(b.outer.dot[bit].imag()),"same-chord outer imaginary dot changed");
-                near(static_cast<double>(a.outer.variance[bit]),static_cast<double>(b.outer.variance[bit]),"same-chord outer variance changed");
+                check_near(static_cast<double>(a.outer.dot[bit].real()),static_cast<double>(b.outer.dot[bit].real()),"same-chord outer real dot changed");
+                check_near(static_cast<double>(a.outer.dot[bit].imag()),static_cast<double>(b.outer.dot[bit].imag()),"same-chord outer imaginary dot changed");
+                check_near(static_cast<double>(a.outer.variance[bit]),static_cast<double>(b.outer.variance[bit]),"same-chord outer variance changed");
                 check(a.outer.contributing_terms[bit]==b.outer.contributing_terms[bit],"same-chord outer support changed");
             }
         }
         for(double threshold:{0.,12.,24.,48.,100.}) {
             const auto x=events::scores(a,g,threshold),y=events::scores(b,g,threshold);
             check(x.valid && y.valid && x.bit==y.bit && x.outer_presence_active==y.outer_presence_active,"same-chord threshold guard branch changed");
-            near(x.score[0],y.score[0],"same-chord zero score changed");near(x.score[1],y.score[1],"same-chord one score changed");
-            near(x.outer_presence_score,y.outer_presence_score,"same-chord outer score changed");
+            check_near(x.score[0],y.score[0],"same-chord zero score changed");check_near(x.score[1],y.score[1],"same-chord one score changed");
+            check_near(x.outer_presence_score,y.outer_presence_score,"same-chord outer score changed");
         }
     }
     struct Totals {std::uint64_t comparisons=0,original_above=0,point_lost=0,below_T_divergence=0,changed_bit=0;double max_field_relative=0,max_score_drop=0,max_chip_relative=0,max_outer_relative=0;std::uint64_t rank_differences=0;};
@@ -288,7 +288,7 @@ struct PatternCorrelatorTimingTestAccess {
             for(unsigned b=0;b<2;++b) {
                 const auto& a=numeric[j].whole[b];const auto& b0=original.whole[b];
                 check(a.count==b0.count && a.count>2 && a.energy>0 && b0.energy>0,"point lost actual physical usable samples/noise energy");
-                near(a.energy,b0.energy,"point changed Original observed energy");
+                check_near(a.energy,b0.energy,"point changed Original observed energy");
                 for(const auto [x,y]:{std::pair{a.xc,b0.xc},std::pair{a.xs,b0.xs},std::pair{a.cc,b0.cc},std::pair{a.ss,b0.ss},std::pair{a.cs,b0.cs}})
                     max_field=std::max(max_field,std::abs(x-y)/(1+std::abs(y)));
                 const auto& nc=numeric[j].chips[b];const auto& oc=original.chips[b];
@@ -513,7 +513,7 @@ struct PatternCorrelatorTimingTestAccess {
         namespace family=detail::scheduled_default_point_family;
         check(family::usable(fft) && family::usable(full),"actual long FFT/full point produced singular/nonfinite whole Gram");
         check(fft.count==full.count && fft.count>2,"long FFT/full point changed actual usable sample count");
-        near(fft.energy,full.energy,"long FFT/full point changed raw observed noise energy");
+        check_near(fft.energy,full.energy,"long FFT/full point changed raw observed noise energy");
         const auto trace=full.cc+full.ss,dot_scale=std::sqrt(std::max(1e-30,full.energy*trace));
         const auto de=std::max(std::abs(fft.xc-full.xc),std::abs(fft.xs-full.xs))/dot_scale;
         const auto ge=std::max({std::abs(fft.cc-full.cc),std::abs(fft.ss-full.ss),std::abs(fft.cs-full.cs)})/std::max(1e-30,trace);
@@ -616,7 +616,7 @@ struct PatternCorrelatorTimingTestAccess {
             largest_drop=std::max(largest_drop,std::max(truth.score[0],truth.score[1])-std::max(selected.scores.score[0],selected.scores.score[1]));
             for(unsigned b=0;b<2;++b){const auto& a=guarded[j].whole[b];const auto& o=original.whole[b];
                 check(a.count==o.count && a.count==wholes[j][b].count,"long approximate/Original usable sample counts changed");
-                near(a.energy,o.energy,"long Original observed energy differs");
+                check_near(a.energy,o.energy,"long Original observed energy differs");
                 largest_original_difference=std::max(largest_original_difference,std::hypot(a.xc-o.xc,a.xs-o.xs)/std::sqrt(std::max(1e-30,o.energy*(o.cc+o.ss))));}
             std::cout<<"LONG_LANE id="<<id<<" Q="<<subdivisions<<" j="<<j<<" trial="<<j+1<<" T="<<T<<" floor="<<floor
                 <<" Original0="<<truth.score[0]<<" Original1="<<truth.score[1]<<" Original_bit="<<truth.bit

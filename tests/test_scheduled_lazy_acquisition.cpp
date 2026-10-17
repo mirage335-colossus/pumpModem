@@ -1,3 +1,5 @@
+#include "test_environment.hpp"
+#include "../src/scheduled_acquisition_certificate.hpp"
 #include "datapump/pattern_correlator.hpp"
 #include "datapump/receiver_strategy.hpp"
 #include "../src/family_simd.hpp"
@@ -25,6 +27,9 @@
 using namespace datapump;
 namespace {
 void check(bool value,const char* text){if(!value)throw Error(text);}
+bool native_reference_available() {
+    return modem::detail::scheduled_acquisition_certificate::original_reference_environment();
+}
 struct ThrowingOwnerValue {
     static inline int constructions_before_failure=-1;
     ThrowingOwnerValue(){if(constructions_before_failure==0)throw Error("injected owner construction failure");
@@ -251,10 +256,10 @@ void paired(unsigned factor,bool fhss,bool broad,bool clocks) {
     auto s=search(c,pcm);s.chunk_bits=1;s.retain_score=0;s.candidate_limit=4096;
     if(broad)s.start_uncertainty_seconds=static_cast<double>(modem::pattern_chip_samples(c))/2/c.sample_rate;
     if(clocks)s.clock_errors_ppm={-10,0,10};
-    setenv("DATAPUMP_SCHED_LAZY_BATCH","0",1);
-    setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","0",1);const auto original=receive(c,pcm,s,113,false,false,false,false,false,false,true);
-    setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);const auto actual=receive(c,pcm,s,113,false,false,false,false,false,false,true);
-    unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_BATCH","0");
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","0");const auto original=receive(c,pcm,s,113,false,false,false,false,false,false,true);
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","1");const auto actual=receive(c,pcm,s,113,false,false,false,false,false,false,true);
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION",nullptr);
     check(actual.work.backend==modem::PatternCorrelationBackend::scheduled_acquisition,"implicit backend not executed");
     if(original.bits!=bits || !original.complete || actual.bits!=bits || !actual.complete) {
         std::cerr<<"LAZY_COMPLETE factor="<<factor<<" fhss="<<fhss<<" broad="<<broad<<" clocks="<<clocks
@@ -265,8 +270,8 @@ void paired(unsigned factor,bool fhss,bool broad,bool clocks) {
     check(original.bits==bits && original.complete,"original full-reception fixture did not cover physical END");
     check(actual.bits==bits && actual.complete,"implicit production full reception failed");compare(original,actual);
     auto fp64=c;fp64.search_arithmetic=modem::SearchArithmetic::fp64;
-    setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);const auto reference=receive(fp64,pcm,s,113,false,false,false,false,false,false,true);
-    unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");compare(original,reference);
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","1");const auto reference=receive(fp64,pcm,s,113,false,false,false,false,false,false,true);
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION",nullptr);compare(original,reference);
     std::cout<<"LAZY_PAIR factor="<<factor<<" fhss="<<fhss<<" broad="<<broad<<" clocks="<<clocks
         <<" hypotheses="<<actual.work.hypotheses<<" peak="<<actual.peak<<"\n";
 }
@@ -282,12 +287,12 @@ void smooth_fhss_native_parity() {
         for(const auto noise_only:{false,true}) {
             auto input=pcm;
             if(noise_only){std::mt19937_64 rng(7719);std::normal_distribution<float> noise(0,.2F);for(auto& x:input.pcm)x=noise(rng);}
-            setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","0",1);setenv("DATAPUMP_SCHED_LAZY_BATCH","0",1);
+            datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","0");datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_BATCH","0");
             const auto original=receive(c,input,s,257);
-            setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);
+            datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","1");
             const auto native=receive(c,input,s,257);
-            unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");compare(original,native);
-            check(native.work.implicit_screened_lanes>0 && native.work.implicit_fp32_ranges>0,
+            datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION",nullptr);compare(original,native);
+            if(native_reference_available())check(native.work.implicit_screened_lanes>0 && native.work.implicit_fp32_ranges>0,
                 "smooth FHSS never executed its native physical-calendar template screen");
             if(noise_only)check(native.bits.empty()&&!native.complete,"smooth FHSS screen manufactured noise bits or END");
             else check(native.bits==bits && native.complete && native.completed>=pcm.absent_end,
@@ -302,10 +307,10 @@ void original_push_fences() {
     auto c=configuration(10,10,true);const Bytes bits{0,1};const auto pcm=capture(c,bits,true);
     auto s=search(c,pcm);s.start_uncertainty_seconds=static_cast<double>(modem::pattern_chip_samples(c))/2/c.sample_rate;
     s.chunk_bits=1;s.retain_score=0;s.candidate_limit=4096;s.track_limit=2;
-    setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","0",1);const auto original=receive(c,pcm,s,8192,false,false,false,false,false,false,true);
-    setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);unsetenv("DATAPUMP_SCHED_LAZY_BATCH");
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","0");const auto original=receive(c,pcm,s,8192,false,false,false,false,false,false,true);
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","1");datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_BATCH",nullptr);
     const auto actual=receive(c,pcm,s,8192,false,false,false,false,false,false,true);
-    unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");compare(original,actual);
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION",nullptr);compare(original,actual);
     check(actual.bits==bits && actual.complete,"original push/fence split lost intended payload or physical END");
 }
 void screened_noise_and_payload() {
@@ -314,13 +319,16 @@ void screened_noise_and_payload() {
     s.clock_errors_ppm={-0.0003,0,0.0003};s.retain_score=5;s.candidate_limit=128;s.chunk_bits=1;
     for(bool noise_only:{false,true}) {
         auto input=pcm;if(noise_only){std::mt19937_64 rng(7719);std::normal_distribution<float> noise(0,.2F);for(auto& x:input.pcm)x=noise(rng);}
-        setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","0",1);setenv("DATAPUMP_SCHED_LAZY_BATCH","0",1);
+        datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","0");datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_BATCH","0");
         const auto original=receive(c,input,s,257);
-        setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);const auto actual=receive(c,input,s,257);
-        unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");compare(original,actual);
-        check(actual.work.implicit_screened_lanes>0 && actual.work.implicit_rejected_lanes>0,
+        datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","1");const auto actual=receive(c,input,s,257);
+        datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION",nullptr);compare(original,actual);
+        if(native_reference_available())check(actual.work.implicit_screened_lanes>0 && actual.work.implicit_rejected_lanes>0,
             "normal threshold fixture did not execute/reject through native tile certificates");
-        if(!noise_only)check(actual.work.implicit_refined_lanes>0 && actual.bits==bits,"native survivors did not run original guards");
+        if(!noise_only) {
+            check(actual.bits==bits,"native survivors did not run original guards");
+            if(native_reference_available())check(actual.work.implicit_refined_lanes>0,"native survivors did not run original guards");
+        }
         else check(actual.bits.empty() && !actual.complete,"screened noise manufactured bits or END");
         if(actual.work.implicit_proxy_ranges==0)std::cerr<<"PROXY_DETAIL noise="<<noise_only
             <<" eligible="<<actual.work.implicit_eligible_ranges<<" fallback="<<actual.work.implicit_fallback_ranges
@@ -334,27 +342,27 @@ void screened_noise_and_payload() {
     }
     // Batching may add bounded acquisition latency. It cannot change the
     // accepted prefixes, original physical endpoints or final completion.
-    unsetenv("DATAPUMP_SCHED_LAZY_BATCH");setenv("DATAPUMP_SCHED_LAZY_BATCH_SAMPLES","1024",1);setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);
-    const auto batched=receive(c,pcm,s,257);unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_BATCH",nullptr);datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_BATCH_SAMPLES","1024");datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","1");
+    const auto batched=receive(c,pcm,s,257);datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION",nullptr);
     check(batched.bits==bits && batched.complete && batched.completed>=pcm.absent_end,
         "bounded tiled batching changed payload or physical completion");
-    check(batched.work.implicit_proxy_ranges>0,"near-clock proxy eligibility became vacuous");
-    unsetenv("DATAPUMP_SCHED_LAZY_BATCH_SAMPLES");setenv("DATAPUMP_SCHED_LAZY_BATCH","0",1);
-    setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);
+    if(native_reference_available())check(batched.work.implicit_proxy_ranges>0,"near-clock proxy eligibility became vacuous");
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_BATCH_SAMPLES",nullptr);datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_BATCH","0");
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","1");
     // Preserve the original PCM-duplication storage oracle independently of
     // optional cache occupancy. Separate parity cases exercise cache storage.
-    setenv("DATAPUMP_SCHED_ORIGINAL_PROJECTION_CACHE_BYTES","0",1);
+    datapump::testing::set_environment("DATAPUMP_SCHED_ORIGINAL_PROJECTION_CACHE_BYTES","0");
     // This is the unchanged RAW PCM-duplication oracle. Optional template
     // cache occupancy is independently validated by parity/pressure cases.
     std::optional<std::string> demand_mode;
     if(const auto* mode=std::getenv("DATAPUMP_SCHED_COLD_COLORED_ON_DEMAND"))demand_mode=mode;
-    setenv("DATAPUMP_SCHED_COLD_COLORED_ON_DEMAND","0",1);
+    datapump::testing::set_environment("DATAPUMP_SCHED_COLD_COLORED_ON_DEMAND","0");
     const auto shared=receive(c,pcm,s,257,false,false,false,false,false,false,false,{},false,false,false,true,true);
     const auto local=receive(c,pcm,s,257);
-    if(demand_mode)setenv("DATAPUMP_SCHED_COLD_COLORED_ON_DEMAND",demand_mode->c_str(),1);
-    else unsetenv("DATAPUMP_SCHED_COLD_COLORED_ON_DEMAND");
-    unsetenv("DATAPUMP_SCHED_ORIGINAL_PROJECTION_CACHE_BYTES");
-    unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");compare(local,shared);
+    if(demand_mode)datapump::testing::set_environment("DATAPUMP_SCHED_COLD_COLORED_ON_DEMAND",demand_mode->c_str());
+    else datapump::testing::set_environment("DATAPUMP_SCHED_COLD_COLORED_ON_DEMAND",nullptr);
+    datapump::testing::set_environment("DATAPUMP_SCHED_ORIGINAL_PROJECTION_CACHE_BYTES",nullptr);
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION",nullptr);compare(local,shared);
     check(shared.peak<local.peak,"bound shared capture retained duplicated bank PCM/energy history");
 
 }
@@ -363,21 +371,21 @@ void exact_guard_demand_parity() {
     const Bytes bits{0,1};const auto pcm=capture(c,bits,true,0,0,0,0,0,0,4.);
     auto s=search(c,pcm);s.chunk_bits=1;s.retain_score=0;s.candidate_limit=4096;
     s.start_uncertainty_seconds=17.*modem::pattern_chip_samples(c)/c.sample_rate;
-    setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);
-    setenv("DATAPUMP_SCHED_LAZY_BATCH","0",1);
-    setenv("DATAPUMP_SCHED_COLORED_EXACT_DEMAND","0",1);
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","1");
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_BATCH","0");
+    datapump::testing::set_environment("DATAPUMP_SCHED_COLORED_EXACT_DEMAND","0");
     const auto ref_cpu=std::clock();const auto ref_wall=std::chrono::steady_clock::now();
     const auto reference=receive(c,pcm,s,113,false,false,false,false,false,false,true);
     const auto reference_cpu=double(std::clock()-ref_cpu)/CLOCKS_PER_SEC;
     const auto reference_wall=std::chrono::duration<double>(std::chrono::steady_clock::now()-ref_wall).count();
-    setenv("DATAPUMP_SCHED_COLORED_EXACT_DEMAND","1",1);
+    datapump::testing::set_environment("DATAPUMP_SCHED_COLORED_EXACT_DEMAND","1");
     const auto new_cpu=std::clock();const auto new_wall=std::chrono::steady_clock::now();
     const auto actual=receive(c,pcm,s,113,false,false,false,false,false,false,true);
     const auto actual_cpu=double(std::clock()-new_cpu)/CLOCKS_PER_SEC;
     const auto actual_wall=std::chrono::duration<double>(std::chrono::steady_clock::now()-new_wall).count();
     compare(reference,actual);
     check(actual.bits==bits && actual.complete,"exact demand lost payload or observed END");
-    check(actual.work.implicit_exact_guard_queries>0,"exact demand branch never completed an original-owner query");
+    if(native_reference_available())check(actual.work.implicit_exact_guard_queries>0,"exact demand branch never completed an original-owner query");
     std::cout<<"EXACT_DEMAND completed="<<actual.work.implicit_exact_guard_queries
         <<" reference_cpu="<<reference_cpu<<" actual_cpu="<<actual_cpu
         <<" reference_wall="<<reference_wall<<" actual_wall="<<actual_wall
@@ -385,17 +393,17 @@ void exact_guard_demand_parity() {
         <<" physical_seconds="<<double(pcm.pcm.size())/c.sample_rate
         <<" publication_sample="<<actual.first<<" completion_sample="<<actual.completed
         <<" scope=complete_single_bank_not_live_cohort"<<'\n';
-    unsetenv("DATAPUMP_SCHED_COLORED_EXACT_DEMAND");unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
+    datapump::testing::set_environment("DATAPUMP_SCHED_COLORED_EXACT_DEMAND",nullptr);datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION",nullptr);
 }
 void original_projection_cache_parity() {
     auto c=configuration(10,10,false);const Bytes bits{0,1};const auto pcm=capture(c,bits,true);
     auto s=search(c,pcm,true);s.chunk_bits=1;s.retain_score=0;s.candidate_limit=4096;
     s.start_uncertainty_seconds=static_cast<double>(modem::pattern_chip_samples(c))/2/c.sample_rate;
-    setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);setenv("DATAPUMP_SCHED_LAZY_BATCH","0",1);
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","1");datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_BATCH","0");
     for(bool shared:{false,true}) {
-        setenv("DATAPUMP_SCHED_ORIGINAL_PROJECTION_CACHE_BYTES","0",1);
+        datapump::testing::set_environment("DATAPUMP_SCHED_ORIGINAL_PROJECTION_CACHE_BYTES","0");
         const auto reference=receive(c,pcm,s,113,false,false,false,false,false,false,true,{},false,false,false,true,shared);
-        setenv("DATAPUMP_SCHED_ORIGINAL_PROJECTION_CACHE_BYTES","2097152",1);
+        datapump::testing::set_environment("DATAPUMP_SCHED_ORIGINAL_PROJECTION_CACHE_BYTES","2097152");
         const auto cached=receive(c,pcm,s,113,false,false,false,false,false,false,true,{},false,false,false,true,shared);
         const auto trimmed=receive(c,pcm,s,113,false,false,true,false,false,false,true,{},false,false,false,true,shared);
         compare(reference,cached);compare(reference,trimmed);
@@ -408,7 +416,7 @@ void original_projection_cache_parity() {
             }
         }
     }
-    unsetenv("DATAPUMP_SCHED_ORIGINAL_PROJECTION_CACHE_BYTES");unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
+    datapump::testing::set_environment("DATAPUMP_SCHED_ORIGINAL_PROJECTION_CACHE_BYTES",nullptr);datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION",nullptr);
 }
 void coherent_prefit_parity() {
     for(const bool short_symbol:{false,true}) {
@@ -424,10 +432,10 @@ void coherent_prefit_parity() {
         auto s=search(c,input);s.chunk_bits=1;s.retain_score=5;s.candidate_limit=4096;
         s.clock_errors_ppm=short_symbol?std::vector<double>{0}:std::vector<double>{-12,0,12};
         s.start_uncertainty_seconds=short_symbol?0:modem::pattern_chip_samples(c)/2./c.sample_rate;
-        setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);setenv("DATAPUMP_SCHED_LAZY_BATCH","0",1);
-        setenv("DATAPUMP_SCHED_COHERENT_PREFIT","0",1);
+        datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","1");datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_BATCH","0");
+        datapump::testing::set_environment("DATAPUMP_SCHED_COHERENT_PREFIT","0");
         const auto original=receive(c,input,s,113);
-        setenv("DATAPUMP_SCHED_COHERENT_PREFIT","1",1);
+        datapump::testing::set_environment("DATAPUMP_SCHED_COHERENT_PREFIT","1");
         const auto actual=receive(c,input,s,113);
         compare(original,actual);
         check(actual.bits==expected&&actual.complete,"coherent prefit lost exact pending payload or scored absence");
@@ -438,7 +446,7 @@ void coherent_prefit_parity() {
                   a.outer_presence_score==b.outer_presence_score&&a.outer_presence_active==b.outer_presence_active,
                   "coherent prefit changed exact retained diagnostic evidence");
         }
-        unsetenv("DATAPUMP_SCHED_COHERENT_PREFIT");unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
+        datapump::testing::set_environment("DATAPUMP_SCHED_COHERENT_PREFIT",nullptr);datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION",nullptr);
     }
     // Wide clock/timing cells reach Original fallbacks that the prepared cold
     // screen cannot certify. Use noise only to test exact additional rejection
@@ -453,35 +461,36 @@ void coherent_prefit_parity() {
     for(auto& value:input.pcm)value=static_cast<float>(noise(random));
     auto s=search(c,input);s.chunk_bits=1;s.retain_score=5;s.candidate_limit=4096;
     s.clock_errors_ppm={-600,0,600};s.start_uncertainty_seconds=2.*modem::pattern_chip_samples(c)/c.sample_rate;
-    setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);setenv("DATAPUMP_SCHED_LAZY_BATCH","0",1);
-    setenv("DATAPUMP_SCHED_COHERENT_PREFIT","0",1);const auto original=receive(c,input,s,113);
-    setenv("DATAPUMP_SCHED_COHERENT_PREFIT","1",1);const auto actual=receive(c,input,s,113);
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","1");datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_BATCH","0");
+    datapump::testing::set_environment("DATAPUMP_SCHED_COHERENT_PREFIT","0");const auto original=receive(c,input,s,113);
+    datapump::testing::set_environment("DATAPUMP_SCHED_COHERENT_PREFIT","1");const auto actual=receive(c,input,s,113);
     compare(original,actual);check(actual.bits.empty()&&!actual.complete,"coherent prefit admitted noise");
     std::cout<<"COHERENT_PREFIT original_rejected="<<original.work.implicit_rejected_lanes
         <<" prefit_rejected="<<actual.work.implicit_rejected_lanes<<" original_refined="<<original.work.implicit_refined_lanes
         <<" prefit_refined="<<actual.work.implicit_refined_lanes<<"\n";
-    check(actual.work.implicit_rejected_lanes>original.work.implicit_rejected_lanes,
+    if(native_reference_available())check(actual.work.implicit_rejected_lanes>original.work.implicit_rejected_lanes,
           "qualifying coherent prefit fixture executed no new exact rejection");
-    unsetenv("DATAPUMP_SCHED_COHERENT_PREFIT");unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
+    datapump::testing::set_environment("DATAPUMP_SCHED_COHERENT_PREFIT",nullptr);datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION",nullptr);
 
 }
 void exact_source_binding_parity(bool odd_chips=false) {
     namespace xs=modem::detail::scheduled_source_samples;
     if(!xs::environment()){std::cout<<"OMITTED: native exact-source positive-hit coverage; unqualified numeric environment\n";return;} // The independently tested original fallback remains valid.
     auto c=configuration(10,10,false);c.integration_seconds=8;
-    if(odd_chips)setenv("DATAPUMP_SCHED_ORIGIN_CLASSES","1",1);
+    if(odd_chips)datapump::testing::set_environment("DATAPUMP_SCHED_ORIGIN_CLASSES","1");
     if(odd_chips)c.bandwidth_hz=16;
     check(modem::symbol_sample_count(c)==8ULL*c.sample_rate,"source binding fixture lost its fixed complete symbol");
     const Bytes bits{0};const auto pcm=capture(c,bits,true);
     auto s=search(c,pcm,true);s.clock_errors_ppm={0};s.admitted_clock_half_width_ppm=0;
     s.start_uncertainty_seconds=static_cast<double>(modem::pattern_chip_samples(c))/2/c.sample_rate;
     s.worker_threads=2;
-    setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);setenv("DATAPUMP_SCHED_LAZY_BATCH","0",1);
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","1");datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_BATCH","0");
     const auto original=receive(c,pcm,s,113,false,false,false,false,false,true,true,{},false,false,false,true,false,false);
     const auto cached=receive(c,pcm,s,113,false,false,true,false,false,true,true,{},false,false,false,true,false,true);
     compare(original,cached);
     check(original.bits==bits && original.complete,"positive exact source fixture failed physical reception");
-    check(cached.source_bytes>0 && cached.source_counts.queries>0 && cached.source_counts.cached_points>0 &&
+    check(cached.source_bytes>0,"bound exact source Pool was not allocated");
+    if(native_reference_available())check(cached.source_counts.queries>0 && cached.source_counts.cached_points>0 &&
           cached.source_counts.original_build_calls>0,"native acquisition never borrowed the bound exact source Pool");
     check(xs::binding.pool==nullptr && xs::binding.reclaim==nullptr,"joined native receiver leaked source TLS binding");
     if(odd_chips) {
@@ -492,8 +501,8 @@ void exact_source_binding_parity(bool odd_chips=false) {
     std::cout<<"source binding queries="<<cached.source_counts.queries<<" cached="<<cached.source_counts.cached_points
         <<" build="<<cached.source_counts.original_build_calls<<" direct="<<cached.source_counts.direct_calls
         <<" bytes="<<cached.source_bytes<<" peak_combined="<<cached.peak<<"\n";
-    unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
-    if(odd_chips)unsetenv("DATAPUMP_SCHED_ORIGIN_CLASSES");
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION",nullptr);
+    if(odd_chips)datapump::testing::set_environment("DATAPUMP_SCHED_ORIGIN_CLASSES",nullptr);
 }
 void exact_point_cache_parity() {
     namespace xp=modem::detail::scheduled_source_points;
@@ -509,7 +518,7 @@ void exact_point_cache_parity() {
     auto s=search(c,input,true);s.chunk_bits=1;s.retain_score=5;s.candidate_limit=4096;
     s.clock_errors_ppm={-12,0,12};s.admitted_clock_half_width_ppm=12;s.worker_threads=2;
     s.start_uncertainty_seconds=modem::pattern_chip_samples(c)/2./c.sample_rate;
-    setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);setenv("DATAPUMP_SCHED_LAZY_BATCH","0",1);
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","1");datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_BATCH","0");
     // Same full receiver, PCM, guards and process fences. Only the explicitly
     // injected exact q arena differs; no ambient Live environment flag is used.
     const auto original=receive(c,input,s,113,false,false,false,false,false,false,false,{},false,false,false,true,false,false,false,true);
@@ -550,14 +559,14 @@ void exact_point_cache_parity() {
     check(!xs::binding.points&&!xs::binding.point_cache,"joined exact point fixture leaked TLS binding");
     std::cout<<"exact point cache queries="<<counts.queries<<" hits="<<counts.hits<<" original_calls="<<original_calls
         <<" bytes="<<cached.point_bytes<<" peak="<<cached.peak<<" carry="<<cached.work.scheduled_carry_samples<<"\n";
-    unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
+    datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION",nullptr);
 }
 void automatic_dense_footprint() {
     constexpr std::size_t budget=23045189;
     // An implicit eligibility exclusion is not a rejection of affordable
     // original complex/drift reception, even under the diagnostic override.
     for(const auto* mode:{"auto","1"}) {
-        setenv("DATAPUMP_SCHED_LAZY_ACQUISITION",mode,1);
+        datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION",mode);
         auto c=configuration(3,1,false);c.integration_seconds=16;
         c.receiver_strategy=modem::ReceiverStrategy::complex_only;
         auto s=modem::PatternSearch{};s.start_offset_seconds=0;s.start_uncertainty_seconds=0;
@@ -582,7 +591,7 @@ void automatic_dense_footprint() {
         const auto g=modem::pattern_scheduled_complex_geometry(c,s);
         check(g.supported && g.retained_hypotheses>10000 && g.workspace_lower_bound_bytes<budget,
             "calendar footprint fixture no longer exposes the cheap-bound gap");
-        unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
+        datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION",nullptr);
         const auto policy=modem::pattern_scheduled_acquisition_policy(c,s,g,budget);
         check(policy.requested && policy.supported,
             "automatic used the cheap fit-only bound instead of complete mandatory eager state");
@@ -609,11 +618,11 @@ void short_split_lifecycle_parity() {
         check(!modem::packed_scheduled_symbols(c),"short Spread fixture did not exercise split-source lifecycle");
         const auto pcm=capture(c,bits,true);
         auto s=search(c,pcm);s.chunk_bits=1;s.retain_score=0;s.candidate_limit=4096;
-        setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","0",1);
+        datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","0");
         const auto reference=receive(c,pcm,s,113,false,false,false,false,false,false,true);
-        setenv("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);
+        datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION","1");
         const auto actual=receive(c,pcm,s,113,false,false,false,false,false,false,true);
-        unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");
+        datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION",nullptr);
         compare(reference,actual);
         check(actual.work.backend==modem::PatternCorrelationBackend::scheduled_acquisition,
             "short-symbol fixture silently retained dense fallback");
@@ -627,10 +636,11 @@ void short_split_lifecycle_parity() {
 
 }
 int main(){try {
+    if(!native_reference_available())std::cout<<"OMITTED: native-screen execution counters; unqualified ORIGINAL reference environment (functional fallback parity remains active)\n";
     stable_owner_storage();
     smooth_fhss_native_parity();
     automatic_dense_footprint();
     short_split_lifecycle_parity();coherent_prefit_parity();exact_point_cache_parity();
     paired(1,false,false,false);paired(10,true,true,false);paired(10,false,true,true);original_push_fences();screened_noise_and_payload();original_projection_cache_parity();exact_guard_demand_parity();exact_source_binding_parity();exact_source_binding_parity(true);
     std::cout<<"scheduled implicit acquisition lifecycle tests passed\n";return 0;
-} catch(const std::exception& error){unsetenv("DATAPUMP_SCHED_LAZY_ACQUISITION");std::cerr<<error.what()<<'\n';return 1;}}
+} catch(const std::exception& error){datapump::testing::set_environment("DATAPUMP_SCHED_LAZY_ACQUISITION",nullptr);std::cerr<<error.what()<<'\n';return 1;}}

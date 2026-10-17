@@ -5,6 +5,7 @@
 #include <limits>
 #include <new>
 #include <stdexcept>
+#include <string>
 using namespace datapump::modem::detail::scheduled_capture;
 namespace {std::atomic<std::size_t> allocations{0};}
 void* operator new(std::size_t n) {allocations.fetch_add(1,std::memory_order_relaxed);if(auto* p=std::malloc(n?n:1))return p;throw std::bad_alloc();}

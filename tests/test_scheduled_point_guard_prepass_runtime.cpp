@@ -97,10 +97,10 @@ struct PatternCorrelatorTimingTestAccess {
         s.lazy_state()->history_generation,s.history.size(),s.emissions.size(),s.bursts.size()};}
 
     static bool qualified(){return State::lazy_reference_environment();}
-    static void near(double a,double b,const char* m){check(std::isfinite(a)&&std::isfinite(b)&&std::abs(a-b)<=2e-8*(1+std::abs(a)+std::abs(b)),m);}
+    static void check_near(double a,double b,const char* m){check(std::isfinite(a)&&std::isfinite(b)&&std::abs(a-b)<=2e-8*(1+std::abs(a)+std::abs(b)),m);}
     static void same_fit(const detail::CorrelationFit& a,const detail::CorrelationFit& b){
-        check(a.count==b.count,"end-strip actual count changed");near(a.xc,b.xc,"end-strip xc changed");near(a.xs,b.xs,"end-strip xs changed");
-        near(a.cc,b.cc,"end-strip cc changed");near(a.ss,b.ss,"end-strip ss changed");near(a.cs,b.cs,"end-strip cs changed");near(a.energy,b.energy,"end-strip energy changed");
+        check(a.count==b.count,"end-strip actual count changed");check_near(a.xc,b.xc,"end-strip xc changed");check_near(a.xs,b.xs,"end-strip xs changed");
+        check_near(a.cc,b.cc,"end-strip cc changed");check_near(a.ss,b.ss,"end-strip ss changed");check_near(a.cs,b.cs,"end-strip cs changed");check_near(a.energy,b.energy,"end-strip energy changed");
     }
     static void actual_prepass(bool bulk,bool archive_enabled,bool fhss,bool cohort,bool compact=false) {
         namespace sum=detail::scheduled_default_point_guard_summary;
@@ -129,11 +129,11 @@ struct PatternCorrelatorTimingTestAccess {
         mode("DATAPUMP_SCHED_DEFAULT_POINT_GUARD_ARCHIVE","0");state.default_linear_cache.reset();
         const auto direct=s.lazy_default_linear_point(first,range,37,{},true);check(direct.ready&&state.default_linear_cache,"ordinary fullguard fallback unavailable");
         for(unsigned bit=0;bit<2;++bit){same_fit(saved.whole[bit],state.default_linear_cache->result.events.front().whole[bit]);
-            near(prepared.scores.score[bit],direct.scores.score[bit],"prepass changed chosen complete guard statistic");}
+            check_near(prepared.scores.score[bit],direct.scores.score[bit],"prepass changed chosen complete guard statistic");}
         for(const auto threshold:{0.,5.,37.,91.}){const auto a=sum::scores(saved,threshold);
             const auto b=detail::scheduled_default_linear_events::scores(state.default_linear_cache->result.events.front(),state.default_linear_cache->geometry,threshold);
             check(a.valid&&b.valid&&a.bit==b.bit&&a.outer_presence_active==b.outer_presence_active,"prepass retained old threshold branch");
-            near(a.score[0],b.score[0],"prepass zero statistic changed");near(a.score[1],b.score[1],"prepass one statistic changed");}
+            check_near(a.score[0],b.score[0],"prepass zero statistic changed");check_near(a.score[1],b.score[1],"prepass one statistic changed");}
         check(detector(s)==before&&pcm_identity(s)==pcm&&std::tuple{range.first,range.end,range.index,range.id}==before_range,
             "prepass consumed detector lane/trial/history or changed original PCM");
         check(!state.transient_reservation&&!state.default_point_guard_archive.borrowed()&&!state.serial_execution->screen_active,

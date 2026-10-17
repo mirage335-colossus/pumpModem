@@ -198,12 +198,12 @@ struct PatternCorrelatorTimingTestAccess {
         }
         check(witnesses>0,"successful P3 bypassed preceding Temporal source acceleration");
         check(detail::scheduled_r1_export_counts().samples>r1.samples,"P3 lost preceding R1 export");
-        const auto near=[](double a,double b){return std::abs(a-b)<=1e-7*std::max({1.,std::abs(a),std::abs(b)});};
+        const auto approximately_equal=[](double a,double b){return std::abs(a-b)<=1e-7*std::max({1.,std::abs(a),std::abs(b)});};
         const auto fit=[&](const Fit& a,const Fit& b) {
             check(a.count==b.count&&std::abs(a.energy-b.energy)<=1e-12*std::max({1.,a.energy,b.energy}),"P3 changed actual observations/noise energy");
-            check(near(a.xc,b.xc)&&near(a.xs,b.xs)&&near(a.cc,b.cc)&&near(a.ss,b.ss)&&near(a.cs,b.cs),
+            check(approximately_equal(a.xc,b.xc)&&approximately_equal(a.xs,b.xs)&&approximately_equal(a.cc,b.cc)&&approximately_equal(a.ss,b.ss)&&approximately_equal(a.cs,b.cs),
                 "P3 real I/Q Fit differs beyond bounded association tolerance");
-            check(near(a.score(),b.score()),"P3 score differs beyond bounded association tolerance");
+            check(approximately_equal(a.score(),b.score()),"P3 score differs beyond bounded association tolerance");
             for(double threshold:{1.,3.,10.,40.})check((a.score()>=threshold)==(b.score()>=threshold),
                 "P3 changed fixed-threshold comparison");
         };
@@ -216,7 +216,7 @@ struct PatternCorrelatorTimingTestAccess {
                 if(!x.chip_evidence.empty()) {
                     const auto& ca=x.chip_evidence[i][bit];const auto& cb=y.chip_evidence[i][bit];fit(ca.cell,cb.cell);
                     check(ca.projected_rank==cb.projected_rank&&ca.cell_index==cb.cell_index&&ca.nested==cb.nested&&
-                        near(ca.projected_energy,cb.projected_energy),"P3 changed chip guard identity/energy");
+                        approximately_equal(ca.projected_energy,cb.projected_energy),"P3 changed chip guard identity/energy");
                     check(ca.colored_excess(a.fits[bit],40)==cb.colored_excess(b.fits[bit],40),"P3 changed excess guard");
                 }
             }
@@ -225,7 +225,7 @@ struct PatternCorrelatorTimingTestAccess {
                     "P3 changed original outer ring chronology");
                 for(std::size_t k=0;k<a.pulse.size();++k)check(std::abs(a.pulse[k]-b.pulse[k])<=1e-7*std::max({1.,std::abs(a.pulse[k]),std::abs(b.pulse[k])}),
                     "P3 changed complete outer pulse evidence");
-                for(unsigned bit=0;bit<2;++bit)check(near(a.variance[bit],b.variance[bit])&&
+                for(unsigned bit=0;bit<2;++bit)check(approximately_equal(a.variance[bit],b.variance[bit])&&
                     std::abs(a.dot[bit]-b.dot[bit])<=1e-7L*std::max({1.L,std::abs(a.dot[bit]),std::abs(b.dot[bit])})&&
                     a.can_admit(bit,40)==b.can_admit(bit,40),"P3 changed outer evidence");
             };
