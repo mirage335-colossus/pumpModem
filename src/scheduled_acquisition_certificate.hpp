@@ -67,9 +67,9 @@ template<class T> bool environment() {
     // Native SSE/AVX arithmetic has an independent MXCSR rounding field.
     if(_mm_getcsr()&((1U<<15)|(1U<<6)|(3U<<13)))return false;
 #endif
-    volatile T small=std::numeric_limits<T>::min(),two=2,tiny=std::numeric_limits<T>::denorm_min(),one=1;
+    volatile T minimum_normal=std::numeric_limits<T>::min(),two=2,tiny=std::numeric_limits<T>::denorm_min(),one=1;
     volatile double dsmall=std::numeric_limits<double>::min(),dtwo=2,dtiny=std::numeric_limits<double>::denorm_min(),done=1;
-    return small/two>0 && tiny*one>0 && dsmall/dtwo>0 && dtiny*done>0;
+    return minimum_normal/two>0 && tiny*one>0 && dsmall/dtwo>0 && dtiny*done>0;
 }
 // Source-coordinate reuse and its residual bounds require the declared native
 // long-double width, not an x87 register silently set to binary64 precision.

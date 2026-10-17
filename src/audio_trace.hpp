@@ -134,7 +134,27 @@ struct State {
         {std::lock_guard lock(mutex);done=true;}finished.notify_all();
     }
 };
-inline std::atomic<std::shared_ptr<State>> active;
+// The shared_ptr atomic free functions also support standard libraries without
+// the C++20 atomic<shared_ptr> specialization (including the GCC 11 SDK build).
+// Keep owning snapshots so delayed producers and detached writers retain State.
+class StateSlot {
+    std::shared_ptr<State> pointer_;
+public:
+    StateSlot()=default;
+    StateSlot(const StateSlot&)=delete;
+    StateSlot& operator=(const StateSlot&)=delete;
+    std::shared_ptr<State> load(std::memory_order order=std::memory_order_seq_cst) const noexcept {
+        return std::atomic_load_explicit(&pointer_,order);
+    }
+    void store(std::shared_ptr<State> desired,std::memory_order order=std::memory_order_seq_cst) noexcept {
+        std::atomic_store_explicit(&pointer_,std::move(desired),order);
+    }
+    bool compare_exchange_strong(std::shared_ptr<State>& expected,std::shared_ptr<State> desired) noexcept {
+        return std::atomic_compare_exchange_strong_explicit(&pointer_,&expected,std::move(desired),
+            std::memory_order_seq_cst,std::memory_order_seq_cst);
+    }
+};
+inline StateSlot active;
 inline std::atomic<std::uint64_t> next_identity{0};
 inline std::uint64_t identity(){return ++next_identity;}
 template<class F>void record(const char* event,F fields) noexcept {

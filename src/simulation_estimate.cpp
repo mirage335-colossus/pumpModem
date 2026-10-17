@@ -607,8 +607,8 @@ std::optional<FftWindowWork> fft_window_work(const modem::Config& config,std::si
         // envelope cannot prove this, narrower actual maps may still split.
         // Price both the broad fallback and up to Cmax successful components.
         const auto separation=radius/bin+(radius%bin!=0);
-        const auto component_bound=std::min({std::size_t{256},candidate_limit,
-            std::size_t{1}+(starts-1)/separation});
+        const auto component_bound=static_cast<std::size_t>(std::min<std::uint64_t>({256,candidate_limit,
+            std::uint64_t{1}+(starts-1)/separation}));
         const bool uncertain_partition=minimum_readiness&&component_scheduling&&!separated;
         const auto dispatches=separated?components.count:std::size_t{1};
         long double operations=0,host=0,gpu=0,jobs=0,positions=0,direct=0,transforms=0;
@@ -1727,8 +1727,8 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         const auto component_radius=std::max<std::uint64_t>(1,symbol/2);
         const auto component_separation=component_radius/static_cast<std::size_t>(bin)+
             (component_radius%static_cast<std::size_t>(bin)!=0);
-        const auto maximum_component_dispatches=std::min({std::size_t{256},modem::PatternSearch{}.candidate_limit,
-            std::size_t{1}+(static_cast<std::size_t>(hop)-1)/component_separation});
+        const auto maximum_component_dispatches=static_cast<std::size_t>(std::min<std::uint64_t>({256,modem::PatternSearch{}.candidate_limit,
+            std::uint64_t{1}+(static_cast<std::uint64_t>(hop)-1)/component_separation}));
         // If exact enumeration is unavailable, cover each potential group's
         // separate paired input cache as well as a whole-component fallback.
         const auto full_group_allowance=frequencies*template_pair_work*length+
@@ -2419,7 +2419,8 @@ bool shaped_source_statistics(const transfer::Options& options,const Work& work,
                 // Match real PCM input, including its conjugate carrier image.
                 cell+=2.*pcm[i].real()*rotation/amplitude;++payload;
                 if(payload%bin)continue;
-                const auto first=payload-bin,section=static_cast<std::size_t>(first/(total/4));
+                const auto first=payload-bin;
+                const auto section=static_cast<std::size_t>(first/(total/4));
                 const auto position=static_cast<double>(first)+(static_cast<double>(bin)-1)/2;
                 const auto pair=code.shaped_values(0,position);
                 const auto a=pair[source_bit],b=pair[1-source_bit],s=cell/static_cast<double>(bin);

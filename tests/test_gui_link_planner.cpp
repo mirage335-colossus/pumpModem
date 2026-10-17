@@ -162,6 +162,11 @@ void earth_moon_earth_estimate() {
           "Collapsed Existing-only EME must display its unqualified model scope");
     auto amplitude_inputs=inputs;amplitude_inputs.target_db_hz=-35.07209969647869;
     amplitude_inputs.receiver_settings->receive_keys.emplace_back(Bytes(32,0x71));
+    // This negative coverage fixture must not inherit the CI host's RAM size.
+    // Keep the real EME preset's 75% forwarding assertion above independent.
+    amplitude_inputs.options.dsp_workspace_bytes=2ULL*1024*1024*1024;
+    amplitude_inputs.receiver_settings->dsp_workspace_bytes=amplitude_inputs.options.dsp_workspace_bytes;
+    amplitude_inputs.receiver_settings->transfer.dsp_workspace_bytes=amplitude_inputs.options.dsp_workspace_bytes;
     planner::Cache amplitude_cache;std::stop_source amplitude_stop;std::optional<planner::Model> amplitude;
     try {planner::build(amplitude_inputs,amplitude_cache,amplitude_stop.get_token(),[&](const auto& current) {
         amplitude=current;amplitude_stop.request_stop();

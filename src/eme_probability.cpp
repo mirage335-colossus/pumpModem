@@ -66,7 +66,8 @@ Geometry make_geometry(const modem::Config& c,const EmeProbabilitySettings& sett
         return std::abs(a.frequency_offset_hz-physical_frequency)<std::abs(b.frequency_offset_hz-physical_frequency);
     });
     g.frequency_center=nearest->frequency_offset_hz;
-    const auto initial=c.sample_rate/bin,hop=g.samples/bin/2;
+    const auto initial=c.sample_rate/bin;
+    const auto hop=g.samples/bin/2;
     const auto trials=static_cast<long double>(initial+hop)*bank.hypotheses.size();
     g.threshold=static_cast<double>(-std::log(1e-10L)+2*std::log(trials+1)+std::log(2.L*bank.hypotheses.size()));
     const auto image=std::abs(modem::detail::pattern_projection_image_ratio(bin,c.carrier_hz,c.sample_rate));

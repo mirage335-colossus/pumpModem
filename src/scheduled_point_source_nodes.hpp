@@ -33,8 +33,8 @@ inline std::optional<std::size_t> nodes(const Key& k){
 // No one-ulp or nearest-node approximation is authorized by this cache.
 inline std::optional<std::size_t> canonical(const Key& k,double source){
     const auto n=nodes(k);if(!n||!std::isfinite(source)||source<0||source>k.symbol)return {};
-    const auto near=std::round(source*k.subdivisions/k.chip);
-    if(near<0||near>=*n)return {};const auto at=static_cast<std::size_t>(near);
+    const auto rounded_index=std::round(source*k.subdivisions/k.chip);
+    if(rounded_index<0||rounded_index>=*n)return {};const auto at=static_cast<std::size_t>(rounded_index);
     const auto exact=static_cast<double>(static_cast<std::uint64_t>(at)*k.chip)/k.subdivisions;
     if(std::bit_cast<std::uint64_t>(exact)!=std::bit_cast<std::uint64_t>(source))return {};return at;
 }

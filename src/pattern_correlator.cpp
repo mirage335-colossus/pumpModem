@@ -1077,11 +1077,11 @@ struct PatternCorrelator::Impl {
     };
     struct PhaseGroup {std::uint64_t lower=0,upper=0;};
     struct PhaseGroups {
-        std::array<PhaseGroup,3> small{};
+        std::array<PhaseGroup,3> inline_groups{};
         std::uint64_t first=0,step=0;
         PhaseGroup operator[](std::size_t index) const {
             if(step){const auto phase=first+index*step;return {phase,phase};}
-            return small.at(index);
+            return inline_groups.at(index);
         }
     };
     struct AmplitudePhaseEntry {
@@ -2675,7 +2675,7 @@ struct PatternCorrelator::Impl {
     std::uint64_t lazy_history_first() const {
         return lazy_state()->shared_capture?lazy_state()->history_first:lazy_state()->capture.empty()?lazy_state()->capture_end:lazy_state()->capture.front().first;
     }
-    struct LazyCaptureFence {std::uint64_t first=0;std::size_t count=0;};
+    struct LazyCaptureFence {std::uint64_t first=0,count=0;};
     template<class Consumer> void lazy_visit_fences(std::uint64_t first,std::uint64_t end,Consumer consume) const {
         require(first<=end && first>=lazy_history_first() && end<=lazy_state()->capture_end,
             "implicit original fence interval is outside retained capture");
@@ -7841,7 +7841,7 @@ struct PatternCorrelator::Impl {
     }
     PhaseGroups phase_groups(const Hypothesis& h,std::size_t& count)const {
         PhaseGroups groups;count=0;
-        if(scheduled_map()){groups.small[0]={h.phase_lower,h.phase_upper};count=1;return groups;}
+        if(scheduled_map()){groups.inline_groups[0]={h.phase_lower,h.phase_upper};count=1;return groups;}
         if(config.fake_hopping && config.fake_hopping->matched_gaps && h.phase_lower<=h.phase_upper) {
             groups.first=h.phase_lower;groups.step=phase_step;
             count=(h.phase_upper-h.phase_lower)/phase_step+1;return groups;
@@ -7858,8 +7858,8 @@ struct PatternCorrelator::Impl {
                 else high=mid-1;
             }
             const auto end=lower+low*phase_step;
-            require(count<groups.small.size(),"pattern phase groups exceed finite symbol interval");
-            groups.small[count++]={lower,end};
+            require(count<groups.inline_groups.size(),"pattern phase groups exceed finite symbol interval");
+            groups.inline_groups[count++]={lower,end};
             if(end==h.phase_upper)break;
             lower=end+phase_step;
         }

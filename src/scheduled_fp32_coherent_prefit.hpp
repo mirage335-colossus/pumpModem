@@ -47,9 +47,9 @@ struct Budget {
         // The factor2 is exact in this bounded domain. D uses fewer operations.
         const auto g=cert::gamma(3*static_cast<std::size_t>(count)+8,u);
         const auto den=cert::down(1-g);
-        const auto small=cert::mul(8*static_cast<double>(count)+32,eta);
-        const auto du=cert::divide(cert::add(d,small),den);
-        const auto hu=cert::divide(cert::add(h,small),den);
+        const auto underflow_allowance=cert::mul(8*static_cast<double>(count)+32,eta);
+        const auto du=cert::divide(cert::add(d,underflow_allowance),den);
+        const auto hu=cert::divide(cert::add(h,underflow_allowance),den);
         // Each field's dependency path has <=9 local rounded operations and
         // its ordered accumulation. 12n+32 conservatively covers both.
         const auto graph=cert::gamma(12*static_cast<std::size_t>(count)+32,u);
