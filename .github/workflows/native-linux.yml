@@ -16,7 +16,7 @@ on:
       scope:
         description: 'Run one complete native scope without repeating the other shards'
         type: choice
-        options: [core, fast, live, calibration, frontends, web, package]
+        options: [core, fast, live, calibration, frontends, web, package, cli]
         default: core
       calibration_section:
         description: 'Calibration section; used only by the calibration scope'
@@ -36,7 +36,7 @@ on:
         type: string
         default: Release
       scope:
-        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, or sanitizer-gui'
+        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, or sanitizer-gui'
         type: string
         required: true
       calibration_section:
@@ -130,6 +130,7 @@ jobs:
           -DDART_TESTING_TIMEOUT=3600
           -DCMAKE_DISABLE_FIND_PACKAGE_Python3=${{ (inputs.scope == 'frontends' || inputs.scope == 'web') && 'FALSE' || 'TRUE' }}
       - name: Build this shard's prerequisites
+        id: build_prerequisites
         run: |
           case "$CI_SCOPE" in
             calibration|calibration-aggregate) targets=(test_differential_receiver_probability) ;;
@@ -138,6 +139,7 @@ jobs:
             web) targets=(datapump-tests-web) ;;
             sanitizer-gui) targets=(datapump-apps test_gui_smoke_budget test_gui_launch_command) ;;
             core) targets=(datapump-apps datapump-tests-ci-core) ;;
+            cli) targets=(pump) ;;
             fast) targets=(datapump-tests-fast) ;;
             live) targets=(datapump-tests-ci-live) ;;
             *) echo "Unknown native scope: $CI_SCOPE" >&2; exit 2 ;;
@@ -205,8 +207,12 @@ jobs:
         run: |
           xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 tools/run-gui-smoke.py --allow-budget-exhaustion --report "$DATAPUMP_CI_SMOKE_WARNINGS_DIR/source-gui.json" --log "build/gui-smoke-${{ inputs.build_type }}-${{ github.run_attempt }}.log" --summary "$GITHUB_STEP_SUMMARY" -- ./build/datapump-gui --smoke-test --smoke-timeout 600
       - name: Developer CLI regressions (Python is not packaged)
-        if: inputs.scope == 'core'
-        run: python3 tests/test_cli.py build/pump
+        if: ${{ !cancelled() && (inputs.scope == 'core' || inputs.scope == 'cli') && steps.build_prerequisites.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          printf 'source_sha=%s\n' "$GITHUB_SHA" | tee build/cli-regressions.log
+          sha256sum build/pump | tee -a build/cli-regressions.log
+          python3 tests/test_cli.py build/pump 2>&1 | tee -a build/cli-regressions.log
       - name: Verify relocated native GUI and package inventory
         if: inputs.scope == 'package'
         env:
@@ -240,6 +246,7 @@ jobs:
           name: CI-Linux-${{ inputs.build_type }}-${{ inputs.scope }}-${{ inputs.calibration_section }}${{ inputs.calibration_shard != '' && format('-part-{0}', inputs.calibration_shard) || '' }}-attempt-${{ github.run_attempt }}
           path: |
             build/ci-test-report.*
+            build/cli-regressions.log
             build/Testing/Temporary/
             build/gui-smoke-*.log
             build/package-*.log
