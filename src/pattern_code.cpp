@@ -883,11 +883,23 @@ struct PatternTransmitter::Impl {
     std::unique_ptr<StreamCache> suppression, suppression_data, suppression_pattern, suppression_dsss;
     std::unique_ptr<FhssSymbolCalendar> calendar;
     std::unique_ptr<ScheduledSymbolCalendar> packed_calendar;
-    std::unique_ptr<SymbolBurstPlan> burst;
-    mutable std::optional<SymbolBurstCursor> burst_cursor;
-    SymbolBurstSlot burst_first;
-    bool burst_open=false;
-    mutable std::optional<std::uint64_t> burst_horizon_finish;
+    struct BurstState {
+        SymbolBurstPlan plan;
+        SymbolBurstSlot first;
+        mutable SymbolBurstCursor cursor;
+        bool open=false;
+        mutable std::optional<std::uint64_t> horizon_finish;
+        BurstState(const Config& value,std::uint64_t epoch,bool open_stream):
+            plan(value),first(plan.bind_payload(epoch,value.stream_phase_samples)),
+            cursor(plan,first),open(open_stream) {}
+        BurstState(const BurstState&)=delete;
+        BurstState& operator=(const BurstState&)=delete;
+        BurstState(BurstState&&)=delete;
+        BurstState& operator=(BurstState&&)=delete;
+    };
+    // The cursor borrows its enclosing plan. Keep both at one stable address,
+    // and leave ordinary transmission free of Burst-only control storage.
+    std::unique_ptr<BurstState> burst;
     std::unique_ptr<VirtualCover> waiting_cover;
     std::uint64_t calendar_rank=0,calendar_tick=0;
     mutable std::uint64_t bit_count=0;
@@ -907,7 +919,7 @@ struct PatternTransmitter::Impl {
          std::uint64_t generated_count=0):
         bits(std::move(input)), config(value), code(config, epoch),
         bit_count(generated_count?generated_count:bits.size()),source_epoch(epoch),start(start_chip) {
-        burst_open=config.symbol_burst.enabled() && generated_count==std::numeric_limits<std::uint64_t>::max();
+        const bool burst_open=config.symbol_burst.enabled() && generated_count==std::numeric_limits<std::uint64_t>::max();
         if(burst_open)bit_count=NoiseTransmitter::sample_target/code.symbol_samples();
         if(config.fake_hopping) {
             require(config.data_key.has_value(),"FHSS requires an encryption key");
@@ -929,9 +941,7 @@ struct PatternTransmitter::Impl {
                 "pattern transmission duration would overflow");
         if(config.symbol_burst.enabled()) {
             require(start==0,"Symbol_Burst requires a rebased symbol origin");
-            burst=std::make_unique<SymbolBurstPlan>(config);
-            burst_first=burst->bind_payload(epoch,config.stream_phase_samples);
-            burst_cursor.emplace(*burst,burst_first);
+            burst=std::make_unique<BurstState>(config,epoch,burst_open);
         }
         if(packed_scheduled_symbols(config)) {
             packed_calendar=std::make_unique<ScheduledSymbolCalendar>(config);
@@ -951,7 +961,7 @@ struct PatternTransmitter::Impl {
         total = burst_open?0:symbol_schedule_detail::add(payload_offset(bit_count-1),code.symbol_samples());
         // Exact finite sizing walks the recursive calendar once. Playback
         // starts from its original checkpoint rather than revisiting that walk.
-        if(burst_cursor)burst_cursor->checkpoint(burst_first);
+        if(burst)burst->cursor.checkpoint(burst->first);
         training=surrounding_noise?training_sample_count(config):0;
         require(training<=std::numeric_limits<std::uint64_t>::max()-total,"pattern transmission duration would overflow");
         total+=training;
@@ -975,7 +985,7 @@ struct PatternTransmitter::Impl {
             total=NoiseTransmitter::sample_target;
             require(suppression_samples<total,"Symbol_Burst tuning cover exceeds its safety horizon");
             content_end=total-suppression_samples;
-            const auto first_end=symbol_schedule_detail::add(training,burst->distance(burst_first.support_begin,burst_first.support_end));
+            const auto first_end=symbol_schedule_detail::add(training,burst->plan.distance(burst->first.support_begin,burst->first.support_end));
             const auto reserve=transmit_stop_sample_count(config);
             require(reserve<=total && first_end<=total-reserve,"Symbol_Burst tuning symbol exceeds its safety horizon");
         }
@@ -1024,7 +1034,6 @@ struct PatternTransmitter::Impl {
         if(calendar || packed_calendar)cover_bytes+=sizeof(VirtualCover)+code.working_bytes()+sizeof(Config)+2*sizeof(Crypto)+64;
         if(calendar)cover_bytes+=sizeof(FhssSymbolCalendar);
         if(packed_calendar)cover_bytes+=packed_calendar->working_bytes();
-        if(burst)cover_bytes+=burst->working_bytes();
         const bool retain_prefix=protected_cover && training && padding;
         if(retain_prefix)cover_bytes+=sizeof(PrefixSnapshot);
         require(bit_count <= std::numeric_limits<std::uint64_t>::max() / code.chips_per_symbol(),
@@ -1039,6 +1048,7 @@ struct PatternTransmitter::Impl {
             (1U+static_cast<unsigned>(config.data_key.has_value())+
              static_cast<unsigned>(config.scramble)+static_cast<unsigned>(config.dsss));
         const auto fixed = sizeof(Impl) + sizeof(PatternTransmitter) + code.working_bytes()+cover_bytes+
+            (burst?sizeof(BurstState):0)+
             (hopping?sizeof(FhssSchedule)+sizeof(FhssPlan)+hopping->plan->power_fallback_reason.capacity()+1+FhssSchedule::cycle_bytes+sizeof(std::array<unsigned,FhssPlan::capacity>):0)+
             (scheduled?scheduled->working_bytes():0)+(suppression_samples && !private_cover?sizeof(SuppressionChips):0)+
             (caches+static_cast<unsigned>(generated_data!=nullptr))*sizeof(StreamCache);
@@ -1082,26 +1092,26 @@ struct PatternTransmitter::Impl {
         OPENSSL_cleanse(config.dsss_seed.data(),config.dsss_seed.size());
     }
     std::uint64_t payload_offset(std::uint64_t symbol) const {
-        if(burst_cursor)return burst->distance(burst_first.payload_begin,burst_cursor->at(symbol).payload_begin);
+        if(burst)return burst->plan.distance(burst->first.payload_begin,burst->cursor.at(symbol).payload_begin);
         if(packed_calendar)return packed_calendar->source_slot(symbol_schedule_detail::add(calendar_rank,symbol))-calendar_tick;
         return calendar?calendar->slot(symbol_schedule_detail::add(calendar_rank,symbol))-calendar_tick:
             symbol_schedule_detail::multiply(symbol,code.symbol_samples());
     }
     std::uint64_t payload_lower_bound(long double position) const {
         if(position<=0)return 0;
-        if(burst_cursor) {
+        if(burst) {
             require(std::isfinite(position) && position<std::ldexp(1.L,64),"Symbol_Burst lookup exceeds the sample range");
-            const auto slot=burst_cursor->seek_payload_at_or_after(burst->add(burst_first.payload_begin,static_cast<std::uint64_t>(std::ceil(position))));
-            if(burst_open && !burst_horizon_finish) {
+            const auto slot=burst->cursor.seek_payload_at_or_after(burst->plan.add(burst->first.payload_begin,static_cast<std::uint64_t>(std::ceil(position))));
+            if(burst->open && !burst->horizon_finish) {
                 const auto reserve=transmit_stop_sample_count(config);
-                const auto end=symbol_schedule_detail::add(training,burst->distance(burst_first.support_begin,slot.support_end));
+                const auto end=symbol_schedule_detail::add(training,burst->plan.distance(burst->first.support_begin,slot.support_end));
                 if(reserve>NoiseTransmitter::sample_target || end>NoiseTransmitter::sample_target-reserve) {
                     // Never start a symbol whose complete finite support and
                     // protected stop cannot fit. Finish after its predecessor.
                     bit_count=std::min(bit_count,slot.index);
                     require(bit_count!=0,"Symbol_Burst tuning has no complete symbol before its horizon");
-                    const auto previous=burst_cursor->at(bit_count-1);
-                    burst_horizon_finish=symbol_schedule_detail::add(training,burst->distance(burst_first.support_begin,previous.support_end));
+                    const auto previous=burst->cursor.at(bit_count-1);
+                    burst->horizon_finish=symbol_schedule_detail::add(training,burst->plan.distance(burst->first.support_begin,previous.support_end));
                 }
             }
             return slot.index;
@@ -1140,8 +1150,8 @@ struct PatternTransmitter::Impl {
         // immutable calendar already validated for this transmitter instead of
         // reconstructing waveform geometry for each generated Data bit.
         SymbolStreamAddress address;
-        if(burst_cursor) {
-            const auto payload=burst_cursor->at(symbol).payload_begin;
+        if(burst) {
+            const auto payload=burst->cursor.at(symbol).payload_begin;
             address={payload.epoch,payload.phase/code.symbol_samples(),payload.phase};
         } else if(calendar) {
             const auto total=symbol_schedule_detail::add(payload_offset(symbol),config.stream_phase_samples);
@@ -1352,7 +1362,7 @@ struct PatternTransmitter::Impl {
             std::size_t i=0;
             for(;i<count && cursor<total;++i,++cursor) {
                 if((i&4095U)==0)cancelled(stop);
-                if(burst_horizon_finish && !stop_at && cursor>=*burst_horizon_finish) {
+                if(burst && burst->horizon_finish && !stop_at && cursor>=*burst->horizon_finish) {
                     position=cursor;finish();physical_total=total;
                     if(cursor>=total)break;
                 }
@@ -1523,7 +1533,7 @@ struct PatternTransmitter::Impl {
         const auto exposed=payload_lower_bound(static_cast<long double>(emitted-training));
         if(!exposed)return source_epoch;
         const auto last=std::min(bit_count-1,exposed-1);
-        if(burst_cursor)return burst_cursor->at(last).payload_begin.epoch;
+        if(burst)return burst->cursor.at(last).payload_begin.epoch;
         if(packed_calendar)
             return packed_calendar->physical_slot(symbol_schedule_detail::add(calendar_rank,last))/config.sample_rate;
         if(scheduled) {
@@ -1655,7 +1665,7 @@ std::uint64_t PatternTransmitter::predicted_physical_stop_end(std::uint64_t fron
 std::uint64_t PatternTransmitter::source_total_samples() const { return impl_->total; }
 std::uint64_t PatternTransmitter::source_samples_emitted() const { return impl_->position; }
 double PatternTransmitter::bit_rate() const {
-    if(impl_->burst)return static_cast<double>(impl_->config.sample_rate)/impl_->burst->minimum_spacing_samples();
+    if(impl_->burst)return static_cast<double>(impl_->config.sample_rate)/impl_->burst->plan.minimum_spacing_samples();
     if(impl_->packed_calendar)return static_cast<double>(impl_->packed_calendar->slots_per_group())/(.4*impl_->config.scheduled_hopping->time_multiplier);
     if(impl_->scheduled)return modem::bit_rate(impl_->config);
     if(impl_->calendar)return static_cast<double>(impl_->calendar->per_hop)/impl_->config.fake_hopping->dwell_seconds;
@@ -1663,6 +1673,7 @@ double PatternTransmitter::bit_rate() const {
 }
 std::size_t PatternTransmitter::working_bytes() const {
     return sizeof(PatternTransmitter) + sizeof(Impl) + impl_->code.working_bytes() + impl_->cover_bytes + impl_->bits.capacity()+
+        (impl_->burst?sizeof(Impl::BurstState):0)+
         (impl_->hopping?sizeof(FhssSchedule)+sizeof(FhssPlan)+impl_->hopping->plan->power_fallback_reason.capacity()+1+FhssSchedule::cycle_bytes+sizeof(std::array<unsigned,FhssPlan::capacity>):0)+
         (impl_->scheduled?impl_->scheduled->working_bytes():0)+(impl_->suppression_chips?sizeof(Impl::SuppressionChips):0)+
         ((impl_->generated_data?1U:0U)+(impl_->settling?1U:0U)+(impl_->settling_data?1U:0U)+(impl_->settling_pattern?1U:0U)+
