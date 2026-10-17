@@ -10,6 +10,8 @@ namespace events=d::scheduled_default_linear_events;
 namespace fft=d::scheduled_linear_grid_fft;
 namespace {
 void check(bool x,const char* message){if(!x)throw std::runtime_error(message);}
+bool strip_arithmetic_supported(){return d::scheduled_acquisition_certificate::environment<double>()&&
+    std::numeric_limits<long double>::digits>std::numeric_limits<double>::digits;}
 template<class F>void fails(F&& f,const char* message){bool bad=false;try{f();}catch(const datapump::Error&){bad=true;}check(bad,message);}
 void close(double x,double y,const char* message){check(std::isfinite(x)&&std::isfinite(y)&&std::abs(x-y)<=2e-12*std::max({1.,std::abs(x),std::abs(y)}),message);}
 struct Fixture {
@@ -59,6 +61,10 @@ void roundtrip(unsigned width) {
     }
     const std::size_t cell=3;const auto* e=archive.edge(cell);const auto first=e->first+width,end=e->end-width;
     const auto stripped=a::strip(archive.moment(cell),*e,first,end,f.l,cell);
+    if(!strip_arithmetic_supported()) {
+        check(!stripped.known&&!stripped.count&&stripped.energy==0,"unsupported subtraction published an interior strip");
+        return;
+    }
     check(stripped.known&&stripped.count==end-first&&stripped.count>2,"valid interior strip became unknown");
     fft::InputRow direct{};long double energy=0;std::array<d::CorrelationFit,2> fits;
     for(auto n=first;n<end;++n) {
@@ -145,7 +151,7 @@ void validation_budget_and_cancel() {
 }
 }
 int main(){try {
-    if(!d::scheduled_acquisition_certificate::environment<double>()||std::numeric_limits<long double>::digits<=53)return 77;
     roundtrip(1);roundtrip(2);holes_small_cells_and_unknowns();validation_budget_and_cancel();
+    if(!strip_arithmetic_supported())std::cout<<"unsupported strip arithmetic refusal verified\n";
     std::cout<<"Default point guard endpoint source cases passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

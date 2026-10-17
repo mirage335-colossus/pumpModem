@@ -94,6 +94,7 @@ void exact_scheduled_target_import() {
     }
     verify(startup);startup.close();controller.close();trace.reset();
     std::ifstream in(trace_path);const std::string records((std::istreambuf_iterator<char>(in)),{});
+    in.close(); // Windows requires the reader to release its handle before removal.
     check(records.find("\"event\":\"gui_settings_committed\"")!=std::string::npos&&
           records.find("\"short_target_db_hz\":8")!=std::string::npos&&
           records.find("\"long_target_db_hz\":8")!=std::string::npos,

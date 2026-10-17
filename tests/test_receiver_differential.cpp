@@ -8,6 +8,7 @@
 #include <iostream>
 #include <numbers>
 #include <random>
+#include <string>
 #include <tuple>
 
 using namespace datapump;
@@ -156,13 +157,32 @@ void bounded_long_symbol_state() {
     c=config();const auto pcm=capture(c,{0},Signal::drifting);
     modem::PatternCorrelator enabled(c,search(),budget),baseline(c,search(false),budget);
     const auto prefix=static_cast<std::size_t>(modem::symbol_sample_count(c)/2);
-    enabled.push(std::span(pcm).first(prefix));baseline.push(std::span(pcm).first(prefix));
+    const auto step=[&](const char* phase,auto operation) {
+        try {operation();}
+        catch(const std::exception&) {
+            std::cerr<<"bounded_long_symbol_state phase="<<phase<<'\n';
+            const auto report=[](const char* name,const modem::PatternCorrelator& receiver) {
+                const auto work=receiver.work();
+                std::cerr<<name<<" working="<<receiver.working_bytes()
+                    <<" reserved="<<receiver.reserved_workspace_bytes()
+                    <<" peak="<<work.peak_workspace_bytes
+                    <<" backend="<<static_cast<unsigned>(work.backend)
+                    <<" drift_sections="<<work.drift_sections
+                    <<" differential_window="<<work.differential_window_samples<<'\n';
+            };
+            report("enabled",enabled);report("baseline",baseline);
+            throw;
+        }
+    };
+    step("enabled prefix push",[&]{enabled.push(std::span(pcm).first(prefix));});
+    step("baseline prefix push",[&]{baseline.push(std::span(pcm).first(prefix));});
     check(enabled.take_bursts().empty()&&baseline.take_bursts().empty(),"budget fixture unexpectedly finished a partial bit");
     const auto reduced=baseline.working_bytes();
     check(enabled.working_bytes()>reduced,"new local state was not accounted to the workspace");
-    enabled.set_workspace_bytes(reduced);
+    step("enabled workspace shrink",[&]{enabled.set_workspace_bytes(reduced);});
     check(enabled.working_bytes()<=reduced&&enabled.drift_tolerant(),"dropping local state lost the existing four-section fit");
-    enabled.push(std::span(pcm).subspan(prefix));baseline.push(std::span(pcm).subspan(prefix));
+    step("enabled suffix push",[&]{enabled.push(std::span(pcm).subspan(prefix));});
+    step("baseline suffix push",[&]{baseline.push(std::span(pcm).subspan(prefix));});
     check(enabled.take_bursts().size()==baseline.take_bursts().size(),"workspace shrink reset accumulated legacy evidence");
     const auto a=enabled.candidates(),b=baseline.candidates();
     check(a.size()==b.size(),"workspace shrink changed old detector diagnostics");
@@ -171,7 +191,12 @@ void bounded_long_symbol_state() {
 }
 }
 int main() {
-    try {sampled_improvement();rejection_and_boundaries();chunk_worker_parity();bounded_long_symbol_state();
+    const char* phase="sampled_improvement";
+    try {
+        sampled_improvement();
+        phase="rejection_and_boundaries";rejection_and_boundaries();
+        phase="chunk_worker_parity";chunk_worker_parity();
+        phase="bounded_long_symbol_state";bounded_long_symbol_state();
         std::cout<<"Sampled short-window differential receiver tests passed\n";return 0;
-    }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
+    }catch(const std::exception& e){std::cerr<<phase<<": "<<e.what()<<'\n';return 1;}
 }

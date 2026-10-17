@@ -68,12 +68,19 @@ void actual_pulse(){for(const auto private_key:{false,true}){
     CHECK(pattern.chip_samples()==34);CHECK(pattern.symbol_samples()%pattern.chip_samples()==0);
     for(unsigned Q:{8U,16U,4U,2U})for(const auto amplitude:{.03,2.})for(std::uint64_t cell=32*Q;cell<36*Q;++cell){
         coarse::Request r{pattern.symbol_samples(),pattern.chip_samples(),cell,Q,amplitude,1e-12,true};
-        const auto proof=coarse::certify(r,[&](auto k){return pattern.values(k);},[&](double x){return pattern.shaped_values(0,x);});CHECK(proof.cell.supported&&proof.endpoint_reads==2);
+        const auto proof=coarse::certify(r,[&](auto k){return pattern.values(k);},[&](double x){return pattern.shaped_values(0,x);});
+        if(!cert::coordinate_environment()) {
+            CHECK(!proof.cell.supported&&proof.endpoint_reads==0&&proof.coefficient_reads==0&&proof.execution_radius==cert::infinity);
+            CHECK(proof.cell.residual[0]==cert::infinity&&proof.cell.residual[1]==cert::infinity);
+            continue;
+        }
+        CHECK(proof.cell.supported&&proof.endpoint_reads==2);
         const auto first=double(cell)*pattern.chip_samples()/Q,last=double(cell+1)*pattern.chip_samples()/Q;
         for(unsigned i=0;i<=31;++i){const auto t=double(i)/31,x=(1-t)*first+t*last;const auto raw=pattern.shaped_values(0,x);
             for(unsigned b=0;b<2;++b){const auto original=pattern_limit_pcm(amplitude*raw[b])/amplitude;
                 const auto line=(1-t)*proof.cell.left[b]+t*proof.cell.right[b];CHECK(std::abs(original-line)<=proof.cell.residual[b]);}}}
 }}
 int main(){try{for(const auto r:{1.L,1.L-0.000037L,1.L+0.000051L}){family_oracle<float>(r);family_oracle<double>(r);}seams();actual_pulse();
+    if(!cert::coordinate_environment())std::cout<<"unsupported coordinate arithmetic coarse-pulse refusal verified\n";
     std::cout<<"linear family Original I/Q/Gram/count/certificate, nonunit/fractional, clipping/pulse/cancel/workspace passed\n";}
     catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -43,7 +43,8 @@ void verify(const std::array<double,4>& input,std::uint64_t N,std::uint64_t C) {
 }
 int main() {
     try {
-        check(Tile::arithmetic_supported(),"compile with existing qualified original arithmetic flags/fenv");
+        // This oracle builds public Plans and compares native pulse callbacks;
+        // it does not gather or execute the architecture-specific Tile backend.
         for(std::uint64_t C=1;C<=1023;++C) {
             const auto qmax=((std::uint64_t{1}<<31)-32)/C;
             for(const auto q:{std::uint64_t{9},std::uint64_t{10},qmax-2})

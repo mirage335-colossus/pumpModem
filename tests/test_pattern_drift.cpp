@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cmath>
 #include <complex>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <numbers>
@@ -90,6 +91,7 @@ modem::PatternSearch search(bool drift) {
 struct Result {
     Bytes bits;
     std::vector<modem::PatternBurst> events;
+    std::vector<std::size_t> event_poll_positions;
     std::vector<modem::PatternEvidence> candidates;
     std::size_t bit_polls=0,completions=0,peak_working=0;
     double milliseconds=0;
@@ -115,6 +117,7 @@ Result receive_with(Receiver& receiver,const modem::Config& c,const std::vector<
             result.bits.insert(result.bits.end(),event.bits.begin(),event.bits.end());
             result.bits.insert(result.bits.end(),event.missing_slots,modem::missing_pattern_bit);
             result.events.push_back(std::move(event));
+            result.event_poll_positions.push_back(position);
         }
         if(progressed)++result.bit_polls;
     };
@@ -150,6 +153,29 @@ void exact(const Result& result,const Bytes& expected,bool complete) {
     if(result.bits!=expected) {
         std::string observed;for(const auto bit:result.bits)observed+=static_cast<char>('0'+bit);
         throw Error("drift reception changed, duplicated or omitted an exact raw-bit prefix: "+observed);
+    }
+    if(result.bit_polls!=expected.size()) {
+        std::cerr<<std::setprecision(std::numeric_limits<double>::max_digits10)
+            <<"drift progress diagnostic polls="<<result.bit_polls<<" expected="<<expected.size()
+            <<" events="<<result.events.size()<<" completions="<<result.completions
+            <<" peak_working="<<result.peak_working<<'\n';
+        for(std::size_t i=0;i<result.events.size();++i) {
+            const auto& event=result.events[i];
+            std::cerr<<"event="<<i<<" poll_position="<<result.event_poll_positions[i]
+                <<" first="<<event.first_sample<<" end="<<event.end_sample
+                <<" first_symbol="<<event.first_stream_symbol
+                <<" stream_first="<<event.stream_first_sample
+                <<" stream_symbol="<<event.stream_first_symbol
+                <<" complete="<<event.complete<<" missing="<<event.missing_slots
+                <<" score="<<event.score<<" bits=";
+            for(const auto bit:event.bits)std::cerr<<static_cast<unsigned>(bit);
+            std::cerr<<'\n';
+        }
+        for(const auto& candidate:result.candidates)
+            std::cerr<<"candidate first="<<candidate.first_sample<<" end="<<candidate.end_sample
+                <<" symbol="<<candidate.stream_symbol<<" bit="<<candidate.bit
+                <<" score="<<candidate.score<<" alternative="<<candidate.alternative_score
+                <<" threshold="<<candidate.admission_threshold<<'\n';
     }
     check(result.bit_polls==expected.size(),"drift reception batched accepted bits behind a later symbol");
     check(result.completions==(complete?1U:0U),"drift reception produced the wrong physical completion state");

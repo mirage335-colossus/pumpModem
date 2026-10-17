@@ -38,6 +38,57 @@ Wide oracle(std::span<const Complex> x, std::span<const Complex> t) {
         result += Wide{x[i].real(), x[i].imag()} * std::conj(Wide{t[i].real(), t[i].imag()});
     return result;
 }
+// Compare the exact dyadic scale^2 * integer_energy to an FP64 bound.
+// MSVC long double is FP64, so summing rounded subnormal squares is not an
+// independent energy oracle. The exact product needs at most 131 bits.
+bool reconstructed_energy_enclosed(std::uint32_t integer_energy, double scale, double upper) {
+    check(std::isfinite(scale) && scale >= 0 && upper >= 0 &&
+          integer_energy <= 2 * arithmetic::quantized_tile_size * 127 * 127,
+          "invalid exact reconstructed-energy oracle input");
+    if (!integer_energy || scale == 0 || std::isinf(upper)) return true;
+    if (upper == 0) return false;
+    const auto decode = [](double value) {
+        const auto bits = std::bit_cast<std::uint64_t>(value);
+        const auto exponent = static_cast<unsigned>((bits >> 52) & 2047);
+        const auto mantissa = (bits & 0xfffffffffffffULL) | (exponent ? 1ULL << 52 : 0);
+        return std::pair{mantissa, exponent ? static_cast<int>(exponent) - 1075 : -1074};
+    };
+    const auto [scale_mantissa, scale_exponent] = decode(scale);
+    const auto [bound_mantissa, bound_exponent] = decode(upper);
+    std::array<std::uint32_t, 5> exact{};
+    const std::array<std::uint32_t, 2> mantissa{
+        static_cast<std::uint32_t>(scale_mantissa), static_cast<std::uint32_t>(scale_mantissa >> 32)};
+    for (unsigned i = 0; i < 2; ++i) for (unsigned j = 0; j < 2; ++j) {
+        auto carry = static_cast<std::uint64_t>(mantissa[i]) * mantissa[j];
+        for (std::size_t word = i + j; carry; ++word) {
+            check(word < exact.size(), "exact reconstructed-energy square overflow");
+            const auto sum = static_cast<std::uint64_t>(exact[word]) + (carry & 0xffffffffULL);
+            exact[word] = static_cast<std::uint32_t>(sum);
+            carry = (carry >> 32) + (sum >> 32);
+        }
+    }
+    std::uint64_t carry = 0;
+    for (auto& word : exact) {
+        const auto product = static_cast<std::uint64_t>(word) * integer_energy + carry;
+        word = static_cast<std::uint32_t>(product);
+        carry = product >> 32;
+    }
+    check(carry == 0, "exact reconstructed-energy product overflow");
+    unsigned exact_bits = 0;
+    for (std::size_t i = 0; i < exact.size(); ++i)
+        if (exact[i]) exact_bits = static_cast<unsigned>(32 * i + std::bit_width(exact[i]));
+    const auto bound_bits = static_cast<unsigned>(std::bit_width(bound_mantissa));
+    const auto exact_top = 2 * scale_exponent + static_cast<int>(exact_bits);
+    const auto bound_top = bound_exponent + static_cast<int>(bound_bits);
+    if (exact_top != bound_top) return exact_top < bound_top;
+    for (unsigned offset = 0; offset < std::max(exact_bits, bound_bits); ++offset) {
+        const auto a = offset < exact_bits &&
+            ((exact[(exact_bits - 1 - offset) / 32] >> ((exact_bits - 1 - offset) % 32)) & 1U);
+        const auto b = offset < bound_bits && ((bound_mantissa >> (bound_bits - 1 - offset)) & 1ULL);
+        if (a != b) return b;
+    }
+    return true;
+}
 long double energy(std::span<const Complex> x) {
     long double result = 0;
     for (auto value : x) result += static_cast<long double>(value.real()) * value.real() +
@@ -236,6 +287,12 @@ void integer_exact_and_chunk_overflow() {
     rejects([&] { arithmetic::dot_i8(x, std::span(t).first(1)); }, "integer dot accepted unequal lengths");
 }
 void residual_and_dot_certificates() {
+    // This exact subnormal energy lies strictly between these adjacent bounds.
+    constexpr auto witness_scale = 0x1.f6547094d32f0p-538;
+    check(reconstructed_energy_enclosed(181749, witness_scale, 0x0.000000002ab65p-1022),
+          "exact reconstructed-energy oracle rejected an enclosing subnormal bound");
+    check(!reconstructed_energy_enclosed(181749, witness_scale, 0x0.000000002ab64p-1022),
+          "exact reconstructed-energy oracle accepted an inward subnormal bound");
     std::mt19937_64 rng(0xb9ae88de7765ULL);
     std::uniform_real_distribution<double> sample(-1, 1);
     for (const auto size : {std::size_t{1}, std::size_t{3}, std::size_t{15}, std::size_t{1023}, std::size_t{1024}}) {
@@ -250,15 +307,20 @@ void residual_and_dot_certificates() {
             for (const auto data : {std::pair{std::span<const Complex>(x), std::pair{std::span<const arithmetic::Complex8>(qx), bx}},
                                     std::pair{std::span<const Complex>(t), std::pair{std::span<const arithmetic::Complex8>(qt), bt}}}) {
                 const auto& block = data.second.second;
-                long double original = 0, reconstructed = 0, residual = 0;
+                long double original = 0, residual = 0;
+                std::uint32_t integer_energy = 0;
                 for (std::size_t i = 0; i < size; ++i) {
                     const Wide v{data.first[i].real(), data.first[i].imag()};
                     const Wide q{static_cast<long double>(data.second.first[i].real) * block.scale,
                                  static_cast<long double>(data.second.first[i].imag) * block.scale};
-                    original += std::norm(v); reconstructed += std::norm(q); residual += std::norm(v - q);
+                    original += std::norm(v); residual += std::norm(v - q);
+                    const auto real = static_cast<int>(data.second.first[i].real);
+                    const auto imag = static_cast<int>(data.second.first[i].imag);
+                    integer_energy += static_cast<std::uint32_t>(real * real + imag * imag);
                 }
                 check(original <= block.original_energy_upper, "original energy upper bound rounded inward");
-                check(reconstructed <= block.reconstructed_energy_upper, "reconstructed energy upper bound rounded inward");
+                check(reconstructed_energy_enclosed(integer_energy, block.scale, block.reconstructed_energy_upper),
+                      "reconstructed energy upper bound rounded inward");
                 check(residual <= block.residual_energy_upper, "residual energy upper bound rounded inward");
             }
             const auto exact = oracle(x, t);

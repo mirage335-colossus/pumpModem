@@ -8,6 +8,7 @@ using datapump::modem::SchedHopCoordinate;
 using datapump::modem::SchedHopLocation;
 namespace {
 void check(bool value,const char* message){if(!value)throw std::runtime_error(message);}
+template<class F>void rejects(F&& f,const char* message){bool failed=false;try{f();}catch(const datapump::Error&){failed=true;}check(failed,message);}
 struct Map {
     bool ramp=false;
     SchedHopLocation locate(SchedHopCoordinate tick)const {
@@ -27,10 +28,34 @@ const auto fences=[](auto first,auto end,auto consume) {
     for(const Fence f:{Fence{0,64},Fence{64,64},Fence{128,8}})
         if(f.original_first<end && f.original_first+f.original_count>first)consume(f);
 };
+void portable_storage() {
+    check(runtime::Context::reservation(3,1)<runtime::Context::reservation(runtime::maximum_pieces,1),"Piece reservation still uses unconditional maximum");
+    runtime::Cache cache;cache.key.outputs=2;cache.observed_source_begin={3,7};cache.bind();
+    check(cache.geometry.observed_source_begin.size()==2&&cache.geometry.observed_source_begin[1]==7,"retained cache lost observation-origin ownership");
+}
+void unsupported_environment() {
+    const auto e=event();check(!runtime::valid_event(e),"unsupported sparse event accepted");
+    struct RefusalMap {
+        unsigned calls=0;
+        SchedHopLocation locate(SchedHopCoordinate){++calls;return {};}
+        SchedHopCoordinate source_to_physical(SchedHopCoordinate,bool){++calls;return {};}
+    } map;
+    unsigned fence_calls=0;
+    const auto counted_fences=[&](auto first,auto end,auto consume){++fence_calls;fences(first,end,consume);};
+    rejects([&]{(void)runtime::Context::piece_count(e,map,counted_fences);},"unsupported Piece prepass completed");
+    runtime::Context context(1,0);
+    rejects([&]{context.add(0,e,map,counted_fences);},"unsupported Original lane published");
+    check(!context.lane_count()&&!fence_calls&&!map.calls,"unsupported event visited processing metadata");
+    check(!context.classify(0,0,1).valid,"unpublished lane classified observations");
+    const auto row=runtime::evaluate_row(e,orig::Piece{},0);
+    check(!row.valid()&&row.failure==orig::Failure::event_contract&&!row.current&&!row.carry,"unsupported row acquired Original membership");
+    std::stop_source stop;stop.request_stop();
+    rejects([&]{context.add(0,e,map,counted_fences,stop.get_token());},"pre-cancelled Original piece build completed");
+    check(!context.lane_count()&&!fence_calls&&!map.calls,"cancelled unsupported event visited processing metadata");
+}
 void exact_piece_partitions_and_crops() {
     Map map;
     check(runtime::Context::piece_count(event(),map,fences)==3,"frozen processing Piece prepass changed");
-    check(runtime::Context::reservation(3,1)<runtime::Context::reservation(runtime::maximum_pieces,1),"Piece reservation still uses unconditional maximum");
     runtime::Context c(4,17);c.add(0,event(),map,fences);
     const auto chip=c.classify(0,0,17);check(chip.valid&&chip.observed&&chip.owner==0&&chip.section==0&&chip.window==0,"first exact partition changed");
     check(!c.classify(0,16,18).valid,"differential split classified as one window");
@@ -61,9 +86,10 @@ void ramp_gain_and_cancel_retry() {
     catch(const std::exception&){failed=true;}
     check(failed,"injected partial Piece build completed");partial.add(0,event(),map,fences,{},3);
     check(partial.classify(0,1,10).valid,"unpublished Piece fragments survived retry");
-    runtime::Cache cache;cache.key.outputs=2;cache.observed_source_begin={3,7};cache.bind();
-    check(cache.geometry.observed_source_begin.size()==2&&cache.geometry.observed_source_begin[1]==7,"retained cache lost observation-origin ownership");
 }
 }
-int main(){try {exact_piece_partitions_and_crops();ramp_gain_and_cancel_retry();std::cout<<"Default linear runtime source cases passed\n";return 0;}
+int main(){try {portable_storage();
+    if(d::scheduled_sparse_owned_spans::environment()){exact_piece_partitions_and_crops();ramp_gain_and_cancel_retry();}
+    else {unsupported_environment();std::cout<<"unsupported sparse arithmetic refusal verified\n";}
+    std::cout<<"Default linear runtime source cases passed\n";return 0;}
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

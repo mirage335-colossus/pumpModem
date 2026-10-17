@@ -25,7 +25,15 @@ void actual(){for(const bool encrypted:{false,true})for(const unsigned Q:{2U,4U,
     const auto C=pattern.chip_samples();const double width=double(C)/Q,amplitude=.3;
     for(unsigned phase=0;phase<Q;++phase){const auto k=std::uint64_t(100)*Q+phase;const auto first=double(k)*C/Q;
         coarse::Request request{pattern.symbol_samples(),C,k,Q,amplitude,0,true};
-        const auto raw=coarse::certify(request,[&](auto j){return pattern.values(j);},[&](double x){return pattern.shaped_values(0,x);});CHECK(raw.cell.supported);
+        std::size_t coefficient_calls=0,endpoint_calls=0;
+        const auto raw=coarse::certify(request,[&](auto j){++coefficient_calls;return pattern.values(j);},
+            [&](double x){++endpoint_calls;return pattern.shaped_values(0,x);});
+        if(!d::scheduled_acquisition_certificate::coordinate_environment()) {
+            CHECK(!raw.cell.supported&&raw.coefficient_reads==0&&raw.endpoint_reads==0&&
+                coefficient_calls==0&&endpoint_calls==0&&std::isinf(raw.execution_radius));
+            continue;
+        }
+        CHECK(raw.cell.supported);
         for(const bool falling:{false,true})for(const double begin:{3.,17.,32.}){
             gains::Request r;r.left_gain=g(begin,61,35,falling);r.right_gain=g(begin+width,61,35,falling);
             r.width=std::nextafter(width,INFINITY);r.coordinate_radius=1e-7;r.gain_upper=upper();r.amplitude=.3;r.scheduled_ramp=61;r.fhss_ramp=35;r.qualified=true;

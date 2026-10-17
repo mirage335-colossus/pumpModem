@@ -70,7 +70,8 @@ struct PatternCorrelatorTimingTestAccess {
         }
     }
     static void test_case(bool families,bool ordered=false) {
-        check(Scratch::Tile::arithmetic_supported(),"public batch ordered arithmetic unavailable");
+        const bool arithmetic=Scratch::Tile::arithmetic_supported();
+        check(arithmetic||(!families&&!ordered),"qualified family batching unavailable for this arithmetic");
         auto c=config();PatternCode code(c,c.stream_epoch);
         check(code.chip_samples()==34&&code.symbol_samples()==87040,"intended C34/N87040 geometry changed");
         auto options=PatternCorrelatorOptions{};options.scheduled_family_experiment=options.scheduled_common_shape_experiment=families;
@@ -139,15 +140,24 @@ struct PatternCorrelatorTimingTestAccess {
             check(y.scheduled->common_work[0].phase_address_hits>0,"ordered test did not exercise warmed original phase proof identities");
             states(x,y);order_owner.reset();
         }
-        check(scratch->counts.batched_lanes>=2 && scratch->counts.consumed_samples>=2*pcm.size(),
-            "actual mapped-path public batch did not consume independent source rows");
-        check(consumed_identities.size()>=2,"batched rows were only duplicate frequencies of one private identity");
-        check(scratch->counts.outer_rows>=2*pcm.size(),"private batch discarded its exact public outer pulse plan");
-        if(families)check(y.scheduled->common_work[0].families>0,"new family dispatch bypassed original common execution");
-        check(scratch->counts.plan_fallbacks==0&&scratch->counts.numeric_fallbacks==0,"positive batch fell back");
+        if(arithmetic) {
+            check(scratch->counts.batched_lanes>=2 && scratch->counts.consumed_samples>=2*pcm.size(),
+                "actual mapped-path public batch did not consume independent source rows");
+            check(consumed_identities.size()>=2,"batched rows were only duplicate frequencies of one private identity");
+            check(scratch->counts.outer_rows>=2*pcm.size(),"private batch discarded its exact public outer pulse plan");
+            if(families)check(y.scheduled->common_work[0].families>0,"new family dispatch bypassed original common execution");
+            check(scratch->counts.plan_fallbacks==0&&scratch->counts.numeric_fallbacks==0,"positive batch fell back");
+        } else {
+            check(scratch->counts.batched_lanes==0&&scratch->counts.prepared_samples==0&&
+                scratch->counts.consumed_samples==0&&scratch->counts.outer_rows==0&&consumed_identities.empty(),
+                "unsupported arithmetic consumed prepared private rows");
+            check(std::any_of(y.hypotheses.begin(),y.hypotheses.end(),[](const auto& h){return h.fits[0].count||h.fits[1].count;}),
+                "unsupported-arithmetic fallback parity had no actual observations");
+        }
         check(x.bursts.empty()&&y.bursts.empty(),"partial prefix manufactured admission or END");
         const auto before=y.accounted_bytes;auto owner=y.prepare_private_batch_owner(pcm.size());
-        check(owner&&owner->bytes>sizeof(Scratch)&&y.accounted_bytes==before+owner->bytes,"optional batch loan absent or uncharged");
+        if(arithmetic)check(owner&&owner->bytes>sizeof(Scratch)&&y.accounted_bytes==before+owner->bytes,"optional batch loan absent or uncharged");
+        else check(!owner&&y.accounted_bytes==before,"unsupported arithmetic acquired an optional batch loan");
         owner.reset();check(y.accounted_bytes==before,"joined batch loan was not returned");
         const auto original_budget=y.budget;y.budget=sizeof(PatternCorrelator)+y.accounted_bytes+8;
         check(!y.prepare_private_batch_owner(pcm.size()),"required banks displaced by optional batch");y.budget=original_budget;
@@ -273,7 +283,10 @@ struct PatternCorrelatorTimingTestAccess {
         bool propagated=false;try{view.outer_pulses(100,840,[&](auto,auto){throw Error("callback exception");});}
         catch(const Error&){propagated=true;}check(propagated,"public Plan swallowed a partial-consumption exception");
     }
-    static void run(){gather_policy();public_plan_provenance();test_case(false);test_case(true);test_case(true,true);frequency_source_case();}
+    static void run(){gather_policy();public_plan_provenance();test_case(false);
+        if(Scratch::Tile::arithmetic_supported()){test_case(true);test_case(true,true);frequency_source_case();}
+        else std::cout<<"qualified family/P3 acceleration unavailable; mapped fallback and public Plan checks passed\n";
+    }
 };
 }
 int main(){

@@ -651,6 +651,15 @@ void phase_loss_and_receiver_confidence() {
     // and RAM does not supply the energy lost to whole-symbol phase drift.
     inputs.tx_dbm=inputs.target_db_hz+inputs.path_loss_db+inputs.noise_density_dbm_hz;
     const auto weak=planner::build(inputs);
+    const auto diagnostic_precision=std::cout.precision(17);
+    std::cout<<"phase-loss weak: available="<<weak.available<<" clock="<<weak.clock_search_supported
+        <<" workspace="<<weak.receiver_workspace_supported<<" confidence="<<weak.confidence_available
+        <<" differential_windows="<<weak.differential_windows<<" probability="<<weak.success_probability
+        <<" trials="<<weak.probability_trials<<" drift="<<weak.drift_model_available
+        <<" backend="<<weak.receiver_geometry.receiver_strategy_selected
+        <<" reason="<<weak.receiver_geometry.receiver_strategy_reason
+        <<" probability_limit="<<weak.probability_model_limit<<" error="<<weak.error<<'\n';
+    std::cout.precision(diagnostic_precision);
     check(weak.available&&weak.clock_search_supported&&weak.receiver_workspace_supported&&weak.confidence_available&&
           weak.differential_windows==0&&weak.success_probability<.001,
           "A clock/RAM-compatible long symbol must retain its poor modeled reception when phase loss consumes its energy");

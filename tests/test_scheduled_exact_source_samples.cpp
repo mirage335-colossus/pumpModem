@@ -129,10 +129,14 @@ void retirement_during_build_and_environment() {
     // Canonical setup is speculative: this address overflows, whereas an
     // out-of-support request has no chips and the original legitimately returns zero.
     modem::PatternCode edge(c,UINT64_MAX);const auto first=edge.chips_per_symbol();
+    const auto before_edge=live.counts();const bool qualified=xs::environment();
     {xs::Scope scope(&live,1);xs::Reader reader(c,edge,first);
         const auto at=static_cast<long double>(edge.symbol_samples())+8*edge.chip_samples()+1;
         check(equal_bits(reader.value(at),edge.shaped_values(first,static_cast<double>(at))),"speculative address overflow changed valid zero query");}
-    check(live.counts().speculative_failures>0,"speculative address error fallback missing");
+    if(qualified)check(live.counts().speculative_failures>before_edge.speculative_failures,"speculative address error fallback missing");
+    else check(live.counts().speculative_failures==before_edge.speculative_failures&&
+        live.counts().original_build_calls==before_edge.original_build_calls&&
+        live.counts().direct_calls==before_edge.direct_calls+1,"unsupported environment did not use direct source fallback");
 }
 void independent_sse_rounding_fallback() {
 #if defined(__x86_64__) || (defined(__i386__) && defined(__SSE__))

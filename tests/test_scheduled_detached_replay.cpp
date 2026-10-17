@@ -137,8 +137,11 @@ struct PatternCorrelatorTimingTestAccess {
             same_numeric(original,expected[id],prepared,actual[id]);}
         check(prepared.lazy_state()->detached_prefixes==9&&prepared.lazy_state()->detached_blocks==9,
             "four same-frequency lanes rebuilt physical prefixes or skipped original fences");
-        check(prepared.lazy_state()->detached_private_lanes>0&&prepared.lazy_state()->detached_private_rows>0,
-            "exact original private pulse path did not execute");
+        if(detail::ScheduledPrivateBatchScratch::Tile::arithmetic_supported())
+            check(prepared.lazy_state()->detached_private_lanes>0&&prepared.lazy_state()->detached_private_rows>0,
+                "exact original private pulse path did not execute");
+        else check(prepared.lazy_state()->detached_private_lanes==0&&prepared.lazy_state()->detached_private_rows==0,
+            "unsupported arithmetic consumed detached private pulse rows");
         prepared.lazy_drop_detached_replay();check(!prepared.lazy_state()->detached_replay&&prepared.lazy_state()->slots.empty(),
             "detached release changed authoritative ownership");
     }

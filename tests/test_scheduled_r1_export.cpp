@@ -9,6 +9,12 @@ using namespace datapump::modem::detail;
 void check(bool p,const char* s){if(!p)throw std::runtime_error(s);}
 struct Output {std::vector<std::pair<std::size_t,double>> rows;bool append(std::size_t i,double v){rows.emplace_back(i,v);return true;}};
 int main() {
+#if !defined(DATAPUMP_ORDERED_PULSE_CONTRACT_OFF) || defined(__FAST_MATH__) || (defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__>0)
+    const bool arithmetic_qualified=false;
+#else
+    const bool arithmetic_qualified=std::numeric_limits<double>::is_iec559 &&
+        std::numeric_limits<double>::digits==53 && FLT_EVAL_METHOD==0 && std::fegetround()==FE_TONEAREST;
+#endif
     for(unsigned trial=0;trial<4096;++trial) {
         const auto fraction=std::ldexp(static_cast<long double>((trial*713U)&((1U<<21)-1)),-21);
         const std::uint64_t block=10000,selected=block+7,end=selected+127,N=96000,C=15;
@@ -19,10 +25,16 @@ int main() {
         const auto mapped=anchor.add_signed(source_first+original_piece+7);
         ScheduledR1ExportInput input{1,3.75L,source_first,block,block,selected,end,N,C,
             7,7+carry,mapped,anchor,true,true};
-        const auto proof=scheduled_r1_export_proof(input);check(proof.eligible,"exact-grid R1 case rejected");
-        Output output;unsigned cancellation_checks=0;
-        auto skip=[&](std::size_t offset){return ((offset+trial)%11)==0;};
+        const auto proof=scheduled_r1_export_proof(input);
+        if(arithmetic_qualified)check(proof.eligible,"exact-grid R1 case rejected");
+        else check(!proof.eligible,"unqualified arithmetic accepted R1 export");
+        Output output;unsigned cancellation_checks=0,skip_checks=0;
+        auto skip=[&](std::size_t offset){++skip_checks;return ((offset+trial)%11)==0;};
         const auto result=scheduled_r1_export_append(output,proof,block,selected,end,skip,[&]{++cancellation_checks;});
+        if(!arithmetic_qualified)
+            check(result.end==selected && result.appended==0 && output.rows.empty() &&
+                cancellation_checks==0 && skip_checks==0,"rejected R1 export changed output, endpoint or callbacks");
+        if(arithmetic_qualified) {
         check(result.end==end && result.appended==output.rows.size() && cancellation_checks>0,"export endpoint/mask/poll accounting differs");
         std::size_t at=0;
         // Direct ORIGINAL anchored expression.
@@ -42,6 +54,7 @@ int main() {
             const auto original=within+static_cast<long double>(physical-piece);
             check(std::bit_cast<std::uint64_t>(output.rows[at++].second)==std::bit_cast<std::uint64_t>(static_cast<double>(original)),"common reanchored coordinate bits changed");
         }
+        }
         auto rejected=input;rejected.rate=1.000001L;check(!scheduled_r1_export_proof(rejected).eligible,"nonunit clock accepted");
         rejected=input;rejected.origin=std::nextafter(3.75L,4.L);check(!scheduled_r1_export_proof(rejected).eligible,"off-grid origin accepted");
         rejected=input;rejected.full_flat=false;check(!scheduled_r1_export_proof(rejected).eligible,"uncertified gain accepted");
@@ -49,5 +62,8 @@ int main() {
         rejected=input;rejected.target_index+=2;check(!scheduled_r1_export_proof(rejected).eligible,"private target ownership changed");
     }
     check(!scheduled_r1_export_grid(0x1p31L) && !scheduled_r1_export_grid(std::numeric_limits<long double>::infinity()),"grid bound/nonfinite accepted");
-    std::cout<<"R1 exact direct/common coordinate, mask, target and fallback oracles passed4096cases\n";
+    if(arithmetic_qualified)
+        std::cout<<"R1 exact direct/common coordinate, mask, target and fallback oracles passed4096cases\n";
+    else
+        std::cout<<"R1 unqualified arithmetic fallback passed4096cases with no output/callback effects; optimized coordinate coverage omitted\n";
 }

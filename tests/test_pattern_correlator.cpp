@@ -6,7 +6,9 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <iomanip>
 #include <iostream>
+#include <limits>
 #include <numbers>
 #include <numeric>
 #include <random>
@@ -592,6 +594,31 @@ void paired_pulse_origin_parities_and_canonical_quarters() {
               a[i].stream_symbol==b[i].stream_symbol && a[i].bit==b[i].bit &&
               a[i].admission_threshold==b[i].admission_threshold,
               "shared parity cells changed canonical sampled boundaries or trial ordering");
+        if(!(std::abs(a[i].score-b[i].score)<2e-6*std::max(1.,b[i].score) &&
+             std::abs(a[i].alternative_score-b[i].alternative_score)<2e-6*std::max(1.,b[i].alternative_score))) {
+            const auto projected_work=projected.work();
+            const auto raw_work=raw.work();
+            std::cerr<<std::setprecision(std::numeric_limits<double>::max_digits10)
+                     <<"canonical fractional quarters changed pulse raw evidence across epochs"
+                     <<" row="<<i<<" first="<<a[i].first_sample<<" end="<<a[i].end_sample
+                     <<" symbol="<<a[i].stream_symbol<<" bit="<<static_cast<unsigned>(a[i].bit)
+                     <<" projected_score="<<a[i].score<<" raw_score="<<b[i].score
+                     <<" projected_alternative_score="<<a[i].alternative_score
+                     <<" raw_alternative_score="<<b[i].alternative_score
+                     <<" normalized_score_delta="<<std::abs(a[i].score-b[i].score)/std::max(1.,b[i].score)
+                     <<" normalized_alternative_delta="<<std::abs(a[i].alternative_score-b[i].alternative_score)/
+                         std::max(1.,b[i].alternative_score)
+                     <<" projected_backend="<<static_cast<unsigned>(projected_work.backend)
+                     <<" projected_drift_sections="<<projected_work.drift_sections
+                     <<" projected_differential_window_samples="<<projected_work.differential_window_samples
+                     <<" projected_workspace_bytes="<<projected.working_bytes()
+                     <<" projected_peak_workspace_bytes="<<projected_work.peak_workspace_bytes
+                     <<" raw_backend="<<static_cast<unsigned>(raw_work.backend)
+                     <<" raw_drift_sections="<<raw_work.drift_sections
+                     <<" raw_differential_window_samples="<<raw_work.differential_window_samples
+                     <<" raw_workspace_bytes="<<raw.working_bytes()
+                     <<" raw_peak_workspace_bytes="<<raw_work.peak_workspace_bytes<<'\n';
+        }
         check(std::abs(a[i].score-b[i].score)<2e-6*std::max(1.,b[i].score) &&
               std::abs(a[i].alternative_score-b[i].alternative_score)<2e-6*std::max(1.,b[i].alternative_score),
               "canonical fractional quarters changed pulse raw evidence across epochs");

@@ -128,9 +128,14 @@ void public_amplitude_clock_window() {
     const auto crossing=live::detail::amplitude_epoch_lookahead(c,prepared.search,.9L/c.sample_rate,.2L);
     const auto equivalent=live::detail::amplitude_epoch_lookahead(c,prepared.search,1.1L/c.sample_rate,0);
     check(crossing==equivalent,"future horizon used multiplicative rather than additive capture uncertainty");
+    // ArrivalMap includes an explicit UTC arithmetic allowance in addition to
+    // the physical GPS/region/audio radius; MSVC long double has double precision.
+    const auto timestamp_roundoff=64*std::numeric_limits<long double>::epsilon()*
+        std::max({1.L,std::abs(static_cast<long double>(epoch)+.1L),std::abs(stamp.utc_seconds)});
+    const auto expected_half_width=.402L+.01L/c.sample_rate+timestamp_roundoff;
     const auto prior=*prepared.search.amplitude_start_window;
     check(std::abs(prior.epoch_origin_samples/c.sample_rate-7.664)<1e-6&&
-          std::abs(prior.half_width_samples/c.sample_rate-(.402+.01/c.sample_rate))<1e-6,
+          std::abs(prior.half_width_samples/c.sample_rate-expected_half_width)<1e-6,
           "public amplitude omitted GPS/total-region/offset/causal-audio bounds");
     const auto compare=[&](const live::Settings& settings,double center_delta,double radius_delta) {
         const auto other=prepare(settings,stamp).search.amplitude_start_window;
@@ -189,7 +194,7 @@ void public_amplitude_clock_window() {
     const auto estimate=simulation::estimate_with_receiver_settings(wire,value.transfer,true,channel,value,{},1,false,
         100,256,simulation::ReceiverWorkMode::hardware_timing_model,{.02,0,1./c.sample_rate});
     check(estimate.timing_window_modeled&&estimate.receiver_geometry.arrival_window_available&&
-          std::abs(estimate.receiver_geometry.combined_arrival_half_width_seconds-(.402+.01/c.sample_rate))<1e-6,
+          std::abs(estimate.receiver_geometry.combined_arrival_half_width_seconds-expected_half_width)<1e-6,
           "planner did not report the selected amplitude timing model");
     std::cout<<"public amplitude timing: "<<all<<" broad cells, "<<inside<<" inside, "<<boundary<<" boundary cells\n";
     // Isolate the actual strong two-bit waveform from Live admission. The

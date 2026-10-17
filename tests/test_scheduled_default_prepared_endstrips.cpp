@@ -16,6 +16,8 @@ namespace archive=d::scheduled_default_point_guard_archive;
 namespace point=d::scheduled_default_linear_cellstats;
 using Complex=std::complex<double>;
 void check(bool x,const char* message){if(!x)throw std::runtime_error(message);}
+bool strip_arithmetic_supported(){return d::scheduled_acquisition_certificate::environment<double>()&&
+    std::numeric_limits<long double>::digits>std::numeric_limits<double>::digits;}
 void close(double x,double y,const char* message){check(std::isfinite(x)&&std::isfinite(y)&&std::abs(x-y)<2e-9*std::max({1.,std::abs(x),std::abs(y)}),message);}
 void fit_close(const d::CorrelationFit& a,const d::CorrelationFit& b){check(a.count==b.count,"count changed");
     close(a.xc,b.xc,"xc changed");close(a.xs,b.xs,"xs changed");close(a.cc,b.cc,"cc changed");
@@ -255,9 +257,9 @@ void end_strips(std::size_t chip,unsigned subdivisions,unsigned width,bool holes
         check(actual.valid&&expected.valid,"end-strip guard incomplete");
         for(std::size_t j=0;j<g.outputs;++j)event_close(actual.events[j],expected.events[j],g);
         check(work.attempts>0,"end-strip attempt fixture inactive");
-        if(missing_edges||f.g.node_spacing<4) {
-            check(work.recovered_cells==0&&work.projection_requests_avoided==0,"missing edges invented projections");
-            check(actual.work.projection_lookups==expected.work.projection_lookups,"missing edges changed row fallback");
+        if(missing_edges||f.g.node_spacing<4||!strip_arithmetic_supported()) {
+            check(work.recovered_cells==0&&work.projection_requests_avoided==0,"unavailable end strips invented projections");
+            check(actual.work.projection_lookups==expected.work.projection_lookups,"unavailable end strips changed row fallback");
         } else {
             check(work.recovered_cells>0&&work.bulk_interiors>0&&work.projection_requests_avoided>0,"end strips did not recover owner cells");
             check(actual.work.projection_lookups<expected.work.projection_lookups,"end strips did not avoid projection requests");
@@ -289,12 +291,15 @@ void bulk_producer_edges() {
     check(a.stored_edge_rows()>0,"bulk did not retain endpoint projections");p::StripWork work;
     const auto actual=p::run(g,p::reservation(g),a,[&](auto n){return f.pcm[n];},
         [&](auto j,auto first,auto end){return f.classify(j,first,end);},[&](auto j,auto n,bool q){return f.row(j,n,q);},[&](auto k){return f.coefficients(k);},{},&work);
-    check(actual.valid&&work.recovered_cells>0,"bulk endpoint archive did not recover guards");
+    check(actual.valid,"bulk endpoint archive guard incomplete");
+    if(strip_arithmetic_supported())check(work.recovered_cells>0,"bulk endpoint archive did not recover guards");
+    else check(!work.recovered_cells&&!work.projection_requests_avoided,"unsupported bulk endpoint subtraction invented projections");
     for(std::size_t j=0;j<g.outputs;++j)event_close(actual.events[j],f.reference(g.origin_first+j),g);
 }
 int main(){try{
     for(auto chip:{8U,34U})for(auto q:{2U,4U,8U})for(auto width:{1U,2U})for(bool holes:{false,true})for(bool missing_edges:{false,true})
         end_strips(chip,q,width,holes,missing_edges);
     family_producer_archive();bulk_producer_edges();
+    if(!strip_arithmetic_supported())std::cout<<"unsupported strip arithmetic raw-row fallback verified\n";
     std::cout<<"prepared Default guard exact end-strip tests passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

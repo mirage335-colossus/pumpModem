@@ -319,6 +319,7 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
     PROPERTIES LABELS "amplitude_arrival" RUN_SERIAL TRUE)
   set_tests_properties(scheduled_native_coherent_prefit PROPERTIES SKIP_RETURN_CODE 77)
   set_tests_properties(scheduled_native_cohort PROPERTIES SKIP_RETURN_CODE 77)
+  set_tests_properties(scheduled_exact_source_points scheduled_zero_guard scheduled_gain_chord scheduled_gain_derivative_hook PROPERTIES SKIP_RETURN_CODE 77)
   # The exact-source experiment latches immutable process-level policy. Keep it
   # in a separate process so ordinary Live cases retain their caller's policy.
   add_test(NAME live_exact_source COMMAND test_live_profiles exact_source)

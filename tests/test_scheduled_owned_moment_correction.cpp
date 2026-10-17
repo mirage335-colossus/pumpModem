@@ -172,11 +172,22 @@ void native_model_identity_and_spans(){
     check(native_full.cells.size()==1 && native_full.cells[0].full,"native full C34 cell lost");
     const auto forbidden=p::original_errors(native_full.cells[0],1,0,1,512);
     check(!forbidden[0].valid && !forbidden[1].valid,"native template granted strict Original errors");
-    check(exact.prepare_integral_geometry(34,34,true),"exact geometry fixture failed");
-    p::SourceModels strict(exact,34);
-    check(strict.matches(exact) && !strict.matches_native(exact),"strict constructor behavior changed");
-    exact.invalidate_geometry();
-    check(native_full.matches_native(exact) && !native_full.matches(exact) && !strict.matches(exact),"strict/native geometry invalidation mixed");
+    const bool prepared=exact.prepare_integral_geometry(34,34,true);
+    if(c::coordinate_environment()) {
+        check(prepared,"exact geometry fixture failed");
+        p::SourceModels strict(exact,34);
+        check(strict.matches(exact) && !strict.matches_native(exact),"strict constructor behavior changed");
+        exact.invalidate_geometry();
+        check(native_full.matches_native(exact) && !native_full.matches(exact) && !strict.matches(exact),"strict/native geometry invalidation mixed");
+    } else {
+        check(!prepared&&!exact.geometry_ready&&exact.geometry_mode==g::SourceRows::GeometryMode::unspecified,
+            "unsupported coordinate arithmetic published exact geometry");
+        bool denied=false;try{p::SourceModels strict(exact,34);}catch(const datapump::Error&){denied=true;}
+        check(denied,"strict model accepted unavailable Original geometry");
+        exact.invalidate_geometry();
+        check(native_full.matches_native(exact)&&!native_full.matches(exact),"geometry refusal invalidated native template");
+        std::cout<<"unsupported coordinate arithmetic strict-geometry refusal verified\n";
+    }
 }
 int main(){try{
     transfers_masks_halos_and_whole();thirty_four_to_thirty_five_and_bad_proofs();

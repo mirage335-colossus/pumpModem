@@ -168,6 +168,10 @@ void bounded_system_utc_phase() {
     using namespace datapump::audio;
     constexpr long double epoch=1800000000.L;
     constexpr double phase=.010,raw=.0002;
+    // Two additions at this absolute epoch can round by one ULP in total.
+    // Declare that synthetic clock-read error without changing raw Ui or C.
+    const auto clock_read_roundoff=static_cast<double>(
+        std::nextafter(epoch,std::numeric_limits<long double>::infinity())-epoch);
     for(const auto invalid:{-1.,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()})
         rejects([&]{ClockTimingPolicy{0,.001,invalid}.validate();});
     // True sample presentation is exact. The host clock moves from -C to +C,
@@ -182,7 +186,7 @@ void bounded_system_utc_phase() {
                 const auto true_time=static_cast<long double>(i)*.1L;
                 const auto host_phase=-static_cast<long double>(phase)+2*phase*i/200;
                 timeline.observe({48000*true_time,epoch+true_time+host_phase,
-                    true_time+(joint_slew?host_phase:0),raw,0,TimingQuality::estimated,4});
+                    true_time+(joint_slew?host_phase:0),raw,clock_read_roundoff,TimingQuality::estimated,4});
                 const auto prediction=timeline.predict(48000*(true_time+.05L));
                 const auto truth=epoch+true_time+.05L;
                 require(std::abs(prediction.utc_seconds-truth)<=prediction.uncertainty_seconds,
@@ -230,6 +234,27 @@ void bounded_system_utc_phase() {
         ClockTimingPolicy{0,.001,phase});
     step.observe({0,epoch,0,raw,0,TimingQuality::estimated,1});
     rejects([&]{step.observe({4800,epoch+.1L+.04L,.1L,raw,0,TimingQuality::estimated,1});});
+    // The read-roundoff allowance cannot conceal a real 100 us clock step.
+    // Raw Ui admits this displacement; the zero-slew wall/steady gate rejects it.
+    for(const auto read_radius:{0.,clock_read_roundoff}) {
+        UtcTimeline local(48000,.001,UtcTimeline::Prediction::timestamp_intersection,raw,true,
+            ClockTimingPolicy{0,0,0});
+        local.observe({0,epoch,0,raw,read_radius,TimingQuality::estimated,1});
+        local.observe({48000,epoch+1,1,raw,read_radius,TimingQuality::estimated,1});
+        const auto before=local.predict(96000);
+        rejects([&]{
+            try {local.observe({96000,epoch+2+.0001L,2,raw,read_radius,TimingQuality::estimated,1});}
+            catch(const datapump::Error& error) {
+                require(std::string(error.what())=="system clock stepped during UTC audio",
+                    "small clock step was not rejected by the wall/steady continuity gate");
+                throw;
+            }
+        });
+        const auto after=local.predict(96000);
+        require(after.utc_seconds==before.utc_seconds && after.uncertainty_seconds==before.uncertainty_seconds,
+            "rejected small clock step changed retained UTC evidence");
+        local.observe({96000,epoch+2,2,raw,read_radius,TimingQuality::estimated,1});
+    }
     // A GPS phase allowance is not permission to conceal a sudden wall-clock
     // step or a displaced frame counter. Keep the trace worker's exact 10 ms,
     // 480-frame counterexamples: both were previously absorbed by C=10 ms.
