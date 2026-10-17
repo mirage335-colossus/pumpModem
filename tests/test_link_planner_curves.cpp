@@ -301,6 +301,9 @@ void cache_invalidation() {
     input.mode=tuning::PatternMode::auto_keystream;
     input.options.key.emplace(Bytes(32,0x31));
     input.options.modem=tuning::resolve(8,input.target_db_hz,input.mode,true,1500).config;
+    // This cache regression exercises qualified private finite-pattern probabilities.
+    // Auto may correctly choose an unqualified amplitude reference on fewer CPUs.
+    input.options.modem.receiver_strategy=modem::ReceiverStrategy::complex_only;
     input.options.timestamp=1800000041;input.options.modem.stream_epoch=input.options.timestamp;
     input.channel.clock_error_ppm=.0001;
     const auto verify_transition=[&](const gui::planner::Inputs& current) {
