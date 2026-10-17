@@ -11,7 +11,7 @@ on:
       scope:
         description: 'Run the selected unchanged native scope'
         type: choice
-        options: [core, fast, live, calibration, frontends, web, package]
+        options: [core, fast, live, calibration, frontends, web, gui, package]
         default: live
       calibration_section:
         description: 'Calibration section; used only by the calibration scope'
@@ -24,7 +24,7 @@ on:
         type: string
         default: windows-2022
       scope:
-        description: 'core, fast, live, calibration, frontends, web, or package'
+        description: 'core, fast, live, calibration, frontends, web, gui, or package'
         type: string
         required: true
       calibration_section:
@@ -81,6 +81,7 @@ jobs:
             'frontends' { $targets = @('datapump-tests-frontends') }
             'web' { $targets = @('datapump-tests-web') }
             'core' { $targets = @('datapump-apps', 'datapump-tests-ci-core') }
+            'gui' { $targets = @('datapump-apps', 'datapump-tests-gui') }
             'fast' { $targets = @('datapump-tests-fast') }
             'live' { $targets = @('datapump-tests-ci-live') }
             default { throw "Unknown native scope: $env:CI_SCOPE" }
