@@ -169,13 +169,25 @@ void supported_sizes() {
             occupied_header.push_back(rect);
         }
         const auto key_action=layout[Slot::key_actions],key_path=layout[Slot::key_path],key=layout[Slot::key];
-        check(layout[Slot::repeatable].x+layout[Slot::repeatable].w<key_action.x&&
-              key_action.x+key_action.w<layout[Slot::dsss_factor].x&&
+        const auto burst=layout[Slot::symbol_burst],random=layout[Slot::symbol_burst_random];
+        check(layout[Slot::grid].x+layout[Slot::grid].w<key_action.x&&
+              key_action.x+key_action.w<layout[Slot::dsss_version].x&&
+              layout[Slot::dsss_version].x+layout[Slot::dsss_version].w<layout[Slot::dsss_factor].x&&
               layout[Slot::dsss_factor].x+layout[Slot::dsss_factor].w<layout[Slot::fhss].x&&
-              layout[Slot::fhss].x+layout[Slot::fhss].w<key.x&&
+              layout[Slot::fhss].x+layout[Slot::fhss].w+8==burst.x&&
+              burst.x+burst.w+8==random.x&&random.x+random.w+8==key.x&&
+              burst.y==key.y&&random.y==key.y&&burst.w>=112&&random.w>=96&&key.w>=200&&
+              layout[Slot::fhss].w>=130&&layout[Slot::dsss_version].w>=150&&
+              persistent_slot(Slot::symbol_burst)&&persistent_slot(Slot::symbol_burst_random)&&
               key_action.y==key.y&&key_path.y>=key.y+key.h&&
               key_path.y+key_path.h<simulation.y-label_height&&key_path.w>=648,
-              "Moving Simulation must preserve the key controls and expose more of the key path");
+              "Persistent Burst dropdowns must follow FHSS, fit before the key and preserve readable setup/path controls");
+        const auto repeatable=layout[Slot::repeatable],mode=layout[Slot::mode];
+        check(layout[Slot::fast_mode].x+layout[Slot::fast_mode].w+8==repeatable.x&&
+              repeatable.x+repeatable.w+8==mode.x&&mode.x+mode.w+10==layout[Slot::developer_mode].x&&
+              repeatable.y==layout[Slot::fast_mode].y&&mode.w>=178&&
+              repeatable.y+repeatable.h<burst.y-label_height,
+              "Repeatable and mode must fit the top header without changing the body or covering setup labels");
         const auto message = layout[Slot::message], binary = layout[Slot::binary], qr = layout[Slot::qr];
         check(message.y == binary.y && binary.y == qr.y &&
               message.h == binary.h && qr.h >= 87 && qr.w == qr.h &&

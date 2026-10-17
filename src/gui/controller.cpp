@@ -365,6 +365,11 @@ struct Controller::Impl {
             f(UiField::receiver_cpu_budget).options.push_back({value,std::string(value)+" s / 1 s"});
         f(UiField::fhss).options={{"off","Off"},{"fake-fcc","Fake: FCC"},{"fake-eu","Fake: EU"}};
         f(UiField::fhss).selected="off";
+        f(UiField::symbol_burst).options={{"off","Off"},{"1","1 symbol"},{"2","2 symbols"},
+            {"3","3 symbols"},{"5","5 symbols"},{"10","10 symbols"}};
+        f(UiField::symbol_burst).selected="off";
+        f(UiField::symbol_burst_random).options={{"0","0"},{"1","1"},{"2","2"},{"3","3"}};
+        f(UiField::symbol_burst_random).selected="0";
         f(UiField::sched_hop).options={{"0","0"},
             {"3","3",true,ui::TextTone::discouraged},{"5","5",true,ui::TextTone::discouraged}};
         f(UiField::sched_hop).selected="0";
@@ -640,7 +645,8 @@ struct Controller::Impl {
         } catch(const std::exception&) {return {};}
     }
     static bool shared_hop_calendar(const modem::Config& config) {
-        return config.fake_hopping || (config.scheduled_hopping&&config.scheduled_hopping->enabled());
+        return config.fake_hopping || (config.scheduled_hopping&&config.scheduled_hopping->enabled()) ||
+            config.symbol_burst.enabled();
     }
     simulation::ReceiverWorkMode receiver_work_mode() const {
         if(settings.simulation)return simulation::ReceiverWorkMode::sampled_simulation;
@@ -827,6 +833,11 @@ struct Controller::Impl {
             const auto cpu_budget=load&&load->receiver_cpu_budget?*load->receiver_cpu_budget:
                 number(f(UiField::receiver_cpu_budget).text,"Receiver CPU budget");
             tuning::validate_receiver_cpu_budget(cpu_budget);
+            const modem::SymbolBurstOptions symbol_burst{
+                load&&load->symbol_burst?*load->symbol_burst:
+                    modem::parse_symbol_burst_wait(f(UiField::symbol_burst).selected),
+                load&&load->symbol_burst_random?*load->symbol_burst_random:
+                    modem::parse_symbol_burst_random(f(UiField::symbol_burst_random).selected)};
             const auto burst_multiplier=load&&load->sched_hop?*load->sched_hop:
                 modem::sched_hop_multiplier(f(UiField::sched_hop).selected);
             const auto dilution=load&&load->sched_hop_dilution?*load->sched_hop_dilution:
@@ -856,15 +867,18 @@ struct Controller::Impl {
                 plan.audio_error_seconds=next.transfer.audio_timing_error_seconds;
                 plan.validate();burst_plan=std::make_shared<const modem::SchedHopPlan>(plan);
             }
+            if(burst_plan&&symbol_burst.enabled())
+                throw Error("Symbol_Burst and Sched_Hop cannot be enabled together");
             const auto receiver_policy=[&](modem::Config& config) {
                 config.receiver_strategy=strategy;config.receiver_cpu_budget=cpu_budget;
                 config.scheduled_hopping=burst_plan;
+                config.symbol_burst=symbol_burst;
                 config.frequency_search_multiplier=burst_plan?frequency_multiplier:1;
                 // Short-symbol calendar geometry is keyed even before a
                 // transfer is prepared. Bind the selected immutable key for
                 // inspection/planning, as transfer::effective_options does.
                 // Ordinary encrypted profiles retain their existing binding.
-                if(burst_plan)config.data_key=next.transfer.key;
+                if(burst_plan||symbol_burst.enabled())config.data_key=next.transfer.key;
             };
             const auto rate=load&&load->rate_hz?*load->rate_hz:frequency(f(UiField::bandwidth).text,"Rate");
             const auto shift=load&&load->rf_shift_hz?*load->rf_shift_hz:frequency(f(UiField::rf_shift).text,"Shift");
@@ -1122,6 +1136,8 @@ struct Controller::Impl {
                 if(formatted_budget.ec!=std::errc{})throw Error("Receiver CPU budget cannot be displayed");
                 f(UiField::receiver_cpu_budget).text.assign(budget_text.data(),formatted_budget.ptr);
                 f(UiField::fhss).selected=fhss;
+                f(UiField::symbol_burst).selected=symbol_burst.wait_symbols?std::to_string(symbol_burst.wait_symbols):"off";
+                f(UiField::symbol_burst_random).selected=std::to_string(symbol_burst.random_limit);
                 f(UiField::sched_hop).selected=modem::sched_hop_id(burst_multiplier);
                 f(UiField::sched_frequency_search).selected=planner_number(frequency_multiplier);
                 f(UiField::sched_hop_dilution).selected=modem::sched_hop_dilution_id(dilution);
@@ -1162,6 +1178,8 @@ struct Controller::Impl {
                 fields.add("long_symbol_samples",modem::symbol_sample_count(*settings.long_message_modem));
                 fields.add("receive_keys",settings.receive_keys.size());
                 fields.add("dsss_factor",settings.transfer.modem.dsss_factor);
+                fields.add("symbol_burst_wait",symbol_burst.wait_symbols);
+                fields.add("symbol_burst_random_limit",symbol_burst.random_limit);
                 fields.add("sched_multiplier",burst_multiplier);fields.add("sched_dilution",dilution);
                 fields.add("receiver_strategy",std::string(tuning::receiver_strategy_id(strategy)));
                 fields.add("search_arithmetic",std::string(tuning::search_arithmetic_id(arithmetic)));
@@ -1280,6 +1298,8 @@ struct Controller::Impl {
         values.receiver_cpu_budget=settings.transfer.modem.receiver_cpu_budget;
         values.full_duplex=settings.full_duplex;
         values.fhss=f(UiField::fhss).selected;
+        values.symbol_burst=modem::parse_symbol_burst_wait(f(UiField::symbol_burst).selected);
+        values.symbol_burst_random=modem::parse_symbol_burst_random(f(UiField::symbol_burst_random).selected);
         values.sched_hop_dilution=modem::sched_hop_active_hops(f(UiField::sched_hop_dilution).selected);
         values.sched_hop=modem::sched_hop_multiplier(f(UiField::sched_hop).selected);
         values.sched_frequency_search=number(f(UiField::sched_frequency_search).selected,"Scheduled frequency search");
@@ -1589,6 +1609,11 @@ struct Controller::Impl {
         f(UiField::dsss_factor).enabled=!busy&&encrypted()&&selected_key();
         f(UiField::dsss_version).enabled=!busy&&encrypted()&&selected_key();
         f(UiField::fhss).enabled=!busy&&encrypted()&&selected_key();
+        f(UiField::symbol_burst).enabled=!busy;
+        f(UiField::symbol_burst_random).enabled=!busy&&encrypted()&&selected_key()&&
+            f(UiField::symbol_burst).selected!="off";
+        f(UiField::symbol_burst_random).display_text=encrypted()&&f(UiField::symbol_burst).selected!="off"?
+            "":"0 effective";
         f(UiField::sched_hop).enabled=!busy&&encrypted()&&selected_key();
         f(UiField::sched_frequency_search).enabled=f(UiField::sched_hop).enabled&&
             f(UiField::sched_hop).selected!="0";
@@ -2019,7 +2044,8 @@ struct Controller::Impl {
             diagnostics<<" | Audio lag 0..+"<<1000*settings.transfer.audio_timing_error_seconds<<" ms per station (assumed)";
             if(next.clock_window_modeled) {
                 if(shared_hop_calendar(settings.transfer.modem))
-                    diagnostics<<" | Dated UTC hop-calendar model ("<<
+                    diagnostics<<(settings.transfer.modem.symbol_burst.enabled()?
+                        " | Dated UTC symbol calendar model (":" | Dated UTC hop-calendar model (")<<
                         (next.clock_timing_quality==audio::TimingQuality::bounded?"bounded":"estimated")<<
                         " capture, +/-"<<1000*next.clock_backend_uncertainty_seconds<<" ms); peer TX timing remains assumed";
                 else diagnostics<<" | UTC arrival window modeled; see Link planner retained positions/backend; audio timing estimated, not hardware calibrated";
@@ -2074,8 +2100,9 @@ struct Controller::Impl {
         // with respect to the loaded keys, as explicitly requested.
         const bool private_example=command!=Command::planner_example_eme;
         if(private_example&&keys.empty())throw Error("Load an encryption keyfile before selecting this example");
-        const std::string common=" --noise-dbm-hz -164 --search-margin 3 --reference independent"
-            " --doppler 0c --dsp-workspace 50% --clock-sync default --dsss-factor 10"
+        const std::string common=std::string(" --noise-dbm-hz -164 --search-margin 3 --reference independent --doppler 0c --dsp-workspace ")+
+            (command==Command::planner_example_eme?"75%":"50%")+
+            " --clock-sync default --dsss-factor 10"
             " --dsss-version interleave --search-arithmetic default --live-duplex yes";
         const char* specific=nullptr;
         switch(command) {
@@ -2483,6 +2510,7 @@ void Controller::select(UiField field,std::string id) {
         }
         else if(field==UiField::simulation||field==UiField::simulation_oscillator||field==UiField::rf_oscillator||
             field==UiField::fec||field==UiField::dsp_workspace||field==UiField::fhss||field==UiField::sched_hop||
+            field==UiField::symbol_burst||field==UiField::symbol_burst_random||
             field==UiField::sched_frequency_search||field==UiField::sched_hop_dilution||field==UiField::dsss_version||field==UiField::search_arithmetic||field==UiField::receiver_strategy) p.configure();
         else if(field==UiField::dsss_factor) {
             p.f(UiField::dsss_version).selected="interleave";

@@ -1,4 +1,4 @@
-.TH DATAPUMP-GUI 1 "September 2026" "Data Pump 001_00" "User Commands"
+.TH DATAPUMP-GUI 1 "October 2026" "Data Pump 001_00" "User Commands"
 .nh
 .ad l
 .nr HY 0
@@ -132,6 +132,21 @@ output; it is not silently enlarged.
 Keep hardware capture running during local transmission for physical loopback;
 default no. Clear received resets queued input and receiver backlog without
 cancelling transmission or clearing its private-key reuse lock.
+.TP
+.BI \-\-symbol\-burst " off|1|2|3|5|10"
+Space complete Robust symbols with the selected minimum number of symbol waits.
+The next complete support starts on a UTC 30-second boundary, at least 60 seconds
+after the previous start. Default is off. Both peers select matching settings.
+The GUI selectors are immediately right of FHSS. Complete symbols, pulse padding,
+20-second guards and full timing uncertainty remain captured; proven silence
+is available for receiver backlog processing. This adds no bits, dwell or ramp.
+FHSS remains independent; simultaneous enabled Sched_Hop is rejected.
+.TP
+.BI \-\-symbol\-burst\-random " 0|1|2|3"
+Limit the additional cryptographically selected whole-symbol wait to 0 through
+this value, inclusive. Default is 0; effective extra wait is zero without a key.
+Planned silence does not end reception. A complete expected symbol must be
+scored absent under the ordinary physical-completion rule.
 .TP
 .BI \-\-dsss\-factor " 1|10|100|1000"
 Additional private outer spreading; 1 is off. Requires a selected key for factors

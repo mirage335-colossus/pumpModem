@@ -2,6 +2,7 @@
 #include "datapump/live.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/pattern_correlator.hpp"
+#include "datapump/symbol_burst.hpp"
 #include "live_pattern_scores.hpp"
 #include "live_deferred_pattern_history.hpp"
 #include "scheduled_source_binding_types.hpp"
@@ -40,6 +41,8 @@ struct ReceiverState {
     struct Presentation {
         std::uint64_t candidate_id=0, signal_id=0, published_revision=0;
         bool content_reported=false;
+        std::optional<modem::SymbolBurstCoordinate> burst_first;
+        std::optional<modem::SymbolBurstSlot> burst_next;
     };
     // Candidate chunks may interleave. Retain an identity while a detector or
     // queued chunk can publish it; abandonment never implies physical END.

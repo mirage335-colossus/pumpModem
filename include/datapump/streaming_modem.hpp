@@ -125,6 +125,8 @@ public:
     bool try_skip_unobserved(std::uint64_t samples, std::stop_token stop = {});
     std::optional<std::uint64_t> unobserved_end_from(std::uint64_t local_sample) const;
     std::optional<ScheduledCaptureEnvelope> scheduled_capture_envelope(std::uint64_t local_sample) const;
+    void suspend_fresh_acquisition();
+    bool symbol_burst_tracking_active() const;
     bool synchronized() const;
     // Complete sampled acquisition coverage of the original finite start
     // window, independent of admission and physical message completion.

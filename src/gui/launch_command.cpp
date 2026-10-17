@@ -146,7 +146,8 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             flag=="--rf-oscillator"||flag=="--shift"||flag=="--rf-shift"||flag=="--rf-carrier"||flag=="--search-margin"||
             flag=="--reference"||flag=="--sideband"||flag=="--lf-reference"||
             flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--dsss-mode"||flag=="--search-arithmetic"||flag=="--receiver-strategy"||flag=="--receiver-cpu-budget"||flag=="--doppler"||flag=="--fhss"||flag=="--sched-hop"||flag=="--sched-hop-dilution"||flag=="--sched-frequency-search"||flag=="--fhss-list"||flag=="--fhss-list-file"||flag=="--live-duplex"||
-            flag=="--keyfile"||flag=="--key-name"||flag=="--tx-key";
+            flag=="--keyfile"||flag=="--key-name"||flag=="--tx-key"||
+            flag=="--symbol-burst"||flag=="--symbol-burst-random";
         if(!known)invalid("Unknown launch option: "+std::string(flag));
         std::string_view value;
         if(equal!=std::string_view::npos)value=argument.substr(equal+1);
@@ -194,6 +195,8 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             result.receiver_cpu_budget=number(value,flag,0,std::numeric_limits<double>::max());
             tuning::validate_receiver_cpu_budget(*result.receiver_cpu_budget);
         }
+        else if(flag=="--symbol-burst")result.symbol_burst=modem::parse_symbol_burst_wait(value);
+        else if(flag=="--symbol-burst-random")result.symbol_burst_random=modem::parse_symbol_burst_random(value);
         else if(flag=="--sched-hop")result.sched_hop=modem::sched_hop_multiplier(value);
         else if(flag=="--sched-frequency-search")result.sched_frequency_search=sched_frequency_search(value);
         else if(flag=="--sched-hop-dilution") {
@@ -305,6 +308,8 @@ std::string format(const Patch& settings) {
     if(settings.sched_hop)add("--sched-hop",std::string(modem::sched_hop_id(*settings.sched_hop)));
     if(settings.sched_frequency_search)add("--sched-frequency-search",numeric(sched_frequency_search(numeric(*settings.sched_frequency_search))));
     if(settings.fhss)add("--fhss",std::string(fhss::id(fhss::parse(*settings.fhss))));
+    if(settings.symbol_burst)add("--symbol-burst",*settings.symbol_burst?std::to_string(*settings.symbol_burst):"off");
+    if(settings.symbol_burst_random)add("--symbol-burst-random",std::to_string(*settings.symbol_burst_random));
     if(settings.fhss_list)add("--fhss-list",fhss::list_text(fhss::parse_list(*settings.fhss_list)));
     if(settings.fhss_list_file)arguments.push_back("--fhss-list-file="+*settings.fhss_list_file);
     // Equal syntax preserves a filename or key name beginning with '--'.

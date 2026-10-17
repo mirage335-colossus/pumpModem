@@ -483,6 +483,47 @@ void bounded_history_preserves_active_rows() {
           pending.size() == History::capacity && ids == History::capacity,
           "full active history grew or evicted a pending row");
 }
+void burst_calendar_continuation() {
+    using datapump::modem::SymbolBurstCoordinate;
+    const auto earlier=[] {
+        auto c=candidate(1,1000,2000,100);c.symbol_samples=1000;c.absence_samples=9000;
+        c.burst_first=SymbolBurstCoordinate{100,3};c.burst_next=SymbolBurstCoordinate{190,3};return c;
+    };
+    const auto later=[] {
+        auto c=candidate(2,10407,11407,80);c.symbol_samples=1000;c.absence_samples=9000;
+        c.burst_first=SymbolBurstCoordinate{190,3};c.burst_next=SymbolBurstCoordinate{280,3};return c;
+    };
+    for(unsigned variant=0;variant<10;++variant) {
+        History history;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
+        auto first=earlier(),next=later();
+        switch(variant) {
+        case 1:next.burst_first->epoch+=30;break;
+        case 2:++next.burst_first->phase;break;
+        case 3:next.symbol_samples*=2;break;
+        case 4:++next.family;break;
+        case 5:next.frequency+=100;break;
+        case 6:first.complete=true;break;
+        case 7:next.burst_first.reset();next.burst_next.reset();break;
+        case 9:next.score=120;break;
+        default:break;
+        }
+        const auto original=history.observe(first,allocate);
+        if(variant==8)history.retire_unreferenced([](auto){return false;});
+        const auto result=history.observe(next,allocate);
+        check((result.signal_id==original.signal_id)==(variant==0),
+              "Burst history did not require the exact active same-profile next calendar address");
+    }
+    History history;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
+    const auto original=history.observe(earlier(),allocate);
+    auto advanced=earlier();advanced.end=11000;advanced.score=300;
+    advanced.burst_next=SymbolBurstCoordinate{280,3};history.observe(advanced,allocate);
+    history.observe(earlier(),allocate); // A provisional replay must not rewind nextC.
+    auto continuation=later();continuation.id=3;continuation.first=19407;continuation.end=20407;
+    continuation.score=200;continuation.burst_first=SymbolBurstCoordinate{280,3};
+    continuation.burst_next=SymbolBurstCoordinate{370,3};
+    check(history.observe(continuation,allocate).signal_id==original.signal_id && ids==1,
+          "A stale Burst observation rewound its owner's next calendar address");
+}
 }
 int main() {
     try {
@@ -503,6 +544,7 @@ int main() {
         pending_fragments_must_share_the_long_symbol_clock();
         bounded_history_preserves_active_rows();
         retired_history_preserves_active_aliases();
+        burst_calendar_continuation();
         std::cout << "live reception arbitration tests passed\n";
         return 0;
     } catch (const std::exception& error) {

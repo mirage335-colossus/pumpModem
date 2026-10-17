@@ -4,6 +4,54 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Symbol_Burst — implementation candidate, 17 October 2026
+
+The optional whole-symbol UTC calendar and guarded sparse capture are described
+in [Symbol_Burst](symbol-burst.md). The candidate keeps existing wire bits,
+waveform fits and physical-absence completion. Original timing/rate hypotheses
+remain authoritative; no new adaptive clock recentering is used. FHSS retains
+its independent waveform and usable-power rules.
+
+Frozen local candidates pass calendar/transmit, receiver and reception-history
+controls, residual-clock/GPSDO controls, planner model/curve/GUI checks, example
+imports and launch/layout controls. The final Live suite passes public,
+private two-key/two-duration, forced-amplitude, simulation, early Default clock
+and contradictory timestamp cases. Each retains exact pending bits and actual
+absence completion. The private case recovers ten bits and drains every retained
+profile before fresh discovery. The public fixture parks real queued symbol PCM,
+then independently observes capture omitting PCM while that backlog drains.
+Forced amplitude also omits real PCM, receives exact `001`, completes by its
+original absence deadline and resumes discovery after retained guards drain.
+These are functional controls, not measured low-SNR reliability or paced CPU
+qualification.
+
+Matched planner comparisons fix available-memory reference at 11,367,510,016
+bytes: EME uses 75% on both sides; other examples use 50%. With Burst Off, all
+2,857 baseline rows match exactly. Of twelve selected plain/encrypted examples,
+eight originally fit the 0.6 CPU budget; nine fit with wait1 and ten with wait10.
+The corresponding 54 fixed neighbors improve from 42 to 45 and46. Across 2,084
+comparable distinct wider curve targets, wait10 preserves every formerly
+feasible point and increases feasible points from614 to786. Wait1 leaves ten
+previously feasible Default/−8 curve targets above the budget, with coverage
+still supported: full UTC correction alternatives and finite acquisition debt
+are real costs; a longer wait restores feasibility. The encrypted −8 example
+already exceeds baseline whole-symbol workspace and remains unsupported.
+
+Corrections include actual30-second Burst amplitude admission cadence, separate
+bounded startup cohorts, each heterogeneous profile's own memory residency,
+settled amplitude allocation, and the native final retained FFT batch's complete
+readiness (including coarse-bin fence padding). No keys, profiles or original
+clock/frequency alternatives are removed. Random waits do not subsidize the
+minimum permitted interval.
+
+Full normal native, SDK, platform and packaging regression is pending on this
+candidate. Earlier failed diagnostics are retained under
+`.agent-work/artifacts/symbol-burst-impl-20261017/`; they are not passes. Final
+local runtime evidence uses snapshot18 with the final Live fixture22. The
+inherited very-long private rolling cold-acquisition CPU and peak residency
+limit remains unqualified; later silence neither resolves unknown first epochs
+nor reduces whole-symbol peak workspace.
+
 ## Public amplitude arrival resources — local candidate, 17 October 2026
 
 The 100 W / 220 dB / −164 dBm/Hz launch was limited by duplicated rolling

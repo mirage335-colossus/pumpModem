@@ -1,10 +1,12 @@
 #pragma once
+#include "datapump/symbol_burst.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <optional>
 
 namespace datapump::live::detail {
 // Different symbol durations can admit the same PCM. Share presentation state
@@ -25,6 +27,9 @@ public:
         // Valid only for amplitude candidates. These are actual retained FFT
         // passbands; their reported centers are not coherent carrier estimates.
         double amplitude_low_hz = 0, amplitude_high_hz = 0;
+        // Exact source-calendar identity for optional Burst continuation.
+        // Physical overlap, evidence and completion still use scored PCM.
+        std::optional<modem::SymbolBurstCoordinate> burst_first, burst_next;
     };
     struct Decision {
         std::uint64_t signal_id = 0;
@@ -54,6 +59,8 @@ public:
             observed.first = std::min(observed.first, entry.owner.first);
             observed.end = std::max(observed.end, entry.owner.end);
             observed.absence_samples = std::max(observed.absence_samples, entry.owner.absence_samples);
+            if(entry.owner.burst_next && (!observed.burst_next || *observed.burst_next<*entry.owner.burst_next))
+                observed.burst_next=entry.owner.burst_next;
             if (observed.score < entry.owner.score) {
                 observed.frequency = entry.owner.frequency;
                 observed.frequency_tolerance = entry.owner.frequency_tolerance;
@@ -197,6 +204,14 @@ private:
         // alias merely because a long receiver has yet to score its silence.
         const auto gap = later.first - earlier.end;
         if (gap >= earlier.absence_samples) return false;
+        if(earlier.burst_first || later.burst_first)
+            return earlier.burst_first && earlier.burst_next && later.burst_first && later.burst_next &&
+                earlier.symbol_samples==later.symbol_samples && *earlier.burst_next==*later.burst_first &&
+                // A disjoint suffix has no copy of the leading accepted bits.
+                // Reuse an earlier stronger row without transferring ownership;
+                // a stronger suffix remains independent until actual overlap
+                // supplies the existing full-prefix revision/merge evidence.
+                stronger(earlier,later);
         const auto symbol = std::max(earlier.symbol_samples, later.symbol_samples);
         if (!symbol) return true;
         // Short aliases start on the longer profile's symbol clock. When the

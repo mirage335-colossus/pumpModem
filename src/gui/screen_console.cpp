@@ -17,6 +17,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.purpose=ControlPurpose::planning;break;
     case Slot::device:case Slot::mono:case Slot::live_duplex:case Slot::exclusive:case Slot::key:case Slot::key_actions:
     case Slot::dsss_factor:case Slot::dsss_version:case Slot::fhss:case Slot::sched_hop:case Slot::sched_hop_dilution:case Slot::sched_frequency_search:
+    case Slot::symbol_burst:case Slot::symbol_burst_random:
     case Slot::pattern:case Slot::fec:case Slot::dsp_workspace:case Slot::receive_snr:
     case Slot::developer_mode:case Slot::shellcode_mode:case Slot::send_key:
         control.purpose=ControlPurpose::setup;break;
@@ -33,6 +34,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         slot==Slot::receive_snr||slot==Slot::profile_reference||slot==Slot::callsign||
         slot==Slot::grid||slot==Slot::repeatable;
     control.open_upward=slot>=Slot::device;
+    if(slot==Slot::symbol_burst||slot==Slot::symbol_burst_random)control.open_upward=false;
     control.font_size=control.multiline?16:13;
     if(control.kind==Kind::bitmap)control.font_size=11;
     if(menu==Menu::keyfile)control.menu_label="Keyfile";
@@ -79,6 +81,8 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::dsss_factor)control.help="Additional private outer DSSS spreading factor, using separate DSSS key/counter domains while retaining independent inner private patterns. Selecting 10x, 100x or 1000x starts at Rate 360, 36 or 3.6 Hz and a 1.5 kHz stream carrier, preserving the usual voice-passband width. Rate remains editable; occupied bandwidth grows with Rate times factor. Experimental waveform; both peers must match. Requires an active encryption key; spreading adds no energy per bit.";
     if(slot==Slot::dsss_version)control.help="Off preserves ordinary private patterns. Interleave spreads their coefficients using the independent DSSS key, then shapes the fine chips. Spreading selects 10x, 100x or 1000x. Imported legacy commands remain an explicit diagnostic waveform. Enter actual average radio power in the link budget; interleaving includes digital headroom before limiting.";
     if(slot==Slot::fhss)control.help="Requires a selected encryption key. Fake FCC/EU illustrate band-specific hopping. Below 800 MHz both use narrow experimental spacing; this is a product convention. Carrier/Shift animate during TX; physical audio frequency and radio tuning stay fixed. Supported geometries shape audio power down at hop boundaries; unsupported ramps are reported. Planner uses the highest illustrated RF. Band/access limits and unsupported profiles appear under Model limits and references. No compliance claim or automatic channel-count gain.";
+    if(slot==Slot::symbol_burst)control.help="Off by default. After each complete symbol, wait this many symbol durations, then begin the next on a 30-second UTC boundary with at least 60 seconds between starts. The receiver acquires normally, then listens around expected symbols and uses agreed silence to process queued work. Discovery of unrelated new transmissions pauses while tracking. Guards and clock uncertainty can reduce usable silence; choose a longer wait when needed. Both peers must match. FHSS remains independent; Sched_Hop cannot be active at the same time.";
+    if(slot==Slot::symbol_burst_random)control.help="Maximum additional whole-symbol wait, drawn cryptographically from zero through this limit using the communication key. Both peers must match. Effective zero when Symbol_Burst is Off or no transmit encryption key is selected; the preference is remembered.";
 
     if(control.field==Field::sched_hop) {
         control.developer_only=true;
@@ -242,6 +246,8 @@ const std::vector<Control>& console_screen() {
         placed({Kind::choice,Field::dsss_factor,Command::none,Bitmap::none,Page::console,3,"Spreading"}, Slot::dsss_factor),
         placed({Kind::choice,Field::dsss_version,Command::none,Bitmap::none,Page::console,3,"DSSS"}, Slot::dsss_version),
         placed({Kind::choice,Field::fhss,Command::none,Bitmap::none,Page::console,3,"FHSS"}, Slot::fhss),
+        placed({Kind::choice,Field::symbol_burst,Command::none,Bitmap::none,Page::console,3,"Symbol_Burst"}, Slot::symbol_burst),
+        placed({Kind::choice,Field::symbol_burst_random,Command::none,Bitmap::none,Page::console,3,"Random extra"}, Slot::symbol_burst_random),
         placed({Kind::choice,Field::sched_hop,Command::none,Bitmap::none,Page::planner,5,"Sched_Hop"}, Slot::none),
         placed({Kind::choice,Field::sched_hop_dilution,Command::none,Bitmap::none,Page::planner,5,"Dilution"}, Slot::none),
         placed({Kind::choice,Field::sched_frequency_search,Command::none,Bitmap::none,Page::planner,5,"Freq search"}, Slot::none),

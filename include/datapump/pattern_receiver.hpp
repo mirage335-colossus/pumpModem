@@ -301,6 +301,10 @@ public:
     bool try_skip_unobserved(std::uint64_t samples, std::stop_token = {});
     std::optional<std::uint64_t> unobserved_end_from(std::uint64_t local_sample) const;
     std::optional<ScheduledCaptureEnvelope> scheduled_capture_envelope(std::uint64_t local_sample) const;
+    // Freeze fresh first-start searches, retaining every original acquisition
+    // window and existing continuation. Used by the bank-wide Burst barrier.
+    void suspend_fresh_acquisition();
+    bool symbol_burst_tracking_active() const;
     // Shared per-sample carrier projection for a bank with one carrier/clock.
     // projected[i] is raw[i] * exp(-j*carrier_phase[i]); an arbitrary fixed
     // projection phase is fitted by the pattern score. Both spans must match.
@@ -356,6 +360,7 @@ public:
     bool drift_tolerant() const;
     PatternFftWork fft_work() const;
     std::size_t working_bytes() const;
+    static std::size_t symbol_burst_control_bytes();
     // Includes admitted detector state whose allocation is deferred until PCM.
     std::size_t reserved_workspace_bytes() const;
     // Additional allocation bound for one finite PCM push and its next drain.

@@ -36,7 +36,7 @@ enum class Slot {
     fast_correction, fast_auth, fast_detail, fast_history, fast_status, fast_volume, fast_exclusive,
     fast_waveform, fast_waterfall, fast_constellation_plot, fast_airtime, fast_diagnostics, fast_snr, fast_files, fast_use_text, fast_copy_signal, fast_paste_signal, fast_qr, fast_qr_brightness,
     legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_transmit, legacy_waterfall, legacy_status, legacy_device, legacy_volume, legacy_exclusive, legacy_mono,
-    sched_hop, sched_hop_dilution, sched_frequency_search, count
+    sched_hop, sched_hop_dilution, sched_frequency_search, symbol_burst, symbol_burst_random, count
 };
 inline constexpr bool persistent_slot(Slot slot) {
     switch (slot) {
@@ -47,6 +47,7 @@ inline constexpr bool persistent_slot(Slot slot) {
     case Slot::simulation_oscillator: case Slot::rf_oscillator:
     case Slot::search_margin: case Slot::clock_accuracy: case Slot::clock_region: case Slot::clock_offset: case Slot::audio_error:
     case Slot::dsss_factor: case Slot::dsss_version: case Slot::fhss:
+    case Slot::symbol_burst: case Slot::symbol_burst_random:
     case Slot::key_actions: case Slot::key_path: case Slot::key:
     case Slot::device: case Slot::mono: case Slot::live_duplex: case Slot::volume: case Slot::exclusive: case Slot::bandwidth: case Slot::carrier: case Slot::rf_shift: case Slot::doppler: case Slot::snr: case Slot::long_snr: case Slot::receive_snr: case Slot::pattern:
     case Slot::fec: case Slot::dsp_workspace: case Slot::diagnostics: case Slot::status: return true;
@@ -78,7 +79,7 @@ struct DesktopLayout {
         const int content_height = height - header_rows;
         out[Slot::header] = {margin, 10, 145, 32};
         out[Slot::fast_mode] = {169, 12, 175, 28};
-        out[Slot::mode] = {352, 13, width - 825, 28};
+        out[Slot::mode] = {479, 13, width - 952, 28};
         out[Slot::developer_mode] = {width - 463, 12, 150, 28};
         out[Slot::shellcode_mode] = {width - 313, 12, 150, 28};
         out[Slot::clear] = {width - 153, 12, 137, 28};
@@ -149,15 +150,17 @@ struct DesktopLayout {
         out[Slot::legacy_status]={margin,height-31,volume_x-audio_gap-margin,24};
         out[Slot::legacy_volume]={volume_x,height-31,volume_width,field_height};
         out[Slot::legacy_exclusive]={exclusive_x,height-31,exclusive_width,field_height};
-        out[Slot::callsign] = {margin, 62, 115, field_height};
-        out[Slot::grid] = {142, 62, 85, field_height};
-        out[Slot::repeatable] = {238, 61, 119, 28};
-        out[Slot::key_actions] = {366, 62, 92, field_height};
+        out[Slot::callsign] = {margin, 62, 107, field_height};
+        out[Slot::grid] = {131, 62, 77, field_height};
+        out[Slot::repeatable] = {352, 12, 119, 28};
+        out[Slot::key_actions] = {216, 62, 92, field_height};
         out[Slot::key_path] = {366, 92, width - 382, 18};
-        out[Slot::dsss_version] = {466, 62, 165, field_height};
-        out[Slot::dsss_factor] = {641, 62, 90, field_height};
-        out[Slot::fhss] = {741, 62, width - 999, field_height};
-        out[Slot::key] = {width - 248, 62, 232, field_height};
+        out[Slot::dsss_version] = {316, 62, 150, field_height};
+        out[Slot::dsss_factor] = {474, 62, 70, field_height};
+        out[Slot::fhss] = {552, 62, width - 1000, field_height};
+        out[Slot::symbol_burst] = {width - 440, 62, 112, field_height};
+        out[Slot::symbol_burst_random] = {width - 320, 62, 96, field_height};
+        out[Slot::key] = {width - 216, 62, 200, field_height};
         // Link assumptions and RX success stay beside the compact Simulation
         // Yes/No choice in both modes. Simulation-only computation estimates
         // have a separate row so they never displace the editable inputs.

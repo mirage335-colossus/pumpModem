@@ -87,6 +87,31 @@ struct ReceiverSearchDiagnostics {
     bool arithmetic_experimental=false;
 };
 
+// A planning assumption for one settled Burst reception after ordinary acquisition.
+// Capture exclusion is conditional on the Live union proof; these are neither
+// observed execution counters nor a promise that other active streams fit.
+struct SymbolBurstWorkDiagnostics {
+    bool enabled=false,modeled=false,timing_qualified=false;
+    unsigned wait_symbols=0,effective_random_limit=0,recommended_wait_symbols=0;
+    std::size_t initial_profiles=0,initial_key_families=0;
+    bool configured_bank_modeled=false;
+    double support_seconds=0,minimum_spacing_seconds=0,mean_spacing_seconds=0,maximum_spacing_seconds=0;
+    double guard_before_seconds=0,guard_after_seconds=0,capture_seconds_per_slot=0;
+    double useful_quiet_seconds=0,capture_fraction=1;
+    double seeking_realtime_ratio=0,acquisition_admission_seconds=0,acquisition_observation_seconds=0,acquisition_cpu_seconds=0;
+    double acquisition_cpu_upper_seconds=0;
+    double acquisition_new_epoch_admissions=0;
+    double tracked_cpu_seconds_per_slot=0,tracked_realtime_ratio=0,quiet_drain_ratio=0;
+    double tracked_cpu_upper_seconds_per_slot=0,tracked_realtime_upper_ratio=0;
+    // Minimum-spacing service denominator; CPU retains the longest initial
+    // capture debt. It can be shorter than acquisition_observation_seconds.
+    double finite_observation_seconds=0,finite_receiver_cpu_seconds=0,finite_realtime_ratio=0;
+    double finite_realtime_upper_ratio=0; // Same separate rebuild fallback as the ordinary estimate.
+    // True only for the engineering service allowance, never measured rescue.
+    bool recurring_service_fits=false;
+    std::string scope,limit;
+};
+
 struct Estimate {
     bool gpu_work_supported=true;
     // Engineering estimates, not measurements or calibrated probabilities.
@@ -123,6 +148,7 @@ struct Estimate {
     // Divide by simulated_seconds for a rough real-time workload,
     // not a measured CPU utilization or a guarantee about per-bit latency.
     double receiver_cpu_seconds = 0;
+    SymbolBurstWorkDiagnostics symbol_burst;
     // Separate continuous hardware workload: one complete fresh UTC cohort
     // per admission cadence, through its acquisition/retirement lifetime.
     // A short draft can end before the first FFT and must not imply an idle
@@ -294,4 +320,14 @@ Estimate estimate_with_receiver_settings(const transfer::Estimate& transmission,
                   double differential_window_seconds = 100,std::size_t probability_trials = 4096,
                   ReceiverWorkMode work_mode = ReceiverWorkMode::sampled_simulation,
                   ReceiverTimingModel timing_model = {},std::stop_token stop = {});
+// Pure planner support query with the same configured bank, timing coverage,
+// backend and workspace decisions. Skips Burst service/debt/recommendation work
+// and probability trials. Only coverage, profile and workspace fields are a
+// supported result; CPU/service/probability fields must not be displayed.
+Estimate estimate_receiver_support(const transfer::Estimate& transmission,
+                  const transfer::Options& options,const modem::ChannelConfig& channel,
+                  std::span<const modem::Config> receive_profiles = {},std::size_t receive_key_count = 1,
+                  ReceiverWorkMode work_mode = ReceiverWorkMode::sampled_simulation,
+                  ReceiverTimingModel timing_model = {},const live::Settings* receiver_settings = nullptr,
+                  std::stop_token stop = {});
 }

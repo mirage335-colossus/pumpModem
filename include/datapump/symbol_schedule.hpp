@@ -5,6 +5,7 @@
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/sched_hop.hpp"
 #include "datapump/scheduled_symbol_calendar.hpp"
+#include "datapump/symbol_burst.hpp"
 
 #include <cstdint>
 #include <limits>
@@ -21,6 +22,34 @@ struct SymbolStreamAddress {
     std::uint64_t ordinal = 0;
     std::uint32_t sample_in_second = 0;
 };
+
+// A public waveform has no UTC-dependent source or power calendar. Its first
+// complete symbol can use the ordinary rolling search; that accepted physical
+// start anchors the constant (J=0) Burst spacing. Finite amplitude searches
+// retain their separate arrival windows even for these configurations.
+inline bool symbol_burst_public_rolling_search(const Config& config) {
+    return config.symbol_burst.enabled() && !config.scramble && !config.dsss &&
+        !config.data_key && !config.fake_hopping && !config.scheduled_hopping;
+}
+
+// Symbol_Burst binds its complete finite support to the UTC half-minute grid.
+// The payload begins P samples later, so a keyed payload phase is not generally
+// zero and cannot be enumerated with the ordinary contiguous-symbol gcd grid.
+inline std::optional<std::uint64_t> symbol_burst_payload_start_in_epoch(
+        const Config& config,std::uint64_t epoch) {
+    if(!config.symbol_burst.enabled())return std::nullopt;
+    if(!config.sample_rate)throw Error("invalid Symbol_Burst sample rate");
+    const auto padding=pattern_pulse_padding_samples(config);
+    const auto seconds=padding/config.sample_rate;
+    if(epoch<seconds || (epoch-seconds)%30)return std::nullopt;
+    return padding%config.sample_rate;
+}
+
+template<class Consume>
+inline void for_each_symbol_burst_phase(const Config& config,std::uint64_t epoch,Consume&& consume) {
+    if(const auto phase=symbol_burst_payload_start_in_epoch(config,epoch))
+        consume(*phase);
+}
 
 namespace symbol_schedule_detail {
 inline std::uint64_t add(std::uint64_t a, std::uint64_t b) {
@@ -131,6 +160,7 @@ inline bool scheduled_bursts(const Config& config) {
 // a scheduled symbol is shorter than one second. Active/keyed pruning is a
 // separate operation; continuous and ordinary profiles keep their old extent.
 inline std::uint64_t canonical_phase_extent(const Config& config) {
+    if(config.symbol_burst.enabled())return config.sample_rate;
     return scheduled_bursts(config)?static_cast<std::uint64_t>(config.sample_rate):
         std::min(symbol_sample_count(config),static_cast<std::uint64_t>(config.sample_rate));
 }
@@ -157,6 +187,9 @@ inline void for_each_packed_scheduled_phase(const Config& config,std::uint64_t e
 // same private epoch/ordinal. Arrival-window pruning may exclude phases; the
 // cipher-address gcd alone may not. The iterator does not allocate this grid.
 inline std::uint64_t canonical_phase_step(const Config& config) {
+    // There is one exact payload phase per eligible half-minute epoch. Consumers
+    // use symbol_burst_payload_start_in_epoch rather than assuming its phase=0.
+    if(config.symbol_burst.enabled())return config.sample_rate;
     if(scheduled_bursts(config)) {
         if(packed_scheduled_symbols(config))return 1;
         if(config.fake_hopping&&config.fake_hopping->matched_gaps)return 1;
@@ -174,6 +207,7 @@ inline std::uint64_t canonical_phase_step(const Config& config) {
 // qualified arrival prior must intersect that cell, not only its representative
 // point. This shares the exact templates without discarding fractional starts.
 inline std::uint64_t canonical_phase_cell_upper(const Config& config,std::uint64_t phase) {
+    if(config.symbol_burst.enabled())return phase;
     if(packed_scheduled_symbols(config))return phase;
     const auto limit=canonical_phase_extent(config)-1;
     return phase+std::min(canonical_phase_step(config)-1,limit-std::min(phase,limit));
@@ -181,6 +215,14 @@ inline std::uint64_t canonical_phase_cell_upper(const Config& config,std::uint64
 inline std::uint64_t scheduled_symbol_offset(const Config& config,std::uint64_t epoch,
         std::uint64_t phase,std::uint64_t index) {
     const auto samples=symbol_sample_count(config);
+    if(config.symbol_burst.enabled()) {
+        const SymbolBurstPlan plan(config);
+        const auto first=plan.bind_payload(epoch,phase);
+        SymbolBurstCursor cursor(plan,first);
+        // Compatibility random access is deliberately linear. Streaming PCM,
+        // masking and receiver continuations retain their own bounded cursor.
+        return plan.distance(first.payload_begin,cursor.at(index).payload_begin);
+    }
     if(scheduled_bursts(config)) {
         if(!config.data_key)throw Error("scheduled hopping requires an encryption key");
         if(packed_scheduled_symbols(config)) {
@@ -203,6 +245,12 @@ inline std::uint64_t scheduled_symbol_offset(const Config& config,std::uint64_t 
 }
 inline SymbolStreamAddress symbol_stream_address(const Config& config,std::uint64_t epoch,
         std::uint64_t phase,std::uint64_t index) {
+    if(config.symbol_burst.enabled()) {
+        const SymbolBurstPlan plan(config);
+        SymbolBurstCursor cursor(plan,plan.bind_payload(epoch,phase));
+        const auto payload=cursor.at(index).payload_begin;
+        return {payload.epoch,payload.phase/plan.symbol_samples(),payload.phase};
+    }
     if(!scheduled_bursts(config)&&!deferred_symbols(config))return symbol_stream_address(epoch,phase,index,
         symbol_sample_count(config),config.sample_rate);
     const auto offset=scheduled_symbol_offset(config,epoch,phase,index);
@@ -270,7 +318,7 @@ inline std::shared_ptr<const FhssPlan> resolve_fhss_power(const FhssPlan& source
         FhssPowerShape shape(*plan,fs,support,symbol);
         // Reserve complete short bits where inexpensive; long bits retain their
         // source clock and span gaps. No whole-bit PCM buffer or repeated bits.
-        if(symbol<shape.period) {
+        if(symbol<shape.period && !config.symbol_burst.enabled()) {
             try {FhssSymbolCalendar calendar(*plan,fs,support,symbol);plan->defer_symbols=true;}
             catch(const Error&) {
                 // Deferral cannot create a longer slot than a dwell contains.
@@ -281,6 +329,8 @@ inline std::shared_ptr<const FhssPlan> resolve_fhss_power(const FhssPlan& source
                     throw Error("FHSS cannot retain half a short symbol's usable interval; reduce clock/audio/region uncertainty");
             }
         }
+        if(config.symbol_burst.enabled() && symbol<shape.period && shape.minimum_flat_power_fraction(symbol)<.5)
+            throw Error("FHSS cannot retain half a short symbol's usable interval; reduce clock/audio/region uncertainty");
         if(!plan->remote_guard_covered)plan->power_fallback_reason=
             "Local hop protected; remote timing uncertainty spans the dwell (future radio overlap not guaranteed)";
     } catch(const Error& e) {

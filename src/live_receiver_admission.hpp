@@ -11,6 +11,8 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <limits>
+#include <span>
 #include <utility>
 namespace datapump::live::detail {
 struct ReceiverAdmissionContext {
@@ -20,6 +22,7 @@ struct ReceiverAdmissionContext {
     double now=0,propagation=0;
     std::size_t key_count=1,profile_count=1,capacity=0,capture_owner_bytes=0,control_margin=0;
     bool keyed=true,prefer_streamed_templates=false,compact_clock_search=false;
+    std::optional<std::size_t> amplitude_family_bank_count;
 };
 struct ReceiverSearchPreparation {
     modem::PatternSearch search;
@@ -30,7 +33,7 @@ inline void prepare_public_amplitude_windows(const modem::Config& config,const S
         bool keyed,modem::PatternSearch& search,std::size_t families=1,std::size_t profiles=1) {
     if(keyed || families!=1 || profiles!=1 || value.transfer.key || value.simulation || value.transfer.timestamp || value.transfer.clock_sync ||
        config.scramble || config.data_key || config.dsss || config.dsss_factor!=1 ||
-       config.fake_hopping || modem::scheduled_bursts(config))return;
+       config.fake_hopping || modem::scheduled_bursts(config) || config.symbol_burst.enabled())return;
     const auto chip=modem::pattern_chip_samples(config);
     const auto geometry=modem::pattern_amplitude_geometry(config,search);
     // Preserve the original whole-second/half-chip representatives exactly.
@@ -42,8 +45,12 @@ inline void prepare_public_amplitude_windows(const modem::Config& config,const S
 }
 inline bool modeled_receiver_start_window(modem::PatternSearch& search,const modem::Config& config,
             std::uint64_t epoch,const ReceiverAdmissionContext& context,const Settings& value,std::uint64_t origin,bool amplitude=false) {
+        // Calendar scheduling does not upgrade Default's station-clock prior
+        // to GPS accuracy. Preserve its complete several-second acquisition.
         const bool calendar=transfer::shared_hop_calendar(config);
-        const auto policy=clock_sync::effective_policy(value.transfer.clock_sync,calendar);
+        const auto policy=config.symbol_burst.enabled() && !value.transfer.clock_sync?
+            std::optional<clock_sync::Policy>{{(value.transfer.search_seconds+1.)/2,0,0}}:
+            clock_sync::effective_policy(value.transfer.clock_sync,calendar);
         if(!policy || value.simulation || !context.timing ||
            context.timing->quality==audio::TimingQuality::unavailable ||
            (!calendar && context.timing->uncertainty_seconds>clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds)) || !search.start_offset_seconds ||
@@ -104,6 +111,8 @@ inline ReceiverSearchPreparation prepare_receiver_search(const modem::Config& co
     ReceiverSearchPreparation result{std::move(initial),{},false};
     auto& search=result.search;
     auto& declared_search=result.declared_search;
+    const bool public_burst=config.symbol_burst.enabled() && !config.scramble && !config.dsss;
+    if(public_burst)search.initial_stream_symbols=1;
     search.receiver_schedule_key_count=context.key_count;
     search.receiver_bank_count=modem::receiver_strategy_bank_count(config,value.transfer.search_seconds,context.key_count,context.profile_count);
     const auto owner_charge=context.capture_owner_bytes;
@@ -123,7 +132,9 @@ inline ReceiverSearchPreparation prepare_receiver_search(const modem::Config& co
     search.prefer_streamed_templates=context.prefer_streamed_templates;
     search.allow_local_clock_fallback=true;
     search.compact_clock_search=context.compact_clock_search;
-    search.search_stream_phases=context.keyed;
+    // A Burst support starts on the half-minute grid. Its payload phase is
+    // exactly P%Fs, independently of public/private waveform selection.
+    search.search_stream_phases=context.keyed && !config.symbol_burst.enabled();
     search.bit_limit=transfer::pattern_bit_limit(value.content_limit);
     // A fixed diagnostic message epoch does not replace a dated
     // capture origin. Scheduled settling can span null hops;
@@ -148,6 +159,10 @@ inline ReceiverSearchPreparation prepare_receiver_search(const modem::Config& co
             transfer::effective_clock_sync(value.transfer)?modem::utc_transmit_rate_limit(config):0);
         if(refined.complete_coverage)search=std::move(refined.search);
     }
+    // Establish the finite amplitude relation before computing its FFT lead.
+    // The lead admits future UTC-grid cohorts before their first full window.
+    if(public_burst && !search.amplitude_start_window && search.qualified_start_window)
+        search.amplitude_start_window=search.qualified_start_window;
     if(!value.transfer.timestamp&&!modem::scheduled_bursts(config)) {
         prepare_public_amplitude_windows(config,value,context.keyed,search,context.key_count,context.profile_count);
         if(search.amplitude_epoch_stride_seconds>1 && context.public_amplitude_epoch_origin)
@@ -161,10 +176,49 @@ inline ReceiverSearchPreparation prepare_receiver_search(const modem::Config& co
         search.amplitude_receiver_bank_count=modem::receiver_strategy_amplitude_bank_count(config,search,
             context.key_count,context.profile_count);
         const auto amplitude_share=(context.capacity-std::min(context.capacity,owner_charge))/
-            std::max<std::size_t>(1,search.amplitude_receiver_bank_count);
+            std::max<std::size_t>(1,context.amplitude_family_bank_count.value_or(search.amplitude_receiver_bank_count));
         search.amplitude_strategy_workspace_bytes=amplitude_share>context.control_margin?
             amplitude_share-context.control_margin:1;
     }
+    if(modem::symbol_burst_public_rolling_search(config) && !value.transfer.timestamp &&
+       !search.compact_clock_search && config.receiver_strategy!=modem::ReceiverStrategy::amplitude_only) {
+        // Preserve finite geometry for an amplitude fallback, while the
+        // existing native FFT keeps its original rolling first-symbol search.
+        search.amplitude_start_offset_seconds=search.start_offset_seconds;
+        search.amplitude_start_uncertainty_seconds=search.start_uncertainty_seconds;
+        search.amplitude_start_window=search.qualified_start_window;
+        search.start_offset_seconds.reset();
+        search.qualified_start_window.reset();
+        result.clock_window_modeled=false;
+        search.receiver_bank_count=context.key_count*context.profile_count;
+        const auto native_share=(context.capacity-std::min(context.capacity,owner_charge))/
+            std::max<std::size_t>(1,search.receiver_bank_count);
+        search.receiver_strategy_workspace_bytes=native_share>context.control_margin?
+            native_share-context.control_margin:1;
+    }
     return result;
 }
+// Memory is shared by the actual heterogeneous family. Cost and lifetime stay
+// attached to each row; a long preview is not repeated for every short profile.
+inline std::size_t burst_amplitude_family_bank_count(std::span<const modem::Config> profiles,
+        const Settings& value,ReceiverAdmissionContext context) {
+    context.amplitude_family_bank_count.reset();context.key_count=context.profile_count=1;
+    std::size_t total=0;
+    for(auto config:profiles) {
+        if(!config.symbol_burst.enabled())throw Error("Burst family contains an ordinary profile");
+        const modem::SymbolBurstPlan plan(config);
+        const auto first=plan.first_slot({static_cast<std::uint64_t>(std::max(0.,context.now)),0});
+        config.stream_epoch=first.payload_begin.epoch;config.stream_phase_samples=first.payload_begin.phase;
+        context.keyed=config.data_key.has_value();
+        context.compact_clock_search=context.keyed&&modem::symbol_sample_count(config)>=60ULL*config.sample_rate;
+        context.control_margin=receiver_control_margin(config,context.keyed);
+        const auto prepared=prepare_receiver_search(config,value,config.stream_epoch,context);
+        const auto count=prepared.search.amplitude_receiver_bank_count?
+            prepared.search.amplitude_receiver_bank_count:modem::receiver_strategy_amplitude_bank_count(config,prepared.search,1,1);
+        if(count>std::numeric_limits<std::size_t>::max()-total)throw Error("Burst family count overflow");
+        total+=count;
+    }
+    return std::max<std::size_t>(1,total);
+}
+
 } // namespace datapump::live::detail

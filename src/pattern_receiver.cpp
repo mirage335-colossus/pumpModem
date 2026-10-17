@@ -1,9 +1,11 @@
 #include "datapump/pattern_receiver.hpp"
+#include "pattern_start_geometry.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_correlator.hpp"
 #include "datapump/pattern_search.hpp"
 #include "datapump/scheduled_complex_search.hpp"
+#include "datapump/symbol_burst.hpp"
 #include "datapump/receiver_strategy.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "search_parallel.hpp"
@@ -51,6 +53,13 @@ struct PatternReceiver::Impl {
     // the phase-bank binary searches or per-track address comparisons.
     std::optional<FhssSymbolCalendar> symbol_calendar;
     std::unique_ptr<ScheduledSymbolCalendar> packed_calendar;
+    std::unique_ptr<SymbolBurstPlan> burst_plan;
+    struct BurstPolicy {long double minimum_rate=1,maximum_rate=1;bool capture_revoked=false;};
+    std::unique_ptr<BurstPolicy> burst_policy;
+    mutable std::unique_ptr<SymbolBurstCursor> burst_cursor;
+    SymbolBurstCoordinate burst_origin;
+    bool acquisition_suspended=false;
+    std::uint64_t acquisition_last_start=0,acquisition_capture_end=0,unobserved_until=0;
     std::vector<std::uint64_t> packed_phases;
     // A broad symbol-zero prediction is not a qualified UTC phase map. Keep
     // its admission bound private so diagnostics never imply GPS qualification.
@@ -59,8 +68,9 @@ struct PatternReceiver::Impl {
     long double packed_latest_start_samples=std::numeric_limits<long double>::infinity();
     long double packed_rate_displacement=0;
     std::size_t packed_ring_extra=0;
-    bool calendar_symbols() const {return symbol_calendar.has_value() || static_cast<bool>(packed_calendar);}
+    bool calendar_symbols() const {return burst_plan || symbol_calendar.has_value() || static_cast<bool>(packed_calendar);}
     std::uint64_t calendar_rank(std::uint64_t phase) const {
+        if(burst_plan)return 0; // A Burst epoch owns one exact payload phase.
         return packed_calendar?packed_calendar->first_rank(config.stream_epoch,phase):
             symbol_calendar->first_rank(config.stream_epoch,phase);
     }
@@ -157,6 +167,16 @@ struct PatternReceiver::Impl {
     Impl(Config c,std::size_t bytes,PatternSearch options)
         :config(c),search(std::move(options)),code(c,c.stream_epoch),budget(bytes) {
         validate(c);
+        if(c.symbol_burst.enabled()) {
+            burst_plan=std::make_unique<SymbolBurstPlan>(c);
+            burst_policy=std::make_unique<BurstPolicy>();
+            const auto slot=burst_plan->bind_payload(c.stream_epoch,c.stream_phase_samples);
+            burst_origin=slot.payload_begin;
+            burst_cursor=std::make_unique<SymbolBurstCursor>(*burst_plan,slot);
+            // UTC support boundaries determine one exact cipher phase. Arrival
+            // uncertainty remains in the complete existing timing search.
+            search.search_stream_phases=false;
+        }
         if(packed_scheduled_symbols(c))packed_calendar=std::make_unique<ScheduledSymbolCalendar>(c);
         if(deferred_symbols(c))symbol_calendar.emplace(*c.fake_hopping,c.sample_rate,
             pattern_pulse_padding_samples(c),code.symbol_samples());
@@ -178,6 +198,9 @@ struct PatternReceiver::Impl {
            (search.amplitude_start_uncertainty_seconds&&(!std::isfinite(*search.amplitude_start_uncertainty_seconds)||
                *search.amplitude_start_uncertainty_seconds<0)))
             throw Error("invalid pattern system-clock window");
+        // Public Burst has the same single initial opportunity as the ordinary
+        // public receiver, including an early amplitude fallback.
+        if(c.symbol_burst.enabled() && !c.scramble && !c.dsss)search.initial_stream_symbols=1;
         const auto strategy=resolve_receiver_strategy(config,search,bytes);
         if(!strategy.supported)throw Error(strategy.reason);
         if(strategy.backend==ReceiverBackend::amplitude_energy) {
@@ -281,12 +304,27 @@ struct PatternReceiver::Impl {
             }
         }
         configured_bit_limit=search.bit_limit;
+        if(burst_policy) {
+            auto& policy=*burst_policy;
+            policy.minimum_rate=policy.maximum_rate=clock_ratio(0);
+            for(std::size_t i=1;i<search.frequency_offsets_hz.size();++i) {
+                policy.minimum_rate=std::min(policy.minimum_rate,static_cast<long double>(clock_ratio(i)));
+                policy.maximum_rate=std::max(policy.maximum_rate,static_cast<long double>(clock_ratio(i)));
+            }
+            if(search.admitted_clock_half_width_ppm) {
+                const auto radius=static_cast<long double>(*search.admitted_clock_half_width_ppm)*1e-6L;
+                policy.minimum_rate=1-radius;policy.maximum_rate=1+radius;
+            }
+            if(!std::isfinite(policy.minimum_rate) || !std::isfinite(policy.maximum_rate) ||
+               policy.minimum_rate<=0 || policy.minimum_rate>policy.maximum_rate)
+                throw Error("Symbol_Burst original clock policy is not finite");
+        }
         if(!c.scramble&&!c.dsss)search.initial_stream_symbols=1;
         if(deferred_symbols(c) && search.search_stream_phases) {
             search.initial_stream_symbols=std::max<std::size_t>(search.initial_stream_symbols,
                 symbol_calendar->lower_bound(c.stream_epoch,0,c.sample_rate));
         }
-        if(search.compact_clock_search && !search.couple_clock_to_carrier && !calendar_symbols()) {
+        if(search.compact_clock_search && !search.couple_clock_to_carrier && (!calendar_symbols() || burst_plan)) {
             const auto wrapper=wrapper_bytes();
             if(wrapper>=bytes)throw Error("pattern workspace cannot retain correlator control state");
             fallback=std::make_unique<PatternCorrelator>(config,search,bytes-wrapper);
@@ -313,7 +351,7 @@ struct PatternReceiver::Impl {
             if(packed_phases.empty())throw Error("no packed scheduled payload start in this UTC epoch");
             phase_upper=packed_phases.back();
         }
-        if(packed_calendar) {
+        if(packed_calendar || burst_plan) {
             auto radius=search.admitted_clock_half_width_ppm.value_or(0.);
             for(std::size_t f=0;f<search.frequency_offsets_hz.size();++f)
                 radius=std::max(radius,static_cast<double>(std::abs(clock_ratio(f)-1)*1e6L));
@@ -326,7 +364,7 @@ struct PatternReceiver::Impl {
                 std::numeric_limits<long double>::infinity());
         }
         acquisition_window=search.qualified_start_window;
-        if(packed_calendar && !acquisition_window && search.start_offset_seconds) {
+        if((packed_calendar || burst_plan) && !acquisition_window && search.start_offset_seconds) {
             broad_start_window=true;
             acquisition_window=PatternStartWindow{
                 static_cast<long double>(*search.start_offset_seconds)*c.sample_rate,1,
@@ -346,7 +384,7 @@ struct PatternReceiver::Impl {
                 acquisition_window.reset();search.qualified_start_window.reset();
             } else fft_workload->restricted_timing_active=search.restricted_timing_search;
         }
-        if(packed_calendar && !acquisition_window && search.start_offset_seconds) {
+        if((packed_calendar || burst_plan) && !acquisition_window && search.start_offset_seconds) {
             // Invalid/unsupported tight timing returns to the original broad
             // admission policy, never to an unbounded calendar acquisition.
             broad_start_window=true;
@@ -358,7 +396,7 @@ struct PatternReceiver::Impl {
                 fft_workload->restricted_timing_active=search.restricted_timing_search;
             }
         }
-        if(packed_calendar && acquisition_window) {
+        if((packed_calendar || burst_plan) && acquisition_window) {
             // Calendar deltas need not be monotone across canonical phases:
             // one initial alternative may cross a long null while another
             // stays inside its active group. Cache the exact union endpoint.
@@ -414,6 +452,20 @@ struct PatternReceiver::Impl {
                 throw Error("packed complex continuation coverage exceeds address space");
             packed_ring_extra=static_cast<std::size_t>(extra);
         }
+        if(burst_plan) {
+            // Residual timing displacement accumulates across physical gaps.
+            // Reserve the same full failed-symbol run as the physical END rule.
+            const auto failed=(6ULL*c.sample_rate+symbols-1)/symbols;
+            const auto maximum_step=symbol_schedule_detail::add(
+                symbol_schedule_detail::add(symbol_schedule_detail::multiply(2,burst_plan->padding_samples()),
+                    symbol_schedule_detail::multiply(c.symbol_burst.wait_symbols+burst_plan->random_limit()+1,symbols)),
+                90ULL*c.sample_rate);
+            const auto span=symbol_schedule_detail::multiply(failed+1,maximum_step);
+            const auto extra=std::ceil(2*static_cast<long double>(span)*packed_rate_displacement/bin_samples)+8;
+            if(!std::isfinite(extra) || extra>std::numeric_limits<std::size_t>::max()-4*length-2*hop)
+                throw Error("Symbol_Burst continuation coverage exceeds address space");
+            packed_ring_extra=static_cast<std::size_t>(extra);
+        }
         const auto arrays=5+2*search.frequency_offsets_hz.size();
         long double required=sizeof(Impl)+sizeof(PatternFftWork)+sizeof(TimingComponents)+static_cast<long double>(transform)*sizeof(Complex)*arrays+
             static_cast<long double>(4*length+2*hop+packed_ring_extra)*sizeof(Complex)+
@@ -427,7 +479,8 @@ struct PatternReceiver::Impl {
             static_cast<long double>(search.frequency_offsets_hz.size())*sizeof(decltype(template_square)::value_type)+
             static_cast<long double>(search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double)+
             static_cast<long double>(search.hypotheses.capacity())*sizeof(PatternFrequencyRateHypothesis)+
-            4096*sizeof(Complex)+code.working_bytes()+sizeof(PatternReceiver)+packed_phases.capacity()*sizeof(std::uint64_t)+(packed_calendar?packed_calendar->working_bytes():0);
+            4096*sizeof(Complex)+code.working_bytes()+sizeof(PatternReceiver)+packed_phases.capacity()*sizeof(std::uint64_t)+(packed_calendar?packed_calendar->working_bytes():0)+
+            (burst_plan?burst_plan->working_bytes()+burst_cursor->working_bytes()+sizeof(BurstPolicy):0);
         if(drift_sections>1)required+=static_cast<long double>(hop)*
             (sizeof(detail::FftDriftAccumulator)+sizeof(detail::FftSearchScore));
         if(differential_window)required+=static_cast<long double>(hop)*sizeof(detail::DifferentialAccumulator);
@@ -608,6 +661,7 @@ struct PatternReceiver::Impl {
     PhaseGroups phase_groups(std::uint64_t index,std::uint64_t lower,std::uint64_t upper,
                                         std::size_t& count)const {
         PhaseGroups groups;count=0;
+        if(burst_plan){groups.small[0]={config.stream_phase_samples,config.stream_phase_samples};count=1;return groups;}
         if(packed_calendar) {
             if(!search.search_stream_phases) {groups.small[0]={lower,upper};count=1;return groups;}
             const auto first=std::lower_bound(packed_phases.begin(),packed_phases.end(),lower);
@@ -646,6 +700,7 @@ struct PatternReceiver::Impl {
         return groups;
     }
     std::uint64_t source_start(std::uint64_t index,std::uint64_t phase)const {
+        if(burst_plan)return burst_plan->distance(burst_origin,burst_cursor->at(index).payload_begin);
         if(packed_calendar) {
             const auto physical=packed_calendar->physical_slot(symbol_schedule_detail::add(calendar_rank(phase),index));
             const auto anchor=symbol_schedule_detail::add(symbol_schedule_detail::multiply(config.stream_epoch,config.sample_rate),phase);
@@ -656,6 +711,10 @@ struct PatternReceiver::Impl {
             symbol_schedule_detail::multiply(index,code.symbol_samples());
     }
     SymbolStreamAddress stream_address(std::uint64_t index,std::uint64_t phase)const {
+        if(burst_plan) {
+            const auto payload=burst_cursor->at(index).payload_begin;
+            return {payload.epoch,payload.phase/code.symbol_samples(),payload.phase};
+        }
         if(!calendar_symbols())return symbol_stream_address(config.stream_epoch,phase,index,
             code.symbol_samples(),config.sample_rate);
         const auto total=symbol_schedule_detail::add(source_start(index,phase),phase);
@@ -1002,7 +1061,7 @@ struct PatternReceiver::Impl {
             timing*templates.size():timing));
     }
     std::uint64_t track_radius(const Track& track) const {
-        if(!packed_calendar)return 2;
+        if(!packed_calendar && !burst_plan)return 2;
         const auto distance=source_start(track.index,track.phase_lower)-source_start(track.anchor_index,track.phase_lower);
         const auto radius=2+std::ceil(static_cast<long double>(distance)*packed_rate_displacement/bin_samples);
         if(!std::isfinite(radius) || radius>std::numeric_limits<std::uint64_t>::max()/2 ||
@@ -1011,15 +1070,46 @@ struct PatternReceiver::Impl {
         return static_cast<std::uint64_t>(radius);
     }
     std::uint64_t track_start(const Track& track,std::uint64_t index) const {
-        if(!packed_calendar)return track.next+advance_bins(track.index,track.phase_lower,track.frequency);
+        if(!packed_calendar && !burst_plan)return track.next+advance_bins(track.index,track.phase_lower,track.frequency);
         const auto delta=source_start(index,track.phase_lower)-source_start(track.anchor_index,track.phase_lower);
         const auto offset=std::round(static_cast<long double>(delta)/clock_ratio(track.frequency)/bin_samples);
         if(!std::isfinite(offset) || offset>std::numeric_limits<std::uint64_t>::max()-track.anchor_start)
             throw Error("packed complex continuation coordinate would overflow");
         return track.anchor_start+static_cast<std::uint64_t>(offset);
     }
+    std::pair<long double,long double> original_burst_rates() const {
+        return {burst_policy->minimum_rate,burst_policy->maximum_rate};
+    }
+    bool burst_anchor_allowed(const Track& track,std::uint64_t start,
+            long double minimum_rate,long double maximum_rate) const {
+        auto window=acquisition_window;
+        auto geometry=window_geometry(track.index,{track.phase_lower,track.phase_upper});
+        if(!window) {
+            // Public rolling acquisition has no placeholder-epoch timing
+            // prior. Its first accepted physical anchor is immutable instead.
+            const auto first=track.burst.stream_first_symbol;
+            const auto distance=source_start(track.index,track.phase_lower)-source_start(first,track.phase_lower);
+            window=PatternStartWindow{static_cast<long double>(track.burst.stream_first_sample),1,0};
+            geometry={std::max<std::uint64_t>(1,distance),distance?1U:0U,0,0,1};
+        }
+        const auto source=static_cast<long double>(geometry.samples)*geometry.index;
+        if(!std::isfinite(minimum_rate) || !std::isfinite(maximum_rate) || minimum_rate<=0 ||
+           minimum_rate>maximum_rate || !detail::pattern_fft_window_finite(*window,geometry.upper) ||
+           source>=1e15L || static_cast<long double>(start)*bin_samples>=1e15L)return false;
+        // Reuse the ORIGINAL full FFT-cell/refinement enclosure. This is not a
+        // newly centered clock cone after each accepted continuation.
+        return detail::pattern_fft_select_starts(*window,geometry.samples,geometry.index,
+            geometry.lower,geometry.upper,geometry.step,start,1,bin_samples,minimum_rate,maximum_rate).selected_count!=0;
+    }
     void advance_track(Track& track,std::optional<std::uint64_t> accepted={}) {
-        if(packed_calendar) {
+        if(packed_calendar || burst_plan) {
+            if(burst_plan && accepted) {
+                const auto [lower,upper]=original_burst_rates();
+                if(lower==upper)accepted.reset(); // Exact GPS/rate cells retain the original physical anchor.
+                else if(!burst_anchor_allowed(track,*accepted,lower,upper)) {
+                    burst_policy->capture_revoked=true;accepted.reset();
+                }
+            }
             if(accepted){track.anchor_start=*accepted;track.anchor_index=track.index;}
             track.next=track_start(track,symbol_schedule_detail::add(track.index,1));
         } else track.next=accepted.value_or(track.next)+advance_bins(track.index,track.phase_lower,track.frequency);
@@ -1290,6 +1380,7 @@ struct PatternReceiver::Impl {
                 !calendar_symbols()?event.first_sample+count*(search.hypotheses.empty()?code.symbol_samples():symbol_bins(track.frequency)*bin_samples):
                 event.first_sample+static_cast<std::uint64_t>(std::llround((static_cast<long double>(source_start(event.first_stream_symbol+count-1,track.phase_lower))-
                     source_start(event.first_stream_symbol,track.phase_lower)+code.symbol_samples())/clock_ratio(track.frequency)));
+            if(burst_plan && !count)event.first_sample=event.end_sample;
             event.score=track.confirmed_score;
             event.support_samples=track.confirmed_support;
             if(packed_calendar)audio::trace::record(event.complete?"packed_complex_physical_end":"packed_complex_progress",[&](auto& f) {
@@ -1396,7 +1487,7 @@ struct PatternReceiver::Impl {
             cancelled(stop);auto& track=*it;bool ended=false;
             while(track.next<=latest_start) {
                 const auto radius=track_radius(track);
-                const auto lookahead=final && !packed_calendar?0:radius;
+                const auto lookahead=final && !packed_calendar && !burst_plan?0:radius;
                 if(track.next>std::numeric_limits<std::uint64_t>::max()-length-lookahead ||
                    track.next+length+lookahead>bins)break;
                 ensure_execution_scratch();
@@ -1429,13 +1520,13 @@ struct PatternReceiver::Impl {
                     // A physical null can separate the clock lanes by many
                     // bins. Evaluate the complete bank in that timing interval;
                     // frequency-first order reuses each exact template pair.
-                    const auto first_frequency=packed_calendar?0:track.frequency;
-                    const auto end_frequency=packed_calendar?templates.size():track.frequency+1;
+                    const auto first_frequency=(packed_calendar || burst_plan)?0:track.frequency;
+                    const auto end_frequency=(packed_calendar || burst_plan)?templates.size():track.frequency+1;
                     for(auto f=first_frequency;f<end_frequency;++f)for(auto start=low;start<=high;++start) {
                         if(bins-start>ring.size())continue;
                         auto fit=measure(start,track.index,f,track.burst.end_sample/bin_samples,
                             carrier_phases(start),stop);++trials;
-                        if(packed_calendar) {
+                        if(packed_calendar || burst_plan) {
                             frequency_scores[f][fit.bit]=std::max(frequency_scores[f][fit.bit],fit.score);
                             frequency_scores[f][1-fit.bit]=std::max(frequency_scores[f][1-fit.bit],fit.alternative_score);
                         }
@@ -1451,7 +1542,7 @@ struct PatternReceiver::Impl {
                 const auto timing_fit=best;
                 const auto chosen_carriers=carrier_phases(chosen);
                 const auto eligible=[&](std::size_t f) {
-                    if(packed_calendar)return false; // Full bank already scored above.
+                    if(packed_calendar || burst_plan)return false; // Full bank already scored above.
                     return competing_frequencies() || track.established || std::abs(search.frequency_offsets_hz[f]-search.frequency_offsets_hz[track.frequency])<=
                         static_cast<double>(config.sample_rate)/static_cast<double>(code.symbol_samples());
                 };
@@ -1530,6 +1621,13 @@ struct PatternReceiver::Impl {
                     static_cast<double>(best.end_sample>observed_begin?best.end_sample-observed_begin:0),
                     best.score,code.chip_samples());
                 const auto standalone=best.score>=threshold() && presence;
+                if(burst_plan && acquisition_suspended && !track.established && standalone &&
+                   best.first_sample/bin_samples>acquisition_last_start) {
+                    // The ordinary standalone rule would replace the weak
+                    // prefix with a fresh stream here. Frozen acquisition may
+                    // resolve its old chain, but cannot start that new stream.
+                    ended=true;break;
+                }
                 if(!track.unconfirmed_symbols)track.absent_samples=0;
                 track.absent_samples+=static_cast<long double>(code.symbol_samples())/clock_ratio(track.frequency);
                 ++track.unconfirmed_symbols;
@@ -1640,7 +1738,7 @@ struct PatternReceiver::Impl {
                         f.add("scope","original detector confirmation before public drain, not shared Live selection");
                     });
                 }
-                advance_track(track,(!packed_calendar || bound>=threshold() || standalone)?
+                advance_track(track,((!packed_calendar && !burst_plan) || bound>=threshold() || standalone)?
                     std::optional<std::uint64_t>{chosen}:std::nullopt);
                 publish(track,false);
                 if(gap_expired && track.unconfirmed_symbols){publish(track,true,true);ended=true;break;}
@@ -1650,6 +1748,7 @@ struct PatternReceiver::Impl {
         }
     }
     void admit(const PatternEvidence& item,std::size_t f,double chain_score) {
+        if(burst_plan && acquisition_suspended && item.first_sample/bin_samples>acquisition_last_start)return;
         if(item.score<search.retain_score || item.score-item.alternative_score<1)return;
         remember(item);
         if(search.search_stream_phases && item.score<threshold()) {
@@ -1740,7 +1839,7 @@ struct PatternReceiver::Impl {
         }
         track.burst.stream_phase_samples=track.phase_lower;
         track.anchor_start=item.first_sample/bin_samples;track.anchor_index=item.stream_symbol;track.frequency=f;
-        track.next=packed_calendar?track_start(track,track.index):
+        track.next=(packed_calendar || burst_plan)?track_start(track,track.index):
             item.first_sample/bin_samples+advance_bins(item.stream_symbol,track.phase_lower,f);
         track.total_score=item.score;track.penalty=std::log(2.);
         track.total_support=pattern_symbol_support(static_cast<double>(item.end_sample-item.first_sample),item.score,code.chip_samples());
@@ -2237,7 +2336,10 @@ struct PatternReceiver::Impl {
                     auto& job=scoring_jobs[queued];
                     job={index,groups[g].lower,f,search.frequency_offsets_hz[f]};
                     job.clock_ratio=clock_ratio(f);
-                    if(!selected.full)job.range_count=selected.range_count;
+                    // Drift jobs retain their original full-hop scorer. Its
+                    // backend does not accept restricted ranges; the ordered
+                    // collection below still admits only selected starts.
+                    if(!selected.full && drift_sections==1)job.range_count=selected.range_count;
                     fft_workload->retained_start_trials+=selected.selected_count;
                     if(!cached_templates.empty() || reuse_templates) {
                         const auto& rows=cached_templates.empty()?templates:template_bank(index).rows;
@@ -2395,6 +2497,7 @@ struct PatternReceiver::Impl {
         return true;
     }
     void continue_observed_tracks(std::stop_token stop) {
+        if(burst_plan && acquisition_suspended && next_start>acquisition_last_start){continue_tracks(stop);return;}
         if(long_symbol && !fft_workload->restricted_timing_active){continue_tracks(stop);return;}
         if(!fft_workload->restricted_timing_active || !search.early_qualified_fft || tracks.empty())return;
         if(component_hop) {
@@ -2407,7 +2510,7 @@ struct PatternReceiver::Impl {
             const auto& window=*acquisition_window;
             const auto offset=static_cast<long double>(source_start(search.initial_stream_symbols-1,phase_upper))/timing_minimum_rate;
             const auto physical_upper=search.search_stream_phases?canonical_phase_cell_upper(config,phase_upper):phase_upper;
-            const auto upper=packed_calendar?packed_latest_start_samples:
+            const auto upper=(packed_calendar || burst_plan)?packed_latest_start_samples:
                 window.epoch_origin_samples+window.phase_scale*physical_upper+window.half_width_samples+offset;
             const auto magnitude=std::max({1.L,std::abs(window.epoch_origin_samples),
                 window.phase_scale*phase_upper,std::abs(upper),std::abs(offset),
@@ -2538,6 +2641,9 @@ struct PatternReceiver::Impl {
         process(stop,true);
     }
     void process(std::stop_token stop,bool final=false) {
+        if(burst_plan && acquisition_suspended && next_start>acquisition_last_start) {
+            continue_tracks(stop,final);return;
+        }
         // The first long-symbol pass needs only a small range of fully
         // observed starts. Later passes retain efficient bounded batches.
         // Start coordinates, rather than polling/chunk boundaries, schedule
@@ -2577,6 +2683,7 @@ struct PatternReceiver::Impl {
                 std::min(hop,std::max<std::size_t>(1,config.sample_rate/bin_samples)):hop;
         };
         while(bins>=length+next_start && (final || bins-length+1-next_start>=next_count())) {
+            if(burst_plan && acquisition_suspended && next_start>acquisition_last_start)break;
             cancelled(stop);
             const auto observed=static_cast<std::size_t>(std::min<std::uint64_t>(hop,bins-length+1-next_start));
             const bool early=!final && fft_workload->restricted_timing_active && search.early_qualified_fft &&
@@ -2772,6 +2879,52 @@ struct PatternReceiver::Impl {
         result.complete=false;
         return result;
     }
+    void suspend_acquisition() {
+        if(!burst_plan || acquisition_suspended)return;
+        auto last=static_cast<long double>(sample);
+        if(search.start_offset_seconds) {
+            last=(static_cast<long double>(*search.start_offset_seconds)+search.start_uncertainty_seconds)*config.sample_rate;
+            last+=config.stream_phase_samples+
+                static_cast<long double>(source_start(search.initial_stream_symbols-1,config.stream_phase_samples))/timing_minimum_rate;
+            if(acquisition_window)last=packed_latest_start_samples;
+        }
+        const auto bound=std::max(0.L,std::ceil(last/bin_samples)+4);
+        if(!std::isfinite(bound) || bound>std::numeric_limits<std::uint64_t>::max()-length-hop-4)
+            throw Error("Symbol_Burst acquisition fence exceeds sample coordinates");
+        acquisition_last_start=static_cast<std::uint64_t>(bound);
+        // Exclusion separately requires next_start>acquisition_last_start:
+        // every selected start has therefore already finished its whole fit.
+        // The trailing capture guard dates the latest possible waveform
+        // support, rather than adding the scorer's FFT processing lookahead.
+        acquisition_capture_end=symbol_schedule_detail::multiply(
+            symbol_schedule_detail::add(acquisition_last_start,length+4),bin_samples);
+        acquisition_capture_end=symbol_schedule_detail::add(acquisition_capture_end,
+            symbol_schedule_detail::add(static_cast<std::uint64_t>(std::ceil(20.L*config.sample_rate*
+                detail::original_physical_guard_factor(burst_policy->minimum_rate,burst_policy->maximum_rate))),
+                burst_plan->padding_samples()));
+        acquisition_suspended=true;
+    }
+    std::optional<std::uint64_t> burst_unobserved_end(std::uint64_t from) const {
+        if(!burst_plan || burst_policy->capture_revoked || !acquisition_suspended || next_start<=acquisition_last_start ||
+           from<acquisition_capture_end || tracks.empty())return std::nullopt;
+        auto end=static_cast<long double>(std::numeric_limits<std::uint64_t>::max());
+        for(const auto& track:tracks) {
+            const auto radius=track_radius(track);
+            const auto guard=20.L*config.sample_rate*detail::original_physical_guard_factor(
+                burst_policy->minimum_rate,burst_policy->maximum_rate)+
+                static_cast<long double>(burst_plan->padding_samples())/clock_ratio(track.frequency);
+            const auto begin=(static_cast<long double>(track.next)-radius)*bin_samples-guard;
+            if(track.index) {
+                const auto previous=track_start(track,track.index-1);
+                const auto previous_end=(static_cast<long double>(previous)+length+radius)*bin_samples+guard;
+                if(static_cast<long double>(from)<previous_end)return std::nullopt;
+            }
+            if(static_cast<long double>(from)>=begin)return std::nullopt;
+            end=std::min(end,std::floor(begin/bin_samples)*bin_samples);
+        }
+        if(end<=from || end>=std::numeric_limits<std::uint64_t>::max())return std::nullopt;
+        return static_cast<std::uint64_t>(end);
+    }
     std::size_t working_bytes()const {
         if(fallback)return wrapper_bytes()+fallback->working_bytes();
         std::size_t total=sizeof(Impl)+sizeof(PatternReceiver)+code.working_bytes()+sizeof(PatternFftWork)+sizeof(TimingComponents);
@@ -2785,7 +2938,8 @@ struct PatternReceiver::Impl {
             template_square.capacity()*sizeof(decltype(template_square)::value_type)+
             (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double)+
             search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis)+
-            packed_phases.capacity()*sizeof(std::uint64_t)+(packed_calendar?packed_calendar->working_bytes():0);
+            packed_phases.capacity()*sizeof(std::uint64_t)+(packed_calendar?packed_calendar->working_bytes():0)+
+            (burst_plan?burst_plan->working_bytes()+burst_cursor->working_bytes()+sizeof(BurstPolicy):0);
         for(const auto& row:templates)for(const auto& v:row)total+=v.capacity()*sizeof(Complex);
         total+=cached_templates.capacity()*sizeof(CachedTemplates);
         total+=tracking_reference.capacity()*sizeof(decltype(tracking_reference)::value_type);
@@ -2803,7 +2957,8 @@ struct PatternReceiver::Impl {
         return sizeof(Impl)+sizeof(PatternReceiver)+code.working_bytes()+(fft_workload?sizeof(PatternFftWork):0)+(timing_components?sizeof(TimingComponents):0)+
             search.frequency_offsets_hz.capacity()*sizeof(double)+search.clock_errors_ppm.capacity()*sizeof(double)+
             search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis)+
-            packed_phases.capacity()*sizeof(std::uint64_t)+(packed_calendar?packed_calendar->working_bytes():0);
+            packed_phases.capacity()*sizeof(std::uint64_t)+(packed_calendar?packed_calendar->working_bytes():0)+
+            (burst_plan?burst_plan->working_bytes()+burst_cursor->working_bytes()+sizeof(BurstPolicy):0);
     }
     void set_workspace_bytes(std::size_t bytes) {
         if(fallback) {
@@ -2833,6 +2988,15 @@ std::uint64_t pattern_absence_samples(const Config& config) {
 }
 std::uint64_t pattern_absence_capture_samples(const Config& config) {
     const auto eligible=pattern_absence_samples(config);
+    if(config.symbol_burst.enabled()) {
+        const SymbolBurstPlan plan(config);
+        const auto slots=eligible/symbol_sample_count(config);
+        const auto span=symbol_schedule_detail::add(
+            symbol_schedule_detail::multiply(2,plan.padding_samples()),
+            symbol_schedule_detail::multiply(config.symbol_burst.wait_symbols+plan.random_limit()+1,plan.symbol_samples()));
+        const auto maximum=symbol_schedule_detail::add(std::max<std::uint64_t>(span,60ULL*config.sample_rate),30ULL*config.sample_rate);
+        return symbol_schedule_detail::multiply(slots+1,maximum);
+    }
     if(packed_scheduled_symbols(config)) {
         const ScheduledSymbolCalendar calendar(config);
         const auto slots=eligible/symbol_sample_count(config);
@@ -2859,11 +3023,18 @@ std::uint64_t pattern_absence_capture_samples(const Config& config) {
 }
 PatternReceiver::PatternReceiver(Config c,std::size_t bytes,PatternSearch search):impl_(std::make_unique<Impl>(c,bytes,std::move(search))){}
 PatternReceiver::~PatternReceiver()=default;
+std::size_t PatternReceiver::symbol_burst_control_bytes(){return sizeof(SymbolBurstPlan)+sizeof(SymbolBurstCursor)+sizeof(Impl::BurstPolicy);}
 PatternReceiver::PatternReceiver(PatternReceiver&&) noexcept=default;
 PatternReceiver& PatternReceiver::operator=(PatternReceiver&&) noexcept=default;
 void PatternReceiver::push(std::span<const float> input,std::stop_token stop) {
     auto& s=*impl_;cancelled(stop);if(s.finished)throw Error("pattern capture already finished");
     if(s.fallback){s.fallback->push(input,stop);return;}
+    if(s.sample<s.unobserved_until) {
+        const auto count=std::min<std::uint64_t>(input.size(),s.unobserved_until-s.sample);
+        for(const auto value:input.first(count))if(!std::isfinite(value))throw Error("pattern input contains a nonfinite sample");
+        s.sample+=count;input=input.subspan(count);
+        if(input.empty())return;
+    }
     Impl::ScoringScope scoring{s};
     if(!s.oscillator_valid) {
         s.oscillator=std::polar(1.,static_cast<double>(std::remainder(-static_cast<long double>(tau)*s.config.carrier_hz*s.sample/s.config.sample_rate,
@@ -2898,6 +3069,13 @@ void PatternReceiver::push(std::span<const float> input,std::span<const std::com
                 throw Error("pattern input contains a nonfinite sample");
         push(input,stop);return;
     }
+    if(s.sample<s.unobserved_until) {
+        const auto count=std::min<std::uint64_t>(input.size(),s.unobserved_until-s.sample);
+        for(std::size_t i=0;i<count;++i)if(!std::isfinite(input[i]) || !std::isfinite(projected[i].real()) || !std::isfinite(projected[i].imag()))
+            throw Error("pattern input contains a nonfinite sample");
+        s.sample+=count;input=input.subspan(count);projected=projected.subspan(count);
+        if(input.empty())return;
+    }
     s.oscillator_valid=false;
     Impl::ScoringScope scoring{s};
     for(std::size_t i=0;i<input.size();++i) {
@@ -2912,10 +3090,34 @@ void PatternReceiver::push(std::span<const float> input,std::span<const std::com
 bool PatternReceiver::try_skip_unobserved(std::uint64_t count,std::stop_token stop) {
     cancelled(stop);
     if(impl_->finished)throw Error("pattern capture already finished");
-    return impl_->fallback && impl_->fallback->try_skip_unobserved(count,stop);
+    auto& s=*impl_;
+    if(s.fallback)return s.fallback->try_skip_unobserved(count,stop);
+    if(!s.burst_plan || count>std::numeric_limits<std::uint64_t>::max()-s.sample)return false;
+    const auto end=s.sample+count;
+    const auto limit=s.burst_unobserved_end(s.sample);
+    if(!limit || end>*limit)return false;
+    // The proof excludes all symbol windows and guards. Discard a projection
+    // bin crossing the discontinuity; its samples are never a scored zero.
+    const auto remainder=end%s.bin_samples;
+    const auto tail=remainder?s.bin_samples-remainder:0;
+    if(tail>std::numeric_limits<std::uint64_t>::max()-end)return false;
+    s.sample=end;s.unobserved_until=end+tail;s.bins=s.unobserved_until/s.bin_samples;
+    s.sum={};s.partial=0;s.oscillator_valid=false;
+    s.next_start=std::max(s.next_start,s.bins);
+    s.component_hop=s.acquisition_prepaid=s.early_eof_pending=false;
+    return true;
 }
 std::optional<std::uint64_t> PatternReceiver::unobserved_end_from(std::uint64_t sample) const {
-    return impl_->fallback?impl_->fallback->unobserved_end_from(sample):std::nullopt;
+    return impl_->fallback?impl_->fallback->unobserved_end_from(sample):impl_->burst_unobserved_end(sample);
+}
+void PatternReceiver::suspend_fresh_acquisition() {
+    if(impl_->fallback)impl_->fallback->suspend_fresh_acquisition();else impl_->suspend_acquisition();
+}
+bool PatternReceiver::symbol_burst_tracking_active()const {
+    return impl_->fallback?impl_->fallback->symbol_burst_tracking_active():
+        impl_->burst_plan && (std::any_of(impl_->tracks.begin(),impl_->tracks.end(),[&](const auto& track){
+            return track.established || track.admitted || (impl_->acquisition_suspended && !track.burst.bits.empty());}) ||
+            (impl_->acquisition_suspended && impl_->next_start<=impl_->acquisition_last_start));
 }
 std::optional<ScheduledCaptureEnvelope> PatternReceiver::scheduled_capture_envelope(std::uint64_t sample) const {
     return impl_->fallback?impl_->fallback->scheduled_capture_envelope(sample):std::nullopt;
@@ -2969,6 +3171,7 @@ bool PatternReceiver::synchronized()const{return impl_->fallback?impl_->fallback
 bool PatternReceiver::initial_search_complete()const {
     const auto& s=*impl_;
     if(s.fallback)return s.fallback->initial_search_complete();
+    if(s.burst_plan && s.acquisition_suspended)return s.next_start>s.acquisition_last_start;
     if(!s.search.start_offset_seconds)return false;
     auto upper=(static_cast<long double>(*s.search.start_offset_seconds)+
         s.search.start_uncertainty_seconds)*s.config.sample_rate;
@@ -2976,7 +3179,7 @@ bool PatternReceiver::initial_search_complete()const {
         const auto phase=s.phase_upper;
         upper+=phase+static_cast<long double>(s.source_start(s.search.initial_stream_symbols-1,phase))/s.timing_minimum_rate;
     }
-    if(s.packed_calendar)upper=s.packed_latest_start_samples;
+    if(s.packed_calendar || s.burst_plan)upper=s.packed_latest_start_samples;
     // next_start advances only after a complete FFT acquisition batch. It
     // includes the actual stretched integration and batching lookahead;
     // merely consuming a nominal symbol's PCM is not sufficient.

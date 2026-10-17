@@ -36,7 +36,7 @@ modem::Config resolve(const Inputs& inputs,double target) {
     // Scheduled geometry can construct the keyed packed-symbol calendar before
     // transfer::seeded_config runs. Use the same authoritative immutable key
     // as transfer::effective_options, clearing a stale Config-only key too.
-    if(config.scheduled_hopping&&config.scheduled_hopping->enabled())
+    if(config.symbol_burst.enabled()||(config.scheduled_hopping&&config.scheduled_hopping->enabled()))
         config.data_key=inputs.options.key;
     return tuning::receive_profiles(config,targets,inputs.mode,
                                     inputs.options.key.has_value()).front();
@@ -44,12 +44,24 @@ modem::Config resolve(const Inputs& inputs,double target) {
 double seconds(const modem::Config& config) {
     // Source-symbol integration stays unchanged; this quantity is the mean
     // wall time per bit used by the airtime graph and practical-rate buttons.
+    if(config.symbol_burst.enabled()) {
+        const modem::SymbolBurstPlan plan(config);
+        long double total=0;
+        for(unsigned extra=0;extra<=plan.random_limit();++extra)
+            total+=plan.spacing_samples_for_additional_wait(extra);
+        return static_cast<double>(total/(plan.random_limit()+1)/config.sample_rate);
+    }
     if(modem::scheduled_bursts(config))return 1/modem::bit_rate(config);
     return static_cast<double>(modem::symbol_sample_count(config))/config.sample_rate;
 }
 std::optional<modem::Config> try_resolve(const Inputs& inputs,double target) {
-    try { return resolve(inputs,target); }
-    catch(const Error&) { return std::nullopt; }
+    try {
+        auto config=resolve(inputs,target);
+        // The graph probes much weaker targets than the selected setting.
+        // A representable core can still have an unrepresentable Burst gap.
+        if(config.symbol_burst.enabled())(void)seconds(config);
+        return config;
+    } catch(const Error&) { return std::nullopt; }
 }
 struct ReceiverSupport {
     bool clock=false,workspace=false;
@@ -88,7 +100,7 @@ simulation::ReceiverWorkMode support_work_mode(const Inputs& inputs) {
     // Ordinary full-bank fit does not require arrival enumeration. Scheduled
     // layout is calendar-aware: preserve a genuinely qualified timing prior
     // instead of replacing it with an ownerless full-window fallback.
-    if(inputs.options.modem.fake_hopping||
+    if(inputs.options.modem.symbol_burst.enabled()||inputs.options.modem.fake_hopping||
        (inputs.options.modem.scheduled_hopping&&inputs.options.modem.scheduled_hopping->enabled()))
         return inputs.receiver_work_mode;
     return inputs.receiver_work_mode==simulation::ReceiverWorkMode::hardware_timing_model?
@@ -105,11 +117,19 @@ ReceiverSupport receiver_support(const Inputs& inputs,const modem::Config& confi
     // banks, not payload length. This analytical one-symbol estimate allocates
     // neither a draft, a transfer probe, nor PCM inside the bounded search.
     transfer::Estimate one;one.wire_bits=1;one.total_seconds=seconds(config);
-    const auto estimate=receiver_estimate(one,options,true,channel,profiles,1,false,100,4096,
-        support_work_mode(inputs),(config.fake_hopping||(config.scheduled_hopping&&config.scheduled_hopping->enabled()))?
-            inputs.receiver_timing_model:simulation::ReceiverTimingModel{},
-        receiver_settings(inputs),stop);
-    return {search_supported(estimate),estimate.receiver_workspace_supported};
+    try {
+        const auto estimate=simulation::estimate_receiver_support(one,options,channel,profiles,1,
+            support_work_mode(inputs),(config.symbol_burst.enabled()||config.fake_hopping||(config.scheduled_hopping&&config.scheduled_hopping->enabled()))?
+                inputs.receiver_timing_model:simulation::ReceiverTimingModel{},
+            receiver_settings(inputs),stop);
+        return {search_supported(estimate),estimate.receiver_workspace_supported};
+    } catch(const Error&) {
+        // A checked calendar overflow at an illustrative target is a support
+        // gap. The selected target is still estimated directly and reports its
+        // own error; do not erase it because a graph extreme is unrepresentable.
+        if(!config.symbol_burst.enabled())throw;
+        return {};
+    }
 }
 
 // All searches have fixed iteration counts. Preserve discrete tuner steps:
@@ -453,7 +473,7 @@ transfer::Estimate one_bit_estimate(const transfer::Options& options) {
     count=add_samples(count,modem::pattern_pulse_padding_samples(config));
     count=add_samples(count,modem::pattern_pulse_padding_samples(config));
     count=add_samples(count,modem::suppression_sample_count(config));
-    if(modem::scheduled_bursts(config))count=modem::pattern_transmission_sample_count(config,1);
+    if(config.symbol_burst.enabled()||modem::scheduled_bursts(config))count=modem::pattern_transmission_sample_count(config,1);
     transfer::Estimate result;
     result.wire_bits=result.coded_bytes=result.content_bytes=1;
     result.content_seconds=result.coded_seconds=seconds(config);
@@ -462,6 +482,13 @@ transfer::Estimate one_bit_estimate(const transfer::Options& options) {
     return result;
 }
 std::uint64_t scheduled_content_samples(const modem::Config& config,std::uint64_t bits) {
+    if(config.symbol_burst.enabled()) {
+        if(!bits)return 0;
+        const modem::SymbolBurstPlan plan(config);
+        const auto first=plan.bind_payload(config.stream_epoch,config.stream_phase_samples);
+        modem::SymbolBurstCursor cursor(plan,first);
+        return add_samples(plan.distance(first.payload_begin,cursor.at(bits-1).payload_begin),plan.symbol_samples());
+    }
     const modem::SchedHopSourceMap map(*config.scheduled_hopping,*config.data_key,config.sample_rate);
     const auto anchor=modem::symbol_schedule_detail::add(
         modem::symbol_schedule_detail::multiply(config.stream_epoch,config.sample_rate),config.stream_phase_samples);
@@ -480,6 +507,7 @@ auto curve_base_key(const transfer::Options& options,const modem::ChannelConfig&
     // RNG seed does not choose probability draws.
     return std::tuple{c.pattern_symbols,c.stream_epoch,c.stream_phase_samples,c.sample_rate,
         c.constellation_bits,c.carrier_hz,c.bandwidth_hz,c.training_seconds,
+        c.symbol_burst.wait_symbols,c.symbol_burst.enabled()&&options.key?c.symbol_burst.random_limit:0U,
         modem::symbol_sample_count(c),modem::pattern_chip_samples(c),c.spreading_mode,c.pulse_shaping,c.scramble,c.dsss,modem::legacy_public_pattern(c),
         c.dsss_factor,c.dsss_factor>1?c.outer_dsss_version:modem::OuterDsssVersion::legacy_v1,c.search_arithmetic,c.receiver_strategy,c.receiver_cpu_budget,c.frequency_search_multiplier,c.spreading_seed,c.dsss_seed,c.memory_limit,options.dsp_workspace_bytes,
         options.timestamp,options.search_seconds,options.audio_timing_error_seconds,options.clock_sync.has_value(),
@@ -546,7 +574,7 @@ auto support_context(const Inputs& inputs) {
     // the derived pattern identity already retained by curve_key.
     auto options=inputs.options;options.modem=resolve(inputs,200);
     return std::tuple{curve_key(options,inputs.channel,support_work_mode(inputs),
-        modem::scheduled_bursts(options.modem)?inputs.receiver_timing_model:simulation::ReceiverTimingModel{},receiver_settings(inputs)),inputs.mode,
+        (options.modem.symbol_burst.enabled()||modem::scheduled_bursts(options.modem))?inputs.receiver_timing_model:simulation::ReceiverTimingModel{},receiver_settings(inputs)),inputs.mode,
         inputs.options.key.has_value(),inputs.tx_dbm,inputs.path_loss_db,inputs.noise_density_dbm_hz};
 }
 using SupportContext=decltype(support_context(Inputs{}));
@@ -567,8 +595,16 @@ CurveEntry& curve_entry(CurveCache& cache,const transfer::Options& options,const
     const auto found=std::find_if(entries.begin(),entries.end(),[&](const auto& entry){return entry.key==key;});
     if(found!=entries.end())return *found;
     if(entries.size()==512)entries.erase(entries.begin());
-    entries.push_back({key,receiver_estimate(one_bit_estimate(options),options,true,channel,{},1,false,100,4096,
-        work_mode,timing_model,settings,stop),false});
+    simulation::Estimate estimate;
+    try {
+        estimate=receiver_estimate(one_bit_estimate(options),options,true,channel,{},1,false,100,4096,
+            work_mode,timing_model,settings,stop);
+    } catch(const Error&) {
+        if(!options.modem.symbol_burst.enabled())throw;
+        estimate.carrier_in_search=estimate.clock_in_search=false;
+        estimate.receiver_workspace_supported=estimate.receiver_work_supported=false;
+    }
+    entries.push_back({key,std::move(estimate),false});
     return entries.back();
 }
 ReceivePoint receive_point(double target,const simulation::Estimate& estimate,bool numerical_range) {
@@ -579,10 +615,14 @@ ReceivePoint receive_point(double target,const simulation::Estimate& estimate,bo
     result.clock_supported=search_supported(estimate);result.workspace_supported=estimate.receiver_workspace_supported;
     result.probability_trials=estimate.probability_trials;return result;
 }
-CpuPoint cpu_point(double target,const simulation::Estimate& estimate) {
+double planned_cpu_ratio(const simulation::Estimate& estimate) {
+    if(estimate.symbol_burst.modeled)return std::max(estimate.symbol_burst.finite_realtime_ratio,
+        estimate.symbol_burst.tracked_realtime_ratio);
     const auto finite=estimate.simulated_seconds>0?estimate.receiver_cpu_seconds/estimate.simulated_seconds:0;
-    const auto ratio=std::max(finite,estimate.hardware_sustained_modeled?
-        estimate.hardware_sustained_realtime_ratio:0.);
+    return std::max(finite,estimate.hardware_sustained_modeled?estimate.hardware_sustained_realtime_ratio:0.);
+}
+CpuPoint cpu_point(double target,const simulation::Estimate& estimate) {
+    const auto ratio=planned_cpu_ratio(estimate);
     return {target,std::isfinite(ratio)&&ratio>=0?ratio:0.,estimate.receiver_work_supported&&search_supported(estimate)&&estimate.receiver_workspace_supported&&
         std::isfinite(ratio)&&ratio>0};
 }
@@ -751,7 +791,7 @@ TargetSteps preview_steps(const Inputs& inputs) {
         const auto transmission=transfer::estimate_binary(one_bit,options);
         const auto symbol=modem::symbol_sample_count(options.modem);
         if(!transmission.waveform_samples||transmission.waveform_samples<symbol)return result;
-        if(modem::scheduled_bursts(options.modem)) {
+        if(options.modem.symbol_burst.enabled()||modem::scheduled_bursts(options.modem)) {
             const auto seeded=modem::scheduled_estimate_config(transfer::seeded_config(options,options.timestamp));
             (void)add_samples(modem::pattern_transmission_sample_count(seeded,inputs.wire_bits),
                 modem::pattern_absence_capture_samples(seeded));
@@ -807,7 +847,7 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
         if(!transmission.waveform_samples || transmission.waveform_samples<symbol)
             throw Error("planned duration exceeds the platform sample counter");
         std::uint64_t payload=0,waveform=0;
-        if(modem::scheduled_bursts(config)) {
+        if(config.symbol_burst.enabled()||modem::scheduled_bursts(config)) {
             // Nulls depend on the absolute keyed frame, so scaling a one-bit
             // wall duration would invent airtime and can underflow overhead.
             const auto original=transfer::seeded_config(options,options.timestamp);
@@ -896,22 +936,26 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
         single_receiver.probability_trials=receiver.probability_trials;
         single_receiver.drift_model_available=receiver.drift_model_available;
         single_receiver.coherent_reference_only=receiver.coherent_reference_only;
-        result.one_bit_cpu_seconds=single_receiver.cpu_seconds;
-        result.receiver_cpu_seconds=single_receiver.receiver_cpu_seconds;
+        result.one_bit_cpu_seconds=single_receiver.symbol_burst.modeled?
+            single_receiver.symbol_burst.finite_receiver_cpu_seconds:single_receiver.cpu_seconds;
+        result.receiver_cpu_seconds=single_receiver.symbol_burst.modeled?
+            single_receiver.symbol_burst.finite_receiver_cpu_seconds:single_receiver.receiver_cpu_seconds;
         result.kernel_rebuild_upper_bound=single_receiver.kernel_rebuild_upper_bound;
-        result.finite_cpu_realtime_ratio=single_receiver.simulated_seconds>0?
+        result.symbol_burst=single_receiver.symbol_burst;
+        result.finite_cpu_realtime_ratio=single_receiver.symbol_burst.modeled?single_receiver.symbol_burst.finite_realtime_ratio:single_receiver.simulated_seconds>0?
             single_receiver.receiver_cpu_seconds/single_receiver.simulated_seconds:0;
         result.hardware_sustained_modeled=single_receiver.hardware_sustained_modeled;
         result.hardware_sustained_realtime_ratio=single_receiver.hardware_sustained_realtime_ratio;
         result.hardware_cohort_lifetime_seconds=single_receiver.hardware_cohort_lifetime_seconds;
         result.hardware_sustained_receiver_instances=single_receiver.hardware_sustained_receiver_instances;
-        result.cpu_realtime_ratio=std::max(result.finite_cpu_realtime_ratio,
-            result.hardware_sustained_modeled?result.hardware_sustained_realtime_ratio:0.);
-        result.cpu_realtime_upper_ratio=single_receiver.simulated_seconds>0?
+        result.cpu_realtime_ratio=planned_cpu_ratio(single_receiver);
+        result.cpu_realtime_upper_ratio=single_receiver.symbol_burst.modeled?
+            std::max(single_receiver.symbol_burst.finite_realtime_upper_ratio,single_receiver.symbol_burst.tracked_realtime_upper_ratio):
+            single_receiver.simulated_seconds>0?
             (single_receiver.receiver_cpu_seconds+std::max(0.,single_receiver.receiver_kernel_rebuild_upper_seconds-
                 single_receiver.receiver_kernel_rebuild_seconds))/single_receiver.simulated_seconds:0;
         result.cpu_realtime_upper_ratio=std::max(result.cpu_realtime_upper_ratio,result.cpu_realtime_ratio);
-        result.cpu_per_bit_ratio=single_receiver.cpu_seconds/result.bit_seconds;
+        result.cpu_per_bit_ratio=result.one_bit_cpu_seconds/result.bit_seconds;
         // Unknown execution cost leaves a graph gap. Keep finite presentation
         // placeholders without converting an uncalibrated path to zero work.
         const auto finite_ratio=[](double value) {return std::isfinite(value)&&value>=0?value:0.;};

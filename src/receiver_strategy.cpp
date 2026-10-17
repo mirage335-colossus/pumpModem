@@ -37,6 +37,17 @@ std::size_t receiver_strategy_bank_count(const Config& c,unsigned radius,std::si
     const auto logical=static_cast<long double>(symbol_sample_count(c))+training_sample_count(c)+
         pattern_pulse_padding_samples(c);
     long double epochs=c.scramble||c.dsss?2.L*radius+3+std::ceil(logical/c.sample_rate):1;
+    if(c.symbol_burst.enabled()) {
+        const SymbolBurstPlan plan(c);
+        const auto maximum_step=std::max(60.L,static_cast<long double>(
+            2*plan.padding_samples())/c.sample_rate+
+            (c.symbol_burst.wait_symbols+plan.random_limit()+1.L)*plan.symbol_samples()/c.sample_rate)+30;
+        // Eligible first supports occur every30 seconds while seeking. Keep
+        // all four original private first-start opportunities resident through
+        // their physical calendar age; tracking later stops replenishment.
+        const auto initial=(c.scramble||c.dsss)?3.L*maximum_step:0.L;
+        epochs=2+std::ceil((2.L*radius+3+logical/c.sample_rate+initial)/30);
+    }
     if(c.scheduled_hopping&&c.scheduled_hopping->enabled()&&!c.scheduled_hopping->continuous()) {
         const auto& plan=*c.scheduled_hopping;plan.validate();
         const auto group=static_cast<long double>(2ULL*c.sample_rate/5)*plan.group_hops;
@@ -55,12 +66,44 @@ std::size_t receiver_strategy_bank_count(const Config& c,unsigned radius,std::si
     const auto total=epochs*std::max<std::size_t>(1,keys)*std::max<std::size_t>(1,profiles);
     return static_cast<std::size_t>(std::min(total,static_cast<long double>(std::numeric_limits<std::size_t>::max())));
 }
+namespace {
+struct BurstAmplitudeResidency {long double epochs=0,maximum_lifetime=0;};
+template<class Geometry>
+BurstAmplitudeResidency burst_amplitude_residency(const Config& c,const PatternSearch& search,const Geometry& g) {
+    const auto discrete_ppm=g.clock_hypotheses>1?(g.clock_hypotheses-1)/2.L*g.clock_step_ppm:0.L;
+    const auto ppm=std::max({discrete_ppm,static_cast<long double>(g.clock_half_width_ppm),
+        static_cast<long double>(search.admitted_clock_half_width_ppm.value_or(0))});
+    const auto slow=1-ppm*1e-6L,fast=1+ppm*1e-6L;
+    if(!(slow>0))throw Error("invalid Burst amplitude clock interval");
+    const auto q=(!c.scramble&&!c.dsss)?1.L:static_cast<long double>(std::max<std::size_t>(1,search.initial_stream_symbols));
+    const SymbolBurstPlan plan(c);
+    const auto spacing=static_cast<long double>(plan.spacing_samples_for_additional_wait(plan.random_limit()))/c.sample_rate;
+    const auto symbol=static_cast<long double>(symbol_sample_count(c))/c.sample_rate;
+    const auto prefix=(static_cast<long double>(training_sample_count(c))+2.L*pattern_pulse_padding_samples(c))/c.sample_rate;
+    const auto radius=std::max(static_cast<long double>(search.amplitude_start_uncertainty_seconds.value_or(search.start_uncertainty_seconds)),
+        search.amplitude_start_window?search.amplitude_start_window->half_width_samples/c.sample_rate:0.L);
+    const auto block=static_cast<long double>(g.block_seconds),lead=static_cast<long double>(search.amplitude_lookahead_epochs);
+    const auto overhead=2*radius+block+3+lead+20*std::max({1.L,fast,1/slow});
+    // Shared preparation admits qualified public cohorts a complete FFT block
+    // before every original arrival cell. Only bounded startup cohorts can be
+    // truncated. Keyed/unqualified cohorts retain that extra full opportunity.
+    const bool early=!c.scramble&&!c.dsss&&!c.data_key&&lead>0&&search.amplitude_start_window.has_value();
+    const auto regular=(symbol+prefix+(early?q-1:q)*spacing)/slow+overhead;
+    const auto startup=early?2+std::ceil((2*radius+block+prefix+lead+3)/30):0.L;
+    return {2+std::ceil(regular/30)+startup,(symbol+prefix+q*spacing)/slow+overhead};
+}
+}
 std::size_t receiver_strategy_amplitude_bank_count(const Config& c,const PatternSearch& search,
         std::size_t keys,std::size_t profiles) {
     if(scheduled_bursts(c))return receiver_strategy_bank_count(c,
         static_cast<unsigned>(std::max(0.,search.start_uncertainty_seconds-1)),keys,profiles);
     const auto g=pattern_amplitude_geometry(c,search);
     if(!g.supported)return std::max<std::size_t>(1,search.receiver_bank_count);
+    if(c.symbol_burst.enabled()) {
+        const auto total=burst_amplitude_residency(c,search,g).epochs*
+            std::max<std::size_t>(1,keys)*std::max<std::size_t>(1,profiles);
+        return static_cast<std::size_t>(std::min(total,static_cast<long double>(std::numeric_limits<std::size_t>::max())));
+    }
     const auto slow=1-(g.clock_hypotheses>1?(g.clock_hypotheses-1)/2*g.clock_step_ppm:0)*1e-6L;
     const auto symbol=static_cast<long double>(symbol_sample_count(c))/c.sample_rate;
     const auto prefix=static_cast<long double>(training_sample_count(c)+pattern_pulse_padding_samples(c))/c.sample_rate;
@@ -611,13 +654,20 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
         const bool double_fft=c.search_arithmetic==SearchArithmetic::fp64;
         const auto amplitude_frontend=(double_fft?1.5e-9L:1.0e-9L)*c.sample_rate*
             std::log2(static_cast<double>(amplitude.fft_samples));
-        if(amplitude_search.amplitude_receiver_bank_count&&!scheduled)
+        if(c.symbol_burst.enabled())
+            p.amplitude_cohort_lifetime_seconds=static_cast<double>(burst_amplitude_residency(c,amplitude_search,amplitude).maximum_lifetime);
+        else if(amplitude_search.amplitude_receiver_bank_count&&!scheduled)
             p.amplitude_cohort_lifetime_seconds=static_cast<double>(receiver_strategy_amplitude_bank_count(c,amplitude_search,1,1))*
                 std::max<std::size_t>(1,amplitude_search.amplitude_epoch_stride_seconds);
         const auto lifetime=p.amplitude_cohort_lifetime_seconds>0?p.amplitude_cohort_lifetime_seconds:
             seconds+static_cast<double>(training_sample_count(c)+pattern_pulse_padding_samples(c))/
                 c.sample_rate+2*amplitude_search.start_uncertainty_seconds+3;
-        const auto setup=(double_fft?4e-9L:20e-9L)*amplitude.fft_samples/std::max(1.,lifetime);
+        // One new eligible UTC cohort per30 seconds, independently of the
+        // exceptional startup cohorts' longer maximum retirement tail.
+        const auto setup_lifetime=c.symbol_burst.enabled()?
+            static_cast<long double>(receiver_strategy_amplitude_bank_count(c,amplitude_search,1,1))*30.L:
+            static_cast<long double>(std::max(1.,lifetime));
+        const auto setup=(double_fft?4e-9L:20e-9L)*amplitude.fft_samples/setup_lifetime;
         const auto duty=scheduled?p.scheduled_flat_duty:1.;
         const auto fft_union=scheduled?p.scheduled_fft_union_upper:1.;
         // Raw capture/validation remains full-rate when a future constructor

@@ -389,7 +389,8 @@ Node cpu_graph(const planner::Model& model,float width) {
     auto n=card(width);n.padding=8;
     const float inner=width-2*n.padding,label_width=38,height=86,plot_width=inner-label_width;
     paragraph(n,"CPU estimate",13,Tone::text,true,2);
-    paragraph(n,"Processing seconds per second of audio",10,Tone::muted,false,4);
+    paragraph(n,model.symbol_burst.modeled?"Processing seconds per second of scheduled reception":
+        "Processing seconds per second of audio",10,Tone::muted,false,4);
     const auto chart=cpu_chart_data(model);
     auto body=row(inner);auto labels=column(label_width);labels.height=height;
     float previous=0;
@@ -548,8 +549,9 @@ void link_budget(Node& root, const planner::Model& model) {
             cpu_ratio>=.5 || uncalibrated_cpu?Tone::caution:Tone::positive;
         const auto cpu_label=!cpu_available?"CPU estimate unavailable":uncalibrated_cpu?"CPU engineering estimate: uncalibrated":cpu_ratio>=1?"CPU estimate: slower than real time":
             cpu_ratio>=.5?"CPU estimate: limited headroom":"CPU estimate: headroom";
-        const auto pace=!cpu_available?std::string{}:cpu_ratio<.01?"<0.01 s processing per 1 s audio":
-            cpu_ratio>1000?">1,000 s processing per 1 s audio":"≈ "+number(cpu_ratio,2)+" s processing per 1 s audio";
+        const auto pace_unit=model.symbol_burst.modeled?"scheduled reception":"audio";
+        const auto pace=!cpu_available?std::string{}:cpu_ratio<.01?"<0.01 s processing per 1 s "+std::string(pace_unit):
+            cpu_ratio>1000?">1,000 s processing per 1 s "+std::string(pace_unit):"≈ "+number(cpu_ratio,2)+" s processing per 1 s "+pace_unit;
         if(n.width>=560) {
             const auto inner=n.width-2*n.padding;
             auto heading=row(inner);heading.bottom=4;
@@ -563,6 +565,17 @@ void link_budget(Node& root, const planner::Model& model) {
         } else {
             paragraph(n,verdict,17,rx_tone,true,4);
             paragraph(n,cpu_label+(cpu_available?" · "+pace:""),12,cpu_tone,true,4);
+        }
+        if(model.symbol_burst.enabled) {
+            const auto& burst=model.symbol_burst;
+            paragraph(n,"Symbol_Burst: "+std::string(burst.modeled?"planned finite and tracked workload":"seeking allowance")+
+                " · "+planner::duration(burst.minimum_spacing_seconds)+" minimum spacing"+
+                (burst.effective_random_limit?" · "+planner::duration(burst.mean_spacing_seconds)+" mean · "+
+                    planner::duration(burst.maximum_spacing_seconds)+" maximum":"")+" · "+
+                planner::duration(burst.useful_quiet_seconds)+" usable quiet",11,
+                burst.recurring_service_fits?Tone::accent:Tone::caution,false,4);
+            paragraph(n,burst.limit+(burst.recommended_wait_symbols>burst.wait_symbols?
+                " Try "+std::to_string(burst.recommended_wait_symbols)+" symbol waits.":""),11,Tone::muted,false,4);
         }
         if(search_fits&&!model.probability_model_limit.empty()&&
            (!probability_available||model.probability_model_limit.find("EME first-bit")!=std::string::npos||
@@ -686,7 +699,21 @@ void geometry_details(Node& n,const planner::Model& model) {
         paragraph(n,"Full-window fallback: "+number(model.fallback_cpu_realtime_ratio,3)+
             " s processing per 1 s audio; "+number(model.fallback_timing_hypotheses,6)+
             " timing origins. The timing reduction depends on the admitted capture bounds.",11,Tone::muted,false,0);
-    if(model.hardware_sustained_modeled)
+    if(model.symbol_burst.enabled) {
+        const auto& burst=model.symbol_burst;
+        paragraph(n,"Symbol_Burst seeking: "+number(burst.seeking_realtime_ratio,3)+
+            " processing seconds per second. Finite initial-cohort acquisition and original-window tail: "+
+            planner::duration(burst.acquisition_cpu_seconds)+" CPU over "+
+            planner::duration(burst.acquisition_observation_seconds)+" of capture. Conditional successful first publication freezes new admissions after "+
+            planner::duration(burst.acquisition_admission_seconds)+"; all already admitted windows finish.",11,Tone::muted,false,0);
+        if(burst.modeled)paragraph(n,"Tracked full-symbol allowance: "+number(burst.tracked_cpu_seconds_per_slot,4)+
+            " CPU seconds per guarded slot; "+number(burst.tracked_realtime_ratio,3)+
+            " per scheduled second. Guarded capture "+planner::duration(burst.capture_seconds_per_slot)+
+            "; minimum useful quiet "+planner::duration(burst.useful_quiet_seconds)+
+            ". The CPU graph uses the larger finite initial-cohort and recurring allowance, with zero random extra wait. Whole-symbol FFT and peak RAM are retained. "+
+            burst.scope,11,Tone::muted,false,0);
+    }
+    if(model.hardware_sustained_modeled&&!model.symbol_burst.modeled)
         paragraph(n,"Sustained rolling acquisition allowance: "+number(model.hardware_sustained_realtime_ratio,3)+
             " s processing per 1 s audio; complete cohort lifetime "+planner::duration(model.hardware_cohort_lifetime_seconds)+
             ", approximately "+number(model.hardware_sustained_receiver_instances,4)+
@@ -802,11 +829,18 @@ void details(Node& root,const planner::Model& model) {
             ". Phase loss within a section: "+number(model.section_phase_coherence_loss_db)+" dB.");
     paragraph(n, "Link budget. Average transmit power minus path loss gives received power. Noise then sets signal strength; the selected target sets bit duration. Meeting the target is a planning estimate.");
     paragraph(n, "Timing. Uses the selected modem profile, exact wire-bit count and waveform overhead. Finish adds complete absent symbols covering at least six seconds; processing takes extra time. No reception is tested here.");
-    if(model.one_bit_cpu_available)
+    if(model.one_bit_cpu_available&&model.symbol_burst.modeled)
+        paragraph(n,"CPU. Reference: Ryzen 5 PRO 5650U local acquisition calibration; other work uses engineering allowances. Symbol_Burst charges "+
+            planner::duration(model.symbol_burst.finite_receiver_cpu_seconds)+" of finite receiver work over "+
+            planner::duration(model.symbol_burst.finite_observation_seconds)+" of scheduled reception, conditional on successful first-symbol publication. All initial key/profile banks and their retained search windows finish. The indicator uses the larger finite and full-domain tracked allowance at minimum spacing, with zero random extra wait. The separate seeking diagnostic applies while acquisition has not succeeded. Automatic compact/amplitude rolling cold acquisition and peak resident banks remain unqualified. Whole-symbol FFT and peak RAM remain required. Green: below 0.5× scheduled real time; yellow: 0.5–1×; red: 1× or more. Startup latency, competing receptions and actual backlog drain require execution qualification; this is not a measurement of this computer.");
+    else if(model.one_bit_cpu_available)
         paragraph(n,"CPU. Reference: Ryzen 5 PRO 5650U local acquisition calibration; other work uses engineering allowances. A one-bit simulation takes about "+
             planner::duration(model.one_bit_cpu_seconds)+" of processing for "+planner::duration(model.bit_seconds)+
             " per bit. The finite observation average includes receiver work and ordinary payload processing through the final silence check. Supported hardware FFT searches also include a separate sustained rolling-cohort allowance; the CPU indicator uses the larger value so startup before the first FFT cannot imply headroom. Simulation times remain finite-draft estimates. Additional recovery searches are excluded. Green: below 0.5× real time; yellow: 0.5–1×; red: 1× or more. Search bursts, extra receive targets and slower computers can need more headroom. This is an estimate, not a measurement of this computer.");
-    if(model.kernel_rebuild_upper_bound)
+    if(model.symbol_burst.modeled&&model.cpu_realtime_upper_ratio>model.cpu_realtime_ratio)
+        paragraph(n,"CPU pulse kernels retain their exact offset/count and table-interval cache across symbol gaps. Rebuilding every kernel would raise the finite or tracked allowance to about "+
+            number(model.cpu_realtime_upper_ratio,3)+"× scheduled real time. This conservative fallback remains separate from the displayed central estimate.");
+    else if(model.kernel_rebuild_upper_bound)
         paragraph(n,"CPU cost estimates reuse between nearby clock candidates. Rebuilding every cached kernel would raise receiver work to about "+
             number(model.cpu_realtime_upper_ratio,3)+"× real time. That conservative fallback bound is separate from the displayed estimate.");
     paragraph(n,"Graph. Solid line: time per bit on the left logarithmic axis. Dashed line: one-bit reception probability on the right percentage axis, using the selected power, path and noise. RX reference labels conditional calculations outside full receiver qualification. Both use the same target scale; their visual crossing is not a detection threshold. Gaps have no supported estimate.");

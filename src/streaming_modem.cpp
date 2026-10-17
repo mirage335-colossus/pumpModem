@@ -227,6 +227,8 @@ std::optional<std::uint64_t> StreamingReceiver::unobserved_end_from(std::uint64_
 std::optional<ScheduledCaptureEnvelope> StreamingReceiver::scheduled_capture_envelope(std::uint64_t local_sample)const {
     return impl_->pattern.scheduled_capture_envelope(local_sample);
 }
+void StreamingReceiver::suspend_fresh_acquisition(){impl_->pattern.suspend_fresh_acquisition();}
+bool StreamingReceiver::symbol_burst_tracking_active()const{return impl_->pattern.symbol_burst_tracking_active();}
 bool StreamingReceiver::synchronized()const{return impl_->pattern.synchronized();}
 bool StreamingReceiver::initial_search_complete()const{return impl_->pattern.initial_search_complete();}
 bool StreamingReceiver::clock_windowed()const{return impl_->pattern.clock_windowed();}

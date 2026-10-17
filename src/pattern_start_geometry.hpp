@@ -13,6 +13,10 @@
 
 namespace datapump::modem::detail {
 
+inline long double original_physical_guard_factor(long double minimum_rate,long double maximum_rate) {
+    return std::max({1.L,maximum_rate,1/minimum_rate});
+}
+
 struct PatternStartPhases {
     std::uint64_t lower=0,upper=0;
     std::size_t count=0;

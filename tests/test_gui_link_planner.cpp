@@ -46,6 +46,26 @@ bool contains_text(const ui::DocumentNode& root,std::string_view text) {
     const auto flat=nodes(root);
     return std::any_of(flat.begin(),flat.end(),[&](const auto* node){return node->text.find(text)!=std::string::npos;});
 }
+void symbol_burst_plan_document() {
+    auto inputs=example();inputs.target_db_hz=23;inputs.options.modem.symbol_burst={2,3};
+    inputs.receiver_work_mode=simulation::ReceiverWorkMode::hardware_calendar_model;
+    planner::Cache cache;std::stop_source stop;std::optional<planner::Model> selected;
+    try {planner::build(inputs,cache,stop.get_token(),[&](const auto& model){selected=model;stop.request_stop();});}
+    catch(const estimate_detail::Cancelled&) {}
+    check(selected&&selected->available&&selected->symbol_burst.enabled&&selected->symbol_burst.modeled,
+        "Burst selected values must publish before the probability/CPU curves finish");
+    check(selected->symbol_burst.effective_random_limit==0,
+        "plaintext planner must show zero effective random extra wait");
+    for(const auto width:{220.f,900.f}) {
+        const auto page=planner_page::build(*selected,width,true,false);
+        check(contains_text(page,"Symbol_Burst:")&&contains_text(page,"usable quiet")&&
+            contains_text(page,"Symbol_Burst seeking:")&&contains_text(page,"zero random extra wait")&&
+            contains_text(page,"Whole-symbol FFT and peak RAM are retained"),
+            "Burst planner must distinguish seeking/debt/tracking and preserve whole-symbol memory claims");
+        check(contains_text(page,"Processing seconds per second of scheduled reception"),
+            "Burst CPU graph denominator must identify scheduled reception");
+    }
+}
 void cancelled_planner_and_inspection() {
     std::stop_source stopped;stopped.request_stop();
     planner::Cache cache;
@@ -101,6 +121,10 @@ void earth_moon_earth_estimate() {
     Controller controller({false,false});
     controller.activate(ui::Command::planner_example_eme);
     const auto inputs=controller.link_plan()->inputs;
+    check(controller.field(ui::Field::dsp_workspace).selected=="ram-75"&&inputs.dsp_workspace_percent==75&&
+          inputs.options.dsp_workspace_bytes==controller.settings().dsp_workspace_bytes&&
+          inputs.options.dsp_workspace_bytes==controller.settings().transfer.dsp_workspace_bytes,
+          "EME preset must forward its selected75percent workspace and exact byte allowance to the Link planner");
     controller.close();
     check(!inputs.options.key && !inputs.options.modem.fake_hopping &&
           !inputs.options.modem.scheduled_hopping,
@@ -554,9 +578,24 @@ void narrow_band_differential_model() {
     auto automatic_inputs=inputs;
     automatic_inputs.options.modem.receiver_strategy=modem::ReceiverStrategy::automatic;
     const auto automatic=planner::build(automatic_inputs);
-    check(automatic.receiver_geometry.receiver_strategy_selected=="amplitude energy" &&
-          !automatic.confidence_available && automatic.receiver_geometry.receiver_strategy_experimental,
-          "automatic amplitude fallback must not borrow the older coherent probability");
+    // Complete rolling public-arrival banks are charged before choosing a
+    // detector. This multi-day amplitude bank cannot fit 2GiB, while the bounded
+    // coherent path remains cheap and supported. Preserve the later coverage
+    // correction rather than forcing the former incomplete amplitude choice.
+    check(automatic.receiver_geometry.receiver_strategy_selected=="existing complex" &&
+          automatic.confidence_available && !automatic.receiver_geometry.receiver_strategy_experimental &&
+          automatic.receiver_workspace_supported && automatic.clock_search_supported &&
+          automatic.receiver_geometry.existing_processing_ratio<automatic.receiver_geometry.amplitude_processing_ratio,
+          "automatic selection must retain the supported coherent path when complete amplitude banks cannot fit");
+    auto amplitude_inputs=inputs;amplitude_inputs.options.modem.receiver_strategy=modem::ReceiverStrategy::amplitude_only;
+    planner::Cache amplitude_cache;std::stop_source amplitude_stop;std::optional<planner::Model> amplitude;
+    try {planner::build(amplitude_inputs,amplitude_cache,amplitude_stop.get_token(),[&](const auto& current) {
+        amplitude=current;amplitude_stop.request_stop();
+    });}catch(const estimate_detail::Cancelled&) {}
+    check(amplitude&&amplitude->receiver_geometry.receiver_strategy_selected=="amplitude energy" &&
+          !amplitude->receiver_workspace_supported && !amplitude->confidence_available &&
+          !amplitude->reference_probability_available,
+          "unsupported complete amplitude arrival banks must not borrow the older coherent probability");
     inputs.target_db_hz=-44.25748830262745;
     inputs.options.modem=tuning::resolve(.01,inputs.target_db_hz,inputs.mode,false,1500).config;
     inputs.options.modem.receiver_strategy=modem::ReceiverStrategy::existing_only;
@@ -2243,8 +2282,9 @@ void document_semantics_layout_and_plots() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="--symbol-burst-only") {symbol_burst_plan_document();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--eme-only") {earth_moon_earth_estimate();std::cout<<"EME selected RX model limit passed\n";return 0;}
-        cancelled_planner_and_inspection();
+        symbol_burst_plan_document();cancelled_planner_and_inspection();
         if(argc==2&&std::string_view(argv[1])=="--observer-only") {
             independent_reference_values();exact_geometry_and_physical_finish();separate_link_budget_and_observer_model();
             removing_key_withdraws_cached_observer();estimate_warning_thresholds();document_semantics_layout_and_plots();

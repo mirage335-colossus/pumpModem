@@ -576,6 +576,86 @@ void arithmetic_settings() {
         "explicit default failed to restore the saved default request");
     controller.close();
 }
+void symbol_burst_settings() {
+    Controller controller({true,true});
+    const auto& burst=controller.field(F::symbol_burst);
+    check(burst.selected=="off"&&burst.enabled&&burst.options.size()==6&&
+        burst.options[0].id=="off"&&burst.options[1].id=="1"&&burst.options[2].id=="2"&&
+        burst.options[3].id=="3"&&burst.options[4].id=="5"&&burst.options[5].id=="10"&&
+        controller.field(F::symbol_burst_random).selected=="0"&&
+        controller.field(F::symbol_burst_random).options.size()==4&&
+        !controller.field(F::symbol_burst_random).enabled&&
+        !controller.settings().transfer.modem.symbol_burst.enabled(),
+        "Symbol_Burst must default Off with exact ordinary choices and remain selectable without a key");
+    for(const auto field:{F::symbol_burst,F::symbol_burst_random}) {
+        const auto& declarations=ui::console_screen();
+        const auto control=std::find_if(declarations.begin(),declarations.end(),[&](const auto& c){return c.field==field;});
+        check(control!=declarations.end()&&control->kind==ui::Kind::choice&&control->persistent&&
+            !control->developer_only&&!control->document_only&&!control->open_upward,
+            "Symbol_Burst settings must use ordinary persistent shared dropdowns with header popup placement");
+    }
+    load(controller,"--pattern pattern-16 --rate 1200 --carrier 1500 --symbol-burst 2 --symbol-burst-random 3");
+    const modem::SymbolBurstOptions expected{2,3};
+    check(controller.settings().transfer.modem.symbol_burst==expected&&controller.settings().long_message_modem&&
+        controller.settings().long_message_modem->symbol_burst==expected&&
+        !controller.settings().transfer.key&&!controller.settings().transfer.modem.data_key&&
+        !controller.field(F::symbol_burst_random).enabled&&controller.field(F::symbol_burst_random).selected=="3"&&
+        controller.field(F::symbol_burst_random).display_text=="0 effective",
+        "Plaintext Burst must preserve random preference while displaying effective zero for both TX profiles");
+    load(controller,"--path-loss-db 130");
+    auto saved=launch_command::parse(controller.field(F::planner_command).text);
+    check(saved.symbol_burst==2&&saved.symbol_burst_random==3&&
+        controller.settings().transfer.modem.symbol_burst==expected,
+        "Partial import or export lost saved Symbol_Burst settings");
+    load_synthetic_key(controller);
+    check(controller.settings().transfer.key&&controller.settings().transfer.modem.data_key&&
+        controller.settings().transfer.modem.symbol_burst==expected&&
+        controller.settings().long_message_modem->symbol_burst==expected&&
+        controller.field(F::symbol_burst_random).enabled&&controller.field(F::symbol_burst_random).display_text.empty(),
+        "Encrypted Burst must bind the actual TX key without changing either profile's saved calendar");
+    for(const auto* wait:{"1","2","3","5","10"}) {
+        controller.select(F::symbol_burst,wait);
+        check(controller.settings().transfer.modem.symbol_burst.wait_symbols==modem::parse_symbol_burst_wait(wait)&&
+            controller.settings().long_message_modem->symbol_burst==controller.settings().transfer.modem.symbol_burst,
+            "Symbol_Burst callback did not update both TX profiles");
+    }
+    for(const auto* random:{"0","1","2","3"}) {
+        controller.select(F::symbol_burst_random,random);
+        check(controller.settings().transfer.modem.symbol_burst.random_limit==modem::parse_symbol_burst_random(random),
+            "Random wait callback did not update the accepted configuration");
+    }
+    controller.select(F::symbol_burst,"off");
+    check(!controller.settings().transfer.modem.symbol_burst.enabled()&&
+        controller.settings().transfer.modem.symbol_burst.random_limit==3&&
+        controller.field(F::symbol_burst_random).selected=="3"&&!controller.field(F::symbol_burst_random).enabled,
+        "Burst Off must retain the saved random preference");
+    controller.select(F::symbol_burst,"2");
+    load(controller,"--tx-key none");
+    check(!controller.settings().receive_keys.empty()&&!controller.settings().transfer.key&&
+        !controller.settings().transfer.modem.data_key&&controller.field(F::symbol_burst).enabled&&
+        !controller.field(F::symbol_burst_random).enabled&&controller.field(F::symbol_burst_random).display_text=="0 effective",
+        "Loaded receive keys must not enable TX randomization or disable plaintext Burst");
+    const auto accepted_rate=controller.settings().transfer.modem.bandwidth_hz;
+    for(const auto* invalid:{"--rate 360 --symbol-burst 4","--rate 360 --symbol-burst-random 4"}) {
+        load(controller,invalid);
+        check(controller.settings().transfer.modem.bandwidth_hz==accepted_rate&&
+            controller.settings().transfer.modem.symbol_burst==expected&&
+            controller.field(F::symbol_burst).selected=="2"&&controller.field(F::symbol_burst_random).selected=="3",
+            "Invalid Burst import partially changed active settings or stored preferences");
+    }
+    load_synthetic_key(controller);
+    load(controller,"--rate 360 --sched-hop 3 --symbol-burst 2");
+    check(controller.settings().transfer.modem.bandwidth_hz==accepted_rate&&
+        !controller.settings().transfer.modem.scheduled_hopping&&controller.field(F::sched_hop).selected=="0"&&
+        controller.settings().transfer.modem.symbol_burst==expected,
+        "Incompatible active schedules must reject atomically");
+    auto requested=launch_command::parse("--pattern pattern-16 --rate 1200 --carrier 1500 --symbol-burst 5 --symbol-burst-random 3");
+    Controller startup({false,false,requested});
+    check(startup.settings().transfer.modem.symbol_burst==modem::SymbolBurstOptions{5,3}&&
+        startup.field(F::symbol_burst).selected=="5"&&!startup.field(F::symbol_burst_random).enabled,
+        "Startup launch settings did not install the plaintext Symbol_Burst preference");
+    startup.close();controller.close();
+}
 void scheduled_hop_settings() {
     Controller controller;
     const auto& burst=controller.field(F::sched_hop);
@@ -990,7 +1070,7 @@ void fhss_list_settings() {
     controller.close();
 }
 int main(int argc,char** argv) {
-    try {exact_scheduled_target_import();if(argc>1&&std::string_view(argv[1])=="--sched-target-import"){std::cout<<"Exact scheduled target import passed\n";return 0;}scheduled_hop_settings();if(argc>1&&std::string_view(argv[1])=="--sched-hop"){std::cout<<"Scheduled hop settings passed\n";return 0;}receiver_strategy_settings();if(argc>1&&std::string_view(argv[1])=="--receiver-strategy"){std::cout<<"Receiver strategy settings passed\n";return 0;}fhss_list_settings();if(argc>1&&std::string_view(argv[1])=="--fhss-list"){std::cout<<"FHSS list passed\n";return 0;}fhss_profiles();if(argc>1&&std::string_view(argv[1])=="--fhss-profiles"){std::cout<<"FHSS profiles passed\n";return 0;}doppler_settings();arithmetic_settings();duplex_settings();clock_and_spread_controls();generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();narrow_rate_round_trips();live_validation_is_atomic();real_radio_configuration();invalid_shift_edit_recovers();absolute_carrier_and_shift();zero_shift_legacy_and_shared_round_trip();
+    try {symbol_burst_settings();if(argc>1&&std::string_view(argv[1])=="--symbol-burst"){std::cout<<"Symbol_Burst settings passed\n";return 0;}exact_scheduled_target_import();if(argc>1&&std::string_view(argv[1])=="--sched-target-import"){std::cout<<"Exact scheduled target import passed\n";return 0;}scheduled_hop_settings();if(argc>1&&std::string_view(argv[1])=="--sched-hop"){std::cout<<"Scheduled hop settings passed\n";return 0;}receiver_strategy_settings();if(argc>1&&std::string_view(argv[1])=="--receiver-strategy"){std::cout<<"Receiver strategy settings passed\n";return 0;}fhss_list_settings();if(argc>1&&std::string_view(argv[1])=="--fhss-list"){std::cout<<"FHSS list passed\n";return 0;}fhss_profiles();if(argc>1&&std::string_view(argv[1])=="--fhss-profiles"){std::cout<<"FHSS profiles passed\n";return 0;}doppler_settings();arithmetic_settings();duplex_settings();clock_and_spread_controls();generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();narrow_rate_round_trips();live_validation_is_atomic();real_radio_configuration();invalid_shift_edit_recovers();absolute_carrier_and_shift();zero_shift_legacy_and_shared_round_trip();
         std::cout<<"Planner launch setting round trips passed.\n";return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -2,6 +2,7 @@
 #include "datapump/compression.hpp"
 #include "datapump/transfer.hpp"
 #include "datapump/symbol_schedule.hpp"
+#include "datapump/symbol_burst.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/boundary_sync.hpp"
 #include "datapump/pattern_pulse.hpp"
@@ -23,7 +24,7 @@ struct RecoverySource {
 namespace {
 Options effective_options(const Options& input) {
     auto result=input;
-    if(result.modem.scheduled_hopping && result.modem.scheduled_hopping->enabled())
+    if(result.modem.symbol_burst.enabled() || (result.modem.scheduled_hopping && result.modem.scheduled_hopping->enabled()))
         result.modem.data_key=result.key; // One immutable schedule key before masking and timing.
     if(result.modem.spreading_mode==modem::SpreadingMode::tone) {
         result.key.reset();result.modem.data_key.reset();
@@ -76,10 +77,37 @@ Options binary_options(std::span<const std::uint8_t> bits,const Options& options
     if(std::any_of(bits.begin(),bits.end(),[](auto b){return b>1;}))throw Error("raw bits must be zero or one");
     return result;
 }
-IntervalOptions interval_options(const Options& options,std::uint64_t first_symbol) {
+// A separate cursor belongs to each monotonic consumer. Its plan's address is
+// stable for the cursor's entire lifetime; no whole-message calendar is stored.
+struct BurstAddresses {
+    modem::SymbolBurstPlan plan;
+    modem::SymbolBurstCursor cursor;
+    BurstAddresses(const Options& options):plan([&] {auto config=options.modem;config.data_key=options.key;return config;}()),
+        cursor(plan,plan.bind_payload(options.timestamp,options.modem.stream_phase_samples)) {}
+    BurstAddresses(const Options& options,modem::SymbolBurstSlot checkpoint):
+        plan([&] {auto config=options.modem;config.data_key=options.key;return config;}()),cursor(plan,checkpoint) {}
+    modem::SymbolStreamAddress address(std::uint64_t index) {
+        const auto point=cursor.at(index).payload_begin;
+        return {point.epoch,point.phase/plan.symbol_samples(),point.phase};
+    }
+};
+std::unique_ptr<BurstAddresses> burst_addresses(const Options& options) {
+    return options.key && options.modem.symbol_burst.enabled()?std::make_unique<BurstAddresses>(options):nullptr;
+}
+struct ReceiveOrigin {std::uint64_t epoch=0,phase=0;};
+std::vector<ReceiveOrigin> receive_origins(const modem::Config& config,std::uint64_t center,unsigned window,bool encrypted) {
+    std::vector<ReceiveOrigin> result;
+    for(const auto epoch:drift_candidates(center,window,encrypted)) {
+        if(config.symbol_burst.enabled()) {
+            if(const auto phase=modem::symbol_burst_payload_start_in_epoch(config,epoch))result.push_back({epoch,*phase});
+        } else result.push_back({epoch,config.stream_phase_samples});
+    }
+    return result;
+}
+IntervalOptions interval_options(const Options& options,std::uint64_t first_symbol,BurstAddresses* burst=nullptr) {
     IntervalOptions result;result.fec=options.fec;
     if(options.key) {
-        const auto address=modem::symbol_stream_address(options.modem,options.timestamp,options.modem.stream_phase_samples,first_symbol);
+        const auto address=burst?burst->address(first_symbol):modem::symbol_stream_address(options.modem,options.timestamp,options.modem.stream_phase_samples,first_symbol);
         Bytes domain{'D','P','-','I','N','T','E','R','V','A','L',2,
             static_cast<std::uint8_t>(options.fec),static_cast<std::uint8_t>(options.compression)};
         for(auto value:{address.epoch,address.ordinal})
@@ -96,7 +124,7 @@ IntervalOptions interval_options(const Options& options,std::uint64_t first_symb
 // Post-physical-end boundary search for a single interval. Marker observations
 // add evidence, but are not required to try RS. Source syntax supplies none.
 std::optional<DecodedInterval> recover_interval_alignment(
-        std::span<const std::uint8_t> bits,const Options& options,std::uint64_t first_symbol) {
+        std::span<const std::uint8_t> bits,const Options& options,std::uint64_t first_symbol,BurstAddresses* burst=nullptr) {
     // Cover an absent, partial or damaged leading marker and the existing slip
     // allowance. This is one-interval geometry, not a CPU-work limit.
     constexpr auto maximum_endpoint=boundary_sync::marker_bits+boundary_sync::maximum_slip_bits;
@@ -136,7 +164,7 @@ std::optional<DecodedInterval> recover_interval_alignment(
         candidate.first_stream_symbol=first_symbol+endpoint;
         try {
             auto decoded=decode_interval(candidate.bytes,
-                interval_options(options,candidate.first_stream_symbol),
+                interval_options(options,candidate.first_stream_symbol,burst),
                 std::span(erasures).first(erased),candidate.erasure_bits);
             const auto& stats=decoded.fec_stats;
             const auto errors=stats.data.repaired_bytes-stats.data.erased_bytes+
@@ -186,9 +214,10 @@ Bytes encoded_intervals(const Message& message,const Options& options,StreamLayo
     if(count>Bytes{}.max_size()/(boundary_sync::interval_bits+boundary_sync::marker_bits))
         throw Error("encoded source exceeds address space");
     Bytes wire;wire.reserve(count*stream_interval_bytes);
+    auto burst=burst_addresses(options);
     for(std::size_t i=0;i<count;++i) {
         const auto first=i*(boundary_sync::marker_bits+boundary_sync::interval_bits)+boundary_sync::marker_bits;
-        auto block=encode_interval(std::span(source).subspan(i*capacity,capacity),interval_options(options,first));
+        auto block=encode_interval(std::span(source).subspan(i*capacity,capacity),interval_options(options,first,burst.get()));
         wire.insert(wire.end(),block.begin(),block.end());
     }
     if(layout) {
@@ -220,7 +249,7 @@ std::uint64_t physical_payload_span(const modem::Config& config,std::uint64_t sy
     if(end.fraction!=0 || end.sample<anchor)throw Error("invalid scheduled payload extent");
     return end.sample-anchor;
 }
-void mask_binary_bits(std::span<std::uint8_t>,const Options&,std::size_t,modem::TransmitTrace*);
+void mask_binary_bits(std::span<std::uint8_t>,const Options&,std::size_t,modem::TransmitTrace*,BurstAddresses* =nullptr);
 }
 bool uses_raw_message(const Message& message) noexcept {
     return message.kind==MessageKind::text && !message.data.empty() && message.data.size()<=short_message_bytes;
@@ -264,7 +293,11 @@ modem::Config seeded_config(const Options& input_options, std::uint64_t timestam
 
 Estimate estimate(const Message& message,const Options& options) {return estimate(message,options,nullptr);}
 Estimate estimate(const Message& message,const Options& input,StreamLayout* layout) {
-    const auto options=effective_options(input);
+    auto options=effective_options(input);
+    if(options.modem.symbol_burst.enabled()) {
+        const auto config=modem::scheduled_estimate_config(seeded_config(options,options.timestamp));
+        options.timestamp=config.stream_epoch;options.modem.stream_phase_samples=config.stream_phase_samples;
+    }
     Bytes bits;std::size_t coded_bytes;
     if(uses_raw_message(message)) {
         validate_message(message,options);
@@ -389,7 +422,7 @@ std::unique_ptr<modem::StreamingTransmitter> message_transmitter(const Message& 
 }
 namespace {
 void mask_binary_bits(std::span<std::uint8_t> bits,const Options& input_options,std::size_t bit_offset,
-                      modem::TransmitTrace* trace) {
+                      modem::TransmitTrace* trace,BurstAddresses* addresses) {
     const auto options=effective_options(input_options);
     if(bits.empty())return;
     const auto value=binary_options(bits,options);
@@ -402,6 +435,8 @@ void mask_binary_bits(std::span<std::uint8_t> bits,const Options& input_options,
     if(bits.size()>std::numeric_limits<std::size_t>::max()-bit_offset)
         throw Error("raw binary data-stream offset overflow");
     if(value.key) {
+        auto local=addresses?nullptr:burst_addresses(value);
+        if(local)addresses=local.get();
         // Data and pattern positions use the same symbol-start clock. A new
         // second restarts its local bit positions even after missed symbols.
         // Keep a bounded cache; never allocate a duration-sized keystream.
@@ -411,7 +446,7 @@ void mask_binary_bits(std::span<std::uint8_t> bits,const Options& input_options,
         bool cached=false;
         std::size_t offset=0;
         while(offset<bits.size()) {
-            const auto address=modem::symbol_stream_address(value.modem,value.timestamp,value.modem.stream_phase_samples,bit_offset+offset);
+            const auto address=addresses?addresses->address(bit_offset+offset):modem::symbol_stream_address(value.modem,value.timestamp,value.modem.stream_phase_samples,bit_offset+offset);
             const auto byte=address.ordinal/8,begin=byte-byte%cache_size;
             if(!cached || address.epoch!=cached_epoch || begin!=cached_begin) {
                 mask=value.key->stream(StreamPurpose::Data,address.epoch,begin,cache_size);
@@ -454,10 +489,18 @@ struct StreamReceiver::Impl {
         std::vector<std::uint64_t> recovery_starts;
         std::uint64_t recovery_first=0;
         bool recovery_truncated=false,recovery_contiguous=true,interval_failed=false;
+        std::unique_ptr<BurstAddresses> mask_addresses,interval_addresses;
+        std::optional<modem::SymbolBurstSlot> recovery_checkpoint;
         State(const Options& value,const modem::PatternBurst& burst)
             :collector(burst.first_stream_symbol,0,true),options(value),next_symbol(burst.first_stream_symbol),
              recovery_first(burst.first_stream_symbol) {
             options.modem.stream_phase_samples=burst.stream_phase_samples;
+            mask_addresses=burst_addresses(options);
+            if(mask_addresses) {
+                recovery_checkpoint=mask_addresses->cursor.at(burst.first_stream_symbol);
+                mask_addresses->cursor.checkpoint(*recovery_checkpoint);
+                interval_addresses=std::make_unique<BurstAddresses>(options,*recovery_checkpoint);
+            }
             result.timestamp=options.timestamp;
             const std::array<std::uint64_t,2> identity{options.timestamp,burst.stream_first_sample};
             for(std::size_t j=0;j<2;++j)for(std::size_t i=0;i<8;++i)
@@ -520,7 +563,7 @@ struct StreamReceiver::Impl {
         try {
             std::array<std::size_t,stream_interval_bytes> erasures{};std::size_t count=0;
             for(std::size_t i=0;i<interval.erasures.size();++i)if(interval.erasures[i])erasures[count++]=i;
-            const auto decoded=decode_interval(interval.bytes,interval_options(state.options,interval.first_stream_symbol),
+            const auto decoded=decode_interval(interval.bytes,interval_options(state.options,interval.first_stream_symbol,state.interval_addresses.get()),
                 std::span(erasures).first(count),interval.erasure_bits);
             accept_interval(state,decoded);
         } catch(const Error& error) {state.interval_failed=true;fail(state,error.what());}
@@ -553,6 +596,8 @@ struct StreamReceiver::Impl {
             it=states.emplace(id,std::make_unique<State>(options,burst)).first;
         }
         auto& state=*it->second;
+        if(state.options.modem.symbol_burst.enabled() && state.options.modem.stream_phase_samples!=burst.stream_phase_samples)
+            throw Error("Symbol_Burst reception changed its bound payload origin");
         state.options.modem.stream_phase_samples=burst.stream_phase_samples;
         state.result.diagnostics=std::move(diagnostics);state.result.diagnostics.pattern_score=burst.score;
         state.result.diagnostics.sample_offset=static_cast<std::size_t>(burst.stream_first_sample);
@@ -565,8 +610,8 @@ struct StreamReceiver::Impl {
             if(i<bits.size() && bits[i]!=modem::missing_pattern_bit)continue;
             if(i>begin) {
                 auto context=state.options;context.content_limit=std::max(context.content_limit,i-begin);
-                xor_binary_bits(std::span(bits).subspan(begin,i-begin),context,
-                    static_cast<std::size_t>(burst.first_stream_symbol)+begin);
+                mask_binary_bits(std::span(bits).subspan(begin,i-begin),context,
+                    static_cast<std::size_t>(burst.first_stream_symbol)+begin,nullptr,state.mask_addresses.get());
             }
             if(i<bits.size())++state.result.missing_symbols;
             begin=i+1;
@@ -606,8 +651,10 @@ struct StreamReceiver::Impl {
         if(burst.complete && !state.failed && !state.aligned &&
            !state.collector.leading_marker_recognized() && !state.result.missing_symbols &&
            state.result.observed_bits==state.result.raw_bits.size()) {
+            auto recovery_addresses=state.recovery_checkpoint?
+                std::make_unique<BurstAddresses>(state.options,*state.recovery_checkpoint):nullptr;
             if(const auto recovered=recover_interval_alignment(state.result.raw_bits,state.options,
-                    state.next_symbol-state.result.observed_bits)) {
+                    state.next_symbol-state.result.observed_bits,recovery_addresses.get())) {
                 state.aligned=true;
                 accept_interval(state,*recovered);
             }
@@ -658,7 +705,13 @@ struct StreamReceiver::Impl {
                         capture.bits[i]=static_cast<std::uint8_t>((state.recovery_bits[i/4]>>(2*(i%4)))&3);
                     capture.first_symbol=state.recovery_first;
                     capture.established_starts=std::move(state.recovery_starts);capture.fec=state.options.fec;
-                    capture.interval_options=[value=state.options](std::uint64_t first) {return interval_options(value,first);};
+                    capture.interval_options=[value=state.options,checkpoint=state.recovery_checkpoint](std::uint64_t first) {
+                        // Each worker owns a local cursor rooted at the bounded
+                        // retained window, never a mutable shared cursor or a
+                        // scan through discarded message history.
+                        auto addresses=checkpoint?std::make_unique<BurstAddresses>(value,*checkpoint):nullptr;
+                        return interval_options(value,first,addresses.get());
+                    };
                     state.result.recovery=std::make_shared<RecoveryJob>(std::move(capture),recovery_options);
                     state.result.recovery_progress=state.result.recovery->progress();
                     state.result.recovery_source=std::make_shared<RecoverySource>(RecoverySource{
@@ -693,6 +746,7 @@ std::size_t StreamReceiver::working_bytes()const {
             result.diagnostics.waveform.capacity()*sizeof(float)+result.error.capacity()+
             message.data.capacity()+message.filename.capacity()+message.callsign.capacity()+message.grid.capacity()+
             state->recovery_bits.capacity()+state->recovery_starts.capacity()*sizeof(std::uint64_t);
+        bytes+=(static_cast<unsigned>(state->mask_addresses!=nullptr)+static_cast<unsigned>(state->interval_addresses!=nullptr))*sizeof(BurstAddresses);
         bytes+=state->source.capacity();
     }
     return bytes;
@@ -773,10 +827,11 @@ Received receive(std::span<const float> samples, const Options& input_options, P
     std::optional<Received> best;
     std::string last_error;
     auto profiles=options.automatic_receive_profiles?tuning::receive_profiles(options.modem,options.receive_targets_db_hz,options.receive_pattern_mode,options.key.has_value()):std::vector<modem::Config>{options.modem};
-    for(const auto& profile:profiles)for(auto epoch:drift_candidates(options.timestamp,options.search_seconds,options.key.has_value())) {
+    for(const auto& profile:profiles)for(const auto origin:receive_origins(profile,options.timestamp,options.search_seconds,options.key.has_value())) {
+        const auto epoch=origin.epoch;
         check_cancelled(stop);if(progress)progress(epoch);
         try {
-        auto value=options;value.modem=profile;
+        auto value=options;value.modem=profile;value.modem.stream_phase_samples=origin.phase;
         modem::PatternSearch search;search.allow_local_clock_fallback=true;
         if(profile.oscillator_search) {
             const auto declared=modem::oscillator_pattern_search(profile,effective_clock_sync(options)?modem::utc_transmit_rate_limit(profile):0);
@@ -788,11 +843,13 @@ Received receive(std::span<const float> samples, const Options& input_options, P
         }
         else search.expand_clock_search=true;
         search.start_offset_seconds=static_cast<double>(epoch)-options.capture_epoch.value_or(static_cast<double>(options.timestamp));
+        if(profile.symbol_burst.enabled() && options.capture_epoch)
+            *search.start_offset_seconds+=static_cast<double>(origin.phase)/profile.sample_rate;
         if(!options.capture_epoch)*search.start_offset_seconds+=(static_cast<double>(modem::training_sample_count(profile))+
             static_cast<double>(modem::pattern_pulse_padding_samples(profile)))/profile.sample_rate;
         search.bit_limit=pattern_bit_limit(value.content_limit);
 
-        search.search_stream_phases=options.key.has_value();
+        search.search_stream_phases=!profile.symbol_burst.enabled() && options.key.has_value();
         search.receiver_bank_count=modem::receiver_strategy_bank_count(profile,options.search_seconds,1,profiles.size());
         search.start_uncertainty_seconds=options.search_seconds+1.;
         modem::PatternReceiver decoder(seeded_config(value,epoch),options.dsp_workspace_bytes,search);
@@ -830,10 +887,11 @@ Received simulate(const Message& message, const Options& input_options, const mo
     std::string last_error;
     const auto center=channel.receiver_timestamp.value_or(options.timestamp);
     const auto profiles=options.automatic_receive_profiles?tuning::receive_profiles(options.modem,options.receive_targets_db_hz,options.receive_pattern_mode,options.key.has_value()):std::vector<modem::Config>{options.modem};
-    for(const auto& profile:profiles)for(auto epoch:drift_candidates(center,options.search_seconds,options.key.has_value())) {
+    for(const auto& profile:profiles)for(const auto origin:receive_origins(profile,center,options.search_seconds,options.key.has_value())) {
+        const auto epoch=origin.epoch;
         check_cancelled(stop);if(progress)progress(epoch);
         try {
-        auto source=message_transmitter(message,options);auto value=options;value.modem=profile;
+        auto source=message_transmitter(message,options);auto value=options;value.modem=profile;value.modem.stream_phase_samples=origin.phase;
         modem::PatternSearch search;search.allow_local_clock_fallback=true;
         // This source supplies fixed-rate simulated PCM, without the hardware
         // UTC resampler. Retain its complete oscillator bank without charging
@@ -850,9 +908,11 @@ Received simulate(const Message& message, const Options& input_options, const mo
         search.start_offset_seconds=static_cast<double>(epoch)-static_cast<double>(center)+
             (static_cast<double>(modem::training_sample_count(profile))+
              static_cast<double>(modem::pattern_pulse_padding_samples(profile)))/profile.sample_rate;
+        if(profile.symbol_burst.enabled())*search.start_offset_seconds+=
+            (static_cast<double>(origin.phase)-static_cast<double>(options.modem.stream_phase_samples))/profile.sample_rate;
         search.bit_limit=pattern_bit_limit(value.content_limit);
 
-        search.search_stream_phases=options.key.has_value();
+        search.search_stream_phases=!profile.symbol_burst.enabled() && options.key.has_value();
         search.receiver_bank_count=modem::receiver_strategy_bank_count(profile,options.search_seconds,1,profiles.size());
         search.start_uncertainty_seconds=options.search_seconds+1.;
         modem::PatternReceiver decoder(seeded_config(value,epoch),options.dsp_workspace_bytes,search);

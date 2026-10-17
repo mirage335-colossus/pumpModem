@@ -19,6 +19,8 @@ struct Patch {
     std::optional<double> receiver_cpu_budget;
     // Nominal UTC frame cells and consecutive active cells; multiplier one disables.
     std::optional<unsigned> sched_hop,sched_hop_dilution;
+    // Optional patches retain disabled/random preferences without enabling a key.
+    std::optional<unsigned> symbol_burst,symbol_burst_random;
     std::optional<double> sched_frequency_search;
     // Inline list contents or a file reference; parser never opens files.
     std::optional<std::string> fhss_list,fhss_list_file;

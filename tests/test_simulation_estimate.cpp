@@ -11,6 +11,7 @@
 #include "datapump/live.hpp"
 #include "datapump/scheduled_complex_search.hpp"
 #include "../src/receiver_probability.hpp"
+#include "../src/live_receiver_admission.hpp"
 #include "../src/estimate_cancellation.hpp"
 #include <atomic>
 #include <thread>
@@ -43,6 +44,288 @@ transfer::Estimate wire(std::size_t bits,const modem::Config& config) {
 modem::ChannelConfig clean_channel() {
     modem::ChannelConfig value;value.clock_error_ppm=0;value.phase_noise_degrees_per_sqrt_second=0;
     return value;
+}
+void symbol_burst_amplitude_residency() {
+    live::Settings value;auto& c=value.transfer.modem;
+    c.sample_rate=128;c.carrier_hz=32;c.bandwidth_hz=16;c.spreading_factor=64;
+    c.integration_seconds=256;c.symbol_burst={1,0};c.receiver_strategy=modem::ReceiverStrategy::amplitude_only;
+    c.oscillator_search.emplace();c.oscillator_search->lf={0,0};c.oscillator_search->rf={0,0};
+    value.transfer.search_seconds=6;value.transfer.audio_timing_error_seconds=.07;
+    value.dsp_workspace_bytes=value.transfer.dsp_workspace_bytes=64*1024*1024;
+    const modem::SymbolBurstPlan plan(c);const auto first=plan.first_slot({1800000000,0});
+    c.stream_epoch=first.payload_begin.epoch;c.stream_phase_samples=first.payload_begin.phase;
+    live::detail::ReceiverAdmissionContext context;context.now=1800000000;
+    context.capacity=64*1024*1024;context.key_count=context.profile_count=1;context.keyed=false;
+    context.control_margin=live::receiver_control_margin(c,false);
+    context.timing=audio::TimePrediction{1800000000,.002,1./c.sample_rate,audio::TimingQuality::estimated,0};
+    const auto prepared=live::detail::prepare_receiver_search(c,value,c.stream_epoch,context);
+    check(prepared.search.initial_stream_symbols==1&&prepared.search.amplitude_start_window&&
+          prepared.search.amplitude_lookahead_epochs>0,
+          "public forced-amplitude Burst was not admitted before its original FFT window");
+    const auto count=modem::receiver_strategy_amplitude_bank_count(c,prepared.search,1,1);
+    auto longer=c;longer.symbol_burst.wait_symbols=10;
+    check(count==modem::receiver_strategy_amplitude_bank_count(longer,prepared.search,1,1),
+          "every early public amplitude cohort was charged an exceptional truncated-slot wait");
+    auto shorter=c;shorter.integration_seconds=32;
+    const std::array family{c,shorter};
+    const auto total=live::detail::burst_amplitude_family_bank_count(family,value,context);
+    check(total<2*count&&total>count,
+          "heterogeneous Burst family duplicated the longest profile's residency");
+    context.amplitude_family_bank_count=total;
+    const auto shared=live::detail::prepare_receiver_search(c,value,c.stream_epoch,context);
+    check(shared.search.amplitude_receiver_bank_count==prepared.search.amplitude_receiver_bank_count&&
+          shared.search.amplitude_strategy_workspace_bytes==context.capacity/total-context.control_margin,
+          "heterogeneous memory sharing changed a row's independent cost or omitted its controls");
+    context.amplitude_family_bank_count.reset();
+    auto unqualified=prepared.search;unqualified.amplitude_lookahead_epochs=0;
+    check(modem::receiver_strategy_amplitude_bank_count(longer,unqualified,1,1)>count,
+          "unqualified amplitude cohorts lost their complete following opportunity");
+    auto private_search=prepared.search;private_search.initial_stream_symbols=4;
+    auto private_config=c;private_config.scramble=true;private_config.data_key.emplace(Bytes(32,0x37));
+    const auto private_count=modem::receiver_strategy_amplitude_bank_count(private_config,private_search,1,1);
+    private_config.symbol_burst.wait_symbols=10;
+    check(modem::receiver_strategy_amplitude_bank_count(private_config,private_search,1,1)>private_count,
+          "private Burst amplitude lost its original four complete opportunities");
+}
+void symbol_burst_work_model() {
+    for(const bool encrypted:{false,true}) {
+        transfer::Options o;auto& c=o.modem;
+        c.sample_rate=64;c.carrier_hz=16;c.bandwidth_hz=8;c.integration_seconds=25;
+        c.pulse_shaping=false;c.receiver_strategy=modem::ReceiverStrategy::existing_only;
+        o.search_seconds=0;o.dsp_workspace_bytes=64*1024*1024;o.audio_timing_error_seconds=0;
+        if(encrypted){o.key.emplace(Bytes(32,0x6b));c.scramble=true;}
+        const auto run=[&] {
+            const std::array<std::uint8_t,1> bit{0};
+            return simulation::estimate(transfer::estimate_binary(bit,o),o,true,clean_channel(),{},1,false,100,64,
+                simulation::ReceiverWorkMode::hardware_calendar_model);
+        };
+        const auto off=run();c.symbol_burst.random_limit=3;const auto saved_off=run();
+        near(saved_off.receiver_cpu_seconds,off.receiver_cpu_seconds,"Off random preference changed receiver work");
+        check(!off.symbol_burst.enabled&&!saved_off.symbol_burst.enabled,"Off must not construct a Burst work model");
+        c.symbol_burst={1,0};const auto one=run();
+        check(one.symbol_burst.enabled&&one.symbol_burst.modeled&&one.receiver_workspace_supported,
+            "Burst fixture lost supported full-symbol work or workspace");
+        if(!encrypted)check(one.epoch_hypotheses==1&&one.new_epoch_admissions==0&&
+            one.symbol_burst.acquisition_new_epoch_admissions==0,
+            "public native acquisition must retain one rolling seeker without new UTC epoch clones");
+        near(one.symbol_burst.minimum_spacing_seconds,60,"Burst minimum start spacing changed");
+        near(one.symbol_burst.useful_quiet_seconds,0,"25-second symbols and two20-second guards have no quiet at wait1");
+        check(!one.symbol_burst.recurring_service_fits&&one.symbol_burst.recommended_wait_symbols==2,
+            "overlapping guards need an explicit larger selected wait recommendation");
+        check(one.symbol_burst.guard_before_seconds>=20&&one.symbol_burst.guard_after_seconds>=20&&
+            one.symbol_burst.acquisition_cpu_seconds>0&&one.symbol_burst.tracked_cpu_seconds_per_slot>0,
+            "Burst must charge guards, normal acquisition and complete-symbol tracking");
+        c.symbol_burst={2,0};const auto two=run();
+        const auto support=simulation::estimate_receiver_support(
+            transfer::estimate_binary(std::array<std::uint8_t,1>{0},o),o,clean_channel(),{},1,
+            simulation::ReceiverWorkMode::hardware_calendar_model);
+        check(support.profile_matches==two.profile_matches&&support.carrier_in_search==two.carrier_in_search&&
+            support.clock_in_search==two.clock_in_search&&support.oscillator_search_limited==two.oscillator_search_limited&&
+            support.receiver_workspace_supported==two.receiver_workspace_supported&&!support.symbol_burst.enabled,
+            "support query must preserve complete geometry without evaluating Burst service work");
+        near(two.symbol_burst.minimum_spacing_seconds,90,"wait2 must obey literal wait-and-round rule");
+        check(two.symbol_burst.useful_quiet_seconds>0&&two.symbol_burst.useful_quiet_seconds<25&&two.symbol_burst.modeled,
+            "wait2 must expose the actual guarded capture complement");
+        check(two.symbol_burst.acquisition_admission_seconds>0&&
+            two.symbol_burst.acquisition_observation_seconds>two.symbol_burst.acquisition_admission_seconds&&
+            two.symbol_burst.acquisition_new_epoch_admissions<=
+                std::ceil(two.symbol_burst.acquisition_admission_seconds/30)+1,
+            "finite initial debt must stop fresh admissions at publication while retaining their complete tails");
+        c.symbol_burst.random_limit=3;const auto randomized=run();
+        near(randomized.symbol_burst.minimum_spacing_seconds,two.symbol_burst.minimum_spacing_seconds,
+            "random waits must not be essential to recurring service qualification");
+        check(randomized.symbol_burst.tracked_realtime_ratio+1e-12>=two.symbol_burst.tracked_realtime_ratio,
+            "random waits cannot improve the J0 service denominator; larger clock-age guards may add work");
+        check(randomized.symbol_burst.finite_realtime_ratio+1e-12>=two.symbol_burst.finite_realtime_ratio,
+            "random waits cannot provide an artificial finite CPU allowance through a longer observation denominator");
+        check(randomized.symbol_burst.effective_random_limit==(encrypted?3U:0U),
+            "effective random limit must follow selected transmit encryption");
+        near(randomized.symbol_burst.mean_spacing_seconds,encrypted?127.5:90,
+            "mean airtime must average the rounded whole-symbol wait outcomes");
+        near(randomized.symbol_burst.maximum_spacing_seconds,encrypted?150:90,
+            "maximum airtime must use the largest effective wait outcome");
+        simulation::ReceiverTimingModel wide;wide.capture_error_seconds=20;
+        const auto full=transfer::estimate_binary(std::array<std::uint8_t,1>{0},o);
+        const auto overlap=simulation::estimate(full,o,true,clean_channel(),{},1,false,100,64,
+            simulation::ReceiverWorkMode::hardware_calendar_model,wide);
+        check(overlap.symbol_burst.useful_quiet_seconds==0&&!overlap.symbol_burst.recurring_service_fits,
+            "larger provider uncertainty must withdraw stale quiet-time savings");
+        check(two.receiver_geometry.symbol_samples==off.receiver_geometry.symbol_samples&&
+            two.receiver_geometry.fine_chip_samples==off.receiver_geometry.fine_chip_samples&&
+            two.receiver_geometry.per_bank_workspace_bytes<=off.receiver_geometry.per_bank_workspace_bytes,
+            "Burst must retain whole-symbol geometry and original workspace ceiling");
+    }
+}
+void symbol_burst_configured_bank() {
+    transfer::Options o;auto& c=o.modem;
+    c.sample_rate=64;c.carrier_hz=16;c.bandwidth_hz=8;c.integration_seconds=25;
+    c.pulse_shaping=false;c.receiver_strategy=modem::ReceiverStrategy::existing_only;c.symbol_burst={2,0};
+    o.search_seconds=0;o.audio_timing_error_seconds=0;o.dsp_workspace_bytes=128*1024*1024;
+    o.key.emplace(Bytes(32,0x61));c.scramble=true;
+    live::Settings settings;settings.transfer=o;settings.dsp_workspace_bytes=o.dsp_workspace_bytes;
+    settings.receive_keys.push_back(*o.key); // The selected TX key already is a receive family.
+    const auto run=[&](std::span<const modem::Config> explicit_profiles={}) {
+        const auto t=transfer::estimate_binary(std::array<std::uint8_t,1>{0},o);
+        return simulation::estimate_with_receiver_settings(t,o,true,clean_channel(),settings,explicit_profiles,1,false,100,64,
+            simulation::ReceiverWorkMode::hardware_calendar_model);
+    };
+    const auto single=run();
+    check(single.symbol_burst.configured_bank_modeled&&single.symbol_burst.initial_key_families==1&&
+        single.symbol_burst.initial_profiles==1,"duplicate selected/loaded key must not double-charge the configured bank");
+    settings.transfer.modem.receiver_cpu_budget=.55;
+    const auto different_policy=run();
+    check(different_policy.symbol_burst.initial_profiles==1&&
+        different_policy.receiver_geometry.receiver_cpu_budget==.55,
+        "a matching configured waveform must keep its actual receiver policy without an invented preview receiver");
+    settings.transfer.modem.receiver_cpu_budget=c.receiver_cpu_budget;
+    settings.receive_keys.emplace_back(Bytes(32,0x62));settings.receive_keys.push_back(settings.receive_keys.back());
+    const auto multiple=run();
+    check(multiple.symbol_burst.initial_key_families==2&&multiple.symbol_burst.initial_profiles==2&&
+        multiple.symbol_burst.acquisition_cpu_seconds>single.symbol_burst.acquisition_cpu_seconds,
+        "a distinct receive key must add its full acquisition/debt work while duplicate keys are deduplicated");
+    settings.transfer.automatic_receive_profiles=true;settings.transfer.receive_targets_db_hz={0,20};
+    settings.transfer.receive_pattern_mode=tuning::PatternMode::auto_keystream;
+    const auto companions=run();
+    check(companions.symbol_burst.initial_profiles>multiple.symbol_burst.initial_profiles&&
+        companions.symbol_burst.acquisition_observation_seconds>=multiple.symbol_burst.acquisition_observation_seconds,
+        "configured companion profiles must retain their own complete physical acquisition tail");
+    const std::array explicit_profiles{c};const auto explicit_one=run(explicit_profiles);
+    check(!explicit_one.symbol_burst.configured_bank_modeled&&explicit_one.symbol_burst.initial_profiles==1,
+        "explicitly supplied bank profiles must not be expanded and charged a second time");
+    o.key.reset();o.modem.scramble=false;settings.transfer=o;settings.receive_keys.erase(settings.receive_keys.begin()+1,settings.receive_keys.end());
+    const auto public_and_private=run();
+    check(public_and_private.symbol_burst.initial_key_families==2&&public_and_private.symbol_burst.initial_profiles==2,
+        "TXnone must preserve a plaintext family alongside loaded private receive keys");
+    check(public_and_private.epoch_hypotheses==1&&public_and_private.symbol_burst.acquisition_new_epoch_admissions>0,
+        "public singleton acquisition must still charge retained private loaded-key cohorts before the bank barrier");
+    settings.transfer.key=settings.receive_keys.front();settings.transfer.modem.scramble=true;
+    const auto forbidden=run();
+    check(!forbidden.profile_matches&&!forbidden.receiver_workspace_supported&&!forbidden.symbol_burst.modeled&&
+        forbidden.symbol_burst.initial_key_families==1,
+        "an actual keyed-only receiver must not invent a plaintext family for an unencrypted preview");
+}
+void symbol_burst_pulse_geometry() {
+    transfer::Options o;auto& c=o.modem;
+    c.sample_rate=400;c.carrier_hz=50;c.bandwidth_hz=100;c.integration_seconds=64;
+    c.scramble=true;c.symbol_burst={1,0};c.receiver_strategy=modem::ReceiverStrategy::existing_only;
+    modem::OscillatorSearchConfig oscillator;oscillator.lf={0,0};oscillator.rf={0,0};c.oscillator_search=oscillator;
+    o.key.emplace(Bytes(32,0x72));o.search_seconds=0;o.audio_timing_error_seconds=0;
+    o.dsp_workspace_bytes=std::size_t{2}*1024*1024*1024;
+    const auto run=[&] {
+        const auto t=transfer::estimate_binary(std::array<std::uint8_t,1>{0},o);
+        return simulation::estimate(t,o,true,clean_channel(),{},1,false,100,64,
+            simulation::ReceiverWorkMode::hardware_calendar_model);
+    };
+    const auto disjoint=run();
+    check(disjoint.receiver_workspace_supported&&disjoint.pulse_projection_modeled,
+        "disjoint Burst windows must retain the existing efficient compact pulse projection");
+    o.search_seconds=60;const auto overlap=run();
+    check(!overlap.pulse_projection_modeled,
+        "overlapping original arrival unions must retain the complete compact fallback");
+    c.symbol_burst.wait_symbols=10;const auto separated=run();
+    check(separated.receiver_workspace_supported&&separated.pulse_projection_modeled,
+        "a sufficiently separated selected Burst wait must restore exact pulse projection without narrowing timing");
+}
+void symbol_burst_initial_cohort_geometry() {
+    transfer::Options o;auto& c=o.modem;
+    c.sample_rate=400;c.carrier_hz=50;c.bandwidth_hz=.25;c.integration_seconds=256;
+    c.scramble=true;c.symbol_burst={1,0};c.receiver_strategy=modem::ReceiverStrategy::existing_only;
+    modem::OscillatorSearchConfig oscillator;oscillator.lf={0,0};oscillator.rf={0,0};c.oscillator_search=oscillator;
+    o.key.emplace(Bytes(32,0x73));o.search_seconds=6;o.audio_timing_error_seconds=0;
+    o.dsp_workspace_bytes=std::size_t{2}*1024*1024*1024;
+    const auto run=[&](simulation::ReceiverWorkMode mode) {
+        return simulation::estimate(wire(1,c),o,true,clean_channel(),{},1,false,100,64,mode);
+    };
+    check(modem::pattern_pulse_padding_samples(c)/c.sample_rate>=30,
+        "initial-cohort regression must retain more than one calendar period of pulse padding");
+    const auto hardware=run(simulation::ReceiverWorkMode::hardware_calendar_model);
+    c.integration_seconds=1024;const auto longer=run(simulation::ReceiverWorkMode::hardware_calendar_model);
+    c.pulse_shaping=false;const auto unpadded=run(simulation::ReceiverWorkMode::hardware_calendar_model);
+    check(hardware.epoch_hypotheses==2&&longer.epoch_hypotheses==hardware.epoch_hypotheses&&
+        unpadded.epoch_hypotheses==hardware.epoch_hypotheses,
+        "hardware initial UTC cohorts must not grow with symbol integration or physical pulse padding");
+    const auto no_settling=run(simulation::ReceiverWorkMode::sampled_simulation);
+    c.pulse_shaping=true;const auto settling=run(simulation::ReceiverWorkMode::sampled_simulation);
+    check(settling.epoch_hypotheses>no_settling.epoch_hypotheses,
+        "keyed automatic simulation must preserve its older physical-prefix settling epochs");
+    o.timestamp=1800000000;
+    const auto fixed=run(simulation::ReceiverWorkMode::sampled_simulation);
+    check(fixed.epoch_hypotheses==no_settling.epoch_hypotheses,
+        "a fixed simulation epoch must not acquire automatic older-prefix settling cohorts");
+    o.timestamp=0;o.key.reset();
+    const auto unkeyed=run(simulation::ReceiverWorkMode::sampled_simulation);
+    check(unkeyed.epoch_hypotheses==no_settling.epoch_hypotheses,
+        "unkeyed simulation must not add the keyed listener's older-prefix settling epochs");
+    // Suspension retains an entire final FFT batch, including four projected
+    // bins beyond the publication fence. Coarse bins make that tail visible.
+    transfer::Options coarse;auto& public_config=coarse.modem;
+    public_config.sample_rate=64;public_config.carrier_hz=16;public_config.bandwidth_hz=1./64;
+    public_config.integration_seconds=1536;public_config.pulse_shaping=false;
+    public_config.symbol_burst={1,0};public_config.receiver_strategy=modem::ReceiverStrategy::existing_only;
+    public_config.oscillator_search=oscillator;coarse.search_seconds=0;coarse.audio_timing_error_seconds=0;
+    coarse.dsp_workspace_bytes=64*1024*1024;
+    const auto tail=simulation::estimate(wire(1,public_config),coarse,true,clean_channel(),{},1,false,100,64,
+        simulation::ReceiverWorkMode::hardware_calendar_model);
+    check(tail.symbol_burst.modeled&&tail.epoch_hypotheses==1,
+          "coarse Burst tail must retain its public native FFT receiver");
+    near(tail.receiver_geometry.first_fft_seconds,1536,"coarse Burst first batch geometry changed");
+    near(tail.receiver_geometry.fft_hop_seconds,576,"coarse Burst full-hop geometry changed");
+    const auto fence=std::ceil(tail.symbol_burst.acquisition_admission_seconds/64)+4;
+    long double last=0;
+    for(long double next=0;next<=fence;next+=next==0?1:9)last=next;
+    check(tail.symbol_burst.acquisition_observation_seconds>=(24+last+9-1)*64,
+          "Burst acquisition tail omitted the final fully observed FFT batch");
+    near(tail.symbol_burst.finite_receiver_cpu_seconds,tail.symbol_burst.acquisition_cpu_seconds+
+        tail.symbol_burst.tracked_cpu_seconds_per_slot+tail.payload_processing_seconds,
+        "one payload bit must still score one complete physical absence slot");
+
+}
+void symbol_burst_kernel_reuse_and_upper_cost() {
+    transfer::Options o;auto& c=o.modem;
+    c.sample_rate=6000;c.carrier_hz=1500;c.bandwidth_hz=1;c.integration_seconds=128;
+    c.scramble=true;c.symbol_burst={3,3};c.receiver_strategy=modem::ReceiverStrategy::existing_only;
+    modem::OscillatorSearchConfig oscillator;oscillator.lf={.0003,0};oscillator.rf={0,0};c.oscillator_search=oscillator;
+    o.key.emplace(Bytes(32,0x74));c.data_key=o.key;o.search_seconds=0;o.audio_timing_error_seconds=0;
+    o.dsp_workspace_bytes=std::size_t{2}*1024*1024*1024;
+    const auto estimate=simulation::estimate(wire(1,c),o,true,clean_channel(),{},1,false,100,64,
+        simulation::ReceiverWorkMode::hardware_calendar_model);
+    const auto& burst=estimate.symbol_burst;
+    check(estimate.pulse_projection_modeled&&estimate.kernel_rebuild_upper_bound&&burst.modeled&&
+        burst.acquisition_cpu_upper_seconds>burst.acquisition_cpu_seconds&&
+        burst.tracked_cpu_upper_seconds_per_slot>2*burst.tracked_cpu_seconds_per_slot&&
+        burst.finite_realtime_upper_ratio>burst.finite_realtime_ratio&&
+        burst.tracked_realtime_upper_ratio>burst.tracked_realtime_ratio,
+        "Burst central reuse cost and its separate all-cell rebuilding fallback must both remain visible");
+    const modem::SymbolBurstPlan plan(c);const auto first=plan.first_slot({1800000000,0});
+    const auto chip=modem::pattern_chip_samples(c);
+    for(const auto rate:{1.L,1.L+3e-10L}) {
+        modem::detail::CorrelationPulseKernel cached(chip,rate,1500.003,c.sample_rate);
+        auto slot=first;
+        for(unsigned symbol=0;symbol<4;++symbol) {
+            const auto anchor=.137L+plan.distance(first.payload_begin,slot.payload_begin)/rate;
+            for(std::uint64_t index=0;index<64;++index) {
+                const auto start=anchor+index*chip/rate;
+                const auto begin=std::ceil(start),end=std::ceil(anchor+(index+1)*chip/rate);
+                const auto count=static_cast<std::uint64_t>(end-begin);
+                const auto offset=begin-start;
+                const auto carrier=std::polar(1.,.17*index+.3*symbol);
+                const auto reused=cached.evaluate(offset,count,carrier,1);
+                if(index==0||index==63) {
+                    modem::detail::CorrelationPulseKernel fresh(chip,rate,1500.003,c.sample_rate);
+                    const auto original=fresh.evaluate(offset,count,carrier,1);
+                    for(std::size_t pair=0;pair<modem::detail::correlation_pulse_pairs;++pair) {
+                        const auto tolerance=2e-10*std::max(1.,std::abs(original.energy[pair]));
+                        check(std::abs(reused.energy[pair]-original.energy[pair])<=tolerance&&
+                            std::abs(reused.square[pair]-original.square[pair])<=tolerance,
+                            "actual keyed UTC Burst slots changed the cached pulse Gram identity");
+                    }
+                }
+            }
+            slot=plan.successor(slot);
+        }
+        check(cached.preparation_count()<=4*9,
+            "actual UTC Burst gaps must not imply rebuilding a stable GPSDO kernel at every cell");
+    }
 }
 void one_chip_probability_scope() {
     transfer::Options o;auto& c=o.modem;
@@ -2662,9 +2945,12 @@ void projected_pattern_workload() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="--symbol-burst-only") {symbol_burst_amplitude_residency();symbol_burst_work_model();symbol_burst_configured_bank();symbol_burst_pulse_geometry();symbol_burst_initial_cohort_geometry();symbol_burst_kernel_reuse_and_upper_cost();return 0;}
+        if(argc==2&&std::string_view(argv[1])=="--symbol-burst-initial-only") {symbol_burst_initial_cohort_geometry();return 0;}
+        if(argc==2&&std::string_view(argv[1])=="--symbol-burst-kernel-only") {symbol_burst_kernel_reuse_and_upper_cost();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--probability-maintenance-only") {one_chip_probability_scope();coherent_hardware_power();differential_hardware_power();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--power-only") {coherent_hardware_power();differential_hardware_power();return 0;}
-        one_chip_probability_scope();coherent_hardware_power();differential_hardware_power();
+        symbol_burst_amplitude_residency();symbol_burst_work_model();symbol_burst_configured_bank();symbol_burst_pulse_geometry();symbol_burst_initial_cohort_geometry();symbol_burst_kernel_reuse_and_upper_cost();one_chip_probability_scope();coherent_hardware_power();differential_hardware_power();
         if(argc==2&&std::string_view(argv[1])=="--planning-layout-only") {scheduled_shared_layout_callers();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--strategy-only") {receiver_strategy_model();scheduled_strategy_model();default_hop_calendar_model();scheduled_short_phase_prior_model();scheduled_packed_complex_model();scheduled_split_complex_model();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--sustained-only") {sustained_hardware_acquisition();return 0;}

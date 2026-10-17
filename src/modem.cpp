@@ -2,6 +2,7 @@
 #include "datapump/sched_hop.hpp"
 #include "datapump/fhss_schedule.hpp"
 #include "datapump/symbol_schedule.hpp"
+#include "datapump/symbol_burst.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
@@ -103,6 +104,22 @@ void discard(std::istream& in, std::size_t count) {
     while (count) { const auto n = std::min(count, buffer.size()); exact(in, buffer.data(), n); count -= n; }
 }
 }
+unsigned parse_symbol_burst_wait(std::string_view value) {
+    if(value=="off")return 0;
+    if(value=="1")return 1;
+    if(value=="2")return 2;
+    if(value=="3")return 3;
+    if(value=="5")return 5;
+    if(value=="10")return 10;
+    throw Error("Symbol_Burst accepts off, 1, 2, 3, 5 or 10 symbols");
+}
+unsigned parse_symbol_burst_random(std::string_view value) {
+    if(value=="0")return 0;
+    if(value=="1")return 1;
+    if(value=="2")return 2;
+    if(value=="3")return 3;
+    throw Error("Symbol_Burst random extra accepts 0, 1, 2 or 3 symbols");
+}
 void validate(const Config& c) {
     check(c.search_arithmetic!=SearchArithmetic::matrix4,
           "INT4 search operands are not implemented on the CPU");
@@ -117,6 +134,14 @@ void validate(const Config& c) {
     check(c.frequency_search_multiplier==1 || c.oscillator_search.has_value(),
           "carrier search expansion requires an explicit oscillator search policy");
     if(c.scheduled_hopping)c.scheduled_hopping->validate();
+    const auto wait=c.symbol_burst.wait_symbols;
+    check(wait==0 || wait==1 || wait==2 || wait==3 || wait==5 || wait==10,
+          "Symbol_Burst wait must be Off, 1, 2, 3, 5 or 10 symbols");
+    check(c.symbol_burst.random_limit<=3,"Symbol_Burst random extra must be 0..3 symbols");
+    check(!c.symbol_burst.enabled() || !c.scheduled_hopping || !c.scheduled_hopping->enabled(),
+          "Symbol_Burst cannot be combined with Sched_Hop");
+    check(!c.symbol_burst.enabled() || !c.fake_hopping || !c.fake_hopping->defer_symbols,
+          "Symbol_Burst cannot be combined with diagnostic FHSS whole-symbol deferral");
     if(c.oscillator_search)validate_oscillator_search(*c.oscillator_search);
     check(c.pattern_symbols && c.constellation_bits==1,
           "APSK transport has been removed; use one-bit pattern transport");
@@ -419,6 +444,23 @@ std::uint64_t scheduled_physical_span_samples(const Config& c,std::uint64_t sour
     return add(source_samples,add(whole,fraction));
 }
 Config scheduled_estimate_config(Config c) {
+    if(c.symbol_burst.enabled()) {
+        const SymbolBurstPlan plan(c);
+        try {
+            if(c.stream_epoch) {
+                (void)plan.bind_payload(c.stream_epoch,c.stream_phase_samples);
+                return c;
+            }
+        } catch(const Error&) {
+            // Geometry may exist before a real transmit origin is selected.
+            // Only estimation chooses this representative; actual binding is strict.
+        }
+        constexpr std::uint64_t representative_epoch=1710000000;
+        const auto first=plan.first_slot({std::max(c.stream_epoch,representative_epoch),0});
+        c.stream_epoch=first.payload_begin.epoch;
+        c.stream_phase_samples=first.payload_begin.phase;
+        return c;
+    }
     if(!scheduled_bursts(c))return c;
     check(c.data_key.has_value(),"scheduled estimate requires its immutable encryption key");
     const SchedHopSourceMap map(*c.scheduled_hopping,*c.data_key,c.sample_rate);

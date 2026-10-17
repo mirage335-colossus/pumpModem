@@ -18,6 +18,24 @@ template<class Function> void rejects(Function function,const std::string& messa
     throw std::runtime_error(message);
 }
 void parsing_and_formatting() {
+    for(const auto* wait:{"off","1","2","3","5","10"})for(const auto* random:{"0","1","2","3"}) {
+        const auto patch=launch_command::parse(std::string("--symbol-burst ")+wait+" --symbol-burst-random "+random);
+        check(patch.symbol_burst==(std::string_view(wait)=="off"?0U:static_cast<unsigned>(std::stoul(wait)))&&
+              patch.symbol_burst_random==static_cast<unsigned>(std::stoul(random))&&
+              launch_command::parse(launch_command::format(patch))==patch,
+              "Symbol_Burst waits and random limits must survive exact parameter-list round trips");
+    }
+    const auto older=launch_command::parse("--rate 1200");
+    check(!older.symbol_burst&&!older.symbol_burst_random,
+          "Older partial commands must preserve omitted Symbol_Burst preferences");
+    for(const auto* bad:{"--symbol-burst 0","--symbol-burst 4","--symbol-burst 1.0","--symbol-burst 01",
+        "--symbol-burst -1","--symbol-burst enabled","--symbol-burst nan","--symbol-burst-random 4",
+        "--symbol-burst-random -1","--symbol-burst-random 1.5","--symbol-burst-random 01","--symbol-burst-random off"})
+        rejects([&]{launch_command::parse(bad);},"Unsupported Symbol_Burst setting accepted");
+    launch_command::Patch bad_burst;bad_burst.symbol_burst=4;
+    rejects([&]{launch_command::format(bad_burst);},"Invalid programmatic Symbol_Burst export accepted");
+    bad_burst.symbol_burst=1;bad_burst.symbol_burst_random=4;
+    rejects([&]{launch_command::format(bad_burst);},"Invalid programmatic random wait export accepted");
     for(const auto* multiplier:{"0","3","5"}) for(const auto* dilution:{"0","3"}) {
         const auto patch=launch_command::parse(std::string("--sched-hop ")+multiplier+
             " --sched-frequency-search 8 --sched-hop-dilution "+dilution);

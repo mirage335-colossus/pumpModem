@@ -1,6 +1,7 @@
 #pragma once
 
 #include "datapump/pattern_receiver.hpp"
+#include "datapump/utc_timing.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -93,6 +94,58 @@ inline bool checkedCaptureFence(long double observed_epoch,std::uint64_t count,
     const auto pad=sched_capture_roundoff(std::max(std::abs(offset),duration));
     return duration+pad<1-offset;
 }
+
+// Frozen Burst admission permits a proof to span UTC-second fences. Keep the
+// original dated input model as a continuity check; a later callback cannot
+// silently replace its uncertainty or sample-clock bounds with wider ones.
+struct BurstCaptureTimestamp {
+    std::uint64_t reference_sample=0;
+    std::uint32_t sample_rate=0;
+    audio::TimePrediction reference;
+
+    bool accepts(std::uint64_t first,std::uint64_t count,long double observed_epoch,
+                 const std::optional<audio::TimePrediction>& timing) const {
+        const auto finite=[](long double x){return std::isfinite(x);};
+        if(!sample_rate || !timing || first<reference_sample ||
+           count>std::numeric_limits<std::uint64_t>::max()-first ||
+           reference.quality==audio::TimingQuality::unavailable ||
+           timing->quality==audio::TimingQuality::unavailable ||
+           !finite(reference.utc_seconds) || reference.utc_seconds<0 ||
+           !finite(timing->utc_seconds) || timing->utc_seconds<0 ||
+           !finite(observed_epoch) || observed_epoch<0 ||
+           !finite(reference.seconds_per_frame) || reference.seconds_per_frame<=0 ||
+           !finite(reference.uncertainty_seconds) || reference.uncertainty_seconds<0 ||
+           !finite(reference.rate_uncertainty_fraction) || reference.rate_uncertainty_fraction<0 ||
+           !finite(reference.system_clock_phase_uncertainty_seconds) || reference.system_clock_phase_uncertainty_seconds<0 ||
+           !finite(timing->seconds_per_frame) || timing->seconds_per_frame<=0 ||
+           !finite(timing->uncertainty_seconds) || timing->uncertainty_seconds<0 ||
+           !finite(timing->rate_uncertainty_fraction) || timing->rate_uncertainty_fraction<0 ||
+           !finite(timing->system_clock_phase_uncertainty_seconds) || timing->system_clock_phase_uncertainty_seconds<0)
+            return false;
+        // Live has already removed station phase from the provider radius.
+        // Two allowed station-clock states can differ by at most 2C. Keep C
+        // fixed at admission; never renew it per callback or turn it into ppm.
+        const auto phase=static_cast<long double>(reference.system_clock_phase_uncertainty_seconds);
+        const auto radius=static_cast<long double>(reference.uncertainty_seconds)+2*phase;
+        const auto slope=static_cast<long double>(reference.seconds_per_frame);
+        const auto spread=static_cast<long double>(reference.rate_uncertainty_fraction)/sample_rate;
+        // AudioBlock currently stores its UTC center as double. Account only
+        // for that representation error, separate from physical timing error.
+        const auto pad=4*std::numeric_limits<double>::epsilon()*std::max(1.L,std::abs(observed_epoch));
+        if(spread>=slope || std::abs(timing->utc_seconds-observed_epoch)>pad ||
+           timing->system_clock_phase_uncertainty_seconds>phase+pad)return false;
+        const auto delta=observed_epoch-reference.utc_seconds;
+        const auto contains=[&](std::uint64_t sample,long double difference,long double uncertainty) {
+            const auto age=static_cast<long double>(sample-reference_sample);
+            return finite(difference) && finite(uncertainty) &&
+                   difference-uncertainty>=(slope-spread)*age-radius-pad &&
+                   difference+uncertainty<=(slope+spread)*age+radius+pad;
+        };
+        return contains(first,delta,timing->uncertainty_seconds) && contains(first+count,
+            delta+static_cast<long double>(count)*timing->seconds_per_frame,
+            timing->uncertainty_seconds+static_cast<long double>(count)*timing->rate_uncertainty_fraction/sample_rate);
+    }
+};
 
 // Covers the ORIGINAL finite start prior for every newly admitted epoch,
 // including qualified-prior fallback. It does not substitute an arbitrarily

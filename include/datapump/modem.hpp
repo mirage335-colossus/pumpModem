@@ -10,6 +10,7 @@
 #include <memory>
 #include <span>
 #include <stop_token>
+#include <string_view>
 #include <vector>
 
 namespace datapump::modem {
@@ -54,6 +55,14 @@ struct OscillatorSearchConfig {
     OscillatorSideband sideband = OscillatorSideband::upper;
     bool operator==(const OscillatorSearchConfig&) const = default;
 };
+struct SymbolBurstOptions {
+    unsigned wait_symbols = 0; // Off, 1, 2, 3, 5 or 10 whole useful symbols.
+    unsigned random_limit = 0; // Saved preference; effective zero without Data key.
+    bool enabled() const noexcept { return wait_symbols != 0; }
+    bool operator==(const SymbolBurstOptions&) const = default;
+};
+unsigned parse_symbol_burst_wait(std::string_view value);
+unsigned parse_symbol_burst_random(std::string_view value);
 struct Config {
     // Pattern transport conveys one bit per independently detectable waveform.
     // Obsolete multi-bit APSK profiles are rejected explicitly.
@@ -110,6 +119,9 @@ struct Config {
     // in active cells; physical carrier/audio time stays continuous. This is a
     // separately keyed FHSS-purpose schedule, independent of channel hopping.
     std::shared_ptr<const SchedHopPlan> scheduled_hopping;
+    // Complete symbols separated by actual silence on the 30-second UTC grid.
+    // This calendar is independent of FHSS dwell/envelope behavior.
+    SymbolBurstOptions symbol_burst;
     std::size_t memory_limit = default_memory_limit;
 };
 // Low-level Data-only diagnostic captures retain their historical public mask.

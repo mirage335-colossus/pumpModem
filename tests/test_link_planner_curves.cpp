@@ -77,6 +77,41 @@ void verify_cpu_point(const gui::planner::Inputs& input,const gui::planner::CpuP
     near(point.realtime_ratio,estimate.receiver_cpu_seconds/estimate.simulated_seconds,
          "CPU graph must use receiver work per second of complete one-bit audio");
 }
+void symbol_burst_curve_and_cache() {
+    auto input=example();input.target_db_hz=23;input.options.modem.symbol_burst={2,0};
+    input.options.audio_timing_error_seconds=0;
+    input.receiver_work_mode=simulation::ReceiverWorkMode::hardware_calendar_model;
+    gui::planner::Cache cache;
+    const auto model=gui::planner::build(input,cache);
+    check(model.available&&model.symbol_burst.enabled&&model.symbol_burst.modeled&&model.one_bit_cpu_available,
+        "Burst selected planner estimate must retain a supported finite/tracked CPU model");
+    near(model.cpu_realtime_ratio,std::max(model.symbol_burst.finite_realtime_ratio,
+        model.symbol_burst.tracked_realtime_ratio),"Burst primary ratio must match its actual finite and recurring scope");
+    const auto selected=std::find_if(model.cpu_points.begin(),model.cpu_points.end(),[&](const auto& p){return p.target_db_hz==input.target_db_hz;});
+    check(selected!=model.cpu_points.end()&&selected->available,"Burst curve omitted selected target");
+    near(selected->realtime_ratio,model.cpu_realtime_ratio,"Burst curve and selected point use different CPU formulas");
+    const auto cached=cache.statistics();same_curve(model,gui::planner::build(input,cache));
+    check(cache.statistics().probability_evaluations==cached.probability_evaluations,
+        "repainting Burst settings must reuse the bounded curve cache");
+    input.options.modem.symbol_burst.wait_symbols=5;
+    const auto changed=gui::planner::build(input,cache);
+    check(changed.available&&changed.symbol_burst.wait_symbols==5&&cache.statistics().probability_evaluations>cached.probability_evaluations,
+        "changing minimum Burst wait must invalidate curve/layout support identity");
+    input.options.key.emplace(Bytes(32,0x5c));input.mode=tuning::PatternMode::auto_keystream;
+    input.options.modem.symbol_burst.random_limit=3;
+    const auto keyed=gui::planner::build(input,cache);
+    check(keyed.available&&keyed.symbol_burst.effective_random_limit==3,
+        "selected transmit encryption must invalidate effective random-wait model");
+    near(keyed.bit_seconds,keyed.symbol_burst.mean_spacing_seconds,
+        "Burst airtime graph must use the mean of exact rounded random spacings");
+    check(keyed.symbol_burst.maximum_spacing_seconds>=keyed.symbol_burst.mean_spacing_seconds&&
+        keyed.symbol_burst.mean_spacing_seconds>=keyed.symbol_burst.minimum_spacing_seconds,
+        "Burst spacing diagnostics must order minimum, mean and maximum");
+    input.options.key.reset();input.mode=tuning::PatternMode::auto_pattern;
+    const auto plain=gui::planner::build(input,cache);
+    check(plain.available&&plain.symbol_burst.effective_random_limit==0,
+        "removing selected encryption must withdraw effective random-wait state");
+}
 void transition_and_cpu() {
     auto input=example();
     const auto started=std::chrono::steady_clock::now();
@@ -307,8 +342,9 @@ void cache_invalidation() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="--symbol-burst-only") {symbol_burst_curve_and_cache();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--scheduled-layout-only") {scheduled_shared_layout_headline();return 0;}
-        transition_and_cpu();raw_cpu_processing_scope();cache_invalidation();scheduled_shared_layout_headline();
+        symbol_burst_curve_and_cache();transition_and_cpu();raw_cpu_processing_scope();cache_invalidation();scheduled_shared_layout_headline();
         std::cout<<"link planner curve tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"link planner curve tests failed: "<<error.what()<<'\n';return 1;}
 }

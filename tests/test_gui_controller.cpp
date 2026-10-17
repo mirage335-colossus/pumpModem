@@ -1267,7 +1267,8 @@ void planner_examples() {
               patch.noise_dbm_hz==-164&&patch.oscillator==example.osc&&
               (example.shift==0?!patch.rf_oscillator:patch.rf_oscillator==example.rf)&&
               controller.field(F::rf_oscillator).selected==example.rf&&
-              patch.reference=="independent"&&patch.search_margin==3&&patch.workspace_percent==50&&
+              patch.reference=="independent"&&patch.search_margin==3&&
+              patch.workspace_percent==(example.command==C::planner_example_eme?75:50)&&
               patch.clock_sync=="default"&&patch.audio_timing_error_seconds==example.audio&&
               patch.dsss_mode==example.mode&&patch.dsss_factor==10&&patch.dsss_version=="interleave"&&
               patch.search_arithmetic=="default"&&patch.full_duplex==true&&patch.fhss==example.fhss,

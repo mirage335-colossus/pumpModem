@@ -37,9 +37,11 @@
 namespace datapump::simulation {
 namespace {
 bool shared_hop_calendar(const modem::Config& config) {
-    return config.fake_hopping || (config.scheduled_hopping&&config.scheduled_hopping->enabled());
+    return config.symbol_burst.enabled() || config.fake_hopping || (config.scheduled_hopping&&config.scheduled_hopping->enabled());
 }
 std::optional<clock_sync::Policy> arrival_policy(const transfer::Options& options,const modem::Config& config) {
+    if(config.symbol_burst.enabled()&&!options.clock_sync)
+        return clock_sync::Policy{(options.search_seconds+1.)/2,0,0};
     return clock_sync::effective_policy(options.clock_sync,shared_hop_calendar(config));
 }
 bool arrival_model_available(const transfer::Options& options,const modem::Config& config,
@@ -214,7 +216,9 @@ bool same_profile(const modem::Config& a,const modem::Config& b) {
             x.region_seconds==y.region_seconds&&x.offset_seconds==y.offset_seconds&&
             x.audio_error_seconds==y.audio_error_seconds&&x.ramp_seconds==y.ramp_seconds;
     };
-    return hopping_equal()&&scheduled_equal()&& a.sample_rate==b.sample_rate && a.carrier_hz==b.carrier_hz && a.bandwidth_hz==b.bandwidth_hz && a.dsss_factor==b.dsss_factor &&
+    return hopping_equal()&&scheduled_equal()&&
+        a.symbol_burst.enabled()==b.symbol_burst.enabled()&&
+        (!a.symbol_burst.enabled()||a.symbol_burst==b.symbol_burst)&& a.sample_rate==b.sample_rate && a.carrier_hz==b.carrier_hz && a.bandwidth_hz==b.bandwidth_hz && a.dsss_factor==b.dsss_factor &&
         (a.dsss_factor<=1||a.outer_dsss_version==b.outer_dsss_version) &&
         a.spreading_mode==b.spreading_mode && a.scramble==b.scramble && a.dsss==b.dsss &&
         a.pulse_shaping==b.pulse_shaping && modem::legacy_public_pattern(a)==modem::legacy_public_pattern(b) &&
@@ -346,7 +350,9 @@ struct RollingFftWork {
 RollingFftWork rolling_fft_work(long double samples,std::uint32_t sample_rate,
         long double bin,long double length,long double hop,long double initial_batch,
         long double symbol_seconds,long double prefix_seconds,unsigned epoch_radius,
-        long double default_rate_uncertainty,const ReceiverTimingModel& timing_model,bool early_readiness=false,long double extra_start_samples=0) {
+        long double default_rate_uncertainty,const ReceiverTimingModel& timing_model,bool early_readiness=false,long double extra_start_samples=0,
+        unsigned admission_stride_seconds=1,
+        std::optional<long double> admission_until_seconds=std::nullopt) {
     RollingFftWork result;
     if(!(samples>0))return result;
     const auto seconds=samples/sample_rate;
@@ -358,8 +364,14 @@ RollingFftWork rolling_fft_work(long double samples,std::uint32_t sample_rate,
     const auto maximum_utc_rate=std::max(1.L,slope+uncertainty);
     if(!(minimum_utc_rate>0) || !std::isfinite(maximum_utc_rate))
         throw Error("Automatic Live epoch-refresh work requires a finite positive capture-rate interval");
-    const auto cadence=1/maximum_utc_rate;
-    result.admissions=std::ceil(seconds/cadence);
+    const auto cadence=admission_stride_seconds/maximum_utc_rate;
+    const auto admission_seconds=admission_until_seconds?
+        std::clamp(*admission_until_seconds,0.L,seconds):seconds;
+    // Observation can continue through every promised cohort's lifetime after
+    // Live's joined-worker barrier stops adding new first-start promises.
+    result.admissions=std::ceil(admission_until_seconds?
+        std::nextafter(admission_seconds/cadence,std::numeric_limits<long double>::infinity()):
+        admission_seconds/cadence);
     const auto outward_floor=[](long double value) {
         const auto allowance=64*std::numeric_limits<long double>::epsilon()*std::max(1.L,std::abs(value));
         return std::floor(value+allowance);
@@ -470,6 +482,9 @@ FftPhaseGroups fft_phase_groups(
         const modem::Config& config,std::uint64_t index,std::uint64_t upper,
         std::uint64_t step,std::size_t& count) {
     FftPhaseGroups groups;count=0;
+    if(config.symbol_burst.enabled()) {
+        groups.small[0]={config.stream_phase_samples,config.stream_phase_samples};count=1;return groups;
+    }
     if(config.fake_hopping&&config.fake_hopping->matched_gaps) {
         groups.step=step;count=upper/step+1;return groups;
     }
@@ -533,7 +548,8 @@ std::optional<FftWindowWork> fft_window_work(const modem::Config& config,std::si
     auto active_pricing=pricing; // Exact numerical fallback is sticky per receiver bank.
     const auto symbol=modem::symbol_sample_count(config);
     const auto step=modem::canonical_phase_step(config);
-    const auto upper=(modem::canonical_phase_extent(config)-1)/step*step;
+    const auto upper=config.symbol_burst.enabled()?config.stream_phase_samples:
+        (modem::canonical_phase_extent(config)-1)/step*step;
     const auto radius=std::max<std::uint64_t>(1,symbol/2);
     const auto candidate_limit=modem::PatternSearch{}.candidate_limit;
     modem::detail::FftSearchGeometry geometry;geometry.sample_fit=sample_fit;
@@ -555,7 +571,7 @@ std::optional<FftWindowWork> fft_window_work(const modem::Config& config,std::si
             for(std::size_t g=0;g<count;++g) {
                 if(++checks>1000000)return std::nullopt;
                 auto [lower,last]=groups[g];auto span=symbol,position=index;
-                if(modem::deferred_symbols(config)) {
+                if(config.symbol_burst.enabled()||modem::deferred_symbols(config)) {
                     const auto first=modem::scheduled_symbol_offset(config,config.stream_epoch,lower,0);
                     const auto delta=modem::scheduled_symbol_offset(config,config.stream_epoch,lower,index)-first;
                     lower+=first;last=lower;span=std::max<std::uint64_t>(1,delta);position=delta?1:0;
@@ -794,10 +810,11 @@ std::optional<modem::PatternStartWindow> fft_anchor_window(const transfer::Optio
 struct ReceiverLayoutContext {
     std::size_t cohort_capacity=0,maximum_consumers=128;
     bool shared_capture_reserved=false;
+    std::optional<std::size_t> amplitude_family_bank_count,amplitude_fallback_family_bank_count;
 };
 ReceiverLayoutContext receiver_layout_context(const transfer::Options& options,
         std::span<const modem::Config> profiles,std::size_t keys,ReceiverWorkMode mode,
-        const live::Settings* actual) {
+        const live::Settings* actual,const ReceiverTimingModel& timing_model) {
     auto settings=actual?*actual:live::Settings{};
     if(!actual) {
         settings.transfer=options;settings.content_limit=options.content_limit;
@@ -818,6 +835,32 @@ ReceiverLayoutContext receiver_layout_context(const transfer::Options& options,
         if(modem::scheduled_bursts(profile)&&profile.sample_rate!=options.modem.sample_rate)
             throw Error("scheduled shared-capture planning requires one original PCM sample rate");
     ReceiverLayoutContext out;out.cohort_capacity=live::detail::available_bank_capacity(settings);
+    if(options.modem.symbol_burst.enabled()&&!options.timestamp&&
+       std::all_of(profiles.begin(),profiles.end(),[](const auto& profile){return profile.symbol_burst.enabled();})) {
+        auto planning=settings;planning.transfer=options;planning.simulation=mode==ReceiverWorkMode::sampled_simulation;
+        live::detail::ReceiverAdmissionContext context;context.capacity=out.cohort_capacity;context.now=1800000000;
+        context.propagation=options.clock_sync?options.clock_sync->offset_seconds:0;
+        if(mode==ReceiverWorkMode::hardware_calendar_model||mode==ReceiverWorkMode::hardware_timing_model) {
+            double rate_radius=0;
+            for(const auto& profile:profiles) {
+                const auto bank=search_bank(profile,arrival_policy(options,profile).has_value());
+                rate_radius=std::max({rate_radius,1-bank.minimum_rate,bank.maximum_rate-1});
+            }
+            context.timing=audio::TimePrediction{context.now,
+                timing_model.capture_error_seconds.value_or(clock_sync::audio_lag_radius(options.audio_timing_error_seconds)),
+                timing_model.capture_seconds_per_frame.value_or(1./options.modem.sample_rate),audio::TimingQuality::estimated,
+                timing_model.capture_rate_uncertainty_fraction.value_or(rate_radius)};
+        }
+        auto count=live::detail::burst_amplitude_family_bank_count(profiles,planning,context);
+        if(keys>std::numeric_limits<std::size_t>::max()/count)throw Error("planned Burst family count overflow");
+        out.amplitude_family_bank_count=count*keys;
+        if(context.timing) {
+            context.timing.reset();
+            count=live::detail::burst_amplitude_family_bank_count(profiles,planning,context);
+            if(keys>std::numeric_limits<std::size_t>::max()/count)throw Error("fallback Burst family count overflow");
+        }
+        out.amplitude_fallback_family_bank_count=count*keys;
+    }
     if(!modem::detail::scheduled_acquisition_policy::requested())return out;
     // The span can already contain repeated per-key families (GUI advisory);
     // keys is the remaining multiplier. Do not also multiply settings' keys.
@@ -851,7 +894,7 @@ ReceiverLayoutContext receiver_layout_context(const transfer::Options& options,
     return out;
 }
 void receiver_layout_share(modem::PatternSearch& search,const modem::Config& config,
-        const ReceiverLayoutContext& layout,bool keyed) {
+        const ReceiverLayoutContext& layout,bool keyed,bool fallback_amplitude=false) {
     auto available=layout.cohort_capacity;
     if(layout.shared_capture_reserved) {
         const auto capture=modem::detail::scheduled_capture::SharedScheduledCapture::cohort_layout(
@@ -862,7 +905,9 @@ void receiver_layout_share(modem::PatternSearch& search,const modem::Config& con
     const auto control=live::receiver_control_margin(config,keyed);
     search.receiver_strategy_workspace_bytes=share>control?share-control:1;
     if(search.amplitude_receiver_bank_count) {
-        const auto amplitude_share=available/search.amplitude_receiver_bank_count;
+        const auto amplitude_share=available/std::max<std::size_t>(1,
+            (fallback_amplitude?layout.amplitude_fallback_family_bank_count:layout.amplitude_family_bank_count).value_or(
+                search.amplitude_receiver_bank_count));
         search.amplitude_strategy_workspace_bytes=amplitude_share>control?amplitude_share-control:1;
     }
 }
@@ -1047,7 +1092,9 @@ Work scheduled_complex_receiver_work(modem::Config config,const SearchBank& bank
 Work receiver_work(const modem::Config& config,const SearchBank& bank,long double samples,
                    const transfer::Options& options,std::size_t profiles,std::size_t keys,
                    std::size_t established_stream_bits,double local_window_seconds,ReceiverWorkMode work_mode,
-                   const ReceiverTimingModel& timing_model,const ReceiverLayoutContext* layout,std::stop_token stop) {
+                   const ReceiverTimingModel& timing_model,const ReceiverLayoutContext* layout,std::stop_token stop,
+                   bool burst_tracked_slot=false,
+                   std::optional<long double> burst_admission_until_seconds=std::nullopt) {
     estimate_detail::check(stop);
     if(modem::scheduled_bursts(config)&&config.receiver_strategy!=modem::ReceiverStrategy::amplitude_only) {
         auto mapped=scheduled_complex_receiver_work(config,bank,samples,options,profiles,keys,
@@ -1068,10 +1115,21 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     // the detector/FFT costs already include fitting both candidate rows.
     const auto private_pair_generation=private_pattern?40.L:0.L;
 
-    const auto epochs=private_pattern?2.L*options.search_seconds+1+
+    const bool public_burst_candidate=modem::symbol_burst_public_rolling_search(config)&&!options.timestamp&&
+        config.receiver_strategy!=modem::ReceiverStrategy::amplitude_only;
+    // Live's older prefix-settling epochs exist only for a keyed automatic
+    // simulation listener. Hardware dates the payload support itself; pulse
+    // padding does not add earlier hardware first-start UTC hypotheses.
+    const auto burst_settling=options.key&&!options.timestamp&&work_mode==ReceiverWorkMode::sampled_simulation?
+        static_cast<long double>(modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config))/config.sample_rate:0.L;
+    const auto finite_burst_epochs=config.symbol_burst.enabled()?1.L+std::ceil((2.L*options.search_seconds+
+        burst_settling+
+        1+std::ceil(static_cast<long double>(live::detail::plot_size)/config.sample_rate))/30):1.L;
+    auto epochs=burst_tracked_slot||public_burst_candidate?1.L:config.symbol_burst.enabled()?finite_burst_epochs:
+        private_pattern?2.L*options.search_seconds+1+
         (options.timestamp||work_mode!=ReceiverWorkMode::sampled_simulation?0:std::ceil((static_cast<long double>(modem::training_sample_count(config))+
             modem::pattern_pulse_padding_samples(config))/config.sample_rate)):1.L;
-    const auto banks=epochs*keys;
+    auto banks=epochs*keys;
     const auto& geometry=bank.frequency;
     const bool coupled=bank.legacy_coupled;
     const bool scaled=bank.minimum_rate!=1||bank.maximum_rate!=1;
@@ -1110,7 +1168,19 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     // Retaining transformed template rows is optional. The streamed path
     // keeps FFT/ring/tracking scratch and empty row metadata, then generates
     // each template in existing per-job scratch without reducing coverage.
-    const auto fft_core_bytes=transform*16*5+(4*length+2*hop)*16+
+    long double burst_fft_bytes=0;
+    if(config.symbol_burst.enabled()) {
+        const modem::SymbolBurstPlan plan(config);
+        const auto absent=std::ceil(6.L*config.sample_rate/symbol);
+        const auto maximum_step=2.L*plan.padding_samples()+
+            (config.symbol_burst.wait_symbols+plan.random_limit()+1.L)*symbol+90.L*config.sample_rate;
+        const auto displacement=maximum_clock_ratio>0?
+            std::nextafter(1/(1-maximum_clock_ratio)-1/(1+maximum_clock_ratio),
+                std::numeric_limits<long double>::infinity()):0.L;
+        const auto ring_bins=std::ceil(2*(absent+1)*maximum_step*displacement/bin)+8;
+        burst_fft_bytes=modem::PatternReceiver::symbol_burst_control_bytes()+ring_bins*16+128;
+    }
+    const auto fft_core_bytes=burst_fft_bytes+transform*16*5+(4*length+2*hop)*16+
         (separate_tracking_reference?2*length*16:0)+(transform+1)*8+
         frequencies*(2*24+2*8+2*16+18*8+2*8)+
         4096*16+4096*sizeof(modem::PatternEvidence)+(drift_sections>1?48*hop:0)+
@@ -1122,7 +1192,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     // an equal strategy share is not the existing constructor's allocation.
     const auto control=live::receiver_control_margin(config,options.key.has_value());
     const auto available=layout->cohort_capacity>control?layout->cohort_capacity-control:0;
-    const auto allowance=std::min(static_cast<long double>(available),
+    auto allowance=std::min(static_cast<long double>(available),
         static_cast<long double>(options.dsp_workspace_bytes)/std::max(2.L,banks*profiles));
     // Two uint32 maps plus a rounded fixed allowance for the two bounded
     // coarse/rotation caches and metadata (currently below 64 KiB).
@@ -1132,6 +1202,14 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     // insufficient memory cannot silently substitute a different search path.
     const bool correlator=!modem::deferred_symbols(config) && !coupled &&
         ((private_pattern && symbol>=60.L*config.sample_rate) || fft_core_bytes+outer_map_bytes>allowance);
+    if(public_burst_candidate&&correlator&&!burst_tracked_slot) {
+        // The native singleton optimization grants no compact finite search or
+        // amplitude bank a wider allocation. Restore their original cohort count.
+        epochs=finite_burst_epochs;banks=epochs*keys;
+        allowance=std::min(static_cast<long double>(available),
+            static_cast<long double>(options.dsp_workspace_bytes)/std::max(2.L,banks*profiles));
+    }
+    const bool native_public_burst=public_burst_candidate&&!correlator;
     // Live banks stream expanded template rows when several profiles, keys or
     // epochs share the budget, so early banks cannot consume it with caches.
     bool streamed_templates=!correlator &&
@@ -1149,7 +1227,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         }
         starts=lanes/frequencies;
     }
-    const auto phase_groups=config.fake_hopping&&config.fake_hopping->matched_gaps?
+    const auto phase_groups=config.symbol_burst.enabled()?1.L:config.fake_hopping&&config.fake_hopping->matched_gaps?
         static_cast<long double>((modem::canonical_phase_extent(config)-1)/
             modem::canonical_phase_step(config)+1):modem::deferred_symbols(config)?
         (modem::scheduled_symbol_offset(config,config.stream_epoch,0,0)<
@@ -1175,8 +1253,9 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         !(config.oscillator_search->reference==modem::OscillatorReference::shared_radio&&
           config.oscillator_search->rf_shift_hz!=0)))) {
         const auto phase_step=modem::canonical_phase_step(config);
-        const auto phase_upper=(modem::canonical_phase_extent(config)-1)/phase_step*phase_step;
-        auto minimum_phase=std::uint64_t{0},maximum_phase=modem::canonical_phase_cell_upper(config,phase_upper);
+        const auto phase_upper=config.symbol_burst.enabled()?config.stream_phase_samples:
+            (modem::canonical_phase_extent(config)-1)/phase_step*phase_step;
+        auto minimum_phase=config.symbol_burst.enabled()?phase_upper:std::uint64_t{0},maximum_phase=modem::canonical_phase_cell_upper(config,phase_upper);
         if(modem::deferred_symbols(config)) {
             minimum_phase=modem::scheduled_symbol_offset(config,config.stream_epoch,0,0);
             maximum_phase+=modem::scheduled_symbol_offset(config,config.stream_epoch,phase_upper,0);
@@ -1209,17 +1288,42 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                 if(fresh) {
                     const auto rate=1+static_cast<long double>(hypothesis.clock_error_ppm)*1e-6L;
                     modem::detail::PatternStartLattice lattice(0,2*radius*config.sample_rate,
-                        chip/(2*rate),0,maximum_phase,1,prior);
+                        chip/(2*rate),minimum_phase,maximum_phase,1,prior);
                     const auto range=lattice.retained_index_range();
                     const auto checks=range.second-range.first;
+                    std::size_t count=0;
+                    if(minimum_phase==maximum_phase) {
+                        // Burst has one immutable phase. Its retained origins
+                        // form an interval; intersect the original coverage
+                        // cells with precisely retained_phases()' local pad.
+                        const auto first_true=[&](bool upper) {
+                            auto lower=range.first,higher=range.second;
+                            while(lower<higher) {
+                                estimate_detail::check(stop);
+                                const auto middle=lower+(higher-lower)/2;
+                                const auto cell=lattice.coverage_cell(middle);
+                                const auto pad=64*std::numeric_limits<long double>::epsilon()*
+                                    std::max({1.L,std::abs(cell.first),std::abs(cell.second),
+                                        std::abs(prior.epoch_origin_samples),prior.half_width_samples});
+                                const bool retained=upper?
+                                    (cell.first-prior.epoch_origin_samples-prior.half_width_samples-pad)/prior.phase_scale>maximum_phase:
+                                    (cell.second-prior.epoch_origin_samples+prior.half_width_samples+pad)/prior.phase_scale>=minimum_phase;
+                                if(retained)higher=middle;else lower=middle+1;
+                            }
+                            return lower;
+                        };
+                        const auto lower=first_true(false),higher=first_true(true);
+                        count=std::max(lower,higher)-lower;
+                    } else {
                     // Graph sweeps must not enumerate an unbounded fine-chip
                     // bank merely to obtain a planning number. Such cases
                     // retain the full-window engineering fallback.
                     if(checks>1000000-intersections){bounded=false;break;}
-                    intersections+=checks;std::size_t count=0;
+                    intersections+=checks;
                     for(auto i=range.first;i<range.second;++i) {
                         if(i%256==0)estimate_detail::check(stop);
                         if(lattice.retained_phases(i))++count;
+                    }
                     }
                     entry->second=count;
                 }
@@ -1320,7 +1424,13 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         static_cast<long double>(symbol)/bank.maximum_rate<modem::pattern_absence_seconds*config.sample_rate;
     const auto chain_state=guard_chains?
         phase_groups*sizeof(std::array<modem::detail::CorrelationChipEvidence,2>)+sizeof(double):0.L;
-    const auto compact_required=256*1024.L+outer_map_bytes+
+    // Exact optional control/lane reservation; the receiver owns its private
+    // layout. Payload history and full numerical state remain separate.
+    const auto burst_compact_bytes=config.symbol_burst.enabled()?
+        (lanes<=std::numeric_limits<std::size_t>::max()?
+            static_cast<long double>(modem::PatternCorrelator::symbol_burst_control_bytes(static_cast<std::size_t>(lanes))):
+            std::numeric_limits<long double>::infinity()):0.L;
+    const auto compact_required=burst_compact_bytes+256*1024.L+outer_map_bytes+
         lanes*(512+(phase_groups-1)*sizeof(std::array<modem::detail::CorrelationFit,2>)+2+chain_state)+
         projection_banks*(64+(block_samples+1)*sizeof(modem::detail::CorrelationProjection))+
         candidate_count*sizeof(modem::PatternEvidence)+points*sizeof(std::complex<double>)+
@@ -1373,13 +1483,24 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     // Long-symbol timing guides subscribe only after admission and are charged
     // to retained evidence, not every idle search lane. No constructor reserve
     // may displace the complete bank or its optional coefficient-cache gate.
-    const bool pulse_geometry=modem::pattern_pulse_enabled(config)&&symbol>=16.L*config.sample_rate&&
+    const bool burst_pulse_disjoint=!config.symbol_burst.enabled()||
+        (2.L*(options.search_seconds+1.L)*config.sample_rate+block_samples+2)*bank.maximum_rate+symbol<=
+            modem::SymbolBurstPlan(config).minimum_spacing_samples();
+    const bool pulse_geometry=burst_pulse_disjoint&&modem::pattern_pulse_enabled(config)&&symbol>=16.L*config.sample_rate&&
         (chip<=4096||config.oscillator_search)&&
         symbol%(4*chip)==0&&
         (config.oscillator_search||(chip%2==0&&!scaled));
     const bool pulse_moments=chip>4096;
     const auto cell_capacity=std::ceil(block_samples*bank.maximum_rate/chip)+2;
-    const auto pulse_extra=3*frequencies*(192+sizeof(modem::detail::CorrelationPulseKernel)+
+    long double burst_pulse_extra=0;
+    if(correlator&&config.symbol_burst.enabled()&&pulse_geometry) {
+        const auto pulse_count=3*frequencies;
+        burst_pulse_extra=lanes<=std::numeric_limits<std::size_t>::max()&&pulse_count<=std::numeric_limits<std::size_t>::max()?
+            static_cast<long double>(modem::PatternCorrelator::symbol_burst_control_bytes(
+                static_cast<std::size_t>(lanes),static_cast<std::size_t>(pulse_count)))-burst_compact_bytes:
+            std::numeric_limits<long double>::infinity();
+    }
+    const auto pulse_extra=burst_pulse_extra+3*frequencies*(192+sizeof(modem::detail::CorrelationPulseKernel)+
         sizeof(modem::detail::CorrelationPulseSegment)+2*sizeof(std::complex<long double>)+2*sizeof(std::uint64_t)+
         (1+cell_capacity)*sizeof(modem::detail::CorrelationPulseCell))+lanes*16+32768+
         (pulse_moments?frequencies*(block_samples+1)*sizeof(std::complex<double>):0);
@@ -1421,13 +1542,32 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     if(established_stream_bits)
         result.tracking_windows=static_cast<long double>(established_stream_bits-1)+
             static_cast<long double>(modem::pattern_absence_samples(config))/symbol;
+    long double fitted_samples=samples,fitted_slots=1;
+    if(config.symbol_burst.enabled()) {
+        const modem::SymbolBurstPlan plan(config);
+        if(!burst_tracked_slot) {
+            // A partial first slot plus every original full-slot promise must
+            // finish. Suspension also preserves a shorter profile's current
+            // frontier at the selected source's publication barrier. Count
+            // these supports; the cursor jumps over their intervening gaps.
+            const auto promised=private_pattern?modem::deferred_initial_symbols(config):1U;
+            const auto age=burst_admission_until_seconds.value_or(samples/config.sample_rate)+
+                2*(options.search_seconds+1.L)+1+
+                std::ceil(static_cast<long double>(live::detail::plot_size)/config.sample_rate);
+            fitted_slots=std::max(promised+1.L,2+std::ceil(age*config.sample_rate*bank.maximum_rate/
+                plan.minimum_spacing_samples()));
+        }
+        fitted_samples=std::min(samples,fitted_slots*(std::ceil(
+            (static_cast<long double>(symbol)+2.L*plan.padding_samples())/bank.minimum_rate)+2*block_samples+2));
+    }
     if(correlator) {
         if(result.outer_presence) {
-            const auto cells=std::ceil(samples*bank.maximum_rate/chip);
+            const auto cells=std::ceil(fitted_samples*bank.maximum_rate/chip)+
+                (config.symbol_burst.enabled()?2*fitted_slots:0);
             // Projected pulse paths reuse shared observations; raw shaped
             // fallback also accumulates each observed pulse contribution.
             result.serial+=(cells*outer_operations_per_chip+
-                ((!result.pulse_projected&&!result.pulse_segmented)?samples*outer_operations_per_sample:0))*
+                ((!result.pulse_projected&&!result.pulse_segmented)?fitted_samples*outer_operations_per_sample:0))*
                 search_lanes*phase_groups*banks;
         }
         if(result.pulse_segmented) {
@@ -1438,13 +1578,13 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             // count those cuts independently and cap them at observations.
             // This corrects the preceding 256-knot-only span allowance even
             // when reuse cannot fit; the fallback still charges 1800 per fit.
-            const auto symbols=std::ceil(samples*bank.maximum_rate/symbol);
+            const auto symbols=config.symbol_burst.enabled()?fitted_slots:std::ceil(samples*bank.maximum_rate/symbol);
             const auto boundaries=symbols*(4+(differential_window?differential_windows:0));
             const auto partial_tail=symbol%chip?257*symbols*
                 std::min(9.L,std::ceil(static_cast<long double>(symbol)/chip)):0.L;
-            const auto natural_spans=std::min(samples,1+257*
-                std::ceil(samples*bank.maximum_rate/chip)+partial_tail+boundaries);
-            const auto spans=std::min(samples,std::ceil(samples/block_samples)+natural_spans);
+            const auto natural_spans=std::min(fitted_samples,fitted_slots+257*
+                std::ceil(fitted_samples*bank.maximum_rate/chip)+partial_tail+boundaries);
+            const auto spans=std::min(fitted_samples,std::ceil(fitted_samples/block_samples)+natural_spans);
             const auto preparations=affine_coefficient_reuse?natural_spans:spans;
             result.serial+=samples*8*projection_banks*banks;
             result.search_serial=(preparations*pulse_affine_prepare_operations_per_segment+
@@ -1468,15 +1608,20 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             for(const auto& hypothesis:bank.hypotheses) {
                 estimate_detail::check(stop);
                 const auto rate=1+static_cast<long double>(hypothesis.clock_error_ppm)*1e-6L;
-                const auto cells=3*std::ceil(samples*rate/chip);lattice_cells+=cells;
+                const auto cells=config.symbol_burst.enabled()?3*fitted_slots*(std::ceil(
+                    (static_cast<long double>(symbol)+2.L*modem::pattern_pulse_padding_samples(config)+
+                        2*(options.search_seconds+1.L)*config.sample_rate*bank.maximum_rate)/chip)+2):
+                    3*std::ceil(samples*rate/chip);
+                lattice_cells+=cells;
                 // Engineering estimate of changed-knot density: 256 finite
                 // table knots and one sample-count boundary per chip. Initial
                 // lattice/count variants retain the historical nine setups.
                 // It is not a cache-hit guarantee: exact closed endpoints or
                 // roundoff-sized motion can force the separate upper path.
-                const auto prepared=hypothesis.clock_error_ppm==0?9.L:
-                    std::min(cells,9+3*257*samples*std::abs(rate-1));
-                const auto upper=hypothesis.clock_error_ppm==0?9.L:std::max(9.L,cells);
+                const auto setups=9*fitted_slots;
+                const auto prepared=hypothesis.clock_error_ppm==0?setups:
+                    std::min(cells,setups+3*257*fitted_samples*std::abs(rate-1));
+                const auto upper=hypothesis.clock_error_ppm==0?setups:std::max(setups,cells);
                 if(hypothesis.clock_error_ppm!=0)result.kernel_upper_bound=true;
                 if(pulse_moments) {
                     // No affine Gram preparation scans the original PCM chip.
@@ -1498,7 +1643,13 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                 result.kernel_serial=kernel_samples*(pulse_moment_kernel_operations_per_segment+moment_work)*banks;
                 result.kernel_upper_serial=kernel_upper_samples*(pulse_moment_kernel_operations_per_segment+moment_work)*banks;
             } else {
-                result.serial+=(3*samples*frequencies*pulse_frontend_operations_per_sample+
+                // The 17 pulse-atom dots execute only over each lattice's
+                // symbol union: burst_pulse_cursor skips the gaps. Mixing and
+                // capture validation above still consume the full input.
+                const auto projected_samples=config.symbol_burst.enabled()?std::min(samples,
+                    fitted_samples+fitted_slots*(2*(options.search_seconds+1.L)*config.sample_rate+2*block_samples)):
+                    samples;
+                result.serial+=(3*projected_samples*frequencies*pulse_frontend_operations_per_sample+
                     lattice_cells*pulse_gram_operations_per_cell)*banks;
                 result.kernel_serial=kernel_samples*pulse_kernel_operations_per_sample*banks;
                 result.kernel_upper_serial=kernel_upper_samples*pulse_kernel_operations_per_sample*banks;
@@ -1506,21 +1657,22 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             result.serial+=result.kernel_serial;
             // The projected backend consumes shared cells and commits lane
             // work in order on the caller; it does not use search workers.
-            result.search_serial=std::ceil(samples*bank.maximum_rate/chip)*search_lanes*phase_groups*
+            result.search_serial=(std::ceil(fitted_samples*bank.maximum_rate/chip)+
+                (config.symbol_burst.enabled()?2*fitted_slots:0))*search_lanes*phase_groups*
                 (pulse_pair_operations_per_chip+128*(result.drift_supported+result.differential_supported))*banks;
             result.serial+=result.search_serial;
         } else {
             // Shaped fallback retains every original sample. Rectangular
             // prefix projections can still share each bounded chip interval.
             const bool shaped_policy=config.oscillator_search&&modem::pattern_pulse_enabled(config);
-            const auto observations=shaped_policy?samples:
-                std::ceil(samples/std::min(32.L,static_cast<long double>(chip)));
+            const auto observations=shaped_policy?fitted_samples:
+                std::ceil(fitted_samples/std::min(32.L,static_cast<long double>(chip)));
             // Full shaped evaluation includes the 17-atom private waveform
             // pair as well as its two real fits; prefix-only work is cheaper.
             const auto operations_per_pair=(shaped_policy?512.L:64.L)+(guard_chains?64.L:0.L);
             result.parallel=(observations*search_lanes*phase_groups*operations_per_pair*
                 (1+(result.drift_supported?1:0)+(result.differential_supported?1:0))+
-                (result.differential_supported?samples/symbol*differential_windows*search_lanes*phase_groups*
+                (result.differential_supported?fitted_samples/symbol*differential_windows*search_lanes*phase_groups*
                     differential_operations_per_window:0))*banks;
         }
     } else {
@@ -1553,11 +1705,20 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             blocks=observed_bins<first_batch_end?0:1+std::floor((observed_bins-first_batch_end)/hop);
             scored_starts=blocks>0?initial_batch+(blocks-1)*hop:0;
         }
+        if(native_public_burst && burst_admission_until_seconds) {
+            // suspend_fresh_acquisition() keeps the inclusive last start plus
+            // its original completing batch, then ingests the retained tail
+            // without launching fresh public acquisition FFTs.
+            const auto last=std::ceil(*burst_admission_until_seconds*config.sample_rate/bin)+4;
+            const auto retained=last<initial_batch?1.L:2+std::floor((last-initial_batch)/hop);
+            blocks=std::min(blocks,retained);
+            scored_starts=blocks>0?initial_batch+(blocks-1)*hop:0;
+        }
         result.fft_acquisition_batches=blocks;
         std::optional<long double> filtered_operations;
         long double filtered_host=0,filtered_gpu=0;
         std::size_t filtered_checks=0;
-        const bool restrict_jobs=fft_prior&&drift_sections==1&&!differential_window&&!options.timestamp;
+        const bool restrict_jobs=fft_prior&&!config.symbol_burst.enabled()&&drift_sections==1&&!differential_window&&!options.timestamp;
         const bool early_readiness=restrict_jobs&&initial_batch==hop;
         const auto observed_bins=std::floor(samples/bin);
         const auto qualified_slots=early_readiness?(observed_bins<length?0:
@@ -1639,7 +1800,9 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             // The runtime uses the tighter per-group predicate. This changes
             // acquisition only; ingestion, tracks and all trial charges remain.
             const auto lower=fft_prior->epoch_origin_samples-fft_prior->half_width_samples;
-            const auto offset=modem::deferred_symbols(config)?
+            const auto offset=config.symbol_burst.enabled()?
+                static_cast<long double>(modem::scheduled_symbol_offset(config,config.stream_epoch,config.stream_phase_samples,
+                    modem::deferred_initial_symbols(config)-1))/.99L:modem::deferred_symbols(config)?
                 static_cast<long double>(modem::scheduled_symbol_offset(config,config.stream_epoch,0,
                     modem::deferred_initial_symbols(config)-1))/.99L:3.L*symbol/.99L;
             const auto upper=fft_prior->epoch_origin_samples+
@@ -1656,11 +1819,15 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         }
         if(!filtered_operations)result.fft_retained_acquisition_batches=blocks;
         long double first_batches=blocks>0?1.L:0.L;
-        if(private_pattern && !options.timestamp && work_mode!=ReceiverWorkMode::sampled_simulation) {
+        if((private_pattern||config.symbol_burst.enabled()) && !native_public_burst &&
+           !options.timestamp && work_mode!=ReceiverWorkMode::sampled_simulation) {
             const auto prefix=static_cast<long double>(modem::training_sample_count(config)+
                 modem::pattern_pulse_padding_samples(config))/config.sample_rate;
             long double calendar_extension=0;
-            if(modem::deferred_symbols(config)) {
+            if(config.symbol_burst.enabled()) {
+                calendar_extension=static_cast<long double>(modem::scheduled_symbol_offset(config,
+                    config.stream_epoch,config.stream_phase_samples,modem::deferred_initial_symbols(config)-1))/bank.minimum_rate;
+            } else if(modem::deferred_symbols(config)) {
                 const auto phase=modem::canonical_phase_extent(config)-1;
                 // A 2/5-second calendar repeats at two UTC seconds. Bound both
                 // epoch parities, including every retained initial slot.
@@ -1673,10 +1840,12 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             }
             const auto fresh_full=rolling_fft_work(samples,config.sample_rate,bin,length,hop,initial_batch,
                 static_cast<long double>(symbol)/config.sample_rate,prefix,options.search_seconds,
-                maximum_clock_ratio,timing_model,false,calendar_extension);
+                maximum_clock_ratio,timing_model,false,calendar_extension,config.symbol_burst.enabled()?30U:1U,
+                config.symbol_burst.enabled()?burst_admission_until_seconds:std::nullopt);
             const auto fresh=early_readiness?rolling_fft_work(samples,config.sample_rate,bin,length,hop,initial_batch,
                 static_cast<long double>(symbol)/config.sample_rate,prefix,options.search_seconds,
-                maximum_clock_ratio,timing_model,true,calendar_extension):fresh_full;
+                maximum_clock_ratio,timing_model,true,calendar_extension,config.symbol_burst.enabled()?30U:1U,
+                config.symbol_burst.enabled()?burst_admission_until_seconds:std::nullopt):fresh_full;
             result.new_epoch_admissions=fresh.admissions;
             result.new_epoch_full_fft_batches=fresh_full.full_batches;
             result.new_epoch_qualified_ready_batch_slots=fresh.full_batches;
@@ -1925,20 +2094,22 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     // Resolve the same receiver-local policy as execution. Do not multiply
     // authoritative frequency/rate pairs or narrow timing into a wider bank.
     modem::PatternSearch strategy_search;
+    const bool public_burst=config.symbol_burst.enabled() && !config.scramble && !config.dsss;
+    if(public_burst)strategy_search.initial_stream_symbols=1;
     strategy_search.hypotheses=bank.hypotheses;
     strategy_search.admitted_frequency_half_width_hz=bank.frequency.requested_half_width_hz;
     strategy_search.admitted_clock_half_width_ppm=bank.requested_clock_ppm;
     strategy_search.complex_frequency_coverage=!bank.frequency.limited;
     strategy_search.complex_clock_coverage=bank.clock_ppm>=bank.requested_clock_ppm;
     strategy_search.differential_window_seconds=local_window_seconds;
-    strategy_search.search_stream_phases=private_pattern;
+    strategy_search.search_stream_phases=private_pattern&&!config.symbol_burst.enabled();
     strategy_search.prefer_streamed_templates=streamed_templates;
     strategy_search.compact_clock_search=correlator;
     strategy_search.start_offset_seconds=options.search_seconds+1.;
     strategy_search.start_uncertainty_seconds=options.search_seconds+1.;
     strategy_search.qualified_start_window=strategy_prior;
     if(!strategy_prior&&arrival_model_available(options,config,work_mode,timing_model)) {
-        const auto phase_upper=private_pattern?modem::canonical_phase_cell_upper(config,
+        const auto phase_upper=config.symbol_burst.enabled()?config.stream_phase_samples:private_pattern?modem::canonical_phase_cell_upper(config,
             (modem::canonical_phase_extent(config)-1)/modem::canonical_phase_step(config)*modem::canonical_phase_step(config)):
             config.stream_phase_samples;
         constexpr auto epoch=1800000000.L;
@@ -1958,6 +2129,8 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     strategy_search.receiver_bank_count=modem::receiver_strategy_bank_count(config,
         options.search_seconds,keys,profiles);
     strategy_search.receiver_schedule_key_count=keys;
+    if(public_burst && !strategy_search.amplitude_start_window && strategy_search.qualified_start_window)
+        strategy_search.amplitude_start_window=strategy_search.qualified_start_window;
     if(!options.timestamp&&!modem::scheduled_bursts(config)) {
         live::Settings amplitude_settings;amplitude_settings.transfer=options;
         amplitude_settings.simulation=work_mode==ReceiverWorkMode::sampled_simulation;
@@ -1968,9 +2141,25 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                 timing_model.capture_rate_uncertainty_fraction.value_or(static_cast<double>(maximum_clock_ratio)));
         strategy_search.amplitude_receiver_bank_count=modem::receiver_strategy_amplitude_bank_count(config,strategy_search,keys,profiles);
     }
+    if(native_public_burst) {
+        // Mirror Live's native no-hint rolling public seeker while preserving
+        // independently finite amplitude fallback geometry and allocation.
+        strategy_search.amplitude_start_offset_seconds=strategy_search.start_offset_seconds;
+        strategy_search.amplitude_start_uncertainty_seconds=strategy_search.start_uncertainty_seconds;
+        if(strategy_search.qualified_start_window)
+            strategy_search.amplitude_start_window=strategy_search.qualified_start_window;
+        strategy_search.start_offset_seconds.reset();strategy_search.qualified_start_window.reset();
+        strategy_search.receiver_bank_count=keys*profiles;
+    }
+    if(burst_tracked_slot) {
+        // The successful-acquisition barrier has frozen new starts. This is
+        // one retained complete-symbol receiver; cold-family debt is separate.
+        strategy_search.receiver_bank_count=strategy_search.amplitude_receiver_bank_count=1;
+    }
     // Both actual and inferred settings use Live's exact reservation arithmetic.
     // Analytical inputs need not satisfy Live device/route admission rules.
-    if(layout)receiver_layout_share(strategy_search,config,*layout,options.key.has_value());
+    if(layout)receiver_layout_share(strategy_search,config,*layout,options.key.has_value(),
+        work_mode==ReceiverWorkMode::hardware_fallback&&!burst_tracked_slot);
     auto strategy_config=config;
     // Planning receives unseeded profile geometry; execution attaches the same
     // selected root before constructing its keyed calendar. Never reject a
@@ -2073,6 +2262,55 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         result.sustained_serial=std::max(0.,selected_ratio-tracking_ratio)/profiles*serial_operations_per_second;
         result.sustained_parallel=0;
         result.sustained_tracking=tracking_ratio*serial_operations_per_second/profiles;
+        if(config.symbol_burst.enabled()&&result.strategy.backend==modem::ReceiverBackend::amplitude_energy) {
+            // Amplitude FFT preprocessing still consumes complete captured
+            // blocks. Envelope lanes, however, jump over Burst's symbol gaps.
+            // Charge setup once for each representative initial cohort, not
+            // a steady resident-bank setup rate throughout its silence.
+            auto amplitude_search=strategy_search;
+            if(strategy_search.amplitude_start_window)
+                amplitude_search.qualified_start_window=strategy_search.amplitude_start_window;
+            if(strategy_search.amplitude_start_uncertainty_seconds)
+                amplitude_search.start_uncertainty_seconds=*strategy_search.amplitude_start_uncertainty_seconds;
+            if(strategy_search.amplitude_start_offset_seconds)
+                amplitude_search.start_offset_seconds=strategy_search.amplitude_start_offset_seconds;
+            const auto amplitude=modem::pattern_amplitude_geometry(config,amplitude_search);
+            if(amplitude.supported) {
+                const auto width=amplitude_search.qualified_start_window?
+                    2*amplitude_search.qualified_start_window->half_width_samples/config.sample_rate:
+                    2*amplitude_search.start_uncertainty_seconds;
+                const auto maximum_row_rate=amplitude_search.amplitude_start_window?
+                    1+(amplitude.clock_hypotheses-1)/2.L*amplitude.clock_step_ppm*1e-6L:1.L;
+                const auto step=chip/(2.L*amplitude.receiver_timing_subdivisions*maximum_row_rate);
+                const auto timing_starts=std::ceil(width*config.sample_rate/step)+
+                    (amplitude_search.amplitude_start_window?2:1);
+                const auto amplitude_lanes=phase_groups*timing_starts*amplitude.clock_hypotheses;
+                const auto slow_rate=1-(amplitude.clock_hypotheses>1?
+                    (amplitude.clock_hypotheses-1)/2.L*amplitude.clock_step_ppm:0)*1e-6L;
+                const auto initial_cohorts=burst_tracked_slot?1.L:finite_burst_epochs*keys;
+                auto slots=fitted_slots;
+                if(!burst_tracked_slot) {
+                    // The amplitude constructor precedes the public compact
+                    // reset and retains the default four full opportunities.
+                    const auto age=burst_admission_until_seconds.value_or(samples/config.sample_rate)+
+                        2*(options.search_seconds+1.L)+1+
+                        std::ceil(static_cast<long double>(live::detail::plot_size)/config.sample_rate);
+                    slots=std::max(strategy_search.initial_stream_symbols+1.L,2+std::ceil(age*config.sample_rate*maximum_row_rate/
+                        modem::SymbolBurstPlan(config).minimum_spacing_samples()));
+                }
+                const bool double_fft=config.search_arithmetic==modem::SearchArithmetic::fp64;
+                const auto fft_size=static_cast<long double>(amplitude.fft_samples);
+                const auto captured_blocks=std::ceil(samples/fft_size)+1;
+                const auto fitted_blocks=slots*(std::ceil(symbol/(slow_rate*fft_size))+4);
+                const auto setup=(double_fft?4e-9L:20e-9L)*fft_size;
+                const auto frontend=(double_fft?1.5e-9L:1e-9L)*fft_size*std::log2(fft_size)*captured_blocks;
+                const auto fits=((double_fft?2.5e-6L:2.35e-6L)+.08e-6L*result.strategy.amplitude_channels)*
+                    amplitude_lanes*fitted_blocks;
+                result.serial=initial_cohorts*(setup+frontend+fits)*serial_operations_per_second;
+                result.search_serial=initial_cohorts*fits*serial_operations_per_second;
+                result.epoch_hypotheses=burst_tracked_slot?1.L:finite_burst_epochs;
+            } else result.cost_available=false;
+        }
         const auto source_lifetime=modem::symbol_schedule_detail::add(symbol,
             modem::symbol_schedule_detail::add(modem::training_sample_count(config),
                 modem::pattern_pulse_padding_samples(config)));
@@ -2462,10 +2700,15 @@ std::array<double,2> sampling_interval(double probability,std::size_t trials,dou
 static Estimate estimate_impl(const transfer::Estimate& transmission,const transfer::Options& source_options,bool raw_bits,
                   const modem::ChannelConfig& channel,std::span<const modem::Config> profiles,std::size_t keys,
                   bool compute_probability,double local_window_seconds,std::size_t probability_trials,
-                  ReceiverWorkMode work_mode,ReceiverTimingModel timing_model,const live::Settings* actual_settings,std::stop_token stop) {
+                  ReceiverWorkMode work_mode,ReceiverTimingModel timing_model,const live::Settings* actual_settings,std::stop_token stop,
+                  bool support_only=false) {
     estimate_detail::check(stop);
     auto options=source_options;
     options.search_seconds=live::detail::effective_epoch_search_seconds(options,false);
+    if(options.modem.symbol_burst.enabled()) {
+        options.modem.data_key=options.key;
+        options.modem=modem::scheduled_estimate_config(options.modem);
+    }
     modem::validate(options.modem);modem::validate_channel(options.modem,channel);
     if(!std::isfinite(transmission.total_seconds) || transmission.total_seconds<0 || !keys ||
        !std::isfinite(local_window_seconds) || local_window_seconds<0)
@@ -2474,9 +2717,71 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         if(value&&(!std::isfinite(*value)||*value<0))throw Error("invalid receiver timing model");
     if(timing_model.capture_seconds_per_frame&&(!std::isfinite(*timing_model.capture_seconds_per_frame)||
         *timing_model.capture_seconds_per_frame<=0))throw Error("invalid receiver capture slope");
+    const bool explicit_profiles=!profiles.empty();
+    std::vector<modem::Config> configured_burst_profiles;
+    std::size_t configured_burst_families=keys;
+    if(options.modem.symbol_burst.enabled()&&actual_settings&&!explicit_profiles) {
+        const auto settings=live::detail::normalized_layout(*actual_settings);
+        std::vector<std::optional<Crypto>> families;
+        std::vector<Bytes> fingerprints;
+        if(settings.permits_plaintext())families.emplace_back();
+        const auto add_key=[&](const Crypto& key) {
+            const auto tag=key.mac(Bytes{'D','P','-','R','X','-','B','A','N','K'});
+            if(std::find(fingerprints.begin(),fingerprints.end(),tag)==fingerprints.end()) {
+                fingerprints.push_back(tag);families.emplace_back(key);
+            }
+        };
+        if(settings.transfer.key)add_key(*settings.transfer.key);
+        for(const auto& key:settings.receive_keys)add_key(key);
+        if(options.key)add_key(*options.key);
+        configured_burst_families=families.size();
+        for(const auto& key:families) {
+            auto family=settings.transfer.automatic_receive_profiles?
+                tuning::receive_profiles(settings.transfer.modem,settings.transfer.receive_targets_db_hz,
+                    settings.transfer.receive_pattern_mode,key.has_value()):std::vector<modem::Config>{settings.transfer.modem};
+            // A selected preview with a different RF policy can match the
+            // already configured waveform. Keep that real receiver's whole
+            // domain instead of inventing another parallel receiver for it.
+            auto candidate=options.modem;candidate.data_key=key;
+            if(candidate.spreading_mode==modem::SpreadingMode::pattern)candidate.scramble=key.has_value();
+            if(key.has_value()==options.key.has_value()&&
+               std::none_of(family.begin(),family.end(),[&](auto c) {
+                   c.data_key=key;if(c.spreading_mode==modem::SpreadingMode::pattern)c.scramble=key.has_value();
+                   return same_profile(c,candidate);
+               }))family.push_back(candidate);
+            std::vector<modem::Config> distinct;
+            for(auto c:family) {
+                c.data_key=key;
+                if(c.spreading_mode==modem::SpreadingMode::pattern)c.scramble=key.has_value();
+                if(std::any_of(distinct.begin(),distinct.end(),[&](const auto& old) {
+                    return same_profile(c,old)&&c.oscillator_search==old.oscillator_search&&
+                        c.receiver_strategy==old.receiver_strategy&&c.receiver_cpu_budget==old.receiver_cpu_budget&&
+                        c.frequency_search_multiplier==old.frequency_search_multiplier;
+                }))continue;
+                distinct.push_back(c);
+                auto family_options=options;family_options.modem=c;family_options.key=key;
+                auto bound=key?transfer::seeded_config(family_options,options.modem.stream_epoch):c;
+                if(bound.symbol_burst.enabled())bound=modem::scheduled_estimate_config(bound);
+                configured_burst_profiles.push_back(std::move(bound));
+            }
+        }
+        // An actual policy forbidding plaintext must not acquire a synthetic
+        // public bank just because the selected preview is unencrypted.
+        if(configured_burst_profiles.empty())throw Error("configured receiver permits no matching receive family");
+        profiles=configured_burst_profiles;keys=1; // Families are explicit rows, never multiplied twice.
+    }
     if(profiles.empty())profiles=std::span(&options.modem,1);
+    std::vector<modem::Config> normalized_burst_profiles;
+    if(std::any_of(profiles.begin(),profiles.end(),[](const auto& c){return c.symbol_burst.enabled();})) {
+        normalized_burst_profiles.assign(profiles.begin(),profiles.end());
+        for(auto& c:normalized_burst_profiles)if(c.symbol_burst.enabled()) {
+            if(configured_burst_profiles.empty())c.data_key=options.key;
+            c=modem::scheduled_estimate_config(c);
+        }
+        profiles=normalized_burst_profiles;
+    }
     std::optional<ReceiverLayoutContext> layout;
-    layout=receiver_layout_context(options,profiles,keys,work_mode,actual_settings);
+    layout=receiver_layout_context(options,profiles,keys,work_mode,actual_settings,timing_model);
     Estimate result;result.receiver_profiles=profiles.size();result.receiver_work_mode=work_mode;
     result.probability_reference_only=arrival_policy(options,options.modem).has_value()||options.modem.dsss_factor>1;
     result.receiver_work_assumptions=work_mode==ReceiverWorkMode::sampled_simulation?
@@ -2525,7 +2830,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
     Work matching_work;
     const modem::Config* matching_profile=nullptr;
     struct BankEntry {const modem::Config* profile;SearchBank bank;};
-    struct WorkEntry {std::size_t bank;std::uint64_t training_samples;Work work;};
+    struct WorkEntry {std::size_t bank;std::uint64_t training_samples;std::size_t established_bits;Bytes burst_calendar_tag;Work work;};
     // This cache lasts only for one estimate. Keys/epochs do not change the
     // search geometry; each receive profile still contributes its full cost.
     // Keep waveform identity separate from oscillator policy so matching
@@ -2544,20 +2849,28 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         });
         if(found!=banks.end())return static_cast<std::size_t>(found-banks.begin());
         auto keyed_profile=profile;
-        if(options.key)keyed_profile.data_key=options.key;
+        if(options.key&&!profile.symbol_burst.enabled())keyed_profile.data_key=options.key;
         banks.push_back({&profile,search_bank(keyed_profile,arrival_policy(options,keyed_profile).has_value()&&
             work_mode!=ReceiverWorkMode::sampled_simulation)});
         return banks.size()-1;
     };
     std::size_t matching_bank=0;
-    bool matching_supported=false,all_work_supported=true,all_cost_available=true;
+    bool matching_supported=false,all_work_supported=true,all_cost_available=true,all_workspace_supported=true,all_initial_coverage=true;
     bool all_sustained_modeled=true;
     long double sustained_cpu=0,fallback_sustained_cpu=0;
     const auto frequency=channel.frequency_offset_hz+static_cast<long double>(config.carrier_hz)*channel.clock_error_ppm*1e-6L;
     for(const auto& profile:profiles) {
         estimate_detail::check(stop);
         modem::validate(profile);
-        const auto matches=same_profile(config,profile);
+        auto profile_options=options;
+        if(profile.symbol_burst.enabled())profile_options.key=profile.data_key;
+        const auto same_key=[](const std::optional<Crypto>& a,const std::optional<Crypto>& b) {
+            if(a.has_value()!=b.has_value())return false;
+            return !a||a->mac(Bytes{'D','P','-','R','X','-','B','A','N','K'})==
+                b->mac(Bytes{'D','P','-','R','X','-','B','A','N','K'});
+        };
+        const auto matches=same_profile(config,profile)&&
+            (!config.symbol_burst.enabled()||same_key(profile_options.key,options.key));
         result.profile_matches|=matches;
         const auto index=bank_index(profile);
         const auto& candidate_bank=banks[index].bank;
@@ -2565,19 +2878,25 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         // All its remaining profile inputs are included in the bank identity;
         // media, options, key/profile counts and matching wire bits are fixed.
         const auto training_samples=modem::training_sample_count(profile);
+        const auto established_bits=matches?transmission.wire_bits:0;
+        const auto calendar_tag=profile.symbol_burst.enabled()&&profile.data_key&&profile.symbol_burst.random_limit?
+            profile.data_key->mac(Bytes{'D','P','-','S','B','-','C','A','L','-','C','O','S','T'}):Bytes{};
         const auto existing=std::find_if(work_entries.begin(),work_entries.end(),[&](const auto& entry) {
-            return entry.bank==index&&entry.training_samples==training_samples;
+            return entry.bank==index&&entry.training_samples==training_samples&&
+                entry.established_bits==established_bits&&entry.burst_calendar_tag==calendar_tag;
         });
         const auto work=existing!=work_entries.end()?existing->work:
-            receiver_work(profile,candidate_bank,media*profile.sample_rate,options,profiles.size(),keys,
+            receiver_work(profile,candidate_bank,media*profile.sample_rate,profile_options,profiles.size(),keys,
                           matches?transmission.wire_bits:0,local_window_seconds,work_mode,timing_model,layout?&*layout:nullptr,stop);
-        if(existing==work_entries.end())work_entries.push_back({index,training_samples,work});
+        if(existing==work_entries.end())work_entries.push_back({index,training_samples,established_bits,calendar_tag,work});
         serial+=work.serial;parallel+=work.parallel;all_work_supported&=work.work_supported;
+        all_workspace_supported&=work.workspace_supported;
+        all_initial_coverage&=!candidate_bank.limited||(work.strategy.full_frequency_coverage&&work.strategy.full_clock_coverage);
         result.gpu_work_supported&=work.strategy.backend==modem::ReceiverBackend::existing_complex && !work.strategy.scheduled;
         gpu_host+=work.fft_cost_split?work.fft_host_operations:0;
         gpu_numeric+=work.fft_cost_split?work.fft_gpu_operations:work.parallel;
         const auto fallback_work=work.timing_window_modeled?
-            receiver_work(profile,candidate_bank,media*profile.sample_rate,options,profiles.size(),keys,
+            receiver_work(profile,candidate_bank,media*profile.sample_rate,profile_options,profiles.size(),keys,
                 matches?transmission.wire_bits:0,local_window_seconds,ReceiverWorkMode::hardware_fallback,timing_model,layout?&*layout:nullptr,stop):work;
         fallback_serial+=fallback_work.serial;fallback_parallel+=fallback_work.parallel;
         fallback_tracking+=fallback_work.tracking_serial;
@@ -2614,8 +2933,9 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
             }
         }
     }
-    result.receiver_workspace_supported=matching_profile&&matching_work.workspace_supported&&layout->cohort_capacity>0;
-    result.receiver_work_supported=matching_profile&&all_work_supported;
+    result.receiver_workspace_supported=matching_profile&&matching_work.workspace_supported&&layout->cohort_capacity>0&&
+        (!config.symbol_burst.enabled()||all_workspace_supported);
+    result.receiver_work_supported=matching_profile&&all_work_supported&&(!config.symbol_burst.enabled()||all_initial_coverage);
     result.hardware_sustained_modeled=matching_profile&&all_sustained_modeled;
     if(result.hardware_sustained_modeled) {
         result.hardware_sustained_realtime_ratio=finite_seconds(sustained_cpu);
@@ -2657,6 +2977,245 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         result.receiver_frontend_seconds=result.receiver_search_seconds=unknown;
         result.receiver_kernel_rebuild_seconds=result.receiver_kernel_rebuild_upper_seconds=unknown;
         result.receiver_work_supported=false;
+    }
+    if(config.symbol_burst.enabled()&&!support_only) {
+        auto& burst=result.symbol_burst;burst.enabled=true;
+        burst.wait_symbols=config.symbol_burst.wait_symbols;
+        burst.initial_profiles=profiles.size();burst.initial_key_families=configured_burst_families;
+        burst.configured_bank_modeled=actual_settings&&!explicit_profiles;
+        burst.effective_random_limit=options.key?config.symbol_burst.random_limit:0;
+        const modem::SymbolBurstPlan plan(config);
+        burst.support_seconds=finite_seconds((static_cast<long double>(plan.symbol_samples())+2.L*plan.padding_samples())/config.sample_rate);
+        burst.minimum_spacing_seconds=finite_seconds(static_cast<long double>(plan.minimum_spacing_samples())/config.sample_rate);
+        long double total_spacing=0;
+        for(unsigned extra=0;extra<=plan.random_limit();++extra)
+            total_spacing+=plan.spacing_samples_for_additional_wait(extra);
+        burst.mean_spacing_seconds=finite_seconds(total_spacing/(plan.random_limit()+1)/config.sample_rate);
+        burst.maximum_spacing_seconds=finite_seconds(static_cast<long double>(
+            plan.spacing_samples_for_additional_wait(plan.random_limit()))/config.sample_rate);
+        burst.seeking_realtime_ratio=result.simulated_seconds>0?result.receiver_cpu_seconds/result.simulated_seconds:0;
+        if(result.hardware_sustained_modeled)burst.seeking_realtime_ratio=std::max(
+            burst.seeking_realtime_ratio,result.hardware_sustained_realtime_ratio);
+        burst.scope="Engineering finite initial-cohort allowance conditional on successful first-symbol publication; native FFT rolling cohorts are included where modeled. Original complete-symbol windows and the full configured key/profile and oscillator/timing domains remain. Compact and amplitude automatic rolling cold-acquisition cost and peak residency are unqualified, as in the ordinary planner. One settled source is modeled thereafter; extra active streams can remove quiet. Not measured backlog rescue.";
+        const auto policy=arrival_policy(options,config);
+        const bool all_profiles_burst=std::all_of(profiles.begin(),profiles.end(),[](const auto& p){return p.symbol_burst.enabled();});
+        burst.timing_qualified=matching_profile&&policy&&all_profiles_burst&&
+            (arrival_model_available(options,config,work_mode,timing_model)||
+             (!options.clock_sync&&(work_mode==ReceiverWorkMode::hardware_calendar_model||work_mode==ReceiverWorkMode::hardware_timing_model)));
+        if(!all_profiles_burst)burst.limit="A continuous receive profile prevents a single Burst capture-exclusion model; ordinary seeking work retained.";
+        else if(!burst.timing_qualified)burst.limit="Scheduled capture exclusion needs a finite declared UTC/capture timing model; ordinary seeking work retained.";
+        else if(!result.receiver_workspace_supported||!result.receiver_work_supported)
+            burst.limit="Initial complete-symbol search/workspace is unsupported; silence cannot reduce the whole-symbol allocation.";
+        else {
+            const auto& bank=banks[matching_bank].bank;
+            const auto rate_uncertainty=timing_model.capture_rate_uncertainty_fraction.value_or(
+                std::max(1-bank.minimum_rate,bank.maximum_rate-1));
+            const auto slope=config.sample_rate*timing_model.capture_seconds_per_frame.value_or(1./config.sample_rate);
+            const auto slow=std::min<long double>(bank.minimum_rate,slope-rate_uncertainty);
+            const auto physical_guard_scale=std::max({1.L,static_cast<long double>(bank.maximum_rate),
+                1.L/bank.minimum_rate});
+            const auto capture_error=std::max(clock_sync::audio_lag_radius(options.audio_timing_error_seconds),
+                timing_model.capture_error_seconds.value_or(clock_sync::audio_lag_radius(options.audio_timing_error_seconds)));
+            // Preserve causal audio dating once. Offset moves the entire window;
+            // uncertainty expands both ends. Rate age includes skipped UTC time.
+            const auto absent=std::max(1.L,std::ceil(6.L*config.sample_rate*bank.maximum_rate/samples_per_symbol));
+            const auto slots=static_cast<long double>(transmission.wire_bits)+absent;
+            // Acquisition already pays the first accepted complete symbol.
+            const auto following_slots=std::max(0.L,slots-1);
+            const auto prefix=static_cast<long double>(modem::training_sample_count(config))/config.sample_rate;
+            const auto suppression=static_cast<long double>(modem::suppression_sample_count(config))/config.sample_rate;
+            const auto maximum_spacing=[](const modem::SymbolBurstPlan& p) {
+                return p.spacing_samples_for_additional_wait(p.random_limit());
+            };
+            const auto physical_span=prefix+std::max(0.L,slots-1)*burst.minimum_spacing_seconds+burst.support_seconds+suppression;
+            const auto maximum_age=prefix+std::max(0.L,slots-1)*
+                (static_cast<long double>(maximum_spacing(plan))/config.sample_rate)+burst.support_seconds+suppression;
+            const auto acquisition_radius=options.clock_sync?policy->half_window_seconds():options.search_seconds+1.L;
+            const auto feed_slack=1.L+std::ceil(static_cast<long double>(live::detail::plot_size)/config.sample_rate);
+            // Conditional successful first publication: wait for the complete
+            // selected symbol and its actual initial FFT/pipeline, then the
+            // joined feed/refresh boundary. This is not a timeout promising
+            // acquisition when signal evidence fails. Later/joint acquisition
+            // retains the separate unbounded-seeking diagnostic.
+            auto first_publication=std::max<long double>(burst.support_seconds/slow,
+                std::max(matching_work.geometry.first_fft_seconds,
+                    matching_work.geometry.first_qualified_window_seconds));
+            if(matching_work.strategy.backend==modem::ReceiverBackend::amplitude_energy) {
+                modem::PatternSearch search;search.hypotheses=bank.hypotheses;
+                search.admitted_frequency_half_width_hz=bank.frequency.requested_half_width_hz;
+                search.admitted_clock_half_width_ppm=bank.requested_clock_ppm;
+                const auto amplitude=modem::pattern_amplitude_geometry(*matching_profile,search);
+                if(amplitude.supported)first_publication+=amplitude.block_seconds;
+                else first_publication+=burst.support_seconds/slow;
+            }
+            const auto admission_until=prefix+first_publication+2*(acquisition_radius+capture_error+
+                clock_sync::audio_lag_radius(options.audio_timing_error_seconds))+feed_slack;
+            burst.acquisition_admission_seconds=finite_seconds(admission_until);
+            const auto cohort_lifetime=[&](const modem::Config& profile,bool minimum_calendar=false) {
+                const auto index=bank_index(profile);
+                const auto profile_slow=banks[index].bank.minimum_rate;
+                auto lifetime=(static_cast<long double>(modem::symbol_sample_count(profile))+
+                    modem::training_sample_count(profile)+2.L*modem::pattern_pulse_padding_samples(profile))/
+                    profile.sample_rate/profile_slow+2*options.search_seconds+4+
+                    20*std::max({1.L,static_cast<long double>(banks[index].bank.maximum_rate),1.L/profile_slow})+
+                    std::ceil(static_cast<long double>(live::detail::plot_size)/profile.sample_rate);
+                const auto alternatives=(profile.scramble||profile.dsss)?modem::deferred_initial_symbols(profile):1U;
+                const modem::SymbolBurstPlan profile_plan(profile);
+                lifetime+=(alternatives-1)*static_cast<long double>(minimum_calendar?
+                    profile_plan.minimum_spacing_samples():maximum_spacing(profile_plan))/profile.sample_rate/profile_slow;
+                // Some original pipelines need a whole additional FFT block
+                // before first publication or retirement. Preserve that actual
+                // geometry even when it exceeds the sampled support endpoint.
+                for(const auto& entry:work_entries)if(entry.bank==index)
+                    lifetime=std::max({lifetime,minimum_calendar?0.L:entry.work.cohort_lifetime,
+                        static_cast<long double>(entry.work.geometry.first_fft_seconds)+
+                            (modem::symbol_burst_public_rolling_search(profile)?
+                                entry.work.geometry.fft_hop_seconds+5.L*entry.work.bin_samples/profile.sample_rate:0)+
+                            2*options.search_seconds+feed_slack});
+                return lifetime;
+            };
+            auto acquisition_horizon=admission_until;
+            auto minimum_acquisition_horizon=admission_until;
+            for(const auto& profile:profiles)
+                acquisition_horizon=std::max(acquisition_horizon,admission_until+cohort_lifetime(profile));
+            for(const auto& profile:profiles)
+                minimum_acquisition_horizon=std::max(minimum_acquisition_horizon,admission_until+cohort_lifetime(profile,true));
+            const auto uncertainty=acquisition_radius+capture_error+
+                clock_sync::audio_lag_radius(options.audio_timing_error_seconds)+
+                rate_uncertainty*std::max(maximum_age,acquisition_horizon)+1.L/config.sample_rate;
+            burst.guard_before_seconds=burst.guard_after_seconds=finite_seconds(20.L*physical_guard_scale+uncertainty);
+            if(!(slow>0)||!std::isfinite(uncertainty))burst.limit="Capture rate/timing interval cannot bound the next required symbol.";
+            else {
+                const auto capture=burst.support_seconds/slow+burst.guard_before_seconds+burst.guard_after_seconds;
+                // Outward sample rounding and two endpoint cells preserve whole
+                // FFT/compact dispatch boundaries at separated capture windows.
+                const auto captured_samples=std::ceil(capture*config.sample_rate)+2;
+                burst.capture_seconds_per_slot=finite_seconds(captured_samples/config.sample_rate);
+                burst.useful_quiet_seconds=std::max(0.,burst.minimum_spacing_seconds-burst.capture_seconds_per_slot);
+                burst.capture_fraction=std::min(1.,burst.capture_seconds_per_slot/burst.minimum_spacing_seconds);
+                auto slot_options=options;slot_options.timestamp=config.stream_epoch;
+                auto slot_config=*matching_profile;
+                // Keep the selected numerical receiver and its original peak
+                // allowance. Settling does not permit a different cheaper bank.
+                slot_config.receiver_strategy=matching_work.strategy.backend==modem::ReceiverBackend::amplitude_energy?
+                    modem::ReceiverStrategy::amplitude_only:matching_work.strategy.backend==modem::ReceiverBackend::frequency_axis?
+                    modem::ReceiverStrategy::complex_only:modem::ReceiverStrategy::existing_only;
+                slot_options.modem=slot_config;
+                auto slot_layout=*layout;slot_layout.amplitude_family_bank_count=slot_layout.amplitude_fallback_family_bank_count=1;
+                const auto original_allowance=static_cast<std::size_t>(std::max(0.,matching_work.geometry.per_bank_workspace_bytes));
+                const auto control=live::receiver_control_margin(slot_config,options.key.has_value());
+                if(original_allowance<=std::numeric_limits<std::size_t>::max()-control)
+                    slot_layout.cohort_capacity=std::min(slot_layout.cohort_capacity,original_allowance+control);
+                const auto slot=receiver_work(slot_config,bank,captured_samples,slot_options,profiles.size(),1,
+                    0,local_window_seconds,ReceiverWorkMode::hardware_fallback,timing_model,&slot_layout,stop,true);
+                const auto continuation=matching_work.tracking_windows>0?
+                    matching_work.tracking_serial/matching_work.tracking_windows:0.L;
+                // Settled FFT streams execute continue_tracks(), not a new
+                // acquisition FFT for every guarded sample. Its full-bank
+                // complete-symbol fits are already priced in tracking_serial.
+                // Compact/amplitude keep their full incremental slot allowance.
+                const bool fft_continuation=(matching_work.strategy.backend==modem::ReceiverBackend::frequency_axis||
+                    (!matching_work.compact&&matching_work.strategy.backend==modem::ReceiverBackend::existing_complex))&&continuation>0;
+                const auto slot_cpu=fft_continuation?
+                    (captured_samples*projection_operations_per_sample+continuation+4096)/serial_operations_per_second:
+                    (slot.serial+continuation)/
+                        serial_operations_per_second+slot.parallel/cpu_scoring_operations_per_second;
+                const auto slot_upper=slot_cpu+(fft_continuation?0.L:
+                    std::max(0.L,slot.kernel_upper_serial-slot.kernel_serial)/serial_operations_per_second);
+                // The ordinary model reports exact-interval kernel reuse
+                // centrally and all-cell rebuilding separately. Burst retains
+                // the same cache and identity checks; its calendar does not
+                // turn every cell into a proven cache miss.
+                bool supported=(fft_continuation||(slot.cost_available&&slot.work_supported&&slot.workspace_supported&&
+                    slot.strategy.backend==matching_work.strategy.backend))&&std::isfinite(slot_cpu)&&slot_cpu>0;
+                // All original private first-start alternatives finish their
+                // already promised four-symbol search before tail retirement.
+                // This deliberately charges a finite conservative acquisition
+                // tail rather than perpetual new first-start admissions.
+                long double acquisition_cpu=.03L,acquisition_upper_extra=0;
+                for(const auto& profile:profiles) {
+                    const auto index=bank_index(profile);
+                    auto initial_options=options;initial_options.key=profile.data_key;
+                    const auto observe_until=admission_until+cohort_lifetime(profile);
+                    const auto initial=receiver_work(profile,banks[index].bank,observe_until*profile.sample_rate,
+                        initial_options,profiles.size(),keys,0,local_window_seconds,work_mode,timing_model,&*layout,stop,
+                        false,admission_until);
+                    burst.acquisition_new_epoch_admissions+=finite_seconds(initial.new_epoch_admissions);
+                    supported&=initial.cost_available&&initial.work_supported&&initial.workspace_supported;
+                    acquisition_cpu+=initial.serial/serial_operations_per_second+
+                        initial.parallel/cpu_scoring_operations_per_second;
+                    acquisition_upper_extra+=std::max(0.L,initial.kernel_upper_serial-initial.kernel_serial)/serial_operations_per_second;
+                }
+                burst.acquisition_observation_seconds=finite_seconds(acquisition_horizon);
+                burst.acquisition_cpu_seconds=finite_seconds(acquisition_cpu);
+                burst.acquisition_cpu_upper_seconds=finite_seconds(acquisition_cpu+acquisition_upper_extra);
+                burst.tracked_cpu_seconds_per_slot=finite_seconds(slot_cpu);
+                burst.tracked_cpu_upper_seconds_per_slot=finite_seconds(slot_upper);
+                burst.tracked_realtime_ratio=burst.tracked_cpu_seconds_per_slot/burst.minimum_spacing_seconds;
+                burst.tracked_realtime_upper_ratio=burst.tracked_cpu_upper_seconds_per_slot/burst.minimum_spacing_seconds;
+                burst.quiet_drain_ratio=burst.useful_quiet_seconds>0?
+                    burst.tracked_cpu_seconds_per_slot/burst.useful_quiet_seconds:std::numeric_limits<double>::infinity();
+                burst.finite_observation_seconds=finite_seconds(std::max(physical_span+
+                    burst.guard_before_seconds+burst.guard_after_seconds,minimum_acquisition_horizon));
+                // Numerator retains the longest possible initial capture debt;
+                // its denominator uses J=0. Random extra waits cannot create
+                // an advertised CPU allowance unavailable at minimum spacing.
+                burst.finite_receiver_cpu_seconds=finite_seconds(acquisition_cpu+following_slots*slot_cpu+processing);
+                burst.finite_realtime_ratio=burst.finite_receiver_cpu_seconds/burst.finite_observation_seconds;
+                burst.finite_realtime_upper_ratio=finite_seconds(acquisition_cpu+acquisition_upper_extra+
+                    following_slots*slot_upper+processing)/burst.finite_observation_seconds;
+                burst.modeled=supported&&std::isfinite(burst.finite_realtime_ratio);
+                burst.recurring_service_fits=burst.modeled&&burst.useful_quiet_seconds>0&&
+                    burst.tracked_realtime_ratio<=config.receiver_cpu_budget;
+                for(const auto wait:{1U,2U,3U,5U,10U})if(wait>=burst.wait_symbols) {
+                    auto candidate=config;candidate.symbol_burst.wait_symbols=wait;
+                    const modem::SymbolBurstPlan candidate_plan(candidate);
+                    const auto spacing=static_cast<long double>(candidate_plan.minimum_spacing_samples())/config.sample_rate;
+                    auto horizon=prefix+burst.support_seconds+2*options.search_seconds+3;
+                    for(const auto& profile:profiles) {
+                        auto profile_candidate=profile;profile_candidate.symbol_burst.wait_symbols=wait;
+                        const modem::SymbolBurstPlan profile_plan(profile_candidate);
+                        const auto profile_rate=banks[bank_index(profile)].bank.minimum_rate;
+                        const auto lifetime=(static_cast<long double>(modem::symbol_sample_count(profile))+
+                            modem::training_sample_count(profile)+2.L*modem::pattern_pulse_padding_samples(profile))/
+                            profile.sample_rate/profile_rate+2*options.search_seconds+4+
+                            20*std::max({1.L,static_cast<long double>(banks[bank_index(profile)].bank.maximum_rate),1.L/profile_rate})+
+                            std::ceil(static_cast<long double>(live::detail::plot_size)/profile.sample_rate);
+                        const auto alternatives=(profile.scramble||profile.dsss)?modem::deferred_initial_symbols(profile):1U;
+                        horizon=std::max(horizon,lifetime+(alternatives-1)*
+                            static_cast<long double>(maximum_spacing(profile_plan))/profile.sample_rate/profile_rate);
+                    }
+                    horizon+=admission_until; // latest pre-barrier cohort retains its full tail
+                    const auto age=prefix+std::max(0.L,slots-1)*
+                        static_cast<long double>(maximum_spacing(candidate_plan))/config.sample_rate+
+                        burst.support_seconds+suppression;
+                    const auto candidate_uncertainty=acquisition_radius+capture_error+
+                        clock_sync::audio_lag_radius(options.audio_timing_error_seconds)+
+                        rate_uncertainty*std::max(age,horizon)+1.L/config.sample_rate;
+                    const auto candidate_samples=std::ceil((burst.support_seconds/slow+40*physical_guard_scale+2*candidate_uncertainty)*
+                        config.sample_rate)+2;
+                    auto candidate_config=slot_config;candidate_config.symbol_burst.wait_symbols=wait;
+                    auto candidate_options=slot_options;candidate_options.modem=candidate_config;
+                    const auto candidate_work=receiver_work(candidate_config,bank,candidate_samples,candidate_options,
+                        profiles.size(),1,0,local_window_seconds,ReceiverWorkMode::hardware_fallback,
+                        timing_model,&slot_layout,stop,true);
+                    const auto candidate_cpu=fft_continuation?
+                        (candidate_samples*projection_operations_per_sample+continuation+4096)/serial_operations_per_second:
+                        (candidate_work.serial+continuation)/
+                            serial_operations_per_second+candidate_work.parallel/cpu_scoring_operations_per_second;
+                    if(candidate_work.workspace_supported&&candidate_work.work_supported&&
+                       candidate_work.strategy.backend==matching_work.strategy.backend&&
+                       spacing>candidate_samples/config.sample_rate&&candidate_cpu/spacing<=config.receiver_cpu_budget) {
+                        burst.recommended_wait_symbols=wait;break;
+                    }
+                }
+                burst.limit=!burst.modeled?"Tracked backend/full-domain cost is unsupported; ordinary seeking estimate retained.":
+                    burst.useful_quiet_seconds<=0?"No demonstrated backlog rescue at this setting: guarded capture windows overlap.":
+                    !burst.recurring_service_fits?"No demonstrated backlog rescue at this setting: recurring work exceeds the selected CPU allowance.":
+                    "Potential recurring budget relief only; normal startup and actual paced backlog drain still require qualification.";
+                result.receiver_work_assumptions+="; Symbol_Burst finite acquisition debt plus full-domain guarded-slot work, J=0; seeking and one-settled-reception costs reported separately";
+            }
+        }
     }
     if(!transmission.wire_bits)return result;
 
@@ -2769,6 +3328,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
     result.clock_in_search=matching_work.strategy.backend==modem::ReceiverBackend::amplitude_energy?
         within_representation_bound(channel.clock_error_ppm,matching_work.strategy.amplitude_clock_half_width_ppm):
         (!oscillator_policy||paired_clock_coverage(bank,frequency,channel.clock_error_ppm));
+    if(support_only)return result;
     if(matching_work.strategy.backend==modem::ReceiverBackend::amplitude_energy&&!scheduled_complex) {
         result.probability_reference_only=true;
         result.probability_model_limit="Amplitude-only full-bank RX sensitivity is unqualified";
@@ -3283,5 +3843,10 @@ Estimate estimate_with_receiver_settings(const transfer::Estimate& transmission,
         bool compute_probability,double window,std::size_t trials,ReceiverWorkMode mode,
         ReceiverTimingModel timing,std::stop_token stop) {
     return estimate_impl(transmission,options,raw_bits,channel,profiles,keys,compute_probability,window,trials,mode,timing,&settings,stop);
+}
+Estimate estimate_receiver_support(const transfer::Estimate& transmission,const transfer::Options& options,
+        const modem::ChannelConfig& channel,std::span<const modem::Config> profiles,std::size_t keys,
+        ReceiverWorkMode mode,ReceiverTimingModel timing,const live::Settings* settings,std::stop_token stop) {
+    return estimate_impl(transmission,options,true,channel,profiles,keys,false,100,4096,mode,timing,settings,stop,true);
 }
 }

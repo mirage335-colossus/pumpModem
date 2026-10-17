@@ -7,6 +7,7 @@
 #include "datapump/sched_hop.hpp"
 #include "datapump/scheduled_symbol_calendar.hpp"
 #include "datapump/symbol_schedule.hpp"
+#include "datapump/symbol_burst.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -44,7 +45,7 @@ void configure_transmit_timing_protection(audio::Options& output,const modem::Co
     output.timing_stop_duration_seconds=protection.stop_seconds;
     output.timing_independent_cover_seconds=protection.independent_cover_seconds;
     output.timing_protected_payload_end={};
-    if(modem::scheduled_bursts(config)) {
+    if(config.symbol_burst.enabled() || modem::scheduled_bursts(config)) {
         output.timing_protected_payload_end=[source=std::move(source)](std::uint64_t frontier)->std::optional<std::uint64_t> {
             const auto* transmitter=source();
             if(!transmitter)return std::nullopt;
@@ -70,6 +71,45 @@ ScheduledTransmission schedule_transmission(const modem::Config& config, Factory
             return make(epoch);
         }
     };
+    if(config.symbol_burst.enabled()) {
+        const modem::SymbolBurstPlan plan(config);
+        const auto rate=plan.sample_rate();
+        const auto training=modem::training_sample_count(config);
+        const auto before=[&](modem::SymbolBurstCoordinate point,std::uint64_t samples,bool clamp=false) {
+            const auto whole=samples/rate,remainder=samples%rate;
+            const auto borrow=point.phase<remainder?1U:0U;
+            const auto seconds=modem::symbol_burst_detail::add(whole,borrow);
+            if(point.epoch<seconds) {
+                if(clamp)return modem::SymbolBurstCoordinate{};
+                throw Error("Symbol_Burst preparation precedes the representable UTC clock");
+            }
+            return modem::SymbolBurstCoordinate{point.epoch-seconds,static_cast<std::uint32_t>(borrow?point.phase+rate-remainder:point.phase-remainder)};
+        };
+        const auto minimum_support=before({minimum_epoch,0},plan.padding_samples(),true);
+        double lead=delivery_margin_seconds+.05;
+        for(unsigned attempt=0;attempt<8;++attempt) {
+            if(stop.stop_requested())throw Error("transmission cancelled");
+            const auto now=clock(),whole=std::floor(now);
+            if(!std::isfinite(now) || now<0 || static_cast<long double>(whole)>=std::ldexp(1.L,64))
+                throw Error("transmit clock exceeds the Symbol_Burst epoch range");
+            const auto phase=std::ceil((static_cast<long double>(now-whole)+lead)*rate);
+            if(!std::isfinite(phase) || phase<0 || phase>=std::ldexp(1.L,64))
+                throw Error("Symbol_Burst preparation lead exceeds the sample range");
+            auto earliest=plan.add({static_cast<std::uint64_t>(whole),0},static_cast<std::uint64_t>(phase));
+            earliest=plan.add(earliest,training);
+            const auto slot=plan.first_slot(std::max(earliest,minimum_support));
+            const auto output=before(slot.support_begin,training);
+            ScheduledTransmission result;
+            result.epoch=slot.payload_begin.epoch;result.phase_samples=slot.payload_begin.phase;
+            result.playback_epoch=static_cast<double>(output.epoch)+static_cast<double>(output.phase)/rate;
+            result.transmitter=make_at(result.epoch,result.phase_samples);
+            const auto ready=clock();
+            if(!std::isfinite(ready) || ready<now)throw Error("transmit clock moved backwards during preparation");
+            if(ready+delivery_margin_seconds<result.playback_epoch)return result;
+            lead=std::max(2*lead,ready-now+delivery_margin_seconds+.05);
+        }
+        throw Error("could not prepare transmission before its Symbol_Burst boundary");
+    }
     if (modem::scheduled_bursts(config)) {
         if (!config.data_key) throw Error("scheduled transmission requires an encryption key");
         const auto rate=config.sample_rate;
@@ -155,7 +195,8 @@ template<class Factory,class EpochClock>
 ScheduledTransmission schedule_transfer_transmission(transfer::Options& options,Factory make,
         EpochClock clock,std::stop_token stop={},std::uint64_t minimum_epoch=0,
         double delivery_margin_seconds=0) {
-    return schedule_transmission(options.modem,[&](std::uint64_t epoch,std::uint32_t phase) {
+    const auto config=options.modem.symbol_burst.enabled()?transfer::seeded_config(options,options.timestamp):options.modem;
+    return schedule_transmission(config,[&](std::uint64_t epoch,std::uint32_t phase) {
         options.timestamp=epoch;options.modem.stream_phase_samples=phase;
         return make(options);
     },std::move(clock),stop,minimum_epoch,delivery_margin_seconds);

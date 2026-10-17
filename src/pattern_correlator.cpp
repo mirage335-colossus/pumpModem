@@ -1,5 +1,6 @@
 #include "scheduled_acquisition_policy.hpp"
 #include "pattern_observation_layout.hpp"
+#include "pattern_start_geometry.hpp"
 #include "scheduled_exact_source_samples.hpp"
 #include "scheduled_exact_source_points.hpp"
 #include "scheduled_work_profile.hpp"
@@ -20,6 +21,7 @@
 #include "scheduled_linear_gain_cells.hpp"
 #include "scheduled_linear_fragment.hpp"
 #include "coarse_pulse_cells.hpp"
+#include "datapump/symbol_burst.hpp"
 #include "scheduled_pulse_chord_certificate.hpp"
 #include "scheduled_gain_chord_certificate.hpp"
 #include "scheduled_template_cpu_attribution.hpp"
@@ -606,6 +608,56 @@ struct PatternCorrelator::Impl {
     Config config;
     PatternSearch search;
     PatternCode code;
+    struct BurstLane {
+        std::uint64_t first_full_index=0,acquisition_cutoff=0;
+        long double failed_duration=0,last_guard_end=0;
+        std::uint64_t last_scored_index=std::numeric_limits<std::uint64_t>::max();
+        double last_score=0;
+        std::size_t group_first=0;
+        std::uint8_t last_bit=0;
+        bool last_full=false,last_found=false,last_qualifying=false;
+        double last_support=0,presentation_score_offset=0,presentation_support_offset=0;
+        bool pending_public_window=false;
+        bool group_was_admitted=false;
+        bool dormant=false;
+    };
+    struct BurstPulse {
+        long double base_anchor=0;
+        std::uint64_t slot=0;
+        std::size_t member_begin=0,member_end=0,remaining=0,guide=0;
+        std::int64_t last_chip=0;
+        bool needs_prepare=true,active=false;
+    };
+    struct BurstState {
+        SymbolBurstPlan plan;
+        SymbolBurstCursor cursor;
+        SymbolBurstCoordinate origin;
+        std::array<SymbolBurstSlot,3> slots;
+        std::vector<BurstLane> lanes;
+        std::vector<BurstPulse> pulses;
+        std::vector<std::size_t> pulse_members;
+        bool acquisition_suspended=false;
+        long double clock_radius=0,timing_radius=0;
+        long double original_minimum_rate=1,original_maximum_rate=1;
+        explicit BurstState(const Config& c):plan(c),cursor(plan,plan.bind_payload(c.stream_epoch,c.stream_phase_samples)),
+            origin(cursor.current().payload_begin) {
+            slots[0]=cursor.current();slots[1]=cursor.at(1);slots[2]=cursor.at(2);
+        }
+        SymbolBurstSlot slot(std::uint64_t index) const {
+            for(const auto& cached:slots)if(cached.index==index)return cached;
+            // Search workers borrow immutable calendars. A rare outlying lane
+            // uses its own bounded cursor copy instead of mutating peer state.
+            auto local=cursor;return local.at(index);
+        }
+        std::uint64_t offset(std::uint64_t index) const {return plan.distance(origin,slot(index).payload_begin);}
+        void refresh(std::uint64_t index) {
+            const auto first=index?index-1:0;
+            for(unsigned i=0;i<slots.size();++i)slots[i]=cursor.at(symbol_burst_detail::add(first,i));
+        }
+        std::size_t working_bytes() const {return sizeof(*this)+lanes.capacity()*sizeof(BurstLane)+
+            pulses.capacity()*sizeof(BurstPulse)+pulse_members.capacity()*sizeof(std::size_t);}
+    };
+    std::unique_ptr<BurstState> burst;
     // Mutable keystream/chip caches belong to one scoring worker. Completions
     // still run in hypothesis order on the caller after these workers finish.
     std::vector<PatternCode> worker_codes;
@@ -1573,6 +1625,13 @@ struct PatternCorrelator::Impl {
     Impl(Config c,PatternSearch search_options,std::size_t bytes,PatternCorrelatorOptions work_options)
         :config(c),search(std::move(search_options)),code(c,c.stream_epoch),budget(bytes),options(work_options) {
         validate(c);
+        if(c.symbol_burst.enabled()) {
+            require(search.initial_stream_symbols && search.initial_stream_symbols<=64,
+                "invalid Symbol_Burst initial source-symbol search limit");
+            if(!c.scramble && !c.dsss)search.initial_stream_symbols=1;
+            burst=std::make_unique<BurstState>(c);
+            search.search_stream_phases=false;
+        }
         // Developer-only process override for full GUI/Live paired diagnostics.
         // It changes search preparation only; all precision/reference gates
         // remain below. Unset is default-off until complete cost qualifies it.
@@ -1598,9 +1657,11 @@ struct PatternCorrelator::Impl {
             scheduled->complex_geometry=pattern_scheduled_complex_geometry(c,search,budget-existing);
             if(!scheduled->complex_geometry.supported)throw Error(scheduled->complex_geometry.reason);
         }
+        std::optional<long double> original_amplitude_clock_half_width;
         if(options.amplitude_only) {
             amplitude_geometry=std::make_unique<PatternAmplitudeGeometry>(pattern_amplitude_geometry(c,search));
             if(!amplitude_geometry->supported)throw Error(amplitude_geometry->reason);
+            original_amplitude_clock_half_width=amplitude_geometry->clock_half_width_ppm*1e-6L;
             amplitude_scratch_reservation=amplitude_geometry->fft_samples*2*sizeof(Complex)+sizeof(detail::search_fft::DoublePlan)+
                 (amplitude_geometry->bin_count+1)*sizeof(long double);
             amplitude_scratch_limit=amplitude_scratch_reservation;
@@ -1701,6 +1762,19 @@ struct PatternCorrelator::Impl {
                 require(std::abs(frequency)<tone_limit,"tone frequency uncertainty aliases binary labels");
         }
         const auto qualified=search.qualified_start_window;
+        if(burst) {
+            const auto declared=search.admitted_clock_half_width_ppm.value_or(0.)*1e-6L;
+            burst->clock_radius=2*std::max({declared,std::abs(highest_rate-1),std::abs(lowest_rate-1)});
+            const auto original_width=search.admitted_clock_half_width_ppm?std::optional<long double>{declared}:
+                original_amplitude_clock_half_width;
+            burst->original_minimum_rate=original_width?1-*original_width:lowest_rate;
+            burst->original_maximum_rate=original_width?1+*original_width:highest_rate;
+            burst->timing_radius=code.chip_samples()/(4*lowest_rate);
+            require(std::isfinite(burst->clock_radius) && burst->clock_radius<lowest_rate &&
+                std::isfinite(burst->original_minimum_rate) && std::isfinite(burst->original_maximum_rate) &&
+                burst->original_minimum_rate>0 && burst->original_minimum_rate<=burst->original_maximum_rate,
+                "Symbol_Burst timing envelope is not finite");
+        }
         if(qualified)require(std::isfinite(qualified->epoch_origin_samples) &&
             std::isfinite(qualified->phase_scale) && qualified->phase_scale>0 &&
             std::isfinite(qualified->half_width_samples) && qualified->half_width_samples>=0,
@@ -1837,6 +1911,7 @@ struct PatternCorrelator::Impl {
             static_cast<long double>(search.candidate_limit)*sizeof(PatternEvidence)+search.track_limit*(sizeof(PatternBurst)+sizeof(Emission))+
             (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double)+
             search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis);
+        if(burst)fixed+=sizeof(BurstState)+total*sizeof(BurstLane);
         if(scheduled_map() && !options.amplitude_only)fixed+=total*(sizeof(ScheduledCarry)+
             3*sizeof(std::uint64_t)+sizeof(long double));
         if(scheduled_map() && !options.amplitude_only)
@@ -1920,7 +1995,9 @@ struct PatternCorrelator::Impl {
         // pulse. Two half-chip origin parities share each projection. Affine
         // spans below cover partial chips or unaffordable shared-cell kernels;
         // unsupported legacy fractional grids retain the raw reference path.
-        const bool pulse_geometry=!scheduled_map() && !options.amplitude_only && !options.raw_reference && shaped && code.symbol_samples()>=16ULL*c.sample_rate &&
+        const bool burst_disjoint=!burst ||
+            (upper-lower+block_samples+2)*highest_rate+code.symbol_samples()<=burst->plan.minimum_spacing_samples();
+        const bool pulse_geometry=burst_disjoint && !scheduled_map() && !options.amplitude_only && !options.raw_reference && shaped && code.symbol_samples()>=16ULL*c.sample_rate &&
             // Historical low-level compact banks promise a sub-64-KiB idle
             // footprint. Application oscillator banks provide explicit pairs;
             // retain the bounded raw fallback for legacy long-chip callers.
@@ -1933,6 +2010,7 @@ struct PatternCorrelator::Impl {
         const auto pulse_extra=static_cast<long double>(pulse_count)*
             (sizeof(PulseLattice)+pulse_cell_capacity*sizeof(detail::CorrelationPulseCell))+
             total*sizeof(PulseAddress)+detail::correlation_pulse_scratch_bytes+
+            (burst?pulse_count*sizeof(BurstPulse)+total*sizeof(std::size_t):0)+
             (code.chip_samples()>4096?bank_count*(block_samples+1)*sizeof(Complex):0);
         const bool pulse_enabled=pulse_geometry && fixed+pulse_extra+denominator<=bytes;
         if(pulse_enabled) {fixed+=pulse_extra;pulse_lattices.reserve(pulse_count);pulse_addresses.reserve(count);}
@@ -2108,13 +2186,46 @@ struct PatternCorrelator::Impl {
                     }
                 } else {
                     const auto elapsed=std::max(0.L,-h.origin)*ratio;
-                    const auto index=std::floor(elapsed/code.symbol_samples());
+                    const auto index=burst?static_cast<long double>(burst_index_at(elapsed,false)):
+                        std::floor(elapsed/code.symbol_samples());
                     require(index<std::numeric_limits<std::uint64_t>::max(),"clock hint exceeds stream symbol counter");
                     h.index=static_cast<std::uint64_t>(index);hypotheses.push_back(std::move(h));
                 }
             }
         }
         require(!hypotheses.empty(),"qualified UTC interval does not intersect the existing search lattice");
+        if(burst) {
+            burst->lanes.resize(hypotheses.size());
+            const auto remainder=options.amplitude_only?search.input_sample_origin%amplitude_geometry->fft_samples:0;
+            const auto first_observation=remainder?amplitude_geometry->fft_samples-remainder:0;
+            for(std::size_t i=0;i<hypotheses.size();++i) {
+                const auto& h=hypotheses[i];
+                if(i) {
+                    const auto& previous=hypotheses[i-1];
+                    burst->lanes[i].group_first=h.frequency==previous.frequency && h.rate_index==previous.rate_index &&
+                        h.rate==previous.rate && h.phase_lower==previous.phase_lower && h.phase_upper==previous.phase_upper?
+                        burst->lanes[i-1].group_first:i;
+                }
+                burst->lanes[i].first_full_index=burst_index_at(
+                    std::max(0.L,(static_cast<long double>(first_observation)-h.origin)*h.rate),true);
+                burst->lanes[i].acquisition_cutoff=symbol_burst_detail::add(
+                    burst->lanes[i].first_full_index,search.initial_stream_symbols-1);
+            }
+            if(!pulse_lattices.empty()) {
+                burst->pulses.resize(pulse_lattices.size());
+                burst->pulse_members.resize(hypotheses.size());
+                for(const auto& address:pulse_addresses)++burst->pulses[address.lattice].member_end;
+                std::size_t begin=0;
+                for(std::size_t i=0;i<burst->pulses.size();++i) {
+                    auto& state=burst->pulses[i];const auto count=state.member_end;
+                    state.base_anchor=pulse_lattices[i].anchor;
+                    state.member_begin=begin;state.member_end=begin+count;state.remaining=begin;begin+=count;
+                }
+                for(std::size_t i=0;i<hypotheses.size();++i)
+                    burst->pulse_members[burst->pulses[pulse_addresses[i].lattice].remaining++]=i;
+                for(auto& state:burst->pulses)state.remaining=0;
+            }
+        }
         if(scheduled_map() && !options.amplitude_only) {
             scheduled->symbol_ends.resize(hypotheses.size());scheduled->end_indices.resize(hypotheses.size());scheduled->first_full_indices.resize(hypotheses.size());
             scheduled->earliest_end=std::numeric_limits<long double>::infinity();
@@ -6673,6 +6784,7 @@ struct PatternCorrelator::Impl {
         return true;
     }
     long double clock_boundary(const Hypothesis& h,std::uint64_t within=0) const {
+        if(burst)return burst_boundary(h,h.index,within);
         if(scheduled_map() && !scheduled->symbol_ends.empty() && within==code.symbol_samples()) {
             const auto i=hypotheses.index(h);
             if(scheduled->end_indices[i]==h.index)return scheduled->symbol_ends[i];
@@ -6701,6 +6813,61 @@ struct PatternCorrelator::Impl {
         return anchor+(shift*code.chip_samples()+static_cast<long double>(h.index)*code.symbol_samples()+within)/h.rate;
     }
     long double symbol_start(const Hypothesis& h) const {return clock_boundary(h);}
+    std::uint64_t burst_index_at(long double elapsed,bool full) const {
+        require(burst && std::isfinite(elapsed) && elapsed>=0 &&
+            elapsed<std::numeric_limits<std::uint64_t>::max(),"Symbol_Burst initial coordinate exceeds sample range");
+        auto local=burst->cursor;
+        const auto slot=local.seek_payload_at_or_after(burst->plan.add(burst->origin,static_cast<std::uint64_t>(std::ceil(elapsed))));
+        if(full || !slot.index)return slot.index;
+        const auto previous=local.at(slot.index-1);
+        return static_cast<long double>(burst->plan.distance(burst->origin,previous.payload_end))>elapsed?
+            previous.index:slot.index;
+    }
+    bool burst_dormant(std::size_t hypothesis) const {return burst && burst->lanes[hypothesis].dormant;}
+    long double burst_boundary(const Hypothesis& h,std::uint64_t index,std::uint64_t within=0) const {
+        if(!burst->pulses.empty()) {
+            const auto id=hypotheses.index(h);const auto& address=pulse_addresses[id];
+            const auto anchor=burst->pulses[address.lattice].base_anchor+
+                static_cast<long double>(burst->offset(index))/h.rate;
+            return anchor+(static_cast<long double>(address.shift)*code.chip_samples()+within)/h.rate;
+        }
+        return h.origin+
+            (static_cast<long double>(burst->offset(index))+within)/h.rate;
+    }
+    long double burst_guard_boundary(const Hypothesis& h,long double source,bool upper) const {
+        const auto low=source/(h.rate-burst->clock_radius),high=source/(h.rate+burst->clock_radius);
+        // Preserve every original arrival/rate trajectory. Clock uncertainty
+        // ages from the immutable origin; accepted bits never reset it.
+        return h.origin+(upper?std::max(low,high):std::min(low,high));
+    }
+    long double burst_capture_guard() const {
+        return 20.L*config.sample_rate*detail::original_physical_guard_factor(
+            burst->original_minimum_rate,burst->original_maximum_rate);
+    }
+    std::optional<std::uint64_t> burst_unobserved_end(std::uint64_t from) const {
+        if(!burst || !burst->acquisition_suspended)return std::nullopt;
+        auto end=static_cast<long double>(std::numeric_limits<std::uint64_t>::max());
+        bool consumer=false;
+        for(std::size_t i=0;i<hypotheses.size();++i) {
+            const auto& h=hypotheses[i];const auto& lane=burst->lanes[i];
+            if(h.index<=lane.first_full_index)return std::nullopt;
+            if(static_cast<long double>(from)<lane.last_guard_end)return std::nullopt;
+            if(lane.dormant)continue;
+            consumer=true;
+            const auto support=static_cast<long double>(burst->offset(h.index))-burst->plan.padding_samples();
+            const auto begin=burst_guard_boundary(h,support,false)-burst_capture_guard()-
+                burst->timing_radius;
+            if(static_cast<long double>(from)>=begin)return std::nullopt;
+            end=std::min(end,std::floor(begin));
+        }
+        if(options.amplitude_only && end<std::numeric_limits<std::uint64_t>::max()) {
+            const auto width=amplitude_geometry->fft_samples;
+            const auto residue=search.input_sample_origin%width;
+            end=std::floor((end+residue)/width)*width-residue;
+        }
+        if(!consumer || end<=from || end>=std::numeric_limits<std::uint64_t>::max())return std::nullopt;
+        return static_cast<std::uint64_t>(end);
+    }
     static bool full_rank(const Fit& fit) {
         return fit.count>2 && fit.cc*fit.ss-fit.cs*fit.cs>1e-12*std::max(1.,fit.cc*fit.ss);
     }
@@ -7337,6 +7504,7 @@ struct PatternCorrelator::Impl {
             history.capacity()*sizeof(PatternEvidence)+bursts.capacity()*sizeof(PatternBurst)+
             (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double)+
             search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis);
+        if(burst)value+=burst->working_bytes();
         if(timing)value+=sizeof(*timing)+timing->capacity()*sizeof(TimingEntry);
         value+=pulse_lattices.capacity()*sizeof(PulseLattice);
         value+=pulse_addresses.capacity()*sizeof(PulseAddress);
@@ -7718,6 +7886,30 @@ struct PatternCorrelator::Impl {
             (!emission.ended || h.burst.stream_first_symbol<emission.last_symbol))return &emission;
         return nullptr;
     }
+    std::uint64_t burst_expected_slot(const Emission& stream) const {
+        auto next=stream.last_symbol;
+        if(stream.owner && stream.owner->admitted && stream.owner->committed) {
+            require(stream.owner->committed<=std::numeric_limits<std::uint64_t>::max()-stream.owner->burst.first_stream_symbol,
+                "Symbol_Burst accepted slot overflow");
+            next=std::max(next,stream.owner->burst.first_stream_symbol+stream.owner->committed);
+        }
+        return next;
+    }
+    bool burst_current_compatible(const Hypothesis& h,const Emission& stream) const {
+        if(!burst || !timing_enabled || stream.ended || stream.published_unknown || !stream.owner || !stream.owner->admitted ||
+           h.frequency!=stream.owner->frequency || h.rate!=stream.owner->rate ||
+           h.phase_lower!=stream.owner->phase_lower || h.phase_upper!=stream.owner->phase_upper ||
+           h.phase_lower!=config.stream_phase_samples || h.phase_upper!=config.stream_phase_samples ||
+           std::abs(h.origin-stream.origin)>=static_cast<long double>(code.symbol_samples())/3)return false;
+        // This receiver owns one immutable key and calendar. Equal logical
+        // slot and canonical phase therefore name the exact same C/ordinal,
+        // never an observation from a neighboring public epoch or key.
+        return h.rate>=burst->original_minimum_rate && h.rate<=burst->original_maximum_rate;
+    }
+    Emission* burst_current_context(const Hypothesis& h) {
+        for(auto& stream:emissions)if(burst_expected_slot(stream)==h.index && burst_current_compatible(h,stream))return &stream;
+        return nullptr;
+    }
     const Hypothesis* prospective_output_owner(const Hypothesis& h) {
         const Hypothesis* owner=&h;
         for_each_resident([&](std::size_t,const auto& candidate){if(candidate.admitted && same_output_clock(h,candidate.origin,candidate.burst.frequency_hz) &&
@@ -7763,10 +7955,12 @@ struct PatternCorrelator::Impl {
         }
         return stream.reported_frequency;
     }
+    bool prefix_timing_continuation() const {return burst || (scheduled_map() && !options.amplitude_only);}
     std::size_t process_count(std::size_t count) const {
-        if(scheduled_map() && !options.amplitude_only && timing_enabled) {
+        if(prefix_timing_continuation() && timing_enabled) {
             bool common_fence=bit_limit<2;
-            if(!common_fence)for(const auto& h:hypotheses)if(h.committed)
+            if(!common_fence)for(const auto& h:hypotheses)if(h.committed &&
+                (!burst || !burst_dormant(hypotheses.index(h))))
                 for(const auto& stream:emissions)if(stream.owner!=&h && retain_timing_suffix(h,stream))
                     common_fence=true;
             if(!common_fence)return count;
@@ -7778,6 +7972,7 @@ struct PatternCorrelator::Impl {
             // Normal blocks have at most two complete symbols (Fs>=64,T>=6s),
             // so newly retained work cannot cross a gap and resume in one block.
             for(const auto& h:hypotheses) {
+                if(burst && burst_dormant(hypotheses.index(h)))continue;
                 const auto boundary=std::ceil(clock_boundary(h,code.symbol_samples()));
                 const auto span=boundary>static_cast<long double>(sample)?boundary-sample:1.L;
                 count=std::min(count,static_cast<std::size_t>(std::min<long double>(count,std::max(1.L,span))));
@@ -7790,13 +7985,18 @@ struct PatternCorrelator::Impl {
         const auto duplicate=std::min<std::uint64_t>(h.committed,stream.last_symbol-h.burst.first_stream_symbol);
         const auto through=h.burst.first_stream_symbol+duplicate;
         const auto end=duplicate==h.committed?h.committed_end:static_cast<std::uint64_t>(std::max(0.L,
-            std::ceil(scheduled_boundary(h,scheduled_source_start(h,through-1)+code.symbol_samples(),true))));
+            std::ceil(burst?burst_boundary(h,through-1,code.symbol_samples()):
+                scheduled_boundary(h,scheduled_source_start(h,through-1)+code.symbol_samples(),true))));
         h.burst.bits.erase(h.burst.bits.begin(),h.burst.bits.begin()+static_cast<std::ptrdiff_t>(duplicate));
-        h.burst.first_stream_symbol=through;h.burst.first_sample=end;
+        h.burst.first_stream_symbol=through;h.burst.first_sample=burst?
+            static_cast<std::uint64_t>(std::max(0.L,std::ceil(burst_boundary(h,through)))):end;
         h.committed-=static_cast<std::size_t>(duplicate);
     }
     bool retain_timing_suffix(const Hypothesis& h,const Emission& stream) const {
-        if(!scheduled_map() || options.amplitude_only || !timing_enabled || !timing ||
+        if(burst_current_compatible(h,stream) && h.committed &&
+           h.burst.first_stream_symbol<=burst_expected_slot(stream) &&
+           h.committed>burst_expected_slot(stream)-h.burst.first_stream_symbol)return true;
+        if(!prefix_timing_continuation() || !timing_enabled || !timing ||
            stream.ended || stream.published_unknown || h.burst.stream_first_symbol!=stream.first_symbol ||
            h.frequency!=stream.owner->frequency || h.rate!=stream.owner->rate ||
            h.phase_lower!=stream.owner->phase_lower || h.phase_upper!=stream.owner->phase_upper)return false;
@@ -7810,7 +8010,7 @@ struct PatternCorrelator::Impl {
         return false;
     }
     void trim_known_alias_prefix(Hypothesis& h) {
-        if(!scheduled_map() || options.amplitude_only || !h.admitted)return;
+        if(!prefix_timing_continuation() || !h.admitted)return;
         for(const auto& stream:emissions)if(stream.owner!=&h && stream.first_symbol==h.burst.stream_first_symbol &&
             std::abs(stream.origin-h.origin)<static_cast<long double>(code.symbol_samples())/3 &&
             ((!search.hypotheses.empty() && search.frequency_rate_competition) ||
@@ -7877,9 +8077,13 @@ struct PatternCorrelator::Impl {
             result.end_sample=count==h.committed?h.committed_end:scheduled_map()?
                 static_cast<std::uint64_t>(std::max(0.L,std::ceil(scheduled_boundary(h,
                     scheduled_source_start(h,result.first_stream_symbol+count-1)+code.symbol_samples(),true)))):
+                burst?static_cast<std::uint64_t>(std::max(0.L,std::ceil(burst_boundary(h,
+                    result.first_stream_symbol+count-1,code.symbol_samples())))):
                 result.first_sample+static_cast<std::uint64_t>(count*code.symbol_samples()/h.rate);
-            result.score=h.burst.score;
-            result.support_samples=h.burst.support_samples;
+            if(burst && !count)result.first_sample=result.end_sample;
+            result.score=h.burst.score+(burst?burst->lanes[hypotheses.index(h)].presentation_score_offset:0);
+            result.support_samples=h.burst.support_samples+
+                (burst?burst->lanes[hypotheses.index(h)].presentation_support_offset:0);
             const auto duplicate=std::find_if(bursts.begin(),bursts.end(),[&](const auto& prior) {
                 const auto delta=prior.first_sample>result.first_sample?prior.first_sample-result.first_sample:result.first_sample-prior.first_sample;
                 return prior.first_stream_symbol==result.first_stream_symbol && prior.complete==result.complete &&
@@ -7903,12 +8107,18 @@ struct PatternCorrelator::Impl {
             }
             h.burst.bits.erase(h.burst.bits.begin(),h.burst.bits.begin()+static_cast<std::ptrdiff_t>(count));
             h.burst.first_stream_symbol+=count;h.burst.first_sample=emitted_end;h.committed-=count;
+            if(burst && count)h.burst.first_sample=static_cast<std::uint64_t>(std::max(0.L,
+                std::ceil(burst_boundary(h,h.burst.first_stream_symbol))));
             stream.last_symbol=h.burst.first_stream_symbol;
             if(complete && !h.committed)stream.ended=true;
             if(!h.committed)break;
         } while(complete || flush || h.committed>=chunk);
     }
     void clear(Hypothesis& h) {
+        if(burst) {
+            auto& lane=burst->lanes[hypotheses.index(h)];
+            lane.presentation_score_offset=lane.presentation_support_offset=0;lane.pending_public_window=false;
+        }
         if(auto* state=timing_state(hypotheses.index(h)))
             state->tracking=state->pending_terminal=false;
         // Keep the finite clock hypothesis, but release a terminated message's
@@ -8055,7 +8265,10 @@ struct PatternCorrelator::Impl {
                 }
             }
         }
-        const auto address=scheduled_map()?symbol_stream_address(config,config.stream_epoch,evidence.stream_phase_samples,h.index):
+        const auto address=burst?[&] {
+            const auto payload=burst->slot(h.index).payload_begin;
+            return SymbolStreamAddress{payload.epoch,payload.phase/code.symbol_samples(),payload.phase};
+        }():scheduled_map()?symbol_stream_address(config,config.stream_epoch,evidence.stream_phase_samples,h.index):
             symbol_stream_address(config.stream_epoch,evidence.stream_phase_samples,h.index,code.symbol_samples(),config.sample_rate);
         state.decisions[h.index%2]={h.index,address.epoch,address.ordinal,evidence.score,accepted,
             (scheduled_map() && !options.amplitude_only?scheduled->observed_begin[hypothesis]<=scheduled_source_start(h,h.index):
@@ -8078,11 +8291,65 @@ struct PatternCorrelator::Impl {
             guide.frequency==owner.frequency && guide.rate==owner.rate &&
             guide.phase_lower==owner.phase_lower && guide.phase_upper==owner.phase_upper;
     }
+    void settle_burst_current_symbols() {
+        if(!burst || !timing_enabled)return;
+        for(auto& stream:emissions) {
+            if(stream.ended || !stream.owner || !stream.owner->admitted)continue;
+            const auto owner_id=hypotheses.index(*stream.owner);
+            auto& owner_lane=burst->lanes[owner_id];owner_lane.pending_public_window=false;
+            // Accepted buffered slots are immutable too. Flush that prefix
+            // before choosing only the next failed slot's independent guide.
+            if(stream.owner->committed) {
+                if(owner_lane.last_found)continue;
+                publish(*const_cast<Hypothesis*>(stream.owner),false,true,true);
+                if(stream.owner->committed){owner_lane.pending_public_window=true;timing_dirty=true;continue;}
+            }
+            const auto slot=stream.last_symbol;
+            if(stream.owner->index<=slot)continue;
+            // An accepted current owner already supplies this public slot.
+            // Its ordinary next drain remains authoritative and immutable.
+            if(owner_lane.last_scored_index==slot && owner_lane.last_found)continue;
+            auto best=hypotheses.size();bool pending=false;
+            for(std::size_t i=0;i<hypotheses.size();++i) {
+                auto& h=hypotheses[i];const auto& lane=burst->lanes[i];
+                if(burst_dormant(i) || !burst_current_compatible(h,stream))continue;
+                if(h.index<=slot){pending=true;continue;}
+                if(lane.last_scored_index!=slot || !lane.last_full || !lane.last_qualifying ||
+                   !lane.last_found || !h.admitted || existing_output_stream(h)!=&stream)continue;
+                trim_emitted_prefix(h,stream);
+                if(h.burst.first_stream_symbol!=slot || h.committed!=1 || h.burst.bits.empty() ||
+                   h.burst.bits.front()!=lane.last_bit)continue;
+                if(best==hypotheses.size() || lane.last_score>burst->lanes[best].last_score)best=i;
+            }
+            // Every original compatible arrival window must finish before an
+            // absent old owner can end the context. Silence supplies no fit.
+            owner_lane.pending_public_window=pending;
+            if(pending || best==hypotheses.size())continue;
+            auto& guide=hypotheses[best];auto& lane=burst->lanes[best];
+            const auto public_score=stream.owner->burst.score+owner_lane.presentation_score_offset;
+            const auto public_support=stream.owner->burst.support_samples+owner_lane.presentation_support_offset;
+            // These offsets are presentation bookkeeping only. The guide's
+            // own likelihood, pending chain and full-prefix proof are intact;
+            // only this newly independently qualified symbol extends output.
+            lane.presentation_score_offset=public_score-(guide.burst.score-lane.last_score);
+            lane.presentation_support_offset=public_support-(guide.burst.support_samples-lane.last_support);
+            owner_lane.pending_public_window=false;lane.pending_public_window=false;stream.owner=&guide;
+            if(auto* state=timing_state(best))state->pending_terminal=false;
+            amplitude_publication_dirty=true;
+            audio::trace::record("symbol_burst_standalone_continuation",[&](auto& fields) {
+                const auto payload=burst->slot(slot).payload_begin;
+                fields.add("index",slot);fields.add("epoch",payload.epoch);fields.add("phase",payload.phase);
+                fields.add("owner",owner_id);fields.add("guide",best);fields.add("bit",static_cast<unsigned>(lane.last_bit));
+                fields.add("score",lane.last_score);fields.add("public_score",public_score+lane.last_score);
+                fields.add("public_support",public_support+lane.last_support);
+            });
+        }
+    }
     bool continue_timing(Hypothesis& owner,const TimingState& state,const TimingRelation& proof) {
         // Continuation is a private, same-clock proof. Never replace an emitted
         // bit, infer an old prefix from a matching suffix, or cross a key/phase
         // address. The relation has checked every full admitted prefix decision.
-        if(!scheduled_map() || options.amplitude_only || !compatible_timing_guide(owner,state,proof) ||
+        if(!prefix_timing_continuation() || !compatible_timing_guide(owner,state,proof) ||
            proof.next<=state.last_accepted || proof.guide_score<=proof.owner_score)return false;
         auto& guide=hypotheses[proof.neighbor];
         for(auto& stream:emissions) {
@@ -8090,19 +8357,38 @@ struct PatternCorrelator::Impl {
                stream.last_symbol>proof.next || stream.last_symbol>proof.first_unaccepted ||
                std::abs(guide.origin-stream.origin)>=static_cast<long double>(code.symbol_samples())/3 ||
                guide.burst.first_stream_symbol>stream.last_symbol)continue;
+            if(burst) {
+                publish(owner,false,true,true);
+                if(owner.committed || stream.last_symbol>proof.next || stream.last_symbol>proof.first_unaccepted)continue;
+            }
             const auto duplicate=stream.last_symbol-guide.burst.first_stream_symbol;
             if(duplicate>guide.committed)continue; // A lost suffix cannot be reconstructed.
             if(duplicate) {
-                const auto end=static_cast<std::uint64_t>(std::max(0.L,std::ceil(scheduled_boundary(guide,
+                const auto end=static_cast<std::uint64_t>(std::max(0.L,std::ceil(burst?
+                    burst_boundary(guide,stream.last_symbol-1,code.symbol_samples()):scheduled_boundary(guide,
                     scheduled_source_start(guide,stream.last_symbol-1)+code.symbol_samples(),true))));
                 guide.burst.bits.erase(guide.burst.bits.begin(),guide.burst.bits.begin()+
                     static_cast<std::ptrdiff_t>(duplicate));
-                guide.burst.first_stream_symbol=stream.last_symbol;guide.burst.first_sample=end;
+                guide.burst.first_stream_symbol=stream.last_symbol;guide.burst.first_sample=burst?
+                    static_cast<std::uint64_t>(std::max(0.L,std::ceil(burst_boundary(guide,stream.last_symbol)))):end;
                 guide.committed-=static_cast<std::size_t>(duplicate);
             }
             // Neither absence age nor the established first sample/ordinal is
             // copied from the old timing lane. The guide retains its own fully
             // scored decisions and future source-symbol completion boundary.
+            if(burst) {
+                if(guide.committed>1)continue;
+                const auto old_id=hypotheses.index(owner),new_id=hypotheses.index(guide);
+                auto& old_lane=burst->lanes[old_id];auto& new_lane=burst->lanes[new_id];
+                if(guide.committed && (!new_lane.last_full || !new_lane.last_found ||
+                   new_lane.last_scored_index!=guide.burst.first_stream_symbol))continue;
+                const auto extra=guide.committed?new_lane.last_score:0;
+                const auto support=guide.committed?new_lane.last_support:0;
+                new_lane.presentation_score_offset=owner.burst.score+old_lane.presentation_score_offset-(guide.burst.score-extra);
+                new_lane.presentation_support_offset=owner.burst.support_samples+old_lane.presentation_support_offset-
+                    (guide.burst.support_samples-support);
+                old_lane.pending_public_window=new_lane.pending_public_window=false;
+            }
             stream.owner=&guide;amplitude_publication_dirty=true;
             return true;
         }
@@ -8163,6 +8449,7 @@ struct PatternCorrelator::Impl {
             require(pass+1<timing->size(),"timing continuation ownership did not converge");
         }
         if(continuation_only)return;
+        settle_burst_current_symbols();
         // A newly promoted owner may already hold a full publication chunk.
         // Publish it before the next accumulation so admitted bit_limit=1
         // configurations do not need an uncharged second retained slot.
@@ -8171,17 +8458,18 @@ struct PatternCorrelator::Impl {
         for(auto& entry:*timing) {
             auto& owner=hypotheses[entry.hypothesis];auto& state=entry.state;
             if(!state.tracking || !owner.admitted || !state.pending_terminal)continue;
+            if(burst && burst->lanes[entry.hypothesis].pending_public_window)continue;
             bool has_guide=false;
             for(const auto& relation:state.relations)
                 has_guide=has_guide || (!relation.invalid && relation.neighbor!=std::numeric_limits<std::size_t>::max() &&
                     relation.next>state.last_accepted && relation.guide_score>relation.owner_score &&
-                    (!scheduled_map() || options.amplitude_only || compatible_timing_guide(owner,state,relation)));
+                    (!prefix_timing_continuation() || compatible_timing_guide(owner,state,relation)));
             if(has_guide) {
                 bool ready=true,accepted=false;
                 for(const auto& relation:state.relations) {
                     if(relation.invalid || relation.neighbor==std::numeric_limits<std::size_t>::max() ||
                         relation.next<=state.last_accepted || relation.guide_score<=relation.owner_score ||
-                        (scheduled_map() && !options.amplitude_only && !compatible_timing_guide(owner,state,relation)))continue;
+                        (prefix_timing_continuation() && !compatible_timing_guide(owner,state,relation)))continue;
                     const auto& proof=timing_state(relation.neighbor)->decisions[state.terminal_index%2];
                     const auto& own=state.decisions[state.terminal_index%2];
                     if(proof.index!=state.terminal_index || !proof.full || own.index!=state.terminal_index ||
@@ -8200,6 +8488,10 @@ struct PatternCorrelator::Impl {
     void complete(Hypothesis& h,std::size_t hypothesis,std::uint64_t end,std::stop_token stop,certdiag::Probe* certificate_probe=nullptr) {
         rx_cpu::Scope cpu_scope(rx_cpu::Stage::guards);
         amplitude_publication_dirty=true;
+        const auto retained_context=h.admitted || !h.burst.bits.empty();
+        const auto admitted_before=h.admitted;
+        const bool permitted_start=!burst || !burst->acquisition_suspended ||
+            h.index<=burst->lanes[hypothesis].acquisition_cutoff || retained_context || burst_current_context(h);
         std::size_t group_count=0;
         const auto groups=phase_groups(h,group_count);
         if(scheduled_map() && !options.amplitude_only && differential_window) {
@@ -8310,7 +8602,11 @@ struct PatternCorrelator::Impl {
                 fits(h,hypothesis,selected)[e.bit],threshold());
         }
         const auto presence=!e.outer_presence_active || e.outer_presence_score>=threshold();
-        const auto standalone=e.score>=threshold() && presence;
+        const bool whole_symbol=!burst || (static_cast<long double>(h.observed_start)==std::ceil(symbol_start(h)) &&
+            static_cast<long double>(end)==std::ceil(clock_boundary(h,code.symbol_samples())) &&
+            fits(h,hypothesis,selected)[e.bit].count==end-h.observed_start);
+        const bool can_start=permitted_start && whole_symbol;
+        const auto standalone=e.score>=threshold() && presence && can_start;
         if(certificate_probe){certificate_probe->guarded=e.score;certificate_probe->original_scored=true;}
         if(options.amplitude_only && scheduled_map() && h.admitted && !standalone &&
            scheduled->observed_begin[hypothesis]<=scheduled_source_start(h,h.index)) {
@@ -8350,7 +8646,7 @@ struct PatternCorrelator::Impl {
         // Preserve a tail whose joint evidence justifies continuation. If it
         // does not, a confident current symbol must still start independently.
         // An unadmitted prefix cannot borrow that later symbol's confidence.
-        const auto reliable=presence && e.score>=search.retain_score && e.score-e.alternative_score>=1 &&
+        auto reliable=can_start && presence && e.score>=search.retain_score && e.score-e.alternative_score>=1 &&
             (group_count==1 || standalone);
         const auto can_preserve=h.admitted;
         auto preserve_gap=can_preserve &&
@@ -8371,7 +8667,12 @@ struct PatternCorrelator::Impl {
                 require(h.gap_slots<std::numeric_limits<std::size_t>::max(),"pattern missing-slot count overflow");++h.gap_slots;
             }
         } else {
-            if(standalone && pending_count && (!h.admitted || next_chain<threshold())) {publish(h);clear(h);}
+            if(standalone && pending_count && (!h.admitted || next_chain<threshold())) {
+                const bool restart_allowed=!burst || !burst->acquisition_suspended ||
+                    h.index<=burst->lanes[hypothesis].acquisition_cutoff;
+                publish(h);clear(h);
+                if(!restart_allowed)reliable=false;
+            }
             if(h.burst.bits.size()==bit_limit && e.score>=search.retain_score)
                 throw Error("pattern bit retention limit reached");
             // Weak evidence from different possible schedules cannot be added as
@@ -8388,6 +8689,10 @@ struct PatternCorrelator::Impl {
                     h.burst.stream_phase_samples=h.phase_lower;
                     h.burst.frequency_hz=e.frequency_hz;
                     if(!h.admitted){h.sum_score=h.pending_score=h.burst.score=0;h.committed=0;h.gap_slots=0;
+                        if(burst) {
+                            auto& lane=burst->lanes[hypothesis];
+                            lane.presentation_score_offset=lane.presentation_support_offset=0;lane.pending_public_window=false;
+                        }
                         if(!pending_chip_scores.empty())pending_chip_scores[hypothesis]=0;
                         h.sum_support=h.burst.support_samples=0;}
                 }
@@ -8410,12 +8715,55 @@ struct PatternCorrelator::Impl {
             } else {publish(h);clear(h);}
         }
         timing_decision(h,hypothesis,e,selected);
-        if(scheduled_map() && !options.amplitude_only)settle_timing(true);
+        if(burst && timing_enabled && !emissions.empty())timing_dirty=true;
+        if(prefix_timing_continuation())settle_timing(true);
         if(scheduled_map() && h.admitted && h.committed_end==end)scheduled->last_accepted[hypothesis]=h.index+1;
         // Only integer, fully scored failed source symbols count. A conservative
         // latest-cell END can include a few samples from the next active group;
         // those must not round an incomplete six-second failure run upward.
-        const auto failed_duration=scheduled_map()?
+        if(burst) {
+            auto& lane=burst->lanes[hypothesis];
+            lane.last_scored_index=h.index;lane.last_score=e.score;lane.last_bit=static_cast<std::uint8_t>(e.bit);
+            lane.last_full=whole_symbol;lane.last_found=h.admitted && h.committed_end==end;
+            lane.last_qualifying=whole_symbol && presence && e.score>=threshold() && e.score-e.alternative_score>=1;
+            lane.last_support=symbol_support;
+            audio::trace::record("symbol_burst_decision",[&](auto& fields) {
+                fields.add("hypothesis",hypothesis);fields.add("index",h.index);fields.add("origin",h.origin);
+                fields.add("rate",h.rate);fields.add("begin",e.first_sample);fields.add("end",end);
+                fields.add("score",e.score);fields.add("alternative_score",e.alternative_score);
+                fields.add("threshold",threshold());fields.add("bit",e.bit);fields.add("full",whole_symbol);
+                fields.add("admitted",h.admitted);fields.add("accepted",lane.last_found);
+                fields.add("stream_first_symbol",h.burst.stream_first_symbol);
+            });
+            if((admitted_before || h.admitted) && !burst->lanes[lane.group_first].group_was_admitted) {
+                burst->lanes[lane.group_first].group_was_admitted=true;
+                for(auto i=lane.group_first;i<hypotheses.size() && burst->lanes[i].group_first==lane.group_first;++i) {
+                    auto& peer=burst->lanes[i];if(!peer.dormant)continue;
+                    // A later original start may acquire just after an early
+                    // cold peer retired its last promised opportunity. Restore
+                    // only future empty fits, with the original origin/rate.
+                    require(h.index<std::numeric_limits<std::uint64_t>::max(),"Symbol_Burst future slot overflow");
+                    require(!hypotheses[i].admitted && hypotheses[i].burst.bits.empty() && !hypotheses[i].committed &&
+                        !hypotheses[i].fits[0].count && !hypotheses[i].fits[1].count,
+                        "Symbol_Burst dormant guide retained unfinished evidence");
+                    const auto frontier=static_cast<long double>(std::max({sample,amplitude_processed,end}));
+                    const auto elapsed=std::max(0.L,(frontier-hypotheses[i].origin)*hypotheses[i].rate);
+                    hypotheses[i].index=std::max({hypotheses[i].index,h.index+1,burst_index_at(elapsed,true)});
+                    peer.dormant=false;
+                    if(!burst->pulses.empty()) {
+                        auto& pulse=burst->pulses[pulse_addresses[i].lattice];
+                        if(!pulse.remaining)pulse.needs_prepare=true;
+                    }
+                }
+            }
+            if(h.admitted && h.committed_end==end)lane.failed_duration=0;
+            else if(h.admitted && whole_symbol)lane.failed_duration+=static_cast<long double>(code.symbol_samples())/h.rate;
+            else lane.failed_duration=0;
+            lane.last_guard_end=std::max(lane.last_guard_end,burst_guard_boundary(h,
+                static_cast<long double>(burst->offset(h.index))+code.symbol_samples()+burst->plan.padding_samples(),true)+
+                burst_capture_guard()+burst->timing_radius);
+        }
+        const auto failed_duration=burst?burst->lanes[hypothesis].failed_duration:scheduled_map()?
             static_cast<long double>(h.index+1-scheduled->last_accepted[hypothesis])*code.symbol_samples()/h.rate:
             static_cast<long double>(end-h.committed_end);
         if(h.admitted && detail::absence_duration_complete(failed_duration,config.sample_rate)) {
@@ -8442,6 +8790,23 @@ struct PatternCorrelator::Impl {
         if(differential_window)for(std::size_t group=0;group<=alternate_groups;++group)
             local_fits(hypothesis,group)={};
         require(h.index<std::numeric_limits<std::uint64_t>::max(),"pattern stream symbol counter overflow");++h.index;
+        if(burst) {
+            if(!burst->pulses.empty()) {
+                auto& state=burst->pulses[pulse_addresses[hypothesis].lattice];
+                if(state.active && state.slot==h.index-1) {
+                    require(state.remaining!=0,"Symbol_Burst pulse consumer counter underflow");
+                    if(!--state.remaining)state.needs_prepare=true;
+                }
+            }
+            burst->refresh(h.index);
+            // Original weak chains and subscribed timing guides remain live.
+            // A settled cold lane can retire without declaring physical END.
+            auto& lane=burst->lanes[hypothesis];
+            if(burst->acquisition_suspended && h.index>lane.acquisition_cutoff &&
+               !h.admitted && h.burst.bits.empty() && !timing_state(hypothesis)) {
+                lane.dormant=!burst->lanes[lane.group_first].group_was_admitted;
+            }
+        }
         if(scheduled_calendar())scheduled->source_starts[hypothesis]=scheduled_calendar()->offset_source(
             config.stream_epoch,h.phase_lower,h.index);
         if(scheduled_map() && !options.amplitude_only) {
@@ -8471,6 +8836,10 @@ struct PatternCorrelator::Impl {
         }
     }
     std::uint64_t initial_cursor(const Hypothesis& h,std::uint64_t end) const {
+        if(burst) {
+            const auto begin=std::max(static_cast<long double>(sample),std::ceil(symbol_start(h)));
+            return static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::max(0.L,begin)));
+        }
         if(h.origin>static_cast<long double>(sample))
             return static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(h.origin)));
         return sample;
@@ -8715,10 +9084,15 @@ struct PatternCorrelator::Impl {
         }
         for(std::size_t hypothesis=0;hypothesis<hypotheses.size();++hypothesis) {
             cancelled(stop);auto& h=hypotheses[hypothesis];
+            if(burst_dormant(hypothesis))continue;
             auto cursor=first;
             if(h.origin>static_cast<long double>(cursor))cursor=static_cast<std::uint64_t>(
                 std::min(static_cast<long double>(end),std::ceil(h.origin)));
             while(cursor<end) {
+                if(burst_dormant(hypothesis))break;
+                if(burst)cursor=static_cast<std::uint64_t>(std::min(static_cast<long double>(end),
+                    std::max(static_cast<long double>(cursor),std::ceil(symbol_start(h)))));
+                if(cursor>=end)break;
                 const auto symbol_first=symbol_start(h);
                 const auto boundary=static_cast<std::uint64_t>(std::ceil(clock_boundary(h,code.symbol_samples())));
                 if(cursor>=boundary){complete(h,hypothesis,boundary,stop);continue;}
@@ -10754,6 +11128,61 @@ template<class Source,class Pulses,class Gain,class Prepare>
         if(point_count==points.size()){point_begin=(point_begin+1)%points.size();--point_count;}
         points[(point_begin+point_count++)%points.size()]=delta;previous_point=point;
     }
+    bool prepare_burst_pulse(std::size_t index,std::uint64_t resume) {
+        if(!burst)return true;
+        auto& state=burst->pulses[index];
+        if(!state.needs_prepare)return state.active;
+        state.needs_prepare=false;state.active=false;state.remaining=0;
+        auto slot=std::numeric_limits<std::uint64_t>::max();
+        for(auto at=state.member_begin;at<state.member_end;++at) {
+            const auto member=burst->pulse_members[at];
+            if(!burst_dormant(member))slot=std::min(slot,hypotheses[member].index);
+        }
+        if(slot==std::numeric_limits<std::uint64_t>::max())return false;
+        state.slot=slot;state.last_chip=0;
+        auto first=std::numeric_limits<std::int64_t>::max();
+        for(auto at=state.member_begin;at<state.member_end;++at) {
+            const auto member=burst->pulse_members[at];
+            if(burst_dormant(member) || hypotheses[member].index!=slot)continue;
+            state.guide=member;++state.remaining;
+            const auto shift=pulse_addresses[member].shift;
+            first=std::min(first,shift);
+            require(code.chips_per_symbol()<=static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()-shift),
+                "Symbol_Burst pulse chip endpoint overflow");
+            state.last_chip=std::max(state.last_chip,shift+static_cast<std::int64_t>(code.chips_per_symbol()));
+        }
+        auto& lattice=pulse_lattices[index];
+        lattice.anchor=state.base_anchor+
+            static_cast<long double>(burst->offset(slot))/lattice.rate;
+        const auto position=std::floor((static_cast<long double>(resume)-lattice.anchor)*lattice.rate/code.chip_samples());
+        require(std::isfinite(position) && position>=std::numeric_limits<std::int64_t>::min() &&
+            position<std::numeric_limits<std::int64_t>::max(),"Symbol_Burst pulse coordinate overflow");
+        lattice.pending={};lattice.pending.chip=std::max(first,static_cast<std::int64_t>(position));
+        for(;;) {
+            lattice.start=lattice.anchor+static_cast<long double>(lattice.pending.chip)*code.chip_samples()/lattice.rate;
+            const auto next=std::ceil(lattice.anchor+static_cast<long double>(lattice.pending.chip+1)*code.chip_samples()/lattice.rate);
+            require(std::isfinite(next) && next>=0 && next<std::numeric_limits<std::uint64_t>::max(),
+                "Symbol_Burst pulse sample endpoint overflow");
+            lattice.next=static_cast<std::uint64_t>(next);
+            if(lattice.next>resume)break;
+            // A floor/ceil inversion at an exact initial capture boundary can
+            // name the preceding empty cell. It ended before supplied input.
+            require(lattice.pending.chip<std::numeric_limits<std::int64_t>::max()-1,
+                "Symbol_Burst pulse resume coordinate overflow");
+            ++lattice.pending.chip;
+        }
+        lattice.segment_observed=0;lattice.segment_sum={};lattice.segment_moment={};lattice.cells.clear();
+        state.active=state.remaining!=0;
+        return state.active;
+    }
+    std::size_t burst_pulse_cursor(std::size_t index,std::size_t cursor,std::size_t count) const {
+        if(!burst)return cursor;
+        const auto& state=burst->pulses[index];const auto& lattice=pulse_lattices[index];
+        if(!state.active || lattice.pending.chip>=state.last_chip)return count;
+        const auto first=std::ceil(lattice.start);
+        if(static_cast<long double>(sample+cursor)>=first)return cursor;
+        return static_cast<std::size_t>(std::min(static_cast<long double>(count),first-sample));
+    }
     void finish_pulse_cell(PulseLattice& lattice,std::stop_token stop) {
         auto& cell=lattice.pending;cell.end=lattice.next;
         {
@@ -10771,12 +11200,15 @@ template<class Source,class Pulses,class Gain,class Prepare>
             static_cast<long double>(next_chip+1)*code.chip_samples()/lattice.rate));
     }
     void project_pulse_moments(std::size_t count,std::stop_token stop) {
-        for(auto& lattice:pulse_lattices) {
+        for(std::size_t index=0;index<pulse_lattices.size();++index) {
+            auto& lattice=pulse_lattices[index];
             cancelled(stop);lattice.cells.clear();
+            if(!prepare_burst_pulse(index,sample))continue;
             const auto& bank=banks[lattice.frequency];
             const auto prefix=bank.observations(physical_view(bank));const auto moments=bank.moments(physical_view(bank));
             const auto duration=static_cast<long double>(code.chip_samples())/lattice.rate;
             for(std::size_t i=0;i<count;) {
+                i=burst_pulse_cursor(index,i,count);if(i==count)break;
                 const auto observed=sample+i;auto& cell=lattice.pending;
                 if(!cell.count) {
                     cell.first=observed;lattice.first_offset=static_cast<long double>(observed)-lattice.start;
@@ -10819,10 +11251,13 @@ template<class Source,class Pulses,class Gain,class Prepare>
     void project_pulse_cells(std::size_t count,std::stop_token stop) {
         if(work.backend==PatternCorrelationBackend::pulse_moments){project_pulse_moments(count,stop);return;}
         const auto chip=code.chip_samples();
-        for(auto& lattice:pulse_lattices) {
+        for(std::size_t index=0;index<pulse_lattices.size();++index) {
+            auto& lattice=pulse_lattices[index];
             cancelled(stop);lattice.cells.clear();
+            if(!prepare_burst_pulse(index,sample))continue;
             const auto prefix=banks[lattice.frequency].observations(physical_view(lattice.frequency));
             for(std::size_t i=0;i<count;++i) {
+                i=burst_pulse_cursor(index,i,count);if(i==count)break;
                 const auto observed=sample+i;
                 auto& cell=lattice.pending;
                 const auto projection=prefix[i+1]-prefix[i];
@@ -10850,12 +11285,14 @@ template<class Source,class Pulses,class Gain,class Prepare>
         const auto chips=code.chips_per_symbol();
         for(std::size_t hypothesis=0;hypothesis<hypotheses.size();++hypothesis) {
             cancelled(stop);auto& h=hypotheses[hypothesis];
+            if(burst_dormant(hypothesis))continue;
             const auto& address=pulse_addresses[hypothesis];
             const auto& lattice=pulse_lattices[address.lattice];
             for(const auto& cell:lattice.cells) {
+                if(burst && h.index!=burst->pulses[address.lattice].slot)break;
                 require(h.index<=(static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())-
                     static_cast<std::uint64_t>(address.shift))/chips,"pattern chip coordinate overflow");
-                const auto first=address.shift+static_cast<std::int64_t>(h.index*chips);
+                const auto first=address.shift+(burst?0:static_cast<std::int64_t>(h.index*chips));
                 if(cell.chip<first)continue;
                 require(cell.chip-first<static_cast<std::int64_t>(chips),"pulse projection skipped a symbol endpoint");
                 const auto local=cell.chip-first;
@@ -10905,7 +11342,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
         // The compact lane ABI has three phase fits; UTC gated coefficients
         // can distinguish every original phase point. Scalar/pulse execution
         // retains those points with workspace-charged fit arrays.
-        if(scheduled_map() || (config.fake_hopping&&config.fake_hopping->matched_gaps))return 0;
+        if(burst || scheduled_map() || (config.fake_hopping&&config.fake_hopping->matched_gaps))return 0;
         if(!pulse_lattices.empty() || !search.hypotheses.empty() || worker_codes.size()<2 || input.size()<=block_samples)return 0;
         constexpr std::size_t max_blocks=64,max_lanes=65536;
         using Lane=detail::CorrelationLane;
@@ -11128,6 +11565,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
             struct RestoreTemporalView {decltype(temporal_view) target;decltype(previous_temporal) old;~RestoreTemporalView(){target=old;}} restore_temporal{temporal_view,previous_temporal};
             if(scheduled && !scheduled->worker_temporal_templates.empty())temporal_view={this,scheduled->worker_temporal_templates[worker].get()};
             cancelled(stop);auto& h=hypotheses[hypothesis];
+            if(burst_dormant(hypothesis))return;
             const auto cursor=initial_cursor(h,end);
             const auto symbol_end=clock_boundary(h,code.symbol_samples());
             if(cursor<end && static_cast<long double>(cursor)<symbol_end) {
@@ -11210,6 +11648,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
         collect_scheduled_common_shape();
         for(std::size_t hypothesis=0;hypothesis<hypotheses.size();++hypothesis) {
             auto& h=hypotheses[hypothesis];
+            if(burst_dormant(hypothesis))continue;
             cancelled(stop);auto cursor=initial_cursor(h,end);
             // Only independent fit accumulation was moved ahead. Trial counts,
             // phase selection, peer ownership and every publication retain the
@@ -11222,6 +11661,9 @@ template<class Source,class Pulses,class Gain,class Prepare>
                 }
             }
             while(cursor<end) {
+                if(burst)cursor=static_cast<std::uint64_t>(std::min(static_cast<long double>(end),
+                    std::max(static_cast<long double>(cursor),std::ceil(symbol_start(h)))));
+                if(cursor>=end || burst_dormant(hypothesis))break;
                 const auto symbol_end=clock_boundary(h,code.symbol_samples());
                 if(static_cast<long double>(cursor)>=symbol_end) { complete(h,hypothesis,cursor,stop);continue; }
                 cursor=accumulate(h,hypothesis,cursor,end,code,stop);
@@ -11814,6 +12256,20 @@ PatternCorrelator::~PatternCorrelator(){
 }
 PatternCorrelator::PatternCorrelator(PatternCorrelator&&) noexcept=default;
 PatternCorrelator& PatternCorrelator::operator=(PatternCorrelator&&) noexcept=default;
+std::size_t PatternCorrelator::symbol_burst_control_bytes(std::size_t hypotheses,std::size_t pulse_lattices) {
+    require(hypotheses<=(std::numeric_limits<std::size_t>::max()-sizeof(Impl::BurstState))/sizeof(Impl::BurstLane),
+        "Symbol_Burst control state exceeds address space");
+    auto total=sizeof(Impl::BurstState)+hypotheses*sizeof(Impl::BurstLane);
+    if(pulse_lattices) {
+        require(pulse_lattices<=(std::numeric_limits<std::size_t>::max()-total)/sizeof(Impl::BurstPulse),
+            "Symbol_Burst pulse control exceeds address space");
+        total+=pulse_lattices*sizeof(Impl::BurstPulse);
+        require(hypotheses<=(std::numeric_limits<std::size_t>::max()-total)/sizeof(std::size_t),
+            "Symbol_Burst pulse members exceed address space");
+        total+=hypotheses*sizeof(std::size_t);
+    }
+    return total;
+}
 void PatternCorrelator::push(std::span<const float> samples,std::stop_token stop,detail::CorrelationProjectionCache* cache) {
         rx_cpu::Context cpu_context(rx_cpu::Stage::control_residual);
     auto& s=*impl_;cancelled(stop);require(!s.finished,"pattern capture already finished");
@@ -11889,6 +12345,29 @@ void PatternCorrelator::push(std::span<const float> samples,std::stop_token stop
 }
 bool PatternCorrelator::try_skip_unobserved(std::uint64_t count,std::stop_token stop) {
     auto& s=*impl_;cancelled(stop);require(!s.finished,"pattern capture already finished");
+    if(s.burst) {
+        if(count>std::numeric_limits<std::uint64_t>::max()-s.sample)return false;
+        const auto end=s.sample+count;
+        const auto limit=s.burst_unobserved_end(s.sample);
+        if(!limit || end>*limit)return false;
+        if(s.options.amplitude_only) {
+            // All expected symbols have already completed before their trailing
+            // guards expire. An unfinished FFT here belongs only to the guard;
+            // keep its absolute lattice without manufacturing an observation.
+            const auto width=s.amplitude_geometry->fft_samples;
+            const auto remainder=(s.search.input_sample_origin%width+end%width)%width;
+            const auto tail=remainder?width-remainder:0;
+            if(tail>std::numeric_limits<std::uint64_t>::max()-end || end+tail>*limit)return false;
+            s.amplitude_partial=0;s.amplitude_processed=end+tail;
+        }
+        for(std::size_t i=0;i<s.burst->pulses.size();++i) {
+            auto& lattice=s.pulse_lattices[i];lattice.pending={};lattice.cells.clear();
+            lattice.segment_observed=0;lattice.segment_sum={};lattice.segment_moment={};
+            s.burst->pulses[i].needs_prepare=true;
+        }
+        s.sample=end;s.work.scheduled_null_samples+=count;
+        return true;
+    }
     if(!s.scheduled_map() || !s.options.amplitude_only)return false;
     require(count<=std::numeric_limits<std::uint64_t>::max()-s.sample,"pattern sample counter overflow");
     const auto end=s.sample+count;
@@ -11930,7 +12409,8 @@ std::optional<ScheduledCaptureEnvelope> PatternCorrelator::scheduled_capture_env
     return result;
 }
 std::optional<std::uint64_t> PatternCorrelator::unobserved_end_from(std::uint64_t sample) const {
-    const auto& s=*impl_;if(!s.scheduled_map() || !s.options.amplitude_only)return std::nullopt;
+    const auto& s=*impl_;if(s.burst)return s.burst_unobserved_end(sample);
+    if(!s.scheduled_map() || !s.options.amplitude_only)return std::nullopt;
     auto end=std::numeric_limits<std::uint64_t>::max();
     for(const auto& h:s.hypotheses) {
         const auto center=s.scheduled_tick(h,sample),lower=center.add_signed(-s.scheduled_uncertainty(h,sample));
@@ -11944,6 +12424,23 @@ std::optional<std::uint64_t> PatternCorrelator::unobserved_end_from(std::uint64_
     }
     if(end<=sample || end==std::numeric_limits<std::uint64_t>::max())return std::nullopt;
     return end;
+}
+void PatternCorrelator::suspend_fresh_acquisition() {
+    auto& s=*impl_;
+    if(!s.burst || s.burst->acquisition_suspended)return;
+    for(std::size_t i=0;i<s.hypotheses.size();++i)
+        s.burst->lanes[i].acquisition_cutoff=std::max(s.burst->lanes[i].acquisition_cutoff,s.hypotheses[i].index);
+    s.burst->acquisition_suspended=true;
+}
+bool PatternCorrelator::symbol_burst_tracking_active()const {
+    auto& s=*impl_;if(!s.burst)return false;
+    for(std::size_t i=0;i<s.hypotheses.size();++i) {
+        const auto& h=s.hypotheses[i];
+        if(h.admitted || (s.burst->acquisition_suspended && !h.burst.bits.empty()) ||
+           (s.burst->acquisition_suspended && h.index<=s.burst->lanes[i].acquisition_cutoff))return true;
+        if(const auto* timing=s.timing_state(i);timing && (timing->tracking || timing->pending_terminal))return true;
+    }
+    return false;
 }
 void PatternCorrelator::finish(std::stop_token stop) {
     auto& s=*impl_;cancelled(stop);if(s.finished)return;
@@ -12036,6 +12533,10 @@ bool PatternCorrelator::synchronized()const{return std::any_of(impl_->hypotheses
 bool PatternCorrelator::initial_search_complete()const {
     if(impl_->lazy_state())return static_cast<long double>(impl_->lazy_state()->processed)>=impl_->lazy_state()->initial_complete_due;
     const auto& s=*impl_;
+    if(s.burst) {
+        for(std::size_t i=0;i<s.hypotheses.size();++i)if(s.hypotheses[i].index<=s.burst->lanes[i].acquisition_cutoff)return false;
+        return true;
+    }
     return std::all_of(s.hypotheses.begin(),s.hypotheses.end(),[&](const auto& h) {
         // A negative origin can leave the first scored symbol truncated at
         // capture start. Wait for the next full symbol in that hypothesis's

@@ -109,10 +109,12 @@ Settings normalized_layout(Settings value) {
         auto& longer = *value.long_message_modem;
         const auto& base = value.transfer.modem;
         if (longer.sample_rate != base.sample_rate || longer.carrier_hz != base.carrier_hz ||
+            longer.symbol_burst.enabled()!=base.symbol_burst.enabled() ||
+            (base.symbol_burst.enabled()&&longer.symbol_burst!=base.symbol_burst) ||
             longer.dsss_factor != base.dsss_factor ||
             (base.dsss_factor>1 && longer.outer_dsss_version != base.outer_dsss_version) ||
             longer.bandwidth_hz != base.bandwidth_hz || longer.spreading_mode != base.spreading_mode)
-            throw Error("short and long transmit profiles must share sample rate, carrier, bandwidth and spreading mode");
+            throw Error("short and long transmit profiles must share sample rate, carrier, bandwidth, spreading mode and Symbol_Burst settings");
         if (longer.spreading_mode == modem::SpreadingMode::tone) {
             longer.data_key.reset(); longer.scramble = longer.dsss = false;longer.dsss_factor=1;
             longer.spreading_seed.fill(0); longer.dsss_seed.fill(0);

@@ -16,6 +16,14 @@ These are compatibility requirements for ongoing development, including the
 short paths and per-bit pending view. See the
 [preservation contract and regression coverage](development.md).
 
+## Optional whole-symbol calendar
+
+[Symbol_Burst](symbol-burst.md) spaces complete symbols on the UTC half-minute
+grid, at least 60 seconds apart. Its agreed silence carries no data and is not
+an absent-symbol observation. The fixed short/raw and interval formats below
+remain unchanged; completion still requires fully scored expected symbols.
+FHSS remains independent; simultaneous Sched_Hop is rejected.
+
 ## Fixed wire geometry
 
 Nonempty text of up to 16 source bytes uses the [exact raw-bit path](#exact-raw-bit-path).

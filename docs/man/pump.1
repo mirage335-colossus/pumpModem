@@ -1,4 +1,4 @@
-.TH PUMP 1 "September 2026" "Data Pump 001_00" "User Commands"
+.TH PUMP 1 "October 2026" "Data Pump 001_00" "User Commands"
 .nh
 .ad l
 .nr HY 0
@@ -294,6 +294,21 @@ accuracy, propagation and oscillator models; does not change the audio buffer.
 Insufficient timing allowance visibly falls back to ordinary playback before
 private output, without clipping provider uncertainty or enlarging the setting.
 Failures after private output begins stop transmission; they do not restart it.
+.TP
+.BI \-\-symbol\-burst " off|1|2|3|5|10"
+Space complete Robust symbols with the selected minimum number of symbol waits.
+The next complete support starts on a UTC 30-second boundary, at least 60 seconds
+after the previous start. Default is off. Both peers select matching settings.
+Capture retains complete symbols, pulse padding, 20-second guards and full timing
+uncertainty; proven silence is available for receiver backlog processing.
+This adds no bits, dwell or ramp. FHSS remains independent; simultaneous enabled
+Sched_Hop is rejected. Default clock accuracy retains the full ordinary search.
+.TP
+.BI \-\-symbol\-burst\-random " 0|1|2|3"
+Limit the additional cryptographically selected whole-symbol wait to 0 through
+this value, inclusive. Default is 0; effective extra wait is zero without a key.
+Planned silence does not end reception. A complete expected symbol must be
+scored absent under the ordinary physical-completion rule.
 .TP
 .BI \-\-dsss\-factor " 1|10|100|1000"
 Additional independent private outer spreading, with 1 preserving the existing

@@ -108,6 +108,8 @@ Modem:
   --sched-hop MODE     0, 3, 5 nominal total-time multiplier (requires keyfile)
   --sched-hop-dilution N  0 = one active hop, 3 = three consecutive active hops (developer control)
   --sched-frequency-search N  Frequency uncertainty multiplier 1, 2, 4, 8, 16, 32; active with Sched_Hop
+  --symbol-burst MODE  off, 1, 2, 3, 5, 10 symbol waits; next starts on UTC 30s grid, at least 60s apart
+  --symbol-burst-random N  0, 1, 2, 3 additional whole-symbol waits; effective zero without encryption
   --clock-sync SPEC     default or GPS_1ms-400ms_region-2564ms_offset
   --audio-error TIME    Per-station audio lag 0..+TIME; default or duration (70ms)
   --fec 20|60|off        Reed-Solomon parity overhead, default60
@@ -187,7 +189,7 @@ public:
     Args(int argc,char** argv) {
         const std::set<std::string> booleans={"json","repeatable","no-compression","no-mono","right-mono","scramble","dsss","progress","help","version"};
         const std::set<std::string> valued={"text","input","output","save","kind","filename","callsign","grid",
-            "bw","sample-rate","carrier","doppler","spreading","dsss-factor","dsss-version","dsss-mode","search-arithmetic","receiver-strategy","receiver-cpu-budget","sched-hop","sched-hop-dilution","sched-frequency-search","clock-sync","audio-error","fec","memory-mb","keyfile","pad","time","search-seconds",
+            "bw","sample-rate","carrier","doppler","spreading","dsss-factor","dsss-version","dsss-mode","search-arithmetic","receiver-strategy","receiver-cpu-budget","sched-hop","sched-hop-dilution","sched-frequency-search","symbol-burst","symbol-burst-random","clock-sync","audio-error","fec","memory-mb","keyfile","pad","time","search-seconds",
             "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format",
             "target-snr","receive-targets","pattern","simulation","oscillator","rf-oscillator","shift","rf-shift","rf-carrier","search-margin","reference","sideband","lf-reference","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise","receiver-time",
             "recovery-seconds","recovery-threads","recovery-bits","recovery-errors",
@@ -369,6 +371,8 @@ modem::Config config(const Args& a) {
     c.receiver_strategy=tuning::parse_receiver_strategy(a.get("receiver-strategy","auto"));
     c.receiver_cpu_budget=a.number("receiver-cpu-budget",.6);
     tuning::validate_receiver_cpu_budget(c.receiver_cpu_budget);
+    c.symbol_burst={modem::parse_symbol_burst_wait(a.get("symbol-burst","off")),
+        modem::parse_symbol_burst_random(a.get("symbol-burst-random","0"))};
     const auto burst_multiplier=modem::sched_hop_multiplier(a.get("sched-hop","0"));
     const auto dilution=modem::sched_hop_active_hops(a.get("sched-hop-dilution","0"));
     if(burst_multiplier>1&&dilution>burst_multiplier)
@@ -377,6 +381,7 @@ modem::Config config(const Args& a) {
     if(frequency_multiplier!=1&&frequency_multiplier!=2&&frequency_multiplier!=4&&frequency_multiplier!=8&&
        frequency_multiplier!=16&&frequency_multiplier!=32)throw Error("sched-frequency-search must be 1, 2, 4, 8, 16, or 32");
     if(burst_multiplier>1) {
+        if(c.symbol_burst.enabled())throw Error("Symbol_Burst and Sched_Hop cannot be enabled together");
         if(!a.has("keyfile")||c.spreading_mode==modem::SpreadingMode::tone)
             throw Error("scheduled hopping requires an encrypted pattern and --keyfile");
         modem::SchedHopPlan plan{burst_multiplier,dilution};
@@ -432,8 +437,9 @@ void play_transmission(const Args& a, transfer::Options& options, Factory make) 
             modem::pattern_pulse_padding_samples(timing_config),modem::symbol_sample_count(timing_config));
         output.playback_output_gain=[&,shape](long double seconds) {
             const auto& c=options.modem;
-            const auto origin=static_cast<long double>(c.stream_phase_samples)-
-                modem::training_sample_count(c)-modem::pattern_pulse_padding_samples(c);
+            const auto origin=c.symbol_burst.enabled() && source?
+                static_cast<long double>(source->physical_output_origin())-static_cast<long double>(options.timestamp)*c.sample_rate:
+                static_cast<long double>(c.stream_phase_samples)-modem::training_sample_count(c)-modem::pattern_pulse_padding_samples(c);
             return shape.gain(options.timestamp,origin+seconds*c.sample_rate,c.sample_rate);
         };
     }
@@ -1096,10 +1102,19 @@ int main(int argc,char** argv) {
         auto k=c.spreading_mode==modem::SpreadingMode::tone?std::optional<Crypto>{}:key(a);
         // Scheduled calendar geometry is keyed before transfer preparation,
         // including the bit-rate report for packed short symbols.
-        if(c.scheduled_hopping&&c.scheduled_hopping->enabled())c.data_key=k;
+        if((c.scheduled_hopping&&c.scheduled_hopping->enabled())||c.symbol_burst.enabled())c.data_key=k;
         if(c.spreading_mode==modem::SpreadingMode::tone && a.has("keyfile"))
             std::cerr<<"Tone mode is unencrypted; key selection is disabled.\n";
         auto settings=transfer_options(a,c,k,timestamp);
+        if(c.symbol_burst.enabled() && (a.command=="tx" || a.command=="status-tx" || a.command=="simulate")) {
+            // File and simulated sources need the same eligible physical
+            // calendar binding as hardware scheduling, including fractional P.
+            const modem::SymbolBurstPlan plan(transfer::seeded_config(settings,timestamp));
+            const auto slot=plan.first_slot({timestamp,0});
+            timestamp=slot.payload_begin.epoch;
+            c.stream_epoch=timestamp;c.stream_phase_samples=slot.payload_begin.phase;
+            settings.timestamp=timestamp;settings.modem.stream_phase_samples=slot.payload_begin.phase;
+        }
         if(a.command=="analyze-link") {analyze_link(a,settings);return 0;}
         transfer::Progress progress;
         if(a.has("progress")) progress=[](std::uint64_t candidate) {std::cerr<<"Searching epoch "<<candidate<<'\n';};
@@ -1117,6 +1132,9 @@ int main(int argc,char** argv) {
                 <<",\"search_arithmetic\":\""<<tuning::search_arithmetic_id(c.search_arithmetic)<<'"'
                 <<",\"receiver_strategy\":\""<<tuning::receiver_strategy_id(c.receiver_strategy)<<'"'
                 <<",\"receiver_cpu_budget\":"<<c.receiver_cpu_budget
+                <<",\"symbol_burst\":"<<c.symbol_burst.wait_symbols
+                <<",\"symbol_burst_random\":"<<c.symbol_burst.random_limit
+                <<",\"symbol_burst_random_effective\":"<<(c.symbol_burst.enabled()&&k?c.symbol_burst.random_limit:0)
                 <<",\"sched_hop\":\""<<modem::sched_hop_id(c.scheduled_hopping?c.scheduled_hopping->time_multiplier:1)<<'"'
                 <<",\"sched_hop_dilution\":"<<modem::sched_hop_dilution_id(c.scheduled_hopping?c.scheduled_hopping->group_hops:1)
                 <<",\"sched_frequency_search\":"<<c.frequency_search_multiplier

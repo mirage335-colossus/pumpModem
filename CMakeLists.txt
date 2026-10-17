@@ -300,6 +300,11 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
       add_test(NAME ${component} COMMAND test_${component})
     endif()
   endforeach()
+  foreach(component symbol_burst symbol_burst_transmit symbol_burst_receiver symbol_burst_live)
+    add_executable(test_${component} tests/test_${component}.cpp)
+    target_link_libraries(test_${component} PRIVATE datapump)
+    add_test(NAME ${component} COMMAND test_${component})
+  endforeach()
   set_tests_properties(amplitude_probability PROPERTIES LABELS "amplitude_probability")
   add_test(NAME amplitude_axis_reference_compat COMMAND test_frequency_axis_probability --scope-only)
   set_tests_properties(amplitude_axis_reference_compat PROPERTIES LABELS "amplitude_probability")
@@ -632,7 +637,8 @@ endif()
 # before declaring the browser-audio targets. Objects avoid static archive
 # ordering when Application introduces audio references through another archive.
 if(NOT DATAPUMP_BUILD_WASM)
-  set(_datapump_mock_audio_tests test_gui_scheduled_cold_start test_gui_timing_advice test_legacy_session test_live_profiles
+  set(_datapump_mock_audio_tests
+    test_symbol_burst_live test_gui_scheduled_cold_start test_gui_timing_advice test_legacy_session test_live_profiles
     test_fast_session test_live_transmit_lock test_fast_telemetry
     test_gui_legacy_live test_gui_fast_live)
   set(_datapump_direct_audio_tests test_alsa_audio test_windows_audio)

@@ -249,6 +249,8 @@ public:
     bool try_skip_unobserved(std::uint64_t samples, std::stop_token = {});
     std::optional<std::uint64_t> unobserved_end_from(std::uint64_t local_sample) const;
     std::optional<ScheduledCaptureEnvelope> scheduled_capture_envelope(std::uint64_t local_sample) const;
+    void suspend_fresh_acquisition();
+    bool symbol_burst_tracking_active() const;
     void finish(std::stop_token = {});
     // Publish accepted decisions at each drain; chunk capacity never
     // requires a longer message before a pending symbol becomes visible.
@@ -279,6 +281,9 @@ public:
     // Actual detector availability after reserving the complete search bank.
     bool drift_tolerant() const;
     std::size_t working_bytes() const;
+    // Planner accounting for optional Burst control/lane state only. Existing
+    // numerical banks and detector reservations are accounted independently.
+    static std::size_t symbol_burst_control_bytes(std::size_t hypotheses,std::size_t pulse_lattices=0);
     // Includes promised optional detector state not yet materialized by a push.
     std::size_t reserved_workspace_bytes() const;
     // Additional allocation bound for one finite PCM push and its next drain.

@@ -48,7 +48,7 @@ struct Options {
     RecoveryOptions recovery_options;
 };
 inline bool shared_hop_calendar(const modem::Config& config) {
-    return bool(config.fake_hopping) || (config.scheduled_hopping && config.scheduled_hopping->enabled());
+    return config.symbol_burst.enabled() || bool(config.fake_hopping) || (config.scheduled_hopping && config.scheduled_hopping->enabled());
 }
 inline std::optional<clock_sync::Policy> effective_clock_sync(const Options& options) {
     return clock_sync::effective_policy(options.clock_sync,shared_hop_calendar(options.modem));

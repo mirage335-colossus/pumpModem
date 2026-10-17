@@ -15,7 +15,7 @@ enum class StreamDomain : std::uint8_t {
     OuterDsss10V1, OuterDsss100V1, OuterDsss1000V1, FakeFhssV1,
     OuterDsss10RotationV2, OuterDsss100RotationV2, OuterDsss1000RotationV2,
     OuterDsss10PermutationV2, OuterDsss100PermutationV2, OuterDsss1000PermutationV2, FhssCycleV2, CoverPreambleV1, CoverSuppressionV1, FhssUtcV3, CoverWaitV1,
-    SchedHopKeyV1, SchedHopUtcV1
+    SchedHopKeyV1, SchedHopUtcV1, SymbolBurstWaitV1
 };
 
 // A 256-bit shared secret with independently derived stream and MAC keys.
@@ -47,6 +47,8 @@ public:
     // epoch=group hops and offset=32*time multiplier. SchedHopUtcV1 ("sh-utc01")
     // uses that child root's FHSS purpose and epoch=UTC frame index. Both require
     // FHSS purpose; neither reuses channel-hop, DSSS, pattern or Data addresses.
+    // SymbolBurstWaitV1 ("sb-wai01") uses FHSS purpose at the canonical payload
+    // epoch and a separate 32-byte block at 32*sample-phase for each symbol.
     Bytes stream(StreamPurpose purpose, std::uint64_t timestamp,
                  std::uint64_t offset, std::size_t count,
                  StreamDomain domain = StreamDomain::Payload) const;

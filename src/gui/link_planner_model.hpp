@@ -119,6 +119,7 @@ struct Model {
     double cpu_realtime_ratio=0;
     double cpu_realtime_upper_ratio=0;
     double finite_cpu_realtime_ratio=0;
+    simulation::SymbolBurstWorkDiagnostics symbol_burst;
     bool hardware_sustained_modeled=false;
     double hardware_sustained_realtime_ratio=0,hardware_cohort_lifetime_seconds=0;
     double hardware_sustained_receiver_instances=0;
