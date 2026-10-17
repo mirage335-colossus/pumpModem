@@ -651,6 +651,10 @@ if(NOT DATAPUMP_BUILD_WASM)
         # native capability/clock defaults, compiled with the fixture's platform
         # definitions, without accidentally replacing or duplicating its mock.
         target_sources(${_target} PRIVATE src/audio_policy.cpp)
+        if(_target STREQUAL "test_live_profiles")
+          # This synthetic provider supplies dated capture on every host.
+          target_compile_definitions(${_target} PRIVATE DATAPUMP_TEST_UTC_CAPTURE_PROVIDER=1)
+        endif()
       else()
         target_link_libraries(${_target} PRIVATE datapump_audio_native)
       endif()

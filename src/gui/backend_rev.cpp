@@ -701,7 +701,12 @@ public:
         re::Element* element() const override {return root.get();}
         bool busy() const override {return app.native_callback_depth!=0;}
         void retain(const ui::Control& declaration) {
-            text={declaration.label,declaration.menu_label,declaration.help,declaration.empty_text};
+            // A retained document can refer back to this host's control text.
+            // Snapshot aliases before writes and keep unchanged buffers alive.
+            const std::array<std::string,4> incoming{
+                declaration.label,declaration.menu_label,declaration.help,declaration.empty_text};
+            for(std::size_t i=0;i<text.size();++i)
+                if(text[i]!=incoming[i])text[i]=incoming[i];
             control=declaration;control.label=text[0].c_str();control.menu_label=text[1].c_str();
             control.help=text[2].c_str();control.empty_text=text[3].c_str();
         }

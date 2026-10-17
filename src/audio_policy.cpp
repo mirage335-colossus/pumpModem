@@ -12,7 +12,10 @@ bool exclusive_supported() {
 #endif
 }
 bool utc_follow_supported() {
-#ifdef _WIN32
+#if defined(DATAPUMP_TEST_UTC_CAPTURE_PROVIDER)
+    // The profile fixture replaces native capture with a dated PCM provider.
+    return true;
+#elif defined(_WIN32)
     return false;
 #else
     return true;
