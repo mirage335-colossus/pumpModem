@@ -3,13 +3,39 @@
 #include "datapump/live.hpp"
 #include "datapump/runtime.hpp"
 #include <ostream>
+#if __has_include(<syncstream>)
 #include <syncstream>
+#endif
+#include <mutex>
+#include <sstream>
 #include <algorithm>
 #include <map>
 #include <tuple>
 #include <set>
 
 namespace datapump::gui {
+namespace debug_live_detail {
+#if defined(__cpp_lib_syncbuf) && __cpp_lib_syncbuf>=201803L
+using LogLine=std::osyncstream;
+#else
+// Some pinned browser libraries provide the header without syncbuf. Buffer the
+// whole record, then serialize emission and flush the actual destination.
+inline std::mutex output_mutex;
+class LogLine:public std::ostringstream {
+    std::ostream& destination_;
+public:
+    explicit LogLine(std::ostream& destination):destination_(destination){}
+    ~LogLine() {
+        try {
+            const auto text=str();
+            std::lock_guard lock(output_mutex);
+            destination_.write(text.data(),static_cast<std::streamsize>(text.size()));
+            destination_.flush();
+        }catch(...){} // Like syncbuf destruction, diagnostic emission cannot throw.
+    }
+};
+#endif
+}
 // Opt-in physical-audio diagnostic, not a simulation or receiver qualification.
 // The caller drives ordinary Controller actions and passes its normal snapshots.
 class DebugLive {
@@ -25,7 +51,7 @@ public:
         if(done_)return Action::close;
         if(status.substr(0,2048)!=last_status_) {
             last_status_=status.substr(0,2048);
-            std::osyncstream(log_)<<"{\"event\":\"status\",\"seconds\":"<<elapsed
+            debug_live_detail::LogLine(log_)<<"{\"event\":\"status\",\"seconds\":"<<elapsed
                 <<",\"text\":\""<<json_escape(last_status_)<<"\"}\n"<<std::flush;
         }
         bool complete=false,unexpected=false;
@@ -46,7 +72,7 @@ public:
             const auto identity=std::tuple{line.revision,line.received_bits,line.complete,line.missing_symbols};
             if(!rows_.contains(line.id)||rows_.at(line.id)!=identity) {
                 rows_[line.id]=identity;
-                std::osyncstream(log_)<<"{\"event\":\"stream\",\"seconds\":"<<elapsed<<",\"id\":"<<line.id
+                debug_live_detail::LogLine(log_)<<"{\"event\":\"stream\",\"seconds\":"<<elapsed<<",\"id\":"<<line.id
                     <<",\"revision\":"<<line.revision<<",\"bits\":"<<line.received_bits
                     <<",\"complete\":"<<line.complete<<",\"missing\":"<<line.missing_symbols
                     <<",\"expected_prefix\":"<<expected_.starts_with(bits)<<"}\n"<<std::flush;
@@ -63,7 +89,7 @@ public:
         unexpected_seen_|=unexpected;
         if(elapsed>=next_log_ || s.error!=last_error_ || s.transmission_failed || s.transmission_stopping) {
             next_log_=elapsed+1;last_error_=s.error;
-            std::osyncstream(log_)<<"{\"event\":\"live\",\"seconds\":"<<elapsed<<",\"tx\":"<<s.transmitting
+            debug_live_detail::LogLine(log_)<<"{\"event\":\"live\",\"seconds\":"<<elapsed<<",\"tx\":"<<s.transmitting
                 <<",\"tx_id\":"<<s.transmission_id<<",\"tx_seconds\":"<<s.transmission_seconds
                 <<",\"tx_fraction\":"<<s.transmission_fraction<<",\"tx_finished\":"<<s.transmission_finished
                 <<",\"samples\":"<<s.samples_received<<",\"hardware_rate\":"<<s.hardware_sample_rate
@@ -105,7 +131,7 @@ public:
 private:
     Action finish(double elapsed,const std::string& reason,bool pass) {
         done_=true;passed_=pass;
-        std::osyncstream(log_)<<"{\"event\":\"result\",\"seconds\":"<<elapsed<<",\"passed\":"<<pass
+        debug_live_detail::LogLine(log_)<<"{\"event\":\"result\",\"seconds\":"<<elapsed<<",\"passed\":"<<pass
             <<",\"reason\":\""<<json_escape(reason)<<"\",\"capture_during_tx\":"<<capture_advanced_<<"}\n"<<std::flush;
         return Action::close;
     }
