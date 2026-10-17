@@ -1,6 +1,32 @@
 name: Native Linux validation shard
 
 on:
+  workflow_dispatch:
+    inputs:
+      linux_runner:
+        description: 'Linux x86_64 runner for this validation shard'
+        type: choice
+        options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
+        default: ubuntu-24.04
+      build_type:
+        description: 'Debug includes ASan and UBSan'
+        type: choice
+        options: [Release, Debug]
+        default: Release
+      scope:
+        description: 'Run one complete native scope without repeating the other shards'
+        type: choice
+        options: [core, fast, live, calibration, frontends, web, package]
+        default: core
+      calibration_section:
+        description: 'Calibration section; used only by the calibration scope'
+        type: choice
+        options: [all, shaped, matrix, 'null', default-window]
+        default: all
+      sanitizer_realtime:
+        description: 'Include real-time Fast RX checks in instrumented Debug coverage'
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       linux_runner:
@@ -33,7 +59,9 @@ jobs:
     runs-on: ${{ inputs.linux_runner }}
     # Preserve the portable application's glibc 2.35 baseline in every shard.
     container: ubuntu:22.04
-    timeout-minutes: 120
+    # Standard runners need room for the full instrumented suite after compilation.
+    # Individual test limits and physical deadlines remain unchanged.
+    timeout-minutes: ${{ inputs.build_type == 'Debug' && inputs.scope == 'core' && 240 || 120 }}
     defaults:
       run:
         shell: bash
@@ -53,6 +81,11 @@ jobs:
       DATAPUMP_SANITIZERS: ${{ inputs.build_type == 'Debug' && 'ON' || 'OFF' }}
       SANITIZER_REALTIME: ${{ inputs.sanitizer_realtime }}
     steps:
+      - name: Validate manual package configuration
+        if: github.event_name == 'workflow_dispatch' && inputs.scope == 'package' && inputs.build_type != 'Release'
+        run: |
+          echo '::error::The package scope requires build_type=Release.'
+          exit 2
       - name: Load current package-fetch helper before installing Git
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
