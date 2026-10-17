@@ -76,6 +76,7 @@ struct CaptureScript {
     std::atomic<std::size_t> monitor_released{0},monitor_delivered{0};
     std::atomic<unsigned> interruptions{0},interruptions_delivered{0};
     std::function<void()> after_monitor;
+    std::function<void(std::size_t)> before_capture;
     std::function<audio::TimePrediction(std::size_t)> timing;
     std::optional<audio::TimingStatus> timing_status;
 };
@@ -182,6 +183,7 @@ struct Observations {
     std::map<std::string, transfer::Received> content;
     std::size_t complete = 0, received = 0;
     bool allow_revisions = false;
+    std::size_t workspace_limit = 32 * 1024 * 1024;
 
     void check_final(const Waveform& expected) const {
         check(rows.size() == 1, "one physical transmission retained multiple effective signal rows");
@@ -234,7 +236,7 @@ struct Observations {
         check(snapshot.error.empty(), "live profile capture failed: " + snapshot.error);
         check(snapshot.status.find("overrun") == std::string::npos,
               "profile fixture overran the hardware decode queue");
-        check(snapshot.dsp_buffered_bytes <= 32 * 1024 * 1024,
+        check(snapshot.dsp_buffered_bytes <= workspace_limit,
               "profile bank exceeded its DSP workspace");
         for (const auto& signal : snapshot.signals) {
             ids.insert(signal.id);
@@ -262,7 +264,7 @@ struct Observations {
                 check(!before_absence && snapshot.samples_received >= sample_origin + expected.payload_end + 6 * expected.rate,
                       "profile observation completed before six seconds of physical absence: input="+
                       std::to_string(snapshot.samples_received)+" payload_end="+std::to_string(expected.payload_end)+
-                      " bits="+signal.raw_bits+" before_absence="+std::to_string(before_absence));
+                      " bits="+signal.raw_bits+" text="+signal.text+" count="+std::to_string(signal.received_bits)+" before_absence="+std::to_string(before_absence));
             ++complete;
             if (!allow_revisions && !expected.ambiguous_tone) check(signal.binary == expected.binary && signal.validated == expected.interval && signal.text == expected.text &&
                   signal.raw_bits == (expected.interval || expected.binary ? std::string{} : expected.bits) &&
@@ -429,6 +431,96 @@ void retired_public_streams_release_presentations(const std::vector<double>& tar
     session.stop();capture_script=nullptr;
     std::cout<<"retired public streams RX "<<targets[0]<<','<<targets[1]<<": "<<pending.size()
              <<" pending identities, exact interval and physical end passed\n";
+}
+
+void public_amplitude_rolling_arrivals() {
+    struct Case {unsigned delay;bool timed=false,fallback=false;unsigned shift=0;bool clock_step=false;};
+    for(const auto trial:{Case{12},Case{37},Case{29},Case{31},Case{95,false,false,1,true},
+            Case{12,true,true},Case{12,true},Case{12,true,false,80}}) {
+        const auto delay_seconds=trial.delay;
+        auto value=settings({});auto& c=value.transfer.modem;
+        c.sample_rate=512;c.bandwidth_hz=trial.timed?5:4;c.carrier_hz=128;c.spreading_factor=64;
+        c.integration_seconds=0;c.pattern_symbols=true;c.constellation_bits=1;c.pulse_shaping=true;
+        c.scramble=c.dsss=false;c.dsss_factor=1;c.receiver_strategy=modem::ReceiverStrategy::amplitude_only;
+        c.stream_epoch=epoch;value.transfer.timestamp=0;value.transfer.search_seconds=6;
+        value.transfer.automatic_receive_profiles=false;value.transfer.clock_sync.reset();
+        value.dsp_workspace_bytes=value.transfer.dsp_workspace_bytes=(trial.timed&&!trial.fallback?256:128)*1024*1024;
+        if(!trial.timed)check(modem::symbol_sample_count(c)==16384,"public amplitude arrival fixture changed32second symbols");
+        if(trial.timed) {
+            value.transfer.clock_sync=clock_sync::Policy{.001,.4,2.564};
+            value.transfer.audio_timing_error_seconds=trial.fallback?.001:.2;
+        }
+        const auto delay=delay_seconds*c.sample_rate+37+trial.shift;
+        auto tx_options=value.transfer;tx_options.timestamp=epoch;
+        auto tx=transfer::binary_transmitter(Bytes{0,1},tx_options);
+        Waveform expected;expected.text=expected.bits="01";expected.binary=true;expected.rate=c.sample_rate;
+        expected.symbol_samples=modem::symbol_sample_count(c);
+        expected.payload_end=delay+modem::training_sample_count(c)+modem::pattern_pulse_padding_samples(c)+2*expected.symbol_samples;
+        expected.transmit_end=delay+tx->total_samples();
+        expected.samples.resize(std::max(expected.transmit_end,expected.payload_end+2*expected.symbol_samples+2*c.sample_rate));
+        for(std::size_t at=delay;at<expected.transmit_end;)
+            at+=tx->read(std::span(expected.samples).subspan(at,expected.transmit_end-at));
+        std::mt19937 random(7819+delay_seconds);std::normal_distribution<float> noise(0,.002F);
+        for(auto& x:expected.samples)x+=noise(random);
+        CaptureScript capture;capture.rate=c.sample_rate;capture.samples=expected.samples;
+        capture.monitor_rate=c.sample_rate;capture.monitor_samples=expected.samples;capture_script=&capture;
+        long double capture_epoch=epoch;
+        if(trial.timed) {
+            const auto prefix=modem::training_sample_count(c)+modem::pattern_pulse_padding_samples(c);
+            check(prefix%c.sample_rate!=0,"dated public amplitude fixture must cover fractional-second padding");
+            capture_epoch=epoch+2.564L+value.transfer.audio_timing_error_seconds/2-
+                static_cast<long double>(delay+prefix)/capture.rate;
+            capture.timing=[&](std::size_t sample) {
+                return audio::TimePrediction{capture_epoch+static_cast<long double>(sample)/capture.rate,
+                    .02,1./capture.rate,audio::TimingQuality::estimated,0};
+            };
+            if(trial.fallback)capture.timing_status=audio::TimingStatus{false,.001,.02,
+                "20 ms timestamp uncertainty exceeds Audio error 1 ms; ordinary capture/full search"};
+        }
+        std::atomic<double> now{static_cast<double>(capture_epoch)};
+        capture.before_capture=[&](std::size_t end){now=static_cast<double>(capture_epoch)+double(end)/capture.rate+
+            (trial.clock_step&&end>20*c.sample_rate&&end<70*c.sample_rate?500:0);};
+        live::Session session([&]{return now.load();});session.start(value);Observations observed;
+        observed.workspace_limit=value.dsp_workspace_bytes;
+        const auto drain=[&](std::size_t target,bool before_absence) {
+            testing::CpuWorkBudget budget(30s,"public amplitude rolling arrival");
+            std::optional<std::chrono::steady_clock::time_point> drained;
+            while(budget.pending()) {
+                const auto state=session.snapshot();observed.inspect(state,expected,0,before_absence);
+                check(!state.receiver_health.failed(),"rolling public amplitude lost receive coverage");
+                const auto delivered=capture.delivered.load();
+                if(delivered<target&&delivered==capture.released.load()&&!state.buffered_samples&&!state.decoding_samples) {
+                    const auto end=delivered+std::min<std::size_t>(c.sample_rate/10,target-delivered);
+                    capture.monitor_released=end;capture.released=end;
+                }
+                if(delivered>=target&&!state.buffered_samples&&!state.decoding_samples) {
+                    if(!drained)drained=std::chrono::steady_clock::now();
+                    if(std::chrono::steady_clock::now()-*drained>=250ms)return;
+                } else drained.reset();
+                std::this_thread::sleep_for(1ms);
+            }
+            throw Error("public amplitude arrival fixture didnotdrain");
+        };
+        drain(expected.payload_end-expected.symbol_samples+2*c.sample_rate,true);
+        check(observed.rows.size()==1&&observed.prefixes.contains("0")&&!observed.rows.begin()->second.complete,
+              "later public amplitude arrival hid its first pending bit");
+        drain(expected.payload_end+6*c.sample_rate,true);
+        check(observed.rows.size()==1&&observed.prefixes.contains("01")&&!observed.rows.begin()->second.complete,
+              "rolling public amplitude lost exact pendingbits or used sixseconds as an early END");
+        drain(expected.samples.size(),false);observed.check_final(expected);
+        const auto state=session.snapshot();
+        check(observed.ids.size()==1&&observed.complete==1&&state.receiver_admissions>2&&state.peak_receiver_instances>1,
+              "public amplitude didnot retain one physical row across fresh arrival windows");
+        check(state.clock_window_modeled==(trial.timed&&!trial.fallback),
+              "public amplitude did not apply explicit timing or preserve Default/fallback");
+        if(!trial.timed)check(state.receiver_admissions<12,
+              "public amplitude still admitted a fresh overlapping bank every second");
+        if(trial.fallback)check(state.clock_timing_fallback&&state.clock_timing_status.find("Audio error 1 ms")!=std::string::npos,
+              "public amplitude timing fallback lost its visible provider reason");
+        session.stop();capture_script=nullptr;
+        std::cout<<"public amplitude delayed arrival "<<delay_seconds<<"s timed="<<trial.timed<<" fallback="<<trial.fallback<<" shift="<<trial.shift
+                 <<": exact01, pendingidentity andphysicalabsence passed; admissions="<<state.receiver_admissions<<'\n';
+    }
 }
 
 // Queue processing time must not select the private epoch for already captured
@@ -1150,6 +1242,7 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
             }
             auto begin=script.monitor_delivered.load(),end=script.monitor_released.load();
             if(end>begin) {
+                if(script.before_capture)script.before_capture(end);
                 if(options.capture_monitor)options.capture_monitor(std::span(script.monitor_samples).subspan(begin,end-begin),script.monitor_rate);
                 script.monitor_delivered=end;
                 if(script.after_monitor)script.after_monitor();
@@ -1408,9 +1501,10 @@ int main(int argc, char** argv) {
 #endif
         const std::string suite = argc > 1 ? argv[1] : "all";
         std::optional<audio::trace::Scope> calendar_trace;
-        if(suite=="hop_calendar" && argc>2)calendar_trace.emplace(argv[2]);
-        check(suite == "retired" || suite == "all" || suite == "hop_calendar" || suite == "exact_source" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "frontier_failure" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "arrival_fallback" || suite == "tx_failure",
+        if((suite=="hop_calendar" || suite=="public_amplitude") && argc>2)calendar_trace.emplace(argv[2]);
+        check(suite == "public_amplitude" || suite == "retired" || suite == "all" || suite == "hop_calendar" || suite == "exact_source" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds" || suite == "interval_queue" || suite == "monitor" || suite == "health" || suite == "frontier_failure" || suite == "capture_time" || suite == "arrival_time" || suite == "arrival_time_baseline" || suite == "backlog" || suite == "clear" || suite == "duplex" || suite == "arrival_fallback" || suite == "tx_failure",
               "unknown profile test suite");
+        if(suite=="all" || suite=="public_amplitude") {context="rolling public amplitude arrivals";public_amplitude_rolling_arrivals();if(suite=="public_amplitude")return 0;}
         if(suite=="all" || suite=="retired") {
             context="retired public reception identities";
             retired_public_streams_release_presentations({32,55});

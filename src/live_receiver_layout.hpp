@@ -1,6 +1,7 @@
 #pragma once
 #include "datapump/live.hpp"
 #include "datapump/streaming_modem.hpp"
+#include "datapump/pattern_correlator.hpp"
 #include "live_pattern_scores.hpp"
 #include "live_deferred_pattern_history.hpp"
 #include "scheduled_source_binding_types.hpp"
@@ -25,7 +26,9 @@ struct ReceiverState {
     double admitted_at = 0;
     bool prefer_streamed_templates = false;
     bool clock_window_modeled = false;
-    std::size_t amplitude_fft_samples=0;
+    std::size_t amplitude_fft_samples=0,amplitude_channel_count=0;
+    // Actual selected passbands for coarse-frequency presentation arbitration.
+    std::optional<modem::PatternAmplitudeGeometry> amplitude_geometry;
     double last_confident_at = 0;
     std::uint64_t last_confident_end = 0;
     std::uint64_t sample_origin = 0, family = 0;

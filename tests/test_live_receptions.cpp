@@ -12,6 +12,32 @@ void check(bool value, const char* message) { if (!value) throw std::runtime_err
 History::Candidate candidate(std::uint64_t id, std::uint64_t first, std::uint64_t end, double score) {
     return {id, 1, first, end, 1500, 10, 6000, score, false};
 }
+void amplitude_passband_aliases() {
+    History history;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
+    auto first=candidate(1,100,1100,80);first.frequency=1499;first.frequency_tolerance=.002;
+    first.amplitude_low_hz=1497;first.amplitude_high_hz=1501;
+    const auto initial=history.observe(first,allocate);
+    auto overlap=first;overlap.id=2;overlap.frequency=1501;overlap.score=90;
+    overlap.amplitude_low_hz=1499;overlap.amplitude_high_hz=1503;
+    const auto alias=history.observe(overlap,allocate);
+    check(alias.selected&&alias.signal_id==initial.signal_id&&ids==1,
+          "overlapping amplitude centers duplicated one physical reception");
+    auto weaker=overlap;weaker.score=1;weaker.frequency=1505;
+    weaker.amplitude_low_hz=1503;weaker.amplitude_high_hz=1507;
+    check(history.observe(weaker,allocate).signal_id==initial.signal_id,
+          "weaker owner update abandoned its original row");
+    auto separate=overlap;separate.id=3;separate.frequency=1505;
+    separate.amplitude_low_hz=1503;separate.amplitude_high_hz=1507;
+    check(history.observe(separate,allocate).signal_id!=initial.signal_id&&ids==2,
+          "nonoverlapping amplitude passbands merged separate carriers");
+    auto coherent=first;coherent.id=4;coherent.frequency=1500;coherent.score=100;
+    coherent.amplitude_low_hz=coherent.amplitude_high_hz=0;
+    check(history.observe(coherent,allocate).signal_id!=initial.signal_id&&ids==3,
+          "coarse amplitude uncertainty widened a resolved coherent carrier");
+    overlap.complete=true;
+    check(history.observe(overlap,allocate).signal_id==initial.signal_id,
+          "amplitude physical completion abandoned its pending identity");
+}
 void optional_history_priority() {
     using datapump::live::detail::optional_pattern_history_ready;
     check(optional_pattern_history_ready(2048,2048,2048,true),"caught-up diagnostics were suppressed");
@@ -460,6 +486,7 @@ void bounded_history_preserves_active_rows() {
 }
 int main() {
     try {
+        amplitude_passband_aliases();
         optional_history_priority();
         deferred_provenance_growth();
         immediate_progress_and_physical_completion();

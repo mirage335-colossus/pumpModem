@@ -11,8 +11,9 @@ Coverage metadata travels with the exact finite frequency/clock bank, including
 UTC steering. Endpoint extrema alone do not certify missing joint alternatives.
 The model retains local passband exclusions and expanded nominal/coupled rows;
 amplitude bounds include both declared uncertainty and all supplied endpoints.
-The existing decoder's conditional probability tests remain separate from the
-new decoders' unsupported probability labels.
+Probability availability is tracked separately for each selected backend in the
+[receiver probability inventory](frequency-axis-probability.md). Transform
+equivalence alone does not qualify acquisition sensitivity.
 Unsupported forced requests remain visible as unsupported.
 
 Automatic retains phase evidence when possible. An eligible frequency-axis
@@ -195,6 +196,15 @@ authorize amplitude substitution. Explicit amplitude-only selection remains
 available where its own geometry is supported.
 
 ## Amplitude-only acquisition
+
+The [amplitude probability work](amplitude-probability.md) provides an explicitly
+unqualified matched-envelope planning reference and records a repaired continuous
+Live public-arrival gap. Public amplitude windows now advance with capture time;
+continuous FFT retains its singleton. The planner prices amplitude's longer
+rolling cohort separately. Overlapping amplitude passband centers share a
+presentation row, while resolved coherent-frequency rules remain intact.
+Standalone high-power capture qualification does not establish full continuous
+Live success probability.
 
 This is a receiver of the existing varying envelope, not a new OOK transmitter.
 It supports independently keyed private rows as well as the public alphabet.

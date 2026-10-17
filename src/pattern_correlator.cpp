@@ -1725,8 +1725,8 @@ struct PatternCorrelator::Impl {
         const auto pair_count=paired?search.hypotheses.size():search.frequency_offsets_hz.size()*search.clock_errors_ppm.size();
         const auto origin_step=[&](long double ratio) {
             const auto original=paired?static_cast<long double>(code.chip_samples())/(2*ratio):step;
-            return scheduled_map()?original/(options.amplitude_only?amplitude_geometry->receiver_timing_subdivisions:
-                scheduled->complex_geometry.receiver_timing_subdivisions):original;
+            if(options.amplitude_only)return original/amplitude_geometry->receiver_timing_subdivisions;
+            return scheduled_map()?original/scheduled->complex_geometry.receiver_timing_subdivisions:original;
         };
         const auto phase_bounds=[&](long double origin,long double previous,long double next) {
             auto lo=phase_lower,hi=phase_upper;
@@ -7708,21 +7708,29 @@ struct PatternCorrelator::Impl {
     std::array<DifferentialFit,2>& local_fits(std::size_t hypothesis,std::size_t group) {
         return differential_fits[hypothesis*(alternate_groups+1)+group];
     }
+    bool same_output_clock(const Hypothesis& h,long double origin,double frequency) const {
+        return std::abs(origin-h.origin)<static_cast<long double>(code.symbol_samples())/3 &&
+            ((!search.hypotheses.empty() && search.frequency_rate_competition) ||
+             std::abs(frequency-h.burst.frequency_hz)<=config.sample_rate/static_cast<double>(code.symbol_samples()));
+    }
+    Emission* existing_output_stream(const Hypothesis& h) {
+        for(auto& emission:emissions)if(same_output_clock(h,emission.origin,emission.frequency) &&
+            (!emission.ended || h.burst.stream_first_symbol<emission.last_symbol))return &emission;
+        return nullptr;
+    }
+    const Hypothesis* prospective_output_owner(const Hypothesis& h) {
+        const Hypothesis* owner=&h;
+        for_each_resident([&](std::size_t,const auto& candidate){if(candidate.admitted && same_output_clock(h,candidate.origin,candidate.burst.frequency_hz) &&
+            (candidate.burst.stream_first_symbol<owner->burst.stream_first_symbol ||
+             (candidate.burst.stream_first_symbol==owner->burst.stream_first_symbol && candidate.sum_score>owner->sum_score)))owner=&candidate;});
+        return owner;
+    }
     Emission& output_stream(Hypothesis& h) {
-        const auto same_clock=[&](long double origin,double frequency) {
-            return std::abs(origin-h.origin)<static_cast<long double>(code.symbol_samples())/3 &&
-                ((!search.hypotheses.empty() && search.frequency_rate_competition) ||
-                 std::abs(frequency-h.burst.frequency_hz)<=config.sample_rate/static_cast<double>(code.symbol_samples()));
-        };
-        for(auto& emission:emissions)if(same_clock(emission.origin,emission.frequency) &&
-            (!emission.ended || h.burst.stream_first_symbol<emission.last_symbol))return emission;
+        if(auto* existing=existing_output_stream(h))return *existing;
         // Choose before output starts. A later timing guide may continue only
         // after proving the entire published prefix; delivered bytes and this
         // emission's physical identity are immutable.
-        const Hypothesis* owner=&h;
-        for_each_resident([&](std::size_t,const auto& candidate){if(candidate.admitted && same_clock(candidate.origin,candidate.burst.frequency_hz) &&
-            (candidate.burst.stream_first_symbol<owner->burst.stream_first_symbol ||
-             (candidate.burst.stream_first_symbol==owner->burst.stream_first_symbol && candidate.sum_score>owner->sum_score)))owner=&candidate;});
+        const auto* owner=prospective_output_owner(h);
         Emission emission{owner,owner->burst.stream_first_symbol,owner->burst.first_stream_symbol,
             owner->burst.stream_first_sample,owner->origin,owner->burst.frequency_hz,
             owner->burst.frequency_hz,owner->burst.score,false};
@@ -7817,12 +7825,29 @@ struct PatternCorrelator::Impl {
             return;
         }
     }
-    void publish(Hypothesis& h,bool complete=false,bool flush=true,bool draining=false) {
+    void publish(Hypothesis& h,bool complete=false,bool flush=true,bool draining=false,bool force_initial=false) {
         rx_cpu::Scope cpu_scope(rx_cpu::Stage::publication);
         if(!h.admitted)return;
         if(draining && !h.committed)return;
         const auto chunk=std::min(search.chunk_bits,bit_limit);
         if(!complete && !flush && h.committed<chunk)return;
+        if(options.amplitude_only && !scheduled_map() && search.amplitude_start_window &&
+           h.burst.stream_first_symbol==0 && !force_initial && !existing_output_stream(h)) {
+            // Resolve initial physical ownership only after its nearby start
+            // alternatives have scored symbol zero. An earlier, weaker lane
+            // must not freeze ownership just before a finer lane's FFT fence.
+            // This is initial acquisition only; an established owner's bits
+            // remain available on every drain. EOF uses best available evidence.
+            const auto* owner=prospective_output_owner(h);
+            bool pending=false;
+            for_each_resident([&](std::size_t,const auto& candidate) {
+                // Unscored lanes have no observed carrier yet. Every nearby
+                // original timing/rate alternative must finish competing.
+                if(&candidate!=&h && candidate.index==0 &&
+                   std::abs(candidate.origin-owner->origin)<code.symbol_samples()/3.L)pending=true;
+            });
+            if(pending)return;
+        }
         auto& stream=output_stream(h);
         if(stream.owner!=&h) {
             if(retain_timing_suffix(h,stream) && !complete) {
@@ -8759,7 +8784,11 @@ struct PatternCorrelator::Impl {
                 if(cursor>=boundary)complete(h,hypothesis,boundary,stop);
             }
         }
-        amplitude_processed=end;settle_timing();room_for(0);
+        amplitude_processed=end;settle_timing();
+        if(search.amplitude_start_window)for(auto& h:hypotheses)
+            if(h.index==1 && h.admitted && h.committed && h.burst.stream_first_symbol==0)
+                publish(h,false,true,true);
+        room_for(0);
     }
     void push_amplitude(std::span<const float> input,std::stop_token stop,detail::CorrelationProjectionCache* cache) {
         work.samples+=input.size();
@@ -11922,7 +11951,7 @@ void PatternCorrelator::finish(std::stop_token stop) {
         "implicit finish lacks the required original processing fence; no absence fabricated");}
     s.amplitude_publication_dirty=true;
     s.settle_timing();
-    s.for_each_resident([&](std::size_t,auto& h){s.publish(h);s.clear(h);});
+    s.for_each_resident([&](std::size_t,auto& h){s.publish(h,false,true,false,true);s.clear(h);});
     s.finished=true;
 }
 std::vector<PatternBurst> PatternCorrelator::take_bursts(){

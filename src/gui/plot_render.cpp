@@ -36,6 +36,11 @@ std::pair<double,double> detail_band(const SpectrumDetail& data) {
     const auto count=data.history->detail_rows().back().db.size();
     if(count<2 || !(edge>0))return band;
     const auto spacing=edge/(count-1);
+    // Include a little captured background on each side for comparison with
+    // the searched bins. This changes only the displayed extent, not RX search.
+    const auto context=std::max(2*spacing,.1*(band.second-band.first));
+    band.first=std::max(0.,band.first-context);
+    band.second=std::min(edge,band.second+context);
     // The displayed endpoints are retained bin centers. Round outward so a
     // narrow configured interval cannot silently discard an admitted edge.
     band.first=std::max(0.,std::floor(band.first/spacing)*spacing);
@@ -392,13 +397,22 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
                 const auto last=std::min(end,std::max(first+1,begin+static_cast<std::size_t>(column+1)*(end-begin)/columns));
                 const auto best=static_cast<std::size_t>(std::max_element(row.db.begin()+static_cast<std::ptrdiff_t>(first),
                     row.db.begin()+static_cast<std::ptrdiff_t>(last))-row.db.begin());
+                const auto level=data.history->intensity(row.db[best]);
                 if(phase) {
                     const auto degrees=row.phase_degrees[best];
-                    if(!std::isfinite(degrees))return gray(0);
-                    if(color)return phase_color(degrees);
-                    return gray(static_cast<unsigned char>(std::clamp((degrees+180.)/360.,0.,1.)*254+1));
+                    if(!std::isfinite(degrees) || level<=0)return gray(0);
+                    // Hue carries phase; shared amplitude brightness prevents
+                    // quiet, arbitrary noise phase from looking like a peak.
+                    if(color) {
+                        const auto hue=phase_color(degrees);
+                        return Rgb{static_cast<unsigned char>(std::lround(hue.red*level)),
+                            static_cast<unsigned char>(std::lround(hue.green*level)),
+                            static_cast<unsigned char>(std::lround(hue.blue*level))};
+                    }
+                    const auto phase_level=std::clamp((degrees+180.)/360.,0.,1.)*254+1;
+                    return gray(static_cast<unsigned char>(std::max(1L,std::lround(phase_level*level))));
                 }
-                const auto intensity=static_cast<unsigned char>(data.history->intensity(row.db[best])*255);
+                const auto intensity=static_cast<unsigned char>(level*255);
                 return color?theme::waterfall_palette[intensity]:gray(intensity);
             });
         } else if constexpr (std::is_same_v<Type, Qr>) {
@@ -533,15 +547,19 @@ std::string PlotSnapshot::caption(unsigned width) const {
             const auto [low,high]=detail_band(data);
             const auto count=data.history->detail_rows().empty()?0:data.history->detail_rows().back().db.size();
             const auto spacing=count>1?data.history->max_hz()/(count-1):data.history->bin_hz();
-            out << std::setprecision(6) << low << ".." << high << " Hz / retained " << spacing << " Hz/bin; ";
+            const bool context=data.band && (low!=std::clamp(data.band->first,0.,data.history->max_hz()) ||
+                                             high!=std::clamp(data.band->second,0.,data.history->max_hz()));
+            out << std::setprecision(6);
+            if(data.band)out << "Search " << data.band->first << ".." << data.band->second << " Hz"
+                << (context?" + surrounding spectrum; ":"; ");
+            out << low << ".." << high << " Hz shown / retained " << spacing << " Hz/bin; ";
             out << data.history->lower_db() << ".." << data.history->upper_db()
                 << (data.history->simulation_reference()?" dB sim. ref.\n":" dBFS peak\n");
             out << (width<64?"left amplitude, right phase":"paired columns: amplitude left, phase right");
-            out << "; wrapped phase -180..180 deg relative to bin rotation; black=unavailable, noise phase arbitrary";
+            out << "; wrapped phase -180..180 deg relative to bin rotation; phase brightness follows amplitude; black=unavailable/below display floor, noise phase arbitrary";
             if(!data.band)out << "; search band unavailable: full capture";
             else if(data.band->first<0 || data.band->second>data.history->max_hz())out << "; searched band clipped by capture Nyquist";
-            if(data.band && (low!=std::clamp(data.band->first,0.,data.history->max_hz()) ||
-                             high!=std::clamp(data.band->second,0.,data.history->max_hz())))out << "; display rounded outward to retained FFT grid";
+            if(context)out << "; context rounded outward to retained FFT grid";
         } else if constexpr (std::is_same_v<Type, Qr>) {
             if (data.brightness == QrBrightness::off) return "QR preview off";
             return data.code ? "QR preview" : "No QR message";

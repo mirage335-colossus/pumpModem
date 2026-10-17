@@ -10,6 +10,7 @@
 #include <array>
 #include "../src/pattern_envelope.hpp"
 #include "../src/pattern_observation_layout.hpp"
+#include "../src/live_receiver_admission.hpp"
 using namespace datapump;
 using namespace datapump::modem;
 namespace {
@@ -18,6 +19,78 @@ Config geometry() {
     Config c;c.sample_rate=512;c.bandwidth_hz=4;c.carrier_hz=128;
     c.pattern_symbols=true;c.constellation_bits=1;c.spreading_factor=512;
     c.scramble=true;c.spreading_seed[0]=91;return c;
+}
+void amplitude_arrival_accounting() {
+    auto c=geometry();c.scramble=false;c.spreading_factor=64;
+    PatternSearch search;search.start_offset_seconds=0;search.start_uncertainty_seconds=7;
+    search.hypotheses={{0,0}};search.receiver_bank_count=1;search.worker_threads=1;
+    const auto count=receiver_strategy_amplitude_bank_count(c,search,1,1);
+    check(count>=2*symbol_seconds(c)+2*search.start_uncertainty_seconds,
+          "public amplitude cohort omitted firstfullyobserved symbol lifetime");
+    search.receiver_strategy_workspace_bytes=4*1024*1024;
+    c.receiver_strategy=ReceiverStrategy::existing_only;
+    const auto original=resolve_receiver_strategy(c,search,8*1024*1024);
+    auto rolling=search;rolling.amplitude_receiver_bank_count=count;rolling.amplitude_strategy_workspace_bytes=512*1024;
+    const auto protected_fft=resolve_receiver_strategy(c,rolling,8*1024*1024);
+    check(protected_fft.backend==original.backend&&protected_fft.selected_bank_count==1&&
+          protected_fft.existing_processing_ratio==original.existing_processing_ratio&&
+          protected_fft.selected_workspace_bytes==original.selected_workspace_bytes,
+          "amplitude rolling allowance changed public continuousFFT accounting");
+    c.receiver_strategy=ReceiverStrategy::amplitude_only;
+    auto one_window=rolling;one_window.amplitude_receiver_bank_count=1;
+    const auto single=resolve_receiver_strategy(c,one_window,8*1024*1024);
+    const auto many=resolve_receiver_strategy(c,rolling,8*1024*1024);
+    check(single.supported&&many.supported&&many.selected_bank_count==count&&many.selected_workspace_bytes==512*1024&&
+          std::abs(many.amplitude_processing_ratio/single.amplitude_processing_ratio-count)<1e-8*count,
+          "amplitude cost/count/share omitted rolling public arrival windows");
+    rolling.amplitude_strategy_workspace_bytes=1024;
+    check(!resolve_receiver_strategy(c,rolling,8*1024*1024).supported,
+          "amplitude selection ignored its own rollingworkspace share");
+    rolling.hypotheses={{0,-6000},{0,6000}};
+    const auto slowed=receiver_strategy_amplitude_bank_count(c,rolling,1,1);
+    check(pattern_amplitude_geometry(c,rolling).clock_hypotheses>1&&slowed>count,
+          "slowclock lanes did not extend amplitude cohort lifetime");
+    c.receiver_strategy=ReceiverStrategy::automatic;
+    auto incomplete=search;incomplete.complex_frequency_coverage=false;
+    incomplete.amplitude_receiver_bank_count=1000;
+    incomplete.amplitude_strategy_workspace_bytes=4*1024*1024;
+    const auto covered=resolve_receiver_strategy(c,incomplete,8*1024*1024);
+    check(covered.backend==ReceiverBackend::amplitude_energy&&covered.full_frequency_coverage&&
+          covered.amplitude_processing_ratio>covered.existing_processing_ratio&&
+          covered.amplitude_processing_ratio<=covered.cpu_budget,
+          "automatic retained cheaper incomplete complex coverage over affordable complete amplitude");
+    incomplete.amplitude_receiver_bank_count=100000000;
+    const auto too_costly=resolve_receiver_strategy(c,incomplete,8*1024*1024);
+    check(too_costly.backend==ReceiverBackend::existing_complex&&!too_costly.full_frequency_coverage,
+          "automatic hid an unaffordable complete amplitude cohort");
+    c=geometry();c.scramble=false;c.bandwidth_hz=1;c.spreading_factor=16384;
+    live::Settings settings;settings.transfer.modem=c;settings.simulation=false;
+    PatternSearch partitioned;partitioned.start_offset_seconds=0;partitioned.start_uncertainty_seconds=7;
+    live::detail::prepare_public_amplitude_windows(c,settings,false,partitioned);
+    check(partitioned.amplitude_epoch_stride_seconds==64&&partitioned.amplitude_start_uncertainty_seconds==33&&
+          partitioned.start_uncertainty_seconds==7&&!partitioned.amplitude_start_window,
+          "public finite windows changed the complex domain or claimed dated timing");
+    partitioned.amplitude_lookahead_epochs=live::detail::amplitude_epoch_lookahead(c,partitioned,1.L/c.sample_rate,0);
+    const auto compact_count=receiver_strategy_amplitude_bank_count(c,partitioned,1,1);
+    auto preceding=partitioned;preceding.amplitude_epoch_stride_seconds=1;preceding.amplitude_start_uncertainty_seconds.reset();
+    check(compact_count*50<receiver_strategy_amplitude_bank_count(c,preceding,1,1),
+          "public finite-window cohort did not remove per-second frontend duplication");
+    for(const auto counts:{std::pair{2U,1U},std::pair{1U,2U}}) {
+        auto mixed=search;
+        live::detail::prepare_public_amplitude_windows(c,settings,false,mixed,counts.first,counts.second);
+        check(mixed.amplitude_epoch_stride_seconds==1&&!mixed.amplitude_start_uncertainty_seconds,
+              "mixed key/profile cohort inherited a single-public-family admission discount");
+    }
+    auto encrypted=search;settings.transfer.key.emplace(Bytes(32,0x53));
+    live::detail::prepare_public_amplitude_windows(c,settings,false,encrypted);
+    check(encrypted.amplitude_epoch_stride_seconds==1,"unseeded Data-key estimate used public arrival windows");
+    settings.transfer.key.reset();
+    auto timed=partitioned;timed.amplitude_epoch_stride_seconds=1;timed.amplitude_start_uncertainty_seconds.reset();
+    settings.transfer.clock_sync=clock_sync::Policy{.001,.4,2.564};
+    live::detail::prepare_public_amplitude_windows(c,settings,false,timed);
+    check(timed.amplitude_epoch_stride_seconds==1&&!timed.amplitude_start_uncertainty_seconds,
+          "public Default optimization widened an explicit clock prior");
+    std::cout<<"amplitude public arrival accounting passed\n";
 }
 void fractional_clock_fft_boundary() {
     Config c;c.sample_rate=131072;c.bandwidth_hz=65536;c.carrier_hz=32768;
@@ -354,7 +427,7 @@ void frequency_axis_preserves_long_private_progress() {
     check(candidate.fft_work().frequency_axis_fallback_batches==0,"qualified fixture retained broad numerical work");
 }
 }
-int main(int argc,char** argv){try {fractional_clock_fft_boundary();if(argc>1&&std::string_view(argv[1])=="--fft-geometry")return 0;amplitude_band_geometry_survives_factoring();scheduled_strategy_geometry();packed_defaults_use_complex_evidence();scheduled_packed_phase_model();scheduled_short_split_late_phase_model();scheduled_long_chip_receiver_grid_model();
+int main(int argc,char** argv){try {if(argc==2&&std::string_view(argv[1])=="--amplitude-arrival-only"){amplitude_arrival_accounting();return 0;}amplitude_arrival_accounting();fractional_clock_fft_boundary();if(argc>1&&std::string_view(argv[1])=="--fft-geometry")return 0;amplitude_band_geometry_survives_factoring();scheduled_strategy_geometry();packed_defaults_use_complex_evidence();scheduled_packed_phase_model();scheduled_short_split_late_phase_model();scheduled_long_chip_receiver_grid_model();
     auto c=geometry();PatternSearch s;s.start_offset_seconds=0;s.start_uncertainty_seconds=7;
     s.worker_threads=1;s.compact_clock_search=true;s.search_stream_phases=true;
     for(int i=-100;i<=100;++i)s.hypotheses.push_back({i*.05,0});

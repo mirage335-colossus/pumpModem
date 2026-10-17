@@ -468,8 +468,38 @@ Audio error0; it does not claim that the local Audio allowance was qualified.
 Both stations must satisfy the selected timing assumptions. A capture
 timestamp alone cannot establish the peer's timing behavior.
 
-The map narrows compact and eligible short FFT acquisition; unsupported paths and missing/invalid timing
-metadata keep the full fallback. The fixed propagation offset shifts the receive
+The map also narrows ordinary amplitude acquisition, including public long
+symbols. Default without hopping retains the rolling broad arrival window
+(search margin plus its existing one-second edge allowance). Explicit Clock
+sync accuracy, region, offset and Audio error instead select intersecting cells.
+This dated amplitude lattice adds binary midpoints to the original half-chip
+representatives, resolving intensity at quarter-chip spacing. The amplitude path
+uses its existing FFT band-energy frontend, envelope statistic and confidence
+gates; each extra scored hypothesis retains the existing trial charge. Original
+full-window allocation preflight includes this refinement and remains
+conservative even when fewer cells are scored.
+
+Initial symbol-zero ownership waits for nearby first-symbol timing alternatives
+to finish competing, including when their completion fences straddle FFT blocks.
+After selecting that physical owner, each new accepted bit is available on the
+next drain as before. A shared FFT-block boundary releases an eligible first bit
+even during a large push. EOF keeps the best available pending prefix and never
+supplies an absent symbol. Later-ordinal timing ownership and general receiver
+success remain outside this focused timing repair's qualification.
+
+A dated public amplitude listener prepares future message epochs before their
+arrival windows open, allowing its first complete FFT block to be observed.
+The horizon covers the original full window, one FFT block, the bounded decoder
+feed chunk (including capture slope uncertainty), and UTC refresh rounding.
+These extra cohorts are charged before Auto selects a decoder. Continuous
+complex/FFT candidates retain their existing timing domain and singleton policy.
+Missing dates, invalid maps, simulation startup and ordinary capture uncertainty
+above Audio/2 retain the broad fallback; Audio0 does not qualify a provider with
+positive uncertainty. This constrains arrival time, independently of LF/RF
+oscillator search settings.
+
+The map narrows compact, amplitude and eligible short FFT acquisition;
+unsupported paths and missing/invalid timing metadata keep the full fallback. The fixed propagation offset shifts the receive
 epoch center and retirement time. Subsequent symbols retain all frequency/rate
 lanes and the original physical completion rule. A cold listener inside a long
 symbol can wait for the next symbol boundary; it does not recover unobserved PCM.

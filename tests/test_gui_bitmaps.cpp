@@ -543,11 +543,15 @@ void detailed_waterfall_phase() {
     constexpr std::size_t count=plots::SpectrumHistory::native_bins,k=777;
     constexpr std::uint64_t start=(std::uint64_t{1}<<60)+13,delta=137;
     constexpr double bin_hz=48000./2048;
-    std::vector<double> db(count,-100);db[k]=0;db[k+1]=-10;
+    std::vector<double> db(count,-100);db[k]=0;db[k+1]=-10;db[k-1]=-30;db[k+2]=-80;
     std::vector<std::complex<float>> first(count),second(count);
     first[k]=first[k+1]={1,0};
     second[k]=std::polar(1.f,static_cast<float>(2*std::numbers::pi*k*delta/2048+std::numbers::pi/4));
     second[k+1]=std::polar(1.f,static_cast<float>(2*std::numbers::pi*(k+1)*delta/2048-std::numbers::pi/2));
+    for(const auto bin:{k-1,k+2}) {
+        first[bin]={1,0};
+        second[bin]=std::polar(1.f,static_cast<float>(2*std::numbers::pi*bin*delta/2048+std::numbers::pi/4));
+    }
     plots::SpectrumHistory history;
     history.push(db,bin_hz,{},first,start,2048,7);
     check(!std::isfinite(history.detail_rows().back().phase_degrees[k]),"first FFT window invented prior phase");
@@ -558,10 +562,24 @@ void detailed_waterfall_phase() {
           "line phase lost actual sample delta, wrapping or DC/Nyquist exclusion");
     auto frozen=std::make_shared<const plots::SpectrumHistory>(history);
     const auto source=PlotSnapshot::waterfall_detail(frozen,std::pair{k*bin_hz,(k+1)*bin_hz});
-    auto request=full_bitmap_request(64,2);
+    // Two context bins per side yield six native bins, each occupying six
+    // amplitude/phase pairs at this width. Both outside reference bins remain
+    // visible, on exactly the same power/phase scale as the searched bins.
+    auto request=full_bitmap_request(72,2);
     const auto pixels=render(source,request,false);
-    check(red(pixels,0,1)==255 && red(pixels,1,1)>=159 && red(pixels,1,1)<=160,
+    check(red(pixels,24,1)==255 && red(pixels,25,1)>=159 && red(pixels,25,1)<=160,
           "paired phase did not come from the amplitude-winning native bin");
+    check(red(pixels,12,1)>3*red(pixels,48,1) &&
+          red(pixels,13,1)>3*red(pixels,49,1) && red(pixels,49,1)>0,
+          "surrounding strong/quiet bins lost their shared amplitude/phase contrast");
+    const auto colored=render(source,full_bitmap_request(72,2,false,true),true);
+    const auto brightness=[&](unsigned x,unsigned y) {
+        const auto at=(static_cast<std::size_t>(y)*colored.width()+x)*3;
+        return *std::max_element(colored.pixels().begin()+at,colored.pixels().begin()+at+3);
+    };
+    check(brightness(25,1)==255 && brightness(13,1)>3*brightness(49,1) && brightness(49,1)>0,
+          "quiet noise phase remained as bright as a strong signal's phase");
+    for(unsigned x=1;x<72;x+=2)check(brightness(x,0)==0,"startup phase invented a reference");
     const auto native=PlotSnapshot::waterfall_shared(frozen);
     const auto compact=render(native,full_bitmap_request(256,2),false);
     history.clear();
@@ -581,8 +599,12 @@ void detailed_waterfall_phase() {
         }
         check(complete.pixels()==horizontal.pixels(),"odd-x damage shifted paired amplitude/phase columns");
     }
-    check(source.caption().find("retained 23.4375 Hz/bin")!=std::string::npos &&
-          source.caption().find("noise phase arbitrary")!=std::string::npos,
+    check(source.caption().starts_with("Search ") &&
+          source.caption().find("surrounding spectrum")<source.caption().find('\n') &&
+          source.caption().find("retained 23.4375 Hz/bin")!=std::string::npos &&
+          source.caption().find("noise phase arbitrary")!=std::string::npos &&
+          source.caption().find("phase brightness follows amplitude")!=std::string::npos &&
+          source.caption().find("surrounding spectrum")!=std::string::npos,
           "expanded spectrum invented resolution or phase certainty");
     plots::SpectrumHistory buckets;auto distinct=db;
     std::fill(distinct.begin(),distinct.end(),-100);distinct[k+2]=0;
@@ -590,11 +612,32 @@ void detailed_waterfall_phase() {
     const auto disjoint=PlotSnapshot::waterfall_detail(std::make_shared<const plots::SpectrumHistory>(buckets),
         std::pair{k*bin_hz,(k+63)*bin_hz});
     const auto bucket_pixels=render(disjoint,full_bitmap_request(64,1),false);
-    check(red(bucket_pixels,0,0)==0 && red(bucket_pixels,2,0)==255,
+    check(red(bucket_pixels,6,0)==0 && red(bucket_pixels,8,0)==255 && red(bucket_pixels,10,0)==0,
           "native peak leaked into the adjacent downsampled frequency bucket");
     const auto fractional=PlotSnapshot::waterfall_detail(frozen,std::pair{(k+.2)*bin_hz,(k+.8)*bin_hz});
     check(fractional.caption().find("rounded outward to retained FFT grid")!=std::string::npos,
           "fractional search crop implied finer resolution than retained FFT bins");
+    for(const auto band:{std::pair{-bin_hz,bin_hz},std::pair{1023*bin_hz,1025*bin_hz}}) {
+        const auto edge=PlotSnapshot::waterfall_detail(frozen,band);
+        check(edge.caption().find("clipped by capture Nyquist")!=std::string::npos,
+              "context clipping hid the requested out-of-capture search edge");
+        for(const auto width:{7U,72U}) {
+            const auto edge_pixels=render(edge,full_bitmap_request(width,2),false);
+            check(std::all_of(edge_pixels.pixels().begin(),edge_pixels.pixels().end(),[](auto x){return x==0;}),
+                  "clipped context wrapped around to an unrelated signal");
+        }
+    }
+    check(render(PlotSnapshot::waterfall_detail(frozen,std::pair{0.,24000.}),full_bitmap_request(72,2),false).pixels()==
+          render(PlotSnapshot::waterfall_detail(frozen),full_bitmap_request(72,2),false).pixels(),
+          "full-capture context changed its extent");
+    auto endpoint_db=db;endpoint_db[k]=-1;auto endpoint_phase=second;
+    endpoint_phase[k]=std::polar(1.f,static_cast<float>(2*std::numbers::pi*k*delta/2048-std::numbers::pi+1e-4));
+    plots::SpectrumHistory endpoint;endpoint.push(endpoint_db,bin_hz,{},first,start,2048,7);
+    endpoint.push(endpoint_db,bin_hz,{},endpoint_phase,start+delta,2048,7);
+    check(endpoint.detail_rows().back().phase_degrees[k]<-179,"endpoint fixture missed the negative phase boundary");
+    const auto endpoint_pixels=render(PlotSnapshot::waterfall_detail(std::make_shared<const plots::SpectrumHistory>(endpoint),
+        std::pair{k*bin_hz,(k+1)*bin_hz}),full_bitmap_request(72,2),false);
+    check(red(endpoint_pixels,25,1)>0,"finite above-floor endpoint phase became unavailable in grayscale");
     for(const auto geometry:{std::pair{start+delta,7ULL},std::pair{start+delta+1,8ULL}}) {
         history=*frozen;history.push(db,bin_hz,{},first,geometry.first,2048,geometry.second);
         check(!std::isfinite(history.detail_rows().back().phase_degrees[k]),"duplicate sample position or new segment retained phase coherence");
@@ -606,6 +649,11 @@ void detailed_waterfall_phase() {
     for(unsigned i=0;i<200;++i)history.push(db,bin_hz);
     check(history.rows().size()==160 && history.detail_rows().size()==160 && history.detail_rows().back().db.size()==1025,
           "native detail exceeded its bounded shared row retention");
+    for(const auto band:{std::pair{0.,0.},std::pair{k*bin_hz,k*bin_hz}}) {
+        const auto empty=render(PlotSnapshot::waterfall_detail(frozen,band),full_bitmap_request(72,2),false);
+        check(std::all_of(empty.pixels().begin(),empty.pixels().end(),[](auto x){return x==0;}),
+              "zero-width search band gained surrounding data");
+    }
     const auto outside=PlotSnapshot::waterfall_detail(frozen,std::pair{30000.,40000.});
     const auto blank=render(outside,full_bitmap_request(64,2),false);
     check(std::all_of(blank.pixels().begin(),blank.pixels().end(),[](auto x){return x==0;}) &&
@@ -916,8 +964,12 @@ void sampled_pattern_score_clouds() {
     }
 }
 }
-int main() {
+int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="--waterfall-only") {
+            simulation_waterfall_reference();waterfall_resize();detailed_waterfall_phase();
+            std::cout<<"Focused waterfall display contracts passed\n";return 0;
+        }
         transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); environmental_oscilloscope(); simulation_waterfall_reference(); simulation_waterfall_calibration(); waterfall_resize(); detailed_waterfall_phase(); fitted_history(); qr_and_patterns(); pattern_scores(); sampled_pattern_score_clouds();
         std::cout << "GUI bitmap contract and shared producer tests passed\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

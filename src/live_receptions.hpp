@@ -22,6 +22,9 @@ public:
         double score = 0; // Arbitration support, not a displayed native score.
         bool complete = false;
         std::uint64_t signal_id = 0, symbol_samples = 0, timing_tolerance = 0;
+        // Valid only for amplitude candidates. These are actual retained FFT
+        // passbands; their reported centers are not coherent carrier estimates.
+        double amplitude_low_hz = 0, amplitude_high_hz = 0;
     };
     struct Decision {
         std::uint64_t signal_id = 0;
@@ -54,6 +57,8 @@ public:
             if (observed.score < entry.owner.score) {
                 observed.frequency = entry.owner.frequency;
                 observed.frequency_tolerance = entry.owner.frequency_tolerance;
+                observed.amplitude_low_hz = entry.owner.amplitude_low_hz;
+                observed.amplitude_high_hz = entry.owner.amplitude_high_hz;
             }
             observed.score = std::max(observed.score, entry.owner.score);
         }
@@ -175,9 +180,14 @@ private:
     }
     static bool matches(const Entry& entry, const Candidate& candidate) {
         const auto& owner = entry.owner;
-        if (owner.family != candidate.family ||
-            std::abs(owner.frequency - candidate.frequency) >
-                std::max(owner.frequency_tolerance, candidate.frequency_tolerance)) return false;
+        if (owner.family != candidate.family) return false;
+        const bool amplitude_pair=owner.amplitude_high_hz>owner.amplitude_low_hz&&
+            candidate.amplitude_high_hz>candidate.amplitude_low_hz;
+        if(amplitude_pair) {
+            if(owner.amplitude_low_hz>=candidate.amplitude_high_hz||
+               candidate.amplitude_low_hz>=owner.amplitude_high_hz)return false;
+        } else if(std::abs(owner.frequency-candidate.frequency)>
+                  std::max(owner.frequency_tolerance,candidate.frequency_tolerance))return false;
         if (candidate.first < owner.end && owner.first < candidate.end) return true;
         if (entry.complete || entry.retired) return false;
         const auto& earlier = candidate.first >= owner.end ? owner : candidate;

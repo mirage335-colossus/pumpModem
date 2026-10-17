@@ -11,6 +11,10 @@
 #include "datapump/streaming_modem.hpp"
 #include "../src/scheduled_acquisition_policy.hpp"
 #include <cstdlib>
+#include <algorithm>
+#include <vector>
+#include <array>
+#include <random>
 #include <optional>
 #include <string>
 #include <cmath>
@@ -87,6 +91,183 @@ void policy_and_epoch_normalization() {
         "pure diagnostic estimator lost its wider bounded-search fallback");
     bool refused=false;try{(void)live::detail::effective_epoch_search_seconds(options);}catch(const Error&){refused=true;}
     check(refused,"actual Live must retain its explicit 60-second epoch limit");
+}
+void public_amplitude_clock_window() {
+    constexpr auto epoch=1800000000ULL;
+    live::Settings value;auto& c=value.transfer.modem;
+    c.sample_rate=512;c.bandwidth_hz=4;c.carrier_hz=128;c.spreading_factor=64;
+    c.pattern_symbols=true;c.constellation_bits=1;c.pulse_shaping=true;
+    c.scramble=c.dsss=false;c.dsss_factor=1;c.receiver_strategy=modem::ReceiverStrategy::amplitude_only;
+    c.oscillator_search.emplace();c.oscillator_search->lf={0,0};c.oscillator_search->rf={0,0};
+    c.oscillator_search->reference=modem::OscillatorReference::independent_audio;
+    value.transfer.automatic_receive_profiles=false;value.transfer.timestamp=0;value.transfer.search_seconds=6;
+    value.transfer.clock_sync=clock_sync::Policy{.001,.4,2.564};value.transfer.audio_timing_error_seconds=.2;
+    value.dsp_workspace_bytes=value.transfer.dsp_workspace_bytes=256U*1024*1024;
+    const audio::TimePrediction stamp{static_cast<long double>(epoch)-5,.02,1./c.sample_rate,audio::TimingQuality::estimated,0};
+    const auto prepare=[&](const live::Settings& settings,std::optional<audio::TimePrediction> timing) {
+        live::detail::ReceiverAdmissionContext context;context.timing=timing;context.now=double(epoch)-5;
+        context.propagation=settings.transfer.clock_sync?settings.transfer.clock_sync->offset_seconds:0;
+        context.keyed=false;context.capacity=live::receiver_workspace_capacity(settings);
+        context.control_margin=live::receiver_control_margin(settings.transfer.modem,false);
+        return live::detail::prepare_receiver_search(settings.transfer.modem,settings,epoch,context);
+    };
+    const auto prepared=prepare(value,stamp);
+    check(!prepared.clock_window_modeled&&!prepared.search.qualified_start_window&&prepared.search.amplitude_start_window,
+        "public amplitude timing must have its own prior without narrowing complex search");
+    check(prepared.search.amplitude_lookahead_epochs>=12,
+        "dated public amplitude lacks a future admission horizon");
+    auto no_horizon=prepared.search;no_horizon.amplitude_lookahead_epochs=0;
+    check(prepared.search.amplitude_receiver_bank_count==
+          modem::receiver_strategy_amplitude_bank_count(c,no_horizon,1,1)+prepared.search.amplitude_lookahead_epochs,
+        "future public amplitude cohorts were not charged before selection");
+    auto slow_stamp=stamp;slow_stamp.seconds_per_frame*=2;
+    check(prepare(value,slow_stamp).search.amplitude_lookahead_epochs>prepared.search.amplitude_lookahead_epochs,
+        "future admission ignored the capture slope");
+    check(!live::detail::amplitude_epoch_lookahead(c,prepared.search,
+              std::numeric_limits<long double>::quiet_NaN(),0),"invalid capture slope invented a future horizon");
+    const auto crossing=live::detail::amplitude_epoch_lookahead(c,prepared.search,.9L/c.sample_rate,.2L);
+    const auto equivalent=live::detail::amplitude_epoch_lookahead(c,prepared.search,1.1L/c.sample_rate,0);
+    check(crossing==equivalent,"future horizon used multiplicative rather than additive capture uncertainty");
+    const auto prior=*prepared.search.amplitude_start_window;
+    check(std::abs(prior.epoch_origin_samples/c.sample_rate-7.664)<1e-6&&
+          std::abs(prior.half_width_samples/c.sample_rate-(.402+.01/c.sample_rate))<1e-6,
+          "public amplitude omitted GPS/total-region/offset/causal-audio bounds");
+    const auto compare=[&](const live::Settings& settings,double center_delta,double radius_delta) {
+        const auto other=prepare(settings,stamp).search.amplitude_start_window;
+        check(other&&std::abs((other->epoch_origin_samples-prior.epoch_origin_samples)/c.sample_rate-center_delta)<1e-6&&
+              std::abs((other->half_width_samples-prior.half_width_samples)/c.sample_rate-radius_delta)<1e-6,
+              "amplitude timing controls changed the wrong center or half-width");
+    };
+    auto changed=value;changed.transfer.clock_sync->region_seconds=.1;compare(changed,0,-.15);
+    changed=value;changed.transfer.clock_sync->accuracy_seconds=.005;compare(changed,0,.008);
+    changed=value;changed.transfer.clock_sync->offset_seconds+=1;compare(changed,1,0);
+    changed=value;changed.transfer.audio_timing_error_seconds=.1;compare(changed,-.05,-.1);
+    changed=value;changed.transfer.clock_sync.reset();
+    const auto default_search=prepare(changed,stamp).search;
+    check(!default_search.amplitude_start_window&&!default_search.qualified_start_window&&
+          default_search.amplitude_epoch_stride_seconds==64&&default_search.amplitude_start_uncertainty_seconds==33&&
+          default_search.amplitude_lookahead_epochs>=34&&default_search.start_uncertainty_seconds==value.transfer.search_seconds+1.,
+          "Default public windows lost continuous preadmission or narrowed the complex arrival domain");
+    check(!prepare(value,{}).search.amplitude_start_window,"missing provider date invented an amplitude prior");
+    auto uncertain=stamp;uncertain.uncertainty_seconds=.101;
+    check(!prepare(value,uncertain).search.amplitude_start_window,"amplitude clamped provider uncertainty to Audio allowance");
+    changed=value;changed.transfer.audio_timing_error_seconds=0;
+    check(!prepare(changed,stamp).search.amplitude_start_window,"Audio0 qualified a positive-uncertainty provider");
+    changed=value;changed.simulation=true;
+    check(!prepare(changed,stamp).search.amplitude_start_window,"synthetic startup acquired a hardware timing prior");
+    changed=value;changed.transfer.modem.oscillator_search.reset();
+    check(prepare(changed,stamp).search.amplitude_start_window.has_value(),"clock arrival assumptions incorrectly required an oscillator preset");
+    auto broad=prepared.search;broad.amplitude_start_window.reset();
+    const auto full=modem::resolve_receiver_strategy(c,broad,8U*1024*1024);
+    const auto narrow=modem::resolve_receiver_strategy(c,prepared.search,8U*1024*1024);
+    check(narrow.supported&&narrow.backend==modem::ReceiverBackend::amplitude_energy&&
+          narrow.amplitude_processing_ratio<full.amplitude_processing_ratio&&narrow.amplitude_channels==full.amplitude_channels,
+          "amplitude prior did not reduce envelope work or changed channel geometry");
+    auto complex=c;complex.receiver_strategy=modem::ReceiverStrategy::existing_only;
+    const auto complex_full=modem::resolve_receiver_strategy(complex,broad,8U*1024*1024);
+    const auto complex_prior=modem::resolve_receiver_strategy(complex,prepared.search,8U*1024*1024);
+    check(complex_prior.backend==complex_full.backend&&complex_prior.existing_processing_ratio==complex_full.existing_processing_ratio&&
+          complex_prior.selected_workspace_bytes==complex_full.selected_workspace_bytes,
+          "amplitude-only timing prior changed continuous complex policy");
+    // Count completed first-symbol candidates in the actual wrapper, proving
+    // promotion happens only after amplitude selection and retains cell edges.
+    modem::PatternSearch cells;cells.start_offset_seconds=7;cells.start_uncertainty_seconds=7;
+    cells.hypotheses={{0,0}};cells.worker_threads=1;cells.retain_score=0;cells.candidate_limit=4096;
+    const auto count=[&](std::optional<modem::PatternStartWindow> window) {
+        auto search=cells;search.amplitude_start_window=window;
+        modem::PatternReceiver receiver(c,8U*1024*1024,search);
+        std::vector<float> zeros(50*c.sample_rate);receiver.push(zeros);
+        const auto candidates=receiver.candidates();
+        return std::count_if(candidates.begin(),candidates.end(),[](const auto& item){return item.stream_symbol==0;});
+    };
+    const auto all=count({});
+    const auto inside=count(modem::PatternStartWindow{2.L*c.sample_rate,1,.00001L});
+    const auto boundary=count(modem::PatternStartWindow{2.0625L*c.sample_rate,1,.00001L});
+    check(all>inside&&inside==1&&boundary==2,"amplitude prior shifted timing cells or failed to prune actual receiver candidates");
+    transfer::Estimate wire;wire.wire_bits=1;wire.total_seconds=modem::symbol_seconds(c);
+    modem::ChannelConfig channel;channel.clock_error_ppm=channel.frequency_offset_hz=channel.phase_noise_degrees_per_sqrt_second=0;
+    const auto estimate=simulation::estimate_with_receiver_settings(wire,value.transfer,true,channel,value,{},1,false,
+        100,256,simulation::ReceiverWorkMode::hardware_timing_model,{.02,0,1./c.sample_rate});
+    check(estimate.timing_window_modeled&&estimate.receiver_geometry.arrival_window_available&&
+          std::abs(estimate.receiver_geometry.combined_arrival_half_width_seconds-(.402+.01/c.sample_rate))<1e-6,
+          "planner did not report the selected amplitude timing model");
+    std::cout<<"public amplitude timing: "<<all<<" broad cells, "<<inside<<" inside, "<<boundary<<" boundary cells\n";
+    // Isolate the actual strong two-bit waveform from Live admission. The
+    // near-edge old lane is diagnostic; exact and binary-refined lanes must
+    // preserve both bits and physical completion with the unchanged statistic.
+    auto edge=c;edge.bandwidth_hz=5;edge.stream_epoch=epoch;
+    transfer::Options edge_options;edge_options.modem=edge;edge_options.timestamp=epoch;
+    auto tx=transfer::binary_transmitter(Bytes{0,1},edge_options);
+    constexpr std::size_t delay=12*512+37,input_origin=1377;
+    const auto source_start=delay+modem::training_sample_count(edge)+modem::pattern_pulse_padding_samples(edge);
+    std::vector<float> samples(delay+tx->total_samples()+2*modem::symbol_sample_count(edge));
+    for(std::size_t at=delay;at<delay+tx->total_samples();)
+        at+=tx->read(std::span(samples).subspan(at,delay+tx->total_samples()-at));
+    std::mt19937 random(7831);std::normal_distribution<float> noise(0,.002F);
+    for(auto& x:samples)x+=noise(random);
+    for(const auto origin:{7774.L,static_cast<long double>(source_start),7825.25L}) {
+        modem::PatternSearch fixed;fixed.input_sample_origin=input_origin;
+        fixed.start_offset_seconds=static_cast<double>((origin-input_origin)/edge.sample_rate);
+        fixed.start_uncertainty_seconds=0;fixed.search_stream_phases=false;fixed.hypotheses={{0,0}};
+        fixed.worker_threads=1;fixed.retain_score=0;fixed.candidate_limit=2048;
+        modem::PatternReceiver rx(edge,8U*1024*1024,fixed);
+        std::string bits;bool complete=false;std::array<double,2> scores{},thresholds{};
+        for(std::size_t at=input_origin;at<samples.size();) {
+            const auto count=std::min<std::size_t>(51,samples.size()-at);
+            rx.push(std::span(samples).subspan(at,count));at+=count;
+            for(const auto& burst:rx.take_bursts()) {
+                for(auto bit:burst.bits)bits.push_back(bit?'1':'0');
+                complete|=burst.complete;
+            }
+            for(const auto& evidence:rx.candidates())if(evidence.stream_symbol<2) {
+                scores[evidence.stream_symbol]=evidence.score;
+                thresholds[evidence.stream_symbol]=evidence.admission_threshold;
+            }
+        }
+        std::cout<<"amplitude cell origin="<<origin<<" true="<<source_start<<" bits="<<bits
+                 <<" scores="<<scores[0]<<','<<scores[1]<<" thresholds="<<thresholds[0]<<','<<thresholds[1]<<'\n';
+        if(origin!=7774.L)check(bits=="01"&&complete,"exact/refined amplitude lane lost two-bit/END control");
+    }
+    modem::PatternSearch competing;competing.input_sample_origin=input_origin;
+    competing.start_offset_seconds=12.485937465667725;competing.start_uncertainty_seconds=7;
+    competing.amplitude_start_window=modem::PatternStartWindow{6444,1,205.8340064L};
+    competing.hypotheses={{0,0}};competing.worker_threads=1;
+    {
+        modem::PatternReceiver partial(edge,8U*1024*1024,competing);
+        partial.push(std::span(samples).subspan(input_origin,20992-input_origin));
+        check(partial.take_bursts().empty(),"dated amplitude selected its initial owner before competing starts were scored");
+        partial.finish();std::string bits;bool complete=false;
+        const auto bursts=partial.take_bursts();
+        for(const auto& burst:bursts) {
+            check(!burst.missing_slots&&burst.stream_first_symbol==0&&burst.first_stream_symbol==0,
+                "EOF pending prefix changed ordinal or introduced missing slots");
+            for(auto bit:burst.bits)bits.push_back(bit?'1':'0');complete|=burst.complete;
+        }
+        check(bursts.size()==1&&bits=="0"&&!complete,"EOF dropped the best available pending prefix or manufactured END");
+    }
+    auto one=transfer::binary_transmitter(Bytes{0},edge_options);
+    std::vector<float> single(delay+one->total_samples()+2*modem::symbol_sample_count(edge));
+    for(std::size_t at=delay;at<delay+one->total_samples();)
+        at+=one->read(std::span(single).subspan(at,delay+one->total_samples()-at));
+    for(auto& x:single)x+=noise(random);
+    competing.bit_limit=1;
+    modem::PatternReceiver bounded(edge,8U*1024*1024,competing);
+    bounded.push(std::span(single).subspan(input_origin));
+    std::string bounded_bits;bool bounded_complete=false;
+    const auto bursts=bounded.take_bursts();
+    std::optional<std::pair<std::uint64_t,std::uint64_t>> identity;
+    std::size_t terminals=0,nonempty=0;
+    for(const auto& burst:bursts) {
+        const auto current=std::pair{burst.stream_first_sample,burst.stream_first_symbol};
+        if(!identity)identity=current;
+        check(*identity==current&&!burst.missing_slots&&burst.stream_first_symbol==0&&
+              burst.first_stream_symbol==bounded_bits.size(),
+              "one-bit large push changed physical identity, ordinal or missing slots");
+        if(burst.complete){++terminals;check(burst.bits.empty(),"terminal event repeated accepted data");}
+        if(!burst.bits.empty()){++nonempty;check(!burst.complete,"one-bit pending event acquired early END");}
+        for(auto bit:burst.bits)bounded_bits.push_back(bit?'1':'0');bounded_complete|=burst.complete;
+    }
+    check(bursts.size()==2&&terminals==1&&nonempty==1&&bounded_bits=="0"&&bounded_complete,"dated initial ownership exhausted the one-bit budget during a large push");
 }
 void public_compact_workspace_admission() {
     transfer::Options options;options.timestamp=1800000000;options.search_seconds=6;
@@ -232,6 +413,6 @@ void pure_estimator_consumer() {
         "provider-free planning cannot invent GPU execution or scheduled probability qualification");
 }
 }
-int main(){try {structural_normalization_and_reservations();policy_and_epoch_normalization();public_compact_workspace_admission();ordinary_settings_follow_live_admission();ordinary_legacy_workspace_admission();pure_estimator_consumer();
+int main(){try {structural_normalization_and_reservations();policy_and_epoch_normalization();public_amplitude_clock_window();public_compact_workspace_admission();ordinary_settings_follow_live_admission();ordinary_legacy_workspace_admission();pure_estimator_consumer();
     std::cout<<"provider-free Live allocation/planning link regression passed\n";return 0;
 } catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

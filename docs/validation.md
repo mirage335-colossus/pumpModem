@@ -4,6 +4,230 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Public amplitude arrival resources — local candidate, 17 October 2026
+
+The 100 W / 220 dB / −164 dBm/Hz launch was limited by duplicated rolling
+amplitude arrival banks. The first slower 4096-second point priced 8225 banks,
+0.797 processing ratio and insufficient workspace. A single eligible public
+hardware profile under Clock Default now uses overlapping finite ±33-second
+windows every 64 captured seconds, with the original commensurate half-chip
+grid. The wider amplitude-only domain and actual cohort are priced before Auto.
+Other key/profile families, timing grids, explicit clock policies and simulation
+retain their original policy. The sample anchor, preadmission, refresh and idle
+retirement remain consistent across UTC jumps; full-search/frontier guards,
+pending publication and physical END are preserved.
+
+Final focused `./build.sh test amplitude_arrival` passes **5/5**, 30.86 s. Its
+eight actual Live cases include joins, late starts, a 500-second clock step and
+return, dated captures and insufficient-Audio fallback. All retain exact pending
+`0`/`01`, one identity and complete-symbol absence. Default admissions are 3–5.
+The first candidate's two failed tests were an obsolete no-lookahead assertion
+and an invalid new spreading-factor fixture; their logs are retained. Final
+strategy/planning checks cover the revised policy and mixed-family/key guards.
+
+The amplitude probability/headless GUI consumer group passes **4/4**. Existing
+coherent `long_fft` and `capture_time` controls, the affected incremental GUI/CLI
+build, both help consumers and source whitespace check pass. A fresh linked
+consumer reproducer uses the real launch parser, Controller, estimator and
+planner. The unchanged explicit short/long targets still select 128 seconds.
+Aligning all three targets to `-27.154499349597182` selects 32768 seconds; planner
+and Console both fit clock/RAM and show an **unqualified 99.707% reference**,
+1028 banks and a 0.1497 engineering processing ratio. A target-edit support probe
+accepts that value without clamping. At 65536 seconds, the reference draws all
+succeed, with 2052 banks and ratio 0.2987; this is not a 100% reliability claim.
+
+Evidence: `.agent-work/artifacts/eme-launch-100w-20261017/`. No 9-hour 100 W sampled
+Live capture, held-out probability study, or hardware throughput qualification
+was run. Broad regression, calibration, sanitizer, SDK, native GUI, platform,
+packaging and final qualification remain deferred by the user. General >99%
+Live success, the prior strict EME 2/3-bit failure and unrelated ALSA/native
+workflow failures remain unresolved. The earlier frozen standalone study does
+not transfer its statistical claim to this changed executable.
+
+## Dated amplitude arrival repair — local candidate, 16 October 2026
+
+Explicit Clock sync accuracy, propagation region/offset and Audio error now
+constrain ordinary public/long amplitude acquisition when dated capture satisfies
+the existing strict Audio allowance. Default without hopping retains the rolling
+broad window. Missing dates, simulation startup and insufficient ordinary Audio
+qualification retain the broad fallback. LF/RF oscillator search stays independent.
+The planner uses the selected amplitude prior and includes future public epoch
+cohorts before Auto selection; continuous complex timing/costs remain covered.
+
+Dated amplitude uses the existing FFT energy frontend and envelope statistic,
+with binary quarter-chip timing refinement and original trial charges. A strong
+control at payload sample 7821 compares a rounded coarse test origin of 7774: it
+received only `0`, with second-bit score 20.4283 below threshold 25.5108. Exact 7821
+and refined 7825.25 controls receive `01`, with second-bit scores 112.688 and 99.9391.
+These are fixed functional controls, not probability calibration. Initial
+symbol-zero ownership resolves nearby starts around the prospective owner;
+common FFT-block publication and explicit EOF flushing preserve pending data.
+
+Focused `./build.sh test amplitude_arrival` passes **5/5**, 25.82 s. Its actual
+asynchronous Live test passes Default arrivals at 12/37 s, an explicit insufficient-Audio
+fallback, and two dated fractional-symbol captures separated by 80 samples to
+exercise different FFT completion fences. Each exposes exact pending `0`/`01`
+under one identity and completes only after a fully observed absent symbol.
+Pure-link planning checks exercise every timing control, original/fine cell
+boundaries, separate complex policy, future-cohort charges and capture-slope
+bounds. EOF preserves one pending burst without END; a large one-bit-budget push
+retains exact ordinals, identity, zero missing slots and one terminal event.
+
+The focused amplitude model/consumer group passes **4/4**, including headless GUI
+planning and older probability-reference compatibility. Existing coherent
+`long_fft` and `capture_time` Live suites pass. The affected GUI/CLI incremental
+build, both `--help` consumers and the diff whitespace check pass. This does not
+include native GUI or broad receiver qualification.
+
+The finer grid retains a conservative full original-window allocation preflight.
+The 128 MiB positive dated fixture was refused by that guard; the successful dated
+fixtures reserve 256 MiB. This does not measure the minimum required workspace or
+imply a proportional RAM saving from narrowing. Default/fallback fixtures retain
+128 MiB. Earlier failed diagnostic runs remain in the local evidence directory.
+
+Current evidence is under `.agent-work/artifacts/amplitude-clock-window-20261016/`.
+General later-ordinal timing recovery, competing long-lived cohorts, physical
+hardware calibration and >99% whole-Live success remain unqualified. Broad
+regression, calibration, sanitizers, SDK, native GUI, platform, packaging and final
+qualification remain deferred by the user. The prior strict EME three-bit case
+still recovers only 2/3 bits; that failure and unrelated ALSA/native workflow
+failures are not cleared by this work.
+
+## Amplitude reference and continuous arrival repair — local candidate, 16 October 2026
+
+The [amplitude work record](amplitude-probability.md) covers the user's practical
+three-year symbol ceiling and 1.5/15 kW power cases. The planner and Console have
+a detector-specific conditional hardware-power first-bit reference, explicitly
+unqualified outside its modeled source/statistical assumptions. Extra receive
+profiles retain matching-bank scope instead of inheriting single-profile
+frequency-axis qualification.
+
+Discovery found 40/40 correct complete standalone captures at 1024 seconds/1.5 kW
+and 512 seconds/15 kW. The frozen primary 512-second/15-kW condition passed
+**299/299 fresh held-out standalone public-bank captures**: one-sided exact 95%
+success lower bound **0.9900308532071007**. This is a conditional single-bank AWGN
+success claim, not qualification of the general probability model or GUI Live.
+The opt-in native-capture test and qualification driver reproduce such studies.
+
+Before repair, actual Live public-only and mixed-key probes delivered all
+6,447,921 PCM samples but no signal rows. Their amplitude arrival window stayed
+at capture startup. The candidate now admits rolling public amplitude windows
+and separately accounts their nearly two-symbol unconfirmed lifetime and
+slowest clock. Auto prefers affordable complete amplitude coverage over cheaper
+incomplete complex coverage. Reconstruction uses actual deduplicated key families
+and resolved profiles. Continuous FFT retains its singleton and previous costs.
+
+A full EME intermediate run then exposed duplicate rows from overlapping coarse
+amplitude channel centers. Candidate presentation now compares the actual retained
+FFT passbands only when both candidates are amplitude; coherent-frequency rules
+and nonoverlapping passband separation remain covered. The receiver statistic,
+wire formats, accepted-bit publication and physical-END scoring are unchanged.
+Focused delayed-arrival, two-bit pending/identity/END, resource/policy, detector,
+planning-link and arbitration checks are recorded with the local source candidate.
+
+Final focused results: arrival group **5/5**, amplitude/model/older-reference/planner
+group **4/4**, existing long-FFT and captured-private-epoch compatibility pass,
+build-wrapper tests **56/56**, two current-build native bridge captures, affected
+GUI/CLI incremental build and help checks pass. The 299-capture study retains its
+original frozen executable identity; the bridge does not requalify a new binary. Complete 512-second/15-kW Live controls pass public-only at 2 GiB and public
+plus one synthetic receive key at 4 GiB: each consumes all PCM, exposes pending
+`1` under one ID, waits for physical absence and completes exactly one row with
+no health failure. These two functional captures do not qualify full Live >99%.
+
+The exact original command still transmits 128-second symbols despite its much
+weaker planner preview target. Console can show a conditional matching-bank EME
+reference. The roughly 2.35-day preview no longer advertises a reference over an
+incomplete rolling receive search. A feasible 512-second/15-kW planner point
+retains the explicitly unqualified amplitude reference.
+
+Evidence lives under `.agent-work/artifacts/amplitude-rx-model-20261016/`, including
+`heldout-freeze.json`, `heldout-result.json`, focused logs and pre/post repair
+Live diagnostics. General model accuracy, long 4-W integration, full continuous
+Live probability, private/multiple-key probability, multi-bit continuation and
+actual radio/EME propagation remain unqualified. Earlier strict three-bit 2/3
+recovery and unrelated ALSA/native workflow failures remain unresolved.
+Broad regression, unrelated calibration, sanitizer, SDK, native GUI, platform,
+packaging and release checks remain **deferred**, not passed.
+
+## EME probability and receiver-model maintenance — local candidate, 16 October 2026
+
+The [coverage inventory and protocol](frequency-axis-probability.md) document
+the bounded frequency-axis EME first-bit model and the maintenance audit of
+other receiver statistics. This candidate starts at `10125ac1` with the earlier
+GUI batch preserved. Receiver admission, transmitter, transport and wire source
+are unchanged. There are no additional waterfall changes in this batch.
+
+All seven predeclared hardware-power AWGN cells qualify within **15 percentage
+points at simultaneous 95% confidence**, using 2,112 held-out full-receiver
+captures. The exact cells are 128 seconds at the preset's
+1.0926996097583093 dB and 17/18/19 dB, plus 256 seconds at 17/18/19 dB.
+This is a coarse first-bit accuracy claim for the preset bit/arrival ensemble,
+default arithmetic and 4096 model draws. Interpolation, other impairments,
+physical radios, rare false alarms and multi-bit continuation are unqualified.
+Only a single raw bit at the tested conditions gains confidence; other modeled
+conditions keep explicit reference labels and coded/multi-bit drafts have no
+whole-draft probability.
+
+The final study result has SHA-256
+`7b97f2a5b1025f5943f6f08d299a02094662a1a79d8216e6a4b8bd20bfb8c14f`;
+its capture inventory is
+`917da3e1a364bbc83df52cda42ebf77488915a5d9fc16baf45f27f1ad69c2c13`
+and frozen plan is
+`a658830b8e35892995c4fcc6538e91617d52777eb9b930aebea14cd23c2de8b3`.
+The frozen capture binary is
+`293363baa9e70c818f412a5d6fda04977cc175085820425b1f1856ece3cde605`.
+During the study, that binary, 14 selected source/build/test inputs and all
+371 C++ source/header files under `src/` and `include/` remained unchanged.
+These inventories are not a complete compiler/dependency closure. A scheduling
+amendment reused only validated completed stages; original incomplete suffixes
+remain separately recorded and were not counted twice.
+
+After the study, the estimator's availability flags and separate Existing-only
+EME correction were integrated, along with focused harness/GUI assertions.
+The joint model and receiver engine remain unchanged. The final seven model
+values exactly equal the frozen predictions. Existing-only now charges the
+second acquisition batch but remains reference-only. The audit also corrected
+three hardware source-power normalizations and withheld indistinguishable
+one-chip pattern probabilities.
+
+| Focused scope | Result |
+| --- | --- |
+| Seven held-out qualification cells | 7/7 pass; 2,112 captures, original stopping/confidence rules |
+| Independent exact-interval check | Pass; 35 cases, 80-digit Decimal recurrence, maximum tail residual below 5.5e-13 |
+| Joint score/source projection and six neighborhood convergence cells | Pass; reused unchanged model/scoring evidence |
+| Final seven prediction values and availability flags | Pass; exact frozen-value equality |
+| Supported/unsupported scope and Existing-only reference guards | Pass |
+| Power normalization, strategy, selected GUI EME/reference/cancellation checks | Pass |
+| Paired strong 128/256-second one-bit captures | Pass; actual trial charges, events and publication polls agree |
+| 128/256-second noise-only controls | Pass; reused unchanged receiver evidence |
+| Short-wire/transfer, partial/spread and real-atom compatibility | Pass; reused applicable focused evidence |
+| Incremental application build and CLI/GUI help launch | Pass; GNU 14.2.0 Release, `build/dev`, FLTK |
+| Default strict three-bit focused harness | **Failed**; 30 dB seed 3 receives two of three expected bits |
+| Broad regression, unrelated calibration, sanitizer, native GUI, SDK, cross-platform and packaging qualification | **Deferred by user instruction; not passes** |
+
+The missing third bit remains unresolved. Both backends publish identical events
+and complete after the accepted-event failed-symbol absence bound. An earlier
+one-bit “early completion” report compared against the transmitter's nominal
+grid; the receiver's accepted-grid end contract passes. The diagnostic now
+reports both bounds. The default harness retains its stricter source-grid and
+exact-content assertions and is not reported as passing. Neither sampled-mode
+30 dB diagnostic enters the seven hardware-power qualification cells, whose
+captures passed the original stricter timing oracle.
+
+The final focused harness binary is
+`2c7b9a450270856661bcc9382f621c8931b6d7bb96641ef57d05b598e426d151`.
+Application SHA-256 values are
+`cd90546da49bef8b2b89ec803909ce4d7e1f24f48a234f1f14277ccaf5d71a7f`
+for `build/dev/pump` and
+`a1272dfb785d44ef235278d41a552a41ad22e459b404ad72022da15eab9ff010`
+for `build/dev/datapump-gui`. The root executable was not replaced. Logs,
+frozen inputs, source manifests, repeated-seed agreement, failed diagnostics
+and final integration evidence are retained locally under
+`.agent-work/artifacts/axis-probability-20261016/`.
+Earlier ALSA clipping and native workflow failures below remain unresolved;
+their older broad/SDK results do not qualify this candidate. No release was
+published or certified.
+
 ## Sched_Hop regression review — local unreleased candidate, 16 October 2026
 
 The [complete review](sched-hop-regression-review.md) covers all eleven commits

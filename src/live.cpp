@@ -226,6 +226,9 @@ struct Session::Impl {
         std::size_t peak_receivers = 0;
         std::size_t working_bytes = sizeof(detail::ReceptionHistory)+sizeof(source_curves)+sizeof(exact_source_samples)+sizeof(exact_source_generation)+sizeof(next_exact_source_trace)+sizeof(exact_source_points)+sizeof(point_source_generation)+sizeof(next_point_consumer)+sizeof(next_point_source_trace)+sizeof(permutations)+sizeof(temporal_plans)+sizeof(deferred_input)+sizeof(input_queued_at)+sizeof(shared_capture)+sizeof(future_capture);
         double created_at = 0;
+        std::optional<long double> public_amplitude_epoch_origin;
+        std::uint64_t refreshed_sample=0;
+        bool public_amplitude_windows=false;
         // UTC for a captured block, independent of when its search runs. Sample
         // coordinates remain continuous; fresh stamps only guide new admission.
         std::optional<double> observed_epoch;
@@ -1092,10 +1095,21 @@ struct Session::Impl {
         return *bank.observed_epoch+static_cast<double>((static_cast<long double>(sample)-
             bank.observed_sample)/value.transfer.modem.sample_rate);
     }
+    static void amplitude_metadata(Receiver& receiver,const modem::Config& config,
+            const modem::PatternSearch& search,const modem::ReceiverStrategyPlan& selection) {
+        receiver.amplitude_fft_samples=receiver.amplitude_channel_count=0;
+        receiver.amplitude_geometry.reset();
+        if(selection.backend!=modem::ReceiverBackend::amplitude_energy||!selection.supported)return;
+        receiver.clock_window_modeled=search.amplitude_start_window.has_value()||search.qualified_start_window.has_value();
+        receiver.amplitude_geometry=modem::pattern_amplitude_geometry(config,search);
+        std::string{}.swap(receiver.amplitude_geometry->reason); // Retain allocation-free geometry only.
+        receiver.amplitude_fft_samples=receiver.amplitude_geometry->fft_samples;
+        receiver.amplitude_channel_count=selection.amplitude_channels;
+    }
     bool modeled_start_window(modem::PatternSearch& search,const modem::Config& config,
-            std::uint64_t epoch,const Bank& bank,const Settings& value,std::uint64_t origin) {
+            std::uint64_t epoch,const Bank& bank,const Settings& value,std::uint64_t origin,bool amplitude=false) {
         detail::ReceiverAdmissionContext context;context.timing=bank.timing;context.observed_sample=bank.observed_sample;
-        return detail::modeled_receiver_start_window(search,config,epoch,context,value,origin);
+        return detail::modeled_receiver_start_window(search,config,epoch,context,value,origin,amplitude);
     }
     static bool crossbank_temporal_plans_requested() {
         // Internal experiment: OFF by default; row capacity is independently
@@ -1265,6 +1279,9 @@ struct Session::Impl {
         if (value.transfer.key) add(*value.transfer.key);
         for (const auto& key : value.receive_keys) add(key);
         const auto now = observation_epoch(bank,value,bank.samples);
+        if(!bank.public_amplitude_epoch_origin)
+            bank.public_amplitude_epoch_origin=static_cast<long double>(now)-
+                static_cast<long double>(bank.samples)/value.transfer.modem.sample_rate;
         const auto propagation=!value.simulation && value.transfer.clock_sync?value.transfer.clock_sync->offset_seconds:0;
         const auto center = value.transfer.timestamp ? value.transfer.timestamp : static_cast<std::uint64_t>(std::max(0.,now-propagation));
         for (std::size_t family=0;family<keys.size();++family) {
@@ -1339,7 +1356,29 @@ struct Session::Impl {
                     if(!strategy.supported) {unavailable(strategy.reason);continue;}
                 } catch(const Error& error) {unavailable(error.what());continue;}
             }
-            for (const auto epoch : epochs) {
+            bool amplitude_horizon_added=false;
+            const auto extend_amplitude_horizon=[&](const modem::PatternSearch& search) {
+                if(amplitude_horizon_added||key||!search.amplitude_lookahead_epochs)return;
+                amplitude_horizon_added=true;
+                if(search.amplitude_epoch_stride_seconds>1) {
+                    const auto stride=search.amplitude_epoch_stride_seconds;
+                    const auto sample_now=*bank.public_amplitude_epoch_origin+
+                        static_cast<long double>(bank.samples)/profile.sample_rate;
+                    const auto current=static_cast<std::uint64_t>(std::max(0.L,std::floor(sample_now/stride)*stride));
+                    const auto end=sample_now+search.amplitude_lookahead_epochs;
+                    for(auto candidate=current;candidate<=end;) {
+                        if(std::find(epochs.begin(),epochs.end(),candidate)==epochs.end())epochs.push_back(candidate);
+                        if(candidate>std::numeric_limits<std::uint64_t>::max()-stride)break;
+                        candidate+=stride;
+                    }
+                    return;
+                }
+                for(std::size_t ahead=1;ahead<=search.amplitude_lookahead_epochs &&
+                        ahead<=std::numeric_limits<std::uint64_t>::max()-center;++ahead)
+                    epochs.push_back(center+ahead);
+            };
+            for (std::size_t epoch_index=0;epoch_index<epochs.size();++epoch_index) {
+                const auto epoch=epochs[epoch_index];
                 if(schedule) {
                     if(epoch>std::numeric_limits<std::uint64_t>::max()/profile.sample_rate-1)
                         throw Error("scheduled receive epoch exceeds sample range");
@@ -1361,7 +1400,8 @@ struct Session::Impl {
                 const auto tag = key ? key->mac(Bytes{'D','P','-','R','X','-','B','A','N','K'}) : Bytes{};
                 const auto existing = std::find_if(bank.receivers.begin(), bank.receivers.end(), [&](const auto& receiver) {
                     const auto& c=receiver.options.modem;
-                    return receiver.key_tag == tag && (tag.empty() || receiver.epoch == epoch) &&
+                    return receiver.key_tag == tag &&
+                        ((tag.empty() && !receiver.amplitude_fft_samples) || receiver.epoch == epoch) &&
                         c.spreading_factor==profile.spreading_factor && c.integration_seconds==profile.integration_seconds &&
                         c.dsss_factor==profile.dsss_factor &&
                         (c.dsss_factor==1 || c.outer_dsss_version==profile.outer_dsss_version) &&
@@ -1371,7 +1411,21 @@ struct Session::Impl {
                         c.receiver_strategy==profile.receiver_strategy && c.receiver_cpu_budget==profile.receiver_cpu_budget &&
                         c.pulse_shaping==profile.pulse_shaping && c.oscillator_search==profile.oscillator_search;
                 });
-                if (existing != bank.receivers.end()) continue;
+                if (existing != bank.receivers.end()) {
+                    // Replenish the horizon even when today's epoch was
+                    // already prepared by an earlier refresh.
+                    if(epoch_index==0&&existing->amplitude_fft_samples&&!key) {
+                        detail::ReceiverAdmissionContext context;
+                        context.sample_origin=bank.samples;context.observed_sample=bank.observed_sample;
+                        context.timing=bank.timing;context.now=now;context.propagation=propagation;
+                        context.public_amplitude_epoch_origin=bank.public_amplitude_epoch_origin;
+                        context.key_count=keys.size();context.profile_count=profiles.size();
+                        context.keyed=false;context.capacity=bank_capacity(value);
+                        const auto prepared=detail::prepare_receiver_search(existing->options.modem,value,epoch,context);
+                        extend_amplitude_horizon(prepared.search);
+                    }
+                    continue;
+                }
                 // Exact admission fence: release the full owner (including
                 // optional precision payloads) BEFORE original sizing/selection.
                 // A matching retained receiver above performs no preparation.
@@ -1417,6 +1471,7 @@ struct Session::Impl {
                 try {
                     detail::ReceiverAdmissionContext admission;
                     admission.sample_origin=receiver.sample_origin;admission.observed_sample=bank.observed_sample;
+                    admission.public_amplitude_epoch_origin=bank.public_amplitude_epoch_origin;
                     admission.timing=bank.timing;admission.now=now;admission.propagation=propagation;
                     admission.key_count=keys.size();admission.profile_count=profiles.size();admission.capacity=capacity;
                     admission.capture_owner_bytes=bank.shared_capture?bank.shared_capture->capacity_reservation():0;
@@ -1441,6 +1496,12 @@ struct Session::Impl {
                         f.add("arithmetic_policy",static_cast<unsigned>(config.search_arithmetic));
                         f.add("frequency_rate_pairs",search.hypotheses.size());f.add("initial_symbols",search.initial_stream_symbols);
                         f.add("timing_qualified",search.qualified_start_window.has_value());
+                        f.add("amplitude_timing_qualified",search.amplitude_start_window.has_value());
+                        f.add("amplitude_lookahead_epochs",search.amplitude_lookahead_epochs);
+                        if(search.amplitude_start_window) {
+                            f.add("amplitude_arrival_origin",search.amplitude_start_window->epoch_origin_samples);
+                            f.add("amplitude_arrival_radius",search.amplitude_start_window->half_width_samples);
+                        }
                         f.add("shared_hop_calendar",transfer::shared_hop_calendar(config));
                         f.add("calendar_default_policy",transfer::shared_hop_calendar(config) && !value.transfer.clock_sync);
                         if(bank.timing) {
@@ -1457,12 +1518,26 @@ struct Session::Impl {
                         f.add("timing_positions_allowance",selection.scheduled_timing_positions);
                         f.add("full_frequency_coverage",selection.full_frequency_coverage);
                         f.add("full_clock_coverage",selection.full_clock_coverage);
-                        f.add("workspace_share",search.receiver_strategy_workspace_bytes);f.add("reason",selection.reason);
+                        f.add("workspace_share",selection.selected_workspace_bytes);f.add("cohort_banks",selection.selected_bank_count);f.add("reason",selection.reason);
                     });
                     if(selection.empty_scheduled_epoch) {scheduled_quiet_only=true;continue;}
                     if(!selection.supported) {unavailable(selection.reason);continue;}
-                    receiver.amplitude_fft_samples=selection.backend==modem::ReceiverBackend::amplitude_energy?
-                        modem::pattern_amplitude_geometry(config,search).fft_samples:0;
+                    // Additional epochs exist solely for amplitude arrival windows.
+                    // Auto's continuous complex receiver remains a singleton.
+                    if(!key&&epoch_index>0&&(selection.backend!=modem::ReceiverBackend::amplitude_energy||
+                            (!search.amplitude_start_window && search.amplitude_epoch_stride_seconds==1)))continue;
+                    if(selection.backend==modem::ReceiverBackend::amplitude_energy) {
+                        if(search.amplitude_epoch_stride_seconds>1)bank.public_amplitude_windows=true;
+                        extend_amplitude_horizon(search);
+                        if(search.amplitude_epoch_stride_seconds>1 && epoch_index==0) {
+                            const auto stride=search.amplitude_epoch_stride_seconds;
+                            const auto sample_now=*bank.public_amplitude_epoch_origin+
+                                static_cast<long double>(bank.samples)/config.sample_rate;
+                            const auto anchor=static_cast<std::uint64_t>(std::max(0.L,std::floor(sample_now/stride)*stride));
+                            if(epoch!=anchor)continue; // Original center was only Auto's complex preflight.
+                        }
+                    }
+                    amplitude_metadata(receiver,config,search,selection);
                     if(declared_search && !(selection.supported && selection.full_frequency_coverage && selection.full_clock_coverage))
                         note_oscillator_coverage(bank,*declared_search);
                     const auto construct=[&] {
@@ -1470,7 +1545,7 @@ struct Session::Impl {
                         const auto allocation=std::min(value.dsp_workspace_bytes/2,capacity-bank.working_bytes-control_margin);
                         return std::make_unique<modem::StreamingReceiver>(config,
                             selection.backend==modem::ReceiverBackend::existing_complex && !(selection.scheduled && !packed_schedule)?allocation:
-                                std::min(allocation,search.receiver_strategy_workspace_bytes),search);
+                                std::min(allocation,selection.selected_workspace_bytes),search);
                     };
                     try {receiver.modem=construct();}
                     catch(const Error&) {
@@ -1504,6 +1579,7 @@ struct Session::Impl {
                 f.add("reason","no_new_receiver");
             });
         bank.created_at = now;
+        bank.refreshed_sample=bank.samples;
         if(bank.receivers.empty() && !(scheduled_quiet_only && !bank.coverage_limited) && bank.receiver_limit.empty())
             unavailable("no receive profile fits the configured DSP workspace");
         // Keep an unavailable bank, including its physical sample coordinate.
@@ -1519,7 +1595,8 @@ struct Session::Impl {
             return receiver.key_tag.empty() && receiver.modem->clock_windowed();
         }))return;
         const auto now = observation_epoch(bank,value,bank.samples);
-        const bool new_epoch=std::floor(now)!=std::floor(bank.created_at);
+        const bool new_epoch=std::floor(now)!=std::floor(bank.created_at) ||
+            (bank.public_amplitude_windows && bank.samples-bank.refreshed_sample>=value.transfer.modem.sample_rate);
         if (!new_epoch && !bank.retirement_pending) return;
         bank.retirement_pending=false;
         const auto retired=std::erase_if(bank.receivers,[&](const auto& receiver){
@@ -1543,7 +1620,15 @@ struct Session::Impl {
             // Retire confirmed receivers only after their physical search has
             // ended the stream using the fixed complete-symbol absence rule.
             const auto propagation=!value.simulation && value.transfer.clock_sync?value.transfer.clock_sync->offset_seconds:0;
-            const bool expired=receiver.last_confident_end?now>receiver.last_confident_at+6.+allowance:
+            const auto chip=modem::pattern_chip_samples(config);
+            const bool sample_clock=bank.public_amplitude_windows && receiver.amplitude_geometry &&
+                receiver.amplitude_geometry->clock_hypotheses==1 && !receiver.options.key &&
+                chip && !(chip%2) && config.sample_rate%(chip/2)==0;
+            const auto age=static_cast<long double>(bank.samples-receiver.sample_origin)/config.sample_rate;
+            const auto radius=std::max(allowance,33.);
+            const bool expired=sample_clock?(receiver.last_confident_end?
+                age>static_cast<long double>(receiver.last_confident_end)/config.sample_rate+6+radius:
+                age>prefix+symbol+radius):receiver.last_confident_end?now>receiver.last_confident_at+6.+allowance:
                 receiver.key_tag.empty()?receiver.modem->clock_windowed() && now>receiver.admitted_at+prefix+symbol+allowance:
                 !value.transfer.timestamp && now>static_cast<double>(receiver.epoch)+propagation+prefix+symbol+allowance;
             if(!expired)return false;
@@ -1812,6 +1897,16 @@ struct Session::Impl {
         candidate.frequency=burst.frequency_hz;
         candidate.frequency_tolerance=static_cast<double>(receiver.options.modem.sample_rate)/
             static_cast<double>(modem::symbol_sample_count(receiver.options.modem));
+        if(receiver.amplitude_geometry&&receiver.amplitude_channel_count) {
+            const auto& geometry=*receiver.amplitude_geometry;
+            auto channel=modem::pattern_amplitude_channel(geometry,0,receiver.amplitude_channel_count);
+            for(std::size_t i=1;i<receiver.amplitude_channel_count;++i) {
+                const auto other=modem::pattern_amplitude_channel(geometry,i,receiver.amplitude_channel_count);
+                if(std::abs(other.center_hz-burst.frequency_hz)<std::abs(channel.center_hz-burst.frequency_hz))channel=other;
+            }
+            candidate.amplitude_low_hz=channel.first_bin*geometry.bin_width_hz;
+            candidate.amplitude_high_hz=(channel.first_bin+channel.bin_count)*geometry.bin_width_hz;
+        }
         candidate.absence_samples=modem::pattern_absence_capture_samples(receiver.options.modem);
         candidate.symbol_samples=modem::symbol_sample_count(receiver.options.modem);
         candidate.timing_tolerance=modem::pattern_chip_samples(receiver.options.modem);
@@ -2563,11 +2658,25 @@ struct Session::Impl {
                         bank.limited=true;
                         modem::PatternSearch search;
                         std::optional<modem::OscillatorPatternSearch> declared_search;
-                        search.receiver_bank_count=modem::receiver_strategy_bank_count(receiver.options.modem,value.transfer.search_seconds,
-                            std::max<std::size_t>(1,value.receive_keys.size()+static_cast<std::size_t>(value.transfer.key.has_value())),
-                            std::max<std::size_t>(1,value.transfer.receive_targets_db_hz.size()));
+                        // Reconstruct the same admitted families/profiles: plaintext is
+                        // a family, while duplicate loaded keys are not extra banks.
+                        std::vector<Bytes> fingerprints;
+                        const auto add_family=[&](const Crypto& key) {
+                            const auto fingerprint=key.mac(Bytes{'D','P','-','R','X','-','B','A','N','K'});
+                            if(std::find(fingerprints.begin(),fingerprints.end(),fingerprint)==fingerprints.end())
+                                fingerprints.push_back(fingerprint);
+                        };
+                        if(value.transfer.key)add_family(*value.transfer.key);
+                        for(const auto& key:value.receive_keys)add_family(key);
+                        const auto key_count=fingerprints.size()+static_cast<std::size_t>(value.permits_plaintext());
+                        const auto profile_count=value.transfer.automatic_receive_profiles?
+                            tuning::receive_profiles(value.transfer.modem,value.transfer.receive_targets_db_hz,
+                                value.transfer.receive_pattern_mode,receiver.options.key.has_value()).size():1;
+                        search.receiver_schedule_key_count=key_count;
+                        search.receiver_bank_count=modem::receiver_strategy_bank_count(receiver.options.modem,
+                            value.transfer.search_seconds,key_count,profile_count);
                         const auto owner_charge=bank.shared_capture?bank.shared_capture->capacity_reservation():0;
-                    const auto cohort_share=(capacity-std::min(capacity,owner_charge))/std::max<std::size_t>(1,search.receiver_bank_count);
+                        const auto cohort_share=(capacity-std::min(capacity,owner_charge))/std::max<std::size_t>(1,search.receiver_bank_count);
                         const auto control_margin=receiver_control_margin(receiver.options.modem,receiver.options.key.has_value());
                         search.receiver_strategy_workspace_bytes=cohort_share>control_margin?cohort_share-control_margin:1;
                         search.input_sample_origin=bank.samples+sample_count;search.scheduled_capture=bank.shared_capture;
@@ -2598,19 +2707,43 @@ struct Session::Impl {
                                 static_cast<double>(modem::pattern_pulse_padding_samples(receiver.options.modem)))/receiver.options.modem.sample_rate;
                         search.start_uncertainty_seconds=value.transfer.search_seconds+1.;
                         receiver.clock_window_modeled=modeled_start_window(search,receiver.options.modem,receiver.epoch,bank,value,bank.samples+sample_count);
+                        if(value.transfer.clock_sync&&!search.qualified_start_window) {
+                            auto amplitude_search=search;
+                            if(modeled_start_window(amplitude_search,receiver.options.modem,receiver.epoch,
+                                    bank,value,bank.samples+sample_count,true))
+                                search.amplitude_start_window=amplitude_search.qualified_start_window;
+                        }
+                        if(!value.transfer.timestamp&&!modem::scheduled_bursts(receiver.options.modem)) {
+                            detail::prepare_public_amplitude_windows(receiver.options.modem,value,receiver.options.key.has_value(),search,key_count,profile_count);
+                            if(search.amplitude_epoch_stride_seconds>1 && bank.public_amplitude_epoch_origin) {
+                                search.amplitude_start_offset_seconds=static_cast<double>(static_cast<long double>(receiver.epoch)-
+                                    *bank.public_amplitude_epoch_origin-static_cast<long double>(bank.samples+sample_count)/receiver.options.modem.sample_rate);
+                                search.amplitude_lookahead_epochs=detail::amplitude_epoch_lookahead(receiver.options.modem,search,
+                                    1.L/receiver.options.modem.sample_rate,0);
+                            }
+                            if(!receiver.options.key&&bank.timing)
+                                search.amplitude_lookahead_epochs=std::max(search.amplitude_lookahead_epochs,
+                                    detail::amplitude_epoch_lookahead(receiver.options.modem,search,
+                                    bank.timing->seconds_per_frame,bank.timing->rate_uncertainty_fraction));
+                            search.amplitude_receiver_bank_count=modem::receiver_strategy_amplitude_bank_count(
+                                receiver.options.modem,search,
+                                key_count,profile_count);
+                            const auto amplitude_share=(capacity-std::min(capacity,owner_charge))/
+                                std::max<std::size_t>(1,search.amplitude_receiver_bank_count);
+                            search.amplitude_strategy_workspace_bytes=amplitude_share>control_margin?amplitude_share-control_margin:1;
+                        }
                         const auto other=bank.working_bytes-accounted,overhead=accounted-receiver.modem->working_bytes();
                         if(other>capacity || overhead>capacity-other)throw;
                         const auto remaining=capacity-other-overhead;
                         const auto selection=modem::resolve_receiver_strategy(receiver.options.modem,search,remaining);
-                        receiver.amplitude_fft_samples=selection.backend==modem::ReceiverBackend::amplitude_energy?
-                            modem::pattern_amplitude_geometry(receiver.options.modem,search).fft_samples:0;
+                        amplitude_metadata(receiver,receiver.options.modem,search,selection);
                         if(declared_search && !(selection.supported && selection.full_frequency_coverage && selection.full_clock_coverage))
                             note_oscillator_coverage(bank,*declared_search);
                         receiver.modem.reset();
                         receiver.modem=std::make_unique<modem::StreamingReceiver>(transfer::seeded_config(receiver.options,receiver.epoch),
                             selection.backend==modem::ReceiverBackend::existing_complex &&
                                 !(selection.scheduled && !modem::packed_scheduled_symbols(receiver.options.modem))?remaining:
-                                std::min(remaining,search.receiver_strategy_workspace_bytes),search);
+                                std::min(remaining,selection.selected_workspace_bytes),search);
                         bank.coverage_limited |= receiver.modem->local_clock_fallback();
                         receiver.content=std::make_unique<transfer::StreamReceiver>(receiver.options,receiver.epoch,bank.source_quota);
                         receiver.admitted_at=observation_epoch(bank,value,bank.samples+sample_count);

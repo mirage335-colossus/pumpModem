@@ -97,6 +97,78 @@ void selected_plan_progress_and_support_equivalence() {
     check(cancelled&&published==1,"cancelled curve sweep returned partial numerical trials as a full plan");
 }
 
+void earth_moon_earth_estimate() {
+    Controller controller({false,false});
+    controller.activate(ui::Command::planner_example_eme);
+    const auto inputs=controller.link_plan()->inputs;
+    controller.close();
+    check(!inputs.options.key && !inputs.options.modem.fake_hopping &&
+          !inputs.options.modem.scheduled_hopping,
+          "EME example must retain its public, unkeyed waveform");
+    planner::Cache cache;std::stop_source stop;std::optional<planner::Model> selected;
+    try {planner::build(inputs,cache,stop.get_token(),[&](const auto& current) {
+        selected=current;stop.request_stop();
+    });}catch(const estimate_detail::Cancelled&){}
+    check(selected&&selected->available,"EME example must publish its selected link plan");
+    check(selected->clock_search_supported&&selected->receiver_workspace_supported&&
+          selected->confidence_available&&selected->one_bit_confidence_available&&!selected->probability_reference_only&&
+          !selected->reference_probability_available&&!selected->one_bit_reference_available&&
+          selected->probability_trials==4096&&selected->one_bit_success_probability<.01&&
+          selected->probability_model_limit.find("tested signal level")!=std::string::npos,
+          "EME must publish its qualified first-bit anchor with explicit ensemble and accuracy scope");
+    near(selected->bit_seconds,128,"EME example changed its exact symbol duration");
+    for(const auto width:{220.f,900.f}) {
+        const auto page=planner_page::build(*selected,width,false,false);
+        check(contains_text(page,"RX estimate:")&&contains_text(page,"RX model: ")&&
+              contains_text(page,selected->probability_model_limit)&&contains_text(page,"Received:")&&
+              contains_text(page,"Receiver can finish after"),
+              "Collapsed EME plan must explain its RX model limit and retain link budget and timing");
+    }
+    auto existing_inputs=inputs;existing_inputs.options.modem.receiver_strategy=modem::ReceiverStrategy::existing_only;
+    planner::Cache existing_cache;std::stop_source existing_stop;std::optional<planner::Model> existing;
+    try {planner::build(existing_inputs,existing_cache,existing_stop.get_token(),[&](const auto& current) {
+        existing=current;existing_stop.request_stop();
+    });}catch(const estimate_detail::Cancelled&){}
+    check(existing&&existing->available&&!existing->confidence_available&&existing->reference_probability_available&&
+          existing->one_bit_reference_available&&existing->probability_model_limit.find("second-batch")!=std::string::npos,
+          "Existing-only EME must remain an explicit conditional reference");
+    const auto reference_page=planner_page::build(*existing,220,false,false);
+    check(contains_text(reference_page,"RX reference:")&&contains_text(reference_page,"RX model: ")&&
+          contains_text(reference_page,existing->probability_model_limit),
+          "Collapsed Existing-only EME must display its unqualified model scope");
+    auto amplitude_inputs=inputs;amplitude_inputs.target_db_hz=-35.07209969647869;
+    amplitude_inputs.receiver_settings->receive_keys.emplace_back(Bytes(32,0x71));
+    planner::Cache amplitude_cache;std::stop_source amplitude_stop;std::optional<planner::Model> amplitude;
+    try {planner::build(amplitude_inputs,amplitude_cache,amplitude_stop.get_token(),[&](const auto& current) {
+        amplitude=current;amplitude_stop.request_stop();
+    });}catch(const estimate_detail::Cancelled&){}
+    check(amplitude&&amplitude->available&&!amplitude->confidence_available&&
+          !amplitude->reference_probability_available&&
+          (!amplitude->clock_search_supported||!amplitude->receiver_workspace_supported),
+          "Multi-day EME preview must not hide incomplete rolling arrival coverage behind a reference");
+    const auto limited_page=planner_page::build(*amplitude,220,false,false);
+    check(!contains_text(limited_page,"RX reference:"),
+          "Unfit EME preview displayed a probability despite incomplete receive coverage");
+    // A useful high-power point still exposes the separate amplitude reference.
+    amplitude_inputs.target_db_hz=-9.0926996097583093;
+    amplitude_inputs.tx_dbm=10*std::log10(15000.*1000);
+    amplitude_inputs.options.dsp_workspace_bytes=4ULL*1024*1024*1024;
+    amplitude_inputs.receiver_settings->dsp_workspace_bytes=amplitude_inputs.options.dsp_workspace_bytes;
+    amplitude_inputs.receiver_settings->transfer.dsp_workspace_bytes=amplitude_inputs.options.dsp_workspace_bytes;
+    planner::Cache useful_cache;std::stop_source useful_stop;std::optional<planner::Model> useful;
+    try {planner::build(amplitude_inputs,useful_cache,useful_stop.get_token(),[&](const auto& current) {
+        useful=current;useful_stop.request_stop();
+    });}catch(const estimate_detail::Cancelled&){}
+    check(useful&&useful->available&&useful->clock_search_supported&&useful->receiver_workspace_supported&&
+          useful->reference_probability_available&&useful->one_bit_reference_available&&!useful->confidence_available&&
+          useful->receiver_geometry.receiver_strategy_selected=="amplitude energy"&&
+          useful->probability_model_limit.starts_with("Amplitude"),
+          "Feasible512second15kW EME point lost its explicit conditional amplitude reference");
+    near(useful->bit_seconds,512,"High-power amplitude fixture changed its useful symbol duration");
+    const auto amplitude_page=planner_page::build(*useful,220,false,false);
+    check(contains_text(amplitude_page,"RX reference:")&&contains_text(amplitude_page,useful->probability_model_limit),
+          "Collapsed amplitude EME preview must display the conditional model's coverage");
+}
 void independent_reference_values() {
     const auto inputs=example();
     const auto short_bit=planner::build(inputs);
@@ -1858,6 +1930,13 @@ void conditional_reference_and_timing_work_document() {
         const auto gap=planner_page::build(unsupported,width,true,false);
         check(contains_text(gap,"RX estimate unavailable")&&bit_plot(gap)!=reference_plot,
             "Unqualified references require an explicit availability flag and must otherwise leave a graph gap");
+        auto selected_anchor=model;
+        selected_anchor.probability_reference_only=false;
+        selected_anchor.reference_probability_available=selected_anchor.one_bit_reference_available=false;
+        selected_anchor.confidence_available=selected_anchor.one_bit_confidence_available=true;
+        const auto mixed=planner_page::build(selected_anchor,width,false,false);
+        check(contains_text(mixed,"RX estimate:")&&contains_text(mixed,"1-bit RX reference · right axis"),
+            "A qualified selected value must not qualify the surrounding reference curve");
         auto fallback=model;fallback.timing_window_modeled=false;
         fallback.receiver_work_assumptions="Full arrival-window bank; extra UTC correction lanes retained";
         check(!contains_text(planner_page::build(fallback,width,false,false),"Receiver work:"),
@@ -2164,6 +2243,7 @@ void document_semantics_layout_and_plots() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="--eme-only") {earth_moon_earth_estimate();std::cout<<"EME selected RX model limit passed\n";return 0;}
         cancelled_planner_and_inspection();
         if(argc==2&&std::string_view(argv[1])=="--observer-only") {
             independent_reference_values();exact_geometry_and_physical_finish();separate_link_budget_and_observer_model();
@@ -2183,7 +2263,7 @@ int main(int argc,char** argv) {
         }
         selected_plan_progress_and_support_equivalence();
         sustained_listening_plan_document();
-        independent_reference_values();exact_geometry_and_physical_finish();timing_milestones();
+        earth_moon_earth_estimate();independent_reference_values();exact_geometry_and_physical_finish();timing_milestones();
         clock_and_ram_milestones();sampled_clock_ram_islands();checked_clock_ram_navigation();
         nearest_usable_targets();bounded_navigation_preview();nearest_target_shares_receiver_budget();
         narrow_band_differential_model();phase_loss_and_receiver_confidence();gpsdo_phase_does_not_change_clock_coverage();

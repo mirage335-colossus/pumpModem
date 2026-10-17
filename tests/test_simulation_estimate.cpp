@@ -44,6 +44,93 @@ modem::ChannelConfig clean_channel() {
     modem::ChannelConfig value;value.clock_error_ppm=0;value.phase_noise_degrees_per_sqrt_second=0;
     return value;
 }
+void one_chip_probability_scope() {
+    transfer::Options o;auto& c=o.modem;
+    c.sample_rate=256;c.carrier_hz=64;c.bandwidth_hz=32;c.spreading_factor=1;
+    c.integration_seconds=0;c.pulse_shaping=false;c.receiver_strategy=modem::ReceiverStrategy::existing_only;
+    o.search_seconds=0;o.dsp_workspace_bytes=32*1024*1024;
+    auto ch=clean_channel();ch.snr_db=60;
+    for(const auto seconds:{0.,8./256.}) {
+        c.integration_seconds=seconds;
+        const auto e=simulation::estimate(wire(1,c),o,true,ch,{},1,true,1,256);
+        check(modem::pattern_chips_per_symbol(c)==1&&e.profile_matches&&e.receiver_workspace_supported&&e.carrier_in_search,
+            "one-chip scope fixture lost supported search geometry");
+        check(!e.confidence_available&&!e.one_bit_confidence_available&&!e.reference_probability_available&&
+            !e.one_bit_reference_available&&e.probability_trials==0&&
+            e.probability_model_limit.find("unknown complex gain")!=std::string::npos,
+            "one-chip pattern cannot estimate distinguishable bits under unknown complex gain");
+    }
+    c.integration_seconds=0;c.spreading_factor=2;
+    check(simulation::estimate(wire(1,c),o,true,ch,{},1,true,1,256).confidence_available,
+        "one-chip exclusion removed a two-chip pattern estimate");
+    c.spreading_factor=1;c.spreading_mode=modem::SpreadingMode::tone;
+    check(simulation::estimate(wire(1,c),o,true,ch,{},1,true,1,256).confidence_available,
+        "one-chip pattern degeneracy was incorrectly applied to Tone");
+}
+void coherent_hardware_power() {
+    transfer::Options o;auto& c=o.modem;c.sample_rate=64;c.carrier_hz=16;c.bandwidth_hz=8;
+    c.integration_seconds=16;c.pulse_shaping=false;c.receiver_strategy=modem::ReceiverStrategy::existing_only;
+    o.search_seconds=0;o.dsp_workspace_bytes=32*1024*1024;o.timestamp=c.stream_epoch=1800000041;
+    const auto n=modem::symbol_sample_count(c);long double average=0;
+    for(unsigned bit=0;bit<2;++bit) {
+        modem::PatternTransmitter tx(Bytes{static_cast<std::uint8_t>(bit)},c,c.stream_epoch,0,false);
+        std::array<float,4096> samples{};long double energy=0;std::uint64_t count=0;
+        while(const auto got=tx.read(samples)) {for(std::size_t j=0;j<got;++j)energy+=samples[j]*samples[j];count+=got;}
+        check(count==n,"coherent power fixture unexpectedly includes pulse support");
+        average+=energy/(n*modem::nominal_signal_power)/2;
+    }
+    check(n==1024&&modem::pattern_chip_samples(c)==16&&std::abs(average-1)>.01,
+        "finite coherent source-power fixture became vacuous");
+    auto ch=clean_channel();ch.snr_db=20-10*std::log10(n/2.);
+    const auto sampled=simulation::estimate(wire(1,c),o,true,ch,{},1,true,100,256);
+    const auto hardware=simulation::estimate(wire(1,c),o,true,ch,{},1,true,100,256,
+        simulation::ReceiverWorkMode::hardware_fallback);
+    check(sampled.confidence_available&&hardware.confidence_available&&sampled.drift_model_available&&
+        hardware.drift_model_available&&sampled.frequency_rate_hypotheses==hardware.frequency_rate_hypotheses,
+        "finite coherent power changed detector/bank coverage");
+    std::cout<<"power quarter source="<<double(average)<<" sampled="<<sampled.modeled_symbol_snr_db
+        <<" hardware="<<hardware.modeled_symbol_snr_db<<'\n';
+    check(std::abs(sampled.modeled_symbol_snr_db-(20+10*std::log10(average)))<1e-5,
+        "finite coherent sampled source energy changed");
+    check(std::abs(hardware.modeled_symbol_snr_db-20)<1e-5,
+        "finite coherent hardware model double-counted source power");
+}
+void differential_hardware_power() {
+    for(const bool partial:{false,true}) {
+        transfer::Options o;auto& c=o.modem;
+        c.sample_rate=64;c.carrier_hz=16;c.bandwidth_hz=32;c.spreading_factor=4096;
+        c.integration_seconds=partial?256.25:0;c.pulse_shaping=false;c.scramble=partial;
+        c.spreading_seed.fill(0x57);c.receiver_strategy=modem::ReceiverStrategy::existing_only;
+        o.timestamp=c.stream_epoch=1800000041;o.search_seconds=0;o.dsp_workspace_bytes=32*1024*1024;
+        modem::OscillatorSearchConfig osc;osc.lf={0,0};osc.rf={0,0};osc.margin=3;c.oscillator_search=osc;
+        const auto n=modem::symbol_sample_count(c);
+        check(n==(partial?16400:16384)&&modem::pattern_chip_samples(c)==4,
+            "hardware source-power fixture changed physical windows");
+        long double average=0;
+        for(unsigned bit=0;bit<2;++bit) {
+            modem::PatternTransmitter tx(Bytes{static_cast<std::uint8_t>(bit)},c,c.stream_epoch,0,false);
+            std::array<float,4096> samples{};long double energy=0;std::uint64_t count=0;
+            while(const auto got=tx.read(samples)) {for(std::size_t j=0;j<got;++j)energy+=samples[j]*samples[j];count+=got;}
+            check(count==n,"unshaped power fixture unexpectedly includes padding");
+            average+=energy/(n*modem::nominal_signal_power)/2;
+        }
+        check(std::abs(average-1)>1e-5,"source-power regression became vacuous");
+        auto ch=clean_channel();ch.snr_db=20-10*std::log10(n/2.);
+        const auto sampled=simulation::estimate(wire(1,c),o,true,ch,{},1,true,1,256);
+        const auto hardware=simulation::estimate(wire(1,c),o,true,ch,{},1,true,1,256,
+            simulation::ReceiverWorkMode::hardware_fallback);
+        check(sampled.one_bit_confidence_available&&hardware.one_bit_confidence_available&&
+            sampled.differential_model_available&&hardware.differential_model_available&&
+            sampled.frequency_rate_hypotheses==hardware.frequency_rate_hypotheses,
+            "power normalization changed local detector or bank coverage");
+        std::cout<<"power partial="<<partial<<" source="<<double(average)<<" sampled="<<sampled.modeled_symbol_snr_db
+            <<" hardware="<<hardware.modeled_symbol_snr_db<<'\n';
+        check(std::abs(sampled.modeled_symbol_snr_db-(20+10*std::log10(average)))<1e-5,
+            "sampled model must retain nominal-power-referenced source energy");
+        check(std::abs(hardware.modeled_symbol_snr_db-20)<1e-5,
+            "hardware model charged measured radio power for digital source backoff twice");
+    }
+}
 void sustained_hardware_acquisition() {
     for(const auto shift:{3e7,1e8}) {
     transfer::Options o;
@@ -2575,6 +2662,9 @@ void projected_pattern_workload() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="--probability-maintenance-only") {one_chip_probability_scope();coherent_hardware_power();differential_hardware_power();return 0;}
+        if(argc==2&&std::string_view(argv[1])=="--power-only") {coherent_hardware_power();differential_hardware_power();return 0;}
+        one_chip_probability_scope();coherent_hardware_power();differential_hardware_power();
         if(argc==2&&std::string_view(argv[1])=="--planning-layout-only") {scheduled_shared_layout_callers();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--strategy-only") {receiver_strategy_model();scheduled_strategy_model();default_hop_calendar_model();scheduled_short_phase_prior_model();scheduled_packed_complex_model();scheduled_split_complex_model();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--sustained-only") {sustained_hardware_acquisition();return 0;}

@@ -1,4 +1,5 @@
 #include "live_receiver_layout.hpp"
+#include "live_receiver_admission.hpp"
 #include "scheduled_acquisition_policy.hpp"
 #include "datapump/simulation_estimate.hpp"
 #include "datapump/live.hpp"
@@ -15,6 +16,8 @@
 #include "pattern_differential.hpp"
 #include "pattern_correlator_batch.hpp"
 #include "receiver_probability.hpp"
+#include "eme_probability.hpp"
+#include "amplitude_probability.hpp"
 #include "estimate_cancellation.hpp"
 #include "pattern_start_geometry.hpp"
 #include "pattern_fft_window.hpp"
@@ -858,6 +861,10 @@ void receiver_layout_share(modem::PatternSearch& search,const modem::Config& con
     const auto share=available/std::max<std::size_t>(1,search.receiver_bank_count);
     const auto control=live::receiver_control_margin(config,keyed);
     search.receiver_strategy_workspace_bytes=share>control?share-control:1;
+    if(search.amplitude_receiver_bank_count) {
+        const auto amplitude_share=available/search.amplitude_receiver_bank_count;
+        search.amplitude_strategy_workspace_bytes=amplitude_share>control?amplitude_share-control:1;
+    }
 }
 Work scheduled_complex_receiver_work(modem::Config config,const SearchBank& bank,long double samples,
         const transfer::Options& options,std::size_t profiles,std::size_t keys,
@@ -1930,9 +1937,37 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     strategy_search.start_offset_seconds=options.search_seconds+1.;
     strategy_search.start_uncertainty_seconds=options.search_seconds+1.;
     strategy_search.qualified_start_window=strategy_prior;
+    if(!strategy_prior&&arrival_model_available(options,config,work_mode,timing_model)) {
+        const auto phase_upper=private_pattern?modem::canonical_phase_cell_upper(config,
+            (modem::canonical_phase_extent(config)-1)/modem::canonical_phase_step(config)*modem::canonical_phase_step(config)):
+            config.stream_phase_samples;
+        constexpr auto epoch=1800000000.L;
+        const auto radius=options.search_seconds+1.L;
+        const auto policy=arrival_policy(options,config);
+        const auto map=receiver_arrival_map(options,config,epoch,epoch+policy->offset_seconds-radius,0,
+            timing_model.capture_seconds_per_frame.value_or(1./config.sample_rate),
+            timing_model.capture_rate_uncertainty_fraction.value_or(static_cast<double>(maximum_clock_ratio)),
+            std::max(clock_sync::audio_lag_radius(options.audio_timing_error_seconds),
+                timing_model.capture_error_seconds.value_or(clock_sync::audio_lag_radius(options.audio_timing_error_seconds))),
+            phase_upper);
+        if(map&&map->origin_samples+map->phase_scale*phase_upper+map->half_width_samples>=0&&
+           map->origin_samples-map->half_width_samples<=2*radius*config.sample_rate)
+            strategy_search.amplitude_start_window=modem::PatternStartWindow{
+                map->origin_samples,map->phase_scale,map->half_width_samples};
+    }
     strategy_search.receiver_bank_count=modem::receiver_strategy_bank_count(config,
         options.search_seconds,keys,profiles);
     strategy_search.receiver_schedule_key_count=keys;
+    if(!options.timestamp&&!modem::scheduled_bursts(config)) {
+        live::Settings amplitude_settings;amplitude_settings.transfer=options;
+        amplitude_settings.simulation=work_mode==ReceiverWorkMode::sampled_simulation;
+        live::detail::prepare_public_amplitude_windows(config,amplitude_settings,private_pattern,strategy_search,keys,profiles);
+        if(!private_pattern)
+            strategy_search.amplitude_lookahead_epochs=live::detail::amplitude_epoch_lookahead(config,strategy_search,
+                timing_model.capture_seconds_per_frame.value_or(1./config.sample_rate),
+                timing_model.capture_rate_uncertainty_fraction.value_or(static_cast<double>(maximum_clock_ratio)));
+        strategy_search.amplitude_receiver_bank_count=modem::receiver_strategy_amplitude_bank_count(config,strategy_search,keys,profiles);
+    }
     // Both actual and inferred settings use Live's exact reservation arithmetic.
     // Analytical inputs need not satisfy Live device/route admission rules.
     if(layout)receiver_layout_share(strategy_search,config,*layout,options.key.has_value());
@@ -1950,6 +1985,12 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         static_cast<std::size_t>(std::max(0.L,allowance)),layout->cohort_capacity,layout->maximum_consumers,
         live::receiver_control_margin(strategy_config,options.key.has_value())):
         modem::resolve_receiver_strategy(strategy_config,strategy_search,static_cast<std::size_t>(std::max(0.L,allowance)));
+    if(result.strategy.backend==modem::ReceiverBackend::amplitude_energy&&strategy_search.amplitude_start_window) {
+        result.timing_window_modeled=true;
+        result.geometry.arrival_window_available=true;
+        result.geometry.combined_arrival_half_width_seconds=static_cast<double>(
+            strategy_search.amplitude_start_window->half_width_samples/config.sample_rate);
+    }
     auto& diagnostic=result.geometry;
     diagnostic.receiver_strategy_requested=tuning::receiver_strategy_id(config.receiver_strategy);
     diagnostic.receiver_strategy_selected=modem::receiver_backend_name(result.strategy.backend);
@@ -2037,7 +2078,10 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                 modem::pattern_pulse_padding_samples(config)));
         result.cohort_lifetime=static_cast<long double>(modem::scheduled_physical_span_samples(config,
             source_lifetime))/config.sample_rate+2*options.search_seconds+3;
-        result.sustained_instances=static_cast<long double>(strategy_search.receiver_bank_count)/profiles;
+        if(result.strategy.backend==modem::ReceiverBackend::amplitude_energy&&
+           result.strategy.amplitude_cohort_lifetime_seconds>0)
+            result.cohort_lifetime=result.strategy.amplitude_cohort_lifetime_seconds;
+        result.sustained_instances=static_cast<long double>(result.strategy.selected_bank_count)/profiles;
         diagnostic.backend=diagnostic.receiver_strategy_selected;
         diagnostic.scope+="; alternative-strategy cost is sustained-cohort engineering work times observation duration; component split/startup uncalibrated; legacy FFT work counts are diagnostic only";
         if(result.strategy.backend==modem::ReceiverBackend::frequency_axis) {
@@ -2067,15 +2111,15 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
 // limited analytic PCM, including its finite pulse tails, and use the same
 // projected template centers as the complex FFT receiver. This is conditional
 // matched-statistic algebra, not an adaptive timing/key/epoch acquisition run.
-bool interleaved_statistics(const transfer::Options& options,const Work& work,
+bool shaped_source_statistics(const transfer::Options& options,const Work& work,
         detail::ReceiverProbabilityParameters& p,unsigned source_bit,ReceiverWorkMode mode,
-        std::string& reason,std::stop_token stop) {
+        std::string& reason,std::stop_token stop,std::uint64_t maximum_source_samples=524288) {
     estimate_detail::check(stop);
     const auto& config=options.modem;
     const auto total=modem::symbol_sample_count(config),bin=work.bin_samples;
-    if(work.compact||bin<2||total>524288||!bin||total%bin||total%(4*bin)||
+    if(work.compact||bin<2||total>maximum_source_samples||!bin||total%bin||total%(4*bin)||
        !modem::pattern_pulse_enabled(config)||work.noise_dimensions<16) {
-        reason="Interleave actual-source conditional reference requires a shaped complex FFT geometry, 2+ samples/bin, aligned quarters and at most 524288 source samples";
+        reason="Actual-source conditional reference requires a shaped complex FFT geometry, 2+ samples/bin, aligned quarters and at most "+std::to_string(maximum_source_samples)+" source samples";
         return false;
     }
     auto configured=config;
@@ -2217,7 +2261,7 @@ bool interleaved_statistics(const transfer::Options& options,const Work& work,
 // Unsupported cases keep their timing/resource diagnostics without inventing
 // a reception percentage from a different detector.
 bool real_differential_statistics(const transfer::Options& options,std::uint64_t window,
-                                 detail::ReceiverProbabilityParameters& p,unsigned source_bit,std::stop_token stop) {
+                                 detail::ReceiverProbabilityParameters& p,unsigned source_bit,ReceiverWorkMode mode,std::stop_token stop) {
     estimate_detail::check(stop);
     const auto& config=options.modem;
     const auto total=modem::symbol_sample_count(config),chip=modem::pattern_chip_samples(config);
@@ -2284,11 +2328,22 @@ bool real_differential_statistics(const transfer::Options& options,std::uint64_t
         for(auto& value:atom.signal_energy)value*=2./static_cast<double>(total);
         p.real_atoms.push_back(atom);first=end;
     }
+    if(mode!=ReceiverWorkMode::sampled_simulation) {
+        double physical=0;for(const auto& atom:p.real_atoms)physical+=atom.signal_energy[0];
+        if(!(physical>0))return false;
+        // The radio power is the measured source power. Normalize the fixed
+        // initial-phase source, preserving finite Gram/projection losses.
+        for(auto& atom:p.real_atoms) {
+            for(auto& x:atom.signal_cos)x/=std::sqrt(physical);
+            for(auto& x:atom.signal_sin)x/=std::sqrt(physical);
+            for(auto& x:atom.signal_energy)x/=physical;
+        }
+    }
     return true;
 }
 
 bool differential_statistics(const transfer::Options& options,const Work& work,
-                             std::uint64_t window,detail::ReceiverProbabilityParameters& p,unsigned source_bit,std::stop_token stop) {
+                             std::uint64_t window,detail::ReceiverProbabilityParameters& p,unsigned source_bit,ReceiverWorkMode mode,std::stop_token stop) {
     estimate_detail::check(stop);
     const auto& config=options.modem;
     const auto total=modem::symbol_sample_count(config),chip=modem::pattern_chip_samples(config);
@@ -2298,7 +2353,7 @@ bool differential_statistics(const transfer::Options& options,const Work& work,
         // The old circular approximation has no representation of a tail or
         // a window crossing a drift boundary. Preserve it for aligned cases;
         // raw compact fits use the joint real-covariance atom model instead.
-        return work.compact&&real_differential_statistics(options,window,p,source_bit,stop);
+        return work.compact&&real_differential_statistics(options,window,p,source_bit,mode,stop);
     }
     // Private raw-bin FFT fits use a different trace-only legacy score scale;
     // the joint model currently supports compact raw fits or complex FFT bins.
@@ -2328,7 +2383,7 @@ bool differential_statistics(const transfer::Options& options,const Work& work,
     const auto image=std::abs(std::sin(omega))<1e-12?1.:
         std::sin(static_cast<double>(step)*omega)/(static_cast<double>(step)*std::sin(omega));
     const auto amplitude=std::sqrt(2*modem::nominal_signal_power);
-    double source_energy=0;
+    double source_energy=0,physical_energy=0;
     for(std::uint64_t at=0;at<total;at+=step) {
         if((at/step)%128==0)estimate_detail::check(stop);
         const auto position=static_cast<long double>(at)+(step-1)/2.L;
@@ -2340,12 +2395,14 @@ bool differential_statistics(const transfer::Options& options,const Work& work,
             code.value(index,1-source_bit,fraction);
         const auto local=static_cast<std::size_t>(at/window);
         auto source=a;
+        if(!modem::pattern_pulse_enabled(config))physical_energy+=std::norm(source);
         if(modem::pattern_pulse_enabled(config)) {
             source={};
             for(std::uint64_t node=0;node<quadrature;++node) {
                 const auto sample=static_cast<double>(at)+
                     (static_cast<double>(node)+.5)*static_cast<double>(step)/static_cast<double>(quadrature)-.5;
-                source+=modem::pattern_limit_pcm(amplitude*code.shaped_value(0,source_bit,sample))/amplitude;
+                const auto node_source=modem::pattern_limit_pcm(amplitude*code.shaped_value(0,source_bit,sample))/amplitude;
+                source+=node_source;physical_energy+=std::norm(node_source)/static_cast<double>(quadrature);
             }
             source/=static_cast<double>(quadrature);
         }
@@ -2365,7 +2422,8 @@ bool differential_statistics(const transfer::Options& options,const Work& work,
     // Retain actual finite-code power, radial limiting and projected-bin
     // averaging. Signal fits can differ from the unmodified receive templates;
     // the joint model retains their unfitted energy in the denominator.
-    p.signal_energy*=source_energy/static_cast<double>(total/step);
+    p.signal_energy*=source_energy/(mode==ReceiverWorkMode::sampled_simulation?
+        static_cast<double>(total/step):physical_energy);
     p.differential_alternative_weights=other;
     p.weights.fill(0);p.correlations.fill(0);
     p.alternative_weights.emplace().fill(0);
@@ -2711,7 +2769,76 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
     result.clock_in_search=matching_work.strategy.backend==modem::ReceiverBackend::amplitude_energy?
         within_representation_bound(channel.clock_error_ppm,matching_work.strategy.amplitude_clock_half_width_ppm):
         (!oscillator_policy||paired_clock_coverage(bank,frequency,channel.clock_error_ppm));
-    if(matching_work.strategy.backend!=modem::ReceiverBackend::existing_complex||scheduled_complex) {
+    if(matching_work.strategy.backend==modem::ReceiverBackend::amplitude_energy&&!scheduled_complex) {
+        result.probability_reference_only=true;
+        result.probability_model_limit="Amplitude-only full-bank RX sensitivity is unqualified";
+        result.modeled_symbol_snr_db=static_cast<double>(symbol_db);
+        result.coherent_reference_only=false;
+        if(!compute_probability||!matching_work.strategy.supported||!result.profile_matches||
+           !result.carrier_in_search||!result.clock_in_search||!result.receiver_workspace_supported||
+           result.oscillator_search_limited)return result;
+        if(work_mode==ReceiverWorkMode::sampled_simulation||options.key) {
+            result.probability_model_limit="Amplitude hardware mean-power reference does not cover nominal-power simulation or keyed transmit sources";
+            return result;
+        }
+        if(receiver_config.oscillator_search!=config.oscillator_search||
+           receiver_config.frequency_search_multiplier!=config.frequency_search_multiplier||
+           receiver_config.stream_phase_samples!=config.stream_phase_samples) {
+            result.probability_model_limit="Amplitude reference does not cover a different receiver oscillator or phase domain";return result;
+        }
+        modem::PatternSearch amplitude_search;
+        amplitude_search.start_offset_seconds=0;
+        amplitude_search.start_uncertainty_seconds=options.search_seconds+1;
+        live::Settings amplitude_settings;amplitude_settings.transfer=options;amplitude_settings.simulation=false;
+        live::detail::prepare_public_amplitude_windows(config,amplitude_settings,false,amplitude_search,keys,profiles.size());
+        if(amplitude_search.amplitude_start_uncertainty_seconds)
+            amplitude_search.start_uncertainty_seconds=*amplitude_search.amplitude_start_uncertainty_seconds;
+        const auto amplitude_geometry=modem::pattern_amplitude_geometry(config,amplitude_search);
+        if(amplitude_geometry.channel_count!=matching_work.strategy.amplitude_channels) {
+            result.probability_model_limit="Amplitude reference does not cover workspace-reduced channel geometry";return result;
+        }
+        const auto amplitude=detail::amplitude_probability(config,amplitude_search,static_cast<double>(symbol_db),
+            static_cast<double>(frequency),std::max<std::size_t>(256,probability_trials),stop);
+        result.probability_model_limit=amplitude.limit;
+        if(profiles.size()>1||keys>1)
+            result.probability_model_limit+=" Conditional matching profile only; the configured multi-profile/key union is not qualified.";
+        if(!amplitude.available)return result;
+        result.one_bit_reference_available=true;
+        result.one_bit_success_probability=amplitude.correct;
+        result.probability_trials=amplitude.trials;
+        result.probability_search_approximation=true;
+        // Sampling intervals would omit the explicitly unqualified source and
+        // normal-tail errors. Do not display them as RX confidence intervals.
+        if(raw_bits&&transmission.wire_bits==1) {
+            result.reference_probability_available=true;
+            result.success_probability=amplitude.correct;
+        }
+        return result;
+    }
+    const bool frequency_axis=matching_work.strategy.backend==modem::ReceiverBackend::frequency_axis;
+    const bool eme_reference_geometry=!matching_work.compact&&config.pattern_symbols&&
+        config.spreading_mode==modem::SpreadingMode::pattern&&!config.scramble&&!config.dsss&&
+        config.dsss_factor==1&&!config.fake_hopping&&!config.scheduled_hopping&&!config.data_key&&!options.key&&
+        !arrival_policy(options,config)&&
+        config.frequency_search_multiplier==1&&config.stream_phase_samples==0&&
+        receiver_config.oscillator_search==config.oscillator_search&&
+        receiver_config.frequency_search_multiplier==config.frequency_search_multiplier&&receiver_config.stream_phase_samples==0&&
+        config.sample_rate==6000&&config.carrier_hz==1500&&config.bandwidth_hz==1&&
+        modem::pattern_chip_samples(config)==12000&&modem::pattern_pulse_enabled(config)&&
+        (samples_per_symbol==768000||samples_per_symbol==1536000)&&options.search_seconds==6&&
+        config.oscillator_search&&config.oscillator_search->lf==modem::OscillatorModel{.0001,.005}&&
+        config.oscillator_search->rf==modem::OscillatorModel{.0001,.005}&&
+        config.oscillator_search->rf_shift_hz==5.8e9&&config.oscillator_search->margin==3&&
+        config.oscillator_search->reference==modem::OscillatorReference::independent_audio&&
+        config.oscillator_search->sideband==modem::OscillatorSideband::upper&&
+        ((channel.clock_error_ppm==0&&channel.frequency_offset_hz==0)||
+         (channel.clock_error_ppm==modem::oscillator_effects(config).clock_error_ppm&&
+          channel.frequency_offset_hz==modem::oscillator_effects(config).frequency_offset_hz))&&
+        channel.delay_samples<=6*config.sample_rate&&
+        channel.phase_noise_degrees_per_sqrt_second<=modem::oscillator_effects(config).phase_noise_degrees_per_sqrt_second;
+    const bool axis_source_model=frequency_axis&&eme_reference_geometry;
+    const bool existing_eme_reference=matching_work.strategy.backend==modem::ReceiverBackend::existing_complex&&eme_reference_geometry;
+    if((matching_work.strategy.backend!=modem::ReceiverBackend::existing_complex&&!axis_source_model)||scheduled_complex) {
         result.receiver_work_assumptions+="; "+matching_work.geometry.scope+"; "+matching_work.strategy.reason;
         // New strategies do not inherit finite-window coherent probability
         // references. Full amplitude/frequency-axis acquisition is unqualified.
@@ -2778,6 +2905,10 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
     if(!result.profile_matches || !result.carrier_in_search || !result.clock_in_search ||
        !result.receiver_workspace_supported || result.oscillator_search_limited)return result;
     if(!compute_probability)return result;
+    if(config.spreading_mode==modem::SpreadingMode::pattern&&modem::pattern_chips_per_symbol(config)<=1) {
+        result.probability_model_limit="One-chip pattern alternatives are indistinguishable under unknown complex gain";
+        return result;
+    }
     // Actual-source Interleave statistics include the configured pulse gaps
     // and the deferred payload origin. Other references remain diagnostic.
     // A conditional symbol fit cannot qualify adaptive acquisition or the
@@ -2792,6 +2923,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
             "FHSS matched-gap templates: hop-dependent emitted energy and full acquisition sensitivity remain unqualified":
             "Ungated diagnostic reference: FHSS power gaps and transition loss are not modeled";
     }
+    if(axis_source_model||existing_eme_reference)result.probability_reference_only=true;
     const bool interleaved_reference=(config.dsss_factor>1&&config.outer_dsss_version==modem::OuterDsssVersion::interleaved_v2)||
         (config.fake_hopping&&config.fake_hopping->smooth_ramps);
     if(interleaved_reference&&(matching_work.compact||differential_window||
@@ -2824,7 +2956,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         // Coherent planner curves historically request fewer draws because the
         // legacy branch was analytic. This actual-source reference uses the
         // joint statistic engine and must honor its minimum trial budget.
-        parameters.requested_trials=interleaved_reference?std::max<std::size_t>(256,probability_trials):probability_trials;
+        parameters.requested_trials=(interleaved_reference||axis_source_model)?std::max<std::size_t>(256,probability_trials):probability_trials;
         parameters.signal_energy=static_cast<double>(std::pow(10.L,symbol_db/10));
         parameters.seconds=static_cast<double>(seconds);
         parameters.diffusion_degrees=channel.phase_noise_degrees_per_sqrt_second;
@@ -2841,6 +2973,18 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         parameters.section_dimensions=matching_work.section_dimensions;
         parameters.noise_condition=matching_work.noise_condition;
         parameters.acquisition_threshold=matching_work.acquisition_threshold;
+        if(axis_source_model||existing_eme_reference) {
+            // The payload-aligned EME peak lies in the second logical hop.
+            // Charge all its starts, including unselected cells. Earlier
+            // partial-window admissions need another timing/ownership model
+            // outside the qualified signal levels. Public rows use one phase
+            // and one initial symbol. No receiver threshold is changed.
+            const auto initial=std::floor(static_cast<long double>(config.sample_rate)/matching_work.bin_samples);
+            const auto hop=std::floor(static_cast<long double>(samples_per_symbol)/matching_work.bin_samples/2);
+            const auto charged=(initial+hop)*frequencies;
+            parameters.acquisition_threshold=static_cast<double>(-std::log(1e-10L)+
+                2*std::log(charged+1)+std::log(2*frequencies));
+        }
         // Every eligible symbol lasts longer than the physical six-second
         // absence interval: a merely retained, unconfirmed bit cannot wait
         // for later bits to establish a chain. It needs standalone evidence.
@@ -2854,8 +2998,8 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         const auto chip=modem::pattern_chip_samples(config);
         const auto configure_statistics=[&](detail::ReceiverProbabilityParameters& p,unsigned source_bit) {
     estimate_detail::check(stop);
-            if(interleaved_reference)return interleaved_statistics(options,matching_work,p,source_bit,
-                work_mode,result.probability_model_limit,stop);
+            if(interleaved_reference||axis_source_model)return shaped_source_statistics(options,matching_work,p,source_bit,
+                work_mode,result.probability_model_limit,stop,axis_source_model?1536000:524288);
             if(!differential_window && samples_per_symbol/chip<=1024) {
                 auto code_config=config;
                 if(options.timestamp)code_config.stream_epoch=options.timestamp;
@@ -2882,7 +3026,8 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
                 const auto other=std::accumulate(p.alternative_weights->begin(),p.alternative_weights->end(),0.);
                 for(auto& w:p.weights)w/=weight;
                 for(auto& w:*p.alternative_weights)w/=other;
-                if(!differential_window && !modem::pattern_pulse_enabled(config))
+                if(!differential_window && !modem::pattern_pulse_enabled(config)&&
+                   work_mode==ReceiverWorkMode::sampled_simulation)
                     p.signal_energy*=weight/static_cast<double>(samples_per_symbol);
             }
             if(!differential_window)return true;
@@ -2912,12 +3057,12 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
             // power and covariance. Retry from pristine parameters so the
             // real-covariance fallback applies that normalization exactly once.
             auto candidate=p;
-            if(differential_statistics(options,matching_work,differential_window,candidate,source_bit,stop)) {
+            if(differential_statistics(options,matching_work,differential_window,candidate,source_bit,work_mode,stop)) {
                 p=std::move(candidate);return true;
             }
             if(!matching_work.compact)return false;
             candidate=p;candidate.real_atoms.clear();
-            if(!real_differential_statistics(options,differential_window,candidate,source_bit,stop))return false;
+            if(!real_differential_statistics(options,differential_window,candidate,source_bit,work_mode,stop))return false;
             p=std::move(candidate);return true;
         };
         auto alternative_parameters=parameters;
@@ -2926,7 +3071,16 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
             if(result.probability_model_limit.empty())result.probability_model_limit="Template geometry exceeds the bounded probability model";
             return probability_result();
         }
-        auto probability=detail::receiver_probability(parameters,stop);
+        auto probability=detail::ReceiverProbability{};
+        if(axis_source_model) {
+            detail::EmeProbabilitySettings settings;settings.trials=parameters.requested_trials;
+            settings.frequency_offset_hz=channel.frequency_offset_hz;settings.clock_error_ppm=channel.clock_error_ppm;
+            const auto joint=detail::eme_receiver_probability(options,work_mode,static_cast<double>(symbol_db),
+                channel.phase_noise_degrees_per_sqrt_second,settings,stop);
+            if(std::abs(joint.full_bank_threshold-parameters.acquisition_threshold)>1e-10)
+                throw Error("EME probability trial charge changed");
+            probability=joint.probability;
+        } else probability=detail::receiver_probability(parameters,stop);
         bool averaged_candidates=false;
         // The planner has no wire-bit content. Independent finite candidates
         // need an equiprobable-bit estimate, including each source's limiter
@@ -2941,7 +3095,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
                     result.probability_model_limit="Alternative template geometry exceeds the bounded probability model";
                 return probability_result();
             }
-            const auto other=detail::receiver_probability(alternative_parameters,stop);
+            const auto other=axis_source_model?probability:detail::receiver_probability(alternative_parameters,stop);
             if(!other.available)probability=other;
             else {
                 averaged_candidates=true;
@@ -3044,6 +3198,44 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         }
         if(interleaved_reference)result.probability_model_limit=
             "Private isolated-symbol, fixed initial-phase actual-source reference: shaped and radially limited real PCM, selected source FHSS envelope, projected signal energy and finite candidate overlap. Noncircular projection uses both real-noise principal planes, joint template/source covariance and dependent received energy; circular geometry retains its existing approximation. Orthogonal noise energy uses a bounded chi-square approximation. Hardware uses user-entered actual mean radio power; simulation uses nominal-power-referenced noise. Quarter phase/timing changes remain approximate: time-varying limiter weights, opposite carrier-image rotation and unmatched signal/noise cross terms are unresolved. Adjacent unknown symbols, final device resampling/envelope, complete acquisition-bank behavior, outer presence guard and sensitivity qualification are not modeled";
+        if(existing_eme_reference) {
+            result.probability_model_limit="Existing-only EME first-bit conditional reference; second-batch trial charge corrected; shaped-source and joint peak/timing selection remain approximate; receiver completion is unqualified; no frequency-axis qualification";
+            if(!raw_bits||transmission.wire_bits>1) {
+                result.confidence_available=false;result.probability_interval_available=false;
+                result.success_probability=result.coherent_success_probability=0;
+                result.success_probability_low=0;result.success_probability_high=1;
+                result.probability_model_limit+="; multi-bit timing ownership and continuation are unqualified";
+            }
+        }
+        if(axis_source_model) {
+            const auto effects=modem::oscillator_effects(config);
+            const auto at_level=[&](double db){return std::abs(symbol_db-db)<=1e-9L;};
+            const bool tested_level=at_level(17)||at_level(18)||at_level(19)||
+                (samples_per_symbol==768000&&at_level(1.0926996097583093));
+            // Seven fixed-point, exact-one-bit conditional AWGN agreement
+            // checks. Neither interpolation nor another physical channel is
+            // qualified by this evidence. Fewer draws retain a reference.
+            const bool tested=raw_bits&&transmission.wire_bits==1&&tested_level&&probability.trials==4096&&
+                profiles.size()==1&&keys==1&&(!actual_settings||actual_settings->receive_keys.empty())&&
+                config.search_arithmetic==modem::SearchArithmetic::default_mode&&
+                receiver_config.search_arithmetic==modem::SearchArithmetic::default_mode&&
+                work_mode==ReceiverWorkMode::hardware_fallback&&
+                channel.clock_error_ppm==effects.clock_error_ppm&&
+                channel.frequency_offset_hz==effects.frequency_offset_hz&&
+                channel.phase_noise_degrees_per_sqrt_second==effects.phase_noise_degrees_per_sqrt_second;
+            result.probability_reference_only=!tested;
+            result.probability_model_limit=tested?
+                "EME first-bit AWGN: tested signal level; accuracy within 15 percentage points at 95% simultaneous confidence for the preset bit/arrival ensemble. Interpolation, radio hardware and continuation are unqualified":
+                "EME first-bit acquisition AWGN reference outside tested conditions; receiver completion, radio hardware and continuation are unqualified";
+            if(profiles.size()>1||keys>1||(actual_settings&&!actual_settings->receive_keys.empty()))
+                result.probability_model_limit+="; conditional matching bank only: other profiles/keys, rolling epochs and arbitration are not modeled";
+            if(!raw_bits||transmission.wire_bits>1) {
+                result.confidence_available=false;result.probability_interval_available=false;
+                result.success_probability=result.coherent_success_probability=0;
+                result.success_probability_low=0;result.success_probability_high=1;
+                result.probability_model_limit+="; multi-bit timing ownership and continuation are unqualified";
+            }
+        }
         return probability_result();
     }
     const auto energy=static_cast<double>(std::pow(10.L,std::clamp(effective_db/10,-30.L,12.L)));

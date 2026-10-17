@@ -19,6 +19,8 @@ struct ReceiverStrategyPlan {
     // hypothesis endpoints beyond a rounded requested interval.
     double amplitude_frequency_half_width_hz=0,amplitude_clock_half_width_ppm=0;
     std::size_t estimated_workspace_bytes=0,amplitude_channels=0;
+    std::size_t selected_bank_count=1,selected_workspace_bytes=0;
+    double amplitude_cohort_lifetime_seconds=0;
     bool scheduled=false,scheduled_cost_calibrated=false;
     bool scheduled_implicit_acquisition=false;
     std::size_t scheduled_bank_required_bytes=0,scheduled_local_capture_bytes=0,scheduled_shared_capture_bytes=0,scheduled_optional_tile_bytes=0;
@@ -49,4 +51,10 @@ ReceiverStrategyPlan plan_receiver_strategy(const Config&,const PatternSearch&,s
     std::size_t receiver_control_margin);
 const char* receiver_backend_name(ReceiverBackend);
 std::size_t receiver_strategy_bank_count(const Config&,unsigned epoch_radius,std::size_t keys,std::size_t profiles);
+// Ordinary amplitude's unconfirmed rolling acquisition allowance includes the
+// first fully observed symbol, slowest clock row and FFT endpoint slack. Not a
+// bound on synchronized tracks or stalled/backlogged processing. Scheduled
+// receivers retain their separately modeled calendar cohort.
+std::size_t receiver_strategy_amplitude_bank_count(const Config&,const PatternSearch&,
+    std::size_t keys,std::size_t profiles);
 }

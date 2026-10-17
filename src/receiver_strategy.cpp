@@ -55,12 +55,33 @@ std::size_t receiver_strategy_bank_count(const Config& c,unsigned radius,std::si
     const auto total=epochs*std::max<std::size_t>(1,keys)*std::max<std::size_t>(1,profiles);
     return static_cast<std::size_t>(std::min(total,static_cast<long double>(std::numeric_limits<std::size_t>::max())));
 }
+std::size_t receiver_strategy_amplitude_bank_count(const Config& c,const PatternSearch& search,
+        std::size_t keys,std::size_t profiles) {
+    if(scheduled_bursts(c))return receiver_strategy_bank_count(c,
+        static_cast<unsigned>(std::max(0.,search.start_uncertainty_seconds-1)),keys,profiles);
+    const auto g=pattern_amplitude_geometry(c,search);
+    if(!g.supported)return std::max<std::size_t>(1,search.receiver_bank_count);
+    const auto slow=1-(g.clock_hypotheses>1?(g.clock_hypotheses-1)/2*g.clock_step_ppm:0)*1e-6L;
+    const auto symbol=static_cast<long double>(symbol_sample_count(c))/c.sample_rate;
+    const auto prefix=static_cast<long double>(training_sample_count(c)+pattern_pulse_padding_samples(c))/c.sample_rate;
+    // A negative/truncated origin needs its NEXT complete symbol. Existing
+    // retirement waits for that scored event; wall time cannot shorten it.
+    const auto radius=search.amplitude_start_uncertainty_seconds.value_or(search.start_uncertainty_seconds);
+    if(!std::isfinite(radius)||radius<0)throw Error("invalid amplitude arrival radius");
+    const auto lifetime=2*symbol/slow+prefix+2*radius+3+search.amplitude_lookahead_epochs;
+    const auto stride=std::max<std::size_t>(1,search.amplitude_epoch_stride_seconds);
+    const auto epochs=std::ceil(lifetime/stride)+(stride>1?2:0);
+    const auto total=epochs*std::max<std::size_t>(1,keys)*std::max<std::size_t>(1,profiles);
+    return static_cast<std::size_t>(std::min(total,static_cast<long double>(std::numeric_limits<std::size_t>::max())));
+}
 namespace {
 struct PlanningCaptureContext {std::size_t cohort_workspace=0,maximum_consumers=0;};
 ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const PatternSearch& search,std::size_t workspace,
                                                    const PlanningCaptureContext* planning) {
+    const auto supplied_workspace=workspace;
     if(search.receiver_strategy_workspace_bytes)workspace=std::min(workspace,search.receiver_strategy_workspace_bytes);
     ReceiverStrategyPlan p;p.cpu_budget=c.receiver_cpu_budget;
+    p.selected_bank_count=std::max<std::size_t>(1,search.receiver_bank_count);p.selected_workspace_bytes=workspace;
     p.frequency_axis_processing_ratio=p.amplitude_processing_ratio=std::numeric_limits<double>::infinity();
     const auto symbol=symbol_sample_count(c),chip=pattern_chip_samples(c);
     const auto seconds=static_cast<double>(symbol)/c.sample_rate;
@@ -431,14 +452,32 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
             "scheduled split complex geometry/grid is unsupported; selected policy prohibits amplitude fallback";
         return p;
     }
-    const auto amplitude=pattern_amplitude_geometry(c,search);
+    std::optional<PatternSearch> amplitude_override;
+    if(search.amplitude_start_window || search.amplitude_start_uncertainty_seconds || search.amplitude_start_offset_seconds) {
+        amplitude_override=search;
+        if(search.amplitude_start_window)amplitude_override->qualified_start_window=search.amplitude_start_window;
+        if(search.amplitude_start_uncertainty_seconds)amplitude_override->start_uncertainty_seconds=*search.amplitude_start_uncertainty_seconds;
+        if(search.amplitude_start_offset_seconds)amplitude_override->start_offset_seconds=search.amplitude_start_offset_seconds;
+    }
+    const auto& amplitude_search=amplitude_override?*amplitude_override:search;
+    const auto amplitude=pattern_amplitude_geometry(c,amplitude_search);
     if(amplitude.supported) {
+        const auto amplitude_workspace=amplitude_search.amplitude_strategy_workspace_bytes?
+            std::min(supplied_workspace,amplitude_search.amplitude_strategy_workspace_bytes):workspace;
+        const auto amplitude_banks=amplitude_search.amplitude_receiver_bank_count?
+            amplitude_search.amplitude_receiver_bank_count:banks;
         p.scheduled_fft_seconds=scheduled?amplitude.block_seconds:0;
         p.amplitude_frequency_half_width_hz=amplitude.admitted_frequency_half_width_hz;
         p.amplitude_clock_half_width_ppm=amplitude.clock_half_width_ppm;
-        const auto width=search.qualified_start_window?2*search.qualified_start_window->half_width_samples/c.sample_rate:2*search.start_uncertainty_seconds;
-        const auto starts=std::ceil(width*c.sample_rate/(chip/2.L))+1;
-        const auto full_starts=std::ceil(2*search.start_uncertainty_seconds*c.sample_rate/(chip/2.L))+1;
+        const auto width=amplitude_search.qualified_start_window?2*amplitude_search.qualified_start_window->half_width_samples/c.sample_rate:2*amplitude_search.start_uncertainty_seconds;
+        // An explicit prior can straddle two original lattice cells even at
+        // zero width. Retain the neighboring-cell allowance; never shift cells.
+        const auto maximum_row_rate=amplitude_search.amplitude_start_window?
+            1+(amplitude.clock_hypotheses-1)/2*amplitude.clock_step_ppm*1e-6L:1.L;
+        const auto timing_step=chip/(2.L*amplitude.receiver_timing_subdivisions*maximum_row_rate);
+        const auto starts=std::ceil(width*c.sample_rate/timing_step)+
+            (amplitude_search.amplitude_start_window?2:1);
+        const auto full_starts=std::ceil(2*amplitude_search.start_uncertainty_seconds*c.sample_rate/timing_step)+1;
         long double lanes=correlator_groups*starts*amplitude.clock_hypotheses;
         long double reserved_lanes=correlator_groups*std::max(starts,full_starts)*amplitude.clock_hypotheses;
         if(scheduled) {
@@ -454,30 +493,30 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
             p.scheduled_timing_spacing_seconds=static_cast<double>(chip)/
                 (2.*amplitude.receiver_timing_subdivisions*c.sample_rate);
             p.scheduled_phase_spacing_seconds=static_cast<double>(amplitude.receiver_phase_step_samples)/c.sample_rate;
-            const auto phase_cell=search.search_stream_phases?amplitude.receiver_phase_step_samples-1.L:0.L;
-            const auto timing_cell=search.start_uncertainty_seconds>0?
+            const auto phase_cell=amplitude_search.search_stream_phases?amplitude.receiver_phase_step_samples-1.L:0.L;
+            const auto timing_cell=amplitude_search.start_uncertainty_seconds>0?
                 chip/(2.L*amplitude.receiver_timing_subdivisions*c.sample_rate):0.L;
             const auto interval_width=static_cast<long double>(width)+phase_cell/c.sample_rate+
                 timing_cell+2*clock_radius*lifetime_wall;
             p.scheduled_interval_width_seconds=finite_ratio(interval_width);
             p.scheduled_fft_union_upper=finite_ratio(std::min(1.L,
-                std::max<std::size_t>(1,search.receiver_schedule_key_count)*
+                std::max<std::size_t>(1,amplitude_search.receiver_schedule_key_count)*
                 (p.scheduled_active_seconds+interval_width)/p.scheduled_frame_seconds));
             // A split warp requires independent canonical phase state. Count
             // original coverage cells, including fractional phase cells, rather
             // than multiplying a narrow width by the entire phase bank.
             const auto phase_step=amplitude.receiver_phase_step_samples;
-            const auto phase_lower=search.search_stream_phases&&(c.scramble||c.dsss)?0:c.stream_phase_samples;
-            const auto phase_upper=search.search_stream_phases&&(c.scramble||c.dsss)?
+            const auto phase_lower=amplitude_search.search_stream_phases&&(c.scramble||c.dsss)?0:c.stream_phase_samples;
+            const auto phase_upper=amplitude_search.search_stream_phases&&(c.scramble||c.dsss)?
                 (canonical_phase_extent(c)-1)/phase_step*phase_step:c.stream_phase_samples;
-            auto prior=search.qualified_start_window;
-            if(prior&&search.search_stream_phases) {
+            auto prior=amplitude_search.qualified_start_window;
+            if(prior&&amplitude_search.search_stream_phases) {
                 const auto cell=phase_step-1;
                 prior->epoch_origin_samples+=cell*prior->phase_scale/2;
                 prior->half_width_samples+=cell*prior->phase_scale/2;
             }
-            const auto lower=(static_cast<long double>(*search.start_offset_seconds)-search.start_uncertainty_seconds)*c.sample_rate;
-            const auto upper=(static_cast<long double>(*search.start_offset_seconds)+search.start_uncertainty_seconds)*c.sample_rate;
+            const auto lower=(static_cast<long double>(*amplitude_search.start_offset_seconds)-amplitude_search.start_uncertainty_seconds)*c.sample_rate;
+            const auto upper=(static_cast<long double>(*amplitude_search.start_offset_seconds)+amplitude_search.start_uncertainty_seconds)*c.sample_rate;
             // Match the runtime preflight's key-specific active canonical
             // intervals. Impossible null payload anchors are not candidates,
             // even in the full timing fallback. Count them before allocation,
@@ -555,7 +594,7 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
         const auto base_bytes=192*1024.L+amplitude.fft_samples*36.L+
             (amplitude.bin_count+1.L)*sizeof(long double)+reserved_lanes*4096.L;
         const auto per_channel=reserved_lanes*sizeof(std::array<detail::EnvelopeFit,2>)+sizeof(PatternAmplitudeChannel);
-        const auto fit=workspace>base_bytes?std::floor((workspace-base_bytes)/per_channel):0.L;
+        const auto fit=amplitude_workspace>base_bytes?std::floor((amplitude_workspace-base_bytes)/per_channel):0.L;
         p.amplitude_channels=static_cast<std::size_t>(std::min(static_cast<long double>(amplitude.channel_count),fit));
         const auto amplitude_bytes=base_bytes+reserved_lanes*sizeof(detail::EnvelopeTemplateFit)+
             p.amplitude_channels*(reserved_lanes*sizeof(detail::EnvelopeChannelFit)+sizeof(PatternAmplitudeChannel));
@@ -563,7 +602,7 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
         // blocks, but transfer or mixed geometry can exhaust that cache. The
         // independently keyed weights are paid once per lane, moments per band.
         // Amplitude push is currently serial; hardware thread count must not
-        // divide its elapsed cost merely because complex search has workers.
+        // divide its elapsed cost merely because complex amplitude_search has workers.
         // Rounded local complete-execution engineering allowance (October12).
         // Native FP32 FFT and packed-envelope gains are priced separately.
         // Original pulse geometry is paid per lane, wide factored moments per band.
@@ -572,8 +611,12 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
         const bool double_fft=c.search_arithmetic==SearchArithmetic::fp64;
         const auto amplitude_frontend=(double_fft?1.5e-9L:1.0e-9L)*c.sample_rate*
             std::log2(static_cast<double>(amplitude.fft_samples));
-        const auto lifetime=seconds+static_cast<double>(training_sample_count(c)+pattern_pulse_padding_samples(c))/
-            c.sample_rate+2*search.start_uncertainty_seconds+3;
+        if(amplitude_search.amplitude_receiver_bank_count&&!scheduled)
+            p.amplitude_cohort_lifetime_seconds=static_cast<double>(receiver_strategy_amplitude_bank_count(c,amplitude_search,1,1))*
+                std::max<std::size_t>(1,amplitude_search.amplitude_epoch_stride_seconds);
+        const auto lifetime=p.amplitude_cohort_lifetime_seconds>0?p.amplitude_cohort_lifetime_seconds:
+            seconds+static_cast<double>(training_sample_count(c)+pattern_pulse_padding_samples(c))/
+                c.sample_rate+2*amplitude_search.start_uncertainty_seconds+3;
         const auto setup=(double_fft?4e-9L:20e-9L)*amplitude.fft_samples/std::max(1.,lifetime);
         const auto duty=scheduled?p.scheduled_flat_duty:1.;
         const auto fft_union=scheduled?p.scheduled_fft_union_upper:1.;
@@ -581,7 +624,7 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
         // prevents capture omission. This is separate from omitted per-bank
         // FFTs and paid once for this profile's conservative work allowance.
         const auto input_floor=scheduled?frontend*p.scheduled_recording_union_upper:0.L;
-        const auto cost=input_floor+banks*(amplitude_frontend*fft_union+setup+
+        const auto cost=input_floor+amplitude_banks*(amplitude_frontend*fft_union+setup+
             lanes*(c.sample_rate/static_cast<long double>(amplitude.fft_samples))*duty*
             ((double_fft?2.5e-6L:2.35e-6L)+0.08e-6L*p.amplitude_channels));
         p.amplitude_processing_ratio=finite_ratio(cost);
@@ -590,7 +633,7 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
             // its mean frame spacing. Price the guaranteed drain interval as
             // well as mean duty. Independent schedules and arrival uncertainty
             // consume that quiet opportunity; no hypothesis is removed here.
-            const auto key_count=std::max<std::size_t>(1,search.receiver_schedule_key_count);
+            const auto key_count=std::max<std::size_t>(1,amplitude_search.receiver_schedule_key_count);
             const auto admitted=static_cast<long double>(p.scheduled_interval_width_seconds);
             const auto active=static_cast<long double>(p.scheduled_active_seconds);
             p.scheduled_guaranteed_recovery_seconds=finite_ratio(std::max(0.L,p.scheduled_minimum_quiet_seconds-admitted-
@@ -598,7 +641,7 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
             const auto deadline=active+p.scheduled_guaranteed_recovery_seconds;
             const auto fft_interval=std::min(1.L,key_count*(active+admitted)/deadline);
             const auto flat=p.scheduled_flat_duty*p.scheduled_frame_seconds/deadline;
-            const auto deadline_cost=input_floor+banks*(amplitude_frontend*fft_interval+setup+
+            const auto deadline_cost=input_floor+amplitude_banks*(amplitude_frontend*fft_interval+setup+
                 lanes*(c.sample_rate/static_cast<long double>(amplitude.fft_samples))*flat*
                 ((double_fft?2.5e-6L:2.35e-6L)+0.08e-6L*p.amplitude_channels));
             p.scheduled_mean_processing_ratio=finite_ratio(cost);
@@ -607,11 +650,13 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
             // worst per-hop ratio visible, but select by sustainable throughput.
             p.amplitude_processing_ratio=p.scheduled_mean_processing_ratio;
         }
-        if(p.amplitude_channels && amplitude_bytes<=workspace && ((scheduled && c.receiver_strategy==ReceiverStrategy::automatic) ||
+        if(p.amplitude_channels && amplitude_bytes<=amplitude_workspace && ((scheduled && c.receiver_strategy==ReceiverStrategy::automatic) ||
            c.receiver_strategy==ReceiverStrategy::amplitude_only ||
            (c.receiver_strategy==ReceiverStrategy::automatic &&
-            (limited || p.selected_processing_ratio>p.cpu_budget) && cost<p.selected_processing_ratio))) {
+            ((limited && cost<=p.cpu_budget) ||
+             ((limited || p.selected_processing_ratio>p.cpu_budget) && cost<p.selected_processing_ratio))))) {
             p.backend=ReceiverBackend::amplitude_energy;p.experimental=true;
+            p.selected_bank_count=amplitude_banks;p.selected_workspace_bytes=amplitude_workspace;
             p.full_frequency_coverage=p.full_clock_coverage=true;
             p.selected_processing_ratio=p.amplitude_processing_ratio;
             p.reason="phase-insensitive energy in "+std::to_string(p.amplitude_channels)+" complete-coverage coarse bands; sensitivity and interference remain experimental";
@@ -623,6 +668,7 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
             p.estimated_workspace_bytes=static_cast<std::size_t>(amplitude_bytes);
         } else if(scheduled || c.receiver_strategy==ReceiverStrategy::amplitude_only) {
             p.backend=ReceiverBackend::amplitude_energy;p.supported=false;p.experimental=true;p.workspace_limited=true;
+            p.selected_bank_count=amplitude_banks;p.selected_workspace_bytes=amplitude_workspace;
             p.estimated_workspace_bytes=static_cast<std::size_t>(base_bytes+per_channel);
             p.reason="complete rolling amplitude arrival/clock/phase bank exceeds workspace";
         }

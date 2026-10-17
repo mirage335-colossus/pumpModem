@@ -173,11 +173,17 @@ struct PatternReceiver::Impl {
            !search.bit_limit || !search.chunk_bits || !search.initial_stream_symbols || search.initial_stream_symbols>64)
             throw Error("invalid pattern search limits");
         if((search.start_offset_seconds&&!std::isfinite(*search.start_offset_seconds)) ||
-           !std::isfinite(search.start_uncertainty_seconds) || search.start_uncertainty_seconds<0)
+           !std::isfinite(search.start_uncertainty_seconds) || search.start_uncertainty_seconds<0 ||
+           (search.amplitude_start_offset_seconds&&!std::isfinite(*search.amplitude_start_offset_seconds)) ||
+           (search.amplitude_start_uncertainty_seconds&&(!std::isfinite(*search.amplitude_start_uncertainty_seconds)||
+               *search.amplitude_start_uncertainty_seconds<0)))
             throw Error("invalid pattern system-clock window");
         const auto strategy=resolve_receiver_strategy(config,search,bytes);
         if(!strategy.supported)throw Error(strategy.reason);
         if(strategy.backend==ReceiverBackend::amplitude_energy) {
+            if(search.amplitude_start_offset_seconds)search.start_offset_seconds=search.amplitude_start_offset_seconds;
+            if(search.amplitude_start_uncertainty_seconds)search.start_uncertainty_seconds=*search.amplitude_start_uncertainty_seconds;
+            if(search.amplitude_start_window)search.qualified_start_window=search.amplitude_start_window;
             const auto wrapper=wrapper_bytes();
             search.amplitude_channel_limit=strategy.amplitude_channels;
             if(wrapper>=bytes)throw Error("pattern workspace cannot retain amplitude control state");

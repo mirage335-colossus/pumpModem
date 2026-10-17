@@ -346,8 +346,10 @@ Node graph(const planner::Model& model, bool observer, float width) {
         paragraph(n,"Full-spectrum capture · faster modeled observer",11,Tone::text,false,4);
     if(!observer) {
         const auto rx_available=model.one_bit_confidence_available||model.one_bit_reference_available;
+        const bool reference_curve=model.probability_reference_only||std::any_of(model.receive_points.begin(),
+            model.receive_points.end(),[](const auto& point){return point.reference_available&&!point.confidence_available;});
         paragraph(n,"━ Bit time · left axis",11,Tone::accent,false,2);
-        paragraph(n,std::string("┄ 1-bit RX")+(model.probability_reference_only?" reference":"")+
+        paragraph(n,std::string("┄ 1-bit RX")+(reference_curve?" reference":"")+
             " · right axis"+(rx_available?" · "+probability(model.one_bit_success_probability):""),
             11,rx_available&&model.one_bit_success_probability<.8?Tone::negative:Tone::comparison,false,4);
     }
@@ -562,6 +564,11 @@ void link_budget(Node& root, const planner::Model& model) {
             paragraph(n,verdict,17,rx_tone,true,4);
             paragraph(n,cpu_label+(cpu_available?" · "+pace:""),12,cpu_tone,true,4);
         }
+        if(search_fits&&!model.probability_model_limit.empty()&&
+           (!probability_available||model.probability_model_limit.find("EME first-bit")!=std::string::npos||
+            model.probability_model_limit.starts_with("Amplitude")))
+            paragraph(n,std::string(probability_available?"RX model: ":"RX model limit: ")+
+                model.probability_model_limit+".",11,Tone::muted,false,4);
         paragraph(n, "Received: " + db(model.received_dbm) + " dBm  ·  Signal: " + db(model.actual_cn0_db_hz) +
             " dB in 1 Hz  ·  Target: " + db(model.inputs.target_db_hz) + " dB in 1 Hz", 11, Tone::muted, false, 4);
         paragraph(n, "Budget: " + number(std::abs(model.margin_db)) + (model.margin_db < 0 ? " dB short" : " dB margin") +
@@ -774,10 +781,13 @@ void details(Node& root,const planner::Model& model) {
             number(100*model.success_probability_high,4)+"%.":
             " First bit's 95% sampling interval: "+number(100*model.one_bit_probability_low,4)+"–"+
             number(100*model.one_bit_probability_high,4)+"%.";
-        paragraph(n,std::string(model.probability_reference_only?"Conditional reference. ":"")+"Monte Carlo: "+
+        if(model.probability_model_limit.starts_with("Amplitude")) {
+            paragraph(n,"Conditional amplitude reference: "+std::to_string(model.probability_trials)+
+                " joint energy-moment draws. Source and statistical approximations are unqualified; no RX confidence interval is available.");
+        } else paragraph(n,std::string(model.probability_reference_only?"Conditional reference. ":"")+"Monte Carlo: "+
             std::to_string(model.probability_trials)+" shared-noise trials."+interval+
             " This interval covers sampling uncertainty only; channel and model error can be larger.");
-        if(model.probability_search_approximation)
+        if(model.probability_search_approximation&&!model.probability_model_limit.starts_with("Amplitude"))
             paragraph(n,"Carrier search is approximated"+
                 (model.probability_carrier_candidates?" with "+std::to_string(model.probability_carrier_candidates)+
                     " nearby candidates":std::string{})+

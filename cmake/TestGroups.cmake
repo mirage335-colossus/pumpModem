@@ -16,6 +16,14 @@ set(_script_tests legacy_boundary fast_boundary vendored_lzma_source packaging_c
   build_release_web build_wasm_sdk_release build_native_sdl web_renderer browser_audio web_preview_client build_preview build_wasm_sdk build_package_wasm
   gui_adapter_boundary gui_boundary_regression packaging_support sdk_packaging build_wrapper build_gui_smoke_runner build_native_tests_runner build_ci_tests build_dependencies build_source_sdk build_sdk_runtime build_release build_release_dependencies build_sdk_release build_certify_release build_verify_latest_release build_windows_certification build_release_rev_tools build_windows_base build_ci_apt build_apt_release build_distro_release build_arch_release build_gentoo_sync)
 set(_aliases
+  "amplitude_arrival_strategy=test_receiver_strategy"
+  "amplitude_live_arrival=test_live_profiles"
+  "amplitude_arrival_planning=test_live_planning_link"
+  "amplitude_arrival_detector=test_pattern_envelope"
+  "amplitude_arrival_arbitration=test_live_receptions"
+  "amplitude_older_probability_compat=test_simulation_estimate"
+  "amplitude_axis_reference_compat=test_frequency_axis_probability"
+  "amplitude_planner_probability=test_gui_link_planner"
   "live_exact_source=test_live_profiles"
   "scheduled_fine_curves_65=test_scheduled_fine_curves"
   "scheduled_fine_curves_disabled_policy=test_scheduled_fine_curves"
@@ -83,7 +91,7 @@ set(_contract
   stream_codec stream_receive recovery attachment pattern_correlator pattern_receiver
   pattern_drift pattern_differential receiver_differential pattern_fft_batch search_fft search_arithmetic
   pattern_correlator_batch pattern_search pattern_start_geometry tuning simulation_estimate
-  receiver_probability differential_probability differential_receiver_probability
+  receiver_probability frequency_axis_probability amplitude_probability amplitude_arrival_strategy amplitude_live_arrival differential_probability differential_receiver_probability
   weak_signal gui_application gui_controller gui_timing_advice gui_scheduled_cold_start gui_inspection gui_binary_editor cli)
 list(APPEND _contract scheduled_owned_fft_window_filter scheduled_owned_fft_window_hook scheduled_owned_moment_runtime scheduled_owned_moments scheduled_sparse_owned_spans scheduled_owned_moment_correction scheduled_owned_field_errors scheduled_sparse_carrier)
 set(_ci_live_tests live live_profiles)
@@ -140,7 +148,7 @@ endforeach()
 add_custom_target(datapump-tests DEPENDS ${_all_test_targets})
 add_custom_target(datapump-tests-ci-core DEPENDS ${_ci_core_targets})
 add_custom_target(datapump-tests-ci-live DEPENDS ${_ci_live_targets})
-foreach(_group contract regular fast legacy gui frontends web native packaging build)
+foreach(_group contract regular fast legacy gui frontends web native packaging build amplitude_probability amplitude_arrival)
   if(_group STREQUAL "native")
     set(_label native_gui)
   else()

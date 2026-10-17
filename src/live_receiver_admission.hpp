@@ -2,6 +2,7 @@
 // Shared metadata extraction from Live admission. This does not allocate a
 // receiver, grant memory, score PCM, retire a receiver or classify absence.
 #include "datapump/live.hpp"
+#include "live_receiver_layout.hpp"
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/pattern_search.hpp"
 #include "datapump/receiver_strategy.hpp"
@@ -15,6 +16,7 @@ namespace datapump::live::detail {
 struct ReceiverAdmissionContext {
     std::uint64_t sample_origin=0,observed_sample=0;
     std::optional<audio::TimePrediction> timing;
+    std::optional<long double> public_amplitude_epoch_origin;
     double now=0,propagation=0;
     std::size_t key_count=1,profile_count=1,capacity=0,capture_owner_bytes=0,control_margin=0;
     bool keyed=true,prefer_streamed_templates=false,compact_clock_search=false;
@@ -24,19 +26,33 @@ struct ReceiverSearchPreparation {
     std::optional<modem::OscillatorPatternSearch> declared_search;
     bool clock_window_modeled=false;
 };
+inline void prepare_public_amplitude_windows(const modem::Config& config,const Settings& value,
+        bool keyed,modem::PatternSearch& search,std::size_t families=1,std::size_t profiles=1) {
+    if(keyed || families!=1 || profiles!=1 || value.transfer.key || value.simulation || value.transfer.timestamp || value.transfer.clock_sync ||
+       config.scramble || config.data_key || config.dsss || config.dsss_factor!=1 ||
+       config.fake_hopping || modem::scheduled_bursts(config))return;
+    const auto chip=modem::pattern_chip_samples(config);
+    const auto geometry=modem::pattern_amplitude_geometry(config,search);
+    // Preserve the original whole-second/half-chip representatives exactly.
+    // Other rate lattices retain their preceding admission policy.
+    if(!geometry.supported || geometry.clock_hypotheses!=1 || chip%2 || !chip ||
+       config.sample_rate%(chip/2))return;
+    search.amplitude_epoch_stride_seconds=64;
+    search.amplitude_start_uncertainty_seconds=std::max(search.start_uncertainty_seconds,33.);
+}
 inline bool modeled_receiver_start_window(modem::PatternSearch& search,const modem::Config& config,
-            std::uint64_t epoch,const ReceiverAdmissionContext& context,const Settings& value,std::uint64_t origin) {
+            std::uint64_t epoch,const ReceiverAdmissionContext& context,const Settings& value,std::uint64_t origin,bool amplitude=false) {
         const bool calendar=transfer::shared_hop_calendar(config);
         const auto policy=clock_sync::effective_policy(value.transfer.clock_sync,calendar);
         if(!policy || value.simulation || !context.timing ||
            context.timing->quality==audio::TimingQuality::unavailable ||
            (!calendar && context.timing->uncertainty_seconds>clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds)) || !search.start_offset_seconds ||
-           !(calendar ||
+           !(amplitude || calendar ||
              search.compact_clock_search ||
              (modem::symbol_sample_count(config)<16ULL*config.sample_rate && (config.scramble||config.dsss) &&
               config.spreading_mode==modem::SpreadingMode::pattern && !search.hypotheses.empty() &&
               !search.couple_clock_to_carrier)) ||
-           (!calendar && (!config.oscillator_search || (config.oscillator_search->reference==modem::OscillatorReference::shared_radio &&
+           (!amplitude && !calendar && (!config.oscillator_search || (config.oscillator_search->reference==modem::OscillatorReference::shared_radio &&
              config.oscillator_search->rf_shift_hz!=0))))return false;
         const auto& stamp=*context.timing;
         auto minimum_phase=config.stream_phase_samples,maximum_phase=config.stream_phase_samples;
@@ -69,6 +85,20 @@ inline bool modeled_receiver_start_window(modem::PatternSearch& search,const mod
         search.qualified_start_window=modem::PatternStartWindow{map->origin_samples,map->phase_scale,map->half_width_samples};
         return true;
     }
+inline std::size_t amplitude_epoch_lookahead(const modem::Config& config,const modem::PatternSearch& search,
+        long double seconds_per_frame,long double rate_uncertainty) {
+    if((!search.amplitude_start_window && search.amplitude_epoch_stride_seconds==1) || !std::isfinite(seconds_per_frame) || seconds_per_frame<=0 ||
+       !std::isfinite(rate_uncertainty) || rate_uncertainty<0)return 0;
+    const auto geometry=modem::pattern_amplitude_geometry(config,search);
+    if(!geometry.supported)return 0;
+    // refresh_bank runs before each <=plot_size feed, on UTC-second changes.
+    // Admit early enough that even the ORIGINAL window's lower bound is at
+    // least one FFT block ahead. A dated subset cannot require earlier input.
+    // This remains conservative when the affine prior grows with future time.
+    const auto chunk=plot_size*std::max(1.L/config.sample_rate,seconds_per_frame+rate_uncertainty/config.sample_rate);
+    const auto lead=std::ceil(search.amplitude_start_uncertainty_seconds.value_or(search.start_uncertainty_seconds)+geometry.block_seconds+chunk+1);
+    return static_cast<std::size_t>(std::min(lead,static_cast<long double>(std::numeric_limits<std::size_t>::max())));
+}
 inline ReceiverSearchPreparation prepare_receiver_search(const modem::Config& config,
         const Settings& value,std::uint64_t epoch,const ReceiverAdmissionContext& context,modem::PatternSearch initial={}) {
     ReceiverSearchPreparation result{std::move(initial),{},false};
@@ -108,10 +138,32 @@ inline ReceiverSearchPreparation prepare_receiver_search(const modem::Config& co
             static_cast<double>(modem::pattern_pulse_padding_samples(config)))/config.sample_rate;
     search.start_uncertainty_seconds=value.transfer.search_seconds+1.;
     result.clock_window_modeled=modeled_receiver_start_window(search,config,epoch,context,value,context.sample_origin);
+    if(value.transfer.clock_sync&&!search.qualified_start_window) {
+        auto amplitude_search=search;
+        if(modeled_receiver_start_window(amplitude_search,config,epoch,context,value,context.sample_origin,true))
+            search.amplitude_start_window=amplitude_search.qualified_start_window;
+    }
     if(modem::scheduled_bursts(config) && !modem::packed_scheduled_symbols(config) && config.receiver_strategy!=modem::ReceiverStrategy::amplitude_only) {
         auto refined=modem::scheduled_complex_search(config,search,
             transfer::effective_clock_sync(value.transfer)?modem::utc_transmit_rate_limit(config):0);
         if(refined.complete_coverage)search=std::move(refined.search);
+    }
+    if(!value.transfer.timestamp&&!modem::scheduled_bursts(config)) {
+        prepare_public_amplitude_windows(config,value,context.keyed,search,context.key_count,context.profile_count);
+        if(search.amplitude_epoch_stride_seconds>1 && context.public_amplitude_epoch_origin)
+            search.amplitude_start_offset_seconds=static_cast<double>(static_cast<long double>(epoch)-
+                *context.public_amplitude_epoch_origin-static_cast<long double>(context.sample_origin)/config.sample_rate);
+        if(search.amplitude_epoch_stride_seconds>1)
+            search.amplitude_lookahead_epochs=amplitude_epoch_lookahead(config,search,1.L/config.sample_rate,0);
+        if(!context.keyed&&context.timing)
+            search.amplitude_lookahead_epochs=std::max(search.amplitude_lookahead_epochs,amplitude_epoch_lookahead(config,search,
+                context.timing->seconds_per_frame,context.timing->rate_uncertainty_fraction));
+        search.amplitude_receiver_bank_count=modem::receiver_strategy_amplitude_bank_count(config,search,
+            context.key_count,context.profile_count);
+        const auto amplitude_share=(context.capacity-std::min(context.capacity,owner_charge))/
+            std::max<std::size_t>(1,search.amplitude_receiver_bank_count);
+        search.amplitude_strategy_workspace_bytes=amplitude_share>context.control_margin?
+            amplitude_share-context.control_margin:1;
     }
     return result;
 }

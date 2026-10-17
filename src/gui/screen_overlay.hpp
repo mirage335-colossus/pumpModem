@@ -21,7 +21,7 @@ inline OverlayDefinition waterfall_overlay_definition() {
     Control spectrum{Kind::bitmap};spectrum.bitmap=Bitmap::waterfall_detail;
     spectrum.label="Configured searched spectrum / amplitude and phase";
     spectrum.footer_height=48;spectrum.click=Command::dismiss_overlay;spectrum.instance=1;
-    spectrum.help="Frequency increases left to right; time advances downward. Adjacent columns show amplitude then wrapped line-to-line phase relative to FFT-bin rotation. Black phase is unavailable; noise phase is arbitrary. Native FFT resolution is unchanged. Click or press Escape to return.";
+    spectrum.help="The search band includes a little surrounding captured spectrum for comparison. Frequency increases left to right; time advances downward. Adjacent columns show amplitude then wrapped line-to-line phase relative to FFT-bin rotation. Phase brightness follows amplitude, so quiet noise stays dim. Black phase is unavailable or below the display floor; noise phase is arbitrary. Native FFT resolution is unchanged. Click or press Escape to return.";
     view.controls.push_back(spectrum);
     return view;
 }

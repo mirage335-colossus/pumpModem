@@ -13,6 +13,17 @@ geometries use a joint model of all three detector branches. Unsupported
 geometries retain timing, search and compute diagnostics, with an explicit
 coverage reason instead of a probability from a different detector.
 
+The maintained [receiver probability inventory and EME qualification](frequency-axis-probability.md)
+records which selected backends have models, conditional references or explicit
+coverage gaps, and separates focused evidence from deferred qualification.
+The [amplitude reference and qualification work](amplitude-probability.md) adds a
+bounded, detector-specific first-bit reference through three years per symbol.
+It remains conditional: standalone high-power captures pass, and the reproduced
+Live public arrival-window gap has a focused repair. Continuous-cohort probability,
+competing admissions, continuation and physical completion remain unqualified.
+Rolling amplitude windows now receive their own CPU/RAM allowance; unsupported
+multi-day profiles do not retain a misleading probability reference.
+
 The header distinguishes whole-draft confidence from a supported **First bit**
 reference when compact continuation timing is unmodeled. It does not substitute
 that reference for whole-draft success. Advice publishes through ordinary
@@ -1182,8 +1193,11 @@ receiver's complex projection, including its carrier image. It retains both
 candidate dots and energies in each quarter. Signal means are normalized to
 **projected** signal energy, so energy discarded by averaging is absent from
 the detector denominator; unmatched projected signal remains in that denominator.
-Approximately circular template covariance is required (each normalized image
-term at most 1%). This remains an approximation, not a 0.1 dB sensitivity bound.
+Approximately circular template covariance (each normalized image term at most
+1%) retains the circular reference. Noncircular covariance uses the two
+real-input noise principal planes and their joint source/template statistics;
+it requires at least eight bins per quarter and two nondegenerate noise planes.
+This remains an approximation, not a 0.1 dB sensitivity bound.
 
 For sampled simulation, noise is nominal-power referenced, so the reference
 charges the actual V2 digital backoff, clipping and projection power. For

@@ -1330,14 +1330,20 @@ regressions. A manual-test handoff does not replace those gates.
 Click the compact Console waterfall to open its full-window view; click again or
 press Escape to return. **Clear waterfall** continues to clear the retained
 history separately. The compact plot keeps its environmental view, while the
-expanded view crops to the configured union of receive search bands.
+expanded view shows the configured union of receive search bands with a small
+surrounding spectrum for comparison: 10% of the band width or two retained FFT
+bins on each side, whichever is larger, clipped to the captured spectrum.
 
 Frequency runs left to right and time downward. Each adjacent pair of columns
 shows amplitude on the left and wrapped line-to-line phase on the right, after
 subtracting nominal FFT-bin rotation. Both values belong to the same retained
 native bin. At very small widths, adjacent amplitude and phase panels replace
-the paired columns. Black phase denotes unavailable data; noise phase is
-arbitrary. Phase is display information, not a receiver admission statistic.
+the paired columns. Phase hue represents angle; its brightness follows the same
+amplitude scale as the adjacent power column, keeping quiet noise dim. Black
+phase denotes unavailable data or power below the display floor; noise phase is
+arbitrary. The caption identifies the searched band separately from the displayed
+context. These are visualization changes; phase and context do not change any
+receiver admission statistic or search extent.
 
 The view reuses the existing 2,048-point environmental FFT and retains its 1,025
 complex bins before compact pooling. It adds no second FFT or receiver search.

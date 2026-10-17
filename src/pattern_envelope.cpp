@@ -45,6 +45,10 @@ PatternAmplitudeGeometry pattern_amplitude_geometry(const Config& c,const Patter
     if(!pattern_pulse_enabled(c))return fail("amplitude decoder requires a finite shaped pattern alphabet");
     const auto total=symbol_sample_count(c),chip=pattern_chip_samples(c);
     result.receiver_phase_step_samples=canonical_phase_step(c);
+    // Dated ordinary amplitude acquisition must resolve intensity, whose
+    // bandwidth can be twice the shaped complex envelope's. Binary refinement
+    // retains all preceding half-chip representatives in the full lattice.
+    if(!scheduled && search.amplitude_start_window)result.receiver_timing_subdivisions=2;
     long double flat_samples=0;
     if(scheduled) {
         try {

@@ -87,6 +87,11 @@ struct PatternSearch {
     // Live supplies the entire simultaneous key/profile/epoch cohort for the
     // shared CPU-budget policy. These are scheduling inputs, never wire data.
     std::size_t receiver_bank_count=1;
+    // Ordinary amplitude acquisition has finite arrival windows even for a
+    // public pattern. Live can price/reserve its rolling cohort separately
+    // from a public continuous FFT bank. Zero inherits the original inputs.
+    std::size_t amplitude_receiver_bank_count=0;
+    std::size_t amplitude_strategy_workspace_bytes=0;
     // Independent schedule keys, not rolling epochs sharing those keys.
     // Used only for conservative scheduled capture-union cost accounting.
     std::size_t receiver_schedule_key_count=1;
@@ -191,6 +196,17 @@ struct PatternSearch {
     // original start cells; accepted tracks continue outside this acquisition
     // window. Unsupported geometries keep legacy work.
     std::optional<PatternStartWindow> qualified_start_window;
+    // Dated public/long arrival constraint enforced only by amplitude. Auto's
+    // continuous complex/FFT candidates retain their original timing domain.
+    std::optional<PatternStartWindow> amplitude_start_window;
+    // Public continuous acquisition partitions arrival coverage into wider
+    // finite windows. Apply only after selecting amplitude; complex search
+    // retains its original arrival domain. Cadence is in captured seconds.
+    std::optional<double> amplitude_start_offset_seconds;
+    std::optional<double> amplitude_start_uncertainty_seconds;
+    std::size_t amplitude_epoch_stride_seconds = 1;
+    // Extra public epoch cohorts prepared before a dated arrival opens.
+    std::size_t amplitude_lookahead_epochs = 0;
     // Internal paired-measurement opt-out. Supported coherent FFT searches
     // score only the original start cells intersecting the qualified prior.
     // False preserves the preceding mixed-batch numerical work. Trial counts

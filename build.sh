@@ -10,7 +10,7 @@ Usage: ./build.sh [build|test GROUP|sanitize [GROUP]|package] [OPTIONS] [-- CMAK
 
   build                Build pump and the FLTK GUI (default).
   test GROUP           Build then run contract, regular, fast, legacy, gui,
-                       frontends, web, native, packaging, build, or all tests.
+                       frontends, web, native, packaging, build, amplitude_probability, amplitude_arrival, or all tests.
   sanitize [GROUP]     Run instrumented headless tests (default: contract).
   package              Build and verify portable TGZ and ZIP bundles.
 
@@ -158,7 +158,7 @@ case "$command_name" in
     sanitize) group=${group:-contract} ;;
 esac
 if [ -n "$group" ]; then
-    case "$group" in contract|regular|fast|legacy|gui|frontends|web|native|packaging|build|all) ;;
+    case "$group" in contract|regular|fast|legacy|gui|frontends|web|native|packaging|build|amplitude_probability|amplitude_arrival|all) ;;
         *) die "unknown test group: $group" ;;
     esac
 fi
