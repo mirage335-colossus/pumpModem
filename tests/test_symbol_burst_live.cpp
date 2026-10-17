@@ -231,7 +231,10 @@ void prepare_capture(CaptureScript& capture,const live::Settings& value,bool sec
         capture.retirement_end=std::max(capture.retirement_end,capture.first_absent_end+
             static_cast<std::uint64_t>(std::ceil((60+20+4*radius)*rate))+2*padding+2*geometry.fft_samples);
     }
-    capture.pcm.resize(capture.retirement_end+((secret||amplitude)?60ULL*rate:0));
+    // A final delayed flush can publish END at the last supplied sample.
+    // Ordinary discovery requires a later real-input callback, independently
+    // of the unchanged true-message completion deadline.
+    capture.pcm.resize(capture.retirement_end+60ULL*rate);
     check(capture.pcm.size()<200000,"Live fixture exceeded its bounded PCM scope");
     const auto tx_offset=tx->physical_output_origin()-capture.utc_origin_samples;
     check(tx_offset+tx->total_samples()<capture.first_absent_end,"TX unexpectedly reached the absent symbol");
@@ -617,22 +620,24 @@ void hardware_case(bool secret,double clock_offset=0,bool guard_contradiction=fa
     check(!observed.complete,"partial failed symbol manufactured physical END");
     auto final=advance(capture.completion_checkpoint);
     std::uint64_t discovery_admissions=quiet.receiver_admissions;
+    check(observed.complete&&!observed.ids.empty(),
+          "true payload did not physically complete by its original deadline");
+    const auto completed=observed.rows.find(*observed.ids.begin());
+    check(completed!=observed.rows.end() && completed->second.complete &&
+          completed->second.received_bits==capture.bits.size() && !completed->second.missing_symbols &&
+          (completed->second.raw_bits.empty()?completed->second.text:completed->second.raw_bits)==capture.bits,
+          "extra profile-retirement noise concealed a delayed or incorrect true-message END");
     if(secret||amplitude) {
-        check(observed.complete&&!observed.ids.empty(),
-              "true payload did not physically complete by its original deadline");
-        const auto completed=observed.rows.find(*observed.ids.begin());
-        check(completed!=observed.rows.end() && completed->second.complete &&
-              completed->second.received_bits==capture.bits.size() && !completed->second.missing_symbols &&
-              (completed->second.raw_bits.empty()?completed->second.text:completed->second.raw_bits)==capture.bits,
-              "extra profile-retirement noise concealed a delayed or incorrect true-message END");
         const auto retired=advance(capture.retirement_end);
         std::cerr<<"Burst retained-calendar fence: seconds="<<double(capture.retirement_end-capture.first_support)/rate
                  <<diagnostics(retired,capture)<<'\n';
         discovery_admissions=retired.receiver_admissions;
-        // This is new real input after the frozen cohort/queued-null fence.
-        // Two UTC grid quanta let ordinary acquisition admit a fresh first C.
-        final=advance(capture.pcm.size());
     }
+    // This is new real input after the frozen cohort/queued-null fence.
+    // Two UTC grid quanta let ordinary acquisition admit a fresh first C.
+    // Public rolling discovery may already have rebuilt its one receiver;
+    // retain its quiet-checkpoint baseline rather than requiring a second one.
+    final=advance(capture.pcm.size());
     std::set<std::size_t> expected_prefixes;for(std::size_t n=1;n<=capture.bits.size();++n)expected_prefixes.insert(n);
     // Continuous public acquisition has no bounded arrival window to expose
     // as receiver_timing. Capture omission still requires the actual dated
