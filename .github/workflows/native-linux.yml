@@ -129,7 +129,6 @@ jobs:
           if not __debug__: raise RuntimeError("optimized diagnostic preparation is forbidden")
           from pathlib import Path
           import difflib, hashlib, json, os
-
           import subprocess
           root=Path.cwd()
           git=['git','-c','safe.directory='+str(root)]
@@ -338,17 +337,144 @@ jobs:
                       fake_hop_display(true,false);
                   } else fake_hop_display();
           ''')
+          p = "tests/test_gui_controller.cpp"
+          assert hashlib.sha256(Path("src/scheduled_work_profile.hpp").read_bytes()).hexdigest() == "87a701a4ed853685e4250805a8665fdd0f10b15347ab0f4f8be1fcc8148b7acf"
+          replace(p, '#include "../src/audio_trace.hpp"\n',
+              '#include "../src/audio_trace.hpp"\n#include "../src/scheduled_work_profile.hpp"\n')
+          replace(p, 'void fake_hop_display(bool stop_diagnostic=false,bool abort_only=false) {',
+          '''void fake_hop_display(bool stop_diagnostic=false,bool abort_only=false,
+                                std::chrono::milliseconds stop_observer_period=std::chrono::milliseconds(5)) {''')
+          replace(p, '    const auto diagnostic_transmission_id=controller.snapshot().transmission_id;\n',
+          '''    const auto diagnostic_transmission_id=controller.snapshot().transmission_id;
+              const bool diagnostic_forty=stop_diagnostic&&delayed_arrival&&stop_observer_period==std::chrono::milliseconds(40);
+              std::optional<std::chrono::steady_clock::time_point> diagnostic_first_completion;
+              const auto diagnostic_profile=[&](const char* phase) {
+                  if(!stop_diagnostic||!delayed_arrival)return;
+                  const auto merged=datapump::detail::cpu_profile::global().snapshot();
+                  audio::trace::record("diagnostic_stop_cpu_profile",[&](auto& f) {
+                      f.add("phase",phase);f.add("preference",preference);
+                      f.add("transmission_id",controller.snapshot().transmission_id);
+                      f.add("request_transmission_id",diagnostic_transmission_id);
+                      f.add("wall_since_request",std::chrono::duration<double>(
+                          std::chrono::steady_clock::now()-diagnostic_request_started).count());
+                      f.add("transmitting",controller.snapshot().transmitting);
+                      f.add("stop_observer_ms",stop_observer_period.count());
+                      f.add("first_completion_available",diagnostic_first_completion.has_value());
+                      f.add("first_completion_wall_since_request",diagnostic_first_completion?
+                          std::chrono::duration<double>(*diagnostic_first_completion-diagnostic_request_started).count():-1.);
+                      f.add("cpu_profile_quiescent",merged.quiescent);
+                      f.add("counter_scope","process-global cumulative merged contexts; no reset; active contexts are not yet merged; no unique RX attribution");
+                      datapump::detail::cpu_profile::write_fields(f,merged);
+                  });
+              };
+          ''')
+          replace(p, '    diagnostic_snapshot("before_first_cancel");\n',
+          '''    diagnostic_snapshot("before_first_cancel");
+              diagnostic_profile("before_first_cancel");
+          ''')
+          replace(p,
+          '''    const auto stop_started=std::chrono::steady_clock::now();
+              const auto stop=stop_started+std::chrono::seconds(5);
+              do {controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));}
+          ''',
+          '''    const auto stop_started=std::chrono::steady_clock::now();
+              const auto diagnostic_stop_poll=[&] {
+                  if(!stop_diagnostic||!delayed_arrival) {
+                      controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));return;
+                  }
+                  const auto poll_started=std::chrono::steady_clock::now();
+                  controller.poll();
+                  const auto poll_finished=std::chrono::steady_clock::now();
+                  if(!controller.snapshot().transmitting&&!diagnostic_first_completion)
+                      diagnostic_first_completion=poll_finished;
+                  if(diagnostic_forty)std::this_thread::sleep_until(poll_started+std::chrono::milliseconds(40));
+                  else std::this_thread::sleep_for(std::chrono::milliseconds(5));
+              };
+              const auto stop=stop_started+std::chrono::seconds(5);
+              do {diagnostic_stop_poll();}
+          ''')
+          replace(p,
+          '''        do {controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));}
+                  while(controller.snapshot().transmitting&&std::chrono::steady_clock::now()<workload_end);
+          ''',
+          '''        do {diagnostic_stop_poll();}
+                  while(controller.snapshot().transmitting&&std::chrono::steady_clock::now()<workload_end);
+          ''')
+          replace(p, '    diagnostic_snapshot("bounded_stop_window_end");\n',
+          '''    diagnostic_snapshot("bounded_stop_window_end");
+              if(stop_diagnostic&&delayed_arrival)
+                  std::cout<<"GUI_STOP_OBSERVER stop_observer_ms="<<stop_observer_period.count()
+                           <<" first_completion_available="<<diagnostic_first_completion.has_value()
+                           <<" first_completion_seconds="<<(diagnostic_first_completion?
+                              std::chrono::duration<double>(*diagnostic_first_completion-stop_started).count():-1.)
+                           <<std::endl;
+          ''')
+          replace(p,
+          '''          "Ending fake FHSS did not restore the configured frequencies and idle label");
+              } catch(const Error& strict_error) {
+          ''',
+          '''          "Ending fake FHSS did not restore the configured frequencies and idle label");
+              if(diagnostic_forty)
+                  check(diagnostic_first_completion&&*diagnostic_first_completion<=stop_started+std::chrono::seconds(10),
+                        "40ms diagnostic first observed graceful-stop completion after the unchanged 10s limit");
+              } catch(const Error& strict_error) {
+          ''')
+          replace(p,
+          '''            controller.poll();
+                      const auto now=std::chrono::steady_clock::now();
+                      if(now>=next_observation&&observations<46) {
+          ''',
+          '''            diagnostic_stop_poll();
+                      const auto now=std::chrono::steady_clock::now();
+                      if(now>=next_observation&&observations<46) {
+          ''')
+          replace(p,
+          '''            }
+                      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                  }
+                  const auto observation_finished=std::chrono::steady_clock::now();
+                  diagnostic_snapshot("observation_end_before_cleanup");
+          ''',
+          '''            }
+                  }
+                  const auto observation_finished=std::chrono::steady_clock::now();
+                  diagnostic_profile(controller.snapshot().transmitting?"observation_limit_still_transmitting":"after_observed_finish");
+                  diagnostic_snapshot("observation_end_before_cleanup");
+          ''')
+          replace(p,
+          '''    if(abort_only)audio::trace::record("diagnostic_immediate_abort_completed",[&](auto& f) {
+          ''',
+          '''    if(stop_diagnostic&&delayed_arrival)diagnostic_profile("after_strict_stop");
+              if(abort_only)audio::trace::record("diagnostic_immediate_abort_completed",[&](auto& f) {
+          ''')
+          replace(p,
+          '''        if(argc==3&&std::string_view(argv[1])=="--diagnose-full-stop") {
+                      datapump::audio::trace::Scope trace(argv[2]);
+                      std::cout<<"GUI_STOP_VARIANT diagnostic_only=1 full_prefix=1"<<std::endl;
+                      fake_hop_display(true,false);
+                  } else fake_hop_display();
+          ''',
+          '''        if(argc>1&&std::string_view(argv[1])=="--diagnose-full-stop") {
+                      if(argc!=4||(std::string_view(argv[3])!="5"&&std::string_view(argv[3])!="40"))
+                          throw Error("diagnostic stop observer period must be 5 or 40 ms");
+                      const auto period=std::chrono::milliseconds(std::string_view(argv[3])=="40"?40:5);
+                      datapump::audio::trace::Scope trace(argv[2]);
+                      std::cout<<"GUI_STOP_VARIANT diagnostic_only=1 full_prefix=1 stop_observer_ms="<<period.count()<<std::endl;
+                      fake_hop_display(true,false,period);
+                  } else fake_hop_display();
+          ''')
+
           assert hashlib.sha256(changed["src/live.cpp"].encode()).hexdigest() == \
               "916092bdc052643b392209d78440c3c1a272a1abac1c79cc2c4ade27e30cef78"
           assert hashlib.sha256(changed["tests/test_gui_controller.cpp"].encode()).hexdigest() == \
-              "18128942cdf3bf5f28a011a4d3f66aafda33c504a50eec5076bf5e23f2f66931"
+              "d5c5e76f696223a8e05e74b5b265f71cca707e3bb5187fb5ba9ac2f19a87ba10"
           manifest = {p: {"pre_sha256": expected[p],
               "post_sha256": hashlib.sha256(changed[p].encode()).hexdigest()} for p in expected}
           patch = ''.join(''.join(difflib.unified_diff(
               original[p].splitlines(True), changed[p].splitlines(True),
               fromfile='a/'+p, tofile='b/'+p)) for p in expected)
           assert hashlib.sha256(patch.encode()).hexdigest() == \
-              "0fa86a54f671d40364b8a5d453448191013c82b79b391193a135120737c6a2d9"
+              "2b0fd6ac1dad41e3598561c6b6a449620067a5d20d31208135e8cd2e1e35aaa3"
           print(json.dumps({"files": manifest,"patch_sha256":hashlib.sha256(patch.encode()).hexdigest(),
                             "patch_bytes":len(patch)}, indent=2))
           if os.environ.get("APPLY_GUI_STOP_VARIANT") == "1":
@@ -369,6 +495,8 @@ jobs:
           for p in expected:
               assert hashlib.sha256(Path(p).read_bytes()).hexdigest()==manifest[p]['post_sha256']
               (report/('variant-'+p.replace('/','__'))).write_bytes(Path(p).read_bytes())
+          (report/'read-dependencies.json').write_text(json.dumps({'src/scheduled_work_profile.hpp':
+              '87a701a4ed853685e4250805a8665fdd0f10b15347ab0f4f8be1fcc8148b7acf'},indent=2)+'\n')
           PY_STOP_PREPARE
       - name: Configure native application and selected test scope
         run: >-
@@ -598,30 +726,34 @@ jobs:
         run: |
           python3 -B - <<'PY_STOP_RUN'
           if not __debug__: raise RuntimeError("optimized diagnostic execution is forbidden")
-          import hashlib,json,pathlib,subprocess,time
+          import hashlib,json,os,pathlib,subprocess,time
           root=pathlib.Path.cwd();report=root/'build/gui-stop-diagnostic'
           binary=root/'build/test_gui_controller'
           assert binary.is_file(), 'diagnostic executable missing'
           executable_sha256=hashlib.sha256(binary.read_bytes()).hexdigest()
-          cases=[('stop',['--diagnose-full-stop',str(report/'stop.jsonl')],480),
-                 ('abort',['--fake-hop-display','--diagnose-abort',str(report/'abort.jsonl')],240)]
+          cases=[('stop5',['--diagnose-full-stop',str(report/'stop5.jsonl'),'5'],480,'coarse',5),
+                 ('stop40',['--diagnose-full-stop',str(report/'stop40.jsonl'),'40'],480,'coarse',40),
+                 ('abort',['--fake-hop-display','--diagnose-abort',str(report/'abort.jsonl')],240,'disabled',5)]
           results=[]
-          for name,args,limit in cases:
+          for name,args,limit,profile_mode,stop_observer_ms in cases:
               command=[str(binary),*args];started=time.monotonic()
+              case_env=os.environ.copy()
+              case_env['DATAPUMP_RX_CPU_PROFILE']=profile_mode
               with (report/(name+'.log')).open('wb') as log:
                   try:
-                      completed=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,timeout=limit)
+                      completed=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,timeout=limit,env=case_env)
                       code=completed.returncode;timed_out=False
                   except subprocess.TimeoutExpired:
                       code=124;timed_out=True
               item={'name':name,'command':command,'cwd':str(root),'timeout_seconds':limit,
+                    'profile_mode':profile_mode,'stop_observer_ms':stop_observer_ms,
                     'exit_code':code,'timed_out':timed_out,'elapsed_seconds':time.monotonic()-started,
                     'executable_sha256':executable_sha256,
                     'classification':'temporary source variant; diagnostic only, never qualification'}
               results.append(item)
               (report/'commands-and-exits.json').write_text(json.dumps(results,indent=2)+'\n')
               print(json.dumps(item),flush=True)
-          # Always run the independent process, preserving every actual nonzero exit.
+          # Always run all three independent processes, preserving every actual nonzero exit.
           raise SystemExit(1 if any(r['exit_code']!=0 for r in results) else 0)
           PY_STOP_RUN
       - name: Run the selected native tests
@@ -742,7 +874,7 @@ jobs:
               raise SystemExit(0)
           manifest=json.loads(manifest_path.read_text())
           expected={'src/live.cpp':('789735690478e9c7331487740c475e862293df69a49ce7a44b6793a3909415ac','916092bdc052643b392209d78440c3c1a272a1abac1c79cc2c4ade27e30cef78'),
-                    'tests/test_gui_controller.cpp':('3730678e53ef37e295adc319b757b527ffb6a6505bc5424955958658df56ce0f','18128942cdf3bf5f28a011a4d3f66aafda33c504a50eec5076bf5e23f2f66931')}
+                    'tests/test_gui_controller.cpp':('3730678e53ef37e295adc319b757b527ffb6a6505bc5424955958658df56ce0f','d5c5e76f696223a8e05e74b5b265f71cca707e3bb5187fb5ba9ac2f19a87ba10')}
           assert set(manifest)==set(expected)
           originals={}
           for p,(pre,post) in expected.items():
