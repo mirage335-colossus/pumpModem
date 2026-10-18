@@ -201,9 +201,32 @@ void bounded_system_utc_phase() {
                     "system UTC phase silently changed retained raw timestamp radii");
             }
             const auto last=timeline.predict(48000*20.05L);
-            if(mode==UtcTimeline::Prediction::timestamp_intersection)
-                require(last.uncertainty_seconds<raw+1e-7,
+            if(mode==UtcTimeline::Prediction::timestamp_intersection) {
+                // Exact-rate observations at phases -C and +C intersect at Ui.
+                // Their rounded absolute endpoints contribute at most half an
+                // epoch ULP. Prediction expands the interval and its returned
+                // radius separately; retain both explicit roundoff charges.
+                constexpr auto epsilon=std::numeric_limits<long double>::epsilon();
+                const auto final_utc=epoch+20.L+static_cast<long double>(phase);
+                const auto final_frame=48000*20.05L;
+                const auto prediction_roundoff=32*epsilon*
+                    (std::abs(final_utc)+std::abs(final_frame)/48000+1);
+                // Bound the 201 relative-coordinate updates: 32 units cover
+                // the propagation charge and fewer than 32 scalar roundings
+                // lie on each endpoint path. Other intersections only narrow it.
+                constexpr auto operations=64.L*201;
+                const auto relative_roundoff=operations*epsilon/(1-operations*epsilon)*
+                    (4*(20.05L+1)+2);
+                require(relative_roundoff<clock_read_roundoff/2,
+                    "UTC phase fixture exceeds its relative-coordinate rounding budget");
+                const auto return_roundoff=2*std::numeric_limits<double>::epsilon()*
+                    (static_cast<long double>(raw)+phase);
+                const auto arithmetic_budget=2*prediction_roundoff+clock_read_roundoff+return_roundoff;
+                require(last.uncertainty_seconds<static_cast<long double>(raw)+arithmetic_budget,
+                    "UTC phase intersection exceeds endpoint arithmetic bound");
+                require(last.uncertainty_seconds<raw+phase,
                     "UTC phase intersection unnecessarily restores a full C floor");
+            }
             // Both modes retain the original phase constraints after >64
             // observations. An endpoint outside the complete +/-C corridor is
             // not accepted just because each adjacent difference is small.

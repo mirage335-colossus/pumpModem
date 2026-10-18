@@ -181,9 +181,39 @@ void bounded_long_symbol_state() {
     check(enabled.working_bytes()>reduced,"new local state was not accounted to the workspace");
     step("enabled workspace shrink",[&]{enabled.set_workspace_bytes(reduced);});
     check(enabled.working_bytes()<=reduced&&enabled.drift_tolerant(),"dropping local state lost the existing four-section fit");
+    check(enabled.work().differential_window_samples==0&&enabled.work().drift_sections==4,
+        "workspace pressure did not evict only the local differential detector");
+    // The eviction cap intentionally equals resident state. A subsequent
+    // finite push/drain also needs bounded payload, timing and output scratch.
+    // Grant only the existing API's allowance after proving actual eviction.
+    std::size_t continued_budget=0;
+    for(const auto* receiver:{&enabled,&baseline}) {
+        const auto resident=receiver->reserved_workspace_bytes();
+        const auto headroom=receiver->projection_cache_headroom(pcm.size()-prefix);
+        check(resident<=budget&&headroom<=budget-resident,
+            "finite differential continuation exceeds the original workspace");
+        continued_budget=std::max(continued_budget,resident+headroom);
+        std::cout<<"differential continuation resident="<<resident<<" headroom="<<headroom
+            <<" prior_peak="<<receiver->work().peak_workspace_bytes<<'\n';
+    }
+    enabled.set_workspace_bytes(continued_budget);baseline.set_workspace_bytes(continued_budget);
+    check(enabled.work().differential_window_samples==0&&enabled.work().drift_sections==4,
+        "continuation scratch reconstructed the discarded local detector");
     step("enabled suffix push",[&]{enabled.push(std::span(pcm).subspan(prefix));});
     step("baseline suffix push",[&]{baseline.push(std::span(pcm).subspan(prefix));});
-    check(enabled.take_bursts().size()==baseline.take_bursts().size(),"workspace shrink reset accumulated legacy evidence");
+    check(enabled.reserved_workspace_bytes()<=continued_budget&&baseline.reserved_workspace_bytes()<=continued_budget,
+        "finite differential continuation exceeded its bounded allowance");
+    const auto enabled_events=enabled.take_bursts(),baseline_events=baseline.take_bursts();
+    check(enabled_events.size()==baseline_events.size(),"workspace shrink reset accumulated legacy evidence");
+    for(std::size_t i=0;i<enabled_events.size();++i) {
+        const auto& a=enabled_events[i];const auto& b=baseline_events[i];
+        check(a.bits==b.bits&&a.first_sample==b.first_sample&&a.end_sample==b.end_sample&&
+            a.first_stream_symbol==b.first_stream_symbol&&a.stream_first_sample==b.stream_first_sample&&
+            a.stream_first_symbol==b.stream_first_symbol&&a.complete==b.complete&&a.missing_slots==b.missing_slots&&
+            a.frequency_hz==b.frequency_hz&&a.stream_phase_samples==b.stream_phase_samples&&
+            a.score==b.score&&a.support_samples==b.support_samples,
+            "workspace shrink changed accepted progress, identity or full-symbol evidence");
+    }
     const auto a=enabled.candidates(),b=baseline.candidates();
     check(a.size()==b.size(),"workspace shrink changed old detector diagnostics");
     for(std::size_t i=0;i<a.size();++i)check(a[i].score==b[i].score&&a[i].first_sample==b[i].first_sample&&a[i].end_sample==b[i].end_sample,
