@@ -12,6 +12,9 @@
 #include "datapump/simulation_estimate.hpp"
 #include <filesystem>
 #include <atomic>
+#include <array>
+#include <cmath>
+#include <ctime>
 #include <iostream>
 #include <iomanip>
 #include <limits>
@@ -1045,35 +1048,8 @@ void fake_hop_display() {
     const auto carrier=controller.field(F::carrier).text,shift=controller.field(F::rf_shift).text;
     const auto base=controller.settings().transfer.modem.carrier_hz;
     check(controller.enabled(C::transmit_noise),"Fake hopping fixture has invalid transmit geometry");
-    double receiver_setup_seconds=0;
-    if(delayed_arrival) {
-        // This fixture checks presentation after noise activation. Prepare
-        // optional GUI advice and the independent idle receiver first; no TX
-        // samples or arrival preview exist during this bounded setup.
-        const auto setup_started=std::chrono::steady_clock::now();
-        prepare(controller);
-        controller.start();
-        const auto setup_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
-        while((!controller.snapshot().receiver_bank_builds||!controller.snapshot().samples_received)&&
-              std::chrono::steady_clock::now()<setup_deadline) {
-            controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }
-        const auto& listening=controller.snapshot();
-        receiver_setup_seconds=std::chrono::duration<double>(
-            std::chrono::steady_clock::now()-setup_started).count();
-        std::cout<<"FHSS_IDLE_SETUP preference="<<preference
-            <<" wall_seconds="<<receiver_setup_seconds
-            <<" transmission_id="<<listening.transmission_id
-            <<" bank_builds="<<listening.receiver_bank_builds
-            <<" input_revision="<<listening.receiver_input_revision
-            <<" samples_received="<<listening.samples_received<<'\n';
-        check(listening.running&&listening.simulation&&listening.receiver_bank_builds&&listening.samples_received&&
-              !listening.transmitting&&!listening.transmitting_noise&&!listening.receiver_health.failed()&&
-              listening.error.empty()&&listening.receiver_error.empty(),
-              "delayed FHSS fixture did not prepare a healthy independent idle receiver");
-    } else controller.start();
     const auto prior_transmission_id=controller.snapshot().transmission_id;
-    controller.activate(C::transmit_noise);
+    controller.start();controller.activate(C::transmit_noise);
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
     std::string first;bool changed=false,cycle_seen=false,arrival_seen=false;
     bool pre_arrival_seen=false,emitted_arrival_seen=false;
@@ -1084,9 +1060,45 @@ void fake_hop_display() {
     // sample endpoint-rounding allowance as well; never count idle RX time.
     const auto generation_lookahead_seconds=1026./controller.settings().transfer.modem.sample_rate;
     std::optional<modem::TransmitTrace> previous_trace;
-    while(std::chrono::steady_clock::now()<deadline&&(!changed||(short_list&&!cycle_seen)||
-          (delayed_arrival&&(!arrival_seen||!pre_arrival_seen||!emitted_arrival_seen)))) {
+    struct PreviewPoll {
+        double wall=0,call=0,interval=0,source=0,media=0,process_cpu_seconds=0;
+        std::uint64_t poll=0,sequence=0,transmission=0,builds=0,input=0,samples=0;
+        bool transmitting=false,noise=false,fhss=false,arrival=false,process_cpu_available=false;
+    };
+    std::array<PreviewPoll,21> preview_polls{};
+    std::size_t preview_poll_count=0,preview_records=0;
+    double max_poll_seconds=0,max_poll_interval_seconds=0,next_record_seconds=0;
+    auto previous_poll_end=deadline-std::chrono::seconds(5);
+    while(std::chrono::steady_clock::now()<deadline&&(!changed||(short_list&&!cycle_seen)||(delayed_arrival&&!arrival_seen))) {
+        const auto poll_started=std::chrono::steady_clock::now();
         controller.poll();
+        const auto poll_ended=std::chrono::steady_clock::now();
+        if(delayed_arrival) {
+            const auto wall=std::chrono::duration<double>(poll_ended-(deadline-std::chrono::seconds(5))).count();
+            const auto call=std::chrono::duration<double>(poll_ended-poll_started).count();
+            const auto interval=std::chrono::duration<double>(poll_ended-previous_poll_end).count();
+            previous_poll_end=poll_ended;++preview_poll_count;
+            max_poll_seconds=std::max(max_poll_seconds,call);
+            max_poll_interval_seconds=std::max(max_poll_interval_seconds,interval);
+            // Numeric records only during the deadline: first poll and at
+            // most four per second, with an independent hard capacity.
+            if(preview_records<preview_polls.size()&&wall>=next_record_seconds) {
+                const auto& state=controller.snapshot();
+                // Process-wide CPU total only; it attributes no work to RX or advice.
+#if defined(__linux__)
+                const auto process_clock=std::clock();
+#else
+                const auto process_clock=std::clock_t(-1);
+#endif
+                const bool process_cpu_available=process_clock!=std::clock_t(-1);
+                const auto process_cpu_seconds=process_cpu_available?static_cast<double>(process_clock)/CLOCKS_PER_SEC:0.;
+                preview_polls[preview_records++]={wall,call,interval,state.transmission_seconds,state.virtual_seconds,process_cpu_seconds,
+                    preview_poll_count,state.sequence,state.transmission_id,state.receiver_bank_builds,
+                    state.receiver_input_revision,state.samples_received,state.transmitting,state.transmitting_noise,
+                    state.transmit_trace.fhss_available,state.transmit_trace.fhss_arrival_available,process_cpu_available};
+                next_record_seconds=wall+.25;
+            }
+        }
         const auto& cf=controller.field(F::carrier);const auto& sf=controller.field(F::rf_shift);
         if(!sf.disabled_text.empty()) {
             const auto& current=controller.snapshot();
@@ -1154,6 +1166,23 @@ void fake_hop_display() {
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
+    if(delayed_arrival) {
+        std::cout<<"FHSS_PREVIEW_POLLS preference="<<preference<<" polls="<<preview_poll_count
+            <<" max_call_seconds="<<max_poll_seconds<<" max_interval_seconds="<<max_poll_interval_seconds
+            <<" retained_records="<<preview_records<<'\n';
+        const bool failed_preview=!changed||!arrival_seen||!pre_arrival_seen;
+        for(std::size_t i=0;i<preview_records&&(failed_preview||i==0);++i) {
+            const auto& row=preview_polls[i];
+            std::cout<<"FHSS_PREVIEW_POLL preference="<<preference<<" poll="<<row.poll
+                <<" wall_seconds="<<row.wall<<" call_seconds="<<row.call<<" interval_seconds="<<row.interval
+                <<" transmission_seconds="<<row.source<<" virtual_seconds="<<row.media
+                <<" process_cpu_available="<<row.process_cpu_available<<" process_cpu_seconds="<<row.process_cpu_seconds
+                <<" sequence="<<row.sequence<<" transmission_id="<<row.transmission
+                <<" bank_builds="<<row.builds<<" input_revision="<<row.input<<" samples_received="<<row.samples
+                <<" transmitting="<<row.transmitting<<" noise="<<row.noise
+                <<" fhss_available="<<row.fhss<<" arrival_available="<<row.arrival<<'\n';
+        }
+    }
     if(!changed)throw Error(std::string("Fake FHSS displayed no changing hop: ")+preference+", status="+controller.field(F::status).text+", mode="+controller.field(F::mode).text+", fhss="+controller.field(F::fhss).display_text+", snapshot="+controller.snapshot().status+", error="+controller.snapshot().error);
     const auto& stop_config=controller.settings().transfer.modem;
     std::cout<<"FHSS stop geometry "<<preference<<": Fs="<<stop_config.sample_rate
@@ -1161,7 +1190,7 @@ void fake_hop_display() {
         <<" stop_seconds="<<double(modem::transmit_stop_sample_count(stop_config))/stop_config.sample_rate
         <<" deferred="<<(stop_config.fake_hopping&&stop_config.fake_hopping->defer_symbols)<<'\n';
     check(!short_list||cycle_seen,"FHSS list fixture must cross a fresh keyed hop cycle");
-    if(delayed_arrival&&(!arrival_seen||!pre_arrival_seen||!emitted_arrival_seen)) {
+    if(delayed_arrival&&(!arrival_seen||!pre_arrival_seen)) {
         const auto& failed=controller.snapshot();
         const auto& trace=failed.transmit_trace;
         const auto& health=failed.receiver_health;
@@ -1183,7 +1212,6 @@ void fake_hop_display() {
             <<" arrival_transmission_id="<<arrival_transmission_id.value_or(0)
             <<" pre_arrival_seen="<<pre_arrival_seen
             <<" emitted_arrival_seen="<<emitted_arrival_seen
-            <<" receiver_setup_seconds="<<receiver_setup_seconds
             <<" generation_lookahead_seconds="<<generation_lookahead_seconds
             <<" simulation="<<failed.simulation
             <<" running="<<failed.running
@@ -1224,8 +1252,8 @@ void fake_hop_display() {
             <<std::endl;
     }
     check(!delayed_arrival||arrival_seen,"delayed FHSS preview never reached its first arrival");
-    check(!delayed_arrival||(pre_arrival_seen&&emitted_arrival_seen&&arrival_transmission_id.has_value()),
-          "delayed FHSS preview missed its current-transmission pre-arrival or traversed-offset proof");
+    check(!delayed_arrival||(pre_arrival_seen&&arrival_transmission_id.has_value()),
+          "delayed FHSS preview missed its current-transmission pre-arrival proof");
     const auto stop_source_seconds=controller.snapshot().transmission_seconds;
     const auto protected_tail_seconds=double(modem::transmit_stop_sample_count(stop_config))/stop_config.sample_rate;
     controller.activate(C::cancel);
@@ -1278,6 +1306,28 @@ void fake_hop_display() {
           controller.field(F::rf_shift).disabled_text.empty()&&controller.field(F::carrier).text==carrier&&
           controller.field(F::rf_shift).text==shift&&controller.field(F::fhss).display_text.find("Fake: hop ")==std::string::npos,
           "Ending fake FHSS did not restore the configured frequencies and idle label");
+    if(delayed_arrival) {
+        // Generated preview keeps its original five-second gate. Verify
+        // traversal after the existing protected stop, with no added wait.
+        const auto& finished=controller.snapshot();
+        const auto& final_trace=finished.transmit_trace;
+        const bool healthy=!finished.transmission_failed&&finished.error.empty()&&finished.receiver_error.empty()&&
+            !finished.receiver_health.failed()&&!finished.receiver_health.dropped_samples;
+        emitted_arrival_seen=arrival_transmission_id&&finished.transmission_id==*arrival_transmission_id&&
+            finished.transmission_id!=prior_transmission_id&&healthy&&final_trace.fhss_available&&
+            final_trace.fhss_arrival_available&&final_trace.fhss_arrival_offset_seconds==2.564&&
+            std::isfinite(finished.transmission_seconds)&&
+            finished.transmission_seconds>=final_trace.fhss_arrival_offset_seconds;
+        std::cout<<"FHSS_TRAVERSED_ARRIVAL preference="<<preference
+            <<" transmission_id="<<finished.transmission_id
+            <<" arrival_transmission_id="<<arrival_transmission_id.value_or(0)
+            <<" transmission_seconds="<<finished.transmission_seconds
+            <<" arrival_offset_seconds="<<final_trace.fhss_arrival_offset_seconds
+            <<" arrival_available="<<final_trace.fhss_arrival_available
+            <<" healthy="<<healthy<<" traversed="<<emitted_arrival_seen<<'\n';
+        check(emitted_arrival_seen,
+              "delayed FHSS output missed its healthy current-transmission traversed-offset proof during protected stop");
+    }
     if(!stopped_within_deadline&&!short_list)
         std::cout<<"TEST_WORKLOAD_BUDGET: graceful simulated FHSS stop completed in "<<stop_wall_seconds
                  <<"s, above its ordinary 5s workload allowance (limit 10s); protected source-tail bound passed.\n";
