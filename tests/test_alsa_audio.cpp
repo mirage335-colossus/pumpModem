@@ -2191,7 +2191,7 @@ void native_queued_dsss_playback(bool interleave=false,bool diagnose=false) {
         converted.resize(result.produced);
         const auto offset=2400+first_frame;
         check(f::state.played.size()==offset+converted.size(),"queued playback lost settling/tails or changed finite duration");
-        // Signed FIR reconstruction can exceed the sampled .992 radial bound.
+        // Signed FIR reconstruction can exceed the sampled source radial bound.
         // Check the exact established clamp+quantization, then separately bound
         // its actual waveform residual; a zero-clipping premise is false here.
         for(std::size_t i=0;i<converted.size();++i)check(std::isfinite(converted[i]) &&

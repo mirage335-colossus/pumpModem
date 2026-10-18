@@ -1085,8 +1085,9 @@ coefficient bytes differ. Non-nominal lanes are compared through their original
 arguments, never ideal modulo-chip arithmetic.
 
 The actual full-chip DSSS gain and bounded private coefficients give a pulse-
-table worst-radius estimate of 0.89119 against the 0.992 limiter. This is not a
-blanket limiter exclusion. An actual-row outward certificate passed 256 table-phase rows, with L1 bound
+table worst-radius estimate of 0.89119 against the then 0.992 limiter (the current
+sampled source radius is 0.988). This is not a blanket limiter exclusion.
+An actual-row outward certificate passed 256 table-phase rows, with L1 bound
 1.79689 and computed-power upper bound 0.79473. The bounded 27,720-byte
 real-I/Q pulse-projection oracle passed six geometry cases. These are local
 prototype checks, not production integration or full detector qualification.

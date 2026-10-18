@@ -222,15 +222,22 @@ energy. Constellation observers still report the logical input chips before
 shaping; waveform and spectrum views show the actual shaped samples.
 
 Overlapping pulses can exceed the original chip peak limit. A circular radial
-limiter caps the analytic PCM radius at 0.992 after shaping, preserving rotational
-symmetry without a fixed power backoff. In a reproducible private 65,536-chip
-capture at 600 chips/s, limiting reduced power by 0.083 dB relative to its
-unlimited linear waveform, with 0.109% mean-squared waveform error relative to
+limiter caps the analytic PCM radius at 0.988 after shaping, preserving rotational
+symmetry without a fixed power backoff. In an earlier reproducible private
+65,536-chip capture at 600 chips/s and the former 0.992 radius, limiting reduced
+power by 0.083 dB relative to its unlimited linear waveform, with 0.109%
+mean-squared waveform error relative to
 signal energy. Hann-windowed spectra measured approximately 742–746 Hz at
 26 dB below their spectral peak; spectral density beyond carrier ±400 Hz remained more
 than 33 dB below that peak. These are software measurements for that capture,
 not universal bounds or RF compliance measurements. The test suite checks
 actual limited PCM sidelobes, mean power, crest headroom and chip addressing.
+
+The change from 0.992 to 0.988 provides native reconstruction headroom with at
+most 0.035095 dB additional source-energy loss in real arithmetic before
+resampling. Signed FIR reconstruction can still exceed unity; native clamp
+distortion remains a separate tested limit. This energy bound is not a receiver
+sensitivity measurement. See the [validation record](validation.md).
 
 Receive templates use each candidate symbol's linear shaped contribution,
 evaluated against the original independent sample/bin observations. Actual

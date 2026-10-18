@@ -749,7 +749,9 @@ fixture keeps its explicit second-Cancel immediate abort.
 
 One whole-burst Hann spectral diagnostic per factor gave out-of-band/in-band
 power−34.70→−34.38dBc (Off) and−45.08→−45.16dBc (10), outside the nominal finite-RRC
-band. Off reached the existing0.992 limiter; DSSS10's peak was below0.75.
+band. Off reached the 0.992 limiter used for that capture; DSSS10's peak was below0.75.
+The current sampled source radius is 0.988; these historical spectral measurements
+retain their original 0.992 source identity.
 Different burst lengths/addresses and only one finite capture prevent a general
 spectral-improvement or indistinguishability claim. No downstream gain restoration
 was assumed. Full-bank threshold-region sensitivity, BER/false acceptance,
