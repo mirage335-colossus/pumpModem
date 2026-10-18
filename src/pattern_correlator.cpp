@@ -49,9 +49,10 @@
 #include "scheduled_original_projection_cache.hpp"
 #include "scheduled_original_pulse_row.hpp"
 #include <cfenv>
+#include <cfloat>
 #include <deque>
 #include <map>
-#if defined(__SSE2__)
+#if defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP>=2)
 #include <emmintrin.h>
 #endif
 #include "datapump/pattern_correlator.hpp"
@@ -1586,6 +1587,24 @@ struct PatternCorrelator::Impl {
     // ranges never cross a chip, detector boundary or symbol; completion
     // invalidates all slots before changing the private stream address.
     std::vector<AffineCoefficients> affine_coefficients;
+    struct PulseCellModes {
+        std::array<bool,132> block_raw{};
+        std::int64_t block_first_chip=0;
+        std::size_t block_count=0;
+        bool pending_raw=false;
+    };
+    // Direct cells and long-chip moments never run together. Reuse the
+    // already charged segment storage rather than growing every lattice.
+    union PulseCellScratch {
+        detail::CorrelationPulseSegment segment;
+        PulseCellModes modes;
+        PulseCellScratch():segment{} {}
+    };
+    static_assert(std::is_trivially_copyable_v<detail::CorrelationPulseSegment>);
+    static_assert(std::is_trivially_copyable_v<PulseCellModes>);
+    static_assert(std::is_trivially_copyable_v<PulseCellScratch>);
+    static_assert(sizeof(PulseCellScratch)==sizeof(detail::CorrelationPulseSegment));
+    static_assert(alignof(PulseCellScratch)==alignof(detail::CorrelationPulseSegment));
     struct PulseLattice {
         long double anchor=0,rate=1,start=0,first_offset=0;
         std::size_t frequency=0;
@@ -1597,13 +1616,14 @@ struct PatternCorrelator::Impl {
         // An affine pulse piece survives original oscillator blocks and caller
         // pushes. Only its four measured moments are accumulated until the next
         // table knot; private coefficients never enter this shared frontend.
-        detail::CorrelationPulseSegment segment;
+        PulseCellScratch scratch;
         std::uint64_t segment_first=0,segment_observed=0;
         std::complex<long double> segment_sum{},segment_moment{};
         std::vector<detail::CorrelationPulseCell> cells;
         PulseLattice(long double origin,long double ratio,std::size_t bank,
                      std::uint64_t chip,double frequency_hz,std::uint32_t sample_rate)
             :anchor(origin),rate(ratio),frequency(bank),kernel(chip,ratio,frequency_hz,sample_rate) {
+            if(chip<=4096)std::construct_at(&scratch.modes);
             const auto position=std::floor(-anchor*rate/chip);
             require(position>=std::numeric_limits<std::int64_t>::min() &&
                     position<std::numeric_limits<std::int64_t>::max(),"pulse cell coordinate overflow");
@@ -11221,6 +11241,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
         const auto position=std::floor((static_cast<long double>(resume)-lattice.anchor)*lattice.rate/code.chip_samples());
         require(std::isfinite(position) && position>=std::numeric_limits<std::int64_t>::min() &&
             position<std::numeric_limits<std::int64_t>::max(),"Symbol_Burst pulse coordinate overflow");
+        if(work.backend==PatternCorrelationBackend::pulse)lattice.scratch.modes.pending_raw=false;
         lattice.pending={};lattice.pending.chip=std::max(first,static_cast<std::int64_t>(position));
         for(;;) {
             lattice.start=lattice.anchor+static_cast<long double>(lattice.pending.chip)*code.chip_samples()/lattice.rate;
@@ -11247,12 +11268,173 @@ template<class Source,class Pulses,class Gain,class Prepare>
         if(static_cast<long double>(sample+cursor)>=first)return cursor;
         return static_cast<std::size_t>(std::min(static_cast<long double>(count),first-sample));
     }
+    struct PulseCellGeometry {long double start=0;std::uint64_t first=0,end=0;};
+    static bool pulse_support_environment() {
+#if defined(__FAST_MATH__) || (defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__>0) || (defined(_M_FP_FAST) && _M_FP_FAST) || FLT_EVAL_METHOD!=0
+        return false;
+#else
+        if(!std::numeric_limits<double>::is_iec559||std::numeric_limits<double>::radix!=2||
+           std::numeric_limits<double>::digits!=53||!std::numeric_limits<long double>::is_iec559||
+           std::numeric_limits<long double>::radix!=2||std::numeric_limits<long double>::digits<53||
+           !detail::scheduled_acquisition_certificate::environment<long double>())return false;
+#if defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP>=2)
+        if(_mm_getcsr()&((1U<<15)|(1U<<6)|(3U<<13)))return false;
+#endif
+        volatile long double one=1,epsilon=std::numeric_limits<long double>::epsilon();
+        volatile long double changed=one+epsilon;return changed>one;
+#endif
+    }
+    bool pulse_cell_geometry(const PulseLattice& lattice,std::int64_t chip,PulseCellGeometry& out) const {
+        if(chip>=std::numeric_limits<std::int64_t>::max()-1||!std::isfinite(lattice.anchor)||
+           !std::isfinite(lattice.rate)||!(lattice.rate>0))return false;
+        const bool current=chip==lattice.pending.chip;
+        out.start=current?lattice.start:lattice.anchor+static_cast<long double>(chip)*code.chip_samples()/lattice.rate;
+        const auto first=std::max(0.L,std::ceil(out.start));
+        const auto end=current?static_cast<long double>(lattice.next):
+            std::ceil(lattice.anchor+static_cast<long double>(chip+1)*code.chip_samples()/lattice.rate);
+        const auto limit=std::ldexp(1.L,64);
+        if(!std::isfinite(out.start)||!std::isfinite(first)||!std::isfinite(end)||first>=limit||end<0||end>=limit)return false;
+        out.first=static_cast<std::uint64_t>(first);out.end=static_cast<std::uint64_t>(end);
+        if(current)out.first=lattice.pending.count?lattice.pending.first:std::max(sample,out.first);
+        return out.first<out.end;
+    }
+    struct PulseSupportInterval {std::uint64_t first=0,end=0;};
+    template<class Predicate>static std::uint64_t pulse_first_true(std::uint64_t first,std::uint64_t end,Predicate predicate) {
+        if(first==end||predicate(first))return first;
+        if(!predicate(end-1))return end;
+        auto lo=first+1,hi=end-1;
+        while(lo<hi) {const auto mid=lo+(hi-lo)/2;if(predicate(mid))hi=mid;else lo=mid+1;}
+        return lo;
+    }
+    static bool pulse_same_support(PulseSupportInterval a,PulseSupportInterval b) {
+        return (a.first>=a.end&&b.first>=b.end)||(a.first==b.first&&a.end==b.end);
+    }
+    struct PulseRawVisit {double argument=0;bool lower=false,upper=false,valid=false;};
+    PulseRawVisit pulse_raw_visit(std::uint64_t observed,std::uint64_t position,long double source_start,long double rate) const {
+        const auto samples=code.symbol_samples(),chip=code.chip_samples(),chips=samples/chip;
+        if(position>=chips)return {};
+        // Preserve the original raw traversal's operation order and double cast.
+        const auto within=std::max(0.L,(static_cast<long double>(observed)-source_start)*rate);
+        const auto argument=static_cast<double>(within),length=static_cast<double>(chip);
+        const auto support=pattern_pulse_half_span*length;
+        const auto begin=std::max(0.,std::floor((argument-support)/length)-1);
+        const auto end=std::min(static_cast<double>(chips),std::floor((argument+support)/length)+1);
+        const auto first=position*chip,duration=std::min(chip,samples-first);
+        const auto center=static_cast<double>(first)+.5*static_cast<double>(duration),p=(argument-center)/length;
+        if(!std::isfinite(within)||!std::isfinite(argument)||!std::isfinite(length)||!(length>0)||
+           !std::isfinite(support)||!std::isfinite(begin)||!std::isfinite(end)||!std::isfinite(p))return {};
+        const bool past=static_cast<long double>(begin)>=static_cast<long double>(chips);
+        std::uint64_t integer_begin=0;
+        if(!past) {if(begin<0||static_cast<long double>(begin)>=std::ldexp(1.L,64))return {};integer_begin=static_cast<std::uint64_t>(begin);}
+        // Support-capable visits precede coefficient!=0: interior table roots
+        // do not form monotone predicates, whereas these two bounds do.
+        return {p,argument>=-support&&static_cast<double>(position)<end&&p>=-8,
+            argument>static_cast<double>(samples)+support||past||(!past&&position<integer_begin)||p>8,true};
+    }
+    bool pulse_cell_support_equal(const PulseLattice& lattice,const PulseCellGeometry& geometry,std::uint64_t local,
+                                  long double source_start,std::stop_token stop) const {
+        const auto chip=code.chip_samples(),samples=code.symbol_samples();
+        if(!chip||!samples||samples%chip||!std::isfinite(source_start)||!std::isfinite(lattice.rate)||!(lattice.rate>0))return false;
+        const auto chips=samples/chip;
+        if(chips>static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())||local>=chips)return false;
+        const auto first=geometry.first,end=geometry.end;if(first>=end)return false;
+        const auto offset=static_cast<long double>(first)-geometry.start,duration=static_cast<long double>(chip)/lattice.rate;
+        if(!std::isfinite(offset)||offset<0||!std::isfinite(duration)||!(duration>0))return false;
+        // No raw atom may escape the shared 17-atom window. Centers are monotone.
+        if(local>=9) {const auto p=pulse_raw_visit(first,local-9,source_start,lattice.rate);if(!p.valid||!(p.argument>8))return false;}
+        if(chips-local>9) {const auto p=pulse_raw_visit(end-1,local+9,source_start,lattice.rate);if(!p.valid||!(p.argument< -8))return false;}
+        for(std::size_t j=0;j<detail::correlation_pulse_atoms;++j) {
+            cancelled(stop);std::uint64_t position;
+            if(j<8) {const auto back=8-j;if(local<back)continue;position=local-back;}
+            else {const auto forward=j-8;if(local>std::numeric_limits<std::uint64_t>::max()-forward)return false;
+                position=local+forward;if(position>=chips)continue;}
+            bool valid=true;
+            const auto raw_at=[&](auto n){const auto value=pulse_raw_visit(n,position,source_start,lattice.rate);valid&=value.valid;return value;};
+            const PulseSupportInterval raw{pulse_first_true(first,end,[&](auto n){return raw_at(n).lower;}),
+                pulse_first_true(first,end,[&](auto n){return raw_at(n).upper;})};
+            if(!valid)return false;
+            const auto shared_interval=[&](bool gram) {
+                const auto argument=[&](auto n) {
+                    const auto q=gram?(offset+(n-first))/duration-.5L:
+                        (static_cast<long double>(n)-geometry.start)*lattice.rate/chip-.5L;
+                    const auto p=gram?static_cast<double>(q-static_cast<long double>(j)+8):
+                        static_cast<double>(q+8-static_cast<long double>(j));
+                    valid&=std::isfinite(q)&&std::isfinite(p);return p;
+                };
+                return PulseSupportInterval{pulse_first_true(first,end,[&](auto n){return argument(n)>=-8;}),
+                    pulse_first_true(first,end,[&](auto n){return argument(n)>8;})};
+            };
+            const auto dot=shared_interval(false),gram=shared_interval(true);
+            if(!valid||!pulse_same_support(raw,dot)||!pulse_same_support(raw,gram))return false;
+        }
+        return true;
+    }
+    bool pulse_cell_raw(const PulseLattice& lattice,std::int64_t chip) const {
+        if(work.backend!=PatternCorrelationBackend::pulse)return false;
+        const auto& modes=lattice.scratch.modes;
+        require(chip>=modes.block_first_chip&&(static_cast<std::uint64_t>(chip)-static_cast<std::uint64_t>(modes.block_first_chip))<modes.block_count,
+            "pulse support mode missing from bounded plan");
+        return modes.block_raw[static_cast<std::size_t>(static_cast<std::uint64_t>(chip)-static_cast<std::uint64_t>(modes.block_first_chip))];
+    }
+    bool prepare_pulse_cell_modes(std::size_t count,std::stop_token stop) {
+        // Only the direct shared-cell producer is covered by this classifier.
+        // Long-chip moment partition arithmetic retains its existing path.
+        if(work.backend!=PatternCorrelationBackend::pulse)return false;
+        require(count<=block_samples&&count<=block_size&&count<=std::numeric_limits<std::uint64_t>::max()-sample,
+            "pulse mode plan exceeds original input block");
+        require(!pulse_segmented&&affine_coefficients.empty(),"raw pulse support fallback selected an affine shortcut");
+        const auto block_end=sample+count;const bool qualified=pulse_support_environment();bool classify=false;
+        for(std::size_t i=0;i<pulse_lattices.size();++i) {
+            cancelled(stop);auto& lattice=pulse_lattices[i];auto& modes=lattice.scratch.modes;modes.block_count=0;
+            if(!prepare_burst_pulse(i,sample))continue;
+            modes.block_first_chip=lattice.pending.chip;modes.block_raw.fill(!qualified);
+            require(qualified||!lattice.pending.count||modes.pending_raw,"pulse arithmetic environment changed inside shared cell");
+            for(std::size_t rank=0;;++rank) {
+                require(rank<modes.block_raw.size()&&modes.block_first_chip<=std::numeric_limits<std::int64_t>::max()-static_cast<std::int64_t>(rank),
+                    "pulse mode plan exceeds bounded cell tile");
+                const auto cell=modes.block_first_chip+static_cast<std::int64_t>(rank);
+                if(burst&&cell>=burst->pulses[i].last_chip)break;
+                PulseCellGeometry geometry;require(pulse_cell_geometry(lattice,cell,geometry),"pulse mode plan has invalid sample geometry");
+                if(geometry.first>=block_end)break;
+                require(geometry.end>sample,"pulse mode plan retained expired cell");++modes.block_count;
+                if(rank==0&&lattice.pending.count)modes.block_raw[0]=modes.pending_raw;
+                else classify=true;
+                if(geometry.end>=block_end)break;
+            }
+        }
+        // Tiny pushes inside already classified shared cells do no lane work.
+        if(qualified&&classify)for(std::size_t id=0;id<hypotheses.size();++id) {
+            cancelled(stop);const auto& h=hypotheses[id];if(burst_dormant(id))continue;
+            const auto& address=pulse_addresses[id];auto& lattice=pulse_lattices[address.lattice];auto& modes=lattice.scratch.modes;
+            const auto chips=code.chips_per_symbol(),chip=code.chip_samples(),samples=code.symbol_samples();
+            for(std::size_t rank=0;rank<modes.block_count;++rank) {
+                if((rank==0&&lattice.pending.count)||modes.block_raw[rank])continue;
+                const auto cell=modes.block_first_chip+static_cast<std::int64_t>(rank);if(cell<address.shift)continue;
+                const auto relative=(static_cast<std::uint64_t>(cell)-static_cast<std::uint64_t>(address.shift));std::uint64_t index=0,local=0;
+                if(burst) {const auto& state=burst->pulses[address.lattice];if(h.index!=state.slot||relative>=chips)continue;index=state.slot;local=relative;}
+                else {if(!chips){modes.block_raw[rank]=true;continue;}index=relative/chips;local=relative%chips;if(index<h.index)continue;}
+                if(!chips||index>std::numeric_limits<std::uint64_t>::max()/chips||h.rate!=lattice.rate) {modes.block_raw[rank]=true;continue;}
+                const auto source_start=burst?burst_boundary(h,index,0):lattice.anchor+
+                    (static_cast<long double>(address.shift)*chip+static_cast<long double>(index)*samples+0)/h.rate;
+                PulseCellGeometry geometry;
+                if(!pulse_cell_geometry(lattice,cell,geometry)||!pulse_cell_support_equal(lattice,geometry,local,source_start,stop))modes.block_raw[rank]=true;
+            }
+        }
+        bool any_raw=false;
+        for(auto& lattice:pulse_lattices) {
+            auto& modes=lattice.scratch.modes;
+            if(modes.block_count&&!lattice.pending.count)modes.pending_raw=modes.block_raw[0];
+            for(std::size_t i=0;i<modes.block_count;++i)any_raw|=modes.block_raw[i];
+        }
+        return any_raw;
+    }
     void finish_pulse_cell(PulseLattice& lattice,std::stop_token stop) {
         auto& cell=lattice.pending;cell.end=lattice.next;
         {
             WorkTimer timer(options.measure_work,work.kernel_seconds,work.kernel_cpu_seconds);
-            cell.gram=lattice.kernel.evaluate(lattice.first_offset,cell.count,
-                lattice.carrier_square,lattice.carrier_norm,stop);
+            if(!pulse_cell_raw(lattice,cell.chip))
+                cell.gram=lattice.kernel.evaluate(lattice.first_offset,cell.count,
+                    lattice.carrier_square,lattice.carrier_norm,stop);
         }
         require(lattice.cells.size()<lattice.cells.capacity(),"pulse projection exceeds bounded cell tile");
         lattice.cells.push_back(cell);++work.cells;
@@ -11281,12 +11463,12 @@ template<class Source,class Pulses,class Gain,class Prepare>
                     lattice.carrier_norm=projection.cc+projection.ss;
                 }
                 if(!lattice.segment_observed) {
-                    lattice.segment=detail::correlation_pulse_segment(
+                    lattice.scratch.segment=detail::correlation_pulse_segment(
                         static_cast<long double>(observed)-lattice.start,lattice.next-observed,duration);
                     lattice.segment_first=observed;lattice.segment_sum={};lattice.segment_moment={};
                 }
                 const auto take=static_cast<std::size_t>(std::min<std::uint64_t>(
-                    count-i,lattice.segment.count-lattice.segment_observed));
+                    count-i,lattice.scratch.segment.count-lattice.segment_observed));
                 require(take>0,"empty pulse moment segment");
                 const auto projection=prefix[i+take]-prefix[i];
                 const std::complex<long double> measured{projection.xc,projection.xs};
@@ -11297,10 +11479,10 @@ template<class Source,class Pulses,class Gain,class Prepare>
                 lattice.segment_moment+=std::complex<long double>{moment.real(),moment.imag()}+
                     (static_cast<long double>(sample)-lattice.segment_first)*measured;
                 lattice.segment_observed+=take;cell.count+=take;cell.energy+=projection.energy;i+=take;
-                if(lattice.segment_observed==lattice.segment.count) {
+                if(lattice.segment_observed==lattice.scratch.segment.count) {
                     for(std::size_t j=0;j<detail::correlation_pulse_atoms;++j) {
-                        const auto dot=lattice.segment.value[j]*lattice.segment_sum+
-                            lattice.segment.slope[j]*lattice.segment_moment;
+                        const auto dot=lattice.scratch.segment.value[j]*lattice.segment_sum+
+                            lattice.scratch.segment.slope[j]*lattice.segment_moment;
                         cell.dot[j]+=Complex{static_cast<double>(dot.real()),static_cast<double>(dot.imag())};
                     }
                     lattice.segment_observed=0;++work.segments;
@@ -11330,11 +11512,16 @@ template<class Source,class Pulses,class Gain,class Prepare>
                     lattice.carrier_square={projection.cc-projection.ss,2*projection.cs};
                     lattice.carrier_norm=projection.cc+projection.ss;
                 }
+                const bool raw_cell=pulse_cell_raw(lattice,cell.chip);
+                lattice.scratch.modes.pending_raw=raw_cell;
+                if(!raw_cell) {
                 const auto q=(static_cast<long double>(observed)-lattice.start)*lattice.rate/chip-.5L;
                 const Complex measured{projection.xc,projection.xs};
                 for(std::size_t j=0;j<detail::correlation_pulse_atoms;++j)
                     cell.dot[j]+=pattern_pulse(static_cast<double>(q+8-static_cast<long double>(j)))*measured;
-                cell.energy+=projection.energy;++cell.count;
+                cell.energy+=projection.energy;
+                }
+                ++cell.count;
                 if(observed+1==lattice.next) {
                     finish_pulse_cell(lattice,stop);
                 }
@@ -11345,7 +11532,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
         target.xc+=value.xc;target.xs+=value.xs;target.cc+=value.cc;target.ss+=value.ss;
         target.cs+=value.cs;target.energy+=value.energy;target.count+=value.count;
     }
-    void accumulate_pulse_cells(std::stop_token stop) {
+    void accumulate_pulse_cells(std::size_t current_pulse_count,std::stop_token stop) {
         const auto chips=code.chips_per_symbol();
         for(std::size_t hypothesis=0;hypothesis<hypotheses.size();++hypothesis) {
             cancelled(stop);auto& h=hypotheses[hypothesis];
@@ -11360,6 +11547,13 @@ template<class Source,class Pulses,class Gain,class Prepare>
                 if(cell.chip<first)continue;
                 require(cell.chip-first<static_cast<std::int64_t>(chips),"pulse projection skipped a symbol endpoint");
                 const auto local=cell.chip-first;
+                if(pulse_cell_raw(lattice,cell.chip)) {
+                    const auto begin=std::max(sample,cell.first),limit=std::min(sample+current_pulse_count,cell.end);
+                    if(begin<limit)require(accumulate(h,hypothesis,begin,limit,code,stop)==limit,
+                        "raw pulse cell crossed its source boundary");
+                    if(local+1==static_cast<std::int64_t>(chips))complete(h,hypothesis,cell.end,stop);
+                    continue;
+                }
                 if(!h.fits[0].count)h.observed_start=cell.first;
                 std::size_t group_count=0;const auto groups=phase_groups(h,group_count);
                 for(std::size_t group=0;group<group_count;++group) {
@@ -11396,6 +11590,18 @@ template<class Source,class Pulses,class Gain,class Prepare>
                     }
                 }
                 if(local+1==static_cast<std::int64_t>(chips))complete(h,hypothesis,cell.end,stop);
+            }
+            const auto& pending=lattice.pending;
+            if(pending.count&&pulse_cell_raw(lattice,pending.chip)) {
+                if(burst&&h.index!=burst->pulses[address.lattice].slot)continue;
+                require(h.index<=(static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())-
+                    static_cast<std::uint64_t>(address.shift))/chips,"pattern chip coordinate overflow");
+                const auto first=address.shift+(burst?0:static_cast<std::int64_t>(h.index*chips));
+                if(pending.chip<first)continue;
+                require(pending.chip-first<static_cast<std::int64_t>(chips),"raw pulse projection skipped symbol endpoint");
+                const auto begin=std::max(sample,pending.first),limit=sample+current_pulse_count;
+                if(begin<limit)require(accumulate(h,hypothesis,begin,limit,code,stop)==limit,
+                    "unfinished raw pulse cell crossed source boundary");
             }
         }
     }
@@ -11531,6 +11737,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
             }}
         } clear_shared{*this};
         WorkTimer frontend_timer(options.measure_work,work.frontend_seconds,work.frontend_cpu_seconds);
+        const bool raw_pulse_observations=prepare_pulse_cell_modes(input.size(),stop);
         bool certified_null=scheduled_map()!=nullptr;
         if(certified_null)for(const auto& h:hypotheses) {
             const auto first=scheduled_tick(h,sample).add_signed(-scheduled_uncertainty(h,sample));
@@ -11603,7 +11810,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
             // There is no hypothesis work before a shared chip cell is ready.
             // In particular a high PCM rate must not rescan the timing/key
             // candidates once per tiny oscillator block of an hours-long bit.
-            if(work.cells!=cells_before)accumulate_pulse_cells(stop);
+            if(work.cells!=cells_before||raw_pulse_observations)accumulate_pulse_cells(input.size(),stop);
             settle_timing();
             record_point(banks.front().observations(physical_view(0))[input.size()]);sample=end;room_for(0);return;
         }

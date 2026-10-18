@@ -8,6 +8,7 @@
 #include <cmath>
 #include <numbers>
 #include <iostream>
+#include <iomanip>
 #include <stdexcept>
 #include <source_location>
 namespace {
@@ -432,6 +433,20 @@ void native_query_uncertainty() {
     const auto before=previous.predict(frame),after=native.predict(frame);
     rejects([&]{(void)presentation_correction(before,desired,8000,.025);});
     const auto correction=presentation_correction(after,desired,8000,.025);
+    const auto epoch_ulp=std::nextafter(epoch,std::numeric_limits<long double>::infinity())-epoch;
+    const auto arithmetic_roundoff=32*std::numeric_limits<long double>::epsilon()*
+        (std::abs(epoch+.8L+center_error)+std::abs(frame)/8000+1);
+    std::cout<<std::setprecision(std::numeric_limits<long double>::max_digits10);
+    std::cout<<"Native query counterexample: previous radius_ms="<<before.uncertainty_seconds*1000
+        <<" new radius_ms="<<after.uncertainty_seconds*1000
+        <<" center_error_ms="<<correction.error_seconds*1000
+        <<" previous_total_ms="<<(std::abs(before.utc_seconds-desired)+before.uncertainty_seconds)*1000
+        <<" new_total_ms="<<(std::abs(after.utc_seconds-desired)+after.uncertainty_seconds)*1000<<'\n';
+    std::cout<<"Native query arithmetic: epoch_ulp="<<epoch_ulp<<" R="<<arithmetic_roundoff
+        <<" shared_floor="<<after.provider_uncertainty_floor_seconds
+        <<" extrapolation="<<after.clock_extrapolation_seconds<<" phase="<<after.system_clock_phase_uncertainty_seconds
+        <<" estimated="<<(after.quality==TimingQuality::estimated)
+        <<" aggregate_below_original_cap="<<(std::abs(correction.error_seconds)+after.uncertainty_seconds<.0233)<<'\n';
     require(std::abs(correction.error_seconds)+after.uncertainty_seconds<.0233 &&
         after.uncertainty_seconds>=shared && after.quality==TimingQuality::estimated,
         "isolated slow query persisted as a shared native clock error");
@@ -440,11 +455,6 @@ void native_query_uncertainty() {
     const auto raw=native.observation_uncertainty();
     require(raw.latest==shared && raw.maximum==shared+query/2,
         "query diagnostic lost complete observation uncertainties");
-    std::cout<<"Native query counterexample: previous radius_ms="<<before.uncertainty_seconds*1000
-        <<" new radius_ms="<<after.uncertainty_seconds*1000
-        <<" center_error_ms="<<correction.error_seconds*1000
-        <<" previous_total_ms="<<(std::abs(before.utc_seconds-desired)+before.uncertainty_seconds)*1000
-        <<" new_total_ms="<<(std::abs(after.utc_seconds-desired)+after.uncertainty_seconds)*1000<<'\n';
     // No better evidence: the full interval, not just its shared floor, must
     // determine the bound. The decomposition must not force unsafe acceptance.
     UtcTimeline broad(8000,.001,mode,shared);
@@ -716,18 +726,27 @@ void shaped_timing_error(datapump::modem::Config config) {
     require(mismatch_db<.01 && relative_error<.001,"UTC interpolation distorts finite shaped/limited waveform");
 }
 }
-int main() {try {
-    declared_clock_timing();physical_waveform_rate();bounded_system_utc_phase();
+int main(int argc,char** argv) {try {
+    const bool diagnose=argc==2&&std::string(argv[1])=="--diagnose-all";
+    require(argc==1||diagnose,"usage: test_clock_sync [--diagnose-all]");
+    unsigned diagnostic_failures=0;
+    const auto run=[&](const char* name,auto test) {
+        if(!diagnose) {test();return;}
+        try {test();std::cout<<"clock_diagnostic case="<<name<<" result=passed\n"<<std::flush;}
+        catch(const std::exception& error) {++diagnostic_failures;
+            std::cerr<<"clock_diagnostic case="<<name<<" result=failed error="<<error.what()<<'\n';}
+    };
+    run("declared_clock_timing",declared_clock_timing);run("physical_waveform_rate",physical_waveform_rate);run("bounded_system_utc_phase",bounded_system_utc_phase);
     require(datapump::modem::FhssPlan{}.audio_error_seconds==datapump::clock_sync::default_audio_error_seconds &&
         datapump::modem::SchedHopPlan{}.audio_error_seconds==datapump::clock_sync::default_audio_error_seconds,
         "FHSS and Sched_Hop must share the configured audio-lag default");
-    native_timestamp_intervals();native_query_uncertainty();native_frozen_source_timing();
+    run("native_timestamp_intervals",native_timestamp_intervals);run("native_query_uncertainty",native_query_uncertainty);run("native_frozen_source_timing",native_frozen_source_timing);
     require(datapump::clock_sync::parse_audio_error("default")==.07&&
         datapump::clock_sync::parse_audio_error("Default")==.07&&
         datapump::clock_sync::parse_audio_error("50ms")==.05,
         "CLI Audio Default no longer resolves to70ms while preserving explicit50ms");
     rejects([]{datapump::clock_sync::parse_audio_error("50");});
-    continuous_guard();
+    run("continuous_guard",continuous_guard);
     using namespace datapump::audio;
     constexpr long double epoch=1800000000.L;
     for(const auto fs:{64U,6000U,48000U})for(const auto ppm:{-200.,0.,200.})for(const auto age:{-7.,0.,8.}) {
@@ -914,6 +933,7 @@ int main() {try {
     waveform.bandwidth_hz=120;waveform.dsss_factor=10;shaped_timing_error(waveform);
     waveform.sample_rate=64;waveform.carrier_hz=.5;waveform.bandwidth_hz=.5;waveform.dsss_factor=1;
     shaped_timing_error(waveform);
+    if(diagnostic_failures)return 1;
     std::cout<<"UTC timestamp, uncertainty, rate direction and discontinuity tests passed\n";
     return 0;
 } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}}

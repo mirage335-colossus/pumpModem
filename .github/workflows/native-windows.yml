@@ -170,7 +170,7 @@ jobs:
           $driftFull = $LASTEXITCODE
           ./build/Release/test_pattern_drift.exe --diagnose-commit "$PWD/build/receiver-diagnostic/drift.jsonl" 2>&1 | Tee-Object -FilePath build/receiver-diagnostic/drift.log
           $drift = $LASTEXITCODE
-          ./build/Release/test_clock_sync.exe 2>&1 | Tee-Object -FilePath build/receiver-diagnostic/clock.log
+          ./build/Release/test_clock_sync.exe --diagnose-all 2>&1 | Tee-Object -FilePath build/receiver-diagnostic/clock.log
           $clock = $LASTEXITCODE
           "pulse=$pulse drift_full=$driftFull drift=$drift clock=$clock" | Set-Content build/receiver-diagnostic/exits.txt
           if ($pulse -ne 0 -or $driftFull -ne 0 -or $drift -ne 0 -or $clock -ne 0) { throw "Original receiver diagnostic assertions failed; inspect all retained results" }
