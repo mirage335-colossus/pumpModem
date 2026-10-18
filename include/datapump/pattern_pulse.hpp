@@ -11,7 +11,9 @@ namespace datapump::modem {
 
 inline constexpr double pattern_pulse_rolloff = .25;
 inline constexpr unsigned pattern_pulse_half_span = 8;
-inline constexpr double pattern_pcm_radius_limit = .992;
+// Sampled source headroom for native reconstruction at unity output gain.
+// Radial source limiting does not guarantee reconstructed peaks below unity.
+inline constexpr double pattern_pcm_radius_limit = .988;
 
 inline bool pattern_pulse_enabled(const Config& config) {
     return config.pulse_shaping && config.spreading_mode == SpreadingMode::pattern &&
