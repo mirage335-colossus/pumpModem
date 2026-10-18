@@ -163,7 +163,8 @@ void fft(std::span<std::complex<double>> a,bool inverse,const DoubleTableView& v
             // cancellation bound without a counter branch on every butterfly.
             for(std::size_t begin=0;begin<n;begin+=length)for(std::size_t j=0;j<half;++j){
                 const auto u=values[begin+j],v=values[begin+j+half]*table[j];
-                values[begin+j]=u+v;values[begin+j+half]=u-v;
+                values[begin+j]={u.real()+v.real(),u.imag()+v.imag()};
+                values[begin+j+half]={u.real()-v.real(),u.imag()-v.imag()};
             }
         } else for(std::size_t begin=0;begin<n;begin+=length)for(std::size_t j=0;j<half;++j){
             if((iterations++&4095U)==0)cancelled(stop);
