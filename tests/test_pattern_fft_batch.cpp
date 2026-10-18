@@ -1,3 +1,4 @@
+#include "test_pattern_evidence_reference.hpp"
 #include "../src/pattern_fft_batch.hpp"
 #include "../src/pattern_drift.hpp"
 #include "../src/search_parallel.hpp"
@@ -1455,8 +1456,145 @@ void frequency_axis_equivalence_and_bounds() {
     }
 }
 }
+namespace {
+void score_evidence_legacy_oracle() {
+    namespace reference=datapump::test::pattern_evidence_reference;
+    using ReferenceComplex=reference::Complex;
+    struct Case { FftComplex dot; double energy,template_energy,count,condition; FftComplex square; };
+    const Case defaults{{.125,-.375},4.,2.,16.,1.,{.25,.125}};
+    std::array<Case,24> rows; rows.fill(defaults);
+    rows[1].dot={+0.,-0.}; rows[1].square={0.,0.};
+    rows[2].dot={3.,4.}; rows[2].energy=1.; rows[2].square={0.,0.};
+    rows[3].dot={1.,0.}; rows[3].condition=-1.; rows[3].square={0.,0.};
+    rows[4].condition=.5; rows[5].condition=2.;
+    rows[6].count=-1.; rows[7].count=std::nextafter(4.,0.); rows[8].count=4.;
+    rows[9].energy=-1.; rows[10].energy=0.; rows[11].energy=1e-30;
+    rows[12].energy=std::nextafter(1e-30,std::numeric_limits<double>::infinity());
+    rows[12].dot={1e-16,0.}; rows[12].square={0.,0.};
+    rows[13].template_energy=-1.; rows[14].template_energy=0.; rows[15].template_energy=1e-30;
+    rows[16].template_energy=std::nextafter(1e-30,std::numeric_limits<double>::infinity());
+    rows[16].dot={1e-16,0.}; rows[16].square={0.,0.};
+    rows[17].template_energy=2.; rows[17].square={2.,0.};
+    const double boundary=std::sqrt(1.-1e-12);
+    const double s_hi=std::nextafter(boundary,std::numeric_limits<double>::infinity());
+    const double s_lo=std::nextafter(boundary,0.);
+    check(0.<1.-s_hi*s_hi && 1.-s_hi*s_hi<=1e-12 && 1.-s_lo*s_lo>1e-12,
+          "exact-real determinant boundary witnesses changed");
+    rows[18].template_energy=1.; rows[18].energy=1e14; rows[18].condition=1.; rows[18].square={s_hi,0.};
+    rows[19].template_energy=1.; rows[19].energy=1e14; rows[19].condition=1.; rows[19].square={s_lo,0.};
+
+    struct GramControl { std::array<double,4> x,y,z; double fit; };
+    const std::array<GramControl,2> controls{{
+        {{{1,0,1,0}},{{0,1,0,2}},{{1,2,-1,.5}},1.8},
+        {{{1,2,-1,0}},{{0,1,1,2}},{{.5,-1,2,1}},594./140.}
+    }};
+    std::array<double,2> gram_fits{};
+    for(std::size_t k=0;k<controls.size();++k) {
+        const auto& control=controls[k];
+        double template_energy=0,energy=0,a=0,b=0,c=0,p=0,q=0;
+        ReferenceComplex dot{},square{};
+        for(std::size_t i=0;i<control.x.size();++i) {
+            const ReferenceComplex t{control.x[i],control.y[i]};
+            const ReferenceComplex z{control.z[i],0.};
+            template_energy+=std::norm(t); energy+=std::norm(z); square+=t*t; dot+=z*std::conj(t);
+            a+=control.x[i]*control.x[i]; b+=control.y[i]*control.y[i];
+            c+=control.x[i]*control.y[i]; p+=control.z[i]*control.x[i]; q+=control.z[i]*control.y[i];
+        }
+        const auto determinant=a*b-c*c;
+        check(determinant>0.,"independent PCM Gram control is not positive definite");
+        const auto fit=(b*p*p-2*c*p*q+a*q*q)/determinant;
+        check(std::abs(fit-control.fit)<=1e-13*std::max(1.,std::abs(control.fit)),
+              "independent PCM Gram control fit changed");
+        gram_fits[k]=fit;
+        rows[20+k]={dot,energy,template_energy,4.,1.,square};
+    }
+
+    rows[22].count=4.5; rows[23].count=256.;
+
+    std::size_t evidence_cases=0,explained_cases=0,pcm_gram_controls=0;
+    std::size_t guard_evidence=0,coherent_admitted=0,exact_gram_admitted=0,exact_fallback_admitted=0;
+    std::size_t guard_positive_zero=0,row2_signed_zero_positive_zero=0,row3_exact_upper_cap_score=0;
+    std::size_t row4_nonexact_lower_positive_zero=0;
+    const auto same_bits=[](double a,double b) {
+        return std::bit_cast<std::uint64_t>(a)==std::bit_cast<std::uint64_t>(b);
+    };
+    for(std::size_t row=0;row<rows.size();++row) {
+        const auto& value=rows[row];
+        const bool guarded=value.count<4. || value.energy<=1e-30 || value.template_energy<=1e-30;
+        const auto determinant=value.template_energy*value.template_energy-std::norm(value.square);
+        const bool exact_gram=determinant>1e-12*value.template_energy*value.template_energy;
+        for(const bool exact_real:{false,true}) {
+            const auto actual=pattern_explained(value.dot,value.template_energy,value.condition,exact_real,value.square);
+            const auto legacy=reference::legacy_explained(value.dot,value.template_energy,value.condition,exact_real,value.square);
+            check(std::isfinite(actual)&&std::isfinite(legacy),"nonfinite explained score in finite legacy matrix");
+            check(same_bits(actual,legacy),"pattern_explained differs bitwise from frozen legacy formula");
+            ++explained_cases;
+            if(row>=20&&row<22&&exact_real) {
+                const auto fit=gram_fits[row-20];
+                check(std::abs(actual-fit)<=1e-13*std::max(1.,std::abs(fit)),
+                      "production exact-real explained fit differs from independent PCM Gram control");
+            }
+            if(row==2) {
+                volatile double runtime_upper=1.-1e-15;
+                const double upper=runtime_upper;
+                const double raw=actual/value.energy;
+                check(raw>upper && std::clamp(raw,0.,upper)==upper,
+                      "exact upper-cap fraction witness no longer reaches the cap");
+            }
+            for(const bool real_rank:{false,true}) {
+                const auto evidence=pattern_evidence(value.dot,value.energy,value.template_energy,value.count,
+                    value.condition,real_rank,exact_real,value.square);
+                const auto legacy_evidence=reference::legacy_evidence(value.dot,value.energy,value.template_energy,
+                    value.count,value.condition,real_rank,exact_real,value.square);
+                check(std::isfinite(evidence)&&std::isfinite(legacy_evidence),
+                      "nonfinite evidence score in finite legacy matrix");
+                check(same_bits(evidence,legacy_evidence),
+                      "pattern_evidence differs bitwise from frozen legacy formula");
+                ++evidence_cases;
+                if(guarded) {
+                    ++guard_evidence; ++guard_positive_zero;
+                    check(evidence==0. && !std::signbit(evidence),"legacy evidence guard lost positive zero");
+                } else if(!exact_real) {
+                    ++coherent_admitted;
+                } else if(exact_gram) {
+                    ++exact_gram_admitted;
+                } else {
+                    ++exact_fallback_admitted;
+                }
+                if(row==1) {
+                    ++row2_signed_zero_positive_zero;
+                    check(evidence==0.&&!std::signbit(evidence),"signed-zero input did not produce positive-zero evidence");
+                }
+                if(row==2) ++row3_exact_upper_cap_score;
+                if(row==3&&!exact_real) {
+                    ++row4_nonexact_lower_positive_zero;
+                    check(evidence==0.&&!std::signbit(evidence),"nonexact lower clamp did not produce positive-zero evidence");
+                }
+                if(row>=20&&row<22&&exact_real) {
+                    const auto fit=gram_fits[row-20];
+                    const auto fraction=std::clamp(fit/value.energy,0.,1.-1e-15);
+                    const auto independent=-(real_rank?(value.count-2.)/2.:value.count-1.)*std::log1p(-fraction);
+                    check(std::abs(evidence-independent)<=1e-13*std::max(1.,std::abs(independent)),
+                          "production evidence differs from independent PCM Gram score");
+                }
+            }
+        }
+        if(row>=20&&row<22) ++pcm_gram_controls;
+    }
+    check(evidence_cases==96&&explained_cases==48&&pcm_gram_controls==2,
+          "score evidence legacy oracle comparison totals changed");
+    check(guard_evidence==32&&guard_positive_zero==32&&coherent_admitted==32&&
+          exact_gram_admitted==28&&exact_fallback_admitted==4,
+          "score evidence legacy oracle guard/rank coverage changed");
+    check(row2_signed_zero_positive_zero==4&&row3_exact_upper_cap_score==4&&
+          row4_nonexact_lower_positive_zero==2,
+          "score evidence legacy oracle clamp/sign witnesses changed");
+    std::cout<<"score evidence legacy oracle: evidence_cases="<<evidence_cases
+             <<" explained_cases="<<explained_cases<<" pcm_gram_controls="<<pcm_gram_controls<<'\n';
+}
+}
 int main() {
-    try {prepared_batch_scalar_oracle();paired_regression::run();flat_batch_tiling_and_order();borrowed_double_tables_equivalence_and_guards();prepared_template_and_cancellation();restricted_coherent_direct_and_fft();public_nominal_reference_exactness();
+    try {score_evidence_legacy_oracle();prepared_batch_scalar_oracle();paired_regression::run();flat_batch_tiling_and_order();borrowed_double_tables_equivalence_and_guards();prepared_template_and_cancellation();restricted_coherent_direct_and_fft();public_nominal_reference_exactness();
         drift_rank_and_partition();drift_direct_fft_and_real_gram();differential_direct_fft_and_real_gram();frequency_axis_equivalence_and_bounds();}
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
     std::cout<<"pattern FFT batch tests passed\n";

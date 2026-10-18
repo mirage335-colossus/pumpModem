@@ -230,7 +230,9 @@ double pattern_explained(Complex dot,double template_energy,double condition,boo
 double pattern_evidence(Complex dot,double energy,double template_energy,double count,double condition,bool real_rank,
                 bool exact_real,Complex template_square) {
     if(count<4 || energy<=1e-30 || template_energy<=1e-30)return 0;
-    const auto fraction=std::clamp(pattern_explained(dot,template_energy,condition,exact_real,template_square)/energy,0.,1.-1e-15);
+    const auto explained=exact_real?pattern_explained(dot,template_energy,condition,exact_real,template_square):
+        std::norm(dot)/(template_energy*condition);
+    const auto fraction=std::clamp(explained/energy,0.,1.-1e-15);
     // Nonsingular quadrature bins use a covariance-eigenratio bound. Individual
     // real samples use the exact rank-two fit above; an ill-conditioned Gram
     // matrix retains the conservative lambda_max<=trace bound. These scores
