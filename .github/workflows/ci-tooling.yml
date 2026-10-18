@@ -2,6 +2,7 @@ name: CTest runner utility checks
 
 on:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
