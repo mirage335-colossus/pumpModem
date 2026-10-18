@@ -44,13 +44,80 @@ readiness (including coarse-bin fence padding). No keys, profiles or original
 clock/frequency alternatives are removed. Random waits do not subsidize the
 minimum permitted interval.
 
-Full normal native, SDK, platform and packaging regression is pending on this
-candidate. Earlier failed diagnostics are retained under
-`.agent-work/artifacts/symbol-burst-impl-20261017/`; they are not passes. Final
-local runtime evidence uses snapshot18 with the final Live fixture22. The
-inherited very-long private rolling cold-acquisition CPU and peak residency
-limit remains unqualified; later silence neither resolves unknown first epochs
-nor reduces whole-symbol peak workspace.
+Full qualification remains **incomplete**. Broad native, SDK, platform and
+packaging runs have executed; failures, omissions and source identities must be
+retained rather than described as pending execution or passes. Final local
+runtime evidence uses snapshot18 with the final Live fixture22. The modem,
+waveform and clock implementation is unchanged from `b001e7e`; `02cb5f4` also
+corrects GUI worker priority and optional planner error handling. That distinction
+does not make earlier runs qualification of every later runtime file.
+
+Standard-runner results reconciled for the 17 October handoff are:
+
+| Scope and exact source | Executed result | Evidence |
+| --- | --- | --- |
+| Windows GUI, `02cb5f4` | 39 passed, 0 failed, 0 skipped | [39070238355](https://github.com/mirage335-colossus/pumpModem/actions/runs/39070238355) |
+| GNU GUI contracts, `02cb5f4` | FLTK 41 passed; Rev 44 passed | [39070238542](https://github.com/mirage335-colossus/pumpModem/actions/runs/39070238542) |
+| Windows core, `0561361` | 263 selected: 222 passed, 8 failed, 33 skipped | [39067051379](https://github.com/mirage335-colossus/pumpModem/actions/runs/39067051379) |
+| Linux ASan/UBSan core, `5e23466` | 265 selected: 245 passed, 3 failed, 17 skipped | [39063199918](https://github.com/mirage335-colossus/pumpModem/actions/runs/39063199918) |
+| SDK FLTK contracts, `7277fc9` | All 195 selected entries executed: Live 2 passed, general 191 passed/1 failed, calibration 1 passed | [39067960488](https://github.com/mirage335-colossus/pumpModem/actions/runs/39067960488) |
+| Earlier SDK FLTK contracts, `e5ff434` | All 195 selected entries executed: Live 2 passed, general 192 passed/1 failed; calibration is included in general | [39064674790](https://github.com/mirage335-colossus/pumpModem/actions/runs/39064674790) |
+| Complete instrumented shaped calibration, `6384bc1` | 1/1 test passed; both 64-capture cases and combined gates completed | [39066075787](https://github.com/mirage335-colossus/pumpModem/actions/runs/39066075787) |
+| Complete CLI, `3d7c361` | Release 39/39 and ASan/UBSan 39/39 passed | [Release](https://github.com/mirage335-colossus/pumpModem/actions/runs/39063803539), [instrumented](https://github.com/mirage335-colossus/pumpModem/actions/runs/39063805533) |
+
+These use standard Ubuntu 24.04 and Windows 2022 runners. GNU native checks use
+GCC 11; the prepared SDK FLTK check uses GNU 15.3.0 in `debian:bookworm-slim`;
+Windows uses MSVC 19.44. All four Symbol_Burst tests passed in the complete
+Windows core, Linux instrumented core and both complete SDK contract runs.
+The 33 Windows and 17 Linux skips remain omitted native-domain coverage.
+
+The Windows core failures were `pattern_correlator`, `pattern_drift`,
+`receiver_differential`, `frequency_axis_probability`, `clock_sync`,
+`gui_timing_advice`, `gui_controller` and `gui_link_planner`. The three GUI
+failures are superseded by the complete `02cb5f4` Windows GUI pass; the other
+five remain unresolved. Linux instrumented core failed
+`frequency_axis_probability`, `gui_controller` and `alsa_audio_contract`.
+The later Release GUI result does not replace instrumented controller coverage.
+Both complete SDK runs failed only `frequency_axis_probability`.
+
+The strict EME frequency-axis continuation and V1 fractional-resampling clipping
+failures have earlier retained investigation evidence. Unchanged source alone
+does not prove the other Windows failures predate Symbol_Burst. A frozen
+pre-feature Windows comparison was prepared locally but has not been committed,
+pushed or run. It must preserve the original tests and explicitly identify its
+four identifier-only MSVC compile ports. No failed assertion has been relaxed.
+
+The full instrumented shaped calibration used four capture workers and 64 fixed
+seeds per case: public 41/64 against prediction 0.631348, private 40/64 against
+0.63208, combined RMS 0.00825217 and maximum error 0.00927734. It completed in
+7020.02 seconds. The earlier complete SDK all-section calibration passed 13
+modeled cases with RMS 0.024103 and maximum error 0.0574951. Original per-case,
+fixed-seed coverage and combined RMS <= 0.07 gates remain intact. These are
+calibration results, not radio-link reliability or rare-event certification.
+
+`02cb5f4` prevents a graph sweep from taking the sole GUI worker during the
+initial airtime inspection's 120 ms debounce. Unsupported illustrative geometry
+leaves a graph gap while selected-target errors and cancellation remain visible.
+The existing timing fixture retains its 8-second acquisition, 1-second stale
+result and 2-second close checks. Graceful sampled-simulation stops have a
+bounded 10-second computation/scheduling allowance with a warning after 5 seconds
+and an independent source-tail cap; final completion/error checks were
+strengthened. Immediate-abort and hardware deadlines remain unchanged.
+
+Latest GUI evidence covers the selected CTest contracts and simulation tests;
+`gui_smoke_budget` alone is not proof of a separate live or packaged smoke.
+Windows GUI package/relocation steps were outside that scope. Earlier ordinary
+package producers and copied-package consumers passed on their recorded sources,
+but no release was created or certified. Instrumented real-time Fast omissions
+and the opt-in instrumented native GUI smoke remain explicit omitted coverage.
+
+Retained local manifests and diagnostics are under
+`.agent-work/artifacts/symbol-burst-impl-20261017/`. A final normal regression and
+applicable SDK qualification must follow remaining fixes, reusing only matching
+source/configuration evidence. The very-long private rolling cold-acquisition
+CPU and peak-residency limit remains unqualified: later silence neither resolves
+unknown first epochs nor reduces whole-symbol peak workspace. A paced low-SNR
+backlog-rescue measurement also remains unrun.
 
 ## Public amplitude arrival resources — local candidate, 17 October 2026
 
