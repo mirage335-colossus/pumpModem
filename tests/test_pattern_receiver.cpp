@@ -200,12 +200,15 @@ void borrowed_double_tables_preserve_progress() {
     constexpr std::size_t delay=17;
     const auto samples=waveform(c,bits,delay,12*c.sample_rate,.37);
     const auto progress=compare_parallel_progress(samples,c,{},3,true);
-    check(modem::detail::search_concurrency(3)<2||progress.tabulated_transforms>0,
+    const auto assertion_concurrency=modem::detail::search_concurrency(3);
+    check(assertion_concurrency<2||progress.tabulated_transforms>0,
           "eligible parallel receiver did not execute borrowed FP64 tables");
     check(progress.bits==bits&&progress.pending_polls>=2&&progress.complete_events==1,
           "borrowed tables changed exact prefixes, next-poll progress or completion count");
     check(progress.completed_at>=delay+bits.size()*symbol+modem::pattern_absence_samples(c),
           "borrowed tables completed before whole-symbol physical absence");
+    std::cout<<"borrowed FP64 receiver evidence: assertion_concurrency="<<assertion_concurrency
+             <<" tabulated_transforms="<<progress.tabulated_transforms<<'\n';
 }
 void parallel_search_exact_progress() {
     for(const unsigned workers:{3U,0U}) {

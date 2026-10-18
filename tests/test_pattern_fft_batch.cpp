@@ -172,9 +172,13 @@ void borrowed_double_tables_equivalence_and_guards() {
     }
     const auto old_round=std::fegetround();
     struct RestoreRound {int value;~RestoreRound(){std::fesetround(value);}} restore{old_round};
-    if(std::fesetround(FE_DOWNWARD)==0) {
+    const auto downward_status=std::fesetround(FE_DOWNWARD);
+    bool downward_rejected=false,rounding_restored=false;
+    if(downward_status==0) {
         invalid([](auto&,auto&,auto&){});
+        downward_rejected=true;
         check(std::fesetround(old_round)==0,"could not restore floating-point rounding mode");
+        rounding_restored=true;
     }
     std::stop_source stopped;stopped.request_stop();
     std::vector<FftSearchScore> output(expected.size(),untouched);
@@ -182,6 +186,8 @@ void borrowed_double_tables_equivalence_and_guards() {
     try{execute_fft_search_cpu(f.batch,f.jobs,output,workers,stopped.get_token());}catch(const Error&){cancelled=true;}
     check(cancelled&&std::all_of(output.begin(),output.end(),[](auto x){return equal(x,untouched);}),
           "cancelled borrowed FFT batch published evidence");
+    std::cout<<"borrowed FFT batch rounding evidence: downward_status="<<downward_status
+             <<" rejected="<<downward_rejected<<" restored="<<rounding_restored<<'\n';
 }
 void prepared_template_and_cancellation() {
     Fixture fixture;
