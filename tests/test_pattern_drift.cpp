@@ -3,6 +3,7 @@
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_receiver.hpp"
 #include "../src/pattern_drift.hpp"
+#include "../src/audio_trace.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -101,12 +102,28 @@ template<class Receiver>
 Result receive_with(Receiver& receiver,const modem::Config& c,const std::vector<float>& pcm,
                     std::size_t chunk,bool finish,std::size_t already_observed=0) {
     Result result;
+    const bool probe=audio::trace::receiver_probe_enabled();
+    std::size_t poll=0;
     const auto begun=std::chrono::steady_clock::now();
     const auto drain=[&](std::size_t position) {
         result.peak_working=std::max(result.peak_working,receiver.working_bytes());
         check(result.peak_working<=workspace,"drift reception exceeded its declared DSP workspace");
         bool progressed=false;
-        for(auto event:receiver.take_bursts()) {
+        auto events=receiver.take_bursts();
+        for(auto event:events) {
+            if(probe)audio::trace::record("drift_probe_returned_event",[&](auto& f) {
+                f.add("poll",poll);f.add("position",position);
+                f.add("first_sample",event.first_sample);f.add("end_sample",event.end_sample);
+                f.add("first_symbol",event.first_stream_symbol);
+                f.add("stream_first_sample",event.stream_first_sample);
+                f.add("stream_first_symbol",event.stream_first_symbol);
+                f.add("bits_count",event.bits.size());f.add("missing_slots",event.missing_slots);
+                f.add("complete",event.complete);
+                std::string bits;
+                for(std::size_t i=0;i<std::min<std::size_t>(64,event.bits.size());++i)
+                    bits+=event.bits[i]<2?static_cast<char>('0'+event.bits[i]):'?';
+                f.add("bits_prefix",bits);
+            });
             check(position>=modem::symbol_sample_count(c),"partial drift sections manufactured a bit before a whole symbol");
             if(event.complete) {
                 check(position>=event.end_sample+modem::pattern_absence_samples(c),
@@ -120,9 +137,19 @@ Result receive_with(Receiver& receiver,const modem::Config& c,const std::vector<
             result.event_poll_positions.push_back(position);
         }
         if(progressed)++result.bit_polls;
+        if(probe)audio::trace::record("drift_probe_drain",[&](auto& f) {
+            f.add("poll",poll);f.add("position",position);f.add("returned_events",events.size());
+            f.add("received_slots_total",result.bits.size());f.add("productive_polls_total",result.bit_polls);
+            f.add("completions_total",result.completions);
+        });
     };
     for(std::size_t position=already_observed;position<pcm.size();) {
         const auto count=std::min(chunk,pcm.size()-position);
+        ++poll;
+        if(probe)audio::trace::record("drift_probe_push",[&](auto& f) {
+            f.add("poll",poll);f.add("first_sample",position);
+            f.add("sample_count",count);f.add("end_sample",position+count);
+        });
         receiver.push(std::span(pcm).subspan(position,count));position+=count;drain(position);
     }
     if(finish) {
@@ -190,6 +217,23 @@ void exact(const Result& result,const Bytes& expected,bool complete) {
         check(count<=expected.size()&&std::equal(result.bits.begin(),result.bits.begin()+static_cast<std::ptrdiff_t>(count),expected.begin()),
               "an intermediate drift reception prefix differs from the entered bits");
     }
+}
+
+void diagnose_commit(const std::filesystem::path& path) {
+    audio::trace::Scope trace(path,true);
+    const Bytes bits{0,0,1};const auto c=config(true);
+    const auto pcm=waveform(c,bits,Impairment::power_steps);
+    audio::trace::record("drift_probe_fixture",[&](auto& f) {
+        f.add("backend","compact");f.add("keyed",true);
+        f.add("impairment",static_cast<unsigned>(Impairment::power_steps));
+        f.add("waveform_seed",7919);f.add("noise_sigma",.25);
+        f.add("sample_rate",c.sample_rate);f.add("symbol_samples",modem::symbol_sample_count(c));
+        f.add("delay_samples",delay);f.add("pcm_samples",pcm.size());
+        f.add("chunk_samples",257);f.add("expected_bits","001");
+    });
+    const auto enabled=receive(Backend::compact,c,pcm);
+    try {exact(enabled,bits,true);}
+    catch(const Error& error) {throw Error(std::string("Compact private impairment 3: ")+error.what());}
 }
 
 void drifting_symbols_and_power_steps() {
@@ -440,8 +484,13 @@ void independent_rank_and_selection_penalty() {
           "a truncated quarter with fewer than sixteen complete chips must keep the coherent detector");
 }
 }
-int main() {
+int main(int argc,char** argv) {
     try {
+        if(argc!=1) {
+            check(argc==3 && std::string(argv[1])=="--diagnose-commit",
+                "usage: test_pattern_drift [--diagnose-commit NEW_TRACE_PATH]");
+            diagnose_commit(argv[2]);return 0;
+        }
         independent_rank_and_selection_penalty();
         drifting_symbols_and_power_steps();drifting_signal_below_sample_noise();
         partial_symbols_and_eof_are_not_absence();

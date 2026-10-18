@@ -1,4 +1,6 @@
 #include "datapump/pattern_correlator.hpp"
+#include "../src/pattern_correlator_batch.hpp"
+#include <sstream>
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/symbol_schedule.hpp"
@@ -547,6 +549,86 @@ void compact_constructor_uses_attached_oscillator_policy() {
     modem::PatternCorrelator explicit_receiver(c,search,4*1024*1024);explicit_receiver.push(silence);
     check(explicit_receiver.candidates().size()==1,"attached policy overrode explicit compact frequency coverage");
 }
+bool diagnose_pulse_membership=false;
+void pulse_membership_witness(const modem::Config& c,const modem::PatternSearch& search,
+        std::span<const float> samples,std::size_t row_index,
+        const modem::PatternEvidence& projected,const modem::PatternEvidence& raw) {
+    constexpr std::uint64_t observed=100000,index=1,cell=833;
+    constexpr std::size_t atoms=modem::detail::correlation_pulse_atoms;
+    const auto chip=modem::pattern_chip_samples(c),symbol=modem::symbol_sample_count(c);
+    check(chip==120 && symbol==96000 && observed<samples.size() && search.hypotheses.size()==1,
+        "pulse membership diagnostic geometry changed");
+    const auto rate=1+static_cast<long double>(search.hypotheses.front().clock_error_ppm)*1e-6L;
+    const long double anchor=0,shift=0;
+    const auto symbol_start=anchor+(shift*chip+static_cast<long double>(index)*symbol+0)/rate;
+    const auto within=std::max(0.L,(static_cast<long double>(observed)-symbol_start)*rate);
+    const auto argument=static_cast<double>(within);
+    const auto start=anchor+static_cast<long double>(cell)*chip/rate;
+    const auto first=static_cast<std::uint64_t>(std::ceil(start));
+    const auto offset=static_cast<long double>(first)-start;
+    const auto n=observed-first;
+    const auto duration=static_cast<long double>(chip)/rate;
+    const auto dot_q=(static_cast<long double>(observed)-start)*rate/chip-.5L;
+    const auto gram_q=(offset+n)/duration-.5L;
+    const auto chips=symbol/chip,local=cell-index*chips,base=local-8,first_chip=index*chips;
+    std::array<double,atoms> raw_weights{};std::array<bool,atoms> raw_seen{};
+    std::size_t callbacks=0,unexpected=0;
+    modem::pattern_pulse_each(argument,symbol,chip,[&](std::uint64_t position,double weight) {
+        ++callbacks;
+        if(position<base || position-base>=atoms) {++unexpected;return;}
+        raw_seen[position-base]=true;raw_weights[position-base]=weight;
+    });
+    modem::PatternCode pattern(c,c.stream_epoch);pattern.set_stream_phase_samples(c.stream_phase_samples);
+    pattern.prepare_symbol(first_chip);
+    const auto raw_q=pattern.shaped_values(first_chip,argument);
+    const auto address=pattern.resolved_symbol_address(first_chip);
+    // Production kernel, replayed as one sample with unit carrier. This does
+    // not inspect the live cached whole-cell Gram or prove exclusive causation.
+    modem::detail::CorrelationPulseKernel kernel(chip,rate,c.carrier_hz,c.sample_rate);
+    const auto gram=kernel.evaluate(offset+n,1,{1,0},1);
+    std::array<std::complex<double>,2> shared_q{},callback_q{},edge_delta{};
+    std::ostringstream out;out<<std::setprecision(std::numeric_limits<long double>::max_digits10)
+        <<"pulse_membership row="<<row_index<<" observed="<<observed<<" index="<<index<<" cell="<<cell
+        <<" local="<<local<<" projected_first="<<projected.first_sample<<" projected_end="<<projected.end_sample
+        <<" raw_first="<<raw.first_sample<<" raw_end="<<raw.end_sample
+        <<" in_projected_row="<<(projected.first_sample<=observed&&observed<projected.end_sample)
+        <<" in_raw_row="<<(raw.first_sample<=observed&&observed<raw.end_sample)
+        <<" long_double_digits="<<std::numeric_limits<long double>::digits
+        <<" callback_count="<<callbacks<<" unexpected_atoms="<<unexpected
+        <<" pattern_epoch="<<address.epoch<<" pattern_ordinal="<<address.ordinal<<" pcm="<<samples[observed]
+        <<" support_scope=native_original_pulse_each_and_singleton_Gram_replay actual_cached_full_cell_gram=false\n"
+        <<std::hexfloat<<"pulse_membership_geometry rate="<<rate<<" symbol_start="<<symbol_start
+        <<" within_wide="<<within<<" within_double="<<argument<<" lattice_start="<<start
+        <<" cell_first="<<first<<" first_offset="<<offset<<" row_offset="<<n<<" duration="<<duration
+        <<" dot_q="<<dot_q<<" gram_q="<<gram_q<<'\n';
+    for(std::size_t j=0;j<atoms;++j) {
+        const auto position=base+j,pulse_first=position*chip;
+        const auto pulse_duration=std::min(chip,symbol-pulse_first);
+        const auto center=static_cast<double>(pulse_first)+.5*static_cast<double>(pulse_duration);
+        const auto raw_argument=(argument-center)/static_cast<double>(chip);
+        const auto dot_argument=static_cast<double>(dot_q+8-static_cast<long double>(j));
+        const auto gram_argument=static_cast<double>(gram_q-static_cast<long double>(j)+8);
+        const auto dot_weight=modem::pattern_pulse(dot_argument),gram_weight=modem::pattern_pulse(gram_argument);
+        const auto values=pattern.values(first_chip+position);const auto diagonal=j*(2*atoms+1-j)/2;
+        for(unsigned bit=0;bit<2;++bit) {
+            callback_q[bit]+=raw_weights[j]*values[bit];shared_q[bit]+=dot_weight*values[bit];
+            if(j==0||j+1==atoms)edge_delta[bit]+=(raw_weights[j]-dot_weight)*values[bit];
+        }
+        out<<"pulse_membership_atom j="<<j<<" local="<<position<<" raw_seen="<<raw_seen[j]
+            <<" raw_argument_replay="<<raw_argument<<" raw_callback_weight="<<raw_weights[j]
+            <<" dot_argument="<<dot_argument<<" dot_weight="<<dot_weight
+            <<" gram_argument_replay="<<gram_argument<<" gram_weight_replay="<<gram_weight
+            <<" gram_diagonal_native="<<gram.energy[diagonal]
+            <<" raw_weight_squared="<<raw_weights[j]*raw_weights[j]
+            <<" coefficient0="<<values[0]<<" coefficient1="<<values[1]<<'\n';
+    }
+    for(unsigned bit=0;bit<2;++bit)out<<"pulse_membership_template bit="<<bit
+        <<" raw_native="<<raw_q[bit]<<" raw_callback_sum="<<callback_q[bit]
+        <<" callback_sum_matches="<<(callback_q[bit]==raw_q[bit])<<" shared_dot_row_replay="<<shared_q[bit]
+        <<" endpoint_only_delta="<<edge_delta[bit]<<" nonzero_endpoint_template_delta="<<(std::norm(edge_delta[bit])>0)
+        <<" nonzero_pcm="<<(samples[observed]!=0)<<'\n';
+    std::cerr<<out.str();
+}
 void paired_pulse_origin_parities_and_canonical_quarters() {
     auto c=tuning::resolve(100,0,tuning::PatternMode::auto_pattern,true,1500).config;
     c.integration_seconds=16;c.stream_epoch=1730000221;c.stream_phase_samples=11;
@@ -618,6 +700,10 @@ void paired_pulse_origin_parities_and_canonical_quarters() {
                      <<" raw_differential_window_samples="<<raw_work.differential_window_samples
                      <<" raw_workspace_bytes="<<raw.working_bytes()
                      <<" raw_peak_workspace_bytes="<<raw_work.peak_workspace_bytes<<'\n';
+            if(diagnose_pulse_membership && i==6) {
+                try {pulse_membership_witness(c,search,samples,i,a[i],b[i]);}
+                catch(const std::exception& error) {std::cerr<<"pulse_membership diagnostic_incomplete="<<error.what()<<'\n';}
+            }
         }
         check(std::abs(a[i].score-b[i].score)<2e-6*std::max(1.,b[i].score) &&
               std::abs(a[i].alternative_score-b[i].alternative_score)<2e-6*std::max(1.,b[i].alternative_score),
@@ -1717,6 +1803,7 @@ void initial_search_coverage() {
 }
 }
 int main(int argc,char** argv) {
+    diagnose_pulse_membership=argc>2 && std::string(argv[2])=="--diagnose-pulse-membership";
     unsigned failures=0;
     const auto run=[&](const char* name,auto test) {
         if(argc>1 && std::string(name).find(argv[1])==std::string::npos)return;

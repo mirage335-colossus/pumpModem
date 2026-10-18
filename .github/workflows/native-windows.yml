@@ -11,7 +11,7 @@ on:
       scope:
         description: 'Run the selected unchanged native scope'
         type: choice
-        options: [core, fast, live, calibration, frontends, web, gui, package, receiver-baseline, eme-diagnostic, receiver]
+        options: [core, fast, live, calibration, frontends, web, gui, package, receiver-baseline, eme-diagnostic, receiver, receiver-diagnostic]
         default: live
       calibration_section:
         description: 'Calibration section; used only by the calibration scope'
@@ -24,7 +24,7 @@ on:
         type: string
         default: windows-2022
       scope:
-        description: 'core, fast, live, calibration, frontends, web, gui, package, frozen receiver-baseline, eme-diagnostic, or receiver'
+        description: 'core, fast, live, calibration, frontends, web, gui, package, frozen receiver-baseline, eme-diagnostic, receiver, or receiver-diagnostic'
         type: string
         required: true
       calibration_section:
@@ -136,6 +136,7 @@ jobs:
             'receiver-baseline' { $targets = @('test_pattern_correlator', 'test_pattern_drift', 'test_receiver_differential', 'test_clock_sync') }
             'eme-diagnostic' { $targets = @('test_frequency_axis_probability') }
             'receiver' { $targets = @('test_pattern_correlator', 'test_pattern_drift', 'test_receiver_differential', 'test_clock_sync') }
+            'receiver-diagnostic' { $targets = @('test_pattern_correlator', 'test_pattern_drift', 'test_clock_sync') }
             'fast' { $targets = @('datapump-tests-fast') }
             'live' { $targets = @('datapump-tests-ci-live') }
             default { throw "Unknown native scope: $env:CI_SCOPE" }
@@ -145,7 +146,7 @@ jobs:
           cmake --build build --config Release --target @targets --parallel $env:CL_MPCount
           if ($LASTEXITCODE -ne 0) { throw "Native shard build failed" }
       - name: Run the selected native tests
-        if: inputs.scope != 'package' && inputs.scope != 'receiver-baseline' && inputs.scope != 'eme-diagnostic' && inputs.scope != 'receiver'
+        if: inputs.scope != 'package' && inputs.scope != 'receiver-baseline' && inputs.scope != 'eme-diagnostic' && inputs.scope != 'receiver' && inputs.scope != 'receiver-diagnostic'
         # Separate runners supply parallelism; preserve per-runner live budgets.
         run: python tools/run-ci-tests.py --build-dir build --scope "$env:CI_SCOPE" --jobs 1 --config Release --report build/ci-test-report.json
       - name: Diagnose one strict EME continuation capture without changing its gates
@@ -157,6 +158,20 @@ jobs:
           ./build/Release/test_frequency_axis_probability.exe --diagnose-end 128 30 3 3 2>&1 | Tee-Object -FilePath build/eme-diagnostic.log
           if ($LASTEXITCODE -ne 0) { throw "Paired EME continuation diagnostic failed" }
           'One paired diagnostic capture only. Exit zero checks accepted-grid timing and backend parity; it is not exact-content recovery, full regression or qualification.' >> $env:GITHUB_STEP_SUMMARY
+      - name: Diagnose original receiver decisions and portable timing guards
+        if: inputs.scope == 'receiver-diagnostic'
+        run: |
+          New-Item -ItemType Directory -Force build/receiver-diagnostic | Out-Null
+          git rev-parse HEAD | Tee-Object -FilePath build/receiver-diagnostic/source.txt
+          if ($LASTEXITCODE -ne 0) { throw "Receiver diagnostic source identity failed" }
+          ./build/Release/test_pattern_correlator.exe paired_pulse_origin_parities_and_canonical_quarters --diagnose-pulse-membership 2>&1 | Tee-Object -FilePath build/receiver-diagnostic/pulse.log
+          $pulse = $LASTEXITCODE
+          ./build/Release/test_pattern_drift.exe --diagnose-commit "$PWD/build/receiver-diagnostic/drift.jsonl" 2>&1 | Tee-Object -FilePath build/receiver-diagnostic/drift.log
+          $drift = $LASTEXITCODE
+          ./build/Release/test_clock_sync.exe 2>&1 | Tee-Object -FilePath build/receiver-diagnostic/clock.log
+          $clock = $LASTEXITCODE
+          "pulse=$pulse drift=$drift clock=$clock" | Set-Content build/receiver-diagnostic/exits.txt
+          if ($pulse -ne 0 -or $drift -ne 0 -or $clock -ne 0) { throw "Original receiver diagnostic assertions failed; inspect all retained results" }
       - name: Run all four selected receiver and clock tests
         if: inputs.scope == 'receiver-baseline' || inputs.scope == 'receiver'
         run: |
@@ -300,6 +315,7 @@ jobs:
             build/Testing/Temporary/
             build/receiver-baseline/
             build/receiver-fixtures/
+            build/receiver-diagnostic/
             build/CMakeCache.txt
             build/eme-diagnostic*
             build/package-*.log

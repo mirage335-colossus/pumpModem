@@ -7,6 +7,9 @@
 #include "../src/alsa_plugin_path.hpp"
 #include "../src/pulse_playback.hpp"
 #include <algorithm>
+#include <bit>
+#include <iomanip>
+#include <openssl/evp.h>
 #include <cerrno>
 #include <chrono>
 #include <cmath>
@@ -1779,7 +1782,7 @@ struct QueuedPlayback {
         return {static_cast<long double>(presented),origin+time,time,.028,1e-6,a::TimingQuality::estimated,771};
     }
 };
-std::vector<float> dsss_audio_pcm(bool interleave) {
+datapump::modem::Config dsss_audio_config(bool interleave) {
     datapump::modem::Config config;
     config.sample_rate=48000;config.carrier_hz=9000;config.bandwidth_hz=1200;
     config.spreading_factor=64;config.scramble=true;config.dsss_factor=10;
@@ -1792,6 +1795,10 @@ std::vector<float> dsss_audio_pcm(bool interleave) {
         datapump::modem::symbol_sample_count(config)==5120 &&
         datapump::modem::pattern_pulse_padding_samples(config)==64,
         "DSSS audio fixture geometry changed");
+    return config;
+}
+std::vector<float> dsss_audio_pcm(bool interleave) {
+    const auto config=dsss_audio_config(interleave);
     datapump::modem::PatternTransmitter source(datapump::Bytes{0,0,1},config,1800000000,0,true);
     std::vector<float> result(static_cast<std::size_t>(source.total_samples()));
     for(std::size_t offset=0;offset<result.size();) {
@@ -1987,7 +1994,127 @@ long double outside_energy(std::span<const float> pcm,double low,double high) {
     }
     return outside;
 }
-void native_queued_dsss_playback(bool interleave=false) {
+void dsss_clipping_diagnostic(std::span<const float> input,double fixture_fraction,
+                              const datapump::modem::Config& config) {
+    const auto begun=std::chrono::steady_clock::now();
+    std::array<unsigned char,EVP_MAX_MD_SIZE> digest{};unsigned digest_size=0;
+    check(EVP_Digest(input.data(),input.size_bytes(),digest.data(),&digest_size,EVP_sha256(),nullptr)==1,
+        "DSSS clipping diagnostic digest failed");
+    std::cout<<std::setprecision(17)<<"clipping_diagnostic_source samples="<<input.size()<<" sha256=";
+    for(unsigned i=0;i<digest_size;++i)std::cout<<std::hex<<std::setw(2)<<std::setfill('0')<<unsigned(digest[i]);
+    std::cout<<std::dec<<std::setfill(' ')<<" fixture_fraction="<<fixture_fraction<<'\n';
+    struct Peak {double fraction=0;std::size_t index=0;float value=0;};
+    Peak largest;
+    std::vector<float> converted(input.size()+4);
+    const auto coefficients=[](unsigned p) {
+        constexpr double pi=std::numbers::pi;const double cutoff=.46*1.;
+        std::array<float,97> result{};double sum=0;
+        for(std::size_t tap=0;tap<result.size();++tap) {
+            const auto distance=static_cast<double>(tap)-48-static_cast<double>(p)/256;
+            const auto window_position=distance/48;
+            const auto window=std::abs(window_position)>=1?0:.42+.5*std::cos(pi*window_position)+
+                .08*std::cos(2*pi*window_position);
+            const auto value=std::abs(distance)<1e-12?2*cutoff:std::sin(2*pi*cutoff*distance)/(pi*distance);
+            result[tap]=static_cast<float>(value*window);sum+=value*window;
+        }
+        for(auto& value:result)value=static_cast<float>(value/sum);
+        return result;
+    };
+    const auto convert=[&](double fraction) {
+        a::Resampler converter(48000,48000,true);converter.initialize_timing(fraction,0);
+        const auto result=converter.process(input,converted,true);
+        check(result.consumed==input.size()&&converter.finished(),"phase sweep did not finish the original finite PCM");
+        long double energy=0,clamp_energy=0;Peak peak{fraction};std::size_t clipped=0;
+        for(std::size_t i=0;i<result.produced;++i) {
+            const auto value=converted[i];energy+=value*value;
+            const auto error=value-std::clamp(value,-1.f,1.f);clamp_energy+=error*error;
+            clipped+=std::abs(value)>1;
+            if(std::abs(value)>std::abs(peak.value))peak={fraction,i,value};
+        }
+        if(std::abs(peak.value)>std::abs(largest.value))largest=peak;
+        std::cout<<"clipping_diagnostic_phase fraction="<<fraction<<" samples="<<result.produced
+            <<" peak="<<peak.value<<" index="<<peak.index<<" over_unity="<<clipped
+            <<" clamp_fraction="<<static_cast<double>(clamp_energy/energy)<<'\n';
+        return result.produced;
+    };
+    const auto count=convert(fixture_fraction);
+    const std::vector<float> whole(converted.begin(),converted.begin()+static_cast<std::ptrdiff_t>(count));
+    a::Resampler split(48000,48000,true);split.initialize_timing(fixture_fraction,0);
+    std::array<float,61> block{};std::size_t consumed=0,produced=0;
+    std::size_t chunk_end=std::min<std::size_t>(97,input.size());
+    while(!split.finished()) {
+        const auto n=chunk_end-consumed;
+        const auto result=split.process(input.subspan(consumed,n),block,chunk_end==input.size());
+        check(result.consumed||result.produced||split.finished(),"split clipping diagnostic stalled");
+        consumed+=result.consumed;
+        if(consumed==chunk_end)chunk_end=std::min(input.size(),chunk_end+97);
+        for(std::size_t i=0;i<result.produced;++i) {
+            check(produced<whole.size()&&std::bit_cast<std::uint32_t>(block[i])==std::bit_cast<std::uint32_t>(whole[produced]),
+                "clipping diagnostic changed actual PCM with source/output chunks");
+            ++produced;
+        }
+    }
+    check(consumed==input.size()&&produced==whole.size(),"split clipping diagnostic changed finite duration");
+    for(unsigned phase=0;phase<256;++phase) {
+        const auto produced=convert(static_cast<double>(phase)/256);
+        check(produced==input.size(),"table-node sweep changed constant fractional advance");
+    }
+    // The formal phase-1 endpoint is phase 0 shifted by one input sample,
+    // plus its last zero-extended cell. Near-1 initialization is not constant:
+    // adding one can round to two and change the production source advance.
+    const auto endpoint=coefficients(256);
+    double endpoint_tail=0;
+    for(std::size_t tap=0;tap<endpoint.size();++tap) {
+        const auto index=static_cast<std::int64_t>(input.size()-1)+static_cast<std::int64_t>(tap)-48;
+        if(index>=0&&static_cast<std::uint64_t>(index)<input.size())
+            endpoint_tail+=input[static_cast<std::size_t>(index)]*static_cast<double>(endpoint[tap]);
+    }
+    const auto endpoint_value=static_cast<float>(endpoint_tail);
+    if(std::abs(endpoint_value)>std::abs(largest.value))largest={1.,input.size()-1,endpoint_value};
+    double max_jump=0,max_l1=0,max_input=0;
+    for(auto value:input)max_input=std::max(max_input,std::abs(static_cast<double>(value)));
+    for(unsigned phase=0;phase<256;++phase) {
+        const auto a=coefficients(phase),b=coefficients(phase+1);double jump=0,l1=0;
+        for(std::size_t tap=0;tap<a.size();++tap) {
+            jump+=std::abs(static_cast<double>(a[tap])+static_cast<double>(b[tap]-a[tap])-b[tap]);
+            l1+=std::abs(static_cast<double>(a[tap]))+std::abs(static_cast<double>(b[tap]-a[tap]));
+        }
+        max_jump=std::max(max_jump,jump);max_l1=std::max(max_l1,l1);
+    }
+    const auto arithmetic_bound=max_input*(max_jump+1024*std::numeric_limits<double>::epsilon()*max_l1);
+    const auto peak_upper=std::nextafter(static_cast<float>(std::abs(largest.value)+arithmetic_bound),
+        std::numeric_limits<float>::infinity());
+    std::cout<<"clipping_diagnostic_nodes phase_nodes=257 formal_phase_1_tail="<<endpoint_value
+        <<" interpolation_endpoint_l1_jump="<<max_jump<<" arithmetic_bound="<<arithmetic_bound
+        <<" phase_peak_upper="<<peak_upper<<'\n';
+    const auto phase_position=largest.fraction*256;
+    const auto phase=static_cast<unsigned>(phase_position);
+    const auto blend=phase_position-phase;
+    const auto first=coefficients(phase),second=coefficients(std::min(phase+1,256u));double reconstructed=0;
+    const auto training=datapump::modem::training_sample_count(config);
+    const auto padding=datapump::modem::pattern_pulse_padding_samples(config);
+    const auto payload_end=training+padding+3*datapump::modem::symbol_sample_count(config);
+    const auto source_position=largest.index+largest.fraction;
+    const auto section=source_position<training?"training":source_position<training+padding?"leading-pulse":
+        source_position<payload_end?"payload":source_position<payload_end+padding?"trailing-pulse":"suppression";
+    std::cout<<"clipping_diagnostic_peak fraction="<<largest.fraction<<" index="<<largest.index
+        <<" value="<<largest.value<<" section="<<section<<'\n';
+    for(std::size_t tap=0;tap<first.size();++tap) {
+        const auto index=static_cast<std::int64_t>(largest.index)+static_cast<std::int64_t>(tap)-48;
+        const auto value=index>=0&&static_cast<std::uint64_t>(index)<input.size()?input[static_cast<std::size_t>(index)]:0.f;
+        const auto weight=first[tap]+(second[tap]-first[tap])*blend;
+        const auto contribution=value*weight;reconstructed+=contribution;
+        std::cout<<"clipping_diagnostic_tap tap="<<tap<<" source_index="<<index<<" input="<<value
+            <<" weight="<<weight<<" contribution="<<contribution<<'\n';
+    }
+    check(std::bit_cast<std::uint32_t>(static_cast<float>(reconstructed))==std::bit_cast<std::uint32_t>(largest.value),
+        "clipping diagnostic FIR oracle disagrees with production converter");
+    std::cout<<"clipping_diagnostic_complete actual_phase_nodes=256 formal_endpoint=1 actual_fixture_phase=1 chunk_parity=1 fir_oracle=1 seconds="
+        <<std::chrono::duration<double>(std::chrono::steady_clock::now()-begun).count()
+        <<" note=original_clipping_gate_follows\n";
+}
+
+void native_queued_dsss_playback(bool interleave=false,bool diagnose=false) {
     const auto input=dsss_audio_pcm(interleave);
     std::vector<std::int16_t> reference_pcm;
     std::vector<float> expected;
@@ -2090,6 +2217,10 @@ void native_queued_dsss_playback(bool interleave=false) {
         const auto q=expected[i]-quantized[i];pcm_error+=q*q;
     }
     std::cerr<<"clipping audit peak="<<peak_converted<<" clipped="<<clipped<<" energy_fraction="<<double(clamp_error/energy(expected))<<"\n";
+    if(diagnose) {
+        check(reference_fraction.has_value(),"DSSS clipping diagnostic lacks its actual fixture phase");
+        dsss_clipping_diagnostic(input,*reference_fraction,dsss_audio_config(interleave));
+    }
     check(clamp_error/energy(expected)<1e-8L,
         "fractional DSSS reconstruction clipping exceeds the bounded reference distortion");
     const auto raw_out=outside_energy(input,5250,12750),converted_out=outside_energy(expected,5250,12750);
@@ -2707,6 +2838,7 @@ void audio_options() {
           "shared capture did not keep its own route after exclusive access was busy");
 }
 int main(int argc,char** argv){try{
+    if(argc==2&&std::string(argv[1])=="--dsss-clipping-diagnostic") {native_queued_dsss_playback(false,true);return 0;}
     std::unique_ptr<datapump::audio::trace::Scope> verbose;
     if(argc==3&&std::string(argv[1])=="--trace-utc") {
         verbose=std::make_unique<datapump::audio::trace::Scope>(argv[2]);argv[1]=const_cast<char*>("--utc-runtime");argc=2;

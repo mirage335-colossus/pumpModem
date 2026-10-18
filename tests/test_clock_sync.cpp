@@ -9,9 +9,14 @@
 #include <numbers>
 #include <iostream>
 #include <stdexcept>
+#include <source_location>
 namespace {
 void require(bool value,const char* message) {if(!value)throw std::runtime_error(message);}
-template<class F> void rejects(F function) {try {function();}catch(const datapump::Error&){return;}throw std::runtime_error("unsafe timing accepted");}
+template<class F> void rejects(F function,std::source_location where=std::source_location::current()) {
+    try {function();}catch(const datapump::Error&){return;}
+    throw std::runtime_error("unsafe timing accepted at "+std::string(where.file_name())+":"+
+        std::to_string(where.line())+" in "+where.function_name());
+}
 void declared_clock_timing() {
     using namespace datapump::audio;
     constexpr auto mode=UtcTimeline::Prediction::timestamp_intersection;

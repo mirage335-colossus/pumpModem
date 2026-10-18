@@ -16,7 +16,7 @@ on:
       scope:
         description: 'Run one complete native scope without repeating the other shards'
         type: choice
-        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic, receiver]
+        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic, receiver, alsa-diagnostic]
         default: core
       calibration_section:
         description: 'Calibration section; used only by the calibration scope'
@@ -36,7 +36,7 @@ on:
         type: string
         default: Release
       scope:
-        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, or receiver'
+        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, or alsa-diagnostic'
         type: string
         required: true
       calibration_section:
@@ -141,6 +141,7 @@ jobs:
             core) targets=(datapump-apps datapump-tests-ci-core) ;;
             cli) targets=(pump) ;;
             eme-diagnostic) targets=(test_frequency_axis_probability) ;;
+            alsa-diagnostic) targets=(test_alsa_audio) ;;
             receiver) targets=(test_pattern_correlator test_pattern_drift test_receiver_differential test_clock_sync) ;;
             fast) targets=(datapump-tests-fast) ;;
             live) targets=(datapump-tests-ci-live) ;;
@@ -155,6 +156,13 @@ jobs:
           git -c safe.directory="$PWD" rev-parse HEAD | tee build/eme-diagnostic-source.txt
           ./build/test_frequency_axis_probability --diagnose-end 128 30 3 3 2>&1 | tee build/eme-diagnostic.log
           echo 'One paired diagnostic capture only. Exit zero checks accepted-grid timing and backend parity; it is not exact-content recovery, full regression or qualification.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Measure original V1 reconstruction before its unchanged strict gate
+        if: inputs.scope == 'alsa-diagnostic'
+        timeout-minutes: 30
+        run: |
+          set -o pipefail
+          git -c safe.directory="$PWD" rev-parse HEAD | tee build/alsa-diagnostic-source.txt
+          ./build/test_alsa_audio --dsss-clipping-diagnostic 2>&1 | tee build/alsa-diagnostic.log
       - name: Run all four selected receiver and clock tests
         if: inputs.scope == 'receiver'
         run: |
@@ -281,6 +289,7 @@ jobs:
             build/shaped-result.txt
             build/calibration-aggregate.log
             build/eme-diagnostic*
+            build/alsa-diagnostic*
             build/CMakeCache.txt
             build/receiver-fixtures/
             ${{ github.workspace }}/build/ci-smoke-results/

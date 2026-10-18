@@ -68,6 +68,7 @@ struct State {
     static constexpr std::uint64_t maximum_file_bytes=256ULL*1024*1024;
     std::uint64_t file_bytes=0;
     bool size_limited=false;
+    bool receiver_probe=false;
     std::FILE* file=nullptr;
     std::string token,path;
     std::mutex mutex;
@@ -155,6 +156,10 @@ public:
     }
 };
 inline StateSlot active;
+inline bool receiver_probe_enabled() noexcept {
+    const auto state=active.load(std::memory_order_acquire);
+    return state && state->receiver_probe;
+}
 inline std::atomic<std::uint64_t> next_identity{0};
 inline std::uint64_t identity(){return ++next_identity;}
 template<class F>void record(const char* event,F fields) noexcept {
@@ -176,10 +181,11 @@ class Scope {
     std::thread writer_;
     std::filesystem::path path_;
 public:
-    explicit Scope(std::filesystem::path path={}) {
+    explicit Scope(std::filesystem::path path={},bool receiver_probe=false) {
         if(path.empty())path="datapump-verbose-"+std::to_string(std::chrono::system_clock::now().time_since_epoch().count())+".jsonl";
         path_=std::filesystem::absolute(path);
         state_=std::make_shared<State>();
+        state_->receiver_probe=receiver_probe;
         const auto utf8=path_.u8string();state_->path.assign(utf8.begin(),utf8.end());
         state_->token=std::to_string(std::chrono::system_clock::now().time_since_epoch().count())+"-"+std::to_string(identity());
 #if defined(_WIN32) && !defined(__linux__)
@@ -195,7 +201,8 @@ public:
         catch(...){active.store({});throw;}
         record("trace_begin",[&](Fields& f){f.add("schema",2);f.add("token",state_->token);f.add("maximum_queue_records",State::capacity);
             f.add("maximum_record_bytes",State::maximum_record);f.add("maximum_file_bytes",State::maximum_file_bytes);
-            f.add("long_double_digits",std::numeric_limits<long double>::max_digits10);});
+            f.add("long_double_digits",std::numeric_limits<long double>::max_digits10);
+            f.add("receiver_probe",receiver_probe);});
     }
     ~Scope(){
         state_->closing=true;

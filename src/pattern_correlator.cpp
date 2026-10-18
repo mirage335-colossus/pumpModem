@@ -8093,13 +8093,40 @@ struct PatternCorrelator::Impl {
                 f.add("accepted_count",count);f.add("complete",result.complete);f.add("trials",trials);
                 f.add("score",result.score);f.add("threshold",threshold());
             });
-            if(duplicate!=bursts.end()) {
-                if(result.score>duplicate->score) {
+            const bool queue_duplicate=duplicate!=bursts.end();
+            const bool queue_replaced=queue_duplicate && result.score>duplicate->score;
+            if(queue_duplicate) {
+                if(queue_replaced) {
                     accounted_bytes=accounted_bytes-duplicate->bits.capacity()+result.bits.capacity();*duplicate=std::move(result);
                 }
             } else {
                 require(bursts.size()<search.track_limit,"pattern output queue requires draining");
                 accounted_bytes+=result.bits.capacity();bursts.push_back(std::move(result));
+            }
+            if(audio::trace::receiver_probe_enabled()) {
+                const auto& queued=queue_duplicate?*duplicate:bursts.back();
+                audio::trace::record("correlator_probe_publication",[&](auto& f) {
+                    f.add("stage","after_queue_update_before_owner_erase");
+                    f.add("queue_action",queue_duplicate?(queue_replaced?"replaced":"kept"):"inserted");
+                    f.add("owner_lane_id",logical_id(hypotheses.index(h)));
+                    f.add("block_first_sample",sample);
+                    f.add("stream_first_sample",stream.stream_first_sample);
+                    f.add("stream_first_symbol",stream.first_symbol);
+                    f.add("stream_enqueued_next_before",stream.last_symbol);
+                    f.add("owner_buffer_first_symbol",h.burst.first_stream_symbol);
+                    f.add("owner_committed_before",h.committed);
+                    f.add("owner_consumed_bits",count);
+                    f.add("owner_committed_after",h.committed-count);
+                    f.add("owner_last_committed_end",h.committed_end);
+                    f.add("queued_first_sample",queued.first_sample);
+                    f.add("queued_end_sample",queued.end_sample);
+                    f.add("queued_first_symbol",queued.first_stream_symbol);
+                    f.add("queued_stream_first_sample",queued.stream_first_sample);
+                    f.add("queued_stream_first_symbol",queued.stream_first_symbol);
+                    f.add("queued_bits",queued.bits.size());
+                    f.add("queued_missing_slots",queued.missing_slots);
+                    f.add("queued_complete",queued.complete);
+                });
             }
             h.burst.bits.erase(h.burst.bits.begin(),h.burst.bits.begin()+static_cast<std::ptrdiff_t>(count));
             h.burst.first_stream_symbol+=count;h.burst.first_sample=emitted_end;h.committed-=count;
@@ -8711,6 +8738,47 @@ struct PatternCorrelator::Impl {
             } else {publish(h);clear(h);}
         }
         timing_decision(h,hypothesis,e,selected);
+        if(audio::trace::receiver_probe_enabled()) {
+            const auto* probe_timing=timing_state(hypothesis);
+            const auto* decision=probe_timing && probe_timing->decisions[h.index%2].index==h.index?
+                &probe_timing->decisions[h.index%2]:nullptr;
+            const auto* stream=existing_output_stream(h);
+            audio::trace::record("correlator_probe_decision",[&](auto& f) {
+                f.add("stage","after_admission_before_settlement");
+                f.add("lane_slot",hypothesis);f.add("lane_id",logical_id(hypothesis));
+                f.add("block_first_sample",sample);f.add("symbol",h.index);
+                f.add("observed_first_sample",e.first_sample);f.add("symbol_end_sample",end);
+                f.add("origin",h.origin);f.add("rate",h.rate);f.add("bit",e.bit);
+                f.add("score",e.score);f.add("alternative_score",e.alternative_score);
+                f.add("threshold",threshold());f.add("standalone",standalone);
+                f.add("retain_reliable",reliable);f.add("admitted_before",admitted_before);
+                f.add("admitted_after",h.admitted);f.add("timing_decision_present",decision!=nullptr);
+                if(decision) {
+                    f.add("decision_accepted",decision->accepted);f.add("decision_full",decision->full);
+                    f.add("decision_epoch",decision->epoch);f.add("decision_ordinal",decision->ordinal);
+                }
+                f.add("lane_buffer_first_symbol",h.burst.first_stream_symbol);
+                f.add("lane_buffer_bits",h.burst.bits.size());f.add("lane_committed_bits",h.committed);
+                f.add("lane_pending_bits",h.burst.bits.size()-h.committed);
+                f.add("lane_last_committed_end",h.committed_end);
+                f.add("output_stream_present",stream!=nullptr);
+                if(stream) {
+                    f.add("stream_first_sample",stream->stream_first_sample);
+                    f.add("stream_first_symbol",stream->first_symbol);
+                    f.add("stream_enqueued_next_symbol",stream->last_symbol);
+                    f.add("stream_ended",stream->ended);f.add("lane_is_output_owner",stream->owner==&h);
+                    f.add("output_owner_present",stream->owner!=nullptr);
+                    if(stream->owner) {
+                        const auto& owner=*stream->owner;
+                        f.add("output_owner_lane_id",logical_id(hypotheses.index(owner)));
+                        f.add("owner_admitted",owner.admitted);
+                        f.add("owner_buffer_first_symbol",owner.burst.first_stream_symbol);
+                        f.add("owner_committed_bits",owner.committed);
+                        f.add("owner_last_committed_end",owner.committed_end);
+                    }
+                }
+            });
+        }
         if(burst && timing_enabled && !emissions.empty())timing_dirty=true;
         if(prefix_timing_continuation())settle_timing(true);
         if(scheduled_map() && h.admitted && h.committed_end==end)scheduled->last_accepted[hypothesis]=h.index+1;
