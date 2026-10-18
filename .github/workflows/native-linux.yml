@@ -154,7 +154,7 @@ jobs:
         run: |
           set -o pipefail
           git -c safe.directory="$PWD" rev-parse HEAD | tee build/eme-diagnostic-source.txt
-          ./build/test_frequency_axis_probability --diagnose-end 128 30 3 3 2>&1 | tee build/eme-diagnostic.log
+          ./build/test_frequency_axis_probability --diagnose-end 128 30 3 3 --score-covered 2>&1 | tee build/eme-diagnostic.log
           echo 'One paired diagnostic capture only. Exit zero checks accepted-grid timing and backend parity; it is not exact-content recovery, full regression or qualification.' >> "$GITHUB_STEP_SUMMARY"
       - name: Measure original V1 reconstruction before its unchanged strict gate
         if: inputs.scope == 'alsa-diagnostic'

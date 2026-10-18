@@ -5,6 +5,8 @@
 #include "datapump/tuning.hpp"
 #include "../src/eme_probability.hpp"
 #include "../src/pattern_fft_batch.hpp"
+#include "../src/pattern_observation_layout.hpp"
+#include <optional>
 #include <bit>
 #include <numbers>
 #include <random>
@@ -18,7 +20,7 @@
 #include <string_view>
 using namespace datapump;
 namespace {
-bool diagnostic_capture=false;
+bool diagnostic_capture=false,diagnostic_covered_scores=false;
 void require(bool condition,const char* message) {if(!condition)throw std::runtime_error(message);}
 auto evidence_key(const modem::PatternEvidence& e) {
     return std::array<std::uint64_t,13>{e.first_sample,e.end_sample,e.stream_symbol,
@@ -96,6 +98,7 @@ struct Outcome {
     Bytes bits;std::vector<Event> events;std::size_t complete=0;
     std::uint64_t completion_at=0;std::uint64_t axis=0,tracking=0,first_trials=0,first_starts=0;
     double first_threshold=0;
+    std::optional<modem::PatternEvidence> first_candidate;
 };
 Outcome receive(modem::Config c,const transfer::Options& o,const std::vector<float>& pcm,
                 const auto& bank,modem::ReceiverStrategy strategy) {
@@ -129,7 +132,12 @@ Outcome receive(modem::Config c,const transfer::Options& o,const std::vector<flo
                 const auto work=rx.fft_work();out.first_trials=work.threshold_trials;out.first_starts=work.retained_start_trials;
                 for(const auto& candidate:rx.candidates())
                     if(candidate.first_sample==e.first_sample&&candidate.bit==e.bits.front())
-                        out.first_threshold=candidate.admission_threshold;
+                        {
+                            out.first_threshold=candidate.admission_threshold;
+                            if(candidate.end_sample==e.end_sample && candidate.stream_symbol==e.first_stream_symbol &&
+                               candidate.stream_phase_samples==e.stream_phase_samples && candidate.frequency_hz==e.frequency_hz)
+                                out.first_candidate=candidate;
+                        }
             }
             out.events.push_back({e.bits,e.first_sample,e.end_sample,e.complete,at});
             out.bits.insert(out.bits.end(),e.bits.begin(),e.bits.end());
@@ -165,6 +173,105 @@ Outcome receive(modem::Config c,const transfer::Options& o,const std::vector<flo
     }
     out.axis=rx.fft_work().frequency_axis_batches;out.tracking=rx.fft_work().frequency_axis_tracking_batches;
     return out;
+}
+void isolated_eme_128_scores(const modem::Config& c,const std::vector<float>& pcm,
+        const auto& bank,const modem::PatternEvidence& live) {
+    using Complex=std::complex<double>;constexpr double tau=2*std::numbers::pi;
+    require(c.sample_rate==6000&&c.carrier_hz==1500&&modem::symbol_sample_count(c)==768000&&
+        !c.scramble&&!c.dsss&&bank.hypotheses.size()==1783,"isolated scorer supports public EME128 only");
+    double maximum_offset=0,minimum_rate=1+bank.hypotheses.front().clock_error_ppm*1e-6;bool variable_clock=false;
+    for(const auto& h:bank.hypotheses) {
+        maximum_offset=std::max(maximum_offset,std::abs(h.frequency_offset_hz));
+        minimum_rate=std::min(minimum_rate,1+h.clock_error_ppm*1e-6);variable_clock|=h.clock_error_ppm!=0;
+    }
+    const auto bin=modem::detail::pattern_observation_bin_samples(c,maximum_offset);
+    const auto layout=modem::detail::pattern_observation_layout(c,bin,minimum_rate);
+    require(bin==750&&layout.length==1025&&layout.transform==2048&&layout.hop==512,
+        "isolated scorer changed EME geometry");
+    require(live.first_sample%bin==0&&live.frequency_hypothesis<bank.hypotheses.size()&&live.bit<2,
+        "isolated scorer lacks live candidate identity");
+    const auto needed=8+layout.hop+layout.length-1;require(needed<=pcm.size()/bin,"isolated scorer lacks PCM");
+    std::vector<Complex> projected;projected.reserve(needed);
+    Complex oscillator{1,0},sum{};const auto rotation=std::polar(1.,-tau*c.carrier_hz/c.sample_rate);std::size_t partial=0;
+    for(std::size_t sample=0;sample<needed*bin;++sample) {
+        require(std::isfinite(pcm[sample]),"isolated scorer nonfinite PCM");
+        sum+=static_cast<double>(pcm[sample])*oscillator;oscillator*=rotation;
+        if(((sample+1)&65535U)==0)oscillator/=std::abs(oscillator);
+        if(++partial==bin) {projected.push_back(sum/static_cast<double>(partial));sum={};partial=0;}
+    }
+    modem::detail::FftSearchGeometry geometry;
+    geometry.pattern={c.stream_epoch,modem::pattern_chip_samples(c),modem::pattern_chips_per_symbol(c),
+        modem::symbol_sample_count(c),c.sample_rate,static_cast<std::uint32_t>(c.spreading_mode),
+        modem::pattern_pulse_enabled(c)?1U:0U,0,0,c.spreading_seed,c.dsss_seed,c.dsss_factor,
+        static_cast<std::uint32_t>(c.outer_dsss_version)};
+    geometry.pattern.legacy_public=modem::legacy_public_pattern(c);geometry.bin_samples=bin;
+    geometry.bins_per_symbol=layout.length;geometry.carrier_hz=c.carrier_hz;
+    geometry.evidence_count=static_cast<double>(layout.length);geometry.drift_sections=4;
+    geometry.extended_clock_window=variable_clock;
+    const auto omega=tau*c.carrier_hz/c.sample_rate,sine=std::sin(omega);
+    const auto image=std::abs(sine)>1e-12?std::abs(std::sin(static_cast<double>(bin)*omega)/sine):static_cast<double>(bin);
+    const auto minimum_eigenvalue=static_cast<double>(bin)-image;
+    geometry.real_rank=minimum_eigenvalue<=1e-10*static_cast<double>(bin);
+    geometry.noise_condition=geometry.real_rank?1.:(static_cast<double>(bin)+image)/minimum_eigenvalue;
+    struct Maximum {std::uint64_t first=0;std::size_t lane=0;unsigned bit=0;double score=-1,alternative=0;};
+    const auto emit=[&](const char* domain,std::size_t first_bin,std::size_t starts,const Maximum& m) {
+        require(m.score>=0,"isolated score domain empty");const auto& h=bank.hypotheses[m.lane];
+        std::cout<<"isolated_eme_max domain="<<domain<<" batch_first_bin="<<first_bin<<" starts="<<starts
+            <<" first="<<m.first<<" end="<<m.first+layout.length*bin<<" symbol=0 phase=0 lane="<<m.lane
+            <<" frequency="<<c.carrier_hz+h.frequency_offset_hz<<" clock_ppm="<<h.clock_error_ppm
+            <<" bit="<<m.bit<<" score="<<m.score<<" alternative="<<m.alternative
+            <<" full_support=1 outer_checked=0 representation=maximum_before_peak_compression\n";
+    };
+    const auto run=[&](std::size_t first_bin,std::size_t starts,bool check_live) {
+        const auto observations=std::span<const Complex>(projected).subspan(first_bin,layout.length+starts-1);
+        std::vector<Complex> spectrum(layout.transform),product(layout.transform);
+        std::copy(observations.begin(),observations.end(),spectrum.begin());
+        modem::detail::pattern_fft(spectrum,false,{},modem::SearchArithmetic::fp64);
+        std::vector<double> energy(observations.size()+1);
+        for(std::size_t i=0;i<observations.size();++i)energy[i+1]=energy[i]+std::norm(observations[i]);
+        modem::detail::FftSearchBatch batch;batch.geometry=geometry;batch.observations=observations;
+        batch.spectrum=spectrum;batch.energy_prefix=energy;batch.first_bin=first_bin;batch.starts=batch.score_stride=starts;
+        modem::PatternCode code(c,c.stream_epoch);
+        std::vector<modem::detail::FftSearchScore> scores(starts);
+        std::vector<modem::detail::FftDriftAccumulator> scratch(starts);
+        std::array<Maximum,2> global{},owned{};Maximum overall;bool checked=false;
+        std::uint64_t cells=0;const auto radius=modem::symbol_sample_count(c)/2;
+        for(std::size_t f=0;f<bank.hypotheses.size();++f) {
+            const auto& h=bank.hypotheses[f];modem::detail::FftSearchJob job{0,0,f,h.frequency_offset_hz};
+            job.clock_ratio=1+h.clock_error_ppm*1e-6;
+            modem::detail::execute_drift_search_job(batch,job,scores,product,scratch,code);
+            for(std::size_t j=0;j<starts;++j) {
+                ++cells;const auto first=(first_bin+j)*bin;
+                const auto distance=first>live.first_sample?first-live.first_sample:live.first_sample-first;
+                const std::array<double,2> value{scores[j].zero,scores[j].one};
+                for(unsigned bit=0;bit<2;++bit) {
+                    const Maximum item{first,f,bit,value[bit],value[1-bit]};
+                    if(item.score>global[bit].score)global[bit]=item;
+                    if(distance<radius&&item.score>owned[bit].score)owned[bit]=item;
+                }
+                const auto winner=value[1]>value[0]?1U:0U;const Maximum item{first,f,winner,value[winner],value[1-winner]};
+                if(item.score>overall.score)overall=item;
+                if(check_live&&first==live.first_sample&&f==live.frequency_hypothesis) {
+                    const auto score_error=std::abs(value[live.bit]-live.score);
+                    const auto alternative_error=std::abs(value[1-live.bit]-live.alternative_score);
+                    std::cout<<"isolated_eme_live_cell score="<<value[live.bit]<<" alternative="<<value[1-live.bit]
+                        <<" live_score="<<live.score<<" live_alternative="<<live.alternative_score
+                        <<" score_error="<<score_error<<" alternative_error="<<alternative_error<<'\n';
+                    require(score_error<1e-9&&alternative_error<1e-9,"isolated scorer differs from live cell");checked=true;
+                }
+            }
+        }
+        require(cells==starts*bank.hypotheses.size(),"isolated scorer omitted original hypotheses");
+        if(check_live)require(checked&&overall.first==live.first_sample&&overall.lane==live.frequency_hypothesis&&
+            overall.bit==live.bit,"isolated original first batch winner differs");
+        for(unsigned bit=0;bit<2;++bit) {emit("whole_batch",first_bin,starts,global[bit]);emit("frozen_owner_strict_half_symbol",first_bin,starts,owned[bit]);}
+        std::cout<<"isolated_eme_batch_complete first_bin="<<first_bin<<" starts="<<starts<<" original_cells="<<cells<<" both_bits=1\n";
+    };
+    std::cout<<"isolated_eme_geometry bin="<<bin<<" length="<<layout.length<<" transform="<<layout.transform
+        <<" bank="<<bank.hypotheses.size()<<" owner_first="<<live.first_sample
+        <<" owner_radius_exclusive="<<modem::symbol_sample_count(c)/2
+        <<" note=independent_scores_not_admission_or_recovery\n";
+    run(0,8,true);run(8,layout.hop,false);
 }
 void exact_score_algebra() {
     for(const auto seconds:{128U,256U}) {
@@ -452,6 +559,10 @@ void capture(unsigned seconds,double es,std::uint64_t seed,bool compare,unsigned
         if(require_success&&bits==1)check_charge(old,"existing");
         require(old.events==axis.events,"FFT backends disagree on pending bits/timing/completion");
     }
+    if(diagnostic_covered_scores) {
+        require(axis.first_candidate.has_value(),"isolated scorer has no admitted first candidate");
+        isolated_eme_128_scores(c,pcm,bank,*axis.first_candidate);
+    }
     // Derive the last nominal grid endpoint from the transmitter's independent
     // support endpoint. source_valid_payload_end includes trailing pulse padding.
     const auto nominal_end=support_end-modem::pattern_pulse_padding_samples(c)+startup;
@@ -490,10 +601,13 @@ int main(int argc,char** argv) {try {
     if(argc==2&&std::string_view(argv[1])=="--algebra-source-only") {exact_score_algebra();source_projection_checks();return 0;}
     if(argc==2&&std::string_view(argv[1])=="--scope-only") {probability_scope();return 0;}
     if(argc==2&&std::string_view(argv[1])=="--existing-eme-only") {existing_eme_scope();return 0;}
-    if(argc==6&&std::string_view(argv[1])=="--diagnose-end") {
+    if((argc==6||argc==7)&&std::string_view(argv[1])=="--diagnose-end") {
+        require(argc==6||std::string_view(argv[6])=="--score-covered","unknown end diagnostic option");
+        diagnostic_covered_scores=argc==7;
         diagnostic_capture=true;std::cout<<std::setprecision(17);
         const auto seconds=std::stoul(argv[2]),bits=std::stoul(argv[5]);
         require((seconds==128||seconds==256)&&bits>=1&&bits<=4,"invalid end diagnostic scope");
+        require(!diagnostic_covered_scores||seconds==128,"isolated covered-bank scorer requires 128 seconds");
         capture(seconds,std::stod(argv[3]),std::stoull(argv[4]),true,bits,false,false,false,false);
         return 0; // Timing diagnostic; neither source-grid alignment nor full-bit success is asserted.
     }
