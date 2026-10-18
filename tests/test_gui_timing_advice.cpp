@@ -338,6 +338,8 @@ int main(int argc,char** argv) {
     Application app(launch);app.start();app.edit(F::message,"quick brown");
     const auto begin=std::chrono::steady_clock::now();std::string previous;unsigned resets=0;bool numeric=false;double ready=-1;
     double max_tick=0,plan_ready=-1,graphs_ready=-1;std::string plan_text;
+    double plan_requested=-1,numeric_ready=-1,first_plan_document_seconds=-1,max_plan_document_seconds=0;
+    double selected_observed=-1,selected_request_seconds=-1;
     while(std::chrono::steady_clock::now()-begin<std::chrono::seconds(argc>2?std::stoi(argv[2]):8)) {
         const auto before=std::chrono::steady_clock::now();app.tick();
         max_tick=std::max(max_tick,std::chrono::duration<double>(std::chrono::steady_clock::now()-before).count());
@@ -345,13 +347,26 @@ int main(int argc,char** argv) {
         const auto label=app.field(F::simulation_confidence).text;
         if(label!=previous) {
             if(numeric&&label.ends_with("Calculating..."))++resets;
-            if(label.find('%')!=std::string::npos)numeric=true;
+            if(label.find('%')!=std::string::npos) {
+                if(!numeric)numeric_ready=std::chrono::duration<double>(std::chrono::steady_clock::now()-begin).count();
+                numeric=true;
+            }
             if(probe)std::cout<<std::chrono::duration<double>(before-begin).count()<<" "<<label<<'\n';
             previous=label;
         }
         if(ready>=0) {
+            const auto request_started=std::chrono::steady_clock::now();
+            if(plan_requested<0)plan_requested=std::chrono::duration<double>(request_started-begin).count();
             plan_text=all_text(*app.document(ui::Page::planner,1080));
+            const auto observed=std::chrono::steady_clock::now();
+            const auto document_seconds=std::chrono::duration<double>(observed-request_started).count();
+            if(first_plan_document_seconds<0)first_plan_document_seconds=document_seconds;
+            max_plan_document_seconds=std::max(max_plan_document_seconds,document_seconds);
             if(plan_text.find("15×")!=std::string::npos) {
+                if(selected_observed<0) {
+                    selected_observed=std::chrono::duration<double>(observed-begin).count();
+                    selected_request_seconds=selected_observed-plan_requested;
+                }
                 if(plan_ready<0)plan_ready=std::chrono::duration<double>(before-begin).count();
                 if(graphs_ready<0&&plan_text.find("Calculating graphs...")==std::string::npos)
                     graphs_ready=std::chrono::duration<double>(before-begin).count();
@@ -359,7 +374,11 @@ int main(int argc,char** argv) {
         }
         std::this_thread::sleep_for(5ms);
     }
-    std::cout<<"ready="<<ready<<" tick_max="<<max_tick<<" plan_ready="<<plan_ready<<" graphs_ready="<<graphs_ready<<" numeric_resets="<<resets<<" timings="<<timing_observations<<" capture_opens="<<capture_opens<<'\n';
+    std::cout<<"ready="<<ready<<" tick_max="<<max_tick<<" plan_ready="<<plan_ready<<" graphs_ready="<<graphs_ready
+        <<" plan_requested="<<plan_requested<<" numeric_ready="<<numeric_ready
+        <<" selected_observed="<<selected_observed<<" selected_request_seconds="<<selected_request_seconds
+        <<" first_plan_document_seconds="<<first_plan_document_seconds<<" max_plan_document_seconds="<<max_plan_document_seconds
+        <<" numeric_resets="<<resets<<" timings="<<timing_observations<<" capture_opens="<<capture_opens<<'\n';
     std::cout<<"airtime="<<app.field(F::airtime).text<<" observer="<<app.field(F::lpi_estimate).text<<'\n';
     if(probe)std::cout<<"plan="<<plan_text<<'\n';
     if(!probe) {

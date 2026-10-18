@@ -1045,15 +1045,52 @@ void fake_hop_display() {
     const auto carrier=controller.field(F::carrier).text,shift=controller.field(F::rf_shift).text;
     const auto base=controller.settings().transfer.modem.carrier_hz;
     check(controller.enabled(C::transmit_noise),"Fake hopping fixture has invalid transmit geometry");
-    controller.start();controller.activate(C::transmit_noise);
+    double receiver_setup_seconds=0;
+    if(delayed_arrival) {
+        // This fixture checks presentation after noise activation. Prepare
+        // optional GUI advice and the independent idle receiver first; no TX
+        // samples or arrival preview exist during this bounded setup.
+        const auto setup_started=std::chrono::steady_clock::now();
+        prepare(controller);
+        controller.start();
+        const auto setup_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+        while((!controller.snapshot().receiver_bank_builds||!controller.snapshot().samples_received)&&
+              std::chrono::steady_clock::now()<setup_deadline) {
+            controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        const auto& listening=controller.snapshot();
+        receiver_setup_seconds=std::chrono::duration<double>(
+            std::chrono::steady_clock::now()-setup_started).count();
+        std::cout<<"FHSS_IDLE_SETUP preference="<<preference
+            <<" wall_seconds="<<receiver_setup_seconds
+            <<" transmission_id="<<listening.transmission_id
+            <<" bank_builds="<<listening.receiver_bank_builds
+            <<" input_revision="<<listening.receiver_input_revision
+            <<" samples_received="<<listening.samples_received<<'\n';
+        check(listening.running&&listening.simulation&&listening.receiver_bank_builds&&listening.samples_received&&
+              !listening.transmitting&&!listening.transmitting_noise&&!listening.receiver_health.failed()&&
+              listening.error.empty()&&listening.receiver_error.empty(),
+              "delayed FHSS fixture did not prepare a healthy independent idle receiver");
+    } else controller.start();
+    const auto prior_transmission_id=controller.snapshot().transmission_id;
+    controller.activate(C::transmit_noise);
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
     std::string first;bool changed=false,cycle_seen=false,arrival_seen=false;
+    bool pre_arrival_seen=false,emitted_arrival_seen=false;
+    std::optional<std::uint64_t> arrival_transmission_id;
+    // Trace observes generated source PCM; transmission_seconds excludes
+    // channel interpolation lookahead. channel.cpp bounds that lookahead by
+    // its 1024-source-sample buffer. Retain the existing stop proof's two
+    // sample endpoint-rounding allowance as well; never count idle RX time.
+    const auto generation_lookahead_seconds=1026./controller.settings().transfer.modem.sample_rate;
     std::optional<modem::TransmitTrace> previous_trace;
-    while(std::chrono::steady_clock::now()<deadline&&(!changed||(short_list&&!cycle_seen)||(delayed_arrival&&!arrival_seen))) {
+    while(std::chrono::steady_clock::now()<deadline&&(!changed||(short_list&&!cycle_seen)||
+          (delayed_arrival&&(!arrival_seen||!pre_arrival_seen||!emitted_arrival_seen)))) {
         controller.poll();
         const auto& cf=controller.field(F::carrier);const auto& sf=controller.field(F::rf_shift);
         if(!sf.disabled_text.empty()) {
-            const auto& trace=controller.snapshot().transmit_trace;
+            const auto& current=controller.snapshot();
+            const auto& trace=current.transmit_trace;
             check(controller.field(F::transmit_scope).records==transmit_scope_records(trace,false),
                   "FHSS current-cycle scope prefix remained stale between chip revisions");
             if(previous_trace&&trace.fhss_cycle!=previous_trace->fhss_cycle)
@@ -1063,7 +1100,31 @@ void fake_hop_display() {
                 const auto& label=controller.field(F::fhss).display_text;
                 check(trace.fhss_arrival_offset_seconds==2.564&&label.find("arrival +")!=std::string::npos,
                     "EME offset missing from separate delayed arrival preview");
+                check(current.transmitting&&current.transmitting_noise&&!current.transmission_failed&&
+                      current.transmission_id!=prior_transmission_id,
+                      "delayed FHSS preview did not belong to the newly activated noise transmission");
+                if(!arrival_transmission_id) {
+                    arrival_transmission_id=current.transmission_id;
+                    std::cout<<"FHSS_FIRST_NOISE_PREVIEW preference="<<preference
+                        <<" wall_seconds="<<std::chrono::duration<double>(std::chrono::steady_clock::now()-
+                            (deadline-std::chrono::seconds(5))).count()
+                        <<" transmission_id="<<current.transmission_id
+                        <<" bank_builds="<<current.receiver_bank_builds
+                        <<" input_revision="<<current.receiver_input_revision
+                        <<" samples_received="<<current.samples_received
+                        <<" transmission_seconds="<<current.transmission_seconds<<'\n';
+                }
+                check(current.transmission_id==*arrival_transmission_id,
+                      "delayed FHSS preview changed transmission identity");
+                const auto generated_upper_seconds=current.transmission_seconds+generation_lookahead_seconds;
+                if(generated_upper_seconds<trace.fhss_arrival_offset_seconds) {
+                    check(!trace.fhss_arrival_available,"idle receiver progress manufactured an early FHSS arrival");
+                    pre_arrival_seen=true;
+                }
                 if(trace.fhss_arrival_available) {
+                    check(pre_arrival_seen&&generated_upper_seconds>=trace.fhss_arrival_offset_seconds,
+                          "delayed FHSS arrival lacked a current-transmission pre-arrival observation or physical support");
+                    if(current.transmission_seconds>=trace.fhss_arrival_offset_seconds)emitted_arrival_seen=true;
                     arrival_seen=true;
                     check(label.find("hop "+std::to_string(trace.fhss_arrival_channel+1)+", Shift ")!=std::string::npos&&
                         trace.fhss_arrival_hop<trace.fhss_hop,
@@ -1100,7 +1161,7 @@ void fake_hop_display() {
         <<" stop_seconds="<<double(modem::transmit_stop_sample_count(stop_config))/stop_config.sample_rate
         <<" deferred="<<(stop_config.fake_hopping&&stop_config.fake_hopping->defer_symbols)<<'\n';
     check(!short_list||cycle_seen,"FHSS list fixture must cross a fresh keyed hop cycle");
-    if(delayed_arrival&&!arrival_seen) {
+    if(delayed_arrival&&(!arrival_seen||!pre_arrival_seen||!emitted_arrival_seen)) {
         const auto& failed=controller.snapshot();
         const auto& trace=failed.transmit_trace;
         const auto& health=failed.receiver_health;
@@ -1118,6 +1179,12 @@ void fake_hop_display() {
             <<" wall_seconds="<<wall_seconds
             <<" snapshot_sequence="<<failed.sequence
             <<" transmission_id="<<failed.transmission_id
+            <<" prior_transmission_id="<<prior_transmission_id
+            <<" arrival_transmission_id="<<arrival_transmission_id.value_or(0)
+            <<" pre_arrival_seen="<<pre_arrival_seen
+            <<" emitted_arrival_seen="<<emitted_arrival_seen
+            <<" receiver_setup_seconds="<<receiver_setup_seconds
+            <<" generation_lookahead_seconds="<<generation_lookahead_seconds
             <<" simulation="<<failed.simulation
             <<" running="<<failed.running
             <<" transmitting="<<failed.transmitting
@@ -1157,6 +1224,8 @@ void fake_hop_display() {
             <<std::endl;
     }
     check(!delayed_arrival||arrival_seen,"delayed FHSS preview never reached its first arrival");
+    check(!delayed_arrival||(pre_arrival_seen&&emitted_arrival_seen&&arrival_transmission_id.has_value()),
+          "delayed FHSS preview missed its current-transmission pre-arrival or traversed-offset proof");
     const auto stop_source_seconds=controller.snapshot().transmission_seconds;
     const auto protected_tail_seconds=double(modem::transmit_stop_sample_count(stop_config))/stop_config.sample_rate;
     controller.activate(C::cancel);
