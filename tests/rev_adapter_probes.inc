@@ -581,6 +581,7 @@
             throw std::runtime_error("Rev hidden document page retained inline editor input or focus");
     }
     void native_frame() {
+        ::rev_adapter_timing::FrameTiming timing;
         // refresh queues an OS paint; an immediate pump can observe no event
         // until that request has completed its native round trip. Preserve the
         // probes' frame budgets by awaiting an actual visible surface paint.
@@ -589,10 +590,11 @@
         refresh(event);
         while(surface->draws==previous) {
             Rev::NativeWindow::pumpEvents();
-            if(surface->draws!=previous)return;
+            if(surface->draws!=previous){timing.painted=true;return;}
             if(Clock::now()>=deadline)throw std::runtime_error("Rev native probe timed out awaiting its requested paint");
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
+        timing.painted=true;
     }
     void verify_estimate_warning_colors() {
         test::estimate_warning_fields(application,[&] {
