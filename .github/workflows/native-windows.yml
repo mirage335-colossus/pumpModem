@@ -104,7 +104,7 @@ jobs:
           (report/'compile-ports.patch').write_bytes(patch)
           actual_diff=subprocess.check_output(['git','diff','--binary'],cwd=root)
           (report/'actual-source.patch').write_bytes(actual_diff)
-          names=['pattern_correlator','pattern_drift','receiver_differential']
+          names=['pattern_correlator','pattern_drift','receiver_differential','clock_sync']
           manifest={'baseline_sha':base,'workflow_sha':os.environ['GITHUB_SHA'],'port_reference':'38e20952d512b8073cbe49d3e49d1fdfb436ce1a','patch_sha256':H(patch),'selected_tests':names,'unchanged_test_sources':{name:H((root/('tests/test_'+name+'.cpp')).read_bytes().replace(b'\r\n',b'\n')) for name in names},'files':[{'path':path,'raw_before_sha256':H(raw),'canonical_before_sha256':H(src),'after_sha256':H(dst),'fragment_counts':counts} for path,raw,src,dst,counts in prepared]}
           manifest['actual_diff_sha256']=H(actual_diff)
           (report/'baseline-ports.json').write_text(json.dumps(manifest,sort_keys=True,indent=2)+'\n',encoding='utf-8')
@@ -133,7 +133,7 @@ jobs:
             'web' { $targets = @('datapump-tests-web') }
             'core' { $targets = @('datapump-apps', 'datapump-tests-ci-core') }
             'gui' { $targets = @('datapump-apps', 'datapump-tests-gui') }
-            'receiver-baseline' { $targets = @('test_pattern_correlator', 'test_pattern_drift', 'test_receiver_differential') }
+            'receiver-baseline' { $targets = @('test_pattern_correlator', 'test_pattern_drift', 'test_receiver_differential', 'test_clock_sync') }
             'fast' { $targets = @('datapump-tests-fast') }
             'live' { $targets = @('datapump-tests-ci-live') }
             default { throw "Unknown native scope: $env:CI_SCOPE" }
@@ -146,18 +146,106 @@ jobs:
         if: inputs.scope != 'package' && inputs.scope != 'receiver-baseline'
         # Separate runners supply parallelism; preserve per-runner live budgets.
         run: python tools/run-ci-tests.py --build-dir build --scope "$env:CI_SCOPE" --jobs 1 --config Release --report build/ci-test-report.json
-      - name: Run all three unchanged pre-Burst receiver tests
+      - name: Run all four unchanged pre-Burst receiver and clock tests
         if: inputs.scope == 'receiver-baseline'
         run: |
-          $selector = '^(pattern_correlator|pattern_drift|receiver_differential)$'
+          $selector = '^(pattern_correlator|pattern_drift|receiver_differential|clock_sync)$'
           ctest --test-dir build -C Release --show-only=json-v1 -R $selector > build/receiver-baseline/inventory.json
           if ($LASTEXITCODE -ne 0) { throw "Frozen receiver inventory failed" }
           $inventory = Get-Content build/receiver-baseline/inventory.json -Raw | ConvertFrom-Json
-          $expected = @('pattern_correlator', 'pattern_drift', 'receiver_differential')
+          $expected = @('pattern_correlator', 'pattern_drift', 'receiver_differential', 'clock_sync')
           $actual = @($inventory.tests | ForEach-Object { $_.name })
-          if ($actual.Count -ne 3 -or @(Compare-Object $actual $expected).Count -ne 0) { throw "Frozen receiver inventory must contain all three tests" }
+          if ($actual.Count -ne 4 -or @(Compare-Object $actual $expected).Count -ne 0) { throw "Frozen receiver inventory must contain all four tests" }
           ctest --test-dir build -C Release --output-on-failure --no-tests=error --parallel 1 --timeout 3600 --output-junit "$PWD/build/receiver-baseline/results.xml" -R $selector
           if ($LASTEXITCODE -ne 0) { throw "Frozen receiver control tests failed" }
+      - name: Probe frozen and current UTC phase arithmetic independently
+        if: always() && inputs.scope == 'receiver-baseline'
+        run: |
+          $probe = 'build/receiver-baseline/utc-phase-probe'
+          New-Item -ItemType Directory -Force $probe | Out-Null
+          @'
+          #include "datapump/utc_timing.hpp"
+          #include <iomanip>
+          #include <iostream>
+          int main() {
+              using namespace datapump::audio;
+              constexpr long double epoch=1800000000.L;
+              constexpr double phase=.010,raw=.0002;
+              const auto ulp=std::nextafter(epoch,std::numeric_limits<long double>::infinity())-epoch;
+              std::cout<<std::setprecision(std::numeric_limits<long double>::max_digits10);
+              unsigned failures=0;
+              for(const auto read_roundoff:{0.L,ulp})
+                  for(const auto mode:{UtcTimeline::Prediction::fitted,UtcTimeline::Prediction::timestamp_intersection})
+                      for(const auto joint:{false,true}) {
+                          unsigned observed=0,index=0; bool contained=true,decomposed=true; std::string error,stage="construct";
+                          TimePrediction last{};
+                          try {
+                              UtcTimeline timeline(48000,.001,mode,
+                                  mode==UtcTimeline::Prediction::timestamp_intersection?std::optional<double>(raw):std::nullopt,
+                                  mode==UtcTimeline::Prediction::timestamp_intersection,ClockTimingPolicy{0,.001,phase});
+                              for(unsigned i=0;i<=200;++i) {
+                                  index=i; stage="observe";
+                                  const auto t=static_cast<long double>(i)*.1L;
+                                  const auto p=-static_cast<long double>(phase)+2*phase*i/200;
+                                  timeline.observe({48000*t,epoch+t+p,t+(joint?p:0),raw,
+                                      static_cast<double>(read_roundoff),TimingQuality::estimated,4});
+                                  ++observed;
+                                  stage="predict";
+                                  last=timeline.predict(48000*(t+.05L));
+                                  contained=contained && std::abs(last.utc_seconds-(epoch+t+.05L))<=last.uncertainty_seconds;
+                                  const auto seen=timeline.observation_uncertainty();
+                                  decomposed=decomposed && last.system_clock_phase_uncertainty_seconds==phase &&
+                                      last.provider_uncertainty_floor_seconds==raw && seen.latest==raw && seen.maximum==raw &&
+                                      last.clock_extrapolation_seconds==0 && last.rate_uncertainty_fraction<1e-12;
+                              }
+                              stage="final_predict";
+                              last=timeline.predict(48000*20.05L);
+                          } catch(const std::exception& e) { error=e.what(); }
+                          const auto latest=epoch+20.L+static_cast<long double>(phase);
+                          const auto roundoff=32*std::numeric_limits<long double>::epsilon()*(std::abs(latest)+20.05L+1);
+                          const auto contraction=last.uncertainty_seconds<raw+1e-7;
+                          const auto passed=error.empty() && observed==201 && contained && decomposed &&
+                              (mode!=UtcTimeline::Prediction::timestamp_intersection || contraction);
+                          if(!passed)++failures;
+                          std::cout<<"mode="<<(mode==UtcTimeline::Prediction::fitted?"fitted":"intersection")
+                              <<" joint_slew="<<joint<<" read_roundoff="<<read_roundoff
+                              <<" long_double_bytes="<<sizeof(long double)<<" long_double_digits="<<std::numeric_limits<long double>::digits
+                              <<" epsilon="<<std::numeric_limits<long double>::epsilon()<<" epoch_ulp="<<ulp
+                              <<" observed="<<observed<<" contained="<<contained<<" decomposed="<<decomposed
+                              <<" uncertainty="<<last.uncertainty_seconds<<" test_limit="<<(raw+1e-7)
+                              <<" predict_roundoff="<<roundoff<<" provider_floor="<<last.provider_uncertainty_floor_seconds
+                              <<" phase_allowance="<<last.system_clock_phase_uncertainty_seconds
+                              <<" utc_offset="<<(last.utc_seconds-epoch)<<" seconds_per_frame="<<last.seconds_per_frame
+                              <<" rate_uncertainty="<<last.rate_uncertainty_fraction<<" extrapolation="<<last.clock_extrapolation_seconds
+                              <<" minimum_radius="<<(raw+roundoff)<<" contraction_assertion="<<contraction
+                              <<" passed="<<passed<<" index="<<index<<" stage="<<stage<<" error="<<std::quoted(error)<<'\n';
+                      }
+              return failures?1:0;
+          }
+          '@ | Set-Content -Encoding utf8 "$probe/probe.cpp"
+          @'
+          cmake_minimum_required(VERSION 3.21)
+          project(utc_phase_probe LANGUAGES CXX)
+          foreach(source frozen current)
+            add_executable(${source} probe.cpp)
+            target_compile_features(${source} PRIVATE cxx_std_20)
+            target_include_directories(${source} PRIVATE "${${source}_ROOT}/include")
+          endforeach()
+          '@ | Set-Content -Encoding utf8 "$probe/CMakeLists.txt"
+          Get-FileHash comparison-source/include/datapump/utc_timing.hpp, include/datapump/utc_timing.hpp, "$probe/probe.cpp" | Format-List | Out-File build/receiver-baseline/utc-phase-inputs.txt
+          cmake -S $probe -B build/utc-phase-probe -A x64 "-Dfrozen_ROOT=$PWD/comparison-source" "-Dcurrent_ROOT=$PWD"
+          if ($LASTEXITCODE -ne 0) { throw "UTC phase probe configuration failed" }
+          cmake --build build/utc-phase-probe --config Release --parallel 1
+          if ($LASTEXITCODE -ne 0) { throw "UTC phase probe build failed" }
+          $probeFailed = $false
+          foreach ($source in @('frozen', 'current')) {
+            & "./build/utc-phase-probe/Release/$source.exe" | Tee-Object -FilePath "build/receiver-baseline/utc-phase-$source.log"
+            $probeExit = $LASTEXITCODE
+            "$source exit=$probeExit" | Tee-Object -FilePath "build/receiver-baseline/utc-phase-$source-exit.txt"
+            if ($probeExit -ne 0) { $probeFailed = $true }
+          }
+          Copy-Item build/utc-phase-probe/CMakeCache.txt build/receiver-baseline/utc-phase-probe-cache.txt
+          if ($probeFailed) { throw "UTC phase diagnostic retained failing subcases; see both numerical logs" }
       - name: Verify Windows GUI and relocation with an empty PATH
         if: inputs.scope == 'package'
         env:

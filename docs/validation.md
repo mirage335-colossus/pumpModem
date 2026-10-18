@@ -83,8 +83,8 @@ Both complete SDK runs failed only `frequency_axis_probability`.
 The strict EME frequency-axis continuation and V1 fractional-resampling clipping
 failures have earlier retained investigation evidence. Unchanged source alone
 does not prove the other Windows failures predate Symbol_Burst. A frozen
-pre-feature Windows comparison was prepared locally but has not been committed,
-pushed or run. It must preserve the original tests and explicitly identify its
+pre-feature Windows comparison was committed and pushed in `325073e`, but has
+not run. It must preserve the original tests and explicitly identify its
 four identifier-only MSVC compile ports. No failed assertion has been relaxed.
 
 The full instrumented shaped calibration used four capture workers and 64 fixed
