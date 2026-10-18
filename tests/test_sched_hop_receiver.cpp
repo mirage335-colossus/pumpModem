@@ -14,6 +14,8 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <iomanip>
+#include <limits>
 #include <numbers>
 
 using namespace datapump;
@@ -285,14 +287,37 @@ void weak_amplitude_chain() {
     constexpr std::array<double,4> scales{354.031494140625,306.191162109375,
         310.993408203125,277.803466796875};
     const auto pcm=make_pcm(scales,capture_end);const auto e=observe(std::span(pcm).first(prefix_end));
+    const auto joint=[&](std::size_t count) {double sum=0;for(std::size_t i=0;i<count;++i)sum+=e.values[i].score;
+        const auto n=static_cast<double>(count);return sum>n?sum-n-n*std::log(sum/n)-n*std::log(2.):0.;};
+    std::cerr<<std::setprecision(std::numeric_limits<double>::max_digits10)
+        <<"WEAK_CHAIN_CONTEXT radius="<<modem::pattern_pcm_radius_limit
+        <<" pulse_flag="<<c.pulse_shaping<<" pulse_enabled="<<modem::pattern_pulse_enabled(c)
+        <<" packed="<<modem::packed_scheduled_symbols(c)
+        <<" chip_samples="<<modem::pattern_chip_samples(c)<<" symbol_samples="<<symbol
+        <<" padding_samples="<<modem::pattern_pulse_padding_samples(c)
+        <<" fft_samples="<<geometry.fft_samples<<" bins="<<geometry.bin_count
+        <<" arithmetic_request="<<static_cast<unsigned>(c.search_arithmetic)
+        <<" retain_score="<<query.retain_score<<" target="<<target<<std::endl;
+    bool prefix_present=true;
+    for(std::size_t i=0;i<4;++i) {
+        prefix_present=prefix_present&&e.present[i];const auto& v=e.values[i];
+        std::cerr<<"WEAK_CHAIN_EVIDENCE symbol="<<i<<" present="<<e.present[i]<<" scale="<<scales[i]
+            <<" first="<<v.first_sample<<" end="<<v.end_sample
+            <<" expected="<<static_cast<unsigned>(expected[i])<<" bit="<<static_cast<unsigned>(v.bit)
+            <<" score="<<v.score<<" alternative="<<v.alternative_score<<" threshold="<<v.admission_threshold
+            <<" target_delta="<<std::abs(v.score-target)<<" target_ok="<<(std::abs(v.score-target)<.05)
+            <<" retained="<<(v.score>=query.retain_score)<<" individual_below="<<(v.score+1<v.admission_threshold)
+            <<" distinct_winner="<<(v.bit==expected[i]&&v.score-v.alternative_score>=1.)
+            <<" joint_available="<<prefix_present;
+        if(prefix_present)std::cerr<<" joint="<<joint(i+1);
+        std::cerr<<std::endl;
+    }
     for(std::size_t i=0;i<4;++i) {
         check(e.present[i],"weak-chain evidence was not retained");const auto& v=e.values[i];
         check(v.bit==expected[i]&&v.score-v.alternative_score>=1.,"weak-chain symbol lost its correct distinct winner");
         check(std::abs(v.score-target)<.05&&v.score>=query.retain_score&&v.score+1<v.admission_threshold,
               "weak-chain symbols must be individually below unchanged admission threshold");
     }
-    const auto joint=[&](std::size_t count) {double sum=0;for(std::size_t i=0;i<count;++i)sum+=e.values[i].score;
-        const auto n=static_cast<double>(count);return sum>n?sum-n-n*std::log(sum/n)-n*std::log(2.):0.;};
     for(std::size_t count=1;count<4;++count)check(joint(count)<e.values[count-1].admission_threshold,"weak prefix meets joint admission");
     check(joint(4)>e.values.back().admission_threshold+1.,"four-symbol chain lacks joint evidence");
     modem::PatternCorrelator rx(c,query,16*1024*1024,{.amplitude_only=true});

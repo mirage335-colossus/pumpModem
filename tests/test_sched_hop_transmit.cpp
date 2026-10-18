@@ -9,6 +9,8 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <iomanip>
+#include <limits>
 #include <numbers>
 #include <string>
 
@@ -76,6 +78,22 @@ void split_waveform() {
                 base+=code.shaped_value(bit*code.chips_per_symbol(),bits[bit],static_cast<double>(u-pad-bit*code.symbol_samples()));
             const auto oscillator=std::polar(1.,2*std::numbers::pi*c.carrier_hz*(static_cast<double>(i)/c.sample_rate));
             const auto expected=modem::SchedHopSourceMap::gain(where,{origin+i})*oscillator*modem::pattern_limit_pcm(gain*base);
+            if(!(std::abs(actual[i]-expected)<2e-8)) {
+                const auto envelope=modem::SchedHopSourceMap::gain(where,{origin+i});
+                const auto raw=envelope*oscillator*(gain*base);
+                std::cerr<<std::setprecision(std::numeric_limits<double>::max_digits10)
+                    <<"SPLIT_WAVEFORM_MISMATCH fs="<<c.sample_rate<<" factor="<<c.dsss_factor
+                    <<" sample="<<i<<" source_sample="<<u<<" chip="<<code.chip_samples()
+                    <<" symbol="<<code.symbol_samples()<<" padding="<<pad
+                    <<" shaped="<<modem::pattern_pulse_enabled(c)
+                    <<" packed="<<modem::packed_scheduled_symbols(c)<<" envelope="<<envelope
+                    <<" source_radius="<<std::abs(gain*base)<<" limit="<<modem::pattern_pcm_radius_limit
+                    <<" actual="<<actual[i]<<" raw="<<raw<<" limited="<<expected
+                    <<" raw_error="<<std::abs(actual[i]-raw)
+                    <<" limited_error="<<std::abs(actual[i]-expected)
+                    <<" predicted_radial_error="<<envelope*std::max(0.,std::abs(gain*base)-modem::pattern_pcm_radius_limit)
+                    <<std::endl;
+            }
             check(std::abs(actual[i]-expected)<2e-8,"split waveform lost source shaping, independent patterns, or physical carrier phase");
             lit+=std::abs(actual[i])>1e-10;
         }

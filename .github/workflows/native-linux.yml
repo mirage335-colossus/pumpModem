@@ -16,7 +16,7 @@ on:
       scope:
         description: 'Run one complete native scope without repeating the other shards'
         type: choice
-        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic, receiver, startup-guide, alsa-diagnostic, alsa-radius-diagnostic]
+        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, alsa-diagnostic, alsa-radius-diagnostic]
         default: core
       calibration_section:
         description: 'Calibration section; used only by the calibration scope'
@@ -36,7 +36,7 @@ on:
         type: string
         default: Release
       scope:
-        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, startup-guide, alsa-diagnostic, or alsa-radius-diagnostic'
+        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, alsa-diagnostic, or alsa-radius-diagnostic'
         type: string
         required: true
       calibration_section:
@@ -144,6 +144,7 @@ jobs:
             alsa-diagnostic|alsa-radius-diagnostic) targets=(test_alsa_audio) ;;
             receiver) targets=(test_pattern_correlator test_pattern_drift test_receiver_differential test_clock_sync test_pattern_startup_guide) ;;
             startup-guide) targets=(test_pattern_startup_guide) ;;
+            sched-hop-diagnostic) targets=(test_sched_hop_transmit test_sched_hop_receiver) ;;
             fast) targets=(datapump-tests-fast) ;;
             live) targets=(datapump-tests-ci-live) ;;
             *) echo "Unknown native scope: $CI_SCOPE" >&2; exit 2 ;;
@@ -209,14 +210,18 @@ jobs:
           subprocess.run(git+['diff','--exit-code'],check=True)
           (report/'results.json').write_text(json.dumps(results,indent=2)+'\n')
           PY
-      - name: Run selected receiver and clock tests
-        if: inputs.scope == 'receiver' || inputs.scope == 'startup-guide'
+      - name: Run selected receiver, clock and scheduled-hop tests
+        if: inputs.scope == 'receiver' || inputs.scope == 'startup-guide' || inputs.scope == 'sched-hop-diagnostic'
         run: |
           mkdir -p build/receiver-fixtures
           selector='^(pattern_correlator|pattern_drift|receiver_differential|clock_sync|pattern_startup_guide)$'
           expected='pattern_correlator,pattern_drift,receiver_differential,clock_sync,pattern_startup_guide'
           if [ "$CI_SCOPE" = startup-guide ]; then
             selector='^pattern_startup_guide$'; expected='pattern_startup_guide'
+          fi
+          if [ "$CI_SCOPE" = sched-hop-diagnostic ]; then
+            selector='^(sched_hop_transmit|sched_hop_receiver)$'
+            expected='sched_hop_transmit,sched_hop_receiver'
           fi
           ctest --test-dir build --show-only=json-v1 -R "$selector" > build/receiver-fixtures/inventory.json
           python3 -c 'import json,sys; names=[t["name"] for t in json.load(open("build/receiver-fixtures/inventory.json"))["tests"]]; expected=sys.argv[1].split(","); assert len(names)==len(expected) and set(names)==set(expected),names' "$expected"
