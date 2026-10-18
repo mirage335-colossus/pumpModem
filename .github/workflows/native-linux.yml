@@ -997,10 +997,12 @@ jobs:
               --parallel 1 --timeout 7200 \
               --output-junit "$report/gui-serial-results.xml" -R "$selector" \
               > "$report/gui-serial.log" 2>&1
+            cp build/Testing/Temporary/LastTest.log "$report/gui-serial-LastTest.log"
             ctest --test-dir build --output-on-failure --no-tests=error \
               --parallel 2 --timeout 7200 \
               --output-junit "$report/gui-parallel-results.xml" -R "$selector" \
               > "$report/gui-parallel.log" 2>&1
+            cp build/Testing/Temporary/LastTest.log "$report/gui-parallel-LastTest.log"
             echo 'Focused GUI core diagnostic completed serially and in parallel. This is not full native matrix qualification.' >> "$GITHUB_STEP_SUMMARY"
           fi
       - name: Observe graceful completion and independently check immediate abort
