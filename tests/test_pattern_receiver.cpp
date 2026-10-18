@@ -6,6 +6,7 @@
 #include "datapump/symbol_schedule.hpp"
 #include "../src/pattern_fft_batch.hpp"
 #include "../src/pattern_fft_window.hpp"
+#include "../src/search_parallel.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -119,6 +120,7 @@ struct ComparedProgress {
     Bytes bits;
     std::size_t pending_polls=0,complete_events=0,candidates=0;
     std::size_t completed_at=0;
+    std::uint64_t tabulated_transforms=0;
 };
 ComparedProgress compare_parallel_progress(const std::vector<float>& samples,const modem::Config& c,
                                           modem::PatternSearch search,unsigned workers,bool shrink=false,
@@ -188,7 +190,22 @@ ComparedProgress compare_parallel_progress(const std::vector<float>& samples,con
         serial.finish();parallel.finish();poll(samples.size());
         serial.finish();parallel.finish();poll(samples.size());
     }
+    result.tabulated_transforms=parallel.fft_work().tabulated_fp64_transforms;
     return result;
+}
+void borrowed_double_tables_preserve_progress() {
+    auto c=config(64,true);c.pulse_shaping=false;c.search_arithmetic=modem::SearchArithmetic::fp64;
+    c.sample_rate=512;c.bandwidth_hz=64;c.carrier_hz=128;c.integration_seconds=1;
+    const Bytes bits{0,0,1};const auto symbol=modem::symbol_sample_count(c);
+    constexpr std::size_t delay=17;
+    const auto samples=waveform(c,bits,delay,12*c.sample_rate,.37);
+    const auto progress=compare_parallel_progress(samples,c,{},3,true);
+    check(modem::detail::search_concurrency(3)<2||progress.tabulated_transforms>0,
+          "eligible parallel receiver did not execute borrowed FP64 tables");
+    check(progress.bits==bits&&progress.pending_polls>=2&&progress.complete_events==1,
+          "borrowed tables changed exact prefixes, next-poll progress or completion count");
+    check(progress.completed_at>=delay+bits.size()*symbol+modem::pattern_absence_samples(c),
+          "borrowed tables completed before whole-symbol physical absence");
 }
 void parallel_search_exact_progress() {
     for(const unsigned workers:{3U,0U}) {
@@ -2482,6 +2499,7 @@ int main(int argc,char** argv) {
     run("short pattern shared projection phase",short_pattern_shared_projection_phase);
     run("short template cache workspace and exact equivalence",short_template_cache_workspace);
     run("parallel search exact progress",parallel_search_exact_progress);
+    run("borrowed FP64 tables preserve progress",borrowed_double_tables_preserve_progress);
     run("outer DSSS progress and physical absence",outer_dsss_progress_and_absence);
     run("outer DSSS weak AWGN unchanged",outer_dsss_weak_awgn_preserves_admission);
     run("long timing guide immutable progress",long_timing_guide_preserves_bit_owner);

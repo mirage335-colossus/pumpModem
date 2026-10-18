@@ -124,6 +124,9 @@ struct FftSearchBatch {
     ~FftSearchBatch();
     FftSearchGeometry geometry;
     std::span<const FftComplex> spectrum, carrier_square;
+    // Optional immutable public FP64 tables. Backing is borrowed through the
+    // joined dispatch only; broad coherent jobs preserve legacy scalar math.
+    search_fft::DoubleTableView double_tables;
     // Original disjoint projection bins permit a direct first-window pass.
     std::span<const FftComplex> observations;
     std::uint64_t first_bin = 0;

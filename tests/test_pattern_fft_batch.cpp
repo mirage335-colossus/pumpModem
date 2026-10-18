@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cfenv>
 #include <iostream>
 #include <numeric>
 #include <numbers>
@@ -75,6 +76,113 @@ void flat_batch_tiling_and_order() {
             check(equal(reversed[job*stride+start],expected[(fixture.jobs.size()-1-job)*stride+start]),
                   "FFT backend attached a result to execution order instead of its job index");
 }
+void borrowed_double_tables_equivalence_and_guards() {
+    Fixture f;f.jobs.resize(23);f.batch.carrier_square={};
+    for(std::size_t j=0;j<f.jobs.size();++j)f.jobs[j].clock_ratio=j%2?.9998:1.0002;
+    const auto n=f.spectrum.size(),stride=f.batch.score_stride;
+    std::vector<FftComplex> forward(n-1),inverse(n-1);
+    const auto tables=search_fft::prepare_double_tables(forward,inverse);
+    const auto saved_forward=forward,saved_inverse=inverse;
+    auto workers=f.workspaces(3);
+    std::vector<FftSearchScore> expected(f.jobs.size()*stride,untouched);
+    execute_fft_search_cpu(f.batch,f.jobs,expected,workers);
+    f.batch.double_tables=tables;
+    for(const auto count:{std::size_t{1},std::size_t{3}})
+        for(const auto tile:{std::size_t{1},std::size_t{7},f.jobs.size()}) {
+            auto selected=f.workspaces(count);
+            std::vector<FftSearchScore> actual(expected.size(),untouched);
+            for(std::size_t first=0;first<f.jobs.size();first+=tile) {
+                const auto jobs=std::min(tile,f.jobs.size()-first);
+                execute_fft_search_cpu(f.batch,std::span(f.jobs).subspan(first,jobs),
+                    std::span(actual).subspan(first*stride,jobs*stride),selected);
+            }
+            check(std::equal(expected.begin(),expected.end(),actual.begin(),equal),
+                  "borrowed tables changed generated scores, clock/phase jobs or output padding");
+        }
+    check(forward==saved_forward&&inverse==saved_inverse,"FFT workers modified borrowed public tables");
+    const auto invalid=[&](auto modify) {
+        auto batch=f.batch;auto jobs=f.jobs;
+        auto selected=f.workspaces(2);
+        const FftComplex scratch{-83,19};
+        for(auto& worker:selected)std::fill(worker.product.begin(),worker.product.end(),scratch);
+        std::vector<FftSearchScore> output(expected.size(),untouched);
+        modify(batch,jobs,selected);
+        bool rejected=false;
+        try{execute_fft_search_cpu(batch,jobs,output,selected);}catch(const Error&){rejected=true;}
+        check(rejected,"malformed borrowed FFT batch was accepted");
+        check(std::all_of(output.begin(),output.end(),[](auto x){return equal(x,untouched);}),
+              "borrowed FFT preflight failure published output");
+        check(std::all_of(selected.begin(),selected.end(),[&](const auto& worker){
+            return std::all_of(worker.product.begin(),worker.product.end(),[&](auto x){return x==scratch;});
+        }),"borrowed FFT preflight failure dispatched template/FFT work");
+    };
+    invalid([&](auto& b,auto&,auto&){b.double_tables.maximum=0;});
+    invalid([&](auto& b,auto&,auto&){b.double_tables.forward=std::span(forward).first(n-2);});
+    invalid([&](auto& b,auto&,auto&){b.double_tables.inverse=b.double_tables.forward;});
+    invalid([&](auto& b,auto&,auto&){b.double_tables.forward=std::span(f.spectrum).first(n-1);});
+    invalid([&](auto& b,auto&,auto& w){b.double_tables.forward=std::span(w[0].product).first(n-1);});
+    invalid([&](auto& b,auto&,auto&){b.geometry.search_arithmetic=static_cast<unsigned>(SearchArithmetic::fp32);});
+    invalid([&](auto& b,auto&,auto&){b.geometry.sample_fit=1;b.carrier_square=f.carrier;});
+    invalid([&](auto& b,auto&,auto&){b.geometry.drift_sections=4;});
+    invalid([&](auto& b,auto&,auto&){b.geometry.drift_sections=4;b.geometry.differential_window_samples=64;});
+    invalid([&](auto& b,auto&,auto&){b.double_tables.maximum=63;});
+    invalid([&](auto& b,auto&,auto&){b.double_tables.maximum=128;});
+    invalid([&](auto&,auto& j,auto&){j.back().prepared_template=std::numeric_limits<std::uint64_t>::max()-1;});
+    invalid([&](auto& b,auto&,auto&){b.observations=f.spectrum;});
+    invalid([&](auto& b,auto& j,auto&){j[0].range_count=0;});
+    std::array<FftStartRange,1> range{{{0,f.batch.starts}}};
+    invalid([&](auto& b,auto&,auto&){b.start_ranges=range;});
+    std::array<std::vector<FftComplex>,2> prepared_rows;
+    FftPreparedTemplate prepared;
+    for(unsigned bit=0;bit<2;++bit){prepared_rows[bit].resize(n);prepared.rows[bit]=prepared_rows[bit];}
+    invalid([&](auto& b,auto& j,auto&){
+        b.prepared=std::span(&prepared,1);j[0].prepared_template=0;
+        b.double_tables.forward=std::span(prepared_rows[0]).first(n-1);
+    });
+    // Tiny N=2 permits a legally typed table alias into one nominal pair.
+    // Complex-array double access below is the standard complex representation
+    // guarantee; no unrelated struct is reinterpreted as live Complex objects.
+    for(const bool energy_alias:{false,true}) {
+        std::array<FftComplex,2> source{{{1,0},{0,0}}},forward_storage{{{0,0},{1,0}}};
+        std::array<FftComplex,1> inverse_storage{};
+        std::array<std::array<FftComplex,2>,1> nominal{};
+        std::array<double,2> energy{{0,1}};
+        std::array<std::array<FftComplex,2>,2> rows{};
+        FftPreparedTemplate prepared_tiny;
+        prepared_tiny.rows={std::span(rows[0]),std::span(rows[1])};
+        FftSearchBatch tiny;tiny.geometry=f.batch.geometry;tiny.geometry.bins_per_symbol=1;
+        tiny.spectrum=source;tiny.energy_prefix=energy;tiny.prepared=std::span(&prepared_tiny,1);
+        tiny.starts=tiny.score_stride=1;
+        tiny.double_tables=search_fft::prepare_double_tables(std::span(forward_storage).first(1),inverse_storage);
+        if(energy_alias)
+            tiny.energy_prefix=std::span(reinterpret_cast<const double*>(forward_storage.data())+1,2);
+        else {
+            tiny.nominal_reference=nominal;
+            tiny.double_tables.forward=std::span(nominal[0]).first(1);
+        }
+        FftSearchJob job;job.prepared_template=0;
+        std::vector<FftSearchWorkspace> selected;selected.emplace_back(f.config,2,false);
+        const FftComplex scratch{-7,13};std::fill(selected[0].product.begin(),selected[0].product.end(),scratch);
+        std::array<FftSearchScore,1> output{{untouched}};
+        bool rejected=false;
+        try{execute_fft_search_cpu(tiny,std::span(&job,1),output,selected);}catch(const Error&){rejected=true;}
+        check(rejected&&equal(output[0],untouched)&&
+              std::all_of(selected[0].product.begin(),selected[0].product.end(),[&](auto x){return x==scratch;}),
+              "borrowed table/energy or nominal alias was not rejected before dispatch");
+    }
+    const auto old_round=std::fegetround();
+    struct RestoreRound {int value;~RestoreRound(){std::fesetround(value);}} restore{old_round};
+    if(std::fesetround(FE_DOWNWARD)==0) {
+        invalid([](auto&,auto&,auto&){});
+        check(std::fesetround(old_round)==0,"could not restore floating-point rounding mode");
+    }
+    std::stop_source stopped;stopped.request_stop();
+    std::vector<FftSearchScore> output(expected.size(),untouched);
+    bool cancelled=false;
+    try{execute_fft_search_cpu(f.batch,f.jobs,output,workers,stopped.get_token());}catch(const Error&){cancelled=true;}
+    check(cancelled&&std::all_of(output.begin(),output.end(),[](auto x){return equal(x,untouched);}),
+          "cancelled borrowed FFT batch published evidence");
+}
 void prepared_template_and_cancellation() {
     Fixture fixture;
     auto& geometry=fixture.batch.geometry;
@@ -102,6 +210,13 @@ void prepared_template_and_cancellation() {
     execute_fft_search_cpu(fixture.batch,fixture.jobs,cached,workers);
     check(std::equal(generated.begin(),generated.end(),cached.begin(),equal),
           "FFT uploaded-template view changed exact generated-template scores");
+    std::vector<FftComplex> forward(fixture.spectrum.size()-1),inverse(forward.size());
+    fixture.batch.double_tables=search_fft::prepare_double_tables(forward,inverse);
+    fixture.batch.carrier_square={};std::fill(cached.begin(),cached.end(),untouched);
+    execute_fft_search_cpu(fixture.batch,fixture.jobs,cached,workers);
+    check(std::equal(generated.begin(),generated.end(),cached.begin(),equal),
+          "borrowed FFT tables changed exact prepared-template scores or padding");
+    fixture.batch.double_tables={};fixture.batch.carrier_square=fixture.carrier;
     const FftStartRange selected{7,1};fixture.batch.start_ranges=std::span(&selected,1);
     fixture.jobs[0].range_count=1;std::fill(cached.begin(),cached.end(),untouched);
     std::vector<FftSearchWorkspace> prepared_only;
@@ -1191,7 +1306,7 @@ void frequency_axis_equivalence_and_bounds() {
 }
 }
 int main() {
-    try {paired_regression::run();flat_batch_tiling_and_order();prepared_template_and_cancellation();restricted_coherent_direct_and_fft();public_nominal_reference_exactness();
+    try {paired_regression::run();flat_batch_tiling_and_order();borrowed_double_tables_equivalence_and_guards();prepared_template_and_cancellation();restricted_coherent_direct_and_fft();public_nominal_reference_exactness();
         drift_rank_and_partition();drift_direct_fft_and_real_gram();differential_direct_fft_and_real_gram();frequency_axis_equivalence_and_bounds();}
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
     std::cout<<"pattern FFT batch tests passed\n";

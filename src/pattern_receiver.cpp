@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cfenv>
 #include <limits>
 #include <numbers>
 #include <numeric>
@@ -2271,6 +2272,17 @@ struct PatternReceiver::Impl {
         if(drift_sections>1 || (fft_workload->restricted_timing_active && search.restricted_direct_search && !sample_fit))batch.observations=work;
         batch.first_bin=next_start;
         batch.starts=count;batch.score_stride=hop;
+        // The original shared input transform is complete. These two fixed,
+        // already-accounted buffers are dead until joined acquisition returns.
+        // No table survives this call or competes with receiver admission.
+        if(!fft_workload->restricted_timing_active && !sample_fit && drift_sections==1 && !differential_window &&
+           acquisition_arithmetic()==SearchArithmetic::fp64 && batch.observations.empty() &&
+           !batch.observation_skip && work.size()==transform && reference.size()==transform &&
+           std::fegetround()==FE_TONEAREST) {
+            batch.carrier_square={};
+            batch.double_tables=detail::search_fft::prepare_double_tables(
+                std::span(work).first(transform-1),std::span(reference).first(transform-1),stop);
+        }
         detail::PatternFftStartSelection selected{{},0,count,true};
         const auto flush=[&] {
             if(!queued)return;
@@ -2307,6 +2319,9 @@ struct PatternReceiver::Impl {
                 std::span<const detail::FftSearchJob>(unique_jobs);
             detail::execute_fft_search_cpu(batch,jobs,
                 std::span(scoring_outputs).first(jobs.size()*hop),scoring_workspaces,stop);
+            if(batch.double_tables.maximum)for(const auto& job:jobs)
+                fft_workload->tabulated_fp64_transforms+=
+                    job.prepared_template==std::numeric_limits<std::uint64_t>::max()?4:2;
             // Trials, tie-breaking and peak replacement use the original
             // stream/phase/frequency/start order regardless of backend order.
             std::size_t collected_unique=0;

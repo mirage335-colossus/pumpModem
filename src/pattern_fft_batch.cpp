@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cfenv>
+#include <cstdint>
 #include <numbers>
 #include <openssl/crypto.h>
 
@@ -13,6 +15,17 @@ namespace {
 using Complex = FftComplex;
 constexpr double tau = 2 * std::numbers::pi;
 void cancelled(std::stop_token stop) { if(stop.stop_requested()) throw Error("pattern search cancelled"); }
+template<class A,class B> bool fft_table_overlap(std::span<A> a,std::span<B> b) {
+    if(a.empty()||b.empty())return false;
+    const auto limit=std::numeric_limits<std::uintptr_t>::max();
+    if(a.size()>limit/sizeof(A)||b.size()>limit/sizeof(B))
+        throw Error("pattern FFT table span extent overflow");
+    const auto first=reinterpret_cast<std::uintptr_t>(a.data()),second=reinterpret_cast<std::uintptr_t>(b.data());
+    const auto bytes_a=a.size()*sizeof(A),bytes_b=b.size()*sizeof(B);
+    if(!a.data()||!b.data()||bytes_a>limit-first||bytes_b>limit-second)
+        throw Error("pattern FFT table address extent overflow");
+    return first<second+bytes_b&&second<first+bytes_a;
+}
 Complex template_value(PatternCode& code,const FftSearchGeometry& geometry,
                        const FftSearchJob& job,std::size_t bin,unsigned bit,
                        std::span<const std::array<Complex,2>> nominal_reference={},bool rotate=true) {
@@ -427,7 +440,9 @@ void execute_drift_search_job(const FftSearchBatch& batch,const FftSearchJob& jo
 void execute_fft_search_cpu(const FftSearchBatch& batch,std::span<const FftSearchJob> jobs,
                             std::span<FftSearchScore> scores,std::span<FftSearchWorkspace> workspaces,
                             std::stop_token stop) {
-    if(jobs.empty())return;
+    const auto& tables=batch.double_tables;
+    const bool supplied_tables=tables.maximum||!tables.forward.empty()||!tables.inverse.empty();
+    if(jobs.empty()&&!supplied_tables)return;
     const auto& geometry=batch.geometry;
     const auto transform=batch.spectrum.size();
     const auto length=static_cast<std::size_t>(geometry.bins_per_symbol);
@@ -461,6 +476,42 @@ void execute_fft_search_cpu(const FftSearchBatch& batch,std::span<const FftSearc
             previous=range.first+range.count;
         }
     }
+    if(supplied_tables) {
+        // Validate every borrowed view and policy before any worker can prepare
+        // a private template or publish an output. Normal non-trapping FP and
+        // an unchanged rounding environment are the exactness precondition.
+        if(std::fegetround()!=FE_TONEAREST || effective_search_arithmetic(geometry)!=SearchArithmetic::fp64 ||
+           geometry.sample_fit || geometry.drift_sections!=1 || geometry.differential_window_samples ||
+           !batch.observations.empty() || !batch.carrier_square.empty() || !batch.start_ranges.empty() ||
+           !tables.maximum || (tables.maximum&(tables.maximum-1)) || transform>tables.maximum ||
+           tables.forward.size()!=tables.maximum-1 || tables.inverse.size()!=tables.maximum-1 ||
+           fft_table_overlap(tables.forward,tables.inverse))
+            throw Error("invalid borrowed pattern FFT tables or policy");
+        const auto validate_table=[&](std::span<const Complex> table) {
+            if(fft_table_overlap(table,batch.spectrum)||fft_table_overlap(table,batch.energy_prefix)||
+               fft_table_overlap(table,batch.prepared)||fft_table_overlap(table,batch.nominal_reference)||
+               fft_table_overlap(table,scores)||fft_table_overlap(table,jobs))
+                throw Error("borrowed pattern FFT tables alias batch storage");
+            for(const auto& workspace:workspaces)if(fft_table_overlap(table,std::span(workspace.product)))
+                throw Error("borrowed pattern FFT tables alias worker storage");
+            for(const auto& job:jobs) {
+                if(job.range_begin || job.range_count!=std::numeric_limits<std::size_t>::max())
+                    throw Error("borrowed pattern FFT tables require full jobs");
+                if(job.prepared_template==std::numeric_limits<std::uint64_t>::max()) {
+                    for(const auto& workspace:workspaces)if(!workspace.code)
+                        throw Error("pattern FFT generation needs a private pattern cache");
+                } else {
+                    if(job.prepared_template>=batch.prepared.size())
+                        throw Error("invalid prepared pattern FFT template");
+                    for(const auto row:batch.prepared[static_cast<std::size_t>(job.prepared_template)].rows)
+                        if(row.size()!=transform || fft_table_overlap(table,row))
+                            throw Error("invalid or aliased prepared pattern FFT row");
+                }
+            }
+        };
+        validate_table(tables.forward);validate_table(tables.inverse);
+    }
+    if(jobs.empty())return;
     // This backend preserves the original within-job floating-point order.
     // A GPU backend can map job/start/bin dimensions to many more execution
     // lanes, but must pass the same score and ordered-publication checks.
@@ -516,14 +567,18 @@ void execute_fft_search_cpu(const FftSearchBatch& batch,std::span<const FftSearc
                         if(geometry.sample_fit)square+=value*value*carrier_square(geometry,i);
                     }
                     if(!direct) {
-                        pattern_fft(row,false,stop,mode);
+                        if(supplied_tables)search_fft::fft(std::span(row),false,tables,stop);
+                        else pattern_fft(row,false,stop,mode);
                         for(std::size_t i=0;i<transform;++i)row[i]=pattern_fft_product(batch.spectrum[i],row[i],mode);
                     }
                 } else {
                     norm=prepared->energy[bit];square=prepared->square[bit];
                     for(std::size_t i=0;i<transform;++i)row[i]=pattern_fft_product(batch.spectrum[i],prepared->rows[bit][i],mode);
                 }
-                if(!direct)pattern_fft(row,true,stop,mode);
+                if(!direct) {
+                    if(supplied_tables)search_fft::fft(std::span(row),true,tables,stop);
+                    else pattern_fft(row,true,stop,mode);
+                }
                 visit([&](std::size_t j) {
                     Complex dot{};
                     if(direct)for(std::size_t i=0;i<length;++i) {

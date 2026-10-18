@@ -33,6 +33,16 @@ template<class T> bool finite(std::span<T> input) {
     return true;
 }
 enum class Kernel { automatic,scalar };
+// Public twiddles only; the caller keeps both tables alive and immutable
+// through joined use. Preparation/execution allocate no storage. Exact legacy
+// scalar ordering assumes a stable normal floating-point environment.
+struct DoubleTableView {
+    std::size_t maximum=0;
+    std::span<const std::complex<double>> forward,inverse;
+};
+DoubleTableView prepare_double_tables(std::span<std::complex<double>> forward,
+    std::span<std::complex<double>> inverse,std::stop_token stop={});
+void fft(std::span<std::complex<double>>,bool inverse,const DoubleTableView&,std::stop_token stop={});
 const char* kernel_name(Kernel kernel=Kernel::automatic);
 struct FloatPlan {
     explicit FloatPlan(std::size_t maximum,std::stop_token stop={});
