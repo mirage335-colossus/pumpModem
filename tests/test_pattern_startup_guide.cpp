@@ -50,13 +50,16 @@ struct PatternReceiverStartupGuideTestAccess {
     static std::unique_ptr<PatternReceiver> make() {
         auto c=datapump::tuning::resolve(1,-3.0720996964786846,datapump::tuning::PatternMode::auto_pattern,false,1500).config;
         c.integration_seconds=128;c.stream_epoch=1800000041;c.receiver_strategy=ReceiverStrategy::existing_only;
-        PatternSearch search;search.hypotheses={{0,0},{.1,.0003}};
+        // Retain the original 750-sample projection and slow-lane padding
+        // while reducing the number of independently paired alternatives.
+        PatternSearch search;search.hypotheses={{0,-.0003},{1.75,.0003}};
         search.worker_threads=1;search.chunk_bits=1;search.track_limit=4;search.candidate_limit=8;
         auto receiver=std::make_unique<PatternReceiver>(c,8*1024*1024,search);auto& s=*receiver->impl_;
         check(!s.fallback && s.fft_workload && s.long_symbol && s.shaped && s.drift_sections==4,
             "startup guide test lost its original public FFT geometry");
         const auto initial=std::min(s.hop,std::max<std::size_t>(1,c.sample_rate/s.bin_samples));
-        check(initial>1 && s.hop>initial && s.peaks.capacity()>=2,"startup guide test lacks its two cohorts/storage");
+        check(s.bin_samples==750 && s.length==1025 && s.transform==2048 && s.hop==512 && initial==8 &&
+            s.peaks.capacity()>=2,"startup guide test lost its exact original cohorts/storage");
         s.trials=s.acquisition_trials(initial);
         PatternEvidence first{s.bin_samples,(1+s.length)*s.bin_samples,0,c.carrier_hz,s.threshold()+.25,1,0,c.stream_phase_samples};
         s.admit(first,0,first.score);
