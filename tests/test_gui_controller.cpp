@@ -5,6 +5,7 @@
 #include "../src/gui/binary_editor.hpp"
 #include "../src/gui/transmit_scope.hpp"
 #include "../src/gui/receiver_health.hpp"
+#include "cpu_work_budget.hpp"
 #include "datapump/compression.hpp"
 #include "datapump/runtime.hpp"
 #include "../src/frequency_parse.hpp"
@@ -19,6 +20,7 @@
 #include <iomanip>
 #include <limits>
 #include <set>
+#include <sstream>
 #include <thread>
 
 namespace {
@@ -996,6 +998,7 @@ void noise_transmission_controls() {
 }
 void fake_hop_display() {
     using F=ui::Field;using C=ui::Command;
+    std::ostringstream delayed_arrival_warnings;
     struct Fixture {
         std::filesystem::path path=std::filesystem::temp_directory_path()/"dp-fhss-list-20261011"/("animation-key-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         ~Fixture(){std::error_code ec;std::filesystem::remove(path,ec);}
@@ -1007,7 +1010,7 @@ void fake_hop_display() {
     controller.edit(F::rf_shift,"1 MHz");
     controller.edit(F::carrier,"1.0015 MHz");
     // This checks presentation cadence, not broad crystal acquisition throughput.
-    // Keep the original deadline with a qualified narrow oscillator bank.
+    // Keep five-second hop-change cadence with a qualified narrow oscillator bank.
     controller.select(F::simulation_oscillator,"gpsdo-xo");
     controller.select(F::rf_oscillator,"gpsdo-xo");
     controller.activate(C::open_keyfile);const auto requests=controller.take_services();
@@ -1051,6 +1054,8 @@ void fake_hop_display() {
     const auto prior_transmission_id=controller.snapshot().transmission_id;
     controller.start();controller.activate(C::transmit_noise);
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+    testing::CpuWorkBudget delayed_arrival_work(std::chrono::seconds(5),"GUI fake-EU delayed sampled arrival",
+        testing::instrumented_test&&delayed_arrival,deadline-std::chrono::seconds(5),delayed_arrival_warnings);
     std::string first;bool changed=false,cycle_seen=false,arrival_seen=false;
     bool pre_arrival_seen=false,emitted_arrival_seen=false;
     std::optional<std::uint64_t> arrival_transmission_id;
@@ -1069,7 +1074,9 @@ void fake_hop_display() {
     std::size_t preview_poll_count=0,preview_records=0;
     double max_poll_seconds=0,max_poll_interval_seconds=0,next_record_seconds=0;
     auto previous_poll_end=deadline-std::chrono::seconds(5);
-    while(std::chrono::steady_clock::now()<deadline&&(!changed||(short_list&&!cycle_seen)||(delayed_arrival&&!arrival_seen))) {
+    while((!changed||(short_list&&!cycle_seen)||(delayed_arrival&&!arrival_seen))&&
+          (std::chrono::steady_clock::now()<deadline||
+           (delayed_arrival&&changed&&(!short_list||cycle_seen)&&!arrival_seen&&delayed_arrival_work.pending()))) {
         const auto poll_started=std::chrono::steady_clock::now();
         controller.poll();
         const auto poll_ended=std::chrono::steady_clock::now();
@@ -1080,7 +1087,7 @@ void fake_hop_display() {
             previous_poll_end=poll_ended;++preview_poll_count;
             max_poll_seconds=std::max(max_poll_seconds,call);
             max_poll_interval_seconds=std::max(max_poll_interval_seconds,interval);
-            // Numeric records only during the deadline: first poll and at
+            // Numeric records during the preview loop: first poll and at
             // most four per second, with an independent hard capacity.
             if(preview_records<preview_polls.size()&&wall>=next_record_seconds) {
                 const auto& state=controller.snapshot();
@@ -1166,8 +1173,15 @@ void fake_hop_display() {
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
+    const auto preview_finished=std::chrono::steady_clock::now();
+    if(testing::instrumented_test&&delayed_arrival)
+        check(delayed_arrival_work.pending(preview_finished),
+              "delayed FHSS preview exceeded its 15s instrumented computation limit");
     if(delayed_arrival) {
+        const auto preview_wall_seconds=std::chrono::duration<double>(
+            preview_finished-(deadline-std::chrono::seconds(5))).count();
         std::cout<<"FHSS_PREVIEW_POLLS preference="<<preference<<" polls="<<preview_poll_count
+            <<" preview_wall_seconds="<<preview_wall_seconds<<" normal_budget_exceeded="<<(preview_wall_seconds>5)
             <<" max_call_seconds="<<max_poll_seconds<<" max_interval_seconds="<<max_poll_interval_seconds
             <<" retained_records="<<preview_records<<'\n';
         const bool failed_preview=!changed||!arrival_seen||!pre_arrival_seen;
@@ -1307,8 +1321,8 @@ void fake_hop_display() {
           controller.field(F::rf_shift).text==shift&&controller.field(F::fhss).display_text.find("Fake: hop ")==std::string::npos,
           "Ending fake FHSS did not restore the configured frequencies and idle label");
     if(delayed_arrival) {
-        // Generated preview keeps its original five-second gate. Verify
-        // traversal after the existing protected stop, with no added wait.
+        // Preview has a bounded sampled-work allowance. Verify traversal
+        // after the existing protected stop, with neither stop deadline changed.
         const auto& finished=controller.snapshot();
         const auto& final_trace=finished.transmit_trace;
         const bool healthy=!finished.transmission_failed&&finished.error.empty()&&finished.receiver_error.empty()&&
@@ -1338,6 +1352,8 @@ void fake_hop_display() {
     check(controller.field(F::carrier).disabled_text.empty()&&controller.field(F::rf_shift).disabled_text.empty(),"Unkeyed noise used sequential hopping fallback");
     controller.activate(C::cancel);controller.close();
     }
+    // Emit this allowance warning only after every FHSS stage succeeds.
+    std::cout<<delayed_arrival_warnings.str();
 }
 std::size_t check_pending_snapshot(Controller& controller) {
     using F=ui::Field;using C=ui::Command;

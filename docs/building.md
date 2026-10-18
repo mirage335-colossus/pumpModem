@@ -667,6 +667,20 @@ summary. Every case must still finish and pass its assertions within the bounded
 instrumented allowance. Real-time throughput, cancellation, physical absence
 and queue-drain stabilization requirements are unchanged.
 
+The `gui_controller` fake-EU delayed sampled-arrival fixture has a separate
+CPU-functional allowance: five seconds normally and fifteen seconds with
+ASan/UBSan instrumentation. Continuation past five seconds requires the hop
+change and any required list cycle to have already satisfied their original
+five-second window. The original simultaneous cold advice/RX/noise setup and
+all fixture assertions remain required. The arrival warning is buffered until
+every FHSS fixture stage succeeds. A warning records exceeded computation time;
+it does not establish a strict five-second instrumented arrival pass or a
+performance improvement. Release retains five seconds. The three-second GUI
+timing-advice gate, hardware timing, immediate abort, cancellation, physical
+END and protected source-tail bounds are unchanged. The fifteen-second limit
+is fatal if full completion fails; this fixture has no incomplete-coverage or
+exit-75 classification.
+
 The instrumented native GUI smoke is an independent optional job. Normal full
 CI omits it and explicitly records missing instrumented desktop coverage;
 Release/package GUI smoke still runs. Select `sanitizer_smoke=true` to
