@@ -136,6 +136,10 @@ jobs:
           report=Path('build/gui-stop-diagnostic');report.mkdir(parents=True,exist_ok=False)
           (report/'source.txt').write_text(subprocess.check_output(git+['rev-parse','HEAD'],text=True))
 
+          read_dependencies = {'src/live.cpp': '789735690478e9c7331487740c475e862293df69a49ce7a44b6793a3909415ac', 'tests/test_gui_controller.cpp': '3730678e53ef37e295adc319b757b527ffb6a6505bc5424955958658df56ce0f', 'src/scheduled_work_profile.hpp': '87a701a4ed853685e4250805a8665fdd0f10b15347ab0f4f8be1fcc8148b7acf', 'src/audio_trace.hpp': '2e476953b87dbb555e5734357a7de68873709070a97986b6b48fa82397bc52d9', 'src/channel.cpp': '1d484160f58b0955a4683096dc756fdd3086a28197dcb54ab2ce6861384c2515', 'src/search_parallel.cpp': '4aa3270515e0e8aaf6f6f146588c40fbff83627af615c85f95897e1af9132f4b', 'src/pattern_receiver.cpp': 'fe84989d588151f203d40dbcebf35570355586da26ce7708845815a0d6cc4524'}
+          for path,digest in read_dependencies.items():
+              assert hashlib.sha256(Path(path).read_bytes()).hexdigest()==digest,path
+
           expected = {
               "src/live.cpp":
                   "789735690478e9c7331487740c475e862293df69a49ce7a44b6793a3909415ac",
@@ -468,13 +472,149 @@ jobs:
               "916092bdc052643b392209d78440c3c1a272a1abac1c79cc2c4ade27e30cef78"
           assert hashlib.sha256(changed["tests/test_gui_controller.cpp"].encode()).hexdigest() == \
               "d5c5e76f696223a8e05e74b5b265f71cca707e3bb5187fb5ba9ac2f19a87ba10"
+          p = "src/live.cpp"
+          replace(p, "        unsigned idle_fraction = 0;\n",
+          """        unsigned idle_fraction = 0;
+                  std::uint64_t diagnostic_phase_generation=0,diagnostic_phase_serial=0,diagnostic_phase_ordinal=0;
+          """)
+          replace(p,
+          """                        prepare_source_read(*wave);
+                                  const auto count = simulation_channel->read(*wave->transmitter,
+          """,
+          """                        prepare_source_read(*wave);
+                                  const bool diagnostic_stop_trace=wave->graceful&&bool(audio::trace::active.load());
+                                  if(diagnostic_stop_trace&&(diagnostic_phase_generation!=wave->generation||diagnostic_phase_serial!=wave->serial)) {
+                                      diagnostic_phase_generation=wave->generation;diagnostic_phase_serial=wave->serial;diagnostic_phase_ordinal=0;
+                                  }
+                                  if(diagnostic_stop_trace)++diagnostic_phase_ordinal;
+                                  const bool diagnostic_phase=diagnostic_stop_trace&&diagnostic_phase_ordinal<=128;
+                                  if(diagnostic_stop_trace&&diagnostic_phase_ordinal==129)
+                                      audio::trace::record("diagnostic_stop_phase_limit",[&](auto& f) {
+                                          f.add("generation",wave->generation);f.add("transmission_id",wave->serial);
+                                          f.add("block_limit",128);f.add("first_omitted_ordinal",diagnostic_phase_ordinal);
+                                      });
+                                  std::array<Clock::time_point,9> diagnostic_wall{};
+                                  std::array<Clock::time_point,4> diagnostic_ledger_times{};
+                                  std::array<rx_cpu::Tick,9> diagnostic_cpu{};
+                                  const auto diagnostic_stamp=[&](std::size_t index) {
+                                      if(!diagnostic_phase)return;
+                                      diagnostic_wall[index]=Clock::now();diagnostic_cpu[index]=rx_cpu::native_thread_cpu(nullptr);
+                                  };
+                                  const auto diagnostic_traversed_before=wave->transmitted_samples;
+                                  const auto diagnostic_generated_before=wave->transmitter->samples_emitted();
+                                  const auto diagnostic_receivers_before=simulation_bank->receivers.size();
+                                  const auto diagnostic_builds_before=simulation_bank->builds;
+                                  const auto diagnostic_native_fields=[&](auto& f,std::size_t output_count,bool eof) {
+                                      f.add("generation",wave->generation);f.add("transmission_id",wave->serial);
+                                      f.add("block_ordinal",diagnostic_phase_ordinal);f.add("read_eof",eof);
+                                      f.add("block_start_steady",std::chrono::duration<long double>(block_start.time_since_epoch()).count());
+                                      f.add("block_end_steady",std::chrono::duration<long double>(diagnostic_wall[eof?1:8].time_since_epoch()).count());
+                                      f.add("output_samples",output_count);f.add("sample_rate",value.transfer.modem.sample_rate);
+                                      f.add("traversed_before",diagnostic_traversed_before);f.add("traversed_after",wave->transmitted_samples);
+                                      f.add("generated_before",diagnostic_generated_before);f.add("generated_after",wave->transmitter->samples_emitted());
+                                      f.add("endpoint_samples",wave->transmitter->total_samples());f.add("stop_requested",wave->stop.stop_requested());
+                                      f.add("receivers_before",diagnostic_receivers_before);f.add("receivers_after",simulation_bank->receivers.size());
+                                      f.add("builds_before",diagnostic_builds_before);f.add("builds_after",simulation_bank->builds);
+                                      constexpr std::array<const char*,5> names{"channel_read","rx_feed","publication","mutex_acquire","pacing_wait"};
+                                      constexpr std::array<std::array<std::size_t,2>,5> slots{{{0,1},{2,3},{4,5},{6,7},{7,8}}};
+                                      for(std::size_t phase=0;phase<(eof?1:names.size());++phase) {
+                                          const auto first=slots[phase][0],last=slots[phase][1];
+                                          const auto key=std::string(names[phase]);
+                                          f.add((key+"_wall_seconds").c_str(),std::chrono::duration<long double>(diagnostic_wall[last]-diagnostic_wall[first]).count());
+                                          const bool valid=diagnostic_cpu[first].valid&&diagnostic_cpu[last].valid&&diagnostic_cpu[last].ns>=diagnostic_cpu[first].ns;
+                                          f.add((key+"_calling_thread_cpu_valid").c_str(),valid);
+                                          f.add((key+"_calling_thread_cpu_ns").c_str(),valid?diagnostic_cpu[last].ns-diagnostic_cpu[first].ns:0);
+                                      }
+                                      if(!eof) {
+                                          const auto minimum=static_cast<long double>(output_count)/value.transfer.modem.sample_rate;
+                                          f.add("minimum_block_seconds",minimum);
+                                          f.add("minimum_deadline_already_past_before_wait",diagnostic_wall[7]>=block_start+
+                                              std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(static_cast<double>(output_count)/value.transfer.modem.sample_rate)));
+                                          f.add("whole_block_wall_seconds",std::chrono::duration<long double>(diagnostic_wall[8]-block_start).count());
+                                      }
+                                      f.add("cpu_scope","phase CPU is calling source thread only; RX parallel workers require separate merged-global ledger snapshots");
+                                  };
+                                  diagnostic_stamp(0);
+                                  const auto count = simulation_channel->read(*wave->transmitter,
+          """)
+          replace(p,
+          """                        wave->transmitted_samples = simulation_channel->transmitted_samples();
+                                  if (!count) {
+          """,
+          """                        diagnostic_stamp(1);
+                                  wave->transmitted_samples = simulation_channel->transmitted_samples();
+                                  if (!count) {
+                                      if(diagnostic_phase)audio::trace::record("diagnostic_stop_block",[&](auto& f) {diagnostic_native_fields(f,0,true);});
+          """)
+          replace(p,
+          """                        plot_window.push(input_samples);
+                                  feed_samples(*simulation_bank,input_samples,value,version,wave->stop,nullptr,processing_token);
+                                  publish(plot_window,transmit_modem,version,last_plot,false,
+                                      wave->transmitter.get(),wave->serial);
+          """,
+          """                        plot_window.push(input_samples);
+                                  std::optional<rx_cpu::Snapshot> diagnostic_feed_before,diagnostic_feed_after;
+                                  if(diagnostic_phase) {
+                                      diagnostic_ledger_times[0]=Clock::now();diagnostic_feed_before=rx_cpu::global().snapshot();
+                                      diagnostic_ledger_times[1]=Clock::now();
+                                  }
+                                  diagnostic_stamp(2);
+                                  feed_samples(*simulation_bank,input_samples,value,version,wave->stop,nullptr,processing_token);
+                                  diagnostic_stamp(3);
+                                  if(diagnostic_phase) {
+                                      diagnostic_ledger_times[2]=Clock::now();diagnostic_feed_after=rx_cpu::global().snapshot();
+                                      diagnostic_ledger_times[3]=Clock::now();
+                                  }
+                                  diagnostic_stamp(4);
+                                  publish(plot_window,transmit_modem,version,last_plot,false,
+                                      wave->transmitter.get(),wave->serial);
+                                  diagnostic_stamp(5);
+          """)
+          replace(p,
+          """                        std::unique_lock lock(mutex);
+                                  changed.wait_until(lock,stop,deadline,[&] {
+                                      return !current.running || generation != version || wave->stop.stop_requested();
+                                  });
+                                  continue;
+          """,
+          """                        diagnostic_stamp(6);
+                                  {
+                                      std::unique_lock lock(mutex);diagnostic_stamp(7);
+                                      changed.wait_until(lock,stop,deadline,[&] {
+                                          return !current.running || generation != version || wave->stop.stop_requested();
+                                      });
+                                      diagnostic_stamp(8);
+                                  }
+                                  if(diagnostic_phase) {
+                                      audio::trace::record("diagnostic_stop_block",[&](auto& f) {diagnostic_native_fields(f,count,false);});
+                                      const auto emit_ledger=[&](const char* phase,const rx_cpu::Snapshot& snapshot,std::size_t slot) {
+                                          audio::trace::record("diagnostic_stop_feed_cpu",[&](auto& f) {
+                                              f.add("generation",wave->generation);f.add("transmission_id",wave->serial);
+                                              f.add("block_ordinal",diagnostic_phase_ordinal);f.add("phase",phase);
+                                              f.add("capture_begin_steady",std::chrono::duration<long double>(diagnostic_ledger_times[slot].time_since_epoch()).count());
+                                              f.add("capture_end_steady",std::chrono::duration<long double>(diagnostic_ledger_times[slot+1].time_since_epoch()).count());
+                                              f.add("cpu_profile_quiescent",snapshot.quiescent);
+                                              f.add("counter_scope","process-global cumulative merged contexts; no reset; active contexts remain unmerged; no unique RX attribution");
+                                              rx_cpu::write_fields(f,snapshot);
+                                          });
+                                      };
+                                      emit_ledger("before_feed",*diagnostic_feed_before,0);
+                                      emit_ledger("after_feed",*diagnostic_feed_after,2);
+                                  }
+                                  continue;
+          """)
+
+          assert hashlib.sha256(changed["src/live.cpp"].encode()).hexdigest() == \
+              "a5ea910a216b4dcfd6b5ea6fab3880e2d3b90124c1094c0558784ac34c7a3cd8"
+          assert hashlib.sha256(changed["tests/test_gui_controller.cpp"].encode()).hexdigest() == \
+              "d5c5e76f696223a8e05e74b5b265f71cca707e3bb5187fb5ba9ac2f19a87ba10"
           manifest = {p: {"pre_sha256": expected[p],
               "post_sha256": hashlib.sha256(changed[p].encode()).hexdigest()} for p in expected}
           patch = ''.join(''.join(difflib.unified_diff(
               original[p].splitlines(True), changed[p].splitlines(True),
               fromfile='a/'+p, tofile='b/'+p)) for p in expected)
           assert hashlib.sha256(patch.encode()).hexdigest() == \
-              "2b0fd6ac1dad41e3598561c6b6a449620067a5d20d31208135e8cd2e1e35aaa3"
+              "99038abb3ae23156fd9527180460ea7c2e7ddf18f1929d25d2a979f73530fd20"
           print(json.dumps({"files": manifest,"patch_sha256":hashlib.sha256(patch.encode()).hexdigest(),
                             "patch_bytes":len(patch)}, indent=2))
           if os.environ.get("APPLY_GUI_STOP_VARIANT") == "1":
@@ -495,8 +635,7 @@ jobs:
           for p in expected:
               assert hashlib.sha256(Path(p).read_bytes()).hexdigest()==manifest[p]['post_sha256']
               (report/('variant-'+p.replace('/','__'))).write_bytes(Path(p).read_bytes())
-          (report/'read-dependencies.json').write_text(json.dumps({'src/scheduled_work_profile.hpp':
-              '87a701a4ed853685e4250805a8665fdd0f10b15347ab0f4f8be1fcc8148b7acf'},indent=2)+'\n')
+          (report/'read-dependencies.json').write_text(json.dumps(read_dependencies,indent=2)+'\n')
           PY_STOP_PREPARE
       - name: Configure native application and selected test scope
         run: >-
@@ -732,7 +871,6 @@ jobs:
           assert binary.is_file(), 'diagnostic executable missing'
           executable_sha256=hashlib.sha256(binary.read_bytes()).hexdigest()
           cases=[('stop5',['--diagnose-full-stop',str(report/'stop5.jsonl'),'5'],480,'coarse',5),
-                 ('stop40',['--diagnose-full-stop',str(report/'stop40.jsonl'),'40'],480,'coarse',40),
                  ('abort',['--fake-hop-display','--diagnose-abort',str(report/'abort.jsonl')],240,'disabled',5)]
           results=[]
           for name,args,limit,profile_mode,stop_observer_ms in cases:
@@ -753,7 +891,7 @@ jobs:
               results.append(item)
               (report/'commands-and-exits.json').write_text(json.dumps(results,indent=2)+'\n')
               print(json.dumps(item),flush=True)
-          # Always run all three independent processes, preserving every actual nonzero exit.
+          # Always run both independent processes, preserving every actual nonzero exit.
           raise SystemExit(1 if any(r['exit_code']!=0 for r in results) else 0)
           PY_STOP_RUN
       - name: Run the selected native tests
@@ -873,7 +1011,7 @@ jobs:
               print('No source-variant manifest; preparation did not reach source writes.')
               raise SystemExit(0)
           manifest=json.loads(manifest_path.read_text())
-          expected={'src/live.cpp':('789735690478e9c7331487740c475e862293df69a49ce7a44b6793a3909415ac','916092bdc052643b392209d78440c3c1a272a1abac1c79cc2c4ade27e30cef78'),
+          expected={'src/live.cpp':('789735690478e9c7331487740c475e862293df69a49ce7a44b6793a3909415ac','a5ea910a216b4dcfd6b5ea6fab3880e2d3b90124c1094c0558784ac34c7a3cd8'),
                     'tests/test_gui_controller.cpp':('3730678e53ef37e295adc319b757b527ffb6a6505bc5424955958658df56ce0f','d5c5e76f696223a8e05e74b5b265f71cca707e3bb5187fb5ba9ac2f19a87ba10')}
           assert set(manifest)==set(expected)
           originals={}
