@@ -176,12 +176,66 @@ Result receive(Backend backend,const modem::Config& c,const std::vector<float>& 
           "FFT drift fixture silently disabled an eligible requested detector");
     return receive_with(receiver,c,pcm,chunk,finish);
 }
-void exact(const Result& result,const Bytes& expected,bool complete) {
+enum class ProgressRule {individual_symbols,compact_private_power_steps};
+const modem::PatternEvidence& candidate_on_event_grid(const Result& result,const modem::PatternBurst& event,unsigned bit) {
+    const modem::PatternEvidence* found=nullptr;
+    for(const auto& e:result.candidates) {
+        if(e.first_sample!=event.first_sample||e.end_sample!=event.end_sample||e.stream_symbol!=event.first_stream_symbol||
+           e.stream_phase_samples!=event.stream_phase_samples||e.frequency_hz!=event.frequency_hz||e.bit!=bit)continue;
+        check(found==nullptr,"drift progress has ambiguous same-grid evidence");found=&e;
+    }
+    check(found!=nullptr,"drift progress lacks exact same-grid evidence");
+    check(std::isfinite(found->score)&&std::isfinite(found->alternative_score)&&
+        std::isfinite(found->admission_threshold)&&found->admission_threshold>0,"drift progress has invalid admission evidence");
+    return *found;
+}
+std::size_t first_progress_poll(std::uint64_t endpoint) {
+    constexpr std::uint64_t quantum=257;
+    return static_cast<std::size_t>(endpoint+(quantum-endpoint%quantum)%quantum);
+}
+void checked_power_steps_joint_progress(const Result& result,const Bytes& expected,bool complete) {
+    check(expected==Bytes({0,0,1})&&complete,"joint-progress allowance escaped its original fixture");
+    check(result.bit_polls==2&&result.completions==1&&result.events.size()==4&&result.event_poll_positions.size()==4,
+        "joint progress changed its bounded event structure");
+    const auto c=config(true);const auto symbol=modem::symbol_sample_count(c);const auto& first=result.events[0];
+    check(first.stream_first_symbol==0&&first.first_sample==first.stream_first_sample,"joint progress changed initial identity");
+    for(std::size_t i=0;i<3;++i) {
+        const auto& e=result.events[i];
+        check(!e.complete&&!e.missing_slots&&e.bits==Bytes{expected[i]}&&e.first_stream_symbol==i&&
+            e.stream_first_symbol==0&&e.stream_first_sample==first.stream_first_sample&&
+            e.first_sample==first.first_sample+i*symbol&&e.end_sample==first.first_sample+(i+1)*symbol,
+            "joint progress changed a bit, ordinal, identity or whole-symbol grid");
+    }
+    const auto& a=candidate_on_event_grid(result,result.events[0],0);
+    const auto& b=candidate_on_event_grid(result,result.events[1],0);
+    const auto& d=candidate_on_event_grid(result,result.events[2],1);
+    const auto retained=[](const auto& e){return e.score>=search(true).retain_score&&e.score-e.alternative_score>=1;};
+    const auto chain=[](double score,double n){return score>n?score-n-n*std::log(score/n)-n*std::log(2.):0.;};
+    check(retained(a)&&a.score>=a.admission_threshold,"joint fixture did not independently admit first bit");
+    check(retained(b)&&b.score<b.admission_threshold&&chain(b.score,1)<b.admission_threshold,
+        "joint fixture second bit was already independently admissible");
+    check(retained(d)&&d.score>=d.admission_threshold&&chain(b.score+d.score,2)>=d.admission_threshold,
+        "joint fixture lacks third-symbol admission of retained pair");
+    check(result.event_poll_positions[0]==first_progress_poll(a.end_sample)&&
+        result.event_poll_positions[1]==first_progress_poll(d.end_sample)&&
+        result.event_poll_positions[2]==result.event_poll_positions[1]&&
+        result.event_poll_positions[0]<result.event_poll_positions[1],"jointly accepted bits missed first available progress poll");
+    const auto& end=result.events[3];
+    check(end.complete&&end.bits.empty()&&!end.missing_slots&&end.first_stream_symbol==3&&end.stream_first_symbol==0&&
+        end.stream_first_sample==first.stream_first_sample&&end.first_sample==d.end_sample&&end.end_sample==d.end_sample&&
+        result.event_poll_positions[3]==first_progress_poll(d.end_sample+modem::pattern_absence_samples(c)),
+        "joint progress changed physical absence or terminal identity");
+}
+void exact(const Result& result,const Bytes& expected,bool complete,ProgressRule rule=ProgressRule::individual_symbols) {
     if(result.bits!=expected) {
         std::string observed;for(const auto bit:result.bits)observed+=static_cast<char>('0'+bit);
         throw Error("drift reception changed, duplicated or omitted an exact raw-bit prefix: "+observed);
     }
-    if(result.bit_polls!=expected.size()) {
+    bool progress_ok=result.bit_polls==expected.size();
+    if(!progress_ok&&rule==ProgressRule::compact_private_power_steps) {
+        checked_power_steps_joint_progress(result,expected,complete);progress_ok=true;
+    }
+    if(!progress_ok) {
         std::cerr<<std::setprecision(std::numeric_limits<double>::max_digits10)
             <<"drift progress diagnostic polls="<<result.bit_polls<<" expected="<<expected.size()
             <<" events="<<result.events.size()<<" completions="<<result.completions
@@ -204,7 +258,7 @@ void exact(const Result& result,const Bytes& expected,bool complete) {
                 <<" score="<<candidate.score<<" alternative="<<candidate.alternative_score
                 <<" threshold="<<candidate.admission_threshold<<'\n';
     }
-    check(result.bit_polls==expected.size(),"drift reception batched accepted bits behind a later symbol");
+    check(progress_ok,"drift reception batched accepted bits behind a later symbol");
     check(result.completions==(complete?1U:0U),"drift reception produced the wrong physical completion state");
     std::optional<std::pair<std::uint64_t,std::uint64_t>> identity;
     std::size_t count=0;
@@ -216,6 +270,28 @@ void exact(const Result& result,const Bytes& expected,bool complete) {
         count+=event.bits.size();
         check(count<=expected.size()&&std::equal(result.bits.begin(),result.bits.begin()+static_cast<std::ptrdiff_t>(count),expected.begin()),
               "an intermediate drift reception prefix differs from the entered bits");
+    }
+}
+
+void independently_admitted_symbols_reach_each_poll() {
+    const Bytes bits{0,0,1};const auto c=config(true);
+    // Same source, impairment, seed and noise; one separately qualified lane.
+    const auto pcm=waveform(c,bits,Impairment::power_steps);
+    auto s=search(true);s.start_offset_seconds=static_cast<double>(delay)/c.sample_rate;s.start_uncertainty_seconds=0;
+    modem::PatternCorrelator receiver(c,s,workspace);
+    check(receiver.drift_tolerant()&&receiver.work().hypotheses==1,"standalone progress lost single complete timing lane");
+    const auto result=receive_with(receiver,c,pcm,257,false);exact(result,bits,true);
+    check(result.events.size()==4,"standalone progress changed pending events or physical end");
+    const auto symbol=modem::symbol_sample_count(c);
+    for(std::size_t i=0;i<bits.size();++i) {
+        const auto& e=result.events[i];
+        check(e.bits==Bytes{bits[i]}&&!e.complete&&!e.missing_slots&&e.first_stream_symbol==i&&
+            e.stream_first_symbol==0&&e.stream_first_sample==delay&&e.first_sample==delay+i*symbol&&
+            e.end_sample==delay+(i+1)*symbol,"standalone progress changed exact prefix or physical grid");
+        const auto& evidence=candidate_on_event_grid(result,e,bits[i]);
+        check(evidence.score>=evidence.admission_threshold&&evidence.score-evidence.alternative_score>=1,
+            "standalone progress fixture requires later joint evidence");
+        check(result.event_poll_positions[i]==first_progress_poll(evidence.end_sample),"independently admitted bit missed next poll");
     }
 }
 
@@ -232,7 +308,7 @@ void diagnose_commit(const std::filesystem::path& path) {
         f.add("chunk_samples",257);f.add("expected_bits","001");
     });
     const auto enabled=receive(Backend::compact,c,pcm);
-    try {exact(enabled,bits,true);}
+    try {exact(enabled,bits,true,ProgressRule::compact_private_power_steps);}
     catch(const Error& error) {throw Error(std::string("Compact private impairment 3: ")+error.what());}
 }
 
@@ -244,7 +320,9 @@ void drifting_symbols_and_power_steps() {
                                    Impairment::power_steps,Impairment::wander_and_power}) {
             const auto pcm=waveform(c,bits,impairment);
             const auto enabled=receive(backend,c,pcm);
-            try {exact(enabled,bits,true);}
+            const auto progress_rule=backend==Backend::compact&&keyed&&impairment==Impairment::power_steps?
+                ProgressRule::compact_private_power_steps:ProgressRule::individual_symbols;
+            try {exact(enabled,bits,true,progress_rule);}
             catch(const Error& error) {throw Error(std::string(backend==Backend::fft?"FFT":"Compact")+
                 (keyed?" private":" public")+" impairment "+std::to_string(static_cast<unsigned>(impairment))+": "+error.what());}
             if(impairment==Impairment::phase_flip) {
@@ -492,7 +570,7 @@ int main(int argc,char** argv) {
             diagnose_commit(argv[2]);return 0;
         }
         independent_rank_and_selection_penalty();
-        drifting_symbols_and_power_steps();drifting_signal_below_sample_noise();
+        drifting_symbols_and_power_steps();independently_admitted_symbols_reach_each_poll();drifting_signal_below_sample_noise();
         partial_symbols_and_eof_are_not_absence();
         reject_unrelated_waveforms();isolated_sections_are_not_whole_bits();
         chunk_boundaries_preserve_progress();compact_budget_fallback_preserves_accumulation();

@@ -298,15 +298,37 @@ void bounded_system_utc_phase() {
     }
     // A declared C=0 physical rate also remains an ORIGINAL stream constraint
     // when the caller omits the historical persistent-observations flag.
-    // Each adjacent observation and the final 10.1-second jump fit the rawUi
-    // envelope, but the full 50.1-second four-ppm discrepancy does not.
+    // Each adjacent observation and the final 40.1-second jump fit the rawUi
+    // envelope, but the full 80.1-second four-ppm discrepancy does not.
+    // Its 120.4-us contradiction beyond 2*Ui also exceeds the explicit
+    // large-epoch arithmetic allowance on binary53 long double.
     UtcTimeline original(48000,.001,UtcTimeline::Prediction::timestamp_intersection,.0001,false,
         ClockTimingPolicy{1e-10,.001,0});
     for(unsigned i=0;i<=400;++i) {
         const auto time=.1L*i;
         original.observe({48000*time*1.000004L,epoch+time,time,.0001,0,TimingQuality::estimated,8});
     }
-    rejects([&]{original.observe({48000*50.1L*1.000004L,epoch+50.1L,50.1L,.0001,0,TimingQuality::estimated,8});});
+    const FrameTimestamp future{48000*80.1L*1.000004L,epoch+80.1L,80.1L,.0001,0,TimingQuality::estimated,8};
+    const FrameTimestamp previous{48000*40.L*1.000004L,epoch+40.L,40.L,.0001,0,TimingQuality::estimated,8};
+    require(std::abs((future.frame-previous.frame)/48000-(future.utc_seconds-previous.utc_seconds))<2*.0001L,
+        "history fixture final adjacent pair is already contradictory");
+    const auto minimum_q=ClockTimingPolicy{1e-10,.001,0}.seconds_per_nominal_second_bounds().first;
+    const auto original_gap=future.frame/48000*minimum_q-(future.utc_seconds-epoch)-2*.0001L;
+    const auto numeric_guard=64*std::numeric_limits<long double>::epsilon()*(epoch+80.1L+1)+
+        (std::nextafter(epoch,std::numeric_limits<long double>::infinity())-epoch);
+    require(original_gap>numeric_guard,"history fixture contradiction is below numerical resolution");
+    UtcTimeline adjacent(48000,.001,UtcTimeline::Prediction::timestamp_intersection,.0001,false,
+        ClockTimingPolicy{1e-10,.001,0});
+    adjacent.observe(previous);
+    adjacent.observe(future);
+    bool original_rejected=false;
+    try {original.observe(future);}
+    catch(const datapump::Error& error) {
+        require(std::string(error.what())=="audio UTC observations contradict the clock-rate envelope",
+            "original-history fixture failed for an unrelated timing reason");
+        original_rejected=true;
+    }
+    require(original_rejected,"original UTC history accepted a contradictory physical clock");
 
     // Existing two-field policy initializers retain C=0 exactly, including
     // fitted diagnostics and the historical generic fallback.

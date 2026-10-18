@@ -16,7 +16,7 @@ on:
       scope:
         description: 'Run one complete native scope without repeating the other shards'
         type: choice
-        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic, receiver, alsa-diagnostic]
+        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic, receiver, alsa-diagnostic, alsa-radius-diagnostic]
         default: core
       calibration_section:
         description: 'Calibration section; used only by the calibration scope'
@@ -36,7 +36,7 @@ on:
         type: string
         default: Release
       scope:
-        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, or alsa-diagnostic'
+        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, alsa-diagnostic, or alsa-radius-diagnostic'
         type: string
         required: true
       calibration_section:
@@ -141,7 +141,7 @@ jobs:
             core) targets=(datapump-apps datapump-tests-ci-core) ;;
             cli) targets=(pump) ;;
             eme-diagnostic) targets=(test_frequency_axis_probability) ;;
-            alsa-diagnostic) targets=(test_alsa_audio) ;;
+            alsa-diagnostic|alsa-radius-diagnostic) targets=(test_alsa_audio) ;;
             receiver) targets=(test_pattern_correlator test_pattern_drift test_receiver_differential test_clock_sync) ;;
             fast) targets=(datapump-tests-fast) ;;
             live) targets=(datapump-tests-ci-live) ;;
@@ -163,6 +163,51 @@ jobs:
           set -o pipefail
           git -c safe.directory="$PWD" rev-parse HEAD | tee build/alsa-diagnostic-source.txt
           ./build/test_alsa_audio --dsss-clipping-diagnostic 2>&1 | tee build/alsa-diagnostic.log
+      - name: Measure exact source-radius variants with the original native clipping gate
+        if: inputs.scope == 'alsa-radius-diagnostic'
+        timeout-minutes: 40
+        run: |
+          python3 -B - <<'PY'
+          import hashlib,json,pathlib,re,subprocess
+          root=pathlib.Path.cwd(); report=root/'build/alsa-radius-diagnostic';report.mkdir()
+          header=root/'include/datapump/pattern_pulse.hpp'; original=header.read_bytes()
+          assert hashlib.sha256(original).hexdigest()=='21f2e598edafc01871409655c96941bb3e0df7cbfffb4c62c0361b5fa1683a14'
+          before=b'inline constexpr double pattern_pcm_radius_limit = .992;'
+          assert original.count(before)==1
+          git=['git','-c','safe.directory='+str(root)]
+          subprocess.run(git+['diff','--exit-code'],check=True)
+          source=subprocess.check_output(git+['rev-parse','HEAD'],text=True).strip()
+          (report/'original-pattern-pulse.hpp').write_bytes(original)
+          jobs=subprocess.check_output(['python3','-B','tools/build_capacity.py'],text=True).strip()
+          results=[]
+          try:
+              for radius in ['.988','.984','.981']:
+                  changed=original.replace(before,b'inline constexpr double pattern_pcm_radius_limit = '+radius.encode()+b';')
+                  header.write_bytes(changed)
+                  prefix=report/('radius-'+radius[1:]); prefix.with_suffix('.patch').write_bytes(subprocess.check_output(git+['diff','--binary','--',str(header)]))
+                  subprocess.run(['cmake','--build','build','--target','test_alsa_audio','--parallel',jobs],check=True)
+                  with prefix.with_suffix('.log').open('w') as log:
+                      run=subprocess.run(['./build/test_alsa_audio','--dsss-clipping-diagnostic'],stdout=log,stderr=subprocess.STDOUT)
+                  lines=prefix.with_suffix('.log').read_text().splitlines()
+                  assert sum(line.startswith('clipping_diagnostic_complete ') for line in lines)==1, 'incomplete source-radius measurement'
+                  phases=[line for line in lines if line.startswith('clipping_diagnostic_phase ')]
+                  assert len(phases)==257, 'omitted table-node or actual-fixture phase'
+                  known='fractional DSSS reconstruction clipping exceeds the bounded reference distortion'
+                  assert run.returncode==0 or (run.returncode==1 and lines[-1]==known), 'unexpected diagnostic failure'
+                  metrics=[{k:float(v) for k,v in re.findall(r'(fraction|clamp_fraction)=([^ ]+)',line)} for line in phases]
+                  worst=max(metrics,key=lambda m:m['clamp_fraction'])
+                  item={'source':source,'only_source_change':'pattern_pcm_radius_limit','radius':radius,
+                      'header_sha256':hashlib.sha256(changed).hexdigest(),
+                      'binary_sha256':hashlib.sha256((root/'build/test_alsa_audio').read_bytes()).hexdigest(),
+                      'original_strict_exit':run.returncode,
+                      'actual_fixture':metrics[0],'worst_measured_node':worst,
+                      'scope':'exact compiled source variant; diagnostic only, not regression or sensitivity qualification'}
+                  results.append(item);prefix.with_suffix('.json').write_text(json.dumps(item,indent=2)+'\n');print(json.dumps(item),flush=True)
+          finally:
+              header.write_bytes(original)
+          subprocess.run(git+['diff','--exit-code'],check=True)
+          (report/'results.json').write_text(json.dumps(results,indent=2)+'\n')
+          PY
       - name: Run all four selected receiver and clock tests
         if: inputs.scope == 'receiver'
         run: |
@@ -290,6 +335,7 @@ jobs:
             build/calibration-aggregate.log
             build/eme-diagnostic*
             build/alsa-diagnostic*
+            build/alsa-radius-diagnostic/
             build/CMakeCache.txt
             build/receiver-fixtures/
             ${{ github.workspace }}/build/ci-smoke-results/

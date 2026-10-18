@@ -166,12 +166,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Receiver diagnostic source identity failed" }
           ./build/Release/test_pattern_correlator.exe paired_pulse_origin_parities_and_canonical_quarters --diagnose-pulse-membership 2>&1 | Tee-Object -FilePath build/receiver-diagnostic/pulse.log
           $pulse = $LASTEXITCODE
+          ./build/Release/test_pattern_drift.exe 2>&1 | Tee-Object -FilePath build/receiver-diagnostic/drift-full.log
+          $driftFull = $LASTEXITCODE
           ./build/Release/test_pattern_drift.exe --diagnose-commit "$PWD/build/receiver-diagnostic/drift.jsonl" 2>&1 | Tee-Object -FilePath build/receiver-diagnostic/drift.log
           $drift = $LASTEXITCODE
           ./build/Release/test_clock_sync.exe 2>&1 | Tee-Object -FilePath build/receiver-diagnostic/clock.log
           $clock = $LASTEXITCODE
-          "pulse=$pulse drift=$drift clock=$clock" | Set-Content build/receiver-diagnostic/exits.txt
-          if ($pulse -ne 0 -or $drift -ne 0 -or $clock -ne 0) { throw "Original receiver diagnostic assertions failed; inspect all retained results" }
+          "pulse=$pulse drift_full=$driftFull drift=$drift clock=$clock" | Set-Content build/receiver-diagnostic/exits.txt
+          if ($pulse -ne 0 -or $driftFull -ne 0 -or $drift -ne 0 -or $clock -ne 0) { throw "Original receiver diagnostic assertions failed; inspect all retained results" }
       - name: Run all four selected receiver and clock tests
         if: inputs.scope == 'receiver-baseline' || inputs.scope == 'receiver'
         run: |
