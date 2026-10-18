@@ -9,6 +9,7 @@
 #include <numeric>
 #include <numbers>
 #include <random>
+#include <string_view>
 
 using namespace datapump;
 using namespace datapump::modem;
@@ -598,7 +599,7 @@ void prepared_batch_scalar_oracle() {
     const auto same_bits=[](double a,double b) {
         return std::bit_cast<std::uint64_t>(a)==std::bit_cast<std::uint64_t>(b);
     };
-    std::size_t cases=0;
+    std::size_t cases=0,requested_cases=0,rejected_cases=0;
     for(const auto transform:{std::size_t{256},std::size_t{512}})for(const auto mode:modes) {
         const auto length=transform-starts+1;
         Config config;config.sample_rate=6000;config.bandwidth_hz=1200;config.carrier_hz=1500;
@@ -606,6 +607,19 @@ void prepared_batch_scalar_oracle() {
         config.stream_epoch=1800000000;config.search_arithmetic=mode;
         for(std::size_t i=0;i<config.spreading_seed.size();++i)
             config.spreading_seed[i]=static_cast<std::uint8_t>(3*i+7);
+        ++requested_cases;
+        if(mode==SearchArithmetic::matrix4) {
+            bool rejected=false;
+            try { PatternCode unsupported(config,config.stream_epoch); }
+            catch(const Error& error) {
+                check(std::string_view(error.what())=="INT4 search operands are not implemented on the CPU",
+                      "unsupported INT4 request failed for an unexpected reason");
+                rejected=true;
+            }
+            check(rejected,"prepared scalar oracle accepted unsupported INT4 Config");
+            ++rejected_cases;
+            continue;
+        }
         PatternCode code(config,config.stream_epoch);
         FftSearchBatch batch;auto& geometry=batch.geometry;
         geometry.pattern={config.stream_epoch,code.chip_samples(),code.chips_per_symbol(),code.symbol_samples(),
@@ -716,8 +730,10 @@ void prepared_batch_scalar_oracle() {
         check_selection(true);
         ++cases;
     }
-    check(cases==12,"prepared scalar FFT oracle did not cover the complete 12-case matrix");
-    std::cout<<"prepared scalar FFT oracle cases: "<<cases<<'\n';
+    check(requested_cases==12&&cases==10&&rejected_cases==2,
+          "prepared scalar FFT oracle did not cover all supported requests and INT4 rejections");
+    std::cout<<"prepared scalar FFT oracle scored: "<<cases<<" requested: "<<requested_cases
+             <<" rejected INT4: "<<rejected_cases<<'\n';
 }
 } // namespace
 namespace paired_regression {
