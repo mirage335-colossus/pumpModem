@@ -165,7 +165,7 @@ jobs:
         if: inputs.scope == 'sched-hop-diagnostic'
         run: |
           {
-            git rev-parse HEAD > "$SDK_LOG_DIR/sched-hop-source.txt"
+            git -c safe.directory="$PWD" rev-parse HEAD > "$SDK_LOG_DIR/sched-hop-source.txt"
             build/sdk/bin/cmake -S . -B build/sdk-application -DDART_TESTING_TIMEOUT=3600
             build/sdk/bin/cmake --build build/sdk-application --target test_sched_hop_transmit test_sched_hop_receiver --parallel "$(python3 -B tools/build_capacity.py)"
             selector='^(sched_hop_transmit|sched_hop_receiver)$'
