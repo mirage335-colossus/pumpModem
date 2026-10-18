@@ -280,10 +280,11 @@ void weak_amplitude_chain() {
         }
         return result;
     };
-    // Fixed deterministic channel noise puts each symbol near score 12,
-    // below admission, while the complete four-symbol chain is sufficient.
-    // Assert that evidence below; never tune receiver thresholds for the test.
-    constexpr double target=12.;
+    // The original deterministic channel and noise scales, with the .988
+    // shaped radial limit, put each symbol near 11.95 (formerly 12 at .992).
+    // This is fixture calibration; the independent standalone/joint admission
+    // gates below retain their thresholds and margins unchanged.
+    constexpr double target=11.95;
     constexpr std::array<double,4> scales{354.031494140625,306.191162109375,
         310.993408203125,277.803466796875};
     const auto pcm=make_pcm(scales,capture_end);const auto e=observe(std::span(pcm).first(prefix_end));
@@ -315,7 +316,8 @@ void weak_amplitude_chain() {
     for(std::size_t i=0;i<4;++i) {
         check(e.present[i],"weak-chain evidence was not retained");const auto& v=e.values[i];
         check(v.bit==expected[i]&&v.score-v.alternative_score>=1.,"weak-chain symbol lost its correct distinct winner");
-        check(std::abs(v.score-target)<.05&&v.score>=query.retain_score&&v.score+1<v.admission_threshold,
+        check(std::abs(v.score-target)<.05,"weak-chain deterministic score calibration changed");
+        check(v.score>=query.retain_score&&v.score+1<v.admission_threshold,
               "weak-chain symbols must be individually below unchanged admission threshold");
     }
     for(std::size_t count=1;count<4;++count)check(joint(count)<e.values[count-1].admission_threshold,"weak prefix meets joint admission");

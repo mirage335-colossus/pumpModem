@@ -69,6 +69,9 @@ void split_waveform() {
         modem::PatternCode code(c,c.stream_epoch);const auto pad=modem::pattern_pulse_padding_samples(c);
         const auto origin=tx.physical_output_origin();const auto source_origin=map.locate(origin).source;
         const auto gain=std::sqrt(2*modem::nominal_signal_power)*modem::outer_dsss_transmit_gain(c);
+        // Ordinary rectangular chips retain their linear source values. Only
+        // shaped overlap or packed source composition selects the final limiter.
+        const bool source_limited=pad||modem::packed_scheduled_symbols(c);
         std::size_t nulls=0,lit=0;
         for(std::uint64_t i=0;i<actual.size();++i) {
             const auto where=map.locate(origin+i);
@@ -77,7 +80,9 @@ void split_waveform() {
             for(std::size_t bit=0;bit<bits.size();++bit)
                 base+=code.shaped_value(bit*code.chips_per_symbol(),bits[bit],static_cast<double>(u-pad-bit*code.symbol_samples()));
             const auto oscillator=std::polar(1.,2*std::numbers::pi*c.carrier_hz*(static_cast<double>(i)/c.sample_rate));
-            const auto expected=modem::SchedHopSourceMap::gain(where,{origin+i})*oscillator*modem::pattern_limit_pcm(gain*base);
+            const auto signal=gain*base;
+            const auto source=source_limited?modem::pattern_limit_pcm(signal):signal;
+            const auto expected=modem::SchedHopSourceMap::gain(where,{origin+i})*oscillator*source;
             if(!(std::abs(actual[i]-expected)<2e-8)) {
                 const auto envelope=modem::SchedHopSourceMap::gain(where,{origin+i});
                 const auto raw=envelope*oscillator*(gain*base);
@@ -86,12 +91,12 @@ void split_waveform() {
                     <<" sample="<<i<<" source_sample="<<u<<" chip="<<code.chip_samples()
                     <<" symbol="<<code.symbol_samples()<<" padding="<<pad
                     <<" shaped="<<modem::pattern_pulse_enabled(c)
-                    <<" packed="<<modem::packed_scheduled_symbols(c)<<" envelope="<<envelope
+                    <<" packed="<<modem::packed_scheduled_symbols(c)<<" source_limited="<<source_limited<<" envelope="<<envelope
                     <<" source_radius="<<std::abs(gain*base)<<" limit="<<modem::pattern_pcm_radius_limit
-                    <<" actual="<<actual[i]<<" raw="<<raw<<" limited="<<expected
+                    <<" actual="<<actual[i]<<" raw="<<raw<<" expected="<<expected
                     <<" raw_error="<<std::abs(actual[i]-raw)
-                    <<" limited_error="<<std::abs(actual[i]-expected)
-                    <<" predicted_radial_error="<<envelope*std::max(0.,std::abs(gain*base)-modem::pattern_pcm_radius_limit)
+                    <<" expected_error="<<std::abs(actual[i]-expected)
+                    <<" potential_cap_error="<<envelope*std::max(0.,std::abs(gain*base)-modem::pattern_pcm_radius_limit)
                     <<std::endl;
             }
             check(std::abs(actual[i]-expected)<2e-8,"split waveform lost source shaping, independent patterns, or physical carrier phase");
