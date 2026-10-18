@@ -11,7 +11,7 @@ on:
       scope:
         description: 'Run the selected unchanged native scope'
         type: choice
-        options: [core, fast, live, calibration, frontends, web, gui, package, receiver-baseline, eme-diagnostic, receiver, receiver-diagnostic, startup-guide]
+        options: [core, fast, live, calibration, frontends, web, gui, package, receiver-baseline, eme-diagnostic, receiver, receiver-diagnostic, startup-guide, sched-hop-diagnostic]
         default: live
       calibration_section:
         description: 'Calibration section; used only by the calibration scope'
@@ -24,7 +24,7 @@ on:
         type: string
         default: windows-2022
       scope:
-        description: 'core, fast, live, calibration, frontends, web, gui, package, frozen receiver-baseline, eme-diagnostic, receiver, receiver-diagnostic, or startup-guide'
+        description: 'core, fast, live, calibration, frontends, web, gui, package, frozen receiver-baseline, eme-diagnostic, receiver, receiver-diagnostic, startup-guide, or sched-hop-diagnostic'
         type: string
         required: true
       calibration_section:
@@ -137,6 +137,7 @@ jobs:
             'eme-diagnostic' { $targets = @('test_frequency_axis_probability') }
             'receiver' { $targets = @('test_pattern_correlator', 'test_pattern_drift', 'test_receiver_differential', 'test_clock_sync', 'test_pattern_startup_guide') }
             'startup-guide' { $targets = @('test_pattern_startup_guide') }
+            'sched-hop-diagnostic' { $targets = @('test_sched_hop_transmit', 'test_sched_hop_receiver') }
             'receiver-diagnostic' { $targets = @('test_pattern_correlator', 'test_pattern_drift', 'test_clock_sync') }
             'fast' { $targets = @('datapump-tests-fast') }
             'live' { $targets = @('datapump-tests-ci-live') }
@@ -147,7 +148,7 @@ jobs:
           cmake --build build --config Release --target @targets --parallel $env:CL_MPCount
           if ($LASTEXITCODE -ne 0) { throw "Native shard build failed" }
       - name: Run the selected native tests
-        if: inputs.scope != 'package' && inputs.scope != 'receiver-baseline' && inputs.scope != 'eme-diagnostic' && inputs.scope != 'receiver' && inputs.scope != 'receiver-diagnostic' && inputs.scope != 'startup-guide'
+        if: inputs.scope != 'package' && inputs.scope != 'receiver-baseline' && inputs.scope != 'eme-diagnostic' && inputs.scope != 'receiver' && inputs.scope != 'receiver-diagnostic' && inputs.scope != 'startup-guide' && inputs.scope != 'sched-hop-diagnostic'
         # Separate runners supply parallelism; preserve per-runner live budgets.
         run: python tools/run-ci-tests.py --build-dir build --scope "$env:CI_SCOPE" --jobs 1 --config Release --report build/ci-test-report.json
       - name: Diagnose one strict EME continuation capture without changing its gates
@@ -176,13 +177,14 @@ jobs:
           "pulse=$pulse drift_full=$driftFull drift=$drift clock=$clock" | Set-Content build/receiver-diagnostic/exits.txt
           if ($pulse -ne 0 -or $driftFull -ne 0 -or $drift -ne 0 -or $clock -ne 0) { throw "Original receiver diagnostic assertions failed; inspect all retained results" }
       - name: Run selected receiver and clock tests
-        if: inputs.scope == 'receiver-baseline' || inputs.scope == 'receiver' || inputs.scope == 'startup-guide'
+        if: inputs.scope == 'receiver-baseline' || inputs.scope == 'receiver' || inputs.scope == 'startup-guide' || inputs.scope == 'sched-hop-diagnostic'
         run: |
           $report = if ($env:CI_SCOPE -eq 'receiver-baseline') { 'receiver-baseline' } else { 'receiver-fixtures' }
           New-Item -ItemType Directory -Force "build/$report" | Out-Null
           $expected = @('pattern_correlator', 'pattern_drift', 'receiver_differential', 'clock_sync')
           if ($env:CI_SCOPE -eq 'receiver') { $expected += 'pattern_startup_guide' }
           if ($env:CI_SCOPE -eq 'startup-guide') { $expected = @('pattern_startup_guide') }
+          if ($env:CI_SCOPE -eq 'sched-hop-diagnostic') { $expected = @('sched_hop_transmit', 'sched_hop_receiver') }
           $selector = '^(' + ($expected -join '|') + ')$'
           ctest --test-dir build -C Release --show-only=json-v1 -R $selector > "build/$report/inventory.json"
           if ($LASTEXITCODE -ne 0) { throw "Frozen receiver inventory failed" }
