@@ -591,6 +591,134 @@ void differential_direct_fft_and_real_gram() {
         check(rejected(local),"local differential scorer accepted fewer than 256 complete windows");
     }
 }
+void prepared_batch_scalar_oracle() {
+    constexpr std::size_t starts=23,stride=26;
+    const std::array<SearchArithmetic,6> modes{{SearchArithmetic::default_mode,SearchArithmetic::matrix4,
+        SearchArithmetic::matrix8,SearchArithmetic::int8,SearchArithmetic::fp32,SearchArithmetic::fp64}};
+    const auto same_bits=[](double a,double b) {
+        return std::bit_cast<std::uint64_t>(a)==std::bit_cast<std::uint64_t>(b);
+    };
+    std::size_t cases=0;
+    for(const auto transform:{std::size_t{256},std::size_t{512}})for(const auto mode:modes) {
+        const auto length=transform-starts+1;
+        Config config;config.sample_rate=6000;config.bandwidth_hz=1200;config.carrier_hz=1500;
+        config.spreading_factor=128;config.scramble=false;config.pulse_shaping=false;
+        config.stream_epoch=1800000000;config.search_arithmetic=mode;
+        for(std::size_t i=0;i<config.spreading_seed.size();++i)
+            config.spreading_seed[i]=static_cast<std::uint8_t>(3*i+7);
+        PatternCode code(config,config.stream_epoch);
+        FftSearchBatch batch;auto& geometry=batch.geometry;
+        geometry.pattern={config.stream_epoch,code.chip_samples(),code.chips_per_symbol(),code.symbol_samples(),
+            config.sample_rate,static_cast<std::uint32_t>(config.spreading_mode),0,0,0,
+            config.spreading_seed,config.dsss_seed};
+        geometry.bins_per_symbol=length;geometry.bin_samples=1;geometry.carrier_hz=config.carrier_hz;
+        geometry.evidence_count=static_cast<double>(length);geometry.noise_condition=1.375;
+        geometry.real_rank=0;geometry.sample_fit=0;geometry.drift_sections=1;
+        geometry.differential_window_samples=0;
+        geometry.search_arithmetic=static_cast<std::uint32_t>(mode);
+
+        std::vector<FftComplex> input(transform),spectrum;
+        std::vector<double> energy(transform+1);
+        for(std::size_t i=0;i<transform;++i) {
+            const auto x=static_cast<double>(i);
+            input[i]={std::sin(.193*x+.017*transform)+.07*std::cos(.113*x),
+                      std::cos(.157*x-.023*transform)-.03*std::sin(.071*x)};
+            energy[i+1]=energy[i]+std::norm(input[i]);
+        }
+        spectrum=input;const auto arithmetic=effective_search_arithmetic(geometry);
+        check(arithmetic==(mode==SearchArithmetic::default_mode?SearchArithmetic::fp64:mode),
+              "plain prepared oracle geometry resolved an unexpected effective arithmetic mode");
+        pattern_fft(spectrum,false,{},arithmetic);
+        batch.spectrum=spectrum;batch.energy_prefix=energy;batch.starts=starts;batch.score_stride=stride;
+
+        std::array<std::vector<FftComplex>,2> rows;
+        FftPreparedTemplate prepared;
+        FftSearchJob prepared_job;prepared_job.phase=7;
+        code.set_stream_phase_samples(prepared_job.phase);
+        code.prepare_symbol(prepared_job.symbol*geometry.pattern.chips_per_symbol);
+        for(unsigned bit=0;bit<2;++bit) {
+            rows[bit].assign(transform,FftComplex{});
+            for(std::size_t i=0;i<length;++i) {
+                const auto sample_position=static_cast<long double>(i)*geometry.bin_samples+
+                    static_cast<long double>(geometry.bin_samples-1)/2;
+                const auto source_position=sample_position*prepared_job.clock_ratio;
+                const auto chip_position=source_position/geometry.pattern.chip_samples;
+                const auto local=static_cast<std::uint64_t>(chip_position);
+                const auto chip=prepared_job.symbol*geometry.pattern.chips_per_symbol+local;
+                auto value=code.value(chip,bit,static_cast<double>(chip_position-local))*
+                    std::polar(1.,(2*std::numbers::pi)*prepared_job.frequency_hz*
+                        static_cast<double>(sample_position)/geometry.pattern.sample_rate);
+                if(arithmetic==SearchArithmetic::fp32)
+                    value={static_cast<float>(value.real()),static_cast<float>(value.imag())};
+                rows[bit][length-1-i]=std::conj(value);
+                prepared.energy[bit]+=std::norm(value);
+            }
+            pattern_fft(rows[bit],false,{},arithmetic);
+            prepared.rows[bit]=rows[bit];
+        }
+        std::array<FftPreparedTemplate,1> prepared_templates{{prepared}};
+        std::array<FftSearchJob,2> jobs{};
+        for(auto& job:jobs)job=prepared_job;
+        std::vector<FftSearchWorkspace> workspaces;
+        workspaces.emplace_back(config,transform,true);
+        workspaces.emplace_back(config,transform,true);
+
+        const auto check_selection=[&](bool restricted) {
+            const FftStartRange selected{7,3};
+            batch.start_ranges=restricted?std::span<const FftStartRange>(&selected,1):std::span<const FftStartRange>{};
+            for(auto& job:jobs) {
+                job.prepared_template=std::numeric_limits<std::uint64_t>::max();
+                job.range_begin=0;
+                job.range_count=restricted?1:std::numeric_limits<std::size_t>::max();
+            }
+            std::vector<FftSearchScore> generated(jobs.size()*stride,untouched);
+            execute_fft_search_cpu(batch,jobs,generated,workspaces);
+
+            batch.prepared=prepared_templates;
+            for(auto& job:jobs)job.prepared_template=0;
+            std::vector<FftSearchScore> actual(generated.size(),untouched),reference(generated.size(),untouched);
+            execute_fft_search_cpu(batch,jobs,actual,workspaces);
+            for(std::size_t job=0;job<jobs.size();++job)for(unsigned bit=0;bit<2;++bit) {
+                std::vector<FftComplex> product(transform);
+                for(std::size_t i=0;i<transform;++i)
+                    product[i]=pattern_fft_product(spectrum[i],rows[bit][i],arithmetic);
+                pattern_fft(product,true,{},arithmetic);
+                for(std::size_t start=0;start<starts;++start) {
+                    if(restricted&&(start<selected.first||start>=selected.first+selected.count))continue;
+                    const auto observed_energy=energy[start+length]-energy[start];
+                    const auto score=pattern_evidence(product[length-1+start],observed_energy,
+                        prepared.energy[bit],geometry.evidence_count,geometry.noise_condition,false,false,FftComplex{});
+                    auto& expected=reference[job*stride+start];
+                    (bit==0?expected.zero:expected.one)=score;
+                }
+            }
+            for(std::size_t job=0;job<jobs.size();++job)for(std::size_t start=0;start<stride;++start) {
+                const auto index=job*stride+start;
+                const bool selected_cell=start<starts&&(!restricted||
+                    (start>=selected.first&&start<selected.first+selected.count));
+                if(!selected_cell) {
+                    check(equal(generated[index],untouched)&&equal(actual[index],untouched)&&
+                          equal(reference[index],untouched),
+                          "prepared scalar oracle wrote an excluded or padding cell");
+                    continue;
+                }
+                const auto expected=reference[index];
+                const auto from_generated=generated[index],from_prepared=actual[index];
+                check(same_bits(from_prepared.zero,expected.zero)&&same_bits(from_prepared.one,expected.one),
+                      "prepared FFT score differs bitwise from the independent scalar oracle");
+                check(same_bits(from_generated.zero,from_prepared.zero)&&
+                      same_bits(from_generated.one,from_prepared.one),
+                      "generated and prepared FFT templates differ bitwise");
+            }
+            batch.prepared={};
+        };
+        check_selection(false);
+        check_selection(true);
+        ++cases;
+    }
+    check(cases==12,"prepared scalar FFT oracle did not cover the complete 12-case matrix");
+    std::cout<<"prepared scalar FFT oracle cases: "<<cases<<'\n';
+}
 } // namespace
 namespace paired_regression {
 using namespace datapump;
@@ -1312,7 +1440,7 @@ void frequency_axis_equivalence_and_bounds() {
 }
 }
 int main() {
-    try {paired_regression::run();flat_batch_tiling_and_order();borrowed_double_tables_equivalence_and_guards();prepared_template_and_cancellation();restricted_coherent_direct_and_fft();public_nominal_reference_exactness();
+    try {prepared_batch_scalar_oracle();paired_regression::run();flat_batch_tiling_and_order();borrowed_double_tables_equivalence_and_guards();prepared_template_and_cancellation();restricted_coherent_direct_and_fft();public_nominal_reference_exactness();
         drift_rank_and_partition();drift_direct_fft_and_real_gram();differential_direct_fft_and_real_gram();frequency_axis_equivalence_and_bounds();}
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
     std::cout<<"pattern FFT batch tests passed\n";

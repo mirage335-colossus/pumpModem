@@ -569,11 +569,17 @@ void execute_fft_search_cpu(const FftSearchBatch& batch,std::span<const FftSearc
                     if(!direct) {
                         if(supplied_tables)search_fft::fft(std::span(row),false,tables,stop);
                         else pattern_fft(row,false,stop,mode);
-                        for(std::size_t i=0;i<transform;++i)row[i]=pattern_fft_product(batch.spectrum[i],row[i],mode);
+                        if(mode!=SearchArithmetic::fp32)
+                            for(std::size_t i=0;i<transform;++i)row[i]=batch.spectrum[i]*row[i];
+                        else
+                            for(std::size_t i=0;i<transform;++i)row[i]=pattern_fft_product(batch.spectrum[i],row[i],mode);
                     }
                 } else {
                     norm=prepared->energy[bit];square=prepared->square[bit];
-                    for(std::size_t i=0;i<transform;++i)row[i]=pattern_fft_product(batch.spectrum[i],prepared->rows[bit][i],mode);
+                    if(mode!=SearchArithmetic::fp32)
+                        for(std::size_t i=0;i<transform;++i)row[i]=batch.spectrum[i]*prepared->rows[bit][i];
+                    else
+                        for(std::size_t i=0;i<transform;++i)row[i]=pattern_fft_product(batch.spectrum[i],prepared->rows[bit][i],mode);
                 }
                 if(!direct) {
                     if(supplied_tables)search_fft::fft(std::span(row),true,tables,stop);

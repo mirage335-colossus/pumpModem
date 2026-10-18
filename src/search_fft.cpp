@@ -149,9 +149,10 @@ void fft(std::span<std::complex<double>> a,bool inverse,const DoubleTableView& v
        overlaps(std::span<const std::complex<double>>(a),view.inverse))
         throw Error("double FFT input overlaps its tables");
     cancelled(stop);
+    auto* const values=a.data();
     for(std::size_t i=1,j=0;i<n;++i){
         if((i&4095U)==0)cancelled(stop);
-        auto bit=n>>1;for(;j&bit;bit>>=1)j^=bit;j^=bit;if(i<j)std::swap(a[i],a[j]);
+        auto bit=n>>1;for(;j&bit;bit>>=1)j^=bit;j^=bit;if(i<j)std::swap(values[i],values[j]);
     }
     std::size_t iterations=0;
     for(std::size_t length=2;length<=n;length*=2){
@@ -161,19 +162,19 @@ void fft(std::span<std::complex<double>> a,bool inverse,const DoubleTableView& v
             // A stage has at most 4096 butterflies, preserving the existing
             // cancellation bound without a counter branch on every butterfly.
             for(std::size_t begin=0;begin<n;begin+=length)for(std::size_t j=0;j<half;++j){
-                const auto u=a[begin+j],v=a[begin+j+half]*table[j];
-                a[begin+j]=u+v;a[begin+j+half]=u-v;
+                const auto u=values[begin+j],v=values[begin+j+half]*table[j];
+                values[begin+j]=u+v;values[begin+j+half]=u-v;
             }
         } else for(std::size_t begin=0;begin<n;begin+=length)for(std::size_t j=0;j<half;++j){
             if((iterations++&4095U)==0)cancelled(stop);
-            const auto u=a[begin+j],v=a[begin+j+half]*table[j];
-            a[begin+j]=u+v;a[begin+j+half]=u-v;
+            const auto u=values[begin+j],v=values[begin+j+half]*table[j];
+            values[begin+j]=u+v;values[begin+j+half]=u-v;
         }
         if(length==n)break;
     }
     if(inverse)for(std::size_t i=0;i<n;++i){
         if((i&4095U)==0)cancelled(stop);
-        a[i]/=static_cast<double>(n);
+        values[i]/=static_cast<double>(n);
     }
 }
 void fft(std::span<std::complex<float>> a,bool inverse,const FloatPlan& p,std::stop_token stop,Kernel k){execute(a,inverse,p,stop,k);}
