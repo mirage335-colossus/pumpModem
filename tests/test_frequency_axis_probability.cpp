@@ -92,6 +92,8 @@ double source_power(const modem::Config& c,unsigned bit) {
 }
 struct Event {
     Bytes bits;std::uint64_t first=0,end=0;bool complete=false;std::uint64_t polled_at=0;
+    std::uint64_t ordinal=0,stream_first=0,stream_symbol=0,phase=0,missing=0;
+    double frequency=0;
     bool operator==(const Event&)const=default;
 };
 struct Outcome {
@@ -139,7 +141,9 @@ Outcome receive(modem::Config c,const transfer::Options& o,const std::vector<flo
                                 out.first_candidate=candidate;
                         }
             }
-            out.events.push_back({e.bits,e.first_sample,e.end_sample,e.complete,at});
+            out.events.push_back({e.bits,e.first_sample,e.end_sample,e.complete,at,
+                e.first_stream_symbol,e.stream_first_sample,e.stream_first_symbol,
+                e.stream_phase_samples,e.missing_slots,e.frequency_hz});
             out.bits.insert(out.bits.end(),e.bits.begin(),e.bits.end());
             if(e.complete){++out.complete;out.completion_at=at;}
         }
@@ -589,7 +593,20 @@ void capture(unsigned seconds,double es,std::uint64_t seed,bool compare,unsigned
         <<" first_trials="<<axis.first_trials<<" first_starts="<<axis.first_starts
         <<" paired="<<compare<<'\n'<<std::flush;
     if(noise)require(axis.bits.empty()&&axis.complete==0,"noise-only capture admitted a bit or completed reception");
-    if(require_success)require(correct,"strong signal did not complete the exact expected bits");
+    if(require_success) {
+        require(correct,"strong signal did not complete the exact expected bits");
+        require(!axis.events.empty(),"strict capture omitted its pending identity");
+        const auto& initial=axis.events.front();std::uint64_t ordinal=initial.ordinal;
+        for(const auto& event:axis.events) {
+            require(event.stream_first==initial.stream_first && event.stream_symbol==initial.stream_symbol &&
+                event.phase==initial.phase && event.ordinal==ordinal && !event.missing,
+                "strict capture replaced its pending identity or repeated/skipped an ordinal");
+            require(event.bits.size()==(event.complete?0U:1U),
+                "strict capture batched bits or attached data to its physical end");
+            ordinal+=event.bits.size();
+        }
+        require(ordinal-initial.ordinal==expected.size(),"strict capture duplicated an accepted bit");
+    }
     require(!accepted_early,"receiver completed before a full failed duration on its accepted symbol grid");
     if(require_oracle_end)require(!early,"receiver completed before independent payload endpoint plus fully scored absence");
     require(axis.axis>0,"fixture did not exercise frequency-axis acquisition");
@@ -601,15 +618,18 @@ int main(int argc,char** argv) {try {
     if(argc==2&&std::string_view(argv[1])=="--algebra-source-only") {exact_score_algebra();source_projection_checks();return 0;}
     if(argc==2&&std::string_view(argv[1])=="--scope-only") {probability_scope();return 0;}
     if(argc==2&&std::string_view(argv[1])=="--existing-eme-only") {existing_eme_scope();return 0;}
-    if((argc==6||argc==7)&&std::string_view(argv[1])=="--diagnose-end") {
+    if((argc==6||argc==7)&&(std::string_view(argv[1])=="--diagnose-end" ||
+            std::string_view(argv[1])=="--strict-end")) {
+        const bool strict=std::string_view(argv[1])=="--strict-end";
         require(argc==6||std::string_view(argv[6])=="--score-covered","unknown end diagnostic option");
+        require(!strict||argc==6,"strict continuation does not repeat the isolated diagnostic scorer");
         diagnostic_covered_scores=argc==7;
         diagnostic_capture=true;std::cout<<std::setprecision(17);
         const auto seconds=std::stoul(argv[2]),bits=std::stoul(argv[5]);
         require((seconds==128||seconds==256)&&bits>=1&&bits<=4,"invalid end diagnostic scope");
         require(!diagnostic_covered_scores||seconds==128,"isolated covered-bank scorer requires 128 seconds");
-        capture(seconds,std::stod(argv[3]),std::stoull(argv[4]),true,bits,false,false,false,false);
-        return 0; // Timing diagnostic; neither source-grid alignment nor full-bit success is asserted.
+        capture(seconds,std::stod(argv[3]),std::stoull(argv[4]),true,bits,false,strict,false,strict);
+        return 0; // Strict mode additionally requires exact content and independent physical end.
     }
     if(argc==2&&std::string_view(argv[1])=="--strong-controls") {
         capture(128,30,1,true,1,false,true);capture(256,30,2,true,1,false,true);return 0;

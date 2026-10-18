@@ -155,9 +155,9 @@ jobs:
         run: |
           git rev-parse HEAD | Tee-Object -FilePath build/eme-diagnostic-source.txt
           if ($LASTEXITCODE -ne 0) { throw "EME diagnostic source identity failed" }
-          ./build/Release/test_frequency_axis_probability.exe --diagnose-end 128 30 3 3 --score-covered 2>&1 | Tee-Object -FilePath build/eme-diagnostic.log
+          ./build/Release/test_frequency_axis_probability.exe --strict-end 128 30 3 3 2>&1 | Tee-Object -FilePath build/eme-diagnostic.log
           if ($LASTEXITCODE -ne 0) { throw "Paired EME continuation diagnostic failed" }
-          'One paired diagnostic capture only. Exit zero checks accepted-grid timing and backend parity; it is not exact-content recovery, full regression or qualification.' >> $env:GITHUB_STEP_SUMMARY
+          'One paired strict capture: exact content, immutable pending identity, backend parity and independent physical end are required. Full regression and calibration remain separate.' >> $env:GITHUB_STEP_SUMMARY
       - name: Diagnose original receiver decisions and portable timing guards
         if: inputs.scope == 'receiver-diagnostic'
         run: |

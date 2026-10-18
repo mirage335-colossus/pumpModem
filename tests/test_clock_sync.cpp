@@ -18,6 +18,29 @@ template<class F> void rejects(F function,std::source_location where=std::source
     throw std::runtime_error("unsafe timing accepted at "+std::string(where.file_name())+":"+
         std::to_string(where.line())+" in "+where.function_name());
 }
+void checked_causal_map(const datapump::clock_sync::ArrivalMap& map,long double epoch,
+        const datapump::clock_sync::Policy& policy,double capture_ui,double lag,
+        std::uint64_t maximum_phase) {
+    // Independent causal-interval geometry for these 1 kHz fixtures. Preserve
+    // the double-valued API inputs before evaluating the relative bounds.
+    const long double tau=1./1000,midpoint=lag/2;
+    const auto epsilon=std::numeric_limits<long double>::epsilon();
+    const auto ulp=std::nextafter(epoch,std::numeric_limits<long double>::infinity())-epoch;
+    const auto center=midpoint/tau;
+    const auto center_budget=ulp/(2*tau)+32*epsilon*(std::abs(center)+1);
+    const auto physical=2.L*policy.accuracy_seconds+policy.region_seconds/2.L+capture_ui+midpoint;
+    const auto roundoff=64*epsilon*std::max({1.L,std::abs(epoch+midpoint),std::abs(epoch)});
+    const auto width_bound=(physical+.01L/1000+roundoff)/tau;
+    const auto relative_roundoff=32*epsilon*(std::abs(center)+maximum_phase+width_bound+1)+
+        4*std::numeric_limits<double>::epsilon()*(std::abs(physical)/tau+1);
+    std::cout<<"Causal map arithmetic: epoch="<<epoch<<" lag="<<lag<<" capture_ui="<<capture_ui
+        <<" center="<<map.origin_samples<<" expected_center="<<center<<" center_budget="<<center_budget
+        <<" width="<<map.half_width_samples<<" physical_width="<<physical/tau
+        <<" width_bound="<<width_bound+relative_roundoff<<'\n';
+    require(std::abs(map.origin_samples-center)<=center_budget,"causal lag map changed its midpoint");
+    require(map.half_width_samples>=physical/tau,"causal lag map halved provider uncertainty");
+    require(map.half_width_samples<=width_bound+relative_roundoff,"causal lag map invented excess uncertainty");
+}
 void declared_clock_timing() {
     using namespace datapump::audio;
     constexpr auto mode=UtcTimeline::Prediction::timestamp_intersection;
@@ -447,9 +470,23 @@ void native_query_uncertainty() {
         <<" extrapolation="<<after.clock_extrapolation_seconds<<" phase="<<after.system_clock_phase_uncertainty_seconds
         <<" estimated="<<(after.quality==TimingQuality::estimated)
         <<" aggregate_below_original_cap="<<(std::abs(correction.error_seconds)+after.uncertainty_seconds<.0233)<<'\n';
-    require(std::abs(correction.error_seconds)+after.uncertainty_seconds<.0233 &&
-        after.uncertainty_seconds>=shared && after.quality==TimingQuality::estimated,
+    // The latest query-free interval is narrower than every preceding one by
+    // at least p*.05 (>100 us). Bound its two explicit epoch-roundoff charges
+    // separately from center quantization, including on binary53 long double.
+    constexpr long double horizon=817.L/8000,propagation=.002L/(1-.002L);
+    const auto epsilon=std::numeric_limits<long double>::epsilon();
+    const auto local_roundoff=64*epsilon*(frame/8000+shared+propagation*horizon+1);
+    const auto return_roundoff=2*std::numeric_limits<double>::epsilon()*
+        (shared+propagation*horizon+2*arithmetic_roundoff);
+    const auto radius_bound=shared+propagation*horizon+2*arithmetic_roundoff+local_roundoff+return_roundoff;
+    std::cout<<"Native query bounds: radius="<<radius_bound
+        <<" center="<<std::abs(center_error)+3*epoch_ulp+local_roundoff<<'\n';
+    require(after.uncertainty_seconds<=radius_bound,
         "isolated slow query persisted as a shared native clock error");
+    require(std::abs(correction.error_seconds)<=std::abs(center_error)+3*epoch_ulp+local_roundoff,
+        "query-free native prediction changed its center");
+    require(after.uncertainty_seconds>=shared && after.provider_uncertainty_floor_seconds==shared &&
+        after.quality==TimingQuality::estimated,"query decomposition lost its provider floor or quality");
     require(std::abs(after.utc_seconds-desired)<=after.uncertainty_seconds,
         "native interval omitted the compatible physical clock");
     const auto raw=native.observation_uncertainty();
@@ -568,18 +605,32 @@ void native_frozen_source_timing() {
     }
     // Informative constraints survive history eviction; broad-but-compatible
     // later observations cannot reset either source origin or the rate budget.
+    for(const long double test_epoch:{0.L,epoch}) {
     UtcTimeline persistent(8000,.001,mode,shared,true),recent(8000,.001,mode,shared);
     for(unsigned i=1;i<=140;++i) {
         const auto time=i*.001L;
         const auto radius=i<=2?shared:.030;
         const auto bias=i<=2?0.L:.010L;
-        const FrameTimestamp value{i*8.L,epoch+time+bias,time+bias,radius,1e-6,TimingQuality::estimated,17};
+        const FrameTimestamp value{i*8.L,test_epoch+time+bias,time+bias,radius,1e-6,TimingQuality::estimated,17};
         persistent.observe(value);recent.observe(value);
     }
-    require(persistent.predict(1120).uncertainty_seconds<.005 && recent.predict(1120).uncertainty_seconds>.029,
+    // The generic model charges epoch roundoff at each propagation: 139
+    // updates plus two prediction charges. All relative coordinates are <.2s.
+    const auto epsilon=std::numeric_limits<long double>::epsilon();
+    const auto epoch_roundoff=32*epsilon*(test_epoch+2);
+    constexpr long double units=64.L*141,propagation=.002L/(1-.002L);
+    const auto local_roundoff=units*epsilon/(1-units*epsilon)*4;
+    const auto history_bound=shared+propagation*.139L+141*epoch_roundoff+local_roundoff+
+        2*std::numeric_limits<double>::epsilon()*.030L;
+    const auto retained=persistent.predict(1120),evicted=recent.predict(1120);
+    std::cout<<"Persistent history arithmetic: epoch="<<test_epoch<<" retained_radius="<<retained.uncertainty_seconds
+        <<" recent_radius="<<evicted.uncertainty_seconds<<" retained_bound="<<history_bound<<'\n';
+    require(retained.uncertainty_seconds<history_bound && evicted.uncertainty_seconds>.029,
         "persistent phase constraint was forgotten at ring wrap");
+    if(test_epoch==0)require(retained.uncertainty_seconds<.005,"local-epoch history lost its original bound");
     require(persistent.predict_without_history(1120+48000).uncertainty_seconds>.042,
         "silence restart incorrectly retained refined phase evidence during qualification");
+    }
     // Continuous UTC slew is still admitted; GUI oscillator precision must not
     // silently replace the native provider's existing generic rate envelope.
     for(const double slew:{-.0005,.0005}) {
@@ -798,9 +849,8 @@ int main(int argc,char** argv) {try {
         std::abs((default_audio->half_width_samples-zero_audio->half_width_samples)/48000-datapump::clock_sync::default_audio_error_seconds)<1e-12,
         "default total per-station audio interval incorrectly used as a radius");
     const auto positive=datapump::clock_sync::audio_lag_arrival_map({0,0,0},epoch,epoch,0,1000,1./1000,0,.01,0,.05);
-    require(positive && std::abs(positive->origin_samples-25)<1e-6 &&
-        positive->half_width_samples>=35 && positive->half_width_samples<35.02,
-        "positive playback lag lost its center or halved provider uncertainty");
+    require(positive.has_value(),"positive playback lag map was rejected");
+    checked_causal_map(*positive,epoch,{0,0,0},.01,.05,0);
     require(!datapump::clock_sync::audio_lag_arrival_map({},epoch,epoch,0,1000,1./1000,0,.026,0,.05),
         "26 ms timestamp radius qualified inside a 50 ms total lag interval");
     require(datapump::clock_sync::audio_lag_arrival_map({},epoch,epoch,0,1000,1./1000,0,.024,0,.05).has_value(),
@@ -818,10 +868,8 @@ int main(int argc,char** argv) {try {
     for(const auto lag:{0.,.05,.1})for(const auto u:{0.,.012,.2}) {
         const auto calendar=datapump::clock_sync::calendar_arrival_map(*hop_policy,epoch,epoch,0,
             1000,1./1000,0,u,1000,lag);
-        require(calendar && std::abs(calendar->origin_samples-lag*500)<1e-6 &&
-                calendar->half_width_samples>=(.02+lag/2+u)*1000 &&
-                calendar->half_width_samples<(.02+lag/2+u)*1000+.02,
-            "calendar conflated provider dating uncertainty with causal Audio lag");
+        require(calendar.has_value(),"calendar arrival map was rejected");
+        checked_causal_map(*calendar,epoch,*hop_policy,u,lag,1000);
         for(const auto phase:{0.,333.,1000.})for(const auto endpoint:{-1.,1.}) {
             const auto actual=phase+lag*500+endpoint*(.02+lag/2+u)*1000;
             require(std::abs(actual-(calendar->origin_samples+calendar->phase_scale*phase))<=calendar->half_width_samples,
@@ -903,17 +951,32 @@ int main(int argc,char** argv) {try {
     unresolved.observe({0,epoch,0,.1,.1,0});
     unresolved.observe({.05L,epoch+.05L,.05L,.1,.1,0});
     require(!unresolved.interval(),"short imprecise timestamps manufactured rate confidence");
-    for(const auto ppm:{-500.,-100.,0.,100.,500.}) {
+    for(const long double test_epoch:{0.L,epoch})for(const auto ppm:{-500.,-100.,0.,100.,500.}) {
         UtcTimeline timeline(48000);
         for(unsigned i=0;i<80;++i) {
             const long double t=i*.05L;
-            timeline.observe({t*48000*(1+ppm*1e-6L),epoch+t,t,2e-7,2e-8,TimingQuality::bounded,4});
+            timeline.observe({t*48000*(1+ppm*1e-6L),test_epoch+t,t,2e-7,2e-8,TimingQuality::bounded,4});
         }
         const auto prediction=timeline.predict(4.1L*48000*(1+ppm*1e-6L));
-        require(std::abs(prediction.utc_seconds-epoch-4.1L)<2e-8,"UTC fit lost fractional timestamp accuracy");
+        // The retained 64 observations span .8..3.95s, mean2.375. Bound
+        // half-ULP observation errors using independent least-squares leverage.
+        constexpr long double absolute_deviations=51.2L,squares=54.6L;
+        const auto ulp=std::nextafter(test_epoch,std::numeric_limits<long double>::infinity())-test_epoch;
+        const auto gain=1+std::abs(4.1L-2.375L)*absolute_deviations/squares;
+        const auto epoch_fit_error=(gain/2+1)*ulp;
+        const auto fit_error=std::abs(prediction.utc_seconds-test_epoch-4.1L);
+        const auto rate_quantization=(ulp/2)*(absolute_deviations/squares)/(1+ppm*1e-6L);
+        std::cout<<"UTC fit arithmetic: epoch="<<test_epoch<<" ppm="<<ppm<<" error="<<fit_error
+            <<" error_bound="<<2e-8L+epoch_fit_error<<" rate_quantization="<<rate_quantization<<'\n';
+        require(fit_error<2e-8L+epoch_fit_error,"UTC fit lost fractional timestamp accuracy");
         require(prediction.quality==TimingQuality::bounded,"bounded provider was downgraded");
-        const auto correction=presentation_correction(prediction,epoch+4.1L,48000);
-        require(std::abs(correction.rate_fraction-(1/(1+ppm*1e-6)-1))<1e-8,"DAC correction has wrong sign or scale");
+        const auto correction=presentation_correction(prediction,test_epoch+4.1L,48000);
+        const auto expected_rate=1/(1+ppm*1e-6)-1;
+        std::cout<<"UTC fit rate: actual="<<correction.rate_fraction<<" expected="<<expected_rate
+            <<" error="<<std::abs(correction.rate_fraction-expected_rate)
+            <<" error_bound="<<1e-8+rate_quantization<<'\n';
+        require(std::abs(correction.rate_fraction-expected_rate)<1e-8+rate_quantization,
+            "DAC correction has wrong sign or scale");
     }
     UtcTimeline timeline(48000);
     timeline.observe({0,epoch,0,.1,1e-6,TimingQuality::estimated,9});
