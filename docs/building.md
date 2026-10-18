@@ -769,9 +769,12 @@ gh workflow run ci.yml --ref REF -f devfast=true -f diagnostic=sdk-live \
 ```
 
 `diagnostic_release` selects the exact source tag/ref; omitting it uses `REF`.
-The ARM diagnostic runs every existing adapter assertion with a 600-second
-outer diagnostic cap and warns only after complete success exceeds the normal
-330-second CTest cap. Failure or incomplete execution remains fatal. The SDK
+The ARM diagnostic runs every existing adapter assertion. Its outer cumulative
+cap matches the existing 900-second allowance on the standard ARM runner;
+other diagnostic runners retain 600 seconds. It warns only after complete
+success exceeds the normal 330-second CTest cap. Every assertion and internal
+deadline remains unchanged; failure or incomplete execution remains fatal.
+The SDK
 diagnostic runs the keyed acquisition reproducer, then both complete Live
 suites serially with their original deadlines. Neither runs general calibration
 or certifies a release. Full SDK and Linux certification also isolate these two
