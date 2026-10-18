@@ -91,8 +91,9 @@ def run(args):
             if junit.exists():
                 raise FileExistsError('Native CTest result already exists')
             pattern = '^(' + '|'.join(re.escape(test['name']) for test in remaining) + ')$'
-            command = base + ['--output-on-failure', '--no-tests=error', '--stop-on-failure',
+            command = base + ['--output-on-failure', '--verbose', '--no-tests=error', '--stop-on-failure',
                               '--parallel', '1', '--output-junit', str(junit), '-R', pattern]
+            workload_collector = ci.WorkloadWarningCollector(remaining)
             with log_path.open('xb') as log:
                 with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as process:
                     for line in process.stdout:
@@ -100,10 +101,13 @@ def run(args):
                         log.flush()
                         sys.stdout.buffer.write(line)
                         sys.stdout.buffer.flush()
+                        workload_collector.feed(line)
                     code = process.wait()
+            workload_warnings = workload_collector.finish(require_all=(code == 0))
             if code:
                 raise ValueError(f'Complementary CTest selection failed (exit {code}); see {log_path}')
-            results = ci.read_results(junit, remaining, 0, .8)
+            results = ci.read_results(junit, remaining, 0, .8,
+                                      workload_warnings=workload_warnings)
             if not all(test['status'] == 'passed' for test in results):
                 raise ValueError('CTest reported incomplete or failed mandatory cases')
             report['tests'].extend(results)

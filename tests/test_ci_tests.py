@@ -95,6 +95,101 @@ class Selection(unittest.TestCase):
         self.assertEqual([item['name'] for item in selected], ['gui', 'native'])
 
 
+class WorkloadCollector(unittest.TestCase):
+    def test_parallel_interleaving_uses_ctest_numbers_not_selected_positions(self):
+        selected = [test('first'), test('second')]
+        collector = runner.WorkloadWarningCollector(selected)
+        collector.feed('Start 3: second\n')
+        collector.feed('Start 8: first\n')
+        collector.feed('8: TEST_WORKLOAD_BUDGET: first late warning\n')
+        collector.feed('3: TEST_WORKLOAD_BUDGET: second late warning\n')
+        collector.feed('8: TEST_WORKLOAD_BUDGET: first late warning\n')
+        self.assertEqual(collector.finish(), {
+            'first': ['TEST_WORKLOAD_BUDGET: first late warning'],
+            'second': ['TEST_WORKLOAD_BUDGET: second late warning']})
+
+    def test_nested_fake_prefix_is_not_misattributed(self):
+        collector = runner.WorkloadWarningCollector([test('sample')])
+        collector.feed('Start 1: sample\n')
+        collector.feed('1: 9: TEST_WORKLOAD_BUDGET: nested child text\n')
+        self.assertEqual(collector.finish(), {'sample': []})
+
+    def test_command_metadata_and_output_replay_are_ignored(self):
+        marker = 'TEST_WORKLOAD_BUDGET: live record'
+        collector = runner.WorkloadWarningCollector([test('sample')])
+        collector.feed('Start 1: sample\n')
+        collector.feed('1: Test command: /tmp/probe "' + marker + '"\n')
+        collector.feed('1: ' + marker + '\n')
+        collector.feed('1/1 Test #1: sample ............ Failed  0.01 sec\n')
+        collector.feed('1: ' + marker + '\n')
+        collector.feed('The following tests FAILED:\n')
+        collector.feed(marker + '\n')
+        self.assertEqual(collector.finish(), {'sample': [marker]})
+
+    def test_unknown_repeated_conflicting_and_incomplete_framing_fail(self):
+        cases = (
+            ['Start 1: sample\n', '9: TEST_WORKLOAD_BUDGET: unknown id\n'],
+            ['Start 1: sample\n', 'Start 1: sample\n'],
+            ['Start 1: sample\n', 'Start 2: sample\n'],
+            ['Start 1: sample\n', '1: TEST_WORKLOAD_BUDGET:'],
+            ['1: TEST_WORKLOAD_BUDGET: before start\n', 'Start 1: sample\n'],
+            ['Start 1: sample'],
+            ['Start 1: other\n'],
+        )
+        for lines in cases:
+            with self.subTest(lines=lines):
+                collector = runner.WorkloadWarningCollector([test('sample')])
+                for line in lines:
+                    collector.feed(line)
+                with self.assertRaises(ValueError):
+                    collector.finish()
+
+    def test_completion_requires_complete_matching_started_identity(self):
+        for completion in (
+                '1/1 Test #9: bogus ........ Passed 0.01 sec\n',
+                '1/1 Test #1: sample ........ Passed 0.01 sec',
+                '1/1 Test #1:\n',
+                '1/1 Test #1\n',
+                '1/1 Test #1: other ........ Passed 0.01 sec\n',
+                '1/1 Test #1: sample extra ........ Passed 0.01 sec\n'):
+            with self.subTest(completion=completion):
+                collector = runner.WorkloadWarningCollector([test('sample')])
+                collector.feed('Start 1: sample\n')
+                collector.feed(completion)
+                with self.assertRaises(ValueError):
+                    collector.finish()
+        unknown = runner.WorkloadWarningCollector([test('sample')])
+        unknown.feed('Start 1: sample\n')
+        unknown.feed('1/1 Test #9: bogus ........ Passed 0.01 sec\n')
+        unknown.feed('9: TEST_WORKLOAD_BUDGET: unknown\n')
+        with self.assertRaises(ValueError):
+            unknown.finish()
+        collector = runner.WorkloadWarningCollector([test('sample')])
+        collector.feed('Start 1: sample\n')
+        for _ in range(2):
+            collector.feed('1/1 Test #1: sample ........ Passed 0.01 sec\n')
+        with self.assertRaisesRegex(ValueError, 'repeated CTest completion'):
+            collector.finish()
+
+    def test_completion_distinguishes_prefix_names_without_interpreting_status(self):
+        collector = runner.WorkloadWarningCollector([test('foo'), test('foo bar')])
+        collector.feed('Start 1: foo\n')
+        collector.feed('Start 3: foo bar\n')
+        collector.feed('1: TEST_WORKLOAD_BUDGET: first\n')
+        collector.feed('3: TEST_WORKLOAD_BUDGET: second\n')
+        collector.feed('1/2 Test #1: foo ........ Custom CTest status\n')
+        collector.feed('2/2 Test #3: foo bar ....***Custom status\n')
+        self.assertEqual(collector.finish(), {
+            'foo': ['TEST_WORKLOAD_BUDGET: first'],
+            'foo bar': ['TEST_WORKLOAD_BUDGET: second']})
+        wrong = runner.WorkloadWarningCollector([test('foo'), test('foo bar')])
+        wrong.feed('Start 1: foo\n')
+        wrong.feed('Start 3: foo bar\n')
+        wrong.feed('1/2 Test #1: foo bar .... Passed 0.01 sec\n')
+        with self.assertRaisesRegex(ValueError, 'conflicts with CTest Start'):
+            wrong.finish()
+
+
 class Reports(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -113,6 +208,26 @@ class Reports(unittest.TestCase):
             result = runner.read_results(self.path, [test('bad', timeout=10)], 3600, .8)[0]
             self.assertEqual(result['status'], 'incomplete_or_failed')
             self.assertFalse(result['near_timeout'])
+
+    def test_supplied_complete_warnings_replace_truncated_junit_markers_and_deduplicate(self):
+        marker = 'TEST_WORKLOAD_BUDGET: late complete warning'
+        partial = 'TEST_WORKLOAD_BUDGET: truncated'
+        self.path.write_text('<testsuite><testcase name="wanted" status="run">'
+                             '<system-out>' + partial + '</system-out></testcase></testsuite>')
+        result = runner.read_results(self.path, [test('wanted')], 3600, .8,
+                                     workload_warnings={'wanted': [marker, marker]})[0]
+        self.assertEqual(result['workload_warnings'], [marker])
+
+    def test_failure_skip_and_timeout_stay_failed_with_collected_warnings(self):
+        marker = 'TEST_WORKLOAD_BUDGET: warning does not change status'
+        for child in ('<failure message="assertion"/>', '<skipped/>', '<error message="timeout"/>'):
+            with self.subTest(child=child):
+                self.path.write_text(f'<testsuite><testcase name="bad" status="run" time="10">{child}</testcase></testsuite>')
+                result = runner.read_results(self.path, [test('bad', timeout=10)], 3600, .8,
+                                             workload_warnings={'bad': [marker]})[0]
+                self.assertEqual(result['status'], 'incomplete_or_failed')
+                self.assertEqual(result['workload_warnings'], [marker])
+                self.assertFalse(result['near_timeout'])
 
     def test_missing_extra_or_duplicate_results_fail_closed(self):
         for contents in ('', '<testcase name="wrong"/>', '<testcase name="wanted"/><testcase name="wanted"/>'):
@@ -150,21 +265,128 @@ class BuildPartitions(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which('ctest'), 'CTest is needed for temporary integration fixtures')
 class CTestIntegration(unittest.TestCase):
-    def exercise(self, program, timeout=5):
+    def exercise(self, program, timeout=5, *, skip_return=None, jobs=1, stale_last_test=False,
+                 truncated_markers=()):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             executable = Path(sys.executable).as_posix()
+            properties = f'LABELS "regular;contract" TIMEOUT "{timeout}"'
+            if skip_return is not None:
+                properties += f' SKIP_RETURN_CODE "{skip_return}"'
             (root / 'CTestTestfile.cmake').write_text(
                 f'add_test(sample "{executable}" "-c" "{program}")\n'
-                f'set_tests_properties(sample PROPERTIES LABELS "regular;contract" TIMEOUT "{timeout}")\n')
+                f'set_tests_properties(sample PROPERTIES {properties})\n')
+            if stale_last_test:
+                old = root / 'Testing' / 'Temporary'
+                old.mkdir(parents=True)
+                (old / 'LastTest.log').write_text('999: TEST_WORKLOAD_BUDGET: stale prior run\n')
+            if truncated_markers:
+                (root / 'CTestCustom.cmake').write_text(
+                    'set(CTEST_CUSTOM_MAXIMUM_PASSED_TEST_OUTPUT_SIZE 1024)\n')
             report = root / 'report.json'
             args = argparse.Namespace(build_dir=root, scope='core', config=None, ctest=shutil.which('ctest'),
-                                      jobs=1, sanitizers=False, sanitizer_realtime=False, report=report,
+                                      jobs=jobs, sanitizers=False, sanitizer_realtime=False, report=report,
                                       summary=root / 'summary.md', timeout=3600, warn_fraction=.005)
             stdout = io.StringIO()
             with redirect_stdout(stdout):
                 result = runner.run(args)
-            return result, json.loads(report.read_text()), stdout.getvalue()
+            contents = json.loads(report.read_text())
+            contents['_summary_text'] = (root / 'summary.md').read_text()
+            if truncated_markers:
+                junit = root / 'report.xml'
+                xml = junit.read_text()
+                for marker in truncated_markers:
+                    self.assertNotIn(marker, xml)
+            return result, contents, stdout.getvalue()
+
+    def test_real_ctest_collects_late_warnings_after_large_stdout_and_stderr(self):
+        markers = ['TEST_WORKLOAD_BUDGET: late warning one',
+                   'TEST_WORKLOAD_BUDGET: late warning two']
+        program = ("import sys; print('O'*4096, flush=True); "
+                   "print('E'*4096, file=sys.stderr, flush=True); "
+                   f"print({markers[0]!r}, flush=True); print({markers[1]!r}, flush=True)")
+        result, report, output = self.exercise(program, truncated_markers=markers)
+        self.assertEqual(result, 0, output[-2000:])
+        self.assertEqual(report['tests'][0]['workload_warnings'], markers)
+        self.assertGreater(len(output), 1024)
+        self.assertIn('::warning title=CI test workload::sample passed all assertions.', output)
+        for marker in markers:
+            self.assertIn(marker, report['_summary_text'])
+
+    def test_real_ctest_ignores_stale_lasttest_and_nested_fake_prefix(self):
+        program = "print('2: TEST_WORKLOAD_BUDGET: nested fake output')"
+        result, report, output = self.exercise(program, stale_last_test=True)
+        self.assertEqual(result, 0, output)
+        self.assertEqual(report['tests'][0]['workload_warnings'], [])
+        self.assertNotIn('stale prior run', output)
+
+    def test_real_parallel_ctest_maps_nonconsecutive_numbers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = root / 'parallel.py'
+            fixture.write_text(
+                'import sys,time\nfrom pathlib import Path\n'
+                'name=sys.argv[1]\nPath("ready-"+name).touch()\n'
+                'deadline=time.monotonic()+4\n'
+                'while not all(Path("ready-"+n).exists() for n in ("first","second")):\n'
+                ' assert time.monotonic()<deadline,"parallel peer did not start"\n'
+                ' time.sleep(.005)\n'
+                'for index in range(2):\n'
+                ' print("TEST_WORKLOAD_BUDGET: "+name+" "+str(index),flush=True)\n'
+                ' time.sleep(.02)\n')
+            quote = lambda value: json.dumps(str(value).replace('\\', '/'))
+            lines = []
+            for name, labels in [('first', 'regular;contract'), ('excluded', 'fast'),
+                                 ('second', 'regular;contract')]:
+                lines.append(f'add_test({name} {quote(sys.executable)} {quote(fixture)} {name})')
+                lines.append(f'set_tests_properties({name} PROPERTIES LABELS "{labels}" TIMEOUT 5)')
+            (root / 'CTestTestfile.cmake').write_text('\n'.join(lines)+'\n')
+            report = root / 'report.json'
+            args = argparse.Namespace(build_dir=root, scope='core', config=None,
+                                      ctest=shutil.which('ctest'), jobs=2, sanitizers=False,
+                                      sanitizer_realtime=False, report=report,
+                                      summary=root / 'summary.md', timeout=3600, warn_fraction=.8)
+            stdout = io.StringIO()
+            with redirect_stdout(stdout):
+                result = runner.run(args)
+            self.assertEqual(result, 0, stdout.getvalue())
+            data = json.loads(report.read_text())
+            self.assertEqual(set(data['selected']), {'first', 'second'})
+            self.assertEqual(data['command'][data['command'].index('--parallel')+1], '2')
+            self.assertIn('Start 1: first', stdout.getvalue())
+            self.assertIn('Start 3: second', stdout.getvalue())
+            self.assertEqual({case['name']: case['workload_warnings'] for case in data['tests']},
+                             {name: [f'TEST_WORKLOAD_BUDGET: {name} {i}' for i in range(2)]
+                              for name in ('first', 'second')})
+
+    def test_runner_drains_and_waits_before_rejecting_bad_framing(self):
+        real_popen = __import__('subprocess').Popen
+        observed = {}
+        class Child:
+            def __init__(self, command):
+                self.command = command
+                self.stdout = iter(['Start 1: sample\n', '1: TEST_WORKLOAD_BUDGET:'])
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def wait(self):
+                observed['waited'] = True
+                junit = Path(self.command[self.command.index('--output-junit') + 1])
+                junit.write_text('<testsuite><testcase name="sample" status="run"/></testsuite>')
+                return 0
+        def popen(command, *args, **kwargs):
+            if '--show-only=json-v1' in command:
+                return real_popen(command, *args, **kwargs)
+            observed['child'] = Child(command)
+            return observed['child']
+        from unittest.mock import patch
+        with patch.object(__import__('subprocess'), 'Popen', side_effect=popen):
+            result, report, _ = self.exercise('print("ok")')
+        self.assertEqual(result, 1)
+        self.assertTrue(observed.get('waited'))
+        self.assertEqual(report['status'], 'failed')
+        self.assertIn('incomplete workload warning line', report['error'])
 
     def test_real_ctest_success_and_slow_warning(self):
         result, report, output = self.exercise('import time; time.sleep(.05)')
@@ -194,12 +416,28 @@ class CTestIntegration(unittest.TestCase):
                 self.assertEqual(report['tests'][0]['workload_warnings'], [marker])
                 self.assertIn('::warning title=CI test workload::sample passed all assertions.', output)
 
+    def test_workload_warning_does_not_turn_skip_or_timeout_into_success(self):
+        marker = 'TEST_WORKLOAD_BUDGET: status remains authoritative'
+        result, report, output = self.exercise(f'print({marker!r}); raise SystemExit(77)', skip_return=77)
+        self.assertEqual(result, 1)
+        self.assertEqual(report['status'], 'failed')
+        self.assertEqual(report['tests'][0]['status'], 'incomplete_or_failed')
+        self.assertEqual(report['tests'][0]['workload_warnings'], [marker])
+        self.assertNotIn('::warning title=CI test workload::', output)
+
+        result, report, output = self.exercise(
+            f'import time; print({marker!r}, flush=True); time.sleep(10)', timeout=.1)
+        self.assertEqual(result, 1)
+        self.assertEqual(report['status'], 'failed')
+        self.assertFalse(any('passed all assertions' in line for line in output.splitlines()))
+
     def test_workload_marker_cannot_turn_failure_into_warning(self):
         marker = 'TEST_WORKLOAD_BUDGET: fixture: exceeded 30s normal budget'
         result, report, output = self.exercise(f'print({marker!r}); raise AssertionError(123)')
         self.assertEqual(result, 1)
         self.assertEqual(report['status'], 'failed')
         self.assertEqual(report['tests'][0]['workload_warnings'], [marker])
+        self.assertEqual(report['tests'][0]['status'], 'incomplete_or_failed')
         self.assertNotIn('::warning title=CI test workload::', output)
 
 

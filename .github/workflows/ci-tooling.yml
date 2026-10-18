@@ -1,0 +1,78 @@
+name: CTest runner utility checks
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  utility:
+    name: CTest utilities / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Verify utility source and required CMake tools
+        run: |
+          python -B - <<'PY'
+          if not __debug__: raise RuntimeError('optimized utility validation is forbidden')
+          import hashlib,json,os,pathlib,shutil,subprocess,sys
+          root=pathlib.Path.cwd()
+          source=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
+          assert source==os.environ['GITHUB_SHA'], 'unexpected checkout revision'
+          assert subprocess.check_output(['git','status','--porcelain=v1'],text=True)=='', 'dirty utility checkout'
+          paths=['tools/run-ci-tests.py','tools/run-native-tests.py','tests/test_ci_tests.py','tests/test_native_tests_runner.py']
+          tools={}
+          for name in ['cmake','ctest']:
+              executable=shutil.which(name)
+              if executable is None: raise RuntimeError('required real-CTest tool unavailable: '+name)
+              tools[name]={'path':executable,'version':subprocess.check_output([executable,'--version'],text=True)}
+          report=root/'build/ci-tooling';report.mkdir(parents=True)
+          (report/'provenance.json').write_text(json.dumps({'source':source,'python':sys.executable,'python_version':sys.version,'tools':tools,
+              'source_sha256':{p:hashlib.sha256((root/p).read_bytes()).hexdigest() for p in paths},
+              'source_git_blobs':{p:subprocess.check_output(['git','rev-parse','HEAD:'+p],text=True).strip() for p in paths},
+              'scope':'Python runner utilities with temporary CMake/CTest fixtures; no application or dependency compilation'},indent=2)+'\n')
+          print((report/'provenance.json').read_text())
+          PY
+      - name: Run both utility suites and retain actual exits
+        run: |
+          python -B - <<'PY'
+          if not __debug__: raise RuntimeError('optimized utility validation is forbidden')
+          import hashlib,json,pathlib,re,subprocess,sys,time
+          root=pathlib.Path.cwd();report=root/'build/ci-tooling';results=[]
+          for script in ['tests/test_ci_tests.py','tests/test_native_tests_runner.py']:
+              command=[sys.executable,'-B',script,'-v'];log=report/(pathlib.Path(script).stem+'.log')
+              started=time.monotonic()
+              with log.open('wb') as stream:
+                  completed=subprocess.run(command,stdout=stream,stderr=subprocess.STDOUT)
+              text=log.read_text(errors='replace')
+              skipped=[line for line in text.splitlines() if re.search(r' \.\.\. skipped(?: |$)',line)]
+              incomplete=bool(skipped or re.search(r'^OK \(skipped=\d+\)$',text,re.M))
+              item={'script':script,'command':command,'exit_code':completed.returncode,'elapsed_seconds':time.monotonic()-started,
+                    'log':log.name,'log_sha256':hashlib.sha256(log.read_bytes()).hexdigest(),'incomplete':incomplete,'skipped':skipped}
+              results.append(item)
+              (report/'commands-and-exits.json').write_text(json.dumps(results,indent=2)+'\n')
+              print(json.dumps(item),flush=True)
+              print(log.read_text(errors='replace'),flush=True)
+          # Named unittest outcomes retain skips: skipped required fixtures are incomplete acceptance.
+          raise SystemExit(1 if any(r['exit_code']!=0 or r['incomplete'] for r in results) else 0)
+          PY
+      - name: Retain utility provenance and complete test logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: CI-Tooling-${{ matrix.os }}-attempt-${{ github.run_attempt }}
+          path: build/ci-tooling/
+          if-no-files-found: warn
+          retention-days: 7

@@ -54,7 +54,133 @@ def select_tests(tests, scope, sanitizers=False, sanitizer_realtime=False):
     return selected, omitted, {name: len(values) for name, values in partitions.items()}
 
 
-def read_results(path, selected, default_timeout, warn_fraction):
+class WorkloadWarningCollector:
+    """Bind complete verbose CTest workload records to this process's tests."""
+    _start = re.compile(r'^\s*Start (\d+): (.+)$')
+    _warning = re.compile(r'^(\d+): (TEST_WORKLOAD_BUDGET:.*)$')
+    _nested_warning = re.compile(r'^\d+:\s+\d+:\s+TEST_WORKLOAD_BUDGET:')
+    _malformed_warning = re.compile(r'^\d+: TEST_WORKLOAD_BUDGET(?:\s|$)')
+    _raw_warning = re.compile(r'^TEST_WORKLOAD_BUDGET:')
+    _start_prefix = re.compile(r'^\s*Start \d')
+    _completion = re.compile(r'^\s*\d+/\d+ Test #(\d+):(.*)$')
+    _completion_prefix = re.compile(r'^\s*\d+/\d+ Test #\d+')
+
+    def __init__(self, selected):
+        self.selected = tuple(test['name'] for test in selected)
+        self.starts = {}
+        self.names = {}
+        self.warnings = {}
+        self.errors = []
+        self.replaying_output = False
+        self.completed = set()
+
+    def _error(self, message):
+        if len(self.errors) < 20:
+            self.errors.append(message)
+
+    def feed(self, line):
+        if isinstance(line, bytes):
+            complete = line.endswith(b'\n')
+            text = line.decode('utf-8', 'replace').rstrip('\r\n')
+        else:
+            complete = line.endswith('\n')
+            text = line.rstrip('\r\n')
+
+        # CTest may replay failed test output after its summary without the
+        # live per-test framing. Keep collection limited to the original stream.
+        if text.strip().startswith(('The following tests FAILED:', 'The following tests passed:')):
+            self.replaying_output = True
+            return
+        if self.replaying_output:
+            return
+        completion = self._completion.fullmatch(text)
+        if completion or self._completion_prefix.match(text):
+            if not complete or not completion:
+                self._error('incomplete CTest completion identity')
+                return
+            number = int(completion.group(1))
+            if number not in self.starts:
+                self._error(f'completion lacks CTest Start identity {number}')
+            elif number in self.completed:
+                self._error(f'repeated CTest completion identity {number}')
+            elif not re.match(r'^\s*' + re.escape(self.starts[number]) + r'\s+\.+(?=\s|\*)',
+                              completion.group(2)):
+                self._error(f'completion conflicts with CTest Start identity {number}')
+            else:
+                self.completed.add(number)
+            return
+
+        start = self._start.fullmatch(text)
+        if start or self._start_prefix.match(text):
+            if not complete:
+                self._error('incomplete CTest Start identity')
+                return
+            if not start:
+                self._error('malformed CTest Start identity')
+                return
+            number, name = int(start.group(1)), start.group(2)
+            if number in self.starts:
+                self._error(f'repeated CTest test number {number}')
+            elif name in self.names:
+                self._error(f'repeated CTest test identity {name!r}')
+            else:
+                self.starts[number] = name
+                self.names[name] = number
+            return
+
+        warning = self._warning.fullmatch(text)
+        if warning:
+            if not complete:
+                self._error('incomplete workload warning line')
+                return
+            number, message = int(warning.group(1)), warning.group(2)
+            if number in self.completed:
+                return
+            detail = message[len('TEST_WORKLOAD_BUDGET:'):].strip()
+            if not detail:
+                self._error(f'incomplete workload warning for CTest test {number}')
+                return
+            if number not in self.starts:
+                self._error(f'workload warning precedes or lacks CTest test number {number}')
+                return
+            records = self.warnings.setdefault(number, [])
+            if message not in records:
+                records.append(message)
+            return
+
+        # Metadata such as "N: Test command: ...marker text..." and nested
+        # child prefixes are not test-output records. Reject only malformed
+        # direct marker frames, while ignoring unrelated text that mentions it.
+        if self._nested_warning.match(text):
+            return
+        if self._malformed_warning.match(text):
+            self._error('workload warning lacks complete CTest test framing')
+        elif self._raw_warning.match(text) and not self.completed:
+            self._error('workload warning lacks complete CTest test framing')
+
+    def finish(self, *, require_all=True):
+        expected = set(self.selected)
+        if len(expected) != len(self.selected):
+            self._error('selected CTest inventory contains duplicate names')
+        actual = set(self.names)
+        extra = actual - expected
+        missing = expected - actual
+        if extra:
+            self._error('CTest Start identities are outside selected inventory: '
+                        f'extra={sorted(extra)}')
+        if require_all and missing:
+            self._error('CTest Start identities omit selected tests: '
+                        f'missing={sorted(missing)}')
+        for number in self.warnings:
+            if number not in self.starts:
+                self._error(f'workload warning references unknown CTest test number {number}')
+        if self.errors:
+            raise ValueError('Invalid verbose CTest workload output: ' + '; '.join(self.errors))
+        return {name: list(self.warnings.get(self.names[name], ())) if name in self.names else []
+                for name in self.selected}
+
+
+def read_results(path, selected, default_timeout, warn_fraction, *, workload_warnings=None):
     root = ET.parse(path).getroot()
     cases = list(root.iter('testcase'))
     observed = Counter(case.get('name') for case in cases)
@@ -71,13 +197,16 @@ def read_results(path, selected, default_timeout, warn_fraction):
         # failure/skip into success just because it ran slowly.
         passed = (case.get('status', 'run') == 'run' and
                   not any(case.find(tag) is not None for tag in ('failure', 'error', 'skipped')))
-        workload_warnings = list(dict.fromkeys(
-            line for output in case.findall('system-out')
-            for line in (output.text or '').splitlines()
-            if line.startswith('TEST_WORKLOAD_BUDGET:')))
+        if workload_warnings is None:
+            case_warnings = list(dict.fromkeys(
+                line for output in case.findall('system-out')
+                for line in (output.text or '').splitlines()
+                if line.startswith('TEST_WORKLOAD_BUDGET:')))
+        else:
+            case_warnings = list(dict.fromkeys(workload_warnings.get(name, ())))
         results.append({'name': name, 'status': 'passed' if passed else 'incomplete_or_failed',
                         'seconds': seconds, 'timeout_seconds': timeout,
-                        'workload_warnings': workload_warnings,
+                        'workload_warnings': case_warnings,
                         'near_timeout': passed and timeout > 0 and seconds >= timeout * warn_fraction})
     return results
 
@@ -142,11 +271,12 @@ def run(args):
         if omitted:
             print('Omitted instrumented real-time coverage: ' + ', '.join(omitted), flush=True)
         pattern = '^(' + '|'.join(re.escape(test['name']) for test in selected) + ')$'
-        command = base + ['--output-on-failure', '--no-tests=error', '--parallel', str(args.jobs),
+        command = base + ['--output-on-failure', '--verbose', '--no-tests=error', '--parallel', str(args.jobs),
                           '--timeout', str(args.timeout), '--output-junit', str(junit_path), '-R', pattern]
         report['command'] = command
         # Prevent stale evidence from a previous attempt satisfying this run.
         junit_path.unlink(missing_ok=True)
+        workload_collector = WorkloadWarningCollector(selected)
         with log_path.open('w', encoding='utf-8') as log:
             with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                   text=True, errors='replace') as process:
@@ -154,8 +284,11 @@ def run(args):
                     print(line, end='', flush=True)
                     log.write(line)
                     log.flush()
+                    workload_collector.feed(line)
                 returncode = process.wait()
-        report['tests'] = read_results(junit_path, selected, args.timeout, args.warn_fraction)
+        workload_warnings = workload_collector.finish(require_all=(returncode == 0))
+        report['tests'] = read_results(junit_path, selected, args.timeout, args.warn_fraction,
+                                       workload_warnings=workload_warnings)
         complete = all(test['status'] == 'passed' for test in report['tests'])
         if returncode == 0 and complete:
             report['status'] = 'passed'

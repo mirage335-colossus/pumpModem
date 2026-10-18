@@ -70,7 +70,8 @@ class NativeRunnerTests(unittest.TestCase):
             'if mode=="failure":print("physical assertion failed");sys.exit(1)\n'
             'if mode=="sanitizer":print("ERROR: AddressSanitizer: heap-use-after-free")\n'
             'if mode=="slow":time.sleep(.05)\n'
-            'if mode=="timing":print("TEST_WORKLOAD_BUDGET: fixture completed with additional workload time")\n')
+            'if mode=="timing":print("TEST_WORKLOAD_BUDGET: fixture completed with additional workload time")\n'
+            'if mode=="timing_stderr":print("TEST_WORKLOAD_BUDGET: fixture warning from stderr",file=sys.stderr)\n')
 
     def configure(self, smoke='budget', adapter='adapter', remaining='platform', timeout=2, extra=''):
         quote = lambda value: json.dumps(str(value).replace('\\','/'))
@@ -137,6 +138,16 @@ class NativeRunnerTests(unittest.TestCase):
         self.assertNotEqual(result.returncode,0)
         self.assertEqual(self.report()['status'],'failed')
         self.assertNotIn('Incomplete GUI smoke coverage',result.stdout)
+
+    def test_native_ctest_collector_preserves_stderr_warning(self):
+        self.configure(smoke='smoke',remaining='timing_stderr')
+        result=self.invoke('--label','gui','--exclude-label','calibration')
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        report=self.report()
+        platform=next(item for item in report['tests'] if item['name']=='gui_platform_conformance')
+        self.assertEqual(platform['workload_warnings'],
+                         ['TEST_WORKLOAD_BUDGET: fixture warning from stderr'])
+        self.assertIn('::warning title=CI test workload::',result.stdout)
 
     def test_direct_adapter_all_assertions_and_success_only_warning(self):
         self.configure(smoke='smoke',adapter='slow')
