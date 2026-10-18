@@ -816,7 +816,8 @@ TargetSteps preview_steps(const Inputs& inputs) {
     } catch(const Error&) {return {};}
     return result;
 }
-Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::function<void(const Model&)>& selected) {
+Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::function<void(const Model&)>& selected,
+            std::optional<TargetSteps> supplied_steps) {
     std::unique_lock lock(cache.impl_->mutex,std::defer_lock);
     estimate_detail::lock(lock,stop);
     Model result;result.inputs=inputs;result.automatic_mode=automatic(inputs.mode);
@@ -1007,7 +1008,7 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
         if(selected) {
             estimate_detail::check(stop);
             auto current=result;current.available=true;current.curves_calculating=true;
-            const auto steps=preview_steps(inputs);
+            const auto steps=supplied_steps?*supplied_steps:preview_steps(inputs);
             current.stronger_fit_target=steps.stronger;current.weaker_fit_target=steps.weaker;
             selected(current);
         }

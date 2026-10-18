@@ -511,6 +511,72 @@ void bounded_navigation_preview() {
     const auto unaffordable=planner::preview_steps(inputs);
     check(!unaffordable.stronger&&!unaffordable.weaker,"Preview navigation must reject unaffordable receiver geometry");
 }
+void retained_navigation_preview() {
+    auto inputs=example();inputs.target_db_hz=23;
+    for(const auto mode:{tuning::PatternMode::auto_pattern,tuning::PatternMode::pattern_16}) {
+        inputs.mode=mode;
+        const auto steps=planner::preview_steps(inputs);
+        if(mode==tuning::PatternMode::auto_pattern)
+            check(steps.stronger==24&&steps.weaker==22,"Retained preview fixture lost its independently checked exact steps");
+        else check(!steps.stronger&&!steps.weaker,"Fixed preview fixture must carry a completed empty pair");
+        const auto selected=[&](std::optional<planner::TargetSteps> supplied) {
+            planner::Cache cache;std::stop_source stop;std::optional<planner::Model> published;
+            bool cancelled=false;unsigned publications=0;
+            try {planner::build(inputs,cache,stop.get_token(),[&](const auto& model) {
+                ++publications;published=model;stop.request_stop();
+            },supplied);}catch(const estimate_detail::Cancelled&) {cancelled=true;}
+            check(cancelled&&publications==1&&published&&published->available&&published->curves_calculating,
+                  "Retaining navigation must preserve selected publication and curve cancellation");
+            return *published;
+        };
+        const auto original=selected(std::nullopt);
+        const auto carried=selected(steps);
+        const auto repeated=selected(steps);
+        for(const auto* result:{&carried,&repeated}) {
+            check(result->stronger_fit_target==steps.stronger&&result->weaker_fit_target==steps.weaker&&
+                  result->stronger_fit_target==original.stronger_fit_target&&result->weaker_fit_target==original.weaker_fit_target,
+                  "Retained or repeated navigation changed the exact current-input preview");
+            check(result->inputs.mode==mode&&result->inputs.target_db_hz==inputs.target_db_hz&&
+                  result->clock_search_supported==original.clock_search_supported&&
+                  result->receiver_workspace_supported==original.receiver_workspace_supported&&
+                  result->probability_trials==original.probability_trials&&result->points.empty()&&result->receive_points.empty(),
+                  "Retained navigation changed selected input, receiver coverage or publication stage");
+            near(result->success_probability,original.success_probability,"Retained navigation changed selected confidence");
+            near(result->one_bit_success_probability,original.one_bit_success_probability,"Retained navigation changed first-bit confidence");
+            near(result->observer_ratio,original.observer_ratio,"Retained navigation changed the observer estimate");
+            near(result->cpu_realtime_ratio,original.cpu_realtime_ratio,"Retained navigation changed selected receiver work");
+        }
+        std::stop_source stopped;stopped.request_stop();planner::Cache cache;bool cancelled=false;
+        try {planner::build(inputs,cache,stopped.get_token(),{},steps);}
+        catch(const estimate_detail::Cancelled&) {cancelled=true;}
+        check(cancelled,"A retained preview must not bypass cancellation before planning");
+    }
+    inputs.mode=tuning::PatternMode::auto_pattern;
+    const auto steps=planner::preview_steps(inputs);
+    planner::Cache direct_cache,retained_cache;
+    unsigned direct_publications=0,retained_publications=0;
+    const auto direct=planner::build(inputs,direct_cache,{},[&](const auto& current) {
+        ++direct_publications;
+        check(current.stronger_fit_target==steps.stronger&&current.weaker_fit_target==steps.weaker,
+              "Direct completed planning changed the current-input selected preview");
+    });
+    const auto retained=planner::build(inputs,retained_cache,{},[&](const auto& current) {
+        ++retained_publications;
+        check(current.stronger_fit_target==steps.stronger&&current.weaker_fit_target==steps.weaker,
+              "Retained completed planning changed the current-input selected preview");
+    },steps);
+    check(direct_publications==1&&retained_publications==1&&
+          direct.available&&retained.available&&!direct.curves_calculating&&!retained.curves_calculating&&
+          direct.clock_target==retained.clock_target&&direct.clock_limit_reason==retained.clock_limit_reason&&
+          direct.stronger_fit_target==retained.stronger_fit_target&&direct.weaker_fit_target==retained.weaker_fit_target&&
+          direct.points.size()==retained.points.size()&&direct.receive_points.size()==retained.receive_points.size(),
+          "Retained preview changed completed navigation or omitted curve work");
+    for(std::size_t i=0;i<direct.receive_points.size();++i) {
+        near(retained.receive_points[i].target_db_hz,direct.receive_points[i].target_db_hz,"Retained preview moved a curve location");
+        near(retained.receive_points[i].success_probability,direct.receive_points[i].success_probability,
+             "Retained preview changed a completed curve probability");
+    }
+}
 simulation::Estimate independently_check_banks(const planner::Inputs& inputs,double target,
         std::span<const double> companions,planner::ReceiveBanks banks) {
     auto options=inputs.options;options.modem=planned_config(inputs,target);
@@ -2319,7 +2385,7 @@ int main(int argc,char** argv) {
         sustained_listening_plan_document();
         earth_moon_earth_estimate();independent_reference_values();exact_geometry_and_physical_finish();timing_milestones();
         clock_and_ram_milestones();sampled_clock_ram_islands();checked_clock_ram_navigation();
-        nearest_usable_targets();bounded_navigation_preview();nearest_target_shares_receiver_budget();
+        nearest_usable_targets();bounded_navigation_preview();retained_navigation_preview();nearest_target_shares_receiver_budget();
         narrow_band_differential_model();phase_loss_and_receiver_confidence();gpsdo_phase_does_not_change_clock_coverage();
         separate_link_budget_and_observer_model();quantization_fixed_modes_and_limits();
         persistent_worker_curve_cache();removing_key_withdraws_cached_observer();stable_planner_navigation_document();

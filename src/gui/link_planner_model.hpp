@@ -154,6 +154,9 @@ struct Model {
     std::optional<double> stronger_fit_target;
     std::optional<double> weaker_fit_target;
 };
+struct TargetSteps {
+    std::optional<double> stronger,weaker;
+};
 // Bounded estimator state survives short-lived GUI worker threads. Access is
 // serialized internally; separate controllers retain independent caches.
 class Cache {
@@ -170,17 +173,18 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
-    friend Model build(const Inputs&,Cache&,std::stop_token,const std::function<void(const Model&)>&);
+    friend Model build(const Inputs&,Cache&,std::stop_token,const std::function<void(const Model&)>&,
+                       std::optional<TargetSteps>);
 };
 // Bounded analytical planning only; no sampled audio or transmission occurs.
 Model build(const Inputs& inputs,std::stop_token stop = {});
 // The optional callback receives completed selected values before curve work.
 // Called under the cache lock; it must not reenter this cache.
+// Supplied steps must be the preview for this exact immutable input snapshot;
+// a present pair with both directions empty is still a completed preview.
 Model build(const Inputs& inputs,Cache& cache,std::stop_token stop = {},
-            const std::function<void(const Model&)>& selected = {});
-struct TargetSteps {
-    std::optional<double> stronger,weaker;
-};
+            const std::function<void(const Model&)>& selected = {},
+            std::optional<TargetSteps> supplied_steps = std::nullopt);
 // Two exact +/-1 dB receiver-support checks, without probability calculations
 // or the full gap search. Missing directions remain for the background planner
 // to resolve. The caller retains this result for its immutable input snapshot.

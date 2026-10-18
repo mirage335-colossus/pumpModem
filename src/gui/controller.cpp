@@ -1827,13 +1827,17 @@ struct Controller::Impl {
             // debounce. An optional sweep must not delay transmit readiness.
             // A failed inspection records this revision, allowing error plans.
             auto request=std::move(*pending_planner);pending_planner.reset();
+            // The pending model already checked navigation for these exact
+            // inputs. Carry its value with the same identity across the worker
+            // boundary, including a computed pair with no available directions.
+            const planner::TargetSteps steps{request.pending->stronger_fit_target,request.pending->weaker_fit_target};
             result.kind=PrepKind::planner;result.planner_pending=std::move(request.pending);
-            start_worker([this,input=std::move(request.inputs),cache=planner_cache](Prepared& value,std::stop_token stop) {
+            start_worker([this,input=std::move(request.inputs),cache=planner_cache,steps](Prepared& value,std::stop_token stop) {
                 if(stop.stop_requested())throw Error("Operation cancelled");
                 value.planner_result=std::make_shared<const planner::Model>(planner::build(input,*cache,stop,[&](const planner::Model& current) {
                     auto preview=value;preview.planner_result=std::make_shared<const planner::Model>(current);
                     std::lock_guard lock(mutex);prepared_preview=std::move(preview);
-                }));
+                },steps));
             },std::move(result));
         }
     }
