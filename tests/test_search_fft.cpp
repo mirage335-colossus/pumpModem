@@ -124,6 +124,29 @@ int main(){try{
                 throw Error("double-table pattern FFT mismatch");
         }
 
+    // Keep every existing seeded fixture unchanged while checking the small
+    // borrowed transforms and boundary against the independent original-order oracle.
+    auto boundary_random=random;auto boundary_value=wide_value;
+    for(const std::size_t n:{256U,512U,8192U})
+      for(const std::size_t maximum:std::array<std::size_t,2>{n,16384U}) {
+        std::vector<std::complex<double>> forward(maximum-1),inverse(maximum-1);
+        const auto view=prepare_double_tables(forward,inverse);
+        for(unsigned kind=0;kind<4;++kind)for(const bool backwards:{false,true})
+            for(const double scale:{1e-100,1.,1e100}) {
+                std::vector<std::complex<double>> actual(n),expected;
+                for(std::size_t i=0;i<actual.size();++i) {
+                    if(kind==0)actual[i]={boundary_value(boundary_random)*scale,boundary_value(boundary_random)*scale};
+                    else if(kind==1)actual[i]={i==0?scale:0.0,0.0};
+                    else if(kind==2)actual[i]={(i&1)?-scale:scale,(i&1)?+0.0:-0.0};
+                    else actual[i]={-0.0,(i&1)?+0.0:-0.0};
+                }
+                expected=actual;detail::pattern_fft(expected,backwards,{});
+                fft(actual,backwards,view);
+                if(actual!=expected || (kind>=2 && !bytes_equal(actual,expected)))
+                    throw Error("small-boundary double-table FFT mismatch");
+            }
+    }
+
     // Negative controls use live, correctly typed backing spans. Malformed
     // span construction itself would violate the caller's C++ preconditions.
     std::vector<std::complex<double>> untouched_a(3,{7.,-2.}),untouched_b(2,{3.,4.});

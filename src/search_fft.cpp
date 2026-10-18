@@ -157,7 +157,14 @@ void fft(std::span<std::complex<double>> a,bool inverse,const DoubleTableView& v
     for(std::size_t length=2;length<=n;length*=2){
         cancelled(stop);const auto half=length/2;
         const auto table=(inverse?view.inverse:view.forward).data()+half-1;
-        for(std::size_t begin=0;begin<n;begin+=length)for(std::size_t j=0;j<half;++j){
+        if(n<=8192) {
+            // A stage has at most 4096 butterflies, preserving the existing
+            // cancellation bound without a counter branch on every butterfly.
+            for(std::size_t begin=0;begin<n;begin+=length)for(std::size_t j=0;j<half;++j){
+                const auto u=a[begin+j],v=a[begin+j+half]*table[j];
+                a[begin+j]=u+v;a[begin+j+half]=u-v;
+            }
+        } else for(std::size_t begin=0;begin<n;begin+=length)for(std::size_t j=0;j<half;++j){
             if((iterations++&4095U)==0)cancelled(stop);
             const auto u=a[begin+j],v=a[begin+j+half]*table[j];
             a[begin+j]=u+v;a[begin+j+half]=u-v;
