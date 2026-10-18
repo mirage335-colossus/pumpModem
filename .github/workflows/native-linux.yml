@@ -16,7 +16,7 @@ on:
       scope:
         description: 'Run one complete native scope without repeating the other shards'
         type: choice
-        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic]
+        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic]
         default: core
       calibration_section:
         description: 'Calibration section; used only by the calibration scope'
@@ -36,7 +36,7 @@ on:
         type: string
         default: Release
       scope:
-        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, or gui-core-diagnostic'
+        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, or gui-stop-diagnostic'
         type: string
         required: true
       calibration_section:
@@ -81,6 +81,11 @@ jobs:
       DATAPUMP_SANITIZERS: ${{ inputs.build_type == 'Debug' && 'ON' || 'OFF' }}
       SANITIZER_REALTIME: ${{ inputs.sanitizer_realtime }}
     steps:
+      - name: Restrict the temporary graceful-stop diagnostic
+        if: inputs.scope == 'gui-stop-diagnostic' && (github.event_name != 'workflow_dispatch' || inputs.build_type != 'Debug' || inputs.linux_runner != 'ubuntu-24.04')
+        run: |
+          echo '::error::The temporary stop diagnostic requires manual Debug on ubuntu-24.04.'
+          exit 2
       - name: Validate manual package configuration
         if: github.event_name == 'workflow_dispatch' && inputs.scope == 'package' && inputs.build_type != 'Release'
         run: |
@@ -115,6 +120,256 @@ jobs:
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: '24.19.0'
+      - name: Prepare the exact isolated graceful-stop source variant
+        if: inputs.scope == 'gui-stop-diagnostic'
+        env:
+          APPLY_GUI_STOP_VARIANT: '1'
+        run: |
+          python3 -B - <<'PY_STOP_PREPARE'
+          if not __debug__: raise RuntimeError("optimized diagnostic preparation is forbidden")
+          from pathlib import Path
+          import difflib, hashlib, json, os
+
+          import subprocess
+          root=Path.cwd()
+          git=['git','-c','safe.directory='+str(root)]
+          assert subprocess.check_output(git+['status','--porcelain=v1','--untracked-files=all'],text=True)=='', 'diagnostic requires clean checkout'
+          report=Path('build/gui-stop-diagnostic');report.mkdir(parents=True,exist_ok=False)
+          (report/'source.txt').write_text(subprocess.check_output(git+['rev-parse','HEAD'],text=True))
+
+          expected = {
+              "src/live.cpp":
+                  "789735690478e9c7331487740c475e862293df69a49ce7a44b6793a3909415ac",
+              "tests/test_gui_controller.cpp":
+                  "3730678e53ef37e295adc319b757b527ffb6a6505bc5424955958658df56ce0f",
+          }
+          original = {p: Path(p).read_text() for p in expected}
+          for p in expected:
+              assert hashlib.sha256(original[p].encode()).hexdigest() == expected[p], p
+          changed = dict(original)
+
+          def replace(p, a, b):
+              assert changed[p].count(a) == 1, (p, a[:100], changed[p].count(a))
+              changed[p] = changed[p].replace(a, b)
+
+          p = "src/live.cpp"
+          replace(p, """            wave.transmitter->request_finish();wave.graceful=true;""",
+          """            const auto diagnostic_endpoint_before=wave.transmitter->total_samples();
+                      const auto diagnostic_generated_before=wave.transmitter->samples_emitted();
+                      wave.transmitter->request_finish();wave.graceful=true;
+                      audio::trace::record("diagnostic_finish_ack",[&](auto& f) {
+                          f.add("generation",wave.generation);f.add("transmission_id",wave.serial);
+                          f.add("noise",wave.noise);f.add("sample_rate",wave.modem.sample_rate);
+                          f.add("traversed_physical_samples",wave.transmitted_samples);
+                          f.add("generated_physical_samples_before",diagnostic_generated_before);
+                          f.add("generated_physical_samples_after",wave.transmitter->samples_emitted());
+                          f.add("endpoint_physical_samples_before",diagnostic_endpoint_before);
+                          f.add("endpoint_physical_samples_after",wave.transmitter->total_samples());
+                          f.add("stop_requested",wave.stop.stop_requested());
+                      });""")
+          replace(p, """                        if (!count) { complete_tx(*wave); wave.reset(); continue; }""",
+          """                        if (!count) {
+                                      audio::trace::record("diagnostic_noise_read_eof",[&](auto& f) {
+                                          f.add("generation",wave->generation);f.add("transmission_id",wave->serial);
+                                          f.add("sample_rate",wave->modem.sample_rate);f.add("graceful",wave->graceful);
+                                          f.add("stop_requested",wave->stop.stop_requested());
+                                          f.add("traversed_physical_samples",wave->transmitted_samples);
+                                          f.add("generated_physical_samples",wave->transmitter->samples_emitted());
+                                          f.add("endpoint_physical_samples",wave->transmitter->total_samples());
+                                      });
+                                      complete_tx(*wave); wave.reset(); continue;
+                                  }""")
+          p = "tests/test_gui_controller.cpp"
+          replace(p, '#include "cpu_work_budget.hpp"\n',
+              '#include "cpu_work_budget.hpp"\n#include "../src/audio_trace.hpp"\n#include <exception>\n')
+          replace(p, 'void fake_hop_display() {',
+              'void fake_hop_display(bool stop_diagnostic=false,bool abort_only=false) {')
+          replace(p, '    for(const auto* preference:{"fake-fcc","fake-eu","fake-list"}) {\n',
+          '''    for(const auto* preference:{"fake-fcc","fake-eu","fake-list"}) {
+              if(abort_only&&std::string_view(preference)!="fake-list")continue;
+          ''')
+          replace(p,
+          '''    const auto protected_tail_seconds=double(modem::transmit_stop_sample_count(stop_config))/stop_config.sample_rate;
+              controller.activate(C::cancel);''',
+          '''    const auto protected_tail_seconds=double(modem::transmit_stop_sample_count(stop_config))/stop_config.sample_rate;
+              const auto diagnostic_request_started=std::chrono::steady_clock::now();
+              const auto diagnostic_transmission_id=controller.snapshot().transmission_id;
+              const auto diagnostic_snapshot=[&](const char* phase) {
+                  if(!stop_diagnostic||!delayed_arrival)return;
+                  const auto& s=controller.snapshot();
+                  const auto& h=s.receiver_health;
+          #if defined(__linux__)
+                  const auto cpu=std::clock();
+          #else
+                  const auto cpu=std::clock_t(-1);
+          #endif
+                  audio::trace::record("diagnostic_stop_snapshot",[&](auto& f) {
+                      f.add("phase",phase);f.add("preference",preference);
+                      f.add("wall_since_request",std::chrono::duration<double>(
+                          std::chrono::steady_clock::now()-diagnostic_request_started).count());
+                      f.add("transmission_id",s.transmission_id);f.add("request_transmission_id",diagnostic_transmission_id);
+                      f.add("transmission_seconds",s.transmission_seconds);f.add("virtual_seconds",s.virtual_seconds);
+                      f.add("transmitting",s.transmitting);f.add("noise",s.transmitting_noise);
+                      f.add("stopping",s.transmission_stopping);f.add("finished",s.transmission_finished);
+                      f.add("transmission_failed",s.transmission_failed);
+                      f.add("process_cpu_available",cpu!=std::clock_t(-1));
+                      f.add("process_cpu_seconds",cpu!=std::clock_t(-1)?double(cpu)/CLOCKS_PER_SEC:0.);
+                      f.add("receiver_bank_builds",s.receiver_bank_builds);
+                      f.add("receiver_admissions",s.receiver_admissions);f.add("receiver_retirements",s.receiver_retirements);
+                      f.add("receiver_instances",s.receiver_instances);f.add("input_revision",s.receiver_input_revision);
+                      f.add("received_samples",s.samples_received);f.add("processed_physical_samples",s.processed_physical_samples);
+                      f.add("queued_physical_samples",s.queued_physical_samples);
+                      f.add("decoding_physical_samples",s.decoding_physical_samples);
+                      f.add("receiver_failed",h.failed());f.add("dropped_samples",h.dropped_samples);
+                      f.add("input_overruns",h.input_overruns);f.add("receiver_reset",h.receiver_reset);
+                      f.add("input_interrupted",h.input_interrupted);f.add("search_limited",h.search_limited);
+                      f.add("receiver_behind",s.receiver_behind);f.add("backlog_seconds",s.receiver_backlog_seconds);
+                      f.add("oldest_input_seconds",s.receiver_oldest_input_seconds);
+                      f.add("error",s.error.substr(0,256));f.add("receiver_error",s.receiver_error.substr(0,256));
+                      f.add("status",s.status.substr(0,256));
+                  });
+              };
+              diagnostic_snapshot("before_first_cancel");
+              controller.activate(C::cancel);
+              diagnostic_snapshot("after_first_cancel");''')
+          replace(p, '    const auto source_at_deadline=controller.snapshot().transmission_seconds;\n',
+          '''    const auto source_at_deadline=controller.snapshot().transmission_seconds;
+              diagnostic_snapshot("ordinary_stop_window_end");
+          ''')
+          replace(p, '    const auto source_since_request=controller.snapshot().transmission_seconds-requested_source_seconds;\n',
+          '''    const auto source_since_request=controller.snapshot().transmission_seconds-requested_source_seconds;
+              diagnostic_snapshot("bounded_stop_window_end");
+          ''')
+          replace(p,
+          """        controller.activate(C::cancel); // Preserve this fixture's immediate cancellation deadline.
+          """,
+          """        if(abort_only)audio::trace::record("diagnostic_immediate_abort_invoked",[&](auto& f) {
+                      f.add("transmission_id",controller.snapshot().transmission_id);
+                  });
+                  controller.activate(C::cancel); // Preserve this fixture's immediate cancellation deadline.
+          """)
+          first = '    check(short_list||source_since_request<=source_allowance,\n'
+          last = '    if(delayed_arrival) {\n        // Preview has a bounded sampled-work allowance.'
+          i = changed[p].index(first)
+          j = changed[p].index(last, i)
+          strict = changed[p][i:j]
+          catch = '''    } catch(const Error& strict_error) {
+                  if(!stop_diagnostic||!delayed_arrival)throw;
+                  const auto strict_failure=std::current_exception();
+                  std::cout<<"GUI_STOP_STRICT_RESULT status=FAILED reason="<<std::quoted(strict_error.what())
+                           <<" original_stop_wall_seconds="<<stop_wall_seconds<<std::endl;
+                  try {
+                  // Observation only: never retry/cancel or turn the original failure into a pass.
+                  const auto observation_end=diagnostic_request_started+std::chrono::seconds(45);
+                  auto next_observation=std::chrono::steady_clock::now();
+                  unsigned observations=0;
+                  while(controller.snapshot().transmitting&&std::chrono::steady_clock::now()<observation_end) {
+                      controller.poll();
+                      const auto now=std::chrono::steady_clock::now();
+                      if(now>=next_observation&&observations<46) {
+                          diagnostic_snapshot("post_failure_observation");
+                          ++observations;next_observation=now+std::chrono::seconds(1);
+                      }
+                      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                  }
+                  const auto observation_finished=std::chrono::steady_clock::now();
+                  diagnostic_snapshot("observation_end_before_cleanup");
+                  const auto& s=controller.snapshot();
+                  const auto& t=s.transmit_trace;
+                  const bool same_id=s.transmission_id==diagnostic_transmission_id&&
+                      arrival_transmission_id&&s.transmission_id==*arrival_transmission_id&&s.transmission_id!=prior_transmission_id;
+                  const bool healthy=!s.transmission_failed&&s.error.empty()&&s.receiver_error.empty()&&
+                      !s.receiver_health.failed()&&!s.receiver_health.dropped_samples;
+                  const bool restored=!s.transmitting&&s.transmission_finished&&!s.transmission_stopping&&
+                      controller.field(F::carrier).disabled_text.empty()&&controller.field(F::rf_shift).disabled_text.empty()&&
+                      controller.field(F::carrier).text==carrier&&controller.field(F::rf_shift).text==shift&&
+                      controller.field(F::fhss).display_text.find("Fake: hop ")==std::string::npos;
+                  const bool traversed=same_id&&healthy&&t.fhss_available&&t.fhss_arrival_available&&
+                      t.fhss_arrival_offset_seconds==2.564&&std::isfinite(s.transmission_seconds)&&
+                      s.transmission_seconds>=t.fhss_arrival_offset_seconds;
+                  const bool source_cap=std::isfinite(s.transmission_seconds)&&
+                      s.transmission_seconds>=requested_source_seconds&&
+                      s.transmission_seconds-requested_source_seconds<=source_allowance;
+                  std::cout<<"GUI_STOP_OBSERVATION strict_result=FAILED same_id="<<same_id
+                           <<" healthy="<<healthy<<" restored="<<restored<<" traversed="<<traversed
+                           <<" source_cap="<<source_cap<<" source_since_request="
+                           <<s.transmission_seconds-requested_source_seconds<<" source_allowance="<<source_allowance
+                           <<" within_45_seconds="<<(observation_finished<=observation_end)
+                           <<" wall_since_request="<<std::chrono::duration<double>(
+                              observation_finished-diagnostic_request_started).count()<<std::endl;
+                  // Cleanup only after the bounded observation, never evidence of natural EOF.
+                  if(controller.snapshot().transmitting) {
+                      controller.activate(C::cancel);
+                      const auto abort_end=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+                      do {controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));}
+                      while(controller.snapshot().transmitting&&std::chrono::steady_clock::now()<abort_end);
+                      diagnostic_snapshot("post_45_second_cleanup_abort");
+                  }
+                  } catch(const std::exception& observation_error) {
+                      std::cout<<"GUI_STOP_OBSERVATION_ERROR "<<std::quoted(observation_error.what())<<std::endl;
+                  } catch(...) {
+                      std::cout<<"GUI_STOP_OBSERVATION_ERROR unknown"<<std::endl;
+                  }
+                  std::rethrow_exception(strict_failure);
+              }
+          '''
+          changed[p] = changed[p][:i] + '    try {\n' + strict + catch + '''    if(abort_only)audio::trace::record("diagnostic_immediate_abort_completed",[&](auto& f) {
+                  f.add("transmission_id",controller.snapshot().transmission_id);
+                  f.add("stop_wall_seconds",stop_wall_seconds);
+                  f.add("stopped_within_deadline",stopped_within_deadline);
+              });
+          ''' + changed[p][j:]
+          replace(p,
+          '        if(argc>1&&std::string_view(argv[1])=="--fake-hop-display") {fake_hop_display();std::cout<<"Fake hop display passed\\n";return 0;}\n',
+          '''        if(argc==4&&std::string_view(argv[1])=="--fake-hop-display"&&
+                     (std::string_view(argv[2])=="--diagnose-stop"||std::string_view(argv[2])=="--diagnose-abort")) {
+                      datapump::audio::trace::Scope trace(argv[3]);
+                      const bool abort_only=std::string_view(argv[2])=="--diagnose-abort";
+                      std::cout<<"GUI_STOP_VARIANT diagnostic_only=1 abort_only="<<abort_only<<std::endl;
+                      fake_hop_display(!abort_only,abort_only);
+                      std::cout<<"GUI_STOP_VARIANT completed; diagnostic only, not qualification\\n";return 0;
+                  }
+                  if(argc>1&&std::string_view(argv[1])=="--fake-hop-display") {fake_hop_display();std::cout<<"Fake hop display passed\\n";return 0;}
+          ''')
+          replace(p, '        fake_hop_display();\n',
+          '''        if(argc==3&&std::string_view(argv[1])=="--diagnose-full-stop") {
+                      datapump::audio::trace::Scope trace(argv[2]);
+                      std::cout<<"GUI_STOP_VARIANT diagnostic_only=1 full_prefix=1"<<std::endl;
+                      fake_hop_display(true,false);
+                  } else fake_hop_display();
+          ''')
+          assert hashlib.sha256(changed["src/live.cpp"].encode()).hexdigest() == \
+              "916092bdc052643b392209d78440c3c1a272a1abac1c79cc2c4ade27e30cef78"
+          assert hashlib.sha256(changed["tests/test_gui_controller.cpp"].encode()).hexdigest() == \
+              "18128942cdf3bf5f28a011a4d3f66aafda33c504a50eec5076bf5e23f2f66931"
+          manifest = {p: {"pre_sha256": expected[p],
+              "post_sha256": hashlib.sha256(changed[p].encode()).hexdigest()} for p in expected}
+          patch = ''.join(''.join(difflib.unified_diff(
+              original[p].splitlines(True), changed[p].splitlines(True),
+              fromfile='a/'+p, tofile='b/'+p)) for p in expected)
+          assert hashlib.sha256(patch.encode()).hexdigest() == \
+              "0fa86a54f671d40364b8a5d453448191013c82b79b391193a135120737c6a2d9"
+          print(json.dumps({"files": manifest,"patch_sha256":hashlib.sha256(patch.encode()).hexdigest(),
+                            "patch_bytes":len(patch)}, indent=2))
+          if os.environ.get("APPLY_GUI_STOP_VARIANT") == "1":
+              assert os.environ.get("CI") == "true", "apply only in the isolated CI checkout"
+              report = Path("build/gui-stop-diagnostic")
+              report.mkdir(parents=True, exist_ok=True)
+              (report/"source-variant.patch").write_text(patch)
+              (report/"source-variant-manifest.json").write_text(json.dumps(manifest, indent=2)+"\n")
+              for p in expected:
+                  (report/("original-"+p.replace("/", "__"))).write_text(original[p])
+                  Path(p).write_text(changed[p])
+
+          assert os.environ.get('APPLY_GUI_STOP_VARIANT')=='1'
+          actual=subprocess.check_output(git+['diff','--binary','HEAD','--'])
+          (report/'actual-source-variant.patch').write_bytes(actual)
+          names=subprocess.check_output(git+['diff','--name-only','HEAD','--'],text=True).splitlines()
+          assert sorted(names)==sorted(expected), names
+          for p in expected:
+              assert hashlib.sha256(Path(p).read_bytes()).hexdigest()==manifest[p]['post_sha256']
+              (report/('variant-'+p.replace('/','__'))).write_bytes(Path(p).read_bytes())
+          PY_STOP_PREPARE
       - name: Configure native application and selected test scope
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11
@@ -140,6 +395,7 @@ jobs:
             web) targets=(datapump-tests-web) ;;
             preparation-diagnostic) targets=(test_scheduled_parallel_preparation) ;;
             gui-core-diagnostic) targets=(test_gui_timing_advice test_gui_controller) ;;
+            gui-stop-diagnostic) targets=(test_gui_controller) ;;
             sanitizer-gui) targets=(datapump-apps test_gui_smoke_budget test_gui_launch_command) ;;
             core) targets=(datapump-apps datapump-tests-ci-core) ;;
             cli) targets=(pump) ;;
@@ -337,6 +593,37 @@ jobs:
               > "$report/gui-parallel.log" 2>&1
             echo 'Focused GUI core diagnostic completed serially and in parallel. This is not full native matrix qualification.' >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Observe graceful completion and independently check immediate abort
+        if: inputs.scope == 'gui-stop-diagnostic'
+        run: |
+          python3 -B - <<'PY_STOP_RUN'
+          if not __debug__: raise RuntimeError("optimized diagnostic execution is forbidden")
+          import hashlib,json,pathlib,subprocess,time
+          root=pathlib.Path.cwd();report=root/'build/gui-stop-diagnostic'
+          binary=root/'build/test_gui_controller'
+          assert binary.is_file(), 'diagnostic executable missing'
+          executable_sha256=hashlib.sha256(binary.read_bytes()).hexdigest()
+          cases=[('stop',['--diagnose-full-stop',str(report/'stop.jsonl')],480),
+                 ('abort',['--fake-hop-display','--diagnose-abort',str(report/'abort.jsonl')],240)]
+          results=[]
+          for name,args,limit in cases:
+              command=[str(binary),*args];started=time.monotonic()
+              with (report/(name+'.log')).open('wb') as log:
+                  try:
+                      completed=subprocess.run(command,stdout=log,stderr=subprocess.STDOUT,timeout=limit)
+                      code=completed.returncode;timed_out=False
+                  except subprocess.TimeoutExpired:
+                      code=124;timed_out=True
+              item={'name':name,'command':command,'cwd':str(root),'timeout_seconds':limit,
+                    'exit_code':code,'timed_out':timed_out,'elapsed_seconds':time.monotonic()-started,
+                    'executable_sha256':executable_sha256,
+                    'classification':'temporary source variant; diagnostic only, never qualification'}
+              results.append(item)
+              (report/'commands-and-exits.json').write_text(json.dumps(results,indent=2)+'\n')
+              print(json.dumps(item),flush=True)
+          # Always run the independent process, preserving every actual nonzero exit.
+          raise SystemExit(1 if any(r['exit_code']!=0 for r in results) else 0)
+          PY_STOP_RUN
       - name: Run the selected native tests
         if: inputs.scope == 'core' || inputs.scope == 'fast' || inputs.scope == 'live' || inputs.scope == 'calibration' || inputs.scope == 'frontends' || inputs.scope == 'web'
         run: |
@@ -441,6 +728,37 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
+      - name: Restore and verify the diagnostic source preimages
+        if: always() && inputs.scope == 'gui-stop-diagnostic'
+        run: |
+          python3 -B - <<'PY_STOP_RESTORE'
+          if not __debug__: raise RuntimeError("optimized diagnostic execution is forbidden")
+          import hashlib,json,pathlib,subprocess
+          report=pathlib.Path('build/gui-stop-diagnostic')
+          manifest_path=report/'source-variant-manifest.json'
+          if not manifest_path.exists():
+              # No variant was prepared; do not guess at or overwrite source bytes.
+              print('No source-variant manifest; preparation did not reach source writes.')
+              raise SystemExit(0)
+          manifest=json.loads(manifest_path.read_text())
+          expected={'src/live.cpp':('789735690478e9c7331487740c475e862293df69a49ce7a44b6793a3909415ac','916092bdc052643b392209d78440c3c1a272a1abac1c79cc2c4ade27e30cef78'),
+                    'tests/test_gui_controller.cpp':('3730678e53ef37e295adc319b757b527ffb6a6505bc5424955958658df56ce0f','18128942cdf3bf5f28a011a4d3f66aafda33c504a50eec5076bf5e23f2f66931')}
+          assert set(manifest)==set(expected)
+          originals={}
+          for p,(pre,post) in expected.items():
+              assert manifest[p]=={'pre_sha256':pre,'post_sha256':post}
+              data=(report/('original-'+p.replace('/','__'))).read_bytes()
+              assert hashlib.sha256(data).hexdigest()==pre, p
+              assert hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()==post, p
+              originals[p]=data
+          # Check all current postimages and originals before the first restoration.
+          for p,data in originals.items(): pathlib.Path(p).write_bytes(data)
+          for p,(pre,_) in expected.items():
+              assert hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()==pre, p
+          git=['git','-c','safe.directory='+str(pathlib.Path.cwd())]
+          subprocess.run(git+['diff','--exit-code','HEAD','--'],check=True)
+          (report/'restoration.json').write_text(json.dumps({'restored_preimages':{p:v[0] for p,v in expected.items()},'source_diff_empty':True,'binary_remains_diagnostic_only':True},indent=2)+'\n')
+          PY_STOP_RESTORE
       - name: Retain shard reports and failure logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -460,6 +778,7 @@ jobs:
             build/CMakeCache.txt
             build/receiver-fixtures/
             build/core-diagnostics/
+            build/gui-stop-diagnostic/
             build/sched-hop-radius-control/
             ${{ github.workspace }}/build/ci-smoke-results/
           if-no-files-found: warn
