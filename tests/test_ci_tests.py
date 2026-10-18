@@ -229,6 +229,66 @@ class Reports(unittest.TestCase):
                 self.assertEqual(result['workload_warnings'], [marker])
                 self.assertFalse(result['near_timeout'])
 
+    def test_declared_skip_requires_exact_ctest_metadata_and_shape(self):
+        marker = 'TEST_WORKLOAD_BUDGET: retained for omitted result'
+        selected = test('declared', timeout=10)
+        selected['properties'].append({'name': 'SKIP_RETURN_CODE', 'value': 77})
+        xml = ('<testsuite><testcase name="declared" status="notrun" time="10">'
+               '<skipped message="SKIP_RETURN_CODE=77"/></testcase></testsuite>')
+        self.path.write_text(xml)
+        result = runner.read_results(self.path, [selected], 3600, .8,
+                                     workload_warnings={'declared': [marker]})[0]
+        self.assertEqual(result['status'], 'omitted')
+        self.assertEqual(result['omission_reason'], 'declared_skip_return_code')
+        self.assertEqual(result['skip_return_code'], 77)
+        self.assertFalse(result['near_timeout'])
+        self.assertEqual(result['workload_warnings'], [marker])
+        selected['properties'].append({'name': 'DISABLED', 'value': False})
+        self.assertEqual(runner.read_results(self.path, [selected], 3600, .8)[0]['status'],
+                         'omitted')
+        selected['properties'] = [item for item in selected['properties']
+                                  if item['name'] != 'DISABLED']
+
+        invalid_metadata = (
+            ('undeclared skip', None, False),
+            ('string return code', {'name': 'SKIP_RETURN_CODE', 'value': '77'}, False),
+            ('boolean return code', {'name': 'SKIP_RETURN_CODE', 'value': True}, False),
+            ('float return code', {'name': 'SKIP_RETURN_CODE', 'value': 77.0}, False),
+            ('other return code', {'name': 'SKIP_RETURN_CODE', 'value': 78}, False),
+            ('disabled true', {'name': 'SKIP_RETURN_CODE', 'value': 77}, True),
+        )
+        for label, metadata, is_disabled in invalid_metadata:
+            with self.subTest(metadata=label):
+                props = [item for item in selected['properties']
+                         if item['name'] not in ('SKIP_RETURN_CODE', 'DISABLED')]
+                if metadata is not None:
+                    props.append(metadata)
+                if is_disabled:
+                    props.append({'name': 'DISABLED', 'value': True})
+                invalid = {'name': 'declared', 'properties': props}
+                self.path.write_text(xml)
+                result = runner.read_results(self.path, [invalid], 3600, .8)[0]
+                self.assertEqual(result['status'], 'incomplete_or_failed')
+                self.assertFalse(result['near_timeout'])
+                self.assertNotIn('omission_reason', result)
+
+        malformed_cases = (
+            ('wrong status', '<testcase name="declared" status="run"><skipped message="SKIP_RETURN_CODE=77"/></testcase>'),
+            ('missing skipped child', '<testcase name="declared" status="notrun"/>'),
+            ('missing status', '<testcase name="declared"><skipped message="SKIP_RETURN_CODE=77"/></testcase>'),
+            ('wrong reason', '<testcase name="declared" status="notrun"><skipped message="other reason"/></testcase>'),
+            ('duplicate skipped', '<testcase name="declared" status="notrun"><skipped message="SKIP_RETURN_CODE=77"/><skipped message="SKIP_RETURN_CODE=77"/></testcase>'),
+            ('failure plus skip', '<testcase name="declared" status="notrun"><failure message="assertion"/><skipped message="SKIP_RETURN_CODE=77"/></testcase>'),
+            ('error plus skip', '<testcase name="declared" status="notrun"><error message="error"/><skipped message="SKIP_RETURN_CODE=77"/></testcase>'),
+        )
+        for label, case in malformed_cases:
+            with self.subTest(case=label):
+                self.path.write_text(f'<testsuite>{case}</testsuite>')
+                result = runner.read_results(self.path, [selected], 3600, .8)[0]
+                self.assertEqual(result['status'], 'incomplete_or_failed')
+                self.assertFalse(result['near_timeout'])
+                self.assertNotIn('omission_reason', result)
+
     def test_missing_extra_or_duplicate_results_fail_closed(self):
         for contents in ('', '<testcase name="wrong"/>', '<testcase name="wanted"/><testcase name="wanted"/>'):
             self.path.write_text(f'<testsuite>{contents}</testsuite>')
@@ -265,17 +325,21 @@ class BuildPartitions(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which('ctest'), 'CTest is needed for temporary integration fixtures')
 class CTestIntegration(unittest.TestCase):
-    def exercise(self, program, timeout=5, *, skip_return=None, jobs=1, stale_last_test=False,
-                 truncated_markers=()):
+    def exercise(self, program, timeout=5, *, skip_return=None, companion_program=None,
+                 jobs=1, stale_last_test=False, truncated_markers=()):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             executable = Path(sys.executable).as_posix()
             properties = f'LABELS "regular;contract" TIMEOUT "{timeout}"'
             if skip_return is not None:
                 properties += f' SKIP_RETURN_CODE "{skip_return}"'
-            (root / 'CTestTestfile.cmake').write_text(
-                f'add_test(sample "{executable}" "-c" "{program}")\n'
-                f'set_tests_properties(sample PROPERTIES {properties})\n')
+            quote = lambda value: json.dumps(str(value))
+            tests = [f'add_test(sample {quote(executable)} "-c" {quote(program)})',
+                     f'set_tests_properties(sample PROPERTIES {properties})']
+            if companion_program is not None:
+                tests.extend((f'add_test(companion {quote(executable)} "-c" {quote(companion_program)})',
+                              f'set_tests_properties(companion PROPERTIES {properties})'))
+            (root / 'CTestTestfile.cmake').write_text('\n'.join(tests) + '\n')
             if stale_last_test:
                 old = root / 'Testing' / 'Temporary'
                 old.mkdir(parents=True)
@@ -421,15 +485,100 @@ class CTestIntegration(unittest.TestCase):
         result, report, output = self.exercise(f'print({marker!r}); raise SystemExit(77)', skip_return=77)
         self.assertEqual(result, 1)
         self.assertEqual(report['status'], 'failed')
-        self.assertEqual(report['tests'][0]['status'], 'incomplete_or_failed')
+        self.assertEqual(report['error'], 'No selected test passed; all selected coverage was omitted')
+        self.assertEqual(report['tests'][0]['status'], 'omitted')
         self.assertEqual(report['tests'][0]['workload_warnings'], [marker])
+        self.assertEqual(report['result_counts'],
+                         {'passed': 0, 'omitted': 1, 'incomplete_or_failed': 0})
+        self.assertEqual(report['runtime_omissions'], ['sample'])
         self.assertNotIn('::warning title=CI test workload::', output)
+        self.assertNotIn('passed all assertions', output)
 
         result, report, output = self.exercise(
             f'import time; print({marker!r}, flush=True); time.sleep(10)', timeout=.1)
         self.assertEqual(result, 1)
         self.assertEqual(report['status'], 'failed')
         self.assertFalse(any('passed all assertions' in line for line in output.splitlines()))
+
+    def test_real_ctest_mixed_pass_and_declared_skip_is_success_with_omission(self):
+        result, report, output = self.exercise(
+            'raise SystemExit(77)', skip_return=77, companion_program='print("passed")')
+        self.assertEqual(result, 0, output[-2000:])
+        self.assertEqual(report['status'], 'passed_with_omissions')
+        self.assertEqual(report['result_counts'],
+                         {'passed': 1, 'omitted': 1, 'incomplete_or_failed': 0})
+        self.assertEqual(report['runtime_omissions'], ['sample'])
+        self.assertEqual(report['omitted'], [])
+        statuses = {case['name']: case['status'] for case in report['tests']}
+        self.assertEqual(statuses, {'sample': 'omitted', 'companion': 'passed'})
+        self.assertIn('sample', report['_summary_text'])
+        self.assertIn('companion', report['_summary_text'])
+        summary = report['_summary_text']
+        self.assertRegex(summary, r'(?i)(?:\b1\b[^\n]*\bpassed\b|\bpassed\b[^\n]*\b1\b)')
+        self.assertRegex(summary, r'(?i)(?:\b1\b[^\n]*\bomissions?\b|\bomissions?\b[^\n]*\b1\b)')
+        self.assertRegex(summary, r'(?i)(?:\b0\b[^\n]*\bincomplete\b|\bincomplete\b[^\n]*\b0\b)')
+        self.assertNotIn('sample passed all assertions', output)
+
+    def test_real_ctest_fixture_preserves_python_program_backslashes(self):
+        result, report, output = self.exercise(
+            'raise SystemExit(77)', skip_return=77,
+            companion_program=r"print(r'left\right')")
+        self.assertEqual(result, 0, output[-2000:])
+        self.assertEqual(report['status'], 'passed_with_omissions')
+        self.assertRegex(output, r'(?m)^\d+: left\\right$')
+
+    def test_mixed_declared_omission_never_masks_failure_or_timeout(self):
+        cases = (
+            ('assertion', 'raise SystemExit(77)', 'raise AssertionError("assertion")', None),
+            ('timeout', 'raise SystemExit(77)', 'import time; time.sleep(10)', .1),
+        )
+        for label, skipped, companion, timeout in cases:
+            with self.subTest(case=label):
+                result, report, output = self.exercise(
+                    skipped, skip_return=77, companion_program=companion,
+                    timeout=timeout or 5)
+                self.assertEqual(result, 1, output[-2000:])
+                self.assertEqual(report['status'], 'failed')
+                self.assertEqual(report['runtime_omissions'], ['sample'])
+                self.assertEqual(report['result_counts']['omitted'], 1)
+                self.assertEqual(report['result_counts']['incomplete_or_failed'], 1)
+                self.assertNotIn('sample passed all assertions', output)
+
+    def test_nonzero_ctest_overrules_valid_mixed_results(self):
+        subprocess = __import__('subprocess')
+        real_popen = subprocess.Popen
+        observed = {}
+
+        class Child:
+            def __init__(self, process):
+                self.process = process
+                self.stdout = process.stdout
+            def __enter__(self):
+                self.process.__enter__()
+                return self
+            def __exit__(self, *args):
+                return self.process.__exit__(*args)
+            def wait(self):
+                observed['real_returncode'] = self.process.wait()
+                observed['stdout_drained'] = self.stdout.read() == ''
+                return 1
+
+        def popen(command, *args, **kwargs):
+            process = real_popen(command, *args, **kwargs)
+            if '--show-only=json-v1' in command:
+                return process
+            return Child(process)
+
+        from unittest.mock import patch
+        with patch.object(subprocess, 'Popen', side_effect=popen):
+            result, report, output = self.exercise(
+                'raise SystemExit(77)', skip_return=77, companion_program='print("passed")')
+        self.assertEqual(observed, {'real_returncode': 0, 'stdout_drained': True})
+        self.assertEqual(result, 1, output[-2000:])
+        self.assertEqual(report['status'], 'failed')
+        self.assertEqual(report['result_counts'],
+                         {'passed': 1, 'omitted': 1, 'incomplete_or_failed': 0})
+        self.assertEqual(report['runtime_omissions'], ['sample'])
 
     def test_workload_marker_cannot_turn_failure_into_warning(self):
         marker = 'TEST_WORKLOAD_BUDGET: fixture: exceeded 30s normal budget'

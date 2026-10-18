@@ -192,11 +192,23 @@ def read_results(path, selected, default_timeout, warn_fraction, *, workload_war
     for case in cases:
         name = case.get('name')
         seconds = float(case.get('time', '0'))
-        timeout = float(properties(inventory[name]).get('TIMEOUT', default_timeout))
+        props = properties(inventory[name])
+        timeout = float(props.get('TIMEOUT', default_timeout))
         # CTest uses status="fail" for some process outcomes. Never turn a
         # failure/skip into success just because it ran slowly.
         passed = (case.get('status', 'run') == 'run' and
                   not any(case.find(tag) is not None for tag in ('failure', 'error', 'skipped')))
+        skips = case.findall('skipped')
+        declared_omission = (
+            type(props.get('SKIP_RETURN_CODE')) is int
+            and props['SKIP_RETURN_CODE'] == 77
+            and props.get('DISABLED', False) is False
+            and case.get('status') == 'notrun'
+            and len(skips) == 1
+            and skips[0].get('message') == 'SKIP_RETURN_CODE=77'
+            and case.find('failure') is None
+            and case.find('error') is None
+        )
         if workload_warnings is None:
             case_warnings = list(dict.fromkeys(
                 line for output in case.findall('system-out')
@@ -204,10 +216,14 @@ def read_results(path, selected, default_timeout, warn_fraction, *, workload_war
                 if line.startswith('TEST_WORKLOAD_BUDGET:')))
         else:
             case_warnings = list(dict.fromkeys(workload_warnings.get(name, ())))
-        results.append({'name': name, 'status': 'passed' if passed else 'incomplete_or_failed',
-                        'seconds': seconds, 'timeout_seconds': timeout,
-                        'workload_warnings': case_warnings,
-                        'near_timeout': passed and timeout > 0 and seconds >= timeout * warn_fraction})
+        result = {'name': name,
+                  'status': 'passed' if passed else 'omitted' if declared_omission else 'incomplete_or_failed',
+                  'seconds': seconds, 'timeout_seconds': timeout,
+                  'workload_warnings': case_warnings,
+                  'near_timeout': passed and timeout > 0 and seconds >= timeout * warn_fraction}
+        if declared_omission:
+            result.update(omission_reason='declared_skip_return_code', skip_return_code=77)
+        results.append(result)
     return results
 
 
@@ -226,6 +242,13 @@ def write_summary(path, report):
         if report.get('omitted'):
             stream.write('Omitted instrumented real-time coverage (not passes): ' +
                          ', '.join(report['omitted']) + '. Release retains these tests.\n\n')
+        if report.get('result_counts') is not None:
+            counts = report['result_counts']
+            stream.write(f"Results: {counts['passed']} passed, {counts['omitted']} declared omissions, "
+                         f"{counts['incomplete_or_failed']} incomplete or failed.\n\n")
+        if report.get('runtime_omissions'):
+            stream.write('Selected conditional tests omitted by their declared exit 77 (not passes): ' +
+                         ', '.join(report['runtime_omissions']) + '.\n\n')
         longest = sorted(report.get('tests', []), key=lambda test: test['seconds'], reverse=True)[:5]
         if longest:
             stream.write('Longest tests in this scope:\n\n')
@@ -256,6 +279,7 @@ def run(args):
     log_path = report_path.with_suffix('.log')
     junit_path = report_path.with_suffix('.xml')
     report = {'scope': args.scope, 'status': 'failed', 'selected': [], 'omitted': [],
+              'runtime_omissions': [], 'result_counts': None,
               'tests': [], 'source_sha': os.environ.get('GITHUB_SHA', '')}
     returncode = 1
     try:
@@ -289,10 +313,18 @@ def run(args):
         workload_warnings = workload_collector.finish(require_all=(returncode == 0))
         report['tests'] = read_results(junit_path, selected, args.timeout, args.warn_fraction,
                                        workload_warnings=workload_warnings)
-        complete = all(test['status'] == 'passed' for test in report['tests'])
-        if returncode == 0 and complete:
-            report['status'] = 'passed'
+        report['result_counts'] = {
+            status: sum(test['status'] == status for test in report['tests'])
+            for status in ('passed', 'omitted', 'incomplete_or_failed')
+        }
+        report['runtime_omissions'] = [test['name'] for test in report['tests']
+                                       if test['status'] == 'omitted']
+        complete = all(test['status'] in ('passed', 'omitted') for test in report['tests'])
+        if returncode == 0 and complete and report['result_counts']['passed']:
+            report['status'] = 'passed_with_omissions' if report['runtime_omissions'] else 'passed'
         else:
+            if returncode == 0 and complete:
+                report['error'] = 'No selected test passed; all selected coverage was omitted'
             returncode = returncode or 1
         for test in report['tests']:
             if test['status'] == 'passed':

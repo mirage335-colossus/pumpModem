@@ -529,6 +529,21 @@ timeout produce warnings. Assertions, sanitizer findings, skipped mandatory
 tests and unclassified timeouts remain failures; elapsed time alone cannot
 establish correctness.
 
+Conditional arithmetic fixtures remain selected when the current CTest inventory
+explicitly declares integer `SKIP_RETURN_CODE 77`. A matching JUnit `notrun` case
+with exactly `SKIP_RETURN_CODE=77` and no failure, error or disabled condition is
+reported as `omitted`. Its name remains in the selected inventory and results,
+with its reason and exit code; it receives no passing-assertion annotation.
+Reports enumerate `runtime_omissions` and separate passed, omitted and incomplete
+or failed counts. A scope with at least one passing case and only these declared
+omissions reports `passed_with_omissions`; an all-omitted scope fails for having
+no passed coverage. Undeclared skips, malformed results, nonzero CTest exits,
+assertions and timeouts still fail. The existing `omitted` field continues to
+record only preselected instrumented Fast exclusions. These conditional fixtures
+retain their existing eligibility checks; the GUI smoke budget policy and native
+direct-test runner keep their existing contracts. Historical failed jobs retain
+their actual outcomes.
+
 The complete GUI contract uses a 1200-second cumulative smoke budget on
 `ubuntu-24.04`, with a warning only after a successful smoke exceeds the normal
 600 seconds. Its renderer uses one worker. H runners retain 600 seconds and
