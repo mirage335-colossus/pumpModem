@@ -142,7 +142,7 @@ jobs:
             cli) targets=(pump) ;;
             eme-diagnostic) targets=(test_frequency_axis_probability) ;;
             alsa-diagnostic|alsa-radius-diagnostic) targets=(test_alsa_audio) ;;
-            receiver) targets=(test_pattern_correlator test_pattern_drift test_receiver_differential test_clock_sync) ;;
+            receiver) targets=(test_pattern_correlator test_pattern_drift test_receiver_differential test_clock_sync test_pattern_startup_guide) ;;
             fast) targets=(datapump-tests-fast) ;;
             live) targets=(datapump-tests-ci-live) ;;
             *) echo "Unknown native scope: $CI_SCOPE" >&2; exit 2 ;;
@@ -208,13 +208,13 @@ jobs:
           subprocess.run(git+['diff','--exit-code'],check=True)
           (report/'results.json').write_text(json.dumps(results,indent=2)+'\n')
           PY
-      - name: Run all four selected receiver and clock tests
+      - name: Run selected receiver and clock tests
         if: inputs.scope == 'receiver'
         run: |
           mkdir -p build/receiver-fixtures
-          selector='^(pattern_correlator|pattern_drift|receiver_differential|clock_sync)$'
+          selector='^(pattern_correlator|pattern_drift|receiver_differential|clock_sync|pattern_startup_guide)$'
           ctest --test-dir build --show-only=json-v1 -R "$selector" > build/receiver-fixtures/inventory.json
-          python3 -c 'import json; names=[t["name"] for t in json.load(open("build/receiver-fixtures/inventory.json"))["tests"]]; assert len(names)==4 and set(names)=={"pattern_correlator","pattern_drift","receiver_differential","clock_sync"},names'
+          python3 -c 'import json; names=[t["name"] for t in json.load(open("build/receiver-fixtures/inventory.json"))["tests"]]; assert len(names)==5 and set(names)=={"pattern_correlator","pattern_drift","receiver_differential","clock_sync","pattern_startup_guide"},names'
           ctest --test-dir build --output-on-failure --no-tests=error --parallel 1 --timeout 3600 --output-junit "$PWD/build/receiver-fixtures/results.xml" -R "$selector"
       - name: Run the selected native tests
         if: inputs.scope == 'core' || inputs.scope == 'fast' || inputs.scope == 'live' || inputs.scope == 'calibration' || inputs.scope == 'frontends' || inputs.scope == 'web'

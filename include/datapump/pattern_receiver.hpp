@@ -375,6 +375,7 @@ public:
     void trim_optional_workspace();
     Diagnostics diagnostics() const;
 private:
+    friend struct PatternReceiverStartupGuideTestAccess;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

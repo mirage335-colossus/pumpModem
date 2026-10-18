@@ -135,7 +135,7 @@ jobs:
             'gui' { $targets = @('datapump-apps', 'datapump-tests-gui') }
             'receiver-baseline' { $targets = @('test_pattern_correlator', 'test_pattern_drift', 'test_receiver_differential', 'test_clock_sync') }
             'eme-diagnostic' { $targets = @('test_frequency_axis_probability') }
-            'receiver' { $targets = @('test_pattern_correlator', 'test_pattern_drift', 'test_receiver_differential', 'test_clock_sync') }
+            'receiver' { $targets = @('test_pattern_correlator', 'test_pattern_drift', 'test_receiver_differential', 'test_clock_sync', 'test_pattern_startup_guide') }
             'receiver-diagnostic' { $targets = @('test_pattern_correlator', 'test_pattern_drift', 'test_clock_sync') }
             'fast' { $targets = @('datapump-tests-fast') }
             'live' { $targets = @('datapump-tests-ci-live') }
@@ -174,18 +174,19 @@ jobs:
           $clock = $LASTEXITCODE
           "pulse=$pulse drift_full=$driftFull drift=$drift clock=$clock" | Set-Content build/receiver-diagnostic/exits.txt
           if ($pulse -ne 0 -or $driftFull -ne 0 -or $drift -ne 0 -or $clock -ne 0) { throw "Original receiver diagnostic assertions failed; inspect all retained results" }
-      - name: Run all four selected receiver and clock tests
+      - name: Run selected receiver and clock tests
         if: inputs.scope == 'receiver-baseline' || inputs.scope == 'receiver'
         run: |
           $report = if ($env:CI_SCOPE -eq 'receiver-baseline') { 'receiver-baseline' } else { 'receiver-fixtures' }
           New-Item -ItemType Directory -Force "build/$report" | Out-Null
-          $selector = '^(pattern_correlator|pattern_drift|receiver_differential|clock_sync)$'
+          $expected = @('pattern_correlator', 'pattern_drift', 'receiver_differential', 'clock_sync')
+          if ($env:CI_SCOPE -eq 'receiver') { $expected += 'pattern_startup_guide' }
+          $selector = '^(' + ($expected -join '|') + ')$'
           ctest --test-dir build -C Release --show-only=json-v1 -R $selector > "build/$report/inventory.json"
           if ($LASTEXITCODE -ne 0) { throw "Frozen receiver inventory failed" }
           $inventory = Get-Content "build/$report/inventory.json" -Raw | ConvertFrom-Json
-          $expected = @('pattern_correlator', 'pattern_drift', 'receiver_differential', 'clock_sync')
           $actual = @($inventory.tests | ForEach-Object { $_.name })
-          if ($actual.Count -ne 4 -or @(Compare-Object $actual $expected).Count -ne 0) { throw "Frozen receiver inventory must contain all four tests" }
+          if ($actual.Count -ne $expected.Count -or @(Compare-Object $actual $expected).Count -ne 0) { throw "Receiver inventory differs from its complete selected scope" }
           ctest --test-dir build -C Release --output-on-failure --no-tests=error --parallel 1 --timeout 3600 --output-junit "$PWD/build/$report/results.xml" -R $selector
           if ($LASTEXITCODE -ne 0) { throw "Frozen receiver control tests failed" }
       - name: Probe frozen and current UTC phase arithmetic independently
