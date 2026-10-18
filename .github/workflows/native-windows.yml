@@ -11,7 +11,7 @@ on:
       scope:
         description: 'Run the selected unchanged native scope'
         type: choice
-        options: [core, fast, live, calibration, frontends, web, gui, package, receiver-baseline]
+        options: [core, fast, live, calibration, frontends, web, gui, package, receiver-baseline, eme-diagnostic]
         default: live
       calibration_section:
         description: 'Calibration section; used only by the calibration scope'
@@ -24,7 +24,7 @@ on:
         type: string
         default: windows-2022
       scope:
-        description: 'core, fast, live, calibration, frontends, web, gui, package, or frozen receiver-baseline'
+        description: 'core, fast, live, calibration, frontends, web, gui, package, frozen receiver-baseline, or eme-diagnostic'
         type: string
         required: true
       calibration_section:
@@ -134,6 +134,7 @@ jobs:
             'core' { $targets = @('datapump-apps', 'datapump-tests-ci-core') }
             'gui' { $targets = @('datapump-apps', 'datapump-tests-gui') }
             'receiver-baseline' { $targets = @('test_pattern_correlator', 'test_pattern_drift', 'test_receiver_differential', 'test_clock_sync') }
+            'eme-diagnostic' { $targets = @('test_frequency_axis_probability') }
             'fast' { $targets = @('datapump-tests-fast') }
             'live' { $targets = @('datapump-tests-ci-live') }
             default { throw "Unknown native scope: $env:CI_SCOPE" }
@@ -143,9 +144,18 @@ jobs:
           cmake --build build --config Release --target @targets --parallel $env:CL_MPCount
           if ($LASTEXITCODE -ne 0) { throw "Native shard build failed" }
       - name: Run the selected native tests
-        if: inputs.scope != 'package' && inputs.scope != 'receiver-baseline'
+        if: inputs.scope != 'package' && inputs.scope != 'receiver-baseline' && inputs.scope != 'eme-diagnostic'
         # Separate runners supply parallelism; preserve per-runner live budgets.
         run: python tools/run-ci-tests.py --build-dir build --scope "$env:CI_SCOPE" --jobs 1 --config Release --report build/ci-test-report.json
+      - name: Diagnose one strict EME continuation capture without changing its gates
+        if: inputs.scope == 'eme-diagnostic'
+        timeout-minutes: 30
+        run: |
+          git rev-parse HEAD | Tee-Object -FilePath build/eme-diagnostic-source.txt
+          if ($LASTEXITCODE -ne 0) { throw "EME diagnostic source identity failed" }
+          ./build/Release/test_frequency_axis_probability.exe --diagnose-end 128 30 3 3 2>&1 | Tee-Object -FilePath build/eme-diagnostic.log
+          if ($LASTEXITCODE -ne 0) { throw "Paired EME continuation diagnostic failed" }
+          'One paired diagnostic capture only. Exit zero checks accepted-grid timing and backend parity; it is not exact-content recovery, full regression or qualification.' >> $env:GITHUB_STEP_SUMMARY
       - name: Run all four unchanged pre-Burst receiver and clock tests
         if: inputs.scope == 'receiver-baseline'
         run: |
@@ -287,6 +297,7 @@ jobs:
             build/Testing/Temporary/
             build/receiver-baseline/
             build/CMakeCache.txt
+            build/eme-diagnostic*
             build/package-*.log
             ${{ github.workspace }}/build/ci-smoke-results/
           if-no-files-found: warn

@@ -16,7 +16,7 @@ on:
       scope:
         description: 'Run one complete native scope without repeating the other shards'
         type: choice
-        options: [core, fast, live, calibration, frontends, web, package, cli]
+        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic]
         default: core
       calibration_section:
         description: 'Calibration section; used only by the calibration scope'
@@ -36,7 +36,7 @@ on:
         type: string
         default: Release
       scope:
-        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, or sanitizer-gui'
+        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, or eme-diagnostic'
         type: string
         required: true
       calibration_section:
@@ -140,11 +140,20 @@ jobs:
             sanitizer-gui) targets=(datapump-apps test_gui_smoke_budget test_gui_launch_command) ;;
             core) targets=(datapump-apps datapump-tests-ci-core) ;;
             cli) targets=(pump) ;;
+            eme-diagnostic) targets=(test_frequency_axis_probability) ;;
             fast) targets=(datapump-tests-fast) ;;
             live) targets=(datapump-tests-ci-live) ;;
             *) echo "Unknown native scope: $CI_SCOPE" >&2; exit 2 ;;
           esac
           cmake --build build --target "${targets[@]}" --parallel "$(python3 -B tools/build_capacity.py)"
+      - name: Diagnose one strict EME continuation capture without changing its gates
+        if: inputs.scope == 'eme-diagnostic'
+        timeout-minutes: 30
+        run: |
+          set -o pipefail
+          git rev-parse HEAD | tee build/eme-diagnostic-source.txt
+          ./build/test_frequency_axis_probability --diagnose-end 128 30 3 3 2>&1 | tee build/eme-diagnostic.log
+          echo 'One paired diagnostic capture only. Exit zero checks accepted-grid timing and backend parity; it is not exact-content recovery, full regression or qualification.' >> "$GITHUB_STEP_SUMMARY"
       - name: Run the selected native tests
         if: inputs.scope == 'core' || inputs.scope == 'fast' || inputs.scope == 'live' || inputs.scope == 'calibration' || inputs.scope == 'frontends' || inputs.scope == 'web'
         run: |
@@ -262,6 +271,8 @@ jobs:
             build/package-*.log
             build/shaped-result.txt
             build/calibration-aggregate.log
+            build/eme-diagnostic*
+            build/CMakeCache.txt
             ${{ github.workspace }}/build/ci-smoke-results/
           if-no-files-found: warn
           retention-days: 7

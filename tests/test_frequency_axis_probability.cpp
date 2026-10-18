@@ -13,11 +13,30 @@
 #include <cmath>
 #include <iomanip>
 #include <iostream>
+#include <openssl/evp.h>
 #include <stdexcept>
 #include <string_view>
 using namespace datapump;
 namespace {
+bool diagnostic_capture=false;
 void require(bool condition,const char* message) {if(!condition)throw std::runtime_error(message);}
+auto evidence_key(const modem::PatternEvidence& e) {
+    return std::array<std::uint64_t,13>{e.first_sample,e.end_sample,e.stream_symbol,
+        std::bit_cast<std::uint64_t>(e.frequency_hz),std::bit_cast<std::uint64_t>(e.score),
+        std::bit_cast<std::uint64_t>(e.alternative_score),e.bit,e.stream_phase_samples,
+        std::bit_cast<std::uint64_t>(e.admission_threshold),e.frequency_hypothesis,
+        e.outer_presence_active,std::bit_cast<std::uint64_t>(e.outer_presence_score),e.completed_event};
+}
+void diagnostic_pcm(const std::vector<float>& pcm,const Bytes& expected) {
+    std::array<unsigned char,EVP_MAX_MD_SIZE> digest{};unsigned size=0;
+    require(EVP_Digest(pcm.data(),pcm.size()*sizeof(float),digest.data(),&size,EVP_sha256(),nullptr)==1,
+        "diagnostic PCM digest failed");
+    std::cout<<"diagnostic_pcm samples="<<pcm.size()<<" float_bytes="<<sizeof(float)<<" sha256=";
+    for(unsigned i=0;i<size;++i)std::cout<<std::hex<<std::setw(2)<<std::setfill('0')<<unsigned(digest[i]);
+    std::cout<<std::dec<<std::setfill(' ')<<" expected=";
+    for(auto bit:expected)std::cout<<unsigned(bit);
+    std::cout<<'\n';
+}
 transfer::Options eme(unsigned seconds) {
     transfer::Options o;
     o.modem=tuning::resolve(1,-3.0720996964786846,tuning::PatternMode::auto_pattern,false,1500).config;
@@ -88,11 +107,24 @@ Outcome receive(modem::Config c,const transfer::Options& o,const std::vector<flo
     require(plan.supported&&plan.backend==(strategy==modem::ReceiverStrategy::existing_only?
         modem::ReceiverBackend::existing_complex:modem::ReceiverBackend::frequency_axis),"capture selected another backend");
     modem::PatternReceiver rx(c,o.dsp_workspace_bytes,search);Outcome out;
+    const auto backend=strategy==modem::ReceiverStrategy::existing_only?"existing":"frequency-axis";
+    std::vector<modem::PatternEvidence> previous_history;
+    bool history_saturated=false;
     for(std::size_t at=0;at<pcm.size();) {
         const auto n=std::min<std::size_t>(4096,pcm.size()-at);
         rx.push(std::span(pcm).subspan(at,n));at+=n;
         // Consume every next progress poll, including single pending bits.
         for(const auto& e:rx.take_bursts()) {
+            if(diagnostic_capture) {
+                std::cout<<"diagnostic_event backend="<<backend<<" poll="<<at<<" first="<<e.first_sample
+                    <<" end="<<e.end_sample<<" first_symbol="<<e.first_stream_symbol
+                    <<" stream_first="<<e.stream_first_sample<<" stream_symbol="<<e.stream_first_symbol
+                    <<" phase="<<e.stream_phase_samples<<" frequency="<<e.frequency_hz
+                    <<" score="<<e.score<<" support="<<e.support_samples<<" missing="<<e.missing_slots
+                    <<" complete="<<e.complete<<" bits=";
+                for(auto bit:e.bits)std::cout<<unsigned(bit);
+                std::cout<<'\n';
+            }
             if(out.events.empty()&&!e.bits.empty()) {
                 const auto work=rx.fft_work();out.first_trials=work.threshold_trials;out.first_starts=work.retained_start_trials;
                 for(const auto& candidate:rx.candidates())
@@ -102,6 +134,29 @@ Outcome receive(modem::Config c,const transfer::Options& o,const std::vector<flo
             out.events.push_back({e.bits,e.first_sample,e.end_sample,e.complete,at});
             out.bits.insert(out.bits.end(),e.bits.begin(),e.bits.end());
             if(e.complete){++out.complete;out.completion_at=at;}
+        }
+        if(diagnostic_capture) {
+            auto history=rx.candidates();
+            const auto prefix=previous_history.size()<=history.size() &&
+                std::equal(previous_history.begin(),previous_history.end(),history.begin(),
+                    [](const auto& a,const auto& b){return evidence_key(a)==evidence_key(b);});
+            const auto changed=previous_history.size()!=history.size() || !prefix;
+            if(!prefix || (history.size()==search.candidate_limit && !history_saturated))
+                std::cout<<"diagnostic_history backend="<<backend<<" poll="<<at<<" size="<<history.size()
+                    <<" ordered_prefix="<<prefix<<" candidate_limited="<<rx.candidate_limited()
+                    <<" saturated="<<(history.size()==search.candidate_limit)
+                    <<" note=history_cannot_prove_unretained_scores_or_rejection_reason\n";
+            if(changed)for(std::size_t i=prefix?previous_history.size():0;i<history.size();++i) {
+                const auto& e=history[i];
+                std::cout<<"diagnostic_candidate backend="<<backend<<" poll="<<at<<" history_index="<<i
+                    <<" first="<<e.first_sample<<" end="<<e.end_sample<<" symbol="<<e.stream_symbol
+                    <<" phase="<<e.stream_phase_samples<<" frequency="<<e.frequency_hz<<" lane="<<e.frequency_hypothesis
+                    <<" bit="<<e.bit<<" score="<<e.score<<" alternative="<<e.alternative_score
+                    <<" threshold="<<e.admission_threshold<<" outer_active="<<e.outer_presence_active
+                    <<" outer_score="<<e.outer_presence_score<<" completed_event="<<e.completed_event<<'\n';
+            }
+            history_saturated=history_saturated || history.size()==search.candidate_limit;
+            previous_history=std::move(history);
         }
         require(rx.working_bytes()<=o.dsp_workspace_bytes,"receiver exceeded workspace");
         // This is a one-burst fixture. Stop only after the receiver publishes
@@ -371,6 +426,14 @@ void capture(unsigned seconds,double es,std::uint64_t seed,bool compare,unsigned
         2*modem::pattern_pulse_padding_samples(c);
     while(tail) {const auto n=static_cast<std::size_t>(std::min<std::uint64_t>(tail,block.size()));
         sampled.read_noise(std::span(block).first(n));pcm.insert(pcm.end(),block.begin(),block.begin()+n);tail-=n;}
+    if(diagnostic_capture) {
+        diagnostic_pcm(pcm,expected);
+        std::cout<<"diagnostic_source startup="<<startup<<" support_end="<<support_end
+            <<" symbol_samples="<<modem::symbol_sample_count(c)<<" sample_rate="<<c.sample_rate
+            <<" training="<<modem::training_sample_count(c)<<" padding="<<modem::pattern_pulse_padding_samples(c)
+            <<" clock_ppm="<<ch.clock_error_ppm<<" frequency_offset="<<ch.frequency_offset_hz
+            <<" phase_diffusion="<<ch.phase_noise_degrees_per_sqrt_second<<'\n';
+    }
     const auto axis=receive(c,o,pcm,bank,modem::ReceiverStrategy::complex_only);
     const auto check_charge=[&](const Outcome& result,const char* backend) {
         const auto starts=c.sample_rate/750+modem::symbol_sample_count(c)/750/2;
@@ -428,6 +491,7 @@ int main(int argc,char** argv) {try {
     if(argc==2&&std::string_view(argv[1])=="--scope-only") {probability_scope();return 0;}
     if(argc==2&&std::string_view(argv[1])=="--existing-eme-only") {existing_eme_scope();return 0;}
     if(argc==6&&std::string_view(argv[1])=="--diagnose-end") {
+        diagnostic_capture=true;std::cout<<std::setprecision(17);
         const auto seconds=std::stoul(argv[2]),bits=std::stoul(argv[5]);
         require((seconds==128||seconds==256)&&bits>=1&&bits<=4,"invalid end diagnostic scope");
         capture(seconds,std::stod(argv[3]),std::stoull(argv[4]),true,bits,false,false,false,false);
