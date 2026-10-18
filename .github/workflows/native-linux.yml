@@ -16,7 +16,7 @@ on:
       scope:
         description: 'Run one complete native scope without repeating the other shards'
         type: choice
-        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic]
+        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic]
         default: core
       calibration_section:
         description: 'Calibration section; used only by the calibration scope'
@@ -36,7 +36,7 @@ on:
         type: string
         default: Release
       scope:
-        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, or alsa-radius-diagnostic'
+        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, or gui-core-diagnostic'
         type: string
         required: true
       calibration_section:
@@ -61,7 +61,7 @@ jobs:
     container: ubuntu:22.04
     # Standard runners need room for the full instrumented suite after compilation.
     # Explicit test limits and physical deadlines remain unchanged.
-    timeout-minutes: ${{ inputs.build_type == 'Debug' && (inputs.scope == 'core' || inputs.scope == 'calibration') && 240 || 120 }}
+    timeout-minutes: ${{ inputs.build_type == 'Debug' && (inputs.scope == 'core' || inputs.scope == 'calibration' || inputs.scope == 'preparation-diagnostic') && 240 || 120 }}
     defaults:
       run:
         shell: bash
@@ -138,6 +138,8 @@ jobs:
             package) targets=(datapump-apps) ;;
             frontends) targets=(datapump-tests-frontends) ;;
             web) targets=(datapump-tests-web) ;;
+            preparation-diagnostic) targets=(test_scheduled_parallel_preparation) ;;
+            gui-core-diagnostic) targets=(test_gui_timing_advice test_gui_controller) ;;
             sanitizer-gui) targets=(datapump-apps test_gui_smoke_budget test_gui_launch_command) ;;
             core) targets=(datapump-apps datapump-tests-ci-core) ;;
             cli) targets=(pump) ;;
@@ -277,6 +279,64 @@ jobs:
           ctest --test-dir build --show-only=json-v1 -R "$selector" > build/receiver-fixtures/inventory.json
           python3 -c 'import json,sys; names=[t["name"] for t in json.load(open("build/receiver-fixtures/inventory.json"))["tests"]]; expected=sys.argv[1].split(","); assert len(names)==len(expected) and set(names)==set(expected),names' "$expected"
           ctest --test-dir build --output-on-failure --no-tests=error --parallel 1 --timeout 3600 --output-junit "$PWD/build/receiver-fixtures/results.xml" -R "$selector"
+      - name: Run focused preparation or GUI core diagnostics
+        if: inputs.scope == 'preparation-diagnostic' || inputs.scope == 'gui-core-diagnostic'
+        run: |
+          set -euo pipefail
+          report="$PWD/build/core-diagnostics"
+          mkdir -p "$report"
+          git -c safe.directory="$PWD" rev-parse HEAD > "$report/source.txt"
+
+          if [ "$CI_SCOPE" = preparation-diagnostic ]; then
+            selector='^scheduled_parallel_preparation$'
+            inventory="$report/preparation-inventory.json"
+            expected='{"scheduled_parallel_preparation":"test_scheduled_parallel_preparation"}'
+          else
+            selector='^(gui_timing_advice|gui_controller)$'
+            inventory="$report/gui-inventory.json"
+            expected='{"gui_timing_advice":"test_gui_timing_advice","gui_controller":"test_gui_controller"}'
+          fi
+
+          ctest --test-dir build --show-only=json-v1 -R "$selector" > "$inventory"
+          python3 - "$inventory" "$expected" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          inventory = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          expected = json.loads(sys.argv[2])
+          tests = inventory.get("tests", [])
+          names = [test.get("name") for test in tests]
+          assert len(names) == len(expected), f"wrong inventory count: {names}"
+          assert len(set(names)) == len(expected), f"duplicate inventory names: {names}"
+          assert set(names) == set(expected), f"wrong inventory names: {names}"
+          for test in tests:
+              command = test.get("command")
+              assert isinstance(command, list) and len(command) == 1, (
+                  f"test command must contain only its executable: {test}"
+              )
+              assert pathlib.Path(command[0]).name == expected[test["name"]], (
+                  f"unexpected executable or test arguments: {test}"
+              )
+          PY
+
+          if [ "$CI_SCOPE" = preparation-diagnostic ]; then
+            ctest --test-dir build --output-on-failure --no-tests=error \
+              --parallel 1 --timeout 7200 \
+              --output-junit "$report/preparation-results.xml" -R "$selector" \
+              > "$report/preparation.log" 2>&1
+            echo 'Focused scheduled parallel preparation diagnostic completed. This is not full native matrix qualification.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            ctest --test-dir build --output-on-failure --no-tests=error \
+              --parallel 1 --timeout 7200 \
+              --output-junit "$report/gui-serial-results.xml" -R "$selector" \
+              > "$report/gui-serial.log" 2>&1
+            ctest --test-dir build --output-on-failure --no-tests=error \
+              --parallel 2 --timeout 7200 \
+              --output-junit "$report/gui-parallel-results.xml" -R "$selector" \
+              > "$report/gui-parallel.log" 2>&1
+            echo 'Focused GUI core diagnostic completed serially and in parallel. This is not full native matrix qualification.' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Run the selected native tests
         if: inputs.scope == 'core' || inputs.scope == 'fast' || inputs.scope == 'live' || inputs.scope == 'calibration' || inputs.scope == 'frontends' || inputs.scope == 'web'
         run: |
@@ -399,6 +459,7 @@ jobs:
             build/alsa-radius-diagnostic/
             build/CMakeCache.txt
             build/receiver-fixtures/
+            build/core-diagnostics/
             build/sched-hop-radius-control/
             ${{ github.workspace }}/build/ci-smoke-results/
           if-no-files-found: warn

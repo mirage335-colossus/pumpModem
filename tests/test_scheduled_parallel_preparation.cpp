@@ -2,6 +2,9 @@
 #include "../src/scheduled_parallel_preparation.hpp"
 #include "../src/search_parallel.hpp"
 #include "../src/audio_trace.hpp"
+#include <chrono>
+#include <ctime>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -10,6 +13,49 @@
 
 namespace {
 constexpr std::size_t global_loan=192*1024*1024;
+std::size_t timing_sequence=0;
+struct PreparationTiming {
+    using Clock=std::chrono::steady_clock;
+    const char* phase;
+    int arithmetic=-1;
+    bool parallel=false,shared=false,evidence=false;
+    std::size_t loan=0,requested=0,effective=0,id=++timing_sequence;
+    Clock::time_point started=Clock::now();
+    std::clock_t cpu_started=std::clock();
+    int exceptions=std::uncaught_exceptions();
+    explicit PreparationTiming(const char* label,int mode=-1,bool parallel_run=false,
+            bool shared_owner=false,std::size_t loan_bytes=0,bool retain_evidence=false,
+            std::size_t requested_threads=0) noexcept
+        :phase(label),arithmetic(mode),parallel(parallel_run),shared(shared_owner),
+         evidence(retain_evidence),loan(loan_bytes),requested(requested_threads) {
+        if(requested)try {effective=modem::detail::search_concurrency(requested);}catch(...) {}
+        emit(true);
+    }
+    PreparationTiming(const PreparationTiming&)=delete;
+    PreparationTiming& operator=(const PreparationTiming&)=delete;
+    ~PreparationTiming() noexcept {emit(false);}
+    void emit(bool begin) const noexcept {
+        try {
+            const auto wall=std::chrono::duration<double>(Clock::now()-started).count();
+            const auto cpu_finished=std::clock();
+            std::cerr<<"preparation_timing id="<<id<<" phase="<<phase
+                     <<" event="<<(begin?"begin":"end")
+                     <<" outcome="<<(begin?"entered":std::uncaught_exceptions()>exceptions?"unwinding":"returned")
+                     <<" wall_seconds="<<wall<<" process_cpu_seconds=";
+            if(cpu_started!=std::clock_t(-1) && cpu_finished!=std::clock_t(-1) && cpu_finished>=cpu_started)
+                std::cerr<<(static_cast<long double>(cpu_finished)-static_cast<long double>(cpu_started))/CLOCKS_PER_SEC;
+            else std::cerr<<"unavailable";
+            if(arithmetic>=0) {
+                std::cerr<<" arithmetic="<<arithmetic<<" parallel="<<parallel<<" shared="<<shared
+                         <<" loan="<<loan<<" evidence="<<evidence<<" requested_threads="<<requested
+                         <<" effective_concurrency_limit=";
+                if(effective)std::cerr<<effective;else std::cerr<<"unavailable";
+            }
+            std::cerr<<std::endl;
+        } catch(...) {} // Diagnostics must not replace an assertion or unwind.
+    }
+};
+
 void set_test_env(const char* key,const char* value,int) {
 #if defined(_WIN32)
     _putenv_s(key,value);
@@ -31,9 +77,10 @@ constexpr bool native_certified_environment() {
     return false;
 #endif
 }
-Result run(const modem::Config& c,const Capture& pcm,modem::PatternSearch s,bool parallel,
+Result run(const char* phase,const modem::Config& c,const Capture& pcm,modem::PatternSearch s,bool parallel,
         std::size_t loan=global_loan,bool shared=false,bool evidence=true) {
     s.worker_threads=parallel?9:1;
+    PreparationTiming timing{phase,static_cast<int>(c.search_arithmetic),parallel,shared,loan,evidence,s.worker_threads};
     set_test_env("DATAPUMP_SCHED_LAZY_PARALLEL",parallel?"1":"0",1);
     if(!parallel)return receive(c,pcm,s,257,false,false,false,false,false,false,evidence,{},false,false,false,true,shared,loan);
     const auto path=std::filesystem::temp_directory_path()/("scheduled-parallel-"+
@@ -53,7 +100,8 @@ Result run(const modem::Config& c,const Capture& pcm,modem::PatternSearch s,bool
     }
     trace.close();std::filesystem::remove(path);return result;
 }
-void compare_events(const Result& a,const Result& b) {
+void compare_events(const Result& a,const Result& b,const char* phase) {
+    PreparationTiming timing{phase};
     compare(a,b);
     check(a.events.size()==b.events.size(),"parallel preparation changed pending publication count");
     for(std::size_t i=0;i<a.events.size();++i) {
@@ -64,6 +112,7 @@ void compare_events(const Result& a,const Result& b) {
     }
 }
 void reservation_policy() {
+    PreparationTiming timing{"reservation_policy"};
     namespace sizing=modem::detail::scheduled_parallel_preparation;
     namespace tile=modem::detail::scheduled_acquisition_tile;
     const auto scratch=sizing::scratch_bytes(tile::maximum_start_span,tile::maximum_start_span,512);
@@ -99,6 +148,7 @@ void reservation_policy() {
     check(rejected,"worker reservation addition wrapped its size bound");
 }
 void identical_pcm() {
+    PreparationTiming timing{"identical_pcm"};
     auto c=configuration();const Bytes bits{0,1};const auto pcm=capture(c,bits,true);
     auto s=search(c,pcm,true);s.search_stream_phases=true;
     s.start_uncertainty_seconds=.5*modem::pattern_chip_samples(c)/c.sample_rate;
@@ -107,9 +157,9 @@ void identical_pcm() {
     for(const auto arithmetic:{modem::SearchArithmetic::default_mode,modem::SearchArithmetic::fp32,modem::SearchArithmetic::fp64}) {
         c.search_arithmetic=arithmetic;
         std::cerr<<"parallel preparation fixture: arithmetic="<<static_cast<int>(arithmetic)<<" serial/parallel pair beginning\n";
-        const auto serial=run(c,pcm,s,false),parallel=run(c,pcm,s,true);
+        const auto serial=run("arithmetic.serial",c,pcm,s,false),parallel=run("arithmetic.parallel",c,pcm,s,true);
         check(serial.bits==bits && serial.complete,"serial native fixture lacks full payload/physical END");
-        compare_events(serial,parallel);
+        compare_events(serial,parallel,"compare.arithmetic");
         if(native_certified_environment()) {
             check(parallel.work.implicit_input_transforms>0 && parallel.work.implicit_template_transforms>0,
                 "parallel fixture did not execute native numerical preparation");
@@ -125,29 +175,31 @@ void identical_pcm() {
             "worker isolation changed arithmetic eligibility or certified proxy scope");
     }
     c.search_arithmetic=modem::SearchArithmetic::default_mode;
-    const auto serial_shared=run(c,pcm,s,false,global_loan,true),parallel_shared=run(c,pcm,s,true,global_loan,true);
-    compare_events(serial_shared,parallel_shared);
+    const auto serial_shared=run("shared.serial",c,pcm,s,false,global_loan,true),parallel_shared=run("shared.parallel",c,pcm,s,true,global_loan,true);
+    compare_events(serial_shared,parallel_shared,"compare.shared");
     auto narrow=s;narrow.search_stream_phases=false;narrow.clock_errors_ppm={0};narrow.frequency_offsets_hz={0};
     narrow.start_uncertainty_seconds=0;narrow.candidate_limit=4096;
-    const auto small_serial=run(c,pcm,narrow,false,8*1024*1024),small_parallel=run(c,pcm,narrow,true,8*1024*1024);
-    compare_events(small_serial,small_parallel);
+    const auto small_serial=run("small.serial",c,pcm,narrow,false,8*1024*1024),small_parallel=run("small.parallel",c,pcm,narrow,true,8*1024*1024);
+    compare_events(small_serial,small_parallel,"compare.small");
     auto large_span=narrow;large_span.start_uncertainty_seconds=3000./c.sample_rate;
-    const auto tiled_serial=run(c,pcm,large_span,false,7899971,false,false),tiled_parallel=run(c,pcm,large_span,true,7899971,false,false);
-    compare_events(tiled_serial,tiled_parallel);
+    const auto tiled_serial=run("tiled.serial",c,pcm,large_span,false,7899971,false,false),tiled_parallel=run("tiled.parallel",c,pcm,large_span,true,7899971,false,false);
+    compare_events(tiled_serial,tiled_parallel,"compare.tiled");
     if(native_certified_environment())check(tiled_parallel.work.implicit_input_transforms>0,
         "bounded numerical subdivision left the P8192 workspace fallback cliff unchanged");
 }
 void cancellation_and_no_false_end() {
+    PreparationTiming timing{"cancellation_and_no_false_end"};
     auto c=configuration();const Bytes bits{0,1};auto pcm=capture(c,bits,false);
     auto s=search(c,pcm);s.search_stream_phases=true;s.worker_threads=9;
     s.start_uncertainty_seconds=.5*modem::pattern_chip_samples(c)/c.sample_rate;
     s.candidate_limit=65536;s.chunk_bits=1;
-    const auto serial=run(c,pcm,s,false),parallel=run(c,pcm,s,true);
-    compare_events(serial,parallel);check(!parallel.complete,"EOF/partial absence manufactured physical END");
+    const auto serial=run("partial.serial",c,pcm,s,false),parallel=run("partial.parallel",c,pcm,s,true);
+    compare_events(serial,parallel,"compare.partial");check(!parallel.complete,"EOF/partial absence manufactured physical END");
     std::fill(pcm.pcm.begin(),pcm.pcm.end(),0.F);
-    const auto zero_serial=run(c,pcm,s,false),zero_parallel=run(c,pcm,s,true);
-    compare_events(zero_serial,zero_parallel);
+    const auto zero_serial=run("zero.serial",c,pcm,s,false),zero_parallel=run("zero.parallel",c,pcm,s,true);
+    compare_events(zero_serial,zero_parallel,"compare.zero");
     check(zero_parallel.bits.empty() && !zero_parallel.complete,"zero capture manufactured a payload or END");
+    PreparationTiming stopped_timing{"stopped_push"};
     modem::PatternCorrelator rx(c,s,global_loan,{.measure_work=true});
     std::stop_source source;source.request_stop();bool cancelled=false;
     try {rx.push(std::span(pcm.pcm).first(std::min<std::size_t>(1024,pcm.pcm.size())),source.get_token());}

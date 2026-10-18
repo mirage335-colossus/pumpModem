@@ -13,6 +13,8 @@
 #include <filesystem>
 #include <atomic>
 #include <iostream>
+#include <iomanip>
+#include <limits>
 #include <set>
 #include <thread>
 
@@ -1098,6 +1100,62 @@ void fake_hop_display() {
         <<" stop_seconds="<<double(modem::transmit_stop_sample_count(stop_config))/stop_config.sample_rate
         <<" deferred="<<(stop_config.fake_hopping&&stop_config.fake_hopping->defer_symbols)<<'\n';
     check(!short_list||cycle_seen,"FHSS list fixture must cross a fresh keyed hop cycle");
+    if(delayed_arrival&&!arrival_seen) {
+        const auto& failed=controller.snapshot();
+        const auto& trace=failed.transmit_trace;
+        const auto& health=failed.receiver_health;
+        const auto bounded_text=[](std::string_view text) {
+            std::string result;
+            // Bound and sanitize diagnostic text without exposing key arrays.
+            for(const unsigned char byte:text.substr(0,160))
+                result.push_back(byte>=32&&byte<127?static_cast<char>(byte):'?');
+            return result;
+        };
+        const auto wall_seconds=std::chrono::duration<double>(
+            std::chrono::steady_clock::now()-(deadline-std::chrono::seconds(5))).count();
+        std::cerr<<std::setprecision(std::numeric_limits<double>::max_digits10)
+            <<"FHSS_ARRIVAL_FAILURE preference="<<preference
+            <<" wall_seconds="<<wall_seconds
+            <<" snapshot_sequence="<<failed.sequence
+            <<" transmission_id="<<failed.transmission_id
+            <<" simulation="<<failed.simulation
+            <<" running="<<failed.running
+            <<" transmitting="<<failed.transmitting
+            <<" transmitting_noise="<<failed.transmitting_noise
+            <<" stopping="<<failed.transmission_stopping
+            <<" transmission_failed="<<failed.transmission_failed
+            <<" transmission_seconds="<<failed.transmission_seconds
+            <<" virtual_seconds="<<failed.virtual_seconds
+            <<" simulation_compute_seconds="<<failed.simulation_compute_seconds
+            <<" rx_samples_received="<<failed.samples_received
+            <<" rx_input_revision="<<failed.receiver_input_revision
+            <<" rx_processed_physical_samples="<<failed.processed_physical_samples
+            <<" rx_queued_physical_samples="<<failed.queued_physical_samples
+            <<" rx_decoding_physical_samples="<<failed.decoding_physical_samples
+            <<" fhss_available="<<trace.fhss_available
+            <<" fhss_utc_calendar="<<trace.fhss_utc_calendar
+            <<" fhss_hop="<<trace.fhss_hop
+            <<" fhss_channel="<<trace.fhss_channel
+            <<" fhss_dwell_seconds="<<trace.fhss_dwell_seconds
+            <<" arrival_offset_seconds="<<trace.fhss_arrival_offset_seconds
+            <<" arrival_available="<<trace.fhss_arrival_available
+            <<" arrival_hop="<<trace.fhss_arrival_hop
+            <<" arrival_channel="<<trace.fhss_arrival_channel
+            <<" receiver_failed="<<health.failed()
+            <<" input_overruns="<<health.input_overruns
+            <<" dropped_samples="<<health.dropped_samples
+            <<" input_interrupted="<<health.input_interrupted
+            <<" search_limited="<<health.search_limited
+            <<" receiver_reset="<<health.receiver_reset
+            <<" receiver_behind="<<failed.receiver_behind
+            <<" backlog_seconds="<<failed.receiver_backlog_seconds
+            <<" oldest_input_seconds="<<failed.receiver_oldest_input_seconds
+            <<" status="<<std::quoted(bounded_text(failed.status))
+            <<" error="<<std::quoted(bounded_text(failed.error))
+            <<" receiver_error="<<std::quoted(bounded_text(failed.receiver_error))
+            <<" fhss_label="<<std::quoted(bounded_text(controller.field(F::fhss).display_text))
+            <<std::endl;
+    }
     check(!delayed_arrival||arrival_seen,"delayed FHSS preview never reached its first arrival");
     const auto stop_source_seconds=controller.snapshot().transmission_seconds;
     const auto protected_tail_seconds=double(modem::transmit_stop_sample_count(stop_config))/stop_config.sample_rate;
