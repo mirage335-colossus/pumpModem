@@ -2,6 +2,7 @@
 """Coverage partition and failure-preserving timing checks for the CI runner."""
 import argparse
 from contextlib import redirect_stdout
+import hashlib
 import importlib.util
 import io
 import json
@@ -326,7 +327,7 @@ class BuildPartitions(unittest.TestCase):
 @unittest.skipUnless(shutil.which('ctest'), 'CTest is needed for temporary integration fixtures')
 class CTestIntegration(unittest.TestCase):
     def exercise(self, program, timeout=5, *, skip_return=None, companion_program=None,
-                 jobs=1, stale_last_test=False, truncated_markers=()):
+                 jobs=1, stale_last_test=False, truncated_markers=(), inventory_bytes=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             executable = Path(sys.executable).as_posix()
@@ -352,16 +353,66 @@ class CTestIntegration(unittest.TestCase):
                                       jobs=jobs, sanitizers=False, sanitizer_realtime=False, report=report,
                                       summary=root / 'summary.md', timeout=3600, warn_fraction=.005)
             stdout = io.StringIO()
-            with redirect_stdout(stdout):
-                result = runner.run(args)
+            if inventory_bytes is None:
+                with redirect_stdout(stdout):
+                    result = runner.run(args)
+            else:
+                from unittest.mock import patch
+                real_run = __import__('subprocess').run
+                def run(command, *call_args, **call_kwargs):
+                    if '--show-only=json-v1' in command:
+                        return __import__('subprocess').CompletedProcess(
+                            command, 0, stdout=inventory_bytes, stderr=b'')
+                    return real_run(command, *call_args, **call_kwargs)
+                with patch.object(__import__('subprocess'), 'run', side_effect=run):
+                    with redirect_stdout(stdout):
+                        result = runner.run(args)
             contents = json.loads(report.read_text())
             contents['_summary_text'] = (root / 'summary.md').read_text()
+            inventory = report.with_suffix('.inventory.json')
+            contents['_inventory_bytes'] = inventory.read_bytes() if inventory.exists() else None
+            if contents['ctest_returncode'] is not None:
+                self.assertIs(type(contents['ctest_returncode']), int)
             if truncated_markers:
                 junit = root / 'report.xml'
                 xml = junit.read_text()
                 for marker in truncated_markers:
                     self.assertNotIn(marker, xml)
             return result, contents, stdout.getvalue()
+
+    def test_inventory_sidecar_preserves_exact_listing_bytes_and_hash(self):
+        raw = (b'{\r\n  "kind": "ctestInfo",\r\n  "version": {"major": 1, "minor": 0},\r\n'
+               b'  "tests": [\r\n'
+               b'    {"name": "sample", "properties": [{"name": "LABELS", "value": ["regular", "contract"]}]}\r\n'
+               b'  ]\r\n}\r\n')
+        result, report, output = self.exercise('print("ok")', inventory_bytes=raw)
+        self.assertEqual(result, 0, output[-2000:])
+        self.assertEqual(report['_inventory_bytes'], raw)
+        self.assertEqual(report['inventory_file'], 'report.inventory.json')
+        self.assertEqual(report['inventory_sha256'], hashlib.sha256(raw).hexdigest())
+        self.assertEqual(report['ctest_returncode'], 0)
+
+    def test_listing_failure_removes_stale_inventory_and_keeps_unavailable_fields_none(self):
+        import subprocess
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            report_path = root / 'report.json'
+            inventory = report_path.with_suffix('.inventory.json')
+            inventory.write_bytes(b'stale inventory')
+            args = argparse.Namespace(build_dir=root, scope='core', config=None, ctest='ctest',
+                                      jobs=1, sanitizers=False, sanitizer_realtime=False, report=report_path,
+                                      summary=root / 'summary.md', timeout=3600, warn_fraction=.8)
+            with patch.object(subprocess, 'run', side_effect=subprocess.CalledProcessError(
+                    2, ['ctest', '--show-only=json-v1'])):
+                result = runner.run(args)
+            report = json.loads(report_path.read_text())
+            self.assertEqual(result, 1)
+            self.assertEqual(report['status'], 'failed')
+            self.assertFalse(inventory.exists())
+            self.assertIsNone(report['inventory_file'])
+            self.assertIsNone(report['inventory_sha256'])
+            self.assertIsNone(report['ctest_returncode'])
 
     def test_real_ctest_collects_late_warnings_after_large_stdout_and_stderr(self):
         markers = ['TEST_WORKLOAD_BUDGET: late warning one',
@@ -450,12 +501,14 @@ class CTestIntegration(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertTrue(observed.get('waited'))
         self.assertEqual(report['status'], 'failed')
+        self.assertEqual(report['ctest_returncode'], 0)
         self.assertIn('incomplete workload warning line', report['error'])
 
     def test_real_ctest_success_and_slow_warning(self):
         result, report, output = self.exercise('import time; time.sleep(.05)')
         self.assertEqual(result, 0)
         self.assertEqual(report['status'], 'passed')
+        self.assertEqual(report['ctest_returncode'], 0)
         self.assertIn('::warning', output)
         self.assertEqual(report['selected'], ['sample'])
 
@@ -463,11 +516,15 @@ class CTestIntegration(unittest.TestCase):
         result, report, _ = self.exercise('raise AssertionError(123)')
         self.assertEqual(result, 1)
         self.assertEqual(report['status'], 'failed')
+        self.assertIsInstance(report['ctest_returncode'], int)
+        self.assertNotEqual(report['ctest_returncode'], 0)
 
     def test_real_ctest_timeout_remains_fatal(self):
         result, report, _ = self.exercise('import time; time.sleep(10)', timeout=.1)
         self.assertEqual(result, 1)
         self.assertEqual(report['status'], 'failed')
+        self.assertIsInstance(report['ctest_returncode'], int)
+        self.assertNotEqual(report['ctest_returncode'], 0)
         self.assertFalse(report['tests'][0]['near_timeout'])
 
     def test_workload_warning_from_passing_ctest_output_remains_visible(self):
@@ -486,6 +543,7 @@ class CTestIntegration(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertEqual(report['status'], 'failed')
         self.assertEqual(report['error'], 'No selected test passed; all selected coverage was omitted')
+        self.assertEqual(report['ctest_returncode'], 0)
         self.assertEqual(report['tests'][0]['status'], 'omitted')
         self.assertEqual(report['tests'][0]['workload_warnings'], [marker])
         self.assertEqual(report['result_counts'],
@@ -505,6 +563,7 @@ class CTestIntegration(unittest.TestCase):
             'raise SystemExit(77)', skip_return=77, companion_program='print("passed")')
         self.assertEqual(result, 0, output[-2000:])
         self.assertEqual(report['status'], 'passed_with_omissions')
+        self.assertEqual(report['ctest_returncode'], 0)
         self.assertEqual(report['result_counts'],
                          {'passed': 1, 'omitted': 1, 'incomplete_or_failed': 0})
         self.assertEqual(report['runtime_omissions'], ['sample'])
@@ -576,6 +635,7 @@ class CTestIntegration(unittest.TestCase):
         self.assertEqual(observed, {'real_returncode': 0, 'stdout_drained': True})
         self.assertEqual(result, 1, output[-2000:])
         self.assertEqual(report['status'], 'failed')
+        self.assertEqual(report['ctest_returncode'], 1)
         self.assertEqual(report['result_counts'],
                          {'passed': 1, 'omitted': 1, 'incomplete_or_failed': 0})
         self.assertEqual(report['runtime_omissions'], ['sample'])

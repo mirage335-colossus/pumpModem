@@ -2,6 +2,7 @@
 """Run a disjoint CTest scope and retain timing/coverage evidence for CI."""
 import argparse
 from collections import Counter
+import hashlib
 import json
 import math
 import os
@@ -278,16 +279,22 @@ def run(args):
     report_path.parent.mkdir(parents=True, exist_ok=True)
     log_path = report_path.with_suffix('.log')
     junit_path = report_path.with_suffix('.xml')
+    inventory_path = report_path.with_suffix('.inventory.json')
     report = {'scope': args.scope, 'status': 'failed', 'selected': [], 'omitted': [],
               'runtime_omissions': [], 'result_counts': None,
-              'tests': [], 'source_sha': os.environ.get('GITHUB_SHA', '')}
+              'tests': [], 'source_sha': os.environ.get('GITHUB_SHA', ''),
+              'inventory_file': None, 'inventory_sha256': None, 'ctest_returncode': None}
     returncode = 1
     try:
         base = [args.ctest, '--test-dir', str(args.build_dir.resolve())]
         if args.config:
             base += ['--build-config', args.config]
+        inventory_path.unlink(missing_ok=True)
         listing = subprocess.run(base + ['--show-only=json-v1'], check=True,
-                                 capture_output=True, text=True)
+                                 capture_output=True)
+        inventory_path.write_bytes(listing.stdout)
+        report['inventory_sha256'] = hashlib.sha256(listing.stdout).hexdigest()
+        report['inventory_file'] = inventory_path.name
         tests = json.loads(listing.stdout)['tests']
         selected, omitted, counts = select_tests(tests, args.scope, args.sanitizers, args.sanitizer_realtime)
         report.update(selected=[test['name'] for test in selected], omitted=omitted, partitions=counts)
@@ -310,6 +317,7 @@ def run(args):
                     log.flush()
                     workload_collector.feed(line)
                 returncode = process.wait()
+                report['ctest_returncode'] = returncode
         workload_warnings = workload_collector.finish(require_all=(returncode == 0))
         report['tests'] = read_results(junit_path, selected, args.timeout, args.warn_fraction,
                                        workload_warnings=workload_warnings)
