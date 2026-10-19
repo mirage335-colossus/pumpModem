@@ -16,7 +16,7 @@ on:
       scope:
         description: 'Run one complete native scope without repeating the other shards'
         type: choice
-        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, simulation-clock-trace-diagnostic, fft-normalization-diagnostic]
+        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, fft-normalization-diagnostic]
         default: core
       stop_group:
         description: Temporary matched stop experiment group; diagnostic only
@@ -41,7 +41,7 @@ on:
         type: string
         default: Release
       scope:
-        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, simulation-clock-trace-diagnostic, or fft-normalization-diagnostic'
+        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, or fft-normalization-diagnostic'
         type: string
         required: true
       stop_group:
@@ -95,7 +95,7 @@ jobs:
       CXX: g++-11
       CI_SCOPE: ${{ inputs.scope }}
       CI_STOP_GROUP: ${{ inputs.stop_group }}
-      DATAPUMP_SANITIZERS: ${{ inputs.scope == 'gui-stop-differential' && (inputs.stop_group == 'eu-o1-san-off' || inputs.stop_group == 'eu-o0-san-off' || inputs.stop_group == 'eu-focus-o1-san-off' || inputs.stop_group == 'eu-focus-o0-san-off' || inputs.stop_group == 'eu-kernel-o1-san-off') && 'OFF' || ((inputs.build_type == 'Debug' || inputs.scope == 'simulation-clock-trace-diagnostic') && 'ON' || 'OFF') }}
+      DATAPUMP_SANITIZERS: ${{ inputs.scope == 'gui-stop-differential' && (inputs.stop_group == 'eu-o1-san-off' || inputs.stop_group == 'eu-o0-san-off' || inputs.stop_group == 'eu-focus-o1-san-off' || inputs.stop_group == 'eu-focus-o0-san-off' || inputs.stop_group == 'eu-kernel-o1-san-off') && 'OFF' || ((inputs.build_type == 'Debug' || (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic')) && 'ON' || 'OFF') }}
       SANITIZER_REALTIME: ${{ inputs.sanitizer_realtime }}
     steps:
       - name: Restrict the temporary graceful-stop diagnostic
@@ -697,9 +697,9 @@ jobs:
       - name: Configure native application and selected test scope
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11
-          -DCMAKE_BUILD_TYPE=${{ inputs.scope == 'simulation-clock-trace-diagnostic' && 'Debug' || inputs.build_type }}
+          -DCMAKE_BUILD_TYPE=${{ (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic') && 'Debug' || inputs.build_type }}
           -DDATAPUMP_SANITIZERS="$DATAPUMP_SANITIZERS"
-          -DDATAPUMP_PORTABLE=${{ inputs.scope != 'simulation-clock-trace-diagnostic' && inputs.build_type == 'Release' && 'ON' || 'OFF' }}
+          -DDATAPUMP_PORTABLE=${{ inputs.scope != 'simulation-clock-trace-diagnostic' && inputs.scope != 'simulation-clock-geometry-diagnostic' && inputs.build_type == 'Release' && 'ON' || 'OFF' }}
           -DBUILD_TESTING=${{ inputs.scope == 'package' && 'OFF' || 'ON' }}
           -DDATAPUMP_BUILD_TUI=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }}
           -DDATAPUMP_BUILD_FB=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }}
@@ -724,7 +724,7 @@ jobs:
             gui-core-diagnostic) targets=(test_gui_timing_advice test_gui_controller) ;;
             gui-stop-diagnostic) targets=(test_gui_controller) ;;
             gui-stop-differential) targets=(test_gui_controller) ;;
-            simulation-clock-diagnostic|simulation-clock-trace-diagnostic) targets=(test_live) ;;
+            simulation-clock-diagnostic|simulation-clock-trace-diagnostic|simulation-clock-geometry-diagnostic) targets=(test_live) ;;
             fft-diagnostic) targets=(test_search_fft test_pattern_fft_batch test_search_parallel test_pattern_receiver test_pattern_startup_guide) ;;
             eme-probability-diagnostic) targets=(test_frequency_axis_probability) ;;
             planner-diagnostic) targets=(test_gui_link_planner test_link_planner_curves) ;;
@@ -1212,8 +1212,8 @@ jobs:
         if: inputs.scope == 'simulation-clock-diagnostic'
         run: echo 'This focused simulation media clock diagnostic does not replace the complete Live test scope.' >> "$GITHUB_STEP_SUMMARY"
       - name: Run default and explicitly traced simulation clock diagnostics
-        if: inputs.scope == 'simulation-clock-trace-diagnostic'
-        timeout-minutes: 25
+        if: (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic')
+        timeout-minutes: ${{ inputs.scope == 'simulation-clock-geometry-diagnostic' && 35 || 25 }}
         run: |
           python3 -B - <<'PY_CLOCK_TRACE'
           from datetime import datetime, timezone
@@ -1252,10 +1252,15 @@ jobs:
           # its definitions does not run its guarded prepare/run/restore CLI.
           trace_seal = runpy.run_path(str(root / "tools/gui-stop-differential.py"))["trace_seal"]
           trace_path = (report / "default-media-clock.jsonl").resolve()
-          cases = (("default", [str(binary), "--simulation-media-clock"]),
-                   ("trace", [str(binary), "--simulation-media-clock-trace", str(trace_path)]))
+          if os.environ["CI_SCOPE"] == "simulation-clock-geometry-diagnostic":
+              cases = (("default", "compact", [str(binary), "--simulation-media-clock"]),
+                       ("standard", "standard", [str(binary), "--simulation-media-clock-standard"]),
+                       ("trace", "standard", [str(binary), "--simulation-media-clock-standard-trace", str(trace_path)]))
+          else:
+              cases = (("default", "compact", [str(binary), "--simulation-media-clock"]),
+                       ("trace", "compact", [str(binary), "--simulation-media-clock-trace", str(trace_path)]))
           results = []
-          for name, command in cases:
+          for name, geometry, command in cases:
               stdout_path = report / (name + ".stdout.log")
               stderr_path = report / (name + ".stderr.log")
               started_utc = datetime.now(timezone.utc).isoformat()
@@ -1290,7 +1295,7 @@ jobs:
                       "correctness_note": "Incomplete, dropped, ambiguous, or size-limited trace data is never a pass."
                   }, indent=2) + "\n")
               item = {
-                  "name": name, "command": command, "cwd": str(root),
+                  "name": name, "fixture_geometry": geometry, "command": command, "cwd": str(root),
                   "environment": environment, "environment_sha256": environment_sha256,
                   "started_utc": started_utc, "finished_utc": finished_utc,
                   "timeout_seconds": timeout_seconds, "timed_out": timed_out,
@@ -1315,8 +1320,8 @@ jobs:
           raise SystemExit(1 if failed else 0)
           PY_CLOCK_TRACE
       - name: Mark traced simulation clock scope as diagnostic only
-        if: inputs.scope == 'simulation-clock-trace-diagnostic'
-        run: echo 'This paired simulation clock and trace capture is diagnostic evidence only. It does not qualify Live or GUI behavior.' >> "$GITHUB_STEP_SUMMARY"
+        if: (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic')
+        run: echo 'This simulation clock geometry/trace capture is diagnostic evidence only. Original assertions and each process outcome remain required; it does not qualify Live or GUI behavior.' >> "$GITHUB_STEP_SUMMARY"
       - name: Record partial capture scope
         if: inputs.calibration_shard != ''
         run: |

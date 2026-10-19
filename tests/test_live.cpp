@@ -787,11 +787,21 @@ void simulation_media_clock_arithmetic() {
     check(input.interrupted(108,50) && input.interrupted(108,54) && !input.interrupted(108,58),
           "media clock confused partial and committed delivery");
 }
-void simulation_media_clock_transmissions() {
+void simulation_media_clock_transmissions(bool standard_geometry=false) {
     SimulationScript script;SimulationHookScope hook(script);
     std::atomic<std::int64_t> replay_ms{0};
     live::Session session({},[&]{return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_ms.load());});
-    auto value=media_clock_settings();session.start(value);
+    auto value=media_clock_settings();
+    if(standard_geometry) {
+        // Diagnostic factor: change only the positive workload's geometry.
+        // Keep its default clock, key, search radius and workspace unchanged.
+        const auto standard=settings().transfer.modem;
+        value.transfer.modem.sample_rate=standard.sample_rate;
+        value.transfer.modem.bandwidth_hz=standard.bandwidth_hz;
+        value.transfer.modem.carrier_hz=standard.carrier_hz;
+        value.transfer.modem.spreading_factor=standard.spreading_factor;
+    }
+    session.start(value);
     wait_for(session,"default media clock idle",[](const auto& s){return s.samples_received>=64;});
     for(unsigned mode=0;mode<3;++mode) {
         const auto* case_name=mode==0?"raw":mode==1?"short":"framed";
@@ -799,6 +809,7 @@ void simulation_media_clock_transmissions() {
         const Bytes raw{0,0,1};
         audio::trace::record("simulation_media_clock_case",[&](auto& fields) {
             fields.add("case",case_name);fields.add("phase","begin");
+            fields.add("geometry",standard_geometry?"standard":"compact");
             fields.add("sample_rate",value.transfer.modem.sample_rate);fields.add("bandwidth_hz",value.transfer.modem.bandwidth_hz);
             fields.add("spreading_factor",value.transfer.modem.spreading_factor);
             fields.add("search_seconds",value.transfer.search_seconds);fields.add("dsp_budget",value.dsp_workspace_bytes);
@@ -952,9 +963,9 @@ void simulation_media_clock_error_reporting() {
           "simulation's own invalidation swallowed a channel error or continued the failed TX");
     session.stop();
 }
-void simulation_media_clock() {
+void simulation_media_clock(bool standard_positive_geometry=false) {
     simulation_media_clock_arithmetic();
-    simulation_media_clock_transmissions();
+    simulation_media_clock_transmissions(standard_positive_geometry);
     simulation_media_clock_cancellation();
     simulation_media_clock_clear_construction();
     simulation_media_clock_error_reporting();
@@ -963,6 +974,16 @@ void simulation_media_clock() {
 int main(int argc,char** argv) {
     try {
         cpu_work_budget_boundaries();
+        if(argc>1 && std::string_view(argv[1])=="--simulation-media-clock-standard-trace") {
+            check(argc==3 && !std::string_view(argv[2]).empty(),
+                  "usage: test_live --simulation-media-clock-standard-trace <path>");
+            audio::trace::Scope trace(argv[2]);
+            simulation_media_clock(true);std::cout<<"default simulation media clock standard geometry passed\n";return 0;
+        }
+        if(argc>1 && std::string_view(argv[1])=="--simulation-media-clock-standard") {
+            check(argc==2,"usage: test_live --simulation-media-clock-standard");
+            simulation_media_clock(true);std::cout<<"default simulation media clock standard geometry passed\n";return 0;
+        }
         if(argc>1 && std::string_view(argv[1])=="--simulation-media-clock-trace") {
             check(argc==3 && !std::string_view(argv[2]).empty(),
                   "usage: test_live --simulation-media-clock-trace <path>");
