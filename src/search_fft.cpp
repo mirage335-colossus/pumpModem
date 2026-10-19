@@ -1,6 +1,8 @@
 #include "search_fft.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cfenv>
+#include <cfloat>
 #include <cstdint>
 #include <numbers>
 #include <type_traits>
@@ -93,6 +95,32 @@ __attribute__((target("avx2"))) void butterflies(std::complex<double>* a,const s
     for(;j<half;++j){const auto w=inverse?std::conj(table[j]):table[j];const auto u=a[begin+j],v=a[begin+j+half]*w;
         a[begin+j]=u+v;a[begin+j+half]=u-v;}
 }
+// Restrict the borrowed small-transform SIMD path to finite arithmetic. With
+// table components bounded by two, growth is at most eight per stage including
+// rounding. Since 8^log2(n) = n^3, every product and sum retains headroom.
+bool small_borrowed_simd_safe(std::span<const std::complex<double>> values,
+        std::span<const std::complex<double>> table,std::stop_token stop){
+#if defined(__FAST_MATH__) || (defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__>0) || !defined(__SSE2__)
+    (void)values;(void)table;(void)stop;return false;
+#else
+    if(!std::numeric_limits<double>::is_iec559 || std::numeric_limits<double>::digits!=53 ||
+       FLT_EVAL_METHOD!=0 || std::fegetround()!=FE_TONEAREST ||
+       (_mm_getcsr()&((1U<<15)|(1U<<6)|(3U<<13)|(0x3fU<<7)))!=(0x3fU<<7))return false;
+    const auto size=static_cast<double>(values.size());
+    const auto limit=std::numeric_limits<double>::max()/(8*size*size*size);
+    for(std::size_t i=0;i<values.size();++i){
+        if((i&4095U)==0)cancelled(stop);
+        if(!std::isfinite(values[i].real()) || !std::isfinite(values[i].imag()) ||
+           std::abs(values[i].real())>limit || std::abs(values[i].imag())>limit)return false;
+    }
+    for(std::size_t i=0;i<table.size();++i){
+        if((i&4095U)==0)cancelled(stop);
+        if(!std::isfinite(table[i].real()) || !std::isfinite(table[i].imag()) ||
+           std::abs(table[i].real())>2 || std::abs(table[i].imag())>2)return false;
+    }
+    return true;
+#endif
+}
 #endif
 template<class T,class P>void execute(std::span<std::complex<T>> a,bool inverse,const P& plan,std::stop_token stop,Kernel kernel){
     const auto n=a.size();valid_size(n);
@@ -149,6 +177,11 @@ void fft(std::span<std::complex<double>> a,bool inverse,const DoubleTableView& v
        overlaps(std::span<const std::complex<double>>(a),view.inverse))
         throw Error("double FFT input overlaps its tables");
     cancelled(stop);
+#if defined(DATAPUMP_SEARCH_FFT_X86)
+    const bool vectorized=n>=4 && n<=8192 &&
+        use_avx2(Kernel::automatic) && small_borrowed_simd_safe(a,
+            (inverse?view.inverse:view.forward).first(n-1),stop);
+#endif
     auto* const values=a.data();
     for(std::size_t i=1,j=0;i<n;++i){
         if((i&4095U)==0)cancelled(stop);
@@ -161,10 +194,16 @@ void fft(std::span<std::complex<double>> a,bool inverse,const DoubleTableView& v
         if(n<=8192) {
             // A stage has at most 4096 butterflies, preserving the existing
             // cancellation bound without a counter branch on every butterfly.
-            for(std::size_t begin=0;begin<n;begin+=length)for(std::size_t j=0;j<half;++j){
-                const auto u=values[begin+j],v=values[begin+j+half]*table[j];
-                values[begin+j]={u.real()+v.real(),u.imag()+v.imag()};
-                values[begin+j+half]={u.real()-v.real(),u.imag()-v.imag()};
+            for(std::size_t begin=0;begin<n;begin+=length){
+#if defined(DATAPUMP_SEARCH_FFT_X86)
+                // Directional borrowed tables already contain the inverse signs.
+                if(vectorized && half>=2){butterflies(values,table,begin,half,false);continue;}
+#endif
+                for(std::size_t j=0;j<half;++j){
+                    const auto u=values[begin+j],v=values[begin+j+half]*table[j];
+                    values[begin+j]={u.real()+v.real(),u.imag()+v.imag()};
+                    values[begin+j+half]={u.real()-v.real(),u.imag()-v.imag()};
+                }
             }
         } else for(std::size_t begin=0;begin<n;begin+=length)for(std::size_t j=0;j<half;++j){
             if((iterations++&4095U)==0)cancelled(stop);
