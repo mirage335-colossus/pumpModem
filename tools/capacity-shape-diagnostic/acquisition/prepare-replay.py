@@ -201,7 +201,7 @@ def main():
     PCM=CAPTURE/'a3-source-input.f32';SIDECAR=CAPTURE/'a3-source-input.f32.partitions.json'
     if OUT.exists(): raise ValueError('output-dir must be fresh')
     OUT.mkdir(parents=True)
-    subprocess.run(['git','-C',str(ROOT),'merge-base','--is-ancestor',REVISION,'HEAD'],check=True)
+    subprocess.run(['git','-c','safe.directory='+str(ROOT),'-C',str(ROOT),'merge-base','--is-ancestor',REVISION,'HEAD'],check=True)
     first=json.loads((PRODUCER/'manifest.json').read_text())
     for rel,digest in first['source_closure'].items():
         if sha((ROOT/rel).read_bytes())!=digest: raise ValueError(f'first-layer source hash mismatch: {rel}')
