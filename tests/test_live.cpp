@@ -631,18 +631,26 @@ void continuous_noise_lifecycle() {
 
 struct SimulationScript {
     using Phase=live::detail::SimulationPhase;
+    static constexpr std::size_t phase_count=static_cast<std::size_t>(Phase::input_invalidated)+1;
     Phase target=Phase::before_read;
     std::atomic<bool> armed{false},entered{false},released{false},transmit_seen{false};
     bool fail_checkpoint=false;
     std::mutex mutex;
     std::vector<live::detail::SimulationObservation> banks;
     std::vector<double> epochs;
+    std::array<live::detail::SimulationObservation,phase_count> latest{};
+    std::array<std::uint64_t,phase_count> counts{};
+    std::optional<std::pair<decltype(latest),decltype(counts)>> first_interruption;
     static void observe(void* context,const live::detail::SimulationObservation& point) {
         auto& self=*static_cast<SimulationScript*>(context);
-        if(point.phase==Phase::bank_created || point.phase==Phase::transmit_epoch) {
+        {
             std::lock_guard lock(self.mutex);
+            const auto index=static_cast<std::size_t>(point.phase);
+            self.latest[index]=point;++self.counts[index];
+            if(point.phase==Phase::input_invalidated && !self.first_interruption)
+                self.first_interruption=std::pair{self.latest,self.counts};
             if(point.phase==Phase::bank_created)self.banks.push_back(point);
-            else {self.epochs.push_back(point.epoch);self.transmit_seen=true;}
+            else if(point.phase==Phase::transmit_epoch) {self.epochs.push_back(point.epoch);self.transmit_seen=true;}
         }
         if(point.phase!=self.target || !self.transmit_seen || !self.armed.exchange(false))return;
         self.entered=true;
@@ -691,8 +699,17 @@ std::string media_clock_result_context(std::string_view mode,const live::Snapsho
         <<" [case="<<mode<<" origin="<<origin<<" tx_date="<<epoch<<" tx_epoch="<<std::uint64_t(epoch)
         <<" source_seconds="<<calculated.transmission_seconds<<" samples="<<calculated.samples_received
         <<" receivers="<<calculated.receiver_instances<<" admissions="<<calculated.receiver_admissions
+        <<" retirements="<<calculated.receiver_retirements<<" input_revision="<<completed.receiver_input_revision
+        <<" dsp_bytes="<<completed.dsp_buffered_bytes<<" behind="<<completed.receiver_behind
+        <<" backlog_seconds="<<completed.receiver_backlog_seconds
         <<" calculated_replay="<<calculated.simulation_replay<<" final_replay="<<completed.simulation_replay
         <<" signals="<<completed.signals.size()<<" received="<<completed.received.size()
+        <<" health={overruns:"<<completed.receiver_health.input_overruns
+        <<",dropped:"<<completed.receiver_health.dropped_samples
+        <<",interrupted:"<<completed.receiver_health.input_interrupted
+        <<",limited:"<<completed.receiver_health.search_limited<<",reset:"<<completed.receiver_health.receiver_reset<<'}'
+        <<" status="<<std::quoted(completed.status.substr(0,128))
+        <<" receiver_error="<<std::quoted(completed.receiver_error.substr(0,128))
         <<" error="<<std::quoted(completed.error.substr(0,128));
     for(std::size_t i=0;i<std::min<std::size_t>(4,completed.signals.size());++i) {
         const auto& signal=completed.signals[i];
@@ -701,6 +718,44 @@ std::string media_clock_result_context(std::string_view mode,const live::Snapsho
             <<std::quoted(signal.text.substr(0,64))<<",raw:"<<std::quoted(signal.raw_bits.substr(0,64))<<'}';
     }
     return out.str()+']';
+}
+std::string media_clock_checkpoint_context(SimulationScript& script) {
+    std::lock_guard lock(script.mutex);
+    std::ostringstream out;
+    const auto points=[&](std::string_view label,const auto& observations,const auto& counts) {
+        out<<" ["<<label;
+        for(const auto phase:{SimulationScript::Phase::before_read,SimulationScript::Phase::read_progress,
+                             SimulationScript::Phase::before_feed,SimulationScript::Phase::after_commit,
+                             SimulationScript::Phase::input_invalidated}) {
+            const auto index=static_cast<std::size_t>(phase);const auto& point=observations[index];
+            out<<" phase"<<index<<"={count:"<<counts[index]<<",N:"<<point.source
+                <<",B:"<<point.bank<<",revision:"<<point.revision<<'}';
+        }
+        out<<']';
+    };
+    points("latest-checkpoints",script.latest,script.counts);
+    if(script.first_interruption)points("first-interruption",script.first_interruption->first,script.first_interruption->second);
+    return out.str();
+}
+live::Snapshot wait_for_media_clock(live::Session& session,std::string_view mode,SimulationScript& script) {
+    try {
+        return wait_for_sampled(session,"default media clock transmission",[](const auto& snapshot) {
+            check(!snapshot.receiver_health.failed(),"healthy media clock reported lost input");
+            return snapshot.transmission_finished && snapshot.simulation_replay;
+        });
+    } catch(const std::exception& error) {
+        // snapshot() has released the Session mutex before script inspection.
+        // All records are bounded; capture the first actual invalidation even
+        // if the source has already rebuilt a bank before this failure poll.
+        const auto observed=session.snapshot();double epoch=0,origin=0;
+        {
+            std::lock_guard lock(script.mutex);
+            if(!script.epochs.empty())epoch=script.epochs.back();
+            if(!script.banks.empty())origin=script.banks.front().epoch;
+        }
+        throw Error(std::string(error.what())+media_clock_result_context(mode,observed,observed,epoch,origin)+
+            media_clock_checkpoint_context(script));
+    }
 }
 void simulation_media_clock_arithmetic() {
     using live::detail::simulation_media_epoch;
@@ -730,10 +785,7 @@ void simulation_media_clock_transmissions() {
         Message message;message.data=mode==1?Bytes{'h','i'}:Bytes(17,'x');
         const Bytes raw{0,0,1};
         if(mode==0)session.transmit_bits(raw);else session.transmit(message);
-        const auto calculated=wait_for_sampled(session,"default media clock transmission",[](const auto& s){
-            check(!s.receiver_health.failed(),"healthy media clock reported lost input");
-            return s.transmission_finished && s.simulation_replay;
-        });
+        const auto calculated=wait_for_media_clock(session,mode==0?"raw":mode==1?"short":"framed",script);
         double epoch,origin;
         {std::lock_guard lock(script.mutex);check(script.epochs.size()==mode+1,"default provider missed source epoch handoff");epoch=script.epochs.back();origin=script.banks.front().epoch;}
         auto options=value.transfer;options.timestamp=static_cast<std::uint64_t>(epoch);
@@ -843,10 +895,7 @@ void simulation_media_clock_clear_construction() {
     session.clear_received();
     check(session.snapshot().transmitting,"Clear cancelled deferred simulation preparation");
     script.released=true;
-    const auto calculated=wait_for_sampled(session,"media clock construction retry",[](const auto& s){
-        check(!s.receiver_health.failed(),"obsolete construction attempt relatch lost reception");
-        return s.transmission_finished && s.simulation_replay;
-    });
+    const auto calculated=wait_for_media_clock(session,"clear-raw-retry",script);
     replay_ms=3000;const auto completed=session.snapshot();
     std::lock_guard lock(script.mutex);
     check(script.epochs.size()==2 && script.banks.size()==2,"Clear did not retry source epoch construction on a fresh bank");
