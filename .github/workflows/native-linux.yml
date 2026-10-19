@@ -16,7 +16,7 @@ on:
       scope:
         description: 'Run one complete native scope without repeating the other shards'
         type: choice
-        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, fft-normalization-diagnostic]
+        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, fft-normalization-diagnostic]
         default: core
       stop_group:
         description: Temporary matched stop experiment group; diagnostic only
@@ -41,7 +41,7 @@ on:
         type: string
         default: Release
       scope:
-        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, or fft-normalization-diagnostic'
+        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, or fft-normalization-diagnostic'
         type: string
         required: true
       stop_group:
@@ -95,7 +95,7 @@ jobs:
       CXX: g++-11
       CI_SCOPE: ${{ inputs.scope }}
       CI_STOP_GROUP: ${{ inputs.stop_group }}
-      DATAPUMP_SANITIZERS: ${{ inputs.scope == 'gui-stop-differential' && (inputs.stop_group == 'eu-o1-san-off' || inputs.stop_group == 'eu-o0-san-off' || inputs.stop_group == 'eu-focus-o1-san-off' || inputs.stop_group == 'eu-focus-o0-san-off' || inputs.stop_group == 'eu-kernel-o1-san-off') && 'OFF' || ((inputs.build_type == 'Debug' || (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic'))) && 'ON' || 'OFF') }}
+      DATAPUMP_SANITIZERS: ${{ inputs.scope == 'gui-stop-differential' && (inputs.stop_group == 'eu-o1-san-off' || inputs.stop_group == 'eu-o0-san-off' || inputs.stop_group == 'eu-focus-o1-san-off' || inputs.stop_group == 'eu-focus-o0-san-off' || inputs.stop_group == 'eu-kernel-o1-san-off') && 'OFF' || ((inputs.build_type == 'Debug' || (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic'))) && 'ON' || 'OFF') }}
       SANITIZER_REALTIME: ${{ inputs.sanitizer_realtime }}
     steps:
       - name: Restrict the temporary graceful-stop diagnostic
@@ -733,9 +733,9 @@ jobs:
       - name: Configure native application and selected test scope
         run: >-
           cmake -S "${{ inputs.scope == 'simulation-clock-chain-score-diagnostic' && 'build/raw-chain-source' || '.' }}" -B build -G Ninja -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11
-          -DCMAKE_BUILD_TYPE=${{ (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic')) && 'Debug' || inputs.build_type }}
+          -DCMAKE_BUILD_TYPE=${{ (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic')) && 'Debug' || inputs.build_type }}
           -DDATAPUMP_SANITIZERS="$DATAPUMP_SANITIZERS"
-          -DDATAPUMP_PORTABLE=${{ inputs.scope != 'simulation-clock-trace-diagnostic' && inputs.scope != 'simulation-clock-geometry-diagnostic' && inputs.scope != 'simulation-clock-raw-component-diagnostic' && inputs.scope != 'simulation-clock-chain-score-diagnostic' && inputs.build_type == 'Release' && 'ON' || 'OFF' }}
+          -DDATAPUMP_PORTABLE=${{ inputs.scope != 'simulation-clock-trace-diagnostic' && inputs.scope != 'simulation-clock-geometry-diagnostic' && inputs.scope != 'simulation-clock-raw-component-diagnostic' && inputs.scope != 'simulation-clock-chain-score-diagnostic' && inputs.scope != 'continuation-carrier-diagnostic' && inputs.build_type == 'Release' && 'ON' || 'OFF' }}
           -DBUILD_TESTING=${{ inputs.scope == 'package' && 'OFF' || 'ON' }}
           -DDATAPUMP_BUILD_TUI=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }}
           -DDATAPUMP_BUILD_FB=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }}
@@ -747,6 +747,9 @@ jobs:
       - name: Prepare simulation media clock diagnostic evidence
         if: inputs.scope == 'simulation-clock-diagnostic'
         run: mkdir -p build/simulation-clock-diagnostics
+      - name: Prepare continuation carrier diagnostic evidence
+        if: inputs.scope == 'continuation-carrier-diagnostic'
+        run: mkdir -p build/receiver-fixtures build/simulation-clock-diagnostics
       - name: Build this shard's prerequisites
         id: build_prerequisites
         if: inputs.scope != 'sched-hop-radius-control'
@@ -761,6 +764,7 @@ jobs:
             gui-stop-diagnostic) targets=(test_gui_controller) ;;
             gui-stop-differential) targets=(test_gui_controller) ;;
             simulation-clock-diagnostic|simulation-clock-trace-diagnostic|simulation-clock-geometry-diagnostic|simulation-clock-raw-component-diagnostic|simulation-clock-chain-score-diagnostic) targets=(test_live) ;;
+            continuation-carrier-diagnostic) targets=(test_pattern_receiver test_noise_receive test_transmit_cover test_weak_signal test_live) ;;
             fft-diagnostic) targets=(test_search_fft test_pattern_fft_batch test_search_parallel test_pattern_receiver test_pattern_startup_guide) ;;
             eme-probability-diagnostic) targets=(test_frequency_axis_probability) ;;
             planner-diagnostic) targets=(test_gui_link_planner test_link_planner_curves) ;;
@@ -888,9 +892,52 @@ jobs:
           (report/'results.json').write_text(json.dumps(results,indent=2)+'\n')
           PY
       - name: Run selected receiver, clock and scheduled-hop tests
-        if: inputs.scope == 'receiver' || inputs.scope == 'startup-guide' || inputs.scope == 'sched-hop-diagnostic'
+        if: inputs.scope == 'receiver' || inputs.scope == 'startup-guide' || inputs.scope == 'sched-hop-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic'
         run: |
           mkdir -p build/receiver-fixtures
+          if [ "$CI_SCOPE" = continuation-carrier-diagnostic ]; then
+            selector='^(pattern_receiver|noise_receive|transmit_cover|weak_signal)$'
+            ctest --test-dir build --show-only=json-v1 -R "$selector" > build/receiver-fixtures/inventory.json
+            python3 - "$PWD/build/receiver-fixtures/inventory.json" <<'PY_INVENTORY'
+          import json, pathlib, sys
+          tests = json.loads(pathlib.Path(sys.argv[1]).read_text()).get('tests', [])
+          expected = {
+              'pattern_receiver': 'test_pattern_receiver',
+              'noise_receive': 'test_noise_receive',
+              'transmit_cover': 'test_transmit_cover',
+              'weak_signal': 'test_weak_signal',
+          }
+          assert len(tests) == len(expected), [test.get('name') for test in tests]
+          assert {test.get('name') for test in tests} == set(expected)
+          for test in tests:
+              command = test.get('command', [])
+              assert pathlib.Path(command[0]).name == expected[test['name']], (test['name'], command)
+              assert len(command) == 1, (test['name'], command)
+          PY_INVENTORY
+            python3 -B - <<'PY_REPORT'
+          from pathlib import Path
+          import hashlib, json, subprocess
+          report = Path('build/receiver-fixtures')
+          digest = lambda path: hashlib.sha256(Path(path).read_bytes()).hexdigest()
+          report.joinpath('scope.json').write_text(json.dumps({
+              'source_commit': subprocess.check_output(['git', '-c', 'safe.directory=' + str(Path.cwd()), 'rev-parse', 'HEAD'], text=True).strip(),
+              'scope': 'continuation-carrier-diagnostic',
+              'build_type': 'Debug', 'sanitizers': 'ON', 'portable': 'OFF',
+              'tests': ['pattern_receiver', 'noise_receive', 'transmit_cover', 'weak_signal'],
+              'test_targets': ['test_pattern_receiver', 'test_noise_receive', 'test_transmit_cover', 'test_weak_signal', 'test_live'],
+              'test_invocation': 'CTest registered no-argument binaries',
+              'source_files_sha256': {name: digest(name) for name in (
+                  'src/pattern_receiver.cpp', 'src/channel.cpp', 'tests/test_transmit_cover.cpp',
+                  'tests/test_pattern_receiver.cpp', 'tests/test_noise_receive.cpp', 'tests/test_weak_signal.cpp',
+                  'CMakeLists.txt', '.github/workflows/native-linux.yml')},
+              'configuration_sha256': digest('build/CMakeCache.txt'),
+              'binaries_sha256': {name: digest('build/' + name) for name in (
+                  'test_pattern_receiver', 'test_noise_receive', 'test_transmit_cover', 'test_weak_signal', 'test_live')},
+          }, indent=2) + '\n')
+          PY_REPORT
+            ctest --test-dir build --output-on-failure --no-tests=error --parallel 2 --timeout 3600 --output-junit "$PWD/build/receiver-fixtures/results.xml" -R "$selector"
+            exit $?
+          fi
           selector='^(pattern_correlator|pattern_drift|receiver_differential|clock_sync|pattern_startup_guide)$'
           expected='pattern_correlator,pattern_drift,receiver_differential,clock_sync,pattern_startup_guide'
           if [ "$CI_SCOPE" = startup-guide ]; then
@@ -1185,7 +1232,7 @@ jobs:
           fi
           python3 tools/run-ci-tests.py --build-dir build --scope "$CI_SCOPE" --jobs "$jobs" --timeout "$test_timeout" --report build/ci-test-report.json "${options[@]}"
       - name: Run the focused simulation media clock diagnostic
-        if: inputs.scope == 'simulation-clock-diagnostic'
+        if: (inputs.scope == 'simulation-clock-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic') && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 15
         run: |
           python3 -B - <<'PY_CLOCK_DIAGNOSTIC'
@@ -1245,7 +1292,7 @@ jobs:
           raise SystemExit(exit_code)
           PY_CLOCK_DIAGNOSTIC
       - name: Mark simulation clock scope as diagnostic only
-        if: inputs.scope == 'simulation-clock-diagnostic'
+        if: inputs.scope == 'simulation-clock-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic'
         run: echo 'This focused simulation media clock diagnostic does not replace the complete Live test scope.' >> "$GITHUB_STEP_SUMMARY"
       - name: Run default and explicitly traced simulation clock diagnostics
         if: (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic'))

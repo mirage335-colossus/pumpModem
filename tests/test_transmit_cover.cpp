@@ -3,13 +3,19 @@
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "datapump/fhss_schedule.hpp"
+#include "datapump/channel.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <iomanip>
 #include <iostream>
 #include <numbers>
 #include <map>
 #include <random>
+#include <tuple>
+#include <sstream>
+#include <limits>
+#include <openssl/evp.h>
 #include "datapump/pattern_receiver.hpp"
 #include "../src/pattern_correlator_batch.hpp"
 
@@ -1083,6 +1089,176 @@ void diagnostic_cover_compatibility() {
     for(const auto& [index,value]:frozen)
         check(std::abs(pcm.at(index)-value)<1e-10,"DSSS-only diagnostic cover changed");
 }
+// Full finite replay of the media-clock raw-001 regression. Keep transmitter
+// settling, channel startup/noise, suppression and sampled absence together:
+// bare payload replay drops the private-cover chains this test is meant to
+// reject. The 60 source targets mirror Live replay frames; receiver feeds reuse
+// those exact boundaries after trimming the second receiver's input origin.
+void continuation_cover_regression() {
+    constexpr double origin=1792403097.8202908;
+    constexpr std::uint64_t tx_epoch=1792403097,idle=400;
+    constexpr std::size_t replay_frames=60,plot_size=2048,workspace=16*1024*1024;
+    struct Fixture {
+        std::vector<float> pcm;
+        std::vector<std::pair<std::size_t,std::size_t>> blocks;
+        std::vector<std::size_t> source_chunk_sizes;
+        std::uint64_t valid_end=0;
+    };
+    transfer::Options options;options.timestamp=tx_epoch;options.key.emplace(Bytes(32,0x61));
+    options.content_limit=1024*1024;options.search_seconds=1;options.fec=FecMode::rs20;
+    auto& modem_config=options.modem;
+    modem_config.sample_rate=8000;modem_config.carrier_hz=1500;modem_config.bandwidth_hz=1000;
+    modem_config.spreading_factor=16;modem_config.scramble=true;modem_config.dsss=false;
+    auto config=transfer::seeded_config(options,tx_epoch);
+    modem::ChannelConfig channel_config;channel_config.seed=1;channel_config.snr_db=30;
+    channel_config.clock_error_ppm=0;channel_config.phase_noise_degrees_per_sqrt_second=0;
+    modem::SampledSimulationChannel channel(modem_config,channel_config);
+    auto tx=transfer::binary_transmitter(Bytes{0,0,1},options);
+    Fixture fixture;fixture.valid_end=tx->source_valid_payload_end();
+    fixture.pcm.resize(idle);channel.read_noise(fixture.pcm);fixture.blocks.emplace_back(0,idle);
+    channel.begin_burst();
+    const auto source_samples=tx->total_samples();
+    check(source_samples==41409,"continuation fixture source geometry changed");
+    std::array<float,plot_size> scratch{};
+    const auto target=[&](std::size_t frame) {
+        const auto denominator=replay_frames-1;
+        return (source_samples/denominator)*frame+
+            (source_samples%denominator*frame+denominator-1)/denominator;
+    };
+    std::size_t frame=1;bool tail=false;
+    std::uint64_t tail_remaining=modem::pattern_absence_capture_samples(config)+
+        config.sample_rate+2*modem::pattern_pulse_padding_samples(config);
+    while(true) {
+        std::size_t count=0;bool source_chunk=false;
+        if(!tail) {
+            const auto next=frame<replay_frames?target(frame):source_samples;
+            const auto left=next>channel.transmitted_samples()?next-channel.transmitted_samples():1;
+            count=channel.read(*tx,std::span(scratch).first(std::min<std::uint64_t>(scratch.size(),left)));
+            source_chunk=count!=0;
+            if(!count)tail=true;
+        }
+        if(tail&&tail_remaining) {
+            count=static_cast<std::size_t>(std::min<std::uint64_t>(scratch.size(),tail_remaining));
+            channel.read_noise(std::span(scratch).first(count));tail_remaining-=count;
+        }
+        if(count) {
+            check(fixture.pcm.size()+count<=2*1024*1024,"continuation fixture exceeded its finite input bound");
+            if(source_chunk)fixture.source_chunk_sizes.push_back(count);
+            fixture.blocks.emplace_back(fixture.pcm.size(),count);
+            fixture.pcm.insert(fixture.pcm.end(),scratch.begin(),scratch.begin()+count);
+        }
+        if(tail&&!tail_remaining)break;
+        if(!tail&&frame<replay_frames&&channel.transmitted_samples()>=target(frame))++frame;
+    }
+    check(tail&&fixture.pcm.size()==99379&&fixture.blocks.size()==90,
+          "continuation fixture did not finish within its bounded full-waveform storage");
+    check(fixture.source_chunk_sizes.size()==61,
+          "continuation fixture changed its 60-target source partition");
+
+    static_assert(sizeof(float)==4 && std::numeric_limits<float>::is_iec559);
+    std::array<unsigned char,EVP_MAX_MD_SIZE> digest{};unsigned digest_size=0;
+    check(EVP_Digest(fixture.pcm.data(),fixture.pcm.size()*sizeof(float),digest.data(),&digest_size,
+                    EVP_sha256(),nullptr)==1 && digest_size==32,"continuation PCM digest failed");
+    std::ostringstream pcm_digest;pcm_digest<<std::hex<<std::setfill('0');
+    for(unsigned i=0;i<digest_size;++i)pcm_digest<<std::setw(2)<<unsigned(digest[i]);
+    // PCM hash is evidence for matched-toolchain readback, not a universal
+    // cross-platform gate for std::normal_distribution.
+    std::cout<<"continuation-cover fixture origin="<<std::setprecision(17)<<origin
+             <<" tx_epoch="<<tx_epoch<<" source_bits=001 sample_rate="<<config.sample_rate
+             <<" bandwidth_hz="<<config.bandwidth_hz<<" carrier_hz="<<config.carrier_hz
+             <<" spreading_factor="<<config.spreading_factor<<" replay_frames="<<replay_frames
+             <<" source_samples="<<source_samples<<" pcm_samples="<<fixture.pcm.size()
+             <<" source_valid_end="<<fixture.valid_end<<" block_count="<<fixture.blocks.size()
+             <<" key_material=32x0x61 scramble=1 dsss=0"
+             <<" source_chunk_samples=";
+    for(std::size_t i=0;i<fixture.source_chunk_sizes.size();++i)
+        std::cout<<(i?",":"")<<fixture.source_chunk_sizes[i];
+    std::cout<<" channel_seed=1 channel_snr_db=30 clock_error_ppm="<<channel_config.clock_error_ppm
+             <<" frequency_offset_hz="<<channel_config.frequency_offset_hz
+             <<" phase_noise="<<channel_config.phase_noise_degrees_per_sqrt_second
+             <<" pcm_sha256="<<pcm_digest.str()
+             <<" startup_offset_samples="<<channel.startup_offset_samples()
+             <<" partition=live-60-frame-targets-plus-2048-sample-tail\n";
+
+    for(const auto [epoch,input_origin,offset]:{
+            std::tuple<std::uint64_t,std::uint64_t,double>{tx_epoch,0,1.2117091960906983},
+            std::tuple<std::uint64_t,std::uint64_t,double>{tx_epoch+3,10009,2.960584098815918}}) {
+        auto rx_options=options;rx_options.timestamp=epoch;
+        const auto rx_config=transfer::seeded_config(rx_options,epoch);
+        modem::PatternSearch search;search.initial_stream_symbols=4;search.search_stream_phases=true;
+        search.receiver_bank_count=8;search.expand_clock_search=true;
+        search.prefer_streamed_templates=true;
+        search.start_offset_seconds=offset;search.start_uncertainty_seconds=2;
+        search.receiver_strategy_workspace_bytes=2788821;search.input_sample_origin=input_origin;
+        search.bit_limit=transfer::pattern_bit_limit(rx_options.content_limit);
+        modem::StreamingReceiver receiver(rx_config,workspace,search);
+        using Stream=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>;
+        std::map<Stream,Bytes> streams;
+        std::size_t events=0,accepted_bits=0;bool complete=false;
+        std::uint64_t consumed=0;
+        const auto harvest=[&] {
+            receiver.process_pending();
+            for(const auto& event:receiver.take_pattern_bursts()) {
+                ++events;check(events<=4096,"continuation fixture detector output exceeded its bound");
+                if(epoch==tx_epoch)check(!event.missing_slots,
+                      "correct-date continuation stream contained missing slots");
+                const Stream identity{event.stream_first_sample,event.stream_first_symbol,event.stream_phase_samples};
+                auto& stream=streams[identity];
+                check(event.first_stream_symbol==event.stream_first_symbol+stream.size(),
+                      "continuation fixture changed accepted bit positions");
+                auto plain=event.bits;
+                const bool observed=std::none_of(plain.begin(),plain.end(),[](auto bit) {
+                    return bit==modem::missing_pattern_bit;
+                });
+                if(observed) {
+                    auto decode=rx_options;decode.modem.stream_phase_samples=event.stream_phase_samples;
+                    transfer::xor_binary_bits(plain,decode,event.first_stream_symbol);
+                }
+                stream.insert(stream.end(),plain.begin(),plain.end());
+                accepted_bits+=plain.size();
+                if(epoch==tx_epoch) {
+                    const Bytes expected{0,0,1};
+                    check(stream.size()<=expected.size()&&
+                          std::equal(stream.begin(),stream.end(),expected.begin()),
+                          "correct-date receiver published a non-prefix or extra raw bit");
+                }
+                if(event.complete) {
+                    check(consumed>=event.end_sample+modem::pattern_absence_samples(rx_config),
+                          "continuation fixture completion preceded fully scored physical absence");
+                    complete=true;
+                }
+            }
+        };
+        for(const auto [begin,count]:fixture.blocks) {
+            if(begin+count<=input_origin)continue;
+            const auto first=std::max<std::size_t>(begin,input_origin);
+            receiver.push(std::span(fixture.pcm).subspan(first,begin+count-first));
+            consumed=begin+count-input_origin;
+            harvest();
+        }
+        check(!receiver.local_clock_fallback() && !receiver.candidate_limited() &&
+              receiver.working_bytes()<=workspace,"continuation fixture lost complete bounded search coverage");
+        const bool completed_from_samples=complete;
+        receiver.finish();harvest();
+        check(completed_from_samples||!complete,
+              "continuation fixture EOF manufactured physical completion");
+        const bool true_date=epoch==tx_epoch;
+        if(true_date) {
+            check(streams.size()==1&&accepted_bits==3&&streams.begin()->second==Bytes({0,0,1})&&complete,
+                  "correct media-clock date failed exact raw-001 progress and physical completion");
+        } else {
+            check(accepted_bits==0,
+                  "wrong media-clock date accepted a private-cover continuation stream");
+        }
+        std::cout<<"continuation-cover receiver epoch="<<epoch<<" input_origin="<<input_origin
+                 <<" start_offset="<<std::setprecision(17)<<offset<<" events="<<events
+                 <<" streams="<<streams.size()<<" accepted_bits="<<accepted_bits
+                 <<" physical_end="<<complete<<" radius=2 initial_symbols=4 search_stream_phases=1"
+                 <<" expand_clock_search=1 prefer_streamed_templates=1 receiver_bank_count=8"
+                 <<" receiver_workspace="<<workspace<<" strategy_workspace=2788821"
+                 <<" bit_limit="<<search.bit_limit<<" chunk_bits="<<search.chunk_bits<<'\n';
+    }
+}
 }
 int main(int argc,char** argv) {
     try {if(argc==2&&std::string_view(argv[1])=="--xrun") {finish_paths();xrun_erasure_evidence();forward_repair_evidence();confirmed_forward_repair_evidence();return 0;}
@@ -1093,7 +1269,8 @@ int main(int argc,char** argv) {
         if(argc==2&&std::string_view(argv[1])=="--deferred") {deferred_calendar();deferred_calendar(10);return 0;}
         if(argc==2&&std::string_view(argv[1])=="--fhss-echo-reference") {encrypted_echoes(true,4,false);return 0;}
         if(argc==2&&std::string_view(argv[1])=="--fhss-echo") {encrypted_echoes(true);return 0;}
+        if(argc==2&&std::string_view(argv[1])=="--continuation-cover") {continuation_cover_regression();return 0;}
         smooth_envelope();qualified_cipher_phase_cells();matched_gap_channel_stress(true);matched_gap_channel_stress();omitted_pulse_evidence();mandatory_gate_rejection();matched_hop_gaps(1);matched_hop_gaps(10);matched_hop_gaps(10,false,true);matched_hop_gaps(10,false,true,true);matched_hop_gaps(1,true);matched_hop_gaps(10,true);matched_hop_gaps(100,true);matched_hop_gaps(1000,true);
-        deferred_calendar();deferred_calendar(10);hop_arrival_timing();hop_power_boundaries();full_outer_cover();encrypted_echoes();encrypted_echoes(true,1);finish_paths();xrun_erasure_evidence();forward_repair_evidence();confirmed_forward_repair_evidence();cancelled_partial_chip_lattice();finite_tuning();production_boundaries();diagnostic_cover_compatibility();std::cout<<"full virtual cover, shared boundaries and finish passed\n";return 0;}
+        deferred_calendar();deferred_calendar(10);hop_arrival_timing();hop_power_boundaries();full_outer_cover();continuation_cover_regression();encrypted_echoes();encrypted_echoes(true,1);finish_paths();xrun_erasure_evidence();forward_repair_evidence();confirmed_forward_repair_evidence();cancelled_partial_chip_lattice();finite_tuning();production_boundaries();diagnostic_cover_compatibility();std::cout<<"full virtual cover, shared boundaries and finish passed\n";return 0;}
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

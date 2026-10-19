@@ -1052,14 +1052,13 @@ struct PatternReceiver::Impl {
             std::log(2.*static_cast<double>(templates.size()*search.initial_stream_symbols));
     }
     double continuation_penalty(std::uint64_t radius=2)const {
-        // Every retained timing refinement compares both independent bits.
-        // Calendar gaps may need more than the ordinary five starts; charge
-        // those alternatives rather than retaining the former five-bin bound.
-        if(radius==2)return std::log((packed_calendar || (search.expand_clock_search && templates.size()>5) || !search.hypotheses.empty())?
-            10.*static_cast<double>(templates.size()):10.);
+        // Continuation can select either bit at each timing and carrier.
+        // Other carriers reuse a timing chosen from PCM, so charge the full
+        // timing/carrier envelope rather than only the executed fits. This
+        // retains the reference score model, not a structured-cover guarantee.
+        if(radius==2)return std::log(10.*static_cast<double>(templates.size()));
         const auto timing=2.L*(2.L*radius+1);
-        return static_cast<double>(std::log((packed_calendar || (search.expand_clock_search && templates.size()>5) || !search.hypotheses.empty())?
-            timing*templates.size():timing));
+        return static_cast<double>(std::log(timing*templates.size()));
     }
     std::uint64_t track_radius(const Track& track) const {
         if(!packed_calendar && !burst_plan)return 2;
