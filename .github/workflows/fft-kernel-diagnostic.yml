@@ -1,0 +1,36 @@
+name: TEMP matched FFT kernel diagnostic
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  kernel:
+    name: GNU11 same-host fixed-work old/current FFT, SAN on/off
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Install only compiler and diagnostic tools
+        run: apt-get update && apt-get install -y --no-install-recommends ca-certificates git python3 g++-11 binutils libssl-dev
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Fetch exact immutable kernel sources
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git fetch --no-tags origin bbb47e020d9c6ec3e85fca8cf58d7062b776d9ff 789fb91e351f9c2ecd3ef72b9881f74d7a4796fd
+      - name: Compare fixed work and retain compiler assembly
+        run: python3 -B tools/fft-kernel-differential.py --root "$GITHUB_WORKSPACE" --output "$GITHUB_WORKSPACE/fft-kernel-results" --compiler g++-11 --iterations 4096
+      - name: Preserve all evidence including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fft-kernel-differential-${{ github.run_id }}-${{ github.run_attempt }}
+          path: fft-kernel-results
+          if-no-files-found: error
+          retention-days: 7
