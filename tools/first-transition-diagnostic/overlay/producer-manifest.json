@@ -1,0 +1,40 @@
+{
+  "base_commit": "e25748f07be9ec96e8e7f859228f72289ea675ec",
+  "marker": "DATAPUMP_FIRST_TRANSITION_CENSUS=1",
+  "sources": [
+    {
+      "path": "src/live.cpp",
+      "before_sha256": "61af54534d8ad77fd3c5ec95273f15fce621a35151ea29c91c3e473437a2f291",
+      "after_sha256": "e0616f83ab96b625b043d99cbc3fce85f20a03bcb6bc4c15eaec09b42189cf76"
+    },
+    {
+      "path": "src/pattern_receiver.cpp",
+      "before_sha256": "ad696ec937f0279a10619a69781c83596ab980d7520e8fe2680071cb4d4b4747",
+      "after_sha256": "494870820b2bb78cb9e597616dec47d461d94646164c275fdd607680e00f4b35"
+    },
+    {
+      "path": "src/audio_trace.hpp",
+      "before_sha256": "2e476953b87dbb555e5734357a7de68873709070a97986b6b48fa82397bc52d9",
+      "after_sha256": "47988c02eb964f6ee3ae0e7d80bbc5391efac9b7ec9666eed672dffd9123b262"
+    }
+  ],
+  "read_inputs": {
+    "include/datapump/pattern_receiver.hpp": "20cbfe93c7f6af60f9e0a2ba909372147633c76dbb4348b092edcbb15200fc3e",
+    "include/datapump/streaming_modem.hpp": "ed4b02208926e955813028d4d6e985240b1af106a571dcdd8422a78e48f70210",
+    "src/live_receiver_layout.hpp": "46fc13c289e222438a093ae0dd9a037271c7100022c83ff6fc33a655d41c28ea",
+    "src/streaming_modem.cpp": "c32a02b2a48466effa3f6a37b48c0835b6e8b969fe48212f1dc019959fb5b6ce",
+    "src/receiver_strategy.cpp": "1f38444ae72ab2fa1d3e4635a0e02fb85029671f0d66aabbde629d3d85da909e",
+    "tests/test_live.cpp": "4c38f29eff44f89f39170a2408b7d967f30194c32914302cd3b6ac4a88ee91b7",
+    "CMakeLists.txt": "f3973f79ef40c0521d6e1bdf58bac8a4e5de87797c7a3d4333264f202e274995"
+  },
+  "runtime_executed": false,
+  "support_sha256": "3ece81479f7cd539c4cf64f0be60913caad5b3f8a02d976d85ef8877b14d351c",
+  "prepare_sha256": "37021c86fbad4dee0b62ba345fe94199d85674dfe3a7f662812cde1a007ef0da",
+  "all_output_sha256": {
+    "src/live.cpp": "e0616f83ab96b625b043d99cbc3fce85f20a03bcb6bc4c15eaec09b42189cf76",
+    "src/pattern_receiver.cpp": "494870820b2bb78cb9e597616dec47d461d94646164c275fdd607680e00f4b35",
+    "src/audio_trace.hpp": "47988c02eb964f6ee3ae0e7d80bbc5391efac9b7ec9666eed672dffd9123b262",
+    "src/first_transition_probe.hpp": "3ece81479f7cd539c4cf64f0be60913caad5b3f8a02d976d85ef8877b14d351c"
+  },
+  "input_archive_sha256": "a0cd8f7a28d0177eec416a269f04e6da3c6b8582e0884788f6b16c86787af32b"
+}

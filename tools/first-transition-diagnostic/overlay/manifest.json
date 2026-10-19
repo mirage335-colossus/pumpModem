@@ -1,0 +1,25 @@
+{
+  "baseline_source_commit": "e25748f07be9ec96e8e7f859228f72289ea675ec",
+  "files": {
+    "src/live.cpp": {
+      "before_sha256": "61af54534d8ad77fd3c5ec95273f15fce621a35151ea29c91c3e473437a2f291",
+      "after_sha256": "e0616f83ab96b625b043d99cbc3fce85f20a03bcb6bc4c15eaec09b42189cf76",
+      "payloadpath": "payload/src/live.cpp"
+    },
+    "src/pattern_receiver.cpp": {
+      "before_sha256": "ad696ec937f0279a10619a69781c83596ab980d7520e8fe2680071cb4d4b4747",
+      "after_sha256": "494870820b2bb78cb9e597616dec47d461d94646164c275fdd607680e00f4b35",
+      "payloadpath": "payload/src/pattern_receiver.cpp"
+    },
+    "src/audio_trace.hpp": {
+      "before_sha256": "2e476953b87dbb555e5734357a7de68873709070a97986b6b48fa82397bc52d9",
+      "after_sha256": "47988c02eb964f6ee3ae0e7d80bbc5391efac9b7ec9666eed672dffd9123b262",
+      "payloadpath": "payload/src/audio_trace.hpp"
+    },
+    "src/first_transition_probe.hpp": {
+      "before_sha256": null,
+      "after_sha256": "3ece81479f7cd539c4cf64f0be60913caad5b3f8a02d976d85ef8877b14d351c",
+      "payloadpath": "payload/src/first_transition_probe.hpp"
+    }
+  }
+}
