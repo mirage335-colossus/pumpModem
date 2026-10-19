@@ -16,7 +16,7 @@ on:
       scope:
         description: 'Run one complete native scope without repeating the other shards'
         type: choice
-        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, fft-normalization-diagnostic]
+        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, simulation-owner-census-diagnostic, fft-normalization-diagnostic]
         default: core
       stop_group:
         description: Temporary matched stop experiment group; diagnostic only
@@ -41,7 +41,7 @@ on:
         type: string
         default: Release
       scope:
-        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, or fft-normalization-diagnostic'
+        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, simulation-owner-census-diagnostic, or fft-normalization-diagnostic'
         type: string
         required: true
       stop_group:
@@ -95,7 +95,7 @@ jobs:
       CXX: g++-11
       CI_SCOPE: ${{ inputs.scope }}
       CI_STOP_GROUP: ${{ inputs.stop_group }}
-      DATAPUMP_SANITIZERS: ${{ inputs.scope == 'gui-stop-differential' && (inputs.stop_group == 'eu-o1-san-off' || inputs.stop_group == 'eu-o0-san-off' || inputs.stop_group == 'eu-focus-o1-san-off' || inputs.stop_group == 'eu-focus-o0-san-off' || inputs.stop_group == 'eu-kernel-o1-san-off') && 'OFF' || ((inputs.build_type == 'Debug' || (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic'))) && 'ON' || 'OFF') }}
+      DATAPUMP_SANITIZERS: ${{ inputs.scope == 'gui-stop-differential' && (inputs.stop_group == 'eu-o1-san-off' || inputs.stop_group == 'eu-o0-san-off' || inputs.stop_group == 'eu-focus-o1-san-off' || inputs.stop_group == 'eu-focus-o0-san-off' || inputs.stop_group == 'eu-kernel-o1-san-off') && 'OFF' || ((inputs.build_type == 'Debug' || (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic' || inputs.scope == 'simulation-owner-census-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic'))) && 'ON' || 'OFF') }}
       SANITIZER_REALTIME: ${{ inputs.sanitizer_realtime }}
     steps:
       - name: Restrict the temporary graceful-stop diagnostic
@@ -730,12 +730,78 @@ jobs:
               "classification": "private reversible diagnostic overlay; not qualification"
           }, indent=2) + "\n")
           PY_RAW_CHAIN_PREPARE
+      - name: Prepare isolated first-owner census source
+        if: inputs.scope == 'simulation-owner-census-diagnostic'
+        run: |
+          python3 -B - <<'PY_OWNER_CENSUS_PREPARE'
+          from pathlib import Path
+          import hashlib, json, shutil, subprocess, tarfile
+
+          root = Path.cwd().resolve()
+          source = root / "build/owner-census-source"
+          source.mkdir(parents=True, exist_ok=False)
+          archive = root / "build/owner-census-source.tar"
+          git = ["git", "-c", "safe.directory=" + str(root)]
+          with archive.open("xb") as output:
+              subprocess.run(git + ["archive", "HEAD"], cwd=root, stdout=output, check=True)
+          with tarfile.open(archive) as captured:
+              for member in captured.getmembers():
+                  path = Path(member.name)
+                  if path.is_absolute() or ".." in path.parts:
+                      raise ValueError("unsafe isolated source archive member")
+                  if member.issym() or member.islnk():
+                      target = (source / path.parent / member.linkname).resolve()
+                      if not target.is_relative_to(source):
+                          raise ValueError("isolated source archive link escapes source")
+              captured.extractall(source)
+
+          evidence = root / "build/simulation-owner-census-diagnostics/overlay-evidence"
+          evidence.parent.mkdir(parents=True, exist_ok=False)
+          subprocess.run(["python3", "-B", str(root / "tools/owner-census-diagnostic/prepare.py"),
+                          "--source-root", str(source), "--output-dir", str(evidence)], check=True)
+          manifest = json.loads((evidence / "manifest.json").read_text())
+          expected_tool = "715bac90cbb5a2ec5e6291a9b6623f651fab17662dbddbf553d77495df900c48"
+          expected_header = "079a2a8f5a19774c560f194202975991bf75ca4c5a052bf9ab68bbf6ead7a10a"
+          assert manifest["schema"] == 1 and manifest["status"] == "private_preparation_only"
+          assert manifest["base_commit"] == "a9b2d95a5fca8f7f007d84a9269cac3863da65c3"
+          assert manifest["tool_sha256"] == expected_tool
+          assert manifest["support_sha256"] == expected_header
+          assert hashlib.sha256((root / "tools/owner-census-diagnostic/prepare.py").read_bytes()).hexdigest() == expected_tool
+          assert hashlib.sha256((root / "tools/owner-census-diagnostic/owner_census_probe.hpp").read_bytes()).hexdigest() == expected_header
+          closure = manifest["source_closure"]
+          assert len(closure) == 7
+          for name, digest in closure.items():
+              assert hashlib.sha256((source / name).read_bytes()).hexdigest() == digest, name
+          for key, filename, reverse in (("live", "live.cpp", "live.reversed.cpp"),
+                                         ("pattern_receiver", "pattern_receiver.cpp", "pattern_receiver.reversed.cpp")):
+              item = manifest["sources"][key]
+              assert hashlib.sha256((evidence / filename).read_bytes()).hexdigest() == item["after_sha256"]
+              assert hashlib.sha256((evidence / reverse).read_bytes()).hexdigest() == item["reverse_sha256"]
+              assert item["before_sha256"] == closure["src/" + filename]
+              assert item["reverse_sha256"] == item["before_sha256"]
+          header = evidence / "owner_census_probe.hpp"
+          assert hashlib.sha256(header.read_bytes()).hexdigest() == expected_header
+          shutil.copyfile(evidence / "live.cpp", source / "src/live.cpp")
+          shutil.copyfile(evidence / "pattern_receiver.cpp", source / "src/pattern_receiver.cpp")
+          shutil.copyfile(header, source / "src/owner_census_probe.hpp")
+          compiled_sources = {name: hashlib.sha256((source / name).read_bytes()).hexdigest()
+                              for name in ("src/live.cpp", "src/pattern_receiver.cpp", "src/owner_census_probe.hpp")}
+          archive_commit = subprocess.check_output(git + ["rev-parse", "HEAD"], cwd=root, text=True).strip()
+          (evidence / "source-archive.json").write_text(json.dumps({
+              "launcher_source_commit": archive_commit,
+              "application_source_commit": manifest["base_commit"],
+              "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+              "compiled_source_directory": str(source),
+              "compiled_overlay_sha256": compiled_sources,
+              "classification": "private reversible diagnostic overlay; not qualification"
+          }, indent=2) + "\n")
+          PY_OWNER_CENSUS_PREPARE
       - name: Configure native application and selected test scope
         run: >-
-          cmake -S "${{ inputs.scope == 'simulation-clock-chain-score-diagnostic' && 'build/raw-chain-source' || '.' }}" -B build -G Ninja -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11
-          -DCMAKE_BUILD_TYPE=${{ (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic')) && 'Debug' || inputs.build_type }}
+          cmake -S "${{ inputs.scope == 'simulation-clock-chain-score-diagnostic' && 'build/raw-chain-source' || (inputs.scope == 'simulation-owner-census-diagnostic' && 'build/owner-census-source' || '.') }}" -B build -G Ninja -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11
+          -DCMAKE_BUILD_TYPE=${{ (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic' || inputs.scope == 'simulation-owner-census-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic')) && 'Debug' || inputs.build_type }}
           -DDATAPUMP_SANITIZERS="$DATAPUMP_SANITIZERS"
-          -DDATAPUMP_PORTABLE=${{ inputs.scope != 'simulation-clock-trace-diagnostic' && inputs.scope != 'simulation-clock-geometry-diagnostic' && inputs.scope != 'simulation-clock-raw-component-diagnostic' && inputs.scope != 'simulation-clock-chain-score-diagnostic' && inputs.scope != 'continuation-carrier-diagnostic' && inputs.build_type == 'Release' && 'ON' || 'OFF' }}
+          -DDATAPUMP_PORTABLE=${{ inputs.scope != 'simulation-clock-trace-diagnostic' && inputs.scope != 'simulation-clock-geometry-diagnostic' && inputs.scope != 'simulation-clock-raw-component-diagnostic' && inputs.scope != 'simulation-clock-chain-score-diagnostic' && inputs.scope != 'simulation-owner-census-diagnostic' && inputs.scope != 'continuation-carrier-diagnostic' && inputs.build_type == 'Release' && 'ON' || 'OFF' }}
           -DBUILD_TESTING=${{ inputs.scope == 'package' && 'OFF' || 'ON' }}
           -DDATAPUMP_BUILD_TUI=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }}
           -DDATAPUMP_BUILD_FB=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }}
@@ -763,7 +829,7 @@ jobs:
             gui-core-diagnostic) targets=(test_gui_timing_advice test_gui_controller) ;;
             gui-stop-diagnostic) targets=(test_gui_controller) ;;
             gui-stop-differential) targets=(test_gui_controller) ;;
-            simulation-clock-diagnostic|simulation-clock-trace-diagnostic|simulation-clock-geometry-diagnostic|simulation-clock-raw-component-diagnostic|simulation-clock-chain-score-diagnostic) targets=(test_live) ;;
+            simulation-clock-diagnostic|simulation-clock-trace-diagnostic|simulation-clock-geometry-diagnostic|simulation-clock-raw-component-diagnostic|simulation-clock-chain-score-diagnostic|simulation-owner-census-diagnostic) targets=(test_live) ;;
             continuation-carrier-diagnostic) targets=(test_pattern_receiver test_noise_receive test_transmit_cover test_weak_signal test_live) ;;
             fft-diagnostic) targets=(test_search_fft test_pattern_fft_batch test_search_parallel test_pattern_receiver test_pattern_startup_guide) ;;
             eme-probability-diagnostic) targets=(test_frequency_axis_probability) ;;
@@ -1457,6 +1523,158 @@ jobs:
       - name: Mark traced simulation clock scope as diagnostic only
         if: (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic'))
         run: echo 'This simulation clock geometry/trace capture is diagnostic evidence only. Original assertions and each process outcome remain required; it does not qualify Live or GUI behavior.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Capture one first-owner census with the original Live assertion
+        if: inputs.scope == 'simulation-owner-census-diagnostic'
+        timeout-minutes: 12
+        env:
+          DATAPUMP_OWNER_CENSUS_DIAGNOSTIC: '1'
+        run: |
+          python3 -B - <<'PY_OWNER_CENSUS_CAPTURE'
+          from datetime import datetime, timezone
+          from pathlib import Path
+          import hashlib, json, os, resource, runpy, shutil, subprocess, time
+
+          root = Path.cwd()
+          report = root / "build/simulation-owner-census-diagnostics"
+          evidence = report / "overlay-evidence"
+          report.mkdir(parents=True, exist_ok=True)
+          binary = root / "build/test_live"
+          trace_path = (report / "first-owner-census.jsonl").resolve()
+          timeout_seconds = 600
+          git = ["git", "-c", "safe.directory=" + str(root)]
+          source_probe = subprocess.run(git + ["rev-parse", "HEAD"], cwd=root,
+                                        capture_output=True, text=True)
+          (report / "source-probe.stdout").write_text(source_probe.stdout)
+          (report / "source-probe.stderr").write_text(source_probe.stderr)
+          source_probe.check_returncode()
+          source_commit = source_probe.stdout.strip()
+          assert len(source_commit) == 40 and all(character in "0123456789abcdef" for character in source_commit)
+          archive_record = json.loads((evidence / "source-archive.json").read_text())
+          overlay_manifest = json.loads((evidence / "manifest.json").read_text())
+          assert archive_record["launcher_source_commit"] == source_commit
+          compiled_source = Path(archive_record["compiled_source_directory"])
+          source_paths = tuple(overlay_manifest["source_closure"])
+          source_files = {name: hashlib.sha256((compiled_source / name).read_bytes()).hexdigest()
+                          for name in source_paths}
+          compiled_overlay = {name: hashlib.sha256((compiled_source / name).read_bytes()).hexdigest()
+                              for name in ("src/live.cpp", "src/pattern_receiver.cpp", "src/owner_census_probe.hpp")}
+          assert compiled_overlay == archive_record["compiled_overlay_sha256"]
+          assert compiled_overlay["src/live.cpp"] == overlay_manifest["sources"]["live"]["after_sha256"]
+          assert compiled_overlay["src/pattern_receiver.cpp"] == overlay_manifest["sources"]["pattern_receiver"]["after_sha256"]
+          assert compiled_overlay["src/owner_census_probe.hpp"] == overlay_manifest["support_sha256"]
+          source_files.update(compiled_overlay)
+          source_files["tests/test_live.cpp"] = hashlib.sha256(
+              (compiled_source / "tests/test_live.cpp").read_bytes()).hexdigest()
+          binary_sha256 = hashlib.sha256(binary.read_bytes()).hexdigest()
+          config_path = root / "build/CMakeCache.txt"
+          config_sha256 = hashlib.sha256(config_path.read_bytes()).hexdigest()
+          cache = config_path.read_text().splitlines()
+          def cache_value(key):
+              matches = [line.split("=", 1)[1] for line in cache if line.startswith(key + ":")]
+              if len(matches) != 1:
+                  raise ValueError("missing or duplicate CMake cache key: " + key)
+              return matches[0]
+          cache_values = {key: cache_value(key) for key in (
+              "CMAKE_BUILD_TYPE", "DATAPUMP_SANITIZERS", "DATAPUMP_PORTABLE",
+              "CMAKE_C_COMPILER", "CMAKE_CXX_COMPILER")}
+          assert cache_values["CMAKE_BUILD_TYPE"] == "Debug"
+          assert cache_values["DATAPUMP_SANITIZERS"] == "ON"
+          assert cache_values["DATAPUMP_PORTABLE"] == "OFF"
+          c_compiler = shutil.which("gcc-11")
+          compiler = shutil.which("g++-11")
+          assert c_compiler and Path(cache_values["CMAKE_C_COMPILER"]).resolve() == Path(c_compiler).resolve()
+          assert compiler and Path(cache_values["CMAKE_CXX_COMPILER"]).resolve() == Path(compiler).resolve()
+          compiler_version = subprocess.run([compiler or "g++-11", "--version"], cwd=root,
+                                            capture_output=True, text=True)
+          safe_environment_keys = ("PATH", "LANG", "LC_ALL", "TZ", "ASAN_OPTIONS",
+                                   "UBSAN_OPTIONS", "RUNNER_OS", "RUNNER_ARCH")
+          environment = {key: os.environ[key] for key in safe_environment_keys if key in os.environ}
+          environment["DATAPUMP_OWNER_CENSUS_DIAGNOSTIC"] = os.environ["DATAPUMP_OWNER_CENSUS_DIAGNOSTIC"]
+          environment_sha256 = hashlib.sha256("\0".join(
+              key + "=" + value for key, value in sorted(environment.items())).encode()).hexdigest()
+          trace_seal = runpy.run_path(str(root / "tools/gui-stop-differential.py"))["trace_seal"]
+          command = [str(binary), "--simulation-media-clock-trace", str(trace_path)]
+          child_environment = os.environ.copy()
+          started_utc = datetime.now(timezone.utc).isoformat()
+          started = time.monotonic()
+          cpu_started = resource.getrusage(resource.RUSAGE_CHILDREN)
+          timed_out = False
+          try:
+              completed = subprocess.run(command, cwd=root, capture_output=True,
+                                         timeout=timeout_seconds, env=child_environment)
+              stdout, stderr = completed.stdout, completed.stderr
+              actual_exit_code = completed.returncode
+          except subprocess.TimeoutExpired as error:
+              stdout, stderr = error.stdout or b"", error.stderr or b""
+              actual_exit_code, timed_out = 124, True
+          elapsed = time.monotonic() - started
+          cpu_finished = resource.getrusage(resource.RUSAGE_CHILDREN)
+          finished_utc = datetime.now(timezone.utc).isoformat()
+          (report / "first-owner-census.stdout.log").write_bytes(stdout)
+          (report / "first-owner-census.stderr.log").write_bytes(stderr)
+          validation, validation_error = None, None
+          try:
+              validation = trace_seal(trace_path, stderr.decode("utf-8", errors="strict"))
+          except (OSError, UnicodeError, ValueError, KeyError, TypeError) as error:
+              validation_error = type(error).__name__ + ": " + str(error)
+          trace_complete = validation is not None and not timed_out
+          trace_status = {
+              "path": str(trace_path), "exists": trace_path.exists(),
+              "sha256": hashlib.sha256(trace_path.read_bytes()).hexdigest() if trace_path.exists() else None,
+              "validator": "tools/gui-stop-differential.py::trace_seal",
+              "validation": validation, "validation_error": validation_error,
+              "timed_out": timed_out, "trace_complete": trace_complete,
+              "correctness_note": "Strict footer, external finalization, flush, close, sequence and drop checks are required; the original test exit remains authoritative."
+          }
+          (report / "trace-status.json").write_text(json.dumps(trace_status, indent=2) + "\n")
+          reader_metadata = {
+              "source_commit": source_commit,
+              "trace_path": str(trace_path),
+              "trace_sha256": trace_status["sha256"],
+              "status_path": str(report / "first-owner-census.stderr.log"),
+              "status_sha256": hashlib.sha256(stderr).hexdigest(),
+              "actual_exit_code": actual_exit_code
+          }
+          (report / "census-reader-metadata.json").write_text(json.dumps(reader_metadata, indent=2) + "\n")
+          identity = {
+              "scope": "simulation-owner-census-diagnostic",
+              "classification": "one original default-provider first-omission capture; diagnostic only, no Live/GUI qualification",
+              "fixture": "one test_live --simulation-media-clock-trace process; natural origin; no paired or fixed-work comparison",
+              "source_commit": source_commit,
+              "source_archive": archive_record,
+              "overlay_manifest": overlay_manifest,
+              "compiled_source_directory": str(compiled_source),
+              "source_files_sha256": source_files,
+              "configuration_path": str(config_path), "configuration_sha256": config_sha256,
+              "configuration": cache_values,
+              "compiler_path": compiler, "compiler_version": compiler_version.stdout.strip(),
+              "compiler_version_exit": compiler_version.returncode,
+              "binary_path": str(binary), "binary_sha256": binary_sha256,
+              "command": command, "cwd": str(root), "environment": environment,
+              "environment_sha256": environment_sha256,
+              "started_utc": started_utc, "finished_utc": finished_utc,
+              "timeout_seconds": timeout_seconds, "timed_out": timed_out,
+              "actual_exit_code": actual_exit_code, "wall_seconds": elapsed,
+              "process_cpu_user_seconds": cpu_finished.ru_utime - cpu_started.ru_utime,
+              "process_cpu_system_seconds": cpu_finished.ru_stime - cpu_started.ru_stime,
+              "process_cpu_seconds": (cpu_finished.ru_utime + cpu_finished.ru_stime -
+                                      cpu_started.ru_utime - cpu_started.ru_stime),
+              "process_cpu_scope": "RUSAGE_CHILDREN difference around the one subprocess, includes child threads; distinct from producer census emission timing",
+              "stdout_path": str(report / "first-owner-census.stdout.log"),
+              "stdout_sha256": hashlib.sha256(stdout).hexdigest(),
+              "stderr_path": str(report / "first-owner-census.stderr.log"),
+              "stderr_sha256": hashlib.sha256(stderr).hexdigest(),
+              "trace_path": str(trace_path), "trace_complete": trace_complete,
+              "preservation": "original test assertions and exit code are retained; 10-second stop and fully scored six-second absence behavior are unchanged"
+          }
+          (report / "run.json").write_text(json.dumps(identity, indent=2) + "\n")
+          print(json.dumps(identity), flush=True)
+          # A sealed diagnostic trace does not convert the original assertion failure to success.
+          raise SystemExit(actual_exit_code if actual_exit_code != 0 else (0 if trace_complete else 1))
+          PY_OWNER_CENSUS_CAPTURE
+      - name: Mark first-owner census as diagnostic only
+        if: inputs.scope == 'simulation-owner-census-diagnostic'
+        run: echo 'This one-process first-owner census preserves the original test outcome and physical deadlines. Its trace and timing are diagnostic evidence only, not Live or GUI qualification.' >> "$GITHUB_STEP_SUMMARY"
       - name: Record partial capture scope
         if: inputs.calibration_shard != ''
         run: |
@@ -1602,6 +1820,7 @@ jobs:
             build/planner-diagnostics/
             build/simulation-clock-diagnostics/
             build/simulation-clock-trace-diagnostics/
+            build/simulation-owner-census-diagnostics/
             build/sched-hop-radius-control/
             ${{ github.workspace }}/build/ci-smoke-results/
           if-no-files-found: warn
