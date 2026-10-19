@@ -1,0 +1,10 @@
+{
+  "README.md": "2ae27584fbf12cf517d8235d4a4b2b5351a481073a673cd2eaf8166bc9b34e47",
+  "capture.py": "14855f3e77a13b85e640c8f018d48c409db022d39ccb60a48736667d5293f1d9",
+  "fixture/a3-oracle.json": "48d2c0b5f0c11867fec2dec8ae7adcc489cb8cebfe8570899672892da74a91da",
+  "fixture/a3-source-input.f32": "3f1ecd6bb83ebfd9b1314d25b7b1fcc77f8bf282503171bb2e0e59c921e6ddd1",
+  "fixture/a3-source-input.f32.partitions.json": "afe4936afe0241d23823384e3f0c4b3f7c6dcfe21587401996362e83cb126a9d",
+  "prepare-inner.py": "ee814b3060f47c56d90fe47be75f53720cc8a556bab6e8f22b3860f8f14f61db",
+  "prepare-replay.py": "cf3384d19b4794ff14c5c0c79ef9a8ccfdf5b0eb3ff380560cee60d818e23b91",
+  "prepare.py": "b733e78751a83ab3855d0b64965f4b899b5c3480029be53519799e6bbef92205"
+}
