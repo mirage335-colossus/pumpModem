@@ -685,7 +685,7 @@ jobs:
       - name: Prepare the matched stop differential source variant
         if: inputs.scope == 'gui-stop-differential'
         run: |
-          git -c safe.directory="$PWD" fetch --no-tags --depth=1 origin eb42d6a2a5725e935589e504564f28a11d37651b
+          git -c safe.directory="$PWD" fetch --no-tags --depth=1 origin bbb47e020d9c6ec3e85fca8cf58d7062b776d9ff
           python3 -B tools/gui-stop-differential.py prepare --root "$PWD" --report "$PWD/build/stop-differential" --group "$CI_STOP_GROUP"
       - name: Configure native application and selected test scope
         run: >-
