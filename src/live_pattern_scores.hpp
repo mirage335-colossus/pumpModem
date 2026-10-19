@@ -3,6 +3,7 @@
 #include "datapump/pattern_receiver.hpp"
 #include <algorithm>
 #include <array>
+#include <vector>
 #include <span>
 #include <tuple>
 
@@ -20,6 +21,11 @@ public:
         modem::PatternEvidence candidate;
         PatternScoreObservation observation;
     };
+    static constexpr std::size_t reserved_entries_bytes=Snapshot::pattern_score_limit*sizeof(Entry);
+    std::size_t allocation_headroom(std::size_t count)const noexcept {
+        count=std::min(count,Snapshot::pattern_score_limit);
+        return count>entries_.capacity()?count*sizeof(Entry):0;
+    }
     template<class AllocateId>
     void update(std::span<const modem::PatternEvidence> candidates,
                 std::chrono::steady_clock::time_point now, AllocateId allocate_id) {
@@ -31,7 +37,7 @@ public:
     // identity/age. Existing exact candidates still retain their first metadata.
     template<class Observe>
     void update_observations(std::span<const modem::PatternEvidence> candidates,Observe observe) {
-        const auto retained = candidates.last(std::min(candidates.size(), entries_.size()));
+        const auto retained = candidates.last(std::min(candidates.size(), Snapshot::pattern_score_limit));
         std::array<Entry, Snapshot::pattern_score_limit> next{};
         std::size_t count = 0;
         for (const auto& candidate : retained) {
@@ -43,16 +49,21 @@ public:
                         candidate.completed_event == entry.candidate.completed_event;
                 return key(entry.candidate) == key(candidate);
             };
-            const auto previous = std::find_if(entries_.begin(), entries_.begin() + size_, same);
+            const auto previous = std::find_if(entries_.begin(), entries_.end(), same);
             const auto duplicate = std::find_if(next.begin(), next.begin() + count, same);
-            const auto observation = previous != entries_.begin() + size_ ? previous->observation :
+            const auto observation = previous != entries_.end() ? previous->observation :
                 duplicate != next.begin() + count ? duplicate->observation :
                 observe(candidate);
             next[count++] = {candidate, observation};
         }
-        entries_ = next; size_ = count;
+        entries_.reserve(count);
+        entries_.assign(next.begin(), next.begin() + count);
     }
-    std::span<const Entry> entries() const { return std::span(entries_).first(size_); }
+    std::span<const Entry> entries() const { return entries_; }
+    // Dynamic storage owned by this history, measured from its real vector
+    // capacity for receiver-bank accounting. The vector control object is part
+    // of sizeof(PatternScoreHistory), and allocator metadata is implementation-owned.
+    std::size_t working_bytes() const noexcept { return entries_.capacity() * sizeof(Entry); }
     double best_score(std::chrono::steady_clock::time_point now) const {
         double best = -1;
         for (const auto& entry : entries())
@@ -63,8 +74,7 @@ public:
         return now - observation.observed_at > Snapshot::pattern_score_lifetime;
     }
 private:
-    std::array<Entry, Snapshot::pattern_score_limit> entries_{};
-    std::size_t size_ = 0;
+    std::vector<Entry> entries_;
 };
 
 // Rebase CPU-produced observations to their first scheduled presentation

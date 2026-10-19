@@ -1,9 +1,14 @@
 #include "datapump/pattern_receiver.hpp"
+#include "datapump/streaming_modem.hpp"
+#include "../src/native_point_workspace.hpp"
+#include <bit>
+#include "native_diagnostic_history_oracle.hpp"
 #include "datapump/pattern_correlator.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/symbol_schedule.hpp"
+#include "../src/native_peak_workspace.hpp"
 #include "../src/pattern_fft_batch.hpp"
 #include "../src/pattern_fft_window.hpp"
 #include "../src/search_parallel.hpp"
@@ -115,6 +120,9 @@ bool same_evidence(const modem::PatternEvidence& a,const modem::PatternEvidence&
                     a.bit,a.stream_phase_samples,a.admission_threshold,a.frequency_hypothesis,a.outer_presence_score,a.outer_presence_active)==
            std::tie(b.first_sample,b.end_sample,b.stream_symbol,b.frequency_hz,b.score,b.alternative_score,
                     b.bit,b.stream_phase_samples,b.admission_threshold,b.frequency_hypothesis,b.outer_presence_score,b.outer_presence_active);
+}
+bool same_retention_evidence(const modem::PatternEvidence& a,const modem::PatternEvidence& b) {
+    return same_evidence(a,b) && a.completed_event==b.completed_event;
 }
 struct ComparedProgress {
     Bytes bits;
@@ -1032,11 +1040,21 @@ void qualified_fft_partial_eof_threshold() {
     search.start_offset_seconds=8./256;search.start_uncertainty_seconds=6;
     search.qualified_start_window=modem::PatternStartWindow{8,1,.025L};
     search.prefer_streamed_templates=true;search.worker_threads=1;search.bit_limit=32;
-    struct Result {Bytes bits;double score=0,threshold=0;std::uint64_t trials=0,replays=0;};
-    const auto run=[&](double gain,bool component,std::size_t extent=300,bool cancel_finish=false,unsigned alternatives=3) {
+    struct Result {Bytes bits;double score=0,threshold=0;std::uint64_t trials=0,replays=0;
+        std::vector<modem::PatternEvidence> history;};
+    const auto run=[&](double gain,bool component,std::size_t extent=300,bool cancel_finish=false,unsigned alternatives=3,bool shared_peaks=false,bool history_tail=false) {
         auto local=search;local.component_qualified_search=component;
         local.early_qualified_fft=component;local.initial_stream_symbols=alternatives;
         modem::PatternReceiver receiver(c,4*1024*1024,local);Result out;
+        modem::detail::NativePeakWorkspace peak_workspace;
+        if(shared_peaks)check(modem::detail::NativePeakLease::adopt(peak_workspace,receiver),"partial EOF receiver could not share peaks");
+        const auto with_peaks=[&](auto operation){modem::detail::NativePeakLease lease(shared_peaks?&peak_workspace:nullptr,receiver);operation();};
+        if(history_tail) {
+            using Access=modem::detail::NativeDiagnosticHistoryAccess;
+            const auto required=Access::requirements(receiver,128);
+            check(required && Access::bind(receiver,128,required->binding_growth_bytes),
+                "partial EOF diagnostic-tail binding failed");
+        }
         std::vector<float> pcm(extent);
         for(std::size_t i=0;i<pcm.size();++i)pcm[i]=static_cast<float>(noise[i]+gain*clean[i]);
         const auto drain=[&] {
@@ -1046,19 +1064,23 @@ void qualified_fft_partial_eof_threshold() {
             }
         };
         for(std::size_t i=0;i<pcm.size();i+=11) {
-            receiver.push(std::span(pcm).subspan(i,std::min<std::size_t>(11,pcm.size()-i)));drain();
+            with_peaks([&]{receiver.push(std::span(pcm).subspan(i,std::min<std::size_t>(11,pcm.size()-i)));});drain();
         }
         if(cancel_finish) {
             std::stop_source canceled;canceled.request_stop();
-            rejects([&]{receiver.finish(canceled.get_token());},"canceled finish performed EOF replay");
+            rejects([&]{with_peaks([&]{receiver.finish(canceled.get_token());});},"canceled finish performed EOF replay");
+            check(!peak_workspace.leased(),"canceled EOF retained its native peak lease");
             check(receiver.fft_work().eof_replays==0,"canceled finish changed replay state");
         }
-        receiver.finish();drain();receiver.finish();
+        with_peaks([&]{receiver.finish();});drain();with_peaks([&]{receiver.finish();});
         check(receiver.take_bursts().empty(),"repeated partial EOF emitted duplicate progress");
         for(const auto& item:receiver.candidates())if(item.score>out.score) {
             out.score=item.score;out.threshold=item.admission_threshold;
         }
         const auto work=receiver.fft_work();out.trials=work.threshold_trials;out.replays=work.eof_replays;
+        out.history=receiver.candidates(128);
+        if(history_tail)check(modem::detail::NativeDiagnosticHistoryAccess::accounting(receiver).checkpoint_bytes==0,
+            "partial EOF retained diagnostic-tail journal");
         return out;
     };
     // One fixed noise realization. Tune only signal amplitude to specified
@@ -1077,6 +1099,14 @@ void qualified_fft_partial_eof_threshold() {
             if(run(middle,false,300,false,alternatives).score<target)low=middle;else high=middle;
         }
         const auto a=run((low+high)/2,false,300,false,alternatives),b=run((low+high)/2,true,300,false,alternatives);
+        const auto shared=run((low+high)/2,true,300,false,alternatives,true);
+        check(shared.bits==b.bits && shared.score==b.score && shared.threshold==b.threshold && shared.trials==b.trials && shared.replays==b.replays,
+              "native peak sharing changed exact cold partial-EOF decisions/thresholds/trials");
+        const auto compact=run((low+high)/2,true,300,false,alternatives,false,true);
+        check(compact.bits==b.bits && compact.trials==b.trials && compact.replays==b.replays &&
+              compact.history.size()==b.history.size() &&
+              std::equal(compact.history.begin(),compact.history.end(),b.history.begin(),same_retention_evidence),
+            "private diagnostic tail changed actual cold EOF replay or established-output history");
         check(std::abs(a.score-target)<1e-4&&std::abs(a.score-b.score)<1e-8*(1+a.score),
             "partial EOF replay changed retained same-PCM statistics");
         check(a.bits==b.bits&&a.bits==(level?Bytes{0}:Bytes{}),
@@ -1086,6 +1116,14 @@ void qualified_fft_partial_eof_threshold() {
         else check(b.replays==0,"partial EOF rolled back already established output");
         if(level==1) {
             const auto canceled=run((low+high)/2,true,300,true,alternatives);
+            const auto shared_canceled=run((low+high)/2,true,300,true,alternatives,true);
+            check(shared_canceled.bits==canceled.bits && shared_canceled.score==canceled.score && shared_canceled.threshold==canceled.threshold &&
+                  shared_canceled.trials==canceled.trials && shared_canceled.replays==canceled.replays,"native peak cancellation changed partial EOF retry");
+            const auto compact_canceled=run((low+high)/2,true,300,true,alternatives,false,true);
+            check(compact_canceled.bits==canceled.bits && compact_canceled.trials==canceled.trials &&
+                  compact_canceled.replays==canceled.replays && compact_canceled.history.size()==canceled.history.size() &&
+                  std::equal(compact_canceled.history.begin(),compact_canceled.history.end(),canceled.history.begin(),same_retention_evidence),
+                "private diagnostic tail changed canceled-then-retried actual EOF replay");
             check(canceled.bits==b.bits&&canceled.trials==b.trials&&canceled.replays==1,
                 "canceled-then-retried finish changed partial EOF decisions");
             const auto early_a=run((low+high)/2,false,268,false,alternatives),early_b=run((low+high)/2,true,268,false,alternatives);
@@ -2383,6 +2421,328 @@ void application_local_fallback_preserves_original_search() {
 }
 }
 namespace {
+void native_peak_workspace_ownership() {
+    modem::detail::NativePeakWorkspace workspace;
+    std::vector<modem::PatternEvidence> owner;owner.reserve(8);owner.push_back({});
+    const auto capacity=owner.capacity()*sizeof(modem::PatternEvidence);
+    check(workspace.adopt(owner,8) && owner.capacity()==0 && workspace.capacity_bytes()==capacity,
+          "native peak workspace did not adopt exact full quota capacity");
+    check(workspace.owns_storage() && !workspace.leased(),"adopted native peak workspace state is incorrect");
+    {
+        std::vector<modem::PatternEvidence> borrower;
+        modem::detail::NativePeakLease lease(&workspace,borrower,8);
+        check(lease.active() && workspace.leased() && borrower.capacity()*sizeof(modem::PatternEvidence)==capacity,
+              "native peak lease did not lend its actual backing storage");
+        borrower.push_back({});
+        bool overlap_rejected=false;
+        try { modem::detail::NativePeakLease overlap(&workspace,borrower,8); }
+        catch(const std::logic_error&) { overlap_rejected=true; }
+        check(overlap_rejected,"native peak workspace accepted overlapping borrowers");
+    }
+    check(!workspace.leased() && workspace.capacity_bytes()==capacity,
+          "native peak lease failed to return its fixed backing capacity");
+    {
+        std::vector<modem::PatternEvidence> larger;larger.reserve(9);
+        modem::detail::NativePeakLease fallback(&workspace,larger,9);
+        check(!fallback.active() && larger.capacity()>=9,
+              "larger candidate quota did not retain its owning fallback");
+    }
+    std::vector<modem::PatternEvidence> redundant;redundant.reserve(8);
+    check(workspace.adopt(redundant,8) && redundant.capacity()==0,
+          "full-capacity workspace did not release a joined receiver's redundant array");
+}
+void compare_native_peak_receiver(modem::PatternReceiver& owning,modem::PatternReceiver& shared,
+                                  modem::detail::NativePeakWorkspace& workspace) {
+    check(!workspace.leased(),"native peak scope escaped a receiver operation");
+    check(owning.working_bytes()==shared.working_bytes()+workspace.capacity_bytes(),
+          "shared peak accounting differs from actual owning storage");
+    check(owning.reserved_workspace_bytes()==std::max(shared.reserved_workspace_bytes(),
+              shared.working_bytes()+workspace.capacity_bytes()),
+          "shared peaks changed the original reservation versus measured-storage maximum");
+    check(owning.candidate_limited()==shared.candidate_limited() &&
+          owning.synchronized()==shared.synchronized() && owning.acquiring()==shared.acquiring() &&
+          owning.initial_search_complete()==shared.initial_search_complete(),
+          "shared peaks changed detector status or quota loss");
+    check(same_burst(owning.provisional(),shared.provisional()),"shared peaks changed provisional progress");
+    const auto a=owning.candidates(),b=shared.candidates();
+    check(a.size()==b.size() && std::equal(a.begin(),a.end(),b.begin(),[](const auto& x,const auto& y){
+        return same_evidence(x,y) && x.completed_event==y.completed_event;
+    }),"shared peaks changed full history, order or admission thresholds");
+    const auto x=owning.fft_work(),y=shared.fft_work();
+    check(std::tie(x.input_transforms,x.template_jobs,x.scored_start_trials,x.skipped_start_trials,
+                   x.threshold_trials,x.tabulated_fp64_transforms,x.eof_replays,x.timing_components)==
+          std::tie(y.input_transforms,y.template_jobs,y.scored_start_trials,y.skipped_start_trials,
+                   y.threshold_trials,y.tabulated_fp64_transforms,y.eof_replays,y.timing_components),
+          "shared peaks changed acquisition work, trials or EOF replay");
+    const auto da=owning.diagnostics(),db=shared.diagnostics();
+    check(std::tie(da.sample_offset,da.bit_rate,da.pattern_score,da.constellation,da.waveform)==
+          std::tie(db.sample_offset,db.bit_rate,db.pattern_score,db.constellation,db.waveform),
+          "shared peaks changed retained diagnostic values");
+}
+void native_peak_receiver_equivalence() {
+    auto c=config(16,true);c.sample_rate=512;c.bandwidth_hz=128;c.carrier_hz=128;c.pulse_shaping=false;
+    modem::PatternSearch search;search.worker_threads=2;search.bit_limit=128;search.track_limit=4;
+    constexpr std::size_t budget=2*1024*1024;
+    modem::PatternReceiver reference(c,budget,search),shared(c,budget,search);
+    auto second=c;++second.stream_epoch;
+    modem::PatternReceiver reference2(second,budget,search),shared2(second,budget,search);
+    modem::detail::NativePeakWorkspace workspace;
+    check(modem::detail::NativePeakLease::adopt(workspace,shared) &&
+          modem::detail::NativePeakLease::adopt(workspace,shared2),"native receiver bridge did not adopt full quota");
+    check(workspace.capacity_bytes()>=2048*sizeof(modem::PatternEvidence),"native peak bridge reduced the full2048 quota");
+    const Bytes bits{0,0,1},bits2{1,0,0};
+    const auto input=waveform(c,bits,17,7*c.sample_rate,.83,.001);
+    const auto input2=waveform(second,bits2,17,7*c.sample_rate,.37,.001);
+    check(input.size()==input2.size(),"paired native peak fixture extent changed");
+    Bytes received,received2;unsigned ends=0,ends2=0;
+    const auto poll=[&](auto& a,auto& b,Bytes& output,unsigned& completed) {
+        compare_native_peak_receiver(a,b,workspace);
+        const auto aa=a.take_bursts(),bb=b.take_bursts();
+        check(aa.size()==bb.size() && std::equal(aa.begin(),aa.end(),bb.begin(),same_burst),
+              "shared peaks changed next-poll burst fields or physical completion");
+        for(const auto& burst:aa){output.insert(output.end(),burst.bits.begin(),burst.bits.end());completed+=burst.complete;}
+    };
+    for(std::size_t at=0;at<input.size();) {
+        const auto count=std::min<std::size_t>(137,input.size()-at);
+        reference.push(std::span(input).subspan(at,count));
+        {modem::detail::NativePeakLease lease(&workspace,shared);
+            check(lease.active() && !workspace.capacity_bytes() && lease.transferred_bytes()>=2048*sizeof(modem::PatternEvidence),
+                  "native receiver lease did not expose physical ownership before the byte loan");
+            shared.set_workspace_bytes(budget);shared.push(std::span(input).subspan(at,count));}
+        poll(reference,shared,received,ends);
+        reference2.push(std::span(input2).subspan(at,count));
+        {modem::detail::NativePeakLease lease(&workspace,shared2);check(lease.active(),"second logical receiver lost peak backing");
+            shared2.set_workspace_bytes(budget);shared2.push(std::span(input2).subspan(at,count));}
+        poll(reference2,shared2,received2,ends2);at+=count;
+    }
+    reference.finish();{modem::detail::NativePeakLease lease(&workspace,shared);shared.finish();}
+    poll(reference,shared,received,ends);
+    reference2.finish();{modem::detail::NativePeakLease lease(&workspace,shared2);shared2.finish();}
+    poll(reference2,shared2,received2,ends2);
+    check(received==bits && received2==bits2 && ends==1 && ends2==1,
+          "peak equivalence fixture did not verify exact independent streams and scored physical END");
+    // A pre-stopped call must restore the actual backing and leave every state unchanged.
+    modem::PatternReceiver canceled(c,budget,search),canceled_reference(c,budget,search);
+    check(modem::detail::NativePeakLease::adopt(workspace,canceled),"cancellation receiver could not join peak arena");
+    std::stop_source stop;stop.request_stop();
+    rejects([&]{canceled_reference.push(input,stop.get_token());},"owning canceled peak control did not reject");
+    rejects([&]{modem::detail::NativePeakLease lease(&workspace,canceled);canceled.push(input,stop.get_token());},
+            "shared canceled peak control did not reject");
+    compare_native_peak_receiver(canceled_reference,canceled,workspace);
+    // Without a lease a previously shared receiver must recover full owning capacity.
+    canceled.push(input);canceled_reference.push(input);
+    check(canceled.working_bytes()==canceled_reference.working_bytes(),"unleased receiver did not recover owning peak capacity");
+    check(!modem::detail::NativePeakLease(&workspace,canceled).active(),"owning receiver silently exchanged an unaccounted second array");
+}
+void native_peak_quota_equivalence() {
+    auto c=config(128,true);c.sample_rate=6000;c.carrier_hz=1500;c.bandwidth_hz=1200;c.pulse_shaping=false;
+    auto shifted=c;shifted.carrier_hz+=75;
+    auto samples=waveform(c,Bytes{0},0,0,.21);const auto other=waveform(shifted,Bytes{1},0,0,-.53);
+    for(std::size_t i=0;i<samples.size();++i)samples[i]+=other[i];
+    for(unsigned limit:{0U,1U,2U}) {
+        modem::PatternSearch search;search.frequency_offsets_hz={0,75};search.drift_tolerant=false;
+        search.worker_threads=1;search.chunk_bits=16;search.candidate_limit=limit==1?1:16;search.track_limit=limit==2?1:4;
+        modem::PatternReceiver owning(c,8*1024*1024,search),shared(c,8*1024*1024,search);
+        modem::detail::NativePeakWorkspace workspace;check(modem::detail::NativePeakLease::adopt(workspace,shared),"quota receiver could not share peaks");
+        owning.push(samples);{modem::detail::NativePeakLease lease(&workspace,shared);shared.push(samples);}
+        owning.finish();{modem::detail::NativePeakLease lease(&workspace,shared);shared.finish();}
+        compare_native_peak_receiver(owning,shared,workspace);
+        const auto a=owning.take_bursts(),b=shared.take_bursts();
+        check(a.size()==b.size() && std::equal(a.begin(),a.end(),b.begin(),same_burst),"shared peak quota changed independent events");
+        check(shared.candidate_limited()==(limit!=0) && a.size()==(limit?1:2),"shared peak quota fixture lost its positive/negative omission controls");
+        for(const auto& event:b)check(!event.complete,"shared peak quota/EOF fabricated absence");
+    }
+}
+void native_peak_streaming_bridge() {
+    auto c=config(16,true);c.sample_rate=512;c.bandwidth_hz=128;c.carrier_hz=128;c.pulse_shaping=false;
+    modem::PatternSearch search;search.candidate_limit=7;search.track_limit=2;search.bit_limit=32;
+    constexpr std::size_t budget=2*1024*1024;
+    modem::StreamingReceiver owning(c,budget,search),shared(c,budget,search);
+    modem::detail::NativePeakWorkspace workspace;check(modem::detail::NativePeakLease::adopt(workspace,shared),"StreamingReceiver bridge could not adopt native storage");
+    const auto pcm=waveform(c,Bytes{0,0,1},17,7*c.sample_rate,.83,.001);
+    owning.push(pcm);{modem::detail::NativePeakLease lease(&workspace,shared);check(lease.active(),"StreamingReceiver bridge did not lease actual native storage");shared.push(pcm);}
+    const auto a=owning.take_pattern_bursts(),b=shared.take_pattern_bursts();
+    check(a.size()==b.size() && std::equal(a.begin(),a.end(),b.begin(),same_burst),"StreamingReceiver peak bridge changed detector events");
+    check(owning.working_bytes()==shared.working_bytes()+workspace.capacity_bytes(),"StreamingReceiver bridge omitted actual peak accounting");
+    shared.reset();owning.reset();
+    {modem::detail::NativePeakLease lease(&workspace,shared);check(!lease.active(),"StreamingReceiver reset retained a stale peak attachment");}
+    check(shared.working_bytes()==owning.working_bytes(),"StreamingReceiver reset changed default storage");
+    auto slow=config(64,true);slow.integration_seconds=3600;
+    modem::PatternSearch fallback;fallback.start_offset_seconds=0;fallback.frequency_offsets_hz={0};fallback.clock_errors_ppm={0};
+    fallback.track_limit=2;fallback.candidate_limit=7;fallback.bit_limit=32;
+    modem::PatternReceiver receiver(slow,256*1024,fallback);
+    check(receiver.clock_windowed() && !modem::detail::NativePeakLease::adopt(workspace,receiver),"fallback acquired a native peak arena");
+    const auto before=receiver.working_bytes();
+    {modem::detail::NativePeakLease lease(&workspace,receiver);check(!lease.active(),"fallback borrowed native peak storage");receiver.process_pending();}
+    check(receiver.working_bytes()==before && !workspace.leased(),"fallback/native lease changed retained accounting");
+}
+bool native_points_equal(std::span<const std::complex<double>> a,std::span<const std::complex<double>> b) {
+    if(a.size()!=b.size())return false;
+    for(std::size_t i=0;i<a.size();++i)if(std::bit_cast<std::uint64_t>(a[i].real())!=std::bit_cast<std::uint64_t>(b[i].real()) ||
+        std::bit_cast<std::uint64_t>(a[i].imag())!=std::bit_cast<std::uint64_t>(b[i].imag()))return false;
+    return true;
+}
+void compare_native_points(modem::PatternReceiver& reference,modem::PatternReceiver& candidate) {
+    const auto a=reference.diagnostics(),b=candidate.diagnostics();
+    check(std::tie(a.sample_offset,a.preamble_correlation,a.snr_db,a.bit_rate,a.pattern_score,a.waveform)==
+          std::tie(b.sample_offset,b.preamble_correlation,b.snr_db,b.bit_rate,b.pattern_score,b.waveform) &&
+          a.preamble_reception.has_value()==b.preamble_reception.has_value() && native_points_equal(a.constellation,b.constellation),
+          "native point sharing changed full native diagnostics");
+    if(a.preamble_reception)check(std::tie(a.preamble_reception->expected_samples,a.preamble_reception->observed_samples,a.preamble_reception->matched_samples)==
+        std::tie(b.preamble_reception->expected_samples,b.preamble_reception->observed_samples,b.preamble_reception->matched_samples),
+        "native point sharing changed full preamble diagnostics");
+    check(reference.working_bytes()==candidate.working_bytes(),"active point vector not charged in receiver working bytes");
+    const auto x=reference.candidates(),y=candidate.candidates();
+    check(x.size()==y.size()&&std::equal(x.begin(),x.end(),y.begin(),[](const auto& u,const auto& v){return same_evidence(u,v)&&u.completed_event==v.completed_event;}),
+          "native point sharing changed diagnostic history");
+    const auto wx=reference.fft_work(),wy=candidate.fft_work();
+    check(std::tie(wx.input_transforms,wx.template_jobs,wx.scored_start_trials,wx.threshold_trials,wx.eof_replays)==
+          std::tie(wy.input_transforms,wy.template_jobs,wy.scored_start_trials,wy.threshold_trials,wy.eof_replays) &&
+          same_burst(reference.provisional(),candidate.provisional()) && reference.candidate_limited()==candidate.candidate_limited(),
+          "native point sharing changed detector decisions/work/quota");
+}
+void native_point_receiver_equivalence() {
+    for(bool projected:{false,true}) {
+        auto c=config(16,true);c.sample_rate=512;c.bandwidth_hz=128;c.carrier_hz=128;c.pulse_shaping=false;
+        modem::PatternSearch search;search.worker_threads=1;search.frequency_offsets_hz={0};search.clock_errors_ppm={0};search.bit_limit=128;
+        constexpr std::size_t budget=4*1024*1024;
+        modem::PatternReceiver reference(c,budget,search),shared(c,budget,search),reference2(c,budget,search),shared2(c,budget,search);
+        modem::detail::NativePointPool pool(8);modem::detail::NativePointOwner owner,owner2;
+        check(modem::detail::NativePointLease::try_adopt(pool,owner,shared)&&modem::detail::NativePointLease::try_adopt(pool,owner2,shared2),"native point bridge adoption failed");
+        check(pool.entries()==1&&pool.data_bytes()==2048*sizeof(std::complex<double>),"initial empty quota storage not shared exactly once");
+        const Bytes bits{0,0,1};const auto pcm=waveform(c,bits,17,7*c.sample_rate,.83,.001);
+        auto second=pcm;for(std::size_t i=pcm.size()/2;i<second.size();++i)second[i]+=static_cast<float>(.03*std::sin(.13*i));
+        std::vector<std::complex<double>> mixed(pcm.size()),mixed2(pcm.size());auto oscillator=std::complex<double>{1,0};
+        const auto rotation=std::polar(1.,-2*std::numbers::pi*c.carrier_hz/c.sample_rate);
+        for(std::size_t i=0;i<pcm.size();++i){mixed[i]=static_cast<double>(pcm[i])*oscillator;mixed2[i]=static_cast<double>(second[i])*oscillator;oscillator*=rotation;}
+        Bytes observed;unsigned complete=0;
+        const auto poll=[&](auto& a,auto& b,bool primary) {
+            const auto aa=a.take_bursts(),bb=b.take_bursts();
+            check(aa.size()==bb.size()&&std::equal(aa.begin(),aa.end(),bb.begin(),same_burst),"native points changed next-poll bits or physical END");
+            if(primary)for(const auto& burst:aa){observed.insert(observed.end(),burst.bits.begin(),burst.bits.end());complete+=burst.complete;}
+        };
+        for(std::size_t at=0;at<pcm.size();) {
+            const auto count=std::min<std::size_t>(137,pcm.size()-at);
+            for(unsigned member=0;member<2;++member) {
+                auto& a=member?reference2:reference;auto& b=member?shared2:shared;auto& o=member?owner2:owner;
+                const auto raw=std::span(member?second:pcm).subspan(at,count);const auto iq=std::span(member?mixed2:mixed).subspan(at,count);
+                if(projected)a.push(raw,iq);else a.push(raw);
+                {modem::detail::NativePointLease lease(&pool,o,b);check(lease.active(),"native point bridge inactive");
+                    if(projected)b.push(raw,iq);else b.push(raw);compare_native_points(a,b);poll(a,b,member==0);}
+            }
+            if(at+count<=pcm.size()/2)check(pool.entries()==1,"identical future point values did not re-intern");
+            at+=count;
+        }
+        reference.finish();{modem::detail::NativePointLease lease(&pool,owner,shared);shared.finish();compare_native_points(reference,shared);poll(reference,shared,true);}
+        reference2.finish();{modem::detail::NativePointLease lease(&pool,owner2,shared2);shared2.finish();compare_native_points(reference2,shared2);poll(reference2,shared2,false);}
+        check(observed==bits&&complete==1,"native point equivalence fixture lost exact001 or fully scored END");
+        check(pool.entries()==2,"unequal future PCM failed to detach point states");
+        const auto expected=reference.take_chip_constellation();
+        {modem::detail::NativePointLease lease(&pool,owner,shared);const auto actual=shared.take_chip_constellation();
+            check(native_points_equal(expected,actual)&&shared.take_chip_constellation().empty(),"native point drain/clear behavior changed");}
+        {modem::detail::NativePointLease lease(&pool,owner,shared);compare_native_points(reference,shared);}
+    }
+}
+void native_point_partial_error_and_cursor() {
+    auto c=config(16,true);c.sample_rate=512;c.bandwidth_hz=128;c.carrier_hz=128;c.pulse_shaping=false;
+    modem::PatternSearch search;search.worker_threads=1;search.frequency_offsets_hz={0};search.bit_limit=128;
+    constexpr std::size_t budget=4*1024*1024;
+    modem::PatternReceiver reference(c,budget,search),shared(c,budget,search),reference2(c,budget,search),shared2(c,budget,search);
+    modem::detail::NativePointPool pool(8);modem::detail::NativePointOwner owner,owner2;
+    check(modem::detail::NativePointLease::try_adopt(pool,owner,shared)&&modem::detail::NativePointLease::try_adopt(pool,owner2,shared2),"cursor fixture adoption");
+    // Different circular cursors, bit-identical zero backing; no cursor lives in the pool.
+    std::vector<float> zero((2048+3)*4);reference.push(zero);{modem::detail::NativePointLease lease(&pool,owner,shared);shared.push(zero);compare_native_points(reference,shared);}
+    zero.resize((2048+7)*4);reference2.push(zero);{modem::detail::NativePointLease lease(&pool,owner2,shared2);shared2.push(zero);compare_native_points(reference2,shared2);}
+    check(pool.entries()==1,"equal point values with independent cursors did not share");
+    std::vector<float> bad(513,.25F);bad.push_back(std::numeric_limits<float>::quiet_NaN());
+    rejects([&]{reference.push(bad);},"partial-error reference accepted NaN");
+    rejects([&]{modem::detail::NativePointLease lease(&pool,owner,shared);shared.push(bad);},"partial-error shared receiver accepted NaN");
+    check(!owner.leased()&&!pool.borrowed(),"partial exception retained point lease");
+    {modem::detail::NativePointLease lease(&pool,owner,shared);compare_native_points(reference,shared);}
+    {modem::detail::NativePointLease lease(&pool,owner2,shared2);compare_native_points(reference2,shared2);}
+    std::stop_source stopped;stopped.request_stop();
+    rejects([&]{reference.push(zero,stopped.get_token());},"pre-stopped reference did not cancel");
+    rejects([&]{modem::detail::NativePointLease lease(&pool,owner,shared);shared.push(zero,stopped.get_token());},"pre-stopped shared receiver did not cancel");
+    {modem::detail::NativePointLease lease(&pool,owner,shared);compare_native_points(reference,shared);}
+    auto moved=std::move(shared);auto moved_owner=std::move(owner);
+    const std::array<float,4> tail{.1F,.2F,.3F,.4F};reference.push(tail);
+    {modem::detail::NativePointLease lease(&pool,moved_owner,moved);moved.push(tail);compare_native_points(reference,moved);}
+    check(!owner.bound()&&moved_owner.bound(),"moving receiver/owner lost private binding");
+}
+void native_point_streaming_reset_and_fallback() {
+    auto c=config(16,true);c.sample_rate=512;c.bandwidth_hz=128;c.carrier_hz=128;c.pulse_shaping=false;
+    modem::PatternSearch search;search.worker_threads=1;search.frequency_offsets_hz={0};
+    modem::StreamingReceiver reference(c,4*1024*1024,search),shared(c,4*1024*1024,search);
+    modem::detail::NativePointPool pool(8);modem::detail::NativePointOwner owner;
+    check(modem::detail::NativePointLease::try_adopt(pool,owner,shared),"streaming point bridge adoption");
+    const auto pcm=waveform(c,Bytes{0,0,1},17,0,.83,.001);reference.push(pcm);
+    {modem::detail::NativePointLease lease(&pool,owner,shared);shared.push(pcm);
+        check(native_points_equal(reference.diagnostics().constellation,shared.diagnostics().constellation),"streaming point diagnostics changed");
+        check(native_points_equal(reference.take_payload_constellation().points,shared.take_payload_constellation().points),"streaming point clear changed");}
+    owner.reset();shared.reset();reference.reset();check(!pool.owners()&&!pool.data_bytes(),"reset binding retained old storage");
+    check(modem::detail::NativePointLease::try_adopt(pool,owner,shared),"fresh reset receiver could not rebind");
+    {modem::detail::NativePointLease lease(&pool,owner,shared);check(shared.diagnostics().constellation.empty(),"reset fabricated old point data");}
+    owner.reset();auto slow=config(64,true);slow.integration_seconds=3600;
+    modem::PatternSearch fallback;fallback.start_offset_seconds=0;fallback.frequency_offsets_hz={0};fallback.clock_errors_ppm={0};fallback.track_limit=2;fallback.candidate_limit=7;fallback.bit_limit=32;
+    modem::PatternReceiver receiver(slow,256*1024,fallback);
+    check(receiver.clock_windowed()&&!modem::detail::NativePointLease::try_adopt(pool,owner,receiver),"correlator fallback adopted native points");
+    {modem::detail::NativePointLease lease(&pool,owner,receiver);check(!lease.active(),"correlator fallback borrowed native points");}
+}
+void diagnostic_history_retention() {
+    check(test::native_diagnostic_history_oracle()>0,"diagnostic FIFO oracle did not run");
+    auto c=config(32,true);c.sample_rate=256;c.bandwidth_hz=64;c.carrier_hz=64;
+    c.integration_seconds=260./256;c.pulse_shaping=false;
+    const auto clean=waveform(c,Bytes{0},8,32,.37);
+    std::mt19937_64 random(173);std::normal_distribution<double> gaussian(0,.2);
+    std::vector<float> pcm(clean.size());
+    for(std::size_t i=0;i<pcm.size();++i)pcm[i]=static_cast<float>(gaussian(random)+clean[i]);
+    modem::PatternSearch search;search.hypotheses={{0,0}};search.initial_stream_symbols=3;
+    search.start_offset_seconds=8./256;search.start_uncertainty_seconds=6;
+    search.qualified_start_window=modem::PatternStartWindow{8,1,.025L};
+    search.prefer_streamed_templates=true;search.worker_threads=1;search.bit_limit=32;
+    search.component_qualified_search=true;search.early_qualified_fft=true;
+    using Access=modem::detail::NativeDiagnosticHistoryAccess;
+    modem::PatternReceiver baseline(c,4*1024*1024,search),limited(c,4*1024*1024,search);
+    const auto required=Access::requirements(limited,128);
+    check(required.has_value(),"native empty receiver did not support private history binding");
+    check(required->bound_reserved_bytes==baseline.reserved_workspace_bytes(),
+        "Live-sized history binding changed the original conservative arithmetic reservation");
+    const auto before=limited.working_bytes();
+    check(!Access::bind(limited,128,required->binding_growth_bytes-1) && limited.working_bytes()==before,
+        "history binding changed receiver after insufficient-headroom rejection");
+    check(Access::bind(limited,128,required->binding_growth_bytes),"private diagnostic history binding failed");
+    check(limited.working_bytes()==required->bound_working_bytes &&
+          limited.reserved_workspace_bytes()==required->bound_reserved_bytes,
+        "private diagnostic history requirements differ from actual accounting");
+    check(!Access::bind(limited,128,required->binding_growth_bytes),"history binding accepted an already bound receiver");
+    const auto compare=[&] {
+        const auto expected=baseline.candidates(128),actual=limited.candidates(128);
+        check(expected.size()==actual.size()&&std::equal(expected.begin(),expected.end(),actual.begin(),same_retention_evidence),
+            "private diagnostic history differs from default last-128 query");
+        const auto a=baseline.take_bursts(),b=limited.take_bursts();
+        check(a.size()==b.size()&&std::equal(a.begin(),a.end(),b.begin(),same_burst),
+            "private diagnostic retention changed pending bits or physical-completion events");
+        check(baseline.candidate_limited()==limited.candidate_limited()&&
+              baseline.fft_work().threshold_trials==limited.fft_work().threshold_trials,
+            "private diagnostic retention changed search quota or threshold accounting");
+    };
+    std::stop_source canceled;canceled.request_stop();
+    rejects([&]{baseline.push(std::span(pcm).first(11),canceled.get_token());},"baseline accepted canceled push");
+    rejects([&]{limited.push(std::span(pcm).first(11),canceled.get_token());},"bounded history accepted canceled push");
+    compare();
+    for(std::size_t i=0;i<pcm.size();i+=11) {
+        const auto part=std::span(pcm).subspan(i,std::min<std::size_t>(11,pcm.size()-i));
+        baseline.push(part);limited.push(part);compare();
+    }
+    check(!Access::requirements(baseline,128),"private history binding accepted receiver after input");
+    rejects([&]{baseline.finish(canceled.get_token());},"baseline accepted canceled finish");
+    rejects([&]{limited.finish(canceled.get_token());},"bounded history accepted canceled finish");
+    compare();baseline.finish();limited.finish();compare();
+    check(baseline.fft_work().eof_replays==limited.fft_work().eof_replays,
+        "private diagnostic retention changed early-qualified partial-EOF replay");
+    check(Access::accounting(limited).checkpoint_bytes==0,"EOF retained cold checkpoint backing");
+}
+
 void candidate_quota_health() {
     auto c=config(128,true);c.sample_rate=6000;c.carrier_hz=1500;c.bandwidth_hz=1200;c.pulse_shaping=false;
     auto shifted=c;shifted.carrier_hz+=75;
@@ -2469,6 +2829,14 @@ int main(int argc,char** argv) {
         try { test();std::cout<<name<<": passed\n"; }
         catch(const std::exception& error){++failures;std::cerr<<name<<": "<<error.what()<<'\n';}
     };
+    run("native peak workspace ownership",native_peak_workspace_ownership);
+    run("native peak receiver equivalence",native_peak_receiver_equivalence);
+    run("native peak quota equivalence",native_peak_quota_equivalence);
+    run("native peak StreamingReceiver bridge",native_peak_streaming_bridge);
+    run("native point receiver equivalence",native_point_receiver_equivalence);
+    run("native point partial error and cursor",native_point_partial_error_and_cursor);
+    run("native point streaming reset and fallback",native_point_streaming_reset_and_fallback);
+    run("diagnostic history retention",diagnostic_history_retention);
     run("candidate quota health",candidate_quota_health);
     run("initial search coverage",initial_search_coverage);
     run("exact blind bits",exact_blind_bits);run("chunk invariance and late start",changing_chunks_and_late_start);
@@ -2518,7 +2886,7 @@ int main(int argc,char** argv) {
     run("qualified UTC FFT bounded readiness",qualified_fft_bounded_readiness);
     run("qualified UTC FFT follow-on progress",qualified_fft_followon_progress);
     run("qualified UTC FFT component progress",qualified_fft_component_progress);
-    run("qualified UTC FFT partial EOF threshold",qualified_fft_partial_eof_threshold);
+    run("qualified UTC FFT partial EOF threshold / native peak",qualified_fft_partial_eof_threshold);
     run("parallel search physical absence",parallel_search_physical_absence);
     run("parallel long continuation exact progress",parallel_long_continuation_exact_progress);
     run("bounded long clock-window fallback",long_clock_window_fallback);

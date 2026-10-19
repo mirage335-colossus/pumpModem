@@ -8,6 +8,9 @@
 
 namespace datapump::modem {
 namespace detail::scheduled_capture {class SharedScheduledCapture;}
+namespace detail { class NativePeakLease; }
+namespace detail {class NativePointLease;}
+namespace detail {struct NativeDiagnosticHistoryAccess;}
 // Cross-profile presentation weight for one admitted symbol. Native scores
 // have different conservative bounds on different DSP paths; cap each symbol
 // separately so a strong prefix cannot lend its surplus to a weak later fit.
@@ -376,6 +379,9 @@ public:
     Diagnostics diagnostics() const;
 private:
     friend struct PatternReceiverStartupGuideTestAccess;
+    friend class detail::NativePeakLease;
+    friend class detail::NativePointLease;
+    friend struct detail::NativeDiagnosticHistoryAccess;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

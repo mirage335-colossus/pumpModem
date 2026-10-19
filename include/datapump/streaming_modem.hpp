@@ -174,6 +174,9 @@ public:
     void trim_optional_workspace();
     void reset();
 private:
+    friend class detail::NativePeakLease;
+    friend class detail::NativePointLease;
+    friend struct detail::NativeDiagnosticHistoryAccess;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

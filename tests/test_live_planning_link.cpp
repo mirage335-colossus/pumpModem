@@ -50,12 +50,13 @@ void structural_normalization_and_reservations() {
     rejected=false;try {(void)live::receiver_workspace_capacity(invalid);}catch(const Error&){rejected=true;}
     check(rejected,"long/short physical profile mismatch cannot borrow pure allocation capacity");
     auto short_config=legacy.transfer.modem,long_config=short_config;long_config.integration_seconds=60;
-    const auto exact=sizeof(live::detail::ReceiverState);
+    const auto exact=sizeof(live::detail::ReceiverState)+
+        live::detail::PatternScoreHistory::reserved_entries_bytes;
     check(live::receiver_control_margin(short_config,false)==65536U+exact&&
         live::receiver_control_margin(short_config,true)==65536U+exact&&
         live::receiver_control_margin(long_config,false)==65536U+exact&&
         live::receiver_control_margin(long_config,true)==8192U+exact,
-        "control margins must charge the same concrete type used by Session, not a guessed sizeof");
+        "control margins must charge the concrete Session shell and full heap history backing");
     check(live::receiver_control_margin(short_config,true)-live::receiver_control_margin(long_config,true)==57344,
         "keyed long-symbol control-margin boundary changed");
 }

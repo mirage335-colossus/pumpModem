@@ -95,13 +95,18 @@ jobs:
       CXX: g++-11
       CI_SCOPE: ${{ inputs.scope }}
       CI_STOP_GROUP: ${{ inputs.stop_group }}
-      DATAPUMP_SANITIZERS: ${{ inputs.scope == 'gui-stop-differential' && (inputs.stop_group == 'eu-o1-san-off' || inputs.stop_group == 'eu-o0-san-off' || inputs.stop_group == 'eu-focus-o1-san-off' || inputs.stop_group == 'eu-focus-o0-san-off' || inputs.stop_group == 'eu-kernel-o1-san-off') && 'OFF' || ((inputs.build_type == 'Debug' || (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic' || inputs.scope == 'simulation-owner-census-diagnostic' || inputs.scope == 'simulation-capacity-shape-diagnostic' || inputs.scope == 'simulation-acquisition-partition-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic'))) && 'ON' || 'OFF') }}
+      DATAPUMP_SANITIZERS: ${{ inputs.scope == 'gui-stop-differential' && (inputs.stop_group == 'eu-o1-san-off' || inputs.stop_group == 'eu-o0-san-off' || inputs.stop_group == 'eu-focus-o1-san-off' || inputs.stop_group == 'eu-focus-o0-san-off' || inputs.stop_group == 'eu-kernel-o1-san-off') && 'OFF' || ((inputs.build_type == 'Debug' || inputs.scope == 'simulation-clock-diagnostic' || (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic' || inputs.scope == 'simulation-owner-census-diagnostic' || inputs.scope == 'simulation-capacity-shape-diagnostic' || inputs.scope == 'simulation-acquisition-partition-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic'))) && 'ON' || 'OFF') }}
       SANITIZER_REALTIME: ${{ inputs.sanitizer_realtime }}
     steps:
       - name: Restrict the temporary graceful-stop diagnostic
         if: inputs.scope == 'gui-stop-diagnostic' && (github.event_name != 'workflow_dispatch' || inputs.build_type != 'Debug' || inputs.linux_runner != 'ubuntu-24.04')
         run: |
           echo '::error::The temporary stop diagnostic requires manual Debug on ubuntu-24.04.'
+          exit 2
+      - name: Restrict the production simulation-clock component route
+        if: inputs.scope == 'simulation-clock-diagnostic' && (github.event_name != 'workflow_dispatch' || inputs.build_type != 'Debug' || inputs.linux_runner != 'ubuntu-24.04')
+        run: |
+          echo '::error::The production component route requires manual Debug on ubuntu-24.04.'
           exit 2
       - name: Restrict the native peak lease diagnostic
         if: inputs.scope == 'native-peak-lease-diagnostic' && (github.event_name != 'workflow_dispatch' || inputs.build_type != 'Debug' || inputs.linux_runner != 'ubuntu-24.04')
@@ -840,9 +845,9 @@ jobs:
       - name: Configure native application and selected test scope
         run: >-
           cmake -S "${{ inputs.scope == 'native-peak-lease-diagnostic' && 'build/native-peak-lease-source' || (inputs.scope == 'simulation-clock-chain-score-diagnostic' && 'build/raw-chain-source' || (inputs.scope == 'simulation-owner-census-diagnostic' && 'build/owner-census-source' || ((inputs.scope == 'simulation-capacity-shape-diagnostic' || inputs.scope == 'simulation-acquisition-partition-diagnostic') && 'build/capacity-shape-source' || '.'))) }}" -B build -G Ninja -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11
-          -DCMAKE_BUILD_TYPE=${{ (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic' || inputs.scope == 'simulation-owner-census-diagnostic' || inputs.scope == 'simulation-capacity-shape-diagnostic' || inputs.scope == 'simulation-acquisition-partition-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic')) && 'Debug' || inputs.build_type }}
+          -DCMAKE_BUILD_TYPE=${{ (inputs.scope == 'simulation-clock-diagnostic' || inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic' || inputs.scope == 'simulation-owner-census-diagnostic' || inputs.scope == 'simulation-capacity-shape-diagnostic' || inputs.scope == 'simulation-acquisition-partition-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic')) && 'Debug' || inputs.build_type }}
           -DDATAPUMP_SANITIZERS="$DATAPUMP_SANITIZERS"
-          -DDATAPUMP_PORTABLE=${{ inputs.scope != 'simulation-clock-trace-diagnostic' && inputs.scope != 'simulation-clock-geometry-diagnostic' && inputs.scope != 'simulation-clock-raw-component-diagnostic' && inputs.scope != 'simulation-clock-chain-score-diagnostic' && inputs.scope != 'simulation-owner-census-diagnostic' && inputs.scope != 'simulation-capacity-shape-diagnostic' && inputs.scope != 'simulation-acquisition-partition-diagnostic' && inputs.scope != 'continuation-carrier-diagnostic' && inputs.build_type == 'Release' && 'ON' || 'OFF' }}
+          -DDATAPUMP_PORTABLE=${{ inputs.scope != 'simulation-clock-diagnostic' && inputs.scope != 'simulation-clock-trace-diagnostic' && inputs.scope != 'simulation-clock-geometry-diagnostic' && inputs.scope != 'simulation-clock-raw-component-diagnostic' && inputs.scope != 'simulation-clock-chain-score-diagnostic' && inputs.scope != 'simulation-owner-census-diagnostic' && inputs.scope != 'simulation-capacity-shape-diagnostic' && inputs.scope != 'simulation-acquisition-partition-diagnostic' && inputs.scope != 'continuation-carrier-diagnostic' && inputs.build_type == 'Release' && 'ON' || 'OFF' }}
           -DBUILD_TESTING=${{ inputs.scope == 'package' && 'OFF' || 'ON' }}
           -DDATAPUMP_BUILD_TUI=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }}
           -DDATAPUMP_BUILD_FB=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }}
@@ -876,7 +881,8 @@ jobs:
             gui-core-diagnostic) targets=(test_gui_timing_advice test_gui_controller) ;;
             gui-stop-diagnostic) targets=(test_gui_controller) ;;
             gui-stop-differential) targets=(test_gui_controller) ;;
-            simulation-clock-diagnostic|simulation-clock-trace-diagnostic|simulation-clock-geometry-diagnostic|simulation-clock-raw-component-diagnostic|simulation-clock-chain-score-diagnostic|simulation-owner-census-diagnostic|simulation-capacity-shape-diagnostic|simulation-acquisition-partition-diagnostic) targets=(test_live) ;;
+            simulation-clock-diagnostic) targets=(test_live test_pattern_receiver test_stream_receive test_live_planning_link) ;;
+            simulation-clock-trace-diagnostic|simulation-clock-geometry-diagnostic|simulation-clock-raw-component-diagnostic|simulation-clock-chain-score-diagnostic|simulation-owner-census-diagnostic|simulation-capacity-shape-diagnostic|simulation-acquisition-partition-diagnostic) targets=(test_live) ;;
             native-peak-lease-diagnostic) targets=(test_pattern_receiver) ;;
             continuation-carrier-diagnostic) targets=(test_pattern_receiver test_noise_receive test_transmit_cover test_weak_signal test_live) ;;
             fft-diagnostic) targets=(test_search_fft test_pattern_fft_batch test_search_parallel test_pattern_receiver test_pattern_startup_guide) ;;
@@ -1369,8 +1375,19 @@ jobs:
       - name: Mark acquisition partition replay as diagnostic only
         if: inputs.scope == 'simulation-acquisition-partition-diagnostic'
         run: echo 'Six identical fixed-bank prefix replays retain acquisition scopes and a joined storage census in both modes, alternating detailed FFT and continuation scopes together as one instrumentation variable. Original A4 timeline/work/output gates and the additive storage reader remain mandatory. This diagnostic does not execute original full-fixture assertions or establish Live/GUI deadlines or qualification.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Run production component gates before the default-clock Live diagnostic
+        id: production_components
+        if: inputs.scope == 'simulation-clock-diagnostic' && !cancelled() && steps.build_prerequisites.outcome == 'success'
+        timeout-minutes: 30
+        run: |
+          python3 -B tools/simulation-clock-diagnostic/production_components.py \
+            --root "$PWD" \
+            --report "$PWD/build/simulation-clock-diagnostics/components-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --expected-head "$GITHUB_SHA" \
+            --timeout-seconds 120
+          echo 'The production-source component gates passed before the unchanged default-clock Live case. This diagnostic remains a focused component plus Live check; GUI regressions and the full native/SDK matrix remain separate acceptance coverage.' >> "$GITHUB_STEP_SUMMARY"
       - name: Run the focused simulation media clock diagnostic
-        if: (inputs.scope == 'simulation-clock-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic') && !cancelled() && steps.build_prerequisites.outcome == 'success'
+        if: (inputs.scope == 'simulation-clock-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic') && !cancelled() && steps.build_prerequisites.outcome == 'success' && (inputs.scope != 'simulation-clock-diagnostic' || steps.production_components.outcome == 'success')
         timeout-minutes: 15
         run: |
           python3 -B - <<'PY_CLOCK_DIAGNOSTIC'

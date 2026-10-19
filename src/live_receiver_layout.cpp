@@ -39,6 +39,7 @@ std::size_t plot_workspace(const Settings& value) { return plot_size * (sizeof(f
                                        detail::SignalWindow::sample_capacity(value.transfer.modem) * 2 * sizeof(float) +
                                        pattern_score_limit * (4 * (sizeof(std::complex<double>) + sizeof(PatternScoreObservation)) + sizeof(modem::PatternEvidence)) +
                                        sizeof(detail::PatternScoreHistory) +
+                                       detail::PatternScoreHistory::reserved_entries_bytes +
                                        sizeof(detail::SignalWindow) + modem::SampledSimulationChannel::workspace_bound +
                                        plot_size * (sizeof(float)+sizeof(std::complex<double>)) +
                                        sizeof(modem::TransmitTrace) + trace_prefix_workspace + replay_workspace(value) +
@@ -150,6 +151,7 @@ std::size_t receiver_workspace_capacity(const Settings& settings) {
 }
 std::size_t receiver_control_margin(const modem::Config& config,bool keyed) {
     const auto compact=keyed && modem::symbol_sample_count(config)>=60ULL*config.sample_rate;
-    return (compact?8192U:65536U)+sizeof(detail::ReceiverState);
+    return (compact?8192U:65536U)+sizeof(detail::ReceiverState)+
+        detail::PatternScoreHistory::reserved_entries_bytes;
 }
 }

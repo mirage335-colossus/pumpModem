@@ -2,7 +2,12 @@
 #include "scheduled_work_profile.hpp"
 #include "shared_scheduled_capture.hpp"
 #include "datapump/live.hpp"
+#include "transfer_pending.hpp"
 #include "live_receiver_layout.hpp"
+#include "receiver_storage_allocator.hpp"
+#include "native_peak_workspace.hpp"
+#include "native_point_workspace.hpp"
+#include "native_diagnostic_history.hpp"
 #include "live_receiver_admission.hpp"
 #include "datapump/fhss_schedule.hpp"
 #include "datapump/sched_hop.hpp"
@@ -208,7 +213,23 @@ struct Session::Impl {
     using Receiver = detail::ReceiverState;
     struct Bank {
         std::shared_ptr<transfer::ReceiveStorageQuota> source_quota;
-        std::vector<Receiver> receivers;
+        // Pools precede handles for destruction. Whole-object move assignment
+        // destroys destination handles before replacing either stable heap pool.
+        std::shared_ptr<detail::ReceiverAllocationAccount> receiver_allocations=
+            std::make_shared<detail::ReceiverAllocationAccount>(0);
+        std::unique_ptr<modem::detail::NativePeakWorkspace> native_peaks=
+            std::make_unique<modem::detail::NativePeakWorkspace>();
+        std::unique_ptr<modem::detail::NativePointPool> native_points;
+        std::vector<Receiver,detail::ReceiverStorageAllocator<Receiver>> receivers{
+            detail::ReceiverStorageAllocator<Receiver>{receiver_allocations}};
+        Bank()=default;
+        Bank(const Bank&)=delete;
+        Bank& operator=(const Bank&)=delete;
+        Bank(Bank&&)noexcept=default;
+        Bank& operator=(Bank&& other)noexcept {
+            if(this!=&other){this->~Bank();std::construct_at(this,std::move(other));}
+            return *this;
+        }
         detail::ReceptionHistory receptions;
         std::unique_ptr<modem::detail::SharedSourceCurves<>> source_curves;
         std::unique_ptr<modem::detail::scheduled_source_samples::Pool> exact_source_samples;
@@ -230,7 +251,7 @@ struct Session::Impl {
         std::uint64_t samples = 0, next_candidate = 1,revision=0;
         std::uint64_t admissions = 0, retirements = 0, builds = 0;
         std::size_t peak_receivers = 0;
-        std::size_t working_bytes = sizeof(detail::ReceptionHistory)+sizeof(source_curves)+sizeof(exact_source_samples)+sizeof(exact_source_generation)+sizeof(next_exact_source_trace)+sizeof(exact_source_points)+sizeof(point_source_generation)+sizeof(next_point_consumer)+sizeof(next_point_source_trace)+sizeof(permutations)+sizeof(temporal_plans)+sizeof(deferred_input)+sizeof(input_queued_at)+sizeof(shared_capture)+sizeof(future_capture);
+        std::size_t working_bytes = sizeof(detail::ReceptionHistory)+sizeof(source_curves)+sizeof(exact_source_samples)+sizeof(exact_source_generation)+sizeof(next_exact_source_trace)+sizeof(exact_source_points)+sizeof(point_source_generation)+sizeof(next_point_consumer)+sizeof(next_point_source_trace)+sizeof(permutations)+sizeof(temporal_plans)+sizeof(deferred_input)+sizeof(input_queued_at)+sizeof(shared_capture)+sizeof(future_capture)+sizeof(receiver_allocations)+sizeof(detail::ReceiverAllocationAccount)+sizeof(receivers)+sizeof(native_peaks)+sizeof(modem::detail::NativePeakWorkspace)+sizeof(native_points)+65536;
         double created_at = 0;
         std::optional<long double> public_amplitude_epoch_origin;
         std::uint64_t refreshed_sample=0;
@@ -538,13 +559,84 @@ struct Session::Impl {
         // Reserve bounded diagnostic growth and control storage before
         // admitting a receiver, rather than reporting only its idle allocation.
         const auto& config=receiver.options.modem;
-        const auto margin=receiver_control_margin(config,receiver.options.key.has_value());
+        // Inline shells live in the allocator-accounted receiver vector. One
+        // bank-wide serialized allowance covers caller/control temporaries.
+        const auto owned_plan=receiver.options.key && config.fake_hopping?
+            sizeof(modem::FhssPlan)+config.fake_hopping->power_fallback_reason.capacity():0;
         std::size_t burst_bytes=receiver.bursts.capacity()*sizeof(modem::PatternBurst);
         for(const auto& burst:receiver.bursts)burst_bytes+=burst.bits.capacity();
-        return receiver.modem->working_bytes() + margin + burst_bytes + receiver.history_ordinals.heap_bytes() +
+        return receiver.modem->working_bytes() + burst_bytes + receiver.history_ordinals.heap_bytes() +
+            receiver.pattern_score_history.working_bytes()+receiver.key_tag.capacity()+
+            receiver.options.receive_targets_db_hz.capacity()*sizeof(double)+owned_plan +
             receiver.presentations.size()*(sizeof(decltype(receiver.presentations)::value_type)+4*sizeof(void*)) +
             (receiver.content?receiver.content->working_bytes():0) +
             (receiver.source_curve_family?sizeof(modem::detail::SourceFamily):0);
+    }
+    static std::size_t native_pool_workspace(const Bank& bank)noexcept {
+        return (bank.native_peaks?bank.native_peaks->capacity_bytes():0)+
+            (bank.native_points?bank.native_points->working_bytes():0);
+    }
+    static void set_receiver_container_limit(Bank& bank,std::size_t capacity) {
+        const auto used=bank.receiver_allocations->allocated_bytes();
+        if(used>bank.working_bytes)throw Error("receiver container charge exceeds bank");
+        const auto other=bank.working_bytes-used;
+        bank.receiver_allocations->set_allocation_limit(other<capacity?capacity-other:0);
+    }
+    static void trim_native_caches(Bank& bank) {
+        for(auto& peer:bank.receivers)if(!peer.modem->clock_windowed()) {
+            const auto before=peer.modem->working_bytes();peer.modem->trim_optional_workspace();
+            bank.working_bytes-=before-peer.modem->working_bytes();
+        }
+    }
+    // Point COW allocation is preflighted before input. Both arrays remain
+    // visible in the active ledger; restores happen before reset/publication.
+    struct NativeStorageScope {
+        Bank& bank;Receiver& receiver;
+        std::optional<modem::detail::NativePeakLease> peaks;
+        std::optional<modem::detail::NativePointLease> points;
+        NativeStorageScope(Bank& b,Receiver& r,std::size_t capacity,std::size_t& accounted):bank(b),receiver(r) {
+            const auto growth=bank.native_points?modem::detail::NativePointLease::allocation_headroom(
+                *bank.native_points,receiver.native_points,*receiver.modem):0;
+            if(bank.working_bytes>capacity || growth>capacity-bank.working_bytes)trim_native_caches(bank);
+            accounted=receiver_workspace(receiver);
+            if(bank.working_bytes>capacity || growth>capacity-bank.working_bytes)
+                throw Error("native point writable overlap exceeds receiver bank");
+            const auto before=receiver_workspace(receiver)+native_pool_workspace(bank);
+            try {
+                peaks.emplace(bank.native_peaks.get(),*receiver.modem);
+                points.emplace(bank.native_points.get(),receiver.native_points,*receiver.modem);
+            } catch(...) {points.reset();peaks.reset();throw;}
+            bank.working_bytes=bank.working_bytes-before+receiver_workspace(receiver)+native_pool_workspace(bank);
+            accounted=receiver_workspace(receiver);
+        }
+        void release()noexcept {
+            if(!peaks&&!points)return;
+            const auto before=receiver_workspace(receiver)+native_pool_workspace(bank);
+            points.reset();peaks.reset();
+            bank.working_bytes=bank.working_bytes-before+receiver_workspace(receiver)+native_pool_workspace(bank);
+        }
+        ~NativeStorageScope(){release();}
+    };
+    static void bind_native_storage(Bank& bank,Receiver& receiver,std::size_t capacity) {
+        if(bank.working_bytes>capacity)throw Error("receiver construction exceeds bank before binding");
+        const auto before=receiver_workspace(receiver)+native_pool_workspace(bank);
+        const auto history=modem::detail::NativeDiagnosticHistoryAccess::requirements(*receiver.modem,pattern_score_limit);
+        if(history) {
+            const auto available=capacity-bank.working_bytes;
+            if(history->binding_growth_bytes>available ||
+               !modem::detail::NativeDiagnosticHistoryAccess::bind(*receiver.modem,pattern_score_limit,available))
+                throw Error("native diagnostic binding exceeds receiver construction overlap");
+        }
+        // The full candidate array is constructor-owned before adoption. No
+        // capacity credit changes constructor selection or acquisition quotas.
+        (void)modem::detail::NativePeakLease::adopt(*bank.native_peaks,*receiver.modem);
+        if(bank.native_points) {
+            const auto now=receiver_workspace(receiver)+native_pool_workspace(bank);
+            const auto remaining=capacity-(bank.working_bytes-before+now);
+            if(bank.native_points->adoption_metadata_headroom()<=remaining)
+                (void)modem::detail::NativePointLease::try_adopt(*bank.native_points,receiver.native_points,*receiver.modem);
+        }
+        bank.working_bytes=bank.working_bytes-before+receiver_workspace(receiver)+native_pool_workspace(bank);
     }
     const bool custom_epoch_clock;
     EpochClock epoch_clock;
@@ -1240,6 +1332,13 @@ struct Session::Impl {
         // Calendar refresh alone neither invalidates public N/C/coordinate
         // keys nor changes any original receiver grant. Retain the complete
         // joined owner until a genuinely new receiver is found below.
+        if(!bank.native_points) {
+            const auto capacity=bank_capacity(value);
+            if(sizeof(modem::detail::NativePointPool)>capacity-std::min(capacity,bank.working_bytes))
+                throw Error("native point pool control exceeds receiver bank");
+            bank.native_points=std::make_unique<modem::detail::NativePointPool>(capacity/sizeof(modem::detail::NativePointEntry));
+            bank.working_bytes+=bank.native_points->working_bytes();
+        }
         const auto prior_admissions=bank.admissions;
         // Optional reusable scratch must not displace a required admission.
         // Preserve it while space suffices; a calendar refresh is not itself
@@ -1571,6 +1670,17 @@ struct Session::Impl {
                     });
                     continue;
                 }
+                set_receiver_container_limit(bank,capacity);
+                if(bank.receivers.size()==bank.receivers.capacity()) {
+                    const auto before=bank.receiver_allocations->allocated_bytes();
+                    try {bank.receivers.reserve(bank.receivers.size()+1);}
+                    catch(const std::bad_alloc&){unavailable("receiver container replacement exceeds DSP workspace");continue;}
+                    bank.working_bytes+=bank.receiver_allocations->allocated_bytes()-before;
+                }
+                if(bank.working_bytes>=capacity || capacity-bank.working_bytes<=control_margin)reclaim_scratch();
+                if(bank.working_bytes>=capacity || capacity-bank.working_bytes<=control_margin) {
+                    unavailable("receiver container leaves insufficient constructor headroom");continue;
+                }
                 Receiver receiver;
                 receiver.sample_origin=bank.samples;receiver.family=family;
                 if(bank.next_point_consumer==UINT64_MAX)throw Error("point pool consumer identity exhausted");
@@ -1675,6 +1785,8 @@ struct Session::Impl {
                 bank.coverage_limited |= receiver.modem->local_clock_fallback();
                 receiver.content=std::make_unique<transfer::StreamReceiver>(receiver.options,receiver.epoch,bank.source_quota);
                 bank.working_bytes += receiver_workspace(receiver);
+                if(bank.working_bytes>capacity)throw Error("receiver construction exceeds configured DSP workspace");
+                bind_native_storage(bank,receiver,capacity);
                 if (bank.working_bytes > bank_capacity(value))
                     throw Error("key and epoch receiver bank exceeds the configured DSP workspace");
                 bank.receivers.push_back(std::move(receiver));
@@ -1783,6 +1895,9 @@ struct Session::Impl {
             (bank.exact_source_samples?bank.exact_source_samples->working_bytes():0)+
             (bank.exact_source_points?bank.exact_source_points->working_bytes():0)+(bank.permutations?bank.permutations->working_bytes():0)+
             (bank.temporal_plans?bank.temporal_plans->working_bytes():0);
+        bank.working_bytes+=sizeof(bank.receiver_allocations)+sizeof(detail::ReceiverAllocationAccount)+
+            sizeof(bank.receivers)+bank.receiver_allocations->allocated_bytes()+sizeof(bank.native_peaks)+
+            sizeof(modem::detail::NativePeakWorkspace)+sizeof(bank.native_points)+native_pool_workspace(bank)+65536;
         for(const auto& receiver:bank.receivers)bank.working_bytes+=receiver_workspace(receiver);
         if(new_epoch && !bank.burst_admission_frozen) {
             bank.burst_resume_pending=false;
@@ -2488,6 +2603,9 @@ struct Session::Impl {
             modem::detail::PatternPermutationScope history_permutations(permutation_eligible?bank.permutations.get():nullptr,permutation_ns);
             const auto accounted=receiver_workspace(receiver);
             const auto candidates=receiver.modem->pattern_candidates(pattern_score_limit,stop);
+            const auto history_growth=receiver.pattern_score_history.allocation_headroom(candidates.size());
+            if(bank.working_bytes>capacity || history_growth>capacity-bank.working_bytes)
+                throw Error("pattern score history replacement exceeds receiver bank");
             if(deferred) {
                 if(receiver.modem->diagnostic_history_generation()!=generation)
                     throw Error("diagnostic history query changed receiver completion events");
@@ -2561,12 +2679,14 @@ struct Session::Impl {
                 execution::checkpoint();
                 if (stop.stop_requested()) return;
                 auto accounted = receiver_workspace(receiver);
+                std::optional<NativeStorageScope> native_storage;
                 const auto update_workspace = [&] {
                     const auto actual = receiver_workspace(receiver);
                     bank.working_bytes = bank.working_bytes - accounted + actual;
                     accounted = actual;
                 };
                 try {
+                    native_storage.emplace(bank,receiver,capacity,accounted);
                     if(phase==0) {
                         // Resolve/grow provenance before borrowing numeric caches
                         // or computing the modem loan. New heap bytes then reduce
@@ -2574,6 +2694,12 @@ struct Session::Impl {
                         prepare_history_fence(receiver);
                         accounted=receiver_workspace(receiver);
                         if(stop.stop_requested())return;
+                        const auto required=receiver.modem->reserved_workspace_bytes();
+                        const auto retained=receiver.modem->working_bytes();
+                        const auto native_growth=required>retained?required-retained:0;
+                        if(bank.working_bytes>capacity || native_growth>capacity-bank.working_bytes) {
+                            trim_native_caches(bank);accounted=receiver_workspace(receiver);
+                        }
                         const auto actual=receiver.modem->working_bytes();
                         auto overhead = accounted - actual;
                         auto other = bank.working_bytes - accounted;
@@ -2699,7 +2825,8 @@ struct Session::Impl {
                             if(presentation==receiver.presentations.end())continue;
                             auto& display=presentation->second;
                             const auto candidate=reception_candidate(receiver,burst,display);
-                            auto result=receiver.content->push(std::move(burst),receiver.modem->diagnostics());
+                            auto result=transfer::detail::push_live_pending(
+                                *receiver.content,std::move(burst),receiver.modem->diagnostics());
                             update_workspace();
                             if(bank.working_bytes>capacity)throw Error("receive content diagnostics exceed the configured DSP workspace");
                             std::string bits;bits.reserve(result.raw_bits.size());
@@ -2776,7 +2903,7 @@ struct Session::Impl {
                         continue;
                     }
                 } catch (const Error& error) {
-                    update_workspace();
+                    update_workspace();if(native_storage)native_storage->release();accounted=receiver_workspace(receiver);
                     if (stop.stop_requested()) return;
                     release_optimization();accounted=receiver_workspace(receiver);
                     {
@@ -2889,12 +3016,16 @@ struct Session::Impl {
                         amplitude_metadata(receiver,receiver.options.modem,search,selection);
                         if(declared_search && !(selection.supported && selection.full_frequency_coverage && selection.full_clock_coverage))
                             note_oscillator_coverage(bank,*declared_search);
+                        const auto old_pool_bytes=native_pool_workspace(bank);
+                        receiver.native_points.reset();
+                        bank.working_bytes=bank.working_bytes-old_pool_bytes+native_pool_workspace(bank);
                         receiver.modem.reset();
                         receiver.modem=std::make_unique<modem::StreamingReceiver>(transfer::seeded_config(receiver.options,receiver.epoch),
                             selection.backend==modem::ReceiverBackend::existing_complex &&
                                 !(selection.scheduled && !modem::packed_scheduled_symbols(receiver.options.modem))?remaining:
                                 std::min(remaining,selection.selected_workspace_bytes),search);
                         bank.coverage_limited |= receiver.modem->local_clock_fallback();
+                        update_workspace();bind_native_storage(bank,receiver,capacity);accounted=receiver_workspace(receiver);
                         receiver.content=std::make_unique<transfer::StreamReceiver>(receiver.options,receiver.epoch,bank.source_quota);
                         receiver.admitted_at=observation_epoch(bank,value,bank.samples+sample_count);
                         receiver.sample_origin=bank.samples+sample_count;

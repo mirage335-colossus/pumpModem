@@ -3,6 +3,7 @@
 #include "datapump/boundary_sync.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "../src/transfer_pending.hpp"
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
@@ -52,6 +53,62 @@ void arbitrary_content_limits() {
         else check(wire.size()%1216==0 && received.content_validated && received.content.message.data==sent.data,
                    "interval text within a small local content limit must roundtrip its advertised capacity");
     }
+}
+void live_pending_diagnostics_policy() {
+    const auto value=options();
+    const std::array<std::uint8_t,1> bit{1};
+    transfer::StreamReceiver live(value,value.timestamp);
+    modem::Diagnostics pending_diagnostics;
+    pending_diagnostics.sample_offset=37;
+    pending_diagnostics.preamble_correlation=.625;
+    pending_diagnostics.snr_db=12.5;
+    pending_diagnostics.bit_rate=4.25;
+    pending_diagnostics.pattern_score=7.5;
+    pending_diagnostics.constellation.resize(1024,{1.0,-2.0});
+    pending_diagnostics.waveform.resize(2048,.5f);
+    auto pending=transfer::detail::push_live_pending(
+        live,chunk(bit,0,444),std::move(pending_diagnostics));
+    check(!pending.stream_complete && pending.raw_bits==Bytes{1} &&
+          pending.diagnostics.sample_offset==444 && pending.diagnostics.preamble_correlation==.625 &&
+          pending.diagnostics.snr_db==12.5 && pending.diagnostics.bit_rate==4.25 &&
+          pending.diagnostics.pattern_score==100 && pending.diagnostics.constellation.empty() &&
+          pending.diagnostics.waveform.empty(),
+          "Live pending delivery must preserve scalar diagnostics and exact prefix without retaining point vectors");
+
+    modem::Diagnostics complete_diagnostics;
+    complete_diagnostics.sample_offset=99;
+    complete_diagnostics.preamble_correlation=.875;
+    complete_diagnostics.constellation.resize(16,{3.0,4.0});
+    complete_diagnostics.waveform.resize(32,.25f);
+    auto final=chunk({},1,444, true);
+    auto complete=transfer::detail::push_live_pending(
+        live,std::move(final),std::move(complete_diagnostics));
+    check(complete.stream_complete && complete.raw_bits==Bytes{1} &&
+          complete.diagnostics.sample_offset==444 && complete.diagnostics.preamble_correlation==.875 &&
+          complete.diagnostics.constellation.size()==16 && complete.diagnostics.waveform.size()==32,
+          "Live completion must receive full diagnostics at the completing push");
+
+    transfer::StreamReceiver gap_receiver(value,value.timestamp);
+    modem::Diagnostics gap_diagnostics;
+    gap_diagnostics.sample_offset=101;
+    gap_diagnostics.constellation.resize(7,{7.0,8.0});
+    gap_diagnostics.waveform.resize(9,.125f);
+    auto gap=chunk({},0,446,true);
+    gap.missing_slots=1;
+    const auto gap_complete=transfer::detail::push_live_pending(
+        gap_receiver,std::move(gap),std::move(gap_diagnostics));
+    check(gap_complete.stream_complete && gap_complete.missing_symbols==1 &&
+          gap_complete.diagnostics.sample_offset==446 && gap_complete.diagnostics.constellation.size()==7 &&
+          gap_complete.diagnostics.waveform.size()==9,
+          "a completing missing run must publish full diagnostics through the unchanged complete delivery path");
+
+    transfer::StreamReceiver public_receiver(value,value.timestamp);
+    modem::Diagnostics public_diagnostics;
+    public_diagnostics.constellation.resize(3,{5.0,6.0});
+    public_diagnostics.waveform.resize(5,.75f);
+    const auto public_result=public_receiver.push(chunk(bit,0,555),std::move(public_diagnostics));
+    check(public_result.diagnostics.constellation.size()==3 && public_result.diagnostics.waveform.size()==5,
+          "public StreamReceiver delivery must continue retaining caller diagnostics");
 }
 void timed_acquisition_coordinates() {
     const auto value=options(true);const auto sent=message(44);const auto wire=transfer::message_wire_bits(sent,value);
@@ -725,7 +782,7 @@ void dictionary_interpretation_is_bounded_and_post_end() {
 }
 }
 int main() {
-    try {arbitrary_content_limits();timed_acquisition_coordinates();refined_phase_and_post_end_gate();
+    try {arbitrary_content_limits();live_pending_diagnostics_policy();timed_acquisition_coordinates();refined_phase_and_post_end_gate();
          source_headers_are_opaque_until_physical_end();underfilled_interval_does_not_end_reception();final_parity_statistics();
          late_acquisition_recovers_only_after_physical_end();late_acquisition_rejects_unsupported_evidence();
          markerless_acquisition_recovers_only_after_physical_end();damaged_marker_and_all_bit_phases();

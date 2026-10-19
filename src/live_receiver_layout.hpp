@@ -4,6 +4,7 @@
 #include "datapump/pattern_correlator.hpp"
 #include "datapump/symbol_burst.hpp"
 #include "live_pattern_scores.hpp"
+#include "native_point_workspace.hpp"
 #include "live_deferred_pattern_history.hpp"
 #include "scheduled_source_binding_types.hpp"
 #include <complex>
@@ -35,6 +36,7 @@ struct ReceiverState {
     std::uint64_t sample_origin = 0, family = 0;
     modem::detail::scheduled_source_samples::PointFamilyToken point_family;
     std::uint64_t point_consumer=UINT64_MAX;
+    modem::detail::NativePointOwner native_points;
     PatternScoreHistory pattern_score_history;
     DeferredPatternHistoryOrdinals history_ordinals;
     DeferredPatternHistoryPoll history_poll;

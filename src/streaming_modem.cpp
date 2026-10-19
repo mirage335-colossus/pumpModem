@@ -1,4 +1,7 @@
 #include "datapump/streaming_modem.hpp"
+#include "native_peak_workspace.hpp"
+#include "native_point_workspace.hpp"
+#include "native_diagnostic_history.hpp"
 #include "datapump/pattern_code.hpp"
 #include <openssl/crypto.h>
 #include <algorithm>
@@ -242,6 +245,29 @@ std::size_t StreamingReceiver::reserved_workspace_bytes()const{return sizeof(Str
 std::size_t StreamingReceiver::projection_cache_headroom(std::size_t input_samples)const{return impl_->pattern.projection_cache_headroom(input_samples);}
 std::optional<std::size_t> StreamingReceiver::temporal_plan_workers()const{return impl_->pattern.temporal_plan_workers();}
 void StreamingReceiver::trim_optional_workspace(){impl_->pattern.trim_optional_workspace();}
+detail::NativePeakLease::NativePeakLease(detail::NativePeakWorkspace* workspace,StreamingReceiver& receiver)
+    :NativePeakLease(workspace,receiver.impl_->pattern) {}
+bool detail::NativePeakLease::adopt(detail::NativePeakWorkspace& workspace,StreamingReceiver& receiver) {
+    return adopt(workspace,receiver.impl_->pattern);
+}
+detail::NativePointLease::NativePointLease(detail::NativePointPool* pool,detail::NativePointOwner& owner,StreamingReceiver& receiver)
+    :NativePointLease(pool,owner,receiver.impl_->pattern) {}
+bool detail::NativePointLease::try_adopt(detail::NativePointPool& pool,detail::NativePointOwner& owner,StreamingReceiver& receiver) {
+    return try_adopt(pool,owner,receiver.impl_->pattern);
+}
+std::size_t detail::NativePointLease::allocation_headroom(const detail::NativePointPool& pool,const detail::NativePointOwner& owner,const StreamingReceiver& receiver) {
+    return allocation_headroom(pool,owner,receiver.impl_->pattern);
+}
+std::optional<detail::NativeDiagnosticHistoryRequirements>
+detail::NativeDiagnosticHistoryAccess::requirements(const StreamingReceiver& receiver,std::size_t limit) {
+    return requirements(receiver.impl_->pattern,limit);
+}
+bool detail::NativeDiagnosticHistoryAccess::bind(StreamingReceiver& receiver,std::size_t limit,std::size_t available_growth_bytes) {
+    return bind(receiver.impl_->pattern,limit,available_growth_bytes);
+}
+detail::NativeDiagnosticHistoryAccounting detail::NativeDiagnosticHistoryAccess::accounting(const StreamingReceiver& receiver)noexcept {
+    return accounting(receiver.impl_->pattern);
+}
 void StreamingReceiver::set_workspace_bytes(std::size_t bytes) {
     if(bytes<working_bytes())throw Error("DSP workspace is smaller than retained receiver history");
     impl_->pattern.set_workspace_bytes(bytes-sizeof(Impl));impl_->workspace=bytes;

@@ -1,5 +1,8 @@
 #include "datapump/pattern_receiver.hpp"
+#include "native_peak_workspace.hpp"
+#include "native_point_workspace.hpp"
 #include "pattern_start_geometry.hpp"
+#include "native_diagnostic_history.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_correlator.hpp"
@@ -140,6 +143,7 @@ struct PatternReceiver::Impl {
     bool finished=false,oscillator_valid=true,candidate_limit_reached=false;
     std::uint64_t trials=0,history_insertions=0;
     std::vector<PatternEvidence> history,peaks;
+    std::unique_ptr<detail::NativeDiagnosticHistoryTail<PatternEvidence>> diagnostic_tail;
     struct Completed {std::uint64_t first=0,end=0;double frequency=0;};
     std::vector<Completed> completed;
     std::vector<PatternBurst> bursts;
@@ -1118,8 +1122,12 @@ struct PatternReceiver::Impl {
     void remember(PatternEvidence item) {
         if(item.score<search.retain_score)return;
         item.admission_threshold=threshold();
-        if(history.size()==search.candidate_limit)history.erase(history.begin());
-        history.push_back(item);++history_insertions;
+        if(diagnostic_tail)diagnostic_tail->append(history,item);
+        else {
+            if(history.size()==search.candidate_limit)history.erase(history.begin());
+            history.push_back(item);
+        }
+        ++history_insertions;
     }
     std::array<std::size_t,5> drift_edges(std::size_t frequency) const {
         std::array<std::size_t,5> edges{};edges.back()=length;
@@ -1359,7 +1367,10 @@ struct PatternReceiver::Impl {
         return !evidence.outer_presence_active || evidence.outer_presence_score>=threshold();
     }
     void publish(Track& track,bool complete,bool flush=false,bool draining=false) {
-        if(early_eof_pending && track.established)early_eof_replayable=false;
+        if(early_eof_pending && track.established) {
+            early_eof_replayable=false;
+            if(diagnostic_tail)diagnostic_tail->release_checkpoint();
+        }
         track.burst.score=track.confirmed_score;
         track.burst.support_samples=track.confirmed_support;
         if(!track.established)return;
@@ -2604,6 +2615,10 @@ struct PatternReceiver::Impl {
         if(early_eof_pending && early_eof_begin==begin)return;
         if(early_eof_pending && bins-length+1<early_eof_end)
             throw Error("overlapping unobserved acquisition checkpoints");
+        if(diagnostic_tail) {
+            if(tracks.empty())diagnostic_tail->checkpoint(history);
+            else diagnostic_tail->release_checkpoint();
+        }
         early_eof_pending=true;early_eof_replayable=tracks.empty();
         early_eof_begin=begin;early_eof_end=begin+hop;
         early_trials_before=trials;early_history_before=history_insertions;
@@ -2654,8 +2669,11 @@ struct PatternReceiver::Impl {
             // hops and published receptions keep their live accounting.
             if(bins-early_eof_begin>ring.size())throw Error("partial component replay lost observed samples");
             tracks.clear();trials=early_trials_before;
-            const auto appended=std::min<std::uint64_t>(history.size(),history_insertions-early_history_before);
-            history.resize(history.size()-static_cast<std::size_t>(appended));
+            if(diagnostic_tail)diagnostic_tail->rollback(history,history_insertions-early_history_before);
+            else {
+                const auto appended=std::min<std::uint64_t>(history.size(),history_insertions-early_history_before);
+                history.resize(history.size()-static_cast<std::size_t>(appended));
+            }
             ++fft_workload->eof_replays;next_start=early_eof_begin;early_eof_pending=false;
             component_hop=acquisition_prepaid=false;
             scheduled_start=continuation_schedule=std::numeric_limits<std::uint64_t>::max();
@@ -2858,6 +2876,9 @@ struct PatternReceiver::Impl {
                 ++fft_workload->arithmetic_fallback_jobs;
             }
             if(early)++fft_workload->early_batches;
+            // Explicit cohort leases return this transient backing after a call.
+            // Unleased calls still retain the full original candidate quota.
+            if(peaks.capacity()<search.candidate_limit)peaks.reserve(search.candidate_limit);
             peaks.clear();
             if(startup_guide) {
                 peaks.resize(2);
@@ -2970,8 +2991,10 @@ struct PatternReceiver::Impl {
     }
     void bin(Complex value,std::stop_token stop) {
         ring[static_cast<std::size_t>(bins%ring.size())]=value;++bins;
-        if(early_eof_pending && bins>=length && bins-length+1>=early_eof_end)
+        if(early_eof_pending && bins>=length && bins-length+1>=early_eof_end) {
             early_eof_pending=false;
+            if(diagnostic_tail)diagnostic_tail->release_checkpoint();
+        }
         const auto point=std::abs(previous_chip)>1e-20?value*std::conj(previous_chip)/std::abs(previous_chip):value;
         if(points.size()==2048){points[point_cursor]=point;point_cursor=(point_cursor+1)%points.size();}
         else points.push_back(point);
@@ -3071,7 +3094,7 @@ struct PatternReceiver::Impl {
         }
         for(const auto& track:tracks)total+=track.burst.bits.capacity()+track.frequency_scores.capacity()*sizeof(double);
         for(const auto& burst:bursts)total+=burst.bits.capacity();
-        return total+latest.bits.capacity()+scoring_reservation+(work.empty()?0:arithmetic_reservation)+native_active_bytes+native_plan_bytes();
+        return total+(diagnostic_tail?diagnostic_tail->working_bytes():0)+latest.bits.capacity()+scoring_reservation+(work.empty()?0:arithmetic_reservation)+native_active_bytes+native_plan_bytes();
     }
     std::size_t wrapper_bytes()const {
         return sizeof(Impl)+sizeof(PatternReceiver)+code.working_bytes()+(fft_workload?sizeof(PatternFftWork):0)+(timing_components?sizeof(TimingComponents):0)+
@@ -3142,7 +3165,72 @@ std::uint64_t pattern_absence_capture_samples(const Config& config) {
     return eligible;
 }
 PatternReceiver::PatternReceiver(Config c,std::size_t bytes,PatternSearch search):impl_(std::make_unique<Impl>(c,bytes,std::move(search))){}
+detail::NativePeakLease::NativePeakLease(detail::NativePeakWorkspace* workspace,PatternReceiver& receiver)
+    :NativePeakLease(receiver.impl_->fallback?nullptr:workspace,receiver.impl_->peaks,
+                     receiver.impl_->search.candidate_limit) {}
+bool detail::NativePeakLease::adopt(detail::NativePeakWorkspace& workspace,PatternReceiver& receiver) {
+    auto& s=*receiver.impl_;
+    return !s.fallback && workspace.adopt(s.peaks,s.search.candidate_limit);
+}
+detail::NativePointLease::NativePointLease(detail::NativePointPool* pool,detail::NativePointOwner& owner,PatternReceiver& receiver)
+    :NativePointLease(receiver.impl_->fallback?nullptr:pool,owner,receiver.impl_->points) {}
+bool detail::NativePointLease::try_adopt(detail::NativePointPool& pool,detail::NativePointOwner& owner,PatternReceiver& receiver) {
+    return !receiver.impl_->fallback && pool.try_adopt(owner,receiver.impl_->points);
+}
+std::size_t detail::NativePointLease::allocation_headroom(const detail::NativePointPool& pool,const detail::NativePointOwner& owner,const PatternReceiver& receiver) {
+    return receiver.impl_->fallback?0:pool.loan_allocation_headroom(owner,receiver.impl_->points);
+}
 PatternReceiver::~PatternReceiver()=default;
+
+std::optional<detail::NativeDiagnosticHistoryRequirements>
+detail::NativeDiagnosticHistoryAccess::requirements(const PatternReceiver& receiver,std::size_t limit) {
+    const auto& s=*receiver.impl_;
+    if(s.fallback || s.diagnostic_tail || !limit || limit>s.search.candidate_limit || s.finished ||
+       s.sample || s.bins || s.partial || s.trials || s.history_insertions || !s.history.empty() ||
+       !s.tracks.empty() || !s.bursts.empty() || !s.completed.empty() || s.early_eof_pending)return std::nullopt;
+    const auto tail_bytes=limit*sizeof(PatternEvidence);
+    const auto control_bytes=sizeof(NativeDiagnosticHistoryTail<PatternEvidence>);
+    const auto working=s.working_bytes();
+    const auto growth=control_bytes+tail_bytes;
+    const auto bound=working-s.history.capacity()*sizeof(PatternEvidence)+growth;
+    const auto reserved=s.fixed_reservation-s.search.candidate_limit*sizeof(PatternEvidence)+growth+tail_bytes;
+    // Binding's new array coexists with the constructor's old array until swap.
+    // Do not turn storage compaction into additional arithmetic/cache budget.
+    // The original C-entry reservation already covers H+J+control for Live.
+    return NativeDiagnosticHistoryRequirements{growth,working+growth,bound,tail_bytes,
+        std::max({bound,s.fixed_reservation,reserved})};
+}
+bool detail::NativeDiagnosticHistoryAccess::bind(PatternReceiver& receiver,std::size_t limit,std::size_t available_growth_bytes) {
+    const auto required=requirements(receiver,limit);
+    if(!required || required->binding_growth_bytes>available_growth_bytes)return false;
+    auto& s=*receiver.impl_;
+    if(required->binding_peak_bytes>s.budget || required->bound_reserved_bytes>s.budget)return false;
+    auto tail=std::make_unique<NativeDiagnosticHistoryTail<PatternEvidence>>(s.search.candidate_limit,limit);
+    std::vector<PatternEvidence> history;history.reserve(limit);
+    // A library may reserve more than requested. Reject before committing if its
+    // actual overlap or checkpoint reservation exceeds the promised headroom.
+    const auto growth=sizeof(*tail)+history.capacity()*sizeof(PatternEvidence);
+    if(growth>available_growth_bytes || growth>s.budget-s.working_bytes())return false;
+    const auto reserved=std::max(s.fixed_reservation,
+        s.fixed_reservation-s.search.candidate_limit*sizeof(PatternEvidence)+growth+
+        required->checkpoint_growth_bytes);
+    if(reserved>s.budget)return false;
+    s.history.swap(history);s.diagnostic_tail=std::move(tail);s.fixed_reservation=reserved;
+    // Bit capacity and every detector/search choice remain exactly as constructed.
+    return true;
+}
+detail::NativeDiagnosticHistoryAccounting
+detail::NativeDiagnosticHistoryAccess::accounting(const PatternReceiver& receiver)noexcept {
+    const auto& s=*receiver.impl_;
+    NativeDiagnosticHistoryAccounting result;
+    result.history_capacity_bytes=s.history.capacity()*sizeof(PatternEvidence);
+    if(s.diagnostic_tail) {
+        result.bound=true;result.logical_size=s.diagnostic_tail->logical_size();result.limit=s.diagnostic_tail->limit();
+        result.checkpoint_bytes=s.diagnostic_tail->checkpoint_bytes();result.control_bytes=sizeof(*s.diagnostic_tail);
+    }
+    return result;
+}
+
 std::size_t PatternReceiver::symbol_burst_control_bytes(){return sizeof(SymbolBurstPlan)+sizeof(SymbolBurstCursor)+sizeof(Impl::BurstPolicy);}
 PatternReceiver::PatternReceiver(PatternReceiver&&) noexcept=default;
 PatternReceiver& PatternReceiver::operator=(PatternReceiver&&) noexcept=default;
@@ -3225,6 +3313,7 @@ bool PatternReceiver::try_skip_unobserved(std::uint64_t count,std::stop_token st
     s.sum={};s.partial=0;s.oscillator_valid=false;
     s.next_start=std::max(s.next_start,s.bins);
     s.component_hop=s.acquisition_prepaid=s.early_eof_pending=false;
+    if(s.diagnostic_tail)s.diagnostic_tail->release_checkpoint();
     return true;
 }
 std::optional<std::uint64_t> PatternReceiver::unobserved_end_from(std::uint64_t sample) const {
@@ -3332,7 +3421,12 @@ std::optional<std::size_t> PatternReceiver::temporal_plan_workers()const {
     return impl_->fallback?impl_->fallback->temporal_plan_workers():std::nullopt;
 }
 void PatternReceiver::set_workspace_bytes(std::size_t bytes){impl_->set_workspace_bytes(bytes);}
-void PatternReceiver::trim_optional_workspace(){if(impl_->fallback)impl_->fallback->trim_optional_workspace();}
+void PatternReceiver::trim_optional_workspace(){
+    if(impl_->fallback)impl_->fallback->trim_optional_workspace();
+    else if(impl_->cached_templates.capacity() ||
+            (!impl_->required_tracking_reference && impl_->tracking_reference.capacity()))
+        impl_->drop_template_cache(); // Joined optional storage only; exact bounded recomputation remains.
+}
 Diagnostics PatternReceiver::diagnostics()const {
     if(impl_->fallback)return impl_->fallback->diagnostics();
     const auto& s=*impl_;const auto& burst=s.current_burst();Diagnostics d;d.bit_rate=bit_rate(s.config);d.sample_offset=static_cast<std::size_t>(burst.first_sample);
