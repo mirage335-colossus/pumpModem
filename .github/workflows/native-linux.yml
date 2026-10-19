@@ -21,7 +21,7 @@ on:
       stop_group:
         description: Temporary matched stop experiment group; diagnostic only
         type: choice
-        options: [original, eu, fcc, eu-offset, eu-guard, eu-position, eu-o0-san-on, eu-o1-san-off, eu-o0-san-off, eu-focus-o1-san-on, eu-focus-o0-san-on, eu-focus-o1-san-off, eu-focus-o0-san-off, eu-kernel-o1-san-on, eu-kernel-o1-san-off, eu-clock-o1-san-on]
+        options: [original, eu, fcc, eu-offset, eu-guard, eu-position, eu-o0-san-on, eu-o1-san-off, eu-o0-san-off, eu-focus-o1-san-on, eu-focus-o0-san-on, eu-focus-o1-san-off, eu-focus-o0-san-off, eu-kernel-o1-san-on, eu-kernel-o1-san-off, eu-clock-o1-san-on, eu-worker-one-o1-san-on]
         default: original
       calibration_section:
         description: 'Calibration section; used only by the calibration scope'
