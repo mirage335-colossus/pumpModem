@@ -15,6 +15,7 @@
 #include <tuple>
 #include <mutex>
 #include <limits>
+#include <iomanip>
 using namespace datapump;
 using namespace std::chrono_literals;
 namespace {
@@ -663,12 +664,43 @@ struct ReleaseSimulationScript {
 };
 live::Settings media_clock_settings() {
     auto value=settings();value.transfer.timestamp=0;
+    // Flooring the TX date leaves <1s, plus the independent sampled channel's
+    // <0.30s startup and fractional sample. Declare that arrival uncertainty;
+    // cipher phase search does not extend the ordinary receiver's time prior.
+    value.transfer.search_seconds=1;
     value.transfer.modem.sample_rate=512;value.transfer.modem.carrier_hz=128;
-    value.transfer.modem.bandwidth_hz=128;value.transfer.modem.spreading_factor=1;
+    // A one-chip private symbol has only two projected observations here;
+    // the ordinary scorer requires at least four. Use the established 16-chip
+    // Live/transfer geometry so this fixture can actually acquire a waveform.
+    value.transfer.modem.bandwidth_hz=128;value.transfer.modem.spreading_factor=16;
     value.transfer.modem.scramble=true;value.transfer.modem.dsss=false;
     std::array<std::uint8_t,32> material{};material.fill(0x61);
     value.transfer.key=Crypto(material);
     return value;
+}
+bool completed_media_clock_raw(const live::Snapshot& snapshot,std::span<const std::uint8_t> bits) {
+    std::string expected;for(const auto bit:bits)expected.push_back(bit?'1':'0');
+    return std::any_of(snapshot.signals.begin(),snapshot.signals.end(),[&](const auto& signal) {
+        return signal.complete && !signal.validated && !signal.missing_symbols && signal.received_bits==bits.size() &&
+            (signal.binary?signal.text:signal.raw_bits)==expected;
+    });
+}
+std::string media_clock_result_context(std::string_view mode,const live::Snapshot& calculated,
+    const live::Snapshot& completed,double epoch,double origin) {
+    std::ostringstream out;out<<std::setprecision(std::numeric_limits<double>::max_digits10)
+        <<" [case="<<mode<<" origin="<<origin<<" tx_date="<<epoch<<" tx_epoch="<<std::uint64_t(epoch)
+        <<" source_seconds="<<calculated.transmission_seconds<<" samples="<<calculated.samples_received
+        <<" receivers="<<calculated.receiver_instances<<" admissions="<<calculated.receiver_admissions
+        <<" calculated_replay="<<calculated.simulation_replay<<" final_replay="<<completed.simulation_replay
+        <<" signals="<<completed.signals.size()<<" received="<<completed.received.size()
+        <<" error="<<std::quoted(completed.error.substr(0,128));
+    for(std::size_t i=0;i<std::min<std::size_t>(4,completed.signals.size());++i) {
+        const auto& signal=completed.signals[i];
+        out<<" signal"<<i<<"={complete:"<<signal.complete<<",validated:"<<signal.validated
+            <<",bits:"<<signal.received_bits<<",missing:"<<signal.missing_symbols<<",binary:"<<signal.binary<<",text:"
+            <<std::quoted(signal.text.substr(0,64))<<",raw:"<<std::quoted(signal.raw_bits.substr(0,64))<<'}';
+    }
+    return out.str()+']';
 }
 void simulation_media_clock_arithmetic() {
     using live::detail::simulation_media_epoch;
@@ -702,21 +734,31 @@ void simulation_media_clock_transmissions() {
             check(!s.receiver_health.failed(),"healthy media clock reported lost input");
             return s.transmission_finished && s.simulation_replay;
         });
-        double epoch;
-        {std::lock_guard lock(script.mutex);check(script.epochs.size()==mode+1,"default provider missed source epoch handoff");epoch=script.epochs.back();}
+        double epoch,origin;
+        {std::lock_guard lock(script.mutex);check(script.epochs.size()==mode+1,"default provider missed source epoch handoff");epoch=script.epochs.back();origin=script.banks.front().epoch;}
         auto options=value.transfer;options.timestamp=static_cast<std::uint64_t>(epoch);
         auto expected=mode==0?raw:transfer::message_wire_bits(message,options);
         if(mode==0)transfer::xor_binary_bits(expected,options);
         if(expected.size()>modem::TransmitTrace::bit_limit)expected.resize(modem::TransmitTrace::bit_limit);
         replay_ms+=3000;
         const auto completed=session.snapshot();
-        check(completed.transmit_trace.wire_bits==expected,"media-clock epoch was applied after wire construction");
-        check(!completed.received.empty(),"media-clock keyed waveform did not physically complete");
-        check(completed.received.back().stream_complete,"media-clock source validity bypassed physical completion");
-        if(mode==0)check(completed.received.back().raw_bits==raw,"media clock lost leading raw zeros");
-        else check(completed.received.back().content.message.data==message.data,"media clock changed short/framed source bytes");
-        if(mode==2)check(completed.received.back().content_validated,"media clock bypassed framed source validation");
-        check(calculated.samples_received>64 && !completed.receiver_health.failed(),"media clock reset healthy reception");
+        const auto require=[&](bool valid,const char* message) {
+            if(!valid)throw Error(std::string(message)+media_clock_result_context(
+                mode==0?"raw":mode==1?"short":"framed",calculated,completed,epoch,origin));
+        };
+        require(completed.transmit_trace.wire_bits==expected,"media-clock epoch was applied after wire construction");
+        if(mode==0) {
+            require(completed_media_clock_raw(completed,raw),"media clock did not physically complete exact raw leading-zero bits");
+            for(const auto& result:completed.received)
+                require(result.stream_complete && result.raw_bits==raw && !result.content_validated,
+                        "media clock changed optional raw dictionary interpretation");
+        } else {
+            require(!completed.received.empty(),"media-clock keyed waveform did not physically complete");
+            require(completed.received.back().stream_complete,"media-clock source validity bypassed physical completion");
+            require(completed.received.back().content.message.data==message.data,"media clock changed short/framed source bytes");
+            if(mode==2)require(completed.received.back().content_validated,"media clock bypassed framed source validation");
+        }
+        require(calculated.samples_received>64 && !completed.receiver_health.failed(),"media clock reset healthy reception");
     }
     const auto before=session.snapshot();session.clear_received();
     wait_for(session,"media clock bank after Clear",[&](const auto& s){return s.samples_received>before.samples_received;});
@@ -801,15 +843,16 @@ void simulation_media_clock_clear_construction() {
     session.clear_received();
     check(session.snapshot().transmitting,"Clear cancelled deferred simulation preparation");
     script.released=true;
-    wait_for_sampled(session,"media clock construction retry",[](const auto& s){
+    const auto calculated=wait_for_sampled(session,"media clock construction retry",[](const auto& s){
         check(!s.receiver_health.failed(),"obsolete construction attempt relatch lost reception");
         return s.transmission_finished && s.simulation_replay;
     });
     replay_ms=3000;const auto completed=session.snapshot();
-    check(!completed.received.empty() && completed.received.back().stream_complete &&
-          completed.received.back().raw_bits==Bytes({0,0,1}),"Clear lost retryable deferred TX or its exact source bits");
     std::lock_guard lock(script.mutex);
     check(script.epochs.size()==2 && script.banks.size()==2,"Clear did not retry source epoch construction on a fresh bank");
+    if(!completed_media_clock_raw(completed,Bytes{0,0,1}))
+        throw Error("Clear lost retryable deferred TX or its exact physically completed source bits"+
+            media_clock_result_context("clear-raw-retry",calculated,completed,script.epochs.back(),script.banks.front().epoch));
 }
 void simulation_media_clock_error_reporting() {
     SimulationScript script;script.target=live::detail::SimulationPhase::read_progress;
