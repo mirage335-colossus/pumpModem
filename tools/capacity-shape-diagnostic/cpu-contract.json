@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "mode": "exact_coarse",
+  "profile_environment": {
+    "DATAPUMP_CAPACITY_CPU_DIAGNOSTIC": "1",
+    "DATAPUMP_RX_CPU_PROFILE": "coarse"
+  },
+  "stages_added": [
+    "ordinary_acquisition",
+    "ordinary_continuation",
+    "ordinary_source_generation"
+  ],
+  "worker_stage": "submitting active frame stage captured alongside collector; serial submissions inherit current frame",
+  "events": [
+    "receiver_component_cpu",
+    "capacity_cpu_case_cpu",
+    "capacity_cpu_work",
+    "capacity_cpu_summary"
+  ],
+  "case_snapshots": "cumulative explicit begin/end markers; active_contexts and quiescent flags authoritative; nonquiescent differences are not exact per-case deltas",
+  "final_cpu_scope": "existing Session destructor after task joins; cumulative exclusive native-thread CPU across caller and pool workers; includes clock-read overhead",
+  "work_scope": "original native fft_work counters from active post-push snapshots plus exact destruction snapshots; final all-destroyed totals; partial execution CPU is included but interrupted jobs may not increment original completion counters; failed-constructor counters unavailable; threshold trials can roll back at EOF",
+  "work_owner_cap": 1024,
+  "work_point_cap": 512,
+  "pcm_byte_cap": 1048576,
+  "pcm_partition_cap": 8192,
+  "pcm_environment": "DATAPUMP_CAPACITY_CPU_PCM",
+  "pcm_path": "explicit runtime output path",
+  "pcm_partitions_suffix": ".partitions.json",
+  "pcm_scope": "generated channel output before RX delivery; partitions preserve source coordinates and normal/partial read outcome; no claim every lane committed",
+  "calibration": "6 batches of10000 native thread CPU clock reads after Session joins; median cost times actual profiler clock_reads is an estimate, not a bound",
+  "overhead_limit": "natural origin differs from prior runs; no matched overall overhead claim; observer subsets and clock calibration exclude trace writer and other context overhead",
+  "interpretation": "diagnostic only; original512MiB fixture and120s assertions unchanged; no32MiB or application qualification",
+  "pcm_partition_fields": {
+    "first": "u64 source coordinate",
+    "count": "u64 generated count",
+    "file_sample_offset": "u64 sample offset in concatenated PCM file",
+    "captured_count": "u64 actual file samples written",
+    "case_id": "0 before raw,1 raw,2 short,3 framed",
+    "case_sequence": "u64 most recent test begin/end marker at capture",
+    "noise": "bool channel noise read",
+    "partial": "bool original read threw after generating prefix"
+  },
+  "work_complete_semantics": "all observed fully constructed native owner lifetimes closed without map/overflow/fallback omissions; not a guarantee that counters enumerate every interrupted arithmetic operation",
+  "pcm_path_character_cap": 1024,
+  "pcm_channel_identity": "one positive Session continuous channel; no configure between raw/short/framed; case/source coordinates join existing capacity_shape_channel_origin events"
+}

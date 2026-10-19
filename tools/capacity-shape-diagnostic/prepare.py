@@ -5,6 +5,8 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 BASE_COMMIT='81c7da84121be60fe0ce1e7252e94cdf952773e8'
 EXPECTED={
+ 'src/scheduled_work_profile.hpp':'87a701a4ed853685e4250805a8665fdd0f10b15347ab0f4f8be1fcc8148b7acf',
+ 'src/search_parallel.cpp':'4aa3270515e0e8aaf6f6f146588c40fbff83627af615c85f95897e1af9132f4b',
  'src/pattern_receiver.cpp':'e956fab251fa1e42981fada7f132d07f6beba53d36a8fc4ff5ace80b66a70f87',
  'src/live.cpp':'536c2005424ba5c973d6db15163ef60c6bf2fe8d3983a5046be931805b1bea9a',
  'src/audio_trace.hpp':'2e476953b87dbb555e5734357a7de68873709070a97986b6b48fa82397bc52d9',
@@ -128,8 +130,89 @@ inline std::atomic<std::uint64_t> next_identity{0};
     private_cap='owner_cap=512,track_cap=16,row_cap=11000'
     if source_support.count(source_cap)!=1: raise ValueError('canonical owner cap anchor differs')
     support=source_support.replace(source_cap,private_cap,1).encode();shape=SHAPE.read_bytes()
+
+    # Further private CPU partition. Keep accepted capacity/census postimages
+    # as explicit intermediate preimages, and reverse this layer independently.
+    profiler=(root/'src/scheduled_work_profile.hpp').read_text()
+    parallel=(root/'src/search_parallel.cpp').read_text()
+    cpu_edits={
+      'live':[
+        ('#include "capacity_shape_probe.hpp"\n','#include "capacity_shape_probe.hpp"\n#include "capacity_cpu_probe.hpp"\n'),
+        ('        if(rx_cpu::global().mode!=rx_cpu::Mode::disabled)audio::trace::record("receiver_component_cpu",',
+         '        ::datapump::diagnostic::capacity_cpu::finalize();\n        if(rx_cpu::global().mode!=rx_cpu::Mode::disabled)audio::trace::record("receiver_component_cpu",'),
+        ('        ::datapump::diagnostic::capacity_shape::observe(bank,value,[](const auto& receiver){return receiver_workspace(receiver);});\n',
+         '        ::datapump::diagnostic::capacity_shape::observe(bank,value,[](const auto& receiver){return receiver_workspace(receiver);});\n        ::datapump::diagnostic::capacity_cpu::work_point("joined_refresh_before_new_admissions");\n'),
+      ],
+      'pattern':[
+        ('#include "owner_census_probe.hpp"\n','#include "owner_census_probe.hpp"\n#include "capacity_cpu_probe.hpp"\n'),
+        ('namespace datapump::modem {\n','namespace datapump::modem {\nnamespace rx_cpu=::datapump::detail::cpu_profile;\n'),
+        ('    Impl(Config c,std::size_t bytes,PatternSearch options)\n','    ~Impl(){::datapump::diagnostic::capacity_cpu::destroyed(*this);}\n    Impl(Config c,std::size_t bytes,PatternSearch options)\n'),
+        ('        ~ScoringScope() {state.drop_scoring();state.release_idle_scratch();}\n',
+         '        ~ScoringScope() {state.drop_scoring();state.release_idle_scratch();::datapump::diagnostic::capacity_cpu::observe(state);}\n'),
+        ('                         std::uint64_t latest_start=std::numeric_limits<std::uint64_t>::max()) {\n',
+         '                         std::uint64_t latest_start=std::numeric_limits<std::uint64_t>::max()) {\n        rx_cpu::Scope cpu_continuation(rx_cpu::Stage::ordinary_continuation);\n'),
+        ('            cancelled(stop);\n            const auto observed=static_cast<std::size_t>(std::min<std::uint64_t>(hop,bins-length+1-next_start));\n',
+         '            cancelled(stop);\n            rx_cpu::Scope cpu_acquisition(rx_cpu::Stage::ordinary_acquisition);\n            const auto observed=static_cast<std::size_t>(std::min<std::uint64_t>(hop,bins-length+1-next_start));\n'),
+      ],
+      'audio':[
+        ('        std::strncmp(event,"capacity_shape_",15)==0 || std::strncmp(event,"owner_census_",13)==0 ||\n',
+         '        std::strncmp(event,"capacity_shape_",15)==0 || std::strncmp(event,"owner_census_",13)==0 ||\n        std::strncmp(event,"capacity_cpu_",13)==0 || std::strcmp(event,"receiver_component_cpu")==0 ||\n'),
+        ('kept trace_begin, simulation_media_clock_case, capacity_shape_*, owner_census_*, receiver selection/admission/retirement/refusal and shared-capacity events;',
+         'kept trace_begin, simulation_media_clock_case, capacity_shape_*, owner_census_*, capacity_cpu_*, receiver_component_cpu, receiver selection/admission/retirement/refusal and shared-capacity events;'),
+      ],
+      'test':[
+        ('#include "../src/capacity_shape_probe.hpp"\n','#include "../src/capacity_shape_probe.hpp"\n#include "../src/capacity_cpu_probe.hpp"\n'),
+        ('::datapump::diagnostic::capacity_shape::begin_case(label);}',
+         '::datapump::diagnostic::capacity_shape::begin_case(label);::datapump::diagnostic::capacity_cpu::case_marker(label,"begin");}'),
+        ('::datapump::diagnostic::capacity_shape::end_case(label,session.snapshot());',
+         '::datapump::diagnostic::capacity_shape::end_case(label,session.snapshot());::datapump::diagnostic::capacity_cpu::case_marker(label,"end");'),
+      ],
+      'profiler':[
+        ('scheduled_candidate_residual, common_raw, count\n','scheduled_candidate_residual, common_raw, ordinary_acquisition, ordinary_continuation, ordinary_source_generation, count\n'),
+        ('"scheduled_common_residual","scheduled_candidate_residual","common_raw"\n',
+         '"scheduled_common_residual","scheduled_candidate_residual","common_raw","ordinary_acquisition","ordinary_continuation","ordinary_source_generation"\n'),
+      ],
+      'parallel':[
+        ('            profile_owner_ = rx_cpu::current_collector();\n',
+         '            profile_owner_ = rx_cpu::current_collector();\n            profile_stage_ = rx_cpu::active?rx_cpu::active->stage:rx_cpu::Stage::search_residual;\n'),
+        ('        rx_cpu::Context cpu(profile_owner_,rx_cpu::Stage::search_residual);\n',
+         '        rx_cpu::Context cpu(profile_owner_,profile_stage_);\n'),
+        ('    rx_cpu::Collector* profile_owner_ = nullptr; // Immutable until all batch workers join.\n',
+         '    rx_cpu::Collector* profile_owner_ = nullptr; // Immutable until all batch workers join.\n    rx_cpu::Stage profile_stage_=rx_cpu::Stage::search_residual; // Same joined submission lifetime.\n'),
+      ],
+    }
+    for call in ['wave->prepare_simulation(*wave,observation_epoch(*simulation_bank,value,simulation_bank->samples));','prepare(*wave,observation_epoch(*simulation_bank,value,simulation_bank->samples));']:
+        cpu_edits['live'].append((call,'::datapump::diagnostic::capacity_cpu::generate([&]{'+call+'});'))
+    for old,new in [
+      ('simulation_channel->read(', '::datapump::diagnostic::capacity_cpu::read(*simulation_channel,'),
+      ('simulation_channel->read_noise(', '::datapump::diagnostic::capacity_cpu::read_noise(*simulation_channel,'),
+    ]:
+        if not live2.count(old):raise ValueError('missing source generation calls')
+        cpu_edits['live'].append((live2,live2.replace(old,new)))
+        live2=live2.replace(old,new)
+    # The two call replacements above are already applied; retain their exact
+    # inverse anchors separately from the other original postimage edits.
+    calls_reverse=live2
+    for old,new in reversed(cpu_edits['live'][5:]):calls_reverse=once(calls_reverse,new,old)
+    cpu_edits['live']=cpu_edits['live'][:5]
+    live3,live_cpu_reverse=edits_from(live2,cpu_edits['live'])
+    # calls_reverse equals the accepted capacity-shape postimage.
+    live_cpu_reverse=calls_reverse
+    pattern3,pattern_cpu_reverse=edits_from(pattern2,cpu_edits['pattern'])
+    audio3,audio_cpu_reverse=edits_from(audio2,cpu_edits['audio'])
+    test3,test_cpu_reverse=edits_from(test2,cpu_edits['test'])
+    profiler2,profiler_reverse=edits_from(profiler,cpu_edits['profiler'])
+    parallel2,parallel_reverse=edits_from(parallel,cpu_edits['parallel'])
+    cpu_intermediate={'src/live.cpp':live_cpu_reverse,'src/pattern_receiver.cpp':pattern_cpu_reverse,
+        'src/audio_trace.hpp':audio_cpu_reverse,'tests/test_live.cpp':test_cpu_reverse}
+    live2,pattern2,audio2,test2=live3,pattern3,audio3,test3
+    cpu_support=(HERE/'capacity_cpu_probe.hpp').read_bytes()
+    cpu_contract=json.loads((HERE/'cpu-contract.json').read_text())
+
     out.mkdir(parents=True)
     files={
+      'prepared-source/src/scheduled_work_profile.hpp':profiler2,'prepared-source/src/search_parallel.cpp':parallel2,
+      'scheduled_work_profile.reversed.hpp':profiler_reverse,'search_parallel.reversed.cpp':parallel_reverse,
       'prepared-source/src/live.cpp':live2,'prepared-source/src/pattern_receiver.cpp':pattern2,
       'prepared-source/src/audio_trace.hpp':audio2,'prepared-source/tests/test_live.cpp':test2,
       'live.reversed.cpp':live_reverse,'audio_trace.reversed.hpp':audio_reverse,'test_live.reversed.cpp':test_reverse,
@@ -145,6 +228,12 @@ inline std::atomic<std::uint64_t> next_identity{0};
             content=''.join(difflib.unified_diff(source.splitlines(True),target.splitlines(True),fromfile='base/'+name,tofile='private/'+name))
         p.write_text(content)
         if p.read_text()!=content:raise ValueError(f'readback mismatch: {rel}')
+    (out/'prepared-source/src/capacity_cpu_probe.hpp').write_bytes(cpu_support)
+    for rel,content in cpu_intermediate.items():
+        dest=out/'cpu-intermediate'/rel;dest.parent.mkdir(parents=True,exist_ok=True);dest.write_text(content)
+    for name,before,after in [('scheduled_work_profile',profiler,profiler2),('search_parallel',parallel,parallel2)]:
+        suffix='.hpp' if name=='scheduled_work_profile' else '.cpp'
+        (out/(name+'.patch')).write_text(''.join(difflib.unified_diff(before.splitlines(True),after.splitlines(True),fromfile='base/src/'+name+suffix,tofile='private/src/'+name+suffix)))
     (out/'prepared-source/src/owner_census_probe.hpp').write_bytes(support)
     (out/'prepared-source/src/capacity_shape_probe.hpp').write_bytes(shape)
     manifest={
@@ -153,10 +242,14 @@ inline std::atomic<std::uint64_t> next_identity{0};
         'src/live.cpp':{'before_sha256':sha(live.encode()),'after_sha256':sha(live2.encode()),'reverse_sha256':sha(live_reverse.encode())},
         'src/pattern_receiver.cpp':{'before_sha256':sha(pattern.encode()),'after_sha256':sha(pattern2.encode()),'reverse_sha256':sha(pattern_reverse.encode())},
         'src/audio_trace.hpp':{'before_sha256':sha(audio.encode()),'after_sha256':sha(audio2.encode()),'reverse_sha256':sha(audio_reverse.encode())},
-        'tests/test_live.cpp':{'before_sha256':sha(test.encode()),'after_sha256':sha(test2.encode()),'reverse_sha256':sha(test_reverse.encode())}},
+        'tests/test_live.cpp':{'before_sha256':sha(test.encode()),'after_sha256':sha(test2.encode()),'reverse_sha256':sha(test_reverse.encode())},
+        'src/scheduled_work_profile.hpp':{'before_sha256':sha(profiler.encode()),'after_sha256':sha(profiler2.encode()),'reverse_sha256':sha(profiler_reverse.encode())},
+        'src/search_parallel.cpp':{'before_sha256':sha(parallel.encode()),'after_sha256':sha(parallel2.encode()),'reverse_sha256':sha(parallel_reverse.encode())}},
+      'launcher_baseline_commit':'f08dec051ea86b4e0356c53ad1bf16bd0c228ca2',
+      'cpu_partition_contract':cpu_contract,'capacity_cpu_support_sha256':sha(cpu_support),'cpu_contract_sha256':sha((HERE/'cpu-contract.json').read_bytes()),
       'tool_sha256':sha(Path(__file__).read_bytes()),'canonical_tool_hashes':tool_hashes,'canonical_tool_root':CANONICAL,'owner_cap_derivation':'canonical cap changed 128->512 and row cap 2400->11000; same producer code',
       'owner_census_support_sha256':sha(support),'capacity_shape_support_sha256':sha(shape),
-      'diagnostic_environment':{'DATAPUMP_CAPACITY_SHAPE_DIAGNOSTIC':'1','DATAPUMP_OWNER_CENSUS_DIAGNOSTIC':'1'},
+      'diagnostic_environment':{'DATAPUMP_CAPACITY_SHAPE_DIAGNOSTIC':'1','DATAPUMP_OWNER_CENSUS_DIAGNOSTIC':'1','DATAPUMP_CAPACITY_CPU_DIAGNOSTIC':'1','DATAPUMP_RX_CPU_PROFILE':'coarse'},
       'runner_argv':['test_live','--simulation-media-clock-trace','<trace-path>'],
       'settings':{'settings_dsp_workspace_bytes':536870912,'transfer_dsp_workspace_bytes':536870912},
       'fixture_invariants':['original natural epoch clock and key','original geometry/search/inputs/assertions','instrumented sampled-work budget remains 120s','generated samples are not transmitted samples'],
