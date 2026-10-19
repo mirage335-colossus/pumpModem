@@ -4,6 +4,7 @@
 #include "datapump/symbol_schedule.hpp"
 #include "../src/live_pattern_scores.hpp"
 #include "../src/live_simulation_clock.hpp"
+#include "../src/audio_trace.hpp"
 #include <algorithm>
 #include <chrono>
 #include <atomic>
@@ -753,6 +754,17 @@ live::Snapshot wait_for_media_clock(live::Session& session,std::string_view mode
             if(!script.epochs.empty())epoch=script.epochs.back();
             if(!script.banks.empty())origin=script.banks.front().epoch;
         }
+        audio::trace::record("simulation_media_clock_case",[&](auto& fields) {
+            fields.add("case",std::string(mode));fields.add("phase","failure");
+            fields.add("origin",origin);fields.add("tx_date",epoch);
+            fields.add("transmission_seconds",observed.transmission_seconds);fields.add("samples_received",observed.samples_received);
+            fields.add("receivers",observed.receiver_instances);fields.add("admissions",observed.receiver_admissions);
+            fields.add("retirements",observed.receiver_retirements);fields.add("dsp_bytes",observed.dsp_buffered_bytes);
+            fields.add("search_limited",observed.receiver_health.search_limited);
+            fields.add("input_interrupted",observed.receiver_health.input_interrupted);
+            fields.add("receiver_reset",observed.receiver_health.receiver_reset);
+            fields.add("receiver_error",observed.receiver_error.substr(0,128));
+        });
         throw Error(std::string(error.what())+media_clock_result_context(mode,observed,observed,epoch,origin)+
             media_clock_checkpoint_context(script));
     }
@@ -782,10 +794,17 @@ void simulation_media_clock_transmissions() {
     auto value=media_clock_settings();session.start(value);
     wait_for(session,"default media clock idle",[](const auto& s){return s.samples_received>=64;});
     for(unsigned mode=0;mode<3;++mode) {
+        const auto* case_name=mode==0?"raw":mode==1?"short":"framed";
         Message message;message.data=mode==1?Bytes{'h','i'}:Bytes(17,'x');
         const Bytes raw{0,0,1};
+        audio::trace::record("simulation_media_clock_case",[&](auto& fields) {
+            fields.add("case",case_name);fields.add("phase","begin");
+            fields.add("sample_rate",value.transfer.modem.sample_rate);fields.add("bandwidth_hz",value.transfer.modem.bandwidth_hz);
+            fields.add("spreading_factor",value.transfer.modem.spreading_factor);
+            fields.add("search_seconds",value.transfer.search_seconds);fields.add("dsp_budget",value.dsp_workspace_bytes);
+        });
         if(mode==0)session.transmit_bits(raw);else session.transmit(message);
-        const auto calculated=wait_for_media_clock(session,mode==0?"raw":mode==1?"short":"framed",script);
+        const auto calculated=wait_for_media_clock(session,case_name,script);
         double epoch,origin;
         {std::lock_guard lock(script.mutex);check(script.epochs.size()==mode+1,"default provider missed source epoch handoff");epoch=script.epochs.back();origin=script.banks.front().epoch;}
         auto options=value.transfer;options.timestamp=static_cast<std::uint64_t>(epoch);
@@ -794,6 +813,12 @@ void simulation_media_clock_transmissions() {
         if(expected.size()>modem::TransmitTrace::bit_limit)expected.resize(modem::TransmitTrace::bit_limit);
         replay_ms+=3000;
         const auto completed=session.snapshot();
+        audio::trace::record("simulation_media_clock_case",[&](auto& fields) {
+            fields.add("case",case_name);fields.add("phase","presented");
+            fields.add("origin",origin);fields.add("tx_date",epoch);
+            fields.add("transmission_seconds",calculated.transmission_seconds);fields.add("samples_received",calculated.samples_received);
+            fields.add("signals",completed.signals.size());fields.add("received",completed.received.size());
+        });
         const auto require=[&](bool valid,const char* message) {
             if(!valid)throw Error(std::string(message)+media_clock_result_context(
                 mode==0?"raw":mode==1?"short":"framed",calculated,completed,epoch,origin));
@@ -938,6 +963,15 @@ void simulation_media_clock() {
 int main(int argc,char** argv) {
     try {
         cpu_work_budget_boundaries();
+        if(argc>1 && std::string_view(argv[1])=="--simulation-media-clock-trace") {
+            check(argc==3 && !std::string_view(argv[2]).empty(),
+                  "usage: test_live --simulation-media-clock-trace <path>");
+            // Existing owner/admission/confirmation records need no detailed
+            // correlator probe. Finalize only after every Session/hook joins,
+            // including when the original fixture throws into the outer catch.
+            audio::trace::Scope trace(argv[2]);
+            simulation_media_clock();std::cout<<"default simulation media clock passed\n";return 0;
+        }
         if(argc>1 && std::string_view(argv[1])=="--simulation-media-clock") {
             simulation_media_clock();std::cout<<"default simulation media clock passed\n";return 0;
         }
