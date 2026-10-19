@@ -95,6 +95,20 @@ __attribute__((target("avx2"))) void butterflies(std::complex<double>* a,const s
     for(;j<half;++j){const auto w=inverse?std::conj(table[j]):table[j];const auto u=a[begin+j],v=a[begin+j+half]*w;
         a[begin+j]=u+v;a[begin+j+half]=u-v;}
 }
+// Keep a complete bounded borrowed stage inside one AVX2 target call.
+// Directional tables already encode inverse signs; half is even and at least two.
+__attribute__((target("avx2"))) void borrowed_stage(std::complex<double>* a,
+        const std::complex<double>* table,std::size_t n,std::size_t half){
+    for(std::size_t begin=0;begin<n;begin+=2*half)for(std::size_t j=0;j<half;j+=2){
+        const auto u=_mm256_loadu_pd(reinterpret_cast<const double*>(a+begin+j));
+        const auto v=_mm256_loadu_pd(reinterpret_cast<const double*>(a+begin+j+half));
+        const auto w=_mm256_loadu_pd(reinterpret_cast<const double*>(table+j));
+        const auto real=_mm256_movedup_pd(v),imag=_mm256_permute_pd(v,0xf),swap=_mm256_permute_pd(w,0x5);
+        const auto product=_mm256_addsub_pd(_mm256_mul_pd(real,w),_mm256_mul_pd(imag,swap));
+        _mm256_storeu_pd(reinterpret_cast<double*>(a+begin+j),_mm256_add_pd(u,product));
+        _mm256_storeu_pd(reinterpret_cast<double*>(a+begin+j+half),_mm256_sub_pd(u,product));
+    }
+}
 // Restrict the borrowed small-transform SIMD path to finite arithmetic. With
 // table components bounded by two, growth is at most eight per stage including
 // rounding. Since 8^log2(n) = n^3, every product and sum retains headroom.
@@ -191,14 +205,13 @@ void fft(std::span<std::complex<double>> a,bool inverse,const DoubleTableView& v
     for(std::size_t length=2;length<=n;length*=2){
         cancelled(stop);const auto half=length/2;
         const auto table=(inverse?view.inverse:view.forward).data()+half-1;
+#if defined(DATAPUMP_SEARCH_FFT_X86)
+        if(vectorized && half>=2){borrowed_stage(values,table,n,half);}else
+#endif
         if(n<=8192) {
             // A stage has at most 4096 butterflies, preserving the existing
             // cancellation bound without a counter branch on every butterfly.
             for(std::size_t begin=0;begin<n;begin+=length){
-#if defined(DATAPUMP_SEARCH_FFT_X86)
-                // Directional borrowed tables already contain the inverse signs.
-                if(vectorized && half>=2){butterflies(values,table,begin,half,false);continue;}
-#endif
                 for(std::size_t j=0;j<half;++j){
                     const auto u=values[begin+j],v=values[begin+j+half]*table[j];
                     values[begin+j]={u.real()+v.real(),u.imag()+v.imag()};
