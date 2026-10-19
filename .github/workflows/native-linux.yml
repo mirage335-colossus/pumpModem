@@ -760,14 +760,21 @@ jobs:
           subprocess.run(["python3", "-B", str(root / "tools/owner-census-diagnostic/prepare.py"),
                           "--source-root", str(source), "--output-dir", str(evidence)], check=True)
           manifest = json.loads((evidence / "manifest.json").read_text())
-          expected_tool = "715bac90cbb5a2ec5e6291a9b6623f651fab17662dbddbf553d77495df900c48"
-          expected_header = "079a2a8f5a19774c560f194202975991bf75ca4c5a052bf9ab68bbf6ead7a10a"
-          assert manifest["schema"] == 1 and manifest["status"] == "private_preparation_only"
-          assert manifest["base_commit"] == "a9b2d95a5fca8f7f007d84a9269cac3863da65c3"
+          expected_tool = "d627abbccbddf9ead52279ff970e8a06c4a540c25936108f4af651d52bebedfd"
+          expected_extension_tool = "733194a043848d5a3492539b1fd8443b191f246c0f46edea29fdb3cfa7e141aa"
+          expected_header = "5b22ccbd23aebdb9e7ca3296348c8d4c32b6607e3270fb0f2f0d7f96597068e6"
+          expected_field_contract = "43bab30a9ea47d3c58f96d7b67b10ed3862aa502341bde7361857dd7833669d5"
+          assert manifest["schema"] == 2 and manifest["event_schema"] == 2
+          assert manifest["status"] == "private_preparation_only"
+          assert manifest["base_commit"] == "73a94aa69f201cc295d695b45dfa023e53151302"
           assert manifest["tool_sha256"] == expected_tool
+          assert manifest["extension_tool_sha256"] == expected_extension_tool
           assert manifest["support_sha256"] == expected_header
+          assert manifest["field_contract_sha256"] == expected_field_contract
           assert hashlib.sha256((root / "tools/owner-census-diagnostic/prepare.py").read_bytes()).hexdigest() == expected_tool
+          assert hashlib.sha256((root / "tools/owner-census-diagnostic/ledger_extension.py").read_bytes()).hexdigest() == expected_extension_tool
           assert hashlib.sha256((root / "tools/owner-census-diagnostic/owner_census_probe.hpp").read_bytes()).hexdigest() == expected_header
+          assert hashlib.sha256((root / "tools/owner-census-diagnostic/reader-contract.md").read_bytes()).hexdigest() == expected_field_contract
           closure = manifest["source_closure"]
           assert len(closure) == 7
           for name, digest in closure.items():
@@ -781,6 +788,8 @@ jobs:
               assert item["reverse_sha256"] == item["before_sha256"]
           header = evidence / "owner_census_probe.hpp"
           assert hashlib.sha256(header.read_bytes()).hexdigest() == expected_header
+          field_contract = evidence / "reader-contract.md"
+          assert hashlib.sha256(field_contract.read_bytes()).hexdigest() == expected_field_contract
           shutil.copyfile(evidence / "live.cpp", source / "src/live.cpp")
           shutil.copyfile(evidence / "pattern_receiver.cpp", source / "src/pattern_receiver.cpp")
           shutil.copyfile(header, source / "src/owner_census_probe.hpp")

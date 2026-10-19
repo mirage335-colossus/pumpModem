@@ -46,6 +46,7 @@ struct Candidate {
     std::uint32_t rate=0;unsigned sf=0,dsss=0,arithmetic=0,strategy=0;
     double bandwidth=0,carrier=0,integration=0,start=0,radius=0;
     bool start_known=false,search_phases=false;std::size_t initial=0,pairs=0,allocation=0,capacity=0,margin=0;
+    const char* stage="preselection";
 };
 template<class C>void profile(Candidate& p,const C& c) noexcept {
     p.rate=c.sample_rate;p.sf=c.spreading_factor;p.dsss=c.dsss_factor;p.bandwidth=c.bandwidth_hz;
@@ -82,7 +83,38 @@ template<class S>void inspect(const S& s) noexcept {
             f.add("input_samples",s.sample);f.add("bins",s.bins);f.add("bin_samples",s.bin_samples);f.add("length_bins",s.length);
             f.add("hop_bins",s.hop);f.add("next_start_bin",s.next_start);f.add("earliest_unscored_start_bin",s.earliest_unscored_start);
             f.add("continuation_schedule_bin",s.continuation_schedule);f.add("track_total",s.tracks.size());f.add("track_retained",std::min(track_cap,s.tracks.size()));
-            f.add("budget",s.budget);f.add("fixed_reservation",s.fixed_reservation);f.add("finished",s.finished);
+            f.add("budget",s.budget);f.add("fixed_reservation",s.fixed_reservation);
+            f.add("current_working_bytes",s.working_bytes());
+            f.add("acquisition_window_available",s.acquisition_window.has_value());
+            if(s.acquisition_window) {
+                f.add("acquisition_window_epoch_origin_samples",s.acquisition_window->epoch_origin_samples);
+                f.add("acquisition_window_phase_scale",s.acquisition_window->phase_scale);
+                f.add("acquisition_window_half_width_samples",s.acquisition_window->half_width_samples);
+            }
+            f.add("broad_start_window",s.broad_start_window);
+            f.add("restricted_timing_active_available",static_cast<bool>(s.fft_workload));
+            if(s.fft_workload)f.add("restricted_timing_active",s.fft_workload->restricted_timing_active);
+            f.add("current_cache_reservation_bytes",s.cache_reservation);f.add("current_scoring_reservation_bytes",s.scoring_reservation);
+            f.add("current_arithmetic_reservation_bytes",s.arithmetic_reservation);
+            f.add("current_native_active_bytes",s.native_active_bytes);f.add("current_native_plan_bytes",s.native_plan_bytes());
+            f.add("current_fixed_reservation_bytes",s.fixed_reservation);
+            f.add("current_latest_bit_capacity_bytes",s.latest.bits.capacity());
+            f.add("current_history_bytes",s.history.capacity()*sizeof(typename decltype(s.history)::value_type));
+            f.add("current_peak_bytes",s.peaks.capacity()*sizeof(typename decltype(s.peaks)::value_type));
+            f.add("history_size",s.history.size());f.add("history_capacity",s.history.capacity());
+            f.add("peak_size",s.peaks.size());f.add("peak_capacity",s.peaks.capacity());
+            f.add("evidence_object_bytes",sizeof(typename decltype(s.history)::value_type));
+            f.add("candidate_limit",s.search.candidate_limit);f.add("track_limit",s.search.track_limit);
+            f.add("transform_bins",s.transform);f.add("frequency_count",s.search.frequency_offsets_hz.size());
+            f.add("current_ring_bytes",s.ring.capacity()*sizeof(typename decltype(s.ring)::value_type));
+            f.add("current_point_bytes",s.points.capacity()*sizeof(typename decltype(s.points)::value_type));
+            f.add("current_execution_vector_bytes",(s.work.capacity()+s.spectrum.capacity()+s.product.capacity()+s.reference.capacity())*sizeof(typename decltype(s.work)::value_type));
+            std::size_t track_bit_capacity=0,burst_bit_capacity=0;
+            for(const auto& track:s.tracks)track_bit_capacity+=track.burst.bits.capacity();
+            for(const auto& burst:s.bursts)burst_bit_capacity+=burst.bits.capacity();
+            f.add("current_track_bit_capacity_bytes",track_bit_capacity);f.add("current_burst_bit_capacity_bytes",burst_bit_capacity);
+            f.add("reservation_semantics","budget/fixed/cache/scoring/arithmetic reservations are charges or limits, not equivalent to heap residency");
+            f.add("finished",s.finished);
             f.add("candidate_limited",s.candidate_limit_reached);f.add("trials",s.trials);f.add("ring_bins",s.ring.size());
             f.add("start_known",s.search.start_offset_seconds.has_value());if(s.search.start_offset_seconds)f.add("start_seconds",*s.search.start_offset_seconds);
             f.add("start_radius_seconds",s.search.start_uncertainty_seconds);f.add("initial_symbols",s.search.initial_stream_symbols);
@@ -120,14 +152,48 @@ inline bool thread_cpu(long double& result) noexcept {
     return false;
 #endif
 }
-template<class B,class V>void capture(const B& bank,const V& value,const Candidate& candidate,
-        const std::string& reason,double now,std::size_t capacity) noexcept {
+template<class B,class V,class Margin>void capture(const B& bank,const V& value,const Candidate& candidate,
+        const std::string& reason,double now,std::size_t capacity,Margin margin_of) noexcept {
     if(!enabled()||captured.exchange(true))return;
     Capture c;long double cpu_begin=0,cpu_end=0;const bool cpu_begin_valid=thread_cpu(cpu_begin);
     const auto begin=std::chrono::steady_clock::now();
     try {
-        emit(c,"owner_census_begin",[&](auto& f){f.add("schema",1);f.add("marker",marker());f.add("reason",reason.substr(0,512));
+        const auto bank_base=sizeof(decltype(bank.receptions))+sizeof(bank.source_curves)+sizeof(bank.exact_source_samples)+
+            sizeof(bank.exact_source_generation)+sizeof(bank.next_exact_source_trace)+sizeof(bank.exact_source_points)+
+            sizeof(bank.point_source_generation)+sizeof(bank.next_point_consumer)+sizeof(bank.next_point_source_trace)+
+            sizeof(bank.permutations)+sizeof(bank.temporal_plans)+sizeof(bank.deferred_input)+sizeof(bank.input_queued_at)+
+            sizeof(bank.shared_capture)+sizeof(bank.future_capture);
+        const auto shared_capture=bank.shared_capture?bank.shared_capture->capacity_reservation():0;
+        const auto deferred=bank.deferred_input.working_bytes();
+        const auto source_curves=bank.source_curves?bank.source_curves->working_bytes():0;
+        const auto sample_pool=bank.exact_source_samples?bank.exact_source_samples->working_bytes():0;
+        const auto point_pool=bank.exact_source_points?bank.exact_source_points->working_bytes():0;
+        const auto permutations=bank.permutations?bank.permutations->working_bytes():0;
+        const auto temporal_plans=bank.temporal_plans?bank.temporal_plans->working_bytes():0;
+        std::size_t receiver_sum=0;
+        emit(c,"owner_census_begin",[&](auto& f){f.add("schema",2);f.add("marker",marker());f.add("reason",reason.substr(0,512));
             f.add("revision",bank.revision);f.add("sample",bank.samples);f.add("now",now);f.add("resident",bank.receivers.size());
+            f.add("ledger_scope","application workspace accounting; excludes process heap/RSS outside these charges");
+            for(const auto& current:bank.receivers) {
+                const auto& config=current.options.modem;
+                std::size_t bursts=current.bursts.capacity()*sizeof(modem::PatternBurst);
+                for(const auto& burst:current.bursts)bursts+=burst.bits.capacity();
+                const auto history=current.history_ordinals.heap_bytes();
+                const auto presentations=current.presentations.size()*(sizeof(typename decltype(current.presentations)::value_type)+4*sizeof(void*));
+                const auto content=current.content?current.content->working_bytes():0;
+                const auto family=current.source_curve_family?sizeof(*current.source_curve_family):0;
+                const auto control=margin_of(current);
+                const auto modem=current.modem->working_bytes();
+                receiver_sum+=modem+control+bursts+history+presentations+content+family;
+            }
+            const auto recomputed_bank=bank_base+shared_capture+deferred+source_curves+sample_pool+point_pool+permutations+temporal_plans+receiver_sum;
+            f.add("stored_bank_working_bytes",bank.working_bytes);f.add("summed_receiver_workspace_bytes",receiver_sum);
+            f.add("recomputed_current_bank_ledger_bytes",recomputed_bank);f.add("stored_vs_recomputed_match",bank.working_bytes==recomputed_bank);
+            f.add("stored_minus_recomputed_bytes",static_cast<std::int64_t>(bank.working_bytes)-static_cast<std::int64_t>(recomputed_bank));
+            f.add("bank_base_bytes",bank_base);f.add("shared_capture_bytes",shared_capture);f.add("deferred_input_bytes",deferred);
+            f.add("source_curve_pool_bytes",source_curves);f.add("exact_source_sample_pool_bytes",sample_pool);
+            f.add("exact_source_point_pool_bytes",point_pool);f.add("permutation_pool_bytes",permutations);f.add("temporal_plan_pool_bytes",temporal_plans);
+            f.add("configured_dsp_workspace_bytes",value.dsp_workspace_bytes);f.add("configured_bank_capacity_bytes",capacity);
             f.add("admissions",bank.admissions);f.add("retirements",bank.retirements);f.add("working_bytes",bank.working_bytes);f.add("capacity",capacity);
             f.add("observed_epoch_known",bank.observed_epoch.has_value());if(bank.observed_epoch)f.add("observed_epoch",*bank.observed_epoch);
             f.add("observed_sample",bank.observed_sample);f.add("retirement_pending",bank.retirement_pending);
@@ -135,9 +201,9 @@ template<class B,class V>void capture(const B& bank,const V& value,const Candida
             f.add("journal_valid",journal.valid);f.add("journal_revision",journal.revision);f.add("journal_sample",journal.sample);
             f.add("journal_now",journal.now);f.add("journal_total",journal.total);f.add("journal_retained",journal.count);
         });
-        emit(c,"owner_census_candidate",[&](auto& f){const auto& p=candidate;f.add("valid",p.valid);f.add("epoch",p.epoch);
+        emit(c,"owner_census_candidate",[&](auto& f){const auto& p=candidate;f.add("schema",2);f.add("valid",p.valid);f.add("epoch",p.epoch);
             f.add("family",p.family);f.add("sample_origin",p.origin);f.add("key_tag",hex(p.tag));f.add("key_tag_size",p.key_size);
-            f.add("key_tag_truncated",p.key_size>p.tag.size());f.add("sample_rate",p.rate);f.add("bandwidth_hz",p.bandwidth);
+            f.add("key_tag_truncated",p.key_size>p.tag.size());f.add("stage",p.stage);f.add("sample_rate",p.rate);f.add("bandwidth_hz",p.bandwidth);
             f.add("carrier_hz",p.carrier);f.add("spreading_factor",p.sf);f.add("dsss_factor",p.dsss);f.add("integration_seconds",p.integration);
             f.add("phase",p.phase);f.add("arithmetic",p.arithmetic);f.add("strategy",p.strategy);f.add("config_known",p.config_known);
             f.add("search_known",p.search_known);f.add("start_known",p.start_known);if(p.start_known)f.add("start_seconds",p.start);
@@ -155,6 +221,19 @@ template<class B,class V>void capture(const B& bank,const V& value,const Candida
             emit(c,"owner_census_owner",[&](auto& f){const auto& config=r.options.modem;f.add("owner",ordinal);f.add("consumer",r.point_consumer);
                 f.add("epoch",r.epoch);f.add("family",r.family);f.add("key_tag",hex(r.key_tag));f.add("key_tag_size",r.key_tag.size());f.add("key_tag_truncated",r.key_tag.size()>32);
                 f.add("sample_origin",r.sample_origin);f.add("ingress_valid",r.sample_origin<=bank.samples);if(r.sample_origin<=bank.samples)f.add("local_ingress",bank.samples-r.sample_origin);
+                const auto owner_modem_bytes=r.modem->working_bytes();
+                const auto owner_control_bytes=margin_of(r);
+                const auto owner_burst_struct_bytes=r.bursts.capacity()*sizeof(modem::PatternBurst);
+                std::size_t owner_burst_bit_bytes=0;for(const auto& burst:r.bursts)owner_burst_bit_bytes+=burst.bits.capacity();
+                const auto owner_history_bytes=r.history_ordinals.heap_bytes();
+                const auto owner_presentation_bytes=r.presentations.size()*(sizeof(typename decltype(r.presentations)::value_type)+4*sizeof(void*));
+                const auto owner_content_bytes=r.content?r.content->working_bytes():0;
+                const auto owner_family_bytes=r.source_curve_family?sizeof(*r.source_curve_family):0;
+                f.add("ledger_modem_reserved_bytes",r.modem->reserved_workspace_bytes());f.add("ledger_modem_working_bytes",owner_modem_bytes);f.add("ledger_control_margin_bytes",owner_control_bytes);
+                f.add("ledger_burst_vector_struct_bytes",owner_burst_struct_bytes);f.add("ledger_burst_bit_capacity_bytes",owner_burst_bit_bytes);
+                f.add("ledger_history_heap_bytes",owner_history_bytes);f.add("ledger_presentation_bytes",owner_presentation_bytes);
+                f.add("ledger_content_working_bytes",owner_content_bytes);f.add("ledger_optional_source_family_bytes",owner_family_bytes);
+                f.add("ledger_receiver_workspace_bytes",owner_modem_bytes+owner_control_bytes+owner_burst_struct_bytes+owner_burst_bit_bytes+owner_history_bytes+owner_presentation_bytes+owner_content_bytes+owner_family_bytes);
                 f.add("synchronized",synchronized);f.add("initial_search_complete",complete);f.add("query_complete",queried);f.add("frontier_known",frontier.has_value());if(frontier)f.add("frontier",*frontier);
                 f.add("sample_rate",config.sample_rate);f.add("bandwidth_hz",config.bandwidth_hz);f.add("carrier_hz",config.carrier_hz);
                 f.add("spreading_factor",config.spreading_factor);f.add("dsss_factor",config.dsss_factor);f.add("integration_seconds",config.integration_seconds);
@@ -172,7 +251,7 @@ template<class B,class V>void capture(const B& bank,const V& value,const Candida
     const auto end=std::chrono::steady_clock::now();const bool cpu_end_valid=thread_cpu(cpu_end);
     const auto wall=std::chrono::duration<long double>(end-begin).count();const bool cpu_valid=cpu_begin_valid&&cpu_end_valid&&cpu_end>=cpu_begin;
     // Synchronous summary is inside the existing trace Scope, before footer/seal.
-    emit(c,"owner_census_summary",[&](auto& f){f.add("schema",1);f.add("rows_before_summary",c.rows-1);f.add("owners",c.owners);
+    emit(c,"owner_census_summary",[&](auto& f){f.add("schema",2);f.add("rows_before_summary",c.rows-1);f.add("owners",c.owners);
         f.add("owner_total",bank.receivers.size());f.add("pattern_states",c.states);f.add("tracks",c.tracks);f.add("track_total",c.track_total);
         f.add("limited",c.limited);f.add("probe_errors",c.errors);f.add("fallback_unavailable",c.fallback);f.add("journal_overflow",journal.total>owner_cap);
         f.add("cpu_valid",cpu_valid);if(cpu_valid)f.add("thread_cpu_seconds",cpu_end-cpu_begin);f.add("wall_seconds",wall);f.add("explicit_clock_read_attempts",4);

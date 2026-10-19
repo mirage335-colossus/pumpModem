@@ -4,8 +4,9 @@ import argparse
 import difflib
 import hashlib
 import json
+import importlib.util
 from pathlib import Path
-BASE_COMMIT='a9b2d95a5fca8f7f007d84a9269cac3863da65c3'
+BASE_COMMIT='73a94aa69f201cc295d695b45dfa023e53151302'
 EXPECTED={
  'src/pattern_receiver.cpp':'e956fab251fa1e42981fada7f132d07f6beba53d36a8fc4ff5ace80b66a70f87',
  'src/live.cpp':'536c2005424ba5c973d6db15163ef60c6bf2fe8d3983a5046be931805b1bea9a',
@@ -16,6 +17,8 @@ EXPECTED={
  'tests/test_live.cpp':'4c38f29eff44f89f39170a2408b7d967f30194c32914302cd3b6ac4a88ee91b7',
 }
 NS='::datapump::diagnostic::owner_census::'
+_ext_spec=importlib.util.spec_from_file_location('workspace_byte_ledger_extension',Path(__file__).with_name('ledger_extension.py'))
+_ext=importlib.util.module_from_spec(_ext_spec);_ext_spec.loader.exec_module(_ext)
 
 def once(text,old,new):
     if text.count(old)!=1:raise ValueError(f'anchor must occur once ({text.count(old)}): {old[:120]!r}')
@@ -89,6 +92,10 @@ def transform(source,kind):
     for old,new in edits:result=once(result,old,new)
     reverse=result
     for old,new in reversed(edits):reverse=once(reverse,new,old)
+    if kind=='live':
+        result,extra=_ext.live_edits(result);edits.extend(extra)
+        reverse=result
+        for old,new in reversed(edits):reverse=once(reverse,new,old)
     if reverse!=source:raise ValueError('reverse reconstruction differs')
     return result,reverse,edits
 
@@ -103,11 +110,13 @@ def prepare(root,output):
     for kind in ('live','pattern_receiver'):
         before=(root/f'src/{kind}.cpp').read_text();after,reverse,edits=transform(before,kind)
         prepared[kind]=(before,after,reverse,len(edits))
-    support=Path(__file__).with_name('owner_census_probe.hpp').read_bytes()
+    support_text=Path(__file__).with_name('owner_census_probe.hpp').read_text()
+    support=support_text.encode()
+    contract=Path(__file__).with_name('reader-contract.md').read_bytes()
     output.mkdir(parents=True,exist_ok=False)
-    manifest={'schema':1,'status':'private_preparation_only','base_commit':BASE_COMMIT,
+    manifest={'schema':2,'event_schema':2,'status':'private_preparation_only','base_commit':BASE_COMMIT,
         'source_root':str(root),'output_dir':str(output),'source_closure':actual,'sources':{},
-        'tool_sha256':sha(Path(__file__).read_bytes()),'support_sha256':sha(support),
+        'tool_sha256':sha(Path(__file__).read_bytes()),'extension_tool_sha256':sha(Path(__file__).with_name('ledger_extension.py').read_bytes()),'support_sha256':sha(support),'field_contract_sha256':sha(contract),
         'environment':'DATAPUMP_OWNER_CENSUS_DIAGNOSTIC=0|1 (unset=0; other values disabled/incomplete)',
         'capture':'one FIRST omission, synchronous joined admission boundary; original default clock unchanged',
         'caps':{'owners':128,'tracks_per_owner':16,'rows':2400,'journal':128},
@@ -123,6 +132,8 @@ def prepare(root,output):
         manifest['sources'][kind]={'before_sha256':sha(before.encode()),'after_sha256':sha(after.encode()),'reverse_sha256':sha(reverse.encode()),'anchors':anchors}
     (output/'owner_census_probe.hpp').write_bytes(support)
     if (output/'owner_census_probe.hpp').read_bytes()!=support:raise ValueError('support readback differs')
+    (output/'reader-contract.md').write_bytes(contract)
+    if (output/'reader-contract.md').read_bytes()!=contract:raise ValueError('field contract readback differs')
     (output/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     return manifest
 
