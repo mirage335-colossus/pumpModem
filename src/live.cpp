@@ -1674,7 +1674,19 @@ struct Session::Impl {
                 if(bank.receivers.size()==bank.receivers.capacity()) {
                     const auto before=bank.receiver_allocations->allocated_bytes();
                     try {bank.receivers.reserve(bank.receivers.size()+1);}
-                    catch(const std::bad_alloc&){unavailable("receiver container replacement exceeds DSP workspace");continue;}
+                    catch(const std::bad_alloc&) {
+                        // Replacement must fit while the old array is alive.
+                        // Optional receiver caches can satisfy that overlap
+                        // without abandoning any retained receiver state.
+                        if(!reclaim_scratch()) {
+                            unavailable("receiver container replacement exceeds DSP workspace");continue;
+                        }
+                        set_receiver_container_limit(bank,capacity);
+                        try {bank.receivers.reserve(bank.receivers.size()+1);}
+                        catch(const std::bad_alloc&) {
+                            unavailable("receiver container replacement exceeds DSP workspace");continue;
+                        }
+                    }
                     bank.working_bytes+=bank.receiver_allocations->allocated_bytes()-before;
                 }
                 if(bank.working_bytes>=capacity || capacity-bank.working_bytes<=control_margin)reclaim_scratch();
