@@ -51,8 +51,12 @@ def prepare(root, report):
             if sha(path) != digest:
                 raise ValueError('patch preimage mismatch: ' + name)
         content = patch.read_bytes()
-        subprocess.run(['patch', '--batch', '--forward', '--dry-run', '-p1'], input=content, cwd=source, check=True, capture_output=True)
-        subprocess.run(['patch', '--batch', '--forward', '-p1'], input=content, cwd=source, check=True, capture_output=True)
+        # Git is an established runner dependency; the lean container does not
+        # provide the standalone patch utility. Bind paths to the private tree.
+        command = ['git', '-c', 'safe.directory=' + str(root), 'apply',
+                   '--directory=' + str(source.relative_to(root)), '-p1']
+        subprocess.run(command + ['--check'], input=content, cwd=root, check=True, capture_output=True)
+        subprocess.run(command, input=content, cwd=root, check=True, capture_output=True)
         for name, digest in postimages.items():
             if sha(source / name) != digest:
                 raise ValueError('patch postimage mismatch: ' + name)
