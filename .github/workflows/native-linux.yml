@@ -1162,8 +1162,12 @@ jobs:
           binary = root / "build/test_live"
           compiler = shutil.which("g++-11")
           command = [str(binary), "--simulation-media-clock"]
-          source = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
-                                  capture_output=True, text=True).stdout.strip()
+          source_probe = subprocess.run(["git", "-c", "safe.directory=" + str(root), "rev-parse", "HEAD"],
+                                        cwd=root, capture_output=True, text=True)
+          (report / "source-probe.stdout").write_text(source_probe.stdout)
+          (report / "source-probe.stderr").write_text(source_probe.stderr)
+          source_probe.check_returncode()
+          source = source_probe.stdout.strip()
           compiler_version = subprocess.run([compiler or "g++-11", "--version"], cwd=root,
                                             capture_output=True, text=True)
           binary_sha256 = hashlib.sha256(binary.read_bytes()).hexdigest()
