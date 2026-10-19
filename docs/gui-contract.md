@@ -393,6 +393,19 @@ states declares a received message complete. **RX estimate** is
 conditional on completed receiver computation, not a measured success rate or
 the probability of finishing within a deadline.
 
+For ordinary simulation with the default epoch provider, no explicit transfer
+timestamp and Symbol_Burst disabled, the channel gets one source-time origin.
+Receive and transmit epochs then follow that origin plus channel sample
+position, so receiver CPU time spent scoring does not age the simulated media.
+Clear or input interruption rebuilds the receiver at the channel's current
+sample position; a new configuration generation creates a new channel and
+origin. The transmit epoch is selected before the transmitter is constructed.
+An injected epoch clock, explicit timestamp, Symbol_Burst or hardware path
+retains its existing timing behavior. ReplayClock remains presentation-only;
+steady-clock cancellation and GUI deadlines are unchanged. Physical completion
+still requires scoring consecutive absent symbols whose complete durations
+cover at least six seconds.
+
 The persistent audio-channel dropdown below **Audio device** starts at **Left
 mono**. **Right mono** and **Stereo** are alternatives; a mono-only output always
 uses its sole channel. Stereo duplicates the waveform on both outputs. The same

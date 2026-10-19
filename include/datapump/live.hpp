@@ -245,6 +245,10 @@ public:
     // Unix epoch seconds for key admission. An optional clock makes controlled
     // time sources and deterministic clock-jump tests possible. It must be
     // thread-safe and return finite, nonnegative values within uint64 range.
+    // With the default provider, ordinary simulation without an explicit
+    // timestamp or Symbol_Burst anchors a channel once, then advances media
+    // epochs by channel sample position rather than receiver wall time.
+    // Injected providers and other timing paths retain their existing behavior.
     // Plot cadence and cancellation deadlines always use the steady clock.
     using EpochClock = std::function<double()>;
     // Independent monotonic presentation clock; never changes modem timing,
