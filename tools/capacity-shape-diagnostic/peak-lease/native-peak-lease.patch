@@ -1,0 +1,394 @@
+--- a/include/datapump/pattern_receiver.hpp
++++ b/include/datapump/pattern_receiver.hpp
+@@ -8,6 +8,7 @@
+ 
+ namespace datapump::modem {
+ namespace detail::scheduled_capture {class SharedScheduledCapture;}
++namespace detail { class NativePeakLease; }
+ // Cross-profile presentation weight for one admitted symbol. Native scores
+ // have different conservative bounds on different DSP paths; cap each symbol
+ // separately so a strong prefix cannot lend its surplus to a weak later fit.
+@@ -376,6 +377,7 @@
+     Diagnostics diagnostics() const;
+ private:
+     friend struct PatternReceiverStartupGuideTestAccess;
++    friend class detail::NativePeakLease;
+     struct Impl;
+     std::unique_ptr<Impl> impl_;
+ };
+--- a/include/datapump/streaming_modem.hpp
++++ b/include/datapump/streaming_modem.hpp
+@@ -174,6 +174,7 @@
+     void trim_optional_workspace();
+     void reset();
+ private:
++    friend class detail::NativePeakLease;
+     struct Impl;
+     std::unique_ptr<Impl> impl_;
+ };
+--- a/src/pattern_receiver.cpp
++++ b/src/pattern_receiver.cpp
+@@ -1,4 +1,5 @@
+ #include "datapump/pattern_receiver.hpp"
++#include "native_peak_workspace.hpp"
+ #include "pattern_start_geometry.hpp"
+ #include "datapump/pattern_code.hpp"
+ #include "datapump/pattern_pulse.hpp"
+@@ -2858,6 +2859,9 @@
+                 ++fft_workload->arithmetic_fallback_jobs;
+             }
+             if(early)++fft_workload->early_batches;
++            // Explicit cohort leases return this transient backing after a call.
++            // Unleased calls still retain the full original candidate quota.
++            if(peaks.capacity()<search.candidate_limit)peaks.reserve(search.candidate_limit);
+             peaks.clear();
+             if(startup_guide) {
+                 peaks.resize(2);
+@@ -3142,6 +3146,13 @@
+     return eligible;
+ }
+ PatternReceiver::PatternReceiver(Config c,std::size_t bytes,PatternSearch search):impl_(std::make_unique<Impl>(c,bytes,std::move(search))){}
++detail::NativePeakLease::NativePeakLease(detail::NativePeakWorkspace* workspace,PatternReceiver& receiver)
++    :NativePeakLease(receiver.impl_->fallback?nullptr:workspace,receiver.impl_->peaks,
++                     receiver.impl_->search.candidate_limit) {}
++bool detail::NativePeakLease::adopt(detail::NativePeakWorkspace& workspace,PatternReceiver& receiver) {
++    auto& s=*receiver.impl_;
++    return !s.fallback && workspace.adopt(s.peaks,s.search.candidate_limit);
++}
+ PatternReceiver::~PatternReceiver()=default;
+ std::size_t PatternReceiver::symbol_burst_control_bytes(){return sizeof(SymbolBurstPlan)+sizeof(SymbolBurstCursor)+sizeof(Impl::BurstPolicy);}
+ PatternReceiver::PatternReceiver(PatternReceiver&&) noexcept=default;
+--- a/src/streaming_modem.cpp
++++ b/src/streaming_modem.cpp
+@@ -1,4 +1,5 @@
+ #include "datapump/streaming_modem.hpp"
++#include "native_peak_workspace.hpp"
+ #include "datapump/pattern_code.hpp"
+ #include <openssl/crypto.h>
+ #include <algorithm>
+@@ -242,6 +243,11 @@
+ std::size_t StreamingReceiver::projection_cache_headroom(std::size_t input_samples)const{return impl_->pattern.projection_cache_headroom(input_samples);}
+ std::optional<std::size_t> StreamingReceiver::temporal_plan_workers()const{return impl_->pattern.temporal_plan_workers();}
+ void StreamingReceiver::trim_optional_workspace(){impl_->pattern.trim_optional_workspace();}
++detail::NativePeakLease::NativePeakLease(detail::NativePeakWorkspace* workspace,StreamingReceiver& receiver)
++    :NativePeakLease(workspace,receiver.impl_->pattern) {}
++bool detail::NativePeakLease::adopt(detail::NativePeakWorkspace& workspace,StreamingReceiver& receiver) {
++    return adopt(workspace,receiver.impl_->pattern);
++}
+ void StreamingReceiver::set_workspace_bytes(std::size_t bytes) {
+     if(bytes<working_bytes())throw Error("DSP workspace is smaller than retained receiver history");
+     impl_->pattern.set_workspace_bytes(bytes-sizeof(Impl));impl_->workspace=bytes;
+--- /dev/null
++++ b/src/native_peak_workspace.hpp
+@@ -0,0 +1,61 @@
++#pragma once
++#include "datapump/pattern_receiver.hpp"
++#include <stdexcept>
++#include <utility>
++namespace datapump::modem { class StreamingReceiver; }
++namespace datapump::modem::detail {
++// Caller-owned, fixed-capacity backing. Adopt and lease only at joined receiver
++// boundaries. This object must outlive every lease; it never retains a receiver.
++class NativePeakWorkspace {
++public:
++    NativePeakWorkspace()=default;
++    NativePeakWorkspace(const NativePeakWorkspace&)=delete;
++    NativePeakWorkspace& operator=(const NativePeakWorkspace&)=delete;
++    bool adopt(std::vector<PatternEvidence>& peaks,std::size_t candidate_limit) {
++        if(leased_)throw std::logic_error("native peak workspace is currently leased");
++        if(owned_) {
++            if(storage_.capacity()<candidate_limit)return false;
++            peaks.clear();std::vector<PatternEvidence>().swap(peaks);return true;
++        }
++        if(peaks.capacity()<candidate_limit)return false;
++        peaks.clear();storage_.swap(peaks);owned_=true;return true;
++    }
++    std::size_t capacity_bytes()const noexcept{return storage_.capacity()*sizeof(PatternEvidence);}
++    bool owns_storage()const noexcept{return owned_;}
++    bool leased()const noexcept{return leased_;}
++private:
++    friend class NativePeakLease;
++    std::vector<PatternEvidence> storage_;
++    bool owned_=false,leased_=false;
++};
++// Explicit transfer BEFORE the caller grants the receiver's active byte loan.
++// While active, receiver.working_bytes() counts the transferred array and the
++// arena has zero capacity. Restore before caller accounting or modem reset.
++// No public configuration/receiver layout or persistent attachment is added.
++class NativePeakLease {
++public:
++    NativePeakLease(NativePeakWorkspace* workspace,PatternReceiver& receiver);
++    NativePeakLease(NativePeakWorkspace* workspace,StreamingReceiver& receiver);
++    static bool adopt(NativePeakWorkspace&,PatternReceiver&);
++    static bool adopt(NativePeakWorkspace&,StreamingReceiver&);
++    NativePeakLease(NativePeakWorkspace* workspace,std::vector<PatternEvidence>& peaks,
++                    std::size_t candidate_limit):workspace_(workspace),peaks_(&peaks) {
++        if(!workspace_)return;
++        if(workspace_->leased_)throw std::logic_error("native peak workspace already has a borrower");
++        // An unprepared/oversized/owning receiver preserves its original path.
++        if(!workspace_->owned_ || workspace_->storage_.capacity()<candidate_limit || peaks.capacity())return;
++        transferred_bytes_=workspace_->capacity_bytes();workspace_->leased_=true;
++        workspace_->storage_.swap(peaks);active_=true;
++    }
++    NativePeakLease(const NativePeakLease&)=delete;
++    NativePeakLease& operator=(const NativePeakLease&)=delete;
++    ~NativePeakLease(){if(active_){peaks_->clear();workspace_->storage_.swap(*peaks_);workspace_->leased_=false;}}
++    bool active()const noexcept{return active_;}
++    std::size_t transferred_bytes()const noexcept{return transferred_bytes_;}
++private:
++    NativePeakWorkspace* workspace_=nullptr;
++    std::vector<PatternEvidence>* peaks_=nullptr;
++    std::size_t transferred_bytes_=0;
++    bool active_=false;
++};
++}
+--- a/tests/test_pattern_receiver.cpp
++++ b/tests/test_pattern_receiver.cpp
+@@ -1,9 +1,11 @@
+ #include "datapump/pattern_receiver.hpp"
++#include "datapump/streaming_modem.hpp"
+ #include "datapump/pattern_correlator.hpp"
+ #include "datapump/pattern_code.hpp"
+ #include "datapump/pattern_pulse.hpp"
+ #include "datapump/channel.hpp"
+ #include "datapump/symbol_schedule.hpp"
++#include "../src/native_peak_workspace.hpp"
+ #include "../src/pattern_fft_batch.hpp"
+ #include "../src/pattern_fft_window.hpp"
+ #include "../src/search_parallel.hpp"
+@@ -1033,10 +1035,13 @@
+     search.qualified_start_window=modem::PatternStartWindow{8,1,.025L};
+     search.prefer_streamed_templates=true;search.worker_threads=1;search.bit_limit=32;
+     struct Result {Bytes bits;double score=0,threshold=0;std::uint64_t trials=0,replays=0;};
+-    const auto run=[&](double gain,bool component,std::size_t extent=300,bool cancel_finish=false,unsigned alternatives=3) {
++    const auto run=[&](double gain,bool component,std::size_t extent=300,bool cancel_finish=false,unsigned alternatives=3,bool shared_peaks=false) {
+         auto local=search;local.component_qualified_search=component;
+         local.early_qualified_fft=component;local.initial_stream_symbols=alternatives;
+         modem::PatternReceiver receiver(c,4*1024*1024,local);Result out;
++        modem::detail::NativePeakWorkspace peak_workspace;
++        if(shared_peaks)check(modem::detail::NativePeakLease::adopt(peak_workspace,receiver),"partial EOF receiver could not share peaks");
++        const auto with_peaks=[&](auto operation){modem::detail::NativePeakLease lease(shared_peaks?&peak_workspace:nullptr,receiver);operation();};
+         std::vector<float> pcm(extent);
+         for(std::size_t i=0;i<pcm.size();++i)pcm[i]=static_cast<float>(noise[i]+gain*clean[i]);
+         const auto drain=[&] {
+@@ -1046,14 +1051,15 @@
+             }
+         };
+         for(std::size_t i=0;i<pcm.size();i+=11) {
+-            receiver.push(std::span(pcm).subspan(i,std::min<std::size_t>(11,pcm.size()-i)));drain();
++            with_peaks([&]{receiver.push(std::span(pcm).subspan(i,std::min<std::size_t>(11,pcm.size()-i)));});drain();
+         }
+         if(cancel_finish) {
+             std::stop_source canceled;canceled.request_stop();
+-            rejects([&]{receiver.finish(canceled.get_token());},"canceled finish performed EOF replay");
++            rejects([&]{with_peaks([&]{receiver.finish(canceled.get_token());});},"canceled finish performed EOF replay");
++            check(!peak_workspace.leased(),"canceled EOF retained its native peak lease");
+             check(receiver.fft_work().eof_replays==0,"canceled finish changed replay state");
+         }
+-        receiver.finish();drain();receiver.finish();
++        with_peaks([&]{receiver.finish();});drain();with_peaks([&]{receiver.finish();});
+         check(receiver.take_bursts().empty(),"repeated partial EOF emitted duplicate progress");
+         for(const auto& item:receiver.candidates())if(item.score>out.score) {
+             out.score=item.score;out.threshold=item.admission_threshold;
+@@ -1077,6 +1083,9 @@
+             if(run(middle,false,300,false,alternatives).score<target)low=middle;else high=middle;
+         }
+         const auto a=run((low+high)/2,false,300,false,alternatives),b=run((low+high)/2,true,300,false,alternatives);
++        const auto shared=run((low+high)/2,true,300,false,alternatives,true);
++        check(shared.bits==b.bits && shared.score==b.score && shared.threshold==b.threshold && shared.trials==b.trials && shared.replays==b.replays,
++              "native peak sharing changed exact cold partial-EOF decisions/thresholds/trials");
+         check(std::abs(a.score-target)<1e-4&&std::abs(a.score-b.score)<1e-8*(1+a.score),
+             "partial EOF replay changed retained same-PCM statistics");
+         check(a.bits==b.bits&&a.bits==(level?Bytes{0}:Bytes{}),
+@@ -1086,6 +1095,9 @@
+         else check(b.replays==0,"partial EOF rolled back already established output");
+         if(level==1) {
+             const auto canceled=run((low+high)/2,true,300,true,alternatives);
++            const auto shared_canceled=run((low+high)/2,true,300,true,alternatives,true);
++            check(shared_canceled.bits==canceled.bits && shared_canceled.score==canceled.score && shared_canceled.threshold==canceled.threshold &&
++                  shared_canceled.trials==canceled.trials && shared_canceled.replays==canceled.replays,"native peak cancellation changed partial EOF retry");
+             check(canceled.bits==b.bits&&canceled.trials==b.trials&&canceled.replays==1,
+                 "canceled-then-retried finish changed partial EOF decisions");
+             const auto early_a=run((low+high)/2,false,268,false,alternatives),early_b=run((low+high)/2,true,268,false,alternatives);
+@@ -2383,6 +2395,161 @@
+ }
+ }
+ namespace {
++void native_peak_workspace_ownership() {
++    modem::detail::NativePeakWorkspace workspace;
++    std::vector<modem::PatternEvidence> owner;owner.reserve(8);owner.push_back({});
++    const auto capacity=owner.capacity()*sizeof(modem::PatternEvidence);
++    check(workspace.adopt(owner,8) && owner.capacity()==0 && workspace.capacity_bytes()==capacity,
++          "native peak workspace did not adopt exact full quota capacity");
++    check(workspace.owns_storage() && !workspace.leased(),"adopted native peak workspace state is incorrect");
++    {
++        std::vector<modem::PatternEvidence> borrower;
++        modem::detail::NativePeakLease lease(&workspace,borrower,8);
++        check(lease.active() && workspace.leased() && borrower.capacity()*sizeof(modem::PatternEvidence)==capacity,
++              "native peak lease did not lend its actual backing storage");
++        borrower.push_back({});
++        bool overlap_rejected=false;
++        try { modem::detail::NativePeakLease overlap(&workspace,borrower,8); }
++        catch(const std::logic_error&) { overlap_rejected=true; }
++        check(overlap_rejected,"native peak workspace accepted overlapping borrowers");
++    }
++    check(!workspace.leased() && workspace.capacity_bytes()==capacity,
++          "native peak lease failed to return its fixed backing capacity");
++    {
++        std::vector<modem::PatternEvidence> larger;larger.reserve(9);
++        modem::detail::NativePeakLease fallback(&workspace,larger,9);
++        check(!fallback.active() && larger.capacity()>=9,
++              "larger candidate quota did not retain its owning fallback");
++    }
++    std::vector<modem::PatternEvidence> redundant;redundant.reserve(8);
++    check(workspace.adopt(redundant,8) && redundant.capacity()==0,
++          "full-capacity workspace did not release a joined receiver's redundant array");
++}
++void compare_native_peak_receiver(modem::PatternReceiver& owning,modem::PatternReceiver& shared,
++                                  modem::detail::NativePeakWorkspace& workspace) {
++    check(!workspace.leased(),"native peak scope escaped a receiver operation");
++    check(owning.working_bytes()==shared.working_bytes()+workspace.capacity_bytes(),
++          "shared peak accounting differs from actual owning storage");
++    check(owning.reserved_workspace_bytes()==std::max(shared.reserved_workspace_bytes(),
++              shared.working_bytes()+workspace.capacity_bytes()),
++          "shared peaks changed the original reservation versus measured-storage maximum");
++    check(owning.candidate_limited()==shared.candidate_limited() &&
++          owning.synchronized()==shared.synchronized() && owning.acquiring()==shared.acquiring() &&
++          owning.initial_search_complete()==shared.initial_search_complete(),
++          "shared peaks changed detector status or quota loss");
++    check(same_burst(owning.provisional(),shared.provisional()),"shared peaks changed provisional progress");
++    const auto a=owning.candidates(),b=shared.candidates();
++    check(a.size()==b.size() && std::equal(a.begin(),a.end(),b.begin(),[](const auto& x,const auto& y){
++        return same_evidence(x,y) && x.completed_event==y.completed_event;
++    }),"shared peaks changed full history, order or admission thresholds");
++    const auto x=owning.fft_work(),y=shared.fft_work();
++    check(std::tie(x.input_transforms,x.template_jobs,x.scored_start_trials,x.skipped_start_trials,
++                   x.threshold_trials,x.tabulated_fp64_transforms,x.eof_replays,x.timing_components)==
++          std::tie(y.input_transforms,y.template_jobs,y.scored_start_trials,y.skipped_start_trials,
++                   y.threshold_trials,y.tabulated_fp64_transforms,y.eof_replays,y.timing_components),
++          "shared peaks changed acquisition work, trials or EOF replay");
++    const auto da=owning.diagnostics(),db=shared.diagnostics();
++    check(std::tie(da.sample_offset,da.bit_rate,da.pattern_score,da.constellation,da.waveform)==
++          std::tie(db.sample_offset,db.bit_rate,db.pattern_score,db.constellation,db.waveform),
++          "shared peaks changed retained diagnostic values");
++}
++void native_peak_receiver_equivalence() {
++    auto c=config(16,true);c.sample_rate=512;c.bandwidth_hz=128;c.carrier_hz=128;c.pulse_shaping=false;
++    modem::PatternSearch search;search.worker_threads=2;search.bit_limit=128;search.track_limit=4;
++    constexpr std::size_t budget=2*1024*1024;
++    modem::PatternReceiver reference(c,budget,search),shared(c,budget,search);
++    auto second=c;++second.stream_epoch;
++    modem::PatternReceiver reference2(second,budget,search),shared2(second,budget,search);
++    modem::detail::NativePeakWorkspace workspace;
++    check(modem::detail::NativePeakLease::adopt(workspace,shared) &&
++          modem::detail::NativePeakLease::adopt(workspace,shared2),"native receiver bridge did not adopt full quota");
++    check(workspace.capacity_bytes()>=2048*sizeof(modem::PatternEvidence),"native peak bridge reduced the full2048 quota");
++    const Bytes bits{0,0,1},bits2{1,0,0};
++    const auto input=waveform(c,bits,17,7*c.sample_rate,.83,.001);
++    const auto input2=waveform(second,bits2,17,7*c.sample_rate,.37,.001);
++    check(input.size()==input2.size(),"paired native peak fixture extent changed");
++    Bytes received,received2;unsigned ends=0,ends2=0;
++    const auto poll=[&](auto& a,auto& b,Bytes& output,unsigned& completed) {
++        compare_native_peak_receiver(a,b,workspace);
++        const auto aa=a.take_bursts(),bb=b.take_bursts();
++        check(aa.size()==bb.size() && std::equal(aa.begin(),aa.end(),bb.begin(),same_burst),
++              "shared peaks changed next-poll burst fields or physical completion");
++        for(const auto& burst:aa){output.insert(output.end(),burst.bits.begin(),burst.bits.end());completed+=burst.complete;}
++    };
++    for(std::size_t at=0;at<input.size();) {
++        const auto count=std::min<std::size_t>(137,input.size()-at);
++        reference.push(std::span(input).subspan(at,count));
++        {modem::detail::NativePeakLease lease(&workspace,shared);
++            check(lease.active() && !workspace.capacity_bytes() && lease.transferred_bytes()>=2048*sizeof(modem::PatternEvidence),
++                  "native receiver lease did not expose physical ownership before the byte loan");
++            shared.set_workspace_bytes(budget);shared.push(std::span(input).subspan(at,count));}
++        poll(reference,shared,received,ends);
++        reference2.push(std::span(input2).subspan(at,count));
++        {modem::detail::NativePeakLease lease(&workspace,shared2);check(lease.active(),"second logical receiver lost peak backing");
++            shared2.set_workspace_bytes(budget);shared2.push(std::span(input2).subspan(at,count));}
++        poll(reference2,shared2,received2,ends2);at+=count;
++    }
++    reference.finish();{modem::detail::NativePeakLease lease(&workspace,shared);shared.finish();}
++    poll(reference,shared,received,ends);
++    reference2.finish();{modem::detail::NativePeakLease lease(&workspace,shared2);shared2.finish();}
++    poll(reference2,shared2,received2,ends2);
++    check(received==bits && received2==bits2 && ends==1 && ends2==1,
++          "peak equivalence fixture did not verify exact independent streams and scored physical END");
++    // A pre-stopped call must restore the actual backing and leave every state unchanged.
++    modem::PatternReceiver canceled(c,budget,search),canceled_reference(c,budget,search);
++    check(modem::detail::NativePeakLease::adopt(workspace,canceled),"cancellation receiver could not join peak arena");
++    std::stop_source stop;stop.request_stop();
++    rejects([&]{canceled_reference.push(input,stop.get_token());},"owning canceled peak control did not reject");
++    rejects([&]{modem::detail::NativePeakLease lease(&workspace,canceled);canceled.push(input,stop.get_token());},
++            "shared canceled peak control did not reject");
++    compare_native_peak_receiver(canceled_reference,canceled,workspace);
++    // Without a lease a previously shared receiver must recover full owning capacity.
++    canceled.push(input);canceled_reference.push(input);
++    check(canceled.working_bytes()==canceled_reference.working_bytes(),"unleased receiver did not recover owning peak capacity");
++    check(!modem::detail::NativePeakLease(&workspace,canceled).active(),"owning receiver silently exchanged an unaccounted second array");
++}
++void native_peak_quota_equivalence() {
++    auto c=config(128,true);c.sample_rate=6000;c.carrier_hz=1500;c.bandwidth_hz=1200;c.pulse_shaping=false;
++    auto shifted=c;shifted.carrier_hz+=75;
++    auto samples=waveform(c,Bytes{0},0,0,.21);const auto other=waveform(shifted,Bytes{1},0,0,-.53);
++    for(std::size_t i=0;i<samples.size();++i)samples[i]+=other[i];
++    for(unsigned limit:{0U,1U,2U}) {
++        modem::PatternSearch search;search.frequency_offsets_hz={0,75};search.drift_tolerant=false;
++        search.worker_threads=1;search.chunk_bits=16;search.candidate_limit=limit==1?1:16;search.track_limit=limit==2?1:4;
++        modem::PatternReceiver owning(c,8*1024*1024,search),shared(c,8*1024*1024,search);
++        modem::detail::NativePeakWorkspace workspace;check(modem::detail::NativePeakLease::adopt(workspace,shared),"quota receiver could not share peaks");
++        owning.push(samples);{modem::detail::NativePeakLease lease(&workspace,shared);shared.push(samples);}
++        owning.finish();{modem::detail::NativePeakLease lease(&workspace,shared);shared.finish();}
++        compare_native_peak_receiver(owning,shared,workspace);
++        const auto a=owning.take_bursts(),b=shared.take_bursts();
++        check(a.size()==b.size() && std::equal(a.begin(),a.end(),b.begin(),same_burst),"shared peak quota changed independent events");
++        check(shared.candidate_limited()==(limit!=0) && a.size()==(limit?1:2),"shared peak quota fixture lost its positive/negative omission controls");
++        for(const auto& event:b)check(!event.complete,"shared peak quota/EOF fabricated absence");
++    }
++}
++void native_peak_streaming_bridge() {
++    auto c=config(16,true);c.sample_rate=512;c.bandwidth_hz=128;c.carrier_hz=128;c.pulse_shaping=false;
++    modem::PatternSearch search;search.candidate_limit=7;search.track_limit=2;search.bit_limit=32;
++    constexpr std::size_t budget=2*1024*1024;
++    modem::StreamingReceiver owning(c,budget,search),shared(c,budget,search);
++    modem::detail::NativePeakWorkspace workspace;check(modem::detail::NativePeakLease::adopt(workspace,shared),"StreamingReceiver bridge could not adopt native storage");
++    const auto pcm=waveform(c,Bytes{0,0,1},17,7*c.sample_rate,.83,.001);
++    owning.push(pcm);{modem::detail::NativePeakLease lease(&workspace,shared);check(lease.active(),"StreamingReceiver bridge did not lease actual native storage");shared.push(pcm);}
++    const auto a=owning.take_pattern_bursts(),b=shared.take_pattern_bursts();
++    check(a.size()==b.size() && std::equal(a.begin(),a.end(),b.begin(),same_burst),"StreamingReceiver peak bridge changed detector events");
++    check(owning.working_bytes()==shared.working_bytes()+workspace.capacity_bytes(),"StreamingReceiver bridge omitted actual peak accounting");
++    shared.reset();owning.reset();
++    {modem::detail::NativePeakLease lease(&workspace,shared);check(!lease.active(),"StreamingReceiver reset retained a stale peak attachment");}
++    check(shared.working_bytes()==owning.working_bytes(),"StreamingReceiver reset changed default storage");
++    auto slow=config(64,true);slow.integration_seconds=3600;
++    modem::PatternSearch fallback;fallback.start_offset_seconds=0;fallback.frequency_offsets_hz={0};fallback.clock_errors_ppm={0};
++    fallback.track_limit=2;fallback.candidate_limit=7;fallback.bit_limit=32;
++    modem::PatternReceiver receiver(slow,256*1024,fallback);
++    check(receiver.clock_windowed() && !modem::detail::NativePeakLease::adopt(workspace,receiver),"fallback acquired a native peak arena");
++    const auto before=receiver.working_bytes();
++    {modem::detail::NativePeakLease lease(&workspace,receiver);check(!lease.active(),"fallback borrowed native peak storage");receiver.process_pending();}
++    check(receiver.working_bytes()==before && !workspace.leased(),"fallback/native lease changed retained accounting");
++}
+ void candidate_quota_health() {
+     auto c=config(128,true);c.sample_rate=6000;c.carrier_hz=1500;c.bandwidth_hz=1200;c.pulse_shaping=false;
+     auto shifted=c;shifted.carrier_hz+=75;
+@@ -2469,6 +2636,10 @@
+         try { test();std::cout<<name<<": passed\n"; }
+         catch(const std::exception& error){++failures;std::cerr<<name<<": "<<error.what()<<'\n';}
+     };
++    run("native peak workspace ownership",native_peak_workspace_ownership);
++    run("native peak receiver equivalence",native_peak_receiver_equivalence);
++    run("native peak quota equivalence",native_peak_quota_equivalence);
++    run("native peak StreamingReceiver bridge",native_peak_streaming_bridge);
+     run("candidate quota health",candidate_quota_health);
+     run("initial search coverage",initial_search_coverage);
+     run("exact blind bits",exact_blind_bits);run("chunk invariance and late start",changing_chunks_and_late_start);
+@@ -2518,7 +2689,7 @@
+     run("qualified UTC FFT bounded readiness",qualified_fft_bounded_readiness);
+     run("qualified UTC FFT follow-on progress",qualified_fft_followon_progress);
+     run("qualified UTC FFT component progress",qualified_fft_component_progress);
+-    run("qualified UTC FFT partial EOF threshold",qualified_fft_partial_eof_threshold);
++    run("qualified UTC FFT partial EOF threshold / native peak",qualified_fft_partial_eof_threshold);
+     run("parallel search physical absence",parallel_search_physical_absence);
+     run("parallel long continuation exact progress",parallel_long_continuation_exact_progress);
+     run("bounded long clock-window fallback",long_clock_window_fallback);
