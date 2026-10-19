@@ -16,7 +16,7 @@ on:
       scope:
         description: 'Run one complete native scope without repeating the other shards'
         type: choice
-        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic]
+        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, fft-normalization-diagnostic]
         default: core
       stop_group:
         description: Temporary matched stop experiment group; diagnostic only
@@ -41,7 +41,7 @@ on:
         type: string
         default: Release
       scope:
-        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, or fft-kernel-diagnostic'
+        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, or fft-normalization-diagnostic'
         type: string
         required: true
       stop_group:
@@ -66,8 +66,11 @@ jobs:
   fft-kernel:
     if: inputs.scope == 'fft-kernel-diagnostic'
     uses: ./.github/workflows/fft-kernel-diagnostic.yml
+  fft-normalization:
+    if: inputs.scope == 'fft-normalization-diagnostic'
+    uses: ./.github/workflows/fft-normalization-diagnostic.yml
   native:
-    if: inputs.scope != 'fft-kernel-diagnostic'
+    if: inputs.scope != 'fft-kernel-diagnostic' && inputs.scope != 'fft-normalization-diagnostic'
     name: Linux ${{ inputs.build_type }} / ${{ inputs.scope }} / ${{ inputs.calibration_section }}${{ inputs.calibration_shard != '' && format(' / part {0}', inputs.calibration_shard) || '' }}${{ inputs.scope == 'gui-stop-differential' && format(' / {0}', inputs.stop_group) || '' }}
     runs-on: ${{ inputs.linux_runner }}
     # Preserve the portable application's glibc 2.35 baseline in every shard.
@@ -705,6 +708,9 @@ jobs:
           -DDATAPUMP_CALIBRATION_SHARD=${{ inputs.calibration_shard }}
           -DDART_TESTING_TIMEOUT=3600
           -DCMAKE_DISABLE_FIND_PACKAGE_Python3=${{ (inputs.scope == 'frontends' || inputs.scope == 'web') && 'FALSE' || 'TRUE' }}
+      - name: Prepare simulation media clock diagnostic evidence
+        if: inputs.scope == 'simulation-clock-diagnostic'
+        run: mkdir -p build/simulation-clock-diagnostics
       - name: Build this shard's prerequisites
         id: build_prerequisites
         if: inputs.scope != 'sched-hop-radius-control'
@@ -718,6 +724,7 @@ jobs:
             gui-core-diagnostic) targets=(test_gui_timing_advice test_gui_controller) ;;
             gui-stop-diagnostic) targets=(test_gui_controller) ;;
             gui-stop-differential) targets=(test_gui_controller) ;;
+            simulation-clock-diagnostic) targets=(test_live) ;;
             fft-diagnostic) targets=(test_search_fft test_pattern_fft_batch test_search_parallel test_pattern_receiver test_pattern_startup_guide) ;;
             eme-probability-diagnostic) targets=(test_frequency_axis_probability) ;;
             planner-diagnostic) targets=(test_gui_link_planner test_link_planner_curves) ;;
@@ -1141,6 +1148,65 @@ jobs:
             fi
           fi
           python3 tools/run-ci-tests.py --build-dir build --scope "$CI_SCOPE" --jobs "$jobs" --timeout "$test_timeout" --report build/ci-test-report.json "${options[@]}"
+      - name: Run the focused simulation media clock diagnostic
+        if: inputs.scope == 'simulation-clock-diagnostic'
+        timeout-minutes: 15
+        run: |
+          python3 -B - <<'PY_CLOCK_DIAGNOSTIC'
+          from pathlib import Path
+          import hashlib, json, shutil, subprocess, time
+
+          root = Path.cwd()
+          report = root / "build/simulation-clock-diagnostics"
+          report.mkdir(parents=True, exist_ok=True)
+          binary = root / "build/test_live"
+          compiler = shutil.which("g++-11")
+          command = [str(binary), "--simulation-media-clock"]
+          source = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True,
+                                  capture_output=True, text=True).stdout.strip()
+          compiler_version = subprocess.run([compiler or "g++-11", "--version"], cwd=root,
+                                            capture_output=True, text=True)
+          binary_sha256 = hashlib.sha256(binary.read_bytes()).hexdigest()
+          source_files = {}
+          for name in ("tests/test_live.cpp", "CMakeLists.txt", "src/live.cpp", "src/channel.cpp",
+                       "src/live_simulation_clock.hpp"):
+              source_files[name] = hashlib.sha256((root / name).read_bytes()).hexdigest()
+          started = time.monotonic()
+          timeout_seconds = 600
+          timed_out = False
+          try:
+              result = subprocess.run(command, cwd=root, capture_output=True, timeout=timeout_seconds)
+              stdout, stderr, exit_code = result.stdout, result.stderr, result.returncode
+          except subprocess.TimeoutExpired as error:
+              stdout, stderr = error.stdout or b"", error.stderr or b""
+              exit_code, timed_out = 124, True
+          elapsed = time.monotonic() - started
+          (report / "stdout.log").write_bytes(stdout)
+          (report / "stderr.log").write_bytes(stderr)
+          identity = {
+              "source_commit": source,
+              "source_files": source_files,
+              "build_command": ["cmake", "--build", "build", "--target", "test_live"],
+              "compiler_path": compiler,
+              "compiler_version": compiler_version.stdout.strip(),
+              "compiler_version_exit": compiler_version.returncode,
+              "binary_path": str(binary),
+              "binary_sha256": binary_sha256,
+              "command": command,
+              "timeout_seconds": timeout_seconds,
+              "timed_out": timed_out,
+              "exit": exit_code,
+              "wall_seconds": elapsed,
+              "stdout_sha256": hashlib.sha256(stdout).hexdigest(),
+              "stderr_sha256": hashlib.sha256(stderr).hexdigest(),
+          }
+          (report / "run.json").write_text(json.dumps(identity, indent=2) + "\n")
+          print(f"Simulation media clock diagnostic exit={exit_code} timed_out={timed_out} wall_seconds={elapsed:.3f}")
+          raise SystemExit(exit_code)
+          PY_CLOCK_DIAGNOSTIC
+      - name: Mark simulation clock scope as diagnostic only
+        if: inputs.scope == 'simulation-clock-diagnostic'
+        run: echo 'This focused simulation media clock diagnostic does not replace the complete Live test scope.' >> "$GITHUB_STEP_SUMMARY"
       - name: Record partial capture scope
         if: inputs.calibration_shard != ''
         run: |
@@ -1284,6 +1350,7 @@ jobs:
             build/eme-probability-diagnostics/
             build/stop-differential/
             build/planner-diagnostics/
+            build/simulation-clock-diagnostics/
             build/sched-hop-radius-control/
             ${{ github.workspace }}/build/ci-smoke-results/
           if-no-files-found: warn

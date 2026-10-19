@@ -3,6 +3,7 @@
 #include "cpu_work_budget.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "../src/live_pattern_scores.hpp"
+#include "../src/live_simulation_clock.hpp"
 #include <algorithm>
 #include <chrono>
 #include <atomic>
@@ -12,6 +13,8 @@
 #include <string_view>
 #include <thread>
 #include <tuple>
+#include <mutex>
+#include <limits>
 using namespace datapump;
 using namespace std::chrono_literals;
 namespace {
@@ -624,10 +627,228 @@ void continuous_noise_lifecycle() {
         check(!session.snapshot().transmitting_noise,"stopping retained noise state");
     }
 }
+
+struct SimulationScript {
+    using Phase=live::detail::SimulationPhase;
+    Phase target=Phase::before_read;
+    std::atomic<bool> armed{false},entered{false},released{false},transmit_seen{false};
+    bool fail_checkpoint=false;
+    std::mutex mutex;
+    std::vector<live::detail::SimulationObservation> banks;
+    std::vector<double> epochs;
+    static void observe(void* context,const live::detail::SimulationObservation& point) {
+        auto& self=*static_cast<SimulationScript*>(context);
+        if(point.phase==Phase::bank_created || point.phase==Phase::transmit_epoch) {
+            std::lock_guard lock(self.mutex);
+            if(point.phase==Phase::bank_created)self.banks.push_back(point);
+            else {self.epochs.push_back(point.epoch);self.transmit_seen=true;}
+        }
+        if(point.phase!=self.target || !self.transmit_seen || !self.armed.exchange(false))return;
+        self.entered=true;
+        while(!self.released.load())std::this_thread::sleep_for(1ms);
+        if(self.fail_checkpoint)throw Error("injected simulation input/construction failure");
+    }
+};
+struct SimulationHookScope {
+    live::detail::SimulationHook hook;
+    explicit SimulationHookScope(SimulationScript& script):hook{&script,&SimulationScript::observe} {
+        live::detail::SimulationHook* empty=nullptr;
+        check(live::detail::simulation_hook.compare_exchange_strong(empty,&hook),"simulation hook already installed");
+    }
+    ~SimulationHookScope(){live::detail::simulation_hook.store(nullptr,std::memory_order_release);}
+};
+struct ReleaseSimulationScript {
+    SimulationScript& script;
+    ~ReleaseSimulationScript(){script.released=true;}
+};
+live::Settings media_clock_settings() {
+    auto value=settings();value.transfer.timestamp=0;
+    value.transfer.modem.sample_rate=512;value.transfer.modem.carrier_hz=128;
+    value.transfer.modem.bandwidth_hz=128;value.transfer.modem.spreading_factor=1;
+    value.transfer.modem.scramble=true;value.transfer.modem.dsss=false;
+    std::array<std::uint8_t,32> material{};material.fill(0x61);
+    value.transfer.key=Crypto(material);
+    return value;
+}
+void simulation_media_clock_arithmetic() {
+    using live::detail::simulation_media_epoch;
+    const double origin=1800000000.25;
+    check(simulation_media_epoch(origin,384,512)==1800000001.,"media clock lost integer boundary");
+    check(std::uint64_t(simulation_media_epoch(origin,383,512))==1800000000 &&
+          std::uint64_t(simulation_media_epoch(origin,385,512))==1800000001,
+          "media clock changed epoch flooring around a sample boundary");
+    for(const auto invalid:{-1.,std::numeric_limits<double>::infinity(),
+                            std::numeric_limits<double>::quiet_NaN(),std::ldexp(1.,64)}) {
+        bool rejected=false;try{(void)simulation_media_epoch(invalid,0,512);}catch(const Error&){rejected=true;}
+        check(rejected,"media clock accepted an invalid Unix epoch");
+    }
+    live::detail::SimulationInputTransaction input{100,50,7};
+    check(!input.interrupted(100,50) && input.interrupted(101,50),"media clock missed partial generation");
+    input.expected=8;input.feed_attempted=true;
+    check(input.interrupted(108,50) && input.interrupted(108,54) && !input.interrupted(108,58),
+          "media clock confused partial and committed delivery");
+}
+void simulation_media_clock_transmissions() {
+    SimulationScript script;SimulationHookScope hook(script);
+    std::atomic<std::int64_t> replay_ms{0};
+    live::Session session({},[&]{return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_ms.load());});
+    auto value=media_clock_settings();session.start(value);
+    wait_for(session,"default media clock idle",[](const auto& s){return s.samples_received>=64;});
+    for(unsigned mode=0;mode<3;++mode) {
+        Message message;message.data=mode==1?Bytes{'h','i'}:Bytes(17,'x');
+        const Bytes raw{0,0,1};
+        if(mode==0)session.transmit_bits(raw);else session.transmit(message);
+        const auto calculated=wait_for_sampled(session,"default media clock transmission",[](const auto& s){
+            check(!s.receiver_health.failed(),"healthy media clock reported lost input");
+            return s.transmission_finished && s.simulation_replay;
+        });
+        double epoch;
+        {std::lock_guard lock(script.mutex);check(script.epochs.size()==mode+1,"default provider missed source epoch handoff");epoch=script.epochs.back();}
+        auto options=value.transfer;options.timestamp=static_cast<std::uint64_t>(epoch);
+        auto expected=mode==0?raw:transfer::message_wire_bits(message,options);
+        if(mode==0)transfer::xor_binary_bits(expected,options);
+        if(expected.size()>modem::TransmitTrace::bit_limit)expected.resize(modem::TransmitTrace::bit_limit);
+        replay_ms+=3000;
+        const auto completed=session.snapshot();
+        check(completed.transmit_trace.wire_bits==expected,"media-clock epoch was applied after wire construction");
+        check(!completed.received.empty(),"media-clock keyed waveform did not physically complete");
+        check(completed.received.back().stream_complete,"media-clock source validity bypassed physical completion");
+        if(mode==0)check(completed.received.back().raw_bits==raw,"media clock lost leading raw zeros");
+        else check(completed.received.back().content.message.data==message.data,"media clock changed short/framed source bytes");
+        if(mode==2)check(completed.received.back().content_validated,"media clock bypassed framed source validation");
+        check(calculated.samples_received>64 && !completed.receiver_health.failed(),"media clock reset healthy reception");
+    }
+    const auto before=session.snapshot();session.clear_received();
+    wait_for(session,"media clock bank after Clear",[&](const auto& s){return s.samples_received>before.samples_received;});
+    {
+        std::lock_guard lock(script.mutex);
+        check(script.banks.size()==2 && script.banks[1].bank==0 && script.banks[1].source>0,
+              "Clear reset the source or retained the old bank coordinates");
+        check(script.banks[1].epoch==live::detail::simulation_media_epoch(script.banks[0].epoch,
+              script.banks[1].source,value.transfer.modem.sample_rate),"Clear reanchored media time to processing wall time");
+    }
+    session.stop();
+}
+void simulation_media_clock_cancellation() {
+    using Phase=live::detail::SimulationPhase;
+    for(const auto phase:{Phase::before_read,Phase::read_progress,Phase::before_feed,
+                          Phase::receiver_processed,Phase::before_commit,Phase::after_commit}) {
+        // Clear and reconfiguration must make the old transaction incapable
+        // of restoring a loss flag in the newly accepted receive revision.
+        for(const unsigned reset:{0U,1U,2U}) {
+            if(reset && phase!=Phase::before_feed)continue;
+            SimulationScript script;script.target=phase;script.fail_checkpoint=phase==Phase::read_progress;
+            SimulationHookScope hook(script);live::Session session;
+            ReleaseSimulationScript unblock{script};
+            auto value=media_clock_settings();session.start(value);
+            wait_for(session,"media clock before cancellation",[](const auto& s){return s.samples_received>=32;});
+            script.armed=true;session.transmit_bits(Bytes(32,0));
+            wait_for(session,"simulation cancellation checkpoint",[&](const auto&){return script.entered.load();});
+            session.cancel_transmit();const auto cancelled=session.snapshot();
+            check(!cancelled.transmitting && cancelled.transmission_cancelled,"simulation cancellation waited for RX work");
+            if(reset==1)session.clear_received();
+            if(reset==2)session.configure(value);
+            script.released=true;
+            const bool interrupted=!reset && phase!=Phase::before_read && phase!=Phase::after_commit;
+            const auto resumed=wait_for(session,"simulation idle after cancellation",[&](const auto& s){
+                check(s.received.empty(),"cancelled simulation released staged source content");
+                for(const auto& event:s.signals)check(!event.complete,"interrupted input manufactured physical completion");
+                return s.samples_received>cancelled.samples_received &&
+                    (!interrupted || s.receiver_health.input_interrupted);
+            });
+            check(resumed.receiver_health.input_interrupted==interrupted && !resumed.receiver_health.dropped_samples,
+                  "simulation cancellation lost continuity status or invented discarded PCM");
+            check(!resumed.simulation_replay && (reset==2 || same_capture(cancelled.transmit_trace,resumed.transmit_trace)),
+                  "retired simulation published a late TX capture");
+            {
+                std::lock_guard lock(script.mutex);
+                check(script.banks.size()==(interrupted||reset?2U:1U),"simulation rebuilt a healthy bank or retained interrupted acquisition");
+                if(script.banks.size()==2) {
+                    const auto& fresh=script.banks.back();
+                    check(fresh.bank==0 && fresh.revision!=script.banks.front().revision,
+                          "interruption retained old receiver coordinates");
+                    if(reset==2)check(fresh.source==0,"reconfiguration retained an obsolete channel");
+                    else check(fresh.source>0 && fresh.epoch==live::detail::simulation_media_epoch(
+                        script.banks.front().epoch,fresh.source,value.transfer.modem.sample_rate),
+                        "interruption or Clear reset/reseeded the source timeline");
+                }
+            }
+            session.stop();
+        }
+    }
+    for(const bool custom:{false,true}) {
+        SimulationScript script;SimulationHookScope hook(script);
+        live::Session session(custom?live::Session::EpochClock([]{return 1800000000.;}):live::Session::EpochClock{});
+        auto value=media_clock_settings();if(!custom)value.transfer.timestamp=1800000000;
+        session.start(value);session.transmit_noise();
+        wait_for(session,"unchanged explicit simulation clock",[](const auto& s){return s.transmission_seconds>=.1;});
+        session.cancel_transmit();session.stop();
+        std::lock_guard lock(script.mutex);
+        check(script.banks.empty() && script.epochs.empty(),"media clock changed an explicit timestamp or injected provider");
+    }
+}
+void simulation_media_clock_clear_construction() {
+    SimulationScript script;script.target=live::detail::SimulationPhase::transmit_epoch;
+    script.fail_checkpoint=true;
+    SimulationHookScope hook(script);
+    std::atomic<std::int64_t> replay_ms{0};
+    live::Session session({},[&]{return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_ms.load());});
+    ReleaseSimulationScript unblock{script};
+    auto value=media_clock_settings();session.start(value);
+    wait_for(session,"media clock before construction Clear",[](const auto& s){return s.samples_received>=32;});
+    script.armed=true;session.transmit_bits(Bytes{0,0,1});
+    wait_for(session,"media clock construction checkpoint",[&](const auto&){return script.entered.load();});
+    session.clear_received();
+    check(session.snapshot().transmitting,"Clear cancelled deferred simulation preparation");
+    script.released=true;
+    wait_for_sampled(session,"media clock construction retry",[](const auto& s){
+        check(!s.receiver_health.failed(),"obsolete construction attempt relatch lost reception");
+        return s.transmission_finished && s.simulation_replay;
+    });
+    replay_ms=3000;const auto completed=session.snapshot();
+    check(!completed.received.empty() && completed.received.back().stream_complete &&
+          completed.received.back().raw_bits==Bytes({0,0,1}),"Clear lost retryable deferred TX or its exact source bits");
+    std::lock_guard lock(script.mutex);
+    check(script.epochs.size()==2 && script.banks.size()==2,"Clear did not retry source epoch construction on a fresh bank");
+}
+void simulation_media_clock_error_reporting() {
+    SimulationScript script;script.target=live::detail::SimulationPhase::read_progress;
+    script.fail_checkpoint=true;
+    SimulationHookScope hook(script);live::Session session;ReleaseSimulationScript unblock{script};
+    session.start(media_clock_settings());
+    wait_for(session,"media clock before input error",[](const auto& s){return s.samples_received>=32;});
+    script.armed=true;session.transmit_bits(Bytes(32,0));
+    wait_for(session,"media clock input error checkpoint",[&](const auto&){return script.entered.load();});
+    script.released=true;
+    // This is an actual channel failure, without cancel_transmit or Clear.
+    // Its own receive-revision invalidation must not be classified as Clear.
+    testing::CpuWorkBudget budget(10s,"media clock input error reporting");
+    live::Snapshot failed;
+    while(budget.pending()) {
+        failed=session.snapshot();
+        if(!failed.error.empty())break;
+        std::this_thread::sleep_for(1ms);
+    }
+    check(failed.error=="injected simulation input/construction failure" && failed.transmission_failed &&
+          failed.transmission_finished && !failed.transmitting && failed.receiver_health.input_interrupted &&
+          !failed.receiver_health.dropped_samples && failed.received.empty(),
+          "simulation's own invalidation swallowed a channel error or continued the failed TX");
+    session.stop();
+}
+void simulation_media_clock() {
+    simulation_media_clock_arithmetic();
+    simulation_media_clock_transmissions();
+    simulation_media_clock_cancellation();
+    simulation_media_clock_clear_construction();
+    simulation_media_clock_error_reporting();
+}
 }
 int main(int argc,char** argv) {
     try {
         cpu_work_budget_boundaries();
+        if(argc>1 && std::string_view(argv[1])=="--simulation-media-clock") {
+            simulation_media_clock();std::cout<<"default simulation media clock passed\n";return 0;
+        }
         if(argc>1&&std::string_view(argv[1])=="--transmit-capture") {transmit_capture_tracks_generation_and_replay();return 0;}
         if(argc>1&&std::string_view(argv[1])=="--workload-budget") {
             std::cout<<"CPU workload budget boundaries passed\n";return 0;
@@ -645,7 +866,7 @@ int main(int argc,char** argv) {
         if(argc>1 && std::string_view(argv[1])=="--keyed-acquisition-epoch") {
             keyed_acquisition_survives_early_epoch_refresh();std::cout<<"pre-acquisition keyed epoch refresh passed\n";return 0;
         }
-        if(argc==1){run();separate_short_and_long_transmit_profiles();background_recovery_lifecycle();transmit_capture_tracks_generation_and_replay();continuous_noise_lifecycle();keyed_acquisition_survives_early_epoch_refresh();}
+        if(argc==1){run();separate_short_and_long_transmit_profiles();background_recovery_lifecycle();transmit_capture_tracks_generation_and_replay();continuous_noise_lifecycle();keyed_acquisition_survives_early_epoch_refresh();simulation_media_clock();}
         short_keyed_stream_survives_epoch_refresh();std::cout<<"live fixed-interval lifecycle passed\n";
     } catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

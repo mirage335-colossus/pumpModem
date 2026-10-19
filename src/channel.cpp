@@ -1,4 +1,5 @@
 #include "datapump/channel.hpp"
+#include "live_simulation_clock.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -144,6 +145,7 @@ std::size_t SampledSimulationChannel::read(StreamingTransmitter& source,std::spa
         if(position>=s.total){s.complete=true;break;}
         const auto value=position<0?Complex{}:s.interpolate(source,position,stop)*s.oscillator*s.burst_rotation;
         output[written++]=static_cast<float>(value.real()+s.noise());s.advance();
+        if(written==1)live::detail::simulation_checkpoint(live::detail::SimulationPhase::read_progress,s.received);
     }
     return written;
 }
