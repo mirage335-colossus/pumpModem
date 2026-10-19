@@ -21,7 +21,7 @@ on:
       stop_group:
         description: Temporary matched stop experiment group; diagnostic only
         type: choice
-        options: [original, eu, fcc]
+        options: [original, eu, fcc, eu-offset, eu-guard, eu-position, eu-o0-san-on, eu-o1-san-off, eu-o0-san-off]
         default: original
       calibration_section:
         description: 'Calibration section; used only by the calibration scope'
@@ -88,7 +88,7 @@ jobs:
       CXX: g++-11
       CI_SCOPE: ${{ inputs.scope }}
       CI_STOP_GROUP: ${{ inputs.stop_group }}
-      DATAPUMP_SANITIZERS: ${{ inputs.build_type == 'Debug' && 'ON' || 'OFF' }}
+      DATAPUMP_SANITIZERS: ${{ inputs.scope == 'gui-stop-differential' && (inputs.stop_group == 'eu-o1-san-off' || inputs.stop_group == 'eu-o0-san-off') && 'OFF' || (inputs.build_type == 'Debug' && 'ON' || 'OFF') }}
       SANITIZER_REALTIME: ${{ inputs.sanitizer_realtime }}
     steps:
       - name: Restrict the temporary graceful-stop diagnostic
@@ -686,12 +686,12 @@ jobs:
         if: inputs.scope == 'gui-stop-differential'
         run: |
           git -c safe.directory="$PWD" fetch --no-tags --depth=1 origin eb42d6a2a5725e935589e504564f28a11d37651b
-          python3 -B tools/gui-stop-differential.py prepare --root "$PWD" --report "$PWD/build/stop-differential"
+          python3 -B tools/gui-stop-differential.py prepare --root "$PWD" --report "$PWD/build/stop-differential" --group "$CI_STOP_GROUP"
       - name: Configure native application and selected test scope
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11
           -DCMAKE_BUILD_TYPE=${{ inputs.build_type }}
-          -DDATAPUMP_SANITIZERS=${{ inputs.build_type == 'Debug' && 'ON' || 'OFF' }}
+          -DDATAPUMP_SANITIZERS="$DATAPUMP_SANITIZERS"
           -DDATAPUMP_PORTABLE=${{ inputs.build_type == 'Release' && 'ON' || 'OFF' }}
           -DBUILD_TESTING=${{ inputs.scope == 'package' && 'OFF' || 'ON' }}
           -DDATAPUMP_BUILD_TUI=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }}
