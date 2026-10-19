@@ -5,6 +5,13 @@
 #include "../src/live_pattern_scores.hpp"
 #include "../src/live_simulation_clock.hpp"
 #include "../src/audio_trace.hpp"
+#include "../src/live_receiver_admission.hpp"
+#include "../src/signal_view.hpp"
+#include "datapump/channel.hpp"
+#include <openssl/evp.h>
+#include <bit>
+#include <fstream>
+#include <map>
 #include <algorithm>
 #include <chrono>
 #include <atomic>
@@ -970,10 +977,172 @@ void simulation_media_clock(bool standard_positive_geometry=false) {
     simulation_media_clock_clear_construction();
     simulation_media_clock_error_reporting();
 }
+std::string component_sha256(const void* data,std::size_t bytes) {
+    std::array<unsigned char,EVP_MAX_MD_SIZE> digest{};unsigned count=0;
+    check(EVP_Digest(data,bytes,digest.data(),&count,EVP_sha256(),nullptr)==1 && count==32,
+          "component input digest failed");
+    std::ostringstream out;out<<std::hex<<std::setfill('0');
+    for(unsigned i=0;i<count;++i)out<<std::setw(2)<<unsigned(digest[i]);
+    return out.str();
+}
+template<class Fill>void component_record(const char* event,Fill fill) {
+    audio::trace::Fields fields;fill(fields);
+    const auto identity=std::string(event)+fields.out.str();
+    fields.add("record_sha256",component_sha256(identity.data(),identity.size()));
+    std::cout<<"{\"event\":"<<audio::trace::quoted(event)<<fields.out.str()<<"}\n";
+}
+void simulation_media_clock_raw_component(const std::filesystem::path& directory) {
+    // Component replay of the recorded 612db0f failure, not a Session/default
+    // clock qualification. No TX metadata is passed to detector acquisition.
+    constexpr double origin=1792403097.8202908;
+    constexpr std::uint64_t tx_epoch=1792403097,idle=400;
+    auto value=media_clock_settings();const auto standard=settings().transfer.modem;
+    value.transfer.modem.sample_rate=standard.sample_rate;value.transfer.modem.bandwidth_hz=standard.bandwidth_hz;
+    value.transfer.modem.carrier_hz=standard.carrier_hz;value.transfer.modem.spreading_factor=standard.spreading_factor;
+    value=live::detail::normalized_layout(std::move(value));
+    auto options=value.transfer;options.timestamp=tx_epoch;
+    auto source=transfer::binary_transmitter(Bytes{0,0,1},options);
+    check(source->total_samples()==41409,"component source geometry differs from recorded 41409 samples");
+    const auto config=transfer::seeded_config(options,tx_epoch);
+    modem::SampledSimulationChannel channel(value.transfer.modem,live::detail::channel_config(value));
+    std::vector<float> pcm(idle);channel.read_noise(pcm);channel.begin_burst();
+    const auto startup=channel.startup_offset_samples();
+    std::vector<std::pair<std::size_t,std::size_t>> blocks{{0,idle}};
+    const auto points=std::max<std::size_t>(32,live::detail::SignalWindow::constellation_capacity(config));
+    const auto replay_count=std::min(live::detail::replay_frames,
+        (live::detail::replay_workspace(value)-live::detail::replay_result_workspace)/
+        (live::detail::replay_frame_base+points*sizeof(std::complex<float>)));
+    check(replay_count>=2,"component replay frame geometry is invalid");
+    std::size_t replay_index=1;bool tail=false;std::uint64_t remaining_tail=0;
+    const auto target=[&] {
+        const auto n=source->total_samples(),d=replay_count-1;
+        return (n/d)*replay_index+(n%d*replay_index+d-1)/d;
+    };
+    testing::CpuWorkBudget budget(30s,"recorded raw component generation");
+    std::array<float,live::detail::plot_size> scratch{};
+    while(budget.pending()) {
+        std::size_t count=0;
+        if(!tail) {
+            const auto next=replay_index<replay_count?target():source->total_samples();
+            const auto left=next>channel.transmitted_samples()?next-channel.transmitted_samples():1;
+            count=channel.read(*source,std::span(scratch).first(std::min<std::uint64_t>(scratch.size(),left)));
+            if(!count) {tail=true;remaining_tail=modem::pattern_absence_capture_samples(config)+config.sample_rate+
+                2*modem::pattern_pulse_padding_samples(config);}
+        }
+        if(tail && remaining_tail) {
+            count=std::min<std::uint64_t>(scratch.size(),remaining_tail);
+            channel.read_noise(std::span(scratch).first(count));remaining_tail-=count;
+        }
+        if(count) {blocks.emplace_back(pcm.size(),count);pcm.insert(pcm.end(),scratch.begin(),scratch.begin()+count);}
+        if(tail && !remaining_tail)break;
+        if(!tail && replay_index<replay_count && replay_index+1<replay_count && channel.transmitted_samples()>=target())++replay_index;
+    }
+    check(tail && !remaining_tail,"component waveform generation exceeded its computation limit");
+    static_assert(sizeof(float)==4 && std::numeric_limits<float>::is_iec559);
+    const auto file=directory/"input.f32";check(!std::filesystem::exists(file),"component PCM output already exists");
+    {std::ofstream out(file,std::ios::binary);out.write(reinterpret_cast<const char*>(pcm.data()),pcm.size()*sizeof(float));
+     out.close();check(bool(out),"component PCM output failed");}
+    component_record("component_input",[&](auto& f) {
+        f.add("scope","component diagnostic; not default-policy qualification");f.add("origin",origin);f.add("tx_epoch",tx_epoch);
+        f.add("source_plain_bits","001");f.add("key_material","32 bytes of 0x61");
+        f.add("original_pcm_sha256","not captured; regenerated PCM identity is not a prior-waveform equality proof");
+        f.add("idle_samples",idle);f.add("sample_rate",config.sample_rate);f.add("bandwidth_hz",config.bandwidth_hz);
+        f.add("carrier_hz",config.carrier_hz);f.add("spreading_factor",config.spreading_factor);f.add("seed",value.simulation_seed);
+        f.add("snr_db",value.simulation_snr_db);f.add("clock_ppm",value.simulation_clock_error_ppm);
+        f.add("frequency_offset_hz",value.simulation_frequency_offset_hz);f.add("phase_noise",value.simulation_phase_noise_degrees_per_sqrt_second);
+        f.add("startup_samples",startup);f.add("training_samples",modem::training_sample_count(config));
+        f.add("padding_samples",modem::pattern_pulse_padding_samples(config));f.add("symbol_samples",modem::symbol_sample_count(config));
+        f.add("source_samples",source->total_samples());f.add("source_valid_payload_end",source->source_valid_payload_end());
+        f.add("source_preamble_begin",0);f.add("source_payload_clock_begin",modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config));
+        f.add("source_payload_clock_end",modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config)+3*modem::symbol_sample_count(config));
+        f.add("region_note","source clock before payload is private preamble/cover; pulse supports overlap nominal boundaries; channel startup is fractional");
+        f.add("payload_clock_begin",idle+startup+modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config));
+        f.add("payload_clock_end",idle+startup+modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config)+3*modem::symbol_sample_count(config));
+        f.add("suppression_samples",modem::suppression_sample_count(config));f.add("sample_count",pcm.size());f.add("block_count",blocks.size());
+        f.add("replay_frames",replay_count);f.add("float_byte_order",std::endian::native==std::endian::little?"little":"big");
+        f.add("pcm_sha256",component_sha256(pcm.data(),pcm.size()*sizeof(float)));
+        f.add("private_chain_score_threshold","unavailable through existing public diagnostics");
+        f.add("projection_note","direct receiver internally projects PCM; original Live bank used shared carrier projection");
+    });
+    for(const auto [epoch,input_origin]:{std::pair<std::uint64_t,std::uint64_t>{tx_epoch,0},{tx_epoch+3,10009}}) {
+        auto rx_options=value.transfer;rx_options.timestamp=epoch;
+        const auto rx_config=transfer::seeded_config(rx_options,epoch);
+        live::detail::ReceiverAdmissionContext context;context.sample_origin=input_origin;
+        context.now=live::detail::simulation_media_epoch(origin,input_origin,config.sample_rate);
+        context.capacity=live::detail::bank_capacity(value);context.control_margin=live::receiver_control_margin(rx_config,true);
+        context.prefer_streamed_templates=true;
+        const auto prepared=live::detail::prepare_receiver_search(rx_config,value,epoch,context);
+        const auto& search=prepared.search;constexpr std::size_t workspace=16*1024*1024;
+        modem::StreamingReceiver receiver(rx_config,workspace,search);
+        component_record("component_receiver",[&](auto& f) {
+            f.add("epoch",epoch);f.add("input_origin",input_origin);f.add("workspace",workspace);
+            f.add("sample_rate",rx_config.sample_rate);f.add("bandwidth_hz",rx_config.bandwidth_hz);f.add("carrier_hz",rx_config.carrier_hz);
+            f.add("spreading_factor",rx_config.spreading_factor);f.add("scramble",rx_config.scramble);f.add("dsss",rx_config.dsss);
+            f.add("dsss_factor",rx_config.dsss_factor);f.add("stream_phase",rx_config.stream_phase_samples);
+            f.add("start_offset",*search.start_offset_seconds);f.add("start_radius",search.start_uncertainty_seconds);
+            f.add("initial_symbols",search.initial_stream_symbols);f.add("search_stream_phases",search.search_stream_phases);
+            f.add("expand_clock_search",search.expand_clock_search);f.add("prefer_streamed_templates",search.prefer_streamed_templates);
+            f.add("worker_threads",search.worker_threads);f.add("candidate_limit",search.candidate_limit);f.add("track_limit",search.track_limit);
+            f.add("bit_limit",search.bit_limit);f.add("chunk_bits",search.chunk_bits);
+            f.add("strategy_workspace",search.receiver_strategy_workspace_bytes);f.add("cohort_banks",search.receiver_bank_count);
+            f.add("spreading_seed_sha256",component_sha256(rx_config.spreading_seed.data(),rx_config.spreading_seed.size()));
+            f.add("input_origin_is_block_boundary",std::any_of(blocks.begin(),blocks.end(),[&](auto block){return block.first==input_origin;}));
+        });
+        testing::CpuWorkBudget rx_budget(30s,"recorded raw component reception");
+        std::size_t events=0;bool exact_three=false,known_thirteen=false;
+        std::map<std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>,std::optional<std::string>> streams;
+        for(const auto [begin,count]:blocks) {
+            if(begin+count<=input_origin)continue;
+            check(rx_budget.pending(),"component receiver exceeded its computation limit");
+            const auto first=std::max<std::size_t>(begin,input_origin);
+            receiver.push(std::span(pcm).subspan(first,begin+count-first));receiver.process_pending();
+            for(auto& burst:receiver.take_pattern_bursts()) {
+                ++events;check(events<=4096,"component detector event output exceeded its bound");
+                std::string wire;for(const auto bit:burst.bits)wire+=bit==modem::missing_pattern_bit?'?':bit?'1':'0';
+                auto plain=burst.bits;auto decode=rx_options;decode.modem.stream_phase_samples=burst.stream_phase_samples;
+                const bool plaintext_available=!burst.missing_slots &&
+                    std::none_of(plain.begin(),plain.end(),[](auto bit){return bit==modem::missing_pattern_bit;});
+                if(plaintext_available)
+                    transfer::xor_binary_bits(plain,decode,burst.first_stream_symbol);
+                std::string bits;if(plaintext_available)for(const auto bit:plain)bits+=bit?'1':'0';
+                const auto identity=std::tuple{burst.stream_first_sample,burst.stream_first_symbol,burst.stream_phase_samples};
+                auto& stream=streams.try_emplace(identity,std::string{}).first->second;
+                if(plaintext_available && stream && burst.first_stream_symbol==burst.stream_first_symbol+stream->size())*stream+=bits;
+                else stream.reset();
+                exact_three|=stream && *stream=="001" && burst.complete;
+                known_thirteen|=burst.bits.size()==13;
+                component_record("component_burst",[&](auto& f) {
+                    f.add("epoch",epoch);f.add("input_origin",input_origin);f.add("feed_end",begin+count);
+                    f.add("physical_first",input_origin+burst.stream_first_sample);f.add("physical_end",input_origin+burst.end_sample);
+                    f.add("first_stream_symbol",burst.first_stream_symbol);f.add("stream_first_symbol",burst.stream_first_symbol);
+                    f.add("stream_phase",burst.stream_phase_samples);f.add("wire_bits",wire);
+                    f.add("plaintext_available",plaintext_available);
+                    if(plaintext_available)f.add("plain_bits",bits);
+                    else f.add("plaintext_status","unavailable: missing symbols");
+                    f.add("missing",burst.missing_slots);f.add("complete",burst.complete);f.add("score",burst.score);f.add("support",burst.support_samples);
+                    f.add("accumulated_plaintext_available",bool(stream));
+                    if(stream)f.add("accumulated_plain_bits",*stream);
+                    else f.add("accumulated_plaintext_status","unavailable: missing or noncontiguous observations");
+                });
+            }
+        }
+        component_record("component_result",[&](auto& f) {
+            f.add("epoch",epoch);f.add("events",events);f.add("observed_13bit_drain",known_thirteen);f.add("exact_3bit_complete_drain",exact_three);
+            f.add("local_clock_fallback",receiver.local_clock_fallback());f.add("candidate_limited",receiver.candidate_limited());
+            f.add("working_bytes",receiver.working_bytes());f.add("comparison","diagnostic observations; matching known trace not assumed");
+        });
+    }
+}
 }
 int main(int argc,char** argv) {
     try {
         cpu_work_budget_boundaries();
+        if(argc>1 && std::string_view(argv[1])=="--simulation-media-clock-raw-component") {
+            check(argc==3 && !std::string_view(argv[2]).empty(),"usage: test_live --simulation-media-clock-raw-component <output-directory>");
+            const std::filesystem::path directory(argv[2]);std::filesystem::create_directories(directory);
+            audio::trace::Scope trace((directory/"component-trace.jsonl").string());
+            simulation_media_clock_raw_component(directory);return 0;
+        }
         if(argc>1 && std::string_view(argv[1])=="--simulation-media-clock-standard-trace") {
             check(argc==3 && !std::string_view(argv[2]).empty(),
                   "usage: test_live --simulation-media-clock-standard-trace <path>");
