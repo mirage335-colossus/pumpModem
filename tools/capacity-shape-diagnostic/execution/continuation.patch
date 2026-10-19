@@ -1,0 +1,157 @@
+--- a/src/pattern_receiver.cpp
++++ b/src/pattern_receiver.cpp
+@@ -1193,7 +1193,7 @@
+         }
+     };
+     PatternEvidence measure(std::uint64_t start,std::uint64_t index,std::size_t f,std::uint64_t observed_before,
+-                            std::span<const Complex> carrier_phases,std::stop_token stop) {
++                            std::span<const Complex> carrier_phases,std::stop_token stop,bool continuation=false) {
+         std::array<Complex,2> dot{},square{};std::array<double,2> norm{};double energy=0;
+         SectionFits sections;const auto edges=drift_edges(f);unsigned section=0;
+         // Timing refinements of one stream symbol fit the same templates.
+@@ -1203,6 +1203,8 @@
+         if(!tracking_reference_valid || tracking_reference_index!=index || tracking_reference_frequency!=f) {
+             tracking_reference_valid=false;
+             if(index>std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol())throw Error("pattern stream coordinate overflow");
++            rx_cpu::ConditionalScope continuation_reference(rx_cpu::Stage::continuation_reference_generation,
++                continuation && rx_cpu::continuation_inner_enabled());
+             code.prepare_symbol(index*code.chips_per_symbol(),stop);
+             for(std::size_t i=0;i<length;++i)for(unsigned b=0;b<2;++b) {
+                 if((i&4095U)==0)cancelled(stop);
+@@ -1522,6 +1524,9 @@
+                     }
+                     return std::span<const Complex>(reference).first(length);
+                 };
++                {
++                rx_cpu::ConditionalScope continuation_timing(rx_cpu::Stage::continuation_timing_scoring,
++                    rx_cpu::continuation_inner_enabled());
+                 for(std::size_t g=0;g<group_count;++g) {
+                     stream_phase(groups[g].lower);
+                     // A physical null can separate the clock lanes by many
+@@ -1532,13 +1537,14 @@
+                     for(auto f=first_frequency;f<end_frequency;++f)for(auto start=low;start<=high;++start) {
+                         if(bins-start>ring.size())continue;
+                         auto fit=measure(start,track.index,f,track.burst.end_sample/bin_samples,
+-                            carrier_phases(start),stop);++trials;
++                            carrier_phases(start),stop,true);++trials;
+                         if(packed_calendar || burst_plan) {
+                             frequency_scores[f][fit.bit]=std::max(frequency_scores[f][fit.bit],fit.score);
+                             frequency_scores[f][1-fit.bit]=std::max(frequency_scores[f][1-fit.bit],fit.alternative_score);
+                         }
+                         if(fit.score>best.score){best=fit;chosen=start;selected=groups[g];selected_frequency=f;}
+                     }
++                }
+                 }
+                 // Acquisition can select a neighboring carrier from one
+                 // distorted startup symbol. Compare the same disjoint PCM
+@@ -1553,10 +1559,17 @@
+                     return competing_frequencies() || track.established || std::abs(search.frequency_offsets_hz[f]-search.frequency_offsets_hz[track.frequency])<=
+                         static_cast<double>(config.sample_rate)/static_cast<double>(code.symbol_samples());
+                 };
++                {
++                rx_cpu::ConditionalScope continuation_frequency(rx_cpu::Stage::continuation_frequency_dispatch,
++                    rx_cpu::continuation_inner_enabled());
+                 std::size_t jobs=0;
+                 for(std::size_t f=0;f<templates.size();++f)if(f!=track.frequency && eligible(f))++jobs;
+-                const bool axis=jobs>=1023 && jobs*5>=templates.size()*4 &&
+-                    tracking_frequency_axis(chosen,track.index,track.burst.end_sample/bin_samples,frequency_scores,stop);
++                bool axis=false;
++                if(jobs>=1023 && jobs*5>=templates.size()*4) {
++                    rx_cpu::ConditionalScope continuation_axis(rx_cpu::Stage::continuation_frequency_axis,
++                        rx_cpu::continuation_inner_enabled());
++                    axis=tracking_frequency_axis(chosen,track.index,track.burst.end_sample/bin_samples,frequency_scores,stop);
++                }
+                 auto* workers=axis?nullptr:prepare_tracking(jobs);
+                 double axis_max=best.score;
+                 if(axis)for(std::size_t f=0;f<templates.size();++f)if(eligible(f))
+@@ -1589,16 +1602,19 @@
+                             // Original arithmetic decides the strongest carrier
+                             // and near ties, independently of transform rounding.
+                             if(axis && fit.score>=axis_max-1e-5*std::max(1.,axis_max)) {
+-                                fit=measure(chosen,track.index,f,track.burst.end_sample/bin_samples,chosen_carriers,stop);
++                                fit=measure(chosen,track.index,f,track.burst.end_sample/bin_samples,chosen_carriers,stop,true);
+                                 ++fft_workload->frequency_axis_refinements;
+                             }
+-                        } else fit=measure(chosen,track.index,f,track.burst.end_sample/bin_samples,chosen_carriers,stop);
++                        } else fit=measure(chosen,track.index,f,track.burst.end_sample/bin_samples,chosen_carriers,stop,true);
+                     }
+                     if(f!=track.frequency)++trials;
+                     frequency_scores[f][fit.bit]=fit.score;
+                     frequency_scores[f][1-fit.bit]=fit.alternative_score;
+                     if(fit.score>best.score){best=fit;selected_frequency=f;}
+                 }
++                }
++                rx_cpu::ConditionalScope continuation_state(rx_cpu::Stage::continuation_state,
++                    rx_cpu::continuation_inner_enabled());
+                 // A weak candidate may migrate onto an already established
+                 // carrier during continuation. Apply overlap arbitration here
+                 // as well as at acquisition, before it can publish a duplicate
+@@ -1655,7 +1671,7 @@
+                         advance_track(track);
+                         continue;
+                     }
+-                    publish(track,gap_expired,true);
++                    {rx_cpu::ConditionalScope continuation_publication(rx_cpu::Stage::continuation_publication,rx_cpu::continuation_inner_enabled());publish(track,gap_expired,true);}
+                     if(!track.established || gap_expired){ended=true;break;}
+                     // A lost symbol closes this contiguous span, but timing
+                     // and the private stream advance without requiring it to
+@@ -1681,7 +1697,7 @@
+                             track.total_score=track.confirmed_score;track.pending_score=track.penalty=0;
+                             track.total_support=track.confirmed_support;
+                         } else {
+-                            publish(track,false,true);track.burst.bits.clear();
++                            {rx_cpu::ConditionalScope continuation_publication(rx_cpu::Stage::continuation_publication,rx_cpu::continuation_inner_enabled());publish(track,false,true);}track.burst.bits.clear();
+                             track.burst.complete=false;track.admitted=false;
+                         }
+                     }
+@@ -1747,10 +1763,10 @@
+                 }
+                 advance_track(track,((!packed_calendar && !burst_plan) || bound>=threshold() || standalone)?
+                     std::optional<std::uint64_t>{chosen}:std::nullopt);
+-                publish(track,false);
+-                if(gap_expired && track.unconfirmed_symbols){publish(track,true,true);ended=true;break;}
+-            }
+-            if(final && !ended) { publish(track,false,true);ended=true; }
++                {rx_cpu::ConditionalScope continuation_publication(rx_cpu::Stage::continuation_publication,rx_cpu::continuation_inner_enabled());publish(track,false);}
++                if(gap_expired && track.unconfirmed_symbols){{rx_cpu::ConditionalScope continuation_publication(rx_cpu::Stage::continuation_publication,rx_cpu::continuation_inner_enabled());publish(track,true,true);}ended=true;break;}
++            }
++            if(final && !ended) { {rx_cpu::ConditionalScope continuation_publication(rx_cpu::Stage::continuation_publication,rx_cpu::continuation_inner_enabled());publish(track,false,true);}ended=true; }
+             if(ended)it=tracks.erase(it);else ++it;
+         }
+     }
+--- a/src/scheduled_work_profile.hpp
++++ b/src/scheduled_work_profile.hpp
+@@ -34,7 +34,7 @@
+ enum class Stage : std::size_t {
+     input_validation, mixing, calendar, template_build, template_cache, shared_frontend,
+     physical_moments, gram, guards, rolling, allocation, publication,
+-    setup, search_residual, control_residual, private_permutation, private_coefficient, private_address, temporal_coordinates, temporal_lookup, temporal_plan_build, temporal_validate, temporal_gather, temporal_evaluate, temporal_export, scheduled_common_residual, scheduled_candidate_residual, common_raw, ordinary_acquisition, ordinary_continuation, ordinary_source_generation, ordinary_acq_input, ordinary_acq_reference, ordinary_acq_execute, ordinary_acq_collect, fft_execution_job_prepare, fft_execution_convolution, fft_execution_score, count
++    setup, search_residual, control_residual, private_permutation, private_coefficient, private_address, temporal_coordinates, temporal_lookup, temporal_plan_build, temporal_validate, temporal_gather, temporal_evaluate, temporal_export, scheduled_common_residual, scheduled_candidate_residual, common_raw, ordinary_acquisition, ordinary_continuation, ordinary_source_generation, ordinary_acq_input, ordinary_acq_reference, ordinary_acq_execute, ordinary_acq_collect, fft_execution_job_prepare, fft_execution_convolution, fft_execution_score, continuation_reference_generation, continuation_timing_scoring, continuation_frequency_dispatch, continuation_frequency_axis, continuation_state, continuation_publication, count
+ };
+ inline constexpr std::size_t stage_count=static_cast<std::size_t>(Stage::count);
+ inline constexpr std::array<const char*,stage_count> names={
+@@ -42,7 +42,9 @@
+     "shared_frontend","physical_moments","gram","guards","rolling","allocation","publication",
+     "setup","search_residual","control_residual","private_permutation","private_coefficient","private_address",
+     "temporal_coordinates","temporal_lookup","temporal_plan_build","temporal_validate",
+-    "temporal_gather","temporal_evaluate","temporal_export","scheduled_common_residual","scheduled_candidate_residual","common_raw","ordinary_acquisition","ordinary_continuation","ordinary_source_generation","ordinary_acq_input","ordinary_acq_reference","ordinary_acq_execute","ordinary_acq_collect","fft_execution_job_prepare","fft_execution_convolution","fft_execution_score"
++    "temporal_gather","temporal_evaluate","temporal_export","scheduled_common_residual","scheduled_candidate_residual","common_raw","ordinary_acquisition","ordinary_continuation","ordinary_source_generation","ordinary_acq_input","ordinary_acq_reference","ordinary_acq_execute","ordinary_acq_collect","fft_execution_job_prepare","fft_execution_convolution","fft_execution_score",
++    "continuation_reference_generation","continuation_timing_scoring","continuation_frequency_dispatch",
++    "continuation_frequency_axis","continuation_state","continuation_publication"
+ };
+ enum class Mode {disabled,coarse,fine,sampled};
+ namespace sampled_detail {
+@@ -467,6 +469,13 @@
+ public:
+     explicit InnerScope(Stage category) noexcept {if(acquisition_inner_enabled())scope_.emplace(category);}
+ };
++inline bool continuation_inner_enabled() noexcept {
++    static const bool enabled=[] {
++        const auto* value=std::getenv("DATAPUMP_CONTINUATION_INNER_CPU");
++        return value && std::strcmp(value,"1")==0;
++    }();
++    return enabled;
++}
+ inline bool fft_execution_inner_enabled() noexcept {
+     static const bool enabled=[] {
+         const auto* value=std::getenv("DATAPUMP_FFT_EXECUTION_INNER_CPU");

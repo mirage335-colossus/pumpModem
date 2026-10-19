@@ -1,8 +1,8 @@
 {
   "assignment": "fixed-prefix-storage-census-20261019",
   "parent": "instrumented-gui-core-failures-20261018",
-  "status": "unaccepted_private_Sol_takeover",
-  "overlay_identity": "ee7790318a06c632c03d5c8d68dcdb83af959500db4b59290e11a67748da08b2",
+  "status": "root Sol continuation after actual A5 inactive-ledger gate failure; repaired preparation awaiting actual replay",
+  "overlay_identity": "63e914c6a5c917ea0b62a3fea855ff9e795fd83524fb926a69c999fbc85558c6",
   "original_luna_patch_sha256": "95de064db9c19c7d3850702a2dede297d2dca3d55510c966f4e5583d0d32224a",
   "original_failure": "free observation_epoch lookup; repair1of1 qualified impl->observation_epoch; substantive review rejected",
   "original_repair_count": 1,
@@ -15,14 +15,13 @@
     "src/fixed_prefix_storage_probe.hpp": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
   },
   "postimages": {
-    "src/live.cpp": "e345d768d00c6ffff7f6a117ca4ea56c89aa2a694b7de5e6a9634d78efb9c6ed",
-    "src/pattern_receiver.cpp": "943337ac96c2048ae3ef3cdfb99a864579031928fdc70b776aabb5ba958ef9d6",
+    "src/live.cpp": "8cea169a8d2120b6b9887320d7ff4025b77fe7047ec375bcd28ef060185934a4",
+    "src/pattern_receiver.cpp": "e714363359b1b87154e043369da2c1bf852e92aaffddc895fc669e191b7d6b6a",
     "src/transfer.cpp": "5dc6754a79bcfaa32ab1d3be9085d236a11fdf0cf1bb5cc7bf3a03c84742c90b",
     "src/audio_trace.hpp": "d57e31e8d1b8040570a75ab7bb49d5af7a9f128540455e6b4fd0c7ee2ee2f1f7",
-    "src/fixed_prefix_storage_probe.hpp": "dad3500c0da0a4fccca2d067bdea5933e3b071a6d533fc4b5c012ed093a4e42f"
+    "src/fixed_prefix_storage_probe.hpp": "f74a58da6f8620d6c83c8d2939fc4810ddff6b0e0ea869444ee5293541b0fdaa"
   },
-  "patch_sha256": "8c37d72d8682b8c2c74e8253e3a5d3ef042858866aad95a8616b050ea4027d99",
-  "reverse_patch_sha256": "e31433bc2ffa4265a34b29ee025f14956a07898c4cba73fc66827248fead1463",
+  "patch_sha256": "deb4d80a532fad63a165060a49b724d387326693e7782b10cc0ffe6edd6a24a0",
   "read_pins": {
     "src/alsa_plugin_path.hpp": "8ed3a5ebe28d2ff2c2b676dea57bdf3157144fe13a4e0e705151debdc6465b1b",
     "src/amplitude_probability.cpp": "c5a91303ba2802ef274d2b6e796ee8a6f961bc145e5be05ea5806d9041d8971d",
@@ -449,5 +448,13 @@
     "job": 118164621516,
     "source": "4ac0b7bb3b602e5cf8bb82dc37c9cb8df872f4cc",
     "status": "root independently accepted original A4 source/runtime/fidelity; this new census remains unexecuted"
+  },
+  "prior_overlay_identity": "ee7790318a06c632c03d5c8d68dcdb83af959500db4b59290e11a67748da08b2",
+  "runtime_failure": {
+    "run": 39292791113,
+    "job": 118197533327,
+    "source": "a721d6e5ccf1e07006be0d7a3b01dce5bf8a112b",
+    "failure": "ValueError: A3 frozen end ledger",
+    "mechanism": "fixed replay never activated capacity_shape observer; ledger remained zero; independent component rows partial only"
   }
 }

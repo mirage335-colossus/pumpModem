@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Same-binary A4 fidelity replay with constant census and paired FFT scopes."""
+"""Same-binary A4 replay with constant census and paired detailed CPU scopes."""
 from pathlib import Path
 import argparse
 import hashlib
@@ -11,6 +11,9 @@ import sys
 HERE = Path(__file__).resolve().parent
 MODES = ('0', '1', '0', '1', '0', '1')
 STAGES = ('fft_execution_job_prepare', 'fft_execution_convolution', 'fft_execution_score')
+CONTINUATION = ('continuation_reference_generation', 'continuation_timing_scoring',
+                'continuation_frequency_dispatch', 'continuation_frequency_axis',
+                'continuation_state', 'continuation_publication')
 
 
 def load(name, path):
@@ -41,16 +44,19 @@ def capture(root, report, timeout_seconds):
         raise ValueError('composed census source gate changed')
     composed = json.loads(composed_path.read_text())
     expected_composed = dict(census)
-    expected_composed['read_pins'] = {**census['read_pins'], **manifest['fft_postimages']}
+    additional = {**manifest['fft_postimages'], **manifest['continuation_postimages']}
+    expected_composed['read_pins'] = {**census['read_pins'], **additional}
+    expected_composed['postimages'] = {**census['postimages'], **additional}
     expected_composed['composition'] = {'parent_manifest_sha256': prep.sha(HERE / 'census/manifest.json'),
                                       'fft_patch_sha256': manifest['fft_patch_sha256'],
-                                      'additional_postimages': manifest['fft_postimages']}
+                                      'continuation_patch_sha256': manifest['continuation_patch_sha256'],
+                                      'additional_postimages': additional}
     if composed != expected_composed:
         raise ValueError('unreviewed change to composed census gate')
     validator = runpy.run_path(str(root / 'tools/gui-stop-differential.py'))['trace_seal']
     original_environment = base.safe_environment
-    # Retain the accepted acquisition scopes in BOTH modes. Only the new FFT
-    # stages alternate; labels OFF/ON refer to that explicit new toggle.
+    # Acquisition scopes and census remain constant. The single deliberate
+    # variable is detailed FFT+continuation timing, switched as one group.
     base.SCOPES = ('1',) * 6
     records, failure = [], None
     binary_hash = prep.sha(binary)
@@ -59,12 +65,14 @@ def capture(root, report, timeout_seconds):
             def environment():
                 env = original_environment()
                 env['DATAPUMP_FFT_EXECUTION_INNER_CPU'] = mode
+                env['DATAPUMP_CONTINUATION_INNER_CPU'] = mode
                 return env
             base.safe_environment = environment
             record = base.run_one(root=root, report=report, binary=binary, pcm_path=pcm,
                                   pcm_sha256=integrated['fixture']['pcm_sha256'], index=index,
                                   timeout_seconds=timeout_seconds, trace_validator=validator)
             record['fft_execution_scope'] = mode
+            record['continuation_scope'] = mode
             records.append(record)
             if record['exit_code'] or record['timed_out'] or record['trace_seal'] is None or not record['input_unchanged_after_run']:
                 raise ValueError('process/input/strict trace seal failed')
@@ -78,6 +86,15 @@ def capture(root, report, timeout_seconds):
                     raise ValueError('new FFT scope switch mismatch: ' + stage)
             if mode == '1' and profile['cpu_fft_execution_score_calls'] != 2 * 2871980:
                 raise ValueError('new score scope did not cover every expected job/bit')
+            for stage in CONTINUATION:
+                ns, calls = profile['cpu_' + stage + '_ns'], profile['cpu_' + stage + '_calls']
+                if mode == '0' and (ns != 0 or calls != 0):
+                    raise ValueError('continuation OFF scope mismatch: ' + stage)
+                if mode == '1' and stage != 'continuation_frequency_axis' and (ns <= 0 or calls <= 0):
+                    raise ValueError('continuation ON scope missing: ' + stage)
+            # This exact five-carrier fixture cannot reach the >=1023-job axis.
+            if profile['cpu_continuation_frequency_axis_calls'] or profile['cpu_continuation_frequency_axis_ns']:
+                raise ValueError('unexpected frequency-axis coverage for five-carrier fixture')
             record['semantic_readback'] = readback
             record['storage_readback'] = reader.read(Path(record['trace_path']), Path(record['stderr_path']),
                                                      report / 'integrated-source.json', base_path,
@@ -94,7 +111,7 @@ def capture(root, report, timeout_seconds):
             records[-1]['failure'] = failure
             base.write_json(Path(records[-1]['stdout_path']).parent / 'run.json', records[-1])
     summary = dict(scope='simulation-acquisition-partition-diagnostic', classification=base.CLASSIFICATION,
-                   interpretation='six fixed-input diagnostic replays; old acquisition scopes and terminal census constant ON; three matched new FFT-scope OFF/ON pairs; not qualification',
+                   interpretation='six fixed-input diagnostic replays; old acquisition scopes, terminal census and bounded scheduler markers constant ON; three matched detailed FFT+continuation OFF/ON pairs; combined scope overhead only; not qualification',
                    launcher_source_commit=integrated['launcher_source_commit'], application_source_commit=integrated['application_source_commit'],
                    compiled_overlay_sha256=integrated['compiled_overlay_sha256'], fixture=integrated['fixture'],
                    integrated_source_sha256=prep.sha(report / 'integrated-source.json'), configuration=config,

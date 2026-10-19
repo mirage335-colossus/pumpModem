@@ -1368,7 +1368,7 @@ jobs:
           python3 -B tools/capacity-shape-diagnostic/execution/capture.py --root "$PWD" --report "$PWD/build/simulation-acquisition-partition-diagnostics" --timeout-seconds 300
       - name: Mark acquisition partition replay as diagnostic only
         if: inputs.scope == 'simulation-acquisition-partition-diagnostic'
-        run: echo 'Six identical fixed-bank prefix replays retain acquisition scopes and a joined storage census in both modes, alternating only the new FFT execution scopes. Original A4 timeline/work/output gates and the additive storage reader remain mandatory. This diagnostic does not execute original full-fixture assertions or establish Live/GUI deadlines or qualification.' >> "$GITHUB_STEP_SUMMARY"
+        run: echo 'Six identical fixed-bank prefix replays retain acquisition scopes and a joined storage census in both modes, alternating detailed FFT and continuation scopes together as one instrumentation variable. Original A4 timeline/work/output gates and the additive storage reader remain mandatory. This diagnostic does not execute original full-fixture assertions or establish Live/GUI deadlines or qualification.' >> "$GITHUB_STEP_SUMMARY"
       - name: Run the focused simulation media clock diagnostic
         if: (inputs.scope == 'simulation-clock-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic') && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 15

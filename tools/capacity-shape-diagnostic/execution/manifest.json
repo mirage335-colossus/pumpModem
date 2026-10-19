@@ -13,13 +13,25 @@
     "src/pattern_fft_batch.cpp": "cdf4c8ffee612b709cf65c5e174712d21223b4206114e70ef0e3eab27290f6ed",
     "src/scheduled_work_profile.hpp": "f90af52b2fcfc33f60b135175e6711deb4813ff73b1c8713ece452ff5da654c4"
   },
-  "census_patch_sha256": "8c37d72d8682b8c2c74e8253e3a5d3ef042858866aad95a8616b050ea4027d99",
-  "census_manifest_sha256": "7870ab783ea1709d8a1946fa9a386a620d538ec98e1ea2fefbb31eee991abbc0",
+  "census_patch_sha256": "deb4d80a532fad63a165060a49b724d387326693e7782b10cc0ffe6edd6a24a0",
+  "census_manifest_sha256": "b3237653e64d9846c8fca682c6511aa8dec97a91afd6f61793269f7c3eab1ebb",
   "census_reader_sha256": "12dfa12417d7d64b63ed1bac41cc5867fa0704caa28450b648eb317a7fce0d59",
   "baseline_a4_capture": {
     "run": 39283975589,
     "job": 118164621516,
     "source": "4ac0b7bb3b602e5cf8bb82dc37c9cb8df872f4cc"
   },
-  "review": "Root reviewed nonowning joined census/actual retained predicate/defined-bit comparators/unchanged physical/coverage algorithms; rebased FFT profiler preserves all35 existing stage IDs; original FFT code unchanged from worker apart from profiler layer. No qualification claim."
+  "review": "Root reviewed nonowning joined census/actual retained predicate/defined-bit comparators/unchanged physical/coverage algorithms; rebased FFT profiler preserves all35 existing stage IDs; original FFT code unchanged from worker apart from profiler layer. No qualification claim.",
+  "continuation_patch_sha256": "c95e067e2e830a786841d5c528f6048f20634b09f8ca617a98df09d97418a1a2",
+  "continuation_preimages": {
+    "src/pattern_receiver.cpp": "e714363359b1b87154e043369da2c1bf852e92aaffddc895fc669e191b7d6b6a",
+    "src/scheduled_work_profile.hpp": "f90af52b2fcfc33f60b135175e6711deb4813ff73b1c8713ece452ff5da654c4"
+  },
+  "continuation_postimages": {
+    "src/pattern_receiver.cpp": "8db655278eb89194e098ff537e48a44a6d9f7ed6019e5eb4101ada85d2e972f9",
+    "src/scheduled_work_profile.hpp": "7631f88981f3c0d22c8143c7e17eea9783c1992007da32659faf1f689c4692f1"
+  },
+  "continuation_assignment": "continuation-partition-20261019",
+  "original_continuation_patch_sha256": "eff24341ec81e72cbcaa5202b3bd34c7c2b5e5a6073929ec477ecb08dea87633",
+  "continuation_rebase": "root marker-only context rebase; accepted Luna algorithm/scope patch unchanged; no Impl layout change"
 }
