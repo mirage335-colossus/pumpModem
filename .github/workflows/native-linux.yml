@@ -829,6 +829,7 @@ jobs:
         if: inputs.scope == 'simulation-acquisition-partition-diagnostic'
         run: |
           python3 -B tools/capacity-shape-diagnostic/acquisition/prepare.py --root "$PWD" --report "$PWD/build/simulation-acquisition-partition-diagnostics"
+          python3 -B tools/capacity-shape-diagnostic/execution/prepare.py --root "$PWD" --report "$PWD/build/simulation-acquisition-partition-diagnostics"
       - name: Prepare private native peak lease source
         if: inputs.scope == 'native-peak-lease-diagnostic'
         run: >-
@@ -1364,10 +1365,10 @@ jobs:
         if: inputs.scope == 'simulation-acquisition-partition-diagnostic' && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 35
         run: |
-          python3 -B tools/capacity-shape-diagnostic/acquisition/capture.py capture --root "$PWD" --report "$PWD/build/simulation-acquisition-partition-diagnostics" --timeout-seconds 300
+          python3 -B tools/capacity-shape-diagnostic/execution/capture.py --root "$PWD" --report "$PWD/build/simulation-acquisition-partition-diagnostics" --timeout-seconds 300
       - name: Mark acquisition partition replay as diagnostic only
         if: inputs.scope == 'simulation-acquisition-partition-diagnostic'
-        run: echo 'Six fixed-bank prefix replays record receiver-processing traces and each child process outcome. They do not run the original full-fixture assertions or establish its deadlines; three paired inner-CPU scopes are diagnostic evidence only, not Live qualification or a general performance guarantee.' >> "$GITHUB_STEP_SUMMARY"
+        run: echo 'Six identical fixed-bank prefix replays retain acquisition scopes and a joined storage census in both modes, alternating only the new FFT execution scopes. Original A4 timeline/work/output gates and the additive storage reader remain mandatory. This diagnostic does not execute original full-fixture assertions or establish Live/GUI deadlines or qualification.' >> "$GITHUB_STEP_SUMMARY"
       - name: Run the focused simulation media clock diagnostic
         if: (inputs.scope == 'simulation-clock-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic') && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 15

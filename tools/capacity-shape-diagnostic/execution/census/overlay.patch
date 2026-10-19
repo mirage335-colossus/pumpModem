@@ -1,0 +1,283 @@
+--- a/src/live.cpp
++++ b/src/live.cpp
+@@ -38,6 +38,7 @@
+ #include <iterator>
+ #include "audio_trace.hpp"
+ #include "owner_census_probe.hpp"
++#include "fixed_prefix_storage_probe.hpp"
+ #include "capacity_shape_probe.hpp"
+ #include "capacity_cpu_probe.hpp"
+ #include <algorithm>
+@@ -4544,6 +4545,19 @@
+     // Mirrors the next captured feed's admission fence, but returns at the
+     // existing joined-refresh/before-admission work point without feeding tail.
+     impl->refresh_bank(bank,value,true);
++    ::datapump::diagnostic::fixed_prefix_storage::capture(bank,value,::datapump::diagnostic::capacity_shape::state,
++        [](const auto& r){return receiver_control_margin(r.options.modem,r.options.key.has_value());},
++        impl->observation_epoch(bank,value,bank.samples),bank_capacity(value),[&](auto& c){
++            using namespace ::datapump::diagnostic::fixed_prefix_storage;
++            emit(c,"fixed_prefix_storage_caller",[&](auto& f){f.add("owner",owner_cap);f.add("prepared_present",wave!=nullptr);f.add("prepared_received_present",wave&&wave->received.has_value());
++                f.add("scope","retained Prepared received result and replay outer buffers; unrelated UI snapshot/history copies unavailable");});
++            if(wave){
++                vector(c,"caller.replay",wave->replay);vector(c,"caller.signals",wave->signals);values(c,"caller.pattern_scores",wave->pattern_scores);vector(c,"caller.pattern_score_observations",wave->pattern_score_observations);
++                if(wave->received){const auto& r=*wave->received;diagnostics(c,r.diagnostics,0,"Prepared.received retained caller copy");
++                    values(c,"caller.raw_bits",r.raw_bits);values(c,"caller.message.data",r.content.message.data);values(c,"caller.message.filename",r.content.message.filename);values(c,"caller.error",r.error);}
++                std::size_t i=0;for(const auto& replay:wave->replay){values(c,"caller.replay.waveform",replay.waveform,i);values(c,"caller.replay.spectrum",replay.spectrum,i);vector(c,"caller.replay.constellation",replay.constellation,i);vector(c,"caller.replay.pattern_scores",replay.pattern_scores,i);vector(c,"caller.replay.pattern_score_observations",replay.pattern_score_observations,i);++i;}
++            }
++        });
+     const SignalUpdate* event=nullptr;
+     if(wave){if(wave->verified)event=&*wave->verified;else for(auto it=wave->signals.rbegin();it!=wave->signals.rend();++it)if(*it){event=&**it;break;}}
+     audio::trace::record("capacity_shape_fixed_bank_end",[&](auto& f) {
+--- a/src/pattern_receiver.cpp
++++ b/src/pattern_receiver.cpp
+@@ -16,6 +16,7 @@
+ #include "pattern_drift.hpp"
+ #include "audio_trace.hpp"
+ #include "owner_census_probe.hpp"
++#include "fixed_prefix_storage_probe.hpp"
+ #include "capacity_cpu_probe.hpp"
+ #include <algorithm>
+ #include <array>
+@@ -3302,7 +3303,7 @@
+ }
+ std::vector<Complex> PatternReceiver::take_chip_constellation(){if(impl_->fallback)return impl_->fallback->take_chip_constellation();auto result=impl_->chip_points();impl_->points.clear();impl_->point_cursor=0;return result;}
+ bool PatternReceiver::acquiring()const{return impl_->fallback?impl_->fallback->acquiring():!impl_->tracks.empty();}
+-bool PatternReceiver::synchronized()const{::datapump::diagnostic::owner_census::inspect(*impl_);return impl_->fallback?impl_->fallback->synchronized():std::any_of(impl_->tracks.begin(),impl_->tracks.end(),[](const auto& track){return track.admitted;});}
++bool PatternReceiver::synchronized()const{::datapump::diagnostic::fixed_prefix_storage::inspect(*impl_);::datapump::diagnostic::owner_census::inspect(*impl_);return impl_->fallback?impl_->fallback->synchronized():std::any_of(impl_->tracks.begin(),impl_->tracks.end(),[](const auto& track){return track.admitted;});}
+ bool PatternReceiver::initial_search_complete()const {
+     const auto& s=*impl_;
+     if(s.fallback)return s.fallback->initial_search_complete();
+--- a/src/transfer.cpp
++++ b/src/transfer.cpp
+@@ -1,3 +1,4 @@
++#include "fixed_prefix_storage_probe.hpp"
+ #include "datapump/attachment.hpp"
+ #include "datapump/compression.hpp"
+ #include "datapump/transfer.hpp"
+@@ -735,6 +736,7 @@
+     s.states.erase(it);
+ }
+ std::size_t StreamReceiver::working_bytes()const {
++    ::datapump::diagnostic::fixed_prefix_storage::content(*impl_);
+     auto bytes=sizeof(StreamReceiver)+sizeof(Impl)+impl_->options.receive_targets_db_hz.capacity()*sizeof(double);
+     for(const auto& [id,state]:impl_->states) {
+         const auto& result=state->result;const auto& message=result.content.message;
+--- a/src/audio_trace.hpp
++++ b/src/audio_trace.hpp
+@@ -169,7 +169,7 @@
+ inline bool capacity_shape_event_allowed(const char* event) noexcept {
+     if(!capacity_shape_filter_enabled())return true;
+     return std::strcmp(event,"trace_begin")==0 || std::strcmp(event,"simulation_media_clock_case")==0 ||
+-        std::strncmp(event,"capacity_shape_",15)==0 || std::strncmp(event,"owner_census_",13)==0 ||
++        std::strncmp(event,"fixed_prefix_storage_",21)==0 || std::strncmp(event,"capacity_shape_",15)==0 || std::strncmp(event,"owner_census_",13)==0 ||
+         std::strncmp(event,"capacity_cpu_",13)==0 || std::strcmp(event,"receiver_component_cpu")==0 ||
+         std::strcmp(event,"receiver_bank_build")==0 || std::strcmp(event,"receiver_bank_admitted")==0 ||
+         std::strcmp(event,"receiver_bank_retired")==0 || std::strcmp(event,"receiver_selection")==0 ||
+@@ -179,7 +179,7 @@
+         std::strcmp(event,"receiver_shared_capture_reserved")==0 ||
+         std::strcmp(event,"receiver_shared_capture_unavailable")==0;
+ }
+-inline constexpr const char* capacity_shape_filter_policy="kept trace_begin, simulation_media_clock_case, capacity_shape_*, owner_census_*, capacity_cpu_*, receiver_component_cpu, receiver selection/admission/retirement/refusal and shared-capacity events; omitted per-bit confirmation/history and unrelated hot diagnostic events";
++inline constexpr const char* capacity_shape_filter_policy="kept trace_begin, simulation_media_clock_case, fixed_prefix_storage_*, capacity_shape_*, owner_census_*, capacity_cpu_*, receiver_component_cpu, receiver selection/admission/retirement/refusal and shared-capacity events; omitted per-bit confirmation/history and unrelated hot diagnostic events";
+ inline std::atomic<std::uint64_t> next_identity{0};
+ inline std::uint64_t identity(){return ++next_identity;}
+ template<class F>void record(const char* event,F fields) noexcept {
+--- /dev/null
++++ b/src/fixed_prefix_storage_probe.hpp
+@@ -0,0 +1,196 @@
++#pragma once
++// SECOND PRIVATE DIAGNOSTIC OVERLAY. No detector, quota, or public API change.
++#include "datapump/pattern_receiver.hpp"
++#include "datapump/pattern_pulse.hpp"
++#include "audio_trace.hpp"
++#include "owner_census_probe.hpp"
++#include <bit>
++#include <cfloat>
++#include <complex>
++#include <memory>
++#include <type_traits>
++#include <vector>
++namespace datapump::diagnostic::fixed_prefix_storage {
++constexpr std::size_t owner_cap=512,view_cap=65536,row_cap=131072;
++struct View {const void* object=nullptr;const char* component="";std::size_t owner=0,index=0,size=0,capacity=0,element=0,group=0;
++    bool (*equal)(const void*,const void*) noexcept=nullptr;};
++struct Capture {std::array<View,view_cap> views{};std::size_t count=0,rows=0,owner=0,errors=0,owners=0,tracks=0,states=0;
++    bool inspected=false,content_inspected=false,limited=false,queue_timeout=false;};
++static_assert(sizeof(Capture)<8*1024*1024);
++inline thread_local Capture* active=nullptr;
++inline std::atomic<bool> captured{false};
++template<class F>void emit(Capture& c,const char* event,F fields) noexcept {
++    if(c.queue_timeout)return;
++    if(c.rows>=row_cap){c.limited=true;return;}
++    // Terminal observer only: bounded backpressure prevents diagnostic bursts
++    // overrunning the unchanged trace queue. A stalled writer is incomplete.
++    const auto state=audio::trace::active.load();const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);
++    while(state&&state->queued()>128){if(std::chrono::steady_clock::now()>=deadline){c.queue_timeout=true;++c.errors;return;}std::this_thread::yield();}
++    ++c.rows;audio::trace::record(event,[&](auto& f){f.add("storage_schema",1);fields(f);});
++}
++template<class T>bool exact_scalar(const T& a,const T& b) noexcept {
++    if constexpr(std::is_same_v<T,double>)return std::bit_cast<std::uint64_t>(a)==std::bit_cast<std::uint64_t>(b);
++    else if constexpr(std::is_same_v<T,float>)return std::bit_cast<std::uint32_t>(a)==std::bit_cast<std::uint32_t>(b);
++    else if constexpr(std::is_same_v<T,long double>) {
++#if LDBL_MANT_DIG == 64 && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
++        // x87 has ten value bytes; never compare six padding bytes.
++        const auto x=std::bit_cast<std::array<unsigned char,sizeof(T)>>(a),y=std::bit_cast<std::array<unsigned char,sizeof(T)>>(b);
++        for(std::size_t i=0;i<10;++i)if(x[i]!=y[i])return false;return true;
++#elif LDBL_MANT_DIG == 113 || LDBL_MANT_DIG == 53
++        return std::bit_cast<std::array<unsigned char,sizeof(T)>>(a)==std::bit_cast<std::array<unsigned char,sizeof(T)>>(b);
++#else
++        return false; // Unsupported representation cannot establish equality.
++#endif
++    } else return a==b;
++}
++inline bool exact(const std::complex<double>& a,const std::complex<double>& b) noexcept {return exact_scalar(a.real(),b.real())&&exact_scalar(a.imag(),b.imag());}
++template<class T>bool exact(const T& a,const T& b) noexcept requires(std::is_arithmetic_v<T>){return exact_scalar(a,b);}
++inline bool exact(const modem::PatternEvidence& a,const modem::PatternEvidence& b) noexcept {
++#define EQ(n) if(!exact_scalar(a.n,b.n))return false
++    EQ(first_sample);EQ(end_sample);EQ(stream_symbol);EQ(frequency_hz);EQ(score);EQ(alternative_score);EQ(bit);EQ(stream_phase_samples);
++    EQ(admission_threshold);EQ(frequency_hypothesis);EQ(outer_presence_active);EQ(outer_presence_score);EQ(completed_event);
++#undef EQ
++    return true;
++}
++inline bool exact(const modem::PatternBurst& a,const modem::PatternBurst& b) noexcept {
++#define EQ(n) if(!exact_scalar(a.n,b.n))return false
++    EQ(first_sample);EQ(end_sample);EQ(first_stream_symbol);EQ(frequency_hz);EQ(score);EQ(complete);EQ(stream_phase_samples);
++    EQ(stream_first_sample);EQ(stream_first_symbol);EQ(missing_slots);EQ(support_samples);
++#undef EQ
++    return a.bits==b.bits;
++}
++template<class V>bool equal_vector(const void* left,const void* right) noexcept {
++    const auto& a=*static_cast<const V*>(left);const auto& b=*static_cast<const V*>(right);
++    if(a.size()!=b.size())return false;for(std::size_t i=0;i<a.size();++i)if(!exact(a[i],b[i]))return false;return true;
++}
++template<class V>void vector(Capture& c,const char* name,const V& v,std::size_t index=0,bool comparable=false,
++        bool (*compare)(const void*,const void*) noexcept=nullptr) noexcept {
++    if(c.count>=view_cap){c.limited=true;return;}
++    c.views[c.count++]={&v,name,c.owner,index,v.size(),v.capacity(),sizeof(typename V::value_type),0,comparable?compare:nullptr};
++}
++template<class V>void values(Capture& c,const char* name,const V& v,std::size_t index=0) noexcept {vector(c,name,v,index,true,&equal_vector<V>);}
++inline void diagnostics(Capture& c,const modem::Diagnostics& d,std::size_t index,const char* location) noexcept {
++    values(c,"diagnostics.constellation",d.constellation,index);values(c,"diagnostics.waveform",d.waveform,index);
++    emit(c,"fixed_prefix_storage_diagnostics",[&](auto& f){f.add("owner",c.owner);f.add("index",index);f.add("location",location);
++        f.add("sample_offset",d.sample_offset);f.add("preamble_correlation",d.preamble_correlation);f.add("snr_db",d.snr_db);f.add("bit_rate",d.bit_rate);
++        f.add("preamble_reception_known",d.preamble_reception.has_value());f.add("pattern_score_known",d.pattern_score.has_value());
++        if(d.pattern_score)f.add("pattern_score",*d.pattern_score);f.add("scalar_equality_grouped",false);});
++}
++template<class T>bool exact_track_vector(const void* left,const void* right) noexcept {
++    const auto& a=*static_cast<const std::vector<T>*>(left);const auto& b=*static_cast<const std::vector<T>*>(right);
++    if(a.size()!=b.size())return false;for(std::size_t i=0;i<a.size();++i){const auto& x=a[i];const auto& y=b[i];
++        if(!exact(x.burst,y.burst))return false;
++#define EQ(n) if(!exact_scalar(x.n,y.n))return false
++        EQ(next);EQ(index);EQ(unconfirmed_symbols);EQ(phase_lower);EQ(phase_upper);EQ(total_score);EQ(penalty);EQ(pending_score);EQ(confirmed_score);EQ(total_support);EQ(confirmed_support);EQ(confirmed);EQ(gap_slots);EQ(confirmed_end);EQ(anchor_start);EQ(anchor_index);EQ(absent_samples);EQ(frequency);EQ(admitted);EQ(established);EQ(pending_gap);
++#undef EQ
++        if(!equal_vector<std::vector<double>>(&x.frequency_scores,&y.frequency_scores))return false;
++    }return true;
++}
++template<class T>bool exact_completed_vector(const void* left,const void* right) noexcept {
++    const auto& a=*static_cast<const std::vector<T>*>(left);const auto& b=*static_cast<const std::vector<T>*>(right);
++    if(a.size()!=b.size())return false;for(std::size_t i=0;i<a.size();++i)if(a[i].first!=b[i].first||a[i].end!=b[i].end||!exact_scalar(a[i].frequency,b[i].frequency))return false;return true;
++}
++template<class S>void inspect(const S& s) noexcept {
++    if(!active)return;auto& c=*active;if(c.inspected)return;c.inspected=true;++c.states;
++    try {
++        if(s.fallback){emit(c,"fixed_prefix_storage_state",[&](auto& f){f.add("owner",c.owner);f.add("native_available",false);f.add("reason","PatternCorrelator fallback private state unavailable");});return;}
++        emit(c,"fixed_prefix_storage_state",[&](auto& f){f.add("owner",c.owner);f.add("native_available",true);f.add("sample",s.sample);f.add("bins",s.bins);
++            f.add("bin_samples",s.bin_samples);f.add("length",s.length);f.add("next_start",s.next_start);f.add("earliest_unscored_start",s.earliest_unscored_start);
++            f.add("continuation_schedule",s.continuation_schedule);f.add("finished",s.finished);f.add("candidate_limited",s.candidate_limit_reached);
++            f.add("tracks",s.tracks.size());f.add("working_bytes",s.working_bytes());f.add("budget",s.budget);f.add("fixed_reservation",s.fixed_reservation);
++            f.add("cache_reservation",s.cache_reservation);f.add("scoring_reservation",s.scoring_reservation);f.add("arithmetic_reservation",s.arithmetic_reservation);
++            f.add("native_active_bytes",s.native_active_bytes);f.add("native_plan_bytes",s.native_plan_bytes());
++            f.add("reservation_semantics","nonadditive limits/charges: do not sum reservations with actual capacities");
++            f.add("acquisition_window_known",s.acquisition_window.has_value());if(s.acquisition_window){f.add("window_origin",s.acquisition_window->epoch_origin_samples);f.add("window_scale",s.acquisition_window->phase_scale);f.add("window_half_width",s.acquisition_window->half_width_samples);}
++            f.add("acquisition_suspended",s.acquisition_suspended);f.add("acquisition_last_start",s.acquisition_last_start);f.add("acquisition_capture_end",s.acquisition_capture_end);f.add("unobserved_until",s.unobserved_until);
++            f.add("initial_symbols",s.search.initial_stream_symbols);f.add("trials",s.trials);f.add("point_cursor",s.point_cursor);
++            f.add("opaque_storage","code/FFT plans/calendar/Burst plan+cursor/timing components: working-byte aggregate only; internal capacities unavailable");});
++#define V(n) vector(c,"native." #n,s.n)
++#define E(n) values(c,"native." #n,s.n)
++        E(history);E(peaks);E(points);E(ring);E(work);E(spectrum);E(product);E(reference);E(energy_prefix);E(packed_phases);
++        V(drift_scratch);V(differential_scratch);V(drift_scores);V(templates);V(template_energy);V(template_square);V(cached_templates);V(scoring);V(tracking_reference);
++        vector(c,"native.completed",s.completed,0,true,&exact_completed_vector<typename std::remove_reference_t<decltype(s.completed)>::value_type>);E(bursts);
++        vector(c,"native.tracks",s.tracks,0,true,&exact_track_vector<typename std::remove_reference_t<decltype(s.tracks)>::value_type>);values(c,"native.latest.bits",s.latest.bits);
++        values(c,"search.frequency_offsets_hz",s.search.frequency_offsets_hz);values(c,"search.clock_errors_ppm",s.search.clock_errors_ppm);vector(c,"search.hypotheses",s.search.hypotheses);
++#undef E
++#undef V
++        std::size_t nested=0;for(const auto& row:s.templates)for(const auto& v:row)values(c,"native.templates.values",v,nested++);
++        nested=0;for(const auto& bank:s.cached_templates){vector(c,"native.cached.rows",bank.rows,nested);vector(c,"native.cached.energy",bank.energy,nested);vector(c,"native.cached.square",bank.square,nested);++nested;}
++        nested=0;for(const auto& bank:s.cached_templates)for(const auto& row:bank.rows)for(const auto& v:row)values(c,"native.cached.values",v,nested++);
++        nested=0;for(const auto& score:s.scoring){vector(c,"native.scoring.jobs",score.jobs,nested);vector(c,"native.scoring.templates",score.templates,nested);vector(c,"native.scoring.outputs",score.outputs,nested);vector(c,"native.scoring.workspaces",score.workspaces,nested);vector(c,"native.scoring.tracking_workers",score.tracking_workers,nested);vector(c,"native.scoring.nominal_reference",score.nominal_reference,nested);++nested;}
++        nested=0;for(const auto& burst:s.bursts)values(c,"native.bursts.bits",burst.bits,nested++);
++        nested=0;for(const auto& t:s.tracks){const auto i=nested++;++c.tracks;values(c,"native.track.bits",t.burst.bits,i);values(c,"native.track.frequency_scores",t.frequency_scores,i);
++            std::uint64_t radius=0;bool valid=true;try{radius=s.track_radius(t);}catch(...){valid=false;++c.errors;}
++            const bool overflow=!valid||t.next>UINT64_MAX-s.length||t.next+s.length>UINT64_MAX-radius;
++            emit(c,"fixed_prefix_storage_track",[&](auto& f){f.add("owner",c.owner);f.add("index",i);f.add("next",t.next);f.add("stream_index",t.index);f.add("unconfirmed_symbols",t.unconfirmed_symbols);f.add("phase_lower",t.phase_lower);f.add("phase_upper",t.phase_upper);
++                f.add("total_score",t.total_score);f.add("penalty",t.penalty);f.add("pending_score",t.pending_score);f.add("confirmed_score",t.confirmed_score);f.add("total_support",t.total_support);f.add("confirmed_support",t.confirmed_support);
++                f.add("confirmed",t.confirmed);f.add("gap_slots",t.gap_slots);f.add("confirmed_end",t.confirmed_end);f.add("anchor_start",t.anchor_start);f.add("anchor_index",t.anchor_index);
++                f.add("absent_samples",t.absent_samples);f.add("absence_required_samples",6.L*s.config.sample_rate);f.add("frequency",t.frequency);f.add("admitted",t.admitted);f.add("established",t.established);f.add("pending_gap",t.pending_gap);
++                f.add("radius_known",valid);f.add("radius",radius);f.add("needed_end_overflow",overflow);if(!overflow){f.add("needed_end",t.next+s.length+radius);f.add("input_ready",t.next+s.length+radius<=s.bins);}
++                f.add("burst_first_sample",t.burst.first_sample);f.add("burst_end_sample",t.burst.end_sample);f.add("burst_first_symbol",t.burst.first_stream_symbol);f.add("burst_complete",t.burst.complete);f.add("burst_missing_slots",t.burst.missing_slots);
++                f.add("burst_stream_phase",t.burst.stream_phase_samples);f.add("burst_stream_first_sample",t.burst.stream_first_sample);f.add("burst_stream_first_symbol",t.burst.stream_first_symbol);f.add("burst_frequency_hz",t.burst.frequency_hz);f.add("burst_score",t.burst.score);f.add("burst_support_samples",t.burst.support_samples);});
++        }
++    }catch(...){++c.errors;}
++}
++template<class I>void content(const I& s) noexcept {
++    if(!active||active->content_inspected)return;auto& c=*active;c.content_inspected=true;
++    try {
++        values(c,"content.options.receive_targets_db_hz",s.options.receive_targets_db_hz);
++        emit(c,"fixed_prefix_storage_content",[&](auto& f){f.add("owner",c.owner);f.add("states",s.states.size());f.add("quota_limit",s.quota->limit);f.add("quota_used",s.quota->used);f.add("quota_reserved",s.quota->reserved);f.add("quota_shared",true);f.add("quota_semantics","shared nonadditive bank quota");});
++        std::size_t i=0;for(const auto& [id,p]:s.states){const auto& x=*p;const auto& r=x.result;const auto& m=r.content.message;
++            diagnostics(c,r.diagnostics,i,"StreamReceiver::State.result retained Diagnostics");
++            values(c,"content.raw_bits",r.raw_bits,i);values(c,"content.source",x.source,i);values(c,"content.recovery_bits",x.recovery_bits,i);values(c,"content.recovery_starts",x.recovery_starts,i);
++            values(c,"content.message.data",m.data,i);values(c,"content.message.filename",m.filename,i);values(c,"content.message.callsign",m.callsign,i);values(c,"content.message.grid",m.grid,i);values(c,"content.error",r.error,i);values(c,"content.state.receive_targets_db_hz",x.options.receive_targets_db_hz,i);
++            emit(c,"fixed_prefix_storage_content_state",[&](auto& f){f.add("owner",c.owner);f.add("index",i);f.add("first_sample",id.first);f.add("first_symbol",id.second);f.add("collector_working_bytes",x.collector.working_bytes());f.add("collector_buffered_bits",x.collector.buffered_bits());f.add("collector_contents_available",false);
++                f.add("stored",x.stored);f.add("next_symbol",x.next_symbol);f.add("failed",x.failed);f.add("aligned",x.aligned);f.add("stream_complete",r.stream_complete);f.add("content_validated",r.content_validated);f.add("observed_bits",r.observed_bits);f.add("missing_symbols",r.missing_symbols);
++                f.add("corrected_bytes",r.content.corrected_bytes);
++#define FEC(area,n) f.add("fec_" #area "_" #n,r.content.fec_stats.area.n)
++                FEC(data,received_bits);FEC(data,corrected_bits);FEC(data,missing_bits);FEC(data,corrected_bytes);FEC(data,erased_bytes);FEC(data,repaired_bytes);
++                FEC(integrity,received_bits);FEC(integrity,corrected_bits);FEC(integrity,missing_bits);FEC(integrity,corrected_bytes);FEC(integrity,erased_bytes);FEC(integrity,repaired_bytes);
++                FEC(parity,received_bits);FEC(parity,corrected_bits);FEC(parity,missing_bits);FEC(parity,corrected_bytes);FEC(parity,erased_bytes);FEC(parity,repaired_bytes);
++#undef FEC
++                f.add("pre_fec_accuracy_known",r.content.pre_fec_accuracy.has_value());if(r.content.pre_fec_accuracy){f.add("pre_fec_received_data_bits",r.content.pre_fec_accuracy->received_data_bits);f.add("pre_fec_corrected_data_bits",r.content.pre_fec_accuracy->corrected_data_bits);f.add("pre_fec_missing_data_bits",r.content.pre_fec_accuracy->missing_data_bits);}f.add("consumed_bytes",r.content.consumed_bytes);f.add("recovery_slots",x.recovery_slots);f.add("recovery_truncated",x.recovery_truncated);f.add("recovery_contiguous",x.recovery_contiguous);f.add("interval_failed",x.interval_failed);
++                f.add("mask_addresses_present",bool(x.mask_addresses));f.add("interval_addresses_present",bool(x.interval_addresses));f.add("recovery_job_present",bool(r.recovery));f.add("recovery_source_present",bool(r.recovery_source));f.add("opaque_storage","collector internals/BurstAddresses/recovery job+source capacities unavailable; no collector or recovery mutation");});++i;
++        }
++    }catch(...){++c.errors;}
++}
++inline void group_and_emit(Capture& c) noexcept {
++    std::size_t next=1;for(std::size_t i=0;i<c.count;++i){auto& a=c.views[i];
++        if(a.equal){for(std::size_t j=0;j<i;++j){const auto& b=c.views[j];if(b.group&&b.equal==a.equal&&b.size==a.size&&a.equal(a.object,b.object)){a.group=b.group;break;}}if(!a.group)a.group=next++;}
++        emit(c,"fixed_prefix_storage_component",[&](auto& f){f.add("owner",a.owner);f.add("component",a.component);f.add("index",a.index);f.add("size",a.size);f.add("capacity",a.capacity);f.add("element_bytes",a.element);f.add("size_bytes",a.size*a.element);f.add("capacity_bytes",a.capacity*a.element);
++            f.add("empty",a.size==0);f.add("allocated",a.capacity!=0);f.add("equality_available",a.equal!=nullptr);if(!a.equal)f.add("equality_unavailable_reason","no defined-field comparator; size/capacity still observed");if(a.equal)f.add("exact_group",a.group);f.add("equality_scope","same C++ vector type, every defined field and IEEE value bit; excludes capacity/padding/addresses; no lifetime or merge proof");});
++    }
++}
++template<class B,class V,class L,class Margin,class Extra>void capture(const B& bank,const V& value,const L& ledger,Margin margin_of,double now,std::size_t bank_budget,Extra inspect_copies) noexcept {
++    if(!owner_census::enabled()||captured.exchange(true))return;
++    const auto begin=std::chrono::steady_clock::now();long double cpu_begin=0,cpu_end=0;const bool cpu_start=owner_census::thread_cpu(cpu_begin);
++    std::unique_ptr<Capture> storage;try{storage=std::make_unique<Capture>();}catch(...){audio::trace::record("fixed_prefix_storage_allocation_failed",[](auto& f){f.add("storage_schema",1);f.add("complete",false);});return;}
++    auto& c=*storage;std::size_t receiver_sum=0;
++    emit(c,"fixed_prefix_storage_begin",[&](auto& f){f.add("sample",bank.samples);f.add("revision",bank.revision);f.add("owners",bank.receivers.size());f.add("expected_sample",154038);f.add("whole_partitions",233);f.add("unfed_suffix_samples",638);f.add("eof_injected",false);f.add("absence_injected",false);f.add("now",now);f.add("dsp_budget",value.dsp_workspace_bytes);f.add("bank_budget",bank_budget);
++        f.add("overlay_identity","ee7790318a06c632c03d5c8d68dcdb83af959500db4b59290e11a67748da08b2");f.add("order","manual terminal census after joined refresh retirement/capacity/work checkpoint, before admissions");f.add("observer_owned_bytes",sizeof(Capture));f.add("observer_extra_limit_bytes",64ULL*1024*1024);f.add("view_cap",view_cap);f.add("owner_cap",owner_cap);f.add("row_cap",row_cap);f.add("stored",bank.working_bytes);f.add("recomputed",ledger.last_recomputed);f.add("receiver_sum",ledger.last_receiver_sum);f.add("base",ledger.last_base);
++        f.add("shared_capture",ledger.last_shared_capture);f.add("deferred",ledger.last_deferred);f.add("source",ledger.last_source);f.add("exact_samples",ledger.last_exact_samples);f.add("exact_points",ledger.last_exact_points);f.add("permutations",ledger.last_permutations);f.add("temporal",ledger.last_temporal);
++        f.add("ledger_sample",ledger.last_sample);f.add("ledger_owners",ledger.last_owners);f.add("journal_complete",ledger.journal_complete);f.add("journal_total",ledger.journal_total);f.add("journal_rows",ledger.journal_rows);f.add("synchronized_predicate",ledger.synchronized);f.add("initial_incomplete_predicate",ledger.initial_incomplete);f.add("retired_predicate",ledger.retired);f.add("other_retention_predicates",ledger.other_reasons);
++        f.add("heap_scope","application accounting only; reservations nonadditive; process RSS/allocator overhead and unenumerated caller copies unavailable");});
++    try {
++        for(const auto& r:bank.receivers){if(c.owners>=owner_cap){c.limited=true;break;}c.owner=c.owners++;c.inspected=c.content_inspected=false;active=&c;
++            const bool sync=r.modem->synchronized(),complete=r.modem->initial_search_complete();const auto frontier=r.modem->delayed_processing_frontier();
++            const auto modem=r.modem->working_bytes(),control=margin_of(r),content_bytes=r.content?r.content->working_bytes():0;
++            active=nullptr;if(!c.inspected)++c.errors;if(r.content&&!c.content_inspected)++c.errors;
++            std::size_t burst_bits=0;for(const auto& b:r.bursts)burst_bits+=b.bits.capacity();
++            const auto burst_struct=r.bursts.capacity()*sizeof(modem::PatternBurst),history=r.history_ordinals.heap_bytes(),present=r.presentations.size()*(sizeof(typename decltype(r.presentations)::value_type)+4*sizeof(void*)),family=r.source_curve_family?sizeof(*r.source_curve_family):0;
++            const auto charge=modem+control+content_bytes+burst_struct+burst_bits+history+present+family;receiver_sum+=charge;
++            values(c,"owner.bursts",r.bursts);std::size_t i=0;for(const auto& b:r.bursts)values(c,"owner.burst.bits",b.bits,i++);
++            const owner_census::JournalRow* j=nullptr;const auto& journal=owner_census::journal;for(std::size_t n=0;n<journal.count;++n){const auto& x=journal.rows[n];if(x.consumer==r.point_consumer&&x.epoch==r.epoch&&x.origin==r.sample_origin&&x.family==r.family){j=&x;break;}}
++            emit(c,"fixed_prefix_storage_owner",[&](auto& f){f.add("owner",c.owner);f.add("consumer",r.point_consumer);f.add("epoch",r.epoch);f.add("origin",r.sample_origin);f.add("family",r.family);f.add("key_tag",owner_census::hex(r.key_tag));f.add("synchronized",sync);f.add("initial_search_complete",complete);f.add("frontier_known",frontier.has_value());if(frontier)f.add("frontier",*frontier);
++                f.add("modem",modem);f.add("reserved",r.modem->reserved_workspace_bytes());f.add("control",control);f.add("content",content_bytes);f.add("burst_struct",burst_struct);f.add("burst_bits",burst_bits);f.add("history_ordinals",history);f.add("presentation_estimate",present);f.add("source_family",family);f.add("charge",charge);
++                f.add("content_present",bool(r.content));f.add("native_inspected",c.inspected);f.add("content_inspected",c.content_inspected);f.add("journal_match",j!=nullptr);f.add("journal_current",journal.valid&&journal.revision==bank.revision&&journal.sample==bank.samples);f.add("admitted_at",r.admitted_at);f.add("last_confident_end",r.last_confident_end);f.add("last_confident_at",r.last_confident_at);
++                if(j){f.add("decision_reason",j->reason);f.add("decision_retire",j->retire);f.add("expiry_known",j->expiry_known);if(j->expiry_known)f.add("expired",j->expired);f.add("decision_frontier_queried",j->frontier_queried);f.add("decision_frontier_known",j->frontier.has_value());if(j->frontier)f.add("decision_frontier",*j->frontier);}
++                f.add("copies_unavailable","history ordinal internal arrays/presentation node allocations not exposed; caller temporaries unavailable");});
++        }
++        c.owner=owner_cap;inspect_copies(c);
++        group_and_emit(c);
++    }catch(...){active=nullptr;++c.errors;}
++    const auto end=std::chrono::steady_clock::now();const bool cpu_end_ok=owner_census::thread_cpu(cpu_end);const bool cpu_valid=cpu_start&&cpu_end_ok&&cpu_end>=cpu_begin;
++    emit(c,"fixed_prefix_storage_summary",[&](auto& f){f.add("rows_before_summary",c.rows-1);f.add("owners",c.owners);f.add("owner_total",bank.receivers.size());f.add("states",c.states);f.add("tracks",c.tracks);f.add("components",c.count);f.add("receiver_sum",receiver_sum);f.add("limited",c.limited);f.add("errors",c.errors);f.add("queue_timeout",c.queue_timeout);f.add("cpu_valid",cpu_valid);if(cpu_valid)f.add("calling_thread_cpu_seconds",cpu_end-cpu_begin);f.add("monotonic_wall_seconds",std::chrono::duration<long double>(end-begin).count());f.add("cpu_accounting","observer is contained in existing parent clock; report separately, never add to parent CPU");f.add("clock_scope","observer allocation, queries, grouping, trace production/backpressure; excludes final summary/free and writer thread");});
++}
++} // namespace datapump::diagnostic::fixed_prefix_storage

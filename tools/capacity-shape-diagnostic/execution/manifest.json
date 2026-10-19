@@ -1,0 +1,25 @@
+{
+  "assignment": "fft-execution-partition-20261019",
+  "ownership": "same-ID root Sol takeover after substantive source-binding rejection; Luna repair0of1 unchanged",
+  "original_luna_patch_sha256": "397ce08f29a19b1c381e08430fe0edba733128c864ffde3fc60a535eb4df3500",
+  "original_luna_wrong_profiler_preimage": "87a701a4ed853685e4250805a8665fdd0f10b15347ab0f4f8be1fcc8148b7acf",
+  "a4_profiler_preimage": "5f1ffe2c9224ca553b3308fdb84f89e21489afd52326af6b0fc673e8d8e97947",
+  "fft_patch_sha256": "1780d00304a9ec19dd9107d44ae3e1a1913bcbecf186b2e447a93c844733f3b2",
+  "fft_preimages": {
+    "src/pattern_fft_batch.cpp": "14cd5c72e43900497538bafb83a8fef3bf55d30d2342ee1e9880286409a7a7ae",
+    "src/scheduled_work_profile.hpp": "5f1ffe2c9224ca553b3308fdb84f89e21489afd52326af6b0fc673e8d8e97947"
+  },
+  "fft_postimages": {
+    "src/pattern_fft_batch.cpp": "cdf4c8ffee612b709cf65c5e174712d21223b4206114e70ef0e3eab27290f6ed",
+    "src/scheduled_work_profile.hpp": "f90af52b2fcfc33f60b135175e6711deb4813ff73b1c8713ece452ff5da654c4"
+  },
+  "census_patch_sha256": "8c37d72d8682b8c2c74e8253e3a5d3ef042858866aad95a8616b050ea4027d99",
+  "census_manifest_sha256": "7870ab783ea1709d8a1946fa9a386a620d538ec98e1ea2fefbb31eee991abbc0",
+  "census_reader_sha256": "12dfa12417d7d64b63ed1bac41cc5867fa0704caa28450b648eb317a7fce0d59",
+  "baseline_a4_capture": {
+    "run": 39283975589,
+    "job": 118164621516,
+    "source": "4ac0b7bb3b602e5cf8bb82dc37c9cb8df872f4cc"
+  },
+  "review": "Root reviewed nonowning joined census/actual retained predicate/defined-bit comparators/unchanged physical/coverage algorithms; rebased FFT profiler preserves all35 existing stage IDs; original FFT code unchanged from worker apart from profiler layer. No qualification claim."
+}

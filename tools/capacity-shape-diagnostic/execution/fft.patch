@@ -1,0 +1,128 @@
+--- a/src/pattern_fft_batch.cpp
++++ b/src/pattern_fft_batch.cpp
+@@ -2,6 +2,7 @@
+ #include "pattern_drift.hpp"
+ #include "search_parallel.hpp"
+ #include "search_arithmetic.hpp"
++#include "scheduled_work_profile.hpp"
+ #include <algorithm>
+ #include <bit>
+ #include <cmath>
+@@ -12,6 +13,7 @@
+ 
+ namespace datapump::modem::detail {
+ namespace {
++namespace rx_cpu = ::datapump::detail::cpu_profile;
+ using Complex = FftComplex;
+ constexpr double tau = 2 * std::numbers::pi;
+ void cancelled(std::stop_token stop) { if(stop.stop_requested()) throw Error("pattern search cancelled"); }
+@@ -517,6 +519,7 @@
+     // This backend preserves the original within-job floating-point order.
+     // A GPU backend can map job/start/bin dimensions to many more execution
+     // lanes, but must pass the same score and ordered-publication checks.
++    const bool profile_fft_execution=rx_cpu::fft_execution_inner_enabled();
+     parallel_search_ranges(jobs.size(),workspaces.size(),1,
+         [&](std::size_t worker,std::size_t begin,std::size_t end) {
+         auto& workspace=workspaces[worker];
+@@ -535,6 +538,7 @@
+                     workspace.product,workspace.drift,*workspace.code,stop,workspace.differential);
+                 continue;
+             }
++            rx_cpu::ConditionalScope job_cpu(rx_cpu::Stage::fft_execution_job_prepare,profile_fft_execution);
+             const FftPreparedTemplate* prepared=nullptr;
+             if(job.prepared_template!=std::numeric_limits<std::uint64_t>::max()) {
+                 if(job.prepared_template>=batch.prepared.size())throw Error("invalid prepared pattern FFT template");
+@@ -543,6 +547,8 @@
+                     throw Error("invalid prepared pattern FFT row");
+             } else {
+                 if(!workspace.code)throw Error("pattern FFT generation needs a private pattern cache");
++                rx_cpu::ConditionalScope generated_reference_cpu(
++                    rx_cpu::Stage::fft_execution_job_prepare,profile_fft_execution);
+                 workspace.code->set_stream_phase_samples(job.phase);
+                 if(job.symbol>std::numeric_limits<std::uint64_t>::max()/geometry.pattern.chips_per_symbol)
+                     throw Error("pattern stream coordinate overflow");
+@@ -571,22 +577,30 @@
+                     if(!direct) {
+                         if(supplied_tables)search_fft::fft(std::span(row),false,tables,stop);
+                         else pattern_fft(row,false,stop,mode);
++                    }
++                } else {
++                    norm=prepared->energy[bit];square=prepared->square[bit];
++                }
++                if(!direct || prepared) {
++                    rx_cpu::ConditionalScope convolution_cpu(
++                        rx_cpu::Stage::fft_execution_convolution,profile_fft_execution);
++                    if(prepared) {
++                        if(mode!=SearchArithmetic::fp32)
++                            for(std::size_t i=0;i<transform;++i)row[i]=batch.spectrum[i]*prepared->rows[bit][i];
++                        else
++                            for(std::size_t i=0;i<transform;++i)row[i]=pattern_fft_product(batch.spectrum[i],prepared->rows[bit][i],mode);
++                    } else {
+                         if(mode!=SearchArithmetic::fp32)
+                             for(std::size_t i=0;i<transform;++i)row[i]=batch.spectrum[i]*row[i];
+                         else
+                             for(std::size_t i=0;i<transform;++i)row[i]=pattern_fft_product(batch.spectrum[i],row[i],mode);
+                     }
+-                } else {
+-                    norm=prepared->energy[bit];square=prepared->square[bit];
+-                    if(mode!=SearchArithmetic::fp32)
+-                        for(std::size_t i=0;i<transform;++i)row[i]=batch.spectrum[i]*prepared->rows[bit][i];
+-                    else
+-                        for(std::size_t i=0;i<transform;++i)row[i]=pattern_fft_product(batch.spectrum[i],prepared->rows[bit][i],mode);
+-                }
+-                if(!direct) {
+-                    if(supplied_tables)search_fft::fft(std::span(row),true,tables,stop);
+-                    else pattern_fft(row,true,stop,mode);
+-                }
++                    if(!direct) {
++                        if(supplied_tables)search_fft::fft(std::span(row),true,tables,stop);
++                        else pattern_fft(row,true,stop,mode);
++                    }
++                }
++                rx_cpu::ConditionalScope score_cpu(rx_cpu::Stage::fft_execution_score,profile_fft_execution);
+                 visit([&](std::size_t j) {
+                     Complex dot{};
+                     if(direct)for(std::size_t i=0;i<length;++i) {
+--- a/src/scheduled_work_profile.hpp
++++ b/src/scheduled_work_profile.hpp
+@@ -34,7 +34,7 @@
+ enum class Stage : std::size_t {
+     input_validation, mixing, calendar, template_build, template_cache, shared_frontend,
+     physical_moments, gram, guards, rolling, allocation, publication,
+-    setup, search_residual, control_residual, private_permutation, private_coefficient, private_address, temporal_coordinates, temporal_lookup, temporal_plan_build, temporal_validate, temporal_gather, temporal_evaluate, temporal_export, scheduled_common_residual, scheduled_candidate_residual, common_raw, ordinary_acquisition, ordinary_continuation, ordinary_source_generation, ordinary_acq_input, ordinary_acq_reference, ordinary_acq_execute, ordinary_acq_collect, count
++    setup, search_residual, control_residual, private_permutation, private_coefficient, private_address, temporal_coordinates, temporal_lookup, temporal_plan_build, temporal_validate, temporal_gather, temporal_evaluate, temporal_export, scheduled_common_residual, scheduled_candidate_residual, common_raw, ordinary_acquisition, ordinary_continuation, ordinary_source_generation, ordinary_acq_input, ordinary_acq_reference, ordinary_acq_execute, ordinary_acq_collect, fft_execution_job_prepare, fft_execution_convolution, fft_execution_score, count
+ };
+ inline constexpr std::size_t stage_count=static_cast<std::size_t>(Stage::count);
+ inline constexpr std::array<const char*,stage_count> names={
+@@ -42,7 +42,7 @@
+     "shared_frontend","physical_moments","gram","guards","rolling","allocation","publication",
+     "setup","search_residual","control_residual","private_permutation","private_coefficient","private_address",
+     "temporal_coordinates","temporal_lookup","temporal_plan_build","temporal_validate",
+-    "temporal_gather","temporal_evaluate","temporal_export","scheduled_common_residual","scheduled_candidate_residual","common_raw","ordinary_acquisition","ordinary_continuation","ordinary_source_generation","ordinary_acq_input","ordinary_acq_reference","ordinary_acq_execute","ordinary_acq_collect"
++    "temporal_gather","temporal_evaluate","temporal_export","scheduled_common_residual","scheduled_candidate_residual","common_raw","ordinary_acquisition","ordinary_continuation","ordinary_source_generation","ordinary_acq_input","ordinary_acq_reference","ordinary_acq_execute","ordinary_acq_collect","fft_execution_job_prepare","fft_execution_convolution","fft_execution_score"
+ };
+ enum class Mode {disabled,coarse,fine,sampled};
+ namespace sampled_detail {
+@@ -467,6 +467,22 @@
+ public:
+     explicit InnerScope(Stage category) noexcept {if(acquisition_inner_enabled())scope_.emplace(category);}
+ };
++inline bool fft_execution_inner_enabled() noexcept {
++    static const bool enabled=[] {
++        const auto* value=std::getenv("DATAPUMP_FFT_EXECUTION_INNER_CPU");
++        return value && std::strcmp(value,"1")==0;
++    }();
++    return enabled;
++}
++class ConditionalScope {
++    std::optional<Scope> scope_;
++public:
++    explicit ConditionalScope(Stage category,bool enabled) noexcept {
++        if(enabled)scope_.emplace(category);
++    }
++    ConditionalScope(const ConditionalScope&)=delete;
++    ConditionalScope& operator=(const ConditionalScope&)=delete;
++};
+ #undef DATAPUMP_PROFILE_COLD_NOINLINE
+ #undef DATAPUMP_PROFILE_FORCEINLINE
+ // Signed reconciliation: do not clip a negative value into a seemingly good
