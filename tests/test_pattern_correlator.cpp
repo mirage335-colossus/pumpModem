@@ -207,7 +207,7 @@ void symbol_burst_temporal_support() {
     // One independently placed scheduled symbol is enough to inspect support:
     // no quiet interval, EOF or source interpretation supplies physical END.
     for(const bool shaped:{false,true})for(const auto [duration,wide_chip]:
-            std::array{std::pair{2.,false},std::pair{16.,false},std::pair{192.,true}}) {
+            std::array{std::pair{2.,false},std::pair{16.,false},std::pair{320.,true}}) {
         auto c=config();c.sample_rate=wide_chip?64:256;c.carrier_hz=c.sample_rate/4;
         c.bandwidth_hz=wide_chip?.125:32;
         c.integration_seconds=duration;c.spreading_factor=256;c.pulse_shaping=shaped;
@@ -215,6 +215,17 @@ void symbol_burst_temporal_support() {
         const auto padding=modem::pattern_pulse_padding_samples(c);
         c.stream_epoch=1800000000+padding/c.sample_rate;c.stream_phase_samples=padding%c.sample_rate;
         const auto symbol=modem::symbol_sample_count(c);
+        if(wide_chip) {
+            const auto chip=modem::pattern_chip_samples(c);
+            // Twenty complete chips are the first shaped geometry whose
+            // quarter boundaries align with chips but whose eighths do not.
+            check(chip>=1024 && symbol/chip>=2*modem::pattern_pulse_half_span,
+                  "wide-chip affine fixture has insufficient physical pulse support");
+            check(symbol%(4*chip)==0 && symbol%(8*chip)!=0,
+                  "wide-chip affine fixture must align quarters and split eighths");
+            check(!shaped || modem::pattern_pulse_enabled(c),
+                  "wide-chip affine fixture did not enable its requested shaping");
+        }
         constexpr std::uint64_t delay=37;
         const auto first=delay+padding;
         modem::PatternSearch search;search.frequency_offsets_hz={0};search.clock_errors_ppm={0};
@@ -236,6 +247,12 @@ void symbol_burst_temporal_support() {
             }
             modem::PatternCorrelatorOptions options;options.raw_reference=reference;
             modem::PatternCorrelator receiver(c,search,4*1024*1024,options);
+            if(wide_chip && !reference)
+                std::cerr<<"temporal_route: shaped="<<shaped
+                         <<" effective_shaping="<<modem::pattern_pulse_enabled(c)
+                         <<" samples="<<symbol<<" chip_samples="<<code.chip_samples()
+                         <<" backend="<<static_cast<unsigned>(receiver.work().backend)
+                         <<" workspace_bytes="<<receiver.working_bytes()<<'\n';
             if(shaped && duration==16 && !reference)
                 check(receiver.work().backend==modem::PatternCorrelationBackend::pulse,
                       "temporal-support fixture did not execute shared pulse cells");
@@ -258,6 +275,10 @@ void symbol_burst_temporal_support() {
             const auto full=receive(false,false,reference,37);
             const auto fragment=receive(true,false,reference,37);
             const auto rechunked=receive(true,false,reference,113);
+            std::cerr<<"temporal_support_case: shaped="<<shaped<<" wide_chip="<<wide_chip
+                     <<" reference="<<reference<<" samples="<<symbol
+                     <<std::setprecision(17)<<" full="<<full<<" fragment="<<fragment
+                     <<" rechunked="<<rechunked<<'\n';
             check(full>.99*symbol && fragment<.8*symbol && fragment>.45*symbol,
                   "fragment evidence saturated whole-symbol arbitration support");
             check(std::abs(fragment-rechunked)<1e-6,

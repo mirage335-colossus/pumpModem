@@ -914,7 +914,8 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
             windows[i].right=capture.support[i+1]>guard?capture.support[i+1]-guard:0;
             // On: start at source support end, before the mandatory 20-second
             // capture guard, so a proof cannot make the loading stage all nulls.
-            // Off uses a receiver-only hold in the corresponding payload slot.
+            // Off assigns its continuous-capture control boundary after
+            // actual acquisition becomes visible below.
             windows[i].hold.arm_at=burst_on?capture.support[i]+2*padding+symbol:capture.support[i]+symbol/2;
             windows[i].hold.next_guard=burst_on?windows[i].right:capture.support[i+1];
         }
@@ -1049,6 +1050,8 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
                           "paced held decoder reached the next guarded window before release");
                     if(park_ticket&&!h.parked) {
                         h.parked=true;h.first_park=now;h.park_enter_ns=decoder_park_ns.load();
+                        check(burst_on||now.ingress+2ULL*rate<=h.next_guard,
+                              "paced Off control parked without room for fresh independently captured PCM");
                     }
                     const auto reserve=burst_on?4ULL*rate:2ULL*rate;
                     if(h.parked&&!h.pcm_loaded&&now.pcm>=reserve&&now.backlog>=double(reserve)/rate&&now.oldest>=.020) {
@@ -1067,9 +1070,12 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
                     }
                     if(h.pcm_loaded&&material&&now.pcm>=2ULL*rate&&(!burst_on||h.proof))h.material=true;
                     const bool aged=h.parked&&now.after_ns>=h.first_park.after_ns+40000000ULL;
-                    const bool proven_hold=!burst_on||(h.proof&&window.material&&
+                    const bool proven_hold=burst_on?(h.proof&&window.material&&
                         park_ticket==h.proof_ticket&&now.recorded==h.proof_after.recorded&&
-                        now.after_ns>=h.proof_after.after_ns+40000000ULL);
+                        now.after_ns>=h.proof_after.after_ns+40000000ULL):
+                        (park_ticket&&now.frontier==h.first_park.frontier&&
+                         now.ingress>=h.first_park.ingress+2ULL*rate&&
+                         now.recorded>=h.first_park.recorded+2ULL*rate);
                     if(aged&&proven_hold&&h.material&&now.pcm>=2ULL*rate) {
                         h.released=true;h.release=now;h.release_ns=elapsed_ns(Steady::now());decoder_armed=false;
                         active_hold.reset();
@@ -1080,15 +1086,23 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
                         // published. Capture continues at its original pace.
                         decoder_permits=park_ticket+7;
                     }
-                } else if(!decoder_waiting.load()&&!observed.complete&&observed.visible()) {
+                } else if(!decoder_waiting.load()&&(!burst_on||!observed.complete)&&observed.visible()) {
                     for(std::size_t i=0;i<windows.size();++i) {
                         auto& window=windows[i];auto& h=window.hold;
+                        // Off has no discardable calendar gap. Its control starts
+                        // after actual acquisition becomes visible and while the
+                        // independent provider still offers original PCM. A slow
+                        // private bank can first become visible after all payload
+                        // slots were captured; those slots cannot arm this control.
                         const bool after_startup=burst_on?tail_bounded&&startup_tail&&
                             h.arm_at>=startup_tail&&now.frontier>=startup_tail:
-                            first_visible_ingress&&now.frontier>=first_visible_ingress&&
-                            h.arm_at>=first_visible_ingress+symbol;
-                        if(!h.attempted&&after_startup&&now.ingress>=h.arm_at&&
-                           now.ingress+2ULL*rate<(burst_on?window.left:h.next_guard)) {
+                            first_visible_ingress&&now.ingress+4ULL*rate<capture.pcm.size()&&
+                            (!i||(windows[i-1].hold.released&&
+                                  now.frontier>windows[i-1].hold.release.frontier));
+                        const bool room=burst_on?now.ingress>=h.arm_at&&now.ingress+2ULL*rate<window.left:
+                            now.ingress+4ULL*rate<capture.pcm.size();
+                        if(!h.attempted&&after_startup&&room) {
+                            if(!burst_on){h.arm_at=now.ingress;h.next_guard=capture.pcm.size();}
                             h.attempted=true;h.arm=now;active_hold=i;
                             decoder_permits=decoder_arrivals.load();decoder_armed=true;break;
                         }
@@ -1188,6 +1202,7 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
         <<",\"poststartup_material_debt\":"<<(poststartup_debt?"true":"false")
         <<",\"material_min_pcm_seconds\":2,\"material_min_oldest_wall_seconds\":0.020,\"material_persistence_ns\":10000000"
         <<",\"decoder_hold_enabled\":"<<(held?"true":"false")<<",\"decoder_hold_released\":"<<held_released
+        <<",\"decoder_hold_schedule\":"<<paced_json_string(!held?"none":burst_on?"poststartup_guarded_quiet":"visible_acquisition_ongoing_capture_control")
         <<",\"decoder_hold_min_wall_ns\":40000000,\"decoder_hold_pcm_reserve_seconds\":"<<(burst_on?4:2)
         <<",\"cleared_poststartup_gaps\":"<<cleared<<",\"windows\":[";
     const auto sample_json=[](const PacedSample& s) {
@@ -1214,6 +1229,7 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
         std::cout<<"{\"index\":"<<i<<",\"arm_at\":"<<h.arm_at<<",\"next_guard\":"<<h.next_guard
             <<",\"phase\":"<<paced_json_string(h.drained?"drained":h.released?"released":h.proof?"holding_proven_quiet":
                 h.pcm_loaded?(burst_on?"stepping_to_proof":"holding_control_pcm"):h.parked?"loading_pcm":"awaiting_decoder")
+            <<",\"limit_kind\":"<<paced_json_string(burst_on?"next_receive_guard":"prepared_capture_end")
             <<",\"park_enter_ns\":"<<h.park_enter_ns<<",\"proof_park_enter_ns\":"<<h.proof_park_enter_ns<<",\"release_ns\":"<<h.release_ns
             <<",\"parked\":"<<(h.parked?"true":"false")<<",\"pcm_loaded\":"<<(h.pcm_loaded?"true":"false")
             <<",\"proof\":"<<(h.proof?"true":"false")<<",\"proof_ticket\":"<<h.proof_ticket
