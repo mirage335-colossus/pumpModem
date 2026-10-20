@@ -961,7 +961,7 @@ jobs:
             gui-core-diagnostic)
               targets=(test_search_fft test_pattern_fft_batch test_gui_timing_advice test_gui_controller)
               if [ '${{ inputs.build_type }}' = Debug ] && [ '${{ inputs.linux_runner }}' = ubuntu-24.04 ]; then
-                targets+=(test_live test_live_profiles)
+                targets+=(test_live test_live_profiles test_receiver_strategy test_live_planning_link)
               fi
               ;;
             gui-stop-diagnostic) targets=(test_gui_controller) ;;
@@ -1356,6 +1356,31 @@ jobs:
           assert cache.get('DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL') == 'ON', cache.get('DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL')
           assert cache.get('CMAKE_CXX_COMPILER') == '/usr/bin/g++-11', cache.get('CMAKE_CXX_COMPILER')
           PY_LIVE_CONFIG
+
+          # Exercise the actual size-estimation entry points before the full
+          # Live/FFT/strict GUI checks, with all original assertions retained.
+          boundary='^(amplitude_arrival_strategy|amplitude_arrival_planning)$'
+          ctest --test-dir build --show-only=json-v1 -R "$boundary" > "$report/size-boundary-inventory.json"
+          python3 -B - "$report/size-boundary-inventory.json" <<'PY_SIZE_INVENTORY'
+          import json, pathlib, sys
+          tests = json.loads(pathlib.Path(sys.argv[1]).read_text())['tests']
+          expected = {'amplitude_arrival_strategy': ['test_receiver_strategy', '--amplitude-arrival-only'],
+                      'amplitude_arrival_planning': ['test_live_planning_link']}
+          assert len(tests) == 2 and {t['name'] for t in tests} == set(expected)
+          for test in tests:
+              command = test['command']
+              assert [pathlib.Path(command[0]).name] + command[1:] == expected[test['name']], command
+          PY_SIZE_INVENTORY
+          ctest --test-dir build --output-on-failure --no-tests=error --parallel 1 --timeout 3600 \
+            --output-junit "$report/size-boundary.xml" -R "$boundary" > "$report/size-boundary.log" 2>&1
+          python3 -B - "$report/size-boundary.xml" <<'PY_SIZE_RESULTS'
+          import sys, xml.etree.ElementTree as ET
+          root = ET.parse(sys.argv[1]).getroot()
+          cases = root.findall('.//testcase')
+          assert len(cases) == 2 and {c.get('name') for c in cases} == {'amplitude_arrival_strategy', 'amplitude_arrival_planning'}
+          assert all(c.get('status') == 'run' and not any(c.find(tag) is not None for tag in ('failure', 'error', 'skipped')) for c in cases)
+          assert all(int(root.get(tag, '0')) == 0 for tag in ('failures', 'errors', 'skipped', 'disabled'))
+          PY_SIZE_RESULTS
 
           printf '%s\n' 'build/test_live --replay-staging' > "$report/replay-staging-command.txt"
           timeout 60s build/test_live --replay-staging > "$report/replay-staging.log" 2>&1

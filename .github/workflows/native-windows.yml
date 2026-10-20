@@ -9,9 +9,9 @@ on:
         options: [windows-2022, windows-latest-l, windows-latest-h]
         default: windows-2022
       scope:
-        description: 'Run an unchanged native scope or the manual Windows clock functional diagnostic'
+        description: 'Run an unchanged native scope or a focused Windows diagnostic'
         type: choice
-        options: [core, fast, live, calibration, frontends, web, gui, package, receiver-baseline, eme-diagnostic, receiver, receiver-diagnostic, startup-guide, sched-hop-diagnostic, windows-clock-functional-probe]
+        options: [core, fast, live, calibration, frontends, web, gui, package, receiver-baseline, eme-diagnostic, receiver, receiver-diagnostic, startup-guide, sched-hop-diagnostic, receiver-size-boundary, windows-clock-functional-probe]
         default: live
       calibration_section:
         description: 'Calibration section; used only by the calibration scope'
@@ -24,7 +24,7 @@ on:
         type: string
         default: windows-2022
       scope:
-        description: 'core, fast, live, calibration, frontends, web, gui, package, frozen receiver-baseline, eme-diagnostic, receiver, receiver-diagnostic, startup-guide, or sched-hop-diagnostic'
+        description: 'core, fast, live, calibration, frontends, web, gui, package, frozen receiver-baseline, eme-diagnostic, receiver, receiver-diagnostic, startup-guide, sched-hop-diagnostic, or receiver-size-boundary'
         type: string
         required: true
       calibration_section:
@@ -136,6 +136,7 @@ jobs:
             'core' { $targets = @('datapump-apps', 'datapump-tests-ci-core') }
             'gui' { $targets = @('datapump-apps', 'datapump-tests-gui') }
             'receiver-baseline' { $targets = @('test_pattern_correlator', 'test_pattern_drift', 'test_receiver_differential', 'test_clock_sync') }
+            'receiver-size-boundary' { $targets = @('test_receiver_strategy', 'test_live_planning_link') }
             'eme-diagnostic' { $targets = @('test_frequency_axis_probability') }
             'receiver' { $targets = @('test_pattern_correlator', 'test_pattern_drift', 'test_receiver_differential', 'test_clock_sync', 'test_pattern_startup_guide') }
             'startup-guide' { $targets = @('test_pattern_startup_guide') }
@@ -150,9 +151,74 @@ jobs:
           cmake --build build --config Release --target @targets --parallel $env:CL_MPCount
           if ($LASTEXITCODE -ne 0) { throw "Native shard build failed" }
       - name: Run the selected native tests
-        if: inputs.scope != 'package' && inputs.scope != 'receiver-baseline' && inputs.scope != 'eme-diagnostic' && inputs.scope != 'receiver' && inputs.scope != 'receiver-diagnostic' && inputs.scope != 'startup-guide' && inputs.scope != 'sched-hop-diagnostic'
+        if: inputs.scope != 'package' && inputs.scope != 'receiver-size-boundary' && inputs.scope != 'receiver-baseline' && inputs.scope != 'eme-diagnostic' && inputs.scope != 'receiver' && inputs.scope != 'receiver-diagnostic' && inputs.scope != 'startup-guide' && inputs.scope != 'sched-hop-diagnostic'
         # Separate runners supply parallelism; preserve per-runner live budgets.
         run: python tools/run-ci-tests.py --build-dir build --scope "$env:CI_SCOPE" --jobs 1 --config Release --report build/ci-test-report.json
+      - name: Run the production numeric receiver-size boundary regressions
+        if: inputs.scope == 'receiver-size-boundary'
+        run: |
+          $report = 'build/receiver-size-boundary'
+          New-Item -ItemType Directory -Force $report | Out-Null
+          git rev-parse HEAD | Tee-Object -FilePath "$report/source.txt"
+          if ($LASTEXITCODE -ne 0) { throw "Numeric boundary source identity failed" }
+          Copy-Item build/CMakeCache.txt "$report/CMakeCache.txt" -Force
+          $cache = Get-Content build/CMakeCache.txt
+          function CacheValue([string]$key) {
+            $line = $cache | Where-Object { $_ -match "^$([regex]::Escape($key)):[^=]*=" } | Select-Object -First 1
+            if (!$line) { return $null }
+            return ($line -split '=', 2)[1]
+          }
+          $generator = CacheValue 'CMAKE_GENERATOR'
+          $platform = CacheValue 'CMAKE_GENERATOR_PLATFORM'
+          $configs = CacheValue 'CMAKE_CONFIGURATION_TYPES'
+          $toolchain = CacheValue 'CMAKE_TOOLCHAIN_FILE'
+          $triplet = CacheValue 'VCPKG_TARGET_TRIPLET'
+          $runtime = CacheValue 'CMAKE_MSVC_RUNTIME_LIBRARY'
+          $portable = CacheValue 'DATAPUMP_PORTABLE'
+          $cacheEvidence = @("CMAKE_GENERATOR=$generator", "CMAKE_GENERATOR_PLATFORM=$platform", "CMAKE_CONFIGURATION_TYPES=$configs", "CMAKE_TOOLCHAIN_FILE=$toolchain", "VCPKG_TARGET_TRIPLET=$triplet", "CMAKE_MSVC_RUNTIME_LIBRARY=$runtime", "DATAPUMP_PORTABLE=$portable")
+          $cacheEvidence | Set-Content "$report/cache-verification.txt"
+          if ($generator -notmatch '^Visual Studio (17|18) ' -or $platform -ne 'x64' -or
+              $configs -notmatch '(^|;)Release(;|$)' -or
+              [IO.Path]::GetFullPath($toolchain) -ine [IO.Path]::GetFullPath($env:DATAPUMP_WINDOWS_TOOLCHAIN) -or $triplet -ne 'x64-windows-static' -or
+              $runtime -ne 'MultiThreaded' -or $portable -ne 'ON') {
+            throw "Numeric boundary route cache is not the configured MSVC x64 portable Release route"
+          }
+          # Visual Studio does not store CMAKE_CXX_COMPILER in CMakeCache.
+          $compilerFiles = @(Get-ChildItem build/CMakeFiles -Filter CMakeCXXCompiler.cmake -Recurse -File)
+          if ($compilerFiles.Count -ne 1) { throw "Missing or ambiguous configured C++ compiler identity" }
+          Copy-Item $compilerFiles[0].FullName "$report/CMakeCXXCompiler.cmake" -Force
+          $compilerConfig = Get-Content $compilerFiles[0].FullName -Raw
+          if ($compilerConfig -notmatch 'set\(CMAKE_CXX_COMPILER_ID "MSVC"\)') { throw "Numeric boundary route did not configure MSVC" }
+          $expected = @('amplitude_arrival_strategy', 'amplitude_arrival_planning')
+          $selector = '^(amplitude_arrival_strategy|amplitude_arrival_planning)$'
+          ctest --test-dir build -C Release --show-only=json-v1 -R $selector 2>&1 | Tee-Object -FilePath "$report/inventory-output.log" | Out-File -FilePath "$report/inventory.json" -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw "Numeric boundary CTest inventory command failed" }
+          $inventory = Get-Content "$report/inventory.json" -Raw | ConvertFrom-Json
+          $actual = @($inventory.tests | ForEach-Object { $_.name })
+          if ($actual.Count -ne $expected.Count -or @(Compare-Object $actual $expected).Count -ne 0) { throw "Numeric boundary inventory is missing, extra, or changed CTest cases" }
+          foreach ($test in $inventory.tests) {
+            $command = @($test.command)
+            if ($test.name -eq 'amplitude_arrival_strategy') {
+              if ($command.Count -ne 2 -or [IO.Path]::GetFileName($command[0]) -ine 'test_receiver_strategy.exe' -or $command[1] -ne '--amplitude-arrival-only') { throw "Changed production strategy boundary command" }
+            } else {
+              if ($command.Count -ne 1 -or [IO.Path]::GetFileName($command[0]) -ine 'test_live_planning_link.exe') { throw "Changed production planning boundary command" }
+            }
+          }
+          ctest --test-dir build -C Release --output-on-failure --no-tests=error --parallel 1 --timeout 3600 --output-junit "$PWD/$report/results.xml" -R $selector 2>&1 | Tee-Object -FilePath "$report/ctest-output.log"
+          $ctestExit = $LASTEXITCODE
+          if ($ctestExit -ne 0) { throw "Numeric boundary CTest regressions failed (exit $ctestExit)" }
+          [xml]$junit = Get-Content "$report/results.xml" -Raw
+          $cases = @($junit.SelectNodes('//testcase'))
+          $skipped = @($junit.SelectNodes('//testcase/skipped'))
+          $failed = @($junit.SelectNodes('//testcase/failure | //testcase/error'))
+          if ($cases.Count -ne $expected.Count -or $skipped.Count -ne 0 -or $failed.Count -ne 0) { throw "Numeric boundary JUnit has missing cases, skips, failures, or errors" }
+          $caseNames = @($cases | ForEach-Object { $_.name })
+          if (@(Compare-Object $caseNames $expected).Count -ne 0 -or @($cases | Where-Object { $_.status -ne 'run' }).Count -ne 0) { throw "Numeric boundary JUnit identity or execution status changed" }
+          foreach ($attribute in @('failures', 'errors', 'skipped', 'disabled')) {
+            $value = $junit.testsuite.GetAttribute($attribute)
+            if ($value -and [int]$value -ne 0) { throw "Numeric boundary JUnit reports $attribute" }
+          }
+          'Both production numeric boundary regressions passed on the verified MSVC x64 Release route.' >> $env:GITHUB_STEP_SUMMARY
       - name: Diagnose one strict EME continuation capture without changing its gates
         if: inputs.scope == 'eme-diagnostic'
         timeout-minutes: 30
@@ -324,6 +390,7 @@ jobs:
             build/Testing/Temporary/
             build/receiver-baseline/
             build/receiver-fixtures/
+            build/receiver-size-boundary/
             build/receiver-diagnostic/
             build/CMakeCache.txt
             build/eme-diagnostic*
