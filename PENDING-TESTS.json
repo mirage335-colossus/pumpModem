@@ -3,10 +3,10 @@
   "created_utc": "2026-10-20T20:20:28.271887+00:00",
   "target_revision": "e231e4daa727e3943dbc3e184ac86c329a2560e2",
   "inventory_reference_revision": "1e9b83238a50bd7983c5b2301f22ac451b42a7b0",
-  "scope": "All944 executions in the previously reported subtotal, individually named. Existing work on the original computer does not remove or exempt any item.",
-  "total_tasks": 944,
+  "scope": "All 948 named executions: the original 944 plus four mandatory held paced cases. Include every known issue not proved corrected by successful relevant testing, including failures and required coverage outside this named subtotal. Original-computer progress does not exempt destination executions.",
+  "total_tasks": 948,
   "counts_by_profile": {
-    "focus_gnu_debug": 15,
+    "focus_gnu_debug": 19,
     "linux_release_core": 252,
     "linux_debug_core": 249,
     "windows_release_core": 231,
@@ -15,8 +15,8 @@
   "distinct_ctest_names": 273,
   "completion_rule": "Every task must obtain an actual new-host result for the pinned candidate. No missing, skipped, cancelled, setup-blocked, or queued execution counts as passed. Record typed approved warnings/omissions explicitly, never as assertion passes.",
   "not_in_subtotal": [
-    "Four newer receiver-held paced-rescue cases added in e231e4d; run as additional current acceptance coverage.",
-    "Additional full-matrix frontend/web/native-GUI/package/copied-binary jobs outside the original944 subtotal.",
+    "Other applicable full-matrix frontend/web/native-GUI/platform/package/archive/copied-binary and complete calibration scopes remain required; the 948 named cases are not the complete workflow inventory.",
+    "Matched callback baseline/probe experiments are diagnostic measurements, not additional qualification passes.",
     "A green local manifest is not by itself a GitHub Actions green check or public release certification."
   ],
   "variables": {
@@ -30,7 +30,8 @@
     "Collect current CTest show-only=json-v1. For every ctest task, its exact name and registration argv/properties must match the intended test path; record unmatched/missing registrations as setup-blocked, not skipped.",
     "Honor PROCESSORS, RUN_SERIAL, locks, environment and timeouts. Preserve test command arguments such as --ci-functional-clock or calibration --workers/--section.",
     "Execute each execution_group once; map its JUnit cases to all listed task_ids. In particular, the GUI parallel pair must run together with --parallel2.",
-    "This manifest grants no different model, repair allowance, package-maintenance scope, Git/publication permission or deadline waiver."
+    "This manifest grants no different model, repair allowance, package-maintenance scope, Git/publication permission or deadline waiver.",
+    "Reconcile source-bound results and unresolved_issues before execution. The original destination source pin is retained as provenance; distinguish it from the current diagnostic candidate and bind any approved successor explicitly. Preserve assignment identities, failures and existing repair limits."
   ],
   "evidence_per_result": [
     "task_id and execution_group",
@@ -40,12 +41,13 @@
     "start/end UTC, exit and duration",
     "stdout/stderr and JUnit or existing structured result, with hashes",
     "expected/observed testcase count, every failure and every explicit omission/warning",
-    "PCM/progress/trace/physical-end evidence where required by the original fixture"
+    "PCM/progress/trace/physical-end evidence where required by the original fixture",
+    "For held cases: matched unheld PCM identity, generated versus captured/processed input, material holds or qualified drains, producer guard/abort cause and clean health; correct final bits cannot override invalid input."
   ],
   "parallel_policy": {
     "all_tasks_enabled": true,
     "no_other_host_progress_filter": true,
-    "scheduling": "Queue all944 immediately. Execute all independent ready profile/shard groups concurrently within available native agent slots and actual hardware limits. A failure in one group must not cancel unrelated ready groups. Build availability and indivisible timing groups are real dependencies.",
+    "scheduling": "Queue all948 immediately. Execute all independent ready profile/shard groups concurrently within available native agent slots and actual hardware limits. A failure in one group must not cancel unrelated ready groups. Build availability and indivisible timing groups are real dependencies.",
     "cheap_execution_role": "luna_worker: gpt-6-luna/high for authorized bounded execution and settled independent work; use luna_scout for read-only evidence. Preserve primary model and Sol takeovers/independent acceptance.",
     "writes": "Separate checkout/build/output per concurrently writing shard; one canonical integration/Git writer. Do not duplicate a group merely because it contains two task IDs.",
     "resource_rule": "Do not equate agent slots with CPU slots. Protect timing-sensitive fixtures from unrelated CPU saturation. Hosted diagnostic runner ceiling5 remains; it is not a local scout-agent quota.",
@@ -25355,6 +25357,90 @@
       "registered_name": "differential_receiver_probability",
       "preserve_registration_properties": true,
       "timeout_rule": "Original SDK calibration command overrides to7200; general/Live retain registered/default timeouts, no invented override."
+    },
+    "F-016": {
+      "profile": "focus_gnu_debug",
+      "kind": "process",
+      "argv_template": [
+        "{build_dir}/test_symbol_burst_live",
+        "--paced-held-plain-off"
+      ],
+      "task_ids": [
+        "F-016"
+      ],
+      "execute_once_per_group": true,
+      "external_timeout_seconds": 600,
+      "cleanup_seconds": 10,
+      "acceptance_route": ".github/workflows/native-linux.yml paced wrapper: full functional summary, process-group closure, original assertions; trace/footer/closure checks for follow",
+      "fixture_deadline_seconds": 570,
+      "acceptance_requirements": [
+        "Retain the existing 20 ms producer guard, independently paced original PCM, clean input/receiver health, exact source bits, earliest pending lineage, source tail, fully scored six-second physical absence and process-group closure.",
+        "Match generated PCM length/hash against the corresponding unheld case and account separately for captured/processed/queued input. Truncation remains fatal.",
+        "At least three material hold releases with control_no_rescue_claim classification; no rescue claim for Off."
+      ]
+    },
+    "F-017": {
+      "profile": "focus_gnu_debug",
+      "kind": "process",
+      "argv_template": [
+        "{build_dir}/test_symbol_burst_live",
+        "--paced-held-plain-on"
+      ],
+      "task_ids": [
+        "F-017"
+      ],
+      "execute_once_per_group": true,
+      "external_timeout_seconds": 600,
+      "cleanup_seconds": 10,
+      "acceptance_route": ".github/workflows/native-linux.yml paced wrapper: full functional summary, process-group closure, original assertions; trace/footer/closure checks for follow",
+      "fixture_deadline_seconds": 570,
+      "acceptance_requirements": [
+        "Retain the existing 20 ms producer guard, independently paced original PCM, clean input/receiver health, exact source bits, earliest pending lineage, source tail, fully scored six-second physical absence and process-group closure.",
+        "Match generated PCM length/hash against the corresponding unheld case and account separately for captured/processed/queued input. Truncation remains fatal.",
+        "At least three qualified post-startup drains with observed classification."
+      ]
+    },
+    "F-018": {
+      "profile": "focus_gnu_debug",
+      "kind": "process",
+      "argv_template": [
+        "{build_dir}/test_symbol_burst_live",
+        "--paced-held-keyed-off"
+      ],
+      "task_ids": [
+        "F-018"
+      ],
+      "execute_once_per_group": true,
+      "external_timeout_seconds": 600,
+      "cleanup_seconds": 10,
+      "acceptance_route": ".github/workflows/native-linux.yml paced wrapper: full functional summary, process-group closure, original assertions; trace/footer/closure checks for follow",
+      "fixture_deadline_seconds": 570,
+      "acceptance_requirements": [
+        "Retain the existing 20 ms producer guard, independently paced original PCM, clean input/receiver health, exact source bits, earliest pending lineage, source tail, fully scored six-second physical absence and process-group closure.",
+        "Match generated PCM length/hash against the corresponding unheld case and account separately for captured/processed/queued input. Truncation remains fatal.",
+        "At least three material hold releases with control_no_rescue_claim classification; no rescue claim for Off."
+      ]
+    },
+    "F-019": {
+      "profile": "focus_gnu_debug",
+      "kind": "process",
+      "argv_template": [
+        "{build_dir}/test_symbol_burst_live",
+        "--paced-held-keyed-on"
+      ],
+      "task_ids": [
+        "F-019"
+      ],
+      "execute_once_per_group": true,
+      "external_timeout_seconds": 600,
+      "cleanup_seconds": 10,
+      "acceptance_route": ".github/workflows/native-linux.yml paced wrapper: full functional summary, process-group closure, original assertions; trace/footer/closure checks for follow",
+      "fixture_deadline_seconds": 570,
+      "acceptance_requirements": [
+        "Retain the existing 20 ms producer guard, independently paced original PCM, clean input/receiver health, exact source bits, earliest pending lineage, source tail, fully scored six-second physical absence and process-group closure.",
+        "Match generated PCM length/hash against the corresponding unheld case and account separately for captured/processed/queued input. Truncation remains fatal.",
+        "At least three qualified post-startup drains with observed classification."
+      ]
     }
   },
   "tasks": [
@@ -48208,6 +48294,1052 @@
         "RUN_SERIAL": true
       },
       "ctest_timeout_override_seconds": 7200
+    },
+    {
+      "id": "F-016",
+      "profile": "focus_gnu_debug",
+      "name": "test_symbol_burst_live --paced-held-plain-off",
+      "kind": "process",
+      "execution_group": "F-016",
+      "requested_action": "run",
+      "include": true,
+      "skip_because_running_or_passed_on_other_host": false,
+      "diagnostic": true,
+      "source_test": "tests/test_symbol_burst_live.cpp",
+      "qualification_limit": "All original functional/input-integrity assertions are mandatory. Diagnostic rescue classification is not full qualification; valid complete input is required even when final bits match.",
+      "mandatory_functional_acceptance": true,
+      "matched_unheld_task_id": "F-002"
+    },
+    {
+      "id": "F-017",
+      "profile": "focus_gnu_debug",
+      "name": "test_symbol_burst_live --paced-held-plain-on",
+      "kind": "process",
+      "execution_group": "F-017",
+      "requested_action": "run",
+      "include": true,
+      "skip_because_running_or_passed_on_other_host": false,
+      "diagnostic": true,
+      "source_test": "tests/test_symbol_burst_live.cpp",
+      "qualification_limit": "All original functional/input-integrity assertions are mandatory. Diagnostic rescue classification is not full qualification; valid complete input is required even when final bits match.",
+      "mandatory_functional_acceptance": true,
+      "matched_unheld_task_id": "F-003"
+    },
+    {
+      "id": "F-018",
+      "profile": "focus_gnu_debug",
+      "name": "test_symbol_burst_live --paced-held-keyed-off",
+      "kind": "process",
+      "execution_group": "F-018",
+      "requested_action": "run",
+      "include": true,
+      "skip_because_running_or_passed_on_other_host": false,
+      "diagnostic": true,
+      "source_test": "tests/test_symbol_burst_live.cpp",
+      "qualification_limit": "All original functional/input-integrity assertions are mandatory. Diagnostic rescue classification is not full qualification; valid complete input is required even when final bits match.",
+      "mandatory_functional_acceptance": true,
+      "matched_unheld_task_id": "F-004"
+    },
+    {
+      "id": "F-019",
+      "profile": "focus_gnu_debug",
+      "name": "test_symbol_burst_live --paced-held-keyed-on",
+      "kind": "process",
+      "execution_group": "F-019",
+      "requested_action": "run",
+      "include": true,
+      "skip_because_running_or_passed_on_other_host": false,
+      "diagnostic": true,
+      "source_test": "tests/test_symbol_burst_live.cpp",
+      "qualification_limit": "All original functional/input-integrity assertions are mandatory. Diagnostic rescue classification is not full qualification; valid complete input is required even when final bits match.",
+      "mandatory_functional_acceptance": true,
+      "matched_unheld_task_id": "F-005"
     }
-  ]
+  ],
+  "updated_utc": "2026-10-20T22:13:59.775711+00:00",
+  "total_execution_groups": 945,
+  "named_inventory_is_complete_required_scope": false,
+  "historical_inventory": {
+    "schema": "symbol-burst-execution-manifest/v1",
+    "manifest_sha256": "717e33485839f0e37fcda55b57194f27401d51861a7cc259a73bc9c38e75587c",
+    "created_utc": "2026-10-20T20:20:28.271887+00:00",
+    "total_tasks": 944,
+    "counts_by_profile": {
+      "focus_gnu_debug": 15,
+      "linux_release_core": 252,
+      "linux_debug_core": 249,
+      "windows_release_core": 231,
+      "sdk_fltk_contract": 197
+    },
+    "execution_groups": 941,
+    "preservation": "All original task IDs, task/group definitions, profiles, source provenance and destination source pin are preserved. Four new IDs append the omitted held acceptance cases; issue IDs preserve the existing history and do not restart assignments."
+  },
+  "revision_context": {
+    "original_destination_target_revision": "e231e4daa727e3943dbc3e184ac86c329a2560e2",
+    "inventory_reference_revision": "1e9b83238a50bd7983c5b2301f22ac451b42a7b0",
+    "latest_audited_case_source": "72189bce6db6f2c7476039ef8d2852fd6236aa6d",
+    "current_diagnostic_source": "0f97aa5e8c9c1730b7d25250c55b424855161b70",
+    "production_correction_revision": "049e84edc1f8d3b6b69fef661680ff0e0100bc04",
+    "source_binding_rule": "The top-level target_revision and profile pins retain the original destination request; do not silently interpret them as the newer candidate. Every actual run must record its immutable source/configuration. Newer-source passes cannot close older-source failures by inference, or qualify an untested successor.",
+    "known_original_pin_failures": [
+      "The original e231e4d Correlator temporal-support fixture (F-008) failed its routing assertion; the test-only 72189bc correction subsequently passed.",
+      "The held keyed-Off fixture (F-018) on e231e4d had an empty eligible hold domain; the test-only 72189bc correction subsequently passed."
+    ],
+    "current_probe_limit": "0f97aa5 adds diagnostic instrumentation and workflow support; it is not a proved production fix for the producer failure."
+  },
+  "issue_reporting_policy": {
+    "include": "Every known issue or acceptance obligation without successful relevant-path proof, regardless of named inventory membership.",
+    "closure": "A patch alone, skipped/unexecuted case, truncated-input decode, diagnostic variant, or earlier-source pass does not prove current-candidate correction. Retain original failures and narrow focused corrections separately.",
+    "ownership": "instrumented-gui-core-failures-20261018 retains consequential ownership and acceptance. Issue/task IDs do not create new assignments or reset original repair history/limits.",
+    "snapshot": "Saved evidence snapshot, not a live monitor. Reconcile later artifacts before changing dispositions."
+  },
+  "unresolved_issues": [
+    {
+      "id": "9",
+      "title": "observed producer-deadline failure and truncated input",
+      "status": "open_observed_failure",
+      "related_task_ids": [
+        "F-019"
+      ],
+      "evidence_and_required_closure_markdown": "- Failing case: `test_symbol_burst_live --paced-held-keyed-on` in run\n  `39496135280`, job `118881553768`, source `72189bc`, exit 1.\n- Exact failure: `paced diagnostic failed: paced producer stopped:\n  deadline/callback failure; input truncated; cleanup: `.\n- Maximum callback duration was **20,711,219 ns**; producer abort reason was 4,\n  after the callback, against the unchanged 20 ms guard. The requested cadence\n  was 16 samples every 1,953,125 ns. A positive-lateness counter is not a count\n  of 20 ms violations.\n- The fixture generated **223,296 samples**, FNV-1a `d34970be1abe7755`, but its\n  final snapshot had only **216,304 captured**, **214,624 processed**, 1,664\n  queued physical samples and 16 decoding samples. The correct complete\n  16-bit row and eight observed gap drains do **not** make that capture valid.\n- Cause remains unproved: capture CPU, descheduling, blocked waits including\n  the Live mutex, mixed causes and an unaccounted remainder are being measured.\n  A long callback envelope alone does not identify CPU work or lock contention.\n  The current run adds bounded wall/thread-CPU/scheduling and snapshot markers,\n  plus matched baseline/probe pairs; probe compilation, operation and overhead\n  remain unverified until results arrive.\n- Required closure: establish the responsible path or supported classification,\n  complete the original functional case with valid full input, clean health,\n  physical END, exact content and process closure, and satisfy the existing\n  acceptance route. Preserve the original failed result. One non-reproducing\n  diagnostic pair is not proof of a correction. No input-integrity or deadline\n  waiver has been granted for this case."
+    },
+    {
+      "id": "3",
+      "title": "latest integrated recurring backlog-rescue acceptance",
+      "status": "acceptance_pending",
+      "related_task_ids": [
+        "F-002",
+        "F-003",
+        "F-004",
+        "F-005",
+        "F-006",
+        "F-016",
+        "F-017",
+        "F-018",
+        "F-019"
+      ],
+      "evidence_and_required_closure_markdown": "- Successful earlier evidence is retained: source `e231e4d`, run `39490234022`,\n  demonstrated **14 plaintext-On and 8 keyed-On** qualified post-startup drains\n  with valid complete input. On `72189bc`, plaintext-On again passed 14 drains;\n  keyed-Off passed 16 material control holds after its stimulus repair.\n- The latest completed keyed-On case nevertheless failed Issue 9. Its eight\n  drains cannot be counted as a passing whole case with truncated input.\n- Require valid independently paced plaintext/keyed Off/On cases, matching\n  held/unheld PCM identities, real queued PCM/age, complete original acquisition\n  promises and guard union, at least three qualified post-startup On drains,\n  exact source bits, earliest lineage and fully scored physical absence. Off\n  controls make no rescue claim. A forced service-gap demonstration does not\n  establish natural end-user hardware throughput.\n- Keep the three-drain/material-hold assertions and all original producer,\n  guard, source-tail and input-integrity checks. Do not solve the failure by\n  omitting acquisition coverage, blocking the producer or manufacturing counters."
+    },
+    {
+      "id": "7",
+      "title": "new mandatory workspace and lifetime/accounting coverage",
+      "status": "acceptance_pending",
+      "related_task_ids": [
+        "F-007",
+        "F-008",
+        "F-009"
+      ],
+      "evidence_and_required_closure_markdown": "- The temporal-support correction adds mandatory Correlator state and estimator\n  accounting. Source review preserved original detector-funding choices; the\n  corrected 4 MiB Correlator fixture passed on `72189bc`.\n- Broader current-candidate coverage must still verify actual state/storage\n  accounting, shared storage, estimates/reservations, tight-budget behavior and\n  the original lifetime rules. Insufficient aggregate workspace must fail\n  explicitly rather than silently dropping a detector or legitimate receiver.\n- Do not reopen the previously corrected Live workspace failure merely because\n  this new allocation path needs regression coverage. Preserve its accepted\n  evidence; a single successful fixture does not prove every capacity case."
+    },
+    {
+      "id": "8",
+      "title": "alternate receiver modes and full physical-end coverage",
+      "status": "acceptance_pending",
+      "related_task_ids": [],
+      "evidence_and_required_closure_markdown": "- The latest correction has not completed the required general receiver and\n  calibration coverage: amplitude, differential, weak/drift, acquisition,\n  continuation, fixed wire vectors and complete physical-absence cases.\n- FFT/Correlator/batch focused passes establish their tested paths, not all\n  alternate modes, platforms or statistical gates. Require the applicable\n  original cases and complete calibrated aggregates; partial captures do not\n  substitute for full per-case/combined gates.\n- Preserve six seconds of absence across fully scored complete symbols,\n  next-poll bits, pending identity and source interpretation after physical END."
+    },
+    {
+      "id": "10",
+      "title": "current-source strict GUI and copied-runtime assertions",
+      "status": "acceptance_pending",
+      "related_task_ids": [
+        "F-012",
+        "F-013",
+        "F-014",
+        "F-015"
+      ],
+      "evidence_and_required_closure_markdown": "- The original strict GUI serial pair and parallel-two pair were **unexecuted**\n  on both `e231e4d` and `72189bc`. Earlier passes do not qualify the latest\n  integrated candidate. The current workflow retains their original bodies and\n  can run them independently of an earlier paced/component failure.\n- Require both tests in each mode, the actual parallel-two execution, the\n  **10-second stop limit**, source-tail/arrival checks, physical completion,\n  pending-progress ordering and exact copyable content, including `Help`.\n- Corrected copied Rev TGZ/ZIP smokes passed on Ubuntu/Debian at earlier source\n  `1e9b832`; the replay-history correction has successful evidence. The original\n  missing-Help failing input was not retained, so its precise cause is not\n  proved. Current-source native/copied-package regression coverage remains\n  required; do not turn that uncertainty into a claim of a reproduced new bug\n  or restart a closed assignment without new evidence."
+    },
+    {
+      "id": "11",
+      "title": "complete native/SDK/platform/package qualification",
+      "status": "acceptance_pending",
+      "related_task_ids": [],
+      "evidence_and_required_closure_markdown": "- Full native `ci.yml` and SDK `sdk.yml` qualification have **not been launched\n  for the temporal-support production correction or its successors**. After\n  accepted focused/original strict GUI gates, the authorized route is concurrent\n  standard runners with `devfast=false` and the exact prepared base recipes.\n- Reconcile every applicable selected registration/JUnit result, calibration\n  aggregate, frontend/web/platform job, native GUI, package/archive and copied\n  binary smoke against exact source, configuration and binary identities. The\n  944 inventory below is only a subtotal; the four held cases and other required\n  workflow scopes are additional coverage, never exclusions from this file.\n- Preserve historical frontend failures and limits. The demanding TUI paste\n  path later passed the full 9/9 frontend scope and matched PTY checks at\n  `1e9b832`; no buffered-input production optimization was accepted. Current SDK\n  frontend/TUI validation must retain its deadline. Those passes do not prove\n  the original timing cause or implementation of the optional optimization.\n- Earlier full native `39462367772` and SDK `39462388103` successes belong to\n  `1e9b832`, not `049e84e`, `72189bc` or `0f97aa5`. Reuse only matching accepted\n  evidence with an explicit valid source/configuration binding.\n- The `SIZE_MAX` floating-conversion guard has successful GNU and Windows\n  focused boundary evidence at `355080b`; this does not qualify the latest\n  application on Windows. Keep the current native/SDK application checks and\n  the new diagnostic probe's portability/build coverage pending until tested.\n- Keep accepted profile/exit-77 decisions and narrowly authorized warnings\n  explicit. Skips, cancellations, incomplete coverage and conditionally absent\n  jobs are not test passes. Compact hosted Live 40/120 throughput warnings need\n  their completed functional analogue; they do not waive producer input\n  integrity, TUI, GUI stop, content, sanitizer, stall or crash failures.\n- Publication/certification is not authorized by this document. If later\n  requested, it requires its normal exact-source/binary acceptance route."
+    }
+  ],
+  "verified_focused_corrections": [
+    {
+      "historical_issue": "1",
+      "scope": "batch regression failed compilation (`total` not captured)",
+      "patch": "`e231e4d`, nested lambda `[]` to `[&]`",
+      "successful_focused_evidence": "GNU 11 builds and batch regression pass on `e231e4d` and `72189bc`",
+      "status": "proved_for_stated_path_and_source",
+      "limit": "Does not close broader current-candidate acceptance or erase original failed evidence."
+    },
+    {
+      "historical_issue": "2",
+      "scope": "longer-profile alias produced wrong final bits",
+      "patch": "Production `049e84e`, bounded temporal presentation-support ceiling",
+      "successful_focused_evidence": "All four unheld paced cases and follow case return exact `0010010010010010` on `e231e4d` and `72189bc`; full receiver/platform qualification remains pending",
+      "status": "proved_for_stated_path_and_source",
+      "limit": "Does not close broader current-candidate acceptance or erase original failed evidence."
+    },
+    {
+      "historical_issue": "3",
+      "scope": "keyed-Off stimulus never attempted a hold",
+      "patch": "Test-only `72189bc`, arm after visible acquisition during ongoing original PCM capture; require fresh PCM and receiver progress",
+      "successful_focused_evidence": "`--paced-held-keyed-off` passes with 16 material releases on `72189bc`, retaining control/no-rescue classification",
+      "status": "proved_for_stated_path_and_source",
+      "limit": "Does not close broader current-candidate acceptance or erase original failed evidence."
+    },
+    {
+      "historical_issue": "4",
+      "scope": "local-fit geometry/sparse-support/quarter-phase component path",
+      "patch": "Production/test correction `049e84e` and batch capture repair `e231e4d`",
+      "successful_focused_evidence": "Actual FFT and batch temporal-support component checks pass on `72189bc`",
+      "status": "proved_for_stated_path_and_source",
+      "limit": "Does not close broader current-candidate acceptance or erase original failed evidence."
+    },
+    {
+      "historical_issue": "5",
+      "scope": "genuine Burst FFT regression routing",
+      "patch": "Root Sol actual-Burst test replaces the rejected non-Burst draft; integrated `049e84e`",
+      "successful_focused_evidence": "`test_pattern_receiver --burst-temporal-support` passes on `e231e4d` and `72189bc`",
+      "status": "proved_for_stated_path_and_source",
+      "limit": "Does not close broader current-candidate acceptance or erase original failed evidence."
+    },
+    {
+      "historical_issue": "6",
+      "scope": "wide-chip fixture expected shaping with only 12 chips (minimum 16)",
+      "patch": "Test-only `72189bc`, 20-chip/320-second geometry and explicit shaping/alignment preconditions; backend assertion retained",
+      "successful_focused_evidence": "`test_pattern_correlator symbol_burst_temporal_support` passes on `72189bc`, with all support/bit/physical-END/workspace assertions retained",
+      "status": "proved_for_stated_path_and_source",
+      "limit": "Does not close broader current-candidate acceptance or erase original failed evidence."
+    }
+  ],
+  "additional_required_coverage": [
+    {
+      "id": "native-full-matrix",
+      "workflow": ".github/workflows/ci.yml",
+      "status": "pending_current_candidate_qualification",
+      "named_task_profiles": [
+        "linux_release_core",
+        "linux_debug_core",
+        "windows_release_core"
+      ],
+      "remaining_scope": "All applicable selected registrations, full per-case and combined calibration gates, frontend/web/platform/native GUI/package/archive/copied-binary checks outside the named subtotal.",
+      "configuration": "devfast=false; standard runners and exact prepared base recipes; preserve accepted explicit profile/exit-77 and narrow warning classifiers."
+    },
+    {
+      "id": "sdk-full-matrix",
+      "workflow": ".github/workflows/sdk.yml",
+      "status": "pending_current_candidate_qualification",
+      "named_task_profiles": [
+        "sdk_fltk_contract"
+      ],
+      "remaining_scope": "All applicable SDK/frontend/TUI/web/platform/package/copied-runtime checks outside the named subtotal; preserve input integrity, deadlines and assertion coverage.",
+      "configuration": "devfast=false; exact source/configuration/binary identities; only matching accepted evidence may be reused."
+    }
+  ],
+  "audited_original_host_results": {
+    "source": "72189bce6db6f2c7476039ef8d2852fd6236aa6d",
+    "identity": {
+      "source_commit": "72189bce6db6f2c7476039ef8d2852fd6236aa6d",
+      "source_tree": "9ddf1282e8eee1ce7415acde022518302d318eb4",
+      "scope": "symbol-burst-live",
+      "cmake_cache_sha256": "0094596ff2a0172fa9346e5a7073a134fee7959b9ebb9a0e5ca8b29bb16a2d7c",
+      "noarg_binary_sha256": "2b5a5f1bdeca8f92e2cae19508acfd8a087c7bf3b2174ea19e66e60d885a012d",
+      "paced_test_source_sha256": "6c0b3c60eb3fa58ac9da57da6592e7f0d1f24e64d4024b4e698e3f598ef346e3",
+      "paced_binary_sha256": "2b5a5f1bdeca8f92e2cae19508acfd8a087c7bf3b2174ea19e66e60d885a012d",
+      "baseline_ctest": {
+        "ctest_command": [
+          "ctest",
+          "--test-dir",
+          "build",
+          "--output-on-failure",
+          "--verbose",
+          "--no-tests=error",
+          "--parallel",
+          "1",
+          "--timeout",
+          "7200",
+          "--output-junit",
+          "/__w/pumpModem/pumpModem/build/symbol-burst-live-qualification/results.xml",
+          "-R",
+          "^(symbol_burst_live)$"
+        ],
+        "ctest_exit": 0,
+        "started_utc": "2026-10-20T21:14:01Z",
+        "ended_utc": "2026-10-20T21:15:06Z",
+        "elapsed_seconds": 65,
+        "test_count": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0,
+        "result": "PASS",
+        "completed_pass_workload_budget_warnings": [
+          "TEST_WORKLOAD_BUDGET: private Burst Live union: exceeded 25s normal budget; instrumented limit 75s (full completion remains required)."
+        ]
+      }
+    },
+    "run": {
+      "id": 39496135280,
+      "job_id": 118881553768,
+      "status": "completed",
+      "conclusion": "failure",
+      "failed_step": "Run paced Symbol Burst backlog diagnostics and matched selective trace"
+    },
+    "artifact": {
+      "id": 12298679191,
+      "name": "CI-Linux-Debug-symbol-burst-live-all-attempt-1",
+      "size_bytes": 257964,
+      "sha256": "dc84c57675025f335e0c32bfb519332f3492715720e9dbb229de2e40840fae80",
+      "expected_sha256": "dc84c57675025f335e0c32bfb519332f3492715720e9dbb229de2e40840fae80",
+      "zip_entries": 57,
+      "zip_test": "passed",
+      "unsafe_paths": [],
+      "extracted_path": "incoming/__w/pumpModem/pumpModem/build/symbol-burst-live-qualification/"
+    },
+    "readback_path": ".agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/production-qualification-a6c2bf1/temporal-support-fixture-focused-72189bc/readback/readback.json",
+    "readback_sha256": "55fb1b80cf8eda886732288fb813d6e14305938d9c04780a56f6308bc2cf9157",
+    "profile": "GNU 11 Debug/O1 ASan+UBSan, standard Ubuntu runner",
+    "named_948_counts": {
+      "passed": 12,
+      "not_run": 935,
+      "failed": 1
+    },
+    "original_944_counts": {
+      "passed": 9,
+      "failed": 0,
+      "not_run": 935
+    },
+    "additional_four_counts": {
+      "passed": 3,
+      "failed": 1,
+      "not_run": 0
+    },
+    "observed_cases": [
+      {
+        "task_id": "F-001",
+        "status": "passed",
+        "result": {
+          "ctest_command": [
+            "ctest",
+            "--test-dir",
+            "build",
+            "--output-on-failure",
+            "--verbose",
+            "--no-tests=error",
+            "--parallel",
+            "1",
+            "--timeout",
+            "7200",
+            "--output-junit",
+            "/__w/pumpModem/pumpModem/build/symbol-burst-live-qualification/results.xml",
+            "-R",
+            "^(symbol_burst_live)$"
+          ],
+          "ctest_exit": 0,
+          "started_utc": "2026-10-20T21:14:01Z",
+          "ended_utc": "2026-10-20T21:15:06Z",
+          "elapsed_seconds": 65,
+          "test_count": 1,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "result": "PASS",
+          "completed_pass_workload_budget_warnings": [
+            "TEST_WORKLOAD_BUDGET: private Burst Live union: exceeded 25s normal budget; instrumented limit 75s (full completion remains required)."
+          ]
+        }
+      },
+      {
+        "task_id": "F-002",
+        "status": "passed",
+        "selector": "--paced-plain-off",
+        "exit_code": 0,
+        "elapsed_seconds": 4.773057753000103,
+        "command": [
+          "/__w/pumpModem/pumpModem/build/test_symbol_burst_live",
+          "--paced-plain-off"
+        ],
+        "started_utc": "2026-10-20T21:15:06.929829+00:00",
+        "ended_utc": "2026-10-20T21:15:11.702919+00:00",
+        "summary": {
+          "functional": "pass",
+          "failure": "",
+          "pacing_valid": true,
+          "classification": "unchallenged",
+          "observation_failures": 0,
+          "pcm_samples": 37888,
+          "pcm_byte_fnv1a64": "cc3cff148cd4116c",
+          "captured_samples": 37888,
+          "frontier": 37888,
+          "queued_physical": 0,
+          "decoding_physical": 0,
+          "first_visible_ingress": 9280,
+          "startup_tail": 0,
+          "cleared_poststartup_gaps": 0,
+          "decoder_hold_released": 0,
+          "late_deadline_attempts": 2368,
+          "max_lateness_ns": 89231,
+          "callback_duration_max_ns": 651432,
+          "requested_interval_ns": 1953125,
+          "actual_delivery_span_ns": 4623064341,
+          "requested_delivery_span_ns": 4623046875,
+          "producer_aborted": false,
+          "producer_abort_reason": 0,
+          "final_rows": [
+            {
+              "id": 1,
+              "revision": 1,
+              "received_bits": 16,
+              "bits": "0010010010010010",
+              "missing": 0,
+              "complete": true
+            }
+          ],
+          "health": {
+            "input_overruns": 0,
+            "dropped_samples": 0,
+            "input_interrupted": false,
+            "search_limited": false,
+            "receiver_reset": false
+          }
+        }
+      },
+      {
+        "task_id": "F-003",
+        "status": "passed",
+        "selector": "--paced-plain-on",
+        "exit_code": 0,
+        "elapsed_seconds": 25.46163935000004,
+        "command": [
+          "/__w/pumpModem/pumpModem/build/test_symbol_burst_live",
+          "--paced-plain-on"
+        ],
+        "started_utc": "2026-10-20T21:15:11.704769+00:00",
+        "ended_utc": "2026-10-20T21:15:37.166418+00:00",
+        "summary": {
+          "functional": "pass",
+          "failure": "",
+          "pacing_valid": true,
+          "classification": "unchallenged",
+          "observation_failures": 0,
+          "pcm_samples": 205824,
+          "pcm_byte_fnv1a64": "22ee1eefb124076d",
+          "captured_samples": 205824,
+          "frontier": 205824,
+          "queued_physical": 0,
+          "decoding_physical": 0,
+          "first_visible_ingress": 9312,
+          "startup_tail": 23690,
+          "cleared_poststartup_gaps": 0,
+          "decoder_hold_released": 0,
+          "late_deadline_attempts": 12864,
+          "max_lateness_ns": 109332,
+          "callback_duration_max_ns": 598733,
+          "requested_interval_ns": 1953125,
+          "actual_delivery_span_ns": 25123081858,
+          "requested_delivery_span_ns": 25123046875,
+          "producer_aborted": false,
+          "producer_abort_reason": 0,
+          "final_rows": [
+            {
+              "id": 1,
+              "revision": 1,
+              "received_bits": 16,
+              "bits": "0010010010010010",
+              "missing": 0,
+              "complete": true
+            }
+          ],
+          "health": {
+            "input_overruns": 0,
+            "dropped_samples": 0,
+            "input_interrupted": false,
+            "search_limited": false,
+            "receiver_reset": false
+          }
+        }
+      },
+      {
+        "task_id": "F-004",
+        "status": "passed",
+        "selector": "--paced-keyed-off",
+        "exit_code": 0,
+        "elapsed_seconds": 29.42580209599987,
+        "command": [
+          "/__w/pumpModem/pumpModem/build/test_symbol_burst_live",
+          "--paced-keyed-off"
+        ],
+        "started_utc": "2026-10-20T21:15:37.168210+00:00",
+        "ended_utc": "2026-10-20T21:16:06.594024+00:00",
+        "summary": {
+          "functional": "pass",
+          "failure": "",
+          "pacing_valid": true,
+          "classification": "no_demonstrated_rescue",
+          "observation_failures": 0,
+          "pcm_samples": 54032,
+          "pcm_byte_fnv1a64": "5c15748381ef00b5",
+          "captured_samples": 54032,
+          "frontier": 54032,
+          "queued_physical": 0,
+          "decoding_physical": 0,
+          "first_visible_ingress": 33248,
+          "startup_tail": 0,
+          "cleared_poststartup_gaps": 0,
+          "decoder_hold_released": 0,
+          "late_deadline_attempts": 3377,
+          "max_lateness_ns": 1349122,
+          "callback_duration_max_ns": 832053,
+          "requested_interval_ns": 1953125,
+          "actual_delivery_span_ns": 6593789934,
+          "requested_delivery_span_ns": 6593750000,
+          "producer_aborted": false,
+          "producer_abort_reason": 0,
+          "final_rows": [
+            {
+              "id": 1,
+              "revision": 17,
+              "received_bits": 16,
+              "bits": "0010010010010010",
+              "missing": 0,
+              "complete": true
+            }
+          ],
+          "health": {
+            "input_overruns": 0,
+            "dropped_samples": 0,
+            "input_interrupted": false,
+            "search_limited": false,
+            "receiver_reset": false
+          }
+        }
+      },
+      {
+        "task_id": "F-005",
+        "status": "passed",
+        "selector": "--paced-keyed-on",
+        "exit_code": 0,
+        "elapsed_seconds": 28.719366275000084,
+        "command": [
+          "/__w/pumpModem/pumpModem/build/test_symbol_burst_live",
+          "--paced-keyed-on"
+        ],
+        "started_utc": "2026-10-20T21:16:06.595858+00:00",
+        "ended_utc": "2026-10-20T21:16:35.315235+00:00",
+        "summary": {
+          "functional": "pass",
+          "failure": "",
+          "pacing_valid": true,
+          "classification": "no_demonstrated_rescue",
+          "observation_failures": 0,
+          "pcm_samples": 223296,
+          "pcm_byte_fnv1a64": "d34970be1abe7755",
+          "captured_samples": 223296,
+          "frontier": 223296,
+          "queued_physical": 0,
+          "decoding_physical": 0,
+          "first_visible_ingress": 9824,
+          "startup_tail": 92426,
+          "cleared_poststartup_gaps": 0,
+          "decoder_hold_released": 0,
+          "late_deadline_attempts": 13956,
+          "max_lateness_ns": 116305,
+          "callback_duration_max_ns": 731632,
+          "requested_interval_ns": 1953125,
+          "actual_delivery_span_ns": 27255908426,
+          "requested_delivery_span_ns": 27255859375,
+          "producer_aborted": false,
+          "producer_abort_reason": 0,
+          "final_rows": [
+            {
+              "id": 1,
+              "revision": 3,
+              "received_bits": 16,
+              "bits": "0010010010010010",
+              "missing": 0,
+              "complete": true
+            }
+          ],
+          "health": {
+            "input_overruns": 0,
+            "dropped_samples": 0,
+            "input_interrupted": false,
+            "search_limited": false,
+            "receiver_reset": false
+          }
+        }
+      },
+      {
+        "task_id": "F-006",
+        "status": "passed",
+        "selector": "--paced-keyed-on-follow",
+        "exit_code": 0,
+        "elapsed_seconds": 28.719677964999846,
+        "command": [
+          "/__w/pumpModem/pumpModem/build/test_symbol_burst_live",
+          "--paced-keyed-on-follow",
+          "--trace=/__w/pumpModem/pumpModem/build/symbol-burst-live-qualification/paced/05-paced-keyed-on-follow.trace.jsonl"
+        ],
+        "started_utc": "2026-10-20T21:16:35.317129+00:00",
+        "ended_utc": "2026-10-20T21:17:04.036817+00:00",
+        "summary": {
+          "functional": "pass",
+          "failure": "",
+          "pacing_valid": true,
+          "classification": "no_demonstrated_rescue",
+          "observation_failures": 0,
+          "pcm_samples": 223296,
+          "pcm_byte_fnv1a64": "d34970be1abe7755",
+          "captured_samples": 223296,
+          "frontier": 223296,
+          "queued_physical": 0,
+          "decoding_physical": 0,
+          "first_visible_ingress": 9824,
+          "startup_tail": 92426,
+          "cleared_poststartup_gaps": 0,
+          "decoder_hold_released": 0,
+          "late_deadline_attempts": 13956,
+          "max_lateness_ns": 6459076,
+          "callback_duration_max_ns": 8347420,
+          "requested_interval_ns": 1953125,
+          "actual_delivery_span_ns": 27255881055,
+          "requested_delivery_span_ns": 27255859375,
+          "producer_aborted": false,
+          "producer_abort_reason": 0,
+          "final_rows": [
+            {
+              "id": 1,
+              "revision": 3,
+              "received_bits": 16,
+              "bits": "0010010010010010",
+              "missing": 0,
+              "complete": true
+            }
+          ],
+          "health": {
+            "input_overruns": 0,
+            "dropped_samples": 0,
+            "input_interrupted": false,
+            "search_limited": false,
+            "receiver_reset": false
+          }
+        }
+      },
+      {
+        "task_id": "F-016",
+        "status": "passed",
+        "selector": "--paced-held-plain-off",
+        "exit_code": 0,
+        "elapsed_seconds": 4.773067174000062,
+        "command": [
+          "/__w/pumpModem/pumpModem/build/test_symbol_burst_live",
+          "--paced-held-plain-off"
+        ],
+        "started_utc": "2026-10-20T21:17:04.045064+00:00",
+        "ended_utc": "2026-10-20T21:17:08.818144+00:00",
+        "summary": {
+          "functional": "pass",
+          "failure": "",
+          "pacing_valid": true,
+          "classification": "control_no_rescue_claim",
+          "observation_failures": 0,
+          "pcm_samples": 37888,
+          "pcm_byte_fnv1a64": "cc3cff148cd4116c",
+          "captured_samples": 37888,
+          "frontier": 37888,
+          "queued_physical": 0,
+          "decoding_physical": 0,
+          "first_visible_ingress": 9280,
+          "startup_tail": 0,
+          "cleared_poststartup_gaps": 0,
+          "decoder_hold_released": 16,
+          "late_deadline_attempts": 2368,
+          "max_lateness_ns": 92419,
+          "callback_duration_max_ns": 780584,
+          "requested_interval_ns": 1953125,
+          "actual_delivery_span_ns": 4623059068,
+          "requested_delivery_span_ns": 4623046875,
+          "producer_aborted": false,
+          "producer_abort_reason": 0,
+          "final_rows": [
+            {
+              "id": 1,
+              "revision": 1,
+              "received_bits": 16,
+              "bits": "0010010010010010",
+              "missing": 0,
+              "complete": true
+            }
+          ],
+          "health": {
+            "input_overruns": 0,
+            "dropped_samples": 0,
+            "input_interrupted": false,
+            "search_limited": false,
+            "receiver_reset": false
+          }
+        }
+      },
+      {
+        "task_id": "F-017",
+        "status": "passed",
+        "selector": "--paced-held-plain-on",
+        "exit_code": 0,
+        "elapsed_seconds": 25.463013332000173,
+        "command": [
+          "/__w/pumpModem/pumpModem/build/test_symbol_burst_live",
+          "--paced-held-plain-on"
+        ],
+        "started_utc": "2026-10-20T21:17:08.821802+00:00",
+        "ended_utc": "2026-10-20T21:17:34.284828+00:00",
+        "summary": {
+          "functional": "pass",
+          "failure": "",
+          "pacing_valid": true,
+          "classification": "observed",
+          "observation_failures": 0,
+          "pcm_samples": 205824,
+          "pcm_byte_fnv1a64": "22ee1eefb124076d",
+          "captured_samples": 205824,
+          "frontier": 205824,
+          "queued_physical": 0,
+          "decoding_physical": 0,
+          "first_visible_ingress": 9280,
+          "startup_tail": 23690,
+          "cleared_poststartup_gaps": 14,
+          "decoder_hold_released": 14,
+          "late_deadline_attempts": 12864,
+          "max_lateness_ns": 111686,
+          "callback_duration_max_ns": 690850,
+          "requested_interval_ns": 1953125,
+          "actual_delivery_span_ns": 25123068930,
+          "requested_delivery_span_ns": 25123046875,
+          "producer_aborted": false,
+          "producer_abort_reason": 0,
+          "final_rows": [
+            {
+              "id": 1,
+              "revision": 1,
+              "received_bits": 16,
+              "bits": "0010010010010010",
+              "missing": 0,
+              "complete": true
+            }
+          ],
+          "health": {
+            "input_overruns": 0,
+            "dropped_samples": 0,
+            "input_interrupted": false,
+            "search_limited": false,
+            "receiver_reset": false
+          }
+        }
+      },
+      {
+        "task_id": "F-018",
+        "status": "passed",
+        "selector": "--paced-held-keyed-off",
+        "exit_code": 0,
+        "elapsed_seconds": 30.783358102999955,
+        "command": [
+          "/__w/pumpModem/pumpModem/build/test_symbol_burst_live",
+          "--paced-held-keyed-off"
+        ],
+        "started_utc": "2026-10-20T21:17:34.288102+00:00",
+        "ended_utc": "2026-10-20T21:18:05.071470+00:00",
+        "summary": {
+          "functional": "pass",
+          "failure": "",
+          "pacing_valid": true,
+          "classification": "control_no_rescue_claim",
+          "observation_failures": 0,
+          "pcm_samples": 54032,
+          "pcm_byte_fnv1a64": "5c15748381ef00b5",
+          "captured_samples": 54032,
+          "frontier": 54032,
+          "queued_physical": 0,
+          "decoding_physical": 0,
+          "first_visible_ingress": 33904,
+          "startup_tail": 0,
+          "cleared_poststartup_gaps": 0,
+          "decoder_hold_released": 16,
+          "late_deadline_attempts": 3377,
+          "max_lateness_ns": 1570611,
+          "callback_duration_max_ns": 2416753,
+          "requested_interval_ns": 1953125,
+          "actual_delivery_span_ns": 6593764236,
+          "requested_delivery_span_ns": 6593750000,
+          "producer_aborted": false,
+          "producer_abort_reason": 0,
+          "final_rows": [
+            {
+              "id": 1,
+              "revision": 17,
+              "received_bits": 16,
+              "bits": "0010010010010010",
+              "missing": 0,
+              "complete": true
+            }
+          ],
+          "health": {
+            "input_overruns": 0,
+            "dropped_samples": 0,
+            "input_interrupted": false,
+            "search_limited": false,
+            "receiver_reset": false
+          }
+        }
+      },
+      {
+        "task_id": "F-019",
+        "status": "failed",
+        "selector": "--paced-held-keyed-on",
+        "exit_code": 1,
+        "elapsed_seconds": 26.81680312399999,
+        "command": [
+          "/__w/pumpModem/pumpModem/build/test_symbol_burst_live",
+          "--paced-held-keyed-on"
+        ],
+        "started_utc": "2026-10-20T21:18:05.075002+00:00",
+        "ended_utc": "2026-10-20T21:18:31.891816+00:00",
+        "summary": {
+          "functional": "fail",
+          "failure": "paced producer stopped: deadline/callback failure; input truncated",
+          "pacing_valid": false,
+          "classification": "no_demonstrated_rescue",
+          "observation_failures": 0,
+          "pcm_samples": 223296,
+          "pcm_byte_fnv1a64": "d34970be1abe7755",
+          "captured_samples": 216304,
+          "frontier": 214624,
+          "queued_physical": 1664,
+          "decoding_physical": 16,
+          "first_visible_ingress": 9808,
+          "startup_tail": 92426,
+          "cleared_poststartup_gaps": 8,
+          "decoder_hold_released": 8,
+          "late_deadline_attempts": 13519,
+          "max_lateness_ns": 154380,
+          "callback_duration_max_ns": 20711219,
+          "requested_interval_ns": 1953125,
+          "actual_delivery_span_ns": 26423058151,
+          "requested_delivery_span_ns": 27255859375,
+          "producer_aborted": true,
+          "producer_abort_reason": 4,
+          "final_rows": [
+            {
+              "id": 1,
+              "revision": 3,
+              "received_bits": 16,
+              "bits": "0010010010010010",
+              "missing": 0,
+              "complete": true
+            }
+          ],
+          "health": {
+            "input_overruns": 0,
+            "dropped_samples": 0,
+            "input_interrupted": false,
+            "search_limited": false,
+            "receiver_reset": false
+          }
+        }
+      },
+      {
+        "task_id": "F-007",
+        "status": "passed",
+        "result": {
+          "name": "fft",
+          "command": [
+            "/__w/pumpModem/pumpModem/build/test_pattern_receiver",
+            "--burst-temporal-support"
+          ],
+          "source_commit": "72189bce6db6f2c7476039ef8d2852fd6236aa6d",
+          "source_tree": "9ddf1282e8eee1ce7415acde022518302d318eb4",
+          "started_utc": "2026-10-20T21:18:32.020705+00:00",
+          "elapsed_seconds": 0.314538445999915,
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "binary_sha256": "b4d425953f0e03aa009c81913ba203037892ec17fc381eed84fdcb6eb0c7fa87",
+          "test_source_sha256": "74723231ae9d9b05ca03562451306e1db5ded919c54b549f7849ff4742531469",
+          "cmake_cache_sha256": "0094596ff2a0172fa9346e5a7073a134fee7959b9ebb9a0e5ca8b29bb16a2d7c",
+          "stdout_sha256": "dc9c8d4ba499cc638477a652d832a4b33e185afad97dcb5417e8b2aef03a6206",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      {
+        "task_id": "F-008",
+        "status": "passed",
+        "result": {
+          "name": "correlator",
+          "command": [
+            "/__w/pumpModem/pumpModem/build/test_pattern_correlator",
+            "symbol_burst_temporal_support"
+          ],
+          "source_commit": "72189bce6db6f2c7476039ef8d2852fd6236aa6d",
+          "source_tree": "9ddf1282e8eee1ce7415acde022518302d318eb4",
+          "started_utc": "2026-10-20T21:18:32.531255+00:00",
+          "elapsed_seconds": 0.6654306699999779,
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "binary_sha256": "a9b4505d09c096d83926946b2a04669bafa5d25ebce780059fca13c57d34be93",
+          "test_source_sha256": "f8f4c65d8b6e7c1429acf924ec32e5f1d7904f88a6d90538c78a88b61e922e0a",
+          "cmake_cache_sha256": "0094596ff2a0172fa9346e5a7073a134fee7959b9ebb9a0e5ca8b29bb16a2d7c",
+          "stdout_sha256": "099eb423b2d704ca7aff9606f5a07165925b1bab43f2db666faca8509082e44a",
+          "stderr_sha256": "b1de0456c642c3005b699f20f827d80f6b51e2667f0eaeff8739807f53aa8431"
+        }
+      },
+      {
+        "task_id": "F-009",
+        "status": "passed",
+        "result": {
+          "name": "batch",
+          "command": [
+            "/__w/pumpModem/pumpModem/build/test_pattern_correlator_batch"
+          ],
+          "source_commit": "72189bce6db6f2c7476039ef8d2852fd6236aa6d",
+          "source_tree": "9ddf1282e8eee1ce7415acde022518302d318eb4",
+          "started_utc": "2026-10-20T21:18:33.386457+00:00",
+          "elapsed_seconds": 16.448842942000056,
+          "exit_code": 0,
+          "timed_out": false,
+          "passed": true,
+          "binary_sha256": "53648e5cd75ec40c41cb66ed7ad83f29c7f452cb4f7d67c28043bdddf1a31e29",
+          "test_source_sha256": "dbe89a368d95a332f03f8420d42dd71775d891e199a9f9977f83dfabd590d843",
+          "cmake_cache_sha256": "0094596ff2a0172fa9346e5a7073a134fee7959b9ebb9a0e5ca8b29bb16a2d7c",
+          "stdout_sha256": "551d4e5b76ac16bfa832783080f3e2b593900b5b3c4f37653fdbb59f06ad1d4b",
+          "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      }
+    ],
+    "all_other_named_tasks_status": "not_run",
+    "focused_unexecuted_task_ids": [
+      "F-010",
+      "F-011",
+      "F-012",
+      "F-013",
+      "F-014",
+      "F-015"
+    ],
+    "remaining_native_sdk_named_tasks": 929,
+    "limit": "These are the last saved audited per-case results, not current destination completion or qualification of 0f97aa5. Original FFT and strict GUI stages were not executed after the paced failure; full native/SDK were not launched for this correction."
+  },
+  "newer_run_snapshot": {
+    "metadata_at": "2026-10-20T22:10:24.106340+00:00",
+    "metadata_path": ".agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/production-qualification-a6c2bf1/callback-critical-path-focused-0f97aa5/run-metadata.json",
+    "run_id": 39501531859,
+    "job_id": 118899967107,
+    "source": "0f97aa5e8c9c1730b7d25250c55b424855161b70",
+    "status": "completed",
+    "conclusion": "failure",
+    "step_results": [
+      {
+        "name": "Run the original no-argument Symbol Burst Live qualification test",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-10-20T21:54:10Z",
+        "completed_at": "2026-10-20T21:55:15Z"
+      },
+      {
+        "name": "Run paced Symbol Burst backlog diagnostics and matched selective trace",
+        "status": "completed",
+        "conclusion": "failure",
+        "started_at": "2026-10-20T21:55:15Z",
+        "completed_at": "2026-10-20T21:58:43Z"
+      },
+      {
+        "name": "Run actual temporal support component regressions",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-10-20T21:58:43Z",
+        "completed_at": "2026-10-20T21:58:58Z"
+      },
+      {
+        "name": "Run focused preparation or GUI core diagnostics",
+        "status": "completed",
+        "conclusion": "success",
+        "started_at": "2026-10-20T21:58:58Z",
+        "completed_at": "2026-10-20T22:07:59Z"
+      }
+    ],
+    "case_readback_status": "No saved per-case readback was available at this snapshot. Do not project step success into case counts or close current-source acceptance before checking actual structured results, assertions and identities."
+  },
+  "retained_failure_provenance": [
+    {
+      "source": "72189bce6db6f2c7476039ef8d2852fd6236aa6d",
+      "run_id": 39496135280,
+      "job_id": 118881553768,
+      "task_id": "F-019",
+      "failure": "paced diagnostic failed: paced producer stopped: deadline/callback failure; input truncated; cleanup: ",
+      "callback_duration_max_ns": 20711219,
+      "producer_guard_ns": 20000000,
+      "producer_abort_reason": 4,
+      "requested_interval_ns": 1953125,
+      "generated_samples": 223296,
+      "generated_pcm_fnv1a64": "d34970be1abe7755",
+      "captured_samples": 216304,
+      "processed_frontier": 214624,
+      "queued_physical": 1664,
+      "decoding_physical": 16,
+      "status": "open; eight drains and correct final bits do not validate truncated input"
+    },
+    {
+      "source": "e231e4daa727e3943dbc3e184ac86c329a2560e2",
+      "run_id": 39490234022,
+      "failures": [
+        {
+          "task_id": "F-018",
+          "mechanism": "Empty eligible hold domain: first visible ingress 34640, latest eligible payload arm 23552, required arm at least 35664; zero hold attempts."
+        },
+        {
+          "task_id": "F-008",
+          "mechanism": "Wide-chip fixture expected shaping with 12 chips, below the 16-chip minimum."
+        }
+      ],
+      "subsequent_proof": "Both test-only corrections passed on 72189bc; retain original failures separately from broader pending acceptance."
+    },
+    {
+      "source": "049e84edc1f8d3b6b69fef661680ff0e0100bc04",
+      "run_id": 39487011213,
+      "failure": "tests/test_pattern_correlator_batch.cpp:651:88: error: 'total' is not captured",
+      "runtime_cases_executed": false,
+      "subsequent_proof": "Nested lambda capture repaired at e231e4d; batch builds and passes on e231e4d and 72189bc."
+    },
+    {
+      "source": "7b79bc1decbd9f5c66e4366fa0c1ef8a8ecce62f",
+      "failure": "Longer-profile alias: full 223296-sample PCM d34970be1abe7755 produced wrong 8 bits 01001001 instead of 16 bits 0010010010010010.",
+      "subsequent_proof": "Temporal support correction 049e84e yields exact bits in all unheld paced cases and follow on e231e4d/72189bc; broader qualification remains pending."
+    }
+  ],
+  "earlier_full_qualification": {
+    "source": "1e9b83238a50bd7983c5b2301f22ac451b42a7b0",
+    "native_run_id": 39462367772,
+    "sdk_run_id": 39462388103,
+    "conclusions": "success on that source only",
+    "limit": "Not qualification of temporal-support correction 049e84e or its successors."
+  },
+  "diagnostic_comparisons": {
+    "scope": "Two matched --paced-held-keyed-on baseline / --pacing-probe pairs at 0f97aa5, separate from qualification task IDs.",
+    "run_id": 39501531859,
+    "purpose": "Attribute callback wall/thread-CPU/waiting/scheduling intervals and trace overhead; preserve original input, pacing, assertions and deadlines.",
+    "qualification_credit": false,
+    "result_status": "Await saved detailed readback; no inferred correction."
+  },
+  "destination_execution_status": {
+    "requested_task_count": 948,
+    "destination_results_recorded_in_this_manifest": 0,
+    "meaning": "Results on the original host do not remove requested destination tasks. No destination completion is inferred from this snapshot."
+  },
+  "markdown_alignment": {
+    "path": "PENDING.md",
+    "sha256": "34906cd55300886c55d0111e18d750e43e3facf3cbd41a383e8a239b5f731a50",
+    "unresolved_issue_ids": [
+      "9",
+      "3",
+      "7",
+      "8",
+      "10",
+      "11"
+    ],
+    "original_inventory_rows_preserved": 944,
+    "new_held_cases_now_explicit": 4,
+    "snapshot_limit": "The JSON newer-run step snapshot may postdate the Markdown snapshot; unresolved issue closures still require audited relevant evidence."
+  }
 }

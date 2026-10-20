@@ -1,4 +1,196 @@
-# Symbol_Burst: all 944 executions for parallel work on another computer
+# Symbol_Burst: unresolved issues and required validation
+
+Updated **2026-10-20, 4:46 p.m. Central (21:46 UTC)** from the saved main-chat
+evidence. This section is the current issue status. The destination execution
+inventory and historical analysis below are preserved separately.
+
+**Include every known issue or correction that has not been proved by successful
+testing, whether or not its test appears in the 944-entry manifest.** A committed
+patch, correct final bits from truncated input, skipped test, diagnostic variant,
+or earlier-source pass does not by itself close the corresponding issue. Newly
+found failures belong here even when they are outside that fixed subtotal.
+
+The original main-chat Sol owner, assignment identities, failures and repair
+history remain unchanged. Issue numbers below refer to the existing historical
+issue categories; they do not create or restart assignments. This documentation
+update does not change source, deadlines, CI jobs or release authorization.
+
+## Current evidence and source identities
+
+- Last completed focused run: [39496135280](https://github.com/mirage335-colossus/pumpModem/actions/runs/39496135280),
+  source `72189bce6db6f2c7476039ef8d2852fd6236aa6d`, GNU 11 Debug/O1
+  ASan+UBSan on standard Ubuntu. It **failed**, despite successful component
+  tests, because the held keyed-On producer exceeded its deadline and truncated
+  input. Its original FFT and strict GUI checks did not run.
+- Current diagnostic run: [39501531859](https://github.com/mirage335-colossus/pumpModem/actions/runs/39501531859),
+  source `0f97aa5e8c9c1730b7d25250c55b424855161b70`, immutable ref
+  `codex/symbol-burst-callback-0f97aa5`. The saved 21:45 UTC update has this run
+  building prerequisites; no runtime result is yet available for it.
+- Production files remain identical to correction
+  `049e84edc1f8d3b6b69fef661680ff0e0100bc04`. Later commits add test repairs,
+  workflow support and diagnostic measurements. In particular, `0f97aa5` is
+  instrumentation, **not a demonstrated correction of the producer failure**.
+- Current detailed evidence:
+  [fixture/callback continuation](.agent-work/notes/symbol-burst-fixture-current-20261020.md),
+  [721 readback](.agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/production-qualification-a6c2bf1/temporal-support-fixture-focused-72189bc/readback/readback.md).
+  Reconcile newer results before acting; the snapshot below is not a live monitor.
+
+## Open issues and unproved acceptance
+
+### Issue 9 — observed producer-deadline failure and truncated input: OPEN
+
+- Failing case: `test_symbol_burst_live --paced-held-keyed-on` in run
+  `39496135280`, job `118881553768`, source `72189bc`, exit 1.
+- Exact failure: `paced diagnostic failed: paced producer stopped:
+  deadline/callback failure; input truncated; cleanup: `.
+- Maximum callback duration was **20,711,219 ns**; producer abort reason was 4,
+  after the callback, against the unchanged 20 ms guard. The requested cadence
+  was 16 samples every 1,953,125 ns. A positive-lateness counter is not a count
+  of 20 ms violations.
+- The fixture generated **223,296 samples**, FNV-1a `d34970be1abe7755`, but its
+  final snapshot had only **216,304 captured**, **214,624 processed**, 1,664
+  queued physical samples and 16 decoding samples. The correct complete
+  16-bit row and eight observed gap drains do **not** make that capture valid.
+- Cause remains unproved: capture CPU, descheduling, blocked waits including
+  the Live mutex, mixed causes and an unaccounted remainder are being measured.
+  A long callback envelope alone does not identify CPU work or lock contention.
+  The current run adds bounded wall/thread-CPU/scheduling and snapshot markers,
+  plus matched baseline/probe pairs; probe compilation, operation and overhead
+  remain unverified until results arrive.
+- Required closure: establish the responsible path or supported classification,
+  complete the original functional case with valid full input, clean health,
+  physical END, exact content and process closure, and satisfy the existing
+  acceptance route. Preserve the original failed result. One non-reproducing
+  diagnostic pair is not proof of a correction. No input-integrity or deadline
+  waiver has been granted for this case.
+
+### Issue 3 — latest integrated recurring backlog-rescue acceptance: PENDING
+
+- Successful earlier evidence is retained: source `e231e4d`, run `39490234022`,
+  demonstrated **14 plaintext-On and 8 keyed-On** qualified post-startup drains
+  with valid complete input. On `72189bc`, plaintext-On again passed 14 drains;
+  keyed-Off passed 16 material control holds after its stimulus repair.
+- The latest completed keyed-On case nevertheless failed Issue 9. Its eight
+  drains cannot be counted as a passing whole case with truncated input.
+- Require valid independently paced plaintext/keyed Off/On cases, matching
+  held/unheld PCM identities, real queued PCM/age, complete original acquisition
+  promises and guard union, at least three qualified post-startup On drains,
+  exact source bits, earliest lineage and fully scored physical absence. Off
+  controls make no rescue claim. A forced service-gap demonstration does not
+  establish natural end-user hardware throughput.
+- Keep the three-drain/material-hold assertions and all original producer,
+  guard, source-tail and input-integrity checks. Do not solve the failure by
+  omitting acquisition coverage, blocking the producer or manufacturing counters.
+
+### Issue 7 — new mandatory workspace and lifetime/accounting coverage: PENDING
+
+- The temporal-support correction adds mandatory Correlator state and estimator
+  accounting. Source review preserved original detector-funding choices; the
+  corrected 4 MiB Correlator fixture passed on `72189bc`.
+- Broader current-candidate coverage must still verify actual state/storage
+  accounting, shared storage, estimates/reservations, tight-budget behavior and
+  the original lifetime rules. Insufficient aggregate workspace must fail
+  explicitly rather than silently dropping a detector or legitimate receiver.
+- Do not reopen the previously corrected Live workspace failure merely because
+  this new allocation path needs regression coverage. Preserve its accepted
+  evidence; a single successful fixture does not prove every capacity case.
+
+### Issue 8 — alternate receiver modes and full physical-end coverage: PENDING
+
+- The latest correction has not completed the required general receiver and
+  calibration coverage: amplitude, differential, weak/drift, acquisition,
+  continuation, fixed wire vectors and complete physical-absence cases.
+- FFT/Correlator/batch focused passes establish their tested paths, not all
+  alternate modes, platforms or statistical gates. Require the applicable
+  original cases and complete calibrated aggregates; partial captures do not
+  substitute for full per-case/combined gates.
+- Preserve six seconds of absence across fully scored complete symbols,
+  next-poll bits, pending identity and source interpretation after physical END.
+
+### Issue 10 — current-source strict GUI and copied-runtime assertions: PENDING
+
+- The original strict GUI serial pair and parallel-two pair were **unexecuted**
+  on both `e231e4d` and `72189bc`. Earlier passes do not qualify the latest
+  integrated candidate. The current workflow retains their original bodies and
+  can run them independently of an earlier paced/component failure.
+- Require both tests in each mode, the actual parallel-two execution, the
+  **10-second stop limit**, source-tail/arrival checks, physical completion,
+  pending-progress ordering and exact copyable content, including `Help`.
+- Corrected copied Rev TGZ/ZIP smokes passed on Ubuntu/Debian at earlier source
+  `1e9b832`; the replay-history correction has successful evidence. The original
+  missing-Help failing input was not retained, so its precise cause is not
+  proved. Current-source native/copied-package regression coverage remains
+  required; do not turn that uncertainty into a claim of a reproduced new bug
+  or restart a closed assignment without new evidence.
+
+### Issue 11 — complete native/SDK/platform/package qualification: PENDING
+
+- Full native `ci.yml` and SDK `sdk.yml` qualification have **not been launched
+  for the temporal-support production correction or its successors**. After
+  accepted focused/original strict GUI gates, the authorized route is concurrent
+  standard runners with `devfast=false` and the exact prepared base recipes.
+- Reconcile every applicable selected registration/JUnit result, calibration
+  aggregate, frontend/web/platform job, native GUI, package/archive and copied
+  binary smoke against exact source, configuration and binary identities. The
+  944 inventory below is only a subtotal; the four held cases and other required
+  workflow scopes are additional coverage, never exclusions from this file.
+- Preserve historical frontend failures and limits. The demanding TUI paste
+  path later passed the full 9/9 frontend scope and matched PTY checks at
+  `1e9b832`; no buffered-input production optimization was accepted. Current SDK
+  frontend/TUI validation must retain its deadline. Those passes do not prove
+  the original timing cause or implementation of the optional optimization.
+- Earlier full native `39462367772` and SDK `39462388103` successes belong to
+  `1e9b832`, not `049e84e`, `72189bc` or `0f97aa5`. Reuse only matching accepted
+  evidence with an explicit valid source/configuration binding.
+- The `SIZE_MAX` floating-conversion guard has successful GNU and Windows
+  focused boundary evidence at `355080b`; this does not qualify the latest
+  application on Windows. Keep the current native/SDK application checks and
+  the new diagnostic probe's portability/build coverage pending until tested.
+- Keep accepted profile/exit-77 decisions and narrowly authorized warnings
+  explicit. Skips, cancellations, incomplete coverage and conditionally absent
+  jobs are not test passes. Compact hosted Live 40/120 throughput warnings need
+  their completed functional analogue; they do not waive producer input
+  integrity, TUI, GUI stop, content, sanitizer, stall or crash failures.
+- Publication/certification is not authorized by this document. If later
+  requested, it requires its normal exact-source/binary acceptance route.
+
+## Corrections with successful focused testing — retained, not open failures
+
+These results close the stated narrow failure/path on their recorded source.
+They do not close the broader acceptance obligations above or erase original
+failed results.
+
+| Existing issue/path | Actual patch | Successful evidence |
+|---|---|---|
+| 1: batch regression failed compilation (`total` not captured) | `e231e4d`, nested lambda `[]` to `[&]` | GNU 11 builds and batch regression pass on `e231e4d` and `72189bc` |
+| 2: longer-profile alias produced wrong final bits | Production `049e84e`, bounded temporal presentation-support ceiling | All four unheld paced cases and follow case return exact `0010010010010010` on `e231e4d` and `72189bc`; full receiver/platform qualification remains pending |
+| 3: keyed-Off stimulus never attempted a hold | Test-only `72189bc`, arm after visible acquisition during ongoing original PCM capture; require fresh PCM and receiver progress | `--paced-held-keyed-off` passes with 16 material releases on `72189bc`, retaining control/no-rescue classification |
+| 4: local-fit geometry/sparse-support/quarter-phase component path | Production/test correction `049e84e` and batch capture repair `e231e4d` | Actual FFT and batch temporal-support component checks pass on `72189bc` |
+| 5: genuine Burst FFT regression routing | Root Sol actual-Burst test replaces the rejected non-Burst draft; integrated `049e84e` | `test_pattern_receiver --burst-temporal-support` passes on `e231e4d` and `72189bc` |
+| 6: wide-chip fixture expected shaping with only 12 chips (minimum 16) | Test-only `72189bc`, 20-chip/320-second geometry and explicit shaping/alignment preconditions; backend assertion retained | `test_pattern_correlator symbol_burst_temporal_support` passes on `72189bc`, with all support/bit/physical-END/workspace assertions retained |
+
+## Progress counts and closure rule
+
+- On last completed source `72189bc`, the original **944-entry subset has
+  9 passes, 0 failures and 935 unexecuted entries**: 6 focused FFT/GUI checks
+  plus 929 native/SDK entries remain. This is an execution count, not an issue
+  completion percentage.
+- The **four additional held cases have 3 passes and 1 failure** on that source.
+  Consequently there is still an observed blocking failure overall. Never
+  report “no failures” by restricting the denominator to the 944 subset.
+- The current `0f97aa5` diagnostic run has no runtime results at this checkpoint.
+  Its extra baseline/probe comparisons are diagnostic, not qualification.
+- A new failure must be recorded above with its source/input/run/result and
+  remaining acceptance even if it has no manifest ID. Mark a correction tested
+  only after a successful test of the relevant path; retain any broader coverage
+  gaps separately. Preserve earlier failures and distinguish production fixes,
+  test-stimulus fixes, setup failures and unexecuted checks.
+- The separate destination-computer request below still requires all 944
+  executions there. Original-computer results do not silently clear that queue.
+  Its pinned source and JSON manifest remain unchanged; deliberately pin and
+  record any chosen successor rather than following a moving branch.
+
+## Preserved destination inventory: all 944 executions
 
 Prepared **2026-10-20T20:20:28.271887+00:00**. This handoff now enumerates **every one of the 944
 executions**, not just eleven issue categories. **All 944 are requested again on
@@ -1112,7 +1304,7 @@ Sol-owned through completion, including `paced-burst-backlog-fixture-20261020`,
 Correlator temporal-support work, and the temporal-support regression takeover.
 Preserve all original failures, patches, deadlines and remaining repair limits.
 
-## Enumerated open failures and unverified error paths
+## Historical issue categories (snapshot; current dispositions are above)
 
 There is **one reproduced receiver functional defect**, **one observed compile
 blocker**, and the specific unverified paths below. A coverage gap or pending
