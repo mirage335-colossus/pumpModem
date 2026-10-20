@@ -25,6 +25,7 @@
 #include <limits>
 #include <numbers>
 #include <numeric>
+#include <new>
 
 namespace datapump::modem {
 namespace {
@@ -169,8 +170,9 @@ struct PatternReceiver::Impl {
     std::vector<Track> tracks;
     PatternBurst latest;
 
-    Impl(Config c,std::size_t bytes,PatternSearch options)
+    Impl(Config c,std::size_t bytes,PatternSearch options,detail::NativePeakConstruction* construction=nullptr)
         :config(c),search(std::move(options)),code(c,c.stream_epoch),budget(bytes) {
+        detail::NativePeakConstruction::ReceiverScope construction_peaks(construction,peaks,search.candidate_limit);
         validate(c);
         if(c.symbol_burst.enabled()) {
             burst_plan=std::make_unique<SymbolBurstPlan>(c);
@@ -209,6 +211,7 @@ struct PatternReceiver::Impl {
         const auto strategy=resolve_receiver_strategy(config,search,bytes);
         if(!strategy.supported)throw Error(strategy.reason);
         if(strategy.backend==ReceiverBackend::amplitude_energy) {
+            construction_peaks.require_native();
             if(search.amplitude_start_offset_seconds)search.start_offset_seconds=search.amplitude_start_offset_seconds;
             if(search.amplitude_start_uncertainty_seconds)search.start_uncertainty_seconds=*search.amplitude_start_uncertainty_seconds;
             if(search.amplitude_start_window)search.qualified_start_window=search.amplitude_start_window;
@@ -220,6 +223,7 @@ struct PatternReceiver::Impl {
             return;
         }
         if(scheduled_bursts(config) && !packed_scheduled_symbols(config)) {
+            construction_peaks.require_native();
             double correction=0;
             if(config.oscillator_search && search.admitted_clock_half_width_ppm &&
                *search.admitted_clock_half_width_ppm>oscillator_pattern_search(config).requested_clock_half_width_ppm)
@@ -330,13 +334,13 @@ struct PatternReceiver::Impl {
                 symbol_calendar->lower_bound(c.stream_epoch,0,c.sample_rate));
         }
         if(search.compact_clock_search && !search.couple_clock_to_carrier && (!calendar_symbols() || burst_plan)) {
+            construction_peaks.require_native();
             const auto wrapper=wrapper_bytes();
             if(wrapper>=bytes)throw Error("pattern workspace cannot retain correlator control state");
             fallback=std::make_unique<PatternCorrelator>(config,search,bytes-wrapper);
             return;
         }
         fft_workload=std::make_unique<PatternFftWork>();
-        timing_components=std::make_unique<TimingComponents>();
         const auto symbols=code.symbol_samples();
         long_symbol=symbols>=16ULL*c.sample_rate;
         active_stream_phase=c.stream_phase_samples;
@@ -489,6 +493,21 @@ struct PatternReceiver::Impl {
         if(drift_sections>1)required+=static_cast<long double>(hop)*
             (sizeof(detail::FftDriftAccumulator)+sizeof(detail::FftSearchScore));
         if(differential_window)required+=static_cast<long double>(hop)*sizeof(detail::DifferentialAccumulator);
+        // Describe only a known native allocation shortfall. This is not
+        // credit for absent backing or a change to any reservation/bit limit.
+        const auto native_minimum_without_rows=required-
+            2.L*search.frequency_offsets_hz.size()*transform*sizeof(Complex)+2*search.track_limit+2;
+        const auto native_construction_shortfall=[&,required_before_rows=required]()noexcept -> std::size_t {
+            const auto exact_integer_limit=std::ldexp(1.L,std::numeric_limits<long double>::digits);
+            const auto maximum=static_cast<long double>(std::numeric_limits<std::size_t>::max());
+            // Beyond the exactly representable integer domain, keep the old
+            // unknown-shortfall redirect rather than advertise rounded bytes.
+            if(!std::isfinite(required_before_rows) || required_before_rows>=exact_integer_limit ||
+               !std::isfinite(native_minimum_without_rows) || native_minimum_without_rows>=exact_integer_limit ||
+               static_cast<long double>(bytes)>=exact_integer_limit || native_minimum_without_rows>=maximum ||
+               native_minimum_without_rows<=static_cast<long double>(bytes))return 0;
+            return static_cast<std::size_t>(std::ceil(native_minimum_without_rows-static_cast<long double>(bytes)));
+        };
         // Large private rows change at every initial symbol/phase and cannot
         // use the small-symbol persistent transform cache below. Streaming
         // them frees the redundant per-frequency rows for native FFT plans.
@@ -530,9 +549,12 @@ struct PatternReceiver::Impl {
             throw Error("complete packed complex timing/clock coverage exceeds DSP workspace");
         if(required>bytes && search.start_offset_seconds) {
             if(permit_local_fallback && search.couple_clock_to_carrier) {
+                construction_peaks.require_native(native_construction_shortfall());
                 search.frequency_offsets_hz=local_frequency_offsets(c);
                 search.expand_clock_search=false;search.couple_clock_to_carrier=false;
                 search.uncoupled_frequency_count=0;
+                // Preserve the existing late Correlator wrapper and grant.
+                timing_components=std::make_unique<TimingComponents>();
                 const auto wrapper=wrapper_bytes();
                 if(wrapper>=bytes)throw Error("pattern workspace cannot retain correlator control state");
                 fallback=std::make_unique<PatternCorrelator>(config,search,bytes-wrapper);
@@ -543,6 +565,9 @@ struct PatternReceiver::Impl {
             }
             if(search.couple_clock_to_carrier)
                 throw Error("complete carrier/clock competition exceeds FFT workspace; increase the DSP limit");
+            construction_peaks.require_native(native_construction_shortfall());
+            // Preserve the existing late Correlator wrapper and grant.
+            timing_components=std::make_unique<TimingComponents>();
             const auto wrapper=wrapper_bytes();
             if(wrapper>=bytes)throw Error("pattern workspace cannot retain correlator control state");
             fallback=std::make_unique<PatternCorrelator>(config,search,bytes-wrapper);
@@ -958,6 +983,16 @@ struct PatternReceiver::Impl {
         reference.resize(transform);energy_prefix.resize(transform+1);
     }
     void release_idle_scratch() {
+        // These are the last initial-symbol transforms, not detector state.
+        // Unwindowed multi-symbol acquisition rebuilds its initial rows on
+        // the next batch; do not retain one row set per idle peer after its
+        // multi-symbol cache was evicted. Keep useful full caches and the
+        // original active-work reservation, including this reconstruction.
+        if(search.release_idle_fft_scratch && !acquisition_window &&
+           search.initial_stream_symbols>1 && cached_templates.empty()) {
+            for(auto& row:templates)for(auto& values:row)std::vector<Complex>().swap(values);
+            templates_valid=false;
+        }
         if(!search.prefer_streamed_templates || !search.release_idle_fft_scratch || !tracks.empty())return;
         for(auto* buffer:{&work,&spectrum,&product,&reference})std::vector<Complex>().swap(*buffer);
         std::vector<double>().swap(energy_prefix);
@@ -2601,6 +2636,15 @@ struct PatternReceiver::Impl {
         // Every eligible component produces at most one peak. Splitting
         // cannot evade the original logical-hop candidate capacity.
         if(!components.eligible(bin_samples,radius,search.candidate_limit,competing_frequencies()))return false;
+        // The range schedule persists across pushes, but unrestricted searches
+        // never use it. Keep the original full-capacity reservation and allocate
+        // the backing only after an eligible component schedule is known.
+        if(!timing_components) {
+            const auto used=working_bytes();
+            if(sizeof(TimingComponents)>budget || used>budget-sizeof(TimingComponents))return false;
+            try {timing_components=std::make_unique<TimingComponents>();}
+            catch(const std::bad_alloc&) {return false;}
+        }
         timing_component_count=components.count;
         std::copy_n(components.ranges.begin(),components.count,timing_components->begin());
         logical_hop_begin=next_start;logical_hop_end=next_start+hop;
@@ -3070,7 +3114,7 @@ struct PatternReceiver::Impl {
     }
     std::size_t working_bytes()const {
         if(fallback)return wrapper_bytes()+fallback->working_bytes();
-        std::size_t total=sizeof(Impl)+sizeof(PatternReceiver)+code.working_bytes()+sizeof(PatternFftWork)+sizeof(TimingComponents);
+        std::size_t total=sizeof(Impl)+sizeof(PatternReceiver)+code.working_bytes()+sizeof(PatternFftWork)+(timing_components?sizeof(TimingComponents):0);
         for(const auto* v:{&ring,&work,&spectrum,&product,&reference,&points})total+=v->capacity()*sizeof(Complex);
         total+=energy_prefix.capacity()*sizeof(double)+(history.capacity()+peaks.capacity())*sizeof(PatternEvidence)+
             drift_scratch.capacity()*sizeof(detail::FftDriftAccumulator)+drift_scores.capacity()*sizeof(detail::FftSearchScore)+
@@ -3164,7 +3208,7 @@ std::uint64_t pattern_absence_capture_samples(const Config& config) {
     }
     return eligible;
 }
-PatternReceiver::PatternReceiver(Config c,std::size_t bytes,PatternSearch search):impl_(std::make_unique<Impl>(c,bytes,std::move(search))){}
+PatternReceiver::PatternReceiver(Config c,std::size_t bytes,PatternSearch search):impl_(std::make_unique<Impl>(c,bytes,std::move(search),detail::NativePeakConstruction::claim())){}
 detail::NativePeakLease::NativePeakLease(detail::NativePeakWorkspace* workspace,PatternReceiver& receiver)
     :NativePeakLease(receiver.impl_->fallback?nullptr:workspace,receiver.impl_->peaks,
                      receiver.impl_->search.candidate_limit) {}

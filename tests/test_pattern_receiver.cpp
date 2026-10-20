@@ -2576,6 +2576,161 @@ void native_peak_streaming_bridge() {
     {modem::detail::NativePeakLease lease(&workspace,receiver);check(!lease.active(),"fallback borrowed native peak storage");receiver.process_pending();}
     check(receiver.working_bytes()==before && !workspace.leased(),"fallback/native lease changed retained accounting");
 }
+void native_peak_construction_transfer() {
+    using modem::detail::NativePeakConstruction;
+    using modem::detail::NativePeakConstructionFallback;
+    auto c=config(16,true);c.sample_rate=512;c.bandwidth_hz=128;c.carrier_hz=128;c.pulse_shaping=false;
+    modem::PatternSearch search;search.worker_threads=1;search.track_limit=4;search.bit_limit=128;
+    const auto quota=modem::PatternSearch{}.candidate_limit;
+    modem::PatternReceiver donor(c,2*1024*1024,search);
+    modem::detail::NativePeakWorkspace workspace;
+    check(modem::detail::NativePeakLease::adopt(workspace,donor),"construction donor did not supply native peaks");
+    const auto backing=workspace.capacity_bytes();
+    check(backing>=quota*sizeof(modem::PatternEvidence),"construction backing lost the full candidate quota");
+    constexpr std::size_t ordinary=400*1024;
+    rejects([&]{modem::PatternReceiver too_small(c,ordinary,search);},
+            "construction control unexpectedly fit without transferred storage");
+    const auto budget=ordinary+backing;
+    modem::PatternReceiver reference(c,budget,search);
+    std::unique_ptr<modem::PatternReceiver> shared;
+    const auto original_ledger=backing+1024*1024;auto ledger=original_ledger;
+    {
+        NativePeakConstruction construction(&workspace,quota,&ledger);
+        check(construction.active() && workspace.leased() && !workspace.capacity_bytes() &&
+              ledger==original_ledger-backing,"constructor did not transfer real backing before its grant");
+        construction.set_grant_increase(backing);
+        shared=std::make_unique<modem::PatternReceiver>(c,budget,search);
+        check(construction.claimed() && !construction.active() && ledger==original_ledger &&
+              !workspace.leased() && workspace.capacity_bytes()==backing,
+              "actual native constructor did not restore its backing and bank charge");
+    }
+    check(!shared->clock_windowed(),"constructor loan selected fallback instead of native acquisition");
+    compare_native_peak_receiver(reference,*shared,workspace);
+    check(modem::detail::NativePeakLease::adopt(workspace,*shared),"post-constructor adoption is not idempotent");
+    const Bytes bits{0,0,1};const auto pcm=waveform(c,bits,17,7*c.sample_rate,.83,.001);
+    Bytes received;unsigned ends=0;
+    const auto poll=[&] {
+        compare_native_peak_receiver(reference,*shared,workspace);
+        const auto a=reference.take_bursts(),b=shared->take_bursts();
+        check(a.size()==b.size() && std::equal(a.begin(),a.end(),b.begin(),same_burst),
+              "constructor loan changed next-poll bits or physical END");
+        for(const auto& burst:a){received.insert(received.end(),burst.bits.begin(),burst.bits.end());ends+=burst.complete;}
+    };
+    for(std::size_t at=0;at<pcm.size();) {
+        const auto count=std::min<std::size_t>(137,pcm.size()-at);
+        reference.push(std::span(pcm).subspan(at,count));
+        {modem::detail::NativePeakLease lease(&workspace,*shared);check(lease.active(),"constructed owner lost its operation loan");
+            shared->set_workspace_bytes(budget);shared->push(std::span(pcm).subspan(at,count));}
+        at+=count;poll();
+    }
+    std::stop_source stopped;stopped.request_stop();
+    rejects([&]{reference.push({},stopped.get_token());},"construction cancellation control did not reject");
+    rejects([&]{modem::detail::NativePeakLease lease(&workspace,*shared);shared->push({},stopped.get_token());},
+            "constructed cancellation did not restore the operation loan");
+    poll();reference.finish();{modem::detail::NativePeakLease lease(&workspace,*shared);shared->finish();}poll();
+    check(received==bits && ends==1,"constructor fixture lost exact001 or scored physical completion");
+
+    std::unique_ptr<modem::StreamingReceiver> streaming;
+    {NativePeakConstruction construction(&workspace,quota,&ledger);construction.set_grant_increase(backing);
+        streaming=std::make_unique<modem::StreamingReceiver>(c,budget,search);
+        check(construction.claimed() && !construction.active() && ledger==original_ledger,
+              "StreamingReceiver prelude did not hand off the exact constructor context");}
+    modem::StreamingReceiver streaming_control(c,budget,search);streaming_control.push(pcm);
+    {modem::detail::NativePeakLease lease(&workspace,*streaming);check(lease.active(),"constructed StreamingReceiver lost native backing");
+        streaming->set_workspace_bytes(budget);streaming->push(pcm);}
+    const auto sa=streaming_control.take_pattern_bursts(),sb=streaming->take_pattern_bursts();
+    check(sa.size()==sb.size() && std::equal(sa.begin(),sa.end(),sb.begin(),same_burst) &&
+          streaming_control.working_bytes()==streaming->working_bytes()+workspace.capacity_bytes(),
+          "actual StreamingReceiver construction changed events or physical storage accounting");
+
+    auto invalid=search;invalid.false_alarm_probability=0;
+    rejects([&]{NativePeakConstruction construction(&workspace,quota,&ledger);
+        modem::PatternReceiver bad(c,budget,invalid);},"actual constructor body did not reject invalid search");
+    check(ledger==original_ledger && !workspace.leased() && workspace.capacity_bytes()==backing,
+          "constructor Error lost transferred backing or bank charge");
+    auto invalid_config=c;invalid_config.bandwidth_hz=0;
+    rejects([&]{NativePeakConstruction construction(&workspace,quota,&ledger);
+        modem::PatternReceiver bad(invalid_config,budget,search);},"member construction did not reject invalid geometry");
+    check(ledger==original_ledger && !workspace.leased() && workspace.capacity_bytes()==backing,
+          "pre-body constructor Error lost transferred backing or bank charge");
+    bool allocation_error=false;
+    try {
+        NativePeakConstruction construction(&workspace,quota,&ledger);
+        std::vector<modem::PatternEvidence> target;
+        NativePeakConstruction::ReceiverScope guard(NativePeakConstruction::claim(),target,quota);
+        throw std::bad_alloc{};
+    }catch(const std::bad_alloc&){allocation_error=true;}
+    check(allocation_error && ledger==original_ledger && !workspace.leased() && workspace.capacity_bytes()==backing,
+          "construction guard could not restore real storage during allocation-error unwinding");
+    // The marker forwards only metadata: require_native restores the real
+    // array and its bank charge before the caller catches the redirect.
+    for(const auto expected:{std::size_t{0},std::size_t{123}}) {
+        NativePeakConstruction construction(&workspace,quota,&ledger);
+        std::vector<modem::PatternEvidence> target;
+        NativePeakConstruction::ReceiverScope guard(NativePeakConstruction::claim(),target,quota);
+        check(construction.active() && workspace.leased() && !workspace.capacity_bytes() &&
+              target.capacity()*sizeof(modem::PatternEvidence)==backing && ledger==original_ledger-backing,
+              "redirect control did not borrow the real constructor backing");
+        bool forwarded=false;
+        try {
+            if(expected)guard.require_native(expected);else guard.require_native();
+        }catch(const NativePeakConstructionFallback& redirect) {
+            check(redirect.additional_required_bytes==expected,"constructor redirect changed its exact shortfall metadata");
+            check(!construction.active() && !workspace.leased() && workspace.capacity_bytes()==backing &&
+                  target.capacity()==0 && ledger==original_ledger,
+                  "constructor redirect did not restore backing and ledger before catch");
+            forwarded=true;
+        }
+        check(forwarded,"constructor shortfall control did not redirect");
+    }
+    bool redirected=false;auto larger=search;larger.candidate_limit=quota+1;
+    try {NativePeakConstruction construction(&workspace,quota,&ledger);modem::PatternReceiver bad(c,budget,larger);}
+    catch(const NativePeakConstructionFallback& redirect) {
+        check(redirect.additional_required_bytes==0,"candidate quota mismatch invented a native budget shortfall");
+        redirected=true;
+    }
+    check(redirected && ledger==original_ledger && !workspace.leased() && workspace.capacity_bytes()==backing,
+          "candidate quota mismatch did not redirect with an allocation-free restore");
+    redirected=false;auto smaller=search;smaller.candidate_limit=quota/2;
+    try {NativePeakConstruction construction(&workspace,quota,&ledger);modem::PatternReceiver bad(c,budget,smaller);}
+    catch(const NativePeakConstructionFallback& redirect) {
+        check(redirect.additional_required_bytes==0,"candidate quota mismatch invented a native budget shortfall");
+        redirected=true;
+    }
+    check(redirected && ledger==original_ledger && !workspace.leased() && workspace.capacity_bytes()==backing,
+          "smaller candidate quota borrowed an oversized constructor array");
+    modem::detail::NativePeakWorkspace oversized_pool;std::vector<modem::PatternEvidence> oversized;
+    oversized.reserve(quota+1);const auto oversized_bytes=oversized.capacity()*sizeof(modem::PatternEvidence);
+    check(oversized_pool.adopt(oversized,quota),"oversized constructor control did not prepare backing");
+    const auto oversized_original=oversized_bytes+1024*1024;auto oversized_ledger=oversized_original;redirected=false;
+    try {NativePeakConstruction construction(&oversized_pool,quota,&oversized_ledger);modem::PatternReceiver bad(c,budget,search);}
+    catch(const NativePeakConstructionFallback& redirect) {
+        check(redirect.additional_required_bytes==0,"candidate quota mismatch invented a native budget shortfall");
+        redirected=true;
+    }
+    check(redirected && oversized_ledger==oversized_original && !oversized_pool.leased() &&
+          oversized_pool.capacity_bytes()==oversized_bytes,"oversized pool did not restore before ordinary construction");
+    auto slow=config(64,true);slow.integration_seconds=3600;
+    modem::PatternSearch fallback;fallback.start_offset_seconds=0;fallback.frequency_offsets_hz={0};
+    fallback.clock_errors_ppm={0};fallback.track_limit=2;fallback.candidate_limit=7;fallback.bit_limit=32;
+    auto small_search=search;small_search.candidate_limit=fallback.candidate_limit;
+    modem::PatternReceiver small_donor(c,2*1024*1024,small_search);modem::detail::NativePeakWorkspace small_pool;
+    check(modem::detail::NativePeakLease::adopt(small_pool,small_donor),"fallback control did not prepare exact candidate backing");
+    const auto small_backing=small_pool.capacity_bytes();const auto small_original=small_backing+1024*1024;auto small_ledger=small_original;
+    constexpr std::size_t fallback_budget=256*1024;redirected=false;
+    try {NativePeakConstruction construction(&small_pool,fallback.candidate_limit,&small_ledger);construction.set_grant_increase(small_backing);
+        modem::PatternReceiver borrowed(slow,fallback_budget+small_backing,fallback);}
+    catch(const NativePeakConstructionFallback&){redirected=true;}
+    check(redirected && small_ledger==small_original && !small_pool.leased() && small_pool.capacity_bytes()==small_backing,
+          "Correlator fallback spent native credit or failed to restore it before redirection");
+    // Retry OUTSIDE the loan scope, preserving original options and grant.
+    modem::PatternReceiver ordinary_fallback(slow,fallback_budget,fallback),fallback_control(slow,fallback_budget,fallback);
+    check(ordinary_fallback.clock_windowed() && ordinary_fallback.working_bytes()==fallback_control.working_bytes(),
+          "redirected ordinary fallback did not preserve its original resource path");
+    modem::PatternReceiver unaffected(c,budget,search);
+    check(unaffected.working_bytes()==modem::PatternReceiver(c,budget,search).working_bytes(),
+          "construction context leaked into a later standalone receiver");
+}
 bool native_points_equal(std::span<const std::complex<double>> a,std::span<const std::complex<double>> b) {
     if(a.size()!=b.size())return false;
     for(std::size_t i=0;i<a.size();++i)if(std::bit_cast<std::uint64_t>(a[i].real())!=std::bit_cast<std::uint64_t>(b[i].real()) ||
@@ -2833,6 +2988,7 @@ int main(int argc,char** argv) {
     run("native peak receiver equivalence",native_peak_receiver_equivalence);
     run("native peak quota equivalence",native_peak_quota_equivalence);
     run("native peak StreamingReceiver bridge",native_peak_streaming_bridge);
+    run("native peak construction transfer",native_peak_construction_transfer);
     run("native point receiver equivalence",native_point_receiver_equivalence);
     run("native point partial error and cursor",native_point_partial_error_and_cursor);
     run("native point streaming reset and fallback",native_point_streaming_reset_and_fallback);

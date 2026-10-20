@@ -88,6 +88,27 @@ void pattern_score_observation_lifetime() {
           history.entries().front().candidate.stream_symbol==5,
           "plot observation bookkeeping exceeded the retained candidate bound");
 
+    // Presentation storage projects the duplicate key, while callbacks still
+    // receive the complete original evidence and retain its first metadata.
+    History projected;
+    auto event=fresh;event.completed_event=37;event.outer_presence_active=true;event.outer_presence_score=91;
+    std::size_t observed=0;
+    const auto observe=[&](const modem::PatternEvidence& evidence) {
+        check(evidence.outer_presence_active && evidence.outer_presence_score==91 &&
+              evidence.admission_threshold==event.admission_threshold,"plot callback lost original evidence fields");
+        ++observed;return live::PatternScoreObservation{allocate(),completed,evidence.admission_threshold};
+    };
+    projected.update_observations(std::span(&event,1),observe);
+    const auto first_event=projected.entries().front().observation;
+    event.score+=10;event.first_sample+=3;
+    projected.update_observations(std::span(&event,1),observe);
+    check(observed==1 && projected.entries().front().observation==first_event &&
+          projected.entries().front().candidate.score==event.score,"plot completion identity lost first metadata or fresh score");
+    event.completed_event=0;
+    projected.update_observations(std::span(&event,1),observe);
+    check(observed==2 && projected.entries().front().observation.id!=first_event.id,
+          "plot zero-event key reused deferred completion identity");
+
     struct Frame {std::vector<live::PatternScoreObservation> pattern_score_observations;};
     std::vector<Frame> frames(4);
     frames[1].pattern_score_observations={{101,origin,41}};

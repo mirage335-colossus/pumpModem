@@ -11,14 +11,32 @@ namespace datapump::live::detail {
 // Presentation bookkeeping only. Candidate coordinates are complete pattern
 // windows; a long unfinished symbol creates no observation or expiry event.
 class PatternScoreHistory {
-    static auto key(const modem::PatternEvidence& candidate) {
+    // Keep only the fields used by presentation and duplicate detection. The
+    // original evidence remains available to observe callbacks at update time.
+    struct Candidate {
+        std::uint64_t first_sample{}, end_sample{}, stream_symbol{}, stream_phase_samples{};
+        double frequency_hz{}, score{}, alternative_score{};
+        unsigned bit{};
+        std::uint32_t frequency_hypothesis{};
+        std::uint64_t completed_event{};
+
+        Candidate() = default;
+        explicit Candidate(const modem::PatternEvidence& source)
+            : first_sample(source.first_sample), end_sample(source.end_sample),
+              stream_symbol(source.stream_symbol), stream_phase_samples(source.stream_phase_samples),
+              frequency_hz(source.frequency_hz), score(source.score),
+              alternative_score(source.alternative_score), bit(source.bit),
+              frequency_hypothesis(source.frequency_hypothesis), completed_event(source.completed_event) {}
+    };
+    template<class CandidateLike>
+    static auto key(const CandidateLike& candidate) {
         return std::tie(candidate.first_sample, candidate.end_sample, candidate.stream_symbol,
             candidate.stream_phase_samples, candidate.frequency_hz, candidate.bit,
             candidate.score, candidate.alternative_score, candidate.frequency_hypothesis);
     }
 public:
     struct Entry {
-        modem::PatternEvidence candidate;
+        Candidate candidate;
         PatternScoreObservation observation;
     };
     static constexpr std::size_t reserved_entries_bytes=Snapshot::pattern_score_limit*sizeof(Entry);
@@ -54,7 +72,7 @@ public:
             const auto observation = previous != entries_.end() ? previous->observation :
                 duplicate != next.begin() + count ? duplicate->observation :
                 observe(candidate);
-            next[count++] = {candidate, observation};
+            next[count++] = {Candidate(candidate), observation};
         }
         entries_.reserve(count);
         entries_.assign(next.begin(), next.begin() + count);
