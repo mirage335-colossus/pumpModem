@@ -157,6 +157,11 @@ jobs:
                   raise SystemExit('SDK Python selected a path outside its installation: ' + location)
           print('Verified relocated SDK Python and Rev resource-builder imports:', python_paths[0])
           PY
+      - name: Record and verify checkout source identity
+        run: |
+          git rev-parse HEAD > "$SDK_LOG_DIR/source-commit.txt"
+          git status --porcelain --untracked-files=normal > "$SDK_LOG_DIR/source-status.txt"
+          git diff --exit-code HEAD -- > "$SDK_LOG_DIR/source-diff.txt"
       - name: Build and verify portable application archives
         if: inputs.scope == 'packages'
         env:

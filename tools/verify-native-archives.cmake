@@ -58,6 +58,7 @@ foreach(archive IN LISTS archives)
   endif()
   list(GET manifests 0 manifest)
   get_filename_component(package_root "${manifest}" DIRECTORY)
+  file(SHA256 "${archive}" digest)
   execute_process(COMMAND "${CMAKE_COMMAND}" "-DPACKAGE_ROOT=${package_root}"
     "-DBUILD_DIR=${BUILD_DIR}" "-DGUI_SMOKE=${GUI_SMOKE}" "-DREQUIRE_MANUALS=${REQUIRE_MANUALS}"
     "-DREQUIRE_FRONTENDS=${REQUIRE_FRONTENDS}"

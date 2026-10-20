@@ -116,9 +116,15 @@ public:
             }
         }
         const auto replaces=[&](const Entry& e) {
-            return obsolete(e.event,candidate.event) ||
-                (e.event.id==candidate.event.id && e.event.revision==candidate.event.revision &&
-                 ((e.terminal() && candidate.terminal()) || (!e.terminal() && !candidate.terminal() && e.frame==frame)));
+            if(obsolete(e.event,candidate.event)) {
+                // Earlier pending frames record accepted progress before this
+                // interpretation changed. Withdraw obsolete future results,
+                // not that history. A pending replacement may coalesce its own
+                // frame; a terminal still needs that frame's pending prefix.
+                return e.terminal() || e.frame>frame || (!candidate.terminal() && e.frame==frame);
+            }
+            return e.event.id==candidate.event.id && e.event.revision==candidate.event.revision &&
+                ((e.terminal() && candidate.terminal()) || (!e.terminal() && !candidate.terminal() && e.frame==frame));
         };
         std::size_t bytes=sizeof(*this)+4*sizeof(void*),content=0,pending=0,terminal=0,jobs=0,reserved=0;
         const auto count=[&](const Entry& e,const transfer::Received* result) {
@@ -152,10 +158,12 @@ public:
         for(auto& e:entries_)if(e && obsolete(e->event,replacement))e.reset();
     }
     void clear_recoveries() {
-        // First withdraw the recovering terminal's own pending revisions. A
-        // later independent revision of that ID must remain present.
+        // First withdraw the recovering terminal's pending revisions/aliases.
+        // A later independent revision of that ID must remain present.
         for(auto& e:entries_)if(e && !e->terminal() && std::any_of(entries_.begin(),entries_.end(),[&](const auto& done) {
-            return done && done->recovering() && done->event.id==e->event.id && done->event.revision>=e->event.revision;
+            return done && done->recovering() &&
+                (alias(done->event,e->event.id) ||
+                 (done->event.id==e->event.id && done->event.revision>=e->event.revision));
         }))e.reset();
         for(auto& e:entries_)if(e && e->recovering())e.reset();
     }
@@ -169,7 +177,9 @@ public:
     void clear() {for(auto& e:entries_)e.reset();presented_={};}
     template<class Publish> void drain(std::size_t due,bool finished,Publish publish) {
         if(finished)for(auto& e:entries_)if(e && !e->terminal() && std::any_of(entries_.begin(),entries_.end(),[&](const auto& done) {
-            return done && done->terminal() && done->event.id==e->event.id && done->event.revision>=e->event.revision;
+            return done && done->terminal() &&
+                (alias(done->event,e->event.id) ||
+                 (done->event.id==e->event.id && done->event.revision>=e->event.revision));
         }))e.reset();
         for(;;) {
             auto next=entries_.end();

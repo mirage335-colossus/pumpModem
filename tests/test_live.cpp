@@ -109,7 +109,9 @@ void replay_staging_retention() {
     auto job=std::make_shared<transfer::RecoveryJob>(std::move(capture),recovery_options);
     auto recovering=result(91,"");recovering.recovery=job;recovering.recovery_progress=job->progress();
     auto recovering_event=event(91,"001",true);recovering_event.recovery_progress=recovering.recovery_progress;
-    stage(recovery,event(91,"0"),1);stage(recovery,std::move(recovering_event),3,std::move(recovering));
+    recovering_event.superseded_ids={94};
+    stage(recovery,event(91,"0"),1);stage(recovery,event(94,"1"),1);
+    stage(recovery,std::move(recovering_event),3,std::move(recovering));
     stage(recovery,event(92,"ordinary",true),3,result(92,"B"));
     const auto* recovering_terminal=find(recovery,91,true);
     const auto* ordinary_terminal=find(recovery,92,true);
@@ -125,13 +127,13 @@ void replay_staging_retention() {
             "aggregate staged recovery count exceeded the coordinator allowance");
     rejects([&]{recovery.stage(event(93,"001",true),3,std::move(unavailable),4096,8,recovery_before);},
             "aggregate staged recovery bytes exceeded the coordinator allowance");
-    check(recovery.recovery_reserved_bytes()==recovery_before && count(recovery)==3,
+    check(recovery.recovery_reserved_bytes()==recovery_before && count(recovery)==4 && find(recovery,94),
           "recovery capacity refusal modified an admitted ordinary/recovery pair");
     recovery.clear_recoveries();
     check(count(recovery)==1 && find(recovery,92) && recovery.content_bytes()==1 &&
           recovery.recovery_count()==0 && recovery.recovery_reserved_bytes()==0 &&
           recovery.recovery_working_bytes()==0 && job->progress().attempts==0,
-          "Clear recoveries retracted ordinary content or retained a recovering prefix/result");
+          "Clear recoveries retracted ordinary content or retained a recovering prefix/alias/result");
     auto old_recovery=result(91,"");old_recovery.recovery=job;old_recovery.recovery_progress=job->progress();
     auto old_event=event(91,"old",true);old_event.recovery_progress=job->progress();
     stage(recovery,std::move(old_event),3,std::move(old_recovery));
@@ -151,9 +153,106 @@ void replay_staging_retention() {
           "new revision failed to withdraw its own obsolete content or retracted an independent ID");
     auto merged=event(103,"merged",false,3);merged.superseded_ids={101};
     stage(revisions,std::move(merged),2);
-    check(!find(revisions,101) && find(revisions,102) && find(revisions,103),"explicit supersession lost an unrelated terminal");
+    check(find(revisions,101) && !find(revisions,101)->terminal() && find(revisions,101)->frame==1 &&
+          find(revisions,102,true) && find(revisions,103),
+          "explicit supersession lost earlier pending history or an unrelated terminal");
     check(!stage(revisions,event(103,"stale",true,2),3,result(103,"stale")) && find(revisions,103)->event.revision==3,
           "an older revision retracted a later staged interpretation");
+    published.clear();revisions.drain(2,false,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==1 && published[0].event.id==101 && !published[0].terminal(),
+          "an alias merge hid its earlier pending replay frame");
+    revisions.drain(3,false,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==2 && published[1].event.id==103 && published[1].event.revision==3 &&
+          published[1].event.superseded_ids==std::vector<std::uint64_t>{101} && !find(revisions,101) && find(revisions,102,true),
+          "alias replay failed to change to its canonical identity at the merge frame");
+    revisions.drain(4,true,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==3 && published.back().event.id==102 && published.back().received,
+          "an obsolete alias was republished after its canonical merge or an independent terminal was lost");
+
+    // A later interpretation can first publish a terminal while the source
+    // still owns replay staging. Its earlier accepted prefix must survive the
+    // revision change and reach a replay poll before terminal publication.
+    Staging chronology(256*1024,4);
+    stage(chronology,event(201,"0"),1);
+    stage(chronology,event(201,"old",true),3,result(201,"old"));
+    stage(chronology,event(202,"other",true),3,result(202,"B"));
+    stage(chronology,event(201,"new",true,2),3,result(201,"new"));
+    const auto* revised_terminal=find(chronology,201,true);
+    check(count(chronology)==3 && find(chronology,201) && !find(chronology,201)->terminal() &&
+          revised_terminal && revised_terminal->event.revision==2 && revised_terminal->received &&
+          revised_terminal->received->content.message.data==Bytes({'n','e','w'}),
+          "a higher-revision terminal erased its earlier pending frame or retained obsolete content");
+    published.clear();chronology.drain(2,false,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==1 && published[0].event.id==201 && published[0].event.revision==1 &&
+          !published[0].terminal() && !published[0].received,
+          "a higher-revision terminal bypassed its own earlier pending replay poll");
+    chronology.drain(4,true,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==3 && published[1].event.id==202 && published[1].received &&
+          published[2].event.id==201 && published[2].event.revision==2 && published[2].received &&
+          published[2].received->content.message.data==Bytes({'n','e','w'}),
+          "revision replay lost an independent terminal/result pair or published the obsolete result");
+
+    Staging terminal_frame(256*1024,2);
+    stage(terminal_frame,event(211,"0"),1);
+    stage(terminal_frame,event(211,"done",true,2),1,result(211,"A"));
+    published.clear();terminal_frame.drain(2,false,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==1 && published[0].event.id==211 && !published[0].terminal(),
+          "a higher-revision terminal consumed its own pending presentation frame");
+    terminal_frame.drain(2,true,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==2 && published[1].event.id==211 && published[1].event.revision==2 && published[1].received,
+          "same-frame pending preservation lost the later terminal/result pair");
+
+    Staging coalesced(256*1024,4);
+    stage(coalesced,event(301,"0"),1);
+    stage(coalesced,event(301,"00"),2);
+    stage(coalesced,event(302,"1",false,2),2);
+    auto canonical=event(301,"001",false,3);canonical.superseded_ids={302};
+    stage(coalesced,std::move(canonical),2);
+    check(count(coalesced)==2 && !find(coalesced,302),
+          "same-frame revision/alias replacement failed to coalesce pending observations");
+    published.clear();coalesced.drain(2,false,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==1 && published[0].event.id==301 && published[0].event.text=="0",
+          "same-frame coalescing erased an earlier frame");
+    coalesced.drain(3,false,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==2 && published[1].event.id==301 && published[1].event.revision==3 &&
+          published[1].event.text=="001" && published[1].event.superseded_ids==std::vector<std::uint64_t>{302},
+          "same-frame replay exposed an obsolete revision or alias after the canonical observation");
+
+    const auto stage_alias_history=[&](Staging& s) {
+        stage(s,event(401,"0"),1);stage(s,event(402,"1",false,2),1);
+        stage(s,event(402,"11",false,2),3); // obsolete future alias observation
+        stage(s,event(401,"old",true),3,result(401,"old"));
+        stage(s,event(402,"old alias",true,2),3,result(402,"alias"));
+        stage(s,event(403,"independent",true),3,result(403,"B"));
+        auto merge=event(401,"01",false,3);merge.superseded_ids={402};
+        stage(s,std::move(merge),2);
+        auto terminal=event(401,"new",true,3);terminal.superseded_ids={402};
+        stage(s,std::move(terminal),3,result(401,"new"));
+    };
+    Staging alias_replay(256*1024,4);stage_alias_history(alias_replay);
+    check(count(alias_replay)==5 && alias_replay.content_bytes()==4 && !find(alias_replay,402,true),
+          "alias replacement lost historical pending frames or retained obsolete future terminal content");
+    published.clear();alias_replay.drain(2,false,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==2 && published[0].event.id==401 && published[1].event.id==402 &&
+          !published[0].terminal() && !published[1].terminal(),
+          "canonical completion bypassed an earlier pending alias frame");
+    alias_replay.drain(3,false,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==3 && published[2].event.id==401 && published[2].event.revision==3 &&
+          published[2].event.superseded_ids==std::vector<std::uint64_t>{402},
+          "alias merge was not published at its own replay frame");
+    alias_replay.drain(4,false,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==3,"an obsolete future alias prefix was republished after its merge");
+    alias_replay.drain(4,true,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==5 && published[3].event.id==403 && published[3].received &&
+          published[4].event.id==401 && published[4].received &&
+          published[4].received->content.message.data==Bytes({'n','e','w'}),
+          "alias completion lost its canonical or independent terminal/result pair");
+    Staging alias_jump(256*1024,4);stage_alias_history(alias_jump);
+    published.clear();alias_jump.drain(4,true,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==2 && published[0].event.id==403 && published[0].received &&
+          published[1].event.id==401 && published[1].event.revision==3 && published[1].received &&
+          published[1].event.superseded_ids==std::vector<std::uint64_t>{402} && count(alias_jump)==0,
+          "deadline jump exposed historical aliases/prefixes or lost a canonical terminal/result pair");
 
     Staging counts(1024*1024,2);
     stage(counts,event(1,"0"),1);stage(counts,event(2,"1"),1);
@@ -167,18 +266,23 @@ void replay_staging_retention() {
           "terminal-count refusal silently retired an unrelated completion");
 
     Staging probe(256*1024,4);
+    stage(probe,event(1,"0"),1);
     stage(probe,event(1,"old",true),3,result(1,"old"));
     stage(probe,event(2,"other",true),3,result(2,"B"));
     Staging bytes(probe.metadata_bytes(),4);
+    stage(bytes,event(1,"0"),1);
     stage(bytes,event(1,"old",true),3,result(1,"old"));
     stage(bytes,event(2,"other",true),3,result(2,"B"));
     const auto before_bytes=bytes.metadata_bytes();
     auto huge=result(1,"new");huge.diagnostics.waveform.reserve(16384); // capacity, even with only two samples
     auto replacement=event(1,"new",true,2);replacement.superseded_ids={2};
     rejects([&]{stage(bytes,std::move(replacement),3,std::move(huge));},"retained diagnostic capacities escaped the DSP byte cap");
-    check(bytes.metadata_bytes()==before_bytes && count(bytes)==2 && find(bytes,2) && find(bytes,1)->event.revision==1 &&
-          find(bytes,1)->received->content.message.data==Bytes({'o','l','d'}),
-          "byte-cap refusal withdrew the previous revision/result before admission");
+    const auto* prior_terminal=find(bytes,1,true);
+    check(bytes.metadata_bytes()==before_bytes && count(bytes)==3 && find(bytes,2,true) &&
+          find(bytes,1) && !find(bytes,1)->terminal() && find(bytes,1)->frame==1 &&
+          prior_terminal && prior_terminal->event.revision==1 && prior_terminal->received &&
+          prior_terminal->received->content.message.data==Bytes({'o','l','d'}),
+          "byte-cap refusal withdrew earlier pending history or the previous revision/result before admission");
     auto aliases=event(2,"x",true);aliases.superseded_ids.reserve(4096);
     rejects([&]{stage(bytes,std::move(aliases),3);},"alias container capacity escaped staging byte accounting");
     Staging payload(256*1024,4);

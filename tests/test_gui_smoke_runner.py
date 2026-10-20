@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """Only an explicit, typed advancing-work budget outcome can be incomplete."""
 import hashlib
+import io
 import importlib.util
 import json
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import unittest
+import zipfile
 
 
 TOOL = Path(__file__).resolve().parents[1] / 'tools/run-gui-smoke.py'
@@ -316,6 +320,48 @@ class FixtureCaptureTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('direct smoke fixture files', result.stderr)
 
+
+
+@unittest.skipUnless(shutil.which('cmake'), 'CMake is required for archive verifier integration')
+class NativeArchiveSmokeContextTests(unittest.TestCase):
+    def test_each_archive_passes_its_own_digest_to_the_package_verifier(self):
+        with tempfile.TemporaryDirectory(prefix='archive context with spaces ') as temporary:
+            root = Path(temporary)
+            tools = root / 'copied verifier'
+            tools.mkdir()
+            source_tools = TOOL.parent
+            for name in ('verify-native-archives.cmake', 'gui-smoke-timeout.cmake'):
+                shutil.copyfile(source_tools / name, tools / name)
+            # Exercise the real archive loop; isolate its two child verifiers
+            # so this check needs no compiled application or GUI display.
+            (tools / 'verify-native-package.cmake').write_text(
+                'file(APPEND "$ENV{DATAPUMP_TEST_ARCHIVE_CONTEXT}" '
+                '"${GUI_SMOKE_ARCHIVE_NAME} ${GUI_SMOKE_ARCHIVE_SHA256}\\n")\n')
+            (tools / 'verify-linux-abi.cmake').write_text('# No binaries in this fixture.\n')
+            archives = root / 'archives'
+            archives.mkdir()
+            data = b'synthetic package inventory\n'
+            member = 'DataPump-fixture/manifest.sha256'
+            tarball = archives / 'DataPump-fixture-native-rev.tar.gz'
+            with tarfile.open(tarball, 'w:gz') as archive:
+                info = tarfile.TarInfo(member)
+                info.size = len(data)
+                archive.addfile(info, io.BytesIO(data))
+            zipfile_path = archives / 'DataPump-fixture-native-rev.zip'
+            with zipfile.ZipFile(zipfile_path, 'w') as archive:
+                archive.writestr(member, data)
+            record = root / 'archive contexts.txt'
+            result = subprocess.run(
+                [shutil.which('cmake'), f'-DARCHIVE_DIR={archives}', '-DGUI_SMOKE=ON',
+                 '-P', str(tools / 'verify-native-archives.cmake')],
+                env=dict(os.environ, DATAPUMP_TEST_ARCHIVE_CONTEXT=str(record)),
+                capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            contexts = [line.split() for line in record.read_text().splitlines()]
+            self.assertEqual(len(contexts), 2)
+            self.assertEqual(dict(contexts), {
+                archive.name: hashlib.sha256(archive.read_bytes()).hexdigest()
+                for archive in (tarball, zipfile_path)})
 
 
 if __name__ == '__main__':

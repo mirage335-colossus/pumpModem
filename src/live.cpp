@@ -773,7 +773,10 @@ struct Session::Impl {
         if(!staged_receives)return;
         std::erase_if(current.signals,[this](const auto& event) {
             return std::any_of(staged_receives->entries().begin(),staged_receives->entries().end(),[&](const auto& staged) {
-                return staged && staged->recovering() && staged->event.id==event.id && staged->event.revision>=event.revision;
+                return staged && staged->recovering() &&
+                    ((staged->event.id==event.id && staged->event.revision>=event.revision) ||
+                     std::find(staged->event.superseded_ids.begin(),staged->event.superseded_ids.end(),event.id)!=
+                         staged->event.superseded_ids.end());
             });
         });
         staged_receives->clear_recoveries();
@@ -850,7 +853,9 @@ struct Session::Impl {
                 // Suppress obsolete prefixes for every completed reception,
                 // while retaining any independent later revision.
                 std::erase_if(current.signals,[&](const auto& event) {
-                    return event.id==entry.event.id && event.revision<=entry.event.revision;
+                    return (event.id==entry.event.id && event.revision<=entry.event.revision) ||
+                        std::find(entry.event.superseded_ids.begin(),entry.event.superseded_ids.end(),event.id)!=
+                            entry.event.superseded_ids.end();
                 });
                 if(entry.received && entry.received->recovery) {
                     queue_recovery(std::move(*entry.received),entry.event);
@@ -2161,7 +2166,7 @@ struct Session::Impl {
         for(std::size_t i=0;i<8;++i)id[8+i]^=static_cast<std::uint8_t>(signal_id>>(8*i));
         return id;
     }
-    void discard_obsolete(const SignalUpdate& replacement) {
+    void discard_obsolete(const SignalUpdate& replacement,bool discard_staged=true) {
         invalidate_recoveries(&replacement);
         const auto merged=[&](std::uint64_t id) {
             return std::find(replacement.superseded_ids.begin(),replacement.superseded_ids.end(),id)!=
@@ -2181,7 +2186,7 @@ struct Session::Impl {
             if(!old_content(result))return false;
             received_bytes-=result.content.message.data.capacity();return true;
         });
-        if(staged_receives)staged_receives->discard_obsolete(replacement);
+        if(discard_staged && staged_receives)staged_receives->discard_obsolete(replacement);
     }
     bool add_signal(SignalUpdate event, Prepared* wave = nullptr,
                     std::optional<transfer::Received> received = {},bool replacement = false) {
@@ -2205,7 +2210,9 @@ struct Session::Impl {
         if(!accepted)return false;
         // No cache eviction or obsolete-result withdrawal precedes successful
         // transactional staging, so a visible capacity error preserves it.
-        if(replacement)discard_obsolete(*accepted);
+        // Staging already withdrew obsolete future entries transactionally,
+        // while preserving its earlier pending presentation frames.
+        if(replacement)discard_obsolete(*accepted,false);
         make_receive_room(0,settings.content_limit,false);
         return true;
     }
