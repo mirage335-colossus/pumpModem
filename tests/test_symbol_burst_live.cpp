@@ -11,6 +11,8 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <ctime>
+#include <cstddef>
 #include <filesystem>
 #include <iostream>
 #include <limits>
@@ -139,6 +141,14 @@ struct CaptureScript {
     std::atomic<double> now{0};
     std::atomic<double> capture_clock_offset{0};
     std::thread::id capture_thread; // Published before delivered; gate arms only after a drained capture.
+    bool paced=false;
+    std::atomic<bool> pacing_valid{true},pacing_aborted{false};
+    std::atomic<unsigned> pacing_abort_reason{0};
+    std::string pacing_callback_error; // Provider-only writer; read after Session joins.
+    std::atomic<std::uint64_t> pacing_late_callbacks{0},pacing_max_lateness_ns{0},pacing_callbacks{0};
+    std::atomic<std::uint64_t> pacing_min_interval_ns{0},pacing_max_interval_ns{0},pacing_interval_total_ns{0};
+    std::atomic<std::uint64_t> pacing_max_duration_ns{0},pacing_duration_total_ns{0},pacing_delivery_ns{0};
+    std::chrono::steady_clock::time_point pacing_anchor{};
 };
 CaptureScript* capture_script=nullptr;
 
@@ -672,6 +682,375 @@ void hardware_case(bool secret,double clock_offset=0,bool guard_contradiction=fa
         <<final.capture_certified_null_samples<<" certified quiet samples, clock offset "<<clock_offset
         <<" s, guard contradiction "<<guard_contradiction<<", physical END and discovery resumed\n";
 }
+// The optional paced diagnostic does not change the established controlled-clock cases.
+struct PacedObservation {
+    std::set<std::uint64_t> ids;
+    std::map<std::uint64_t,live::SignalUpdate> rows;
+    std::map<std::uint64_t,std::uint64_t> revisions;
+    std::map<std::string,transfer::Received> contents;
+    bool complete=false;
+    void inspect(const live::Snapshot& state,const CaptureScript& capture,bool keyed) {
+        check(state.error.empty()&&!state.receiver_health.failed(),"paced receiver health: "+state.error);
+        check(state.dsp_buffered_bytes<=64*1024*1024,"paced workspace exceeds 64 MiB");
+        const auto ingress=state.capture_recorded_samples+state.capture_certified_null_samples;
+        for(const auto& signal:state.signals) {
+            if(!signal.received_bits)continue;
+            const auto prior=revisions.find(signal.id);
+            if(prior!=revisions.end()&&signal.revision<prior->second)continue;
+            const auto earliest=ids.empty()?signal.id:std::min(signal.id,*ids.begin());
+            const auto bits=signal.raw_bits.empty()?signal.text:signal.raw_bits;
+            const bool alias=keyed&&signal.id!=earliest;
+            check(bits.size()==signal.received_bits&&signal.received_bits<=capture.bits.size()&&
+                  !signal.missing_symbols&&(alias?capture.bits.find(bits,1)!=std::string::npos:
+                  bits==capture.bits.substr(0,signal.received_bits)),"paced selected raw prefix differs from source");
+            const auto previous=rows.find(signal.id);
+            if(previous!=rows.end()) {
+                check(previous->second.revision!=signal.revision||
+                      previous->second.received_bits<=signal.received_bits,"paced same-revision progress regressed");
+                if(previous->second.revision<signal.revision)contents.erase(previous->second.reception_id);
+            }
+            revisions[signal.id]=signal.revision;
+            for(const auto id:signal.superseded_ids) {
+                revisions[id]=std::max(revisions[id],signal.revision);
+                const auto obsolete=rows.find(id);
+                if(obsolete!=rows.end())contents.erase(obsolete->second.reception_id);
+                rows.erase(id);
+            }
+            rows[signal.id]=signal;ids.insert(signal.id);
+            if(!keyed)check(ids.size()==1,"paced plain reception changed its pending identity");
+            if(signal.complete&&(!keyed||signal.received_bits==capture.bits.size())) {
+                check(ingress>=capture.first_absent_end&&signal.received_bits==capture.bits.size(),
+                      "paced full reception ended before complete physical absence");
+                complete=true;
+            }
+        }
+        for(const auto& result:state.received) {
+            check(result.stream_complete&&result.observed_bits&&result.observed_bits<=capture.bits.size()&&
+                  !result.missing_symbols,"paced content is incomplete or has missing symbols");
+            if(!keyed||result.observed_bits==capture.bits.size())
+                check(ingress>=capture.first_absent_end&&result.observed_bits==capture.bits.size(),
+                      "paced full content preceded physical absence");
+            Bytes expected;for(const auto bit:capture.bits.substr(0,result.observed_bits))expected.push_back(bit-'0');
+            check(result.raw_bits==expected,"paced interpreted content changed the raw bits");
+            std::string id;constexpr char digits[]="0123456789abcdef";
+            for(const auto byte:result.content.message.local_id){id+=digits[byte>>4];id+=digits[byte&15];}
+            contents[id]=result;
+        }
+    }
+    bool visible()const{return !rows.empty();}
+    void finish(const CaptureScript& capture)const {
+        check(complete&&!ids.empty()&&rows.size()==1&&rows.begin()->first==*ids.begin(),
+              "paced final arbitration did not retain the earliest single lineage");
+        const auto& row=rows.begin()->second;
+        check(row.complete&&row.received_bits==capture.bits.size()&&!row.missing_symbols&&
+              (row.raw_bits.empty()?row.text:row.raw_bits)==capture.bits,"paced final row is not the exact complete source");
+        check(contents.size()==(row.reception_id.empty()?0U:1U),"paced retained superseded content");
+        if(!contents.empty()) {
+            Bytes expected;for(const auto bit:capture.bits)expected.push_back(bit-'0');
+            const auto& [id,result]=*contents.begin();
+            check(id==row.reception_id&&result.stream_complete&&result.raw_bits==expected&&
+                  result.observed_bits==capture.bits.size(),"paced final content disagrees with its row");
+        }
+    }
+};
+std::uint64_t paced_pcm_hash(std::span<const float> pcm) {
+    std::uint64_t value=14695981039346656037ULL;
+    for(const auto byte:std::as_bytes(pcm)){value^=std::to_integer<unsigned char>(byte);value*=1099511628211ULL;}
+    return value;
+}
+std::string paced_json_string(std::string_view text) {
+    std::string result="\"";constexpr char hex[]="0123456789abcdef";
+    for(const unsigned char c:text.substr(0,256)) {
+        if(c=='"'||c=='\\'){result+='\\';result+=c;}
+        else if(c<32){result+="\\u00";result+=hex[c>>4];result+=hex[c&15];}
+        else result+=c;
+    }
+    return result+'"';
+}
+void prepare_paced_capture(CaptureScript& capture,const live::Settings& value,bool keyed,bool on) {
+    constexpr std::size_t maximum_pcm=262144;
+    capture.bits="0010010010010010";capture.paced=true;
+    auto options=value.transfer;if(keyed)options.key.emplace(Bytes(32,0x67));
+    const auto padding=modem::pattern_pulse_padding_samples(options.modem);
+    options.timestamp=epoch+padding/rate;options.modem.stream_phase_samples=padding%rate;
+    const auto config=transfer::seeded_config(options,options.timestamp);
+    const auto symbol=modem::symbol_sample_count(config);
+    check(symbol==8ULL*rate,"paced source must retain T8");
+    Bytes bits;for(const auto bit:capture.bits)bits.push_back(bit-'0');
+    auto tx=transfer::binary_transmitter(bits,options);
+    check(tx->physical_output_origin()>=25ULL*rate,"paced capture origin underflow");
+    capture.utc_origin_samples=(epoch-60ULL)*rate; // Identical UTC/noise origin in each pair.
+    check(tx->physical_output_origin()>=capture.utc_origin_samples+25ULL*rate,"paced leading observation guard is insufficient");
+    capture.first_support=epoch*rate-capture.utc_origin_samples;
+    capture.support.resize(bits.size()+1);capture.support[0]=capture.first_support;
+    std::uint64_t start=0;
+    for(std::size_t i=0;i<bits.size();++i) {
+        if(on) {
+            const auto minimum=std::max<std::uint64_t>(start+2*padding+11*symbol,start+60ULL*rate);
+            const auto absolute=epoch*rate+minimum;constexpr auto quantum=30ULL*rate;
+            start=((absolute+quantum-1)/quantum)*quantum-epoch*rate;
+        } else start+=symbol;
+        capture.support[i+1]=capture.first_support+start;
+    }
+    capture.first_absent_end=capture.support.back()+padding+symbol;
+    capture.completion_checkpoint=capture.first_absent_end+40ULL*rate;
+    capture.retirement_end=capture.completion_checkpoint;
+    if(keyed) {
+        const auto last_end=capture.support[bits.size()-1]+2*padding+symbol;
+        capture.retirement_end=std::max(capture.retirement_end,private_retirement_end(value,last_end));
+        // Keep the original four-symbol promises, not just the true source's first absent slot.
+        capture.retirement_end=std::max<std::uint64_t>(capture.retirement_end,
+            private_startup_tail(value,capture.first_support+44ULL*rate)+4ULL*rate);
+    }
+    auto extent=capture.retirement_end+60ULL*rate;
+    extent=(extent+15)/16*16;
+    check(extent<=maximum_pcm,"paced original promises exceed 262144-float bound");
+    capture.pcm.resize(static_cast<std::size_t>(extent));
+    const auto offset=tx->physical_output_origin()-capture.utc_origin_samples;
+    check(offset+tx->total_samples()<capture.first_absent_end,"paced waveform reaches its absent slot");
+    for(std::size_t at=0;at<tx->total_samples();) {
+        const auto n=tx->read(std::span(capture.pcm).subspan(offset+at,tx->total_samples()-at));
+        check(n>0,"paced transmitter stalled");at+=n;
+    }
+    // Both calendars use the same physical-coordinate noise process and seed.
+    std::mt19937 random(8071);std::normal_distribution<float> noise(0,.001f);
+    for(auto& sample:capture.pcm)sample+=noise(random);
+    capture.now=static_cast<double>(capture.utc_origin_samples)/rate;
+}
+struct PacedSample {
+    std::uint64_t ingress=0,frontier=0,nulls=0,recorded=0,queued=0,decoding=0,revision=0;
+    std::uint64_t before_ns=0,after_ns=0;
+    std::size_t pcm=0,bytes=0;
+    double backlog=0,oldest=0;
+};
+struct PacedWindow {
+    std::uint64_t left=0,right=0;
+    bool start=false,end=false,start_valid=false,end_valid=false,material=false,cleared=false;
+    PacedSample start_before,start_after,end_before,end_after,debt;
+};
+void paced_burst_case(std::string_view selector,bool keyed,bool burst_on) {
+    using Steady=std::chrono::steady_clock;
+    const auto wall_start=Steady::now(),deadline=wall_start+570s;
+    const auto cpu_start=std::clock();
+    CaptureScript capture;
+    struct Reset {~Reset(){capture_script=nullptr;}} reset;
+    std::unique_ptr<live::Session> session;
+    PacedObservation observed;
+    std::array<PacedWindow,16> windows{};
+    PacedSample previous,final;
+    live::ReceiverHealth final_health;
+    std::string final_status,final_receiver_error;
+    std::uint64_t final_admissions=0,final_retirements=0;
+    std::size_t peak_dsp=0;
+    std::uint64_t pcm_hash=0,startup_tail=0,first_visible_ingress=0,material_since=0,freeze_upper_bound=0;
+    const char* startup_measurement=burst_on?"inconclusive_no_visible_acquisition":"not_applicable_off";
+    bool finished=false,have_previous=false,material_seen=false,startup_debt=false,poststartup_debt=false;
+    bool tail_bounded=false;
+    std::string failure,cleanup_error;
+    const auto elapsed_ns=[&](Steady::time_point t){return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(t-wall_start).count());};
+    try {
+        auto value=settings(keyed);value.transfer.modem.symbol_burst={burst_on?10U:0U,0};
+        prepare_paced_capture(capture,value,keyed,burst_on);
+        pcm_hash=paced_pcm_hash(capture.pcm);
+        check(Steady::now()<deadline,"paced preparation exceeded the internal wall deadline");
+        const auto padding=modem::pattern_pulse_padding_samples(value.transfer.modem);
+        const auto symbol=modem::symbol_sample_count(value.transfer.modem);
+        const auto guard=20ULL*rate+static_cast<std::uint64_t>(std::ceil(
+            (value.transfer.search_seconds+1+value.transfer.audio_timing_error_seconds+.002)*rate));
+        for(std::size_t i=0;i<windows.size();++i) {
+            windows[i].left=capture.support[i]+2*padding+symbol+guard;
+            windows[i].right=capture.support[i+1]>guard?capture.support[i+1]-guard:0;
+        }
+        capture_script=&capture;
+        session=std::make_unique<live::Session>([&]{return capture.now.load();});
+        session->start(value); // No readiness wait or decoder gate precedes capture.
+        while(Steady::now()<deadline) {
+            const auto before=Steady::now();const auto state=session->snapshot();const auto after=Steady::now();
+            final_health=state.receiver_health;final_status=state.status;final_receiver_error=state.receiver_error;
+            final_admissions=state.receiver_admissions;final_retirements=state.receiver_retirements;
+            PacedSample now;
+            now.ingress=state.capture_recorded_samples+state.capture_certified_null_samples;
+            now.frontier=state.processed_physical_samples;now.nulls=state.capture_certified_null_samples;
+            now.recorded=state.capture_recorded_samples;now.queued=state.queued_physical_samples;
+            now.decoding=state.decoding_physical_samples;now.revision=state.receiver_input_revision;
+            now.pcm=state.buffered_samples+state.decoding_samples;now.bytes=state.dsp_buffered_bytes;
+            const bool finite_times=std::isfinite(state.receiver_backlog_seconds)&&std::isfinite(state.receiver_oldest_input_seconds);
+            now.backlog=finite_times?state.receiver_backlog_seconds:0;now.oldest=finite_times?state.receiver_oldest_input_seconds:0;
+            now.before_ns=elapsed_ns(before);now.after_ns=elapsed_ns(after);final=now;
+            check(finite_times,"paced backlog timing is nonfinite");
+            check(now.frontier<=now.ingress&&now.queued+now.decoding==now.ingress-now.frontier,
+                  "paced physical queue/frontier reconciliation failed");
+            if(have_previous&&now.revision==previous.revision)check(now.ingress>=previous.ingress&&
+                now.frontier>=previous.frontier,"paced ingress/frontier regressed within its revision");
+            else if(have_previous)check(previous.ingress==0,"paced capture revision changed after input arrived");
+            peak_dsp=std::max(peak_dsp,now.bytes);
+            observed.inspect(state,capture,keyed);
+            if(!first_visible_ingress&&observed.visible())first_visible_ingress=now.ingress;
+            // A pending event can be visible before the same feed publishes
+            // receiver timing. Retry the first available monotone upper bound.
+            if(first_visible_ingress&&burst_on&&!freeze_upper_bound) {
+                if(!keyed) {
+                    // Public rolling FFT has no modeled receiver_timing. The
+                    // captured ingress nevertheless upper-bounds bank.samples
+                    // at the first visible commit: enqueue owns the complete
+                    // callback before the decoder sees it. Queueing can only
+                    // make this fence conservative, never move it behind freeze.
+                    freeze_upper_bound=first_visible_ingress;
+                    const auto frozen=std::max<std::uint64_t>(freeze_upper_bound,capture.first_support+44ULL*rate);
+                    startup_tail=frozen+30ULL*rate+3*symbol+2*padding+guard;
+                    tail_bounded=startup_tail<=capture.retirement_end;
+                    startup_measurement=tail_bounded?"bounded_public_ingress_upper":
+                        "inconclusive_prepared_capture_tail";
+                } else if(burst_on&&state.receiver_timing) {
+                    // refresh_bank admits at bank.samples, not capture ingress.
+                    // For this 16-sample PCM provider, the previously published
+                    // processing timestamp can lag the current feed by one block;
+                    // its end needs one further block. F may lag both and is not
+                    // an upper bound. See live.cpp:3308,3338,3357,3650,4602.
+                    const auto ticks=state.receiver_timing->utc_seconds*rate-
+                        static_cast<long double>(capture.utc_origin_samples);
+                    if(std::isfinite(ticks)&&ticks>=0&&ticks<=capture.pcm.size()) {
+                        freeze_upper_bound=static_cast<std::uint64_t>(std::ceil(ticks))+32;
+                        const auto frozen=std::max<std::uint64_t>(freeze_upper_bound,capture.first_support+44ULL*rate);
+                        startup_tail=keyed?private_startup_tail(value,frozen)+4ULL*rate:
+                            frozen+30ULL*rate+3*symbol+2*padding+guard;
+                        tail_bounded=startup_tail<=capture.retirement_end;
+                        startup_measurement=tail_bounded?"bounded_processing_timestamp":
+                            "inconclusive_prepared_capture_tail";
+                    } else startup_measurement="inconclusive_processing_timestamp_range";
+                } else if(burst_on)startup_measurement="inconclusive_processing_timestamp_unavailable";
+            }
+            // Require debt beyond an ordinary one-block pipeline, persisting across polls.
+            const bool substantial=now.ingress-now.frontier>=2ULL*rate&&now.backlog>=2.&&now.oldest>=.020;
+            if(!substantial)material_since=0;
+            else if(!material_since)material_since=now.after_ns;
+            const bool material=substantial&&now.after_ns>=material_since+10000000ULL;
+            material_seen|=material;
+            if(material&&(!first_visible_ingress||(burst_on&&(!startup_tail||now.ingress<startup_tail))))startup_debt=true;
+            if(material&&first_visible_ingress&&(!burst_on||(startup_tail&&now.ingress>=startup_tail)))poststartup_debt=true;
+            if(have_previous) {
+                std::size_t crossings=0;
+                for(const auto& window:windows) {
+                    crossings+=previous.ingress<window.left&&now.ingress>=window.left;
+                    if(window.left<window.right)crossings+=previous.ingress<window.right&&now.ingress>=window.right;
+                }
+                const bool narrow=crossings==1&&now.ingress-previous.ingress<=2ULL*rate&&
+                    now.after_ns-previous.before_ns<=40000000ULL;
+                for(auto& window:windows) {
+                    if(!window.start&&previous.ingress<window.left&&now.ingress>=window.left) {
+                        window.start=true;window.start_before=previous;window.start_after=now;
+                        window.start_valid=narrow&&window.left<window.right&&now.ingress<window.right;
+                    }
+                    if(!window.end&&window.left<window.right&&previous.ingress<window.right&&now.ingress>=window.right) {
+                        window.end=true;window.end_before=previous;window.end_after=now;
+                        window.end_valid=narrow&&previous.ingress>=window.left&&previous.ingress<window.right;
+                    }
+                    const bool current=burst_on&&tail_bounded&&startup_tail&&window.left>=startup_tail&&
+                        previous.ingress>=window.left&&now.ingress<window.right;
+                    // Prospective proof must be active while genuine queued work remains.
+                    if(current&&material&&now.nulls>previous.nulls&&now.recorded==previous.recorded) {
+                        if(!window.material){window.material=true;window.debt=now;}
+                    }
+                    if(current&&window.material&&now.ingress>window.debt.ingress&&
+                       now.nulls>window.debt.nulls&&now.recorded==window.debt.recorded&&
+                       now.frontier>window.debt.frontier&&now.queued+now.decoding==0&&now.backlog==0)
+                        window.cleared=true;
+                }
+            }
+            previous=now;have_previous=true;
+            check(!capture.pacing_aborted.load(),"paced producer stopped: deadline/callback failure; input truncated");
+            if(capture.delivered>=capture.pcm.size()&&now.ingress==capture.pcm.size()&&
+               now.frontier==now.ingress&&observed.complete) {finished=true;break;}
+            std::this_thread::sleep_for(5ms);
+        }
+        check(finished,"paced fixture reached its 570-second deadline before full input, physical END and drain");
+        check(final.queued+final.decoding==0&&final.pcm==0&&final.backlog==0,"paced final input did not drain");
+        // Unavailable startup-tail evidence makes rescue inconclusive; it is
+        // distinct from failure of exact reception/END for the complete input.
+        observed.finish(capture);
+    } catch(const std::exception& e){failure=e.what();}
+      catch(...){failure="unknown paced fixture exception";}
+    // Stop and destruction happen before evidence is emitted; retain a prior test failure.
+    try {if(session){session->stop();session.reset();}}
+    catch(const std::exception& e){cleanup_error=e.what();}
+    catch(...){cleanup_error="unknown cleanup exception";}
+    session.reset(); // Also join the provider if explicit stop reported an error.
+    const auto elapsed=std::chrono::duration<double>(Steady::now()-wall_start).count();
+    if(elapsed>570.&&failure.empty())failure="paced fixture exceeded its 570-second internal wall bound including cleanup";
+    if(!cleanup_error.empty()&&failure.empty())failure="paced fixture cleanup failed";
+    const bool valid=capture.pacing_valid.load()&&!capture.pacing_aborted.load()&&
+        capture.delivered==capture.pcm.size()&&capture.pacing_callbacks.load()>1&&
+        capture.pacing_max_lateness_ns.load()<=20000000ULL;
+    if(!valid&&failure.empty())failure="paced producer did not deliver complete input at a valid fixed cadence";
+    const auto qualifies=[](const PacedWindow& w){return w.start_valid&&w.end_valid&&w.material&&w.cleared&&
+        w.end_before.queued+w.end_before.decoding==0&&w.end_before.backlog==0&&
+        w.end_before.recorded==w.debt.recorded&&w.end_before.nulls>w.debt.nulls;};
+    std::size_t cleared=0;for(const auto& window:windows)cleared+=qualifies(window);
+    const bool functional=failure.empty();
+    const char* classification=!functional||!valid?"no_demonstrated_rescue":
+        burst_on&&cleared>=3?"observed":!material_seen?"unchallenged":"no_demonstrated_rescue";
+    const auto cpu_end=std::clock();
+    std::cout<<"PACED_BURST_JSON {\"selector\":"<<paced_json_string(selector)
+        <<",\"configuration\":{\"keyed\":"<<(keyed?"true":"false")<<",\"calendar\":\""<<(burst_on?"N10J0":"N0J0")
+        <<"\",\"sample_rate\":128,\"integration_seconds\":8,\"search_seconds\":6,\"workspace_bytes\":67108864,\"pace_factor\":64,\"callback_samples\":16,\"receive_keys\":"<<(keyed?2:0)
+        <<",\"automatic_profiles\":"<<(keyed?"true":"false")<<",\"receiver_strategy\":\"existing_only\"}"
+        <<",\"logical_bits\":"<<paced_json_string(capture.bits)<<",\"pcm_float_bytes\":"<<sizeof(float)
+        <<",\"pcm_samples\":"<<capture.pcm.size()<<",\"pcm_byte_fnv1a64\":\""<<std::hex<<pcm_hash<<std::dec
+        <<"\",\"functional\":\""<<(functional?"pass":"fail")<<"\",\"failure\":"<<paced_json_string(failure)
+        <<",\"cleanup_error\":"<<paced_json_string(cleanup_error)<<",\"pacing_valid\":"<<(valid?"true":"false")
+        <<",\"classification\":\""<<classification<<"\",\"wall_seconds\":"<<elapsed<<",\"cpu_seconds\":"
+        <<(cpu_start==static_cast<std::clock_t>(-1)||cpu_end==static_cast<std::clock_t>(-1)?-1.:
+            static_cast<double>(cpu_end-cpu_start)/CLOCKS_PER_SEC)
+        <<",\"callbacks\":"<<capture.pacing_callbacks.load()<<",\"requested_interval_ns\":1953125"
+        <<",\"actual_interval_min_ns\":"<<capture.pacing_min_interval_ns.load()
+        <<",\"actual_interval_max_ns\":"<<capture.pacing_max_interval_ns.load()
+        <<",\"actual_interval_total_ns\":"<<capture.pacing_interval_total_ns.load()
+        <<",\"requested_delivery_span_ns\":"<<(capture.pcm.empty()?0ULL:(capture.pcm.size()/16-1)*1953125ULL)
+        <<",\"actual_delivery_span_ns\":"<<capture.pacing_delivery_ns.load()
+        <<",\"callback_duration_max_ns\":"<<capture.pacing_max_duration_ns.load()
+        <<",\"callback_duration_total_ns\":"<<capture.pacing_duration_total_ns.load()
+        <<",\"late_deadline_attempts\":"<<capture.pacing_late_callbacks.load()<<",\"max_lateness_ns\":"<<capture.pacing_max_lateness_ns.load()
+        <<",\"producer_aborted\":"<<(capture.pacing_aborted.load()?"true":"false")
+        <<",\"producer_abort_reason\":"<<capture.pacing_abort_reason.load()
+        <<",\"producer_error\":"<<paced_json_string(capture.pacing_callback_error)
+        <<",\"health\":{\"input_overruns\":"<<final_health.input_overruns<<",\"dropped_samples\":"<<final_health.dropped_samples
+        <<",\"input_interrupted\":"<<(final_health.input_interrupted?"true":"false")
+        <<",\"search_limited\":"<<(final_health.search_limited?"true":"false")
+        <<",\"receiver_reset\":"<<(final_health.receiver_reset?"true":"false")<<'}'
+        <<",\"status\":"<<paced_json_string(final_status)<<",\"receiver_error\":"<<paced_json_string(final_receiver_error)
+        <<",\"admissions\":"<<final_admissions<<",\"retirements\":"<<final_retirements
+        <<",\"captured_samples\":"<<final.ingress<<",\"frontier\":"<<final.frontier
+        <<",\"queued_physical\":"<<final.queued<<",\"decoding_physical\":"<<final.decoding
+        <<",\"sampled_peak_dsp_bytes\":"<<peak_dsp<<",\"first_visible_ingress\":"<<first_visible_ingress
+        <<",\"startup_tail\":"<<startup_tail<<",\"prepared_retirement_end\":"<<capture.retirement_end
+        <<",\"freeze_upper_bound\":"<<freeze_upper_bound<<",\"startup_measurement\":"<<paced_json_string(startup_measurement)
+        <<",\"startup_tail_applicable\":"<<(burst_on?"true":"false")
+        <<",\"startup_tail_covered\":"<<(tail_bounded?"true":"false")
+        <<",\"startup_material_debt\":"<<(startup_debt?"true":"false")
+        <<",\"poststartup_material_debt\":"<<(poststartup_debt?"true":"false")
+        <<",\"material_min_pcm_seconds\":2,\"material_min_oldest_wall_seconds\":0.020,\"material_persistence_ns\":10000000"
+        <<",\"cleared_poststartup_gaps\":"<<cleared<<",\"windows\":[";
+    const auto sample_json=[](const PacedSample& s) {
+        std::cout<<"{\"ingress\":"<<s.ingress<<",\"frontier\":"<<s.frontier<<",\"nulls\":"<<s.nulls
+            <<",\"recorded\":"<<s.recorded<<",\"queued\":"<<s.queued<<",\"decoding\":"<<s.decoding
+            <<",\"pcm\":"<<s.pcm<<",\"backlog_seconds\":"<<s.backlog<<",\"oldest_seconds\":"<<s.oldest
+            <<",\"before_ns\":"<<s.before_ns<<",\"after_ns\":"<<s.after_ns<<'}';
+    };
+    for(std::size_t i=0;i<windows.size();++i) {
+        if(i)std::cout<<',';const auto& w=windows[i];
+        std::cout<<"{\"index\":"<<i<<",\"guarded_end\":"<<w.left<<",\"next_guard\":"<<w.right
+            <<",\"start_valid\":"<<(w.start_valid?"true":"false")<<",\"end_valid\":"<<(w.end_valid?"true":"false")
+            <<",\"material\":"<<(w.material?"true":"false")<<",\"cleared\":"<<(w.cleared?"true":"false")
+            <<",\"qualifies\":"<<(qualifies(w)?"true":"false")
+            <<",\"start_before\":";sample_json(w.start_before);std::cout<<",\"start_after\":";sample_json(w.start_after);
+        std::cout<<",\"end_before\":";sample_json(w.end_before);std::cout<<",\"end_after\":";sample_json(w.end_after);
+        std::cout<<",\"quiet_debt\":";sample_json(w.debt);std::cout<<'}';
+    }
+    std::cout<<"]}\n";
+    check(functional,"paced diagnostic failed: "+failure+"; cleanup: "+cleanup_error);
+}
+
 void simulation_case() {
     auto value=settings(false);value.simulation=true;value.simulation_snr_db=40;
     value.simulation_clock_error_ppm=value.simulation_frequency_offset_hz=value.simulation_phase_noise_degrees_per_sqrt_second=0;
@@ -711,6 +1090,72 @@ void capture(std::uint32_t fs,const std::string& selected,const CaptureCallback&
     script.capture_thread=std::this_thread::get_id();
     check(bool(options.capture_timing),"Default Burst capture did not request provider timestamps");
     if(format)format({rate,rate,rate/2.,0,TimingQuality::estimated,.002});
+    if(script.paced) {
+        using Steady=std::chrono::steady_clock;
+        constexpr auto period=std::chrono::nanoseconds(1953125);
+        script.pacing_anchor=Steady::now()+1ms;
+        Steady::time_point first_begin{},last_begin{};
+        const auto update_max=[](auto& field,std::uint64_t value) {
+            auto prior=field.load();while(prior<value&&!field.compare_exchange_weak(prior,value)){}
+        };
+        while(!stop.stop_requested()) {
+            const auto first=script.delivered.load();
+            if(script.pacing_aborted.load()||first>=script.pcm.size()) {
+                // Keep the device open. No EOF can provide physical END.
+                std::this_thread::sleep_for(1ms);continue;
+            }
+            const auto ordinal=first/16;
+            const auto deadline=script.pacing_anchor+period*static_cast<std::int64_t>(ordinal);
+            std::this_thread::sleep_until(deadline);
+            if(stop.stop_requested())return;
+            const auto before=Steady::now();
+            const auto late=before>deadline?static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(before-deadline).count()):0;
+            if(late)script.pacing_late_callbacks.fetch_add(1);
+            update_max(script.pacing_max_lateness_ns,late);
+            // Deadlines never slide. Abort before delivery on a missed bound;
+            // catch-up is thus bounded by ceil(20ms / period)+1 callbacks.
+            if(late>20000000ULL) {
+                script.pacing_abort_reason=1;script.pacing_valid=false;script.pacing_aborted=true;continue;
+            }
+            if(ordinal==0)first_begin=before;
+            else {
+                const auto interval=static_cast<std::uint64_t>(
+                    std::chrono::duration_cast<std::chrono::nanoseconds>(before-last_begin).count());
+                auto prior=script.pacing_min_interval_ns.load();
+                while((!prior||interval<prior)&&!script.pacing_min_interval_ns.compare_exchange_weak(prior,interval)){}
+                update_max(script.pacing_max_interval_ns,interval);
+                script.pacing_interval_total_ns.fetch_add(interval);
+            }
+            last_begin=before;
+            const auto end=std::min<std::size_t>(script.pcm.size(),first+16);
+            bool accepted=false;
+            try {
+                const auto utc=(static_cast<long double>(script.utc_origin_samples)+first)/rate;
+                script.now=static_cast<double>(utc);options.capture_timing(dated(utc));
+                const auto samples=std::span(script.pcm).subspan(first,end-first);
+                if(options.capture_monitor)options.capture_monitor(samples,rate);
+                accepted=callback(samples);
+                if(!accepted)script.pacing_abort_reason=2;
+            } catch(const std::exception& e) {
+                script.pacing_callback_error=std::string_view(e.what()).substr(0,256);script.pacing_abort_reason=3;
+            } catch(...) {script.pacing_callback_error="unknown capture callback exception";script.pacing_abort_reason=3;}
+            const auto after=Steady::now();
+            const auto duration=static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(after-before).count());
+            update_max(script.pacing_max_duration_ns,duration);
+            script.pacing_duration_total_ns.fetch_add(duration);
+            script.pacing_delivery_ns=static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(after-first_begin).count());
+            script.pacing_callbacks.fetch_add(1);
+            if(accepted)script.delivered=end;
+            if(!accepted||after>deadline+20ms) {
+                if(accepted)script.pacing_abort_reason=4;
+                script.pacing_valid=false;script.pacing_aborted=true;
+            }
+        }
+        return;
+    }
     while(!stop.stop_requested()) {
         const auto first=script.delivered.load(),end=std::min(script.released.load(),first+rate/20);
         if(end==first) {std::this_thread::sleep_for(1ms);continue;}
@@ -748,13 +1193,19 @@ int main(int argc,char** argv) {
             } else {
                 check(selector.empty(),"multiple Burst fixture selectors");
                 check(argument=="--timestamps" || argument=="--simulation" || argument=="--private" ||
-                      argument=="--early" || argument=="--guard-contradiction" || argument=="--public" || argument=="--amplitude",
+                      argument=="--early" || argument=="--guard-contradiction" || argument=="--public" || argument=="--amplitude" ||
+                      argument=="--paced-plain-off" || argument=="--paced-plain-on" ||
+                      argument=="--paced-keyed-off" || argument=="--paced-keyed-on",
                       "unknown Burst fixture option");
                 selector=argument;
             }
         }
         std::optional<audio::trace::Scope> trace;
         if(trace_path)trace.emplace(*trace_path);
+        if(selector=="--paced-plain-off") {paced_burst_case(selector,false,false);return 0;}
+        if(selector=="--paced-plain-on") {paced_burst_case(selector,false,true);return 0;}
+        if(selector=="--paced-keyed-off") {paced_burst_case(selector,true,false);return 0;}
+        if(selector=="--paced-keyed-on") {paced_burst_case(selector,true,true);return 0;}
         timestamp_certificates();
         if(selector=="--timestamps")return 0;
         if(selector=="--simulation") {simulation_case();return 0;}

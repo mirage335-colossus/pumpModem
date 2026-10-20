@@ -32,6 +32,10 @@ on:
         description: 'Include real-time Fast RX checks in instrumented Debug coverage'
         type: boolean
         default: false
+      paced_backlog:
+        description: 'Run four opt-in paced Symbol Burst backlog diagnostics after the original qualification'
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       linux_runner:
@@ -56,6 +60,10 @@ on:
         type: string
         default: ''
       sanitizer_realtime:
+        type: boolean
+        default: false
+      paced_backlog:
+        description: 'Run four opt-in paced Symbol Burst backlog diagnostics after the original qualification'
         type: boolean
         default: false
 
@@ -132,6 +140,11 @@ jobs:
         if: inputs.scope == 'symbol-burst-live' && inputs.build_type != 'Debug'
         run: |
           echo '::error::The focused Symbol Burst Live qualification requires Debug with ASan/UBSan.'
+          exit 2
+      - name: Restrict paced Symbol Burst backlog diagnostics
+        if: always() && inputs.paced_backlog && (github.event_name != 'workflow_dispatch' || inputs.scope != 'symbol-burst-live' || inputs.build_type != 'Debug' || inputs.linux_runner != 'ubuntu-24.04')
+        run: |
+          echo '::error::Paced Symbol Burst diagnostics require manual symbol-burst-live on Debug and ubuntu-24.04.'
           exit 2
       - name: Validate manual package configuration
         if: github.event_name == 'workflow_dispatch' && inputs.scope == 'package' && inputs.build_type != 'Release'
@@ -1668,6 +1681,170 @@ jobs:
           for warning in completed_pass_warnings:
               print('Completed-pass warning: ' + warning)
           PY_BURST_RESULT
+      - name: Run four paced Symbol Burst backlog diagnostics
+        id: paced_burst
+        if: success() && inputs.paced_backlog && !cancelled()
+        timeout-minutes: 45
+        env:
+          PACED_SCOPE: ${{ inputs.scope }}
+          PACED_BUILD_TYPE: ${{ inputs.build_type }}
+          PACED_LINUX_RUNNER: ${{ inputs.linux_runner }}
+        run: |
+          set -euo pipefail
+          python3 -B - "$PWD" <<'PY_PACED_BURST'
+          import datetime, hashlib, json, os, pathlib, signal, subprocess, sys, time
+
+          root = pathlib.Path(sys.argv[1]).resolve()
+          report = root / 'build/symbol-burst-live-qualification/paced'
+          report.mkdir(parents=True, exist_ok=True)
+          binary = root / 'build/test_symbol_burst_live'
+          source = root / 'tests/test_symbol_burst_live.cpp'
+          parent_report = report.parent
+          cache = root / 'build/CMakeCache.txt'
+          for name in ('source.txt', 'source-tree.txt', 'CMakeCache.txt', 'source-inventory.json'):
+              source_file = parent_report / name
+              if not source_file.is_file():
+                  raise SystemExit(f'missing original qualification evidence: {source_file}')
+              (report / name).write_bytes(source_file.read_bytes())
+          if not binary.is_file() or not source.is_file():
+              raise SystemExit('missing built Symbol Burst test or its source')
+          inputs = {
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'event_name': os.environ['GITHUB_EVENT_NAME'],
+              'scope': os.environ['PACED_SCOPE'],
+              'build_type': os.environ['PACED_BUILD_TYPE'],
+              'linux_runner': os.environ['PACED_LINUX_RUNNER'],
+              'source_commit': (report / 'source.txt').read_text().strip(),
+              'source_tree': (report / 'source-tree.txt').read_text().strip(),
+              'cmake_cache_sha256': hashlib.sha256(cache.read_bytes()).hexdigest(),
+              'test_source_sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
+              'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
+          }
+          (report / 'inputs.json').write_text(json.dumps(inputs, indent=2) + '\n')
+          selectors = ('--paced-plain-off', '--paced-plain-on', '--paced-keyed-off', '--paced-keyed-on')
+          results = []
+          for index, selector in enumerate(selectors, 1):
+              stem = f'{index:02d}-{selector[2:]}'
+              stdout_path, stderr_path = report / f'{stem}.stdout.log', report / f'{stem}.stderr.log'
+              started = datetime.datetime.now(datetime.timezone.utc).isoformat()
+              start = time.monotonic()
+              timed_out = False
+              timeout_kill = False
+              launch_error = None
+              returncode = None
+              process = None
+              cleanup_deadline = None
+              with stdout_path.open('wb') as stdout, stderr_path.open('wb') as stderr:
+                  try:
+                      process = subprocess.Popen([str(binary), selector], cwd=root, stdout=stdout,
+                                                stderr=stderr, start_new_session=True)
+                      try:
+                          returncode = process.wait(timeout=600)
+                      except subprocess.TimeoutExpired:
+                          timed_out = True
+                          cleanup_deadline = time.monotonic() + 10
+                          try:
+                              os.killpg(process.pid, signal.SIGTERM)
+                          except ProcessLookupError:
+                              pass
+                          try:
+                              returncode = process.wait(timeout=max(0, cleanup_deadline - time.monotonic()))
+                          except subprocess.TimeoutExpired:
+                              timeout_kill = True
+                              try:
+                                  os.killpg(process.pid, signal.SIGKILL)
+                              except ProcessLookupError:
+                                  pass
+                              returncode = process.wait()
+                  except Exception as error:
+                      launch_error = f'{type(error).__name__}: {error}'
+                  finally:
+                      # Close the private process group even if wait raised an
+                      # unexpected exception. Reap the leader before continuing.
+                      if process is not None:
+                          if cleanup_deadline is None:
+                              cleanup_deadline = time.monotonic() + 10
+                          try:
+                              os.killpg(process.pid, signal.SIGTERM)
+                          except ProcessLookupError:
+                              pass
+                          try:
+                              returncode = process.wait(timeout=max(0, cleanup_deadline - time.monotonic()))
+                          except subprocess.TimeoutExpired:
+                              timeout_kill = True
+                              try:
+                                  os.killpg(process.pid, signal.SIGKILL)
+                              except ProcessLookupError:
+                                  pass
+                              returncode = process.wait()
+                          while time.monotonic() < cleanup_deadline:
+                              try:
+                                  os.killpg(process.pid, 0)
+                              except ProcessLookupError:
+                                  break
+                              time.sleep(0.1)
+                          else:
+                              try:
+                                  os.killpg(process.pid, signal.SIGKILL)
+                              except ProcessLookupError:
+                                  pass
+              elapsed = time.monotonic() - start
+              ended = datetime.datetime.now(datetime.timezone.utc).isoformat()
+              summaries = []
+              parse_errors = []
+              with stdout_path.open('r', encoding='utf-8', errors='replace') as stream:
+                  for line_number, line in enumerate(stream, 1):
+                      if line.startswith('PACED_BURST_JSON '):
+                          try:
+                              value = json.loads(line[len('PACED_BURST_JSON '):])
+                              if not isinstance(value, dict):
+                                  raise ValueError('summary JSON is not an object')
+                              summaries.append({'line': line_number, 'value': value})
+                          except Exception as error:
+                              parse_errors.append(f'line {line_number}: {type(error).__name__}: {error}')
+              summary = summaries[0]['value'] if len(summaries) == 1 else None
+              exit_ok = returncode == 0
+              functional_ok = bool(summary and summary.get('functional') == 'pass')
+              complete = not timed_out and not launch_error and exit_ok and len(summaries) == 1 and not parse_errors and functional_ok
+              result = {
+                  'selector': selector,
+                  'started_utc': started,
+                  'ended_utc': ended,
+                  'elapsed_seconds': elapsed,
+                  'exit_code': returncode,
+                  'signal': -returncode if returncode is not None and returncode < 0 else None,
+                  'timed_out': timed_out,
+                  'timeout_exit_code': (137 if timeout_kill else 124) if timed_out else None,
+                  'launch_error': launch_error,
+                  'stdout_file': stdout_path.name,
+                  'stderr_file': stderr_path.name,
+                  'stdout_sha256': hashlib.sha256(stdout_path.read_bytes()).hexdigest(),
+                  'stderr_sha256': hashlib.sha256(stderr_path.read_bytes()).hexdigest(),
+                  'summary_count': len(summaries),
+                  'summary_parse_errors': parse_errors,
+                  'summary': summary,
+                  'functional_ok': functional_ok,
+                  'diagnostic_complete': complete,
+              }
+              (report / f'{stem}.json').write_text(json.dumps(result, indent=2) + '\n')
+              results.append(result)
+          manifest = {'inputs': inputs, 'results': results,
+                      'all_functional_runs_complete': all(row['diagnostic_complete'] for row in results)}
+          (report / 'results.json').write_text(json.dumps(manifest, indent=2) + '\n')
+          summary_path = pathlib.Path(os.environ['GITHUB_STEP_SUMMARY'])
+          with summary_path.open('a', encoding='utf-8') as stream:
+              stream.write('Paced Symbol Burst backlog diagnostics (four separate processes):\n\n')
+              for row in results:
+                  value = row['summary'] or {}
+                  stream.write(f"- `{row['selector']}`: exit={row['exit_code']}, timeout={row['timed_out']}, "
+                               f"functional={value.get('functional', 'missing')}, "
+                               f"classification={value.get('classification', 'missing')}, "
+                               f"complete={row['diagnostic_complete']}\n")
+              stream.write('\nPacing classifications are diagnostic observations, not qualification or performance claims.\n')
+          if not manifest['all_functional_runs_complete']:
+              raise SystemExit('FATAL: one or more paced Symbol Burst runs timed out, failed, or lacked exactly one valid functional summary')
+          PY_PACED_BURST
       - name: Capture six sequential fixed-bank acquisition partition replays
         if: inputs.scope == 'simulation-acquisition-partition-diagnostic' && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 35
