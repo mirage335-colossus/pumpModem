@@ -16,7 +16,8 @@ HEADER = 'src/gui_stop_current_probe.hpp'
 RUNTIME = 'a6c2bf11d255fd00f35ecc238a56e144e7605145'
 PATHS = ('src/live.cpp', 'src/channel.cpp', 'src/pattern_code.cpp',
          'src/audio_trace.hpp', 'tests/test_gui_controller.cpp',
-         'src/pattern_receiver.cpp', 'src/scheduled_work_profile.hpp', 'src/search_parallel.cpp')
+         'src/pattern_receiver.cpp', 'src/scheduled_work_profile.hpp', 'src/search_parallel.cpp',
+         'src/pattern_fft_batch.cpp')
 
 def sha(value): return hashlib.sha256(value).hexdigest()
 def write(path, value): path.write_text(json.dumps(value, indent=2, allow_nan=False)+'\n')
@@ -51,7 +52,7 @@ def transform(original):
     if d[p].count(a)!=2: raise ValueError('strict stop-loop anchors changed')
     d[p]=d[p].replace(a,'do {{datapump::gui_stop_current::Poll stop_poll;controller.poll();datapump::gui_stop_current::ack(controller.snapshot());}std::this_thread::sleep_for(std::chrono::milliseconds(5));}')
     a='    const auto stop_wall_seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-stop_started).count();'
-    d[p]=replace_once(d[p],a,a+'\n    datapump::gui_stop_current::ack(controller.snapshot(),true);\n    datapump::gui_stop_current::point("strict_stop_observation",{{"transmitting",controller.snapshot().transmitting},{"finished",controller.snapshot().transmission_finished}},{{"stop_wall_seconds",stop_wall_seconds}});\n    datapump::gui_stop_current::cpu_ledger("strict_stop_observation");')
+    d[p]=replace_once(d[p],a,a+'\n    datapump::gui_stop_current::ack(controller.snapshot(),true);\n    datapump::gui_stop_current::point("strict_stop_observation",{{"request",datapump::gui_stop_current::state.request_count.load()},{"transmitting",controller.snapshot().transmitting},{"finished",controller.snapshot().transmission_finished}},{{"stop_wall_seconds",stop_wall_seconds}});\n    datapump::gui_stop_current::cpu_ledger("strict_stop_observation");')
     p='src/live.cpp'
     d[p]=replace_once(d[p],'audio::trace::record("receiver_selection",[&](auto& f) {','datapump::gui_stop_current::detail("receiver_selection",[&](auto& f) {')
     a='                 std::uint64_t observation_id = 0, bool preserve_monitor = false) {\n'
@@ -250,8 +251,8 @@ def capture_readback(out):
     summaries=[x for x in rows if x.get('event')=='gui_stop_current_summary']
     if len(summaries)!=1:raise ValueError('expected one capture summary')
     summary=summaries[0]
-    if summary.get('schema')!=2 or summary.get('float_bytes')!=4 or summary.get('unmatched')!=1 or summary.get('qualification')!=0:raise ValueError('unexpected producer contract')
-    for name in ('record_overflow','detail_overflow','partition_overflow','errors','clock_errors','observer_invalid','poll_invalid','digest_error'):
+    if summary.get('schema')!=3 or summary.get('float_bytes')!=4 or summary.get('unmatched')!=1 or summary.get('qualification')!=0:raise ValueError('unexpected producer contract')
+    for name in ('record_overflow','detail_overflow','cpu_ledger_overflow','partition_overflow','errors','clock_errors','observer_invalid','poll_invalid','digest_error'):
         if summary.get(name)!=0:raise ValueError('incomplete capture '+name)
     observed=[x for x in rows if x.get('event','').startswith('gui_stop_current_') and 'capture_index' in x]
     if [x['capture_index'] for x in observed]!=list(range(summary['records'])):raise ValueError('capture index gap/duplicate')
@@ -285,13 +286,28 @@ def capture_readback(out):
     details=[json.loads(x['detail_json']) for x in rows if x.get('event')=='gui_stop_current_detail']
     ledgers=[x for x in details if x.get('event')=='gui_stop_current_cpu_ledger']
     boundaries=[x.get('boundary') for x in ledgers]
-    if len(boundaries)!=len(set(boundaries)) or not {'case_begin','case_joined'}<=set(boundaries):raise ValueError('missing/duplicate CPU ledger boundary')
+    keys=[(x.get('boundary'),x.get('request_ordinal')) for x in ledgers]
+    if len(keys)!=len(set(keys)) or boundaries.count('case_begin')!=1 or boundaries.count('case_joined')!=1:raise ValueError('missing/duplicate CPU ledger boundary')
     allowed={'case_begin','request','strict_stop_observation','case_joined'}
     if not set(boundaries)<=allowed:raise ValueError('unknown CPU ledger boundary')
+    if len(ledgers)!=summary.get('cpu_ledger_records') or len(details)-len(ledgers)!=summary.get('generic_details'):raise ValueError('CPU/generic detail count')
+    if summary.get('detail_limit')!=256 or summary.get('cpu_ledger_limit')!=16 or any(summary.get(k)!=0 for k in ('detail_first_overflow_wall_ns','cpu_ledger_first_overflow_wall_ns')):raise ValueError('detail storage contract')
+    requests_before=[x for x in observed if x.get('event')=='gui_stop_current_request_before_lock']
+    ordinals=[x['request'] for x in requests_before]
+    if ordinals!=list(range(1,len(ordinals)+1)):raise ValueError('request ordinal sequence')
+    if sorted(x['request_ordinal'] for x in ledgers if x['boundary']=='request')!=ordinals:raise ValueError('request CPU ledger identity')
+    for x in ledgers:
+        ordinal=x.get('request_ordinal')
+        if type(ordinal) is not int or ordinal<0:raise ValueError('invalid CPU ledger request ordinal')
+        if x['boundary']=='case_begin' and ordinal!=0:raise ValueError('case begin CPU ledger identity')
+        if x['boundary']=='case_joined' and ordinal!=len(ordinals):raise ValueError('case joined CPU ledger identity')
+        if x['boundary']=='strict_stop_observation' and ordinal not in ordinals:raise ValueError('strict CPU ledger identity')
+    strict_observed=[x for x in observed if x.get('event')=='gui_stop_current_strict_stop_observation']
+    if sorted(x['request_ordinal'] for x in ledgers if x['boundary']=='strict_stop_observation')!=sorted(x['request'] for x in strict_observed):raise ValueError('strict observation CPU ledger identity')
     for x in ledgers:
         if x.get('cpu_profile_mode')!='exact_coarse' or x.get('cpu_profile_native_clock_supported')!=1:raise ValueError('CPU profile mode/clock')
         if any(x.get(k)!=0 for k in ('cpu_profile_clock_failures','cpu_profile_nesting_failures','cpu_profile_overflows')):raise ValueError('CPU profile accounting failure')
-        for stage in ('native_acquired_batch','native_continuation','native_template_values','native_template_fft','native_fft_search','fallback_dispatch','native_frequency_axis','native_bounded_search','native_whole_search'):
+        for stage in ('native_acquired_batch','native_continuation','native_template_values','native_template_fft','native_fft_search','fallback_dispatch','native_frequency_axis','native_bounded_search','native_whole_search','native_fft_validate','native_fft_template_setup','native_fft_template_values','native_fft_forward','native_fft_product','native_fft_inverse','native_fft_scores','native_fft_drift'):
             for suffix in ('ns','calls'):
                 value=x.get('cpu_'+stage+'_'+suffix)
                 if type(value) is not int or value<0:raise ValueError('missing/invalid CPU stage '+stage)

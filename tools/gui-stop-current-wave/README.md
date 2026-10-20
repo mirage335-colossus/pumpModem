@@ -176,3 +176,30 @@ and retain any signed unexplained residual. No matched overhead or load-causatio
 claim follows from comparison with schema 1's natural input. Existing observer
 self-cost and profile clock-read counts are retained; full instrumentation cost
 remains uncalibrated. This wave localizes work and does not qualify performance.
+
+## Executor subdivision and protected ledgers (schema 3)
+
+The native CPU capture now subdivides `execute_fft_search_cpu` into validation,
+per-job template setup, streamed/private template values, forward transform,
+product sweep, inverse transform, score sweep, and the alternate drift path.
+These are coarse scopes outside bin/start loops. The enclosing
+`native_fft_search` is residual dispatch/control/wait work; the sum of its inner
+stages is the executor workload, rather than FFT arithmetic alone. Calls count
+phase entries, not samples or evidence evaluations. Existing floating-point
+operations, cancellation, jobs, workers, and assertions are unchanged.
+
+CPU ledgers have 16 reserved slots independent of 256 bounded general detail
+slots. Both limits and first-overflow wall times are recorded; any overflow
+still invalidates the capture. Ledger identity is `(boundary, request_ordinal)`:
+the original successful GUI case issues a second request after its primary EU
+stop observation. Every request must have a matching ordinal ledger, and joined
+must match the final ordinal and remain quiescent. Critical ledger storage cannot
+be consumed by later receiver selections. Request/strict snapshots can still
+cut active Contexts; their differences are provisional completed-context deltas,
+not an atomic CPU interval. Only the joined ledger establishes final totals.
+
+The previous schema-2 run 39391135074 passed the entire original GUI main with
+EU stop 9.177969929 seconds, but lost 13 general metadata records including its
+joined ledger. That capture remains incomplete. Schema 3 does not reinterpret
+it as qualification. No matched overhead or speed comparison is inferred from
+natural-input runs; self-cost counters exclude clock/scope and scheduling cost.

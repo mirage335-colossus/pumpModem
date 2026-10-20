@@ -171,7 +171,7 @@
     {
       "path": "src/scheduled_work_profile.hpp",
       "source_sha256": "87a701a4ed853685e4250805a8665fdd0f10b15347ab0f4f8be1fcc8148b7acf",
-      "postimage_sha256": "b0e8ea4a5e01ddf91d9a9410adfa716de995ca127cbd967c63f04b17a6c32ef1",
+      "postimage_sha256": "73e1598d1144b50df2ca290ab6873c2f56121acf5a35dda2675348fa73e4a518",
       "edits": [
         {
           "start_line0": 36,
@@ -181,7 +181,8 @@
           ],
           "new": [
             "    setup, search_residual, control_residual, private_permutation, private_coefficient, private_address, temporal_coordinates, temporal_lookup, temporal_plan_build, temporal_validate, temporal_gather, temporal_evaluate, temporal_export, scheduled_common_residual, scheduled_candidate_residual, common_raw,\n",
-            "    native_acquired_batch, native_continuation, native_template_values, native_template_fft, native_fft_search, native_frequency_axis, native_bounded_search, native_whole_search, fallback_dispatch, count\n"
+            "    native_acquired_batch, native_continuation, native_template_values, native_template_fft, native_fft_search, native_frequency_axis, native_bounded_search, native_whole_search, fallback_dispatch,\n",
+            "    native_fft_validate, native_fft_template_setup, native_fft_template_values, native_fft_forward, native_fft_product, native_fft_inverse, native_fft_scores, native_fft_drift, count\n"
           ]
         },
         {
@@ -192,7 +193,8 @@
           ],
           "new": [
             "    \"temporal_gather\",\"temporal_evaluate\",\"temporal_export\",\"scheduled_common_residual\",\"scheduled_candidate_residual\",\"common_raw\",\n",
-            "    \"native_acquired_batch\",\"native_continuation\",\"native_template_values\",\"native_template_fft\",\"native_fft_search\",\"native_frequency_axis\",\"native_bounded_search\",\"native_whole_search\",\"fallback_dispatch\"\n"
+            "    \"native_acquired_batch\",\"native_continuation\",\"native_template_values\",\"native_template_fft\",\"native_fft_search\",\"native_frequency_axis\",\"native_bounded_search\",\"native_whole_search\",\"fallback_dispatch\",\n",
+            "    \"native_fft_validate\",\"native_fft_template_setup\",\"native_fft_template_values\",\"native_fft_forward\",\"native_fft_product\",\"native_fft_inverse\",\"native_fft_scores\",\"native_fft_drift\"\n"
           ]
         },
         {
@@ -234,6 +236,167 @@
           "old": [],
           "new": [
             "    rx_cpu::Stage profile_stage_ = rx_cpu::Stage::search_residual; // Submission stage for this immutable batch.\n"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/pattern_fft_batch.cpp",
+      "source_sha256": "14cd5c72e43900497538bafb83a8fef3bf55d30d2342ee1e9880286409a7a7ae",
+      "postimage_sha256": "6c4ffc617234d16a243fbce198690853034e0db78406c9f3bf0901506ef1ef7f",
+      "edits": [
+        {
+          "start_line0": 4,
+          "end_line0": 4,
+          "old": [],
+          "new": [
+            "#include \"scheduled_work_profile.hpp\"\n"
+          ]
+        },
+        {
+          "start_line0": 444,
+          "end_line0": 444,
+          "old": [],
+          "new": [
+            "    ::datapump::detail::cpu_profile::Scope validate(\n",
+            "        ::datapump::detail::cpu_profile::Stage::native_fft_validate,false);\n"
+          ]
+        },
+        {
+          "start_line0": 515,
+          "end_line0": 515,
+          "old": [],
+          "new": [
+            "    validate.finish();\n"
+          ]
+        },
+        {
+          "start_line0": 533,
+          "end_line0": 533,
+          "old": [],
+          "new": [
+            "                ::datapump::detail::cpu_profile::Scope drift(\n",
+            "                    ::datapump::detail::cpu_profile::Stage::native_fft_drift,false);\n"
+          ]
+        },
+        {
+          "start_line0": 535,
+          "end_line0": 535,
+          "old": [],
+          "new": [
+            "                drift.finish();\n"
+          ]
+        },
+        {
+          "start_line0": 537,
+          "end_line0": 537,
+          "old": [],
+          "new": [
+            "            ::datapump::detail::cpu_profile::Scope template_setup(\n",
+            "                ::datapump::detail::cpu_profile::Stage::native_fft_template_setup,false);\n"
+          ]
+        },
+        {
+          "start_line0": 550,
+          "end_line0": 550,
+          "old": [],
+          "new": [
+            "            template_setup.finish();\n"
+          ]
+        },
+        {
+          "start_line0": 562,
+          "end_line0": 562,
+          "old": [],
+          "new": [
+            "                    ::datapump::detail::cpu_profile::Scope template_values(\n",
+            "                        ::datapump::detail::cpu_profile::Stage::native_fft_template_values,false);\n"
+          ]
+        },
+        {
+          "start_line0": 570,
+          "end_line0": 570,
+          "old": [],
+          "new": [
+            "                    template_values.finish();\n"
+          ]
+        },
+        {
+          "start_line0": 571,
+          "end_line0": 571,
+          "old": [],
+          "new": [
+            "                        ::datapump::detail::cpu_profile::Scope forward(\n",
+            "                            ::datapump::detail::cpu_profile::Stage::native_fft_forward,false);\n"
+          ]
+        },
+        {
+          "start_line0": 573,
+          "end_line0": 573,
+          "old": [],
+          "new": [
+            "                        forward.finish();\n",
+            "                        ::datapump::detail::cpu_profile::Scope product(\n",
+            "                            ::datapump::detail::cpu_profile::Stage::native_fft_product,false);\n"
+          ]
+        },
+        {
+          "start_line0": 577,
+          "end_line0": 577,
+          "old": [],
+          "new": [
+            "                        product.finish();\n"
+          ]
+        },
+        {
+          "start_line0": 580,
+          "end_line0": 580,
+          "old": [],
+          "new": [
+            "                    ::datapump::detail::cpu_profile::Scope product(\n",
+            "                        ::datapump::detail::cpu_profile::Stage::native_fft_product,false);\n"
+          ]
+        },
+        {
+          "start_line0": 584,
+          "end_line0": 584,
+          "old": [],
+          "new": [
+            "                    product.finish();\n"
+          ]
+        },
+        {
+          "start_line0": 586,
+          "end_line0": 586,
+          "old": [],
+          "new": [
+            "                    ::datapump::detail::cpu_profile::Scope inverse(\n",
+            "                        ::datapump::detail::cpu_profile::Stage::native_fft_inverse,false);\n"
+          ]
+        },
+        {
+          "start_line0": 588,
+          "end_line0": 588,
+          "old": [],
+          "new": [
+            "                    inverse.finish();\n"
+          ]
+        },
+        {
+          "start_line0": 589,
+          "end_line0": 589,
+          "old": [],
+          "new": [
+            "                ::datapump::detail::cpu_profile::Scope scores_stage(\n",
+            "                    ::datapump::detail::cpu_profile::Stage::native_fft_scores,false);\n"
+          ]
+        },
+        {
+          "start_line0": 609,
+          "end_line0": 609,
+          "old": [],
+          "new": [
+            "                scores_stage.finish();\n"
           ]
         }
       ]
