@@ -159,6 +159,8 @@ jobs:
           PY
       - name: Build and verify portable application archives
         if: inputs.scope == 'packages'
+        env:
+          DATAPUMP_CI_SMOKE_CAPTURE_FIXTURES: ${{ inputs.backend == 'rev' && '1' || '' }}
         run: |
           {
             ./build.sh package --tui --fb --web-worker --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)"

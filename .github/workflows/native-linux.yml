@@ -77,7 +77,7 @@ jobs:
     container: ubuntu:22.04
     # Standard runners need room for the full instrumented suite after compilation.
     # Explicit test limits and physical deadlines remain unchanged.
-    timeout-minutes: ${{ inputs.build_type == 'Debug' && (inputs.scope == 'core' || inputs.scope == 'calibration' || inputs.scope == 'preparation-diagnostic' || inputs.scope == 'symbol-burst-live') && 240 || 120 }}
+    timeout-minutes: ${{ inputs.build_type == 'Debug' && (inputs.scope == 'core' || inputs.scope == 'calibration' || inputs.scope == 'preparation-diagnostic' || inputs.scope == 'symbol-burst-live') && 240 || inputs.build_type == 'Debug' && inputs.scope == 'gui-core-diagnostic' && 360 || 120 }}
     defaults:
       run:
         shell: bash
@@ -879,7 +879,7 @@ jobs:
           -DDATAPUMP_CALIBRATION_SHARD=${{ inputs.calibration_shard }}
           -DDART_TESTING_TIMEOUT=3600
           -DCMAKE_DISABLE_FIND_PACKAGE_Python3=${{ (inputs.scope == 'frontends' || inputs.scope == 'web') && 'FALSE' || 'TRUE' }}
-          -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL=${{ inputs.scope == 'live' && inputs.linux_runner == 'ubuntu-24.04' && 'ON' || 'OFF' }}
+          -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL=${{ (inputs.scope == 'live' || (inputs.scope == 'gui-core-diagnostic' && inputs.build_type == 'Debug')) && inputs.linux_runner == 'ubuntu-24.04' && 'ON' || 'OFF' }}
           -DCMAKE_EXPORT_COMPILE_COMMANDS=${{ inputs.scope == 'gui-stop-current-wave' && 'ON' || 'OFF' }}
       - name: Prepare focused Symbol Burst Live qualification evidence
         if: inputs.scope == 'symbol-burst-live'
@@ -958,7 +958,12 @@ jobs:
             frontends) targets=(datapump-tests-frontends) ;;
             web) targets=(datapump-tests-web) ;;
             preparation-diagnostic) targets=(test_scheduled_parallel_preparation) ;;
-            gui-core-diagnostic) targets=(test_search_fft test_pattern_fft_batch test_gui_timing_advice test_gui_controller) ;;
+            gui-core-diagnostic)
+              targets=(test_search_fft test_pattern_fft_batch test_gui_timing_advice test_gui_controller)
+              if [ '${{ inputs.build_type }}' = Debug ] && [ '${{ inputs.linux_runner }}' = ubuntu-24.04 ]; then
+                targets+=(test_live test_live_profiles)
+              fi
+              ;;
             gui-stop-diagnostic) targets=(test_gui_controller) ;;
             gui-stop-differential) targets=(test_gui_controller) ;;
             simulation-clock-diagnostic) targets=(test_live test_pattern_receiver test_stream_receive test_live_planning_link) ;;
@@ -1330,6 +1335,65 @@ jobs:
               assert int(suite.get(name, "0")) == actual, f"JUnit {name} count does not match its test cases"
           assert int(suite.get("disabled", "0")) == 0, "JUnit reports disabled tests"
           PYRESULTS
+      - name: Run staged Live lifetime coverage before GUI core diagnostics
+        if: inputs.scope == 'gui-core-diagnostic' && inputs.build_type == 'Debug' && inputs.linux_runner == 'ubuntu-24.04' && !cancelled() && steps.build_prerequisites.outcome == 'success'
+        timeout-minutes: 125
+        run: |
+          set -euo pipefail
+          report="$PWD/build/core-diagnostics"
+          mkdir -p "$report"
+          git -c safe.directory="$PWD" rev-parse HEAD > "$report/live-source.txt"
+          cp build/CMakeCache.txt "$report/live-CMakeCache.txt"
+          python3 -B - "$report/live-CMakeCache.txt" <<'PY_LIVE_CONFIG'
+          import pathlib, sys
+          cache = {}
+          for line in pathlib.Path(sys.argv[1]).read_text().splitlines():
+              if '=' in line and not line.startswith(('//', '#')):
+                  key, value = line.split('=', 1)
+                  cache[key.split(':', 1)[0]] = value
+          assert cache.get('CMAKE_BUILD_TYPE') == 'Debug', cache.get('CMAKE_BUILD_TYPE')
+          assert cache.get('DATAPUMP_SANITIZERS') == 'ON', cache.get('DATAPUMP_SANITIZERS')
+          assert cache.get('DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL') == 'ON', cache.get('DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL')
+          assert cache.get('CMAKE_CXX_COMPILER') == '/usr/bin/g++-11', cache.get('CMAKE_CXX_COMPILER')
+          PY_LIVE_CONFIG
+
+          printf '%s\n' 'build/test_live --replay-staging' > "$report/replay-staging-command.txt"
+          timeout 60s build/test_live --replay-staging > "$report/replay-staging.log" 2>&1
+
+          python3 tools/run-ci-tests.py --build-dir build --scope live --jobs 1 --timeout 3600 --sanitizers \
+            --report "$report/live-report.json" --summary "$report/live-summary.md"
+          python3 -B - "$report/live-report.json" <<'PY_LIVE_RESULT'
+          import json, pathlib, sys
+          report_path = pathlib.Path(sys.argv[1])
+          report = json.loads(report_path.read_text())
+          expected = ['live', 'live_profiles']
+          source = (report_path.parent / 'live-source.txt').read_text().strip()
+          assert report.get('source_sha') == source, (report.get('source_sha'), source)
+          inventory_path = report_path.parent / report['inventory_file']
+          inventory_bytes = inventory_path.read_bytes()
+          import hashlib
+          assert hashlib.sha256(inventory_bytes).hexdigest() == report.get('inventory_sha256')
+          inventory = json.loads(inventory_bytes)
+          by_name = {test['name']: test for test in inventory.get('tests', [])}
+          assert set(expected) <= set(by_name), sorted(by_name)
+          assert '--ci-functional-clock' in by_name['live'].get('command', []), by_name['live']
+          assert by_name['live_profiles'].get('command', [])[-1:] == [str(pathlib.Path('build/test_live_profiles').resolve())], by_name['live_profiles']
+          assert report.get('scope') == 'live', report.get('scope')
+          assert report.get('selected') == expected, report.get('selected')
+          assert report.get('omitted') == [], report.get('omitted')
+          assert report.get('ctest_returncode') == 0, report.get('ctest_returncode')
+          cases = report.get('tests', [])
+          assert [case.get('name') for case in cases] == expected, cases
+          assert all(case.get('status') == 'passed' for case in cases), cases
+          assert report.get('result_counts', {}).get('passed') == 2, report.get('result_counts')
+          limits = report.get('coverage_limits', [])
+          assert all(item.get('test') == 'live' and item.get('limit_seconds') == 120 for item in limits), limits
+          assert report.get('status') in ('passed', 'passed_with_warnings'), report.get('status')
+          assert pathlib.Path(sys.argv[1]).with_suffix('.xml').is_file()
+          assert pathlib.Path(sys.argv[1]).with_suffix('.inventory.json').is_file()
+          assert pathlib.Path(sys.argv[1]).with_suffix('.log').is_file()
+          PY_LIVE_RESULT
+          echo 'Focused Live lifetime coverage completed before the strict GUI core diagnostic; any compact-clock limit is recorded as typed incomplete coverage, with the functional Live assertions and live_profiles passing.' >> "$GITHUB_STEP_SUMMARY"
       - name: Run focused preparation or GUI core diagnostics
         if: inputs.scope == 'preparation-diagnostic' || inputs.scope == 'gui-core-diagnostic'
         run: |

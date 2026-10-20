@@ -21,12 +21,14 @@ std::size_t constellation_limit(const Settings& settings) {
 }
 constexpr std::size_t reception_alias_bytes = detail::ReceptionHistory::capacity * sizeof(std::uint64_t);
 constexpr std::size_t trace_prefix_workspace = modem::TransmitTrace::dynamic_storage_limit;
+const std::size_t replay_pending_workspace = sizeof(std::optional<SignalUpdate>) + replay_text_limit + 64 + reception_alias_bytes;
 const std::size_t replay_frame_base = sizeof(ReplayFrame) +
     (replay_wave_samples + replay_bins) * sizeof(float) +
     pattern_score_limit * (sizeof(std::complex<float>) + sizeof(PatternScoreObservation)) +
-    sizeof(std::optional<SignalUpdate>) + replay_text_limit + 64 + reception_alias_bytes + trace_prefix_workspace;
-// One verified stream is moved into the receive-content cache at the deadline.
-// Its payload uses the content quota; its diagnostics and caption use DSP space.
+    replay_pending_workspace + trace_prefix_workspace;
+// Historical result allowance, now shared with the pending-event allowances.
+// Every retained event/result capacity is admitted against their common pool;
+// payload capacities use the aggregate content quota.
 const std::size_t replay_result_workspace = sizeof(transfer::Received) +
     sizeof(SignalUpdate) + 2*replay_text_limit + 64 + reception_alias_bytes + minimum_constellation_limit * sizeof(std::complex<double>);
 std::size_t replay_workspace(const Settings& value) {

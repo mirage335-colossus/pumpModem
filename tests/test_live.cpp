@@ -3,6 +3,7 @@
 #include "cpu_work_budget.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "../src/live_pattern_scores.hpp"
+#include "../src/live_replay_staging.hpp"
 #include "../src/live_simulation_clock.hpp"
 #include "../src/audio_trace.hpp"
 #include "../src/live_receiver_admission.hpp"
@@ -31,6 +32,163 @@ using namespace datapump;
 using namespace std::chrono_literals;
 namespace {
 void check(bool value,const char* text){if(!value)throw Error(text);}
+void replay_staging_retention() {
+    using Staging=live::detail::ReplayStaging;
+    using Event=live::SignalUpdate;
+    std::uint64_t sequence=0;
+    const auto event=[&](std::uint64_t id,std::string text,bool complete=false,std::uint64_t revision=1) {
+        Event e;e.id=id;e.revision=revision;e.sequence=++sequence;e.text=std::move(text);
+        e.complete=complete;e.binary=true;e.received_bits=e.text.size();return e;
+    };
+    const auto result=[](std::uint64_t id,std::string_view text) {
+        transfer::Received r;r.stream_complete=true;r.short_text_decoded=true;
+        r.content.message.data.assign(text.begin(),text.end());r.content.message.local_id[0]=static_cast<std::uint8_t>(id);
+        r.diagnostics.waveform={.25f,-.5f};r.diagnostics.constellation={{1.,-2.}};
+        r.raw_bits={0,0,1};r.error="retained diagnostic";return r;
+    };
+    const auto stage=[&](Staging& s,Event e,std::size_t frame,std::optional<transfer::Received> r={}) {
+        return s.stage(std::move(e),frame,std::move(r),4096,8,16*1024*1024);
+    };
+    const auto count=[](const Staging& s) {
+        return std::count_if(s.entries().begin(),s.entries().end(),[](const auto& e){return bool(e);});
+    };
+    const auto find=[](const Staging& s,std::uint64_t id) -> const Staging::Entry* {
+        for(const auto& e:s.entries())if(e && e->event.id==id)return e.get();
+        return nullptr;
+    };
+    const auto rejects=[&](auto action,const char* message) {
+        bool rejected=false;try {action();}catch(const Error&) {rejected=true;}check(rejected,message);
+    };
+
+    Staging pending(256*1024,4);
+    stage(pending,event(1,"0"),1);stage(pending,event(2,"00"),1);stage(pending,event(1,"001"),1);
+    check(count(pending)==2 && find(pending,1)->event.text=="001" && find(pending,2)->event.text=="00",
+          "independent same-frame pending IDs were overwritten or same-ID observations did not coalesce");
+    stage(pending,event(1,"0010"),2);
+    check(count(pending)==3,"same-ID observations in different replay frames lost finite progress history");
+    std::vector<Staging::Entry> published;
+    pending.drain(2,false,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==2 && published[0].event.id==2 && published[1].event.id==1 &&
+          published[1].event.text=="001" && count(pending)==1,
+          "replay due-frame publication lost independent pending IDs or generated future prefixes");
+    check(pending.owns_pending(published[0].event),"cancellation forgot an already-published replay-only pending identity");
+    auto later=published[0].event;++later.revision;
+    check(!pending.owns_pending(later),"replay cancellation retracted an independent later revision");
+    pending.clear();check(count(pending)==0 && !pending.owns_pending(published[0].event),"cancel/clear retained staged or published pending ownership");
+
+    // The actual staging seam called by Session::Impl::add_signal: the proven
+    // 32-bit Help then independent three-bit-space overwrite must retain both
+    // terminal events AND each event's own optional Received transaction.
+    Staging completed(256*1024,4);
+    stage(completed,event(81,"01001000011001010110110001110000"),1);
+    stage(completed,event(82,"000"),1);
+    stage(completed,event(81,"01001000011001010110110001110000",true),3,result(81,"Help"));
+    stage(completed,event(82,"000",true),3,result(82," "));
+    stage(completed,event(82,"000",true),3); // same revision, no duplicate content report
+    check(count(completed)==4 && completed.content_bytes()==5,
+          "independent terminal IDs/results were overwritten or aggregate payload accounting was lost");
+    published.clear();completed.drain(1,false,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.empty(),"terminal content escaped before the fixed replay deadline");
+    completed.drain(4,true,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==2 && published[0].event.id==81 && published[1].event.id==82 &&
+          published[0].received && published[1].received &&
+          published[0].received->content.message.local_id[0]==81 && published[1].received->content.message.local_id[0]==82 &&
+          published[0].received->content.message.data==Bytes({'H','e','l','p'}) &&
+          published[1].received->content.message.data==Bytes({' '}) &&
+          published[0].received->diagnostics.waveform==std::vector<float>({.25f,-.5f}) &&
+          published[0].received->diagnostics.constellation==std::vector<std::complex<double>>({{1.,-2.}}) &&
+          published[0].received->error=="retained diagnostic" && completed.content_bytes()==0,
+          "deadline jump lost terminals, emitted obsolete prefixes, cross-associated content or stripped CLI diagnostics");
+    completed.drain(4,true,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==2,"deadline jump published a terminal more than once");
+
+    Staging recovery(256*1024,4);
+    transfer::RecoveryInput capture;capture.bits.assign(1024,0);
+    capture.interval_options=[](std::uint64_t){return IntervalOptions{FecMode::rs60,{},{}};};
+    transfer::RecoveryOptions recovery_options;recovery_options.workers=1;
+    auto job=std::make_shared<transfer::RecoveryJob>(std::move(capture),recovery_options);
+    auto recovering=result(91,"");recovering.recovery=job;recovering.recovery_progress=job->progress();
+    auto recovering_event=event(91,"001",true);recovering_event.recovery_progress=recovering.recovery_progress;
+    stage(recovery,event(91,"0"),1);stage(recovery,std::move(recovering_event),3,std::move(recovering));
+    stage(recovery,event(92,"ordinary",true),3,result(92,"B"));
+    check(recovery.recovery_count()==1 && recovery.recovery_reserved_bytes()>=job->workspace_bound() &&
+          recovery.recovery_working_bytes()>=job->working_bytes() && job->progress().attempts==0 &&
+          job->progress().state==transfer::RecoveryState::ready &&
+          find(recovery,91)->received->content.message.local_id[0]==91 &&
+          find(recovery,92)->received->content.message.local_id[0]==92,
+          "recovery result borrowed the following ordinary completion's identity");
+    const auto recovery_before=recovery.recovery_reserved_bytes();
+    auto unavailable=result(93,"");unavailable.recovery=job;unavailable.recovery_progress=job->progress();
+    rejects([&]{recovery.stage(event(93,"001",true),3,unavailable,4096,1,16*1024*1024);},
+            "aggregate staged recovery count exceeded the coordinator allowance");
+    rejects([&]{recovery.stage(event(93,"001",true),3,std::move(unavailable),4096,8,recovery_before);},
+            "aggregate staged recovery bytes exceeded the coordinator allowance");
+    check(recovery.recovery_reserved_bytes()==recovery_before && count(recovery)==3,
+          "recovery capacity refusal modified an admitted ordinary/recovery pair");
+    recovery.clear_recoveries();
+    check(count(recovery)==1 && find(recovery,92) && recovery.content_bytes()==1 &&
+          recovery.recovery_count()==0 && recovery.recovery_reserved_bytes()==0 &&
+          recovery.recovery_working_bytes()==0 && job->progress().attempts==0,
+          "Clear recoveries retracted ordinary content or retained a recovering prefix/result");
+    auto old_recovery=result(91,"");old_recovery.recovery=job;old_recovery.recovery_progress=job->progress();
+    auto old_event=event(91,"old",true);old_event.recovery_progress=job->progress();
+    stage(recovery,std::move(old_event),3,std::move(old_recovery));
+    stage(recovery,event(91,"later ordinary",true,2),3,result(91,"later"));
+    recovery.clear_recoveries();
+    check(count(recovery)==2 && find(recovery,91)->event.revision==2 && find(recovery,92),
+          "Clear recoveries retracted a later ordinary revision or independent completion");
+    const auto retained=recovery.metadata_bytes();recovery.clear();
+    check(count(recovery)==0 && recovery.content_bytes()==0 && recovery.metadata_bytes()<retained,
+          "Clear received/cancel did not release staged result storage and accounting");
+
+    Staging revisions(256*1024,4);
+    stage(revisions,event(101,"old",true),3,result(101,"old"));
+    stage(revisions,event(102,"independent",true),3,result(102,"B"));
+    stage(revisions,event(101,"new",false,2),1);
+    check(count(revisions)==2 && !find(revisions,101)->received && find(revisions,102)->received,
+          "new revision failed to withdraw its own obsolete content or retracted an independent ID");
+    auto merged=event(103,"merged",false,3);merged.superseded_ids={101};
+    stage(revisions,std::move(merged),2);
+    check(!find(revisions,101) && find(revisions,102) && find(revisions,103),"explicit supersession lost an unrelated terminal");
+    check(!stage(revisions,event(103,"stale",true,2),3,result(103,"stale")) && find(revisions,103)->event.revision==3,
+          "an older revision retracted a later staged interpretation");
+
+    Staging counts(1024*1024,2);
+    stage(counts,event(1,"0"),1);stage(counts,event(2,"1"),1);
+    const auto before_count=counts.metadata_bytes();
+    rejects([&]{stage(counts,event(3,"0"),1);},"global pending-event count was not bounded");
+    check(count(counts)==2 && counts.metadata_bytes()==before_count,"pending-count refusal mutated prior staging");
+    counts.clear();
+    for(std::uint64_t id=1;id<=live::detail::maximum_events;++id)stage(counts,event(id,"0",true),1);
+    rejects([&]{stage(counts,event(1000,"1",true),1);},"independent terminal count was not bounded");
+    check(count(counts)==live::detail::maximum_events && find(counts,1) && !find(counts,1000),
+          "terminal-count refusal silently retired an unrelated completion");
+
+    Staging probe(256*1024,4);
+    stage(probe,event(1,"old",true),3,result(1,"old"));
+    stage(probe,event(2,"other",true),3,result(2,"B"));
+    Staging bytes(probe.metadata_bytes(),4);
+    stage(bytes,event(1,"old",true),3,result(1,"old"));
+    stage(bytes,event(2,"other",true),3,result(2,"B"));
+    const auto before_bytes=bytes.metadata_bytes();
+    auto huge=result(1,"new");huge.diagnostics.waveform.reserve(16384); // capacity, even with only two samples
+    auto replacement=event(1,"new",true,2);replacement.superseded_ids={2};
+    rejects([&]{stage(bytes,std::move(replacement),3,std::move(huge));},"retained diagnostic capacities escaped the DSP byte cap");
+    check(bytes.metadata_bytes()==before_bytes && count(bytes)==2 && find(bytes,2) && find(bytes,1)->event.revision==1 &&
+          find(bytes,1)->received->content.message.data==Bytes({'o','l','d'}),
+          "byte-cap refusal withdrew the previous revision/result before admission");
+    auto aliases=event(2,"x",true);aliases.superseded_ids.reserve(4096);
+    rejects([&]{stage(bytes,std::move(aliases),3);},"alias container capacity escaped staging byte accounting");
+    Staging payload(256*1024,4);
+    auto a=result(1,"A");a.content.message.data.reserve(64);
+    const auto a_capacity=a.content.message.data.capacity();
+    payload.stage(event(1,"A",true),3,std::move(a),a_capacity,8,16*1024*1024);
+    rejects([&]{payload.stage(event(2,"B",true),3,result(2,"B"),a_capacity,8,16*1024*1024);},
+            "aggregate retained payload capacities exceeded the receive content quota");
+    check(count(payload)==1 && payload.content_bytes()==a_capacity && find(payload,1),
+          "payload admission failure lost prior staged content or its allocation charge");
+}
+
 void cpu_work_budget_boundaries() {
     using Budget=testing::CpuWorkBudget;
     const auto origin=Budget::Clock::time_point{};
@@ -1381,6 +1539,11 @@ void simulation_media_clock_raw_component(const std::filesystem::path& directory
 int main(int argc,char** argv) {
     try {
         cpu_work_budget_boundaries();
+        replay_staging_retention();
+        if(argc>1 && std::string_view(argv[1])=="--replay-staging") {
+            check(argc==2,"usage: test_live --replay-staging");
+            std::cout<<"replay staging retention passed\n";return 0;
+        }
         if(argc>1 && std::string_view(argv[1])=="--hosted-clock-progress") {
             check(argc==2,"usage: test_live --hosted-clock-progress");
             hosted_clock_progress_boundaries();std::cout<<"hosted-clock progress boundaries passed\n";return 0;

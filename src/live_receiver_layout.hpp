@@ -71,7 +71,7 @@ inline constexpr std::size_t plot_size=2048,maximum_events=64,replay_frames=60,
     replay_wave_samples=256,replay_bins=257,minimum_constellation_limit=2048,
     pattern_score_limit=Snapshot::pattern_score_limit,replay_text_limit=4096,
     minimum_workspace=512*1024;
-extern const std::size_t replay_frame_base,replay_result_workspace;
+extern const std::size_t replay_frame_base,replay_result_workspace,replay_pending_workspace;
 std::size_t constellation_limit(const modem::Config& config);
 std::size_t constellation_limit(const Settings& settings);
 std::size_t replay_workspace(const Settings& settings);

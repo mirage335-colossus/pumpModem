@@ -26,6 +26,7 @@
 #include "signal_view.hpp"
 #include "live_pattern_scores.hpp"
 #include "live_receptions.hpp"
+#include "live_replay_staging.hpp"
 #include "live_scheduling.hpp"
 #include "live_simulation_clock.hpp"
 #include "live_deferred_input.hpp"
@@ -153,9 +154,7 @@ struct Session::Impl {
         bool tail_started = false;
         bool simulation_channel_pending=true;
         std::vector<ReplayFrame> replay;
-        std::vector<std::optional<SignalUpdate>> signals;
-        std::optional<SignalUpdate> verified;
-        std::optional<transfer::Received> received;
+        std::shared_ptr<detail::ReplayStaging> receives;
         // Stamped when a physically completed result is staged, so clearing
         // history can invalidate a source-thread result before replay handoff.
         std::uint64_t recovery_clear_generation=0;
@@ -703,11 +702,9 @@ struct Session::Impl {
     modem::ConstellationBatch pending_points;
     ConstellationSource pending_source = ConstellationSource::input;
     std::vector<ReplayFrame> replay;
-    std::vector<std::optional<SignalUpdate>> replay_signals;
-    std::optional<SignalUpdate> replay_verified;
-    std::optional<transfer::Received> replay_received;
-    std::size_t replay_signal_cursor = 0, staged_received_bytes = 0;
-    std::uint64_t replay_signal_id = 0;
+    // Shared with the source-local Prepared so clear/cancel also withdraws
+    // results that have not reached the replay handoff yet.
+    std::shared_ptr<detail::ReplayStaging> staged_receives;
     std::uint64_t replay_omitted = 0;
     Clock::time_point replay_started{};
     std::optional<std::size_t> delivered_replay_frame;
@@ -759,31 +756,27 @@ struct Session::Impl {
         current.simulation_receiving_tail=false;
     }
     void clear_replay(bool discard_pending = true) {
-        if (discard_pending && replay_signal_id)
+        if (discard_pending && staged_receives)
             std::erase_if(current.signals, [this](const auto& event) {
-                return !event.validated && event.id == replay_signal_id;
+                return !event.validated && !event.complete && staged_receives->owns_pending(event);
             });
+        if(staged_receives)staged_receives->clear();
+        staged_receives.reset();
         replay = {}; delivered_replay_frame.reset(); first_visible_replay_frame = 0;
-        replay_signals = {}; replay_verified.reset(); replay_received.reset();
-        replay_signal_cursor = staged_received_bytes = 0; replay_signal_id = 0;
         current.simulation_replay = false;
         current.replay_frame_index = current.replay_frame_count = 0;
         current.simulation_sample_fraction = 0;
         current.pattern_scores.clear();
         current.pattern_score_observations.clear();
     }
-    void discard_staged_recovery(std::optional<transfer::Received>& received,
-                                 std::optional<SignalUpdate>& completed,
-                                 std::vector<std::optional<SignalUpdate>>& events) {
-        const bool recovering=(received && (received->recovery || received->recovery_progress.state!=transfer::RecoveryState::none)) ||
-            (completed && completed->recovery_progress.state!=transfer::RecoveryState::none);
-        if(!recovering)return;
-        const auto id=completed?completed->id:0;
-        received.reset();completed.reset();staged_received_bytes=0;
-        if(!id)return;
-        for(auto& event:events)if(event && event->id==id)event.reset();
-        std::erase_if(current.signals,[&](const auto& event){return event.id==id;});
-        if(replay_signal_id==id)replay_signal_id=0;
+    void discard_staged_recoveries() {
+        if(!staged_receives)return;
+        std::erase_if(current.signals,[this](const auto& event) {
+            return std::any_of(staged_receives->entries().begin(),staged_receives->entries().end(),[&](const auto& staged) {
+                return staged && staged->recovering() && staged->event.id==event.id && staged->event.revision>=event.revision;
+            });
+        });
+        staged_receives->clear_recoveries();
     }
     // Called with mutex held, after validation. Invalid input must leave a
     // currently presented simulation and its pending result untouched.
@@ -845,38 +838,32 @@ struct Session::Impl {
         const auto elapsed = std::max(Clock::duration::zero(), now - replay_started);
         const bool finished = elapsed >= replay_duration;
         const auto elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::min(elapsed, Clock::duration(replay_duration))).count();
-        const auto due = finished ? replay_signals.size() : std::min(replay_signals.size(),
+        const auto due = finished ? replay.size() : std::min(replay.size(),
             static_cast<std::size_t>(static_cast<std::uint64_t>(elapsed_ns) * replay.size() / 3000000000ULL) + 1);
         // Retain only the displayed generation frame if replay is cancelled.
         // The CPU may already have generated the entire transmission.
         const auto trace_index = finished ? replay.size() - 1 : std::min(replay.size() - 1,
             static_cast<std::size_t>(static_cast<std::uint64_t>(elapsed_ns) * replay.size() / 3000000000ULL));
         current.transmit_trace = replay[trace_index].transmit_trace;
-        while (replay_signal_cursor < due) {
-            auto& event = replay_signals[replay_signal_cursor++];
-            if (event && !(finished && replay_verified && event->id==replay_verified->id))
-                append_signal(std::move(*event));
-            event.reset();
-        }
-        if (elapsed >= replay_duration) {
-            if(replay_received && replay_received->recovery && replay_verified) {
-                // Search starts after this simulation's physical completion
-                // reaches the presentation clock, preserving replay ordering.
-                queue_recovery(std::move(*replay_received),*replay_verified);
-                replay_received.reset();staged_received_bytes=0;
+        if(staged_receives)staged_receives->drain(due,finished,[&](detail::ReplayStaging::Entry entry) {
+            if(entry.terminal()) {
+                // Suppress obsolete prefixes for every completed reception,
+                // while retaining any independent later revision.
+                std::erase_if(current.signals,[&](const auto& event) {
+                    return event.id==entry.event.id && event.revision<=entry.event.revision;
+                });
+                if(entry.received && entry.received->recovery) {
+                    queue_recovery(std::move(*entry.received),entry.event);
+                    entry.received.reset();
+                }
+                if(entry.received) {
+                    admit_received(entry.received->content.message.data.capacity(),settings.content_limit);
+                    current.received.push_back(std::move(*entry.received));
+                }
             }
-            if (replay_verified) {
-                // A stalled consumer needs the final state once, rather than
-                // every unpresented prefix followed by that same final state.
-                const auto id=replay_verified->id;
-                std::erase_if(current.signals,[&](const auto& event){return event.id==id;});
-                append_signal(std::move(*replay_verified));
-            }
-            if (replay_received) {
-                staged_received_bytes = 0;
-                admit_received(replay_received->content.message.data.size(), settings.content_limit);
-                current.received.push_back(std::move(*replay_received));
-            }
+            append_signal(std::move(entry.event));
+        });
+        if (finished) {
             // A stalled UI must not extend the replay or paint old symbol
             // coordinates over live input. Account for undelivered points.
             const auto first = delivered_replay_frame ? *delivered_replay_frame + 1 : 0;
@@ -2060,6 +2047,10 @@ struct Session::Impl {
         }
         return events;
     }
+    std::size_t coordinator_recovery_count() const {
+        return recoveries.size()+static_cast<std::size_t>(active_recovery &&
+            std::find(recoveries.begin(),recoveries.end(),active_recovery)==recoveries.end());
+    }
     std::size_t recovery_reserved_bytes() const {
         std::size_t total=0;
         for(const auto& task:recoveries)total+=task->reserved_bytes;
@@ -2091,8 +2082,8 @@ struct Session::Impl {
             event.text.capacity()+event.raw_bits.capacity()+event.reception_id.capacity()+
             event.superseded_ids.capacity()*sizeof(std::uint64_t);
         const auto memory=result.recovery->workspace_bound()+retained;
-        const auto used=recovery_reserved_bytes(),limit=recovery_workspace_limit;
-        if(recoveries.size()+(active_recovery && std::find(recoveries.begin(),recoveries.end(),active_recovery)==recoveries.end())>=maximum_recovery_jobs ||
+        const auto used=recovery_reserved_bytes()+(staged_receives?staged_receives->recovery_reserved_bytes():0),limit=recovery_workspace_limit;
+        if(coordinator_recovery_count()+(staged_receives?staged_receives->recovery_count():0)>=maximum_recovery_jobs ||
            memory>limit || used>limit-memory) {
             event.recovery_progress.state=transfer::RecoveryState::unavailable;
             return;
@@ -2151,7 +2142,7 @@ struct Session::Impl {
                 event.reception_id=reception_id(recovered.content.message);
                 event.pre_fec_accuracy=recovered.content.pre_fec_accuracy;event.fec_stats=recovered.content.fec_stats;
                 try {
-                    admit_received(recovered.content.message.data.size(),settings.content_limit);
+                    admit_received(recovered.content.message.data.capacity(),settings.content_limit);
                     current.received.push_back(std::move(recovered));
                 } catch(const Error& error) {
                     current.error=error.what();event=task->event;
@@ -2170,7 +2161,7 @@ struct Session::Impl {
         for(std::size_t i=0;i<8;++i)id[8+i]^=static_cast<std::uint8_t>(signal_id>>(8*i));
         return id;
     }
-    void discard_obsolete(const SignalUpdate& replacement,Prepared* wave) {
+    void discard_obsolete(const SignalUpdate& replacement) {
         invalidate_recoveries(&replacement);
         const auto merged=[&](std::uint64_t id) {
             return std::find(replacement.superseded_ids.begin(),replacement.superseded_ids.end(),id)!=
@@ -2188,44 +2179,43 @@ struct Session::Impl {
         std::erase_if(current.signals,stale);
         std::erase_if(current.received,[&](const auto& result) {
             if(!old_content(result))return false;
-            received_bytes-=result.content.message.data.size();return true;
+            received_bytes-=result.content.message.data.capacity();return true;
         });
-        // A slower profile may produce stronger evidence while an earlier
-        // simulated interpretation is still queued for presentation.
-        for(auto& event:replay_signals)if(event && stale(*event))event.reset();
-        if(replay_verified && stale(*replay_verified))replay_verified.reset();
-        if(replay_received && old_content(*replay_received)) {
-            replay_received.reset();staged_received_bytes=0;
-        }
-        if(wave) {
-            if(wave->verified && stale(*wave->verified))wave->verified.reset();
-            if(wave->received && old_content(*wave->received)) {
-                wave->received.reset();staged_received_bytes=0;
-            }
-        }
+        if(staged_receives)staged_receives->discard_obsolete(replacement);
     }
-    void add_signal(SignalUpdate event, Prepared* wave = nullptr) {
+    bool add_signal(SignalUpdate event, Prepared* wave = nullptr,
+                    std::optional<transfer::Received> received = {},bool replacement = false) {
         event.sequence = next_event++; event.virtual_seconds = current.virtual_seconds;
-        if (!wave) { append_signal(std::move(event)); return; }
+        if (!wave) {
+            if(replacement)discard_obsolete(event);
+            append_signal(std::move(event));
+            return true;
+        }
         event.text = std::string(event.text.data(), std::min(event.text.size(), replay_text_limit));
-        if (event.validated || event.complete) { wave->verified = std::move(event); return; }
-        // One most recent pending observation per presentation interval.
-        // Floor quantization keeps even a late observation visible for the last
-        // interval before validation; a stalled UI never extends the deadline.
+        // Floor quantization and the original frame geometry retain the fixed
+        // presentation deadline. Independent IDs may share a due frame.
         const auto fraction = static_cast<long double>(wave->transmitted_samples) / wave->transmitter->total_samples();
-        // Frame zero represents input before this transmission began; even an
-        // early confident prefix belongs to a later presentation interval.
-        const auto index = std::min(wave->signals.size() - 1, std::max<std::size_t>(1,
+        const auto index = std::min(wave->replay_count - 1, std::max<std::size_t>(1,
             wave->binary ? wave->replay.size() :
-                static_cast<std::size_t>(fraction * static_cast<long double>(wave->signals.size()))));
-        wave->signals[index] = std::move(event);
+                static_cast<std::size_t>(fraction * static_cast<long double>(wave->replay_count))));
+        const auto jobs=coordinator_recovery_count(),bytes=recovery_reserved_bytes();
+        const auto* accepted=wave->receives->stage(std::move(event),index,std::move(received),settings.content_limit,
+            maximum_recovery_jobs-std::min(maximum_recovery_jobs,jobs),
+            recovery_workspace_limit-std::min(recovery_workspace_limit,bytes));
+        if(!accepted)return false;
+        // No cache eviction or obsolete-result withdrawal precedes successful
+        // transactional staging, so a visible capacity error preserves it.
+        if(replacement)discard_obsolete(*accepted);
+        make_receive_room(0,settings.content_limit,false);
+        return true;
     }
-    void make_receive_room(std::size_t bytes, std::size_t limit) {
+    void make_receive_room(std::size_t bytes, std::size_t limit,bool appending=true) {
+        const auto staged_received_bytes=staged_receives?staged_receives->content_bytes():0;
         if (staged_received_bytes > limit || bytes > limit - staged_received_bytes)
             throw Error("incoming content exceeds remaining receive cache capacity");
         while (!current.received.empty() &&
-               (current.received.size() >= maximum_events || received_bytes > limit - staged_received_bytes - bytes)) {
-            received_bytes -= current.received.front().content.message.data.size();
+               ((appending && current.received.size() >= maximum_events) || received_bytes > limit - staged_received_bytes - bytes)) {
+            received_bytes -= current.received.front().content.message.data.capacity();
             current.received.erase(current.received.begin());
         }
     }
@@ -2985,17 +2975,14 @@ struct Session::Impl {
                                     event.binary=false;
                                     event.reception_id=reception_id(result.content.message);
                                 }
-                                if(display.published_revision!=decision.revision) {
-                                    discard_obsolete(event,simulation_wave);
-                                    display.published_revision=decision.revision;
-                                }
+                                const bool revised=display.published_revision!=decision.revision;
+                                // Hardware/ordinary idle publication retains its
+                                // existing replacement-before-recovery order.
+                                // Simulation defers withdrawal until admission.
+                                if(revised && !simulation_wave)discard_obsolete(event);
                                 const bool recovery=result.recovery && result.stream_complete && !result.content_validated;
-                                if(recovery) {
-                                    event.recovery_progress=result.recovery_progress;
-                                    if(simulation_wave) {
-                                        simulation_wave->received=std::move(result);staged_received_bytes=0;
-                                    } else queue_recovery(std::move(result),event);
-                                }
+                                const bool report_content=!recovery && (result.content_validated || result.short_text_decoded) && !display.content_reported;
+                                if(recovery && !simulation_wave)queue_recovery(std::move(result),event);
                                 audio::trace::record("receiver_signal_commit",[&](auto& f) {
                                     f.add("cohort_start_sample",bank.samples);f.add("feed_end_sample",bank.samples+coordinate_count.value_or(sample_count));
                                     f.add("captured_samples",current.samples_received);f.add("input_revision",bank.revision);f.add("epoch",receiver.epoch);f.add("family",receiver.family);
@@ -3006,15 +2993,17 @@ struct Session::Impl {
                                     f.add("superseded_count",event.superseded_ids.size());
                                     f.add("scope","selected shared Live decision under snapshot mutex; next poll must expose this or a later prefix");
                                 });
-                                add_signal(std::move(event),simulation_wave);
-                                if(!recovery && (result.content_validated || result.short_text_decoded) && !display.content_reported) {
-                                    const auto bytes=result.content.message.data.size();
-                                    if(simulation_wave) {
-                                        simulation_wave->received.reset();staged_received_bytes=0;
-                                        make_receive_room(bytes,value.content_limit);staged_received_bytes=bytes;
-                                        simulation_wave->received=std::move(result);
-                                    } else {admit_received(bytes,value.content_limit);current.received.push_back(std::move(result));}
-                                    display.content_reported=true;
+                                std::optional<transfer::Received> staged_result;
+                                if(simulation_wave && (recovery || report_content))staged_result=std::move(result);
+                                if(add_signal(std::move(event),simulation_wave,std::move(staged_result),simulation_wave && revised)) {
+                                    if(revised)display.published_revision=decision.revision;
+                                    if(report_content) {
+                                        if(!simulation_wave) {
+                                            admit_received(result.content.message.data.capacity(),value.content_limit);
+                                            current.received.push_back(std::move(result));
+                                        }
+                                        display.content_reported=true;
+                                    }
                                 }
                             }
                             if(complete) {
@@ -3681,19 +3670,16 @@ struct Session::Impl {
         current.transmission_cancelled = wave.stop.stop_requested() || wave.graceful;
         current.transmission_stopping=false;source_pcm_started=false;finish_requested=false;
         current.status = idle_status();
-        if (!error.empty()) { transmit_error=error; current.error = error; staged_received_bytes = 0; }
+        if (!error.empty()) { transmit_error=error; current.error = error; clear_replay(); }
+        else if(wave.stop.stop_requested() || wave.graceful)clear_replay();
         else if (!wave.stop.stop_requested() && !wave.graceful) {
             current.transmission_fraction = 1;
             if (settings.simulation && !wave.replay.empty()) {
                 if(wave.receive_clear_generation!=receive_clear_generation) {
-                    wave.received.reset();wave.verified.reset();for(auto& event:wave.signals)event.reset();
+                    wave.receives->clear();
                 } else if(wave.recovery_clear_generation!=recovery_clear_generation)
-                    discard_staged_recovery(wave.received,wave.verified,wave.signals);
+                    discard_staged_recoveries();
                 replay = std::move(wave.replay); delivered_replay_frame.reset(); first_visible_replay_frame = 0;
-                replay_signals = std::move(wave.signals); replay_signal_cursor = 0;
-                replay_verified = std::move(wave.verified); replay_received = std::move(wave.received);
-                if (replay_verified) replay_signal_id = replay_verified->id;
-                else for (const auto& event : replay_signals) if (event) { replay_signal_id = event->id; break; }
                 replay_bin_hz = static_cast<double>(wave.modem.sample_rate) / (plot_size / 4);
                 replay_started = replay_clock(); current.simulation_replay = true;
                 detail::rebase_pattern_score_observations(replay, replay_started, replay_duration);
@@ -3765,8 +3751,7 @@ struct Session::Impl {
                 input_clear_generation=receive_clear_generation;processing_token = decode_stop.get_token();
                 if(simulation_bank && simulation_bank->revision!=receive_revision)reset_simulation_bank("simulation_revision");
                 if(wave && wave->receive_clear_generation!=receive_clear_generation) {
-                    wave->received.reset();wave->verified.reset();
-                    for(auto& event:wave->signals)event.reset();
+                    if(wave->receives)wave->receives->clear();
                     wave->receive_clear_generation=receive_clear_generation;
                 }
                 if (local_generation != version) {
@@ -4521,10 +4506,17 @@ struct Session::Impl {
                         budget / (replay_frame_base + prepared->point_limit * sizeof(std::complex<float>)));
                     if (prepared->replay_count < 2) throw Error("DSP workspace cannot hold a simulation replay");
                     prepared->replay.reserve(prepared->replay_count);
-                    prepared->signals.resize(prepared->replay_count);
+                    // Move the old per-frame pending allowances into one
+                    // shared measured pool; leave frame cadence/reservation
+                    // arithmetic unchanged, including small-workspace layouts.
+                    const auto frame_bytes=prepared->replay_count*(replay_frame_base+
+                        prepared->point_limit*sizeof(std::complex<float>)-detail::replay_pending_workspace);
+                    prepared->receives=std::make_shared<detail::ReplayStaging>(reserved-frame_bytes,
+                        prepared->replay_count,sizeof(RecoveryTask)+4096);
                 }
                 std::lock_guard lock(mutex);
                 if (!current.running || generation != version || tx_serial != serial || token.stop_requested()) continue;
+                staged_receives=prepared->receives;
                 ready = std::move(prepared); if (!value.simulation && !value.full_duplex) capture_stop.request_stop(); changed.notify_all();
             } catch (const std::exception& exception) {
                 std::lock_guard lock(mutex);
@@ -4693,16 +4685,10 @@ void Session::clear_received() {
     impl_->reset_input_locked();
     impl_->invalidate_recoveries();
     impl_->current.signals.clear();impl_->current.received.clear();
-    impl_->received_bytes=impl_->staged_received_bytes=0;
-    // Retain TX/replay plots and progress, but discard all already staged RX.
-    impl_->replay_verified.reset();impl_->replay_received.reset();
-    for(auto& event:impl_->replay_signals)event.reset();
-    impl_->replay_signal_id=0;
-    if(impl_->ready) {
-        impl_->ready->received.reset();impl_->ready->verified.reset();
-        for(auto& event:impl_->ready->signals)event.reset();
-        impl_->ready->receive_clear_generation=impl_->receive_clear_generation;
-    }
+    impl_->received_bytes=0;
+    // Retain TX/replay plots and progress, but discard every staged RX owner.
+    if(impl_->staged_receives)impl_->staged_receives->clear();
+    if(impl_->ready)impl_->ready->receive_clear_generation=impl_->receive_clear_generation;
     impl_->current.receiver_health={};impl_->current.receiver_behind=false;
     impl_->current.receiver_backlog_seconds=impl_->current.receiver_oldest_input_seconds=0;
     impl_->current.pattern_scores.clear();impl_->current.pattern_score_observations.clear();
@@ -4740,9 +4726,7 @@ void Session::cancel_recovery(std::uint64_t signal_id) {
 void Session::clear_recoveries() {
     std::lock_guard lock(impl_->mutex);
     ++impl_->recovery_clear_generation;
-    impl_->discard_staged_recovery(impl_->replay_received,impl_->replay_verified,impl_->replay_signals);
-    if(impl_->ready)
-        impl_->discard_staged_recovery(impl_->ready->received,impl_->ready->verified,impl_->ready->signals);
+    impl_->discard_staged_recoveries();
     // A finished coordinator can already have released its job while its
     // publication is still waiting for the next UI poll.
     std::erase_if(impl_->current.signals,[](const auto& event) {
@@ -4750,10 +4734,12 @@ void Session::clear_recoveries() {
     });
     std::erase_if(impl_->current.received,[&](const auto& received) {
         if(received.recovery_progress.state==transfer::RecoveryState::none)return false;
-        impl_->received_bytes-=received.content.message.data.size();return true;
+        impl_->received_bytes-=received.content.message.data.capacity();return true;
     });
     for(const auto& task:impl_->recoveries)
-        std::erase_if(impl_->current.signals,[&](const auto& event){return event.id==task->event.id;});
+        std::erase_if(impl_->current.signals,[&](const auto& event) {
+            return event.id==task->event.id && event.revision<=task->event.revision;
+        });
     impl_->invalidate_recoveries();
 }
 void Session::transmit(const Message& message, bool force,std::shared_ptr<const modem::FhssPlan> hopping) {

@@ -61,7 +61,7 @@ foreach(archive IN LISTS archives)
   execute_process(COMMAND "${CMAKE_COMMAND}" "-DPACKAGE_ROOT=${package_root}"
     "-DBUILD_DIR=${BUILD_DIR}" "-DGUI_SMOKE=${GUI_SMOKE}" "-DREQUIRE_MANUALS=${REQUIRE_MANUALS}"
     "-DREQUIRE_FRONTENDS=${REQUIRE_FRONTENDS}"
-    "-DGUI_SMOKE_ARCHIVE_NAME=${filename}" ${gui_smoke_options}
+    "-DGUI_SMOKE_ARCHIVE_NAME=${filename}" "-DGUI_SMOKE_ARCHIVE_SHA256=${digest}" ${gui_smoke_options}
     -P "${CMAKE_CURRENT_LIST_DIR}/verify-native-package.cmake"
     RESULT_VARIABLE verified)
   if(NOT verified EQUAL 0)

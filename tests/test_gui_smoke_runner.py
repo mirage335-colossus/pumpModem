@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Only an explicit, typed advancing-work budget outcome can be incomplete."""
+import hashlib
 import importlib.util
 import json
 import os
@@ -237,6 +238,84 @@ class SmokeRunnerTests(unittest.TestCase):
                                 capture_output=True, check=False, timeout=10)
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(self.log.exists())
+
+
+FIXTURE_TOOL = Path(__file__).resolve().parents[1] / 'tools/capture-gui-smoke-fixtures.py'
+ARCHIVE = 'DataPump-2.0-native-rev.tar.gz'
+ARCHIVE_SHA = 'a' * 64
+
+
+@unittest.skipUnless(os.name == 'posix' and os.open in os.supports_dir_fd and hasattr(os, 'O_NOFOLLOW'), 'Linux SDK fixture capture uses directory descriptors')
+class FixtureCaptureTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='gui smoke fixture capture ')
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.source = self.root / 'fixture-source'
+        self.source.mkdir()
+        (self.source / 'generated keys caf\N{LATIN SMALL LETTER E WITH ACUTE}-test.key').write_bytes(b'synthetic-key')
+        (self.source / 'attachment-input.bin').write_bytes(b'input')
+        self.destination = self.root / 'retained fixtures'
+        self.log = self.root / 'smoke.log'
+        self.log.write_text('# GUI smoke invocation ' + json.dumps({
+            'command': ['/package/bin/datapump-gui', '--smoke-test', '--smoke-timeout', '600',
+                        '--smoke-dir', str(self.source)],
+            'source_sha': '1' * 40, 'run_id': '77', 'run_attempt': '2'}) + '\n')
+        self.report = self.root / 'smoke.json'
+        self.report.write_text(json.dumps({'status': 'failed', 'source_sha': '1' * 40}))
+        self.package_manifest = self.root / 'manifest.sha256'
+        self.package_manifest.write_text('2' * 64 + '  bin/datapump-gui\n')
+
+    def invoke(self, destination=None):
+        return subprocess.run([
+            sys.executable, str(FIXTURE_TOOL), '--source', str(self.source), '--destination',
+            str(destination or self.destination), '--log', str(self.log), '--report',
+            str(self.report), '--package-manifest', str(self.package_manifest),
+            '--archive-name', ARCHIVE, '--archive-sha256', ARCHIVE_SHA],
+            capture_output=True, text=True, check=False)
+
+    def test_retains_bounded_inputs_with_exact_invocation_and_hashes(self):
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        key = self.destination / 'generated keys caf\N{LATIN SMALL LETTER E WITH ACUTE}-test.key'
+        self.assertEqual(key.read_bytes(), b'synthetic-key')
+        manifest = json.loads((self.destination / 'capture-manifest.json').read_text())
+        self.assertEqual(manifest['archive_name'], ARCHIVE)
+        self.assertEqual(manifest['synthetic_key']['status'], 'retained')
+        self.assertEqual(manifest['archive_sha256'], ARCHIVE_SHA)
+        self.assertEqual(manifest['package_inventory_sha256'], hashlib.sha256(self.package_manifest.read_bytes()).hexdigest())
+        self.assertEqual(manifest['smoke_invocation']['source_sha'], '1' * 40)
+        self.assertEqual(manifest['smoke_invocation']['command'][-2:], ['--smoke-dir', str(self.source)])
+        self.assertEqual({item['name'] for item in manifest['fixtures']},
+                         {'generated keys caf\N{LATIN SMALL LETTER E WITH ACUTE}-test.key', 'attachment-input.bin'})
+        self.assertEqual({item['sha256'] for item in manifest['fixtures']},
+                         {hashlib.sha256(b'synthetic-key').hexdigest(), hashlib.sha256(b'input').hexdigest()})
+        self.assertNotEqual(self.destination, self.source)
+
+    def test_rejects_symlinked_fixture_without_following_it(self):
+        external = self.root / 'external.key'
+        external.write_bytes(b'outside')
+        (self.source / 'linked.key').symlink_to(external)
+        result = self.invoke()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(external.read_bytes(), b'outside')
+        self.assertFalse(self.destination.exists())
+
+    def test_never_overwrites_evidence_and_rejects_unbounded_file_count(self):
+        self.destination.mkdir()
+        marker = self.destination / 'keep'
+        marker.write_text('existing')
+        result = self.invoke()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(marker.read_text(), 'existing')
+        marker.unlink()
+        self.destination.rmdir()
+        for index in range(7):
+            (self.source / f'extra-{index}.bin').write_bytes(b'x')
+        result = self.invoke()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('direct smoke fixture files', result.stderr)
+
 
 
 if __name__ == '__main__':
