@@ -4,14 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       windows_runner:
-        description: 'Windows x64 runner for this validation shard'
+        description: 'Windows runner for native scopes; the clock functional probe uses windows-2022'
         type: choice
         options: [windows-2022, windows-latest-l, windows-latest-h]
         default: windows-2022
       scope:
-        description: 'Run the selected unchanged native scope'
+        description: 'Run an unchanged native scope or the manual Windows clock functional diagnostic'
         type: choice
-        options: [core, fast, live, calibration, frontends, web, gui, package, receiver-baseline, eme-diagnostic, receiver, receiver-diagnostic, startup-guide, sched-hop-diagnostic]
+        options: [core, fast, live, calibration, frontends, web, gui, package, receiver-baseline, eme-diagnostic, receiver, receiver-diagnostic, startup-guide, sched-hop-diagnostic, windows-clock-functional-probe]
         default: live
       calibration_section:
         description: 'Calibration section; used only by the calibration scope'
@@ -36,6 +36,7 @@ permissions:
 
 jobs:
   native:
+    if: inputs.scope != 'windows-clock-functional-probe' || github.event_name != 'workflow_dispatch'
     name: Windows Release / ${{ inputs.scope }} / ${{ inputs.calibration_section }}
     runs-on: ${{ inputs.windows_runner }}
     timeout-minutes: 120
@@ -327,5 +328,157 @@ jobs:
             build/eme-diagnostic*
             build/package-*.log
             ${{ github.workspace }}/build/ci-smoke-results/
+          if-no-files-found: warn
+          retention-days: 7
+
+  windows-clock-functional-probe:
+    name: Windows standard-clock functional diagnostic
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'windows-clock-functional-probe'
+    runs-on: windows-2022
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      VCPKG_DISABLE_METRICS: '1'
+      UseMultiToolTask: 'true'
+      EnforceProcessCountAcrossBuilds: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize diagnostic artifact directory
+        run: New-Item -ItemType Directory -Force build/windows-clock-functional-probe | Out-Null
+      - name: Reuse verified static dependencies from base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./tools/use-windows-base.ps1 -Repository "$env:GITHUB_REPOSITORY" -Destination "$PWD/build/windows-base"
+      - name: Configure standard portable Release test target
+        run: |
+          $report = 'build/windows-clock-functional-probe'
+          $configureArgs = @('-S', '.', '-B', 'build', '-A', 'x64', "-DCMAKE_TOOLCHAIN_FILE=$env:DATAPUMP_WINDOWS_TOOLCHAIN", '-DVCPKG_TARGET_TRIPLET=x64-windows-static', '-DDATAPUMP_PORTABLE=ON', '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded', '-DBUILD_TESTING=ON', '-DDATAPUMP_BUILD_TUI=OFF', '-DDATAPUMP_BUILD_FB=OFF', '-DDATAPUMP_CALIBRATION_SECTION=all', '-DDART_TESTING_TIMEOUT=3600', '-DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE')
+          $configureCommand = 'cmake ' + (($configureArgs | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' ')
+          $configureOutput = & cmake @configureArgs 2>&1
+          $configureExit = $LASTEXITCODE
+          $configureOutput | Out-File -FilePath "$report/configure.log" -Encoding utf8
+          [ordered]@{ command=$configureCommand; toolchain_file=$env:DATAPUMP_WINDOWS_TOOLCHAIN; exit_code=$configureExit } | ConvertTo-Json | Set-Content -Encoding utf8 "$report/configure.json"
+          if ($configureExit -ne 0) { throw "CMake configuration failed with exit $configureExit" }
+      - name: Build only test_live and retain identity
+        run: |
+          $report = 'build/windows-clock-functional-probe'
+          $sourceSha = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $sourceSha -ne $env:GITHUB_SHA) { throw 'Diagnostic source SHA does not match the checked-out workflow revision' }
+          $testSource = (Get-FileHash tests/test_live.cpp -Algorithm SHA256).Hash.ToLowerInvariant()
+          $workflowSource = (Get-FileHash .github/workflows/native-windows.yml -Algorithm SHA256).Hash.ToLowerInvariant()
+          $configureRecord = Get-Content "$report/configure.json" -Raw | ConvertFrom-Json
+          $cache = 'build/CMakeCache.txt'
+          if (!(Test-Path -LiteralPath $cache -PathType Leaf)) { throw 'Configured CMake cache is missing; diagnostic refuses a cold dependency build' }
+          $cacheSha = (Get-FileHash $cache -Algorithm SHA256).Hash.ToLowerInvariant()
+          $buildCommand = 'cmake --build build --config Release --target test_live --parallel 1'
+          $buildOutput = & cmake --build build --config Release --target test_live --parallel 1 2>&1
+          $buildExit = $LASTEXITCODE
+          $buildOutput | Out-File -FilePath "$report/build.log" -Encoding utf8
+          if ($buildExit -ne 0) { throw "test_live build failed with exit $buildExit" }
+          $binary = 'build/Release/test_live.exe'
+          if (!(Test-Path -LiteralPath $binary -PathType Leaf)) { throw 'Expected Release test_live binary was not produced' }
+          $binarySha = (Get-FileHash $binary -Algorithm SHA256).Hash.ToLowerInvariant()
+          $record = [ordered]@{
+            workflow_run_id = $env:GITHUB_RUN_ID
+            workflow_run_attempt = $env:GITHUB_RUN_ATTEMPT
+            source_sha = $sourceSha
+            workflow_file_sha256 = $workflowSource
+            test_live_source_sha256 = $testSource
+            configure_command = $configureRecord.command
+            configure_exit_code = $configureRecord.exit_code
+            toolchain_file = $configureRecord.toolchain_file
+            toolchain_file_sha256 = (Get-FileHash $configureRecord.toolchain_file -Algorithm SHA256).Hash.ToLowerInvariant()
+            cmake_cache_sha256 = $cacheSha
+            build_command = $buildCommand
+            build_exit_code = $buildExit
+            binary_path = $binary
+            binary_sha256 = $binarySha
+            standard_mode_command = "$binary --simulation-media-clock-standard"
+            result = 'built; application run pending'
+          }
+          $record | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 "$report/build-identity.json"
+      - name: Run only the existing standard-clock functional fixture
+        timeout-minutes: 12
+        run: |
+          $report = 'build/windows-clock-functional-probe'
+          $recordPath = "$report/build-identity.json"
+          $record = Get-Content $recordPath -Raw | ConvertFrom-Json
+          $binary = Resolve-Path -LiteralPath $record.binary_path
+          if ((Get-FileHash $binary -Algorithm SHA256).Hash.ToLowerInvariant() -ne $record.binary_sha256) { throw 'test_live binary changed after build identity capture' }
+          $psi = [System.Diagnostics.ProcessStartInfo]::new()
+          $psi.FileName = $binary.Path
+          $psi.Arguments = '--simulation-media-clock-standard'
+          $psi.WorkingDirectory = (Get-Location).Path
+          $psi.UseShellExecute = $false
+          $psi.RedirectStandardOutput = $true
+          $psi.RedirectStandardError = $true
+          $process = [System.Diagnostics.Process]::new()
+          $process.StartInfo = $psi
+          $startedUtc = [DateTimeOffset]::UtcNow
+          $watch = [System.Diagnostics.Stopwatch]::StartNew()
+          $timedOut = $false
+          $exitCode = $null
+          $launchError = $null
+          $stdout = ''
+          $stderr = ''
+          try {
+            if (!$process.Start()) { throw 'Process.Start returned false' }
+            $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+            $stderrTask = $process.StandardError.ReadToEndAsync()
+            if (!$process.WaitForExit(600000)) {
+              $timedOut = $true
+              try { $process.Kill($true) } catch [System.InvalidOperationException] { }
+              $process.WaitForExit()
+            }
+            else { $process.WaitForExit() }
+            $exitCode = $process.ExitCode
+            $stdout = $stdoutTask.GetAwaiter().GetResult()
+            $stderr = $stderrTask.GetAwaiter().GetResult()
+          }
+          catch { $launchError = $_.Exception.ToString() }
+          finally { $watch.Stop(); $process.Dispose() }
+          [System.IO.File]::WriteAllText((Join-Path $report 'stdout.log'), $stdout, [System.Text.UTF8Encoding]::new($false))
+          [System.IO.File]::WriteAllText((Join-Path $report 'stderr.log'), $stderr, [System.Text.UTF8Encoding]::new($false))
+          $sourceAfter = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0) { $sourceAfter = 'git-rev-parse-failed' }
+          $testSourceAfter = (Get-FileHash tests/test_live.cpp -Algorithm SHA256).Hash.ToLowerInvariant()
+          $cacheAfter = (Get-FileHash build/CMakeCache.txt -Algorithm SHA256).Hash.ToLowerInvariant()
+          $binaryAfter = (Get-FileHash $binary -Algorithm SHA256).Hash.ToLowerInvariant()
+          $sha = [System.Security.Cryptography.SHA256]::Create()
+          try {
+            $stdoutSha = ([Convert]::ToHexString($sha.ComputeHash([System.IO.File]::ReadAllBytes((Join-Path $report 'stdout.log'))))).ToLowerInvariant()
+            $stderrSha = ([Convert]::ToHexString($sha.ComputeHash([System.IO.File]::ReadAllBytes((Join-Path $report 'stderr.log'))))).ToLowerInvariant()
+          }
+          finally { $sha.Dispose() }
+          $marker = $stdout.Contains('default simulation media clock standard geometry passed')
+          $record | Add-Member -NotePropertyName application_started_utc -NotePropertyValue $startedUtc.ToString('o') -Force
+          $record | Add-Member -NotePropertyName wrapper_wall_seconds -NotePropertyValue $watch.Elapsed.TotalSeconds -Force
+          $record | Add-Member -NotePropertyName external_timeout_seconds -NotePropertyValue 600 -Force
+          $record | Add-Member -NotePropertyName timed_out -NotePropertyValue $timedOut -Force
+          $record | Add-Member -NotePropertyName application_exit_code -NotePropertyValue $exitCode -Force
+          $record | Add-Member -NotePropertyName launch_error -NotePropertyValue $launchError -Force
+          $record | Add-Member -NotePropertyName stdout_sha256 -NotePropertyValue $stdoutSha -Force
+          $record | Add-Member -NotePropertyName stderr_sha256 -NotePropertyValue $stderrSha -Force
+          $record | Add-Member -NotePropertyName stdout_success_marker_present -NotePropertyValue $marker -Force
+          $record | Add-Member -NotePropertyName stderr_empty -NotePropertyValue ([string]::IsNullOrEmpty($stderr)) -Force
+          $record | Add-Member -NotePropertyName source_sha_after -NotePropertyValue $sourceAfter -Force
+          $record | Add-Member -NotePropertyName test_live_source_sha256_after -NotePropertyValue $testSourceAfter -Force
+          $record | Add-Member -NotePropertyName cmake_cache_sha256_after -NotePropertyValue $cacheAfter -Force
+          $record | Add-Member -NotePropertyName binary_sha256_after -NotePropertyValue $binaryAfter -Force
+          $passed = (!$timedOut -and $null -eq $launchError -and $exitCode -eq 0 -and $marker -and [string]::IsNullOrEmpty($stderr) -and $sourceAfter -eq $record.source_sha -and $testSourceAfter -eq $record.test_live_source_sha256 -and $cacheAfter -eq $record.cmake_cache_sha256 -and $binaryAfter -eq $record.binary_sha256)
+          $record | Add-Member -NotePropertyName result -NotePropertyValue $(if ($passed) { 'PASS' } else { 'FAIL' }) -Force
+          $record | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 "$report/run.json"
+          if (!$passed) { throw 'Standard-clock diagnostic failed; retained run.json and stdout/stderr.' }
+          'This manual-only standard-geometry run is a diagnostic functional probe, not a compact-geometry throughput qualification or waiver for existing gates.' | Add-Content -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+      - name: Retain standard-clock diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: CI-Windows-Clock-Functional-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          path: build/windows-clock-functional-probe/
           if-no-files-found: warn
           retention-days: 7
