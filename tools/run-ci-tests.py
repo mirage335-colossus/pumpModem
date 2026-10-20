@@ -57,14 +57,14 @@ def select_tests(tests, scope, sanitizers=False, sanitizer_realtime=False):
 
 class WorkloadWarningCollector:
     """Bind complete verbose CTest workload records to this process's tests."""
-    _start = re.compile(r'^\s*Start (\d+): (.+)$')
-    _warning = re.compile(r'^(\d+): (TEST_WORKLOAD_BUDGET:.*)$')
-    _nested_warning = re.compile(r'^\d+:\s+\d+:\s+TEST_WORKLOAD_BUDGET:')
-    _malformed_warning = re.compile(r'^\d+: TEST_WORKLOAD_BUDGET(?:\s|$)')
-    _raw_warning = re.compile(r'^TEST_WORKLOAD_BUDGET:')
-    _start_prefix = re.compile(r'^\s*Start \d')
-    _completion = re.compile(r'^\s*\d+/\d+ Test #(\d+):(.*)$')
-    _completion_prefix = re.compile(r'^\s*\d+/\d+ Test #\d+')
+    _start = re.compile(r'^[ \t]*Start[ \t]+(\d+): (.+)$')
+    _warning = re.compile(r'^[ \t]*(\d+): (TEST_WORKLOAD_BUDGET:.*)$')
+    _nested_warning = re.compile(r'^[ \t]*\d+:[ \t]+\d+:[ \t]+TEST_WORKLOAD_BUDGET:')
+    _malformed_warning = re.compile(r'^[ \t]*\d+:[ \t]+TEST_WORKLOAD_BUDGET(?:\s|$)')
+    _raw_warning = re.compile(r'^[ \t]*TEST_WORKLOAD_BUDGET:')
+    _start_prefix = re.compile(r'^[ \t]*Start[ \t]+\d')
+    _completion = re.compile(r'^[ \t]*\d+/\d+[ \t]+Test[ \t]+#(\d+):(.*)$')
+    _completion_prefix = re.compile(r'^[ \t]*\d+/\d+[ \t]+Test[ \t]+#\d+')
 
     def __init__(self, selected):
         self.selected = tuple(test['name'] for test in selected)

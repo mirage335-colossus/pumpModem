@@ -109,6 +109,39 @@ class WorkloadCollector(unittest.TestCase):
             'first': ['TEST_WORKLOAD_BUDGET: first late warning'],
             'second': ['TEST_WORKLOAD_BUDGET: second late warning']})
 
+    def test_horizontal_padding_preserves_one_two_and_three_digit_identities(self):
+        collector = runner.WorkloadWarningCollector(
+            [test('one'), test('twelve'), test('three hundred eight')])
+        collector.feed('      Start   1: one\n')
+        collector.feed('  1: TEST_WORKLOAD_BUDGET: one completed with progress\n')
+        collector.feed(' 1/3 Test   #1: one ............ Passed 0.01 sec\n')
+        collector.feed('      Start  12: twelve\n')
+        collector.feed(' 12: TEST_WORKLOAD_BUDGET: twelve completed with progress\n')
+        collector.feed(' 2/3 Test  #12: twelve .......... Passed 0.02 sec\n')
+        collector.feed('      Start 308: three hundred eight\n')
+        collector.feed('308: TEST_WORKLOAD_BUDGET: three hundred eight completed with progress\n')
+        collector.feed(' 3/3 Test #308: three hundred eight ... Passed 0.03 sec\n')
+        self.assertEqual(collector.finish(), {
+            'one': ['TEST_WORKLOAD_BUDGET: one completed with progress'],
+            'twelve': ['TEST_WORKLOAD_BUDGET: twelve completed with progress'],
+            'three hundred eight': ['TEST_WORKLOAD_BUDGET: three hundred eight completed with progress']})
+
+    def test_padded_malformed_duplicate_and_conflicting_identities_fail_closed(self):
+        cases = (
+            ['      Start   1: sample\n', '      Start  12: sample\n'],
+            ['      Start  12: sample\n', ' 1/1 Test   #9: sample ........ Passed 0.01 sec\n'],
+            ['      Start  12: sample\n', ' 1/1 Test   #12: other ........ Passed 0.01 sec\n'],
+            ['      Start  12: sample\n', ' 1/1 Test   #12:\n'],
+            ['      Start  12: sample\n', ' 12: TEST_WORKLOAD_BUDGET:   \n'],
+        )
+        for lines in cases:
+            with self.subTest(lines=lines):
+                collector = runner.WorkloadWarningCollector([test('sample')])
+                for line in lines:
+                    collector.feed(line)
+                with self.assertRaises(ValueError):
+                    collector.finish()
+
     def test_nested_fake_prefix_is_not_misattributed(self):
         collector = runner.WorkloadWarningCollector([test('sample')])
         collector.feed('Start 1: sample\n')
