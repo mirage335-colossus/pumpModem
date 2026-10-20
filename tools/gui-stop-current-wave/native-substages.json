@@ -1,0 +1,242 @@
+{
+  "schema": 2,
+  "source_runtime": "a6c2bf11d255fd00f35ecc238a56e144e7605145",
+  "baseline_commit": "b7210055818784b01e70c45aac0891c2c5d0381e",
+  "application": "original lines by exact full-source SHA; disjoint zero-context opcodes applied descending line order; exact postimage SHA required",
+  "files": [
+    {
+      "path": "src/pattern_receiver.cpp",
+      "source_sha256": "176b49f4e269098fd11b2c88a63f71451762496e0b34badc689b0dab0bed13d2",
+      "postimage_sha256": "43396449150be6f4a2a7b7f581f372f81258ebee114b05ad1f8b31ad2980211b",
+      "edits": [
+        {
+          "start_line0": 19,
+          "end_line0": 19,
+          "old": [],
+          "new": [
+            "#include \"scheduled_work_profile.hpp\"\n"
+          ]
+        },
+        {
+          "start_line0": 31,
+          "end_line0": 31,
+          "old": [],
+          "new": [
+            "namespace rx_cpu = ::datapump::detail::cpu_profile;\n"
+          ]
+        },
+        {
+          "start_line0": 815,
+          "end_line0": 816,
+          "old": [
+            "        if(streamed_templates) {code.prepare_symbol(index*code.chips_per_symbol(),stop);return;}\n"
+          ],
+          "new": [
+            "        if(streamed_templates) {\n",
+            "            rx_cpu::Scope values(rx_cpu::Stage::native_template_values);\n",
+            "            code.prepare_symbol(index*code.chips_per_symbol(),stop);return;\n",
+            "        }\n"
+          ]
+        },
+        {
+          "start_line0": 818,
+          "end_line0": 819,
+          "old": [
+            "        code.prepare_symbol(index*code.chips_per_symbol(),stop);\n"
+          ],
+          "new": [
+            "        {\n",
+            "            rx_cpu::Scope values(rx_cpu::Stage::native_template_values);\n",
+            "            code.prepare_symbol(index*code.chips_per_symbol(),stop);\n",
+            "        }\n"
+          ]
+        },
+        {
+          "start_line0": 829,
+          "end_line0": 836,
+          "old": [
+            "            for(std::size_t i=0;i<length;++i) {\n",
+            "                const auto pair=template_values(code,i,index,f);\n",
+            "                for(unsigned bit=0;bit<2;++bit) {\n",
+            "                    const auto value=arithmetic_value(pair[bit]);\n",
+            "                    rows[f][bit][length-1-i]=std::conj(value);\n",
+            "                    energies[f][bit]+=std::norm(value);\n",
+            "                    if(sample_fit)squares[f][bit]+=value*value*carrier_square(i);\n"
+          ],
+          "new": [
+            "            {\n",
+            "                rx_cpu::Scope values(rx_cpu::Stage::native_template_values);\n",
+            "                for(std::size_t i=0;i<length;++i) {\n",
+            "                    const auto pair=template_values(code,i,index,f);\n",
+            "                    for(unsigned bit=0;bit<2;++bit) {\n",
+            "                        const auto value=arithmetic_value(pair[bit]);\n",
+            "                        rows[f][bit][length-1-i]=std::conj(value);\n",
+            "                        energies[f][bit]+=std::norm(value);\n",
+            "                        if(sample_fit)squares[f][bit]+=value*value*carrier_square(i);\n",
+            "                    }\n"
+          ]
+        },
+        {
+          "start_line0": 838,
+          "end_line0": 840,
+          "old": [
+            "            for(unsigned bit=0;bit<2;++bit)\n",
+            "                pattern_fft(rows[f][bit],false,stop,acquisition_arithmetic());\n"
+          ],
+          "new": [
+            "            {\n",
+            "                rx_cpu::Scope transforms(rx_cpu::Stage::native_template_fft);\n",
+            "                for(unsigned bit=0;bit<2;++bit)\n",
+            "                    pattern_fft(rows[f][bit],false,stop,acquisition_arithmetic());\n",
+            "            }\n"
+          ]
+        },
+        {
+          "start_line0": 1558,
+          "end_line0": 1558,
+          "old": [],
+          "new": [
+            "        rx_cpu::Scope continuation(rx_cpu::Stage::native_continuation);\n"
+          ]
+        },
+        {
+          "start_line0": 2192,
+          "end_line0": 2192,
+          "old": [],
+          "new": [
+            "        rx_cpu::Scope native_whole(rx_cpu::Stage::native_whole_search);\n"
+          ]
+        },
+        {
+          "start_line0": 2213,
+          "end_line0": 2213,
+          "old": [],
+          "new": [
+            "        rx_cpu::Scope bounded(rx_cpu::Stage::native_bounded_search);\n"
+          ]
+        },
+        {
+          "start_line0": 2391,
+          "end_line0": 2393,
+          "old": [
+            "            detail::execute_fft_search_cpu(batch,jobs,\n",
+            "                std::span(scoring_outputs).first(jobs.size()*hop),scoring_workspaces,stop);\n"
+          ],
+          "new": [
+            "            {\n",
+            "                rx_cpu::Scope transforms(rx_cpu::Stage::native_fft_search);\n",
+            "                detail::execute_fft_search_cpu(batch,jobs,\n",
+            "                    std::span(scoring_outputs).first(jobs.size()*hop),scoring_workspaces,stop);\n",
+            "            }\n"
+          ]
+        },
+        {
+          "start_line0": 2485,
+          "end_line0": 2485,
+          "old": [],
+          "new": [
+            "        rx_cpu::Scope frequency_axis(rx_cpu::Stage::native_frequency_axis);\n"
+          ]
+        },
+        {
+          "start_line0": 2936,
+          "end_line0": 2936,
+          "old": [],
+          "new": [
+            "            rx_cpu::Scope acquired_batch(rx_cpu::Stage::native_acquired_batch);\n"
+          ]
+        },
+        {
+          "start_line0": 3309,
+          "end_line0": 3310,
+          "old": [
+            "    if(s.fallback){s.fallback->push(input,stop);return;}\n"
+          ],
+          "new": [
+            "    if(s.fallback){rx_cpu::Scope dispatch(rx_cpu::Stage::fallback_dispatch);s.fallback->push(input,stop);return;}\n"
+          ]
+        },
+        {
+          "start_line0": 3340,
+          "end_line0": 3341,
+          "old": [
+            "    if(s.fallback){s.fallback->push(input,stop,cache);return;}\n"
+          ],
+          "new": [
+            "    if(s.fallback){rx_cpu::Scope dispatch(rx_cpu::Stage::fallback_dispatch);s.fallback->push(input,stop,cache);return;}\n"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/scheduled_work_profile.hpp",
+      "source_sha256": "87a701a4ed853685e4250805a8665fdd0f10b15347ab0f4f8be1fcc8148b7acf",
+      "postimage_sha256": "b0e8ea4a5e01ddf91d9a9410adfa716de995ca127cbd967c63f04b17a6c32ef1",
+      "edits": [
+        {
+          "start_line0": 36,
+          "end_line0": 37,
+          "old": [
+            "    setup, search_residual, control_residual, private_permutation, private_coefficient, private_address, temporal_coordinates, temporal_lookup, temporal_plan_build, temporal_validate, temporal_gather, temporal_evaluate, temporal_export, scheduled_common_residual, scheduled_candidate_residual, common_raw, count\n"
+          ],
+          "new": [
+            "    setup, search_residual, control_residual, private_permutation, private_coefficient, private_address, temporal_coordinates, temporal_lookup, temporal_plan_build, temporal_validate, temporal_gather, temporal_evaluate, temporal_export, scheduled_common_residual, scheduled_candidate_residual, common_raw,\n",
+            "    native_acquired_batch, native_continuation, native_template_values, native_template_fft, native_fft_search, native_frequency_axis, native_bounded_search, native_whole_search, fallback_dispatch, count\n"
+          ]
+        },
+        {
+          "start_line0": 44,
+          "end_line0": 45,
+          "old": [
+            "    \"temporal_gather\",\"temporal_evaluate\",\"temporal_export\",\"scheduled_common_residual\",\"scheduled_candidate_residual\",\"common_raw\"\n"
+          ],
+          "new": [
+            "    \"temporal_gather\",\"temporal_evaluate\",\"temporal_export\",\"scheduled_common_residual\",\"scheduled_candidate_residual\",\"common_raw\",\n",
+            "    \"native_acquired_batch\",\"native_continuation\",\"native_template_values\",\"native_template_fft\",\"native_fft_search\",\"native_frequency_axis\",\"native_bounded_search\",\"native_whole_search\",\"fallback_dispatch\"\n"
+          ]
+        },
+        {
+          "start_line0": 352,
+          "end_line0": 352,
+          "old": [],
+          "new": [
+            "inline Stage current_stage() noexcept {return active?active->stage:Stage::search_residual;}\n"
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/search_parallel.cpp",
+      "source_sha256": "4aa3270515e0e8aaf6f6f146588c40fbff83627af615c85f95897e1af9132f4b",
+      "postimage_sha256": "7ed834cdeb9b9c7ab51f0699fe75f7d38672060230080e0ab5f5c46ebf151c8b",
+      "edits": [
+        {
+          "start_line0": 100,
+          "end_line0": 100,
+          "old": [],
+          "new": [
+            "            profile_stage_ = rx_cpu::current_stage();\n"
+          ]
+        },
+        {
+          "start_line0": 164,
+          "end_line0": 165,
+          "old": [
+            "        rx_cpu::Context cpu(profile_owner_,rx_cpu::Stage::search_residual);\n"
+          ],
+          "new": [
+            "        rx_cpu::Context cpu(profile_owner_,profile_stage_);\n"
+          ]
+        },
+        {
+          "start_line0": 195,
+          "end_line0": 195,
+          "old": [],
+          "new": [
+            "    rx_cpu::Stage profile_stage_ = rx_cpu::Stage::search_residual; // Submission stage for this immutable batch.\n"
+          ]
+        }
+      ]
+    }
+  ]
+}

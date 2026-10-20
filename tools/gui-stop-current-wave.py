@@ -15,7 +15,8 @@ SUPPORT = HERE / 'gui-stop-current-wave'
 HEADER = 'src/gui_stop_current_probe.hpp'
 RUNTIME = 'a6c2bf11d255fd00f35ecc238a56e144e7605145'
 PATHS = ('src/live.cpp', 'src/channel.cpp', 'src/pattern_code.cpp',
-         'src/audio_trace.hpp', 'tests/test_gui_controller.cpp')
+         'src/audio_trace.hpp', 'tests/test_gui_controller.cpp',
+         'src/pattern_receiver.cpp', 'src/scheduled_work_profile.hpp', 'src/search_parallel.cpp')
 
 def sha(value): return hashlib.sha256(value).hexdigest()
 def write(path, value): path.write_text(json.dumps(value, indent=2, allow_nan=False)+'\n')
@@ -23,7 +24,7 @@ def load(path): return json.loads(path.read_text())
 def git(root, *args):
     return subprocess.check_output(['git', '-c', 'safe.directory='+str(root), *args], cwd=root, text=True).strip()
 def support_hashes():
-    return {str(p.relative_to(HERE)): sha(p.read_bytes()) for p in (Path(__file__).resolve(), SUPPORT/'probe.hpp', SUPPORT/'pins.json', SUPPORT/'README.md')}
+    return {str(p.relative_to(HERE)): sha(p.read_bytes()) for p in (Path(__file__).resolve(), SUPPORT/'probe.hpp', SUPPORT/'pins.json', SUPPORT/'README.md', SUPPORT/'native-substages.json')}
 def replace_once(text, old, new):
     if text.count(old) != 1: raise ValueError('nonunique overlay anchor: '+old[:160])
     return text.replace(old, new)
@@ -50,8 +51,9 @@ def transform(original):
     if d[p].count(a)!=2: raise ValueError('strict stop-loop anchors changed')
     d[p]=d[p].replace(a,'do {{datapump::gui_stop_current::Poll stop_poll;controller.poll();datapump::gui_stop_current::ack(controller.snapshot());}std::this_thread::sleep_for(std::chrono::milliseconds(5));}')
     a='    const auto stop_wall_seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-stop_started).count();'
-    d[p]=replace_once(d[p],a,a+'\n    datapump::gui_stop_current::ack(controller.snapshot(),true);\n    datapump::gui_stop_current::point("strict_stop_observation",{{"transmitting",controller.snapshot().transmitting},{"finished",controller.snapshot().transmission_finished}},{{"stop_wall_seconds",stop_wall_seconds}});')
+    d[p]=replace_once(d[p],a,a+'\n    datapump::gui_stop_current::ack(controller.snapshot(),true);\n    datapump::gui_stop_current::point("strict_stop_observation",{{"transmitting",controller.snapshot().transmitting},{"finished",controller.snapshot().transmission_finished}},{{"stop_wall_seconds",stop_wall_seconds}});\n    datapump::gui_stop_current::cpu_ledger("strict_stop_observation");')
     p='src/live.cpp'
+    d[p]=replace_once(d[p],'audio::trace::record("receiver_selection",[&](auto& f) {','datapump::gui_stop_current::detail("receiver_selection",[&](auto& f) {')
     a='                 std::uint64_t observation_id = 0, bool preserve_monitor = false) {\n'
     d[p]=replace_once(d[p],a,a+'        datapump::gui_stop_current::Interval stop_publication("publication_begin","publication_end",{{"serial",serial},{"generation",version},{"force",force}});\n')
     a='        std::array<std::complex<double>,plot_size> projected{};\n        const auto rotation='
@@ -116,6 +118,18 @@ def transform(original):
     block=d[p][start:end]
     block=replace_once(block,'    return config;','    datapump::gui_stop_current::config("prepared_noise",config);\n    return config;')
     d[p]=d[p][:start]+block+d[p][end:]
+    spec=load(SUPPORT/'native-substages.json')
+    if spec['schema']!=2:raise ValueError('unknown native substage patch schema')
+    for item in spec['files']:
+        name=item['path'];text=d[name]
+        if sha(text.encode())!=item['source_sha256']:raise ValueError('stale substage source '+name)
+        lines=text.splitlines(True)
+        for edit in reversed(item['edits']):
+            begin,end=edit['start_line0'],edit['end_line0']
+            if lines[begin:end]!=edit['old']:raise ValueError('substage line mismatch '+name)
+            lines[begin:end]=edit['new']
+        d[name]=''.join(lines)
+        if sha(d[name].encode())!=item['postimage_sha256']:raise ValueError('wrong substage postimage '+name)
     return d
 
 def prepare(root, report):
@@ -236,7 +250,7 @@ def capture_readback(out):
     summaries=[x for x in rows if x.get('event')=='gui_stop_current_summary']
     if len(summaries)!=1:raise ValueError('expected one capture summary')
     summary=summaries[0]
-    if summary.get('schema')!=1 or summary.get('float_bytes')!=4 or summary.get('unmatched')!=1 or summary.get('qualification')!=0:raise ValueError('unexpected producer contract')
+    if summary.get('schema')!=2 or summary.get('float_bytes')!=4 or summary.get('unmatched')!=1 or summary.get('qualification')!=0:raise ValueError('unexpected producer contract')
     for name in ('record_overflow','detail_overflow','partition_overflow','errors','clock_errors','observer_invalid','poll_invalid','digest_error'):
         if summary.get(name)!=0:raise ValueError('incomplete capture '+name)
     observed=[x for x in rows if x.get('event','').startswith('gui_stop_current_') and 'capture_index' in x]
@@ -268,22 +282,38 @@ def capture_readback(out):
             if x[flag] not in (0,1):raise ValueError('snapshot applicability flag')
         if x['hardware_frontier_applicable']!=1-x['simulation'] or x['hardware_queues_applicable']!=1-x['simulation'] or x['bank_processed_frontier_available']!=0:raise ValueError('snapshot applicability')
         if i and (x['status_hook_wall_ns']<statuses[i-1]['status_hook_wall_ns'] or (not x['final'] and x['status_hook_wall_ns']-statuses[i-1]['status_hook_wall_ns']<200000000)):raise ValueError('snapshot status rate')
+    details=[json.loads(x['detail_json']) for x in rows if x.get('event')=='gui_stop_current_detail']
+    ledgers=[x for x in details if x.get('event')=='gui_stop_current_cpu_ledger']
+    boundaries=[x.get('boundary') for x in ledgers]
+    if len(boundaries)!=len(set(boundaries)) or not {'case_begin','case_joined'}<=set(boundaries):raise ValueError('missing/duplicate CPU ledger boundary')
+    allowed={'case_begin','request','strict_stop_observation','case_joined'}
+    if not set(boundaries)<=allowed:raise ValueError('unknown CPU ledger boundary')
+    for x in ledgers:
+        if x.get('cpu_profile_mode')!='exact_coarse' or x.get('cpu_profile_native_clock_supported')!=1:raise ValueError('CPU profile mode/clock')
+        if any(x.get(k)!=0 for k in ('cpu_profile_clock_failures','cpu_profile_nesting_failures','cpu_profile_overflows')):raise ValueError('CPU profile accounting failure')
+        for stage in ('native_acquired_batch','native_continuation','native_template_values','native_template_fft','native_fft_search','fallback_dispatch','native_frequency_axis','native_bounded_search','native_whole_search'):
+            for suffix in ('ns','calls'):
+                value=x.get('cpu_'+stage+'_'+suffix)
+                if type(value) is not int or value<0:raise ValueError('missing/invalid CPU stage '+stage)
+        if x['boundary']=='case_joined' and (x.get('cpu_profile_complete')!=1 or x.get('cpu_profile_active_contexts')!=0):raise ValueError('joined CPU ledger not complete/quiescent')
+    if any(x.get('event')=='gui_stop_current_request_before_lock' for x in observed) and 'request' not in boundaries:raise ValueError('missing request CPU ledger')
+    if any(x.get('event')=='gui_stop_current_strict_stop_observation' for x in observed) and 'strict_stop_observation' not in boundaries:raise ValueError('missing strict observation CPU ledger')
     requests=[x for x in observed if x.get('event')=='gui_stop_current_request_installed']
     primary=requests[0]['serial'] if requests else None
     def saw(event):return primary is not None and any(x.get('event')=='gui_stop_current_'+event and x.get('serial')==primary for x in observed)
-    return {'capture_valid':True,'summary':summary,'snapshot_status_count':len(statuses),'simulation_frontier_note':'bank feed counts are ingress/commit witnesses; hardware frontier and queues are inapplicable in Simulation, so zero is not no backlog','primary_request_serial':primary,'pcm_file_sha256':sha(pcm),'stored_pcm_complete':not bool(summary['pcm_truncated']),'natural_eof_observed':saw('natural_eof'),'internal_completion_observed':saw('internal_completion'),'gui_ack_observed':saw('gui_ack'),'qualification':False,'matched':False,'limits':['capture is complete only through original teardown; failure may interrupt a feed or prevent EOF/GUI ack','thread CPU for straddling intervals includes work before request','request published source witness is coherent but may predate an in-flight read','snapshot hardware disposition fields are inapplicable in Simulation; no true simulation processed frontier captured']}
+    return {'capture_valid':True,'summary':summary,'cpu_ledgers':ledgers,'receiver_selections':[x for x in details if x.get('event')=='gui_stop_current_receiver_selection'],'snapshot_status_count':len(statuses),'simulation_frontier_note':'bank feed counts are ingress/commit witnesses; hardware frontier and queues are inapplicable in Simulation, so zero is not no backlog','primary_request_serial':primary,'pcm_file_sha256':sha(pcm),'stored_pcm_complete':not bool(summary['pcm_truncated']),'natural_eof_observed':saw('natural_eof'),'internal_completion_observed':saw('internal_completion'),'gui_ack_observed':saw('gui_ack'),'qualification':False,'matched':False,'limits':['capture is complete only through original teardown; failure may interrupt a feed or prevent EOF/GUI ack','thread CPU for straddling intervals includes work before request','request published source witness is coherent but may predate an in-flight read','snapshot hardware disposition fields are inapplicable in Simulation; no true simulation processed frontier captured']}
 
 def run(root,report,binary,load_binary,condition,capture,timeout):
     m=check_prepared(root,report);out=report/'run';out.mkdir(exist_ok=False)
     if timeout<30 or timeout>900:raise ValueError('GUI external timeout must be30..900 seconds')
     if condition=='preparation' and (not load_binary or not load_binary.is_file()):raise ValueError('missing preparation binary')
-    binary=binary.resolve();build=build_evidence(root,binary);env=dict(os.environ,DATAPUMP_GUI_STOP_CURRENT='1' if capture else '0',DATAPUMP_GUI_STOP_CURRENT_OUT=str(out))
+    binary=binary.resolve();build=build_evidence(root,binary);env=dict(os.environ,DATAPUMP_GUI_STOP_CURRENT='1' if capture else '0',DATAPUMP_GUI_STOP_CURRENT_OUT=str(out),DATAPUMP_RX_CPU_PROFILE='coarse')
     bound={str(binary):sha(binary.read_bytes())}
     bound[build['cache']]=build['cache_sha256'];bound[build['compile_commands']]=build['compile_commands_sha256']
     bound.update({str(root/p):h for p,h in m['read_pins'].items() if p not in m['postimages']})
     bound.update({str(root/p):h for p,h in m['postimages'].items()});bound[str(root/HEADER)]=m['header_sha256']
     if load_binary:bound[str(load_binary.resolve())]=sha(load_binary.read_bytes())
-    launch={'schema':1,'command':[str(binary)],'condition':condition,'capture':capture,'source_commit':m['source_commit'],'runtime':m['runtime'],'binding':bound,'support':m['support'],'build':build,'launcher_python':sys.version,'environment':{k:env[k] for k in ('DATAPUMP_GUI_STOP_CURRENT','DATAPUMP_GUI_STOP_CURRENT_OUT')},'external_timeout_seconds':timeout,'qualification':False,'matched':False,'claims_forbidden':['ON/OFF overhead','load causation','failed-core waveform reconstruction']}
+    launch={'schema':1,'command':[str(binary)],'condition':condition,'capture':capture,'source_commit':m['source_commit'],'runtime':m['runtime'],'binding':bound,'support':m['support'],'build':build,'launcher_python':sys.version,'environment':{k:env[k] for k in ('DATAPUMP_GUI_STOP_CURRENT','DATAPUMP_GUI_STOP_CURRENT_OUT','DATAPUMP_RX_CPU_PROFILE')},'external_timeout_seconds':timeout,'qualification':False,'matched':False,'claims_forbidden':['ON/OFF overhead','load causation','failed-core waveform reconstruction']}
     write(out/'launch.json',launch)
     load_p=None;gui=None;handles=[];samples=[];sample_overflow=False;load_phase=False;load_early_exit=False;timed_out=False;closure={};started=time.monotonic();sampler_wall=0.;sampler_cpu=0.;error=None;load_log_before_gui='';load_log_at_gui_end=''
     previous_handlers={sig:signal.getsignal(sig) for sig in (signal.SIGTERM,signal.SIGINT)}

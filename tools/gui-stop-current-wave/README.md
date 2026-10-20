@@ -145,3 +145,34 @@ EOF/ack missing because the original assertion aborted is reported as unobserved
 This tool requires independent source review, actual C++ build and one standard
 runner invocation. Python/mechanical preparation checks do not establish C++
 syntax, runtime safety, observer cost or successful GUI completion.
+
+## Native receiver CPU partition wave (schema 2)
+
+The completed first-stage capture at commit b721005 remains schema 1 with its
+own frozen tool identity. Schema 2 adds only private diagnostic scopes to the
+native receiver and propagates the submission's profiler stage to joined search
+workers. `native-substages.json` uses whole-file SHA preconditions and disjoint
+original-line edits applied in descending order, followed by exact postimage SHA
+checks. Failed sequential-context recipes remain retained in the assignment's
+before-Sol evidence.
+
+GUI child only enables the existing `DATAPUMP_RX_CPU_PROFILE=coarse`; the partial
+preparation child retains its normal configuration. No arithmetic, search bounds,
+thread count, scheduling, cache policy or test assertion changes. Alternate
+native scoring function scopes count attempts, including their fast rejection.
+The fallback dispatch stage counts wrapper calls; its nested PatternCorrelator
+Context records callee work in the existing categories. Streamed/bounded private
+value generation remains inside its enclosing native backend stage.
+
+Buffered `receiver_selection` details identify actual family/backend choices.
+Four process-cumulative CPU ledgers are taken at Case start, stop request, strict
+observation and joined teardown; pre-stop failures may omit request/observation.
+They never reset counters. Request/observation snapshots can cut active Contexts
+and are not atomic intervals or exact stop CPU totals. Joined teardown must be
+complete/quiescent without clock, nesting or overflow errors. The captured feed
+spans bound carry-in and cancellation work. Keep source and worker CPU separate
+from wall duration; compare completed-context deltas with the proc sample bounds
+and retain any signed unexplained residual. No matched overhead or load-causation
+claim follows from comparison with schema 1's natural input. Existing observer
+self-cost and profile clock-read counts are retained; full instrumentation cost
+remains uncalibrated. This wave localizes work and does not qualify performance.

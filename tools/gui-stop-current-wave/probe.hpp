@@ -1,6 +1,7 @@
 #pragma once
 // PRIVATE diagnostic overlay. Synthetic test_gui_controller EU fixture only.
 #include "audio_trace.hpp"
+#include "scheduled_work_profile.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/fhss_schedule.hpp"
@@ -93,6 +94,11 @@ template<class F>inline void detail(const char* name,F fill)noexcept {
   account(started);
  }catch(...){++state.errors;}
 }
+// Process-cumulative completed Contexts, including workers; never reset. A
+// request/strict snapshot may cut active Contexts and is not an atomic interval.
+inline void cpu_ledger(const char* boundary)noexcept {
+ detail("cpu_ledger",[&](auto& f){f.add("boundary",boundary);::datapump::detail::cpu_profile::write_fields(f,::datapump::detail::cpu_profile::global().snapshot());});
+}
 inline std::string hex(std::span<const unsigned char> bytes){constexpr char h[]="0123456789abcdef";std::string s;for(auto b:bytes){s+=h[b>>4];s+=h[b&15];}return s;}
 inline void config(const char* role,const modem::Config& c)noexcept {
  detail("config",[&](auto& f){f.add("role",role);f.add("sample_rate",c.sample_rate);f.add("bandwidth_hz",c.bandwidth_hz);f.add("carrier_hz",c.carrier_hz);
@@ -169,7 +175,7 @@ inline void request_before()noexcept {
  if(!active())return;const auto entered=stamp();state.requested=true;const auto request=++state.request_count;
  try {Row r;
   {std::lock_guard lock(state.mutex);r=make_row("request_before_lock",{{"request",request},{"current_read_id",state.latest_read.load()},{"published_read_id",state.published_read.load()},{"read_inflight",state.read_active.load()},{"published_generated",state.latest_generated.load()},{"published_transmitted",state.latest_transmitted.load()},{"published_endpoint",state.latest_endpoint.load()},{"source_witness_wall_ns",state.latest_read_wall.load()},{"source_snapshot_wall_ns",wall()}});r.stamp=entered;}
-  push(r);
+  push(r);cpu_ledger("request");
  }catch(...){++state.errors;}
 }
 // Coarse copies of fields from the already-polled GUI Snapshot only. Hardware
@@ -217,9 +223,10 @@ struct Case {
    trace=std::make_unique<audio::trace::Scope>(output("/trace.jsonl"),false);
   }catch(...){++state.errors;}
   point("case_begin",{{"synthetic_fixture_only",1}},{{"system_unix_seconds",std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count()}});
+  cpu_ledger("case_begin");
  }
  ~Case()noexcept {
-  if(!on)return;point("case_joined",{{"request_count",state.request_count.load()}});state.active=false;
+  if(!on)return;point("case_joined",{{"request_count",state.request_count.load()}});cpu_ledger("case_joined");state.active=false;
   // Case is declared before Controller, so every Controller/Session task has
   // joined before any digest/file emission. No hot-path file I/O occurs here.
   try {
@@ -229,7 +236,7 @@ struct Case {
    for(std::size_t i=0;i<state.count;++i){const auto& r=state.rows[i];if(!drain())break;audio::trace::record((std::string("gui_stop_current_")+r.name).c_str(),[&](auto& f){f.add("capture_index",i);f.add("observed_wall_ns",r.stamp.wall);f.add("observed_thread_cpu_ns",r.stamp.cpu);f.add("tid",r.stamp.tid);for(const auto& u:r.u)if(u.first)f.add(u.first,u.second);for(const auto& d:r.d)if(d.first)f.add(d.first,d.second);});}
    for(std::size_t i=0;i<state.detail_count;++i){if(!drain())break;audio::trace::record("gui_stop_current_detail",[&](auto& f){f.add("detail_json",state.details[i]);});}
    for(std::size_t i=0;i<state.partition_count;++i){const auto& p=state.partitions[i];if(!drain())break;audio::trace::record("gui_stop_current_pcm_partition",[&](auto& f){f.add("ordinal",i);f.add("read_id",p.read);f.add("channel",p.channel);f.add("serial",p.serial);f.add("generation",p.generation);f.add("revision",p.revision);f.add("bank",p.bank);f.add("bank_before",p.before);f.add("bank_after",p.after);f.add("count",p.count);f.add("source_first",p.source_first);f.add("source_end",p.source_end);f.add("sample_offset",p.offset);f.add("stored_count",p.stored);f.add("committed",p.committed);f.add("unwinding",p.unwinding);});}
-   drain();audio::trace::record("gui_stop_current_summary",[&](auto& f){f.add("schema",1);f.add("float_bytes",sizeof(float));f.add("native_little_endian",std::endian::native==std::endian::little);f.add("unmatched",true);f.add("qualification",false);f.add("records",state.count);f.add("record_limit",record_limit);f.add("record_overflow",state.overflow);f.add("details",state.detail_count);f.add("detail_overflow",state.detail_overflow);f.add("partitions",state.partition_count);f.add("partition_overflow",state.partition_overflow);f.add("errors",state.errors.load());f.add("clock_reads",state.clock_reads.load());f.add("clock_errors",state.clock_errors.load());f.add("observer_wall_sum_ns",state.observer_wall);f.add("observer_thread_cpu_sum_ns",state.observer_cpu);f.add("observer_invalid",state.observer_invalid);f.add("hash_wall_ns",state.hash_wall);f.add("hash_thread_cpu_ns",state.hash_cpu);f.add("snapshot_status_count",state.status_count);f.add("snapshot_status_poll_calls",state.status_poll_calls);f.add("snapshot_status_final_count",state.status_final_count);f.add("snapshot_status_period_ns",200000000);f.add("poll_calls",state.poll_count);f.add("poll_wall_ns",state.poll_wall);f.add("poll_thread_cpu_ns",state.poll_cpu);f.add("poll_invalid",state.poll_invalid);f.add("poll_max_wall_ns",state.poll_max);f.add("poll_max_interval_ns",state.poll_max_interval);f.add("committed_samples",state.committed_samples);f.add("pcm_stored_samples",state.stored_samples);f.add("pcm_truncated",state.pcm_truncated);f.add("uncertain_feeds",state.uncertain_feeds);f.add("digest_error",state.digest_error);f.add("committed_pcm_sha256",hex(std::span(digest,n)));f.add("worker_cpu_attribution","unavailable; use separate proc sampler, never add wall sums");f.add("overhead_scope","observer sums include point/detail/hash insertion and overlap; exclude interval object construction, snapshot throttle/locking, clock-call self cost, writer, serialization, proc sampler, and changed scheduling; not matched overhead");});
+   drain();audio::trace::record("gui_stop_current_summary",[&](auto& f){f.add("schema",2);f.add("float_bytes",sizeof(float));f.add("native_little_endian",std::endian::native==std::endian::little);f.add("unmatched",true);f.add("qualification",false);f.add("records",state.count);f.add("record_limit",record_limit);f.add("record_overflow",state.overflow);f.add("details",state.detail_count);f.add("detail_overflow",state.detail_overflow);f.add("partitions",state.partition_count);f.add("partition_overflow",state.partition_overflow);f.add("errors",state.errors.load());f.add("clock_reads",state.clock_reads.load());f.add("clock_errors",state.clock_errors.load());f.add("observer_wall_sum_ns",state.observer_wall);f.add("observer_thread_cpu_sum_ns",state.observer_cpu);f.add("observer_invalid",state.observer_invalid);f.add("hash_wall_ns",state.hash_wall);f.add("hash_thread_cpu_ns",state.hash_cpu);f.add("snapshot_status_count",state.status_count);f.add("snapshot_status_poll_calls",state.status_poll_calls);f.add("snapshot_status_final_count",state.status_final_count);f.add("snapshot_status_period_ns",200000000);f.add("poll_calls",state.poll_count);f.add("poll_wall_ns",state.poll_wall);f.add("poll_thread_cpu_ns",state.poll_cpu);f.add("poll_invalid",state.poll_invalid);f.add("poll_max_wall_ns",state.poll_max);f.add("poll_max_interval_ns",state.poll_max_interval);f.add("committed_samples",state.committed_samples);f.add("pcm_stored_samples",state.stored_samples);f.add("pcm_truncated",state.pcm_truncated);f.add("uncertain_feeds",state.uncertain_feeds);f.add("digest_error",state.digest_error);f.add("committed_pcm_sha256",hex(std::span(digest,n)));f.add("worker_cpu_attribution","unavailable; use separate proc sampler, never add wall sums");f.add("overhead_scope","observer sums include point/detail/hash insertion and overlap; exclude interval object construction, snapshot throttle/locking, clock-call self cost, writer, serialization, proc sampler, and changed scheduling; not matched overhead");});
   }catch(...){std::fputs("GUI_STOP_CURRENT_CAPTURE_ERROR: finalization failed\n",stderr);}
   trace.reset();
  }
