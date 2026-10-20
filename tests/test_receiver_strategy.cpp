@@ -24,6 +24,16 @@ void amplitude_arrival_accounting() {
     auto c=geometry();c.scramble=false;c.spreading_factor=64;
     PatternSearch search;search.start_offset_seconds=0;search.start_uncertainty_seconds=7;
     search.hypotheses={{0,0}};search.receiver_bank_count=1;search.worker_threads=1;
+    constexpr auto maximum=std::numeric_limits<std::size_t>::max();
+    check(receiver_strategy_bank_count(c,6,maximum,2)==maximum,
+          "receiver bank count cast a rounded floating SIZE_MAX instead of saturating");
+    check(pattern_amplitude_geometry(c,search).supported&&
+          receiver_strategy_amplitude_bank_count(c,search,maximum,2)==maximum,
+          "ordinary amplitude bank count failed integer saturation");
+    auto burst=c;burst.symbol_burst={1,0};
+    check(pattern_amplitude_geometry(burst,search).supported&&
+          receiver_strategy_amplitude_bank_count(burst,search,maximum,2)==maximum,
+          "Burst amplitude bank count failed integer saturation");
     const auto count=receiver_strategy_amplitude_bank_count(c,search,1,1);
     check(count>=2*symbol_seconds(c)+2*search.start_uncertainty_seconds,
           "public amplitude cohort omitted firstfullyobserved symbol lifetime");

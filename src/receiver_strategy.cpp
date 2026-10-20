@@ -64,7 +64,10 @@ std::size_t receiver_strategy_bank_count(const Config& c,unsigned radius,std::si
         epochs=2.L*radius+3+(std::ceil(logical/group)+3)*(std::ceil(.4L*plan.group_hops)+1);
     }
     const auto total=epochs*std::max<std::size_t>(1,keys)*std::max<std::size_t>(1,profiles);
-    return static_cast<std::size_t>(std::min(total,static_cast<long double>(std::numeric_limits<std::size_t>::max())));
+    // The floating boundary may round up beyond SIZE_MAX (notably on MSVC).
+    if(total>=static_cast<long double>(std::numeric_limits<std::size_t>::max()))
+        return std::numeric_limits<std::size_t>::max();
+    return static_cast<std::size_t>(total);
 }
 namespace {
 struct BurstAmplitudeResidency {long double epochs=0,maximum_lifetime=0;};
@@ -102,7 +105,9 @@ std::size_t receiver_strategy_amplitude_bank_count(const Config& c,const Pattern
     if(c.symbol_burst.enabled()) {
         const auto total=burst_amplitude_residency(c,search,g).epochs*
             std::max<std::size_t>(1,keys)*std::max<std::size_t>(1,profiles);
-        return static_cast<std::size_t>(std::min(total,static_cast<long double>(std::numeric_limits<std::size_t>::max())));
+        if(total>=static_cast<long double>(std::numeric_limits<std::size_t>::max()))
+            return std::numeric_limits<std::size_t>::max();
+        return static_cast<std::size_t>(total);
     }
     const auto slow=1-(g.clock_hypotheses>1?(g.clock_hypotheses-1)/2*g.clock_step_ppm:0)*1e-6L;
     const auto symbol=static_cast<long double>(symbol_sample_count(c))/c.sample_rate;
@@ -115,7 +120,9 @@ std::size_t receiver_strategy_amplitude_bank_count(const Config& c,const Pattern
     const auto stride=std::max<std::size_t>(1,search.amplitude_epoch_stride_seconds);
     const auto epochs=std::ceil(lifetime/stride)+(stride>1?2:0);
     const auto total=epochs*std::max<std::size_t>(1,keys)*std::max<std::size_t>(1,profiles);
-    return static_cast<std::size_t>(std::min(total,static_cast<long double>(std::numeric_limits<std::size_t>::max())));
+    if(total>=static_cast<long double>(std::numeric_limits<std::size_t>::max()))
+        return std::numeric_limits<std::size_t>::max();
+    return static_cast<std::size_t>(total);
 }
 namespace {
 struct PlanningCaptureContext {std::size_t cohort_workspace=0,maximum_consumers=0;};

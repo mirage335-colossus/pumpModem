@@ -126,6 +126,15 @@ void public_amplitude_clock_window() {
         "future admission ignored the capture slope");
     check(!live::detail::amplitude_epoch_lookahead(c,prepared.search,
               std::numeric_limits<long double>::quiet_NaN(),0),"invalid capture slope invented a future horizon");
+    constexpr auto maximum=std::numeric_limits<std::size_t>::max();
+    const auto floating_maximum=static_cast<long double>(maximum);
+    for(const auto slope:{floating_maximum/live::detail::plot_size,floating_maximum,
+                          static_cast<long double>(std::numeric_limits<double>::max())})
+        check(live::detail::amplitude_epoch_lookahead(c,prepared.search,slope,0)==maximum,
+              "amplitude lookahead cast a rounded floating SIZE_MAX instead of saturating");
+    const auto below=live::detail::amplitude_epoch_lookahead(c,prepared.search,
+        floating_maximum/(4*live::detail::plot_size),0);
+    check(below>0&&below<maximum,"finite representable amplitude lookahead saturated early");
     const auto crossing=live::detail::amplitude_epoch_lookahead(c,prepared.search,.9L/c.sample_rate,.2L);
     const auto equivalent=live::detail::amplitude_epoch_lookahead(c,prepared.search,1.1L/c.sample_rate,0);
     check(crossing==equivalent,"future horizon used multiplicative rather than additive capture uncertainty");

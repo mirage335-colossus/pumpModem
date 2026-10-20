@@ -104,7 +104,11 @@ inline std::size_t amplitude_epoch_lookahead(const modem::Config& config,const m
     // This remains conservative when the affine prior grows with future time.
     const auto chunk=plot_size*std::max(1.L/config.sample_rate,seconds_per_frame+rate_uncertainty/config.sample_rate);
     const auto lead=std::ceil(search.amplitude_start_uncertainty_seconds.value_or(search.start_uncertainty_seconds)+geometry.block_seconds+chunk+1);
-    return static_cast<std::size_t>(std::min(lead,static_cast<long double>(std::numeric_limits<std::size_t>::max())));
+    // SIZE_MAX can round up in a double-precision long double. Saturate in
+    // integer space before casting that rounded, out-of-range boundary.
+    if(lead>=static_cast<long double>(std::numeric_limits<std::size_t>::max()))
+        return std::numeric_limits<std::size_t>::max();
+    return static_cast<std::size_t>(lead);
 }
 inline ReceiverSearchPreparation prepare_receiver_search(const modem::Config& config,
         const Settings& value,std::uint64_t epoch,const ReceiverAdmissionContext& context,modem::PatternSearch initial={}) {
