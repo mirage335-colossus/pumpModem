@@ -17,7 +17,7 @@ RUNTIME = 'a6c2bf11d255fd00f35ecc238a56e144e7605145'
 PATHS = ('src/live.cpp', 'src/channel.cpp', 'src/pattern_code.cpp',
          'src/audio_trace.hpp', 'tests/test_gui_controller.cpp',
          'src/pattern_receiver.cpp', 'src/scheduled_work_profile.hpp', 'src/search_parallel.cpp',
-         'src/pattern_fft_batch.cpp')
+         'src/pattern_fft_batch.cpp', 'src/search_fft.cpp')
 
 def sha(value): return hashlib.sha256(value).hexdigest()
 def write(path, value): path.write_text(json.dumps(value, indent=2, allow_nan=False)+'\n')
@@ -307,17 +307,22 @@ def capture_readback(out):
     for x in ledgers:
         if x.get('cpu_profile_mode')!='exact_coarse' or x.get('cpu_profile_native_clock_supported')!=1:raise ValueError('CPU profile mode/clock')
         if any(x.get(k)!=0 for k in ('cpu_profile_clock_failures','cpu_profile_nesting_failures','cpu_profile_overflows')):raise ValueError('CPU profile accounting failure')
-        for stage in ('native_acquired_batch','native_continuation','native_template_values','native_template_fft','native_fft_search','fallback_dispatch','native_frequency_axis','native_bounded_search','native_whole_search','native_fft_validate','native_fft_template_setup','native_fft_template_values','native_fft_forward','native_fft_product','native_fft_inverse','native_fft_scores','native_fft_drift'):
+        for stage in ('native_acquired_batch','native_continuation','native_template_values','native_template_fft','native_fft_search','fallback_dispatch','native_frequency_axis','native_bounded_search','native_whole_search','native_fft_validate','native_fft_template_setup','native_fft_template_values','native_fft_forward','native_fft_product','native_fft_inverse','native_fft_scores','native_fft_drift','borrowed_fft_checks','borrowed_fft_permutation','borrowed_fft_butterflies','borrowed_fft_normalization','legacy_fft_setup','legacy_fft_permutation','legacy_fft_butterflies','legacy_fft_normalization'):
             for suffix in ('ns','calls'):
                 value=x.get('cpu_'+stage+'_'+suffix)
                 if type(value) is not int or value<0:raise ValueError('missing/invalid CPU stage '+stage)
         if x['boundary']=='case_joined' and (x.get('cpu_profile_complete')!=1 or x.get('cpu_profile_active_contexts')!=0):raise ValueError('joined CPU ledger not complete/quiescent')
     if any(x.get('event')=='gui_stop_current_request_before_lock' for x in observed) and 'request' not in boundaries:raise ValueError('missing request CPU ledger')
     if any(x.get('event')=='gui_stop_current_strict_stop_observation' for x in observed) and 'strict_stop_observation' not in boundaries:raise ValueError('missing strict observation CPU ledger')
+    fft_shapes=[x for x in details if x.get('event')=='gui_stop_current_fft_shape']
+    for x in fft_shapes:
+        n=x.get('transform');kind=x.get('kind')
+        if type(n) is not int or n<1 or n&(n-1) or type(kind) is not int or kind not in (0,1,2) or x.get('inverse')!=1 or x.get('vectorized') not in (0,1) or x.get('sample_period')!=257 or x.get('request_ordinal') not in ordinals:raise ValueError('invalid FFT shape')
+        if x['vectorized'] and (kind!=1 or not 4<=n<=8192):raise ValueError('invalid vectorized FFT shape')
     requests=[x for x in observed if x.get('event')=='gui_stop_current_request_installed']
     primary=requests[0]['serial'] if requests else None
     def saw(event):return primary is not None and any(x.get('event')=='gui_stop_current_'+event and x.get('serial')==primary for x in observed)
-    return {'capture_valid':True,'summary':summary,'cpu_ledgers':ledgers,'receiver_selections':[x for x in details if x.get('event')=='gui_stop_current_receiver_selection'],'snapshot_status_count':len(statuses),'simulation_frontier_note':'bank feed counts are ingress/commit witnesses; hardware frontier and queues are inapplicable in Simulation, so zero is not no backlog','primary_request_serial':primary,'pcm_file_sha256':sha(pcm),'stored_pcm_complete':not bool(summary['pcm_truncated']),'natural_eof_observed':saw('natural_eof'),'internal_completion_observed':saw('internal_completion'),'gui_ack_observed':saw('gui_ack'),'qualification':False,'matched':False,'limits':['capture is complete only through original teardown; failure may interrupt a feed or prevent EOF/GUI ack','thread CPU for straddling intervals includes work before request','request published source witness is coherent but may predate an in-flight read','snapshot hardware disposition fields are inapplicable in Simulation; no true simulation processed frontier captured']}
+    return {'capture_valid':True,'summary':summary,'cpu_ledgers':ledgers,'receiver_selections':[x for x in details if x.get('event')=='gui_stop_current_receiver_selection'],'fft_shapes':fft_shapes,'fft_leaf_sample_period':257,'snapshot_status_count':len(statuses),'simulation_frontier_note':'bank feed counts are ingress/commit witnesses; hardware frontier and queues are inapplicable in Simulation, so zero is not no backlog','primary_request_serial':primary,'pcm_file_sha256':sha(pcm),'stored_pcm_complete':not bool(summary['pcm_truncated']),'natural_eof_observed':saw('natural_eof'),'internal_completion_observed':saw('internal_completion'),'gui_ack_observed':saw('gui_ack'),'qualification':False,'matched':False,'limits':['capture is complete only through original teardown; failure may interrupt a feed or prevent EOF/GUI ack','thread CPU for straddling intervals includes work before request','request published source witness is coherent but may predate an in-flight read','snapshot hardware disposition fields are inapplicable in Simulation; no true simulation processed frontier captured']}
 
 def run(root,report,binary,load_binary,condition,capture,timeout):
     m=check_prepared(root,report);out=report/'run';out.mkdir(exist_ok=False)

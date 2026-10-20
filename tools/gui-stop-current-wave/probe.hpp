@@ -110,6 +110,32 @@ template<class F>inline void detail(const char* name,F fill,bool critical=false)
 inline void cpu_ledger(const char* boundary)noexcept {
  detail("cpu_ledger",[&](auto& f){f.add("boundary",boundary);f.add("request_ordinal",state.request_count.load());::datapump::detail::cpu_profile::write_fields(f,::datapump::detail::cpu_profile::global().snapshot());},true);
 }
+// Leaf timing uses one inverse per 257 calls, per kind and physical thread.
+// The odd prime stride avoids systematically selecting only one bit of a pair.
+// Shape records are deduplicated, not emitted for every transform. Only the
+// executor inverse scope is eligible; unrelated transforms stay outside it.
+inline constexpr std::uint64_t fft_sample_period=257;
+inline bool fft_sample(std::size_t,unsigned kind)noexcept {
+ if(!active()||!state.requested||kind>2||
+    ::datapump::detail::cpu_profile::current_stage()!=::datapump::detail::cpu_profile::Stage::native_fft_inverse)return false;
+ static thread_local std::array<std::uint64_t,3> counts{};
+ return ++counts[kind]%fft_sample_period==0;
+}
+inline void fft_shape(std::size_t n,unsigned kind,bool vectorized,bool inverse)noexcept {
+ if(!active()||!state.requested||!inverse||kind>2)return;
+ using Stage=::datapump::detail::cpu_profile::Stage;
+ const auto stage=::datapump::detail::cpu_profile::current_stage();
+ if(stage!=Stage::native_fft_inverse&&stage!=Stage::borrowed_fft_checks&&stage!=Stage::legacy_fft_setup)return;
+ struct Shape {std::size_t n;std::uint64_t request;unsigned kind;bool vectorized;};
+ static thread_local std::array<Shape,64> seen{};
+ static thread_local std::size_t count=0;
+ const Shape key{n,state.request_count.load(),kind,vectorized};
+ for(std::size_t i=0;i<count;++i)if(seen[i].n==key.n&&seen[i].request==key.request&&
+    seen[i].kind==key.kind&&seen[i].vectorized==key.vectorized)return;
+ if(count==seen.size()){++state.errors;return;}
+ seen[count++]=key;
+ detail("fft_shape",[&](auto& f){f.add("request_ordinal",key.request);f.add("transform",n);f.add("kind",kind);f.add("vectorized",vectorized);f.add("inverse",inverse);f.add("sample_period",fft_sample_period);f.add("sample_scope","per-kind per-thread inverses inside executor; sparse exact thread CPU, no extrapolated wall latency");});
+}
 inline std::string hex(std::span<const unsigned char> bytes){constexpr char h[]="0123456789abcdef";std::string s;for(auto b:bytes){s+=h[b>>4];s+=h[b&15];}return s;}
 inline void config(const char* role,const modem::Config& c)noexcept {
  detail("config",[&](auto& f){f.add("role",role);f.add("sample_rate",c.sample_rate);f.add("bandwidth_hz",c.bandwidth_hz);f.add("carrier_hz",c.carrier_hz);

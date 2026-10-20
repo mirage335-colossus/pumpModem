@@ -171,7 +171,7 @@
     {
       "path": "src/scheduled_work_profile.hpp",
       "source_sha256": "87a701a4ed853685e4250805a8665fdd0f10b15347ab0f4f8be1fcc8148b7acf",
-      "postimage_sha256": "73e1598d1144b50df2ca290ab6873c2f56121acf5a35dda2675348fa73e4a518",
+      "postimage_sha256": "9efd08807230f9849c80e1d763a8e49505f4c03540ea59dac0baff6e8316fc5c",
       "edits": [
         {
           "start_line0": 36,
@@ -182,7 +182,8 @@
           "new": [
             "    setup, search_residual, control_residual, private_permutation, private_coefficient, private_address, temporal_coordinates, temporal_lookup, temporal_plan_build, temporal_validate, temporal_gather, temporal_evaluate, temporal_export, scheduled_common_residual, scheduled_candidate_residual, common_raw,\n",
             "    native_acquired_batch, native_continuation, native_template_values, native_template_fft, native_fft_search, native_frequency_axis, native_bounded_search, native_whole_search, fallback_dispatch,\n",
-            "    native_fft_validate, native_fft_template_setup, native_fft_template_values, native_fft_forward, native_fft_product, native_fft_inverse, native_fft_scores, native_fft_drift, count\n"
+            "    native_fft_validate, native_fft_template_setup, native_fft_template_values, native_fft_forward, native_fft_product, native_fft_inverse, native_fft_scores, native_fft_drift,\n",
+            "    borrowed_fft_checks, borrowed_fft_permutation, borrowed_fft_butterflies, borrowed_fft_normalization, legacy_fft_setup, legacy_fft_permutation, legacy_fft_butterflies, legacy_fft_normalization, count\n"
           ]
         },
         {
@@ -194,7 +195,8 @@
           "new": [
             "    \"temporal_gather\",\"temporal_evaluate\",\"temporal_export\",\"scheduled_common_residual\",\"scheduled_candidate_residual\",\"common_raw\",\n",
             "    \"native_acquired_batch\",\"native_continuation\",\"native_template_values\",\"native_template_fft\",\"native_fft_search\",\"native_frequency_axis\",\"native_bounded_search\",\"native_whole_search\",\"fallback_dispatch\",\n",
-            "    \"native_fft_validate\",\"native_fft_template_setup\",\"native_fft_template_values\",\"native_fft_forward\",\"native_fft_product\",\"native_fft_inverse\",\"native_fft_scores\",\"native_fft_drift\"\n"
+            "    \"native_fft_validate\",\"native_fft_template_setup\",\"native_fft_template_values\",\"native_fft_forward\",\"native_fft_product\",\"native_fft_inverse\",\"native_fft_scores\",\"native_fft_drift\",\n",
+            "    \"borrowed_fft_checks\",\"borrowed_fft_permutation\",\"borrowed_fft_butterflies\",\"borrowed_fft_normalization\",\"legacy_fft_setup\",\"legacy_fft_permutation\",\"legacy_fft_butterflies\",\"legacy_fft_normalization\"\n"
           ]
         },
         {
@@ -241,16 +243,202 @@
       ]
     },
     {
+      "path": "src/search_fft.cpp",
+      "source_sha256": "1740668a7f04dfa20c1f73c35709cb5d9696513b9dc047b31409072c134feebc",
+      "postimage_sha256": "aee4c5065f7b96c6f5e5005c311a0c5fd682fbe06d2feb141a2bc092340d520d",
+      "edits": [
+        {
+          "start_line0": 1,
+          "end_line0": 1,
+          "old": [],
+          "new": [
+            "#include \"scheduled_work_profile.hpp\"\n",
+            "#include \"gui_stop_current_probe.hpp\"\n"
+          ]
+        },
+        {
+          "start_line0": 187,
+          "end_line0": 188,
+          "old": [
+            "    const auto n=a.size();valid_size(n);valid_double_view(view);\n"
+          ],
+          "new": [
+            "    const auto n=a.size();\n",
+            "    const bool sample=inverse && ::datapump::gui_stop_current::fft_sample(n,1);\n",
+            "    ::datapump::detail::cpu_profile::Scope checks(\n",
+            "        ::datapump::detail::cpu_profile::Stage::borrowed_fft_checks,!sample);\n",
+            "    valid_size(n);valid_double_view(view);\n"
+          ]
+        },
+        {
+          "start_line0": 197,
+          "end_line0": 198,
+          "old": [
+            "#endif\n"
+          ],
+          "new": [
+            "#else\n",
+            "    const bool vectorized=false;\n",
+            "#endif\n",
+            "    ::datapump::gui_stop_current::fft_shape(n,1,vectorized,inverse);\n",
+            "    checks.finish();\n"
+          ]
+        },
+        {
+          "start_line0": 199,
+          "end_line0": 199,
+          "old": [],
+          "new": [
+            "    ::datapump::detail::cpu_profile::Scope permutation(\n",
+            "        ::datapump::detail::cpu_profile::Stage::borrowed_fft_permutation,!sample);\n"
+          ]
+        },
+        {
+          "start_line0": 203,
+          "end_line0": 203,
+          "old": [],
+          "new": [
+            "    permutation.finish();\n"
+          ]
+        },
+        {
+          "start_line0": 204,
+          "end_line0": 204,
+          "old": [],
+          "new": [
+            "    ::datapump::detail::cpu_profile::Scope butterflies(\n",
+            "        ::datapump::detail::cpu_profile::Stage::borrowed_fft_butterflies,!sample);\n"
+          ]
+        },
+        {
+          "start_line0": 227,
+          "end_line0": 230,
+          "old": [
+            "    if(inverse)for(std::size_t i=0;i<n;++i){\n",
+            "        if((i&4095U)==0)cancelled(stop);\n",
+            "        values[i]/=static_cast<double>(n);\n"
+          ],
+          "new": [
+            "    butterflies.finish();\n",
+            "    if(inverse){\n",
+            "        ::datapump::detail::cpu_profile::Scope normalization(\n",
+            "            ::datapump::detail::cpu_profile::Stage::borrowed_fft_normalization,!sample);\n",
+            "        for(std::size_t i=0;i<n;++i){\n",
+            "            if((i&4095U)==0)cancelled(stop);\n",
+            "            values[i]/=static_cast<double>(n);\n",
+            "        }\n"
+          ]
+        }
+      ]
+    },
+    {
       "path": "src/pattern_fft_batch.cpp",
       "source_sha256": "14cd5c72e43900497538bafb83a8fef3bf55d30d2342ee1e9880286409a7a7ae",
-      "postimage_sha256": "6c4ffc617234d16a243fbce198690853034e0db78406c9f3bf0901506ef1ef7f",
+      "postimage_sha256": "9e6bcf38015cefc83f1535d2654a38dfe0c4d3ef4a27ad350a55a6e88f39005a",
       "edits": [
         {
           "start_line0": 4,
           "end_line0": 4,
           "old": [],
           "new": [
-            "#include \"scheduled_work_profile.hpp\"\n"
+            "#include \"scheduled_work_profile.hpp\"\n",
+            "#include \"gui_stop_current_probe.hpp\"\n"
+          ]
+        },
+        {
+          "start_line0": 145,
+          "end_line0": 145,
+          "old": [],
+          "new": [
+            "    const bool sample=inverse && ::datapump::gui_stop_current::fft_sample(a.size(),0);\n",
+            "    ::datapump::detail::cpu_profile::Scope setup(\n",
+            "        ::datapump::detail::cpu_profile::Stage::legacy_fft_setup,!sample);\n"
+          ]
+        },
+        {
+          "start_line0": 159,
+          "end_line0": 159,
+          "old": [],
+          "new": [
+            "    setup.finish();\n",
+            "    ::datapump::gui_stop_current::fft_shape(n,0,false,inverse);\n",
+            "    ::datapump::detail::cpu_profile::Scope permutation(\n",
+            "        ::datapump::detail::cpu_profile::Stage::legacy_fft_permutation,!sample);\n"
+          ]
+        },
+        {
+          "start_line0": 163,
+          "end_line0": 163,
+          "old": [],
+          "new": [
+            "    permutation.finish();\n",
+            "    ::datapump::detail::cpu_profile::Scope butterflies(\n",
+            "        ::datapump::detail::cpu_profile::Stage::legacy_fft_butterflies,!sample);\n"
+          ]
+        },
+        {
+          "start_line0": 174,
+          "end_line0": 175,
+          "old": [
+            "    if(inverse)for(auto& value:a)value/=static_cast<double>(n);\n"
+          ],
+          "new": [
+            "    butterflies.finish();\n",
+            "    if(inverse){\n",
+            "        ::datapump::detail::cpu_profile::Scope normalization(\n",
+            "            ::datapump::detail::cpu_profile::Stage::legacy_fft_normalization,!sample);\n",
+            "        for(auto& value:a)value/=static_cast<double>(n);\n",
+            "    }\n"
+          ]
+        },
+        {
+          "start_line0": 187,
+          "end_line0": 187,
+          "old": [],
+          "new": [
+            "    const bool sample=inverse && ::datapump::gui_stop_current::fft_sample(n,2);\n",
+            "    ::datapump::detail::cpu_profile::Scope setup(\n",
+            "        ::datapump::detail::cpu_profile::Stage::legacy_fft_setup,!sample);\n"
+          ]
+        },
+        {
+          "start_line0": 191,
+          "end_line0": 191,
+          "old": [],
+          "new": [
+            "    setup.finish();\n",
+            "    ::datapump::gui_stop_current::fft_shape(n,2,false,inverse);\n",
+            "    ::datapump::detail::cpu_profile::Scope permutation(\n",
+            "        ::datapump::detail::cpu_profile::Stage::legacy_fft_permutation,!sample);\n"
+          ]
+        },
+        {
+          "start_line0": 195,
+          "end_line0": 195,
+          "old": [],
+          "new": [
+            "    permutation.finish();\n",
+            "    ::datapump::detail::cpu_profile::Scope butterflies(\n",
+            "        ::datapump::detail::cpu_profile::Stage::legacy_fft_butterflies,!sample);\n"
+          ]
+        },
+        {
+          "start_line0": 211,
+          "end_line0": 214,
+          "old": [
+            "    if(inverse)for(auto& value:a){\n",
+            "        const auto z=std::complex<float>{static_cast<float>(value.real()),static_cast<float>(value.imag())}/static_cast<float>(n);\n",
+            "        value={z.real(),z.imag()};\n"
+          ],
+          "new": [
+            "    butterflies.finish();\n",
+            "    if(inverse){\n",
+            "        ::datapump::detail::cpu_profile::Scope normalization(\n",
+            "            ::datapump::detail::cpu_profile::Stage::legacy_fft_normalization,!sample);\n",
+            "        for(auto& value:a){\n",
+            "            const auto z=std::complex<float>{static_cast<float>(value.real()),static_cast<float>(value.imag())}/static_cast<float>(n);\n",
+            "            value={z.real(),z.imag()};\n",
+            "        }\n"
           ]
         },
         {

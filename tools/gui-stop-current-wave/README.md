@@ -203,3 +203,25 @@ EU stop 9.177969929 seconds, but lost 13 general metadata records including its
 joined ledger. That capture remains incomplete. Schema 3 does not reinterpret
 it as qualification. No matched overhead or speed comparison is inferred from
 natural-input runs; self-cost counters exclude clock/scope and scheduling cost.
+
+
+The next leaf wave records each distinct executor inverse shape per physical
+thread and request ordinal: transform size, legacy FP64 / borrowed FP64 / legacy
+FP32 kind, and the borrowed kernel's actual vectorized selection. Shape records
+are bounded/deduplicated; neither backend nor SIMD selection is inferred from
+receiver-selection text. Timing samples one inverse per 257 calls per kind and
+thread, dividing it into checks/setup, bit permutation, butterflies and inverse
+normalization. The odd prime stride avoids selecting only one bit of a pair.
+Scopes outside selected calls are disengaged in coarse mode. Their CPU counts
+are sparse observations, not the complete inverse workload or extrapolated stop
+latency. The existing enclosing inverse scope still covers the remaining work.
+
+The completed prior wave 39395606466 on 5319139 retained all five CPU ledgers,
+with zero overflow and a full original GUI pass (EU 9.986809925 seconds). Its
+primary completed-Context delta was 20.683850150 CPU seconds across 9.988151231
+wall seconds, with one active Context at each cut. Inverse FFT, scoring and
+product used 8.603036679, 4.550112335 and 2.710410693 CPU seconds, respectively;
+each had 328,450 calls. Private template generation and forward transforms had
+zero measured calls. It did not distinguish the two inverse kernels or sizes.
+Earlier normalization evidence on the exact current FFT source remains retained
+and reusable; it does not prove which kernel this GUI executed.
