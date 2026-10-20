@@ -1,0 +1,147 @@
+# Current-source GUI stop critical-path capture
+
+This is the first-stage, **unmatched** diagnostic for
+`gui-stop-current-identity-wave`, under the original Sol-owned
+`instrumented-gui-core-failures-20261018` diagnosis. It cannot establish ON/OFF
+instrumentation overhead, load causation, or the failed core run's waveform.
+The legacy `gui-stop-differential.py` source pins and preparation history are
+unchanged. Its generic `trace_seal` reader is reused only for file closure.
+
+## Integration and invocation
+
+Use a fresh isolated current checkout/archive. `pins.json` binds actual a6 GUI
+and runtime read dependencies; metadata-only newer commits are recorded. Do not
+relax a stale pin. The preparation manifest records the whole original source
+inventory, actual Git HEAD when available, original and changed files, tool and
+support identities. Archives without Git metadata are suitable for mechanical
+checks, but the runner should retain their separately authenticated commit.
+
+```
+python3 -B tools/gui-stop-current-wave.py prepare --root "$PWD" --report "$PWD/build/gui-stop-current"
+```
+
+Build only `test_gui_controller` and `test_scheduled_parallel_preparation`, using
+the existing standard GNU11 Debug/O1 ASan+UBSan, portable OFF recipe. Export
+`compile_commands.json`; the runner checks actual GUI instrumented/SAN flags and
+cache values. No application build or runtime is performed by `prepare`.
+
+```
+python3 -B tools/gui-stop-current-wave.py run --root "$PWD" --report "$PWD/build/gui-stop-current" --binary "$PWD/build/test_gui_controller" --load-binary "$PWD/build/test_scheduled_parallel_preparation" --condition preparation --capture on --timeout 600
+python3 -B tools/gui-stop-current-wave.py restore --root "$PWD" --report "$PWD/build/gui-stop-current"
+```
+
+Always retain artifacts and run restoration even when `run` exits nonzero.
+Preserve the original GUI exit, timeout, stderr and all assertion failures. The
+GUI executes its **entire original noarg main**. No predicate, 5/10-second stop
+clock, 6-second absence, protected tail, key generation, channel RNG, epoch
+provider, source scheduling or transmitter endpoint is changed. There is no
+extended post-deadline observation and no warning exception. A failed assertion
+can therefore destroy the Session before natural EOF/GUI acknowledgement; that
+is a valid captured prefix, not proof those later events never occur.
+
+For a future unloaded natural-input control use a fresh report and
+`--condition none`; `--capture off` disables the C++ observer but retains the
+external proc sampler. Distinct natural processes remain **unmatched**.
+
+## Processes and bounds
+
+One preparation child runs its original noarg program. The runner waits at most
+120 seconds for actual `arithmetic.serial` entry, then starts the GUI. It retains
+the load until the entire GUI process exits, sends TERM then KILL to the load's
+process group and reaps its leader. Phase crossings/early completion are explicit;
+they invalidate a uniform-first-phase load condition. Deliberately terminated
+preparation is a partial diagnostic, never a preparation test pass. GUI external
+timeout is 600 seconds by default (allowed range 30–900); it is independent of,
+and never replaces, original test deadlines. Finally blocks close both children.
+
+The C++ observer allocates a fixed 4MiB PCM prefix, at most 8192 fixed scalar rows,
+4096 partitions and 64 metadata strings of at most 15000 bytes. It never writes
+files from read/feed hot paths. It flushes only after EU Controller destruction
+has joined all Session tasks. The trace queue is drained below half capacity
+before each final emission, under one global ten-second emission-admission deadline;
+missing/dropped/overflow/error flags invalidate complete measurement. This
+teardown cost is outside the original stop timer, but inside whole-process wall.
+
+The Python sampler polls at 0.2 seconds, caps 4501 observations and 64 TIDs per
+process, and records actual timestamps. It retains raw per-TID CPU ticks,
+identity/start ticks, affinity and schedstat, cgroup CPU/throttling/pressure and
+memory fields. `sched_schedstats` is recorded: raw zero delay with accounting
+disabled is not evidence of no queueing. Proc races/unavailable fields remain
+explicit. Sampler wall/CPU covers proc reads, excluding final JSON serialization;
+C++ observer sums overlap and exclude writer/serialization, snapshot throttle/locking, scope setup and
+clock-call self cost. **Neither is a full overhead bound or matched estimate.**
+
+## Producer and evidence contract
+
+`run/trace.jsonl` has the ordinary strict begin/footer/external finalization seal.
+The private allowlist is applied before sequence assignment and retains only
+`trace_begin` plus `gui_stop_current_*`; existing hot trace events are suppressed.
+All coarse scalar records are serialized after join. `observed_wall_ns`,
+`observed_thread_cpu_ns` and `tid` describe observation time, not serialization.
+`capture_index` is contiguous insertion order; cross-thread timestamps are not a
+causal total order. Thread CPU may only be subtracted for the same TID.
+
+Events are `case_begin`, `source_read_begin/end/result`, `rx_feed_begin/end`,
+`publication_begin/end`, `request_before_lock`, `request_lock_acquired`,
+`request_installed`, `endpoint_before/installed`, `natural_eof`,
+`internal_completion`, `noise_factory_begin/end`, `snapshot_status`, `gui_ack`, `strict_stop_observation`, `case_joined`,
+`detail`, `pcm_partition`, and terminal `summary`, all with that prefix.
+
+* Request-before-lock stores a coherent **last completed source-read witness**
+  and its read ID/time. `current_read_id`/`read_inflight` distinguish a newer read.
+  It does not read mutable transmitter state from the GUI thread. Current
+  in-flight generated/transmitted coordinates are unknown. The source snapshot
+  has its own time and can be taken after API entry.
+* Source-thread endpoint events contain exact physical generated
+  (`samples_emitted`), channel-transmitted and endpoint (`total_samples`)
+  coordinates at that source boundary. These are separate from the published
+  floating source-seconds counter. They are never inferred from one another.
+* Read results name channel address, read ID, serial, source first/end, output
+  count, capacity and unwinding status. Read identity is process-unique. Channel
+  pointers alone are not lifetime identities; use read/configuration generations
+  and actual counters/partitions together.
+* Feed intervals include bank source-quota identity, revision/generation and bank
+  ingested/committed count (not a processed frontier). Only non-unwinding, unchanged-revision, exact count advancement is
+  committed. All other attempted spans remain uncertain; no PCM or absence is
+  invented. Hash concatenation is of committed spans only. Partition fields
+  preserve each bank/channel coordinate; do not treat a reset as continuity.
+* After a stop request, the existing GUI snapshot/ack path buffers `snapshot_status`
+  at most every 200ms, plus first and final/ack observations. It records ingress,
+  raw hardware processed/queued/decoding disposition, resident instances, health,
+  backlog/oldest age, published source seconds and simulation tail/compute state.
+  `hardware_frontier_applicable` and `hardware_queues_applicable` are false in
+  Simulation: their raw zeros do **not** prove no backlog or a processed frontier.
+  `bank_processed_frontier_available` is explicitly false; no per-owner scan or
+  new receiver-frontier accessor was added. `status_hook_wall_ns` marks the hook
+  reading the already-published Snapshot, not the receiver's publication time.
+  First/final status can be closer than 200ms. No status is forced after original
+  teardown, and failed setup before stop can have no post-request status.
+* Publication scopes include early-return/no-op calls; an interval does not prove
+  a plot was changed. Interval CPU is calling-thread CPU, and a straddling interval
+  includes pre-request work. Pool-worker CPU is intentionally not attributed by
+  the C++ scope; join it to proc TIDs or retain it as unaccounted.
+* Details contain selected receiver geometry, source factory geometry and prepared-noise configuration witnesses,
+  plan shifts/guards, key MACs, spreading seeds, channel parameters and serialized
+  RNG/distribution state. Only prepared-noise details inside a same-TID source
+  `noise_factory_begin/end` bracket identify that actual TX; unrelated GUI
+  preparation details must not be conflated. No raw temporary root is exported. The copied keyfile
+  is the synthetic test-created file only; this is not general user-key tracing.
+
+`committed-input.f32` is a bounded native-endian float prefix, up to 4MiB. The
+summary contains a full SHA256 over all committed spans, exact sample counts,
+truncation and uncertainty flags. The runner independently checks partition
+counts/offsets and, when untruncated, the actual file hash. This enables later PCM
+receiver replay; it does **not** promise exact transmitter regeneration without
+the unavailable temporary root or reconstruct the old failed waveform.
+
+The runner records stdout/stderr, original exit, child CPU/RSS and process closure,
+source/cache/compile-command/binary/tool identities before and after, phase logs
+and proc samples. Source, trace and PCM validation do not convert a failed GUI
+into a pass. Coarse capture only localizes work versus waiting within this run.
+EOF/ack missing because the original assertion aborted is reported as unobserved.
+
+## Remaining acceptance
+
+This tool requires independent source review, actual C++ build and one standard
+runner invocation. Python/mechanical preparation checks do not establish C++
+syntax, runtime safety, observer cost or successful GUI completion.
