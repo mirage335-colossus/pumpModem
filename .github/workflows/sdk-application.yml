@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       scope:
-        description: 'Run one complete SDK scope without repeating its other producers and consumers'
+        description: 'Run one SDK scope or the focused FLTK Live validation without repeating other producers and consumers'
         type: choice
-        options: [tests, packages, frontends, web, sched-hop-diagnostic, gui-core-diagnostic]
+        options: [tests, packages, frontends, web, live, sched-hop-diagnostic, gui-core-diagnostic]
         default: tests
       backend:
         type: choice
@@ -60,16 +60,21 @@ jobs:
       LP_NUM_THREADS: ${{ inputs.linux_runner == 'ubuntu-24.04' && '1' || '2' }}
       SDK_SCOPE: ${{ inputs.scope }}
       SDK_BACKEND: ${{ inputs.backend }}
+      DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL: ${{ (inputs.scope == 'live' || (inputs.scope == 'tests' && inputs.backend == 'fltk')) && inputs.linux_runner == 'ubuntu-24.04' && 'ON' || 'OFF' }}
     defaults:
       run:
         shell: bash
     steps:
       - name: Validate qualification scope and prepare logs
         run: |
-          case "$SDK_SCOPE" in packages|tests|frontends|web|sched-hop-diagnostic|gui-core-diagnostic) ;; *) echo '::error::Invalid SDK qualification scope'; exit 2 ;; esac
+          case "$SDK_SCOPE" in packages|tests|frontends|web|live|sched-hop-diagnostic|gui-core-diagnostic) ;; *) echo '::error::Invalid SDK qualification scope'; exit 2 ;; esac
           case "$SDK_BACKEND" in fltk|rev) ;; *) echo '::error::Invalid GUI backend'; exit 2 ;; esac
           if [ "$SDK_SCOPE" = gui-core-diagnostic ] && [ "$SDK_BACKEND" != fltk ]; then
             echo '::error::gui-core-diagnostic requires the FLTK backend'
+            exit 2
+          fi
+          if [ "$SDK_SCOPE" = live ] && { [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ "$SDK_BACKEND" != fltk ] || [ "${{ inputs.linux_runner }}" != ubuntu-24.04 ]; }; then
+            echo '::error::focused SDK Live requires manual FLTK scope on ubuntu-24.04'
             exit 2
           fi
           SDK_LOG_DIR="$RUNNER_TEMP/datapump-sdk-$SDK_SCOPE-$SDK_BACKEND"
@@ -162,9 +167,57 @@ jobs:
         if: inputs.scope == 'tests' || inputs.scope == 'sched-hop-diagnostic' || inputs.scope == 'gui-core-diagnostic'
         run: |
           {
-            ./build.sh test build --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON
-            ./build.sh test packaging --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON
+            ./build.sh test build --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL="$DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL"
+            ./build.sh test packaging --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend "$SDK_BACKEND" --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL="$DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL"
           } 2>&1 | tee "$SDK_LOG_DIR/build-packaging-tests.log"
+      - name: Prepare focused SDK Live with the published SDK toolchain
+        if: inputs.scope == 'live'
+        run: |
+          {
+            # This required build-isolation group is a setup prerequisite, not Live coverage.
+            ./build.sh test build --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend fltk --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL="$DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL"
+          } 2>&1 | tee "$SDK_LOG_DIR/build-isolation-setup.log"
+      - name: Run the two required SDK Live cases
+        if: inputs.scope == 'live'
+        run: |
+          {
+            printf 'source_sha=%s\n' "$GITHUB_SHA"
+            build/sdk/bin/cmake -S . -B build/sdk-application -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_PORTABLE=ON -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL="$DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL"
+            build/sdk/bin/cmake --build build/sdk-application --target datapump-tests-ci-live --parallel "$(python3 -B tools/build_capacity.py)"
+            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --show-only=json-v1 -L '^contract$' -LE native_gui -R '^(live|live_profiles)$' > "$SDK_LOG_DIR/contract-live-inventory.json"
+            python3 - "$SDK_LOG_DIR/contract-live-inventory.json" <<'PY'
+          import json, os, sys
+          tests = json.load(open(sys.argv[1], encoding='utf-8'))['tests']
+          expected = {'live', 'live_profiles'}
+          names = [test.get('name') for test in tests]
+          assert len(tests) == 2 and len(set(names)) == 2 and set(names) == expected, names
+          for test in tests:
+              props = {item['name']: item.get('value') for item in test.get('properties', [])}
+              labels = props.get('LABELS', [])
+              if isinstance(labels, str): labels = labels.split(';')
+              assert 'contract' in labels and 'native_gui' not in labels, (test['name'], labels)
+              command = test.get('command')
+              assert isinstance(command, list) and command, (test['name'], command)
+              has_flag = '--ci-functional-clock' in command[1:]
+              expected_flag = test['name'] == 'live' and os.environ.get('DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL') == 'ON'
+              assert has_flag == expected_flag, (test['name'], command, expected_flag)
+          print('SDK Live inventory: exactly live and live_profiles; functional-clock flag on live only')
+          PY
+            live_status=0
+            python3 tools/run-ci-tests.py --build-dir build/sdk-application --scope live --config Release --jobs 1 --ctest "$GITHUB_WORKSPACE/build/sdk/bin/ctest" --report "$SDK_LOG_DIR/contract-live.json" --summary "$GITHUB_STEP_SUMMARY" || live_status=$?
+            python3 - "$SDK_LOG_DIR/contract-live-inventory.json" "$SDK_LOG_DIR/contract-live.json" <<'PY'
+          import json, sys
+          inventory = json.load(open(sys.argv[1], encoding='utf-8'))['tests']
+          expected = {test['name'] for test in inventory}
+          report = json.load(open(sys.argv[2], encoding='utf-8'))
+          selected = report.get('selected')
+          omitted = report.get('omitted')
+          assert isinstance(selected, list) and set(selected) == expected and len(selected) == len(expected), (selected, expected)
+          assert omitted == [], omitted
+          print('Runner selection matches the complete contract-filtered Live inventory')
+          PY
+            if [ "$live_status" -ne 0 ]; then exit "$live_status"; fi
+          } 2>&1 | tee "$SDK_LOG_DIR/hosted-live.log"
       - name: Run both complete scheduled-hop tests with the prepared SDK
         if: inputs.scope == 'sched-hop-diagnostic'
         run: |
@@ -196,7 +249,7 @@ jobs:
             # The preceding build/packaging groups configured this exact SDK
             # tree. Keep the full contract while isolating functional Live work.
             printf 'source_sha=%s\n' "$GITHUB_SHA"
-            build/sdk/bin/cmake -S . -B build/sdk-application -DDART_TESTING_TIMEOUT=3600
+            build/sdk/bin/cmake -S . -B build/sdk-application -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL="$DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL"
             build/sdk/bin/cmake --build build/sdk-application --target datapump-tests-contract --parallel "$(python3 -B tools/build_capacity.py)"
             build/sdk/bin/ctest --test-dir build/sdk-application -C Release --show-only=json-v1 -L '^contract$' -LE native_gui -R '^(live|live_profiles)$' > "$SDK_LOG_DIR/contract-live-inventory.json"
             build/sdk/bin/ctest --test-dir build/sdk-application -C Release --show-only=json-v1 -L '^contract$' -LE native_gui -E '^(live|live_profiles|differential_receiver_probability)$' > "$SDK_LOG_DIR/contract-general-inventory.json"
@@ -204,7 +257,37 @@ jobs:
             # Complete every selected case even when another group fails.
             # The combined result remains fatal; no failure is converted to a pass.
             live_status=0
-            build/sdk/bin/ctest --test-dir build/sdk-application -C Release --output-on-failure --no-tests=error -L '^contract$' -LE native_gui -R '^(live|live_profiles)$' --parallel 1 --output-junit "$SDK_LOG_DIR/contract-live.xml" || live_status=$?
+            python3 - "$SDK_LOG_DIR/contract-live-inventory.json" <<'PY' || live_status=$?
+          import json, os, sys
+          tests = json.load(open(sys.argv[1], encoding='utf-8'))['tests']
+          expected = {'live', 'live_profiles'}
+          names = [test.get('name') for test in tests]
+          assert len(tests) == 2 and len(set(names)) == 2 and set(names) == expected, names
+          for test in tests:
+              props = {item['name']: item.get('value') for item in test.get('properties', [])}
+              labels = props.get('LABELS', [])
+              if isinstance(labels, str): labels = labels.split(';')
+              assert 'contract' in labels and 'native_gui' not in labels, (test['name'], labels)
+              command = test.get('command')
+              assert isinstance(command, list) and command, (test['name'], command)
+              has_flag = '--ci-functional-clock' in command[1:]
+              expected_flag = test['name'] == 'live' and os.environ.get('DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL') == 'ON'
+              assert has_flag == expected_flag, (test['name'], command, expected_flag)
+          PY
+            python3 tools/run-ci-tests.py --build-dir build/sdk-application --scope live --config Release --jobs 1 --ctest "$GITHUB_WORKSPACE/build/sdk/bin/ctest" --report "$SDK_LOG_DIR/contract-live.json" --summary "$GITHUB_STEP_SUMMARY" || { live_status=$?; }
+            compare_status=0
+            python3 - "$SDK_LOG_DIR/contract-live-inventory.json" "$SDK_LOG_DIR/contract-live.json" <<'PY' || compare_status=$?
+          import json, sys
+          inventory = json.load(open(sys.argv[1], encoding='utf-8'))['tests']
+          expected = {test['name'] for test in inventory}
+          report = json.load(open(sys.argv[2], encoding='utf-8'))
+          selected = report.get('selected')
+          omitted = report.get('omitted')
+          assert isinstance(selected, list) and set(selected) == expected and len(selected) == len(expected), (selected, expected)
+          assert omitted == [], omitted
+          print('Runner selection matches the complete contract-filtered Live inventory')
+          PY
+            if [ "$compare_status" -ne 0 ] && [ "$live_status" -eq 0 ]; then live_status=$compare_status; fi
             contract_status=0
             build/sdk/bin/ctest --test-dir build/sdk-application -C Release --output-on-failure --no-tests=error -L '^contract$' -LE native_gui -E '^(live|live_profiles|differential_receiver_probability)$' --parallel 2 --output-junit "$SDK_LOG_DIR/contract-general.xml" || contract_status=$?
             # Only the complete calibration receives extra computation time.
@@ -286,6 +369,8 @@ jobs:
               echo 'This scope runs both complete scheduled-hop tests plus unchanged build/packaging isolation checks using the prepared SDK. It supplies replacement evidence; it is not the full SDK contract.'
             elif [ "$SDK_SCOPE" = gui-core-diagnostic ]; then
               echo 'This FLTK-only scope runs both complete GUI core tests plus unchanged build/packaging isolation checks using the prepared SDK. It supplies replacement evidence; it is not the full SDK contract.'
+            elif [ "$SDK_SCOPE" = live ]; then
+              echo 'This manual FLTK scope runs the two Live cases with the standard-hosted functional analogue after the separate SDK build-isolation setup group. It does not run the remaining contracts or calibration and is not full SDK qualification.'
             else
               echo 'This scope runs build/packaging regressions plus the FLTK preservation contract or Rev native conformance. Source qualification runs independently of package delivery.'
             fi

@@ -181,7 +181,224 @@ class WorkloadWarningCollector:
                 for name in self.selected}
 
 
-def read_results(path, selected, default_timeout, warn_fraction, *, workload_warnings=None):
+HOSTED_CLOCK_FIELDS = {
+    'schema', 'fixture', 'status', 'case', 'normal_budget_seconds', 'limit_seconds',
+    'elapsed_seconds', 'transmission_id', 'input_revision', 'samples_received',
+    'fraction', 'source_seconds', 'generated_bits', 'total_bits', 'tail',
+    'progress_age_seconds', 'standard_functional_coverage',
+    'remaining_live_coverage', 'first_samples_received', 'first_fraction',
+    'first_source_seconds', 'observation_count',
+}
+HOSTED_CLOCK_CASES = ('raw', 'short', 'framed')
+_HOSTED_CLOCK_MARKER = 'TEST_HOSTED_THROUGHPUT:'
+
+
+def _strict_json_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError(f'duplicate hosted clock JSON key {key!r}')
+        value[key] = item
+    return value
+
+
+def parse_hosted_clock_record(payload):
+    """Parse and validate the one narrowly classified compact-clock record."""
+    try:
+        record = json.loads(payload, object_pairs_hook=_strict_json_object,
+                            parse_constant=lambda value: (_ for _ in ()).throw(
+                                ValueError(f'invalid JSON number {value}')))
+    except (json.JSONDecodeError, ValueError) as error:
+        raise ValueError(f'invalid hosted clock JSON: {error}') from error
+    if type(record) is not dict or set(record) != HOSTED_CLOCK_FIELDS:
+        raise ValueError('hosted clock record has unexpected or missing keys')
+    if type(record['schema']) is not int or record['schema'] != 1:
+        raise ValueError('hosted clock schema must be integer 1')
+    for key, expected in (('fixture', 'default_media_clock_compact'),
+                          ('status', 'incomplete_coverage'),
+                          ('standard_functional_coverage', 'passed'),
+                          ('remaining_live_coverage', 'passed')):
+        if type(record[key]) is not str or record[key] != expected:
+            raise ValueError(f'hosted clock {key} must be {expected!r}')
+    if type(record['case']) is not str or record['case'] not in HOSTED_CLOCK_CASES:
+        raise ValueError('hosted clock case must be raw, short, or framed')
+    if type(record['normal_budget_seconds']) is not int or record['normal_budget_seconds'] != 40:
+        raise ValueError('hosted clock normal budget must be integer 40')
+    if type(record['limit_seconds']) is not int or record['limit_seconds'] not in (40, 120):
+        raise ValueError('hosted clock limit must be integer 40 or 120')
+
+    def integer(key, minimum):
+        value = record[key]
+        if type(value) is not int or value < minimum:
+            raise ValueError(f'hosted clock {key} must be an integer >= {minimum}')
+
+    def number(key, minimum=None, maximum=None):
+        value = record[key]
+        if type(value) not in (int, float):
+            raise ValueError(f'hosted clock {key} must be a finite number')
+        try:
+            finite = math.isfinite(value)
+        except OverflowError:
+            finite = False
+        if not finite:
+            raise ValueError(f'hosted clock {key} must be a finite number')
+        if minimum is not None and value < minimum:
+            raise ValueError(f'hosted clock {key} must be >= {minimum}')
+        if maximum is not None and value > maximum:
+            raise ValueError(f'hosted clock {key} must be <= {maximum}')
+
+    integer('transmission_id', 1)
+    integer('input_revision', 1)
+    integer('samples_received', 0)
+    integer('generated_bits', 0)
+    integer('total_bits', 1)
+    if record['generated_bits'] > record['total_bits']:
+        raise ValueError('hosted clock generated bit count exceeds its source endpoint')
+    integer('first_samples_received', 0)
+    integer('observation_count', 2)
+    number('elapsed_seconds', record['limit_seconds'])
+    number('fraction', 0, 1)
+    number('source_seconds', 0)
+    number('progress_age_seconds', 0, 30)
+    number('first_fraction', 0, 1)
+    number('first_source_seconds', 0)
+    if type(record['tail']) is not bool:
+        raise ValueError('hosted clock tail must be a boolean')
+    if record['samples_received'] < record['first_samples_received']:
+        raise ValueError('hosted clock sample count moved backwards')
+    if record['fraction'] < record['first_fraction']:
+        raise ValueError('hosted clock fraction moved backwards')
+    if record['source_seconds'] < record['first_source_seconds']:
+        raise ValueError('hosted clock source time moved backwards')
+    advanced = (record['fraction'] > record['first_fraction'] or
+                record['source_seconds'] > record['first_source_seconds'])
+    sampled_tail_advance = record['tail'] and record['samples_received'] > record['first_samples_received']
+    if not (advanced or sampled_tail_advance):
+        raise ValueError('hosted clock record has no forward progress evidence')
+    return record
+
+
+def _hosted_clock_eligible(test):
+    command = test.get('command', ())
+    return (test.get('name') == 'live' and isinstance(command, list) and
+            '--ci-functional-clock' in command)
+
+
+class HostedClockWarningCollector:
+    """Bind exactly one strict compact-clock record to an eligible CTest case."""
+    _start = WorkloadWarningCollector._start
+    _raw_marker = re.compile(r'^[ \t]*TEST_HOSTED_THROUGHPUT(?::|\s|$)')
+    _direct_marker = re.compile(r'^[ \t]*\d+:[ \t]+TEST_HOSTED_THROUGHPUT(?::|\s|$)')
+    _frame = re.compile(r'^[ \t]*(\d+): (TEST_HOSTED_THROUGHPUT:[ \t]*\{.*\})$')
+    _nested = re.compile(r'^[ \t]*\d+:[ \t]+\d+:[ \t]+TEST_HOSTED_THROUGHPUT:')
+
+    def __init__(self, selected):
+        self.selected = {item['name']: item for item in selected}
+        self.selected_count = len(selected)
+        self.starts = {}
+        self.names = {}
+        self.records = {}
+        self.errors = []
+        self.replaying_output = False
+        self.completed = set()
+
+    def _error(self, message):
+        if len(self.errors) < 20:
+            self.errors.append(message)
+
+    def feed(self, line):
+        complete = line.endswith(b'\n') if isinstance(line, bytes) else line.endswith('\n')
+        text = (line.decode('utf-8', 'replace').rstrip('\r\n') if isinstance(line, bytes)
+                else line.rstrip('\r\n'))
+        if text.strip().startswith(('The following tests FAILED:', 'The following tests passed:')):
+            self.replaying_output = True
+            return
+        if self.replaying_output:
+            return
+        completion = WorkloadWarningCollector._completion.fullmatch(text)
+        if completion or WorkloadWarningCollector._completion_prefix.match(text):
+            if not complete or not completion:
+                self._error('incomplete CTest completion identity')
+                return
+            number = int(completion.group(1))
+            if number not in self.starts:
+                self._error(f'completion lacks CTest Start identity {number}')
+            elif number in self.completed:
+                self._error(f'repeated CTest completion identity {number}')
+            elif not re.match(r'^\s*' + re.escape(self.starts[number]) + r'\s+\.+(?=\s|\*)',
+                              completion.group(2)):
+                self._error(f'completion conflicts with CTest Start identity {number}')
+            else:
+                self.completed.add(number)
+            return
+        start = self._start.fullmatch(text)
+        if start or WorkloadWarningCollector._start_prefix.match(text):
+            if not complete or not start:
+                self._error('incomplete or malformed CTest Start identity')
+                return
+            number, name = int(start.group(1)), start.group(2)
+            if number in self.starts or name in self.names:
+                self._error('repeated CTest test identity')
+            else:
+                self.starts[number] = name
+                self.names[name] = number
+            return
+        # CTest metadata may quote a command that contains the marker. Only
+        # direct test-output frames (or malformed versions of them) are records.
+        if self._direct_marker.match(text) or self._raw_marker.match(text) or self._nested.match(text):
+            if not complete:
+                self._error('incomplete hosted clock marker line')
+                return
+            if self._nested.match(text):
+                self._error('nested hosted clock marker is not eligible output')
+                return
+            frame = self._frame.fullmatch(text)
+            if not frame:
+                self._error('malformed or unbound hosted clock marker framing')
+                return
+            number = int(frame.group(1))
+            name = self.starts.get(number)
+            if name is None:
+                self._error(f'hosted clock marker precedes or lacks CTest test number {number}')
+                return
+            if number in self.completed:
+                self._error('hosted clock marker follows test completion')
+                return
+            test = self.selected.get(name)
+            if test is None or not _hosted_clock_eligible(test):
+                self._error(f'hosted clock marker is ineligible for CTest test {name!r}')
+                return
+            if number in self.records:
+                self._error(f'duplicate hosted clock marker for CTest test {name!r}')
+                return
+            try:
+                record = parse_hosted_clock_record(frame.group(2)[len(_HOSTED_CLOCK_MARKER):].strip())
+            except ValueError as error:
+                self._error(str(error))
+                return
+            record['warning'] = frame.group(2)
+            self.records[number] = record
+            return
+
+    def finish(self, *, require_all=True):
+        expected = set(self.selected)
+        actual = set(self.names)
+        if len(expected) != self.selected_count:
+            self._error('selected CTest inventory contains duplicate names')
+        if actual - expected:
+            self._error('CTest Start identities are outside selected inventory')
+        if require_all and expected - actual:
+            self._error('CTest Start identities omit selected tests')
+        for number in self.records:
+            if number not in self.completed:
+                self._error('hosted clock record lacks a CTest completion identity')
+        if self.errors:
+            raise ValueError('Invalid verbose CTest hosted clock output: ' + '; '.join(self.errors))
+        return {self.starts[number]: record for number, record in self.records.items()}
+
+
+def read_results(path, selected, default_timeout, warn_fraction, *, workload_warnings=None,
+                 hosted_clock_warnings=None):
     root = ET.parse(path).getroot()
     cases = list(root.iter('testcase'))
     observed = Counter(case.get('name') for case in cases)
@@ -222,6 +439,13 @@ def read_results(path, selected, default_timeout, warn_fraction, *, workload_war
                   'seconds': seconds, 'timeout_seconds': timeout,
                   'workload_warnings': case_warnings,
                   'near_timeout': passed and timeout > 0 and seconds >= timeout * warn_fraction}
+        if hosted_clock_warnings and name in hosted_clock_warnings and passed:
+            coverage_limit = dict(hosted_clock_warnings[name])
+            first_case = HOSTED_CLOCK_CASES.index(coverage_limit['case'])
+            coverage_limit['compact_cases_completed'] = list(HOSTED_CLOCK_CASES[:first_case])
+            coverage_limit['compact_cases_not_completed'] = [
+                *HOSTED_CLOCK_CASES[first_case:], 'clear_after_positive']
+            result['coverage_limit'] = coverage_limit
         if declared_omission:
             result.update(omission_reason='declared_skip_return_code', skip_return_code=77)
         results.append(result)
@@ -265,10 +489,23 @@ def write_summary(path, report):
         workload = [test for test in report.get('tests', [])
                     if test['status'] == 'passed' and test.get('workload_warnings')]
         if workload:
-            stream.write('\nThese tests completed all assertions using additional workload time:\n\n')
+            if any(test.get('coverage_limit') for test in workload):
+                stream.write('\nMandatory functional assertions passed using additional workload time; '
+                             'compact coverage limits are listed separately:\n\n')
+            else:
+                stream.write('\nThese tests completed all assertions using additional workload time:\n\n')
             for test in workload:
                 for warning in test['workload_warnings']:
                     stream.write(f"- `{test['name']}`: {warning}\n")
+        coverage_limits = report.get('coverage_limits', [])
+        if coverage_limits:
+            stream.write('\nCompact default media clock coverage was incomplete; mandatory '
+                         'functional coverage passed:\n\n')
+            for limit in coverage_limits:
+                stream.write(f"- `{limit['test']}`: case `{limit['case']}` reached its "
+                             f"{limit['limit_seconds']}s hosted limit; compact cases not completed: "
+                             f"{', '.join(limit['compact_cases_not_completed'])}.\n")
+            stream.write('\n')
         if report.get('error'):
             stream.write(f"Runner error: {report['error']}\n\n")
 
@@ -282,7 +519,7 @@ def run(args):
     inventory_path = report_path.with_suffix('.inventory.json')
     report = {'scope': args.scope, 'status': 'failed', 'selected': [], 'omitted': [],
               'runtime_omissions': [], 'result_counts': None,
-              'tests': [], 'source_sha': os.environ.get('GITHUB_SHA', ''),
+              'tests': [], 'coverage_limits': [], 'source_sha': os.environ.get('GITHUB_SHA', ''),
               'inventory_file': None, 'inventory_sha256': None, 'ctest_returncode': None}
     returncode = 1
     try:
@@ -308,6 +545,7 @@ def run(args):
         # Prevent stale evidence from a previous attempt satisfying this run.
         junit_path.unlink(missing_ok=True)
         workload_collector = WorkloadWarningCollector(selected)
+        hosted_clock_collector = HostedClockWarningCollector(selected)
         with log_path.open('w', encoding='utf-8') as log:
             with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                   text=True, errors='replace') as process:
@@ -316,20 +554,36 @@ def run(args):
                     log.write(line)
                     log.flush()
                     workload_collector.feed(line)
+                    hosted_clock_collector.feed(line)
                 returncode = process.wait()
                 report['ctest_returncode'] = returncode
         workload_warnings = workload_collector.finish(require_all=(returncode == 0))
+        hosted_clock_warnings = hosted_clock_collector.finish(require_all=(returncode == 0))
+        for record in hosted_clock_warnings.values():
+            if record['limit_seconds'] != (120 if args.sanitizers else 40):
+                raise ValueError('hosted clock limit conflicts with selected sanitizer configuration')
+        if returncode != 0:
+            report['unaccepted_hosted_clock_records'] = hosted_clock_warnings
         report['tests'] = read_results(junit_path, selected, args.timeout, args.warn_fraction,
-                                       workload_warnings=workload_warnings)
+                                       workload_warnings=workload_warnings,
+                                       hosted_clock_warnings=hosted_clock_warnings if returncode == 0 else {})
         report['result_counts'] = {
             status: sum(test['status'] == status for test in report['tests'])
             for status in ('passed', 'omitted', 'incomplete_or_failed')
         }
         report['runtime_omissions'] = [test['name'] for test in report['tests']
                                        if test['status'] == 'omitted']
+        report['coverage_limits'] = [dict(test=test['name'], **test['coverage_limit'])
+                                     for test in report['tests']
+                                     if test.get('status') == 'passed' and test.get('coverage_limit')]
         complete = all(test['status'] in ('passed', 'omitted') for test in report['tests'])
         if returncode == 0 and complete and report['result_counts']['passed']:
-            report['status'] = 'passed_with_omissions' if report['runtime_omissions'] else 'passed'
+            if report['coverage_limits']:
+                report['status'] = 'passed_with_warnings'
+            elif report['runtime_omissions']:
+                report['status'] = 'passed_with_omissions'
+            else:
+                report['status'] = 'passed'
         else:
             if returncode == 0 and complete:
                 report['error'] = 'No selected test passed; all selected coverage was omitted'
@@ -337,7 +591,18 @@ def run(args):
         for test in report['tests']:
             if test['status'] == 'passed':
                 for warning in test['workload_warnings']:
-                    annotation(f"{test['name']} passed all assertions. {warning}", title='CI test workload')
+                    if test.get('coverage_limit'):
+                        message = (f"{test['name']} passed mandatory functional assertions; compact "
+                                   f"default media clock coverage is incomplete. {warning}")
+                    else:
+                        message = f"{test['name']} passed all assertions. {warning}"
+                    annotation(message, title='CI test workload')
+            if test.get('status') == 'passed' and test.get('coverage_limit'):
+                limit = test['coverage_limit']
+                annotation(f"{test['name']} mandatory functional coverage passed; compact default "
+                           f"media clock case {limit['case']} is incomplete after the "
+                           f"{limit['limit_seconds']}s hosted throughput limit.",
+                           title='CI compact clock coverage')
             if test['near_timeout']:
                 annotation(f"{test['name']} passed in {test['seconds']:.1f}s, "
                            f"near its {test['timeout_seconds']:.1f}s allowance. "

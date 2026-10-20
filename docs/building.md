@@ -678,9 +678,26 @@ The functional `live` and `live_profiles` fixtures have separate computation
 allowances. Instrumented builds allow up to three times their normal workload
 budget and report `TEST_WORKLOAD_BUDGET` when they exceed the normal allowance.
 CI preserves these warnings from successful CTest output in its report and
-summary. Every case must still finish and pass its assertions within the bounded
-instrumented allowance. Real-time throughput, cancellation, physical absence
-and queue-drain stabilization requirements are unchanged.
+summary. Except for the typed incomplete-coverage case described below, every
+case must finish and pass its assertions within the bounded instrumented
+allowance. Real-time throughput, cancellation, physical absence and queue-drain
+stabilization requirements are unchanged.
+
+Standard-hosted native Live scopes and the FLTK SDK Live checks also run a
+separate functional-clock analogue. It uses ordinary modulation geometry for
+the positive raw, short and framed transmissions while retaining the original
+content, physical-absence, cancellation and error assertions. This analogue
+checks functional completion under ordinary transmission geometry; it does not
+qualify compact-geometry throughput. The original compact Live attempt remains
+mandatory: only a typed, healthy, recently progressing workload-limit result
+may be recorded as incomplete coverage with a warning. That result is never a
+compact Live pass. The standard-geometry analogue must finish every assertion;
+the compact attempt may be incomplete only under the typed rule above. The
+workflow reports this as `passed_with_warnings` with the coverage limit
+recorded. This exception is limited to standard-hosted Live scopes; local runs
+and all other scopes keep their existing behavior. The manual focused SDK Live
+scope runs the SDK build-isolation setup group separately and does not replace
+the remaining SDK contracts or calibration.
 
 The `gui_controller` fake-EU delayed sampled-arrival fixture has a separate
 CPU-functional allowance: five seconds normally and fifteen seconds with

@@ -7,6 +7,7 @@
 #include "../src/audio_trace.hpp"
 #include "../src/live_receiver_admission.hpp"
 #include "../src/signal_view.hpp"
+#include "../src/gui/gui_smoke_budget.hpp"
 #include "datapump/channel.hpp"
 #include <openssl/evp.h>
 #include <bit>
@@ -23,6 +24,8 @@
 #include <tuple>
 #include <mutex>
 #include <limits>
+#include <optional>
+#include <locale>
 #include <iomanip>
 using namespace datapump;
 using namespace std::chrono_literals;
@@ -766,16 +769,96 @@ std::string media_clock_checkpoint_context(SimulationScript& script) {
     if(script.first_interruption)points("first-interruption",script.first_interruption->first,script.first_interruption->second);
     return out.str();
 }
-live::Snapshot wait_for_media_clock(live::Session& session,std::string_view mode,SimulationScript& script) {
-    try {
-        return wait_for_sampled(session,"default media clock transmission",[](const auto& snapshot) {
-            check(!snapshot.receiver_health.failed(),"healthy media clock reported lost input");
-            return snapshot.transmission_finished && snapshot.simulation_replay;
-        });
-    } catch(const std::exception& error) {
+struct HostedClockProgressProof {
+    using Clock=gui::smoke_detail::SampledWorkProgress::Clock;
+    gui::smoke_detail::SampledWorkProgress progress;
+    std::optional<gui::smoke_detail::SampledWork> first;
+    std::optional<std::uint64_t> transmission,revision,previous_samples,previous_generated,total_bits;
+    unsigned observation_count=0;
+    bool disqualified=false;
+    std::uint64_t pre_enqueue_transmission=0;
+    explicit HostedClockProgressProof(std::uint64_t previous=0):pre_enqueue_transmission(previous) {}
+    void observe(const live::Snapshot& snapshot,Clock::time_point now) {
+        gui::smoke_detail::SampledWork work;
+        work.transmission=snapshot.transmission_id;work.samples=snapshot.samples_received;
+        work.fraction=snapshot.transmission_fraction;work.media_seconds=snapshot.transmission_seconds;
+        work.simulation=snapshot.simulation;work.transmitting=snapshot.transmitting;
+        work.noise=snapshot.transmitting_noise;work.replay=snapshot.simulation_replay;
+        work.tail=snapshot.simulation_receiving_tail;work.finished=snapshot.transmission_finished;
+        work.failed=snapshot.transmission_cancelled||snapshot.transmission_failed||
+            !snapshot.error.empty()||!snapshot.receiver_error.empty()||
+            snapshot.receiver_health.failed()||snapshot.receiver_health.dropped_samples||snapshot.receiver_behind||
+            !std::isfinite(snapshot.receiver_backlog_seconds)||snapshot.receiver_backlog_seconds!=0;
+        // enqueue() publishes a queued request before encode_loop assigns its
+        // new identity. Old-ID/zero-ID startup polls are not progress witnesses.
+        // Actual errors and loss still disqualify even before the first witness.
+        if(work.failed)disqualified=true;
+        if(!transmission && !disqualified &&
+           (!work.transmission || work.transmission==pre_enqueue_transmission))return;
+        if(!work.eligible() || snapshot.receiver_input_revision==0)disqualified=true;
+        if(!disqualified) {
+            if(!transmission) {transmission=work.transmission;revision=snapshot.receiver_input_revision;first=work;}
+            else if(*transmission!=work.transmission||*revision!=snapshot.receiver_input_revision)disqualified=true;
+            if(previous_samples&&snapshot.samples_received<*previous_samples)disqualified=true;
+            if(previous_generated&&snapshot.transmit_trace.generated_bits<*previous_generated)disqualified=true;
+            if(total_bits&&snapshot.transmit_trace.total_wire_bits!=*total_bits)
+                disqualified=true;
+            if(snapshot.transmit_trace.total_wire_bits)total_bits=snapshot.transmit_trace.total_wire_bits;
+            previous_samples=snapshot.samples_received;previous_generated=snapshot.transmit_trace.generated_bits;
+            if(total_bits&&snapshot.transmit_trace.generated_bits>*total_bits)disqualified=true;
+            if(!disqualified) {++observation_count;progress.observe(work,now);}
+        }
+        if(disqualified) {
+            // Feed failure to the shared progress classifier so a later healthy
+            // looking poll cannot requalify the same transmission.
+            work.failed=true;progress.observe(work,now);
+        }
+    }
+    bool qualifies(Clock::time_point now) const {
+        const auto age=progress.progress_age(now);
+        return !disqualified&&first&&observation_count>=2&&progress.advancing(now)&&age&&
+            std::isfinite(*age)&&*age>=0&&*age<=30;
+    }
+    double age(Clock::time_point now) const {
+        const auto value=progress.progress_age(now);
+        return value?*value:std::numeric_limits<double>::infinity();
+    }
+};
+struct CompactClockBudgetExpired final : Error {
+    std::string case_name;
+    live::Snapshot snapshot;
+    double elapsed_seconds=0,limit_seconds=0,progress_age_seconds=0;
+    gui::smoke_detail::SampledWork first;
+    unsigned observation_count=0;
+    std::string origin_context;
+    CompactClockBudgetExpired(std::string fixture_case,live::Snapshot last,double elapsed,double limit,
+        double age,const gui::smoke_detail::SampledWork& first_work,unsigned observations,std::string context)
+        :Error("compact media-clock positive fixture exhausted its bounded CPU-work allowance"+context),
+         case_name(std::move(fixture_case)),snapshot(std::move(last)),elapsed_seconds(elapsed),
+         limit_seconds(limit),progress_age_seconds(age),first(first_work),observation_count(observations),
+         origin_context(std::move(context)) {}
+};
+void emit_compact_clock_warning(const CompactClockBudgetExpired& exhausted) {
+    const auto& s=exhausted.snapshot;const auto& first=exhausted.first;
+    std::ostringstream out;out.imbue(std::locale::classic());
+    out<<std::setprecision(std::numeric_limits<double>::max_digits10)
+       <<"TEST_HOSTED_THROUGHPUT:{\"schema\":1,\"fixture\":\"default_media_clock_compact\",\"status\":\"incomplete_coverage\",\"case\":\""
+       <<exhausted.case_name<<"\",\"normal_budget_seconds\":40,\"limit_seconds\":"<<exhausted.limit_seconds
+       <<",\"elapsed_seconds\":"<<exhausted.elapsed_seconds<<",\"transmission_id\":"<<s.transmission_id
+       <<",\"input_revision\":"<<s.receiver_input_revision<<",\"samples_received\":"<<s.samples_received
+       <<",\"fraction\":"<<s.transmission_fraction<<",\"source_seconds\":"<<s.transmission_seconds
+       <<",\"generated_bits\":"<<s.transmit_trace.generated_bits<<",\"total_bits\":"<<s.transmit_trace.total_wire_bits
+       <<",\"tail\":"<<(s.simulation_receiving_tail?"true":"false")
+       <<",\"progress_age_seconds\":"<<exhausted.progress_age_seconds
+       <<",\"standard_functional_coverage\":\"passed\",\"remaining_live_coverage\":\"passed\""
+       <<",\"first_samples_received\":"<<first.samples<<",\"first_fraction\":"<<first.fraction
+       <<",\"first_source_seconds\":"<<first.media_seconds<<",\"observation_count\":"<<exhausted.observation_count<<"}";
+    std::cerr<<out.str()<<'\n';
+}
+live::Snapshot wait_for_media_clock(live::Session& session,std::string_view mode,SimulationScript& script,
+                                    bool permit_compact_budget_expiry=false,std::uint64_t pre_enqueue_transmission=0) {
+    const auto enrich_failure=[&](const std::exception& error)->live::Snapshot {
         // snapshot() has released the Session mutex before script inspection.
-        // All records are bounded; capture the first actual invalidation even
-        // if the source has already rebuilt a bank before this failure poll.
         const auto observed=session.snapshot();double epoch=0,origin=0;
         {
             std::lock_guard lock(script.mutex);
@@ -795,6 +878,130 @@ live::Snapshot wait_for_media_clock(live::Session& session,std::string_view mode
         });
         throw Error(std::string(error.what())+media_clock_result_context(mode,observed,observed,epoch,origin)+
             media_clock_checkpoint_context(script));
+    };
+    if(!permit_compact_budget_expiry) {
+        try {
+            return wait_for_sampled(session,"default media clock transmission",[](const auto& snapshot) {
+                check(!snapshot.receiver_health.failed(),"healthy media clock reported lost input");
+                return snapshot.transmission_finished && snapshot.simulation_replay;
+            });
+        } catch(const std::exception& error) {return enrich_failure(error);}
+    }
+    const auto started=std::chrono::steady_clock::now();
+    const auto limit=std::chrono::seconds(permit_compact_budget_expiry&&testing::instrumented_test?120:40);
+    testing::CpuWorkBudget budget(40s,"default media clock transmission",testing::instrumented_test,started);
+    HostedClockProgressProof proof(pre_enqueue_transmission);
+    try {
+        while(budget.pending()) {
+            const auto observed=session.snapshot();const auto now=std::chrono::steady_clock::now();
+            if(!observed.error.empty())throw Error(std::string("default media clock transmission: ")+observed.error);
+            if(observed.receiver_health.failed()||observed.receiver_health.dropped_samples||!observed.receiver_error.empty())
+                throw Error("default media clock reported unhealthy receiver input");
+            if(observed.transmission_finished&&observed.simulation_replay)return observed;
+            if(permit_compact_budget_expiry)proof.observe(observed,now);
+            std::this_thread::sleep_for(1ms);
+        }
+        const auto fresh=session.snapshot();const auto now=std::chrono::steady_clock::now();
+        // Completion wins a race with the deadline. Only the compact positive
+        // transmission's still-active, healthy, sampled work can be classified.
+        if(!fresh.error.empty())throw Error(std::string("default media clock transmission: ")+fresh.error);
+        if(fresh.receiver_health.failed()||fresh.receiver_health.dropped_samples||!fresh.receiver_error.empty())
+            throw Error("default media clock reported unhealthy receiver input at its deadline");
+        if(fresh.transmission_finished&&fresh.simulation_replay)return fresh;
+        if(permit_compact_budget_expiry) {
+            proof.observe(fresh,now);
+            if(proof.qualifies(now)&&proof.first&&proof.transmission&&proof.revision&&
+               *proof.transmission==fresh.transmission_id&&*proof.revision==fresh.receiver_input_revision&&
+               fresh.transmitting&&!fresh.transmitting_noise&&!fresh.transmission_cancelled&&
+               !fresh.transmission_failed&&!fresh.transmission_finished&&!fresh.simulation_replay&&
+               fresh.transmit_trace.total_wire_bits>0&&
+               fresh.transmit_trace.generated_bits<=fresh.transmit_trace.total_wire_bits) {
+                const auto elapsed=std::chrono::duration<double>(now-started).count();
+                double epoch=0,origin=0;
+                {std::lock_guard lock(script.mutex);
+                 if(!script.epochs.empty())epoch=script.epochs.back();
+                 if(!script.banks.empty())origin=script.banks.front().epoch;}
+                const auto context=media_clock_result_context(mode,fresh,fresh,epoch,origin)+
+                    media_clock_checkpoint_context(script);
+                throw CompactClockBudgetExpired(std::string(mode),fresh,elapsed,double(limit.count()),
+                    proof.age(now),*proof.first,proof.observation_count,context);
+            }
+        }
+        std::ostringstream diagnostic;
+        diagnostic<<"timed out waiting for default media clock transmission: status="<<fresh.status
+            <<" transmission="<<fresh.transmission_id<<" active="<<fresh.transmitting
+            <<" finished="<<fresh.transmission_finished<<" replay="<<fresh.simulation_replay
+            <<" fraction="<<fresh.transmission_fraction<<" samples="<<fresh.samples_received
+            <<" buffered="<<fresh.buffered_samples<<" compute_seconds="<<fresh.simulation_compute_seconds
+            <<" receiving_tail="<<fresh.simulation_receiving_tail
+            <<" generated_bits="<<fresh.transmit_trace.generated_bits
+            <<" total_bits="<<fresh.transmit_trace.total_wire_bits
+            <<" recovery_bytes="<<fresh.recovery_working_bytes;
+        throw Error(diagnostic.str());
+    } catch(const CompactClockBudgetExpired&) {throw;}
+    catch(const std::exception& error) {return enrich_failure(error);}
+}
+
+void hosted_clock_progress_boundaries() {
+    using Clock=HostedClockProgressProof::Clock;
+    const auto at=[](std::chrono::seconds seconds){return Clock::time_point{}+seconds;};
+    const auto active=[] {
+        live::Snapshot s;s.simulation=true;s.transmitting=true;s.transmission_finished=false;
+        s.transmission_id=7;s.receiver_input_revision=3;s.transmit_trace.total_wire_bits=20;
+        s.transmit_trace.generated_bits=2;s.transmission_fraction=.1;s.transmission_seconds=1;s.samples_received=2;
+        s.receiver_backlog_seconds=0;return s;
+    };
+    auto s=active();HostedClockProgressProof progress;progress.observe(s,at(0s));
+    s.transmission_fraction=.2;s.transmission_seconds=2;s.transmit_trace.generated_bits=4;
+    progress.observe(s,at(1s));
+    check(progress.qualifies(at(31s))&&!progress.qualifies(at(31s)+1ns),
+          "hosted-clock progress did not preserve the thirty-second sampled-work boundary");
+    auto regression=HostedClockProgressProof{};s=active();regression.observe(s,at(0s));
+    s.transmission_fraction=.2;s.transmission_seconds=2;regression.observe(s,at(1s));
+    s.transmission_fraction=.15;regression.observe(s,at(2s));
+    s.transmission_fraction=.3;s.transmission_seconds=3;regression.observe(s,at(3s));
+    check(!regression.qualifies(at(3s)),"hosted-clock progress requalified after a counter regression");
+    for(unsigned kind=0;kind<12;++kind) {
+        auto invalid=HostedClockProgressProof{};s=active();invalid.observe(s,at(0s));
+        s.transmission_fraction=.2;s.transmission_seconds=2;invalid.observe(s,at(1s));
+        s.transmission_fraction=.3;s.transmission_seconds=3;
+        switch(kind) {
+        case 0:++s.transmission_id;break;
+        case 1:++s.receiver_input_revision;break;
+        case 2:s.receiver_backlog_seconds=.01;break;
+        case 3:s.receiver_error="receiver failure";break;
+        case 4:s.receiver_health.input_interrupted=true;break;
+        case 5:s.transmit_trace.generated_bits=1;break;
+        case 6:s.samples_received=1;break;
+        case 7:s.transmission_fraction=std::numeric_limits<double>::quiet_NaN();break;
+        case 8:s.transmission_cancelled=true;break;
+        case 9:s.transmission_finished=true;break;
+        case 10:s.receiver_health.dropped_samples=1;break;
+        case 11:s.transmit_trace.total_wire_bits=0;break;
+        }
+        invalid.observe(s,at(2s));
+        check(!invalid.qualifies(at(2s)),"hosted-clock progress accepted changed identity, unhealthy input or backlog");
+    }
+    // The old identity may remain visible after enqueue, then the first valid
+    // new identity becomes the exact first witness; no old-ID progress counts.
+    auto startup=HostedClockProgressProof(7);s=active();startup.observe(s,at(0s));
+    s.transmission_id=0;startup.observe(s,at(1s));
+    s.transmission_id=8;s.transmission_fraction=.2;s.transmission_seconds=2;
+    startup.observe(s,at(2s));
+    check(startup.first&&startup.first->transmission==8&&startup.first->fraction==.2&&
+          startup.observation_count==1&&!startup.qualifies(at(2s)),
+          "hosted-clock startup used an old or unobserved transmission witness");
+    s.transmission_fraction=.3;s.transmission_seconds=3;startup.observe(s,at(3s));
+    check(startup.qualifies(at(3s)),"hosted-clock startup did not arm on the new transmission");
+    for(unsigned kind=0;kind<3;++kind) {
+        auto failed_startup=HostedClockProgressProof(7);s=active();
+        if(kind==0)s.receiver_health.dropped_samples=1;
+        if(kind==1)s.receiver_error="startup receiver failure";
+        if(kind==2)s.receiver_health.input_interrupted=true;
+        failed_startup.observe(s,at(0s));
+        s=active();s.transmission_id=8;failed_startup.observe(s,at(1s));
+        s.transmission_fraction=.2;s.transmission_seconds=2;failed_startup.observe(s,at(2s));
+        check(!failed_startup.qualifies(at(2s)),"hosted-clock startup erased prior unhealthy input");
     }
 }
 void simulation_media_clock_arithmetic() {
@@ -815,7 +1022,7 @@ void simulation_media_clock_arithmetic() {
     check(input.interrupted(108,50) && input.interrupted(108,54) && !input.interrupted(108,58),
           "media clock confused partial and committed delivery");
 }
-void simulation_media_clock_transmissions(bool standard_geometry=false) {
+void simulation_media_clock_transmissions(bool standard_geometry=false,bool permit_compact_budget_expiry=false) {
     SimulationScript script;SimulationHookScope hook(script);
     std::atomic<std::int64_t> replay_ms{0};
     live::Session session({},[&]{return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_ms.load());});
@@ -842,8 +1049,10 @@ void simulation_media_clock_transmissions(bool standard_geometry=false) {
             fields.add("spreading_factor",value.transfer.modem.spreading_factor);
             fields.add("search_seconds",value.transfer.search_seconds);fields.add("dsp_budget",value.dsp_workspace_bytes);
         });
+        const auto pre_enqueue_transmission=permit_compact_budget_expiry?session.snapshot().transmission_id:0;
         if(mode==0)session.transmit_bits(raw);else session.transmit(message);
-        const auto calculated=wait_for_media_clock(session,case_name,script);
+        const auto calculated=wait_for_media_clock(session,case_name,script,
+            permit_compact_budget_expiry && !standard_geometry,pre_enqueue_transmission);
         double epoch,origin;
         {std::lock_guard lock(script.mutex);check(script.epochs.size()==mode+1,"default provider missed source epoch handoff");epoch=script.epochs.back();origin=script.banks.front().epoch;}
         auto options=value.transfer;options.timestamp=static_cast<std::uint64_t>(epoch);
@@ -997,6 +1206,20 @@ void simulation_media_clock(bool standard_positive_geometry=false) {
     simulation_media_clock_cancellation();
     simulation_media_clock_clear_construction();
     simulation_media_clock_error_reporting();
+}
+std::optional<CompactClockBudgetExpired> simulation_media_clock_hosted_functional() {
+    std::optional<CompactClockBudgetExpired> incomplete_compact;
+    try {simulation_media_clock_transmissions(false,true);}
+    catch(const CompactClockBudgetExpired& exhausted) {
+        incomplete_compact=exhausted;
+        // Preserve the expiry's own source epoch/frontier/checkpoint context,
+        // even if mandatory follow-on coverage later fails. This is not a marker.
+        std::cerr<<exhausted.what()<<'\n';
+    }
+    // The existing standard geometry runs every positive raw/short/framed
+    // completion assertion plus arithmetic, cancellation, Clear and error cases.
+    simulation_media_clock(true);
+    return incomplete_compact;
 }
 std::string component_sha256(const void* data,std::size_t bytes) {
     std::array<unsigned char,EVP_MAX_MD_SIZE> digest{};unsigned count=0;
@@ -1158,6 +1381,22 @@ void simulation_media_clock_raw_component(const std::filesystem::path& directory
 int main(int argc,char** argv) {
     try {
         cpu_work_budget_boundaries();
+        if(argc>1 && std::string_view(argv[1])=="--hosted-clock-progress") {
+            check(argc==2,"usage: test_live --hosted-clock-progress");
+            hosted_clock_progress_boundaries();std::cout<<"hosted-clock progress boundaries passed\n";return 0;
+        }
+        if(argc>1 && std::string_view(argv[1])=="--ci-functional-clock") {
+            check(argc==2,"usage: test_live --ci-functional-clock");
+            hosted_clock_progress_boundaries();
+            pattern_score_observation_lifetime();
+            auto incomplete_compact=simulation_media_clock_hosted_functional();
+            run();separate_short_and_long_transmit_profiles();background_recovery_lifecycle();
+            transmit_capture_tracks_generation_and_replay();continuous_noise_lifecycle();
+            keyed_acquisition_survives_early_epoch_refresh();short_keyed_stream_survives_epoch_refresh();
+            if(incomplete_compact)emit_compact_clock_warning(*incomplete_compact);
+            std::cout<<"default simulation media clock hosted functional coverage passed; compact="
+                <<(incomplete_compact?"incomplete_coverage":"passed")<<'\n';return 0;
+        }
         if(argc>1 && std::string_view(argv[1])=="--simulation-media-clock-raw-component") {
             check(argc==3 && !std::string_view(argv[2]).empty(),"usage: test_live --simulation-media-clock-raw-component <output-directory>");
             const std::filesystem::path directory(argv[2]);std::filesystem::create_directories(directory);

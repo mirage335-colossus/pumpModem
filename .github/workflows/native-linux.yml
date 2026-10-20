@@ -866,6 +866,7 @@ jobs:
           -DDATAPUMP_CALIBRATION_SHARD=${{ inputs.calibration_shard }}
           -DDART_TESTING_TIMEOUT=3600
           -DCMAKE_DISABLE_FIND_PACKAGE_Python3=${{ (inputs.scope == 'frontends' || inputs.scope == 'web') && 'FALSE' || 'TRUE' }}
+          -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL=${{ inputs.scope == 'live' && inputs.linux_runner == 'ubuntu-24.04' && 'ON' || 'OFF' }}
       - name: Prepare acquisition partition diagnostic evidence
         if: inputs.scope == 'simulation-acquisition-partition-diagnostic'
         run: mkdir -p build/simulation-acquisition-partition-diagnostics

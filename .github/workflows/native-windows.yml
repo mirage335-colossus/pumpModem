@@ -125,6 +125,7 @@ jobs:
           -DDATAPUMP_CALIBRATION_SECTION=${{ inputs.calibration_section }}
           -DDART_TESTING_TIMEOUT=3600
           -DCMAKE_DISABLE_FIND_PACKAGE_Python3=${{ inputs.scope == 'frontends' && 'FALSE' || 'TRUE' }}
+          -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL=${{ inputs.scope == 'live' && inputs.windows_runner == 'windows-2022' && 'ON' || 'OFF' }}
       - name: Build this shard's prerequisites
         run: |
           switch ($env:CI_SCOPE) {

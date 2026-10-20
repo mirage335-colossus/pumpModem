@@ -26,6 +26,26 @@ def test(name, labels=(), timeout=None):
     return {'name': name, 'properties': values}
 
 
+def hosted_clock_record(**overrides):
+    record = {
+        'schema': 1, 'fixture': 'default_media_clock_compact',
+        'status': 'incomplete_coverage', 'case': 'short',
+        'normal_budget_seconds': 40, 'limit_seconds': 40,
+        'elapsed_seconds': 41.5, 'transmission_id': 8, 'input_revision': 3,
+        'samples_received': 500, 'fraction': .25, 'source_seconds': 2.0,
+        'generated_bits': 1024, 'total_bits': 4096, 'tail': False,
+        'progress_age_seconds': 1.5, 'standard_functional_coverage': 'passed',
+        'remaining_live_coverage': 'passed', 'first_samples_received': 300,
+        'first_fraction': .1, 'first_source_seconds': 1.0, 'observation_count': 4,
+    }
+    record.update(overrides)
+    return record
+
+
+def hosted_clock_line(record=None):
+    return 'TEST_HOSTED_THROUGHPUT: ' + json.dumps(record or hosted_clock_record(), separators=(',', ':'))
+
+
 class Selection(unittest.TestCase):
     def test_contract_overlap_and_new_tests_have_one_owner(self):
         inventory = [test('unlabelled'), test('gui', ('gui', 'contract')),
@@ -224,6 +244,101 @@ class WorkloadCollector(unittest.TestCase):
             wrong.finish()
 
 
+class HostedClockCoverage(unittest.TestCase):
+    @staticmethod
+    def eligible():
+        return {'name': 'live', 'command': ['pump', '--ci-functional-clock'],
+                'properties': [{'name': 'LABELS', 'value': ['regular', 'contract']}]}
+
+    def test_strict_record_schema_and_forward_progress(self):
+        record = runner.parse_hosted_clock_record(json.dumps(hosted_clock_record()))
+        self.assertEqual(record['case'], 'short')
+        self.assertEqual(record['observation_count'], 4)
+        invalid = (
+            {'schema': True}, {'samples_received': True}, {'tail': 0},
+            {'fraction': 1.01}, {'progress_age_seconds': 30.01},
+            {'elapsed_seconds': 39.99}, {'limit_seconds': 60},
+            {'case': 'unknown'}, {'unexpected': 'field'},
+            {'samples_received': 299}, {'observation_count': 1},
+            {'first_fraction': .25, 'first_source_seconds': 2.0},
+        )
+        for overrides in invalid:
+            with self.subTest(overrides=overrides):
+                with self.assertRaises(ValueError):
+                    runner.parse_hosted_clock_record(json.dumps(hosted_clock_record(**overrides)))
+        duplicate = json.dumps(hosted_clock_record()).replace('"schema": 1,', '"schema": 1, "schema": 1,')
+        with self.assertRaisesRegex(ValueError, 'duplicate hosted clock JSON key'):
+            runner.parse_hosted_clock_record(duplicate)
+
+    def test_tail_progress_and_numeric_bounds(self):
+        tail = hosted_clock_record(tail=True, samples_received=20, first_samples_received=19,
+                                   fraction=.2, first_fraction=.2,
+                                   source_seconds=1.0, first_source_seconds=1.0)
+        runner.parse_hosted_clock_record(json.dumps(tail))
+        for overrides in ({'elapsed_seconds': float('nan')},
+                          {'elapsed_seconds': float('inf')},
+                          {'transmission_id': 0}, {'input_revision': 0},
+                          {'total_bits': 0}, {'generated_bits': -1}, {'generated_bits': 4097}):
+            with self.subTest(overrides=overrides):
+                with self.assertRaises(ValueError):
+                    runner.parse_hosted_clock_record(json.dumps(hosted_clock_record(**overrides)))
+
+    def test_marker_requires_eligible_ctest_identity_and_one_complete_record(self):
+        selected = [self.eligible()]
+        collector = runner.HostedClockWarningCollector(selected)
+        collector.feed('Start 4: live\n')
+        marker = hosted_clock_line()
+        collector.feed(f'4: {marker}\n')
+        collector.feed('1/1 Test #4: live ........ Passed 0.01 sec\n')
+        records = collector.finish()
+        self.assertEqual(records['live']['case'], 'short')
+        self.assertEqual(records['live']['warning'], marker)
+
+        failures = (
+            (['Start 4: live\n', f'4: {marker}\n', f'4: {marker}\n'], 'duplicate'),
+            ([f'4: {marker}\n'], 'precedes or lacks'),
+            (['Start 4: ordinary\n', f'4: {marker}\n'], 'ineligible'),
+            (['Start 4: live\n', f'4: {marker[:-1]}\n'], 'malformed or unbound'),
+            (['Start 4: live\n', f'4: 7: {marker}\n'], 'nested'),
+            (['Start 4: live\n', f'4: {marker}\n'], 'lacks a CTest completion'),
+            (['Start 4: live\n', f'4: {marker}\n',
+              '1/1 Test #4: live ........ Passed 0.01 sec\n', f'4: {marker}\n'], 'follows test completion'),
+        )
+        for lines, error in failures:
+            with self.subTest(error=error):
+                invalid = runner.HostedClockWarningCollector(selected)
+                for line in lines:
+                    invalid.feed(line)
+                with self.assertRaisesRegex(ValueError, error):
+                    invalid.finish()
+        for inventory in ([{'name': 'live', 'command': ['pump']}],
+                          [{'name': 'live', 'command': ['pump', 'xx--ci-functional-clock']}],
+                          [{'name': 'other', 'command': ['pump', '--ci-functional-clock']}]):
+            invalid = runner.HostedClockWarningCollector(inventory)
+            name = inventory[0]['name']
+            invalid.feed(f'Start 1: {name}\n')
+            invalid.feed(f'1: {marker}\n')
+            with self.assertRaisesRegex(ValueError, 'ineligible'):
+                invalid.finish()
+
+    def test_only_passing_eligible_result_gets_compact_coverage_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'results.xml'
+            record = hosted_clock_record()
+            path.write_text('<testsuite><testcase name="live" status="run" time="121"/></testsuite>')
+            result = runner.read_results(path, [self.eligible()], 3600, .8,
+                                         hosted_clock_warnings={'live': record})[0]
+            self.assertEqual(result['status'], 'passed')
+            self.assertEqual(result['coverage_limit']['compact_cases_not_completed'],
+                             ['short', 'framed', 'clear_after_positive'])
+            path.write_text('<testsuite><testcase name="live" status="run" time="121">'
+                            '<failure message="assertion"/></testcase></testsuite>')
+            failed = runner.read_results(path, [self.eligible()], 3600, .8,
+                                         hosted_clock_warnings={'live': record})[0]
+            self.assertEqual(failed['status'], 'incomplete_or_failed')
+            self.assertNotIn('coverage_limit', failed)
+
+
 class Reports(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -360,7 +475,8 @@ class BuildPartitions(unittest.TestCase):
 @unittest.skipUnless(shutil.which('ctest'), 'CTest is needed for temporary integration fixtures')
 class CTestIntegration(unittest.TestCase):
     def exercise(self, program, timeout=5, *, skip_return=None, companion_program=None,
-                 jobs=1, stale_last_test=False, truncated_markers=(), inventory_bytes=None):
+                 jobs=1, stale_last_test=False, truncated_markers=(), inventory_bytes=None,
+                 hosted_clock=False, sanitizers=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             executable = Path(sys.executable).as_posix()
@@ -368,8 +484,10 @@ class CTestIntegration(unittest.TestCase):
             if skip_return is not None:
                 properties += f' SKIP_RETURN_CODE "{skip_return}"'
             quote = lambda value: json.dumps(str(value))
-            tests = [f'add_test(sample {quote(executable)} "-c" {quote(program)})',
-                     f'set_tests_properties(sample PROPERTIES {properties})']
+            sample_name = 'live' if hosted_clock else 'sample'
+            extra_argument = ' "--ci-functional-clock"' if hosted_clock else ''
+            tests = [f'add_test({sample_name} {quote(executable)} "-c" {quote(program)}{extra_argument})',
+                     f'set_tests_properties({sample_name} PROPERTIES {properties})']
             if companion_program is not None:
                 tests.extend((f'add_test(companion {quote(executable)} "-c" {quote(companion_program)})',
                               f'set_tests_properties(companion PROPERTIES {properties})'))
@@ -382,8 +500,8 @@ class CTestIntegration(unittest.TestCase):
                 (root / 'CTestCustom.cmake').write_text(
                     'set(CTEST_CUSTOM_MAXIMUM_PASSED_TEST_OUTPUT_SIZE 1024)\n')
             report = root / 'report.json'
-            args = argparse.Namespace(build_dir=root, scope='core', config=None, ctest=shutil.which('ctest'),
-                                      jobs=jobs, sanitizers=False, sanitizer_realtime=False, report=report,
+            args = argparse.Namespace(build_dir=root, scope='live' if hosted_clock else 'core', config=None, ctest=shutil.which('ctest'),
+                                      jobs=jobs, sanitizers=sanitizers, sanitizer_realtime=False, report=report,
                                       summary=root / 'summary.md', timeout=3600, warn_fraction=.005)
             stdout = io.StringIO()
             if inventory_bytes is None:
@@ -681,6 +799,76 @@ class CTestIntegration(unittest.TestCase):
         self.assertEqual(report['tests'][0]['workload_warnings'], [marker])
         self.assertEqual(report['tests'][0]['status'], 'incomplete_or_failed')
         self.assertNotIn('::warning title=CI test workload::', output)
+
+    def test_hosted_compact_limit_keeps_mandatory_live_assertions_green_with_warning(self):
+        marker = hosted_clock_line()
+        result, report, output = self.exercise(f'print({marker!r}, flush=True)', hosted_clock=True)
+        self.assertEqual(result, 0, output[-2000:])
+        self.assertEqual(report['status'], 'passed_with_warnings')
+        self.assertEqual(report['result_counts'],
+                         {'passed': 1, 'omitted': 0, 'incomplete_or_failed': 0})
+        limit, = report['coverage_limits']
+        self.assertEqual(limit['test'], 'live')
+        self.assertEqual(limit['compact_cases_not_completed'],
+                         ['short', 'framed', 'clear_after_positive'])
+        self.assertEqual(report['tests'][0]['coverage_limit']['warning'], marker)
+        self.assertIn('mandatory functional coverage passed', output)
+        self.assertIn('compact default media clock case short is incomplete', output)
+        self.assertIn('Compact default media clock coverage was incomplete', report['_summary_text'])
+        self.assertEqual(report['inventory_sha256'], hashlib.sha256(report['_inventory_bytes']).hexdigest())
+
+    def test_hosted_compact_limit_never_masks_assertion_or_declared_skip(self):
+        marker = hosted_clock_line()
+        cases = ((f'print({marker!r}, flush=True); raise AssertionError("broken")', None),
+                 (f'print({marker!r}, flush=True); raise SystemExit(77)', 77))
+        for program, skip_return in cases:
+            result, report, output = self.exercise(program, skip_return=skip_return, hosted_clock=True)
+            self.assertEqual(result, 1, output[-2000:])
+            self.assertEqual(report['status'], 'failed')
+            self.assertFalse(report['coverage_limits'])
+            self.assertNotIn('passed all assertions', output)
+
+    def test_hosted_compact_limit_must_match_instrumented_configuration(self):
+        marker = hosted_clock_line(hosted_clock_record(limit_seconds=120, elapsed_seconds=121))
+        program = f'print({marker!r}, flush=True)'
+        result, report, _ = self.exercise(program, hosted_clock=True)
+        self.assertEqual(result, 1)
+        self.assertIn('conflicts with selected sanitizer configuration', report['error'])
+        result, report, output = self.exercise(program, hosted_clock=True, sanitizers=True)
+        self.assertEqual(result, 0, output[-2000:])
+        self.assertEqual(report['status'], 'passed_with_warnings')
+
+    def test_hosted_compact_limit_never_masks_nonzero_ctest_exit(self):
+        import subprocess
+        from unittest.mock import patch
+        real_popen = subprocess.Popen
+
+        class Child:
+            def __init__(self, process):
+                self.process = process
+                self.stdout = process.stdout
+            def __enter__(self):
+                self.process.__enter__()
+                return self
+            def __exit__(self, *args):
+                return self.process.__exit__(*args)
+            def wait(self):
+                self.process.wait()
+                return 1
+
+        def popen(command, *args, **kwargs):
+            process = real_popen(command, *args, **kwargs)
+            if '--show-only=json-v1' in command:
+                return process
+            return Child(process)
+
+        marker = hosted_clock_line()
+        with patch.object(subprocess, 'Popen', side_effect=popen):
+            result, report, output = self.exercise(f'print({marker!r}, flush=True)', hosted_clock=True)
+        self.assertEqual(result, 1, output[-2000:])
+        self.assertEqual(report['status'], 'failed')
+        self.assertEqual(report['ctest_returncode'], 1)
+        self.assertFalse(report['coverage_limits'])
 
 
 if __name__ == '__main__':
