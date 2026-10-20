@@ -4,7 +4,354 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
-## Symbol_Burst — implementation candidate, 17 October 2026
+## Symbol_Burst — continuation, 18 October 2026
+
+The current runtime candidate is `8e72352874e9aa6ad3b3a5cf362e9c733c606344`.
+Full normal qualification remains **incomplete**. Complete follow-ups now cover
+Debug preparation, strict timing advice and CLI; GNU Release, SDK and Windows
+GUI checks passed. Debug controller stopping remains unresolved. The
+17 October section below is retained as historical evidence; its unresolved
+status and unexecuted baseline comparison are superseded by this continuation.
+No release or release certification is in scope.
+
+The fixture candidate is `17880d967574235ee6b27570ae714b76ddf02bf7`.
+Production sources, dependencies and build tools remain identical to `8e72352`.
+Its sole CMake difference privately defines `DATAPUMP_INSTRUMENTED_TEST=1` for
+`test_gui_controller` when sanitizers are enabled outside MSVC. This changes
+that fixture only; CMake inputs are no longer globally identical. The evidence
+keeps each actual source identity and replaces only complete affected tests;
+it does not change an earlier failed workflow into a successful workflow.
+
+The frozen Windows control executed `de8699b47b6b0a4c58b816a1894c974858eb35a3`
+with only the four identifier substitutions needed for MSVC. All four original
+receiver/clock tests failed. The unchanged tests and exact compile-port patch
+are retained in [39086487767](https://github.com/mirage335-colossus/pumpModem/actions/runs/39086487767).
+This is observed pre-feature failure evidence, not baseline release qualification.
+
+The continuation repairs these faults without changing short/raw wire formats,
+whole-symbol physical absence, the original clock bank or accepted-bit progress:
+
+- Direct shared-pulse cells compare the original raw support with both shared
+  dot/Gram support before consuming a cell. An uncertain cell uses the original
+  raw accumulator over each push's intersection. Pending cells retain that
+  choice; moment storage is reused without increasing the lattice footprint.
+  The original Windows pulse oracle and its `2e-6` gates now pass. Long-chip
+  moments retain their existing implementation and coverage.
+- Public continuous EME startup can use the immediately following complete
+  original acquisition hop to refine a one-bit owner's private timing/frequency
+  pair. The closing hop scores every original trial and identifies both per-bit
+  global maxima before overlap compression. Guidance must agree with the emitted
+  bit, remain inside its immutable half-symbol neighborhood and pass the final
+  admission gate.
+  It emits no bit, changes no published identity or admission score/support,
+  excludes reused prefix samples from future evidence, and retains overlap
+  ownership over the consumed union. Keyed, scheduled, partial, stale, failed
+  or ambiguous states refuse this path; no clock/rate is learned.
+- The shaped/packed source radial limit changes from `.992` to `.988`, with native output gain,
+  int16 clamp and the strict `1e-8` clipping-distortion gate unchanged. The
+  highest tested passing radius has original-phase distortion `4.30352e-9` and
+  worst measured 257-node distortion `7.33732e-9`. Reconstructed peaks still
+  exceed unity; the phase sweep is not an all-intermediate-phase distortion
+  certificate. The additional source-energy loss is at most `0.035095 dB` in
+  real arithmetic before resampling, not a receiver-sensitivity measurement.
+- Drift fixtures now distinguish a retained weak second bit admitted jointly
+  with the third from delayed publication of an accepted bit. A separate
+  same-PCM exact timing lane still requires three distinct `0`, `00`, `001`
+  progress polls. The workspace fixture retains the original shrink/eviction
+  and parity checks while allowing the documented finite-push scratch bound.
+  Clock fixtures separately bound epoch quantization and propagation arithmetic;
+  local-epoch accuracy controls and the original 25 ms playback safety gates
+  remain mandatory. Query-floor, forgotten-history and halved-provider mutations
+  still fail. `clock_sync` now also belongs to the SDK contract inventory.
+
+Focused repair evidence (not a substitute for the full matrix):
+
+| Scope and source | Executed result | Evidence |
+| --- | --- | --- |
+| Paired strict EME, `dfda0ae` | GNU and MSVC recover exact `001`; both backend event sequences agree; first publication remains sample750/poll774144; one physical END at3178496 follows independent source and accepted-grid bounds | [GNU39091401450](https://github.com/mirage335-colossus/pumpModem/actions/runs/39091401450), [MSVC39091404567](https://github.com/mirage335-colossus/pumpModem/actions/runs/39091404567) |
+| Windows receiver/clock, `dfda0ae` | 4/4 passed, no skips | [39091408089](https://github.com/mirage335-colossus/pumpModem/actions/runs/39091408089) |
+| Linux receiver/clock, `c838dd8` | Four existing tests passed; new private guide test failed during fixture setup because the reduced bank changed projection geometry | [39091821739](https://github.com/mirage335-colossus/pumpModem/actions/runs/39091821739) |
+| Corrected private guide test, `2bf9ac8` | GNU1/1 and MSVC1/1 passed: actual production publication/collector, conflicts/ties, NaN poison, refusal immutability, fixed storage and consumed-prefix ownership | [GNU39092449457](https://github.com/mirage335-colossus/pumpModem/actions/runs/39092449457), [MSVC39092452822](https://github.com/mirage335-colossus/pumpModem/actions/runs/39092452822) |
+| Exact compiled V1 radius matrix, `04aaa87` plus retained one-constant variants | `.988`, `.984`, `.981` pass the original strict gate; `.988` selected; all 257 measured phases, independent FIR and chunk parity complete | [39089831170](https://github.com/mirage335-colossus/pumpModem/actions/runs/39089831170) |
+
+The private test's corrected two-lane bank preserves bin750, length1025,
+FFT2048, hop512 and initial8. Its first setup failure is retained rather than
+counted as a pass. All earlier diagnostics, source/release identities and
+per-file artifact digests are under
+`.agent-work/artifacts/symbol-burst-resume-20261018/`.
+
+Full qualification dispatches use standard free runners and exact source `8e72352`:
+
+| Scope | Current result | Evidence |
+| --- | --- | --- |
+| Full native `devfast=false`, native GUI, calibration and packages | Finished with failures; Linux/Windows Release each failed the two corrected scheduled-hop fixtures. Debug selected266: 244 passed, 5 failed and 17 omitted; its CLI checks were cancelled at the job limit | [39092802768](https://github.com/mirage335-colossus/pumpModem/actions/runs/39092802768) |
+| Full SDK `devfast=false` and copied packages | Finished with only the two scheduled-hop fixture failures; Live2/2, general192/194 and complete calibration1/1, with no contract skips. Rev conformance, frontends, web, Wasm, both archive producers and all four copied-runtime jobs passed | [39092805744](https://github.com/mirage335-colossus/pumpModem/actions/runs/39092805744) |
+| Windows GUI, `11b2c3b` with matching GUI source/inventory | 39/39 passed, no skips or workload warnings | [39092710003](https://github.com/mirage335-colossus/pumpModem/actions/runs/39092710003) |
+| ARM64 complete Rev adapter diagnostic | Failed: external 600-second timeout, exit124; no per-probe output | [39092844629](https://github.com/mirage335-colossus/pumpModem/actions/runs/39092844629) |
+| ARM64 unchanged Rev package, Ubuntu22.04/Trixie smoke diagnostic | Both complete smokes passed; advisory replay-cadence warnings retained; not certification | [39092812429](https://github.com/mirage335-colossus/pumpModem/actions/runs/39092812429) |
+
+Test-only commit `a38ec4917919fa46422de0f0f7aaa13922cee076` adds bounded
+phase, construction/destruction and paint timing to diagnose the adapter timeout.
+It retains every original probe statement, assertion, frame count and deadline.
+The focused [instrumented adapter run39094256477](https://github.com/mirage335-colossus/pumpModem/actions/runs/39094256477)
+also failed its 600-second diagnostic cap. It completed 977 paints and entered
+the final color fixture at 594 seconds; 561 seconds were inside native-frame
+event pumping/presentation. Construction and shutdown were short. This locates
+cumulative work, without isolating renderer CPU cost. A completed paint took up
+to 5.597 seconds, so this is not proof of a two-second paint wall-clock bound.
+Tooling-only `91ac396` matches the diagnostic's standard ARM cumulative allowance
+to the existing 900-second certification allowance; other diagnostic runners
+retain 600 seconds. Assertions, internal deadlines and the ordinary CTest cap
+remain unchanged. The [complete follow-up39095565681](https://github.com/mirage335-colossus/pumpModem/actions/runs/39095565681)
+passed every default adapter probe and the final empty-window check in 614 seconds,
+with 1,003 completed paints. Its warning above the ordinary 330-second allowance
+is retained. Both earlier timeouts remain failed evidence; this is diagnostic
+qualification, not release certification.
+
+Linux Release core passed all four Symbol_Burst tests, receiver/clock and EME
+probability controls, and the original default V1 ALSA contract. The numerical
+[scheduled-hop diagnostic39095939773](https://github.com/mirage335-colossus/pumpModem/actions/runs/39095939773)
+retains both original failures. TX exactly matches the raw rectangular source at
+radius `0.991921692816864`; its test oracle incorrectly applied the `.988` limiter
+to that path. RX retains four correct weak symbols at scores
+`11.92155, 11.92370, 11.93566, 11.97685`, individually below admission. Prefixes
+of one to three symbols remain below their joint thresholds and all four exceed the
+final threshold with the original margin; only the old `12 ± .05` calibration
+check fails. The [one-constant former-radius control39096369237](https://github.com/mirage335-colossus/pumpModem/actions/runs/39096369237)
+passes both complete tests at `.992`, then restores the original source. It is
+diagnostic evidence, not qualification of the current radius.
+
+Test-only `a810984` limits the independent TX oracle only for shaped overlap or
+packed composition, preserving the ordinary rectangular waveform and `2e-8`
+tolerance. RX keeps the exact channel, four noise scales and `.05` tolerance,
+with a fixed calibration center of `11.95`. Retention, individual/joint admission,
+prompt publication, all 16 wrong roots, noise rejection and physical END remain
+unchanged. Both complete replacement tests passed on GNU Release (5.53/92.18 s),
+GNU Debug with ASan/UBSan (179 s combined), and MSVC Release (6.50/93.91 s).
+Evidence: [GNU39096935454](https://github.com/mirage335-colossus/pumpModem/actions/runs/39096935454),
+[instrumented39096961478](https://github.com/mirage335-colossus/pumpModem/actions/runs/39096961478),
+[MSVC39097120080](https://github.com/mirage335-colossus/pumpModem/actions/runs/39097120080).
+The matching SDK run passed both complete tests in 4.60/74.37 seconds. Its first attempt
+[39097122683](https://github.com/mirage335-colossus/pumpModem/actions/runs/39097122683)
+failed Git checkout ownership during the new source-identification command,
+before building or running either selected test. Tooling-only `4d4a7a6` uses
+per-command trust for the exact checkout; the successful retry is
+[39097811030](https://github.com/mirage335-colossus/pumpModem/actions/runs/39097811030).
+Current x86 Rev adapter tests also require their original native and SDK
+configurations because the timing instrumentation changed those test inputs.
+The SDK scope passed all four native CTest cases, with the complete adapter at 141.03 s
+under the unchanged 330-second limit, plus the separate complete GUI workflow smoke, in
+[39097136665](https://github.com/mirage335-colossus/pumpModem/actions/runs/39097136665).
+The [native x86 follow-up39097133329](https://github.com/mirage335-colossus/pumpModem/actions/runs/39097133329)
+passed all 44 recorded Rev CTest cases, with its adapter at 136.67 s under the
+unchanged 330-second limit, plus the separate complete GUI workflow smoke.
+That smoke is executed by its wrapper and is not a 45th entry in `LastTest.log`.
+Its two advisory replay-cadence warnings remain recorded. FLTK's complete
+follow-up also passed. Earlier failed
+workflows remain failed; any combined qualification must reconcile their exact
+inventories with these complete replacement results.
+
+The checked reconciliation now accounts for Linux GNU11 Release as 252 passed
+and 17 omitted cases, MSVC Release as 231 passed and 33 omitted cases, and the
+SDK general contract as 194 passed with no omissions. SDK Live2/2 and complete
+calibration1/1 also passed. These are combined evidence results, not rewritten
+workflow conclusions. The SDK comparison binds the actual FLTK/Bookworm,
+GNU15.3 Release portable configuration, prepared recipe and manifest, identical
+setup commands, and exact complete-test inventories. Its old CMake cache was not
+retained; both build records mark the worktree modified and do not retain the
+dirty-file list. The matching inspected setup creates untracked SDK downloads,
+but the evidence does not establish a clean worktree. Debug preparation and
+controller evidence still requires final reconciliation after the complete
+follow-ups below, so these results do not complete the full qualification.
+
+Debug's `scheduled_parallel_preparation` timed out at 7,200.12 seconds after
+printing three completed parallel-trace finalizations; its later checks did not
+complete. `gui_timing_advice` completed its selected plan at 3.30384 seconds
+against a strict three-second limit; the missing graph timestamp is diagnostic.
+The `gui_controller` failed to reach the delayed FHSS preview's first arrival.
+The controller's preceding protected-tail check passed with an instrumented
+workload warning. The full test step took 7,344.85 seconds. The following CLI
+run was cancelled when the overall job reached its limit; its partial output
+is not a complete CLI pass. These were three additional failed tests and an
+interrupted CLI scope; their complete follow-ups are distinguished below. The
+earlier matching ASan pair passes replace only the two known scheduled-hop
+fixture failures.
+
+Test-only `caf3060` adds preparation phase wall/process-CPU timing and a bounded
+controller snapshot witness on the existing arrival failure. All original
+assertions, preparation inputs and physical/cancellation deadlines remain
+unchanged. Strict standard-runner Debug/ASan follow-ups retain these results:
+[preparation39109132082](https://github.com/mirage335-colossus/pumpModem/actions/runs/39109132082)
+passed the complete preparation test alone in 7,060.86 seconds under its
+original 7,200-second cap, without skips or an increased allowance;
+[GUI39109133650](https://github.com/mirage335-colossus/pumpModem/actions/runs/39109133650)
+runs both complete no-argument tests serially, then in parallel only after serial
+success. Both serial tests failed, so parallel execution was not launched:
+advice selected its plan at 3.15848 seconds against the unchanged three-second
+gate; the controller reached only 1.00181 seconds of reported TX progress and
+1.2 simulated seconds after 5.00523 seconds wall time, short of the original
+2.564-second arrival offset. Its receiver reported no failure, overrun or
+backlog. This identifies incomplete simulated progress but does not locate its
+computation cost; both failures remain under diagnosis.
+The standalone [full Debug CLI39107966546](https://github.com/mirage335-colossus/pumpModem/actions/runs/39107966546)
+uses `4d4a7a6` with matching runtime and CLI inputs and has completed successfully;
+all 39 tests passed in 181.596 seconds. Its retained executable hash matches
+the interrupted run exactly, the CLI script is unchanged and all 851 CMake
+cache entries match except the generated runner hostname. The original CLI
+attempt remains incomplete. The earlier failed GUI run remains failed.
+The near-limit preparation pass requires a timing warning and preserves its
+original timeout as failed evidence; it is not a throughput improvement.
+
+Test-only `c0bca13` adds first planner-request, document-render, numeric-advice
+and actual selected-observation timings while retaining the original global
+three-second readiness assertions. Its controller experiment prepares advice
+and idle reception before the original five-second noise window. New guards
+require a fresh transmission, pre-arrival observation and independently traversed
+2.564-second offset, accounting for the sampled channel's bounded lookahead.
+This warm setup narrows the former simultaneous cold receiver/noise-start
+scenario; it is diagnostic evidence and cannot silently replace that coverage.
+The complete [Debug GUI follow-up39112435936](https://github.com/mirage335-colossus/pumpModem/actions/runs/39112435936)
+finished with a failed controller case; parallel execution was not launched.
+The complete no-argument advice case passed in 15.2254 seconds with every
+original check, including the three-second gates: the selected plan was observed
+at 1.48474 seconds after a 244-ms first document call. This closes only that
+case's reexecution obligation. It demonstrates no performance cure for the
+retained earlier timing failures and does not make the failed job a pass.
+
+The warmed controller reached generated arrival, but its newly added emitted
+position guard failed at 2.55181 seconds of transmitted progress versus the
+2.564-second offset. That 12.19-ms difference fits within the sampled channel's
+71.25-ms lookahead. Generated preview and emitted position are different
+coordinates; the original five-second assertion concerns generated preview.
+Receiver bank count rose from one to two with the same input revision, which
+does not identify whether ordinary epoch refresh or another cause rebuilt it.
+Test-only `1916003` restores the original simultaneous cold advice, receiver
+and noise-start setup and checks independent traversal after the existing
+protected stop. The complete [cold follow-up39114844215](https://github.com/mirage335-colossus/pumpModem/actions/runs/39114844215)
+passed advice in 16.5072 seconds with its original three-second gate, but
+failed the controller after 124.173 seconds; parallel execution was not launched.
+At 5.006 seconds wall time, reported TX progress plus maximum lookahead was
+only 1.173 seconds, below the 2.564-second arrival. Its 730 GUI polls had a
+maximum 6.3-ms call and 25-ms interval. Process-wide CPU time locates no
+particular subsystem; receiver-bank build counts do not imply replacement.
+Live pacing enforces a minimum block duration from the start of computation;
+it adds no extra 50-ms sleep when computation already exceeds that duration.
+These observations establish delayed simulated progress, without proving a
+production preview defect or delayed publication of a ready result.
+
+Test-only `17880d9` gives only the instrumented fake-EU delayed sampled-arrival
+fixture an explicit bounded computation allowance: five seconds normally,
+fifteen with ASan/UBSan. Hop change and any required list cycle must already
+satisfy the original five-second window before continuation. A captured
+completion timestamp rejects a poll that returns at or after fifteen seconds.
+The original cold setup, all existing assertions, Release five-second window,
+three-second advice gate and physical/cancellation/protected-stop bounds remain
+unchanged. The warning is buffered until every FHSS stage succeeds; full
+completion remains mandatory. This is not a strict five-second sanitizer pass
+or a production performance fix. Original strict failures remain failures.
+The complete affected standard-runner checks retained these results:
+
+| Configuration | Result | Evidence |
+| --- | --- | --- |
+| GNU11 Release | Both full GUI cases passed serially (14.1576/160.719 s) and in parallel (14.4002/161.581 s), no skips; every case finished below the ordinary 3,600-second CTest cap | [39117701896](https://github.com/mirage335-colossus/pumpModem/actions/runs/39117701896) |
+| Prepared GNU15 SDK, FLTK/Bookworm Release | Both complete cases passed in 15.2533/132.2 s, no skips, using the existing prepared recipe | [39117709590](https://github.com/mirage335-colossus/pumpModem/actions/runs/39117709590) |
+| MSVC Release GUI | All 39 complete GUI cases passed, no skips | [39117706048](https://github.com/mirage335-colossus/pumpModem/actions/runs/39117706048) |
+| GNU11 Debug ASan/UBSan | Advice passed in 15.8751 s with its original readiness gate at 2.95842 s. Controller failed after 155.413 s; parallel execution was not launched | [39117698074](https://github.com/mirage335-colossus/pumpModem/actions/runs/39117698074) |
+
+Debug reached generated delayed arrival after 12.7927 seconds, inside the new
+fifteen-second computation limit. Its later existing graceful-stop completion
+check failed. Ten wall seconds after the request, sampled TX had advanced only
+1.35 seconds, short of the 3.14681-second protected tail. The upper source bound
+still passed, with no reported transmission error. That upper bound cannot prove
+that the stop request installed a correct finite endpoint or will drain naturally.
+No stop-budget extension is accepted from this evidence. A bounded diagnostic
+must identify the applied endpoint and natural completion while retaining this
+original ten-second failure and the independent immediate-abort deadlines.
+The buffered arrival allowance warning was not flushed because the complete
+FHSS fixture did not succeed; this is failed coverage, not a warning-only pass.
+
+The follow-up [endpoint diagnostic](https://github.com/mirage335-colossus/pumpModem/actions/runs/39121222565)
+retained the strict failure and independently passed immediate abort. The
+request installed a finite endpoint at sample 82,661, starting from sample
+36,746; generation and traversal reached that endpoint before natural EOF,
+without cleanup abort, receiver failure or a source-bound violation. Healthy
+completion took 31.3065 wall seconds, so it does not satisfy the existing
+ten-second stop limit. Optional timing advice had finished 12.3996 seconds
+before cancellation; this capture supports no advice-priority repair. Process
+CPU increased by 74.0510 seconds over the bracket, which is not a measurement
+of CPU used uniquely by the receiver. A second, remote-only diagnostic compares
+five- and forty-millisecond observation with cumulative receiver profiles;
+its result and complete strict Debug GUI coverage remain outstanding. Neither
+diagnostic extends a cancellation deadline or qualifies its temporary binary.
+
+Passing controller output is truncated to 1,024 bytes in the retained CTest JUnit
+records. Native `LastTest.log` retains the complete final parallel execution,
+including its success footer and sampled-arrival traversal. The earlier serial
+case is established by the exact no-argument inventory, passed CTest status and
+complete CTest summary; its full passing stdout was not separately retained.
+The Windows raw log contains an actual workload warning: fake-FCC graceful
+stop completed in 5.44074 seconds, above the ordinary five-second window and
+inside the existing ten-second allowance; the protected source-tail bound
+passed. Its passing JUnit output omitted that late warning, leaving the normalized
+`workload_warnings` empty. This is a reporting defect, not evidence of warning-free
+execution. The original reports remain preserved. Complete current-process
+warning retention is now repaired: the runners collect complete numbered CTest
+records while draining the process, preserve parallel test identities and reject
+malformed framing after joining the child. JUnit and actual process exits retain
+status authority; failures, skips and timeouts remain failures. Both utility
+suites passed on [Ubuntu and Windows](https://github.com/mirage335-colossus/pumpModem/actions/runs/39123624585):
+29 CI-runner and 12 native-runner tests per OS, with no skips. This includes real
+CTest fixtures, long output, late warnings and concurrent test numbers. The
+Windows checkout's raw hashes differ by the verified LF-to-CRLF conversion;
+canonical Git blobs match. The workflow's other eighteen jobs were unselected
+and provide no application coverage. An independently reviewed exact source
+proof binds these reporting and orchestration changes through `359d3db` to the
+historical runtime evidence; it grants no Debug GUI pass or final qualification.
+
+All Release calibration sections completed on Linux and Windows, including
+64 fixed seeds per modeled case and the original per-case and combined gates.
+Full-matrix RMS errors are `0.024103` / `0.0426631`; shaped RMS errors are
+`0.00842595` / `0.0497994`, against the unchanged `.07` combined limit.
+Both Debug shaped parts completed in 4,521.676/5,938.150 seconds under their
+7,200-second limits; the second reports a near-budget warning. Their fixture
+identities match and their seed sets cover 0–63 exactly once for each case,
+with combined recoveries 41/64 public and 40/64 private. The mandatory compiled
+aggregate passed both original per-case gates and the combined `.07` gate:
+RMS `0.00842595`, maximum error `0.010376`. The SDK's complete all-section
+calibration also passed its original 64-seed cases and statistical gates.
+
+Native and SDK Wasm controls each passed 5/5; both TAR/ZIP pairs passed package
+verification. Native Linux archives passed complete copied GUI smokes on
+Ubuntu22.04 and 24.04, and Windows archives passed both formats and the spaced
+directory check. Both SDK backends and formats passed all copied-runtime jobs
+on Bookworm/Ubuntu24.04 using recipe `6c4884fdff9c745ab0a0`. No completed smoke
+used typed-budget incomplete coverage. Advisory Rev replay-cadence and Fontconfig
+warnings remain in the retained logs. Instrumented Live passed both tests with
+one workload warning: pre-acquisition keyed-epoch refresh exceeded its normal
+30-second budget but completed inside the bounded 90-second instrumented
+allowance. This is completed functional coverage, not a relaxed physical
+deadline or an omitted assertion. Archive evidence keeps its original
+source and binary identity; later fixture/documentation commits do not relabel it.
+
+The native arithmetic skips are explicitly omitted coverage, not passes:
+Linux GNU11 lacks qualified original/reference domains for 16 cases and the
+native exact-source screen for one; Windows reports 33 unavailable cases.
+The SDK contract reports no unavailable-coverage skips.
+
+The Debug controller graceful-stop failure and final configuration/evidence
+reconciliation remain unresolved. Complete preparation, advice and CLI follow-ups do not turn
+the original failed or cancelled workflow into a pass. Default instrumented Fast omits `fast_session`
+and `gui_fast_live`; the opt-in instrumented GUI smoke also remains omitted.
+Release passes both mandatory real-time tests. No skipped, cancelled, queued or typed-budget
+incomplete workload is counted as a test pass.
+
+The earlier extreme-duration and physical-link limits remain: private unknown
+first epochs with hours/days symbols, cold-acquisition CPU/peak memory, ageing
+original clock guards, and paced very-low-SNR backlog/audio reliability are not
+qualified by these functional controls. Silence does not identify a private
+start or reduce whole-symbol peak workspace.
+
+## Symbol_Burst — historical handoff, 17 October 2026
 
 The optional whole-symbol UTC calendar and guarded sparse capture are described
 in [Symbol_Burst](symbol-burst.md). The candidate keeps existing wire bits,
@@ -83,8 +430,9 @@ Both complete SDK runs failed only `frequency_axis_probability`.
 The strict EME frequency-axis continuation and V1 fractional-resampling clipping
 failures have earlier retained investigation evidence. Unchanged source alone
 does not prove the other Windows failures predate Symbol_Burst. A frozen
-pre-feature Windows comparison was committed and pushed in `325073e`, but has
-not run. It must preserve the original tests and explicitly identify its
+pre-feature Windows comparison was committed and pushed in `325073e`, but had
+not run at this historical handoff. Its subsequent execution is recorded above.
+It preserves the original tests and explicitly identifies its
 four identifier-only MSVC compile ports. No failed assertion has been relaxed.
 
 The full instrumented shaped calibration used four capture workers and 64 fixed
@@ -11184,3 +11532,315 @@ retained clipping failure and earlier cover/echo/receiver limitations, calibrate
 IC-7100/independent devices, ARM, sanitizers, platforms, SDK and packaging.
 Everything remains local. This is the rebuilt-GUI manual checkpoint; no broader
 qualification, publication, hosted CI or GPU work was started.
+
+
+## Symbol_Burst — hosted Live coverage continuation, 20 October 2026
+
+The source is `de2b45bd2c399d7ea6141f4bb179bd00313d47ed`; production runtime remains `a6c2bf11d255fd00f35ecc238a56e144e7605145`. The change adds an opt-in, default-OFF CMake registration that supplies `--ci-functional-clock` to CTest `live` only, plus a typed workload-result classifier and hosted workflow wiring. It does not change modem runtime or wire behavior. Only standard-hosted native `live` and FLTK SDK `tests` or manual-focused `live` routes opt in. The new compact-workload exception is limited to these hosted Live routes; other scopes retain existing behavior, including pre-existing typed coverage policies, and local runs remain strict.
+
+The original compact attempt remains first and mandatory under its 40-second normal and 120-second instrumented workload allowances. Only the typed expiry after stable new-transmission identity/revision, healthy state and recent forward progress within 30 seconds—with no drops, backlog, stall or regression—may be recorded as **incomplete coverage**. It is never a compact Live pass. The standard-geometry functional analogue and every other original Live case and assertion must complete successfully before a warning result is accepted. The 32 MiB workspace, six seconds of fully scored physical absence, ten-second GUI stop, input/content assertions and existing deadlines remain unchanged.
+
+Evidence for the conditional hosted route includes the existing Windows standard-geometry fixture passing all assertions in 8.7532 seconds with empty stderr and unchanged source, cache and binary pins ([Windows probe 39363031213](https://github.com/mirage335-colossus/pumpModem/actions/runs/39363031213); artifact metadata is retained under `.agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/windows-clock-functional-probe/`). The local GNU 14 ASan/UBSan standard-geometry run also passed all assertions in 46.6018 seconds, but is a functional diagnostic, not compact-throughput qualification (`.agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/standard-functional-analogue-root/outcome-root.json`). Windows and Linux utility CI on the exact source passed 46 reporter tests and 12 native-runner compatibility tests per OS, with no skips ([utility run 39365073407](https://github.com/mirage335-colossus/pumpModem/actions/runs/39365073407); downloaded artifacts and logs are in `.agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/hosted-clock-driver-build/utility-ci39365073407/`).
+
+Matching GUI evidence is reused by scope and input equivalence, without claiming identical new binary hashes. The original a6 Debug ASan/UBSan GUI run passed serial and parallel 2/2 ([39356248168](https://github.com/mirage335-colossus/pumpModem/actions/runs/39356248168)); the later b8 reporter validation passed 41/41 FLTK and 44/44 Rev GUI tests and their workflow smoke checks ([39361209048](https://github.com/mirage335-colossus/pumpModem/actions/runs/39361209048)). A root replay of the original a6 Release core records 252 passes and 17 declared exit-77 omissions among 269 selected; the actual CLI check passed 39/39 in 44.737 seconds. The replay record is `.agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/ctest-padded-identities/evidence/release-core-v3-parser-replay.json`; the original red workflow report remains preserved. On the affected Windows Release core report, root replay records 231 passes, 33 declared exit-77 omissions and 264 selected, with CTest exit 0 and about 2,615.90 seconds. The original report-parser failure remains preserved beside the replay at `.agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/ctest-padded-identities/evidence/windows-core-parser-replay.json`; this is a replay of retained output, not a new Windows run.
+
+Earlier failures remain failures: the a6 Windows full Live report has `live` failing the original 40-second gate while `live_profiles` passed ([full native run 39359061080](https://github.com/mirage335-colossus/pumpModem/actions/runs/39359061080)); the focused original instrumented Live run failed at 120 seconds after 120.734 seconds, with no external timeout or sanitizer report ([39356259050](https://github.com/mirage335-colossus/pumpModem/actions/runs/39356259050)); and the separate local 240-second diagnostic still failed before framed physical completion (`.agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/san-completion-followthrough-root/outcome-root.json`). The later local full functional ASan/UBSan run also failed at the unchanged 90-second pre-acquisition deadline: 417.321 seconds wrapper wall and 460.466 seconds process CPU, without a sanitizer report, resource stop, changed input pins or final hosted marker. The clean original-path comparison failed at the same pre-acquisition condition after 90.505 seconds wall / 126.171 seconds CPU (`.agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/hosted-clock-driver-build/preacq-failure-partition-root.json`). No pre-acquisition waiver was introduced. None is recast as a pass or proof of a hardware-only cause.
+
+The three affected `de2b45bd` standard-hosted Live runs now each report `live` and `live_profiles` passed, plus the documented compact framed **incomplete-coverage warning**: Linux Release [39366169676](https://github.com/mirage335-colossus/pumpModem/actions/runs/39366169676) (`live` 102.493 s, profiles 196.532 s; reporter elapsed 299.064 s); Windows Release [39366193593](https://github.com/mirage335-colossus/pumpModem/actions/runs/39366193593) (106.841 s, 316.925 s; reporter elapsed 424.469 s); and FLTK SDK [39366211729](https://github.com/mirage335-colossus/pumpModem/actions/runs/39366211729) (105.588 s, 197.025 s; reporter elapsed 302.650 s). The raw and short compact cases completed; framed and clear-after-positive did not. Their reports and inventories were independently read back under `.agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/production-qualification-a6c2bf1/affected-live-de2b45b/`.
+
+The affected Linux Debug ASan/UBSan Live run [39366181028](https://github.com/mirage335-colossus/pumpModem/actions/runs/39366181028) also passed both cases: `live` 330.045 s and `live_profiles` 429.005 s (CTest 759.06 s), with only the compact framed incomplete-coverage warning at its 120-second instrumented limit. The standard analogue and remaining Live assertions completed. All four affected Live scopes are accepted. Separate full native and SDK qualification runs 39359061080 and 39359071582 are on prior runtime revision `a6c2bf1`; shaped calibration aggregation and the SDK contract readback are complete. The later Debug core outcome below contains three actual failures, so native qualification remains incomplete. No full qualification or release certification is claimed.
+
+A bounded local follow-up retained the same keyed fixture and reproduced its original 90-second failure in 90.7203 s wall / 119.177 s CPU. At the final decision all 32 bits were generated, but sampled reception, the tail and replay were not complete; workspace was 38,267,016 of 134,217,728 bytes with no input-loss or search-limit error. Hardware queue/frontier counters are inapplicable to this simulation. The capture does not identify an internal receiver defect, and no further warning or production patch was introduced. Its source, four bounded state records, observer cost and thread-CPU evidence are retained at `.agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/keyed-epoch-census-sol/root-readback.json`.
+
+Native Linux/Windows packages, SDK FLTK/Rev packages and copied consumers completed their GUI smoke coverage without typed-budget omissions. SDK Rev emitted the existing replay-cadence advisories. Package-log artifacts and root readback are retained under `.agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/production-qualification-a6c2bf1/package-readback/`. This reuses matching runtime inputs and makes no claim that newer provenance-stamped package hashes are identical.
+
+The Debug shaped calibration gate in native run 39359061080 completed through jobs `118420665291`, `118420665257` and aggregate `118452613577`. The capture tests passed in 4,472.04 s and 5,962.46 s; the latter retained its near-budget warning against 7,200 s. Independent artifact readback confirms every seed 0–63 exactly once for both public and private cases, with matching source/configuration and input hashes. The original aggregation passed in 8.34503 s: public 41/64 versus predicted 0.630249, private 40/64 versus 0.630859, RMS error 0.00842595 (limit 0.07), maximum per-case error 0.010376. Both data ZIPs, the aggregate log and hash-bound readback are retained in `.agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/production-qualification-a6c2bf1/shaped-qualified-a6c2bf1/`.
+
+The full FLTK SDK job `118420694763` in run 39359071582 completed with the original compact framed-clock failure (`live` 91.08 s overall, compact attempt 40 s; `live_profiles` passed 196.88 s). That original failure remains a failure. Its other groups passed: build isolation 35/35, packaging isolation 4/4 (79.27 s), remaining contract 194/194 (2,374.58 s), and full calibration (3,338.07 s). Retained XML matches every selected inventory name, with no skipped contract or calibration cases. Calibration used all 64 fixed seeds per matrix case; modeled matrix RMS was 0.024103 over 13 cases, and shaped RMS 0.00842595 over two cases. Two diffusion cases retained their sampled results and original timing-ownership prediction limitation. The reviewed newer SDK Live replacement run 39366211729 supplies the complete mandatory functional Live coverage plus only the approved compact warning. These matching results establish SDK functional qualification with that warning; they do not turn the old red workflow or demanding compact measurement into a pass. Artifact `12242021111` has SHA-256 `f22ea04c5a1d4fb93f2932a607c514fc4164ccbb91ea35071b711339c2a03690`; exact source/configuration, XML inventories, logs and root readback are retained under `.agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/production-qualification-a6c2bf1/sdk-fltk-full-a6c2bf1/`.
+
+The retained unaffected matrix reports are indexed under `production-qualification-a6c2bf1/unaffected-shards-a6c2bf1/` within the same evidence directory. Instrumented Debug scope exclusions remain explicit: `fast_session` and `gui_fast_live` are omitted there, while Release coverage remains mandatory. The separately opted-in strict sanitizer GUI checks passed as recorded above; the default native instrumented desktop smoke remains omitted. Zero runtime skip entries in a report do not erase these scope exclusions.
+
+The last Debug core job `118420666405` completed CTest with exit 8 after 7,344.03 seconds: 246 passed, 17 declared exit-77 omissions, and three failures among 266 selected. `scheduled_parallel_preparation` timed out at 7,200.03 seconds; `symbol_burst_live` failed in 26.8296 seconds because its controlled capture had not drained; and `gui_controller` failed in 156.42 seconds with EU stop still active at 10.0056 seconds. The outer job limit then cancelled CLI coverage at 06:28:42 UTC. The partial CLI output is not a pass. Artifact `12245372027` has SHA-256 `9498b99a0157b4f484dc2882824df67bf84b34a90d1b5b0db4f7e4921c054129`; exact inventory/JUnit/cache/log readback is retained under `production-qualification-a6c2bf1/debug-core-a6c2bf1/`. These results are not covered by the compact-clock warning.
+
+The Burst Live failure published the exact six-bit prefix `001001` of its ten-bit private fixture `0010010010`. Its 6,276 queued plus six decoding physical samples exactly account for the 6,282-sample gap between received input and processed frontier; input health and receiver error remained clear. This was an unfinished controlled-clock workload, not a content-mismatch assertion. Its existing `CpuWorkBudget(25s)` lacked the sanitizer compile definition already used by the other functional Live targets. A reviewed CMake correction enables that helper's existing threefold instrumented allowance while retaining the normal 25-second limit and every content, timestamp, queue and physical-completion assertion. The full original no-argument fixture subsequently passed on source `279c505561600477a20d7ce7a97019e237f65ca4` in run [39383663334](https://github.com/mirage335-colossus/pumpModem/actions/runs/39383663334), job `118498336927`: one selected test, zero failures or skips, 54.9432 seconds. The private case emitted the expected completed-workload 25/75-second warning; public, private, early-offset, guard, amplitude and simulation paths returned before the original success marker. Artifact `12246553257` SHA-256 `986df5c1786feb4c65ef14937ff94be8aa797ead2c05332a08581bef73ac5b3b` and independent source/cache/output/JUnit readback are retained under `production-qualification-a6c2bf1/symbol-burst-live-279c505/`. No incomplete-coverage exception was added.
+
+The failed GUI fixture matches the prior strict passes in source, compiler/sanitizers, runner class, settings and published source counter at cancel request. That counter advanced 2.9 source seconds before the ten-second failure, compared with 3.18854 seconds on the strict passes. Generated/prefetched source progress is not the transmitted stop position; these counters do not establish an exact remaining endpoint distance or identify CPU versus waiting. The earlier isolated serial/parallel passes remain valid evidence, and the new core-context deadline failure remains failed. A bounded current-source critical-path capture is being prepared before selecting another runtime correction.
+
+The earlier complete preparation pass in run 39109132082 retained its 7,060.86-second result under the original 7,200-second cap. Relevant test and PatternCorrelator paths are unchanged through `a6c2bf1`, and all 851 CMake cache entries match the new run except the runner's `SITE`. Its isolated one-worker CTest execution differs from the new two-worker core execution. Root reused its completed unchanged functional assertion coverage after comparing twelve critical source hashes, reviewed additive FFT/private-friend changes, and the actual caches. This does not establish a fresh current-core throughput pass or relabel the 7,200.03-second timeout. A separate guarded local GNU 14 sanitizer attempt stopped at 600.297 seconds in its first serial phase, without completing coverage; its evidence remains incomplete. The standard-runner Debug CLI recovery [39380859037](https://github.com/mirage335-colossus/pumpModem/actions/runs/39380859037), job `118489414035`, passed all 39 tests in 156.092 seconds. Its binary SHA-256 `d6ff9a3ef3bcc51f6b06d7de251392f8daaeaa36c097c89ae3d28dea3ac43e0d` exactly matches the interrupted core binary. Source/output readback is retained under `production-qualification-a6c2bf1/cli-debug-de2b45b/`. Native qualification still awaits resolution of the actual GUI stop failure.
+
+
+The first current-source GUI critical-path diagnostic [39386420100](https://github.com/mirage335-colossus/pumpModem/actions/runs/39386420100), job `118507234158`, reproduced the original EU failure on `b7210055818784b01e70c45aac0891c2c5d0381e` (production runtime still `a6c2bf1`): exit 1, stop 10.00015405 s, still transmitting/stopping. The full original no-argument GUI body and every assertion remained intact. Its deliberately partial preparation co-load was terminated and reaped after GUI exit; this is not a preparation test pass. All process groups closed and source preimages restored.
+
+The sealed trace contains 973 records with no drops. Request lock/install took 23.985/34.925 microseconds; endpoint installation occurred 0.214581 s after request, after the current feed. Across the 10.001448 s request-to-observation window, clipped receiver-feed spans occupy 9.724598 s; 56 complete post-request feeds alone used 9.393861 s wall / 9.065587 s calling-thread CPU. Source reads used 0.232060 s wall / 0.230839 s CPU, and publication 0.024490 s / 0.024475 s. These are distinct non-overlapping source-thread spans; straddling CPU is not proportionally divided. Natural EOF, internal completion and GUI acknowledgment were unobserved before assertion teardown.
+
+The 9.949010-second inner proc-sample bracket shows 21.66 GUI-process CPU seconds: source/read/feed TID 7362 used 9.61, GUI main TID 7089 used 1.84, and two other busy TIDs used 5.16 and 5.06 seconds. Preparation used another 9.90 seconds. Cgroup throttling stayed zero; scheduler statistics were disabled, so zero wait counters do not prove zero scheduling delay. Input metadata and counters separate generated 78,717, channel-transmitted 77,786 and installed endpoint 82,661 samples at the last read. The 79,920-sample PCM file is the complete committed prefix; one final uncertain 720-sample feed is excluded. Its SHA-256 is `8bd8d9d2b92e15b566acd8823171ce21194f633345341197a5f9b31351d9e8a8`. Simulation hardware-frontier/queue counters remain inapplicable.
+
+Artifact `12248920975` SHA-256 `a43790bd0391c299bd36391df74c9db14896ec74570e160a25eae32c3875120b`, source/overlay/cache/binary bindings, raw trace and independent root/scout readback are retained under `production-qualification-a6c2bf1/gui-stop-current-b721005/`. Recorded C++ observer insertion cost was 5.971 ms wall / 4.373 ms thread CPU; whole-process proc sampling cost was 1.698 s / 1.640 s. These omit parts of instrumentation cost and are not a calibrated matched overhead estimate. Natural inputs are unmatched, so this capture establishes no preparation-load cause or performance comparison. It locates the next measurement inside receiver feeds and does not qualify the GUI stop behavior. The later receiver substage capture is described below; no production correction or broader completion is claimed.
+
+
+Current-source counter readback corrects the earlier generated-counter label: in `Session::Impl::progress`, the simulation branch publishes `wave.transmitted_samples / sample_rate`; generation uses `samples_emitted()` separately. At the captured request, published 2.55180556 seconds equals 36,746 transmitted samples at 14,400 Hz, while 37,348 samples had been generated. The final published 5.40180556 seconds equals 77,786 transmitted samples; generation was 78,717. The earlier numeric test results and failure history remain valid, but the published counter in this current simulation route must not be labeled generated progress. The request witness is still only the last completed read and may predate an in-flight read; other modes can publish generated progress. No assertion or physical deadline changes.
+
+
+The second GUI diagnostic [39391135074](https://github.com/mirage335-colossus/pumpModem/actions/runs/39391135074), job `118522655093`, ran source `08904a1` with the same unchanged a6 runtime and instrumented runner class. The full original no-argument GUI process exited 0 with its final success marker; the EU stop observation was 9.177969929 s, with natural EOF, internal completion, GUI acknowledgment and all source-tail/final-idle assertions passing. The successful case then issued a second stop request after reconfiguration. This is diagnostic evidence, not strict qualification or a matched timing comparison.
+
+The workflow itself failed: its 64-slot general metadata buffer dropped 13 records and lost the joined CPU ledger. The sealed trace still has 1,119 records and zero writer drops; the primary request and strict-observation CPU ledgers were retained before overflow, each with four active Contexts and zero accounting errors. Across their 9.179248359 s span, completed-Context CPU increased by 18.301827911 s, including 14.868931510 s in `native_fft_search`. These are provisional nonquiescent deltas. That category includes private/streamed template generation, transforms and scoring; it does not prove the FFT arithmetic alone is responsible. The 86,955-sample committed PCM prefix hashes to `c6b851f7af8869a7712f7aef5ae396fe1da495d74c122a3f93982e659a3a6f44`; one uncertain feed is excluded. Artifact `12250243641` hashes to `a9505f27ddf0a896894cc867603dbb7fb41a3dc0560ac31e1080f048e944de1d`. Independent source/tool/file/closure/restoration readback is retained at `production-qualification-a6c2bf1/gui-stop-substages-08904a1/root-outcome.json`.
+
+Diagnostic-only source `53191396033c443e5f714d6d6943b21af5aea69b` adds eight coarse executor phases and protects CPU ledgers in reserved storage with request ordinals. Nineteen pure reader/build-metadata controls and nine-file prepare/check/restore checks passed. Original arithmetic/control-flow tokens, GUI assertions and 417 runtime pins are preserved. That capture completed as described below. The executor probe required Sol takeover after a delegated FP32-operand mutation and one failed repair guard; all original attempts are retained. No stop deadline waiver or production optimization is selected.
+
+
+The executor-phase diagnostic [39395606466](https://github.com/mirage335-colossus/pumpModem/actions/runs/39395606466), job `118537484193`, passed on source `5319139`. The entire original no-argument GUI test exited 0; EU stop was 9.986809925 s, close to its unchanged ten-second limit. Natural EOF, completion acknowledgment, tail bounds and all other GUI assertions passed. It retained five CPU ledgers, 77 metadata records, 1,141 sealed trace records and zero overflow/drop/accounting errors. The 86,955-sample committed PCM prefix hashes to `9aa407ba26c01e223873f357283c58e7e7cf1f0cc6bd66342fe52f986050d683`. Artifact `12253455432` SHA-256 is `59d8b430821768657da4611c8bc4cb329498afd475d4d0f9ad5db0b07a9a8d07`; source/tool/preimage/file/closure/restoration checks and exact counters are retained in `production-qualification-a6c2bf1/gui-stop-executor-5319139/{root-outcome.json,cpu-readback-root.json}`.
+
+The provisional primary completed-Context delta is 20.683850150 CPU seconds over 9.988151231 wall seconds, with one active Context at each cut. Its 45 stages reconcile exactly to that profiled delta. Inverse transforms used 8.603036679 CPU seconds, scoring 4.550112335 and product sweeps 2.710410693, each with 328,450 entries. Private/streamed generation, forward transforms and drift-job scopes had zero entries. The measured executor therefore used prepared rows. This capture still combines the borrowed-table and legacy inverse functions and omits exact transform size/actual SIMD selection, so it does not yet select a kernel correction. Natural inputs remain unmatched; no speed comparison or observer-overhead conclusion follows. The profiled whole-Case delta is 37.541287669 CPU seconds between quiescent boundaries; it includes later reconfiguration and is neither pure stop work nor all process CPU.
+
+Source `0e9125d2168e342a587b7fb292c1bc60794a3472` adds bounded inverse-path/shape records and sparse leaf timing (one inverse per 257 calls per kind and physical thread), covering checks/setup, permutation, butterflies and normalization. Original FFT arithmetic, validation, cancellation and the accepted executor body are preserved. Twenty-four reader/build/shape controls, five supporting CPU-reader controls, and ten-file prepare/check/restore passed; C++ and application validation are pending in one standard-runner capture, [39400655672](https://github.com/mirage335-colossus/pumpModem/actions/runs/39400655672). Prior matching normalization diagnostic evidence is retained and reused before choosing another experiment. The leaf-probe assignment needed Sol completion after its one authorized verifier repair; original failures and changed postimages remain preserved. No production correction, new deadline waiver or full-qualification claim is made.
+
+### Borrowed FFT inverse normalization correction: strict GUI passed; full qualification running
+
+This entry records the borrowed FFT inverse normalization correction. It records the completed B stop-leaf diagnostic and reviewed production source; the new candidate's focused FFT checks and original strict GUI tests have now passed. Full native and SDK qualification remain in progress.
+
+Keep the earlier A-workspace history separate from this B stop investigation. The B stop leaf is diagnostic evidence, not a replacement for prior failed GUI qualification or an A-workspace result. Preserve those original outcomes and their classifications as recorded in their existing entries.
+
+The B4 leaf run, [39400655672](https://github.com/mirage335-colossus/pumpModem/actions/runs/39400655672), used diagnostic source `0e9125d2168e342a587b7fb292c1bc60794a3472` with production runtime `a6c2bf11d255fd00f35ecc238a56e144e7605145`. The original no-argument GUI exited 0; EU stop completed in 9.960213617 seconds, and natural EOF, internal completion, GUI acknowledgment, and the original assertions passed. The trace sealed completely with zero drops, restoration and process closure were verified, and the ZIP artifact `12256466570` has SHA-256 `abfd8e19ecbf1381a7815eb5c9e8da6aa78a9231af27e5ffc7fbac15788bd2fc`. This remains a diagnostic run (`qualification=false`, `matched=false`), not strict GUI qualification.
+
+The sampled executor used borrowed AVX2 FP64 inverse transforms of size 256 and 512 on three TIDs. It recorded 327,370 primary inverse calls and 1,272 sampled calls for each leaf phase: checks/setup 9.970701 ms CPU, permutation 3.161169 ms, butterflies 16.325918 ms, and normalization 6.820299 ms. The samples are deterministic sparse CPU observations and do not estimate total CPU or wall latency. The request/strict cuts each had four active contexts, so the completed-context CPU delta is provisional. Input was unmatched; whole-case PCM was 86,955 samples (85,515 primary plus 1,440 later committed), with two uncertain feeds. The published request values were 37,348 generated versus 36,746 transmitted samples, with endpoint 82,661; event timing must use `observed_wall_ns` because `steady` records buffered trace-emission time. The retained outcome preserves the actual milestone intervals.
+
+The production change in `src/search_fft.cpp` replaces per-complex division in the borrowed inverse path with AVX2 two-complex exact power-of-two scaling under the existing guard. The reviewed source SHA-256 is `3d1f4096734625d373a1e6d32f89dceab5746de1050a713a9cd0dc27e9b42fb5`. The source review accepted the scoped change: exact `1/n` scaling for power-of-two sizes; existing RNE, IEEE binary64, gradual-underflow, signed-zero, masked-exception, finite-growth, and cancellation behavior retained. The existing SIMD guard remains `n=4..8192`; non-x86, MSVC, scalar, owning-FFT and forward paths are unchanged. An independent Sol review found no material blocker. The reused normalization diagnostic `39218344978` supplies numeric controls, exact-output/FE-flag controls and full-FFT-plus-input-copy B/C/C/B timings, but does not establish a GUI gain.
+
+The focused qualification workflow repair is recorded under `fft-stop-fix-focused-qualification-route/root-sol/`. Its history remains explicit: the initial Luna Bash heredoc setup failed; its single authorized repair then hit checker `IndexError`; root Sol took over the same assignment and corrected the embedded-Python indentation. The original GUI suffix remains byte-exact, and the repaired YAML, shell syntax and embedded-Python compilation checks passed. These are validation-route setup events, not candidate test failures. The focused acceptance route remains the two original FFT registrations (`search_fft` and `pattern_fft_batch`), followed by the original GUI timing/controller checks serially and then with parallelism two, with all assertions and deadlines intact.
+
+Candidate `42d7a0cb82c027f906555c39adccb7ec6fa91f21` was committed and pushed with `[skip ci]`; manual run [39405099719](https://github.com/mirage335-colossus/pumpModem/actions/runs/39405099719), job `118568999113`, completed the focused FFT and original strict GUI route on standard Ubuntu 24.04 / Ubuntu 22.04 container / GNU 11 Debug O1 ASan+UBSan. Root independently verified the ZIP digest, both no-argument test inventories, all three JUnit reports, original full-GUI success markers, cache and logs: 2/2 FFT tests passed (pattern_fft_batch 22.0346 s, search_fft 4.7404 s; CTest 26.78 s), 2/2 GUI serial tests passed (267.19 s; EU stop 9.21797 s), and 2/2 GUI parallel tests passed (251.42 s; EU stop 8.93951 s). No skipped or failed cases or sanitizer reports occurred. All original assertions and the hard ten-second stop bound remained intact; ordinary five-second workload warnings are retained. Artifact 12257594882 SHA-256 is ccc68f3e3adfcd5302c26383b14d22d6f207ef49d1ea1303450d48af22caaefe. This establishes the stated candidate checks; unmatched timing pairs do not establish an end-to-end speedup. The authorized hosted-only compact Live 40/120 incomplete-coverage warning does not apply to the GUI ten-second, pre-acquisition 30/90-second, or preparation 7,200-second limits. No GUI or other deadline waiver is part of this correction. Update this entry only from the actual job outcomes; retain any failure rather than relabeling it as a pass.
+
+Evidence pointers (all under `.agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/`):
+
+- B4 diagnostic: `production-qualification-a6c2bf1/gui-stop-leaf-0e9125d/root-outcome.json` (SHA-256 `a5354c4d0fc2256b2fd0871369a5400ee4e14efa55d2641646416e47e6cabd77`) and `cpu-readback-root.json` (SHA-256 `c97d792329c07014082f6335200f760a842d71e335ffad68d23e8de33a2b033e`).
+- Production source review: `fft-normalization-production-root/review.json` (SHA-256 `959969c72e6b6c8689ea71c80881e34b1bd340609ef93a5d52ddeaea1b4d8bab`), `production.patch`, and reviewed `search_fft.cpp`.
+- Focused route review: `fft-stop-fix-focused-qualification-route/root-sol/review.json` (SHA-256 `8e7be75978dc2c97965dbcb8c64305f617ce7afad9c447e66691b5d953a5b6a9`).
+
+Full manual qualification started concurrently on the same immutable source: native [39408796720](https://github.com/mirage335-colossus/pumpModem/actions/runs/39408796720) and SDK [39408799955](https://github.com/mirage335-colossus/pumpModem/actions/runs/39408799955), both `devfast=false`, Linux `ubuntu-24.04`, Windows `windows-2022`. Native uses documented `sanitizer_realtime=false` / `sanitizer_smoke=false` scope; Release retains its mandatory real-time checks, and the exact-source strict instrumented GUI core evidence above is separate. These full-run results are pending; queued/skipped helper jobs are not passes. Source/runtime changed, so prior matrix results alone do not qualify this candidate. Exact launch/configuration/metadata are retained in `production-qualification-a6c2bf1/{native-full-42d7a0c,sdk-full-42d7a0c}/`; strict-gate independent readback is `gui-core-normalization-42d7a0c/root-outcome.json`.
+
+
+### 2026-10-20: current normalization qualification and separate SDK Rev failure
+
+On source `42d7a0cb82c027f906555c39adccb7ec6fa91f21`, run `39405099719`, job `118568999113`, passed the two original FFT checks (26.78 seconds combined), then both original GUI checks serially (267.19 seconds) and in parallel (251.42 seconds), under GNU 11 Debug/O1 ASan/UBSan on a standard Ubuntu runner. The EU graceful stop took 9.21797 and 8.93951 seconds respectively; its ten-second deadline and all physical-end/source-tail assertions remain unchanged. This establishes those strict checks on the integrated revision, without a matched speedup claim.
+
+The required full native run `39408796720` and SDK run `39408799955` were dispatched concurrently with `devfast=false` on standard runners. Accepted partial results include native Linux/Windows package producers, both Ubuntu copied-native-package consumers, SDK FLTK TGZ/ZIP smoke, Debug Fast (31 selected passes, with only the two documented sanitizer scope exclusions), and Linux Debug/Windows Release Live (two selected passes each). The compact framed Live fixture reported typed incomplete throughput coverage at 120.001 seconds (Debug, generated 1127/1216 bits) and 40.003 seconds (Windows Release, 1206/1216); the mandatory standard functional analogue and remaining assertions passed. These generated-source counts do not establish receiver physical completion. Full native core/shaped and SDK FLTK contract results remain pending.
+
+SDK Rev package job `118581186461` failed its relocated TGZ GUI smoke at phase 21: the edited 32 raw bits for `Help` did not become exact copyable text. This is assertion exit 1, not typed workload exit 75, and remains fatal. Two Rev display-cadence advisories do not classify or excuse it. The log records pending acquisition IDs 37/63 with 131 bits and a separate completed three-bit whitespace row; these IDs do not identify transmission 16. Artifact `12260196495` has SHA-256 `83e3891b42d8e12ac73bce79f9a572eac287d86ee661350502e0916c9fa0e8d7`; its `packages.log` lines 5180–5220 retain the exact command and failure. The failure's generated key and PCM were not retained on the ephemeral runner, so an exact replay is unavailable. The dependent SDK copied-consumer matrix was skipped and is not a pass.
+
+The same revision's SDK Rev source conformance job `118581186434` passed four native cases (263.99 seconds combined) and the original shared smoke. That run had a different generated key/media history and is not a matched comparison. Source inspection shows that normal simulation processes the configured absence tail synchronously before starting replay; it gives acquisition an opportunity to finish, rather than certifying every candidate's completion. Hardware queue/frontier counters are inapplicable to this simulation path. Diagnosis now separates receiver acquisition/content, event staging/GUI copy state, input/key/media differences and unaccounted interactions. A bounded two-boundary diagnostic is being reviewed; no production correction for this separate failure has been selected. Qualification is incomplete.
+
+Exact source-bound reports and independent readbacks are retained under `.agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/production-qualification-a6c2bf1/`, including `package-source42-root-review.json`, `current-runtime-root-review.json` and the original failure ZIP. Historical results, dirty documentation prefix, assignment identities and repair histories remain preserved.
+
+
+### 2026-10-20: additional source-42 qualification and SDK capture setup recovery
+
+Native full run `39408796720`, production source `42d7a0cb82c027f906555c39adccb7ec6fa91f21`: Windows Release core job `118581179371` completed CTest with 231 passes and 33 declared return-code-77 omissions out of 264 selected cases (3461.672 s). Receiver, FFT, Symbol_Burst and GUI controller cases passed. The controller's 5.39709-second workload warning remains below its unchanged ten-second stop bound. Linux Debug calibration matrix job `118581180613` passed all fixed 64-seed rows and original gates: 13 modeled cases, RMS 0.024103, maximum 0.0574951, plus the two timing-ownership controls (2196.441 s). These artifacts contain no CLI results; omissions are not passes. Independent raw ZIP, source/inventory, JUnit and critical-output review is retained in `current-windows-core-debug-matrix-root-review.json`.
+
+SDK Rev diagnostic `39418634745` (tools `912ef72b24877c5226f32c8b5accba5f86af507c`, production base unchanged) compiled its sole diagnostic GUI postimage and passed package assertions, then stopped before launching the smoke: the container's default `sh` rejected `set -o pipefail`, exit 2. This is setup failure, not a measured application outcome. Artifact `12262793179`, SHA-256 `2b16da5c8300020edd0947e7efbb797812eb0dadfd298bf61932b3a1f04897aa`, and exact logs remain retained. Sol corrected only that step's explicit Bash selection in `7eb83f00955da87903d0a6f7944e04d6cb54102d`; recovered diagnostic `39420739594` is running with the same production base, SDK pins and capture postimage. It is not qualification. The existing full native/SDK jobs remain running; the separate SDK Rev phase-21 content failure is unresolved.
+
+
+### 2026-10-20: current-source full FLTK SDK contracts
+
+Full SDK run `39408799955`, source `42d7a0cb82c027f906555c39adccb7ec6fa91f21`, FLTK job `118581186397` passed its configured preservation contracts: Live 2/2 (302.04 s), general 194/194 (2365.76 s), and complete differential calibration 1/1 (3267.07 s). Inventories and JUnit names match exactly, with no test-level skips. Build regressions passed 35/35 (32.13 s); packaging passed 4/4 (71.88 s). Shared GUI cases ran; this source scope explicitly excludes native GUI window conformance.
+
+The compact framed Live subcase reached the approved 40-second hosted computation cap at 40.00004007 s with recent progress. Its mandatory standard functional analogue and remaining Live assertions passed. This is incomplete compact subcase coverage with a warning, not a pass of the demanding compact fixture. `scheduled_parallel_preparation` passed at 2301.18 s; `symbol_burst_live` at 14.0981 s, `search_fft` at 1.8629 s and `gui_controller` at 149.218 s.
+
+Artifact `12266885164` has ZIP SHA256 `ccfed7667af73584f1a4ff684361d484bfac49ac0f2ade921a7628b4720df697`. Root independently reconciled all three inventories/XML and 18 retained file hashes in `current-sdk-fltk-root-review.json`. Build information identifies the exact source, portable Release GNU 15.3 FLTK and hosted functional option. It also reports a modified working tree; the mandatory untracked `downloaded-sdk` directory is sufficient to cause that flag, while the exact dirty-path listing was not retained. The workflow contains no runtime source overlay steps.
+
+The full SDK workflow remains failed because the separate Rev portable smoke job `118581186461` failed its phase-21 exact-copy assertion. The two later captured passing single-completion inputs are diagnostic evidence, not replacement package qualification. Native Debug core remains pending.
+
+
+### 2026-10-20: controlled replay-staging diagnosis
+
+Diagnostic run `39430507757`, tools `b5154207eafedf35b339928ddb3366c2c65938f9`, used production `42d7a0cb82c027f906555c39adccb7ec6fa91f21` plus private four-file overlay SHA256 `e91ced6f4df6480b4e70263059af92d9ba6c167b6542095db4c47dda64a75c5e`. Standard Ubuntu 24.04 runners/container, portable Release Rev, GNU 15.3 and sanitizers off reused SDK manifest `4fdcc4b8d57e0a67eeb2ce7fac70667b75f40f01215105de95b771c77c5303c3`. Producer `118654035682` compiled and verified both package formats. Its direct actual `add_signal` check confirmed that completed 32-bit Help ID 81 followed by independent completed 3-bit space ID 82 leaves only one terminal. This is a proven staging invariant violation, not proof that the original receiver failure produced that sequence. Producer artifact `12267509338` ZIP SHA256 `d679c63c40a39e79aca864e48f3ad556c4c209a32cc25af02f25fbb82fde3f1d`.
+
+All four original copied-GUI smokes passed their assertions. Key1 job `118659349334`: full tracing 235.290769414 s, minimal tracing 233.896659894 s; key2 job `118659349273`: minimal 188.863102633 s, full 190.029824913 s. Each had exactly one selected completed 32-bit reception, correct Help copy text/bytes, zero dropped/truncated census records and complete input seals. Generated and transmitted source progress were independently recorded as 104897 samples. Neither real capture exercised independent-terminal overwrite.
+
+Both comparison jobs nevertheless failed correctly because the actual inputs did not match: first-run bank windows had 212909 samples/117 submissions, second-run windows 212189/116. One extra 720-sample nonzero noise prelude shifted TX16 from bank frontier 3600 to 4320. The TX16 submission vectors matched (111 feeds, 208589 samples), but the actual TX16 PCM differed. Settings, per-key key MAC, fixed epoch and GUI binary `8e636b431614a16fd7f284588131fff9f79d0323b8217a3fb584c66d043e54eb` matched. The first bank-relative PCM difference was sample 5734. These are not matched timing results and support no overhead or speedup estimate. Passing minimal traces show verbose tracing was not necessary for those passing inputs; the original failed key remains unavailable.
+
+Key1 artifact `12268996970` ZIP SHA256 `5743e8a470b5d0787a2f5a56fdaafbf938060d19cc6af64b2461e89254f51106`; key2 `12268363246` SHA256 `576ea8678dd684910a4853a4df5efad3f27d4ef72bab438b9d93d3c9cb1266f1`. Root independently checked source/SDK pins, all recorded raw-file hashes, package GUI hash, boundary/census/physical-completion/copy results, PCM joins, and full-trace sequence/flush/close seals. Exact readback is `controlled-replay-causal-b515420/root-wave-outcome.json`. The direct staging violation is being corrected with bounded accounting and lifetime regressions; original SDK failure attribution and required qualification remain outstanding.
+
+
+### 2026-10-20 — source 42d7a0c full native qualification completed
+
+Full native run `39408796720` completed **success** on exact source
+`42d7a0cb82c027f906555c39adccb7ec6fa91f21`, using standard runners and
+`devfast=false`. Final Linux instrumented Debug core job `118581180491`
+selected 266 tests: **249 passed, 17 explicit return-77 profile omissions,
+zero failed or incomplete**. Report/JUnit/inventory reconcile; no omission is
+counted as a pass. Artifact `12271646476` ZIP SHA-256 is
+`9611db25ecef61779eba7de26a49972ba9c1b162efa100fee9da71aa56e19054`.
+Scheduled parallel preparation passed in **6526.71 s / 7200 s** with a near-limit
+warning; GUI controller passed with graceful stop **8.81252 s / 10 s** and its
+protected source-tail assertion. Symbol Burst Live passed in **57.0417 s** under
+its unchanged 75-second instrumented allowance. CLI regressions: **39 passed in
+141.947 s**. No sanitizer report was found in the retained core output.
+
+This completes the previously running source-42 native matrix, including the
+separately recorded strict original GUI serial/parallel evidence. SDK run
+`39408799955` remains **failed** on its original Rev exact-copy assertion; its
+FLTK contracts passed, and four dependent copied-SDK checks were skipped.
+The independently proven replay staging overwrite is being corrected under the
+original Sol owner; original SDK failure causality remains open. Source-42
+passes do not qualify that forthcoming runtime change.
+
+
+### 2026-10-20 — first staging regression qualification stopped on fixture defect
+
+Reviewed correction `50f6fe6c2d9e612abb6b2456572af947d8acad36` compiled in
+standard-runner GNU 11 Debug/ASan/UBSan run `39439430635`, job `118685063060`.
+The new `test_live --replay-staging` failed fatally at
+`tests/test_live.cpp:117:56`: **UBSan member access within null Received**.
+Artifact `12273892561` ZIP SHA-256:
+`80ea739b1751cbb872ec6fa6874357d21ceaca70b5e934882eb5a91f69c15179`.
+The deterministic test lookup selected an older pending entry for ID 91 before
+its terminal entry, then dereferenced its absent result. The preceding
+two-independent-terminal pairing assertions were reached without failure;
+this is partial evidence only. Full Live, FFT and strict GUI checks did not run.
+No stop latency was measured.
+
+Root Sol corrected only the new test's terminal lookup and added explicit
+result-presence guards, retaining both payload identity assertions. Independent
+readback confirmed that cause and found no analogous lookup in the new seam.
+Production source, all pre-existing tests and deadlines are unchanged from
+`50f6fe6`. The reworked test still requires runtime verification; the original
+failed result is preserved. This is the same original Sol-owned assignment,
+with no reset of previous failures or repair history.
+
+
+### 2026-10-20 — paired replay staging correction passes focused qualification
+
+Integrated revision **`783a9e26dd88f6bfebb90874651dbfee03ddf0a4`** retains
+independent selected terminal identities with their own optional receive result,
+under one measured staging pool and existing count, content and recovery bounds.
+Admission precedes obsolete-state withdrawal; clear, cancellation, configuration
+and generation changes withdraw the shared owner. The existing replay reservation,
+frame calculation, three-second replay deadline, six-second physical absence,
+source-tail checks and ten-second stop assertions remain intact. Production
+source is identical to `50f6fe6`; the subsequent commit corrects only the new
+test's pending-versus-terminal lookup after the retained UBSan failure above.
+Independent source review accepted production ownership/accounting/lifecycle,
+and independent readback confirmed the test correction and resulting Live evidence.
+
+Focused standard-runner run **`39443286979`**, job **`118698501315`**, completed
+**success** with GNU 11 Debug/O1, ASan/UBSan enabled and portable mode off.
+Artifact **`12277855300`** ZIP SHA-256:
+`9afc9016a2d0d2e2b5808ba5c932573f728cf1282119042af56859f11b92e070`.
+Source pins, caches, inventories, JUnit and full logs agree. Results:
+
+- `test_live --replay-staging`: **passed**, exercising the actual production
+  staging container with two independently paired terminals, quota refusals and
+  lifecycle/recovery checks. This seam does not drive a modem or Session caller.
+- Full affected Live scope: **2/2 passed**, zero omissions/failures; `live`
+  **330.756 s**, `live_profiles` **425.408 s**. Mandatory standard-geometry
+  analogue and all remaining Live assertions passed. The compact fixture retains
+  its approved **incomplete-coverage** warning at **120.000321991 s**: compact
+  `raw` and `short` completed; `framed` and `clear_after_positive` did not.
+  Reported sampled-input position was **159409**, generated bits **1127/1216**;
+  generated progress does not prove transmission or reception. This is no pass
+  of the two omitted compact cases and changes no intended-hardware target.
+- Original no-argument FFT pair: **2/2 passed**, pattern FFT **22.0299 s**,
+  search FFT **4.6855 s**.
+- Original strict GUI serial: **2/2 passed**; graceful EU stop **9.07420 s / 10 s**,
+  protected source-tail bound passed. GUI timing advice **14.5224 s**,
+  controller **251.098 s**.
+- Original strict GUI parallel-two: **2/2 passed**; graceful EU stop
+  **9.01802 s / 10 s**, protected source-tail bound passed. GUI timing advice
+  **14.5664 s**, controller **251.277 s**.
+
+The original GUI command blocks and no-argument inventories remain unchanged.
+Ordinary five-second workload advisories and delayed-arrival advisories remain
+visible; no strict-stop or receiver assertion was waived. Selected retained
+logs contain no sanitizer diagnostic. These timing runs are qualification,
+not a matched speedup experiment. The original source-42 SDK Rev failure's
+causal attribution remains open because its failed key/input was not retained;
+the corrected staging overwrite is independently proven.
+
+Required full qualification was then dispatched concurrently on standard runners
+with `devfast=false`: native **`39450269246`** and SDK **`39450287152`**, both
+pinned to the exact revision above. Full results remain **pending**. No release
+or publication was requested or performed.
+
+
+### 2026-10-20 — SDK startup validation recovery, native run preserved
+
+SDK full dispatch `39450287152` on `783a9e2` stopped with **startup_failure**,
+zero jobs and zero tests. GitHub's annotation identified two nested diagnostic
+jobs requesting `actions: read` above the caller's `actions: none` ceiling.
+The original run/annotation and blocked-to-ready evidence are retained; this
+is validation setup evidence, not a runtime failure or throughput warning.
+
+Commit **`b051794503de48c71f6cf434562d272da03d2b45`** adds only
+`actions: read` to the SDK caller permission map. All other YAML content and
+all production, tests, tools, CMake and native workflow inputs are identical.
+It grants no write or publication permission. Recovered full SDK run
+**`39451778378`** on that revision passed startup validation: 27 jobs created,
+including running Rev package job **`118728196885`** and queued remaining scopes.
+Tests were still pending at this checkpoint.
+
+Native **`39450269246`** continues on its immutable `783a9e2` source. Exact
+Git tree/blob equivalence is recorded in `sdk-full-b051794/native-source-equivalence.json`;
+native binaries and reports retain their actual source-revision metadata, not
+the SDK-only workflow-fix revision. No native run or GitHub job was cancelled
+or duplicated. The local monitor was replaced after confirmed process closure
+to track native plus the recovered SDK run; the failed SDK startup remains
+preserved separately. Full qualification is still outstanding.
+
+
+### Symbol_Burst 2026-10-20: pending replay history correction, qualification pending
+
+Candidate `499c7e0405c56365b469c878d7ec9736f4764ce3` preserves earlier simulated pending frames across later receiver-owner revisions and canonical alias merges. The paired-terminal staging introduced in `50f6fe6` erased this pre-handoff history; the prior `42d7a0c` source retained it. Obsolete future results still withdraw transactionally within unchanged DSP, content and recovery limits. The correction preserves the three-second replay, six fully scored seconds of absence, ten-second graceful stop, source tail and all original receiver/GUI assertions. Its C++ runtime validation remains pending.
+
+- Native full run `39450269246`, source `783a9e26dd88f6bfebb90874651dbfee03ddf0a4`: Rev GUI job `118722935046` passed 44/44 registered CTests in 692.89s, then the separate original smoke failed phase 11, `Verified stream bypassed an earlier pending replay poll` (exit 1; replay 3.010745s, nine frames, pending poll 0). Artifact `12278958308`, ZIP SHA-256 `93c567e8b9450b9a3078ebcd5a91abefae790491f20bb669a1aa5bc449ab615c`. The source defect is proven; the failed run lacks a revision/staging capture, so direct attribution remains unproven.
+- SDK full run `39451778378`, source `b051794503de48c71f6cf434562d272da03d2b45` (runtime/tests equal `783a9e2`): Rev package job `118728196885` passed both copied TGZ and ZIP GUI smokes, including the prior raw-copy assertion. Rev source job `118728197834` passed four native cases but failed the separate phase-11 smoke (2.810647s, seven frames, pending 0). Copied Rev on Debian job `118741218805` likewise failed phase 11 (2.844581s, four frames, pending 0). These are fatal functional failures; cadence advisories do not excuse them. The original earlier phase-21 raw-copy failure and its lost key/PCM remain preserved; the current package passes do not establish its cause.
+- SDK frontend job `118728197098`: 8/9 passed; `tui_terminal` failed after 21.23s at its unchanged 20s PTY send deadline, sending 4,132,864/4,194,320 bytes of the overflow paste fixture. Input processing, PTY/harness wait and rendering remain unseparated. The 10s rejection deadline and 60s outer test limit are unchanged; no throughput waiver applies here.
+- The first eight native reports have independently reviewed inventory/source/JUnit bindings: Windows Live 2/2 (386.156s, **compact=passed**), frontends 9/9 and web 1/1; Linux Release Fast 33/33 and web 13/13; three null/default calibration section cases passed. Further partial results are retained in `native-batch2-783a9e2`; they do not make the failed full run qualified. Linux Release Live 2/2 has an approved compact-40s incomplete warning with complete functional analogue and remaining assertions; it is not a compact throughput pass.
+- Candidate `499c7e0` also fixes archive smoke context incorrectly reusing the final ZIP digest for TGZ. A real CMake-loop regression failed on the original parent and passed after correction; all 23 helper checks passed (2.735s), with YAML and 17 Bash blocks parsed. SDK now retains actual source-status paths and rejects any tracked HEAD difference before configure. Previous SDK build-info reported a modified tree without paths; unignored `downloaded-sdk/` is a known contributor, not proof of the entire historical dirty scope. The old execution evidence remains valid at its recorded identity and provenance limits.
+
+Focused standard-runner gates on exact `499c7e0` are running: `39456006190` (staging seam, Live, FFT and unchanged strict GUI serial/parallel) and `39456019804` (both original native GUI contracts/smokes). The earlier full runs continue for their original source. Full qualification of the corrected runtime remains outstanding. Original Sol ownership, assignment identities, repair failures and the native-only coordination override remain in force; no release or certification is implied.
+
+
+#### Corrected runtime focused gates accepted; final full matrix running
+
+The replay correction's exact source `499c7e0405c56365b469c878d7ec9736f4764ce3` passed run `39456006190` on the standard Ubuntu runner, GNU 11 Debug/O1 with ASan/UBSan: the production staging regression passed, Live 2/2 passed (327.785s and 427.818s), original FFT 2/2 passed (22.1592s and 4.63623s), and unchanged GUI serial 2/2 and parallel 2/2 passed. EU stop was **9.10816s serial / 9.08142s parallel**, below the unchanged ten-second limit; protected source-tail assertions passed. The Live compact framed fixture exhausted 120.000970091s with progress (1,127/1,216 generated bits, fraction 0.9152557, tail false); its complete standard functional analogue and every remaining Live assertion passed. This remains the approved narrow compact throughput warning, not a compact pass. Artifact `12282527972`, ZIP SHA-256 `e115418e061ec19141264ec87198679d1994d79afaddf373d9bb1beedeb8bc23`.
+
+Original GUI run `39456019804` on source `499c7e0`, Clang 19.1.7 Release, passed FLTK 41/41 (579.75s), Rev 44/44 (733.66s) and both separate original shared smokes. FLTK also passed all 35 build-tool cases. Rev's cadence advisory had a nonzero earlier pending poll and the smoke completed all assertions. Artifacts `12280529673` and `12282320765`, ZIP SHA-256 `88fee5c4204d465013eb6daca00ea163044635b674de61c616dc8b454e465130` and `973071454a227b9bfba6bb7d32daeed2c10c804b1947ffa72329b2167d862d1c`.
+
+Candidate `1e9b83238a50bd7983c5b2301f22ac451b42a7b0` adds only terminal-fixture diagnostics and their SDK workflow route since `499c7e0`; the strict GUI/FFT/Live target sources and native workflow inputs are identical. Actual `499c7e0` evidence retains that source identity. Terminal run `39457985750` passed the unchanged frontend baseline 9/9 (46.76s, terminal case 17.18s) and a separate same-binary traced fixture 1/1 (17.05s). It sent all 4,194,320 bytes in 13.583579937s: harness thread CPU 0.092909635s, writable wait 12.781002301s, with adapter input CPU bounded around 12.61–13.45s within that send window. Paint/flush CPU were small. This localizes the passing capture's expensive work to input consumption, without separating ncurses from paste parsing or explaining the earlier failed run. One pair is not a stable performance estimate. No terminal production patch or deadline waiver was selected. Artifact `12281508485`, ZIP SHA-256 `fedc5b8357470fb8760e2bf65aa3aa4fb8627244141d33e904721e4d86c86ffe`. Its source guard records exact HEAD, empty tracked diff, and only untracked `downloaded-sdk/`.
+
+The first terminal experiment `39457458015` failed before configure/build/tests because the new source guard hit container Git ownership checks (exit 128). The recovered guard uses the established checkout-scoped per-command `safe.directory` option. Original setup failure and all Luna checker failures/Sol takeover rework remain retained; no implementation retry history was reset.
+
+Full native **39462367772** and SDK **39462388103** were dispatched concurrently at about 17:00 UTC, `devfast=false`, standard runners, on `codex/symbol-burst-qualification-1e9b832` pinned to exact candidate `1e9b832`. The distinct qualification ref preserves older running CI. This is still **qualification pending**, not task completion or release certification. Evidence: `.agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/production-qualification-a6c2bf1/` under `staging-focused-499c7e0`, `gui-contract-499c7e0`, `tui-drain-diagnostic-recovery`, `native-final-1e9b832`, and `sdk-final-1e9b832`.
+
+
+#### 2026-10-20 — copied Rev and numeric boundaries accepted; paced keyed Burst failure under diagnosis
+
+Corrected source `1e9b83238a50bd7983c5b2301f22ac451b42a7b0`, SDK run `39462388103`, passed both original TGZ and ZIP copied-Rev smokes on Debian (`118780527120`) and Ubuntu (`118780527055`). Rev producer `118764944716` and source contract job `118764945078` also passed. Both copied FLTK distribution jobs passed, eight copied smokes total. The original pending-poll and raw-copy assertions remain enabled. Rev cadence warnings remain advisory; no typed incomplete-coverage exception was used in these copied smokes. The six small artifact digests were checked; individual inner TGZ/ZIP hashes and per-smoke JSON were not present in those log artifacts. This confirms copied-runtime execution after the `499c7e0` history correction; it does not establish the cause of the older phase-21 failure whose key/input was lost.
+
+Production correction `c573bcc381a1649581cdad877edc458172e1dfc6` guards all four floating-to-size conversions before casting at the floating representation of `SIZE_MAX`. This avoids converting a rounded 2^64 value on platforms with 53-bit floating precision while preserving direct conversion below the boundary. Focused route source `355080b1a17231b783a092224ad6ea87929cd6c2` passed:
+
+- Windows MSVC x64 Release run **39466826531**, job `118780286275`: both actual API boundary cases passed, 0.014549s and 0.0684882s. Artifact `12284993337`, ZIP SHA-256 `13f70595de8fdfa2f7e4dc1052d9c0dabccf8c5126528ae14290e5e530597cd6`.
+- GNU 11 Debug/O1 with ASan/UBSan, standard runner, run **39466815017**, job `118780241485`: numeric 2/2 (0.0762647s, 0.306362s), replay staging seam, Live 2/2 (333.265s, 435.190s), FFT 2/2 (22.6724s, 4.79737s), and original strict GUI serial 2/2 and parallel-two 2/2 passed. EU graceful stop was **9.290s serial / 9.213s parallel**, below the unchanged ten-second limit; protected source tail was 3.14681s and its bound passed. `stopped_within_deadline=false` denotes the ordinary five-second allowance; it remains retained alongside the passing ten-second checks. Artifact `12286849580`, ZIP SHA-256 `ba3c8530e64c23243ac8c38f6d452ad29556a914af3fc30e2b6257bb3c940ac3`.
+
+The GNU compact framed fixture reached its approved 120-second hosted allowance at 159,409 samples, fraction 0.9112296 and 1,127/1,216 generated bits. Compact framed/clear-after-positive remain incomplete; the complete mandatory functional analogue and every remaining Live assertion passed. This is the existing narrow throughput warning, not a compact throughput pass or a general deadline waiver. Production/strict target input equivalence through `659e700` is retained; tested binaries retain their actual `355080b` source identities.
+
+New independently paced diagnostic source `659e7001d6405ed682bfd0bb9050ba7031cc1aba`, run **39470798245**, job `118794044941`, first passed the unchanged original no-argument Symbol_Burst Live case (1/1, 36s). At fixed 64x offered load, separate plaintext Off/On and encrypted Off processes passed. Encrypted On (N10/J0, two receive keys and automatic profiles) failed `paced selected raw prefix differs from source` at 33,312 captured samples, processed frontier 33,280, with 16 queued and 16 decoding. The transmitter generated 223,296 PCM samples; generation is not delivered or transmitted progress. The producer had not aborted and receiver health was clean. Input truncation on failure cleanup caused the final incomplete-pacing status; it is not an independently observed producer failure. No guarded post-startup backlog rescue was demonstrated in any cell. Artifact `12286514739`, ZIP SHA-256 `ccc95793df440312fadd6457dd9bd66c5029985996bbdcfd72215c5aa7048101`.
+
+That artifact omitted the offending row/profile, so it cannot distinguish a fixture interpretation rule from incorrect selected bits or key/calendar handling. Diagnostic-only source `c390351b9df622904448ca46ef8c26a35318f3a4` adds a bounded first-failure census and selective admission/selected-signal trace; run **39474382356** repeats the four baselines then the same keyed-On case with trace. Assertions and individual deadlines are unchanged, and trace completeness requires footer plus external finalization seal. No production correction for this new observation has been selected. It is separate from the focused passing GUI stop and prior receiver workspace observations until evidence establishes a connection.
+
+The existing full `1e9b832` native run has a completed Linux Release core result: **252 passed, 17 runtime omissions with declared skip-return code 77, zero failed**, 269 selected. Per-platform Release shaped-calibration aggregates passed. Remaining native/SDK work and full qualification of the later numeric candidate are still outstanding. No release, publication or certification is implied.
+
+
+### 2026-10-20 — accepted 1e9b qualification readbacks and current Burst temporal-support follow-up
+
+The accepted native run `39462367772` and SDK run `39462388103` qualify source `1e9b83238a50bd7983c5b2301f22ac451b42a7b0`, not current source `049e84edc1f8d3b6b69fef661680ff0e0100bc04`. The accepted result sets record 37 successful native jobs and 62 conditional workflow-branch skips, plus 12 successful SDK jobs and 19 conditional skips. Conditional workflow branches are neither passes nor automatically omitted applicable coverage; interpret them against the dispatch scope. Selected tests skipped under their declared `SKIP_RETURN_CODE=77` property remain omitted coverage; the core report’s explicit omission list is empty. The accepted readbacks cover their applicable selected gates subject to stated warnings and omissions; they do not qualify the newer temporal-support correction. Full qualification of `049e84e` remains pending its focused result and later native/SDK matrix.
+
+On `1e9b832`, Linux Release core passed 252/269 with 17 runtime return-code-77 skips; Windows Release core passed 231/264 with 33 runtime return-code-77 skips. Linux Debug core passed 249/266 with 17 such omissions; its scheduled parallel preparation passed in 4,272.86 seconds against 7,200 seconds. The separate CLI regression group passed 39 tests in 99.697 seconds. The Linux GNU Debug core GUI controller reported a 5.58344-second simulated EU stop against the ordinary five-second advisory. Its instrumented 10-second hard stop bound and 3.26806-second source-progress allowance passed (observed progress 3.18854 seconds). A separate strict GUI serial/parallel diagnostic on source `355080b` (run [39466815017](https://github.com/mirage335-colossus/pumpModem/actions/runs/39466815017)) recorded 9.290 and 9.213 seconds, respectively, each within the unchanged instrumented 10-second bound. SDK FLTK passed all 194/194 general, 2/2 Live and 1/1 calibration cases with no omissions; scheduled preparation took 2,189.46 seconds and CLI took 38.32 seconds. The copied Rev TGZ/ZIP smokes passed on Debian and Ubuntu. Retained Rev replay-cadence advisories remain warnings.
+
+The Windows `1e9b832` Live result includes the approved typed 40-second compact-fixture incomplete-coverage warning: 1,206/1,216 generated bits were reported at the limit. Its mandatory functional analogue and remaining Live assertions passed. This is not a compact test pass. The narrow exception does not cover TUI's 20-second send deadline, preparation's 7,200-second deadline, or the instrumented GUI's 10-second stop deadline. The 17/33 runtime omissions above are also not passes. The accepted evidence is retained under `.agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/production-qualification-a6c2bf1/`; the native and SDK runs are [39462367772](https://github.com/mirage335-colossus/pumpModem/actions/runs/39462367772) and [39462388103](https://github.com/mirage335-colossus/pumpModem/actions/runs/39462388103). The local companion source facts file is `validation-addendum-049e84e-luna/source-facts.json`.
+
+A later, separately paced keyed Burst diagnostic failed on `7b79bc1decbd9f5c66e4366fa0c1ef8a8ecce62f`: after the initial failure, the full 223,296-sample input produced a completed but incorrect eight-bit row `01001001` instead of the expected 16 bits `0010010010010010`, with clean pacing/health. The sealed trace retained 196 sequenced records plus its footer, with no drops, 22 exact finite native FFT fits and all 52 engine FFT/bin-8 markers. The 1,024-physical / 128-native fit rows had `R² > .99`; the 2,048 / 256 subset had `R²` from .418 to .557 while retaining 2,048-sample old support. This bounded evidence locates a presentation-support mismatch; it does not attribute the earlier independent workspace/stop observations to the same cause.
+
+Current candidate `049e84e` adds up to eight fixed nested temporal soft-fit partitions (8/4/2, with the existing fallback for tiny work) for complex non-differential Burst, applied after whole-symbol scoring. Amplitude and differential explicit paths are unchanged. The runtime funds the original detectors before charging bounded Correlator presentation state; insufficient aggregate workspace fails explicitly. The planner includes the added metadata and numerical state conservatively. Public ABI layout is unchanged. The documented physical-end and stop gates remain six fully scored seconds of absence and ten seconds for GUI stop. The current focused run [39487011213](https://github.com/mirage335-colossus/pumpModem/actions/runs/39487011213) was still in progress at this readback, so no pass is claimed. Its selection includes original GUI serial/parallel checks and the paced diagnostic; full native/SDK qualification and a demonstrated post-startup backlog rescue remain pending.
+
+Independent review corrected a component fixture that had not enabled Burst and a first constructor draft that could displace an existing detector at a tight workspace limit. The original proposals and review evidence remain retained under the artifact directory. The integrated correction still requires the current-source runtime gates above.
