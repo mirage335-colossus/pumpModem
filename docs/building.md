@@ -674,14 +674,17 @@ Failures remain fatal when requested. Keep the production FIFO, physical-end and
 pending-content assertions intact; do not classify unrelated sanitizer findings
 as performance warnings.
 
-The functional `live` and `live_profiles` fixtures have separate computation
-allowances. Instrumented builds allow up to three times their normal workload
-budget and report `TEST_WORKLOAD_BUDGET` when they exceed the normal allowance.
-CI preserves these warnings from successful CTest output in its report and
-summary. Except for the typed incomplete-coverage case described below, every
-case must finish and pass its assertions within the bounded instrumented
-allowance. Real-time throughput, cancellation, physical absence and queue-drain
-stabilization requirements are unchanged.
+The functional `live` and `live_profiles` fixtures, and the controlled-clock
+`symbol_burst_live` fixture, have bounded CPU-work allowances. Instrumented
+builds allow up to three times their normal workload budget and report
+`TEST_WORKLOAD_BUDGET` when they exceed the normal allowance. CI preserves these
+warnings from successful CTest output in its report and summary. Except for the
+typed incomplete-coverage case described below, every case must finish and pass
+its assertions within the bounded instrumented allowance. The Symbol_Burst
+fixture keeps its normal 25-second computation budget and uses 75 seconds under
+ASan/UBSan. Every capture-clock, content, queue-drain and physical-completion
+assertion remains required. Real-time throughput, cancellation, physical
+absence and queue-drain stabilization checks are unchanged.
 
 Standard-hosted native Live scopes and the FLTK SDK Live checks also run a
 separate functional-clock analogue. It uses ordinary modulation geometry for

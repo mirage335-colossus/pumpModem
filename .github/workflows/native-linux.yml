@@ -16,7 +16,7 @@ on:
       scope:
         description: 'Run one complete native scope without repeating the other shards'
         type: choice
-        options: [core, fast, live, calibration, frontends, web, package, cli, eme-diagnostic, receiver, native-peak-lease-diagnostic, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-first-transition-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, simulation-owner-census-diagnostic, simulation-capacity-shape-diagnostic, simulation-acquisition-partition-diagnostic, fft-normalization-diagnostic]
+        options: [core, fast, live, symbol-burst-live, calibration, frontends, web, package, cli, eme-diagnostic, receiver, native-peak-lease-diagnostic, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-first-transition-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, simulation-owner-census-diagnostic, simulation-capacity-shape-diagnostic, simulation-acquisition-partition-diagnostic, fft-normalization-diagnostic]
         default: core
       stop_group:
         description: Temporary matched stop experiment group; diagnostic only
@@ -41,7 +41,7 @@ on:
         type: string
         default: Release
       scope:
-        description: 'core, fast, live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-first-transition-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, simulation-owner-census-diagnostic, simulation-capacity-shape-diagnostic, simulation-acquisition-partition-diagnostic, or fft-normalization-diagnostic'
+        description: 'core, fast, live, symbol-burst-live, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-first-transition-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, simulation-owner-census-diagnostic, simulation-capacity-shape-diagnostic, simulation-acquisition-partition-diagnostic, or fft-normalization-diagnostic'
         type: string
         required: true
       stop_group:
@@ -77,7 +77,7 @@ jobs:
     container: ubuntu:22.04
     # Standard runners need room for the full instrumented suite after compilation.
     # Explicit test limits and physical deadlines remain unchanged.
-    timeout-minutes: ${{ inputs.build_type == 'Debug' && (inputs.scope == 'core' || inputs.scope == 'calibration' || inputs.scope == 'preparation-diagnostic') && 240 || 120 }}
+    timeout-minutes: ${{ inputs.build_type == 'Debug' && (inputs.scope == 'core' || inputs.scope == 'calibration' || inputs.scope == 'preparation-diagnostic' || inputs.scope == 'symbol-burst-live') && 240 || 120 }}
     defaults:
       run:
         shell: bash
@@ -122,6 +122,11 @@ jobs:
         if: inputs.scope == 'simulation-acquisition-partition-diagnostic' && (github.event_name != 'workflow_dispatch' || inputs.build_type != 'Debug' || inputs.linux_runner != 'ubuntu-24.04')
         run: |
           echo '::error::The acquisition partition diagnostic requires manual Debug on ubuntu-24.04.'
+          exit 2
+      - name: Restrict focused Symbol Burst Live qualification to Debug
+        if: inputs.scope == 'symbol-burst-live' && inputs.build_type != 'Debug'
+        run: |
+          echo '::error::The focused Symbol Burst Live qualification requires Debug with ASan/UBSan.'
           exit 2
       - name: Validate manual package configuration
         if: github.event_name == 'workflow_dispatch' && inputs.scope == 'package' && inputs.build_type != 'Release'
@@ -867,6 +872,59 @@ jobs:
           -DDART_TESTING_TIMEOUT=3600
           -DCMAKE_DISABLE_FIND_PACKAGE_Python3=${{ (inputs.scope == 'frontends' || inputs.scope == 'web') && 'FALSE' || 'TRUE' }}
           -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL=${{ inputs.scope == 'live' && inputs.linux_runner == 'ubuntu-24.04' && 'ON' || 'OFF' }}
+      - name: Prepare focused Symbol Burst Live qualification evidence
+        if: inputs.scope == 'symbol-burst-live'
+        run: |
+          set -euo pipefail
+          report="$PWD/build/symbol-burst-live-qualification"
+          mkdir -p "$report"
+          git -c safe.directory="$PWD" rev-parse HEAD > "$report/source.txt"
+          git -c safe.directory="$PWD" rev-parse 'HEAD^{tree}' > "$report/source-tree.txt"
+          cp build/CMakeCache.txt "$report/CMakeCache.txt"
+          python3 -B - "$PWD" "$report" <<'PY_BURST_PREPARE'
+          import hashlib, json, pathlib, re, subprocess, sys
+
+          root, report = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+          source = (report / 'source.txt').read_text().strip()
+          tree = (report / 'source-tree.txt').read_text().strip()
+          status = subprocess.check_output(
+              ['git', '-c', 'safe.directory=' + str(root), 'status', '--porcelain=v1', '--untracked-files=all'],
+              cwd=root, text=True)
+          assert not status, f'focused qualification requires a clean source checkout: {status!r}'
+          paths = ('CMakeLists.txt', 'tests/test_symbol_burst_live.cpp', 'tests/cpu_work_budget.hpp')
+          source_inventory = {
+              'source_commit': source,
+              'source_tree': tree,
+              'test': 'symbol_burst_live',
+              'test_target': 'test_symbol_burst_live',
+              'source_files_sha256': {name: hashlib.sha256((root / name).read_bytes()).hexdigest()
+                                      for name in paths},
+              'cmake_cache_sha256': hashlib.sha256((report / 'CMakeCache.txt').read_bytes()).hexdigest(),
+          }
+          (report / 'source-inventory.json').write_text(json.dumps(source_inventory, indent=2) + '\n')
+          selector = '^(symbol_burst_live)$'
+          with (report / 'inventory.json').open('w') as output:
+              subprocess.run(['ctest', '--test-dir', str(root / 'build'), '--show-only=json-v1', '-R', selector],
+                             cwd=root, stdout=output, check=True)
+          tests = json.loads((report / 'inventory.json').read_text()).get('tests', [])
+          assert len(tests) == 1 and tests[0].get('name') == 'symbol_burst_live', [t.get('name') for t in tests]
+          lines = (root / 'build/CTestTestfile.cmake').read_text().splitlines()
+          registration = next((line.strip() for line in lines
+                               if line.lstrip().startswith('add_test(') and 'symbol_burst_live' in line), None)
+          assert registration is not None, 'the original CTest registration is missing'
+          match = re.fullmatch(r'add_test\(\[=\[symbol_burst_live\]=\] "([^"]+/test_symbol_burst_live)"\)', registration)
+          assert match and pathlib.Path(match.group(1)).resolve() == (root / 'build/test_symbol_burst_live').resolve(), registration
+          cache = {}
+          for line in (report / 'CMakeCache.txt').read_text().splitlines():
+              if '=' not in line or line.startswith('//') or line.startswith('#'):
+                  continue
+              key, value = line.split('=', 1)
+              cache[key.split(':', 1)[0]] = value
+          assert cache.get('CMAKE_BUILD_TYPE') == 'Debug', cache.get('CMAKE_BUILD_TYPE')
+          assert cache.get('DATAPUMP_SANITIZERS') == 'ON', cache.get('DATAPUMP_SANITIZERS')
+          assert cache.get('DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL') == 'OFF', cache.get('DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL')
+          print('exact source, one original no-argument test registration and Debug sanitizer configuration verified')
+          PY_BURST_PREPARE
       - name: Prepare acquisition partition diagnostic evidence
         if: inputs.scope == 'simulation-acquisition-partition-diagnostic'
         run: mkdir -p build/simulation-acquisition-partition-diagnostics
@@ -885,6 +943,7 @@ jobs:
         run: |
           case "$CI_SCOPE" in
             calibration|calibration-aggregate) targets=(test_differential_receiver_probability) ;;
+            symbol-burst-live) targets=(test_symbol_burst_live) ;;
             package) targets=(datapump-apps) ;;
             frontends) targets=(datapump-tests-frontends) ;;
             web) targets=(datapump-tests-web) ;;
@@ -1378,6 +1437,85 @@ jobs:
             fi
           fi
           python3 tools/run-ci-tests.py --build-dir build --scope "$CI_SCOPE" --jobs "$jobs" --timeout "$test_timeout" --report build/ci-test-report.json "${options[@]}"
+      - name: Run the original no-argument Symbol Burst Live qualification test
+        if: inputs.scope == 'symbol-burst-live' && !cancelled() && steps.build_prerequisites.outcome == 'success'
+        timeout-minutes: 125
+        run: |
+          set -uo pipefail
+          report="$PWD/build/symbol-burst-live-qualification"
+          selector='^(symbol_burst_live)$'
+          command=(ctest --test-dir build --output-on-failure --verbose --no-tests=error --parallel 1 --timeout 7200 --output-junit "$report/results.xml" -R "$selector")
+          printf '%s\n' "${command[@]}" > "$report/ctest-command.txt"
+          started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          started=$(date +%s)
+          "${command[@]}" > "$report/ctest.log" 2>&1
+          ctest_exit=$?
+          ended_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          elapsed=$(($(date +%s) - started))
+          cp build/Testing/Temporary/LastTest.log "$report/LastTest.log"
+          python3 -B - "$PWD" "$report" "$ctest_exit" "$started_utc" "$ended_utc" "$elapsed" <<'PY_BURST_RESULT'
+          import hashlib, json, pathlib, sys, xml.etree.ElementTree as ET
+
+          root, report = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+          ctest_exit = int(sys.argv[3])
+          output = (report / 'ctest.log').read_text(errors='replace')
+          junit = ET.parse(report / 'results.xml').getroot()
+          cases = junit.findall('.//testcase')
+          failures, errors, skipped = junit.findall('.//failure'), junit.findall('.//error'), junit.findall('.//skipped')
+          marker = 'Symbol_Burst Live integration passed' in output
+          workload_budget_lines = [
+              line[line.index('TEST_WORKLOAD_BUDGET:'):].strip()
+              for line in output.splitlines() if 'TEST_WORKLOAD_BUDGET:' in line
+          ]
+          checks = {
+              'ctest_exit_zero': ctest_exit == 0,
+              'one_original_case': len(cases) == 1 and [case.get('name') for case in cases] == ['symbol_burst_live'],
+              'no_junit_failures_errors_or_skips': not failures and not errors and not skipped,
+              'original_success_marker': marker,
+          }
+          passed = all(checks.values())
+          completed_pass_warnings = workload_budget_lines if passed else []
+          run = {
+              'source_commit': (report / 'source.txt').read_text().strip(),
+              'source_tree': (report / 'source-tree.txt').read_text().strip(),
+              'scope': 'symbol-burst-live',
+              'test': 'symbol_burst_live',
+              'test_target': 'test_symbol_burst_live',
+              'test_command': [str(root / 'build/test_symbol_burst_live')],
+              'ctest_command': ['ctest', '--test-dir', 'build', '--output-on-failure', '--verbose',
+                  '--no-tests=error', '--parallel', '1', '--timeout', '7200', '--output-junit',
+                  str(report / 'results.xml'), '-R', '^(symbol_burst_live)$'],
+              'ctest_exit': ctest_exit,
+              'started_utc': sys.argv[4], 'ended_utc': sys.argv[5], 'elapsed_seconds': int(sys.argv[6]),
+              'test_count': len(cases), 'test_names': [case.get('name') for case in cases],
+              'failures': len(failures), 'errors': len(errors), 'skipped': len(skipped),
+              'success_marker_present': marker,
+              'completed_pass_workload_budget_warnings': completed_pass_warnings,
+              'checks': checks,
+              'result': 'PASS' if passed else 'FATAL',
+              'ctest_output_sha256': hashlib.sha256((report / 'ctest.log').read_bytes()).hexdigest(),
+              'junit_sha256': hashlib.sha256((report / 'results.xml').read_bytes()).hexdigest(),
+              'last_test_sha256': hashlib.sha256((report / 'LastTest.log').read_bytes()).hexdigest(),
+              'cmake_cache_sha256': hashlib.sha256((report / 'CMakeCache.txt').read_bytes()).hexdigest(),
+              'binary_sha256': hashlib.sha256((root / 'build/test_symbol_burst_live').read_bytes()).hexdigest(),
+          }
+          (report / 'run.json').write_text(json.dumps(run, indent=2) + '\n')
+          summary = pathlib.Path(__import__('os').environ['GITHUB_STEP_SUMMARY'])
+          if passed:
+              message = 'Original no-argument `symbol_burst_live` completed and passed all assertions.\n'
+              if completed_pass_warnings:
+                  message += '\nCompleted-pass `TEST_WORKLOAD_BUDGET` warnings:\n'
+                  message += ''.join(f'- `{warning}`\n' for warning in completed_pass_warnings)
+          else:
+              message = 'FATAL: original no-argument `symbol_burst_live` did not complete successfully; see retained CTest/JUnit/LastTest evidence.\n'
+          with summary.open('a') as stream:
+              stream.write(message)
+          if not passed:
+              raise SystemExit(f'FATAL: Symbol Burst Live qualification checks failed: {checks}')
+          print('Original no-argument Symbol Burst Live test completed with all assertions.')
+          for warning in completed_pass_warnings:
+              print('Completed-pass warning: ' + warning)
+          PY_BURST_RESULT
       - name: Capture six sequential fixed-bank acquisition partition replays
         if: inputs.scope == 'simulation-acquisition-partition-diagnostic' && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 35
@@ -1921,6 +2059,7 @@ jobs:
             build/alsa-radius-diagnostic/
             build/CMakeCache.txt
             build/receiver-fixtures/
+            build/symbol-burst-live-qualification/
             build/core-diagnostics/
             build/gui-stop-diagnostic/
             build/fft-diagnostics/

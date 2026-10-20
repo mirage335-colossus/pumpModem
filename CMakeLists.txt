@@ -340,9 +340,9 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
     target_link_libraries(test_live_profiles PRIVATE winmm)
   endif()
   if(DATAPUMP_SANITIZERS AND NOT MSVC)
-    # Sampled-media functional fixtures need bounded CPU-work allowances under
+    # Controlled-clock functional fixtures need bounded CPU-work allowances under
     # ASan/UBSan. Their physical/cancellation clocks and assertions are unchanged.
-    foreach(_functional_test test_live test_live_profiles)
+    foreach(_functional_test test_live test_live_profiles test_symbol_burst_live)
       target_compile_definitions(${_functional_test} PRIVATE DATAPUMP_INSTRUMENTED_TEST=1)
     endforeach()
   endif()
