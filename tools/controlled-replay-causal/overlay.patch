@@ -1,0 +1,951 @@
+--- a/src/live.cpp
++++ b/src/live.cpp
+@@ -38,11 +38,14 @@
+ #include "scheduled_exact_source_points.hpp"
+ #include <charconv>
+ #include "audio_trace.hpp"
++#include "causal_input_feed.hpp"
+ #include <algorithm>
+ #include <atomic>
+ #include <chrono>
+ #include <cmath>
+ #include <condition_variable>
++#include <cstdio>
++#include <ctime>
+ #include <deque>
+ #include <list>
+ #include <iterator>
+@@ -88,6 +91,17 @@
+ constexpr auto replay_duration = std::chrono::seconds(3);
+ constexpr std::size_t reception_alias_bytes = detail::ReceptionHistory::capacity * sizeof(std::uint64_t);
+ double epoch_now() {
++    // Private diagnostic: hold the default media-clock origin fixed without
++    // supplying Session::EpochClock (which changes the production branch).
++    static const auto forced=[]() -> std::optional<double> {
++        const auto* value=std::getenv("DATAPUMP_CAUSAL_EPOCH");
++        if(!value||!*value)return std::nullopt;
++        char* end=nullptr;const auto epoch=std::strtod(value,&end);
++        if(end==value||*end||!std::isfinite(epoch)||epoch<0)
++            throw Error("invalid private causal diagnostic epoch");
++        return epoch;
++    }();
++    if(forced)return *forced;
+     return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+ }
+ std::string reception_id(const Message& message) {
+@@ -114,6 +128,20 @@
+ using detail::signal_plots;
+ void count_dropped(std::uint64_t& total, std::uint64_t count) {
+     total += std::min(count, std::numeric_limits<std::uint64_t>::max() - total);
++}
++bool replay_terminal_census_enabled() noexcept {
++    const auto* value=std::getenv("DATAPUMP_REPLAY_TERMINAL_CENSUS");
++    return value && value[0]=='1' && value[1]=='\0';
++}
++std::string census_id_list(const std::vector<std::uint64_t>& ids) {
++    std::string out="[";
++    for(std::size_t i=0;i<ids.size();++i) {if(i)out+=',';out+=std::to_string(ids[i]);}
++    out+=']';return out;
++}
++std::string census_identity(const std::array<std::uint8_t,16>& bytes) {
++    constexpr char hex[]="0123456789abcdef";std::string out;out.reserve(32);
++    for(const auto byte:bytes) {out+=hex[byte>>4];out+=hex[byte&15];}
++    return out;
+ }
+ void append_points(modem::ConstellationBatch& target, modem::ConstellationBatch batch,
+                    std::size_t limit) {
+@@ -165,6 +193,11 @@
+         std::vector<PatternScoreObservation> pattern_score_observations;
+         std::uint64_t pattern_score_observation_id = 0;
+         std::stop_token stop;
++        bool terminal_census=false, terminal_census_summary_written=false, terminal_census_io_failed=false;
++        std::uint64_t terminal_census_attempts=0, terminal_census_emitted=0, terminal_census_dropped=0;
++        std::uint64_t terminal_census_truncated=0, terminal_census_observer_wall_ns=0;
++        std::uint64_t terminal_census_observer_process_cpu_ns=0;
++        std::uint64_t terminal_census_last_staged_id=0, terminal_census_last_staged_revision=0;
+     };
+     struct AudioBlock {
+         std::vector<float> samples;
+@@ -722,6 +755,8 @@
+           epoch_clock(clock ? std::move(clock) : EpochClock(epoch_now)),
+           replay_clock(presentation_clock ? std::move(presentation_clock) : ReplayClock(Clock::now)) {
+         (void)current_epoch();
++        if(const auto* check=std::getenv("DATAPUMP_REPLAY_STAGING_CHECK");check&&std::string_view(check)=="1")
++            diagnostic_terminal_slot_check();
+         // Local cache identity only: this namespace never enters the wire.
+         std::random_device random;
+         for(auto& byte:reception_namespace)byte=static_cast<std::uint8_t>(random());
+@@ -2204,11 +2239,143 @@
+             }
+         }
+     }
++    static constexpr std::size_t terminal_census_records_per_wave=8;
++    static constexpr std::size_t terminal_census_text_limit=512;
++    static constexpr std::size_t terminal_census_bits_limit=512;
++    static std::string census_prefix(const std::string& value,std::size_t limit,bool& truncated) {
++        truncated=value.size()>limit;
++        return value.substr(0,std::min(value.size(),limit));
++    }
++    static void census_write(Prepared& wave,const std::string& line) noexcept {
++        static std::mutex output_mutex;
++        try {
++            std::lock_guard lock(output_mutex);
++            if(std::fprintf(stderr,"%s\n",line.c_str())<0 || std::fflush(stderr)!=0 || std::ferror(stderr)) {
++                wave.terminal_census_io_failed=true;++wave.terminal_census_dropped;
++            } else ++wave.terminal_census_emitted;
++        } catch(...) {wave.terminal_census_io_failed=true;++wave.terminal_census_dropped;}
++    }
++    void census_terminal_assignment(Prepared& wave,const SignalUpdate& event,std::size_t source_text_bytes) noexcept {
++        const auto wall_start=Clock::now();
++        const auto cpu_start=std::clock();
++        ++wave.terminal_census_attempts;
++        if(wave.terminal_census_attempts>terminal_census_records_per_wave) {
++            ++wave.terminal_census_dropped;
++        } else try {
++            const auto* old=wave.verified ? &*wave.verified : nullptr;
++            const bool old_superseded=old && std::find(event.superseded_ids.begin(),event.superseded_ids.end(),old->id)!=event.superseded_ids.end();
++            const bool independent_old_terminal=old && (old->validated||old->complete) && old->id!=event.id && !old_superseded;
++            bool text_truncated=false,bits_truncated=false;
++            const auto text=census_prefix(event.text,terminal_census_text_limit,text_truncated);
++            text_truncated=text_truncated||source_text_bytes>terminal_census_text_limit;
++            const auto bits=census_prefix(event.raw_bits.empty()&&event.binary?event.text:event.raw_bits,
++                terminal_census_bits_limit,bits_truncated);
++            if(event.raw_bits.empty()&&event.binary&&source_text_bytes>terminal_census_bits_limit)bits_truncated=true;
++            const auto observation_stamp=Clock::now();
++            audio::trace::Fields f;
++            const auto add_bool=[&](const char* name,bool value) {f.out<<','<<audio::trace::quoted(name)<<':'<<(value?"true":"false");};
++            f.add("observation_steady_ns",std::chrono::duration_cast<std::chrono::nanoseconds>(observation_stamp.time_since_epoch()).count());
++            f.add("observation_stamp_kind","steady_clock_since_epoch_ns_relative_not_utc_at_record_construction");
++            f.add("tx_serial",wave.serial);f.add("generation",wave.generation);
++            f.add("signal_id",event.id);f.add("revision",event.revision);f.add("sequence",event.sequence);
++            f.add("old_signal_id",old?old->id:0);f.add("old_revision",old?old->revision:0);
++            f.add("old_sequence",old?old->sequence:0);
++            if(old){add_bool("old_complete",old->complete);add_bool("old_validated",old->validated);}
++            else {f.out<<",\"old_complete\":null,\"old_validated\":null";}
++            f.add("old_received_bits",old?old->received_bits:0);f.add("old_missing",old?old->missing_symbols:0);
++            add_bool("new_complete",event.complete);add_bool("new_validated",event.validated);
++            f.add("new_received_bits",event.received_bits);f.add("new_missing",event.missing_symbols);
++            f.out<<",\"superseded_ids\":"<<census_id_list(event.superseded_ids);
++            f.add("old_relation",!old?"none":old->id==event.id?"same_id":old_superseded?"explicitly_superseded":"independent_id");
++            add_bool("independent_old_terminal",independent_old_terminal);
++            f.add("old_received_identity",wave.received?census_identity(wave.received->content.message.local_id):"");
++            f.add("text",text);f.add("text_bytes",source_text_bytes);add_bool("text_truncated",text_truncated);
++            f.add("raw_bits",bits);f.add("raw_bits_total",event.raw_bits.empty()&&event.binary?source_text_bytes:event.raw_bits.size());
++            add_bool("raw_bits_truncated",bits_truncated);
++            f.add("source_transmitted_samples",wave.transmitted_samples);
++            f.add("generated_samples",wave.transmitter?wave.transmitter->samples_emitted():0);
++            f.add("observer_clock","steady_wall_and_process_cpu");
++            f.add("observer_duration_scope","entry_through_capture_and_json_field_prep_before_this_record_stderr_write");
++            f.add("process_cpu_clock","std::clock_process_cpu_not_thread_attribution");
++            const auto wall=std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now()-wall_start).count();
++            const auto cpu=std::clock()-cpu_start;
++            const auto cpu_ns=cpu>0?static_cast<std::uint64_t>((static_cast<long double>(cpu)*1'000'000'000.L)/CLOCKS_PER_SEC):0;
++            f.add("observer_wall_ns",wall>0?static_cast<std::uint64_t>(wall):0);f.add("observer_process_cpu_ns",cpu_ns);
++            const bool truncated=text_truncated||bits_truncated;
++            if(truncated)++wave.terminal_census_truncated;
++            census_write(wave,"{\"event\":\"replay_terminal_assignment\""+f.out.str()+"}");
++        } catch(...) {++wave.terminal_census_dropped;}
++        wave.terminal_census_observer_wall_ns+=std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now()-wall_start).count();
++        const auto cpu_end=std::clock();
++        if(cpu_end>cpu_start)wave.terminal_census_observer_process_cpu_ns+=static_cast<std::uint64_t>(
++            (static_cast<long double>(cpu_end-cpu_start)*1'000'000'000.L)/CLOCKS_PER_SEC);
++    }
++    void census_wave_summary(Prepared& wave,const std::string& error) noexcept {
++        if(!wave.terminal_census || wave.terminal_census_summary_written)return;
++        wave.terminal_census_summary_written=true;
++        try {
++            const auto observation_stamp=Clock::now();
++            const bool handoff_eligible=wave.generation==generation && wave.serial==tx_serial;
++            audio::trace::Fields f;
++            const auto add_bool=[&](const char* name,bool value) {f.out<<','<<audio::trace::quoted(name)<<':'<<(value?"true":"false");};
++            f.add("observation_steady_ns",std::chrono::duration_cast<std::chrono::nanoseconds>(observation_stamp.time_since_epoch()).count());
++            f.add("observation_stamp_kind","steady_clock_since_epoch_ns_relative_not_utc_at_record_construction");
++            add_bool("handoff_eligible",handoff_eligible);
++            f.add("tx_serial",wave.serial);f.add("generation",wave.generation);
++            f.add("attempts",wave.terminal_census_attempts);f.add("emitted",wave.terminal_census_emitted);
++            f.add("dropped",wave.terminal_census_dropped);f.add("truncated_records",wave.terminal_census_truncated);
++            add_bool("io_failed_before_summary",wave.terminal_census_io_failed);
++            f.add("last_staged_signal_id",wave.terminal_census_last_staged_id);
++            f.add("last_staged_revision",wave.terminal_census_last_staged_revision);
++            f.add("source_transmitted_samples",wave.transmitted_samples);
++            f.add("generated_samples",wave.transmitter?wave.transmitter->samples_emitted():0);
++            f.add("error",error);add_bool("graceful",wave.graceful);
++            add_bool("cancel_requested",wave.stop.stop_requested());
++            f.add("observer_wall_ns",wave.terminal_census_observer_wall_ns);
++            f.add("observer_process_cpu_ns",wave.terminal_census_observer_process_cpu_ns);
++            f.add("observer_duration_scope","sum_of_terminal_assignment_functions_including_assignment_stderr_io; excludes_this_summary_record_and_full_trace");
++            f.add("process_cpu_clock","std::clock_process_cpu_not_thread_attribution");
++            census_write(wave,"{\"event\":\"replay_terminal_summary\""+f.out.str()+"}");
++        } catch(...) {++wave.terminal_census_dropped;}
++    }
++    void diagnostic_terminal_slot_check() {
++        // Directly exercise the actual private staging path, before any Session
++        // tasks start. These are selected-event boundary inputs, not a claim
++        // that the original receiver fixture produced this sequence.
++        Prepared wave;wave.serial=16;wave.binary=true;wave.signals.resize(2);wave.terminal_census=true;
++        SignalUpdate help;help.id=81;help.revision=1;help.complete=true;help.binary=true;
++        help.received_bits=32;help.text="01001000011001010110110001110000";
++        add_signal(help,&wave);
++        SignalUpdate space;space.id=82;space.revision=1;space.complete=true;
++        space.received_bits=3;space.raw_bits="000";space.text=" ";
++        add_signal(space,&wave);
++        bool retained_help=false,retained_space=false;
++        const auto inspect=[&](const auto& item) {
++            if(item&&(item->complete||item->validated)) {
++                retained_help|=item->id==help.id;retained_space|=item->id==space.id;
++            }
++        };
++        inspect(wave.verified);for(const auto& item:wave.signals)inspect(item);
++        audio::trace::Fields fields;
++        fields.add("expected_complete_ids",2);fields.add("retained_complete_ids",unsigned(retained_help)+unsigned(retained_space));
++        fields.add("fixture","direct actual add_signal boundary; independent selected32-bit Help then3-bit space");
++        const auto line="{\"event\":\"replay_terminal_staging_check\""+fields.out.str()+"}";
++        std::fprintf(stderr,"%s\n",line.c_str());std::fflush(stderr);
++        census_wave_summary(wave,"private staging check; not a receiver reproduction");
++        if(!retained_help||!retained_space)throw Error("diagnostic staging invariant: independent completed reception was overwritten");
++    }
+     void add_signal(SignalUpdate event, Prepared* wave = nullptr) {
+         event.sequence = next_event++; event.virtual_seconds = current.virtual_seconds;
+         if (!wave) { append_signal(std::move(event)); return; }
++        std::size_t source_text_bytes=0;
++        if((event.validated||event.complete)&&wave->terminal_census)source_text_bytes=event.text.size();
+         event.text = std::string(event.text.data(), std::min(event.text.size(), replay_text_limit));
+-        if (event.validated || event.complete) { wave->verified = std::move(event); return; }
++        if (event.validated || event.complete) {
++            if(wave->terminal_census)census_terminal_assignment(*wave,event,source_text_bytes);
++            wave->terminal_census_last_staged_id=event.id;
++            wave->terminal_census_last_staged_revision=event.revision;
++            wave->verified = std::move(event); return;
++        }
+         // One most recent pending observation per presentation interval.
+         // Floor quantization keeps even a late observation visible for the last
+         // interval before validation; a stalled UI never extends the deadline.
+@@ -3649,6 +3816,11 @@
+             feed_samples(bank,samples,value,version,combined.get_token(),wave);
+             return;
+         }
++        // Observe only the inner, non-recursive Simulation submission. The
++        // recorder preserves raw input and frontier evidence without claiming
++        // every receiver has fully scored the submitted span.
++        std::optional<datapump::diagnostic::causal_input::Feed> causal_input;
++        if(value.simulation)causal_input.emplace(this,bank.revision,bank.samples,samples,wave?wave->serial:0);
+         std::array<std::complex<double>,plot_size> projected{};
+         const auto rotation=std::polar(1.,-2*std::numbers::pi*value.transfer.modem.carrier_hz/value.transfer.modem.sample_rate);
+         for(std::size_t offset=0;offset<samples.size();) {
+@@ -3665,6 +3837,7 @@
+     }
+     void complete_tx(Prepared& wave, const std::string& error = {}) {
+         std::lock_guard lock(mutex);
++        if(wave.terminal_census)census_wave_summary(wave,error);
+         if (wave.generation != generation || wave.serial != tx_serial) return;
+         // Keep the existing normal-completion quiet interval. Cancellation
+         // retains key exposure independently, without adding a full-symbol
+@@ -4392,6 +4565,7 @@
+                 prepared->output_gain=value.transmit_gain;
+                 prepared->output_channels=audio::output_channels(value.mono,value.channel_mode);
+                 prepared->generation = version; prepared->serial = serial;prepared->receive_clear_generation=clear_generation; prepared->stop = token;
++                prepared->terminal_census=replay_terminal_census_enabled();
+                 prepared->binary = std::holds_alternative<Bytes>(transmission);
+                 prepared->noise=noise;
+                 prepared->hardware = !value.simulation;
+--- a/src/gui/controller.cpp
++++ b/src/gui/controller.cpp
+@@ -28,6 +28,7 @@
+ #include <cctype>
+ #include <charconv>
+ #include <cmath>
++#include <cstdlib>
+ #include <ctime>
+ #include <fstream>
+ #include <iomanip>
+@@ -252,7 +253,9 @@
+     std::shared_ptr<const Bytes> attachment;
+     std::filesystem::path attachment_path,key_path;
+     std::optional<std::string> attached_message_draft;
++    struct SmokeKeyFixture { std::filesystem::path path; std::uintmax_t size=0; std::filesystem::file_time_type modified{}; std::string error; };
+     std::optional<std::filesystem::path> pending_key,pending_file;
++    std::optional<SmokeKeyFixture> pending_smoke_key_fixture;
+     std::optional<launch_command::Patch> pending_key_settings;
+     bool pending_key_simulation_off=true;
+     std::vector<std::string> pending_names;
+@@ -290,6 +293,7 @@
+         std::optional<launch_command::Patch> key_settings;
+         bool key_simulation_off=true;
+         std::vector<std::string> names;
++        std::optional<SmokeKeyFixture> smoke_key_fixture;
+         std::vector<audio::Device> devices;
+         std::shared_ptr<const Bytes> file;
+         std::filesystem::path path;
+@@ -1722,10 +1726,42 @@
+         Prepared result;
+         if(pending_key) {
+             result.kind=PrepKind::keys; result.path=*pending_key; pending_key.reset(); result.names=std::move(pending_names); pending_names.clear(); result.generate=!result.names.empty();
++            result.smoke_key_fixture=std::move(pending_smoke_key_fixture);pending_smoke_key_fixture.reset();
+             result.completion_id=std::exchange(pending_key_completion,0);
+             result.key_settings=std::exchange(pending_key_settings,std::nullopt);
+             result.key_simulation_off=pending_key_simulation_off;
+-            start_worker([](Prepared& value,std::stop_token stop) { if(stop.stop_requested()) throw Error("Operation cancelled"); if(value.generate) { create_keyring(value.path,value.names); value.created=true; } value.keys=load_keyring(value.path); },std::move(result));
++            start_worker([](Prepared& value,std::stop_token stop) {
++                if(stop.stop_requested()) throw Error("Operation cancelled");
++                if(value.generate) {
++                    create_keyring(value.path,value.names); value.created=true;
++                    if(value.smoke_key_fixture) {
++                        const auto& fixture=*value.smoke_key_fixture;
++                        if(!fixture.error.empty())throw Error("Smoke key fixture unavailable: "+fixture.error);
++                        if(value.names!=std::vector<std::string>{"A|B","None"})throw Error("Smoke key fixture names do not match the initial smoke keyring");
++                        if(!std::filesystem::is_regular_file(fixture.path)||std::filesystem::file_size(fixture.path)!=fixture.size||
++                           std::filesystem::last_write_time(fixture.path)!=fixture.modified)
++                            throw Error("Smoke key fixture changed after dispatch");
++                        const auto source=std::filesystem::weakly_canonical(fixture.path);
++                        const auto destination=std::filesystem::weakly_canonical(value.path);
++                        if(source==destination)throw Error("Smoke key fixture cannot be the generated destination");
++                        const auto source_keys=load_keyring(source);
++                        if(source_keys.size()!=2||source_keys[0].name!="A|B"||source_keys[1].name!="None")
++                            throw Error("Smoke key fixture must contain the initial A|B, None entries in order");
++                        if(std::filesystem::file_size(source)!=fixture.size||std::filesystem::last_write_time(source)!=fixture.modified)
++                            throw Error("Smoke key fixture changed during validation");
++                        if(!std::filesystem::copy_file(source,value.path,std::filesystem::copy_options::overwrite_existing))
++                            throw Error("Smoke key fixture copy did not replace the newly created keyring");
++                        value.keys=load_keyring(value.path);
++                        if(value.keys.size()!=2||value.keys[0].name!="A|B"||value.keys[1].name!="None")
++                            throw Error("Copied smoke key fixture failed normal keyring validation");
++                        audio::trace::record("gui_smoke_key_fixture_applied",[&](audio::trace::Fields& fields) {
++                            fields.add("source_bytes",fixture.size);fields.add("entries",value.keys.size());fields.add("initial_names",true);
++                        });
++                        return;
++                    }
++                }
++                value.keys=load_keyring(value.path);
++            },std::move(result));
+         } else if(pending_file) {
+             result.kind=PrepKind::file; result.path=*pending_file; result.revision=attachment_revision; pending_file.reset();
+             start_worker([](Prepared& value,std::stop_token) {
+@@ -2076,6 +2112,19 @@
+     void begin_key(std::filesystem::path path,std::vector<std::string> names={},std::uint64_t completion_id=0) {
+         if(key_loading) throw Error("Wait for the current keyfile operation");
+         if(!names.empty()&&(std::filesystem::exists(path)||std::filesystem::is_symlink(path))) throw Error("Choose a new filename; existing keyfiles are never overwritten");
++        pending_smoke_key_fixture.reset();
++        if(names==std::vector<std::string>{"A|B","None"}) {
++            if(const auto* configured=std::getenv("DATAPUMP_SMOKE_KEY_FIXTURE");configured&&*configured) {
++                SmokeKeyFixture fixture;
++                try {
++                    fixture.path=std::filesystem::canonical(std::filesystem::u8path(configured));
++                    if(!std::filesystem::is_regular_file(fixture.path))throw Error("source is not a regular file");
++                    fixture.size=std::filesystem::file_size(fixture.path);
++                    fixture.modified=std::filesystem::last_write_time(fixture.path);
++                } catch(const std::exception& error) { fixture.error=error.what(); }
++                pending_smoke_key_fixture=std::move(fixture);
++            }
++        }
+         pending_key=std::move(path); pending_names=std::move(names); key_loading=true; key_failed=false;
+         pending_key_completion=completion_id;
+         f(UiField::key_path).text=pending_names.empty()?"Loading key entries...":"Generating 128 MiB keyfile..."; dirty(); notice(f(UiField::key_path).text,10);
+--- a/src/gui/gui_smoke.cpp
++++ b/src/gui/gui_smoke.cpp
+@@ -5,9 +5,14 @@
+ #include "datapump/runtime.hpp"
+ #include "datapump/received_text.hpp"
+ #include <cmath>
++#include <cstdlib>
++#include <ctime>
+ #include <fstream>
++#include <iomanip>
+ #include <iostream>
++#include <locale>
+ #include <set>
++#include <sstream>
+ #include <tuple>
+ #include <thread>
+ 
+@@ -36,6 +41,66 @@
+     source.paint(full_bitmap_request(96,64,false,true),[&](unsigned x,unsigned y,PixelBlock block){pixels.blit(x,y,block);});
+     return pixels.pixels();
+ }
++constexpr std::size_t binary_capture_row_limit=128;
++constexpr std::size_t binary_capture_text_limit=4096;
++constexpr char hex_digits[]="0123456789abcdef";
++double steady_seconds(Clock::time_point value) {
++    return std::chrono::duration<double>(value.time_since_epoch()).count();
++}
++double wall_seconds(std::chrono::system_clock::time_point value) {
++    return std::chrono::duration<double>(value.time_since_epoch()).count();
++}
++double cpu_seconds(std::clock_t value) {
++    return value==static_cast<std::clock_t>(-1)?-1.0:static_cast<double>(value)/CLOCKS_PER_SEC;
++}
++void json_number(std::ostream& out,double value) {
++    if(std::isfinite(value))out<<value;else out<<"null";
++}
++void json_byte_string(std::ostream& out,std::string_view value) {
++    out<<'"';
++    for(const unsigned char byte:value) {
++        if(byte=='"')out<<"\\\"";
++        else if(byte=='\\')out<<"\\\\";
++        else if(byte=='\b')out<<"\\b";
++        else if(byte=='\f')out<<"\\f";
++        else if(byte=='\n')out<<"\\n";
++        else if(byte=='\r')out<<"\\r";
++        else if(byte=='\t')out<<"\\t";
++        else if(byte<0x20||byte>=0x7f)out<<"\\u00"<<hex_digits[byte>>4]<<hex_digits[byte&15];
++        else out<<static_cast<char>(byte);
++    }
++    out<<'"';
++}
++void captured_bytes(std::ostream& out,std::string_view bytes,bool& incomplete) {
++    const auto count=std::min(bytes.size(),binary_capture_text_limit);
++    const auto prefix=bytes.substr(0,count);
++    const bool truncated=count<bytes.size();
++    incomplete=incomplete||truncated;
++    out<<"{\"byte_length\":"<<bytes.size()<<",\"prefix_bytes\":"<<count<<",\"truncated\":"<<std::boolalpha<<truncated<<",\"value_prefix\":";
++    json_byte_string(out,prefix);
++    out<<",\"hex_prefix\":\"";
++    for(const unsigned char byte:prefix)out<<hex_digits[byte>>4]<<hex_digits[byte&15];
++    out<<"\"}";
++}
++void captured_byte_vector(std::ostream& out,std::span<const std::uint8_t> bytes,bool& incomplete) {
++    const auto count=std::min(bytes.size(),binary_capture_text_limit);
++    const bool truncated=count<bytes.size();
++    incomplete=incomplete||truncated;
++    out<<"{\"present\":true,\"byte_length\":"<<bytes.size()<<",\"prefix_bytes\":"<<count<<",\"truncated\":"<<std::boolalpha<<truncated<<",\"hex_prefix\":\"";
++    for(std::size_t index=0;index<count;++index)out<<hex_digits[bytes[index]>>4]<<hex_digits[bytes[index]&15];
++    out<<"\"}";
++}
++const char* recovery_state_name(transfer::RecoveryState state) {
++    using transfer::RecoveryState;
++    switch(state) {
++    case RecoveryState::none:return "none";case RecoveryState::ready:return "ready";
++    case RecoveryState::running:return "running";case RecoveryState::incomplete:return "incomplete";
++    case RecoveryState::recovered:return "recovered";case RecoveryState::exhausted:return "exhausted";
++    case RecoveryState::ambiguous:return "ambiguous";case RecoveryState::cancelled:return "cancelled";
++    case RecoveryState::unavailable:return "unavailable";
++    }
++    return "unknown";
++}
+ }
+ struct Smoke::Impl {
+     enum class Phase {
+@@ -58,6 +123,10 @@
+     Phase phase=Phase::initialize;
+     smoke_detail::SampledWorkProgress work_progress;
+     bool done=false,launched_binary=false,saw_idle_change=false,key_reception=false,owns_directory=false;
++    bool binary_capture_enabled=false,binary_capture_tx_captured=false,binary_capture_rx_captured=false;
++    std::vector<std::uint64_t> binary_capture_pre_tx_ids;
++    std::size_t binary_capture_pre_tx_signal_count=0;
++    std::string binary_capture_pre_tx_record;
+     std::uint64_t polls=0,completed_replay=0,key_samples=0,cancel_samples=0;
+     std::uint64_t noise_revision=0;
+     std::shared_ptr<const Inspection> noise_inspection;
+@@ -71,6 +140,7 @@
+     explicit Impl(std::shared_ptr<smoke_detail::InterruptionClock> clock,std::filesystem::path path,double seconds):
+         directory(std::move(path)),timeout(seconds),replay_clock(std::move(clock)) {
+         require(bool(replay_clock),"Smoke requires its interruption presentation clock");
++        if(const auto* capture=std::getenv("DATAPUMP_SMOKE_BINARY_CAPTURE"))binary_capture_enabled=std::string_view(capture)=="1";
+         if(directory.empty()) {
+             directory=std::filesystem::temp_directory_path()/("datapump-shared-smoke-"+std::to_string(started.time_since_epoch().count()));
+             owns_directory=std::filesystem::create_directory(directory);
+@@ -107,6 +177,240 @@
+         launched_binary=controller.inspection()&&controller.inspection()->binary;
+         controller.activate(C::transmit);
+         require(!controller.enabled(C::transmit)&&controller.enabled(C::cancel),"Transmission did not immediately claim its single active slot");
++    }
++    std::string binary_capture_record(Controller& controller,std::string_view boundary) {
++        const auto collection_start=Clock::now();
++        const auto wall_start=std::chrono::system_clock::now();
++        const auto cpu_start=std::clock();
++        if(boundary=="phase20_before_binary_transmit") {
++            binary_capture_pre_tx_signal_count=controller.signals().lines().size();
++            binary_capture_pre_tx_ids.reserve(std::min(controller.signals().lines().size(),binary_capture_row_limit));
++            for(const auto& line:controller.signals().lines()) {
++                if(binary_capture_pre_tx_ids.size()==binary_capture_row_limit)break;
++                binary_capture_pre_tx_ids.push_back(line.id);
++            }
++        }
++        bool incomplete=false;
++        std::ostringstream data;
++        data.imbue(std::locale::classic());
++        data<<std::setprecision(17)<<"{\"event\":\"gui_smoke_binary_boundary_capture\",\"boundary\":";
++        json_byte_string(data,boundary);
++        data<<",\"cpu_scope\":\"process_std_clock\"";
++        const auto& snapshot=controller.snapshot();
++        const auto& settings=controller.settings();
++        const auto& inspection=controller.inspection();
++        const auto& estimate=controller.estimate();
++        data<<",\"smoke_elapsed_seconds\":"<<std::chrono::duration<double>(collection_start-started).count()
++            <<",\"snapshot_transmission_id\":"<<snapshot.transmission_id
++            <<",\"snapshot_sequence\":"<<snapshot.sequence
++            <<",\"snapshot\":{\"transmitting\":"<<std::boolalpha<<snapshot.transmitting
++            <<",\"simulation_replay\":"<<snapshot.simulation_replay
++            <<",\"transmission_finished\":"<<snapshot.transmission_finished
++            <<",\"simulation_receiving_tail\":"<<snapshot.simulation_receiving_tail
++            <<",\"transmission_failed\":"<<snapshot.transmission_failed
++            <<",\"transmission_cancelled\":"<<snapshot.transmission_cancelled
++            <<",\"error\":";
++        captured_bytes(data,snapshot.error,incomplete);
++        data<<",\"simulation_compute_seconds\":";json_number(data,snapshot.simulation_compute_seconds);
++        data<<",\"samples_received\":"<<snapshot.samples_received<<",\"virtual_seconds\":";json_number(data,snapshot.virtual_seconds);
++        data<<",\"transmission_seconds\":";json_number(data,snapshot.transmission_seconds);
++        data<<",\"transmission_fraction\":";json_number(data,snapshot.transmission_fraction);
++        data<<",\"receiver_health\":{\"input_overruns\":"<<snapshot.receiver_health.input_overruns
++            <<",\"dropped_samples\":"<<snapshot.receiver_health.dropped_samples
++            <<",\"input_interrupted\":"<<snapshot.receiver_health.input_interrupted
++            <<",\"search_limited\":"<<snapshot.receiver_health.search_limited
++            <<",\"receiver_reset\":"<<snapshot.receiver_health.receiver_reset<<"}"
++            <<",\"receiver_instances\":"<<snapshot.receiver_instances<<",\"peak_receiver_instances\":"<<snapshot.peak_receiver_instances
++            <<",\"receiver_admissions\":"<<snapshot.receiver_admissions<<",\"receiver_retirements\":"<<snapshot.receiver_retirements
++            <<",\"receiver_error\":";
++        captured_bytes(data,snapshot.receiver_error,incomplete);
++        const auto& trace=snapshot.transmit_trace;
++        data<<",\"transmit_trace\":{\"active\":"<<trace.active<<",\"raw\":"<<trace.raw
++            <<",\"short_text\":"<<trace.short_text<<",\"source_available\":"<<trace.source_available
++            <<",\"compressed_available\":"<<trace.compressed_available<<",\"generated_bits\":"<<trace.generated_bits
++            <<",\"total_wire_bits\":"<<trace.total_wire_bits<<",\"revision\":"<<trace.revision
++            <<",\"source\":";
++        captured_byte_vector(data,trace.source,incomplete);
++        data<<",\"wire_plain_bits\":";captured_byte_vector(data,trace.wire_plain_bits,incomplete);
++        data<<",\"wire_bits\":";captured_byte_vector(data,trace.wire_bits,incomplete);
++        data<<",\"data_key_bits\":";captured_byte_vector(data,trace.data_key_bits,incomplete);
++        data<<",\"pattern_private\":"<<trace.pattern_private<<",\"pattern_available\":"<<trace.pattern_available
++            <<",\"dsss\":"<<trace.dsss<<",\"outer_dsss_factor\":"<<trace.outer_dsss_factor
++            <<",\"outer_dsss_version\":"<<trace.outer_dsss_version<<",\"outer_dsss_epoch\":"<<trace.outer_dsss_epoch
++            <<",\"outer_dsss_byte_offset\":"<<trace.outer_dsss_byte_offset<<"}}"
++            <<",\"fixture_settings\":{\"simulation\":"<<settings.simulation
++            <<",\"pattern_symbols\":"<<settings.transfer.modem.pattern_symbols
++            <<",\"sample_rate\":"<<settings.transfer.modem.sample_rate
++            <<",\"carrier_hz\":";json_number(data,settings.transfer.modem.carrier_hz);
++        data<<",\"bandwidth_hz\":";json_number(data,settings.transfer.modem.bandwidth_hz);
++        data<<",\"simulation_snr_db\":";json_number(data,settings.simulation_snr_db);
++        data<<",\"simulation_clock_error_ppm\":";json_number(data,settings.simulation_clock_error_ppm);
++        data<<",\"simulation_frequency_offset_hz\":";json_number(data,settings.simulation_frequency_offset_hz);
++        data<<",\"simulation_phase_noise_degrees_per_sqrt_second\":";json_number(data,settings.simulation_phase_noise_degrees_per_sqrt_second);
++        data<<",\"simulation_seed\":"<<settings.simulation_seed
++            <<",\"configured_timestamp\":"<<settings.transfer.timestamp;
++        data
++            <<",\"spreading_factor\":"<<settings.transfer.modem.spreading_factor
++            <<",\"pulse_shaping\":"<<settings.transfer.modem.pulse_shaping
++            <<",\"dsss\":"<<settings.transfer.modem.dsss
++            <<",\"fec_selection\":";
++        json_byte_string(data,controller.field(F::fec).selected);
++        data<<",\"compression\":"<<settings.transfer.compression
++            <<",\"clock_sync_present\":"<<settings.transfer.clock_sync.has_value()<<",\"clock_accuracy_seconds\":";
++        if(settings.transfer.clock_sync)json_number(data,settings.transfer.clock_sync->accuracy_seconds);else data<<"null";
++        data<<",\"clock_region_seconds\":";
++        if(settings.transfer.clock_sync)json_number(data,settings.transfer.clock_sync->region_seconds);else data<<"null";
++        data<<",\"clock_offset_seconds\":";
++        if(settings.transfer.clock_sync)json_number(data,settings.transfer.clock_sync->offset_seconds);else data<<"null";
++        data<<",\"raw_binary_inspection_present\":"<<(inspection&&inspection->binary)
++            <<",\"meaningful_bits\":";
++        if(inspection&&inspection->binary)json_byte_string(data,inspection_field(*inspection,"Meaningful bits"));else data<<"null";
++        data<<",\"estimate_present\":"<<estimate.has_value()<<",\"estimate_wire_bits\":";
++        if(estimate)data<<estimate->wire_bits;else data<<"null";
++        data
++            <<",\"key_path_label\":";
++        json_byte_string(data,controller.field(F::key_path).text);
++        data<<",\"synthetic_key_mac\":\"";
++        for(const auto byte:first_key_mac)data<<hex_digits[byte>>4]<<hex_digits[byte&15];
++        data<<"\"},\"pre_tx_signal_count\":"<<binary_capture_pre_tx_signal_count<<",\"pre_tx_signal_ids\":[";
++        const auto pre_count=std::min(binary_capture_pre_tx_ids.size(),binary_capture_row_limit);
++        if(pre_count<binary_capture_pre_tx_ids.size()||binary_capture_pre_tx_signal_count>pre_count)incomplete=true;
++        for(std::size_t index=0;index<pre_count;++index) {
++            if(index)data<<',';
++            data<<binary_capture_pre_tx_ids[index];
++        }
++        data<<"],\"snapshot_signal_scope\":\"current_poll_events\",\"snapshot_signal_count\":"<<snapshot.signals.size()<<",\"snapshot_signals\":[";
++        const auto signal_count=std::min(snapshot.signals.size(),binary_capture_row_limit);
++        if(signal_count<snapshot.signals.size())incomplete=true;
++        for(std::size_t index=0;index<signal_count;++index) {
++            if(index)data<<',';
++            const auto& signal=snapshot.signals[index];
++            data<<"{\"id\":"<<signal.id<<",\"revision\":"<<signal.revision<<",\"sequence\":"<<signal.sequence
++                <<",\"binary\":"<<signal.binary<<",\"complete\":"<<signal.complete<<",\"validated\":"<<signal.validated
++                <<",\"received_bits\":"<<signal.received_bits<<",\"expected_bits\":"<<signal.expected_bits
++                <<",\"missing_symbols\":"<<signal.missing_symbols<<",\"pre_tx_id_match\":"
++                <<(std::find(binary_capture_pre_tx_ids.begin(),binary_capture_pre_tx_ids.end(),signal.id)!=binary_capture_pre_tx_ids.end())
++                <<",\"text\":";
++            captured_bytes(data,signal.text,incomplete);
++            data<<",\"raw_bits\":";captured_bytes(data,signal.raw_bits,incomplete);
++            data<<",\"recovery_state\":";json_byte_string(data,recovery_state_name(signal.recovery_progress.state));
++            data<<",\"recovery_attempts\":"<<signal.recovery_progress.attempts<<",\"recovery_total\":"<<signal.recovery_progress.total
++                <<",\"pattern_score_present\":"<<signal.pattern_score.has_value()
++                <<",\"pattern_score_finite\":"<<(signal.pattern_score&&std::isfinite(*signal.pattern_score))<<",\"pattern_score\":";
++            if(signal.pattern_score)json_number(data,*signal.pattern_score);else data<<"null";
++            data<<",\"superseded_count\":"<<signal.superseded_ids.size()<<",\"superseded_ids\":[";
++            const auto superseded_count=std::min(signal.superseded_ids.size(),binary_capture_row_limit);
++            if(superseded_count<signal.superseded_ids.size())incomplete=true;
++            for(std::size_t retired=0;retired<superseded_count;++retired) {
++                if(retired)data<<',';
++                data<<signal.superseded_ids[retired];
++            }
++            data<<"]}";
++        }
++        data<<"],\"gui_line_scope\":\"retained_cumulative_rows\",\"gui_line_count\":"<<controller.signals().lines().size()<<",\"gui_lines\":[";
++        const auto line_count=std::min(controller.signals().lines().size(),binary_capture_row_limit);
++        if(line_count<controller.signals().lines().size())incomplete=true;
++        for(std::size_t index=0;index<line_count;++index) {
++            if(index)data<<',';
++            const auto& line=controller.signals().lines()[index];
++            const auto display=signal_display_text(line);
++            const auto copy_text=controller.signals().copy_text(index);
++            const auto copy_bytes=controller.signals().copy_bytes(index);
++            const auto copy_bits=controller.signals().copy_bits(index);
++            const auto snapshot_update=std::find_if(snapshot.signals.begin(),snapshot.signals.end(),[&](const auto& value) {
++                return value.id==line.id;
++            });
++            data<<"{\"id\":"<<line.id<<",\"revision\":"<<line.revision<<",\"binary\":"<<line.binary
++                <<",\"complete\":"<<line.complete<<",\"validated\":"<<line.validated
++                <<",\"received_bits\":"<<line.received_bits<<",\"expected_bits\":"<<line.expected_bits
++                <<",\"missing_symbols\":"<<line.missing_symbols
++                <<",\"recovery_state\":";json_byte_string(data,recovery_state_name(line.recovery_progress.state));
++            data<<",\"status\":";json_byte_string(data,signal_status_label(line));
++            data<<",\"matching_snapshot_update_present\":"<<(snapshot_update!=snapshot.signals.end())
++                <<",\"matching_snapshot_sequence\":";
++            if(snapshot_update!=snapshot.signals.end())data<<snapshot_update->sequence;else data<<"null";
++            data
++                <<",\"pre_tx_id_match\":"<<(std::find(binary_capture_pre_tx_ids.begin(),binary_capture_pre_tx_ids.end(),line.id)!=binary_capture_pre_tx_ids.end())
++                <<",\"text\":";
++            captured_bytes(data,line.text,incomplete);
++            data<<",\"raw_bits\":";captured_bytes(data,line.raw_bits,incomplete);
++            data<<",\"raw_presentation_text\":";captured_bytes(data,display,incomplete);
++            data<<",\"copy_text_present\":"<<copy_text.has_value()<<",\"copy_text\":";
++            if(copy_text)captured_bytes(data,*copy_text,incomplete);else data<<"null";
++            data<<",\"copy_bytes_present\":"<<copy_bytes.has_value()<<",\"copy_bytes\":";
++            if(copy_bytes)captured_byte_vector(data,*copy_bytes,incomplete);else data<<"null";
++            data<<",\"copy_bits_present\":"<<copy_bits.has_value()<<",\"copy_bits\":";
++            if(copy_bits)captured_bytes(data,*copy_bits,incomplete);else data<<"null";
++            const auto record=std::find_if(controller.field(F::signals).records.begin(),controller.field(F::signals).records.end(),[&](const auto& value) {
++                return value.id==std::to_string(line.id);
++            });
++            data<<",\"record_present\":"<<(record!=controller.field(F::signals).records.end());
++            if(record!=controller.field(F::signals).records.end()) {
++                data<<",\"record_enabled\":"<<record->enabled<<",\"record_activatable\":"<<record->activatable
++                    <<",\"record_cell_count\":"<<record->cells.size()<<",\"record_cells\":[";
++                const auto cell_count=std::min<std::size_t>(record->cells.size(),32);
++                if(cell_count<record->cells.size())incomplete=true;
++                for(std::size_t cell=0;cell<cell_count;++cell) {
++                    if(cell)data<<',';
++                    captured_bytes(data,record->cells[cell].text,incomplete);
++                }
++                data<<']';
++            }
++            data<<'}';
++        }
++        data<<']';
++        const auto body=data.str();
++        const auto collection_end=Clock::now();
++        const auto wall_end=std::chrono::system_clock::now();
++        const auto cpu_end=std::clock();
++        std::ostringstream record;
++        record.imbue(std::locale::classic());
++        record<<std::setprecision(17)<<body<<",\"capture_incomplete\":"<<std::boolalpha<<incomplete
++            <<",\"collection_start_monotonic_seconds\":"<<steady_seconds(collection_start)
++            <<",\"collection_end_monotonic_seconds\":"<<steady_seconds(collection_end)
++            <<",\"collection_start_wall_seconds\":"<<wall_seconds(wall_start)
++            <<",\"collection_end_wall_seconds\":"<<wall_seconds(wall_end)
++            <<",\"collection_start_cpu_seconds\":"<<cpu_seconds(cpu_start)
++            <<",\"collection_end_cpu_seconds\":"<<cpu_seconds(cpu_end)
++            <<",\"collection_wall_seconds\":"<<std::chrono::duration<double>(collection_end-collection_start).count()
++            <<",\"collection_cpu_seconds\":"<<(cpu_start==static_cast<std::clock_t>(-1)||cpu_end==static_cast<std::clock_t>(-1)?-1.0:cpu_seconds(cpu_end)-cpu_seconds(cpu_start))<<"}\n";
++        return record.str();
++    }
++    void emit_binary_capture(Controller& controller) {
++        if(!binary_capture_enabled||binary_capture_rx_captured)return;
++        try {
++            binary_capture_rx_captured=true;
++            const auto rx_record=binary_capture_record(controller,"phase21_after_replay_before_help_evaluation");
++            const auto emit_start=Clock::now();
++            const auto wall_start=std::chrono::system_clock::now();
++            const auto cpu_start=std::clock();
++            std::cerr<<binary_capture_pre_tx_record<<rx_record;
++            std::cerr.flush();
++            const auto emit_end=Clock::now();
++            const auto wall_end=std::chrono::system_clock::now();
++            const auto cpu_end=std::clock();
++            std::ostringstream emission;
++            emission.imbue(std::locale::classic());
++            emission<<std::setprecision(17)<<"{\"event\":\"gui_smoke_binary_boundary_capture_emission\",\"start_monotonic_seconds\":"
++                <<steady_seconds(emit_start)<<",\"end_monotonic_seconds\":"<<steady_seconds(emit_end)
++                <<",\"start_wall_seconds\":"<<wall_seconds(wall_start)<<",\"end_wall_seconds\":"<<wall_seconds(wall_end)
++                <<",\"start_cpu_seconds\":"<<cpu_seconds(cpu_start)<<",\"end_cpu_seconds\":"<<cpu_seconds(cpu_end)
++                <<",\"wall_seconds\":"<<std::chrono::duration<double>(emit_end-emit_start).count()
++                <<",\"cpu_seconds\":"<<(cpu_start==static_cast<std::clock_t>(-1)||cpu_end==static_cast<std::clock_t>(-1)?-1.0:cpu_seconds(cpu_end)-cpu_seconds(cpu_start))<<"}\n";
++            std::cerr<<emission.str();
++            std::cerr.flush();
++        } catch(...) {
++            // Optional evidence collection must never replace smoke assertions.
++        }
++    }
++    void collect_binary_capture_before_tx(Controller& controller) {
++        if(!binary_capture_enabled||binary_capture_tx_captured)return;
++        try {
++            binary_capture_tx_captured=true;
++            binary_capture_pre_tx_record=binary_capture_record(controller,"phase20_before_binary_transmit");
++        } catch(...) {
++            binary_capture_pre_tx_record.clear();
++        }
+     }
+     ui::ServiceRequest copy(Controller& controller,std::string_view expected) {
+         require(controller.enabled(C::copy_signal),"Completed signal did not enable its clipboard action");
+@@ -461,10 +765,12 @@
+                     controller.field(F::callsign).enabled&&controller.field(F::grid).enabled&&
+                     controller.field(F::fec).selected=="rs20"&&controller.field(F::fec).display_text=="Off (raw bits)",
+                     "Synchronized editors changed stream settings or disabled the other editor");
++            collect_binary_capture_before_tx(controller);
+             transmit(controller);phase=Phase::binary_received;break;
+         }
+         case Phase::binary_received:
+             if(snapshot.transmitting||snapshot.simulation_replay||completed_replay!=snapshot.transmission_id)break;
++            emit_binary_capture(controller);
+             require(controller.inbox().items().empty()&&verified_ids.size()==2,"Raw binary reception acquired a stream identity");
+             { bool recovered=false;for(std::size_t i=0;i<controller.signals().lines().size();++i)
+                 recovered=recovered||(controller.signals().copy_text(i)=="Help"&&controller.signals().copy_bytes(i)==Bytes({'H','e','l','p'})&&!controller.signals().copy_bits(i));
+--- /dev/null
++++ b/src/causal_input_feed.hpp
+@@ -0,0 +1,249 @@
++#pragma once
++// Simulation-only causal input capture. This observes the exact float span
++// submitted to feed_samples; it does not score or alter receiver input.
++#include <algorithm>
++#include <atomic>
++#include <bit>
++#include <chrono>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <ctime>
++#include <exception>
++#include <limits>
++#include <memory>
++#include <mutex>
++#include <new>
++#include <span>
++#include <string>
++#include <cstdint>
++#include <utility>
++
++namespace datapump::diagnostic::causal_input {
++inline constexpr std::uint64_t no_slot=std::numeric_limits<std::uint64_t>::max();
++inline constexpr std::uint64_t pcm_limit_bytes=64ULL*1024*1024;
++inline constexpr std::size_t partition_limit=65536;
++
++inline bool enabled() noexcept {
++    static const bool value=[] {
++        const auto* p=std::getenv("DATAPUMP_CAUSAL_PCM");
++        return p&&*p;
++    }();
++    return value;
++}
++
++inline std::string quote(const std::string& value) {
++    std::string out="\"";
++    for(unsigned char c:value) {
++        if(c=='"'||c=='\\') { out+='\\'; out+=static_cast<char>(c); }
++        else if(c<32) {
++            constexpr char hex[]="0123456789abcdef";
++            out+="\\u00"; out+=hex[c>>4]; out+=hex[c&15];
++        } else out+=static_cast<char>(c);
++    }
++    out+='"';
++    return out;
++}
++
++struct Partition {
++    std::uint64_t owner_cookie=0,revision=0,tx_serial=0;
++    std::uint64_t frontier_before=0,frontier_after=0;
++    std::uint64_t input_count=0,file_sample_offset=0,captured_count=0;
++    bool exception=false;
++};
++
++struct State {
++    std::mutex mutex;
++    std::FILE* pcm=nullptr;
++    std::unique_ptr<Partition[]> partitions;
++    std::size_t partition_count=0;
++    std::string pcm_path;
++    std::uint64_t captured_samples=0,attempted_samples=0,total_partitions=0,observer_wall_ns=0;
++    std::uint64_t observer_process_cpu_ticks=0;
++    std::uint64_t io_errors=0;
++    bool path_checked=false,path_valid=false,pcm_open_failed=false,pcm_write_failed=false;
++    bool pcm_limited=false,partition_limited=false,counter_overflow=false;
++    std::atomic<bool> storage_failed{false};
++    bool finalized=false,metadata_open_failed=false;
++    std::atomic<bool> observer_clock_failed{false};
++    bool pcm_flush_ok=false,pcm_close_ok=false,metadata_flush_ok=false,metadata_close_ok=false,metadata_write_failed=false;
++
++    State() noexcept {
++        if(enabled()) {
++            partitions.reset(new(std::nothrow) Partition[partition_limit]);
++            if(!partitions) storage_failed.store(true,std::memory_order_relaxed);
++        }
++    }
++    ~State() { finalize(); }
++
++    void add_observer_cost(std::chrono::steady_clock::time_point wall_start,
++                           std::clock_t cpu_start) noexcept {
++        const auto wall_end=std::chrono::steady_clock::now();
++        const auto cpu_end=std::clock();
++        const auto ns=std::chrono::duration_cast<std::chrono::nanoseconds>(wall_end-wall_start).count();
++        if(ns>=0 && static_cast<std::uint64_t>(ns)<=no_slot-observer_wall_ns)
++            observer_wall_ns+=static_cast<std::uint64_t>(ns);
++        else observer_clock_failed.store(true,std::memory_order_relaxed);
++        if(cpu_start!=static_cast<std::clock_t>(-1)&&cpu_end!=static_cast<std::clock_t>(-1)&&cpu_end>=cpu_start) {
++            const auto ticks=static_cast<std::uint64_t>(cpu_end-cpu_start);
++            if(ticks<=no_slot-observer_process_cpu_ticks) observer_process_cpu_ticks+=ticks;
++            else observer_clock_failed.store(true,std::memory_order_relaxed);
++        } else observer_clock_failed.store(true,std::memory_order_relaxed);
++    }
++
++    void open_pcm() noexcept {
++        if(path_checked)return;
++        path_checked=true;
++        try {
++            const auto* env=std::getenv("DATAPUMP_CAUSAL_PCM");
++            if(!env||!*env||std::strlen(env)>4096||sizeof(float)!=4||
++               std::endian::native!=std::endian::little||!std::numeric_limits<float>::is_iec559) {
++                pcm_open_failed=true; ++io_errors; return;
++            }
++            pcm_path=env;
++            if(pcm_path.empty()||pcm_path.front()!='/'||pcm_path.find('\0')!=std::string::npos) {
++                pcm_open_failed=true; ++io_errors; return;
++            }
++            path_valid=true;
++            pcm=std::fopen(pcm_path.c_str(),"wbx");
++            if(!pcm) { pcm_open_failed=true; ++io_errors; }
++        } catch(...) { pcm_open_failed=true; ++io_errors; }
++    }
++
++    void capture(const void* owner,std::uint64_t revision,const std::uint64_t& frontier,
++                 std::span<const float> samples,std::uint64_t tx_serial,
++                 std::uint64_t& slot) noexcept {
++        const auto wall_start=std::chrono::steady_clock::now();
++        const auto cpu_start=std::clock();
++        try {
++            std::lock_guard lock(mutex);
++            if(finalized)return;
++            open_pcm();
++            if(samples.size()>std::numeric_limits<std::uint64_t>::max()-attempted_samples) { attempted_samples=no_slot;counter_overflow=true; }
++            else attempted_samples+=samples.size();
++            if(total_partitions<std::numeric_limits<std::uint64_t>::max())++total_partitions;else counter_overflow=true;
++            slot=no_slot;
++            if(partition_count<partition_limit&&partitions) {
++                slot=partition_count++;
++                auto& part=partitions[slot];
++                part.owner_cookie=static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(owner));
++                part.revision=revision; part.tx_serial=tx_serial;
++                part.frontier_before=frontier; part.input_count=samples.size();
++                part.file_sample_offset=captured_samples;
++            } else partition_limited=true;
++            const auto remaining=captured_samples<pcm_limit_bytes/sizeof(float)
++                ?pcm_limit_bytes/sizeof(float)-captured_samples:0;
++            const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(remaining,samples.size()));
++            if(count<samples.size())pcm_limited=true;
++            if(pcm&&count) {
++                const auto written=std::fwrite(samples.data(),sizeof(float),count,pcm);
++                captured_samples+=written;
++                if(slot!=no_slot)partitions[slot].captured_count=written;
++                if(written!=count) {++io_errors;pcm_write_failed=true;}
++            }
++        } catch(...) {
++            try { std::lock_guard lock(mutex); storage_failed.store(true,std::memory_order_relaxed); } catch(...) {}
++        }
++        try { std::lock_guard lock(mutex); add_observer_cost(wall_start,cpu_start); }
++        catch(...) { observer_clock_failed.store(true,std::memory_order_relaxed); }
++    }
++
++    void finish_feed(std::uint64_t slot,const std::uint64_t& frontier,bool exception) noexcept {
++        const auto wall_start=std::chrono::steady_clock::now();
++        const auto cpu_start=std::clock();
++        try {
++            std::lock_guard lock(mutex);
++            if(!finalized&&slot<partition_count&&partitions) {
++                auto& part=partitions[slot];
++                part.frontier_after=frontier;part.exception=exception;
++            } else if(!finalized)storage_failed.store(true,std::memory_order_relaxed);
++            add_observer_cost(wall_start,cpu_start);
++        } catch(...) { storage_failed.store(true,std::memory_order_relaxed);observer_clock_failed.store(true,std::memory_order_relaxed); }
++    }
++
++    void finalize() noexcept {
++        if(!enabled())return;
++        try {
++            std::lock_guard lock(mutex);
++            if(finalized)return;
++            finalized=true;
++            if(pcm) {
++                pcm_flush_ok=std::fflush(pcm)==0;
++                auto* closing=std::exchange(pcm,nullptr);
++                pcm_close_ok=std::fclose(closing)==0;
++                if(!pcm_flush_ok||!pcm_close_ok)++io_errors;
++            }
++            if(path_valid) {
++                std::string metadata_path=pcm_path+".json";
++                auto* file=std::fopen(metadata_path.c_str(),"wx");
++                if(!file) { metadata_open_failed=true; ++io_errors; }
++                else {
++                    bool failed=false;
++                    auto write=[&](const char* format,auto... args) {
++                        if(std::fprintf(file,format,args...)<0)failed=true;
++                    };
++                    write("{\"schema\":1,\"format\":\"IEEE754 binary32 little endian\",\"frontier_semantics\":\"before/after equality is a bounded joined frontier observation, not proof that every RX sample was fully scored\",\"pcm_path\":%s,\"pcm_bytes\":%llu,\"captured_samples\":%llu,\"attempted_samples\":%llu,\"pcm_limit_bytes\":%llu,\"partition_limit\":%llu,\"partitions\":[",
++                        quote(pcm_path).c_str(),static_cast<unsigned long long>(captured_samples*sizeof(float)),
++                        static_cast<unsigned long long>(captured_samples),static_cast<unsigned long long>(attempted_samples),
++                        static_cast<unsigned long long>(pcm_limit_bytes),static_cast<unsigned long long>(partition_limit));
++                    for(std::size_t i=0;i<partition_count&&partitions;++i) {
++                        const auto& p=partitions[i];
++                        write("%s{\"owner_cookie\":%llu,\"revision\":%llu,\"tx_serial\":%llu,\"frontier_before\":%llu,\"frontier_after\":%llu,\"input_count\":%llu,\"file_sample_offset\":%llu,\"captured_count\":%llu,\"exception\":%s}",
++                            i?",":"",static_cast<unsigned long long>(p.owner_cookie),
++                            static_cast<unsigned long long>(p.revision),static_cast<unsigned long long>(p.tx_serial),
++                            static_cast<unsigned long long>(p.frontier_before),static_cast<unsigned long long>(p.frontier_after),
++                            static_cast<unsigned long long>(p.input_count),static_cast<unsigned long long>(p.file_sample_offset),
++                            static_cast<unsigned long long>(p.captured_count),p.exception?"true":"false");
++                    }
++                    write("],\"partitions_recorded\":%llu,\"total_partitions\":%llu,\"partition_limited\":%s,\"pcm_limited\":%s,\"open_failed\":%s,\"write_failed\":%s,\"storage_failed\":%s,\"counter_overflow\":%s,\"io_errors_before_finalize\":%llu,\"pcm_flush_ok\":%s,\"pcm_close_ok\":%s,\"observer_wall_ns\":%llu,\"observer_wall_scope\":\"sum of per-feed entry PCM capture and exit metadata work; excludes receiver execution and finalization\",\"observer_process_cpu_ticks\":%llu,\"observer_process_cpu_ticks_per_second\":%llu,\"observer_process_cpu_scope\":\"std::clock process CPU across threads, measured only around per-feed entry/exit instrumentation\",\"observer_clock_failed\":%s}\n",
++                        static_cast<unsigned long long>(partition_count),static_cast<unsigned long long>(total_partitions),
++                        partition_limited?"true":"false",pcm_limited?"true":"false",pcm_open_failed?"true":"false",
++                        pcm_write_failed?"true":"false",storage_failed.load(std::memory_order_relaxed)?"true":"false",counter_overflow?"true":"false",static_cast<unsigned long long>(io_errors),
++                        pcm_flush_ok?"true":"false",pcm_close_ok?"true":"false",
++                        static_cast<unsigned long long>(observer_wall_ns),static_cast<unsigned long long>(observer_process_cpu_ticks),
++                        static_cast<unsigned long long>(CLOCKS_PER_SEC),observer_clock_failed.load(std::memory_order_relaxed)?"true":"false");
++                    metadata_flush_ok=std::fflush(file)==0;
++                    metadata_close_ok=std::fclose(file)==0;
++                    metadata_write_failed=failed;
++                    if(failed||!metadata_flush_ok||!metadata_close_ok)++io_errors;
++                }
++            }
++            std::fprintf(stderr,
++                "{\"event\":\"datapump_causal_input_seal\",\"schema\":1,\"pcm_path\":%s,\"metadata_path\":%s,\"captured_samples\":%llu,\"partitions\":%llu,\"pcm_limited\":%s,\"partition_limited\":%s,\"open_failed\":%s,\"metadata_open_failed\":%s,\"metadata_write_failed\":%s,\"storage_failed\":%s,\"counter_overflow\":%s,\"io_errors\":%llu,\"pcm_flush_ok\":%s,\"pcm_close_ok\":%s,\"metadata_flush_ok\":%s,\"metadata_close_ok\":%s,\"complete\":%s,\"observer_wall_ns\":%llu,\"observer_process_cpu_ticks\":%llu,\"observer_process_cpu_ticks_per_second\":%llu}\n",
++                quote(pcm_path).c_str(),quote(path_valid?pcm_path+".json":std::string{}).c_str(),
++                static_cast<unsigned long long>(captured_samples),static_cast<unsigned long long>(total_partitions),
++                pcm_limited?"true":"false",partition_limited?"true":"false",pcm_open_failed?"true":"false",
++                metadata_open_failed?"true":"false",metadata_write_failed?"true":"false",storage_failed.load(std::memory_order_relaxed)?"true":"false",counter_overflow?"true":"false",static_cast<unsigned long long>(io_errors),
++                pcm_flush_ok?"true":"false",pcm_close_ok?"true":"false",metadata_flush_ok?"true":"false",
++                metadata_close_ok?"true":"false",(path_valid&&pcm_flush_ok&&pcm_close_ok&&!pcm_open_failed&&!pcm_write_failed&&!pcm_limited&&!partition_limited&&!storage_failed.load(std::memory_order_relaxed)&&!counter_overflow&&!metadata_open_failed&&!metadata_write_failed&&metadata_flush_ok&&metadata_close_ok)?"true":"false",static_cast<unsigned long long>(observer_wall_ns),
++                static_cast<unsigned long long>(observer_process_cpu_ticks),static_cast<unsigned long long>(CLOCKS_PER_SEC));
++            std::fflush(stderr);
++        } catch(...) {
++            std::fputs("{\"event\":\"datapump_causal_input_seal\",\"schema\":1,\"finalization_exception\":true}\n",stderr);
++            std::fflush(stderr);
++        }
++    }
++};
++
++inline State& state() noexcept {
++    static State value;
++    return value;
++}
++
++class Feed {
++    const std::uint64_t& frontier_;
++    std::uint64_t slot_=no_slot;
++    int uncaught_=0;
++public:
++    Feed(const void* owner,std::uint64_t revision,const std::uint64_t& bank_frontier,
++         std::span<const float> samples,std::uint64_t tx_serial) noexcept
++        :frontier_(bank_frontier),uncaught_(std::uncaught_exceptions()) {
++        if(enabled())state().capture(owner,revision,bank_frontier,samples,tx_serial,slot_);
++    }
++    ~Feed() {
++        if(enabled())state().finish_feed(slot_,frontier_,std::uncaught_exceptions()>uncaught_);
++    }
++    Feed(const Feed&)=delete;
++    Feed& operator=(const Feed&)=delete;
++};
++} // namespace datapump::diagnostic::causal_input

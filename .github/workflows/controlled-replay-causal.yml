@@ -1,0 +1,230 @@
+name: Controlled SDK Rev replay causal diagnostic
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  producer:
+    name: Build one source42 SDK Rev TGZ
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      LP_NUM_THREADS: '1'
+      DATAPUMP_SMOKE_BINARY_CAPTURE: '1'
+      BASE_SOURCE_SHA: '42d7a0cb82c027f906555c39adccb7ec6fa91f21'
+      EXPECTED_SDK_MANIFEST_SHA256: '4fdcc4b8d57e0a67eeb2ce7fac70667b75f40f01215105de95b771c77c5303c3'
+    steps:
+      - name: Bootstrap current APT helper before installing Git
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
+      - name: Install Ubuntu container prerequisites
+        run: |
+          set -euo pipefail
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates git gh python3 file binutils make xvfb xauth fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri libxtst6 2>&1 | tee "$RUNNER_TEMP/controlled-replay-apt.log"
+      - name: Checkout diagnostic tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize evidence
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/metadata
+          cp "$RUNNER_TEMP/controlled-replay-apt.log" evidence/prerequisites.log
+      - name: Checkout the exact source baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: 42d7a0cb82c027f906555c39adccb7ec6fa91f21
+          path: source-base
+      - name: Fetch the exact published SDK from base
+        id: sdk
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 tools/sdk-release.py fetch --binary-only --repo "$GITHUB_REPOSITORY" --directory downloaded-sdk --github-output "$GITHUB_OUTPUT" 2>&1 | tee evidence/sdk-fetch.log
+      - name: Install and verify the published SDK
+        run: |
+          set -euo pipefail
+          if [ '${{ steps.sdk.outputs.found }}' != true ]; then
+            echo '::error::The base release has no SDK matching this recipe.'
+            exit 1
+          fi
+          set -- downloaded-sdk/datapump-sdk-*-linux-x86_64.tar.gz
+          test "$#" -eq 1
+          python3 tools/build-sdk.py install --archive "$1" --destination "$GITHUB_WORKSPACE/source-base/build/sdk"
+          python3 tools/build-sdk.py verify "$GITHUB_WORKSPACE/source-base/build/sdk" --max-host-glibc 2.36
+      - name: Verify relocated SDK tools and private runtimes
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          import subprocess
+
+          root = (Path(os.environ['GITHUB_WORKSPACE']) / 'source-base/build/sdk').resolve()
+          manifest_path = root / 'share/datapump-sdk/manifest.json'
+          manifest = json.loads(manifest_path.read_text())
+          if hashlib.sha256(manifest_path.read_bytes()).hexdigest() != os.environ['EXPECTED_SDK_MANIFEST_SHA256']:
+              raise SystemExit('published SDK manifest differs from the pinned source configuration')
+          runtimes = {'libstdc++.so.6', 'libgcc_s.so.1'}
+          for name in runtimes:
+              if not (root / 'lib' / name).is_file():
+                  raise SystemExit('SDK host runtime is missing: ' + name)
+          env = os.environ.copy()
+          for name in ('LD_LIBRARY_PATH', 'LD_PRELOAD', 'LD_AUDIT', 'LD_DEBUG'):
+              env.pop(name, None)
+          compiler = root / manifest['target']['cxx_compiler']
+          cc1plus = subprocess.check_output([str(compiler), '-print-prog-name=cc1plus'], env=env, text=True).strip()
+          python = root / 'bin/python3'
+          tools = [root / 'bin/cmake', root / 'bin/ninja', Path(cc1plus), python]
+          if (root / 'bin/patchelf').is_file():
+              tools.append(root / 'bin/patchelf')
+          for tool in tools:
+              if not tool.is_absolute() or not tool.is_file() or root not in tool.resolve().parents:
+                  raise SystemExit('SDK host tool missing/outside root: ' + str(tool))
+              result = subprocess.run(['ldd', str(tool)], env=env, text=True, capture_output=True, check=True)
+              if 'not found' in result.stdout:
+                  raise SystemExit('SDK host dependency missing: ' + result.stdout)
+              for line in result.stdout.splitlines():
+                  fields = line.split()
+                  if fields and fields[0] in runtimes:
+                      expected = (root / 'lib' / fields[0]).resolve()
+                      if len(fields) < 3 or fields[1] != '=>' or Path(fields[2]).resolve() != expected:
+                          raise SystemExit('SDK tool selected non-SDK C++ runtime: ' + str(tool) + '\n' + line)
+          python_paths = json.loads(subprocess.check_output([str(python), '-c',
+              'import json, pathlib, sys, sysconfig; print(json.dumps([sys.executable, sys.prefix, sys.base_prefix, sysconfig.get_path("stdlib")]))'], env=env, text=True))
+          for location in python_paths:
+              resolved = Path(location).resolve()
+              if resolved != root and root not in resolved.parents:
+                  raise SystemExit('SDK Python selected path outside installation: ' + location)
+          print('Verified relocated SDK Python and private C++ runtimes')
+          PY
+      - name: Prepare the private causal source postimage
+        run: |
+          set -euo pipefail
+          python3 tools/controlled-replay-causal.py prepare --base source-base --record evidence/metadata/source-settings.json
+      - name: Build original portable Rev TGZ and verify package assertions
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/products
+          (
+            cd source-base
+            ./build.sh package --tui --fb --web-worker --sdk "$GITHUB_WORKSPACE/source-base/build/sdk" --backend rev --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)"
+          ) 2>&1 | tee evidence/package-build.log
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
+            source-base/build/sdk/bin/cmake -DARCHIVE_DIR="$GITHUB_WORKSPACE/source-base/build/sdk-application/releases" \
+            -DBUILD_DIR="$GITHUB_WORKSPACE/source-base/build/sdk-application" -DGUI_SMOKE=OFF \
+            -DMAX_GLIBC=2.36 -DREQUIRE_MANUALS=ON -DREQUIRE_FRONTENDS=ON \
+            -P "$GITHUB_WORKSPACE/source-base/tools/verify-native-archives.cmake" \
+            2>&1 | tee evidence/package-verify.log
+          set -- source-base/build/sdk-application/releases/DataPump-*-native-rev.tar.gz
+          test "$#" -eq 1
+          cp "$1" evidence/products/
+      - name: Confirm expected copied-package staging invariant failure
+        run: |
+          set -euo pipefail
+          archive=$(find evidence/products -maxdepth 1 -type f -name 'DataPump-*-native-rev.tar.gz' -print -quit)
+          test -n "$archive"
+          python3 tools/controlled-replay-causal.py unit --archive "$archive" --output evidence/unit-check
+      - name: Upload shared package and producer evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: controlled-replay-causal-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            evidence/
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 14
+
+  consumers:
+    name: Matched full/minimal copied-TGZ pair / ${{ matrix.key }}
+    needs: producer
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        key: [key1, key2]
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      LP_NUM_THREADS: '1'
+    steps:
+      - name: Bootstrap current APT helper before installing Git
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
+      - name: Install copied-runtime prerequisites
+        run: |
+          set -euo pipefail
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates git gh python3 file xvfb xauth fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri libxtst6 2>&1 | tee "$RUNNER_TEMP/controlled-replay-apt.log"
+      - name: Checkout diagnostic tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize consumer evidence and retrieve the producer package
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.3.0
+        with:
+          name: controlled-replay-causal-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence
+      - name: Record consumer prerequisites
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/metadata
+          cp "$RUNNER_TEMP/controlled-replay-apt.log" evidence/consumer-prerequisites.log
+      - name: Fetch pinned synthetic fixture outside uploaded artifact root
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 tools/controlled-replay-causal.py fixture --key '${{ matrix.key }}' \
+            --output "$RUNNER_TEMP/reference.key" --record evidence/metadata/key.json
+      - name: Run full and minimal original copied-TGZ smokes with matched inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          archive=$(find evidence/products -maxdepth 1 -type f -name 'DataPump-*-native-rev.tar.gz' -print -quit)
+          test -n "$archive"
+          python3 tools/controlled-replay-causal.py pair --archive "$archive" \
+            --evidence evidence/pair --fixture "$RUNNER_TEMP/reference.key" \
+            --key '${{ matrix.key }}' --source-manifest evidence/metadata/source-settings.json
+      - name: Upload per-key captured terminal-failure pairs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: controlled-replay-causal-${{ matrix.key }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            evidence/
+            ${{ runner.temp }}/controlled-replay-apt.log
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 14

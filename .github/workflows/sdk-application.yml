@@ -6,7 +6,7 @@ on:
       scope:
         description: 'Run one SDK scope or the focused FLTK Live validation without repeating other producers and consumers'
         type: choice
-        options: [tests, packages, frontends, web, live, sched-hop-diagnostic, gui-core-diagnostic, binary-capture-diagnostic, binary-capture-continuation]
+        options: [tests, packages, frontends, web, live, sched-hop-diagnostic, gui-core-diagnostic, binary-capture-diagnostic, binary-capture-continuation, controlled-replay-causal]
         default: tests
       backend:
         type: choice
@@ -42,7 +42,7 @@ permissions:
 
 jobs:
   application:
-    if: inputs.scope != 'binary-capture-diagnostic' && inputs.scope != 'binary-capture-continuation'
+    if: inputs.scope != 'binary-capture-diagnostic' && inputs.scope != 'binary-capture-continuation' && inputs.scope != 'controlled-replay-causal'
     name: SDK ${{ inputs.scope }} / ${{ inputs.backend }} / ${{ inputs.image }}
     runs-on: ${{ inputs.linux_runner }}
     container: ${{ inputs.image }}
@@ -388,3 +388,10 @@ jobs:
       contents: read
       actions: read
     uses: ./.github/workflows/sdk-rev-smoke-capture-continue.yml
+
+  controlled-replay-causal:
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'controlled-replay-causal'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/controlled-replay-causal.yml

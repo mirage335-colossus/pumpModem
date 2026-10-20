@@ -278,18 +278,23 @@ def capture(args):
     if capture_error or not trace_closure.get('valid'):
         raise SystemExit('smoke exited successfully but required capture/trace closure is incomplete')
 
-parser = argparse.ArgumentParser()
-sub = parser.add_subparsers(dest='action', required=True)
-p = sub.add_parser('overlay')
-p.add_argument('--base', required=True); p.add_argument('--base-commit', required=True)
-p.add_argument('--postimage', required=True); p.add_argument('--expected-preimage', required=True)
-p.add_argument('--expected-postimage', required=True); p.add_argument('--record', required=True)
-p.set_defaults(func=overlay)
-p = sub.add_parser('capture')
-p.add_argument('--archive', required=True); p.add_argument('--evidence', required=True)
-p.add_argument('--artifact-root', required=True); p.add_argument('--attempt', type=int, required=True)
-p.add_argument('--base-commit', required=True); p.add_argument('--tool-commit', required=True)
-p.add_argument('--source-manifest', required=True); p.add_argument('--settings', required=True)
-p.set_defaults(func=capture)
-args = parser.parse_args()
-args.func(args)
+def main(argv=None):
+    parser = argparse.ArgumentParser()
+    sub = parser.add_subparsers(dest='action', required=True)
+    p = sub.add_parser('overlay')
+    p.add_argument('--base', required=True); p.add_argument('--base-commit', required=True)
+    p.add_argument('--postimage', required=True); p.add_argument('--expected-preimage', required=True)
+    p.add_argument('--expected-postimage', required=True); p.add_argument('--record', required=True)
+    p.set_defaults(func=overlay)
+    p = sub.add_parser('capture')
+    p.add_argument('--archive', required=True); p.add_argument('--evidence', required=True)
+    p.add_argument('--artifact-root', required=True); p.add_argument('--attempt', type=int, required=True)
+    p.add_argument('--base-commit', required=True); p.add_argument('--tool-commit', required=True)
+    p.add_argument('--source-manifest', required=True); p.add_argument('--settings', required=True)
+    p.set_defaults(func=capture)
+    args = parser.parse_args(argv)
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

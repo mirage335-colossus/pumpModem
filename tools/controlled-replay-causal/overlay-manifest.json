@@ -1,0 +1,30 @@
+{
+  "base_commit": "42d7a0cb82c027f906555c39adccb7ec6fa91f21",
+  "patch_sha256": "e91ced6f4df6480b4e70263059af92d9ba6c167b6542095db4c47dda64a75c5e",
+  "files": [
+    {
+      "path": "src/live.cpp",
+      "preimage_sha256": "3e9eeef7a80d357692f5778ff172d664e3f83e01f5cc86c0bdc6e45737bcfd58",
+      "postimage_sha256": "fb48f5eba2147849b3ec48d80d72150eb04461dabdc9fdfe1dc2c084daba8834"
+    },
+    {
+      "path": "src/gui/controller.cpp",
+      "preimage_sha256": "035744048b5532f367d565c20511f768a49951d6a7cc7e5e4b842ff7061d7891",
+      "postimage_sha256": "9e4a611258ef4d4206774c8a6af76d37b4e2b3e021183f57f03931a853070e63"
+    },
+    {
+      "path": "src/gui/gui_smoke.cpp",
+      "preimage_sha256": "222a6f0dacb3c92125ab6b119420bd585e411a9e3ec897562b55784752d439d2",
+      "postimage_sha256": "47a9ceaabdd726f65184a89d50e07da865245d4140cb3f60bd354d0829322ebc"
+    },
+    {
+      "path": "src/causal_input_feed.hpp",
+      "preimage_sha256": null,
+      "postimage_sha256": "2deab14cdc4ca4fb8a591f3bfa90cd79bc923cd62d22c1a462d8de4ca4b7cf91"
+    }
+  ],
+  "diagnostic_only": true,
+  "default_media_clock": "custom_epoch_clock remainsfalse; forcedenvonlyepoch_now privatepostimage",
+  "selected_event_selfcheck": "actualadd_signal expects2 independentcompletions; notclaimoriginalreceiverproducedboth",
+  "luna_reviews": "terminal1authorizedrepair then16checksPASS sourceaccepted; PCM1authorizedrepair atomicfaultflags+CPUscale then16checksPASS sourceaccepted; controllerSoltakeover aftercheckerfailures sourceaccepted11checks; CXXallpending"
+}
