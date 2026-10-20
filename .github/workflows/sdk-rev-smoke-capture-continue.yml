@@ -1,0 +1,100 @@
+name: Continue retained SDK Rev smoke capture
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  retained-sdk-rev-smoke:
+    name: Retained source42 Rev binary / remaining planned smoke
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      LP_NUM_THREADS: '1'
+    steps:
+      - name: Bootstrap existing container prerequisite helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
+      - name: Install only checkout and copied-runtime prerequisites
+        run: |
+          set -o pipefail
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates git gh python3 file xvfb xauth fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri libxtst6 2>&1 | tee "$RUNNER_TEMP/retained-rev-apt.log"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fetch and independently pin the existing binary and producer metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, shutil, subprocess, zipfile
+          from pathlib import Path
+          root = Path('evidence')
+          (root/'products').mkdir(parents=True)
+          (root/'metadata').mkdir()
+          archive = Path(os.environ['RUNNER_TEMP'])/'capture-12264400813.zip'
+          with archive.open('wb') as stream:
+              subprocess.run(['gh','api','repos/'+os.environ['GITHUB_REPOSITORY']+'/actions/artifacts/12264400813/zip'],stdout=stream,check=True)
+          def sha(path):
+              with path.open('rb') as stream:
+                  return hashlib.file_digest(stream,'sha256').hexdigest()
+          expected_zip = '7c36d731da54eab4ceeffa2b398b27340a86b91a1311b443ec2bf03a7909b675'
+          assert sha(archive) == expected_zip, 'retained capture artifact digest changed'
+          with zipfile.ZipFile(archive) as package:
+              def copy(suffix, target):
+                  names = [n for n in package.namelist() if n.endswith(suffix)]
+                  assert len(names) == 1, (suffix,names)
+                  with package.open(names[0]) as source, target.open('wb') as destination:
+                      shutil.copyfileobj(source,destination)
+              product = root/'products/DataPump-1.0.0-Linux-x86_64-native-rev.tar.gz'
+              copy('/products/'+product.name,product)
+              copy('/metadata/source-settings.json',root/'metadata/producer-source-settings.json')
+          assert sha(product) == 'b44da2d741686f6ff9cf25991649170ddc0ed00fb406c2f9c29a91136840aeef'
+          producer = json.loads((root/'metadata/producer-source-settings.json').read_text())
+          assert producer['base_commit'] == '42d7a0cb82c027f906555c39adccb7ec6fa91f21'
+          assert producer['tool_commit'] == '7eb83f00955da87903d0a6f7944e04d6cb54102d'
+          assert producer['overlay']['postimage_sha256'] == 'eb75fd166480c6131ca59555f604621bf6c5d7bb10bba7b4ad6be92b037cf970'
+          assert producer['sdk_manifest']['sha256'] == '4fdcc4b8d57e0a67eeb2ce7fac70667b75f40f01215105de95b771c77c5303c3'
+          settings = dict(producer)
+          settings['tool_commit'] = os.environ['GITHUB_SHA']
+          settings['retained_producer'] = {'run_id':39420739594,'artifact_id':12264400813,'artifact_sha256':expected_zip,
+                                         'tool_commit':producer['tool_commit'],'product_sha256':sha(product),
+                                         'reason':'Complete remaining planned attempt after stdout capture parser recovery; no rebuild'}
+          settings['settings'] = dict(producer['settings'],comparison='Remaining planned independent synthetic input; same retained binary; not a matched timing pair or qualification')
+          (root/'metadata/source-settings.json').write_text(json.dumps(settings,indent=2,sort_keys=True)+'\n')
+          archive.unlink()
+          PY
+      - name: Run only the remaining planned copied-TGZ smoke
+        run: |
+          python3 tools/sdk-rev-smoke-capture.py capture \
+            --archive evidence/products/DataPump-1.0.0-Linux-x86_64-native-rev.tar.gz \
+            --evidence evidence/smokes/run-2 --artifact-root evidence --attempt 2 \
+            --base-commit 42d7a0cb82c027f906555c39adccb7ec6fa91f21 \
+            --tool-commit "$GITHUB_SHA" --source-manifest evidence/metadata/source-settings.json \
+            --settings evidence/metadata/source-settings.json
+      - name: Preserve original result and bounded synthetic capture
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sdk-rev-smoke-continuation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            evidence/
+            ${{ runner.temp }}/retained-rev-apt.log
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 14

@@ -79,7 +79,7 @@ def unique_json(line):
         raise ValueError('JSONL item is not an object')
     return item
 
-def trace_report(trace_path, stderr_path):
+def trace_report(trace_path, jsonl_path):
     result = {'valid': False}
     lines = Path(trace_path).read_text(encoding='utf-8').splitlines()
     events = [unique_json(line) for line in lines if line]
@@ -101,7 +101,7 @@ def trace_report(trace_path, stderr_path):
     if (not all(type(sequence) is int for sequence in sequences) or
             sorted(sequences) != list(range(1, attempted + 1))):
         raise ValueError('trace record sequence does not match attempted count')
-    seals = [unique_json(line) for line in Path(stderr_path).read_text(encoding='utf-8').splitlines()
+    seals = [unique_json(line) for line in Path(jsonl_path).read_text(encoding='utf-8').splitlines()
              if line.startswith('{') and '"event":"trace_finalization"' in line]
     if len(seals) != 1:
         raise ValueError('missing or duplicate external trace finalization seal')
@@ -204,16 +204,22 @@ def capture(args):
     if stdout.stat().st_size > STDOUT_LIMIT:
         capture_error = f'stdout exceeds {STDOUT_LIMIT} byte capture bound'
     if capture_error is None:
-        for line in stderr.read_text(encoding='utf-8', errors='replace').splitlines():
-            if line.startswith('{'):
-                try:
-                    unique_json(line)
-                    json_lines.append(line)
-                except Exception as exc:
-                    capture_error = f'invalid JSON stderr line: {exc}'
-                    break
+        # Portable GUI/runtime combinations may direct diagnostics to either
+        # stream. Keep the raw streams separate and validate the combined typed
+        # records, rejecting duplicates rather than assuming their destination.
+        for path in (stdout, stderr):
+            for line in path.read_text(encoding='utf-8', errors='replace').splitlines():
+                if line.startswith('{'):
+                    try:
+                        unique_json(line)
+                        json_lines.append(line)
+                    except Exception as exc:
+                        capture_error = f'invalid JSON {path.name} line: {exc}'
+                        break
+            if capture_error is not None:
+                break
     if not json_lines and capture_error is None:
-        capture_error = 'capture mode emitted no JSON lines to stderr'
+        capture_error = 'capture mode emitted no JSON lines to stdout or stderr'
     if json_lines:
         capture_jsonl.write_text('\n'.join(json_lines) + '\n', encoding='utf-8')
     boundary_closure = {'valid': False}
@@ -223,9 +229,9 @@ def capture(args):
         except Exception as exc:
             capture_error = f'binary boundary capture invalid: {exc}'
     trace_closure = {'valid': False}
-    if trace.exists() and trace_size <= TRACE_LIMIT and stderr.exists():
+    if trace.exists() and trace_size <= TRACE_LIMIT and capture_jsonl.exists():
         try:
-            trace_closure = trace_report(trace, stderr)
+            trace_closure = trace_report(trace, capture_jsonl)
         except Exception as exc:
             trace_closure = {'valid': False, 'error': f'{type(exc).__name__}: {exc}'}
     elif trace_size > TRACE_LIMIT:
