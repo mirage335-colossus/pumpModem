@@ -49,6 +49,38 @@ struct CorrelationFit {
     }
 };
 
+// Presentation support uses fixed source-time partitions of the selected bit,
+// independently of admission and the optional four-section drift detector.
+// At least four original real observations must fit in every complete part.
+// A one-part geometry explicitly retains historical whole-symbol support;
+// splitting a tiny complete symbol must not erase or rescore its support.
+inline unsigned correlation_temporal_support_sections(std::uint64_t total,long double maximum_rate) {
+    for(unsigned sections=8;sections>1;sections/=2)
+        if(static_cast<long double>(total/sections)/maximum_rate>=4)return sections;
+    return 0;
+}
+struct CorrelationTemporalSupportFit {
+    CorrelationFit active;
+    double completed_support=0;
+    unsigned section=0;
+    static double contribution(const CorrelationFit& fit,std::uint64_t chip_samples) {
+        if(fit.count<4)return 0;
+        const auto score=fit.score();
+        if(!std::isfinite(score))return 0;
+        return std::min(static_cast<double>(fit.count),std::max(0.,score)*chip_samples);
+    }
+    template<class Boundary> void advance(std::uint64_t observed,unsigned sections,
+                                          std::uint64_t chip_samples,Boundary boundary) {
+        while(section+1<sections && static_cast<long double>(observed)>=std::ceil(boundary(section+1))) {
+            completed_support+=contribution(active,chip_samples);
+            active={};++section;
+        }
+    }
+    double support(std::uint64_t chip_samples) const {
+        return completed_support+contribution(active,chip_samples);
+    }
+};
+
 // Fit a complex affine template value+n*slope to the original real samples.
 // signal_first_moment is sum(n*x[n]*oscillator[n]), relative to this span;
 // summed retains the ordinary oscillator projection and unmodified PCM energy.

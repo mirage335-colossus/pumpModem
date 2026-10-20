@@ -965,7 +965,13 @@ jobs:
         run: |
           case "$CI_SCOPE" in
             calibration|calibration-aggregate) targets=(test_differential_receiver_probability) ;;
-            symbol-burst-live) targets=(test_symbol_burst_live) ;;
+            symbol-burst-live)
+              targets=(test_symbol_burst_live)
+              if [ '${{ inputs.paced_backlog }}' = true ]; then
+                targets+=(test_pattern_receiver test_pattern_correlator test_pattern_correlator_batch
+                          test_search_fft test_pattern_fft_batch test_gui_timing_advice test_gui_controller)
+              fi
+              ;;
             gui-stop-current-wave) targets=(test_gui_controller test_scheduled_parallel_preparation) ;;
             package) targets=(datapump-apps) ;;
             frontends) targets=(datapump-tests-frontends) ;;
@@ -1432,106 +1438,6 @@ jobs:
           assert pathlib.Path(sys.argv[1]).with_suffix('.log').is_file()
           PY_LIVE_RESULT
           echo 'Focused Live lifetime coverage completed before the strict GUI core diagnostic; any compact-clock limit is recorded as typed incomplete coverage, with the functional Live assertions and live_profiles passing.' >> "$GITHUB_STEP_SUMMARY"
-      - name: Run focused preparation or GUI core diagnostics
-        if: inputs.scope == 'preparation-diagnostic' || inputs.scope == 'gui-core-diagnostic'
-        run: |
-          set -euo pipefail
-          report="$PWD/build/core-diagnostics"
-          mkdir -p "$report"
-          git -c safe.directory="$PWD" rev-parse HEAD > "$report/source.txt"
-
-          if [ "$CI_SCOPE" = preparation-diagnostic ]; then
-            selector='^scheduled_parallel_preparation$'
-            inventory="$report/preparation-inventory.json"
-            expected='{"scheduled_parallel_preparation":"test_scheduled_parallel_preparation"}'
-          else
-            focus_selector='^(search_fft|pattern_fft_batch)$'
-            focus_inventory="$report/fft-inventory.json"
-            focus_expected='{"search_fft":"test_search_fft","pattern_fft_batch":"test_pattern_fft_batch"}'
-            selector='^(gui_timing_advice|gui_controller)$'
-            inventory="$report/gui-inventory.json"
-            expected='{"gui_timing_advice":"test_gui_timing_advice","gui_controller":"test_gui_controller"}'
-          fi
-
-          if [ "$CI_SCOPE" = gui-core-diagnostic ]; then
-            ctest --test-dir build --show-only=json-v1 -R "$focus_selector" > "$focus_inventory"
-            python3 - "$focus_inventory" "$focus_expected" <<'PY_FFT_INVENTORY'
-          import json
-          import pathlib
-          import sys
-
-          inventory = json.loads(pathlib.Path(sys.argv[1]).read_text())
-          expected = json.loads(sys.argv[2])
-          tests = inventory.get("tests", [])
-          names = [test.get("name") for test in tests]
-          assert len(names) == len(expected), f"wrong inventory count: {names}"
-          assert len(set(names)) == len(expected), f"duplicate inventory names: {names}"
-          assert set(names) == set(expected), f"wrong inventory names: {names}"
-          for test in tests:
-              command = test.get("command")
-              assert isinstance(command, list) and len(command) == 1, (
-                  f"test command must contain only its executable: {test}"
-              )
-              assert pathlib.Path(command[0]).name == expected[test["name"]], (
-                  f"unexpected executable or test arguments: {test}"
-              )
-          PY_FFT_INVENTORY
-            if ctest --test-dir build --output-on-failure --no-tests=error \
-              --parallel 1 --timeout 7200 \
-              --output-junit "$report/fft-results.xml" -R "$focus_selector" \
-              > "$report/fft.log" 2>&1; then
-              focus_status=0
-            else
-              focus_status=$?
-            fi
-            cp build/Testing/Temporary/LastTest.log "$report/fft-LastTest.log"
-            if [ "$focus_status" -ne 0 ]; then
-              exit "$focus_status"
-            fi
-          fi
-
-          ctest --test-dir build --show-only=json-v1 -R "$selector" > "$inventory"
-          python3 - "$inventory" "$expected" <<'PY'
-          import json
-          import pathlib
-          import sys
-
-          inventory = json.loads(pathlib.Path(sys.argv[1]).read_text())
-          expected = json.loads(sys.argv[2])
-          tests = inventory.get("tests", [])
-          names = [test.get("name") for test in tests]
-          assert len(names) == len(expected), f"wrong inventory count: {names}"
-          assert len(set(names)) == len(expected), f"duplicate inventory names: {names}"
-          assert set(names) == set(expected), f"wrong inventory names: {names}"
-          for test in tests:
-              command = test.get("command")
-              assert isinstance(command, list) and len(command) == 1, (
-                  f"test command must contain only its executable: {test}"
-              )
-              assert pathlib.Path(command[0]).name == expected[test["name"]], (
-                  f"unexpected executable or test arguments: {test}"
-              )
-          PY
-
-          if [ "$CI_SCOPE" = preparation-diagnostic ]; then
-            ctest --test-dir build --output-on-failure --no-tests=error \
-              --parallel 1 --timeout 7200 \
-              --output-junit "$report/preparation-results.xml" -R "$selector" \
-              > "$report/preparation.log" 2>&1
-            echo 'Focused scheduled parallel preparation diagnostic completed. This is not full native matrix qualification.' >> "$GITHUB_STEP_SUMMARY"
-          else
-            ctest --test-dir build --output-on-failure --no-tests=error \
-              --parallel 1 --timeout 7200 \
-              --output-junit "$report/gui-serial-results.xml" -R "$selector" \
-              > "$report/gui-serial.log" 2>&1
-            cp build/Testing/Temporary/LastTest.log "$report/gui-serial-LastTest.log"
-            ctest --test-dir build --output-on-failure --no-tests=error \
-              --parallel 2 --timeout 7200 \
-              --output-junit "$report/gui-parallel-results.xml" -R "$selector" \
-              > "$report/gui-parallel.log" 2>&1
-            cp build/Testing/Temporary/LastTest.log "$report/gui-parallel-LastTest.log"
-            echo 'Focused GUI core diagnostic completed serially and in parallel. This is not full native matrix qualification.' >> "$GITHUB_STEP_SUMMARY"
-          fi
       - name: Run current-source GUI stop wave capture
         if: inputs.scope == 'gui-stop-current-wave' && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 13
@@ -1884,6 +1790,204 @@ jobs:
           if not manifest['all_functional_runs_complete']:
               raise SystemExit('FATAL: one or more paced Symbol Burst runs timed out, failed, or lacked exactly one valid functional summary')
           PY_PACED_BURST
+      - name: Run actual temporal support component regressions
+        id: temporal_support
+        if: inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !cancelled() && steps.build_prerequisites.outcome == 'success'
+        timeout-minutes: 35
+        run: |
+          set -euo pipefail
+          python3 -B - <<'PY_TEMPORAL_SUPPORT'
+          import datetime, hashlib, json, pathlib, signal, subprocess, time, os
+          root=pathlib.Path.cwd()
+          report=root/'build/symbol-burst-live-qualification/temporal-support'
+          report.mkdir(parents=True,exist_ok=True)
+          parent=report.parent
+          specs=[('fft','test_pattern_receiver',['--burst-temporal-support'],'burst temporal support: passed'),
+                 ('correlator','test_pattern_correlator',['symbol_burst_temporal_support'],'symbol_burst_temporal_support: passed'),
+                 ('batch','test_pattern_correlator_batch',[],'pattern_correlator_batch ok')]
+          results=[]
+          for name,target,args,marker in specs:
+              binary=root/'build'/target
+              command=[str(binary),*args]
+              stdout_path=report/(name+'.stdout.log');stderr_path=report/(name+'.stderr.log')
+              started=datetime.datetime.now(datetime.timezone.utc).isoformat();start=time.monotonic()
+              timed_out = False
+              timeout_kill = False
+              launch_error = None
+              returncode = None
+              process = None
+              cleanup_deadline = None
+              with stdout_path.open('wb') as stdout, stderr_path.open('wb') as stderr:
+                  try:
+                      process = subprocess.Popen(command, cwd=root, stdout=stdout,
+                                                stderr=stderr, start_new_session=True)
+                      try:
+                          returncode = process.wait(timeout=600)
+                      except subprocess.TimeoutExpired:
+                          timed_out = True
+                          cleanup_deadline = time.monotonic() + 10
+                          try:
+                              os.killpg(process.pid, signal.SIGTERM)
+                          except ProcessLookupError:
+                              pass
+                          try:
+                              returncode = process.wait(timeout=max(0, cleanup_deadline - time.monotonic()))
+                          except subprocess.TimeoutExpired:
+                              timeout_kill = True
+                              try:
+                                  os.killpg(process.pid, signal.SIGKILL)
+                              except ProcessLookupError:
+                                  pass
+                              returncode = process.wait()
+                  except Exception as error:
+                      launch_error = f'{type(error).__name__}: {error}'
+                  finally:
+                      # Close the private process group even if wait raised an
+                      # unexpected exception. Reap the leader before continuing.
+                      if process is not None:
+                          if cleanup_deadline is None:
+                              cleanup_deadline = time.monotonic() + 10
+                          try:
+                              os.killpg(process.pid, signal.SIGTERM)
+                          except ProcessLookupError:
+                              pass
+                          try:
+                              returncode = process.wait(timeout=max(0, cleanup_deadline - time.monotonic()))
+                          except subprocess.TimeoutExpired:
+                              timeout_kill = True
+                              try:
+                                  os.killpg(process.pid, signal.SIGKILL)
+                              except ProcessLookupError:
+                                  pass
+                              returncode = process.wait()
+                          while time.monotonic() < cleanup_deadline:
+                              try:
+                                  os.killpg(process.pid, 0)
+                              except ProcessLookupError:
+                                  break
+                              time.sleep(0.1)
+                          else:
+                              try:
+                                  os.killpg(process.pid, signal.SIGKILL)
+                              except ProcessLookupError:
+                                  pass
+              elapsed=time.monotonic()-start
+              text=stdout_path.read_text(errors='replace')
+              passed=(returncode==0 and not timed_out and not launch_error and text.count(marker)==1)
+              row={'name':name,'command':command,'source_commit':(parent/'source.txt').read_text().strip(),
+                   'source_tree':(parent/'source-tree.txt').read_text().strip(),
+                   'started_utc':started,'elapsed_seconds':elapsed,'exit_code':returncode,'timed_out':timed_out,
+                   'launch_error':launch_error,'success_marker_count':text.count(marker),'passed':passed,
+                   'binary_sha256':hashlib.sha256(binary.read_bytes()).hexdigest(),
+                   'test_source_sha256':hashlib.sha256((root/'tests'/(target+'.cpp')).read_bytes()).hexdigest(),
+                   'cmake_cache_sha256':hashlib.sha256((root/'build/CMakeCache.txt').read_bytes()).hexdigest(),
+                   'stdout_sha256':hashlib.sha256(stdout_path.read_bytes()).hexdigest(),
+                   'stderr_sha256':hashlib.sha256(stderr_path.read_bytes()).hexdigest()}
+              (report/(name+'.json')).write_text(json.dumps(row,indent=2)+'\n');results.append(row)
+          (report/'results.json').write_text(json.dumps({'results':results,'all_passed':all(x['passed'] for x in results)},indent=2)+'\n')
+          if not all(x['passed'] for x in results):raise SystemExit('FATAL: temporal support component regression failed; original outputs retained')
+          print('All three temporal support component regressions passed; strict original GUI serial and parallel checks follow.')
+          PY_TEMPORAL_SUPPORT
+      - name: Run focused preparation or GUI core diagnostics
+        if: inputs.scope == 'preparation-diagnostic' || inputs.scope == 'gui-core-diagnostic' || (inputs.scope == 'symbol-burst-live' && inputs.paced_backlog)
+        run: |
+          set -euo pipefail
+          report="$PWD/build/core-diagnostics"
+          mkdir -p "$report"
+          git -c safe.directory="$PWD" rev-parse HEAD > "$report/source.txt"
+
+          if [ "$CI_SCOPE" = preparation-diagnostic ]; then
+            selector='^scheduled_parallel_preparation$'
+            inventory="$report/preparation-inventory.json"
+            expected='{"scheduled_parallel_preparation":"test_scheduled_parallel_preparation"}'
+          else
+            focus_selector='^(search_fft|pattern_fft_batch)$'
+            focus_inventory="$report/fft-inventory.json"
+            focus_expected='{"search_fft":"test_search_fft","pattern_fft_batch":"test_pattern_fft_batch"}'
+            selector='^(gui_timing_advice|gui_controller)$'
+            inventory="$report/gui-inventory.json"
+            expected='{"gui_timing_advice":"test_gui_timing_advice","gui_controller":"test_gui_controller"}'
+          fi
+
+          if [ "$CI_SCOPE" != preparation-diagnostic ]; then
+            ctest --test-dir build --show-only=json-v1 -R "$focus_selector" > "$focus_inventory"
+            python3 - "$focus_inventory" "$focus_expected" <<'PY_FFT_INVENTORY'
+          import json
+          import pathlib
+          import sys
+
+          inventory = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          expected = json.loads(sys.argv[2])
+          tests = inventory.get("tests", [])
+          names = [test.get("name") for test in tests]
+          assert len(names) == len(expected), f"wrong inventory count: {names}"
+          assert len(set(names)) == len(expected), f"duplicate inventory names: {names}"
+          assert set(names) == set(expected), f"wrong inventory names: {names}"
+          for test in tests:
+              command = test.get("command")
+              assert isinstance(command, list) and len(command) == 1, (
+                  f"test command must contain only its executable: {test}"
+              )
+              assert pathlib.Path(command[0]).name == expected[test["name"]], (
+                  f"unexpected executable or test arguments: {test}"
+              )
+          PY_FFT_INVENTORY
+            if ctest --test-dir build --output-on-failure --no-tests=error \
+              --parallel 1 --timeout 7200 \
+              --output-junit "$report/fft-results.xml" -R "$focus_selector" \
+              > "$report/fft.log" 2>&1; then
+              focus_status=0
+            else
+              focus_status=$?
+            fi
+            cp build/Testing/Temporary/LastTest.log "$report/fft-LastTest.log"
+            if [ "$focus_status" -ne 0 ]; then
+              exit "$focus_status"
+            fi
+          fi
+
+          ctest --test-dir build --show-only=json-v1 -R "$selector" > "$inventory"
+          python3 - "$inventory" "$expected" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          inventory = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          expected = json.loads(sys.argv[2])
+          tests = inventory.get("tests", [])
+          names = [test.get("name") for test in tests]
+          assert len(names) == len(expected), f"wrong inventory count: {names}"
+          assert len(set(names)) == len(expected), f"duplicate inventory names: {names}"
+          assert set(names) == set(expected), f"wrong inventory names: {names}"
+          for test in tests:
+              command = test.get("command")
+              assert isinstance(command, list) and len(command) == 1, (
+                  f"test command must contain only its executable: {test}"
+              )
+              assert pathlib.Path(command[0]).name == expected[test["name"]], (
+                  f"unexpected executable or test arguments: {test}"
+              )
+          PY
+
+          if [ "$CI_SCOPE" = preparation-diagnostic ]; then
+            ctest --test-dir build --output-on-failure --no-tests=error \
+              --parallel 1 --timeout 7200 \
+              --output-junit "$report/preparation-results.xml" -R "$selector" \
+              > "$report/preparation.log" 2>&1
+            echo 'Focused scheduled parallel preparation diagnostic completed. This is not full native matrix qualification.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            ctest --test-dir build --output-on-failure --no-tests=error \
+              --parallel 1 --timeout 7200 \
+              --output-junit "$report/gui-serial-results.xml" -R "$selector" \
+              > "$report/gui-serial.log" 2>&1
+            cp build/Testing/Temporary/LastTest.log "$report/gui-serial-LastTest.log"
+            ctest --test-dir build --output-on-failure --no-tests=error \
+              --parallel 2 --timeout 7200 \
+              --output-junit "$report/gui-parallel-results.xml" -R "$selector" \
+              > "$report/gui-parallel.log" 2>&1
+            cp build/Testing/Temporary/LastTest.log "$report/gui-parallel-LastTest.log"
+            echo 'Focused GUI core diagnostic completed serially and in parallel. This is not full native matrix qualification.' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Capture six sequential fixed-bank acquisition partition replays
         if: inputs.scope == 'simulation-acquisition-partition-diagnostic' && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 35

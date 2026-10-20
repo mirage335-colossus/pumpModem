@@ -8,6 +8,7 @@
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/symbol_schedule.hpp"
+#include "datapump/symbol_burst.hpp"
 #include "../src/native_peak_workspace.hpp"
 #include "../src/pattern_fft_batch.hpp"
 #include "../src/pattern_fft_window.hpp"
@@ -1357,6 +1358,110 @@ void changing_chunks_and_late_start() {
           first.support_samples<=3*static_cast<double>(symbol),
           "PCM push chunk boundaries changed acquisition evidence");
 }
+struct BurstTemporalFixture {std::vector<float> pcm;std::size_t complete_after=0;};
+BurstTemporalFixture burst_temporal_pcm(const modem::Config& c,const Bytes& bits,std::size_t delay,
+                                       unsigned occupancy,double phase,bool quarter_phase_changes=false) {
+    const modem::SymbolBurstPlan calendar(c);
+    auto slot=calendar.bind_payload(c.stream_epoch,c.stream_phase_samples);
+    const auto origin=slot.support_begin.epoch;
+    const auto offset=[&](modem::SymbolBurstCoordinate point) {
+        return static_cast<std::size_t>((point.epoch-origin)*c.sample_rate+point.phase);
+    };
+    std::vector<modem::SymbolBurstSlot> slots;
+    for(std::size_t i=0;i<=bits.size();++i){slots.push_back(slot);slot=calendar.successor(slot);}
+    BurstTemporalFixture fixture;
+    // The next scheduled slot is fully scored absent. Planned quiet and EOF
+    // supply no physical-end evidence; the receiver receives real PCM only.
+    fixture.complete_after=delay+offset(slots.back().payload_end);
+    fixture.pcm.resize(fixture.complete_after+22*c.sample_rate);
+    std::mt19937_64 random(8071);std::normal_distribution<double> noise(0,.002);
+    for(auto& value:fixture.pcm)value=static_cast<float>(noise(random));
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    const auto half=symbol/2,shift=symbol/8;
+    constexpr std::array<double,4> phase_steps{0.,std::numbers::pi/2,std::numbers::pi,3*std::numbers::pi/2};
+    modem::PatternCode code(c,c.stream_epoch);
+    for(std::size_t index=0;index<bits.size();++index) {
+        code.prepare_symbol(index*code.chips_per_symbol());
+        const auto payload=delay+offset(slots[index].payload_begin);
+        for(auto n=delay+offset(slots[index].support_begin);n<delay+offset(slots[index].support_end);++n) {
+            const auto within=static_cast<double>(n)-static_cast<double>(payload);
+            const auto begin=occupancy==0?std::size_t{0}:shift;
+            if(occupancy<2 && !(within>=begin && within<begin+half))continue;
+            const auto quarter=static_cast<unsigned>(4*std::clamp(within,0.,static_cast<double>(symbol-1))/symbol);
+            const auto angle=phase+2*std::numbers::pi*c.carrier_hz*n/c.sample_rate+
+                (quarter_phase_changes?phase_steps[quarter]:0.);
+            fixture.pcm[n]+=static_cast<float>((code.shaped_value(index*code.chips_per_symbol(),bits[index],within)*
+                std::polar(1.7,angle)).real());
+        }
+    }
+    return fixture;
+}
+struct BurstTemporalResult {Bytes bits;double support=0;std::size_t completions=0,completed_at=0;};
+BurstTemporalResult receive_burst_temporal(const BurstTemporalFixture& fixture,const modem::Config& c,
+                                         std::size_t delay) {
+    modem::PatternSearch search;search.worker_threads=1;
+    search.frequency_offsets_hz={0};search.clock_errors_ppm={0};
+    search.start_offset_seconds=static_cast<double>(delay+modem::pattern_pulse_padding_samples(c))/c.sample_rate;
+    search.start_uncertainty_seconds=0;search.initial_stream_symbols=1;search.search_stream_phases=true;
+    search.chunk_bits=1;search.track_limit=4;search.candidate_limit=32;search.bit_limit=32;
+    modem::PatternReceiver receiver(c,8*1024*1024,search);
+    BurstTemporalResult result;
+    constexpr std::array<std::size_t,4> chunks{1024,137,4093,503};
+    for(std::size_t position=0,chunk=0;position<fixture.pcm.size();++chunk) {
+        const auto count=std::min(chunks[chunk%chunks.size()],fixture.pcm.size()-position);
+        receiver.push(std::span(fixture.pcm).subspan(position,count));position+=count;
+        for(const auto& event:receiver.take_bursts()) {
+            check(!event.missing_slots,"clean temporal support fixture manufactured an unknown symbol");
+            check(event.first_stream_symbol==result.bits.size(),"temporal support fixture changed a source slot");
+            result.bits.insert(result.bits.end(),event.bits.begin(),event.bits.end());
+            result.support=std::max(result.support,event.support_samples);
+            if(event.complete) {
+                ++result.completions;result.completed_at=position;
+                check(position>=fixture.complete_after,"temporal support fixture ended without scheduled full-symbol absence");
+            }
+        }
+        if(receiver.synchronized())receiver.suspend_fresh_acquisition();
+    }
+    return result;
+}
+void burst_temporal_support() {
+    auto c=config(128,true);c.sample_rate=64;c.bandwidth_hz=8;c.carrier_hz=16;
+    c.integration_seconds=16;c.symbol_burst={10,0};
+    std::array<std::uint8_t,32> key{};key.fill(0x67);c.data_key.emplace(key);
+    const auto padding=modem::pattern_pulse_padding_samples(c);
+    c.stream_epoch=1800000000+padding/c.sample_rate;c.stream_phase_samples=padding%c.sample_rate;
+    const Bytes expected{0,0,1,0,0,1,0,0,1,0,0,1,0,0,1,0};
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    constexpr std::size_t delay=137;
+    const auto full=receive_burst_temporal(burst_temporal_pcm(c,expected,delay,2,.73),c,delay);
+    check(full.bits==expected && full.completions==1,
+          "fully supported keyed long Burst must preserve bits and scheduled physical END");
+    check(full.support>.9*expected.size()*symbol,"fully supported long Burst lost sampled support");
+
+    double largest_sparse_support=0;
+    for(unsigned placement:{0U,1U}) {
+        const auto sparse=receive_burst_temporal(burst_temporal_pcm(c,expected,delay,placement,.73),c,delay);
+        check(sparse.bits==expected && sparse.completions==1,
+              "half-supported keyed long Burst must preserve bits and scheduled physical END");
+        largest_sparse_support=std::max(largest_sparse_support,sparse.support);
+        // Three short waveforms must outweigh two half-supported long fits.
+        // This margin includes the fixed real noise, not a noise-free occupancy claim.
+        check(sparse.support<.75*full.support,
+              placement==0 ? "aligned half-supported long Burst retained full-symbol weight inflation"
+                           : "shifted half-supported long Burst retained excessive temporal weight");
+        std::cout<<"burst temporal support placement="<<(placement?"shifted":"aligned")
+                 <<" full="<<full.support<<" sampled="<<sparse.support
+                 <<" selection_margin="<<(.75*full.support-sparse.support)<<" samples\n";
+    }
+    const auto phase_control=receive_burst_temporal(burst_temporal_pcm(c,expected,delay,2,.73,true),c,delay);
+    check(phase_control.bits==expected && phase_control.completions==1 &&
+          phase_control.support>.9*full.support && phase_control.support>largest_sparse_support,
+          "quarter-phase Burst must retain near-full temporal support and original decisions");
+    std::cout<<"burst temporal support phase-control="<<phase_control.support
+             <<" fully-supported reference="<<full.support
+             <<" margin_over_sparse="<<(phase_control.support-largest_sparse_support)<<" samples\n";
+}
+
 void continuous_long_fft_progress() {
     auto c=config(64);c.sample_rate=64;c.bandwidth_hz=8;c.carrier_hz=16;c.integration_seconds=40;
     const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
@@ -2978,6 +3083,10 @@ void initial_search_coverage() {
 }
 }
 int main(int argc,char** argv) {
+    if(argc>1 && std::string(argv[1])=="--burst-temporal-support") {
+        try { burst_temporal_support();std::cout<<"burst temporal support: passed\n";return 0; }
+        catch(const std::exception& error) { std::cerr<<"burst temporal support: "<<error.what()<<'\n';return 1; }
+    }
     unsigned failures=0;
     const auto run=[&](const char* name,auto test) {
         if(argc>1 && std::string(name).find(argv[1])==std::string::npos)return;
@@ -2996,6 +3105,7 @@ int main(int argc,char** argv) {
     run("candidate quota health",candidate_quota_health);
     run("initial search coverage",initial_search_coverage);
     run("exact blind bits",exact_blind_bits);run("chunk invariance and late start",changing_chunks_and_late_start);
+    run("burst temporal support",burst_temporal_support);
     run("continuous long FFT progress",continuous_long_fft_progress);
     run("carrier evidence after distorted startup",carrier_evidence_recovers_after_distorted_start);
     run("short pattern sample timing",short_pattern_sample_timing);

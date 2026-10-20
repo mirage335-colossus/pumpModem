@@ -137,6 +137,7 @@ std::uint64_t pulse_span_count(long double offset,std::uint64_t maximum,long dou
 using Projection=detail::CorrelationProjection;
 using Fit=detail::CorrelationFit;
 using DriftFit=detail::CorrelationDriftFit;
+using TemporalSupportFit=detail::CorrelationTemporalSupportFit;
 using DifferentialFit=detail::CorrelationDifferentialFit;
 // Ordinary receivers retain the original compact telemetry footprint.
 // The public snapshot remains flat; scheduled-only counters live in ScheduledState.
@@ -658,7 +659,20 @@ struct PatternCorrelator::Impl {
         std::size_t working_bytes() const {return sizeof(*this)+lanes.capacity()*sizeof(BurstLane)+
             pulses.capacity()*sizeof(BurstPulse)+pulse_members.capacity()*sizeof(std::size_t);}
     };
-    std::unique_ptr<BurstState> burst;
+    // Keep the original control-state size available for detector affordability.
+    // Mandatory presentation storage must not silently displace an existing
+    // drift, differential or outer-code detector at a tight workspace limit.
+    struct BurstPresentationState: BurstState {
+        using BurstState::BurstState;
+        unsigned support_sections=0;
+        std::vector<std::array<TemporalSupportFit,2>> support_fits;
+        std::size_t working_bytes() const {return BurstState::working_bytes()+
+            sizeof(BurstPresentationState)-sizeof(BurstState)+
+            support_fits.capacity()*sizeof(decltype(support_fits)::value_type);}
+    };
+    static_assert(sizeof(std::unique_ptr<BurstPresentationState>)==sizeof(std::unique_ptr<BurstState>) &&
+                  alignof(std::unique_ptr<BurstPresentationState>)==alignof(std::unique_ptr<BurstState>));
+    std::unique_ptr<BurstPresentationState> burst;
     // Mutable keystream/chip caches belong to one scoring worker. Completions
     // still run in hypothesis order on the caller after these workers finish.
     std::vector<PatternCode> worker_codes;
@@ -1649,7 +1663,7 @@ struct PatternCorrelator::Impl {
             require(search.initial_stream_symbols && search.initial_stream_symbols<=64,
                 "invalid Symbol_Burst initial source-symbol search limit");
             if(!c.scramble && !c.dsss)search.initial_stream_symbols=1;
-            burst=std::make_unique<BurstState>(c);
+            burst=std::make_unique<BurstPresentationState>(c);
             search.search_stream_phases=false;
         }
         // Developer-only process override for full GUI/Live paired diagnostics.
@@ -1931,7 +1945,11 @@ struct PatternCorrelator::Impl {
             static_cast<long double>(search.candidate_limit)*sizeof(PatternEvidence)+search.track_limit*(sizeof(PatternBurst)+sizeof(Emission))+
             (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double)+
             search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis);
-        if(burst)fixed+=sizeof(BurstState)+total*sizeof(BurstLane);
+        if(burst) {
+            if(!options.amplitude_only)burst->support_sections=
+                detail::correlation_temporal_support_sections(code.symbol_samples(),highest_rate);
+            fixed+=sizeof(BurstState)+total*sizeof(BurstLane);
+        }
         if(scheduled_map() && !options.amplitude_only)fixed+=total*(sizeof(ScheduledCarry)+
             3*sizeof(std::uint64_t)+sizeof(long double));
         if(scheduled_map() && !options.amplitude_only)
@@ -2009,6 +2027,16 @@ struct PatternCorrelator::Impl {
                 }
             } else outer_presence=false;
         }
+        if(burst) {
+            const auto presentation=sizeof(BurstPresentationState)-sizeof(BurstState)+
+                (burst->support_sections?total*(alternate_groups+1)*sizeof(decltype(burst->support_fits)::value_type):0);
+            // Choose every native detector with its original affordability
+            // calculation first. Reject insufficient total storage explicitly
+            // instead of weakening admission to make this mandatory cap fit.
+            require(fixed+presentation+denominator<=bytes,
+                "Symbol_Burst temporal support and original detectors exceed DSP workspace");
+            fixed+=presentation;
+        }
         timing_enabled=static_cast<long double>(code.symbol_samples())/highest_rate>=
             pattern_absence_seconds*c.sample_rate;
         // Full chip cells are sufficient statistics for this exact finite
@@ -2017,7 +2045,13 @@ struct PatternCorrelator::Impl {
         // unsupported legacy fractional grids retain the raw reference path.
         const bool burst_disjoint=!burst ||
             (upper-lower+block_samples+2)*highest_rate+code.symbol_samples()<=burst->plan.minimum_spacing_samples();
-        const bool pulse_geometry=burst_disjoint && !scheduled_map() && !options.amplitude_only && !options.raw_reference && shaped && code.symbol_samples()>=16ULL*c.sample_rate &&
+        // A shared cell cannot be split after projection. Keep its exact
+        // arithmetic only when every temporal boundary is a chip boundary;
+        // otherwise the existing raw/affine path clips original observations.
+        bool support_cell_aligned=true;
+        if(burst)for(unsigned part=1;part<burst->support_sections;++part)
+            support_cell_aligned&=detail::drift_boundary(part,code.symbol_samples(),burst->support_sections)%code.chip_samples()==0;
+        const bool pulse_geometry=support_cell_aligned && burst_disjoint && !scheduled_map() && !options.amplitude_only && !options.raw_reference && shaped && code.symbol_samples()>=16ULL*c.sample_rate &&
             // Historical low-level compact banks promise a sub-64-KiB idle
             // footprint. Application oscillator banks provide explicit pairs;
             // retain the bounded raw fallback for legacy long-chip callers.
@@ -2216,6 +2250,7 @@ struct PatternCorrelator::Impl {
         require(!hypotheses.empty(),"qualified UTC interval does not intersect the existing search lattice");
         if(burst) {
             burst->lanes.resize(hypotheses.size());
+            if(burst->support_sections)burst->support_fits.resize(hypotheses.size()*(alternate_groups+1));
             const auto remainder=options.amplitude_only?search.input_sample_origin%amplitude_geometry->fft_samples:0;
             const auto first_observation=remainder?amplitude_geometry->fft_samples-remainder:0;
             for(std::size_t i=0;i<hypotheses.size();++i) {
@@ -6884,6 +6919,14 @@ struct PatternCorrelator::Impl {
         if(!consumer || end<=from || end>=std::numeric_limits<std::uint64_t>::max())return std::nullopt;
         return static_cast<std::uint64_t>(end);
     }
+    std::array<TemporalSupportFit,2>* temporal_support_fits(std::size_t hypothesis,std::size_t group) {
+        return burst && burst->support_sections?&burst->support_fits[hypothesis*(alternate_groups+1)+group]:nullptr;
+    }
+    void advance_temporal_support(TemporalSupportFit& fit,const Hypothesis& h,std::uint64_t observed) const {
+        fit.advance(observed,burst->support_sections,code.chip_samples(),[&](unsigned part) {
+            return clock_boundary(h,detail::drift_boundary(part,code.symbol_samples(),burst->support_sections));
+        });
+    }
     static bool full_rank(const Fit& fit) {
         return fit.count>2 && fit.cc*fit.ss-fit.cs*fit.cs>1e-12*std::max(1.,fit.cc*fit.ss);
     }
@@ -8674,8 +8717,11 @@ struct PatternCorrelator::Impl {
             lazy_state()->diagnostics->observe_resolved(e.completed_event);
             lazy_state()->history_generation=e.completed_event;
         }
-        const auto symbol_support=pattern_symbol_support(
+        auto symbol_support=pattern_symbol_support(
             static_cast<double>(fits(h,hypothesis,selected)[e.bit].count),e.score,code.chip_samples());
+        if(burst && burst->support_sections && !differential_window)
+            symbol_support=std::min(symbol_support,
+                (*temporal_support_fits(hypothesis,selected))[e.bit].support(code.chip_samples()));
         // Reclaim known duplicate alias bits before the original quota check.
         // Retained unpublished suffixes remain charged to their existing vector.
         trim_known_alias_prefix(h);
@@ -8897,6 +8943,8 @@ struct PatternCorrelator::Impl {
             chip_evidence[hypothesis*(alternate_groups+1)+group]={};
         for(std::size_t group=0;group<alternate_groups;++group)
             alternate_fits[hypothesis*alternate_groups+group]={};
+        if(burst && burst->support_sections)for(std::size_t group=0;group<=alternate_groups;++group)
+            *temporal_support_fits(hypothesis,group)={};
         if(drift_sections>1)for(std::size_t group=0;group<=alternate_groups;++group)
             section_fits(hypothesis,group)={};
         if(differential_window)for(std::size_t group=0;group<=alternate_groups;++group)
@@ -9300,7 +9348,8 @@ struct PatternCorrelator::Impl {
                           const std::array<Complex,2>& value,const std::array<Complex,2>& slope,
                           std::array<Fit,2>& fit,std::array<DriftFit,2>* drift,
                           std::array<DifferentialFit,2>* differential,
-                          std::array<detail::CorrelationChipEvidence,2>* chip=nullptr,std::uint64_t chip_index=0) {
+                          std::array<detail::CorrelationChipEvidence,2>* chip=nullptr,std::uint64_t chip_index=0,
+                          std::array<TemporalSupportFit,2>* support=nullptr) {
         rx_cpu::Scope cpu_scope(rx_cpu::Stage::gram,true);
         WorkTimer fit_timer(options.measure_affine_work,work.affine_fit_seconds,work.affine_fit_cpu_seconds);
         const auto right=left+static_cast<std::size_t>(piece_count);
@@ -9322,6 +9371,7 @@ struct PatternCorrelator::Impl {
                 piece_count,value[bit],slope[bit],square,first.cc+first.ss,
                 *carrier);
             add_fit(fit[bit],contribution);
+            if(support)add_fit((*support)[bit].active,contribution);
             if(chip)(*chip)[bit].add_fit(contribution,chip_index);
             if(drift)add_fit((*drift)[bit].active,contribution);
             if(differential)add_fit((*differential)[bit].active,contribution);
@@ -11035,7 +11085,8 @@ template<class Source,class Pulses,class Gain,class Prepare>
                     fit_affine_piece(bank,static_cast<std::size_t>(cursor-sample),end-cursor,
                         value,cached.slope,fits(h,hypothesis,group),
                         drift_fits.empty()?nullptr:&section_fits(hypothesis,group),
-                        differential_window?&local_fits(hypothesis,group):nullptr);
+                        differential_window?&local_fits(hypothesis,group):nullptr,
+                        nullptr,0,temporal_support_fits(hypothesis,group));
                     ++affine_counts[hypothesis];
                 }
                 if(options.measure_affine_work)++work.affine_interval_fast_paths;
@@ -11061,16 +11112,22 @@ template<class Source,class Pulses,class Gain,class Prepare>
                 pattern.prepare_symbol(h.index*code.chips_per_symbol(),stop);
             }
             auto& fit=fits(h,hypothesis,group);
+            auto* support=temporal_support_fits(hypothesis,group);
             auto* drift=!drift_fits.empty()?&section_fits(hypothesis,group):nullptr;
             auto* differential=differential_window?&local_fits(hypothesis,group):nullptr;
             auto observed=cursor;
             while(observed<segment_end) {
                 const auto within=std::max(0.L,(static_cast<long double>(observed)-symbol_start)*h.rate);
                 auto section_end=symbol_end;
+                if(support) {
+                    for(auto& item:*support)advance_temporal_support(item,h,observed);
+                    section_end=clock_boundary(h,detail::drift_boundary(
+                        (*support)[0].section+1,code.symbol_samples(),burst->support_sections));
+                }
                 if(drift) {
                     for(auto& item:*drift)advance_drift(item,h,observed);
-                    section_end=clock_boundary(h,detail::drift_boundary(
-                        (*drift)[0].section+1,code.symbol_samples(),drift_sections));
+                    section_end=std::min(section_end,clock_boundary(h,detail::drift_boundary(
+                        (*drift)[0].section+1,code.symbol_samples(),drift_sections)));
                 }
                 if(differential) {
                     for(auto& item:*differential)advance_differential(item,h,observed);
@@ -11179,7 +11236,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
                             }
                         }
                         fit_affine_piece(bank,left,piece_count,value,slope,fit,drift,differential,
-                            outer_presence?&chip_evidence[hypothesis*(alternate_groups+1)+group]:nullptr,local);
+                            outer_presence?&chip_evidence[hypothesis*(alternate_groups+1)+group]:nullptr,local,support);
                         ++affine_counts[hypothesis];observed+=piece_count;continue;
                     }
                     const auto projection=bank.observations(physical_view(bank))[left+1]-bank.observations(physical_view(bank))[left];
@@ -11195,6 +11252,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
                     for(unsigned bit=0;bit<2;++bit) {
                         const auto phase=phases[bit];
                         fit[bit].add(projection,phase,1);
+                        if(support)(*support)[bit].active.add(projection,phase,1);
                         if(!chip_evidence.empty())chip_evidence[hypothesis*(alternate_groups+1)+group][bit].add(
                             projection,phase,1,detail::CorrelationChipEvidence::index(observed,symbol_start,h.rate,code.chip_samples()));
                         if(drift)(*drift)[bit].active.add(projection,phase,1);
@@ -11225,6 +11283,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
                     }
                     const auto projection=bank.observations(physical_view(bank))[right]-bank.observations(physical_view(bank))[left];
                     fit[bit].add(projection,phase,right-left);
+                    if(support)(*support)[bit].active.add(projection,phase,right-left);
                     if(!chip_evidence.empty())chip_evidence[hypothesis*(alternate_groups+1)+group][bit].add(projection,phase,right-left,local);
                     if(drift)(*drift)[bit].active.add(projection,phase,right-left);
                     if(differential)(*differential)[bit].active.add(projection,phase,right-left);
@@ -11595,6 +11654,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
                         for(unsigned bit=0;bit<2;++bit)coefficients[bit][j]=values[bit];
                     }
                     auto& fit=fits(h,hypothesis,group);
+                    auto* support=temporal_support_fits(hypothesis,group);
                     auto* drift=!drift_fits.empty()?&section_fits(hypothesis,group):nullptr;
                     auto* differential=differential_window?&local_fits(hypothesis,group):nullptr;
                     if(outer_presence)for(std::size_t j=0;j<detail::correlation_pulse_atoms;++j) {
@@ -11605,6 +11665,10 @@ template<class Source,class Pulses,class Gain,class Prepare>
                     }
                     for(unsigned bit=0;bit<2;++bit) {
                         const auto contribution=cell.fit(coefficients[bit]);add_fit(fit[bit],contribution);
+                        if(support) {
+                            advance_temporal_support((*support)[bit],h,cell.first);
+                            add_fit((*support)[bit].active,contribution);
+                        }
                         if(!chip_evidence.empty())chip_evidence[hypothesis*(alternate_groups+1)+group][bit].add_fit(
                             contribution,static_cast<std::uint64_t>(local));
                         if(drift) {
@@ -12556,9 +12620,9 @@ PatternCorrelator::~PatternCorrelator(){
 PatternCorrelator::PatternCorrelator(PatternCorrelator&&) noexcept=default;
 PatternCorrelator& PatternCorrelator::operator=(PatternCorrelator&&) noexcept=default;
 std::size_t PatternCorrelator::symbol_burst_control_bytes(std::size_t hypotheses,std::size_t pulse_lattices) {
-    require(hypotheses<=(std::numeric_limits<std::size_t>::max()-sizeof(Impl::BurstState))/sizeof(Impl::BurstLane),
+    require(hypotheses<=(std::numeric_limits<std::size_t>::max()-sizeof(Impl::BurstPresentationState))/sizeof(Impl::BurstLane),
         "Symbol_Burst control state exceeds address space");
-    auto total=sizeof(Impl::BurstState)+hypotheses*sizeof(Impl::BurstLane);
+    auto total=sizeof(Impl::BurstPresentationState)+hypotheses*sizeof(Impl::BurstLane);
     if(pulse_lattices) {
         require(pulse_lattices<=(std::numeric_limits<std::size_t>::max()-total)/sizeof(Impl::BurstPulse),
             "Symbol_Burst pulse control exceeds address space");

@@ -203,6 +203,70 @@ void per_symbol_support_does_not_borrow_strong_prefix_evidence() {
         previous=observed.support_samples;
     }
 }
+void symbol_burst_temporal_support() {
+    // One independently placed scheduled symbol is enough to inspect support:
+    // no quiet interval, EOF or source interpretation supplies physical END.
+    for(const bool shaped:{false,true})for(const auto [duration,wide_chip]:
+            std::array{std::pair{2.,false},std::pair{16.,false},std::pair{192.,true}}) {
+        auto c=config();c.sample_rate=wide_chip?64:256;c.carrier_hz=c.sample_rate/4;
+        c.bandwidth_hz=wide_chip?.125:32;
+        c.integration_seconds=duration;c.spreading_factor=256;c.pulse_shaping=shaped;
+        c.symbol_burst={1,0};
+        const auto padding=modem::pattern_pulse_padding_samples(c);
+        c.stream_epoch=1800000000+padding/c.sample_rate;c.stream_phase_samples=padding%c.sample_rate;
+        const auto symbol=modem::symbol_sample_count(c);
+        constexpr std::uint64_t delay=37;
+        const auto first=delay+padding;
+        modem::PatternSearch search;search.frequency_offsets_hz={0};search.clock_errors_ppm={0};
+        search.start_offset_seconds=static_cast<double>(first)/c.sample_rate;
+        search.search_stream_phases=false;search.initial_stream_symbols=1;
+        search.hypotheses={{0,0}};search.chunk_bits=1;
+        const auto receive=[&](bool fragment,bool quarter_turns,bool reference,std::size_t chunk) {
+            modem::PatternCode code(c,c.stream_epoch);
+            std::vector<float> pcm(static_cast<std::size_t>(first+symbol));
+            std::mt19937 random(6173);std::normal_distribution<double> noise(0,.002);
+            for(std::uint64_t n=0;n<pcm.size();++n) {
+                const auto within=static_cast<double>(n)-static_cast<double>(first);
+                const bool occupied=!fragment || (within>=3*symbol/16. && within<11*symbol/16.);
+                const auto turn=quarter_turns && within>=0?
+                    std::floor(within/(symbol/4.))*std::numbers::pi/2:0.;
+                const auto phase=std::polar(1.7,.371+turn+2*std::numbers::pi*c.carrier_hz*n/c.sample_rate);
+                const auto signal=occupied?code.shaped_value(0,1,within)*phase:std::complex<double>{};
+                pcm[n]=static_cast<float>(signal.real()+noise(random));
+            }
+            modem::PatternCorrelatorOptions options;options.raw_reference=reference;
+            modem::PatternCorrelator receiver(c,search,4*1024*1024,options);
+            if(shaped && duration==16 && !reference)
+                check(receiver.work().backend==modem::PatternCorrelationBackend::pulse,
+                      "temporal-support fixture did not execute shared pulse cells");
+            if(shaped && wide_chip && !reference)
+                check(receiver.work().backend==modem::PatternCorrelationBackend::pulse_segments,
+                      "unaligned temporal partitions did not use the clipped affine path");
+            for(std::size_t offset=0;offset<pcm.size();) {
+                const auto n=std::min(chunk,pcm.size()-offset);
+                receiver.push(std::span(pcm).subspan(offset,n));offset+=n;
+            }
+            auto result=receiver.provisional();
+            const auto events=receiver.take_bursts();
+            if(!events.empty())result=best(events);
+            check(result.bits==Bytes({1}) && !result.complete,
+                  "temporal support changed whole-symbol bit admission or physical completion");
+            check(receiver.working_bytes()<=4*1024*1024,"temporal state exceeded correlator workspace");
+            return result.support_samples;
+        };
+        for(const bool reference:{false,true}) {
+            const auto full=receive(false,false,reference,37);
+            const auto fragment=receive(true,false,reference,37);
+            const auto rechunked=receive(true,false,reference,113);
+            check(full>.99*symbol && fragment<.8*symbol && fragment>.45*symbol,
+                  "fragment evidence saturated whole-symbol arbitration support");
+            check(std::abs(fragment-rechunked)<1e-6,
+                  "input chunks changed selected-bit temporal support");
+            if(duration==16)check(receive(false,true,reference,37)>.99*symbol,
+                  "legitimate drift-quarter phase changes lost full temporal support");
+        }
+    }
+}
 void stronger_significance_rejects_marginal_symbol() {
     auto c=config();c.integration_seconds=.1;c.pulse_shaping=false;
     constexpr std::size_t start=375;
@@ -1816,6 +1880,7 @@ int main(int argc,char** argv) {
     run("late_clock_fragment",late_clock_fragment);
     run("weak_prefix_does_not_borrow_confidence",weak_prefix_does_not_borrow_confidence);
     run("per_symbol_support",per_symbol_support_does_not_borrow_strong_prefix_evidence);
+    run("symbol_burst_temporal_support",symbol_burst_temporal_support);
     run("stronger_significance_rejects_marginal_symbol",stronger_significance_rejects_marginal_symbol);
     run("overlapping_carrier_hypotheses_emit_one_stream",overlapping_carrier_hypotheses_emit_one_stream);
     run("wide_paired_carriers_publish_one_prefix_and_terminal",wide_paired_carriers_publish_one_prefix_and_terminal);

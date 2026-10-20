@@ -1480,13 +1480,29 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         if(compact_allocated+extra<=allowance)compact_allocated+=extra;
         else result.outer_presence=false;
     }
+    const auto burst_support_sections=config.symbol_burst.enabled()?
+        modem::detail::correlation_temporal_support_sections(symbol,bank.maximum_rate):0;
+    if(correlator&&config.symbol_burst.enabled()) {
+        // Preserve the preceding native detector-selection arithmetic. The
+        // mandatory numerical support bank is additional storage, including
+        // while differential scoring temporarily bypasses its final ceiling.
+        // Actual derived control metadata is already in burst_compact_bytes;
+        // this rounded planner may conservatively reject a tight margin.
+        if(burst_support_sections)compact_allocated+=lanes*phase_groups*
+            sizeof(std::array<modem::detail::CorrelationTemporalSupportFit,2>);
+        const auto retention=2*lanes+2*modem::PatternSearch{}.track_limit+2;
+        result.workspace_supported=result.workspace_supported&&compact_allocated+retention<=allowance;
+    }
     // Long-symbol timing guides subscribe only after admission and are charged
     // to retained evidence, not every idle search lane. No constructor reserve
     // may displace the complete bank or its optional coefficient-cache gate.
     const bool burst_pulse_disjoint=!config.symbol_burst.enabled()||
         (2.L*(options.search_seconds+1.L)*config.sample_rate+block_samples+2)*bank.maximum_rate+symbol<=
             modem::SymbolBurstPlan(config).minimum_spacing_samples();
-    const bool pulse_geometry=burst_pulse_disjoint&&modem::pattern_pulse_enabled(config)&&symbol>=16.L*config.sample_rate&&
+    bool burst_support_cell_aligned=true;
+    for(unsigned part=1;part<burst_support_sections;++part)
+        burst_support_cell_aligned&=modem::detail::drift_boundary(part,symbol,burst_support_sections)%chip==0;
+    const bool pulse_geometry=burst_support_cell_aligned&&burst_pulse_disjoint&&modem::pattern_pulse_enabled(config)&&symbol>=16.L*config.sample_rate&&
         (chip<=4096||config.oscillator_search)&&
         symbol%(4*chip)==0&&
         (config.oscillator_search||(chip%2==0&&!scaled));

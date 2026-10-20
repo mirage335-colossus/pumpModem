@@ -634,6 +634,50 @@ void outer_pulse_evidence_retains_complete_pulses() {
     CorrelationOuterEvidence small;small.contributing_terms={20,100};
     check(!small.can_admit(0,32) && small.can_admit(1,32),"partial pulse count allowed impossible outer admission");
 }
+void temporal_support_tracks_observed_distribution() {
+    constexpr std::uint64_t width=32,chip=16,total=8*width;
+    check(correlation_temporal_support_sections(total,1)==8 &&
+          correlation_temporal_support_sections(31,1)==4 &&
+          correlation_temporal_support_sections(15,1)==2 &&
+          correlation_temporal_support_sections(7,1)==0 &&
+          correlation_temporal_support_sections(3,1)==0 &&
+          correlation_temporal_support_sections(63,2)==4,
+          "temporal support did not adapt to four-observation source partitions");
+    const auto measure=[&](unsigned first,unsigned last,std::uint64_t skip=0,bool turn_quarters=false) {
+        CorrelationTemporalSupportFit support;
+        CorrelationFit whole;
+        for(std::uint64_t sample=0;sample<total;++sample) {
+            if(sample==skip && skip)continue;
+            support.advance(sample,8,chip,[](unsigned part){return drift_boundary(part,total,8);});
+            const auto angle=2*std::numbers::pi*static_cast<double>(sample%4)/4;
+            const auto c=std::cos(angle),s=std::sin(angle);
+            const auto phase=turn_quarters?static_cast<double>(sample/(2*width))*std::numbers::pi/2:0.;
+            const auto occupied=sample>=first*width && sample<last*width;
+            const auto x=(occupied?8*std::cos(angle+phase):0)+(sample%2?1.:-1.);
+            const CorrelationProjection projection{x*c,x*s,c*c,s*s,c*s,x*x};
+            support.active.add(projection,{1,0},1);whole.add(projection,{1,0},1);
+        }
+        return std::pair{support.support(chip),whole.count};
+    };
+    const auto full=measure(0,8);
+    check(std::abs(full.first-total)<1e-9 && full.second==total,
+          "complete coherent observations lost temporal support");
+    const auto quarter_turns=measure(0,8,0,true);
+    check(std::abs(quarter_turns.first-total)<1e-9,
+          "legitimate quarter phase changes lost local temporal support");
+    const auto half=measure(0,4),shifted=measure(2,6);
+    check(std::abs(half.first-total/2)<1e-9 && std::abs(shifted.first-total/2)<1e-9,
+          "a strong contiguous half symbol gained whole-symbol temporal support");
+    const auto missing=measure(0,8,100);
+    check(std::abs(missing.first-(total-1))<1e-9 && missing.second==total-1,
+          "an unobserved sample gained temporal support");
+    CorrelationTemporalSupportFit short_fit;
+    short_fit.active.count=3;short_fit.active.cc=short_fit.active.ss=1;
+    short_fit.active.energy=short_fit.active.xc=1;
+    check(short_fit.support(chip)==0,"an underdetermined local fit gained support");
+    short_fit.active.count=32;short_fit.active.cs=1;
+    check(short_fit.support(chip)==0,"a singular local fit gained support");
+}
 } // namespace
 
 int main() {
@@ -653,6 +697,7 @@ int main() {
         fractional_pulse_kernels_reuse_exact_intervals();
         chip_chain_evidence_preserves_noise_integration();
         outer_pulse_evidence_retains_complete_pulses();
+        temporal_support_tracks_observed_distribution();
         std::cout<<"pattern_correlator_batch ok\n";
         return 0;
     } catch(const std::exception& error) {

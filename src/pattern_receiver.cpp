@@ -1256,11 +1256,7 @@ struct PatternReceiver::Impl {
             return detail::combine_differential_evidence(existing,accumulated[bit].score(),window!=0);
         }
     };
-    PatternEvidence measure(std::uint64_t start,std::uint64_t index,std::size_t f,std::uint64_t observed_before,
-                            std::span<const Complex> carrier_phases,std::stop_token stop,
-                            const PatternEvidence* trace_expected=nullptr) {
-        std::array<Complex,2> dot{},square{};std::array<double,2> norm{};double energy=0;
-        SectionFits sections;const auto edges=drift_edges(f);unsigned section=0;
+    void prepare_tracking_reference(std::uint64_t index,std::size_t f,std::stop_token stop) {
         // Timing refinements of one stream symbol fit the same templates.
         // Reuse their exact values; only the received window and carrier Gram
         // phase change. Without optional cache space, the idle acquisition
@@ -1278,6 +1274,89 @@ struct PatternReceiver::Impl {
             }
             tracking_reference_index=index;tracking_reference_frequency=f;tracking_reference_valid=true;
         }
+    }
+    double temporal_symbol_support(const PatternEvidence& item,std::size_t f,
+                                   std::uint64_t observed_before_bins,std::stop_token stop) {
+        const auto begin=std::max(item.first_sample,observed_before_bins*bin_samples);
+        const auto old=pattern_symbol_support(static_cast<double>(item.end_sample>begin?item.end_sample-begin:0),
+            item.score,code.chip_samples());
+        // Admission and physical absence keep their original whole-symbol
+        // statistics. This extra presentation ceiling applies only to complex
+        // Burst fits whose phase is coherent within each local partition.
+        if(!(old>0) || !burst_plan || differential_window)return old;
+        const auto edges_for=[&](unsigned parts) {
+            std::array<std::size_t,9> edges{};edges[parts]=length;
+            for(unsigned j=1;j<parts;++j) {
+                const auto boundary=static_cast<long double>(detail::drift_boundary(j,code.symbol_samples(),parts));
+                const auto bin=std::ceil((boundary/clock_ratio(f)-(bin_samples-1)/2.L)/bin_samples);
+                edges[j]=static_cast<std::size_t>(std::clamp(bin,
+                    static_cast<long double>(edges[j-1]),static_cast<long double>(length)));
+            }
+            return edges;
+        };
+        // Eighths nest the existing quarter-phase model. Use fewer nested
+        // partitions when the native fit has too few independent observations;
+        // physical sample counts are not a substitute for evidence_count().
+        unsigned parts=8;auto edges=edges_for(parts);
+        while(parts>1) {
+            bool usable=true;
+            for(unsigned j=0;j<parts;++j)usable=usable && evidence_count(edges[j+1]-edges[j])>=4;
+            if(usable)break;
+            parts/=2;edges=edges_for(parts);
+        }
+        if(parts==1)return old;
+        stream_phase(item.stream_phase_samples);
+        prepare_tracking_reference(item.stream_symbol,f,stop);
+        struct LocalFit {Complex dot{},square{};double energy=0,norm=0;std::size_t bins=0;};
+        std::array<LocalFit,8> local{};
+        const auto start=item.first_sample/bin_samples;
+        const auto skip=static_cast<std::size_t>(observed_before_bins>start?
+            std::min<std::uint64_t>(length,observed_before_bins-start):0);
+        unsigned part=0;
+        for(std::size_t i=skip;i<length;++i) {
+            if((i&4095U)==0)cancelled(stop);
+            while(part+1<parts && i>=edges[part+1])++part;
+            auto& fit=local[part];const auto value=at(start+i);
+            const auto pattern=tracking_reference.empty()?product[2*i+item.bit]:tracking_reference[i][item.bit];
+            fit.dot+=value*std::conj(pattern);fit.norm+=std::norm(pattern);fit.energy+=std::norm(value);++fit.bins;
+            if(sample_fit)fit.square+=pattern*pattern*carrier_square(start+i);
+        }
+        double supported=0;std::array<double,8> scores{};
+        for(unsigned j=0;j<parts;++j) {
+            const auto& fit=local[j];
+            const auto score=pattern_evidence(fit.dot,fit.energy,fit.norm,evidence_count(fit.bins),
+                noise_condition,real_rank,sample_fit,fit.square);
+            scores[j]=score;
+            supported+=pattern_symbol_support(static_cast<double>(fit.bins)*bin_samples,score,code.chip_samples());
+        }
+        audio::trace::record("symbol_burst_temporal_support",[&](auto& fields) {
+            fields.add("epoch",config.stream_epoch);fields.add("keyed",config.data_key.has_value());
+            fields.add("symbol_samples",code.symbol_samples());fields.add("chip_samples",code.chip_samples());
+            fields.add("sample_origin",search.input_sample_origin);fields.add("index",item.stream_symbol);
+            fields.add("begin",item.first_sample);fields.add("end",item.end_sample);
+            fields.add("observed_before",observed_before_bins*bin_samples);
+            fields.add("bit",item.bit);fields.add("frequency_hypothesis",f);fields.add("clock_ratio",clock_ratio(f));
+            fields.add("partitions",parts);fields.add("old_support",old);
+            fields.add("temporal_support",supported);fields.add("applied_support",std::min(old,supported));
+            for(unsigned j=0;j<parts;++j) {
+                const auto prefix="part"+std::to_string(j)+"_";
+                fields.add((prefix+"known_samples").c_str(),local[j].bins*bin_samples);
+                fields.add((prefix+"evidence_count").c_str(),evidence_count(local[j].bins));
+                fields.add((prefix+"score").c_str(),scores[j]);
+                fields.add((prefix+"support").c_str(),pattern_symbol_support(
+                    static_cast<double>(local[j].bins)*bin_samples,scores[j],code.chip_samples()));
+            }
+        });
+        // Strong cells cannot transfer surplus into a silent cell, or increase
+        // the original confidence weight. Missing/reused bins contribute zero.
+        return std::min(old,supported);
+    }
+    PatternEvidence measure(std::uint64_t start,std::uint64_t index,std::size_t f,std::uint64_t observed_before,
+                            std::span<const Complex> carrier_phases,std::stop_token stop,
+                            const PatternEvidence* trace_expected=nullptr) {
+        std::array<Complex,2> dot{},square{};std::array<double,2> norm{};double energy=0;
+        SectionFits sections;const auto edges=drift_edges(f);unsigned section=0;
+        prepare_tracking_reference(index,f,stop);
         const auto skip=static_cast<std::size_t>(observed_before>start?std::min<std::uint64_t>(length,observed_before-start):0);
         DifferentialFits differential(*this,f,skip);
         for(std::size_t i=skip;i<length;++i) {
@@ -1724,10 +1803,8 @@ struct PatternReceiver::Impl {
                 double chain_score=best.score;
                 const auto presence=outer_presence_check(best,track.burst.end_sample/bin_samples,stop,&chain_score);
                 remember(best);
-                const auto observed_begin=std::max(best.first_sample,track.burst.end_sample);
-                const auto symbol_support=pattern_symbol_support(
-                    static_cast<double>(best.end_sample>observed_begin?best.end_sample-observed_begin:0),
-                    best.score,code.chip_samples());
+                const auto symbol_support=temporal_symbol_support(
+                    best,selected_frequency,track.burst.end_sample/bin_samples,stop);
                 const auto standalone=best.score>=threshold() && presence;
                 if(burst_plan && acquisition_suspended && !track.established && standalone &&
                    best.first_sample/bin_samples>acquisition_last_start) {
@@ -1855,7 +1932,7 @@ struct PatternReceiver::Impl {
             if(ended)it=tracks.erase(it);else ++it;
         }
     }
-    void admit(const PatternEvidence& item,std::size_t f,double chain_score) {
+    void admit(const PatternEvidence& item,std::size_t f,double chain_score,std::stop_token stop) {
         if(burst_plan && acquisition_suspended && item.first_sample/bin_samples>acquisition_last_start)return;
         if(item.score<search.retain_score || item.score-item.alternative_score<1)return;
         remember(item);
@@ -1950,7 +2027,7 @@ struct PatternReceiver::Impl {
         track.next=(packed_calendar || burst_plan)?track_start(track,track.index):
             item.first_sample/bin_samples+advance_bins(item.stream_symbol,track.phase_lower,f);
         track.total_score=item.score;track.penalty=std::log(2.);
-        track.total_support=pattern_symbol_support(static_cast<double>(item.end_sample-item.first_sample),item.score,code.chip_samples());
+        track.total_support=temporal_symbol_support(item,f,0,stop);
         track.frequency_scores[f]=item.score;
         track.admitted=track.established=item.score>=threshold();
         if(track.admitted){track.confirmed=1;track.confirmed_end=item.end_sample;track.confirmed_score=item.score;track.penalty=0;
@@ -3088,7 +3165,7 @@ struct PatternReceiver::Impl {
                     std::numeric_limits<std::uint64_t>::max():start+2);
                 auto checked=peak;
                 double chain_score=checked.score;
-                if(outer_presence_check(checked,0,stop,&chain_score))admit(checked,checked.frequency_hypothesis,chain_score);
+                if(outer_presence_check(checked,0,stop,&chain_score))admit(checked,checked.frequency_hypothesis,chain_score,stop);
                 else remember(checked);
             }
             advance_acquisition(count,stop);

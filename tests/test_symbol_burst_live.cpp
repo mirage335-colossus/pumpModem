@@ -1255,7 +1255,7 @@ int main(int argc,char** argv) {
                     const std::string_view name=event;
                     return name=="trace_begin" || name=="receiver_selection" ||
                         name=="receiver_bank_admitted" || name=="receiver_signal_commit" || name=="symbol_burst_fit" ||
-                        name=="pattern_receiver_engine" || name=="symbol_burst_fft_fit";
+                        name=="pattern_receiver_engine" || name=="symbol_burst_fft_fit" || name=="symbol_burst_temporal_support";
                 });
             else trace.emplace(*trace_path);
         }
