@@ -821,17 +821,23 @@ struct PatternReceiver::Impl {
         auto& rows=cached?template_bank(index).rows:templates;
         auto& energies=cached?template_bank(index).energy:template_energy;
         auto& squares=cached?template_bank(index).square:template_square;
-        for(std::size_t f=0;f<templates.size();++f)for(unsigned bit=0;bit<2;++bit) {
-            auto& row=rows[f][bit];row.resize(transform);
-            std::fill(row.begin(),row.end(),Complex{});
-            auto& norm=energies[f][bit];norm=0;
-            auto& square=squares[f][bit];square={};
-            for(std::size_t i=0;i<length;++i) {
-                const auto value=arithmetic_value(template_value(i,index,bit,f));
-                row[length-1-i]=std::conj(value);norm+=std::norm(value);
-                if(sample_fit)square+=value*value*carrier_square(i);
+        for(std::size_t f=0;f<templates.size();++f) {
+            for(unsigned bit=0;bit<2;++bit) {
+                auto& row=rows[f][bit];row.resize(transform);
+                std::fill(row.begin(),row.end(),Complex{});
+                energies[f][bit]=0;squares[f][bit]={};
             }
-            pattern_fft(row,false,stop,acquisition_arithmetic());
+            for(std::size_t i=0;i<length;++i) {
+                const auto pair=template_values(code,i,index,f);
+                for(unsigned bit=0;bit<2;++bit) {
+                    const auto value=arithmetic_value(pair[bit]);
+                    rows[f][bit][length-1-i]=std::conj(value);
+                    energies[f][bit]+=std::norm(value);
+                    if(sample_fit)squares[f][bit]+=value*value*carrier_square(i);
+                }
+            }
+            for(unsigned bit=0;bit<2;++bit)
+                pattern_fft(rows[f][bit],false,stop,acquisition_arithmetic());
         }
         prepared_template_index=index;templates_valid=true;
         if(cached)template_bank(index).valid=true;
@@ -1049,6 +1055,26 @@ struct PatternReceiver::Impl {
             pattern.value(chip,bit,fraction);
         return value*std::polar(1.,tau*search.frequency_offsets_hz[f]*static_cast<double>(sample_position)/config.sample_rate);
     }
+    std::array<Complex,2> template_values(PatternCode& pattern,std::size_t bin,std::uint64_t index,std::size_t f) const {
+        const auto sample_position=static_cast<long double>(bin)*bin_samples+static_cast<long double>(bin_samples-1)/2;
+        const auto source_position=sample_position*clock_ratio(f);
+        if(variable_clock && source_position>=code.symbol_samples())return {};
+        const auto chip_position=source_position/code.chip_samples();
+        const auto local=static_cast<std::uint64_t>(chip_position);
+        if(index>(std::numeric_limits<std::uint64_t>::max()-local)/code.chips_per_symbol())throw Error("pattern stream coordinate overflow");
+        const auto chip=index*code.chips_per_symbol()+local;
+        const auto fraction=static_cast<double>(chip_position-local);
+        // Keep the nominal reference, coordinate guards and carrier endpoint
+        // identical to template_value while sharing PatternCode's paired pulse work.
+        const bool cached=clock_ratio(f)==1 && !scoring.empty() && !scoring.front().nominal_reference.empty();
+        std::array<Complex,2> values;
+        if(cached)values={scoring.front().nominal_reference[bin][0],scoring.front().nominal_reference[bin][1]};
+        else if(shaped)values=pattern.shaped_values(index*code.chips_per_symbol(),static_cast<double>(source_position));
+        else values=pattern.values(chip,fraction);
+        const auto carrier=std::polar(1.,tau*search.frequency_offsets_hz[f]*static_cast<double>(sample_position)/config.sample_rate);
+        values[0]=values[0]*carrier;values[1]=values[1]*carrier;
+        return values;
+    }
     Complex at(std::uint64_t i)const {
         if(i>=bins || bins-i>ring.size())throw Error("pattern observation expired before refinement");
         return ring[static_cast<std::size_t>(i%ring.size())];
@@ -1242,11 +1268,12 @@ struct PatternReceiver::Impl {
             tracking_reference_valid=false;
             if(index>std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol())throw Error("pattern stream coordinate overflow");
             code.prepare_symbol(index*code.chips_per_symbol(),stop);
-            for(std::size_t i=0;i<length;++i)for(unsigned b=0;b<2;++b) {
+            for(std::size_t i=0;i<length;++i) {
                 if((i&4095U)==0)cancelled(stop);
-                const auto value=template_value(i,index,b,f);
-                if(tracking_reference.empty())product[2*i+b]=value;
-                else tracking_reference[i][b]=value;
+                const auto values=template_values(code,i,index,f);
+                if(tracking_reference.empty()) {
+                    product[2*i]=values[0];product[2*i+1]=values[1];
+                } else tracking_reference[i]=values;
             }
             tracking_reference_index=index;tracking_reference_frequency=f;tracking_reference_valid=true;
         }
