@@ -2994,6 +2994,11 @@ struct Session::Impl {
                                     f.add("cohort_start_sample",bank.samples);f.add("feed_end_sample",bank.samples+coordinate_count.value_or(sample_count));
                                     f.add("captured_samples",current.samples_received);f.add("input_revision",bank.revision);f.add("epoch",receiver.epoch);f.add("family",receiver.family);
                                     f.add("signal_id",event.id);f.add("revision",event.revision);f.add("received_bits",event.received_bits);
+                                    f.add("raw_bits_prefix",(event.raw_bits.empty()?event.text:event.raw_bits).substr(0,128));
+                                    f.add("candidate_id",candidate.id);f.add("candidate_score",candidate.score);
+                                    f.add("sample_origin",receiver.sample_origin);f.add("symbol_samples",candidate.symbol_samples);
+                                    f.add("keyed",receiver.options.key.has_value());
+                                    f.add("burst_enabled",receiver.options.modem.symbol_burst.enabled());
                                     f.add("physical_first",candidate.first);f.add("physical_end",candidate.end);f.add("first_stream_symbol",physical_id.second);
                                     f.add("stream_phase_samples",stream_phase_samples);
                                     f.add("missing",event.missing_symbols);f.add("complete",event.complete);f.add("simulation",bool(simulation_wave));

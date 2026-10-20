@@ -1681,10 +1681,10 @@ jobs:
           for warning in completed_pass_warnings:
               print('Completed-pass warning: ' + warning)
           PY_BURST_RESULT
-      - name: Run four paced Symbol Burst backlog diagnostics
+      - name: Run paced Symbol Burst backlog diagnostics and matched selective trace
         id: paced_burst
         if: success() && inputs.paced_backlog && !cancelled()
-        timeout-minutes: 45
+        timeout-minutes: 55
         env:
           PACED_SCOPE: ${{ inputs.scope }}
           PACED_BUILD_TYPE: ${{ inputs.build_type }}
@@ -1722,10 +1722,14 @@ jobs:
               'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
           }
           (report / 'inputs.json').write_text(json.dumps(inputs, indent=2) + '\n')
-          selectors = ('--paced-plain-off', '--paced-plain-on', '--paced-keyed-off', '--paced-keyed-on')
+          selectors = ('--paced-plain-off', '--paced-plain-on', '--paced-keyed-off', '--paced-keyed-on', '--paced-keyed-on')
           results = []
           for index, selector in enumerate(selectors, 1):
               stem = f'{index:02d}-{selector[2:]}'
+              trace_path = report / f'{stem}.trace.jsonl' if index == 5 else None
+              command = [str(binary), selector]
+              if trace_path is not None:
+                  command.append('--trace=' + str(trace_path))
               stdout_path, stderr_path = report / f'{stem}.stdout.log', report / f'{stem}.stderr.log'
               started = datetime.datetime.now(datetime.timezone.utc).isoformat()
               start = time.monotonic()
@@ -1737,7 +1741,7 @@ jobs:
               cleanup_deadline = None
               with stdout_path.open('wb') as stdout, stderr_path.open('wb') as stderr:
                   try:
-                      process = subprocess.Popen([str(binary), selector], cwd=root, stdout=stdout,
+                      process = subprocess.Popen(command, cwd=root, stdout=stdout,
                                                 stderr=stderr, start_new_session=True)
                       try:
                           returncode = process.wait(timeout=600)
@@ -1804,11 +1808,46 @@ jobs:
                           except Exception as error:
                               parse_errors.append(f'line {line_number}: {type(error).__name__}: {error}')
               summary = summaries[0]['value'] if len(summaries) == 1 else None
+              trace_validation = None
+              if trace_path is not None:
+                  trace_validation = {'complete': False, 'error': None}
+                  try:
+                      records = [json.loads(line) for line in trace_path.read_text().splitlines()]
+                      begins = [row for row in records if row.get('event') == 'trace_begin']
+                      ends = [row for row in records if row.get('event') == 'trace_end']
+                      seals = []
+                      for line in stderr_path.read_text().splitlines():
+                          if line.startswith('{"event":"trace_finalization",'):
+                              seals.append(json.loads(line))
+                      if len(begins) != 1 or len(ends) != 1 or len(seals) != 1:
+                          raise ValueError('trace requires exactly one begin, end and external finalization seal')
+                      begin, end, seal = begins[0], ends[0], seals[0]
+                      attempted = end['attempted']
+                      sequences = sorted(row['sequence'] for row in records if 'sequence' in row)
+                      if sequences != list(range(1, attempted + 1)):
+                          raise ValueError('trace sequence census differs from attempted records')
+                      if not (begin['token'] == end['token'] == seal['token'] and
+                              end['dropped'] == seal['dropped'] == 0 and
+                              end['attempted'] == seal['attempted'] and
+                              not end['size_limited'] and not seal['size_limited'] and
+                              not end['prior_io_failed'] and not seal['prior_io_failed'] and
+                              seal['flush_ok'] and seal['close_ok'] and seal['result'] == 'complete' and
+                              seal['path'] == str(trace_path)):
+                          raise ValueError('trace footer or finalization seal is incomplete or mismatched')
+                      trace_validation.update(complete=True, records=attempted, token=begin['token'])
+                  except Exception as error:
+                      trace_validation['error'] = f'{type(error).__name__}: {error}'
               exit_ok = returncode == 0
               functional_ok = bool(summary and summary.get('functional') == 'pass')
-              complete = not timed_out and not launch_error and exit_ok and len(summaries) == 1 and not parse_errors and functional_ok
+              complete = (not timed_out and not launch_error and exit_ok and len(summaries) == 1 and
+                          not parse_errors and functional_ok and (trace_validation is None or trace_validation['complete']))
               result = {
                   'selector': selector,
+                  'command': command,
+                  'selective_trace': trace_path is not None,
+                  'trace_file': trace_path.name if trace_path else None,
+                  'trace_sha256': hashlib.sha256(trace_path.read_bytes()).hexdigest() if trace_path and trace_path.is_file() else None,
+                  'trace_validation': trace_validation,
                   'started_utc': started,
                   'ended_utc': ended,
                   'elapsed_seconds': elapsed,
@@ -1834,7 +1873,7 @@ jobs:
           (report / 'results.json').write_text(json.dumps(manifest, indent=2) + '\n')
           summary_path = pathlib.Path(os.environ['GITHUB_STEP_SUMMARY'])
           with summary_path.open('a', encoding='utf-8') as stream:
-              stream.write('Paced Symbol Burst backlog diagnostics (four separate processes):\n\n')
+              stream.write('Paced Symbol Burst backlog diagnostics (four baseline processes, then keyed-On selective trace):\n\n')
               for row in results:
                   value = row['summary'] or {}
                   stream.write(f"- `{row['selector']}`: exit={row['exit_code']}, timeout={row['timed_out']}, "

@@ -700,9 +700,37 @@ struct PacedObservation {
             const auto earliest=ids.empty()?signal.id:std::min(signal.id,*ids.begin());
             const auto bits=signal.raw_bits.empty()?signal.text:signal.raw_bits;
             const bool alias=keyed&&signal.id!=earliest;
-            check(bits.size()==signal.received_bits&&signal.received_bits<=capture.bits.size()&&
+            const bool exact=bits.size()==signal.received_bits&&signal.received_bits<=capture.bits.size()&&
                   !signal.missing_symbols&&(alias?capture.bits.find(bits,1)!=std::string::npos:
-                  bits==capture.bits.substr(0,signal.received_bits)),"paced selected raw prefix differs from source");
+                  bits==capture.bits.substr(0,signal.received_bits));
+            if(!exact) {
+                // One failure census, before cleanup truncates capture. No
+                // hot-loop output or change to the original acceptance rule.
+                std::ostringstream detail;
+                detail<<"paced selected raw prefix differs from source: id="<<signal.id
+                    <<" revision="<<signal.revision<<" sequence="<<signal.sequence
+                    <<" earliest="<<earliest<<" alias="<<alias<<" bits_prefix="<<bits.substr(0,64)
+                    <<" received_bits="<<signal.received_bits<<" complete="<<signal.complete
+                    <<" missing="<<signal.missing_symbols<<" reception_id="<<signal.reception_id
+                    <<" ingress="<<ingress<<" frontier="<<state.processed_physical_samples
+                    <<" input_revision="<<state.receiver_input_revision<<" prior_rows=[";
+                std::size_t count=0;
+                for(const auto& [id,row]:rows) {
+                    if(count++==16){detail<<"truncated;";break;}
+                    detail<<id<<':'<<row.revision<<':'<<row.received_bits<<':'
+                        <<(row.raw_bits.empty()?row.text:row.raw_bits).substr(0,64)<<':'<<row.complete<<';';
+                }
+                detail<<"] snapshot_rows=[";
+                count=0;for(const auto& row:state.signals) {
+                    if(count++==16){detail<<"truncated;";break;}
+                    detail<<row.id<<':'<<row.revision<<':'<<row.received_bits<<':'
+                        <<(row.raw_bits.empty()?row.text:row.raw_bits).substr(0,64)<<':'<<row.complete<<';';
+                }
+                detail<<"] superseded=[";count=0;for(const auto id:signal.superseded_ids) {
+                    if(count++==64){detail<<"truncated";break;}detail<<id<<',';
+                }
+                detail<<']';check(false,detail.str());
+            }
             const auto previous=rows.find(signal.id);
             if(previous!=rows.end()) {
                 check(previous->second.revision!=signal.revision||
@@ -1201,7 +1229,15 @@ int main(int argc,char** argv) {
             }
         }
         std::optional<audio::trace::Scope> trace;
-        if(trace_path)trace.emplace(*trace_path);
+        if(trace_path) {
+            if(selector.starts_with("--paced-"))trace.emplace(*trace_path,false,
+                +[](const char* event) noexcept {
+                    const std::string_view name=event;
+                    return name=="trace_begin" || name=="receiver_selection" ||
+                        name=="receiver_bank_admitted" || name=="receiver_signal_commit";
+                });
+            else trace.emplace(*trace_path);
+        }
         if(selector=="--paced-plain-off") {paced_burst_case(selector,false,false);return 0;}
         if(selector=="--paced-plain-on") {paced_burst_case(selector,false,true);return 0;}
         if(selector=="--paced-keyed-off") {paced_burst_case(selector,true,false);return 0;}
