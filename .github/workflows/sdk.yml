@@ -37,6 +37,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: source-sdk-${{ github.workflow }}-${{ github.ref }}-${{ inputs.devfast && 'devfast' || 'full' }}
