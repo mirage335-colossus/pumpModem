@@ -33,7 +33,7 @@ on:
         type: boolean
         default: false
       paced_backlog:
-        description: 'Run four opt-in paced Symbol Burst backlog diagnostics after the original qualification'
+        description: 'Run paced Symbol Burst backlog diagnostics, including four receiver-held cases, after the original qualification'
         type: boolean
         default: false
   workflow_call:
@@ -63,7 +63,7 @@ on:
         type: boolean
         default: false
       paced_backlog:
-        description: 'Run four opt-in paced Symbol Burst backlog diagnostics after the original qualification'
+        description: 'Run paced Symbol Burst backlog diagnostics, including four receiver-held cases, after the original qualification'
         type: boolean
         default: false
 
@@ -1590,7 +1590,7 @@ jobs:
       - name: Run paced Symbol Burst backlog diagnostics and matched selective trace
         id: paced_burst
         if: success() && inputs.paced_backlog && !cancelled()
-        timeout-minutes: 55
+        timeout-minutes: 95
         env:
           PACED_SCOPE: ${{ inputs.scope }}
           PACED_BUILD_TYPE: ${{ inputs.build_type }}
@@ -1628,7 +1628,8 @@ jobs:
               'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
           }
           (report / 'inputs.json').write_text(json.dumps(inputs, indent=2) + '\n')
-          selectors = ('--paced-plain-off', '--paced-plain-on', '--paced-keyed-off', '--paced-keyed-on', '--paced-keyed-on-follow')
+          selectors = ('--paced-plain-off', '--paced-plain-on', '--paced-keyed-off', '--paced-keyed-on', '--paced-keyed-on-follow',
+                       '--paced-held-plain-off', '--paced-held-plain-on', '--paced-held-keyed-off', '--paced-held-keyed-on')
           results = []
           for index, selector in enumerate(selectors, 1):
               stem = f'{index:02d}-{selector[2:]}'
@@ -1745,8 +1746,32 @@ jobs:
                       trace_validation['error'] = f'{type(error).__name__}: {error}'
               exit_ok = returncode == 0
               functional_ok = bool(summary and summary.get('functional') == 'pass')
+              held_acceptance = None
+              held_acceptance_ok = True
+              if selector.startswith('--paced-held-'):
+                  health = summary.get('health') if isinstance(summary, dict) else None
+                  held_on = selector.endswith('-on')
+                  held_checks = {
+                      'functional_pass': functional_ok,
+                      'pacing_valid': isinstance(summary, dict) and summary.get('pacing_valid') is True,
+                      'no_health_fault': isinstance(health, dict) and
+                          health.get('input_overruns') == 0 and health.get('dropped_samples') == 0 and
+                          health.get('input_interrupted') is False and health.get('search_limited') is False and
+                          health.get('receiver_reset') is False,
+                      'not_follow_trace': isinstance(summary, dict) and summary.get('diagnostic_follow') is False,
+                      'observation_failures_zero': isinstance(summary, dict) and summary.get('observation_failures') == 0,
+                      'hold_enabled': isinstance(summary, dict) and summary.get('decoder_hold_enabled') is True,
+                      'held_result': isinstance(summary, dict) and summary.get('classification') ==
+                          ('observed' if held_on else 'control_no_rescue_claim'),
+                      'held_evidence_count': isinstance(summary, dict) and
+                          summary.get('cleared_poststartup_gaps', 0) >= 3 if held_on else
+                          isinstance(summary, dict) and summary.get('decoder_hold_released', 0) >= 3,
+                  }
+                  held_acceptance_ok = all(held_checks.values())
+                  held_acceptance = {'checks': held_checks, 'accepted': held_acceptance_ok}
               complete = (not timed_out and not launch_error and exit_ok and len(summaries) == 1 and
-                          not parse_errors and functional_ok and (trace_validation is None or trace_validation['complete']))
+                          not parse_errors and functional_ok and held_acceptance_ok and
+                          (trace_validation is None or trace_validation['complete']))
               result = {
                   'selector': selector,
                   'command': command,
@@ -1770,6 +1795,7 @@ jobs:
                   'summary_parse_errors': parse_errors,
                   'summary': summary,
                   'functional_ok': functional_ok,
+                  'held_acceptance': held_acceptance,
                   'diagnostic_complete': complete,
               }
               (report / f'{stem}.json').write_text(json.dumps(result, indent=2) + '\n')
@@ -1779,12 +1805,13 @@ jobs:
           (report / 'results.json').write_text(json.dumps(manifest, indent=2) + '\n')
           summary_path = pathlib.Path(os.environ['GITHUB_STEP_SUMMARY'])
           with summary_path.open('a', encoding='utf-8') as stream:
-              stream.write('Paced Symbol Burst backlog diagnostics (four baseline processes, then keyed-On full-input diagnostic trace):\n\n')
+              stream.write('Paced Symbol Burst backlog diagnostics (four baseline processes, keyed-On full-input trace, then four receiver-held cases):\n\n')
               for row in results:
                   value = row['summary'] or {}
                   stream.write(f"- `{row['selector']}`: exit={row['exit_code']}, timeout={row['timed_out']}, "
                                f"functional={value.get('functional', 'missing')}, "
                                f"classification={value.get('classification', 'missing')}, "
+                               f"held_acceptance={(row.get('held_acceptance') or {}).get('accepted', 'n/a')}, "
                                f"complete={row['diagnostic_complete']}\n")
               stream.write('\nPacing classifications are diagnostic observations, not qualification or performance claims.\n')
           if not manifest['all_functional_runs_complete']:

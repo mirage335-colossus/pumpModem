@@ -860,18 +860,30 @@ struct PacedSample {
     std::size_t pcm=0,bytes=0;
     double backlog=0,oldest=0;
 };
+struct PacedHold {
+    std::uint64_t arm_at=0,next_guard=0,proof_ticket=0,park_enter_ns=0,proof_park_enter_ns=0,release_ns=0;
+    bool attempted=false,parked=false,pcm_loaded=false,proof=false,material=false,released=false,drained=false;
+    PacedSample arm,first_park,pcm_debt,proof_before,proof_after,release,drain;
+};
 struct PacedWindow {
     std::uint64_t left=0,right=0;
     bool start=false,end=false,start_valid=false,end_valid=false,material=false,cleared=false;
     PacedSample start_before,start_after,end_before,end_after,debt;
+    PacedHold hold;
 };
-void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool diagnostic_follow=false) {
+void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool diagnostic_follow=false,bool held=false) {
     using Steady=std::chrono::steady_clock;
     const auto wall_start=Steady::now(),deadline=wall_start+570s;
     const auto cpu_start=std::clock();
     CaptureScript capture;
     struct Reset {~Reset(){capture_script=nullptr;}} reset;
+    const auto main_thread=std::this_thread::get_id();
+    std::atomic<bool> decoder_armed{false},decoder_open{false},decoder_waiting{false};
+    std::atomic<std::uint64_t> decoder_arrivals{0},decoder_permits{0},decoder_park_ns{0};
     std::unique_ptr<live::Session> session;
+    // Declared after Session: release on every unwind before it can join a
+    // worker parked in ReplayClock. Stop/destruction below release explicitly too.
+    struct ReleaseDecoder {std::atomic<bool>& open;~ReleaseDecoder(){open=true;}} release_decoder{decoder_open};
     PacedObservation observed;observed.diagnostic_follow=diagnostic_follow;
     std::array<PacedWindow,16> windows{};
     PacedSample previous,final;
@@ -883,6 +895,8 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
     const char* startup_measurement=burst_on?"inconclusive_no_visible_acquisition":"not_applicable_off";
     bool finished=false,have_previous=false,material_seen=false,startup_debt=false,poststartup_debt=false;
     bool tail_bounded=false;
+    std::optional<std::size_t> active_hold;
+    std::uint64_t previous_park_ticket=0;
     std::string failure,cleanup_error;
     const auto elapsed_ns=[&](Steady::time_point t){return static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(t-wall_start).count());};
@@ -898,9 +912,31 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
         for(std::size_t i=0;i<windows.size();++i) {
             windows[i].left=capture.support[i]+2*padding+symbol+guard;
             windows[i].right=capture.support[i+1]>guard?capture.support[i+1]-guard:0;
+            // On: start at source support end, before the mandatory 20-second
+            // capture guard, so a proof cannot make the loading stage all nulls.
+            // Off uses a receiver-only hold in the corresponding payload slot.
+            windows[i].hold.arm_at=burst_on?capture.support[i]+2*padding+symbol:capture.support[i]+symbol/2;
+            windows[i].hold.next_guard=burst_on?windows[i].right:capture.support[i+1];
         }
         capture_script=&capture;
-        session=std::make_unique<live::Session>([&]{return capture.now.load();});
+        if(held)session=std::make_unique<live::Session>([&]{return capture.now.load();},[&] {
+            // The producer and snapshot caller always retain their real clock.
+            // This is the existing hardware_case seam, not a media-clock change.
+            if(decoder_armed.load() && std::this_thread::get_id()!=main_thread &&
+               std::this_thread::get_id()!=capture.capture_thread) {
+                const auto ticket=decoder_arrivals.fetch_add(1)+1;
+                if(!decoder_open.load() && decoder_armed.load() && decoder_permits.load()<ticket) {
+                    decoder_park_ns=static_cast<std::uint64_t>(
+                        std::chrono::duration_cast<std::chrono::nanoseconds>(Steady::now()-wall_start).count());
+                    decoder_waiting=true;
+                    while(!decoder_open.load() && decoder_armed.load() && decoder_permits.load()<ticket)
+                        std::this_thread::sleep_for(1ms);
+                    decoder_waiting=false;
+                }
+            }
+            return Steady::now();
+        });
+        else session=std::make_unique<live::Session>([&]{return capture.now.load();});
         session->start(value); // No readiness wait or decoder gate precedes capture.
         while(Steady::now()<deadline) {
             const auto before=Steady::now();const auto state=session->snapshot();const auto after=Steady::now();
@@ -966,6 +1002,7 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
             material_seen|=material;
             if(material&&(!first_visible_ingress||(burst_on&&(!startup_tail||now.ingress<startup_tail))))startup_debt=true;
             if(material&&first_visible_ingress&&(!burst_on||(startup_tail&&now.ingress>=startup_tail)))poststartup_debt=true;
+            const auto park_ticket=decoder_waiting.load()?decoder_arrivals.load():0;
             if(have_previous) {
                 std::size_t crossings=0;
                 for(const auto& window:windows) {
@@ -995,11 +1032,75 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
                         window.cleared=true;
                 }
             }
+            if(held) {
+                for(auto& window:windows) {
+                    auto& h=window.hold;
+                    if(h.released&&!h.drained&&now.ingress<window.right&&now.ingress>h.release.ingress&&
+                       now.recorded==h.release.recorded&&now.nulls>h.release.nulls&&now.pcm==0&&
+                       now.frontier>h.release.frontier&&now.queued+now.decoding==0&&now.backlog==0) {
+                        h.drained=true;h.drain=now;
+                    }
+                }
+                if(active_hold) {
+                    auto& window=windows[*active_hold];auto& h=window.hold;
+                    // Reserve two media seconds before the next required window;
+                    // a missed bound fails this fixture, rather than extending it.
+                    check(!burst_on||now.ingress+2ULL*rate<h.next_guard,
+                          "paced held decoder reached the next guarded window before release");
+                    if(park_ticket&&!h.parked) {
+                        h.parked=true;h.first_park=now;h.park_enter_ns=decoder_park_ns.load();
+                    }
+                    const auto reserve=burst_on?4ULL*rate:2ULL*rate;
+                    if(h.parked&&!h.pcm_loaded&&now.pcm>=reserve&&now.backlog>=double(reserve)/rate&&now.oldest>=.020) {
+                        h.pcm_loaded=true;h.pcm_debt=now;
+                    }
+                    // A ReplayClock call can precede proof publication. Do not
+                    // infer permission from a calendar or from old null totals:
+                    // fresh dated callbacks must omit input while this exact
+                    // ticket is parked, with real PCM still queued and unchanged.
+                    if(burst_on&&!h.proof&&h.pcm_loaded&&have_previous&&park_ticket&&
+                       park_ticket==previous_park_ticket&&previous.ingress>=window.left&&now.ingress<window.right&&
+                       now.nulls>previous.nulls&&now.recorded==previous.recorded&&
+                       now.frontier==previous.frontier&&now.pcm==previous.pcm&&now.pcm>=2ULL*rate) {
+                        h.proof=true;h.proof_ticket=park_ticket;h.proof_before=previous;h.proof_after=now;
+                        h.proof_park_enter_ns=decoder_park_ns.load();
+                    }
+                    if(h.pcm_loaded&&material&&now.pcm>=2ULL*rate&&(!burst_on||h.proof))h.material=true;
+                    const bool aged=h.parked&&now.after_ns>=h.first_park.after_ns+40000000ULL;
+                    const bool proven_hold=!burst_on||(h.proof&&window.material&&
+                        park_ticket==h.proof_ticket&&now.recorded==h.proof_after.recorded&&
+                        now.after_ns>=h.proof_after.after_ns+40000000ULL);
+                    if(aged&&proven_hold&&h.material&&now.pcm>=2ULL*rate) {
+                        h.released=true;h.release=now;h.release_ns=elapsed_ns(Steady::now());decoder_armed=false;
+                        active_hold.reset();
+                    } else if(burst_on&&!h.proof&&aged&&park_ticket&&now.pcm>=4ULL*rate) {
+                        // At most eight clock calls can commit eight 16-sample
+                        // blocks. A four-second PCM reserve leaves at least
+                        // three seconds while the next prospective proof is
+                        // published. Capture continues at its original pace.
+                        decoder_permits=park_ticket+7;
+                    }
+                } else if(!decoder_waiting.load()&&!observed.complete&&observed.visible()) {
+                    for(std::size_t i=0;i<windows.size();++i) {
+                        auto& window=windows[i];auto& h=window.hold;
+                        const bool after_startup=burst_on?tail_bounded&&startup_tail&&
+                            h.arm_at>=startup_tail&&now.frontier>=startup_tail:
+                            first_visible_ingress&&now.frontier>=first_visible_ingress&&
+                            h.arm_at>=first_visible_ingress+symbol;
+                        if(!h.attempted&&after_startup&&now.ingress>=h.arm_at&&
+                           now.ingress+2ULL*rate<(burst_on?window.left:h.next_guard)) {
+                            h.attempted=true;h.arm=now;active_hold=i;
+                            decoder_permits=decoder_arrivals.load();decoder_armed=true;break;
+                        }
+                    }
+                }
+            }
+            previous_park_ticket=park_ticket;
             previous=now;have_previous=true;
             check(!capture.pacing_aborted.load(),"paced producer stopped: deadline/callback failure; input truncated");
             if(capture.delivered>=capture.pcm.size()&&now.ingress==capture.pcm.size()&&
                now.frontier==now.ingress&&(observed.complete||diagnostic_follow)) {finished=true;break;}
-            std::this_thread::sleep_for(5ms);
+            std::this_thread::sleep_for(held?1ms:5ms);
         }
         check(finished,"paced fixture reached its 570-second deadline before full input, physical END and drain");
         check(final.queued+final.decoding==0&&final.pcm==0&&final.backlog==0,"paced final input did not drain");
@@ -1010,6 +1111,7 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
     } catch(const std::exception& e){failure=e.what();}
       catch(...){failure="unknown paced fixture exception";}
     // Stop and destruction happen before evidence is emitted; retain a prior test failure.
+    decoder_open=true;
     try {if(session){session->stop();session.reset();}}
     catch(const std::exception& e){cleanup_error=e.what();}
     catch(...){cleanup_error="unknown cleanup exception";}
@@ -1021,12 +1123,19 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
         capture.delivered==capture.pcm.size()&&capture.pacing_callbacks.load()>1&&
         capture.pacing_max_lateness_ns.load()<=20000000ULL;
     if(!valid&&failure.empty())failure="paced producer did not deliver complete input at a valid fixed cadence";
-    const auto qualifies=[](const PacedWindow& w){return w.start_valid&&w.end_valid&&w.material&&w.cleared&&
+    const auto qualifies=[&](const PacedWindow& w){return w.start_valid&&w.end_valid&&w.material&&w.cleared&&
         w.end_before.queued+w.end_before.decoding==0&&w.end_before.backlog==0&&
-        w.end_before.recorded==w.debt.recorded&&w.end_before.nulls>w.debt.nulls;};
+        w.end_before.recorded==w.debt.recorded&&w.end_before.nulls>w.debt.nulls&&
+        (!held||(w.hold.proof&&w.hold.pcm_loaded&&w.hold.material&&w.hold.released&&w.hold.drained&&
+                  w.hold.proof_after.pcm>=2ULL*rate&&w.hold.release.pcm>=2ULL*rate));};
     std::size_t cleared=0;for(const auto& window:windows)cleared+=qualifies(window);
+    std::size_t held_released=0;for(const auto& window:windows)held_released+=window.hold.released;
+    if(held&&failure.empty()&&((burst_on&&cleared<3)||(!burst_on&&held_released<3)))
+        failure=burst_on?"paced held On did not demonstrate three actual poststartup PCM gap drains":
+                         "paced held Off did not complete three material PCM holds";
     const bool functional=failure.empty();
     const char* classification=!functional||!valid?"no_demonstrated_rescue":
+        held&&!burst_on?"control_no_rescue_claim":
         burst_on&&cleared>=3?"observed":!material_seen?"unchallenged":"no_demonstrated_rescue";
     const auto cpu_end=std::clock();
     std::cout<<"PACED_BURST_JSON {\"diagnostic_follow\":"<<(diagnostic_follow?"true":"false")
@@ -1078,6 +1187,8 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
         <<",\"startup_material_debt\":"<<(startup_debt?"true":"false")
         <<",\"poststartup_material_debt\":"<<(poststartup_debt?"true":"false")
         <<",\"material_min_pcm_seconds\":2,\"material_min_oldest_wall_seconds\":0.020,\"material_persistence_ns\":10000000"
+        <<",\"decoder_hold_enabled\":"<<(held?"true":"false")<<",\"decoder_hold_released\":"<<held_released
+        <<",\"decoder_hold_min_wall_ns\":40000000,\"decoder_hold_pcm_reserve_seconds\":"<<(burst_on?4:2)
         <<",\"cleared_poststartup_gaps\":"<<cleared<<",\"windows\":[";
     const auto sample_json=[](const PacedSample& s) {
         std::cout<<"{\"ingress\":"<<s.ingress<<",\"frontier\":"<<s.frontier<<",\"nulls\":"<<s.nulls
@@ -1094,6 +1205,23 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
             <<",\"start_before\":";sample_json(w.start_before);std::cout<<",\"start_after\":";sample_json(w.start_after);
         std::cout<<",\"end_before\":";sample_json(w.end_before);std::cout<<",\"end_after\":";sample_json(w.end_after);
         std::cout<<",\"quiet_debt\":";sample_json(w.debt);std::cout<<'}';
+    }
+    std::cout<<"],\"decoder_holds\":[";
+    bool first_hold=true;
+    for(std::size_t i=0;i<windows.size();++i) {
+        const auto& h=windows[i].hold;if(!h.attempted)continue;
+        if(!first_hold)std::cout<<',';first_hold=false;
+        std::cout<<"{\"index\":"<<i<<",\"arm_at\":"<<h.arm_at<<",\"next_guard\":"<<h.next_guard
+            <<",\"phase\":"<<paced_json_string(h.drained?"drained":h.released?"released":h.proof?"holding_proven_quiet":
+                h.pcm_loaded?(burst_on?"stepping_to_proof":"holding_control_pcm"):h.parked?"loading_pcm":"awaiting_decoder")
+            <<",\"park_enter_ns\":"<<h.park_enter_ns<<",\"proof_park_enter_ns\":"<<h.proof_park_enter_ns<<",\"release_ns\":"<<h.release_ns
+            <<",\"parked\":"<<(h.parked?"true":"false")<<",\"pcm_loaded\":"<<(h.pcm_loaded?"true":"false")
+            <<",\"proof\":"<<(h.proof?"true":"false")<<",\"proof_ticket\":"<<h.proof_ticket
+            <<",\"material\":"<<(h.material?"true":"false")<<",\"released\":"<<(h.released?"true":"false")
+            <<",\"drained\":"<<(h.drained?"true":"false")<<",\"arm\":";sample_json(h.arm);
+        std::cout<<",\"first_park\":";sample_json(h.first_park);std::cout<<",\"pcm_debt\":";sample_json(h.pcm_debt);
+        std::cout<<",\"proof_before\":";sample_json(h.proof_before);std::cout<<",\"proof_after\":";sample_json(h.proof_after);
+        std::cout<<",\"release\":";sample_json(h.release);std::cout<<",\"drain\":";sample_json(h.drain);std::cout<<'}';
     }
     std::cout<<"]}\n";
     check(functional,"paced diagnostic failed: "+failure+"; cleanup: "+cleanup_error);
@@ -1243,7 +1371,9 @@ int main(int argc,char** argv) {
                 check(argument=="--timestamps" || argument=="--simulation" || argument=="--private" ||
                       argument=="--early" || argument=="--guard-contradiction" || argument=="--public" || argument=="--amplitude" ||
                       argument=="--paced-plain-off" || argument=="--paced-plain-on" ||
-                      argument=="--paced-keyed-off" || argument=="--paced-keyed-on" || argument=="--paced-keyed-on-follow",
+                      argument=="--paced-keyed-off" || argument=="--paced-keyed-on" || argument=="--paced-keyed-on-follow" ||
+                      argument=="--paced-held-plain-off" || argument=="--paced-held-plain-on" ||
+                      argument=="--paced-held-keyed-off" || argument=="--paced-held-keyed-on",
                       "unknown Burst fixture option");
                 selector=argument;
             }
@@ -1263,6 +1393,10 @@ int main(int argc,char** argv) {
         if(selector=="--paced-plain-on") {paced_burst_case(selector,false,true);return 0;}
         if(selector=="--paced-keyed-off") {paced_burst_case(selector,true,false);return 0;}
         if(selector=="--paced-keyed-on") {paced_burst_case(selector,true,true);return 0;}
+        if(selector=="--paced-held-plain-off") {paced_burst_case(selector,false,false,false,true);return 0;}
+        if(selector=="--paced-held-plain-on") {paced_burst_case(selector,false,true,false,true);return 0;}
+        if(selector=="--paced-held-keyed-off") {paced_burst_case(selector,true,false,false,true);return 0;}
+        if(selector=="--paced-held-keyed-on") {paced_burst_case(selector,true,true,false,true);return 0;}
         // Observe the complete input after recording every original reception
         // violation; this selector remains failing diagnostic evidence, never a pass.
         if(selector=="--paced-keyed-on-follow") {paced_burst_case(selector,true,true,true);return 0;}

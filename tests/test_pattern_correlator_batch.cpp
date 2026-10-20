@@ -648,7 +648,7 @@ void temporal_support_tracks_observed_distribution() {
         CorrelationFit whole;
         for(std::uint64_t sample=0;sample<total;++sample) {
             if(sample==skip && skip)continue;
-            support.advance(sample,8,chip,[](unsigned part){return drift_boundary(part,total,8);});
+            support.advance(sample,8,chip,[&](unsigned part){return drift_boundary(part,total,8);});
             const auto angle=2*std::numbers::pi*static_cast<double>(sample%4)/4;
             const auto c=std::cos(angle),s=std::sin(angle);
             const auto phase=turn_quarters?static_cast<double>(sample/(2*width))*std::numbers::pi/2:0.;
