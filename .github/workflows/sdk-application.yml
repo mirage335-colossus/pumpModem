@@ -6,7 +6,7 @@ on:
       scope:
         description: 'Run one SDK scope or the focused FLTK Live validation without repeating other producers and consumers'
         type: choice
-        options: [tests, packages, frontends, web, live, sched-hop-diagnostic, gui-core-diagnostic]
+        options: [tests, packages, frontends, web, live, sched-hop-diagnostic, gui-core-diagnostic, binary-capture-diagnostic]
         default: tests
       backend:
         type: choice
@@ -42,6 +42,7 @@ permissions:
 
 jobs:
   application:
+    if: inputs.scope != 'binary-capture-diagnostic'
     name: SDK ${{ inputs.scope }} / ${{ inputs.backend }} / ${{ inputs.image }}
     runs-on: ${{ inputs.linux_runner }}
     container: ${{ inputs.image }}
@@ -376,3 +377,7 @@ jobs:
             fi
             echo 'The complete SDK workflow requires both source scopes, both package scopes, the independent frontend and web scopes, both Wasm scopes and every copied-runtime check; a partial scope is not full qualification.'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  binary-capture-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'binary-capture-diagnostic'
+    uses: ./.github/workflows/sdk-rev-smoke-capture.yml

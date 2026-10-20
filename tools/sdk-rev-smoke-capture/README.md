@@ -1,0 +1,9 @@
+# SDK Rev binary boundary diagnostic
+
+Manual-only `sdk-application.yml` scope `binary-capture-diagnostic` calls the reusable SDK Rev capture workflow on a standard Ubuntu 24.04 runner. It pins production base `42d7a0cb82c027f906555c39adccb7ec6fa91f21`, the failing run's published SDK manifest, and the sole diagnostic GUI smoke postimage. Ordinary SDK scopes are unchanged.
+
+The overlay only collects bounded observations before the raw32-bit binary transmit and at the first eligible post-replay poll. Existing actions, assertions and deadlines remain byte-equivalent. Pre-TX data stays in memory until the second boundary; JSON records distinguish current-poll receiver events from retained GUI rows, optional copy values, missing/superseded state and actual TX trace bits. Timings label process CPU separately from monotonic wall time. They do not establish uninstrumented overhead or thread CPU attribution.
+
+The copied TGZ command retains the original isolated runtime environment, path containing spaces and 600-second smoke allowance. At most two sequential independent synthetic fixtures run, stopping at the first failure. This is a state-capture experiment, not a matched timing comparison or qualification. The failed original key/PCM are unavailable; newly generated keys and full verbose trace closure are retained with binary/archive/source hashes. No real user key is involved. No source waveform PCM is retained by this diagnostic; a complete waveform replay remains a potential later measurement if required.
+
+Trace readback accepts out-of-order concurrent enqueue only when the unique sequence set is contiguous and its footer plus external flush/close seal are complete. Exactly two complete typed boundary records and an emission metric are required. Missing/truncated captures are inconclusive and cannot justify a production patch. A smoke assertion remains fatal independently of capture validity. Large SDK/build trees are excluded from evidence.
