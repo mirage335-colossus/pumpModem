@@ -1722,7 +1722,7 @@ jobs:
               'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
           }
           (report / 'inputs.json').write_text(json.dumps(inputs, indent=2) + '\n')
-          selectors = ('--paced-plain-off', '--paced-plain-on', '--paced-keyed-off', '--paced-keyed-on', '--paced-keyed-on')
+          selectors = ('--paced-plain-off', '--paced-plain-on', '--paced-keyed-off', '--paced-keyed-on', '--paced-keyed-on-follow')
           results = []
           for index, selector in enumerate(selectors, 1):
               stem = f'{index:02d}-{selector[2:]}'
@@ -1873,7 +1873,7 @@ jobs:
           (report / 'results.json').write_text(json.dumps(manifest, indent=2) + '\n')
           summary_path = pathlib.Path(os.environ['GITHUB_STEP_SUMMARY'])
           with summary_path.open('a', encoding='utf-8') as stream:
-              stream.write('Paced Symbol Burst backlog diagnostics (four baseline processes, then keyed-On selective trace):\n\n')
+              stream.write('Paced Symbol Burst backlog diagnostics (four baseline processes, then keyed-On full-input diagnostic trace):\n\n')
               for row in results:
                   value = row['summary'] or {}
                   stream.write(f"- `{row['selector']}`: exit={row['exit_code']}, timeout={row['timed_out']}, "

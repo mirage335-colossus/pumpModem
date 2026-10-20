@@ -8691,6 +8691,34 @@ struct PatternCorrelator::Impl {
         // An unadmitted prefix cannot borrow that later symbol's confidence.
         auto reliable=can_start && presence && e.score>=search.retain_score && e.score-e.alternative_score>=1 &&
             (group_count==1 || standalone);
+        // Opt-in, pre-mutation fit census. Admission/publish below can clear a
+        // lane, so inspecting its fits from the later decision event is stale.
+        if(burst && whole_symbol && standalone)audio::trace::record("symbol_burst_fit",[&](auto& f) {
+            f.add("epoch",config.stream_epoch);f.add("keyed",config.data_key.has_value());
+            f.add("symbol_samples",code.symbol_samples());f.add("chip_samples",code.chip_samples());
+            f.add("hypothesis",hypothesis);f.add("group",selected);f.add("index",h.index);
+            f.add("origin",h.origin);f.add("rate",h.rate);f.add("begin",e.first_sample);f.add("end",end);
+            f.add("frequency_hz",e.frequency_hz);f.add("stream_phase_samples",config.stream_phase_samples);
+            f.add("bit",e.bit);f.add("score",e.score);f.add("alternative_score",e.alternative_score);
+            f.add("threshold",threshold());f.add("retain_reliable",reliable);f.add("admitted_before",h.admitted);
+            f.add("symbol_support",symbol_support);f.add("cumulative_support_before",h.sum_support);
+            f.add("drift_sections",drift_sections);f.add("differential_window",differential_window);
+            f.add("outer_presence_active",e.outer_presence_active);f.add("outer_presence_score",e.outer_presence_score);
+            const auto add_fit=[&](const auto& fit,const char* count,const char* energy,const char* explained,
+                    const char* score,const char* cc,const char* ss,const char* cs) {
+                f.add(count,fit.count);f.add(energy,fit.energy);f.add(explained,fit.explained());
+                f.add(score,fit.score());f.add(cc,fit.cc);f.add(ss,fit.ss);f.add(cs,fit.cs);
+            };
+            const auto& pair=fits(h,hypothesis,selected);
+            add_fit(pair[0],"fit0_count","fit0_energy","fit0_explained","fit0_score","fit0_cc","fit0_ss","fit0_cs");
+            add_fit(pair[1],"fit1_count","fit1_energy","fit1_explained","fit1_score","fit1_cc","fit1_ss","fit1_cs");
+            f.add("fit0_xc",pair[0].xc);f.add("fit0_xs",pair[0].xs);
+            f.add("fit1_xc",pair[1].xc);f.add("fit1_xs",pair[1].xs);
+            if(drift_sections>1)f.add("selected_drift_score",
+                section_fits(hypothesis,selected)[e.bit].score(pair[e.bit],drift_sections,code.chip_samples()));
+            if(differential_window)f.add("selected_differential_score",
+                local_fits(hypothesis,selected)[e.bit].score(code.symbol_samples(),differential_window));
+        });
         const auto can_preserve=h.admitted;
         auto preserve_gap=can_preserve &&
             (h.pending_gaps || !reliable || (standalone && pending_count && next_chain<threshold()));

@@ -688,7 +688,15 @@ struct PacedObservation {
     std::map<std::uint64_t,live::SignalUpdate> rows;
     std::map<std::uint64_t,std::uint64_t> revisions;
     std::map<std::string,transfer::Received> contents;
-    bool complete=false;
+    bool complete=false,diagnostic_follow=false;
+    std::size_t observation_failures=0;
+    std::string first_observation_failure;
+    void require(bool okay,const std::string& message) {
+        if(okay)return;
+        if(!diagnostic_follow)check(false,message);
+        ++observation_failures;
+        if(first_observation_failure.empty())first_observation_failure=message;
+    }
     void inspect(const live::Snapshot& state,const CaptureScript& capture,bool keyed) {
         check(state.error.empty()&&!state.receiver_health.failed(),"paced receiver health: "+state.error);
         check(state.dsp_buffered_bytes<=64*1024*1024,"paced workspace exceeds 64 MiB");
@@ -729,11 +737,11 @@ struct PacedObservation {
                 detail<<"] superseded=[";count=0;for(const auto id:signal.superseded_ids) {
                     if(count++==64){detail<<"truncated";break;}detail<<id<<',';
                 }
-                detail<<']';check(false,detail.str());
+                detail<<']';require(false,detail.str());
             }
             const auto previous=rows.find(signal.id);
             if(previous!=rows.end()) {
-                check(previous->second.revision!=signal.revision||
+                require(previous->second.revision!=signal.revision||
                       previous->second.received_bits<=signal.received_bits,"paced same-revision progress regressed");
                 if(previous->second.revision<signal.revision)contents.erase(previous->second.reception_id);
             }
@@ -745,38 +753,39 @@ struct PacedObservation {
                 rows.erase(id);
             }
             rows[signal.id]=signal;ids.insert(signal.id);
-            if(!keyed)check(ids.size()==1,"paced plain reception changed its pending identity");
+            if(!keyed)require(ids.size()==1,"paced plain reception changed its pending identity");
             if(signal.complete&&(!keyed||signal.received_bits==capture.bits.size())) {
-                check(ingress>=capture.first_absent_end&&signal.received_bits==capture.bits.size(),
+                require(ingress>=capture.first_absent_end&&signal.received_bits==capture.bits.size(),
                       "paced full reception ended before complete physical absence");
                 complete=true;
             }
         }
         for(const auto& result:state.received) {
-            check(result.stream_complete&&result.observed_bits&&result.observed_bits<=capture.bits.size()&&
+            require(result.stream_complete&&result.observed_bits&&result.observed_bits<=capture.bits.size()&&
                   !result.missing_symbols,"paced content is incomplete or has missing symbols");
             if(!keyed||result.observed_bits==capture.bits.size())
-                check(ingress>=capture.first_absent_end&&result.observed_bits==capture.bits.size(),
+                require(ingress>=capture.first_absent_end&&result.observed_bits==capture.bits.size(),
                       "paced full content preceded physical absence");
             Bytes expected;for(const auto bit:capture.bits.substr(0,result.observed_bits))expected.push_back(bit-'0');
-            check(result.raw_bits==expected,"paced interpreted content changed the raw bits");
+            require(result.raw_bits==expected,"paced interpreted content changed the raw bits");
             std::string id;constexpr char digits[]="0123456789abcdef";
             for(const auto byte:result.content.message.local_id){id+=digits[byte>>4];id+=digits[byte&15];}
             contents[id]=result;
         }
     }
     bool visible()const{return !rows.empty();}
-    void finish(const CaptureScript& capture)const {
-        check(complete&&!ids.empty()&&rows.size()==1&&rows.begin()->first==*ids.begin(),
+    void finish(const CaptureScript& capture) {
+        require(complete&&!ids.empty()&&rows.size()==1&&rows.begin()->first==*ids.begin(),
               "paced final arbitration did not retain the earliest single lineage");
+        if(rows.empty())return; // The strict mode already threw; follow mode records the failed final invariant.
         const auto& row=rows.begin()->second;
-        check(row.complete&&row.received_bits==capture.bits.size()&&!row.missing_symbols&&
+        require(row.complete&&row.received_bits==capture.bits.size()&&!row.missing_symbols&&
               (row.raw_bits.empty()?row.text:row.raw_bits)==capture.bits,"paced final row is not the exact complete source");
-        check(contents.size()==(row.reception_id.empty()?0U:1U),"paced retained superseded content");
+        require(contents.size()==(row.reception_id.empty()?0U:1U),"paced retained superseded content");
         if(!contents.empty()) {
             Bytes expected;for(const auto bit:capture.bits)expected.push_back(bit-'0');
             const auto& [id,result]=*contents.begin();
-            check(id==row.reception_id&&result.stream_complete&&result.raw_bits==expected&&
+            require(id==row.reception_id&&result.stream_complete&&result.raw_bits==expected&&
                   result.observed_bits==capture.bits.size(),"paced final content disagrees with its row");
         }
     }
@@ -856,14 +865,14 @@ struct PacedWindow {
     bool start=false,end=false,start_valid=false,end_valid=false,material=false,cleared=false;
     PacedSample start_before,start_after,end_before,end_after,debt;
 };
-void paced_burst_case(std::string_view selector,bool keyed,bool burst_on) {
+void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool diagnostic_follow=false) {
     using Steady=std::chrono::steady_clock;
     const auto wall_start=Steady::now(),deadline=wall_start+570s;
     const auto cpu_start=std::clock();
     CaptureScript capture;
     struct Reset {~Reset(){capture_script=nullptr;}} reset;
     std::unique_ptr<live::Session> session;
-    PacedObservation observed;
+    PacedObservation observed;observed.diagnostic_follow=diagnostic_follow;
     std::array<PacedWindow,16> windows{};
     PacedSample previous,final;
     live::ReceiverHealth final_health;
@@ -989,7 +998,7 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on) {
             previous=now;have_previous=true;
             check(!capture.pacing_aborted.load(),"paced producer stopped: deadline/callback failure; input truncated");
             if(capture.delivered>=capture.pcm.size()&&now.ingress==capture.pcm.size()&&
-               now.frontier==now.ingress&&observed.complete) {finished=true;break;}
+               now.frontier==now.ingress&&(observed.complete||diagnostic_follow)) {finished=true;break;}
             std::this_thread::sleep_for(5ms);
         }
         check(finished,"paced fixture reached its 570-second deadline before full input, physical END and drain");
@@ -997,6 +1006,7 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on) {
         // Unavailable startup-tail evidence makes rescue inconclusive; it is
         // distinct from failure of exact reception/END for the complete input.
         observed.finish(capture);
+        if(observed.observation_failures)failure=observed.first_observation_failure;
     } catch(const std::exception& e){failure=e.what();}
       catch(...){failure="unknown paced fixture exception";}
     // Stop and destruction happen before evidence is emitted; retain a prior test failure.
@@ -1019,7 +1029,17 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on) {
     const char* classification=!functional||!valid?"no_demonstrated_rescue":
         burst_on&&cleared>=3?"observed":!material_seen?"unchallenged":"no_demonstrated_rescue";
     const auto cpu_end=std::clock();
-    std::cout<<"PACED_BURST_JSON {\"selector\":"<<paced_json_string(selector)
+    std::cout<<"PACED_BURST_JSON {\"diagnostic_follow\":"<<(diagnostic_follow?"true":"false")
+        <<",\"observation_failures\":"<<observed.observation_failures
+        <<",\"final_rows\":[";
+    bool first_row=true;
+    for(const auto& [id,row]:observed.rows) {
+        if(!first_row)std::cout<<',';first_row=false;
+        std::cout<<"{\"id\":"<<id<<",\"revision\":"<<row.revision<<",\"received_bits\":"<<row.received_bits
+            <<",\"bits\":"<<paced_json_string(row.raw_bits.empty()?row.text:row.raw_bits)
+            <<",\"missing\":"<<row.missing_symbols<<",\"complete\":"<<(row.complete?"true":"false")<<'}';
+    }
+    std::cout<<"],\"selector\":"<<paced_json_string(selector)
         <<",\"configuration\":{\"keyed\":"<<(keyed?"true":"false")<<",\"calendar\":\""<<(burst_on?"N10J0":"N0J0")
         <<"\",\"sample_rate\":128,\"integration_seconds\":8,\"search_seconds\":6,\"workspace_bytes\":67108864,\"pace_factor\":64,\"callback_samples\":16,\"receive_keys\":"<<(keyed?2:0)
         <<",\"automatic_profiles\":"<<(keyed?"true":"false")<<",\"receiver_strategy\":\"existing_only\"}"
@@ -1223,7 +1243,7 @@ int main(int argc,char** argv) {
                 check(argument=="--timestamps" || argument=="--simulation" || argument=="--private" ||
                       argument=="--early" || argument=="--guard-contradiction" || argument=="--public" || argument=="--amplitude" ||
                       argument=="--paced-plain-off" || argument=="--paced-plain-on" ||
-                      argument=="--paced-keyed-off" || argument=="--paced-keyed-on",
+                      argument=="--paced-keyed-off" || argument=="--paced-keyed-on" || argument=="--paced-keyed-on-follow",
                       "unknown Burst fixture option");
                 selector=argument;
             }
@@ -1234,7 +1254,7 @@ int main(int argc,char** argv) {
                 +[](const char* event) noexcept {
                     const std::string_view name=event;
                     return name=="trace_begin" || name=="receiver_selection" ||
-                        name=="receiver_bank_admitted" || name=="receiver_signal_commit";
+                        name=="receiver_bank_admitted" || name=="receiver_signal_commit" || name=="symbol_burst_fit";
                 });
             else trace.emplace(*trace_path);
         }
@@ -1242,6 +1262,9 @@ int main(int argc,char** argv) {
         if(selector=="--paced-plain-on") {paced_burst_case(selector,false,true);return 0;}
         if(selector=="--paced-keyed-off") {paced_burst_case(selector,true,false);return 0;}
         if(selector=="--paced-keyed-on") {paced_burst_case(selector,true,true);return 0;}
+        // Observe the complete input after recording every original reception
+        // violation; this selector remains failing diagnostic evidence, never a pass.
+        if(selector=="--paced-keyed-on-follow") {paced_burst_case(selector,true,true,true);return 0;}
         timestamp_certificates();
         if(selector=="--timestamps")return 0;
         if(selector=="--simulation") {simulation_case();return 0;}
