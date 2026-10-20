@@ -36,6 +36,10 @@ on:
         description: 'Run paced Symbol Burst backlog diagnostics, including four receiver-held cases, after the original qualification'
         type: boolean
         default: false
+      paced_callback_probe:
+        description: 'Run matched held keyed-On callback timing probes; diagnostic only'
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       linux_runner:
@@ -64,6 +68,9 @@ on:
         default: false
       paced_backlog:
         description: 'Run paced Symbol Burst backlog diagnostics, including four receiver-held cases, after the original qualification'
+        type: boolean
+        default: false
+      paced_callback_probe:
         type: boolean
         default: false
 
@@ -145,6 +152,11 @@ jobs:
         if: always() && inputs.paced_backlog && (github.event_name != 'workflow_dispatch' || inputs.scope != 'symbol-burst-live' || inputs.build_type != 'Debug' || inputs.linux_runner != 'ubuntu-24.04')
         run: |
           echo '::error::Paced Symbol Burst diagnostics require manual symbol-burst-live on Debug and ubuntu-24.04.'
+          exit 2
+      - name: Restrict paced callback timing probes
+        if: always() && inputs.paced_callback_probe && (!inputs.paced_backlog || github.event_name != 'workflow_dispatch' || inputs.scope != 'symbol-burst-live' || inputs.build_type != 'Debug' || inputs.linux_runner != 'ubuntu-24.04')
+        run: |
+          echo '::error::Callback probes require manual paced symbol-burst-live on Debug and ubuntu-24.04.'
           exit 2
       - name: Validate manual package configuration
         if: github.event_name == 'workflow_dispatch' && inputs.scope == 'package' && inputs.build_type != 'Release'
@@ -1916,7 +1928,7 @@ jobs:
           print('All three temporal support component regressions passed; strict original GUI serial and parallel checks follow.')
           PY_TEMPORAL_SUPPORT
       - name: Run focused preparation or GUI core diagnostics
-        if: inputs.scope == 'preparation-diagnostic' || inputs.scope == 'gui-core-diagnostic' || (inputs.scope == 'symbol-burst-live' && inputs.paced_backlog)
+        if: (success() && (inputs.scope == 'preparation-diagnostic' || inputs.scope == 'gui-core-diagnostic')) || (inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !cancelled() && steps.build_prerequisites.outcome == 'success')
         run: |
           set -euo pipefail
           report="$PWD/build/core-diagnostics"
@@ -2015,6 +2027,96 @@ jobs:
             cp build/Testing/Temporary/LastTest.log "$report/gui-parallel-LastTest.log"
             echo 'Focused GUI core diagnostic completed serially and in parallel. This is not full native matrix qualification.' >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Capture matched held keyed-On callback timing
+        if: inputs.paced_callback_probe && inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !cancelled() && steps.build_prerequisites.outcome == 'success'
+        timeout-minutes: 45
+        run: |
+          python3 -B - "$PWD" <<'PY_CALLBACK_PROBE'
+          import datetime, hashlib, json, os, pathlib, signal, subprocess, sys, time
+
+          root = pathlib.Path(sys.argv[1]).resolve()
+          parent = root / 'build/symbol-burst-live-qualification'
+          report = parent / 'callback-probe'
+          report.mkdir(parents=True, exist_ok=True)
+          binary = root / 'build/test_symbol_burst_live'
+          identity = {
+              'source_commit': (parent / 'source.txt').read_text().strip(),
+              'source_tree': (parent / 'source-tree.txt').read_text().strip(),
+              'run_id': os.environ['GITHUB_RUN_ID'], 'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+              'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
+              'test_source_sha256': hashlib.sha256((root / 'tests/test_symbol_burst_live.cpp').read_bytes()).hexdigest(),
+              'probe_source_sha256': hashlib.sha256((root / 'tests/paced_capture_probe.hpp').read_bytes()).hexdigest(),
+              'cache_sha256': hashlib.sha256((root / 'build/CMakeCache.txt').read_bytes()).hexdigest(),
+              'comparison': 'two sequential matched baseline/probe pairs; same binary, selector, PCM and original pacing bound',
+              'qualification': False,
+          }
+          results = []
+          for index, enabled in enumerate((False, True, False, True), 1):
+              stem = f'{index:02d}-' + ('probe' if enabled else 'baseline')
+              command = [str(binary), '--paced-held-keyed-on']
+              if enabled:
+                  command.append('--pacing-probe')
+              out, err = report / (stem + '.stdout.log'), report / (stem + '.stderr.log')
+              started = datetime.datetime.now(datetime.timezone.utc).isoformat()
+              start = time.monotonic()
+              process, code, timed_out, launch_error = None, None, False, None
+              with out.open('wb') as stdout, err.open('wb') as stderr:
+                  try:
+                      process = subprocess.Popen(command, cwd=root, stdout=stdout, stderr=stderr, start_new_session=True)
+                      try:
+                          code = process.wait(timeout=600)
+                      except subprocess.TimeoutExpired:
+                          timed_out = True
+                          os.killpg(process.pid, signal.SIGTERM)
+                          try:
+                              code = process.wait(timeout=10)
+                          except subprocess.TimeoutExpired:
+                              os.killpg(process.pid, signal.SIGKILL)
+                              code = process.wait(timeout=5)
+                  except Exception as error:
+                      launch_error = repr(error)
+                  finally:
+                      if process is not None:
+                          try:
+                              os.killpg(process.pid, signal.SIGKILL)
+                          except ProcessLookupError:
+                              pass
+                          if process.poll() is None:
+                              code = process.wait(timeout=5)
+              summaries, parse_errors = [], []
+              for line in out.read_text(errors='replace').splitlines():
+                  prefix = 'PACED_BURST_JSON '
+                  if not line.startswith(prefix):
+                      continue
+                  try:
+                      row = json.loads(line[len(prefix):])
+                      if row.get('selector') == '--paced-held-keyed-on':
+                          summaries.append(row)
+                  except (ValueError, AttributeError) as error:
+                      parse_errors.append(str(error))
+              summary = summaries[0] if len(summaries) == 1 else None
+              result = {'index': index, 'probe_enabled': enabled, 'command': command,
+                        'started_utc': started, 'elapsed_seconds': time.monotonic() - start,
+                        'exit_code': code, 'timed_out': timed_out, 'launch_error': launch_error,
+                        'summary_count': len(summaries), 'parse_errors': parse_errors, 'summary': summary,
+                        'stdout_sha256': hashlib.sha256(out.read_bytes()).hexdigest(),
+                        'stderr_sha256': hashlib.sha256(err.read_bytes()).hexdigest()}
+              (report / (stem + '.json')).write_text(json.dumps(result, indent=2) + '\n')
+              results.append(result)
+          (report / 'results.json').write_text(json.dumps({'identity': identity, 'results': results}, indent=2) + '\n')
+          with pathlib.Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as stream:
+              stream.write('Matched callback captures (diagnostic only; failed and truncated input remains failed):\n\n')
+              for row in results:
+                  value = row['summary'] or {}
+                  stream.write(f"- probe={row['probe_enabled']}, exit={row['exit_code']}, functional={value.get('functional')}, "
+                               f"pacing_valid={value.get('pacing_valid')}, callback_max_ns={value.get('callback_duration_max_ns')}\n")
+              stream.write('\nTwo pairs retain trace-overhead evidence; they are not a stable performance estimate.\n')
+          if any(row['exit_code'] != 0 or row['timed_out'] or row['launch_error'] or row['parse_errors'] or
+                 row['summary_count'] != 1 or row['summary'].get('functional') != 'pass' or
+                 row['summary'].get('pacing_valid') is not True or
+                 row['summary'].get('callback_probe', {}).get('enabled') is not row['probe_enabled'] for row in results):
+              raise SystemExit('FATAL: callback comparison contains a failed or incomplete run; inspect retained timing evidence')
+          PY_CALLBACK_PROBE
       - name: Capture six sequential fixed-bank acquisition partition replays
         if: inputs.scope == 'simulation-acquisition-partition-diagnostic' && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 35

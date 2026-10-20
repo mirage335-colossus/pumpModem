@@ -5,6 +5,7 @@
 #include "../src/audio_trace.hpp"
 #include "../src/sched_capture.hpp"
 #include "cpu_work_budget.hpp"
+#include "paced_capture_probe.hpp"
 
 #include <algorithm>
 #include <array>
@@ -132,6 +133,8 @@ live::Settings settings(bool private_union) {
     return value;
 }
 struct CaptureScript {
+    explicit CaptureScript(bool probe=false):callback_probe(probe){}
+    paced_callback_probe::Probe callback_probe;
     std::vector<float> pcm;
     std::string bits="001";
     std::uint64_t utc_origin_samples=0,first_support=0,first_absent_end=0;
@@ -871,11 +874,11 @@ struct PacedWindow {
     PacedSample start_before,start_after,end_before,end_after,debt;
     PacedHold hold;
 };
-void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool diagnostic_follow=false,bool held=false) {
+void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool diagnostic_follow=false,bool held=false,bool probe=false) {
     using Steady=std::chrono::steady_clock;
     const auto wall_start=Steady::now(),deadline=wall_start+570s;
     const auto cpu_start=std::clock();
-    CaptureScript capture;
+    CaptureScript capture(probe);
     struct Reset {~Reset(){capture_script=nullptr;}} reset;
     const auto main_thread=std::this_thread::get_id();
     std::atomic<bool> decoder_armed{false},decoder_open{false},decoder_waiting{false};
@@ -887,6 +890,8 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
     PacedObservation observed;observed.diagnostic_follow=diagnostic_follow;
     std::array<PacedWindow,16> windows{};
     PacedSample previous,final;
+    std::array<PacedSample,32> slow_snapshots{};
+    std::size_t slow_snapshot_count=0;
     live::ReceiverHealth final_health;
     std::string final_status,final_receiver_error;
     std::uint64_t final_admissions=0,final_retirements=0;
@@ -952,6 +957,15 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
             const bool finite_times=std::isfinite(state.receiver_backlog_seconds)&&std::isfinite(state.receiver_oldest_input_seconds);
             now.backlog=finite_times?state.receiver_backlog_seconds:0;now.oldest=finite_times?state.receiver_oldest_input_seconds:0;
             now.before_ns=elapsed_ns(before);now.after_ns=elapsed_ns(after);final=now;
+            if(probe) {
+                if(slow_snapshot_count<slow_snapshots.size())slow_snapshots[slow_snapshot_count++]=now;
+                else {
+                    const auto least=std::min_element(slow_snapshots.begin(),slow_snapshots.end(),[](const auto& a,const auto& b) {
+                        return a.after_ns-a.before_ns<b.after_ns-b.before_ns;
+                    });
+                    if(now.after_ns-now.before_ns>least->after_ns-least->before_ns)*least=now;
+                }
+            }
             check(finite_times,"paced backlog timing is nonfinite");
             check(now.frontier<=now.ingress&&now.queued+now.decoding==now.ingress-now.frontier,
                   "paced physical queue/frontier reconciliation failed");
@@ -1239,6 +1253,10 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
         std::cout<<",\"proof_before\":";sample_json(h.proof_before);std::cout<<",\"proof_after\":";sample_json(h.proof_after);
         std::cout<<",\"release\":";sample_json(h.release);std::cout<<",\"drain\":";sample_json(h.drain);std::cout<<'}';
     }
+    std::cout<<"],\"callback_probe\":";capture.callback_probe.emit_json(std::cout);
+    std::cout<<",\"snapshot_clock_origin_monotonic_ns\":"<<std::chrono::duration_cast<std::chrono::nanoseconds>(wall_start.time_since_epoch()).count()
+        <<",\"slow_snapshots\":[";
+    for(std::size_t i=0;i<slow_snapshot_count;++i) {if(i)std::cout<<',';sample_json(slow_snapshots[i]);}
     std::cout<<"]}\n";
     check(functional,"paced diagnostic failed: "+failure+"; cleanup: "+cleanup_error);
 }
@@ -1322,17 +1340,22 @@ void capture(std::uint32_t fs,const std::string& selected,const CaptureCallback&
             last_begin=before;
             const auto end=std::min<std::size_t>(script.pcm.size(),first+16);
             bool accepted=false;
+            script.callback_probe.begin(ordinal,first);
             try {
                 const auto utc=(static_cast<long double>(script.utc_origin_samples)+first)/rate;
                 script.now=static_cast<double>(utc);options.capture_timing(dated(utc));
+                script.callback_probe.checkpoint(paced_callback_probe::Probe::Phase::provider_timing);
                 const auto samples=std::span(script.pcm).subspan(first,end-first);
                 if(options.capture_monitor)options.capture_monitor(samples,rate);
+                script.callback_probe.checkpoint(paced_callback_probe::Probe::Phase::monitor);
                 accepted=callback(samples);
                 if(!accepted)script.pacing_abort_reason=2;
             } catch(const std::exception& e) {
                 script.pacing_callback_error=std::string_view(e.what()).substr(0,256);script.pacing_abort_reason=3;
             } catch(...) {script.pacing_callback_error="unknown capture callback exception";script.pacing_abort_reason=3;}
             const auto after=Steady::now();
+            // Keep the original deadline timestamp ahead of probe teardown.
+            script.callback_probe.finish();
             const auto duration=static_cast<std::uint64_t>(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(after-before).count());
             update_max(script.pacing_max_duration_ns,duration);
@@ -1375,10 +1398,13 @@ std::vector<float> record(double,std::uint32_t,const std::string&,std::size_t,st
 int main(int argc,char** argv) {
     try {
         std::string_view selector;
+        bool pacing_probe=false;
         std::optional<std::filesystem::path> trace_path;
         for(int i=1;i<argc;++i) {
             const std::string_view argument=argv[i];
-            if(argument.starts_with("--trace=")) {
+            if(argument=="--pacing-probe") {
+                check(!pacing_probe,"duplicate pacing probe option");pacing_probe=true;
+            } else if(argument.starts_with("--trace=")) {
                 check(!trace_path,"duplicate Burst fixture trace option");
                 trace_path=std::filesystem::path(std::string(argument.substr(8)));
                 check(trace_path->is_absolute(),"Burst fixture trace path must be absolute");
@@ -1394,6 +1420,7 @@ int main(int argc,char** argv) {
                 selector=argument;
             }
         }
+        check(!pacing_probe||selector.starts_with("--paced-"),"pacing probe requires a paced selector");
         std::optional<audio::trace::Scope> trace;
         if(trace_path) {
             if(selector.starts_with("--paced-"))trace.emplace(*trace_path,false,
@@ -1405,17 +1432,17 @@ int main(int argc,char** argv) {
                 });
             else trace.emplace(*trace_path);
         }
-        if(selector=="--paced-plain-off") {paced_burst_case(selector,false,false);return 0;}
-        if(selector=="--paced-plain-on") {paced_burst_case(selector,false,true);return 0;}
-        if(selector=="--paced-keyed-off") {paced_burst_case(selector,true,false);return 0;}
-        if(selector=="--paced-keyed-on") {paced_burst_case(selector,true,true);return 0;}
-        if(selector=="--paced-held-plain-off") {paced_burst_case(selector,false,false,false,true);return 0;}
-        if(selector=="--paced-held-plain-on") {paced_burst_case(selector,false,true,false,true);return 0;}
-        if(selector=="--paced-held-keyed-off") {paced_burst_case(selector,true,false,false,true);return 0;}
-        if(selector=="--paced-held-keyed-on") {paced_burst_case(selector,true,true,false,true);return 0;}
+        if(selector=="--paced-plain-off") {paced_burst_case(selector,false,false,false,false,pacing_probe);return 0;}
+        if(selector=="--paced-plain-on") {paced_burst_case(selector,false,true,false,false,pacing_probe);return 0;}
+        if(selector=="--paced-keyed-off") {paced_burst_case(selector,true,false,false,false,pacing_probe);return 0;}
+        if(selector=="--paced-keyed-on") {paced_burst_case(selector,true,true,false,false,pacing_probe);return 0;}
+        if(selector=="--paced-held-plain-off") {paced_burst_case(selector,false,false,false,true,pacing_probe);return 0;}
+        if(selector=="--paced-held-plain-on") {paced_burst_case(selector,false,true,false,true,pacing_probe);return 0;}
+        if(selector=="--paced-held-keyed-off") {paced_burst_case(selector,true,false,false,true,pacing_probe);return 0;}
+        if(selector=="--paced-held-keyed-on") {paced_burst_case(selector,true,true,false,true,pacing_probe);return 0;}
         // Observe the complete input after recording every original reception
         // violation; this selector remains failing diagnostic evidence, never a pass.
-        if(selector=="--paced-keyed-on-follow") {paced_burst_case(selector,true,true,true);return 0;}
+        if(selector=="--paced-keyed-on-follow") {paced_burst_case(selector,true,true,true,false,pacing_probe);return 0;}
         timestamp_certificates();
         if(selector=="--timestamps")return 0;
         if(selector=="--simulation") {simulation_case();return 0;}
