@@ -159,6 +159,10 @@ public:
     }
 };
 inline StateSlot active;
+inline bool event_enabled(const char* event) noexcept {
+    const auto state=active.load(std::memory_order_acquire);
+    return state && (!state->event_filter || state->event_filter(event));
+}
 inline bool receiver_probe_enabled() noexcept {
     const auto state=active.load(std::memory_order_acquire);
     return state && state->receiver_probe;

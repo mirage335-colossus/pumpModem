@@ -1257,7 +1257,8 @@ struct PatternReceiver::Impl {
         }
     };
     PatternEvidence measure(std::uint64_t start,std::uint64_t index,std::size_t f,std::uint64_t observed_before,
-                            std::span<const Complex> carrier_phases,std::stop_token stop) {
+                            std::span<const Complex> carrier_phases,std::stop_token stop,
+                            const PatternEvidence* trace_expected=nullptr) {
         std::array<Complex,2> dot{},square{};std::array<double,2> norm{};double energy=0;
         SectionFits sections;const auto edges=drift_edges(f);unsigned section=0;
         // Timing refinements of one stream symbol fit the same templates.
@@ -1305,7 +1306,38 @@ struct PatternReceiver::Impl {
         // bins, including the noise-only tail of a faster rate alternative.
         PatternEvidence result{start*bin_samples,(start+length)*bin_samples,index,
             config.carrier_hz+search.frequency_offsets_hz[f],std::max(zero,one),std::min(zero,one),one>zero?1U:0U,active_stream_phase};
-        result.frequency_hypothesis=static_cast<std::uint32_t>(f);return result;
+        result.frequency_hypothesis=static_cast<std::uint32_t>(f);
+        if(trace_expected)audio::trace::record("symbol_burst_fft_fit",[&](auto& fields) {
+            fields.add("stage","selected continuation before track update; trace recomputes cached fit");
+            fields.add("epoch",config.stream_epoch);fields.add("keyed",config.data_key.has_value());
+            fields.add("symbol_samples",code.symbol_samples());fields.add("chip_samples",code.chip_samples());
+            fields.add("sample_origin",search.input_sample_origin);fields.add("index",index);
+            fields.add("begin",result.first_sample);fields.add("end",result.end_sample);
+            fields.add("frequency_hz",result.frequency_hz);fields.add("stream_phase_samples",active_stream_phase);
+            fields.add("frequency_hypothesis",f);fields.add("clock_ratio",clock_ratio(f));
+            fields.add("trials",trials);fields.add("threshold",threshold());
+            fields.add("observed_before",observed_before*bin_samples);fields.add("fft_bins",length);
+            fields.add("skipped_bins",skip);fields.add("bin_samples",bin_samples);
+            fields.add("known_samples",(length-skip)*bin_samples);fields.add("evidence_count",count);
+            fields.add("energy",energy);fields.add("noise_condition",noise_condition);
+            fields.add("real_rank",real_rank);fields.add("sample_fit",sample_fit);
+            fields.add("drift_sections",drift_sections);fields.add("differential_window",differential_window);
+            fields.add("bit",result.bit);fields.add("score",result.score);fields.add("alternative_score",result.alternative_score);
+            fields.add("expected_bit",trace_expected->bit);fields.add("expected_score",trace_expected->score);
+            fields.add("expected_alternative_score",trace_expected->alternative_score);
+            fields.add("recomputed_exact",result.bit==trace_expected->bit && result.score==trace_expected->score &&
+                result.alternative_score==trace_expected->alternative_score);
+            for(unsigned bit=0;bit<2;++bit) {
+                const auto prefix=std::string("fit")+std::to_string(bit)+"_";
+                fields.add((prefix+"dot_real").c_str(),dot[bit].real());fields.add((prefix+"dot_imag").c_str(),dot[bit].imag());
+                fields.add((prefix+"norm").c_str(),norm[bit]);
+                fields.add((prefix+"square_real").c_str(),square[bit].real());fields.add((prefix+"square_imag").c_str(),square[bit].imag());
+                fields.add((prefix+"explained").c_str(),detail::pattern_explained(dot[bit],norm[bit],noise_condition,sample_fit,square[bit]));
+                fields.add((prefix+"coherent_score").c_str(),pattern_evidence(dot[bit],energy,norm[bit],count,noise_condition,real_rank,sample_fit,square[bit]));
+                if(drift_sections>1)fields.add((prefix+"section_explained").c_str(),sections.explained(bit,noise_condition,sample_fit));
+            }
+        });
+        return result;
     }
     std::array<double,2> measure_streamed(PatternCode& pattern,std::uint64_t start,std::uint64_t index,
                                         std::size_t f,std::uint64_t observed_before,
@@ -1686,6 +1718,9 @@ struct PatternReceiver::Impl {
                     });
                     if(duplicate){ended=true;break;}
                 }
+                if(burst_plan && best.score>=threshold() && audio::trace::event_enabled("symbol_burst_fft_fit"))
+                    (void)measure(chosen,track.index,selected_frequency,track.burst.end_sample/bin_samples,
+                        chosen_carriers,stop,&best);
                 double chain_score=best.score;
                 const auto presence=outer_presence_check(best,track.burst.end_sample/bin_samples,stop,&chain_score);
                 remember(best);
@@ -3235,7 +3270,18 @@ std::uint64_t pattern_absence_capture_samples(const Config& config) {
     }
     return eligible;
 }
-PatternReceiver::PatternReceiver(Config c,std::size_t bytes,PatternSearch search):impl_(std::make_unique<Impl>(c,bytes,std::move(search),detail::NativePeakConstruction::claim())){}
+PatternReceiver::PatternReceiver(Config c,std::size_t bytes,PatternSearch search):impl_(std::make_unique<Impl>(c,bytes,std::move(search),detail::NativePeakConstruction::claim())) {
+    audio::trace::record("pattern_receiver_engine",[&](auto& f) {
+        f.add("epoch",impl_->config.stream_epoch);f.add("keyed",impl_->config.data_key.has_value());
+        f.add("sample_origin",impl_->search.input_sample_origin);
+        f.add("symbol_samples",impl_->code.symbol_samples());f.add("chip_samples",impl_->code.chip_samples());
+        f.add("engine",impl_->fallback?"PatternCorrelator fallback":"PatternReceiver FFT");
+        if(!impl_->fallback) {
+            f.add("sample_fit",impl_->sample_fit);f.add("real_rank",impl_->real_rank);
+            f.add("bin_samples",impl_->bin_samples);f.add("noise_condition",impl_->noise_condition);
+        }
+    });
+}
 detail::NativePeakLease::NativePeakLease(detail::NativePeakWorkspace* workspace,PatternReceiver& receiver)
     :NativePeakLease(receiver.impl_->fallback?nullptr:workspace,receiver.impl_->peaks,
                      receiver.impl_->search.candidate_limit) {}
