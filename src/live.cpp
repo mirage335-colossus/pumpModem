@@ -5,6 +5,7 @@
 #include "transfer_pending.hpp"
 #include "live_receiver_layout.hpp"
 #include "live_mutex_probe.hpp"
+#include "live_snapshot_probe.hpp"
 #include "receiver_storage_allocator.hpp"
 #include "native_peak_workspace.hpp"
 #include "native_point_workspace.hpp"
@@ -4860,13 +4861,29 @@ void Session::cancel_transmit() {
     impl_->current.status = impl_->idle_status(); impl_->changed.notify_all();
 }
 Snapshot Session::snapshot() {
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+    snapshot_probe::Observation snapshot_observation;
+#endif
     DATAPUMP_MUTEX_CONTEXT(mutex_context,snapshot);
     std::lock_guard lock(impl_->mutex);
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+    snapshot_observation.acquired(&impl_->mutex);
+    snapshot_observation.census(impl_->recoveries.size(),bool(impl_->active_recovery),impl_->replay.size(),
+        !impl_->selected_transmit_key.empty(),impl_->input.size(),impl_->current.waveform.size(),
+        impl_->current.spectrum_db.size(),impl_->current.constellation.size(),impl_->capture_samples,
+        impl_->current.processed_physical_samples);
+#endif
     impl_->update_simulation_elapsed();
     const auto now = impl_->replay_clock();
     impl_->advance_replay(now);
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+    snapshot_observation.mark(snapshot_probe::Phase::clock);
+#endif
     impl_->publish_recovery_progress();
     impl_->current.recovery_working_bytes=impl_->recovery_bytes();
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+    snapshot_observation.mark(snapshot_probe::Phase::recovery);
+#endif
     impl_->current.transmit_key_lock_seconds=impl_->key_lock_seconds(impl_->settings,
         impl_->settings.transfer.modem,impl_->selected_transmit_key);
     impl_->current.long_transmit_key_lock_seconds=impl_->key_lock_seconds(impl_->settings,
@@ -4902,7 +4919,13 @@ Snapshot Session::snapshot() {
     const auto delay=std::max(pending_seconds,oldest_seconds);
     // A transient warning, with hysteresis; only observed loss flags latch.
     impl_->current.receiver_behind=delay>1. || (impl_->current.receiver_behind && delay>.25);
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+    snapshot_observation.mark(snapshot_probe::Phase::backlog);
+#endif
     auto result = impl_->current; result.signals = std::move(signals); result.received = std::move(received);
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+    snapshot_observation.mark(snapshot_probe::Phase::copy);
+#endif
     if(result.error.empty())result.error=result.receiver_error;
     if(!impl_->transmit_error.empty()) {
         result.transmission_failed=true;
@@ -4918,7 +4941,13 @@ Snapshot Session::snapshot() {
     const auto pending_physical=impl_->capture_samples-std::min(impl_->capture_samples,result.processed_physical_samples);
     result.queued_physical_samples=pending_physical-std::min(pending_physical,result.decoding_physical_samples);
     impl_->replay_snapshot(result, now);
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+    snapshot_observation.mark(snapshot_probe::Phase::replay);
+#endif
     count_dropped(result.constellation_dropped, impl_->replay_omitted); impl_->replay_omitted = 0;
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+    snapshot_observation.before_unlock();
+#endif
     return result;
 }
 void Session::stop() { impl_->halt(); }

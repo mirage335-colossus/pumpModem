@@ -44,6 +44,10 @@ on:
         description: 'Focus paced diagnostics on matched held keyed-On shared-mutex probes; diagnostic only'
         type: boolean
         default: false
+      paced_snapshot_focus:
+        description: 'Observe Snapshot phases and holder OS state with the ordinary mutex; diagnostic only'
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       linux_runner:
@@ -78,6 +82,9 @@ on:
         type: boolean
         default: false
       paced_mutex_focus:
+        type: boolean
+        default: false
+      paced_snapshot_focus:
         type: boolean
         default: false
 
@@ -169,6 +176,11 @@ jobs:
         if: always() && inputs.paced_mutex_focus && (!inputs.paced_callback_probe || !inputs.paced_backlog || github.event_name != 'workflow_dispatch' || inputs.scope != 'symbol-burst-live' || inputs.build_type != 'Debug' || inputs.linux_runner != 'ubuntu-24.04')
         run: |
           echo '::error::Paced mutex focus requires manual paced symbol-burst-live on Debug and ubuntu-24.04 with callback probes enabled.'
+          exit 2
+      - name: Restrict paced Snapshot focus
+        if: always() && inputs.paced_snapshot_focus && (inputs.paced_mutex_focus || !inputs.paced_callback_probe || !inputs.paced_backlog || github.event_name != 'workflow_dispatch' || inputs.scope != 'symbol-burst-live' || inputs.build_type != 'Debug' || inputs.linux_runner != 'ubuntu-24.04')
+        run: |
+          echo '::error::Snapshot focus requires manual Debug on ubuntu-24.04, callback/backlog enabled and mutex wrapper disabled.'
           exit 2
       - name: Validate manual package configuration
         if: github.event_name == 'workflow_dispatch' && inputs.scope == 'package' && inputs.build_type != 'Release'
@@ -908,6 +920,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ (inputs.scope == 'simulation-clock-diagnostic' || inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic' || inputs.scope == 'simulation-owner-census-diagnostic' || inputs.scope == 'simulation-capacity-shape-diagnostic' || inputs.scope == 'simulation-acquisition-partition-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic')) && 'Debug' || inputs.build_type }}
           -DDATAPUMP_SANITIZERS="$DATAPUMP_SANITIZERS"
           -DDATAPUMP_LIVE_MUTEX_PROBE=${{ inputs.paced_mutex_focus && 'ON' || 'OFF' }}
+          -DDATAPUMP_LIVE_SNAPSHOT_PROBE=${{ inputs.paced_snapshot_focus && 'ON' || 'OFF' }}
           -DDATAPUMP_PORTABLE=${{ inputs.scope != 'simulation-clock-diagnostic' && inputs.scope != 'simulation-clock-trace-diagnostic' && inputs.scope != 'simulation-clock-geometry-diagnostic' && inputs.scope != 'simulation-clock-raw-component-diagnostic' && inputs.scope != 'simulation-clock-chain-score-diagnostic' && inputs.scope != 'simulation-owner-census-diagnostic' && inputs.scope != 'simulation-capacity-shape-diagnostic' && inputs.scope != 'simulation-acquisition-partition-diagnostic' && inputs.scope != 'continuation-carrier-diagnostic' && inputs.build_type == 'Release' && 'ON' || 'OFF' }}
           -DBUILD_TESTING=${{ inputs.scope == 'package' && 'OFF' || 'ON' }}
           -DDATAPUMP_BUILD_TUI=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }}
@@ -992,7 +1005,7 @@ jobs:
             calibration|calibration-aggregate) targets=(test_differential_receiver_probability) ;;
             symbol-burst-live)
               targets=(test_symbol_burst_live)
-              if [ '${{ inputs.paced_backlog }}' = true ] && [ '${{ inputs.paced_mutex_focus }}' != true ]; then
+              if [ '${{ inputs.paced_backlog }}' = true ] && [ '${{ inputs.paced_mutex_focus }}' != true ] && [ '${{ inputs.paced_snapshot_focus }}' != true ]; then
                 targets+=(test_pattern_receiver test_pattern_correlator test_pattern_correlator_batch
                           test_search_fft test_pattern_fft_batch test_gui_timing_advice test_gui_controller)
               fi
@@ -1534,7 +1547,7 @@ jobs:
           fi
           python3 tools/run-ci-tests.py --build-dir build --scope "$CI_SCOPE" --jobs "$jobs" --timeout "$test_timeout" --report build/ci-test-report.json "${options[@]}"
       - name: Run the original no-argument Symbol Burst Live qualification test
-        if: inputs.scope == 'symbol-burst-live' && !inputs.paced_mutex_focus && !cancelled() && steps.build_prerequisites.outcome == 'success'
+        if: inputs.scope == 'symbol-burst-live' && !inputs.paced_mutex_focus && !inputs.paced_snapshot_focus && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 125
         run: |
           set -uo pipefail
@@ -1614,7 +1627,7 @@ jobs:
           PY_BURST_RESULT
       - name: Run paced Symbol Burst backlog diagnostics and matched selective trace
         id: paced_burst
-        if: success() && inputs.paced_backlog && !inputs.paced_mutex_focus && !cancelled()
+        if: success() && inputs.paced_backlog && !inputs.paced_mutex_focus && !inputs.paced_snapshot_focus && !cancelled()
         timeout-minutes: 95
         env:
           PACED_SCOPE: ${{ inputs.scope }}
@@ -1844,7 +1857,7 @@ jobs:
           PY_PACED_BURST
       - name: Run actual temporal support component regressions
         id: temporal_support
-        if: inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !inputs.paced_mutex_focus && !cancelled() && steps.build_prerequisites.outcome == 'success'
+        if: inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !inputs.paced_mutex_focus && !inputs.paced_snapshot_focus && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 35
         run: |
           set -euo pipefail
@@ -1941,7 +1954,7 @@ jobs:
           print('All three temporal support component regressions passed; strict original GUI serial and parallel checks follow.')
           PY_TEMPORAL_SUPPORT
       - name: Run focused preparation or GUI core diagnostics
-        if: (success() && (inputs.scope == 'preparation-diagnostic' || inputs.scope == 'gui-core-diagnostic')) || (inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !inputs.paced_mutex_focus && !cancelled() && steps.build_prerequisites.outcome == 'success')
+        if: (success() && (inputs.scope == 'preparation-diagnostic' || inputs.scope == 'gui-core-diagnostic')) || (inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !inputs.paced_mutex_focus && !inputs.paced_snapshot_focus && !cancelled() && steps.build_prerequisites.outcome == 'success')
         run: |
           set -euo pipefail
           report="$PWD/build/core-diagnostics"
@@ -2045,6 +2058,7 @@ jobs:
         timeout-minutes: 45
         env:
           PACED_MUTEX_FOCUS: ${{ inputs.paced_mutex_focus }}
+          PACED_SNAPSHOT_FOCUS: ${{ inputs.paced_snapshot_focus }}
         run: |
           python3 -B - "$PWD" <<'PY_CALLBACK_PROBE'
           import datetime, hashlib, json, os, pathlib, signal, subprocess, sys, time
@@ -2063,15 +2077,21 @@ jobs:
               'probe_source_sha256': hashlib.sha256((root / 'tests/paced_capture_probe.hpp').read_bytes()).hexdigest(),
               'mutex_probe_source_sha256': hashlib.sha256((root / 'src/live_mutex_probe.hpp').read_bytes()).hexdigest() if os.environ.get('PACED_MUTEX_FOCUS') == 'true' else None,
               'cache_sha256': hashlib.sha256((root / 'build/CMakeCache.txt').read_bytes()).hexdigest(),
+              'snapshot_probe_source_sha256': hashlib.sha256((root / 'src/live_snapshot_probe.hpp').read_bytes()).hexdigest() if os.environ.get('PACED_SNAPSHOT_FOCUS') == 'true' else None,
+              'os_sampler_source_sha256': hashlib.sha256((root / 'tests/snapshot_holder_os_probe.hpp').read_bytes()).hexdigest() if os.environ.get('PACED_SNAPSHOT_FOCUS') == 'true' else None,
+              'live_source_sha256': hashlib.sha256((root / 'src/live.cpp').read_bytes()).hexdigest(),
               'comparison': 'two sequential matched baseline/probe pairs; same binary, selector, PCM and original pacing bound',
               'qualification': False,
-              'diagnostic_route': 'paced-mutex-focus' if os.environ.get('PACED_MUTEX_FOCUS') == 'true' else 'paced-callback-probe',
+              'diagnostic_route': 'paced-snapshot-focus' if os.environ.get('PACED_SNAPSHOT_FOCUS') == 'true' else 'paced-mutex-focus' if os.environ.get('PACED_MUTEX_FOCUS') == 'true' else 'paced-callback-probe',
           }
           results = []
           focus = os.environ.get('PACED_MUTEX_FOCUS') == 'true'
+          snapshot_focus = os.environ.get('PACED_SNAPSHOT_FOCUS') == 'true'
           cache_text = (root / 'build/CMakeCache.txt').read_text()
           if focus and 'DATAPUMP_LIVE_MUTEX_PROBE:BOOL=ON' not in cache_text:
               raise SystemExit('mutex focus requires the compile-time observer; no qualification run is implied')
+          if snapshot_focus and ('DATAPUMP_LIVE_SNAPSHOT_PROBE:BOOL=ON' not in cache_text or 'DATAPUMP_LIVE_MUTEX_PROBE:BOOL=OFF' not in cache_text):
+              raise SystemExit('Snapshot focus must retain the ordinary mutex and enable only named phase hooks')
           pairs = (False, True, False, True)
           for index, enabled in enumerate(pairs, 1):
               stem = f'{index:02d}-' + ('probe' if enabled else 'baseline')
@@ -2080,6 +2100,8 @@ jobs:
                   command.append('--pacing-probe')
                   if focus:
                       command.append('--mutex-probe')
+                  if snapshot_focus:
+                      command.append('--snapshot-probe')
               out, err = report / (stem + '.stdout.log'), report / (stem + '.stderr.log')
               started = datetime.datetime.now(datetime.timezone.utc).isoformat()
               start = time.monotonic()
@@ -2173,13 +2195,21 @@ jobs:
                              not mutex_mapping.get('error') and mutex_mapping.get('dropped') == 0 and
                              mutex_mapping.get('omitted_event_count') == 0 and not mutex_mapping.get('unmapped') and
                              all(row.get('source_resolved') is True for row in mutex_mapping.get('mapped', []))))
+              snapshot_value = summary.get('snapshot_probe', {}) if summary else {}
+              snapshot_os = summary.get('snapshot_os_probe', {}) if summary else {}
+              snapshot_ok = (not snapshot_focus or not enabled or
+                             (snapshot_value.get('enabled') is True and snapshot_value.get('dropped') == 0 and
+                              all(row.get('present') == 511 for row in snapshot_value.get('records', [])) and
+                              snapshot_os.get('enabled') is True and snapshot_os.get('supported') is True and
+                              snapshot_os.get('stopped') is True and snapshot_os.get('reader_errors') == 0 and snapshot_os.get('dropped') == 0))
               result = {'index': index, 'probe_enabled': enabled, 'command': command,
                         'started_utc': started, 'elapsed_seconds': process_elapsed,
                         'exit_code': code, 'timed_out': timed_out, 'launch_error': launch_error,
                         'summary_count': len(summaries), 'parse_errors': parse_errors, 'summary': summary,
                         'stdout_sha256': hashlib.sha256(out.read_bytes()).hexdigest(),
                         'stderr_sha256': hashlib.sha256(err.read_bytes()).hexdigest(),
-                        'mutex_mapping': mutex_mapping, 'mapping_complete': mapping_ok}
+                        'mutex_mapping': mutex_mapping, 'mapping_complete': mapping_ok,
+                        'snapshot_capture_complete': snapshot_ok}
               (report / (stem + '.json')).write_text(json.dumps(result, indent=2) + '\n')
               results.append(result)
           (report / 'results.json').write_text(json.dumps({'identity': identity, 'results': results}, indent=2) + '\n')
@@ -2195,7 +2225,7 @@ jobs:
                  row['summary'].get('pacing_valid') is not True or
                  row['summary'].get('callback_probe', {}).get('enabled') is not row['probe_enabled'] or
                  (focus and row['probe_enabled'] and row['summary'].get('mutex_probe', {}).get('enabled') is not True) or
-                 not row['mapping_complete'] for row in results):
+                 not row['mapping_complete'] or not row['snapshot_capture_complete'] for row in results):
               raise SystemExit('FATAL: callback comparison contains a failed/incomplete run or incomplete holder mapping; inspect exact retained process results')
           PY_CALLBACK_PROBE
       - name: Capture six sequential fixed-bank acquisition partition replays
