@@ -13,6 +13,10 @@
 #include <clocale>
 #include <csignal>
 #include <cstdio>
+#ifdef DATAPUMP_NCURSES_ADAPTER_TEST
+#include <cstdint>
+#include <time.h>
+#endif
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
@@ -208,15 +212,29 @@ public:
                     throw std::runtime_error("Cannot install terminal signal handler");
                 ++signal_count_;
             }
+#ifdef DATAPUMP_NCURSES_ADAPTER_TEST
+            test_start_diagnostics();
+#endif
         } catch(...) {restore();throw;}
     }
-    ~Terminal() {restore();}
+    ~Terminal() {
+        restore();
+#ifdef DATAPUMP_NCURSES_ADAPTER_TEST
+        test_progress(test_ticks_,test_events_,test_pastes_,true);
+        if(test_diag_fd_>=0)::close(test_diag_fd_);
+#endif
+    }
     Terminal(const Terminal&)=delete;
     Terminal& operator=(const Terminal&)=delete;
     int width() const {return columns_;}
     int height() const {return rows_;}
     bool disconnected() const {return disconnected_;}
     bool can_paint() const {return pending_.empty();}
+#ifdef DATAPUMP_NCURSES_ADAPTER_TEST
+    bool test_diagnostics_enabled() const {return test_diag_fd_>=0;}
+    void test_poll_result_public(std::uint64_t wait_ns) {++test_poll_calls_;test_poll_wait_ns_+=wait_ns;}
+    void test_progress_public(unsigned long long ticks,unsigned long long events,unsigned long long pastes) {test_progress(ticks,events,pastes);}
+#endif
     bool resize() {
         winsize size{};
         if(ioctl(STDIN_FILENO,TIOCGWINSZ,&size)!=0)return false;
@@ -226,11 +244,20 @@ public:
         columns_=width;rows_=height;resizeterm(rows_,columns_);clearok(stdscr,TRUE);return true;
     }
     void flush() {
+#ifdef DATAPUMP_NCURSES_ADAPTER_TEST
+        TestMeasure measure(test_diagnostics_enabled(),test_flush_wall_ns_,test_flush_cpu_ns_);++test_flush_calls_;
+#endif
         capture();
         // A single bounded burst per loop. EAGAIN preserves the exact partial
         // sequence; no bytes from a newer frame can overtake it.
         if(pending_.empty())return;
         const auto count=write(output_fd_,pending_.data()+offset_,std::min<std::size_t>(16384,pending_.size()-offset_));
+#ifdef DATAPUMP_NCURSES_ADAPTER_TEST
+        ++test_write_calls_;
+        if(count>0)test_bytes_written_+=static_cast<unsigned long long>(count);
+        if(count<0&&(errno==EAGAIN||errno==EWOULDBLOCK))++test_write_would_block_;
+        test_max_pending_=std::max<unsigned long long>(test_max_pending_,pending_.size()-offset_);
+#endif
         if(count>0) {
             offset_+=static_cast<std::size_t>(count);
             if(offset_==pending_.size()) {pending_.clear();offset_=0;}
@@ -238,6 +265,9 @@ public:
     }
     void paint(const Scene& scene) {
         if(!can_paint())return;
+#ifdef DATAPUMP_NCURSES_ADAPTER_TEST
+        TestMeasure measure(test_diagnostics_enabled(),test_paint_wall_ns_,test_paint_cpu_ns_);++test_paint_calls_;
+#endif
         erase();
         for(const auto& primitive:scene.primitives) {
             const auto& box=primitive.bounds;
@@ -293,17 +323,31 @@ public:
         wnoutrefresh(stdscr);doupdate();capture();
     }
     template<class Send,class Close> void input(Send send,Close close) {
+#ifdef DATAPUMP_NCURSES_ADAPTER_TEST
+        TestMeasure measure(test_diagnostics_enabled(),test_input_wall_ns_,test_input_cpu_ns_);++test_input_calls_;
+#endif
         // Bound input work too: paste or mouse floods cannot starve core polls.
         for(unsigned count=0;count<256;++count) {
+#ifdef DATAPUMP_NCURSES_ADAPTER_TEST
+            ++test_input_iterations_;
+#endif
             if(pasting_) {
                 const int byte=wgetch(stdscr);
                 if(byte==ERR)break;
+#ifdef DATAPUMP_NCURSES_ADAPTER_TEST
+                ++test_input_symbols_;
+                if(byte>=0&&byte<=255) {++test_paste_bytes_;++test_current_paste_bytes_;}
+#endif
                 if(byte==KEY_RESIZE) {resized_=true;continue;}
                 paste_byte(static_cast<unsigned char>(byte),send);
                 continue;
             }
             wint_t code=0;const int kind=wget_wch(stdscr,&code);
             if(kind==ERR)break;
+#ifdef DATAPUMP_NCURSES_ADAPTER_TEST
+            ++test_input_symbols_;
+            if(kind==KEY_CODE_YES&&code==paste_begin)test_current_paste_bytes_=0;
+#endif
             if(kind==KEY_CODE_YES) {
                 if(code==paste_begin) {pasting_=true;paste_overflow_=false;paste_.clear();paste_end_.clear();keypad(stdscr,FALSE);continue;}
                 if(code==KEY_RESIZE) {resized_=true;continue;}
@@ -357,6 +401,54 @@ public:
     }
     bool consume_resize() {const bool result=resized_;resized_=false;return resize()||result;}
 private:
+#ifdef DATAPUMP_NCURSES_ADAPTER_TEST
+    static unsigned long long test_cpu_ns() {
+        timespec value{};if(clock_gettime(CLOCK_THREAD_CPUTIME_ID,&value)!=0)return 0;
+        return static_cast<unsigned long long>(value.tv_sec)*1000000000ULL+static_cast<unsigned long long>(value.tv_nsec);
+    }
+    struct TestMeasure {
+        bool enabled;
+        unsigned long long& wall;
+        unsigned long long& cpu;
+        Clock::time_point started{};
+        unsigned long long cpu_started=0;
+        TestMeasure(bool active,unsigned long long& wall_ns,unsigned long long& cpu_ns):enabled(active),wall(wall_ns),cpu(cpu_ns) {
+            if(enabled) {started=Clock::now();cpu_started=test_cpu_ns();}
+        }
+        ~TestMeasure() {
+            if(enabled) {
+                wall+=static_cast<unsigned long long>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now()-started).count());
+                const auto ended=test_cpu_ns();if(ended>=cpu_started)cpu+=ended-cpu_started;
+            }
+        }
+    };
+    int test_diag_fd_=-1;
+    unsigned long long test_input_calls_=0,test_input_iterations_=0,test_input_symbols_=0,test_paste_bytes_=0,test_current_paste_bytes_=0;
+    unsigned long long test_paint_calls_=0,test_flush_calls_=0,test_write_calls_=0,test_write_would_block_=0;
+    unsigned long long test_bytes_written_=0,test_max_pending_=0;
+    unsigned long long test_input_wall_ns_=0,test_input_cpu_ns_=0,test_paint_wall_ns_=0,test_paint_cpu_ns_=0;
+    unsigned long long test_flush_wall_ns_=0,test_flush_cpu_ns_=0,test_poll_calls_=0,test_poll_wait_ns_=0;
+    unsigned long long test_ticks_=0,test_events_=0,test_pastes_=0;
+    Clock::time_point test_diag_started_{},test_diag_last_{};
+    void test_start_diagnostics() {
+        const char* path=std::getenv("DATAPUMP_TEST_DRAIN_DIAGNOSTICS");
+        if(path&&*path)test_diag_fd_=open(path,O_WRONLY|O_CREAT|O_APPEND|O_CLOEXEC|O_NONBLOCK,0600);
+        if(test_diag_fd_>=0)test_diag_started_=test_diag_last_=Clock::now();
+    }
+    void test_progress(unsigned long long ticks,unsigned long long events,unsigned long long pastes,bool final=false) {
+        test_ticks_=ticks;test_events_=events;test_pastes_=pastes;
+        if(test_diag_fd_<0)return;
+        const auto now=Clock::now();
+        if(!final&&now-test_diag_last_<std::chrono::seconds(1))return;
+        test_diag_last_=now;
+        const auto elapsed=std::chrono::duration_cast<std::chrono::nanoseconds>(now-test_diag_started_).count();
+        const auto monotonic=std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+        char line[2048];const int length=std::snprintf(line,sizeof(line),
+            "DATAPUMP_TUI_DRAIN_ADAPTER v=1 at_monotonic_ns=%lld elapsed_wall_ns=%lld thread_cpu_ns=%llu ticks=%llu events=%llu pastes=%llu input_calls=%llu input_iterations=%llu input_symbols=%llu paste_bytes_consumed=%llu current_paste_bytes_consumed=%llu pasting=%d input_wall_ns=%llu input_cpu_ns=%llu paint_calls=%llu paint_wall_ns=%llu paint_cpu_ns=%llu flush_calls=%llu flush_wall_ns=%llu flush_cpu_ns=%llu writes=%llu write_bytes=%llu write_would_block=%llu pending_bytes=%llu max_pending_bytes=%llu poll_calls=%llu poll_wait_ns=%llu final=%d\n",
+            static_cast<long long>(monotonic),static_cast<long long>(elapsed),test_cpu_ns(),test_ticks_,test_events_,test_pastes_,test_input_calls_,test_input_iterations_,test_input_symbols_,test_paste_bytes_,test_current_paste_bytes_,int(pasting_),test_input_wall_ns_,test_input_cpu_ns_,test_paint_calls_,test_paint_wall_ns_,test_paint_cpu_ns_,test_flush_calls_,test_flush_wall_ns_,test_flush_cpu_ns_,test_write_calls_,test_bytes_written_,test_write_would_block_,static_cast<unsigned long long>(pending_.size()-std::min(offset_,pending_.size())),test_max_pending_,test_poll_calls_,test_poll_wait_ns_,int(final));
+        if(length>0&&static_cast<std::size_t>(length)<sizeof(line)) (void)::write(test_diag_fd_,line,static_cast<std::size_t>(length));
+    }
+#endif
     SCREEN* screen_=nullptr;
     FILE* memory_=nullptr;
     std::size_t offset_=0;
@@ -613,7 +705,12 @@ int main(int argc,char** argv) {
                         throw std::runtime_error("Independent terminal record emphasis lost");
                 }
             }
-            terminal.flush();pollfd input{STDIN_FILENO,POLLIN,0};poll(&input,1,4);
+            terminal.flush();pollfd input{STDIN_FILENO,POLLIN,0};
+            const bool measure_poll=terminal.test_diagnostics_enabled();
+            const auto poll_start=measure_poll?std::chrono::steady_clock::now():Clock::time_point{};
+            poll(&input,1,4);
+            if(measure_poll)terminal.test_poll_result_public(static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now()-poll_start).count()));
+            terminal.test_progress_public(ticks,events,pastes);
         }
         return 0;
     }catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}

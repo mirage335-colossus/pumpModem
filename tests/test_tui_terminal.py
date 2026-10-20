@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import select
 import shutil
+import sys
 import signal
 import struct
 import subprocess
@@ -140,6 +141,8 @@ class Pty:
         self.screen = Screen(width, height)
         self.raw = bytearray()
         env = dict(os.environ, TERM=terminal, LC_ALL=locale)
+        env.pop("DATAPUMP_TEST_DRAIN_DIAGNOSTICS", None)
+        env.pop("DATAPUMP_TEST_DRAIN_HARNESS", None)
         if extra_env:
             env.update(extra_env)
         if color:
@@ -189,23 +192,74 @@ class Pty:
     def send(self, value):
         os.write(self.master, value)
 
-    def send_all(self, value, timeout=20):
+    def send_all(self, value, timeout=20, diagnostic_path=None, measure_harness=False):
         remaining = memoryview(value)
+        measuring = bool(diagnostic_path or measure_harness)
+        started_wall = time.monotonic_ns() if measuring else 0
+        started_cpu = time.thread_time_ns() if measuring else 0
+        select_wait_ns = select_cpu_ns = read_wall_ns = read_cpu_ns = output_bytes_read = 0
+        write_calls = blocked_writes = bytes_written = 0
         deadline = time.monotonic() + timeout
-        while remaining:
-            assert self.process.poll() is None, (
-                f"Terminal exited during input: status={self.process.returncode}; "
-                f"sent={len(value) - len(remaining)}/{len(value)}; tail={bytes(self.raw[-6000:])!r}")
-            assert time.monotonic() < deadline, (
-                f"Terminal input stopped draining: sent={len(value) - len(remaining)}/{len(value)}; "
-                f"tail={bytes(self.raw[-6000:])!r}")
-            _, writable, _ = select.select([], [self.master], [], 0.02)
-            if writable:
-                try:
-                    remaining = remaining[os.write(self.master, remaining[:65536]):]
-                except BlockingIOError:
-                    pass
-            self.read(0.001)
+        try:
+            while remaining:
+                assert self.process.poll() is None, (
+                    f"Terminal exited during input: status={self.process.returncode}; "
+                    f"sent={len(value) - len(remaining)}/{len(value)}; tail={bytes(self.raw[-6000:])!r}")
+                assert time.monotonic() < deadline, (
+                    f"Terminal input stopped draining: sent={len(value) - len(remaining)}/{len(value)}; "
+                    f"tail={bytes(self.raw[-6000:])!r}")
+                before = time.monotonic_ns() if measuring else 0
+                cpu_before = time.thread_time_ns() if measuring else 0
+                _, writable, _ = select.select([], [self.master], [], 0.02)
+                if measuring:
+                    select_wait_ns += time.monotonic_ns() - before
+                    select_cpu_ns += time.thread_time_ns() - cpu_before
+                if writable:
+                    write_calls += 1
+                    try:
+                        count = os.write(self.master, remaining[:65536])
+                        bytes_written += count
+                        remaining = remaining[count:]
+                    except BlockingIOError:
+                        blocked_writes += 1
+                before = time.monotonic_ns() if measuring else 0
+                cpu_before = time.thread_time_ns() if measuring else 0
+                raw_before = len(self.raw)
+                self.read(0.001)
+                if measuring:
+                    read_wall_ns += time.monotonic_ns() - before
+                    read_cpu_ns += time.thread_time_ns() - cpu_before
+                    output_bytes_read += len(self.raw) - raw_before
+        finally:
+            if measuring:
+                ended_wall = time.monotonic_ns()
+                ended_cpu = time.thread_time_ns()
+                adapter = ""
+                if diagnostic_path:
+                    try:
+                        with open(diagnostic_path, "rb") as stream:
+                            stream.seek(0, os.SEEK_END)
+                            size = stream.tell()
+                            stream.seek(max(0, size - 65536))
+                            adapter = stream.read(65536).decode(errors="replace")
+                            if size > 65536:
+                                adapter = "DATAPUMP_TUI_DRAIN_ADAPTER status=tail_truncated\n" + adapter
+                    except (OSError, ValueError) as error:
+                        adapter = f"DATAPUMP_TUI_DRAIN_ADAPTER status=unreadable error={error!r}\n"
+                sent = len(value) - len(remaining)
+                record = ("DATAPUMP_TUI_DRAIN_HARNESS v=1 stage=send_all "
+                          f"started_monotonic_ns={started_wall} ended_monotonic_ns={ended_wall} "
+                          f"elapsed_wall_ns={ended_wall - started_wall} "
+                          f"thread_cpu_ns={ended_cpu - started_cpu} "
+                          f"sent_bytes={sent} total_bytes={len(value)} write_bytes={bytes_written} write_calls={write_calls} "
+                          f"blocked_writes={blocked_writes} select_wait_ns={select_wait_ns} select_cpu_ns={select_cpu_ns} "
+                          f"output_bytes_read={output_bytes_read} read_wall_ns={read_wall_ns} read_cpu_ns={read_cpu_ns} "
+                          f"timeout_budget_ns={int(timeout * 1000000000)} deadline_monotonic_ns={int(deadline * 1000000000)}\n")
+                print(record, file=sys.stderr, end="")
+                if adapter:
+                    print(adapter, file=sys.stderr, end="")
+                elif diagnostic_path:
+                    print("DATAPUMP_TUI_DRAIN_ADAPTER status=missing", file=sys.stderr)
 
     def finish(self, sig=None, read=True):
         if self.process.poll() is None:
@@ -239,7 +293,12 @@ class Pty:
 
 
 def run(binary):
-    terminal = Pty(binary)
+    diagnostic_path = os.environ.get("DATAPUMP_TEST_DRAIN_DIAGNOSTICS")
+    diagnostic_env = {"DATAPUMP_TEST_DRAIN_DIAGNOSTICS": diagnostic_path} if diagnostic_path else None
+    measure_harness = bool(os.environ.get("DATAPUMP_TEST_DRAIN_HARNESS"))
+    if diagnostic_path:
+        Path(diagnostic_path).write_text("")
+    terminal = Pty(binary, extra_env=diagnostic_env)
     try:
         terminal.wait_for("Terminal contract ticks=")
         terminal.wait_for("literal:_]52;c;BAD_____")
@@ -313,7 +372,8 @@ def run(binary):
         terminal.wait_for("size=100x32")
         terminal.send(b"\x1b[200~saved draft\x1b[201~")
         terminal.wait_for("pastes=2 paste")
-        terminal.send_all(b"\x1b[200~" + b"x" * (4 * 1024 * 1024 + 1) + b"\n\t\x11\x1b[201~")
+        terminal.send_all(b"\x1b[200~" + b"x" * (4 * 1024 * 1024 + 1) + b"\n\t\x11\x1b[201~",
+                          diagnostic_path=diagnostic_path, measure_harness=measure_harness)
         terminal.wait_for("rejected: Paste exceeds", timeout=10)
         assert "saved draft" in terminal.screen.text(), terminal.screen.text()
         assert "pastes=2" in terminal.screen.text(), terminal.screen.text()

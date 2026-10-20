@@ -21,6 +21,10 @@ on:
         type: choice
         options: [ubuntu-24.04, ubuntu-latest-m, ubuntu-latest-l, ubuntu-latest-h]
         default: ubuntu-24.04
+      tui_drain_diagnostic:
+        description: 'After the ordinary frontend scope, measure the same complete PTY fixture separately'
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       scope:
@@ -36,6 +40,9 @@ on:
       linux_runner:
         type: string
         default: ubuntu-24.04
+      tui_drain_diagnostic:
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -76,6 +83,10 @@ jobs:
           fi
           if [ "$SDK_SCOPE" = live ] && { [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ "$SDK_BACKEND" != fltk ] || [ "${{ inputs.linux_runner }}" != ubuntu-24.04 ]; }; then
             echo '::error::focused SDK Live requires manual FLTK scope on ubuntu-24.04'
+            exit 2
+          fi
+          if [ '${{ inputs.tui_drain_diagnostic }}' = true ] && { [ "$SDK_SCOPE" != frontends ] || [ "$SDK_BACKEND" != fltk ] || [ "$GITHUB_EVENT_NAME" != workflow_dispatch ]; }; then
+            echo '::error::TUI drain measurement requires the manual FLTK frontend scope'
             exit 2
           fi
           SDK_LOG_DIR="$RUNNER_TEMP/datapump-sdk-$SDK_SCOPE-$SDK_BACKEND"
@@ -321,6 +332,48 @@ jobs:
         if: inputs.scope == 'frontends'
         run: |
           ./build.sh test frontends --cli --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --build-dir build/sdk-frontends --jobs 1 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DDATAPUMP_PORTABLE=ON 2>&1 | tee "$SDK_LOG_DIR/frontends.log"
+      - name: Measure the same complete PTY fixture after its ordinary baseline
+        if: always() && inputs.scope == 'frontends' && inputs.tui_drain_diagnostic
+        env:
+          DATAPUMP_TEST_DRAIN_DIAGNOSTICS: ${{ env.SDK_LOG_DIR }}/tui-drain-adapter.log
+          DATAPUMP_TEST_DRAIN_HARNESS: '1'
+        run: |
+          test -x build/sdk-frontends/datapump_tui_adapter_test
+          cp build/sdk-frontends/Testing/Temporary/LastTest.log "$SDK_LOG_DIR/tui-drain-baseline.log"
+          python3 - <<'PY' 2>&1 | tee "$SDK_LOG_DIR/tui-drain-trace.log"
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import time
+
+          binary = Path('build/sdk-frontends/datapump_tui_adapter_test').resolve()
+          fixture = Path('tests/test_tui_terminal.py').resolve()
+          command = [str(Path('build/sdk/bin/ctest').resolve()),
+                     '--test-dir', 'build/sdk-frontends', '--output-on-failure',
+                     '--verbose', '--no-tests=error', '-R', '^tui_terminal$',
+                     '--output-junit', str(Path(os.environ['SDK_LOG_DIR']) / 'tui-drain-trace.xml')]
+          started = time.monotonic_ns()
+          result = subprocess.run(command, check=False)
+          elapsed = time.monotonic_ns() - started
+          report = {
+              'scope': 'diagnostic; ordinary baseline remains independently fatal',
+              'source_sha': os.environ['GITHUB_SHA'],
+              'command': command,
+              'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
+              'fixture_sha256': hashlib.sha256(fixture.read_bytes()).hexdigest(),
+              'returncode': result.returncode,
+              'wall_ns': elapsed,
+              'baseline_log': 'frontends.log',
+              'adapter_log': 'tui-drain-adapter.log',
+              'comparison_limit': 'one matched full-fixture pair; not a reliable performance estimate',
+          }
+          (Path(os.environ['SDK_LOG_DIR']) / 'tui-drain-result.json').write_text(
+              json.dumps(report, indent=2) + '\n')
+          print(json.dumps(report), flush=True)
+          raise SystemExit(result.returncode)
+          PY
       - name: Prepare the JavaScript test host
         if: inputs.scope == 'web'
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
