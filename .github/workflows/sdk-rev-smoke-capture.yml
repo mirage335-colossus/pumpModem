@@ -163,6 +163,7 @@ jobs:
             -P "$GITHUB_WORKSPACE/source-base/tools/verify-native-archives.cmake" \
             2>&1 | tee evidence/package-verify.log
       - name: Capture original copied-TGZ GUI smoke twice, stopping on first failure
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p evidence/products evidence/smokes
