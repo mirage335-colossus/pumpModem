@@ -170,9 +170,9 @@ jobs:
           PY
       - name: Record and verify checkout source identity
         run: |
-          git rev-parse HEAD > "$SDK_LOG_DIR/source-commit.txt"
-          git status --porcelain --untracked-files=normal > "$SDK_LOG_DIR/source-status.txt"
-          git diff --exit-code HEAD -- > "$SDK_LOG_DIR/source-diff.txt"
+          git -c safe.directory="$GITHUB_WORKSPACE" rev-parse HEAD > "$SDK_LOG_DIR/source-commit.txt"
+          git -c safe.directory="$GITHUB_WORKSPACE" status --porcelain --untracked-files=normal > "$SDK_LOG_DIR/source-status.txt"
+          git -c safe.directory="$GITHUB_WORKSPACE" diff --exit-code HEAD -- > "$SDK_LOG_DIR/source-diff.txt"
       - name: Build and verify portable application archives
         if: inputs.scope == 'packages'
         env:
