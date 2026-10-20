@@ -40,6 +40,10 @@ on:
         description: 'Run matched held keyed-On callback timing probes; diagnostic only'
         type: boolean
         default: false
+      paced_mutex_focus:
+        description: 'Focus paced diagnostics on matched held keyed-On shared-mutex probes; diagnostic only'
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       linux_runner:
@@ -71,6 +75,9 @@ on:
         type: boolean
         default: false
       paced_callback_probe:
+        type: boolean
+        default: false
+      paced_mutex_focus:
         type: boolean
         default: false
 
@@ -157,6 +164,11 @@ jobs:
         if: always() && inputs.paced_callback_probe && (!inputs.paced_backlog || github.event_name != 'workflow_dispatch' || inputs.scope != 'symbol-burst-live' || inputs.build_type != 'Debug' || inputs.linux_runner != 'ubuntu-24.04')
         run: |
           echo '::error::Callback probes require manual paced symbol-burst-live on Debug and ubuntu-24.04.'
+          exit 2
+      - name: Restrict paced mutex focus
+        if: always() && inputs.paced_mutex_focus && (!inputs.paced_callback_probe || !inputs.paced_backlog || github.event_name != 'workflow_dispatch' || inputs.scope != 'symbol-burst-live' || inputs.build_type != 'Debug' || inputs.linux_runner != 'ubuntu-24.04')
+        run: |
+          echo '::error::Paced mutex focus requires manual paced symbol-burst-live on Debug and ubuntu-24.04 with callback probes enabled.'
           exit 2
       - name: Validate manual package configuration
         if: github.event_name == 'workflow_dispatch' && inputs.scope == 'package' && inputs.build_type != 'Release'
@@ -895,6 +907,7 @@ jobs:
           cmake -S "${{ inputs.scope == 'simulation-first-transition-diagnostic' && 'build/first-transition-source/source' || inputs.scope == 'native-peak-lease-diagnostic' && 'build/native-peak-lease-source' || (inputs.scope == 'simulation-clock-chain-score-diagnostic' && 'build/raw-chain-source' || (inputs.scope == 'simulation-owner-census-diagnostic' && 'build/owner-census-source' || ((inputs.scope == 'simulation-capacity-shape-diagnostic' || inputs.scope == 'simulation-acquisition-partition-diagnostic') && 'build/capacity-shape-source' || '.'))) }}" -B build -G Ninja -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11
           -DCMAKE_BUILD_TYPE=${{ (inputs.scope == 'simulation-clock-diagnostic' || inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic' || inputs.scope == 'simulation-owner-census-diagnostic' || inputs.scope == 'simulation-capacity-shape-diagnostic' || inputs.scope == 'simulation-acquisition-partition-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic')) && 'Debug' || inputs.build_type }}
           -DDATAPUMP_SANITIZERS="$DATAPUMP_SANITIZERS"
+          -DDATAPUMP_LIVE_MUTEX_PROBE=${{ inputs.paced_mutex_focus && 'ON' || 'OFF' }}
           -DDATAPUMP_PORTABLE=${{ inputs.scope != 'simulation-clock-diagnostic' && inputs.scope != 'simulation-clock-trace-diagnostic' && inputs.scope != 'simulation-clock-geometry-diagnostic' && inputs.scope != 'simulation-clock-raw-component-diagnostic' && inputs.scope != 'simulation-clock-chain-score-diagnostic' && inputs.scope != 'simulation-owner-census-diagnostic' && inputs.scope != 'simulation-capacity-shape-diagnostic' && inputs.scope != 'simulation-acquisition-partition-diagnostic' && inputs.scope != 'continuation-carrier-diagnostic' && inputs.build_type == 'Release' && 'ON' || 'OFF' }}
           -DBUILD_TESTING=${{ inputs.scope == 'package' && 'OFF' || 'ON' }}
           -DDATAPUMP_BUILD_TUI=${{ (inputs.scope == 'package' || inputs.scope == 'frontends') && 'ON' || 'OFF' }}
@@ -979,7 +992,7 @@ jobs:
             calibration|calibration-aggregate) targets=(test_differential_receiver_probability) ;;
             symbol-burst-live)
               targets=(test_symbol_burst_live)
-              if [ '${{ inputs.paced_backlog }}' = true ]; then
+              if [ '${{ inputs.paced_backlog }}' = true ] && [ '${{ inputs.paced_mutex_focus }}' != true ]; then
                 targets+=(test_pattern_receiver test_pattern_correlator test_pattern_correlator_batch
                           test_search_fft test_pattern_fft_batch test_gui_timing_advice test_gui_controller)
               fi
@@ -1521,7 +1534,7 @@ jobs:
           fi
           python3 tools/run-ci-tests.py --build-dir build --scope "$CI_SCOPE" --jobs "$jobs" --timeout "$test_timeout" --report build/ci-test-report.json "${options[@]}"
       - name: Run the original no-argument Symbol Burst Live qualification test
-        if: inputs.scope == 'symbol-burst-live' && !cancelled() && steps.build_prerequisites.outcome == 'success'
+        if: inputs.scope == 'symbol-burst-live' && !inputs.paced_mutex_focus && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 125
         run: |
           set -uo pipefail
@@ -1601,7 +1614,7 @@ jobs:
           PY_BURST_RESULT
       - name: Run paced Symbol Burst backlog diagnostics and matched selective trace
         id: paced_burst
-        if: success() && inputs.paced_backlog && !cancelled()
+        if: success() && inputs.paced_backlog && !inputs.paced_mutex_focus && !cancelled()
         timeout-minutes: 95
         env:
           PACED_SCOPE: ${{ inputs.scope }}
@@ -1831,7 +1844,7 @@ jobs:
           PY_PACED_BURST
       - name: Run actual temporal support component regressions
         id: temporal_support
-        if: inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !cancelled() && steps.build_prerequisites.outcome == 'success'
+        if: inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !inputs.paced_mutex_focus && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 35
         run: |
           set -euo pipefail
@@ -1928,7 +1941,7 @@ jobs:
           print('All three temporal support component regressions passed; strict original GUI serial and parallel checks follow.')
           PY_TEMPORAL_SUPPORT
       - name: Run focused preparation or GUI core diagnostics
-        if: (success() && (inputs.scope == 'preparation-diagnostic' || inputs.scope == 'gui-core-diagnostic')) || (inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !cancelled() && steps.build_prerequisites.outcome == 'success')
+        if: (success() && (inputs.scope == 'preparation-diagnostic' || inputs.scope == 'gui-core-diagnostic')) || (inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !inputs.paced_mutex_focus && !cancelled() && steps.build_prerequisites.outcome == 'success')
         run: |
           set -euo pipefail
           report="$PWD/build/core-diagnostics"
@@ -2030,6 +2043,8 @@ jobs:
       - name: Capture matched held keyed-On callback timing
         if: inputs.paced_callback_probe && inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 45
+        env:
+          PACED_MUTEX_FOCUS: ${{ inputs.paced_mutex_focus }}
         run: |
           python3 -B - "$PWD" <<'PY_CALLBACK_PROBE'
           import datetime, hashlib, json, os, pathlib, signal, subprocess, sys, time
@@ -2046,16 +2061,25 @@ jobs:
               'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
               'test_source_sha256': hashlib.sha256((root / 'tests/test_symbol_burst_live.cpp').read_bytes()).hexdigest(),
               'probe_source_sha256': hashlib.sha256((root / 'tests/paced_capture_probe.hpp').read_bytes()).hexdigest(),
+              'mutex_probe_source_sha256': hashlib.sha256((root / 'src/live_mutex_probe.hpp').read_bytes()).hexdigest() if os.environ.get('PACED_MUTEX_FOCUS') == 'true' else None,
               'cache_sha256': hashlib.sha256((root / 'build/CMakeCache.txt').read_bytes()).hexdigest(),
               'comparison': 'two sequential matched baseline/probe pairs; same binary, selector, PCM and original pacing bound',
               'qualification': False,
+              'diagnostic_route': 'paced-mutex-focus' if os.environ.get('PACED_MUTEX_FOCUS') == 'true' else 'paced-callback-probe',
           }
           results = []
-          for index, enabled in enumerate((False, True, False, True), 1):
+          focus = os.environ.get('PACED_MUTEX_FOCUS') == 'true'
+          cache_text = (root / 'build/CMakeCache.txt').read_text()
+          if focus and 'DATAPUMP_LIVE_MUTEX_PROBE:BOOL=ON' not in cache_text:
+              raise SystemExit('mutex focus requires the compile-time observer; no qualification run is implied')
+          pairs = (False, True, False, True)
+          for index, enabled in enumerate(pairs, 1):
               stem = f'{index:02d}-' + ('probe' if enabled else 'baseline')
               command = [str(binary), '--paced-held-keyed-on']
               if enabled:
                   command.append('--pacing-probe')
+                  if focus:
+                      command.append('--mutex-probe')
               out, err = report / (stem + '.stdout.log'), report / (stem + '.stderr.log')
               started = datetime.datetime.now(datetime.timezone.utc).isoformat()
               start = time.monotonic()
@@ -2083,6 +2107,7 @@ jobs:
                               pass
                           if process.poll() is None:
                               code = process.wait(timeout=5)
+              process_elapsed = time.monotonic() - start
               summaries, parse_errors = [], []
               for line in out.read_text(errors='replace').splitlines():
                   prefix = 'PACED_BURST_JSON '
@@ -2095,12 +2120,66 @@ jobs:
                   except (ValueError, AttributeError) as error:
                       parse_errors.append(str(error))
               summary = summaries[0] if len(summaries) == 1 else None
+              mutex_mapping = None
+              if focus and enabled:
+                  probe = summary.get('mutex_probe') if isinstance(summary, dict) else None
+                  mutex_mapping = {'complete': False, 'error': None, 'mapped': [], 'unmapped': []}
+                  try:
+                      if not isinstance(probe, dict) or probe.get('enabled') is not True:
+                          raise ValueError('mutex_probe.enabled is not true')
+                      anchor_runtime = int(probe['address_anchor'], 0) if isinstance(probe['address_anchor'], str) else int(probe['address_anchor'])
+                      records = probe.get('records')
+                      if not isinstance(records, list):
+                          raise ValueError('mutex_probe.records is not an array')
+                      event_limit = 4096
+                      selected_records = records[:event_limit]
+                      nm = subprocess.run(['nm', '-an', '--demangle', str(binary)], cwd=root, text=True,
+                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, timeout=30)
+                      anchor_name = 'datapump::live::mutex_probe::address_anchor'
+                      anchors = []
+                      for line in nm.stdout.splitlines():
+                          fields = line.split(None, 2)
+                          if len(fields) == 3 and fields[2] in (anchor_name, anchor_name + '()'):
+                              anchors.append(int(fields[0], 16))
+                      if len(anchors) != 1:
+                          raise ValueError(f'expected one nm symbol {anchor_name}, found {len(anchors)}')
+                      link_anchor = anchors[0]
+                      unique_sites = sorted({int(row['call_site'], 0) if isinstance(row.get('call_site'), str) else int(row['call_site'])
+                                             for row in selected_records if isinstance(row, dict) and row.get('call_site') not in (None, 0, '0')})
+                      mapping_rows = []
+                      for runtime_site in unique_sites:
+                          link_site = runtime_site - anchor_runtime + link_anchor - 1
+                          mapped = subprocess.run(['addr2line', '-C', '-f', '-i', '-p', '-e', str(binary), hex(link_site)],
+                                                  cwd=root, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                                  check=False, timeout=30)
+                          mapping_rows.append({'runtime_call_site': hex(runtime_site), 'link_call_site': hex(link_site),
+                                               'source': mapped.stdout.strip() if mapped.returncode == 0 else None,
+                                               'source_resolved': mapped.returncode == 0 and '??' not in mapped.stdout,
+                                               'returncode': mapped.returncode,
+                                               'stderr': mapped.stderr.strip() or None})
+                      mutex_mapping.update(complete=True, address_anchor_runtime=hex(anchor_runtime),
+                                           address_anchor_link=hex(link_anchor), selected=probe.get('selected'),
+                                           dropped=probe.get('dropped'), capacity=probe.get('capacity'),
+                                           threshold_ns=probe.get('threshold_ns'), event_count=len(records),
+                                           mapped_event_count=len(selected_records), omitted_event_count=max(0, len(records)-event_limit),
+                                           mapped=mapping_rows,
+                                           unmapped=[{'record_index': i, 'record': row} for i, row in enumerate(selected_records)
+                                                     if not isinstance(row, dict) or row.get('call_site') in (None, 0, '0')])
+                  except Exception as error:
+                      mutex_mapping['error'] = f'{type(error).__name__}: {error}'
+                  (report / f'{stem}.mutex-mapping.json').write_text(json.dumps(mutex_mapping, indent=2) + '\n')
+              mapping_ok = (not focus or not enabled or
+                            (mutex_mapping is not None and mutex_mapping.get('complete') is True and
+                             not mutex_mapping.get('error') and mutex_mapping.get('dropped') == 0 and
+                             mutex_mapping.get('omitted_event_count') == 0 and not mutex_mapping.get('unmapped') and
+                             all(row.get('source_resolved') is True for row in mutex_mapping.get('mapped', []))))
               result = {'index': index, 'probe_enabled': enabled, 'command': command,
-                        'started_utc': started, 'elapsed_seconds': time.monotonic() - start,
+                        'started_utc': started, 'elapsed_seconds': process_elapsed,
                         'exit_code': code, 'timed_out': timed_out, 'launch_error': launch_error,
                         'summary_count': len(summaries), 'parse_errors': parse_errors, 'summary': summary,
                         'stdout_sha256': hashlib.sha256(out.read_bytes()).hexdigest(),
-                        'stderr_sha256': hashlib.sha256(err.read_bytes()).hexdigest()}
+                        'stderr_sha256': hashlib.sha256(err.read_bytes()).hexdigest(),
+                        'mutex_mapping': mutex_mapping, 'mapping_complete': mapping_ok}
               (report / (stem + '.json')).write_text(json.dumps(result, indent=2) + '\n')
               results.append(result)
           (report / 'results.json').write_text(json.dumps({'identity': identity, 'results': results}, indent=2) + '\n')
@@ -2109,13 +2188,15 @@ jobs:
               for row in results:
                   value = row['summary'] or {}
                   stream.write(f"- probe={row['probe_enabled']}, exit={row['exit_code']}, functional={value.get('functional')}, "
-                               f"pacing_valid={value.get('pacing_valid')}, callback_max_ns={value.get('callback_duration_max_ns')}\n")
+                               f"pacing_valid={value.get('pacing_valid')}, callback_max_ns={value.get('callback_duration_max_ns')}, mutex_probe_enabled={value.get('mutex_probe', {}).get('enabled')}\n")
               stream.write('\nTwo pairs retain trace-overhead evidence; they are not a stable performance estimate.\n')
           if any(row['exit_code'] != 0 or row['timed_out'] or row['launch_error'] or row['parse_errors'] or
                  row['summary_count'] != 1 or row['summary'].get('functional') != 'pass' or
                  row['summary'].get('pacing_valid') is not True or
-                 row['summary'].get('callback_probe', {}).get('enabled') is not row['probe_enabled'] for row in results):
-              raise SystemExit('FATAL: callback comparison contains a failed or incomplete run; inspect retained timing evidence')
+                 row['summary'].get('callback_probe', {}).get('enabled') is not row['probe_enabled'] or
+                 (focus and row['probe_enabled'] and row['summary'].get('mutex_probe', {}).get('enabled') is not True) or
+                 not row['mapping_complete'] for row in results):
+              raise SystemExit('FATAL: callback comparison contains a failed/incomplete run or incomplete holder mapping; inspect exact retained process results')
           PY_CALLBACK_PROBE
       - name: Capture six sequential fixed-bank acquisition partition replays
         if: inputs.scope == 'simulation-acquisition-partition-diagnostic' && !cancelled() && steps.build_prerequisites.outcome == 'success'

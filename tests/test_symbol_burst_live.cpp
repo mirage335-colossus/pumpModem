@@ -6,6 +6,7 @@
 #include "../src/sched_capture.hpp"
 #include "cpu_work_budget.hpp"
 #include "paced_capture_probe.hpp"
+#include "../src/live_mutex_probe.hpp"
 
 #include <algorithm>
 #include <array>
@@ -874,10 +875,11 @@ struct PacedWindow {
     PacedSample start_before,start_after,end_before,end_after,debt;
     PacedHold hold;
 };
-void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool diagnostic_follow=false,bool held=false,bool probe=false) {
+void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool diagnostic_follow=false,bool held=false,bool probe=false,bool mutex_probe=false) {
     using Steady=std::chrono::steady_clock;
     const auto wall_start=Steady::now(),deadline=wall_start+570s;
     const auto cpu_start=std::clock();
+    live::mutex_probe::Scope mutex_scope(mutex_probe);
     CaptureScript capture(probe);
     struct Reset {~Reset(){capture_script=nullptr;}} reset;
     const auto main_thread=std::this_thread::get_id();
@@ -1254,6 +1256,7 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
         std::cout<<",\"release\":";sample_json(h.release);std::cout<<",\"drain\":";sample_json(h.drain);std::cout<<'}';
     }
     std::cout<<"],\"callback_probe\":";capture.callback_probe.emit_json(std::cout);
+    std::cout<<",\"mutex_probe\":";live::mutex_probe::emit_json(std::cout,mutex_scope);
     std::cout<<",\"snapshot_clock_origin_monotonic_ns\":"<<std::chrono::duration_cast<std::chrono::nanoseconds>(wall_start.time_since_epoch()).count()
         <<",\"slow_snapshots\":[";
     for(std::size_t i=0;i<slow_snapshot_count;++i) {if(i)std::cout<<',';sample_json(slow_snapshots[i]);}
@@ -1399,10 +1402,13 @@ int main(int argc,char** argv) {
     try {
         std::string_view selector;
         bool pacing_probe=false;
+        bool mutex_probe=false;
         std::optional<std::filesystem::path> trace_path;
         for(int i=1;i<argc;++i) {
             const std::string_view argument=argv[i];
-            if(argument=="--pacing-probe") {
+            if(argument=="--mutex-probe") {
+                check(!mutex_probe,"duplicate mutex probe option");mutex_probe=true;
+            } else if(argument=="--pacing-probe") {
                 check(!pacing_probe,"duplicate pacing probe option");pacing_probe=true;
             } else if(argument.starts_with("--trace=")) {
                 check(!trace_path,"duplicate Burst fixture trace option");
@@ -1421,6 +1427,7 @@ int main(int argc,char** argv) {
             }
         }
         check(!pacing_probe||selector.starts_with("--paced-"),"pacing probe requires a paced selector");
+        check(!mutex_probe||pacing_probe,"mutex probe requires the pacing probe");
         std::optional<audio::trace::Scope> trace;
         if(trace_path) {
             if(selector.starts_with("--paced-"))trace.emplace(*trace_path,false,
@@ -1432,17 +1439,17 @@ int main(int argc,char** argv) {
                 });
             else trace.emplace(*trace_path);
         }
-        if(selector=="--paced-plain-off") {paced_burst_case(selector,false,false,false,false,pacing_probe);return 0;}
-        if(selector=="--paced-plain-on") {paced_burst_case(selector,false,true,false,false,pacing_probe);return 0;}
-        if(selector=="--paced-keyed-off") {paced_burst_case(selector,true,false,false,false,pacing_probe);return 0;}
-        if(selector=="--paced-keyed-on") {paced_burst_case(selector,true,true,false,false,pacing_probe);return 0;}
-        if(selector=="--paced-held-plain-off") {paced_burst_case(selector,false,false,false,true,pacing_probe);return 0;}
-        if(selector=="--paced-held-plain-on") {paced_burst_case(selector,false,true,false,true,pacing_probe);return 0;}
-        if(selector=="--paced-held-keyed-off") {paced_burst_case(selector,true,false,false,true,pacing_probe);return 0;}
-        if(selector=="--paced-held-keyed-on") {paced_burst_case(selector,true,true,false,true,pacing_probe);return 0;}
+        if(selector=="--paced-plain-off") {paced_burst_case(selector,false,false,false,false,pacing_probe,mutex_probe);return 0;}
+        if(selector=="--paced-plain-on") {paced_burst_case(selector,false,true,false,false,pacing_probe,mutex_probe);return 0;}
+        if(selector=="--paced-keyed-off") {paced_burst_case(selector,true,false,false,false,pacing_probe,mutex_probe);return 0;}
+        if(selector=="--paced-keyed-on") {paced_burst_case(selector,true,true,false,false,pacing_probe,mutex_probe);return 0;}
+        if(selector=="--paced-held-plain-off") {paced_burst_case(selector,false,false,false,true,pacing_probe,mutex_probe);return 0;}
+        if(selector=="--paced-held-plain-on") {paced_burst_case(selector,false,true,false,true,pacing_probe,mutex_probe);return 0;}
+        if(selector=="--paced-held-keyed-off") {paced_burst_case(selector,true,false,false,true,pacing_probe,mutex_probe);return 0;}
+        if(selector=="--paced-held-keyed-on") {paced_burst_case(selector,true,true,false,true,pacing_probe,mutex_probe);return 0;}
         // Observe the complete input after recording every original reception
         // violation; this selector remains failing diagnostic evidence, never a pass.
-        if(selector=="--paced-keyed-on-follow") {paced_burst_case(selector,true,true,true,false,pacing_probe);return 0;}
+        if(selector=="--paced-keyed-on-follow") {paced_burst_case(selector,true,true,true,false,pacing_probe,mutex_probe);return 0;}
         timestamp_certificates();
         if(selector=="--timestamps")return 0;
         if(selector=="--simulation") {simulation_case();return 0;}

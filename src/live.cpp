@@ -4,6 +4,7 @@
 #include "datapump/live.hpp"
 #include "transfer_pending.hpp"
 #include "live_receiver_layout.hpp"
+#include "live_mutex_probe.hpp"
 #include "receiver_storage_allocator.hpp"
 #include "native_peak_workspace.hpp"
 #include "native_point_workspace.hpp"
@@ -64,6 +65,51 @@ namespace datapump::live {
 namespace rx_cpu = ::datapump::detail::cpu_profile;
 namespace {
 using Clock = std::chrono::steady_clock;
+#if !defined(DATAPUMP_LIVE_MUTEX_PROBE) || defined(DATAPUMP_EXECUTION_FIBERS)
+using LiveMutex = execution::Mutex;
+#define DATAPUMP_MUTEX_CONTEXT(name, stage)
+#else
+#define DATAPUMP_MUTEX_CONTEXT(name, stage) mutex_probe::Context name(mutex_probe::Stage::stage)
+// Diagnostic observer only. The underlying mutex and lock ordering are unchanged.
+// The fixture owns the observer until every Session worker has joined.
+class LiveMutex {
+    execution::Mutex mutex_;
+    mutex_probe::State* observer_ = nullptr; // Accessed only while mutex_ is owned.
+    mutex_probe::Record record_{};
+    void acquired(mutex_probe::State* observer,mutex_probe::Stamp requested,std::uintptr_t caller) noexcept {
+        observer_=observer;
+        if(!observer)return;
+        record_={mutex_probe::current_stage(),reinterpret_cast<std::uintptr_t>(this),
+            mutex_probe::thread_id(),caller,requested,mutex_probe::sample(),{}};
+    }
+public:
+#if defined(__GNUC__) || defined(__clang__)
+    __attribute__((noinline))
+#endif
+    void lock() {
+        auto* observer=mutex_probe::observer();
+        const auto requested=observer?mutex_probe::sample():mutex_probe::Stamp{};
+        std::uintptr_t caller=0;
+#if defined(__GNUC__) || defined(__clang__)
+        if(observer)caller=reinterpret_cast<std::uintptr_t>(__builtin_return_address(0));
+#endif
+        mutex_.lock();acquired(observer,requested,caller);
+    }
+    bool try_lock() {
+        auto* observer=mutex_probe::observer();
+        const auto requested=observer?mutex_probe::sample():mutex_probe::Stamp{};
+        if(!mutex_.try_lock())return false;
+        acquired(observer,requested,0);return true;
+    }
+    void unlock() {
+        auto* observer=observer_;
+        if(!observer){mutex_.unlock();return;}
+        auto record=record_;record.released=mutex_probe::sample();observer_=nullptr;
+        mutex_.unlock();
+        observer->add(record); // Bounded publication happens after releasing Live.
+    }
+};
+#endif
 using detail::plot_size;
 using detail::maximum_events;
 using detail::replay_frames;
@@ -649,7 +695,7 @@ struct Session::Impl {
     const bool custom_epoch_clock;
     EpochClock epoch_clock;
     ReplayClock replay_clock;
-    execution::Mutex mutex;
+    LiveMutex mutex;
     execution::StopCondition changed;
     Settings settings;
     Snapshot current;
@@ -2116,6 +2162,7 @@ struct Session::Impl {
         }
     }
     void recovery_loop(std::stop_token stop) {
+        DATAPUMP_MUTEX_CONTEXT(mutex_context,recovery);
         while(!stop.stop_requested()) {
             execution::checkpoint();
             std::shared_ptr<RecoveryTask> task;
@@ -2347,6 +2394,7 @@ struct Session::Impl {
                                         std::stop_token stop, std::span<const float> samples, Feed feed,
                                         Prepared* simulation_wave = nullptr,bool allow_admission=true,
                                         bool account_frontier=true,std::optional<std::uint64_t> coordinate_count={}) {
+        DATAPUMP_MUTEX_CONTEXT(mutex_context,feed_bank);
         rx_cpu::Context cpu_context(rx_cpu::Stage::control_residual);
         // Admit the receiver's current clock epoch before consuming this PCM
         // block. A short burst can finish within one block after a second rolls
@@ -2955,6 +3003,7 @@ struct Session::Impl {
                             if(bank.working_bytes>capacity)throw Error("receive content diagnostics exceed the configured DSP workspace");
                             std::string bits;bits.reserve(result.raw_bits.size());
                             for(auto bit:result.raw_bits)bits.push_back(bit?'1':'0');
+                            DATAPUMP_MUTEX_CONTEXT(mutex_context,phase1);
                             std::lock_guard lock(mutex);
                             if(!current.running || generation!=version || bank.revision!=receive_revision || stop.stop_requested())return;
                             const auto complete=result.stream_complete;
@@ -3169,6 +3218,7 @@ struct Session::Impl {
             }
             if(phase==0) {
                 projection.release();
+                DATAPUMP_MUTEX_CONTEXT(mutex_context,phase0);
                 std::lock_guard lock(mutex);
                 if(!current.running || generation!=version || bank.revision!=receive_revision || stop.stop_requested())return;
                 for(auto& receiver:bank.receivers()) {
@@ -3346,6 +3396,7 @@ struct Session::Impl {
         // the proof between those two externally observable states.
         if(value.transfer.modem.symbol_burst.enabled() && account_frontier)
             publish_capture_quiet(bank,value,version,stop);
+        DATAPUMP_MUTEX_CONTEXT(commit_context,bank_commit);
         std::lock_guard lock(mutex);
         if (current.running && generation == version && bank.revision==receive_revision && !stop.stop_requested()) {
             current.receiver_instances=bank.receivers().size();current.peak_receiver_instances=bank.peak_receivers;
@@ -3448,6 +3499,7 @@ struct Session::Impl {
         bank.burst_resume_pending=true;bank.retirement_pending=true;
     }
     void publish_capture_future(const Bank& bank,const Settings& value,std::uint64_t version,std::stop_token stop={}) {
+        DATAPUMP_MUTEX_CONTEXT(mutex_context,capture_future);
         if(stop.stop_requested() || bank.shared_capture)return;
         const auto& nominal=value.transfer.modem;
         if(value.simulation || value.transfer.timestamp || bank.coverage_limited ||
@@ -3550,6 +3602,7 @@ struct Session::Impl {
             capture_future=std::move(proof);
     }
     void publish_capture_quiet(const Bank& bank,const Settings& value,std::uint64_t version,std::stop_token stop={}) {
+        DATAPUMP_MUTEX_CONTEXT(mutex_context,capture_quiet);
         if(value.simulation || stop.stop_requested())return;
         const auto burst=value.transfer.modem.symbol_burst.enabled();
         const auto trace_burst=burst && bank.samples%value.transfer.modem.sample_rate<value.transfer.modem.sample_rate/20+1;
@@ -3734,6 +3787,7 @@ struct Session::Impl {
         retained=std::max(retained,epoch);
     }
     void source_loop(std::stop_token stop) {
+        DATAPUMP_MUTEX_CONTEXT(mutex_context,source);
         std::uint64_t local_generation = 0;
         std::optional<Bank> simulation_bank;
         const auto reset_simulation_bank=[&](const char* reason) {
@@ -4168,6 +4222,7 @@ struct Session::Impl {
             (settings.full_duplex || (!ready && !source_active));
     }
     void capture_loop(std::stop_token stop) {
+        DATAPUMP_MUTEX_CONTEXT(mutex_context,capture);
         while(!stop.stop_requested()) {
             Settings value;std::uint64_t version;std::stop_token capture_token;
             {
@@ -4231,6 +4286,7 @@ struct Session::Impl {
                     timing_status(status,version,true);
                 };
                 capture_options.capture_timing=[&](const audio::TimePrediction& timing) {
+                    DATAPUMP_MUTEX_CONTEXT(mutex_context,provider_timing);
                     if(!capture_following && !capture_options.request_capture_timing)return;
                     if(timing.quality==audio::TimingQuality::unavailable || !std::isfinite(timing.utc_seconds) ||
                        timing.utc_seconds<0 || !std::isfinite(timing.seconds_per_frame) || timing.seconds_per_frame<=0 ||
@@ -4261,6 +4317,7 @@ struct Session::Impl {
                     raw_seconds=logical_seconds=0;raw_end_epoch.reset();logical_origin.reset();timed_chunk.reset();
                 };
                 capture_options.capture_monitor=[&](std::span<const float> raw,std::uint32_t rate) {
+                    DATAPUMP_MUTEX_CONTEXT(mutex_context,monitor);
                     if(raw.empty())return;
                     raw_end_epoch=current_epoch();
                     raw_seconds+=static_cast<long double>(raw.size())/rate;
@@ -4316,6 +4373,7 @@ struct Session::Impl {
         }
     }
     void encode_loop(std::stop_token stop) {
+        DATAPUMP_MUTEX_CONTEXT(mutex_context,encoder);
         while (!stop.stop_requested()) {
             Transmission transmission; Settings value; Bytes key; bool force=false,noise_long_profile=false;
             std::shared_ptr<const modem::FhssPlan> hopping;
@@ -4543,6 +4601,7 @@ struct Session::Impl {
         }
     }
     void decode_loop(std::stop_token stop) {
+        DATAPUMP_MUTEX_CONTEXT(mutex_context,decoder);
         detail::configure_decoder_scheduling();
         std::optional<Bank> bank; std::uint64_t local_generation = 0, local_revision = 0;
         const auto reset_bank=[&](const char* reason) {
@@ -4801,6 +4860,7 @@ void Session::cancel_transmit() {
     impl_->current.status = impl_->idle_status(); impl_->changed.notify_all();
 }
 Snapshot Session::snapshot() {
+    DATAPUMP_MUTEX_CONTEXT(mutex_context,snapshot);
     std::lock_guard lock(impl_->mutex);
     impl_->update_simulation_elapsed();
     const auto now = impl_->replay_clock();
