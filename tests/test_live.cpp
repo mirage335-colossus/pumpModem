@@ -52,8 +52,8 @@ void replay_staging_retention() {
     const auto count=[](const Staging& s) {
         return std::count_if(s.entries().begin(),s.entries().end(),[](const auto& e){return bool(e);});
     };
-    const auto find=[](const Staging& s,std::uint64_t id) -> const Staging::Entry* {
-        for(const auto& e:s.entries())if(e && e->event.id==id)return e.get();
+    const auto find=[](const Staging& s,std::uint64_t id,bool terminal_only=false) -> const Staging::Entry* {
+        for(const auto& e:s.entries())if(e && e->event.id==id && (!terminal_only || e->terminal()))return e.get();
         return nullptr;
     };
     const auto rejects=[&](auto action,const char* message) {
@@ -111,11 +111,13 @@ void replay_staging_retention() {
     auto recovering_event=event(91,"001",true);recovering_event.recovery_progress=recovering.recovery_progress;
     stage(recovery,event(91,"0"),1);stage(recovery,std::move(recovering_event),3,std::move(recovering));
     stage(recovery,event(92,"ordinary",true),3,result(92,"B"));
+    const auto* recovering_terminal=find(recovery,91,true);
+    const auto* ordinary_terminal=find(recovery,92,true);
     check(recovery.recovery_count()==1 && recovery.recovery_reserved_bytes()>=job->workspace_bound() &&
           recovery.recovery_working_bytes()>=job->working_bytes() && job->progress().attempts==0 &&
           job->progress().state==transfer::RecoveryState::ready &&
-          find(recovery,91)->received->content.message.local_id[0]==91 &&
-          find(recovery,92)->received->content.message.local_id[0]==92,
+          recovering_terminal && recovering_terminal->received && recovering_terminal->received->content.message.local_id[0]==91 &&
+          ordinary_terminal && ordinary_terminal->received && ordinary_terminal->received->content.message.local_id[0]==92,
           "recovery result borrowed the following ordinary completion's identity");
     const auto recovery_before=recovery.recovery_reserved_bytes();
     auto unavailable=result(93,"");unavailable.recovery=job;unavailable.recovery_progress=job->progress();
