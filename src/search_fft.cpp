@@ -157,6 +157,20 @@ template<class T,class P>void execute(std::span<std::complex<T>> a,bool inverse,
     }
     if(inverse)for(std::size_t i=0;i<n;++i){if((i&4095U)==0)cancelled(stop);a[i]/=static_cast<T>(n);}
 }
+#if defined(DATAPUMP_SEARCH_FFT_X86)
+__attribute__((target("avx2"))) void borrowed_inverse_normalize_avx2(
+        std::complex<double>* values,std::size_t n,std::stop_token stop){
+    // The existing borrowed SIMD guard requires finite, bounded operands,
+    // normal IEEE rounding and an even power-of-two size. Its reciprocal is
+    // exact; keep the original cancellation points while scaling two values.
+    const auto scale=_mm256_set1_pd(1.0/static_cast<double>(n));
+    for(std::size_t i=0;i<n;i+=2){
+        if((i&4095U)==0)cancelled(stop);
+        const auto value=_mm256_loadu_pd(reinterpret_cast<const double*>(values+i));
+        _mm256_storeu_pd(reinterpret_cast<double*>(values+i),_mm256_mul_pd(value,scale));
+    }
+}
+#endif
 }
 FloatPlan::FloatPlan(std::size_t n,std::stop_token stop):maximum(n){make(twiddles,n,stop);}
 DoublePlan::DoublePlan(std::size_t n,std::stop_token stop):maximum(n){make(twiddles,n,stop);}
@@ -225,9 +239,14 @@ void fft(std::span<std::complex<double>> a,bool inverse,const DoubleTableView& v
         }
         if(length==n)break;
     }
-    if(inverse)for(std::size_t i=0;i<n;++i){
-        if((i&4095U)==0)cancelled(stop);
-        values[i]/=static_cast<double>(n);
+    if(inverse){
+#if defined(DATAPUMP_SEARCH_FFT_X86)
+        if(vectorized){borrowed_inverse_normalize_avx2(values,n,stop);return;}
+#endif
+        for(std::size_t i=0;i<n;++i){
+            if((i&4095U)==0)cancelled(stop);
+            values[i]/=static_cast<double>(n);
+        }
     }
 }
 void fft(std::span<std::complex<float>> a,bool inverse,const FloatPlan& p,std::stop_token stop,Kernel k){execute(a,inverse,p,stop,k);}

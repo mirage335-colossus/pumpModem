@@ -958,7 +958,7 @@ jobs:
             frontends) targets=(datapump-tests-frontends) ;;
             web) targets=(datapump-tests-web) ;;
             preparation-diagnostic) targets=(test_scheduled_parallel_preparation) ;;
-            gui-core-diagnostic) targets=(test_gui_timing_advice test_gui_controller) ;;
+            gui-core-diagnostic) targets=(test_search_fft test_pattern_fft_batch test_gui_timing_advice test_gui_controller) ;;
             gui-stop-diagnostic) targets=(test_gui_controller) ;;
             gui-stop-differential) targets=(test_gui_controller) ;;
             simulation-clock-diagnostic) targets=(test_live test_pattern_receiver test_stream_receive test_live_planning_link) ;;
@@ -1343,9 +1343,49 @@ jobs:
             inventory="$report/preparation-inventory.json"
             expected='{"scheduled_parallel_preparation":"test_scheduled_parallel_preparation"}'
           else
+            focus_selector='^(search_fft|pattern_fft_batch)$'
+            focus_inventory="$report/fft-inventory.json"
+            focus_expected='{"search_fft":"test_search_fft","pattern_fft_batch":"test_pattern_fft_batch"}'
             selector='^(gui_timing_advice|gui_controller)$'
             inventory="$report/gui-inventory.json"
             expected='{"gui_timing_advice":"test_gui_timing_advice","gui_controller":"test_gui_controller"}'
+          fi
+
+          if [ "$CI_SCOPE" = gui-core-diagnostic ]; then
+            ctest --test-dir build --show-only=json-v1 -R "$focus_selector" > "$focus_inventory"
+            python3 - "$focus_inventory" "$focus_expected" <<'PY_FFT_INVENTORY'
+          import json
+          import pathlib
+          import sys
+
+          inventory = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          expected = json.loads(sys.argv[2])
+          tests = inventory.get("tests", [])
+          names = [test.get("name") for test in tests]
+          assert len(names) == len(expected), f"wrong inventory count: {names}"
+          assert len(set(names)) == len(expected), f"duplicate inventory names: {names}"
+          assert set(names) == set(expected), f"wrong inventory names: {names}"
+          for test in tests:
+              command = test.get("command")
+              assert isinstance(command, list) and len(command) == 1, (
+                  f"test command must contain only its executable: {test}"
+              )
+              assert pathlib.Path(command[0]).name == expected[test["name"]], (
+                  f"unexpected executable or test arguments: {test}"
+              )
+          PY_FFT_INVENTORY
+            if ctest --test-dir build --output-on-failure --no-tests=error \
+              --parallel 1 --timeout 7200 \
+              --output-junit "$report/fft-results.xml" -R "$focus_selector" \
+              > "$report/fft.log" 2>&1; then
+              focus_status=0
+            else
+              focus_status=$?
+            fi
+            cp build/Testing/Temporary/LastTest.log "$report/fft-LastTest.log"
+            if [ "$focus_status" -ne 0 ]; then
+              exit "$focus_status"
+            fi
           fi
 
           ctest --test-dir build --show-only=json-v1 -R "$selector" > "$inventory"
