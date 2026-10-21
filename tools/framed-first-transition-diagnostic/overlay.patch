@@ -1,6 +1,45 @@
+--- a/src/audio_trace.hpp
++++ b/src/audio_trace.hpp
+@@ -6,6 +6,8 @@
+ #include <cmath>
+ #include <condition_variable>
+ #include <cstdio>
++#include <cstdlib>
++#include <cstring>
+ #include <array>
+ #include <filesystem>
+ #include <iomanip>
+@@ -167,6 +169,14 @@
+     const auto state=active.load(std::memory_order_acquire);
+     return state && state->receiver_probe;
+ }
++inline std::atomic<bool> framed_census_trace{false};
++inline std::atomic<std::uint64_t> first_transition_case_stamp{0};
++inline bool first_transition_filter()noexcept{static const bool on=[](){const auto* p=std::getenv("DATAPUMP_FIRST_TRANSITION_CENSUS");return p&&std::strcmp(p,"1")==0;}();return on;}
++inline bool first_transition_allowed(const char* event)noexcept{
++    return std::strncmp(event,"first_transition_",17)==0 || std::strcmp(event,"trace_begin")==0 || std::strcmp(event,"simulation_media_clock_case")==0 ||
++        std::strcmp(event,"receiver_selection")==0 || std::strcmp(event,"receiver_bank_build")==0 || std::strcmp(event,"receiver_bank_admitted")==0 || std::strcmp(event,"receiver_bank_retired")==0 ||
++        std::strcmp(event,"receiver_profile_unavailable")==0 || std::strcmp(event,"receiver_allocation_refused")==0 || std::strcmp(event,"receiver_optional_scratch_reclaimed")==0 || std::strcmp(event,"receiver_constructor_workspace_retry")==0 || std::strcmp(event,"receiver_component_cpu")==0;
++}
+ inline std::atomic<std::uint64_t> next_identity{0};
+ inline std::uint64_t identity(){return ++next_identity;}
+ template<class F>void record(const char* event,F fields) noexcept {
+@@ -180,7 +190,11 @@
+     try {
+         Fields f;f.add("sequence",sequence);
+         f.add("steady",std::chrono::duration<long double>(std::chrono::steady_clock::now().time_since_epoch()).count());
+-        fields(f);state->push("{\"event\":"+quoted(event)+f.out.str()+"}\n");
++        fields(f);
++        if(framed_census_trace.load(std::memory_order_relaxed)&&std::strcmp(event,"simulation_media_clock_case")==0){const auto row=f.out.str();unsigned c=0;
++            if(row.find("\"case\":\"raw\"")!=std::string::npos)c=1;else if(row.find("\"case\":\"short\"")!=std::string::npos)c=2;else if(row.find("\"case\":\"framed\"")!=std::string::npos)c=3;
++            first_transition_case_stamp.store((sequence<<2)|c);}
++        state->push("{\"event\":"+quoted(event)+f.out.str()+"}\n");
+     }catch(...){++state->dropped;}
+     --state->producers;state->changed.notify_one();
+ }
 --- /dev/null
 +++ b/src/first_transition_probe.hpp
-@@ -0,0 +1,488 @@
+@@ -0,0 +1,489 @@
 +#pragma once
 +// PRIVATE diagnostic overlay only. No API/object-layout or receiver-policy change.
 +#include "audio_trace.hpp"
@@ -9,6 +48,7 @@
 +#include "native_peak_workspace.hpp"
 +#include <span>
 +#include "datapump/streaming_modem.hpp"
++#include "datapump/fhss_schedule.hpp"
 +#include <type_traits>
 +#include <openssl/sha.h>
 +#include <bit>
@@ -796,6 +836,22 @@
              current.receiver_health.search_limited |= bank.coverage_limited;
              if(bank.coverage_limited) {
                  // Quota/candidate loss can also arise during this feed, after
+--- a/src/pattern_correlator.cpp
++++ b/src/pattern_correlator.cpp
+@@ -1,3 +1,4 @@
++#include "first_transition_probe.hpp"
+ #include "scheduled_acquisition_policy.hpp"
+ #include "pattern_observation_layout.hpp"
+ #include "pattern_start_geometry.hpp"
+@@ -12892,7 +12893,7 @@
+     s.point_begin=s.point_count=0;return result;
+ }
+ bool PatternCorrelator::acquiring()const {return !impl_->finished && std::any_of(impl_->hypotheses.begin(),impl_->hypotheses.end(),[](const auto& h){return h.admitted || !h.burst.bits.empty();});}
+-bool PatternCorrelator::synchronized()const{return std::any_of(impl_->hypotheses.begin(),impl_->hypotheses.end(),[](const auto& h){return h.admitted;});}
++bool PatternCorrelator::synchronized()const{::datapump::diagnostic::first_transition::inspect_correlator(*impl_);return std::any_of(impl_->hypotheses.begin(),impl_->hypotheses.end(),[](const auto& h){return h.admitted;});}
+ bool PatternCorrelator::initial_search_complete()const {
+     if(impl_->lazy_state())return static_cast<long double>(impl_->lazy_state()->processed)>=impl_->lazy_state()->initial_complete_due;
+     const auto& s=*impl_;
 --- a/src/pattern_receiver.cpp
 +++ b/src/pattern_receiver.cpp
 @@ -18,6 +18,7 @@
@@ -896,61 +952,38 @@
  }
  Diagnostics PatternReceiver::diagnostics()const {
      if(impl_->fallback)return impl_->fallback->diagnostics();
---- a/src/pattern_correlator.cpp
-+++ b/src/pattern_correlator.cpp
-@@ -1,3 +1,4 @@
-+#include "first_transition_probe.hpp"
- #include "scheduled_acquisition_policy.hpp"
- #include "pattern_observation_layout.hpp"
- #include "pattern_start_geometry.hpp"
-@@ -12892,7 +12893,7 @@
-     s.point_begin=s.point_count=0;return result;
- }
- bool PatternCorrelator::acquiring()const {return !impl_->finished && std::any_of(impl_->hypotheses.begin(),impl_->hypotheses.end(),[](const auto& h){return h.admitted || !h.burst.bits.empty();});}
--bool PatternCorrelator::synchronized()const{return std::any_of(impl_->hypotheses.begin(),impl_->hypotheses.end(),[](const auto& h){return h.admitted;});}
-+bool PatternCorrelator::synchronized()const{::datapump::diagnostic::first_transition::inspect_correlator(*impl_);return std::any_of(impl_->hypotheses.begin(),impl_->hypotheses.end(),[](const auto& h){return h.admitted;});}
- bool PatternCorrelator::initial_search_complete()const {
-     if(impl_->lazy_state())return static_cast<long double>(impl_->lazy_state()->processed)>=impl_->lazy_state()->initial_complete_due;
-     const auto& s=*impl_;
---- a/src/audio_trace.hpp
-+++ b/src/audio_trace.hpp
-@@ -6,6 +6,8 @@
- #include <cmath>
- #include <condition_variable>
- #include <cstdio>
-+#include <cstdlib>
-+#include <cstring>
- #include <array>
- #include <filesystem>
- #include <iomanip>
-@@ -167,6 +169,14 @@
-     const auto state=active.load(std::memory_order_acquire);
-     return state && state->receiver_probe;
- }
-+inline std::atomic<bool> framed_census_trace{false};
-+inline std::atomic<std::uint64_t> first_transition_case_stamp{0};
-+inline bool first_transition_filter()noexcept{static const bool on=[](){const auto* p=std::getenv("DATAPUMP_FIRST_TRANSITION_CENSUS");return p&&std::strcmp(p,"1")==0;}();return on;}
-+inline bool first_transition_allowed(const char* event)noexcept{
-+    return std::strncmp(event,"first_transition_",17)==0 || std::strcmp(event,"trace_begin")==0 || std::strcmp(event,"simulation_media_clock_case")==0 ||
-+        std::strcmp(event,"receiver_selection")==0 || std::strcmp(event,"receiver_bank_build")==0 || std::strcmp(event,"receiver_bank_admitted")==0 || std::strcmp(event,"receiver_bank_retired")==0 ||
-+        std::strcmp(event,"receiver_profile_unavailable")==0 || std::strcmp(event,"receiver_allocation_refused")==0 || std::strcmp(event,"receiver_optional_scratch_reclaimed")==0 || std::strcmp(event,"receiver_constructor_workspace_retry")==0 || std::strcmp(event,"receiver_component_cpu")==0;
-+}
- inline std::atomic<std::uint64_t> next_identity{0};
- inline std::uint64_t identity(){return ++next_identity;}
- template<class F>void record(const char* event,F fields) noexcept {
-@@ -180,7 +190,11 @@
-     try {
-         Fields f;f.add("sequence",sequence);
-         f.add("steady",std::chrono::duration<long double>(std::chrono::steady_clock::now().time_since_epoch()).count());
--        fields(f);state->push("{\"event\":"+quoted(event)+f.out.str()+"}\n");
-+        fields(f);
-+        if(framed_census_trace.load(std::memory_order_relaxed)&&std::strcmp(event,"simulation_media_clock_case")==0){const auto row=f.out.str();unsigned c=0;
-+            if(row.find("\"case\":\"raw\"")!=std::string::npos)c=1;else if(row.find("\"case\":\"short\"")!=std::string::npos)c=2;else if(row.find("\"case\":\"framed\"")!=std::string::npos)c=3;
-+            first_transition_case_stamp.store((sequence<<2)|c);}
-+        state->push("{\"event\":"+quoted(event)+f.out.str()+"}\n");
-     }catch(...){++state->dropped;}
-     --state->producers;state->changed.notify_one();
- }
+--- a/src/receiver_storage_allocator.hpp
++++ b/src/receiver_storage_allocator.hpp
+@@ -10,6 +10,19 @@
+ #include <utility>
+
+ namespace datapump::live::detail {
++
++// PRIVATE diagnostic overlay: retain the rejected quota request without changing
++// the std::bad_alloc catch contract or the account/allocator object layout.
++class ReceiverAllocationLimit final : public std::bad_alloc {
++public:
++    ReceiverAllocationLimit(std::size_t requested, std::size_t allocated,
++                            std::size_t limit) noexcept
++        : requested_bytes(requested), allocated_bytes(allocated),
++          allocation_limit(limit) {}
++    const std::size_t requested_bytes;
++    const std::size_t allocated_bytes;
++    const std::size_t allocation_limit;
++};
+
+ // Tracks allocator-requested bytes retained by containers using this account.
+ // The account object and its shared_ptr control block are separate overhead.
+@@ -86,7 +99,8 @@
+         const std::lock_guard lock(account_->mutex_);
+         if (account_->allocated_bytes_ > account_->limit_ ||
+             bytes > account_->limit_ - account_->allocated_bytes_)
+-            throw std::bad_alloc();
++            throw ReceiverAllocationLimit(bytes, account_->allocated_bytes_,
++                                          account_->limit_);
+         T* result = std::allocator<T>{}.allocate(count);
+         account_->allocated_bytes_ += bytes;
+         return result;
 --- a/tests/test_live.cpp
 +++ b/tests/test_live.cpp
 @@ -1654,6 +1654,18 @@

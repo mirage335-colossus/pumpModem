@@ -7,7 +7,7 @@
       "payloadpath": "payload/src/audio_trace.hpp"
     },
     "src/first_transition_probe.hpp": {
-      "after_sha256": "541c08bd2ad43df2a7ffcaa14ee1ae55afcb8fbd42635e4bc4996a43231acb0e",
+      "after_sha256": "abb0f9c9fe381dda91cfa0ea3aa9156edbb9fd22a4bbabad0d788bea0813e70e",
       "before_sha256": null,
       "payloadpath": "payload/src/first_transition_probe.hpp"
     },
@@ -25,6 +25,11 @@
       "after_sha256": "cb834ab0f89371d4c619618eb6b450d916f86e24cc055b4b34067d83d7d377ad",
       "before_sha256": "43b6277c0e54f615bee1755657b983119136df63d57a6531bda4cc0c29c73666",
       "payloadpath": "payload/src/pattern_receiver.cpp"
+    },
+    "src/receiver_storage_allocator.hpp": {
+      "after_sha256": "76001ddd1eabd74973f25ade313999af20ae4a9cc02e5ab9520078d88a15b056",
+      "before_sha256": "af26f8316960d2a8ca118941dfb545e5f02ffc7ba74fd864ae5343500acdf2f3",
+      "payloadpath": "payload/src/receiver_storage_allocator.hpp"
     },
     "tests/test_live.cpp": {
       "after_sha256": "99b2e7b9434a3705f8c4fd53140f7955cd2a46887ce22ced171c9dd6004cb52b",
@@ -853,5 +858,5 @@
   },
   "input_source_inventory_sha256": "7fe8853504779d33e90406c3c9c8dc8bc30b76655112220539423df98e0785e1",
   "schema": 1,
-  "source_inventory_sha256": "5e1693a76c4c55358122551d24d197d984f236da6404c2cd4cb0f4c98f3e7f4f"
+  "source_inventory_sha256": "2f0d88cb9f346badd36ee5df908aea32757951b33167324c6f145cd3e6557468"
 }

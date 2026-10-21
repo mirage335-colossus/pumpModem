@@ -6,6 +6,7 @@
 #include "native_peak_workspace.hpp"
 #include <span>
 #include "datapump/streaming_modem.hpp"
+#include "datapump/fhss_schedule.hpp"
 #include <type_traits>
 #include <openssl/sha.h>
 #include <bit>

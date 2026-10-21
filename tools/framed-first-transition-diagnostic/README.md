@@ -15,7 +15,7 @@ python3 prepare.py --source-root /absolute/private/source --output-dir /absolute
 ```
 
 It validates the complete 816-file `src/include/tests/cmake/CMakeLists.txt`
-preimage inventory and every postimage before writing. Only six allowlisted
+preimage inventory and every postimage before writing. Only seven allowlisted
 source files change. It writes an applied manifest, final source inventory,
 preimages, forward patch and reverse patch to the fresh evidence directory.
 There are no Git operations, build operations, downloads or test launches in
@@ -149,3 +149,15 @@ whole-child OFF/ON measurements and matching boundaries are still required.
 The current trace implementation, queue limits, footer and seal stay intact.
 
 Source-inventory setup recovery: the first manifest included 26 ignored local Python bytecode files. The corrected inventory pins all 816 tracked compile-relevant files from the exact4e Git archive; no tracked input or source/payload byte was omitted or changed. Original manifests and failed CI39555771884 remain retained. Local ignored bytecode is preserved.
+
+Diagnostic compile correction: CI39556521202/job119077458502 passed source
+preparation but failed C++ compilation before either OFF/ON application run.
+The retained six-file payload referenced a quota exception not defined in
+current4e and used sizeof(FhssPlan) before its definition in Pattern TUs. The
+seven-file overlay adds only the diagnostic ReceiverAllocationLimit subclass
+at the existing quota rejection (still caught as std::bad_alloc), preserving
+requested/used/limit values, and includes datapump/fhss_schedule.hpp directly.
+The account and allocator layouts, successful allocation, catch behavior,
+receiver policy and all assertions/deadlines remain unchanged. The original
+compile-failed payload and log remain in compile-repair-root/frozen-5ecb and
+the preceding CI evidence. Actual compilation/OFF/ON validation remains pending.
