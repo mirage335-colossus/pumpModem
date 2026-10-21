@@ -987,6 +987,11 @@ struct Session::Impl {
         auto value = normalized(requested);
         const auto key=value.transfer.key?value.transfer.key->mac(Bytes{'D','P','-','T','X','-','E','P','O','C','H','-','G','U','A','R','D'}):Bytes{};
         std::lock_guard lock(mutex);
+        // These fixed display buffers share plot_workspace. Prepare before any
+        // configuration side effects, then retain capacity across publishers.
+        current.waveform.reserve(plot_size);
+        current.spectrum_db.reserve(plot_size/2+1);
+        current.spectrum_complex.reserve(plot_size/2+1);
         capture_stop.request_stop(); tx_stop.request_stop(); decode_stop.request_stop();
         decode_stop = std::stop_source{};
         settings = std::move(value); ++generation; ++tx_serial; ++receive_revision;
@@ -1002,7 +1007,14 @@ struct Session::Impl {
         auto unavailable=unavailable_recovery_events();invalidate_recoveries();
         clear_replay(); pending_points = {};
         replay_omitted = 0;
-        current = {}; transmit_error.clear(); current.running = true; current.simulation = settings.simulation;
+        auto waveform=std::move(current.waveform);
+        auto spectrum=std::move(current.spectrum_db);
+        auto complex_spectrum=std::move(current.spectrum_complex);
+        current = {};
+        current.waveform=std::move(waveform);current.waveform.clear();
+        current.spectrum_db=std::move(spectrum);current.spectrum_db.clear();
+        current.spectrum_complex=std::move(complex_spectrum);current.spectrum_complex.clear();
+        transmit_error.clear(); current.running = true; current.simulation = settings.simulation;
         simulation_compute_started.reset();
         capture_timing_status.clear();playback_timing_status.clear();
         capture_timing_fallback=playback_timing_fallback=false;
@@ -1054,18 +1066,27 @@ struct Session::Impl {
         if(!capture)current.transmit_clock_following=status.following_system_clock;
         ++current.sequence;
     }
+    // All environment writers retain the capacities prepared by configure.
+    // Source geometry is the fixed plot tail, independent of message contents.
+    template<class T,class Range>
+    static void copy_environment_vector(std::vector<T>& target,const Range& source) {
+        if(source.size()>target.capacity())throw Error("environment plot exceeds its prepared capacity");
+        target.resize(source.size());
+        std::copy(source.begin(),source.end(),target.begin());
+    }
     // Called under mutex; no receiver state or FFT work depends on this display
     // identity. A restart, source switch or capture gap invalidates phase pairs.
-    void publish_spectrum_metadata(detail::SignalPlots& frame,double bin_hz,std::uint64_t source) {
+    void publish_spectrum_metadata(std::span<const std::complex<float>> spectrum,
+        std::uint64_t start,std::size_t count,double bin_hz,std::uint64_t source) {
         if(current.spectrum_complex.empty() || source!=spectrum_source ||
-           frame.spectrum_start_sample<=current.spectrum_start_sample || bin_hz!=current.spectrum_bin_hz) {
+           start<=current.spectrum_start_sample || bin_hz!=current.spectrum_bin_hz) {
             ++spectrum_segment_serial;
             if(!spectrum_segment_serial)++spectrum_segment_serial;
         }
         spectrum_source=source;current.spectrum_segment=spectrum_segment_serial;
-        current.spectrum_complex=std::move(frame.spectrum_complex);
-        current.spectrum_start_sample=frame.spectrum_start_sample;
-        current.spectrum_sample_count=frame.spectrum_sample_count;
+        copy_environment_vector(current.spectrum_complex,spectrum);
+        current.spectrum_start_sample=start;
+        current.spectrum_sample_count=count;
     }
     void publish(const detail::SignalWindow& window, const modem::Config& config, std::uint64_t version,
                  Clock::time_point& last_plot, bool force = false,
@@ -1083,9 +1104,11 @@ struct Session::Impl {
         if (transmitter && tx_serial != serial) return;
         if (pattern_scores && tx_serial != serial) return;
         if(!preserve_monitor) {
-            publish_spectrum_metadata(measured,static_cast<double>(config.sample_rate)/plot_size,
+            publish_spectrum_metadata(measured.spectrum_complex,measured.spectrum_start_sample,
+                measured.spectrum_sample_count,static_cast<double>(config.sample_rate)/plot_size,
                 transmitter?serial+1:0);
-            current.waveform = std::move(measured.waveform); current.spectrum_db = std::move(measured.spectrum);
+            copy_environment_vector(current.waveform,measured.waveform);
+            copy_environment_vector(current.spectrum_db,measured.spectrum);
             current.waveform_sample_rate = config.sample_rate; current.environment_monitor = false;
             current.simulation_spectrum_gain_db = settings.simulation ?
                 detail::spectrum_display_gain(settings.simulation_spectrum_gain_db, current.waveform.size()) : std::nullopt;
@@ -1113,14 +1136,14 @@ struct Session::Impl {
         }
         ++current.sequence; last_plot = Clock::now();
     }
-    void publish_monitor(const detail::SignalWindow& window, const modem::Config& config,
-                         std::uint64_t version, Clock::time_point& last_plot) {
+    void publish_monitor(const detail::SignalWindow& window,detail::EnvironmentFrameWorkspace& workspace,
+                         const modem::Config& config,std::uint64_t version,Clock::time_point& last_plot) {
         if(Clock::now()-last_plot<std::chrono::milliseconds(50))return;
 #if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
         capture_monitor_probe::mark(capture_monitor_probe::Phase::frame_start);
         {
 #endif
-        auto measured=window.frame(config,detail::SignalView::environment);
+        const auto measured=window.environment_frame(workspace);
 #if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
         capture_monitor_probe::mark(capture_monitor_probe::Phase::frame_ready);
         {
@@ -1130,9 +1153,11 @@ struct Session::Impl {
         capture_monitor_probe::mark(capture_monitor_probe::Phase::lock_acquired);
 #endif
         if(!current.running || generation!=version)return;
-        publish_spectrum_metadata(measured,static_cast<double>(config.sample_rate)/plot_size,
+        publish_spectrum_metadata(measured.spectrum_complex,measured.spectrum_start_sample,
+            measured.spectrum_sample_count,static_cast<double>(config.sample_rate)/plot_size,
             std::numeric_limits<std::uint64_t>::max());
-        current.waveform=std::move(measured.waveform);current.spectrum_db=std::move(measured.spectrum);
+        copy_environment_vector(current.waveform,measured.waveform);
+        copy_environment_vector(current.spectrum_db,measured.spectrum);
         current.waveform_sample_rate=config.sample_rate;current.environment_monitor=true;
         current.spectrum_bin_hz=static_cast<double>(config.sample_rate)/plot_size;
         current.simulation_spectrum_gain_db.reset();
@@ -4273,6 +4298,7 @@ struct Session::Impl {
                 }
                 plot_window.reset();
                 std::optional<detail::SignalWindow> monitor_window;
+                std::unique_ptr<detail::EnvironmentFrameWorkspace> monitor_frame;
                 bool monitor_seen=false;
                 auto last_monitor=Clock::time_point{};
                 // Raw monitor callbacks precede the resampler. Map each logical
@@ -4358,7 +4384,7 @@ struct Session::Impl {
 #if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
                     capture_monitor_probe::mark(capture_monitor_probe::Phase::config);
 #endif
-                    publish_monitor(*monitor_window,config,version,last_monitor);
+                    publish_monitor(*monitor_window,*monitor_frame,config,version,last_monitor);
                     monitor_seen=true;
                 };
                 audio::capture(value.transfer.modem.sample_rate, value.device, [&](std::span<const float> chunk) {
@@ -4375,6 +4401,9 @@ struct Session::Impl {
                     std::lock_guard lock(mutex);
                     return capture_allowed_locked(version);
                 }, capture_token, [&](const auto& format) {
+                    // Drop the previous observer before its charge is replaced,
+                    // including when a repeated format loses monitor headroom.
+                    monitor_frame.reset();monitor_window.reset();monitor_seen=false;
                     audio_format(format, version);
                     bool monitor_reserved=false;
                     {
@@ -4388,7 +4417,13 @@ struct Session::Impl {
                     }
                     // Default capacity is exactly 2048, independent of the
                     // hardware rate and narrowband symbol length.
-                    if(monitor_reserved)monitor_window.emplace();
+                    if(monitor_reserved) {
+                        monitor_window.emplace();
+                        const auto actual=sizeof(monitor_window)+monitor_window->sample_storage_bytes()+
+                            sizeof(monitor_frame)+sizeof(detail::EnvironmentFrameWorkspace);
+                        if(actual>monitor_workspace)throw Error("audio monitor exceeds its reserved workspace");
+                        monitor_frame=std::make_unique<detail::EnvironmentFrameWorkspace>();
+                    }
                 }, std::move(capture_options));
             } catch(const std::exception& exception) {
                 std::unique_lock lock(mutex);

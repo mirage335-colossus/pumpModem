@@ -13,7 +13,7 @@ std::size_t integration_samples(std::size_t count, const modem::Config& config) 
         std::ceil(2.*config.sample_rate/config.bandwidth_hz)));
     return std::min(full_chip,std::max<std::size_t>(1,count/16));
 }
-void fft(std::vector<std::complex<double>>& values) {
+void fft(std::span<std::complex<double>> values) {
     const auto n=values.size();
     for (std::size_t i=1,j=0;i<n;++i) {
         auto bit=n>>1;
@@ -31,6 +31,33 @@ void fft(std::vector<std::complex<double>>& values) {
             }
         }
     }
+}
+void environment_spectrum(std::span<const float> waveform,
+                          std::span<std::complex<double>> bins,
+                          std::span<double> spectrum,
+                          std::span<std::complex<float>> spectrum_complex) {
+    std::fill(bins.begin(),bins.end(),std::complex<double>{});
+    double weight=0;
+    for (std::size_t i=0;i<waveform.size();++i) {
+        const auto window=waveform.size()<3?1.:.5-.5*std::cos(2*std::numbers::pi*static_cast<double>(i)/static_cast<double>(waveform.size()-1));
+        bins[i]=static_cast<double>(waveform[i])*window; weight+=window;
+    }
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+    capture_monitor_probe::mark(capture_monitor_probe::Phase::fft_begin);
+#endif
+    fft(bins);
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+    capture_monitor_probe::mark(capture_monitor_probe::Phase::fft_end);
+#endif
+    for (std::size_t i=0;i<spectrum.size();++i) {
+        const double factor=(i==0 || i==signal_window_size/2)?1.:2.;
+        const auto value=bins[i]*factor/std::max(1.,weight);
+        spectrum[i]=20*std::log10(std::max(1e-12,std::abs(bins[i])*factor/std::max(1.,weight)));
+        spectrum_complex[i]=value;
+    }
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+    capture_monitor_probe::mark(capture_monitor_probe::Phase::outputs_ready);
+#endif
 }
 }
 std::optional<double> spectrum_display_gain(std::optional<double> reference_gain_db,
@@ -57,28 +84,11 @@ SignalPlots signal_plots(std::span<const float> samples,const modem::Config& con
         result.spectrum_start_sample=first_sample+(samples.size()-waveform.size());
         result.spectrum_sample_count=waveform.size();
         std::vector<std::complex<double>> bins(signal_window_size);
-        double weight=0;
-        for (std::size_t i=0;i<waveform.size();++i) {
-            const auto window=waveform.size()<3?1.:.5-.5*std::cos(2*std::numbers::pi*static_cast<double>(i)/static_cast<double>(waveform.size()-1));
-            bins[i]=static_cast<double>(waveform[i])*window; weight+=window;
-        }
-#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
-        capture_monitor_probe::mark(capture_monitor_probe::Phase::fft_begin);
-#endif
-        fft(bins);
-#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
-        capture_monitor_probe::mark(capture_monitor_probe::Phase::fft_end);
-#endif
         result.spectrum.reserve(signal_window_size/2+1);
         result.spectrum_complex.reserve(signal_window_size/2+1);
-        for (std::size_t i=0;i<=signal_window_size/2;++i) {
-            const double factor=(i==0 || i==signal_window_size/2)?1.:2.;
-            result.spectrum.push_back(20*std::log10(std::max(1e-12,std::abs(bins[i])*factor/std::max(1.,weight))));
-            result.spectrum_complex.emplace_back(bins[i]*factor/std::max(1.,weight));
-        }
-#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
-        capture_monitor_probe::mark(capture_monitor_probe::Phase::outputs_ready);
-#endif
+        result.spectrum.resize(signal_window_size/2+1);
+        result.spectrum_complex.resize(signal_window_size/2+1);
+        environment_spectrum(waveform,bins,result.spectrum,result.spectrum_complex);
     }
     if(view==SignalView::environment)return result;
     const auto chip=integration_samples(samples.size(),config);
@@ -130,5 +140,16 @@ SignalPlots SignalWindow::frame(const modem::Config& config,SignalView view) con
     capture_monitor_probe::mark(capture_monitor_probe::Phase::ordered_ready);
 #endif
     return signal_plots(ordered,config,total_-size_,view);
+}
+EnvironmentFrameView SignalWindow::environment_frame(EnvironmentFrameWorkspace& workspace) const noexcept {
+    const auto count=std::min(size_,signal_window_size);
+    const auto first=(next_+samples_.size()-count)%samples_.size();
+    for (std::size_t i=0;i<count;++i) workspace.waveform[i]=samples_[(first+i)%samples_.size()];
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+    capture_monitor_probe::mark(capture_monitor_probe::Phase::ordered_ready);
+#endif
+    const auto waveform=std::span<const float>(workspace.waveform).first(count);
+    environment_spectrum(waveform,workspace.bins,workspace.spectrum,workspace.spectrum_complex);
+    return {waveform,workspace.spectrum,workspace.spectrum_complex,total_-count,count};
 }
 }
