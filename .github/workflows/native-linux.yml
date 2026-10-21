@@ -1276,7 +1276,9 @@ jobs:
           PY
       - name: Capture first differing tone arithmetic with a matched original binary
         if: inputs.scope == 'correlator-tone-diagnostic'
-        run: python3 -B tools/correlator-tone-probe/run.py --build-dir build --jobs "$(python3 -B tools/build_capacity.py)"
+        run: |
+          git -c safe.directory="$PWD" fetch --no-tags --depth=1 origin 95cc9b0514d7555103de56723ae7a4adf406bb35
+          python3 -B tools/correlator-tone-probe/run.py --build-dir build --jobs "$(python3 -B tools/build_capacity.py)"
       - name: Run selected receiver, clock and scheduled-hop tests
         if: inputs.scope == 'receiver' || inputs.scope == 'startup-guide' || inputs.scope == 'sched-hop-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic'
         run: |

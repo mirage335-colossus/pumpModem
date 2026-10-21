@@ -58,17 +58,22 @@ def bounded_tree(root):
     return total
 
 
-def group_alive(group):
-    # Ignore reaped/dead zombies; every surviving member of our new session is
-    # a writer risk, including descendants after the direct child exits.
+def group_members(group):
+    members = []
     for path in Path('/proc').glob('[0-9]*/stat'):
         try:
-            fields = path.read_text().rsplit(')', 1)[1].split()
+            value = path.read_text()
+            fields = value.rsplit(')', 1)[1].split()
             if int(fields[2]) == group and fields[0] != 'Z':
-                return True
+                members.append({'pid': int(path.parent.name), 'state': fields[0],
+                                'name': value.split('(', 1)[1].rsplit(')', 1)[0][:80]})
         except (OSError, ValueError, IndexError):
             continue
-    return False
+    return members
+
+
+def group_alive(group):
+    return bool(group_members(group))
 
 
 def signal_group(group, value):
@@ -86,7 +91,8 @@ def run(command, directory, label, seconds, watch=None, stdout_limit=LOG_LIMIT):
     """
     out_path, err_path = directory / (label + '.stdout.log'), directory / (label + '.stderr.log')
     result = {'command': command, 'term_after_seconds': seconds, 'kill_grace_seconds': 10,
-              'started_monotonic_ns': time.monotonic_ns(), 'exit_code': None, 'capture_error': None}
+              'started_monotonic_ns': time.monotonic_ns(), 'exit_code': None, 'capture_error': None,
+              'writer_exit_grace_seconds': 2}
     process = None
     try:
         with out_path.open('xb') as out, err_path.open('xb') as err:
@@ -99,7 +105,8 @@ def run(command, directory, label, seconds, watch=None, stdout_limit=LOG_LIMIT):
             counts = {out: 0, err: 0}
             started = time.monotonic()
             terminated = None
-            while streams.get_map() or process.poll() is None:
+            launcher_exited = None
+            while streams.get_map() or process.poll() is None or group_alive(process.pid):
                 now = time.monotonic()
                 if terminated is None:
                     try:
@@ -135,11 +142,18 @@ def run(command, directory, label, seconds, watch=None, stdout_limit=LOG_LIMIT):
                         result['capture_error'] = 'bounded output exceeded ' + str(limit) + ' bytes'
                         terminated = now
                         signal_group(process.pid, signal.SIGTERM)
-                # A dead launcher must not leave an unbounded pipe-owning child.
+                # Launchers such as xvfb-run can return while their server is
+                # completing normal shutdown. Observe a bounded exit grace;
+                # any writer still alive afterwards remains a fatal orphan.
                 if process.poll() is not None and terminated is None and group_alive(process.pid):
-                    result['capture_error'] = 'launcher exited with surviving process-group members'
-                    terminated = time.monotonic()
-                    signal_group(process.pid, signal.SIGTERM)
+                    if launcher_exited is None:
+                        launcher_exited = time.monotonic()
+                        result['launcher_exit_seen_monotonic_ns'] = time.monotonic_ns()
+                        result['post_exit_members'] = group_members(process.pid)[:16]
+                    if time.monotonic() - launcher_exited >= 2:
+                        result['capture_error'] = 'launcher exited with surviving process-group members after bounded grace'
+                        terminated = time.monotonic()
+                        signal_group(process.pid, signal.SIGTERM)
             result['exit_code'] = process.wait(timeout=2)
             streams.close()
     finally:
