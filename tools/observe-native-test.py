@@ -39,14 +39,18 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
-def proc_stat(pid):
-    fields = (Path("/proc") / str(pid) / "stat").read_text().rsplit(")", 1)[1].split()
+def stat_path(path):
+    fields = path.read_text().rsplit(")", 1)[1].split()
     return {
         "state": fields[0],
         "user_ticks": int(fields[11]),
         "system_ticks": int(fields[12]),
         "start_ticks": int(fields[19]),
     }
+
+
+def proc_stat(pid):
+    return stat_path(Path("/proc") / str(pid) / "stat")
 
 
 def proc_children(pid):
@@ -123,7 +127,9 @@ def sample_target(pid):
     for task in tasks:
         tid = int(task.name)
         try:
-            thread = {"tid": tid, **proc_stat(tid), "affinity": affinity(tid), "nice": priority(tid)}
+            # The task-directory view reports this thread's CPU; the top-level
+            # /proc/<tid>/stat view can aggregate the thread group.
+            thread = {"tid": tid, **stat_path(task / "stat"), "affinity": affinity(tid), "nice": priority(tid)}
             try:
                 thread["wchan"] = (task / "wchan").read_text().strip()[:120]
             except OSError as error:
@@ -195,6 +201,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--retained-binary", type=Path, help="existing independently retained identical ELF; excluded from the diagnostic byte cap")
     parser.add_argument("--source", default=None, help="source commit or descriptive revision")
     parser.add_argument("--log", type=Path, help="existing driver log to follow for progress markers")
     parser.add_argument("command", nargs=argparse.REMAINDER,
@@ -212,14 +219,19 @@ def main():
         parser.error("--binary is not an ELF image")
     output.mkdir(parents=True, exist_ok=False)
 
-    retained = output / "retained-target.elf"
-    if binary.stat().st_size >= OUTPUT_CAP - MIB:
-        raise ValueError("target ELF leaves insufficient space within output cap")
-    shutil.copy2(binary, retained)
-    if sha256_file(binary) != sha256_file(retained) or not os.access(retained, os.X_OK):
+    external_retention = args.retained_binary is not None
+    if external_retention:
+        retained=args.retained_binary.resolve(strict=True)
+        if not retained.is_file():raise ValueError("external retained ELF missing")
+    else:
+        retained=output / "retained-target.elf"
+        if binary.stat().st_size >= OUTPUT_CAP - MIB:
+            raise ValueError("target ELF leaves insufficient space within output cap")
+        shutil.copy2(binary,retained)
+    if sha256_file(binary) != sha256_file(retained) or not os.access(retained,os.X_OK):
         raise RuntimeError("retained ELF hash or executable mode differs")
     metadata = build_metadata(binary, command, args.source, log_path)
-    metadata["retained_binary"] = {"path": retained.name, "sha256": sha256_file(retained),
+    metadata["retained_binary"] = {"path": str(retained) if external_retention else retained.name, "external_retention": external_retention, "sha256": sha256_file(retained),
                                    "bytes": retained.stat().st_size}
     metadata["inherited_affinity"] = affinity(0)
     metadata["inherited_nice"] = priority(0)
@@ -229,7 +241,7 @@ def main():
     events_path = output / "events.jsonl"
     observation_path = output / "observation.json"
     metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
-    budget = [metadata_path.stat().st_size + retained.stat().st_size]
+    budget = [metadata_path.stat().st_size + (0 if external_retention else retained.stat().st_size)]
     errors = []
     warnings = []
     seen_targets = {}

@@ -1,0 +1,91 @@
+{
+  "schema": 1,
+  "source_sha": "8c54277ca9ec7bf35dee65126ec0d78f3a484f74",
+  "files": [
+    {
+      "path": "src/live.cpp",
+      "pre_sha256": "8d24331f48b2d6b56ea4e04b9388b1a610a27451732c74f6df0461ebb2b6dfd9",
+      "post_sha256": "71ad4adedf44acc9565e601ea1bb157388370861cd7c937376c92a086383268b",
+      "replacements": [
+        {
+          "old": "#include \"scheduled_acquisition_policy.hpp\"",
+          "new": "#include \"gui_stop_interval.hpp\"\n#include \"scheduled_acquisition_policy.hpp\""
+        },
+        {
+          "old": "    void complete_tx(Prepared& wave, const std::string& error = {}) {",
+          "new": "    static void stop_interval(const char* event,const Prepared& wave,const Bank* bank=nullptr,std::uint64_t count=0,std::uint64_t extra=0) {\n        if(gui_stop_interval::active() && wave.noise && wave.transmitter)\n            gui_stop_interval::record(event,wave.serial,wave.transmitter->samples_emitted(),wave.transmitted_samples,\n                wave.transmitter->total_samples(),bank?bank->samples:0,\n                bank && bank->receiver_storage?bank->receivers().size():0,count,extra,\n                double(wave.modem.sample_rate),wave.timing_stop_seconds,\n                wave.transmitter->source_samples_emitted(),wave.transmitter->source_total_samples());\n    }\n    void complete_tx(Prepared& wave, const std::string& error = {}) {\n        stop_interval(\"complete_enter\",wave);"
+        },
+        {
+          "old": "        if (wave.generation != generation || wave.serial != tx_serial) return;\n        // Keep the existing normal-completion quiet interval.",
+          "new": "        if (wave.generation != generation || wave.serial != tx_serial) return;\n        stop_interval(\"complete_locked\",wave);\n        // Keep the existing normal-completion quiet interval."
+        },
+        {
+          "old": "        current.transmission_cancelled = wave.stop.stop_requested() || wave.graceful;\n        current.transmission_stopping=false;source_pcm_started=false;finish_requested=false;",
+          "new": "        current.transmission_cancelled = wave.stop.stop_requested() || wave.graceful;\n        current.transmission_stopping=false;source_pcm_started=false;finish_requested=false;\n        stop_interval(\"complete_flags\",wave);"
+        },
+        {
+          "old": "    void prepare_source_read(Prepared& wave) {\n        std::lock_guard lock(mutex);",
+          "new": "    void prepare_source_read(Prepared& wave) {\n        stop_interval(\"prepare_enter\",wave);\n        std::lock_guard lock(mutex);\n        stop_interval(\"prepare_locked\",wave);"
+        },
+        {
+          "old": "            wave.transmitter->request_finish();wave.graceful=true;",
+          "new": "            stop_interval(\"endpoint_install_begin\",wave);\n            wave.transmitter->request_finish();wave.graceful=true;\n            stop_interval(\"endpoint_install_end\",wave);"
+        },
+        {
+          "old": "                        const auto block_start = Clock::now();\n                        const auto capacity = std::min<std::size_t>(samples.size(),\n                            std::max<std::size_t>(1, value.transfer.modem.sample_rate / 20));\n                        prepare_source_read(*wave);\n                        begin_simulation_input();\n                        const auto count = simulation_channel->read(*wave->transmitter,\n                            std::span(samples).first(capacity), wave->stop);\n                        wave->transmitted_samples = simulation_channel->transmitted_samples();\n                        if (!count) { finish_simulation_input();complete_tx(*wave); wave.reset(); continue; }\n                        const auto input_samples = std::span(samples).first(count);\n                        account(count, version); progress(*wave, value);\n                        plot_window.push(input_samples);\n                        before_simulation_feed(count);\n                        feed_samples(*simulation_bank,input_samples,value,version,wave->stop,nullptr,processing_token);\n                        finish_simulation_input();\n                        publish(plot_window,transmit_modem,version,last_plot,false,\n                            wave->transmitter.get(),wave->serial);\n                        const auto deadline = block_start + std::chrono::duration_cast<Clock::duration>(\n                            std::chrono::duration<double>(static_cast<double>(count) / value.transfer.modem.sample_rate));\n                        std::unique_lock lock(mutex);\n                        changed.wait_until(lock,stop,deadline,[&] {\n                            return !current.running || generation != version || wave->stop.stop_requested();\n                        });\n                        continue;",
+          "new": "                        const auto block_start = Clock::now();\n                        stop_interval(\"block_begin\",*wave,&*simulation_bank);\n                        const auto capacity = std::min<std::size_t>(samples.size(),\n                            std::max<std::size_t>(1, value.transfer.modem.sample_rate / 20));\n                        prepare_source_read(*wave);\n                        begin_simulation_input();\n                        stop_interval(\"channel_begin\",*wave,&*simulation_bank);\n                        const auto count = simulation_channel->read(*wave->transmitter,\n                            std::span(samples).first(capacity), wave->stop);\n                        wave->transmitted_samples = simulation_channel->transmitted_samples();\n                        stop_interval(\"channel_end\",*wave,&*simulation_bank,count,simulation_channel->received_samples());\n                        if (!count) { finish_simulation_input();complete_tx(*wave); wave.reset(); continue; }\n                        const auto input_samples = std::span(samples).first(count);\n                        gui_stop_interval::capture(input_samples);\n                        account(count, version); progress(*wave, value);\n                        plot_window.push(input_samples);\n                        before_simulation_feed(count);\n                        stop_interval(\"receiver_begin\",*wave,&*simulation_bank,count);\n                        feed_samples(*simulation_bank,input_samples,value,version,wave->stop,nullptr,processing_token);\n                        stop_interval(\"receiver_end\",*wave,&*simulation_bank,count);\n                        finish_simulation_input();\n                        stop_interval(\"publish_begin\",*wave,&*simulation_bank,count);\n                        publish(plot_window,transmit_modem,version,last_plot,false,\n                            wave->transmitter.get(),wave->serial);\n                        stop_interval(\"publish_end\",*wave,&*simulation_bank,count);\n                        const auto deadline = block_start + std::chrono::duration_cast<Clock::duration>(\n                            std::chrono::duration<double>(static_cast<double>(count) / value.transfer.modem.sample_rate));\n                        stop_interval(\"pace_lock_begin\",*wave,&*simulation_bank,count);\n                        std::unique_lock lock(mutex);\n                        stop_interval(\"pace_lock_acquired\",*wave,&*simulation_bank,count);\n                        changed.wait_until(lock,stop,deadline,[&] {\n                            return !current.running || generation != version || wave->stop.stop_requested();\n                        });\n                        stop_interval(\"pace_end\",*wave,&*simulation_bank,count);\n                        continue;"
+        },
+        {
+          "old": "void Session::finish_transmit() {\n    {",
+          "new": "void Session::finish_transmit() {\n    gui_stop_interval::record(\"request_enter\");\n    {"
+        },
+        {
+          "old": "        std::lock_guard lock(impl_->mutex);\n        if(impl_->source_pcm_started && impl_->current.transmitting",
+          "new": "        std::lock_guard lock(impl_->mutex);\n        gui_stop_interval::record(\"request_locked\",impl_->tx_serial,0,0,0,0,0,0,0,impl_->current.transmission_seconds);\n        if(impl_->source_pcm_started && impl_->current.transmitting"
+        },
+        {
+          "old": "            impl_->finish_requested=true;impl_->current.transmission_stopping=true;",
+          "new": "            impl_->finish_requested=true;impl_->current.transmission_stopping=true;\n            gui_stop_interval::record(\"request_flag\",impl_->tx_serial,0,0,0,0,0,0,0,impl_->current.transmission_seconds);"
+        }
+      ]
+    },
+    {
+      "path": "tests/test_gui_controller.cpp",
+      "pre_sha256": "3730678e53ef37e295adc319b757b527ffb6a6505bc5424955958658df56ce0f",
+      "post_sha256": "736a979943825b2f0f20029c8e1740b9962b44b3b08e1d8d6bfa0fbaba261480",
+      "replacements": [
+        {
+          "old": "#include \"../src/gui/gui_smoke.hpp\"",
+          "new": "#include \"../src/gui_stop_interval.hpp\"\n#include \"../src/gui/gui_smoke.hpp\""
+        },
+        {
+          "old": "    for(const auto* preference:{\"fake-fcc\",\"fake-eu\",\"fake-list\"}) {\n    Controller controller({true,true});",
+          "new": "    for(const auto* preference:{\"fake-fcc\",\"fake-eu\",\"fake-list\"}) {\n    gui_stop_interval::Fixture stop_diagnostic(std::string_view(preference)==\"fake-eu\");\n    Controller controller({true,true});"
+        },
+        {
+          "old": "    const auto protected_tail_seconds=double(modem::transmit_stop_sample_count(stop_config))/stop_config.sample_rate;\n    controller.activate(C::cancel);",
+          "new": "    const auto protected_tail_seconds=double(modem::transmit_stop_sample_count(stop_config))/stop_config.sample_rate;\n    gui_stop_interval::record(\"fixture_request\",controller.snapshot().transmission_id,0,0,0,0,0,0,0,stop_source_seconds,protected_tail_seconds);\n    controller.activate(C::cancel);"
+        },
+        {
+          "old": "    do {controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));}\n    while(controller.snapshot().transmitting&&std::chrono::steady_clock::now()<stop);",
+          "new": "    do {\n        gui_stop_interval::record(\"poll_enter\");\n        controller.poll();\n        gui_stop_interval::record(\"poll_exit\",controller.snapshot().transmission_id,0,0,0,0,0,0,controller.snapshot().sequence,\n            controller.snapshot().transmission_seconds,double(controller.snapshot().transmitting)+2*double(controller.snapshot().transmission_stopping));\n        std::this_thread::sleep_for(std::chrono::milliseconds(5));\n    }\n    while(controller.snapshot().transmitting&&std::chrono::steady_clock::now()<stop);"
+        },
+        {
+          "old": "        do {controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));}\n        while(controller.snapshot().transmitting&&std::chrono::steady_clock::now()<workload_end);",
+          "new": "        do {\n            gui_stop_interval::record(\"poll_enter\");\n            controller.poll();\n            gui_stop_interval::record(\"poll_exit\",controller.snapshot().transmission_id,0,0,0,0,0,0,controller.snapshot().sequence,\n                controller.snapshot().transmission_seconds,double(controller.snapshot().transmitting)+2*double(controller.snapshot().transmission_stopping));\n            std::this_thread::sleep_for(std::chrono::milliseconds(5));\n        }\n        while(controller.snapshot().transmitting&&std::chrono::steady_clock::now()<workload_end);"
+        },
+        {
+          "old": "    const auto source_since_request=controller.snapshot().transmission_seconds-requested_source_seconds;",
+          "new": "    const auto source_since_request=controller.snapshot().transmission_seconds-requested_source_seconds;\n    gui_stop_interval::record(\"fixture_result\",controller.snapshot().transmission_id,0,0,0,0,0,0,0,stop_wall_seconds,source_since_request);"
+        }
+      ]
+    }
+  ],
+  "new_files": [
+    {
+      "path": "src/gui_stop_interval.hpp",
+      "payload": "payload/gui_stop_interval.hpp",
+      "sha256": "c9bb01763d48afcb5bae30d3cd0ee33f64d1ef20be6d464d7fc787136bf47ff8"
+    }
+  ]
+}
