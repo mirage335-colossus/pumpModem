@@ -25,6 +25,16 @@ on:
         description: 'After the ordinary frontend scope, measure the same complete PTY fixture separately'
         type: boolean
         default: false
+      binary_capture_source:
+        description: Immutable source for binary-capture-diagnostic only
+        type: choice
+        options: ['42d7a0cb82c027f906555c39adccb7ec6fa91f21', '37f4315c553b9fc3807f2f173d9a0fae3f239ebc']
+        default: '42d7a0cb82c027f906555c39adccb7ec6fa91f21'
+      binary_capture_attempts:
+        description: Independent synthetic inputs for binary-capture-diagnostic only
+        type: choice
+        options: ['1', '2']
+        default: '2'
   workflow_call:
     inputs:
       scope:
@@ -43,6 +53,12 @@ on:
       tui_drain_diagnostic:
         type: boolean
         default: false
+      binary_capture_source:
+        type: string
+        default: '42d7a0cb82c027f906555c39adccb7ec6fa91f21'
+      binary_capture_attempts:
+        type: string
+        default: '2'
 
 permissions:
   contents: read
@@ -441,6 +457,9 @@ jobs:
   binary-capture-diagnostic:
     if: github.event_name == 'workflow_dispatch' && inputs.scope == 'binary-capture-diagnostic'
     uses: ./.github/workflows/sdk-rev-smoke-capture.yml
+    with:
+      base_source: ${{ inputs.binary_capture_source || '42d7a0cb82c027f906555c39adccb7ec6fa91f21' }}
+      capture_attempts: ${{ inputs.binary_capture_attempts || '2' }}
 
   binary-capture-continuation:
     if: github.event_name == 'workflow_dispatch' && inputs.scope == 'binary-capture-continuation'
