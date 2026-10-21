@@ -69,7 +69,19 @@ def parse_ldd(output: str) -> tuple[list[tuple[str, Path]], list[str]]:
 
 
 def package_metadata(path: Path, docs: Path) -> dict[str, object]:
-    owners_output = run(["dpkg-query", "-S", str(path.resolve())])
+    # Ubuntu's merged /usr filesystem can resolve an installed /lib object to
+    # /usr/lib while dpkg still records the original /lib pathname.
+    queried_path = None
+    query_errors = []
+    for candidate in dict.fromkeys((str(path), str(path.resolve()))):
+        try:
+            owners_output = run(["dpkg-query", "-S", candidate])
+            queried_path = candidate
+            break
+        except RuntimeError as error:
+            query_errors.append(str(error))
+    if queried_path is None:
+        raise RuntimeError("runtime package ownership unavailable:\n" + "\n".join(query_errors))
     owners = []
     for line in owners_output.splitlines():
         package = line.split(": ", 1)[0]
@@ -94,7 +106,7 @@ def package_metadata(path: Path, docs: Path) -> dict[str, object]:
                         "copyright_status": "copied" if copied_copyright else "not_available",
                         "copyright_candidates_checked": [str(path) for path in candidates],
                         "copyright_file": copied_copyright})
-    return {"owners": owners, "packages": records}
+    return {"owners": owners, "packages": records, "ownership_query_path": queried_path}
 
 
 def main() -> int:
@@ -171,7 +183,7 @@ def main() -> int:
         if not destination.exists():
             shutil.copyfile(canonical, destination)
         seen_destinations[filename] = digest
-        metadata = package_metadata(canonical, copyright_root)
+        metadata = package_metadata(original_path, copyright_root)
         runtime_records.append({"name": soname, "resolved_path": str(original_path),
                                 "canonical_path": str(canonical), "retained_path": str(destination.relative_to(report)),
                                 "sha256": digest, **metadata})

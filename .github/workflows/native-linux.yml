@@ -1013,6 +1013,34 @@ jobs:
           assert cache.get('DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL') == 'OFF', cache.get('DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL')
           print('exact source, one original no-argument test registration and Debug sanitizer configuration verified')
           PY_BURST_PREPARE
+      - name: Preflight paced runtime package ownership
+        if: inputs.paced_context_focus || inputs.paced_callback_focus
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          python3 -B - "$PWD" <<'PY_PACED_OWNER_PREFLIGHT'
+          import hashlib, importlib.util, json, pathlib, sys
+
+          root = pathlib.Path(sys.argv[1]).resolve()
+          report = root / 'build/symbol-burst-live-qualification'
+          helper = root / 'tools/retain-paced-diagnostic.py'
+          spec = importlib.util.spec_from_file_location('retain_paced_diagnostic', helper)
+          if spec is None or spec.loader is None:
+              raise RuntimeError('cannot load the canonical paced retention helper')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          copyright_root = report / 'runtime-owner-preflight-copyright'
+          metadata = module.package_metadata(pathlib.Path('/lib/x86_64-linux-gnu/libgcc_s.so.1'), copyright_root)
+          identity = {
+              'source_commit': (report / 'source.txt').read_text().strip(),
+              'source_tree': (report / 'source-tree.txt').read_text().strip(),
+              'helper_source': str(helper),
+              'helper_sha256': hashlib.sha256(helper.read_bytes()).hexdigest(),
+              'classification': 'setup preflight only; no ELF execution or qualification',
+              'runtime_package_metadata': metadata,
+          }
+          (report / 'runtime-owner-preflight.json').write_text(json.dumps(identity, indent=2) + '\n')
+          PY_PACED_OWNER_PREFLIGHT
       - name: Prepare acquisition partition diagnostic evidence
         if: inputs.scope == 'simulation-acquisition-partition-diagnostic'
         run: mkdir -p build/simulation-acquisition-partition-diagnostics
@@ -1918,15 +1946,6 @@ jobs:
           if not manifest['all_functional_runs_complete']:
               raise SystemExit('FATAL: one or more paced Symbol Burst runs timed out, failed, or lacked exactly one valid functional summary')
           PY_PACED_BURST
-      - name: Retain exact paced-context ELF and provenance
-        if: always() && !cancelled() && inputs.paced_context_focus && steps.build_prerequisites.outcome == 'success'
-        timeout-minutes: 3
-        run: |
-          set -euo pipefail
-          python3 -B tools/retain-paced-diagnostic.py \
-            --root "$PWD" \
-            --report "$PWD/build/symbol-burst-live-qualification/paced/reproducer" \
-            --runtime-probe "${{ inputs.paced_callback_probe && 'on' || 'off' }}"
       - name: Run monitor admission and retained plot regressions
         id: monitor_regressions
         if: inputs.scope == 'symbol-burst-live' && inputs.paced_snapshot_focus && !cancelled() && steps.build_prerequisites.outcome == 'success'
@@ -2426,6 +2445,15 @@ jobs:
                  not row['callback_os_capture_complete'] for row in results):
               raise SystemExit('FATAL: callback comparison contains a failed/incomplete run or instrumentation capture; inspect exact retained process results')
           PY_CALLBACK_PROBE
+      - name: Retain exact paced-context ELF and provenance
+        if: always() && !cancelled() && (inputs.paced_context_focus || inputs.paced_callback_focus) && steps.build_prerequisites.outcome == 'success'
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          python3 -B tools/retain-paced-diagnostic.py \
+            --root "$PWD" \
+            --report "$PWD/build/symbol-burst-live-qualification/paced/reproducer" \
+            --runtime-probe "${{ inputs.paced_callback_probe && 'on' || 'off' }}"
       - name: Mark plain callback focus omissions
         if: always() && inputs.paced_callback_focus
         run: echo 'Plain callback focus selects three matched baseline/probe pairs of the original held keyed-On process; retained results identify which processes completed. The no-argument qualification, other paced selectors, temporal support, FFT, snapshot storage and strict GUI serial/parallel checks were omitted and are not passes.' >> "$GITHUB_STEP_SUMMARY"

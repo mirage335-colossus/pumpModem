@@ -28,6 +28,12 @@
 #include <sstream>
 #include <thread>
 
+#if defined(__linux__)
+#include <sys/syscall.h>
+#include <time.h>
+#include <unistd.h>
+#endif
+
 using namespace datapump;
 using namespace std::chrono_literals;
 namespace {
@@ -156,6 +162,13 @@ struct CaptureScript {
     std::atomic<std::uint64_t> pacing_min_interval_ns{0},pacing_max_interval_ns{0},pacing_interval_total_ns{0};
     std::atomic<std::uint64_t> pacing_max_duration_ns{0},pacing_duration_total_ns{0},pacing_delivery_ns{0};
     std::chrono::steady_clock::time_point pacing_anchor{};
+    struct FailureSeal {
+        bool supported=false,valid=false,callback_executed=false,accepted=false;
+        bool thread_cpu_after_valid=false;
+        std::uint64_t pid=0,tid=0,reason=0,ordinal=0,first_sample=0,end_sample=0;
+        std::uint64_t before_ns=0,after_ns=0,deadline_ns=0;
+        std::uint64_t thread_cpu_after_ns=0,cpu_sample_wall_before_ns=0,cpu_sample_wall_after_ns=0;
+    } failure_seal;
 };
 CaptureScript* capture_script=nullptr;
 
@@ -1238,7 +1251,29 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
         <<",\"producer_aborted\":"<<(capture.pacing_aborted.load()?"true":"false")
         <<",\"producer_abort_reason\":"<<capture.pacing_abort_reason.load()
         <<",\"producer_error\":"<<paced_json_string(capture.pacing_callback_error)
-        <<",\"health\":{\"input_overruns\":"<<final_health.input_overruns<<",\"dropped_samples\":"<<final_health.dropped_samples
+        <<",\"producer_failure_seal\":";
+    const auto& seal=capture.failure_seal;
+    if(seal.supported) {
+        std::cout<<"{\"schema\":\"paced-capture-failure-v1\",\"supported\":true,\"valid\":"
+            <<(seal.valid?"true":"false")<<",\"pid\":"<<seal.pid<<",\"tid\":"<<seal.tid
+            <<",\"reason\":"<<seal.reason<<",\"ordinal\":"<<seal.ordinal
+            <<",\"first_sample\":"<<seal.first_sample<<",\"end_sample\":"<<seal.end_sample
+            <<",\"before_ns\":"<<seal.before_ns<<",\"after_ns\":";
+        if(seal.valid&&seal.callback_executed)std::cout<<seal.after_ns;else std::cout<<"null";
+        std::cout<<",\"deadline_ns\":"<<seal.deadline_ns<<",\"callback_executed\":"
+            <<(seal.callback_executed?"true":"false")<<",\"accepted\":"<<(seal.accepted?"true":"false")
+            <<",\"thread_cpu_after_valid\":"<<(seal.thread_cpu_after_valid?"true":"false")
+            <<",\"thread_cpu_after_ns\":";
+        if(seal.thread_cpu_after_valid)std::cout<<seal.thread_cpu_after_ns;else std::cout<<"null";
+        std::cout<<",\"cpu_sample_wall_before_ns\":";
+        if(seal.valid)std::cout<<seal.cpu_sample_wall_before_ns;else std::cout<<"null";
+        std::cout<<",\"cpu_sample_wall_after_ns\":";
+        if(seal.valid)std::cout<<seal.cpu_sample_wall_after_ns;else std::cout<<"null";
+        std::cout<<'}';
+    } else {
+        std::cout<<"{\"schema\":\"paced-capture-failure-v1\",\"supported\":false,\"valid\":false,\"pid\":null,\"tid\":null,\"reason\":null,\"ordinal\":null,\"first_sample\":null,\"end_sample\":null,\"before_ns\":null,\"after_ns\":null,\"deadline_ns\":null,\"callback_executed\":false,\"accepted\":false,\"thread_cpu_after_valid\":false,\"thread_cpu_after_ns\":null,\"cpu_sample_wall_before_ns\":null,\"cpu_sample_wall_after_ns\":null}";
+    }
+    std::cout<<",\"health\":{\"input_overruns\":"<<final_health.input_overruns<<",\"dropped_samples\":"<<final_health.dropped_samples
         <<",\"input_interrupted\":"<<(final_health.input_interrupted?"true":"false")
         <<",\"search_limited\":"<<(final_health.search_limited?"true":"false")
         <<",\"receiver_reset\":"<<(final_health.receiver_reset?"true":"false")<<'}'
@@ -1351,6 +1386,52 @@ void capture(std::uint32_t fs,const std::string& selected,const CaptureCallback&
     if(script.paced) {
         using Steady=std::chrono::steady_clock;
         constexpr auto period=std::chrono::nanoseconds(1953125);
+#if defined(__linux__)
+        script.failure_seal.pid=static_cast<std::uint64_t>(::getpid());
+        const auto numeric_tid=::syscall(SYS_gettid);
+        script.failure_seal.tid=numeric_tid>0?static_cast<std::uint64_t>(numeric_tid):0;
+        const auto steady_before=std::chrono::duration_cast<std::chrono::nanoseconds>(
+            Steady::now().time_since_epoch()).count();
+        struct timespec monotonic{};
+        const bool clock_ok=::clock_gettime(CLOCK_MONOTONIC,&monotonic)==0&&numeric_tid>0;
+        const auto monotonic_ns=clock_ok?static_cast<std::int64_t>(monotonic.tv_sec)*1000000000LL+
+            static_cast<std::int64_t>(monotonic.tv_nsec):0;
+        const auto steady_after=std::chrono::duration_cast<std::chrono::nanoseconds>(
+            Steady::now().time_since_epoch()).count();
+        std::cout<<"PACED_CAPTURE_THREAD_JSON {\"schema\":\"paced-capture-thread-v1\",\"pid\":"
+            <<script.failure_seal.pid<<",\"tid\":"<<script.failure_seal.tid
+            <<",\"supported\":"<<(clock_ok?"true":"false")
+            <<",\"steady_before_ns\":"<<steady_before<<",\"monotonic_ns\":"<<monotonic_ns
+            <<",\"steady_after_ns\":"<<steady_after<<"}\n"<<std::flush;
+        script.failure_seal.supported=clock_ok;
+#else
+        std::cout<<"PACED_CAPTURE_THREAD_JSON {\"schema\":\"paced-capture-thread-v1\",\"pid\":null,\"tid\":null,\"supported\":false,\"steady_before_ns\":null,\"monotonic_ns\":null,\"steady_after_ns\":null}\n"<<std::flush;
+#endif
+        const auto steady_ns=[](Steady::time_point point) {
+            return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                point.time_since_epoch()).count());
+        };
+        const auto seal_failure=[&](std::uint64_t reason,std::uint64_t ordinal,std::size_t first,
+                                    std::size_t end,Steady::time_point before,
+                                    std::optional<Steady::time_point> after,Steady::time_point due,
+                                    bool callback_executed,bool accepted) {
+            auto& seal=script.failure_seal;
+            seal.valid=true;seal.reason=reason;seal.ordinal=ordinal;seal.first_sample=first;seal.end_sample=end;
+            seal.before_ns=steady_ns(before);seal.after_ns=after?steady_ns(*after):0;
+            seal.deadline_ns=steady_ns(due);seal.callback_executed=callback_executed;seal.accepted=accepted;
+#if defined(__linux__)
+            // This endpoint is sampled only after a failure's original timing
+            // decision. It cannot affect that verdict, and bounds callback CPU
+            // when paired with an earlier external accounted-runtime sample.
+            seal.cpu_sample_wall_before_ns=steady_ns(Steady::now());
+            struct timespec cpu{};
+            seal.thread_cpu_after_valid=::clock_gettime(CLOCK_THREAD_CPUTIME_ID,&cpu)==0;
+            seal.cpu_sample_wall_after_ns=steady_ns(Steady::now());
+            if(seal.thread_cpu_after_valid)
+                seal.thread_cpu_after_ns=static_cast<std::uint64_t>(cpu.tv_sec)*1000000000ULL+
+                    static_cast<std::uint64_t>(cpu.tv_nsec);
+#endif
+        };
         script.pacing_anchor=Steady::now()+1ms;
         Steady::time_point first_begin{},last_begin{};
         const auto update_max=[](auto& field,std::uint64_t value) {
@@ -1374,7 +1455,8 @@ void capture(std::uint32_t fs,const std::string& selected,const CaptureCallback&
             // Deadlines never slide. Abort before delivery on a missed bound;
             // catch-up is thus bounded by ceil(20ms / period)+1 callbacks.
             if(late>20000000ULL) {
-                script.pacing_abort_reason=1;script.pacing_valid=false;script.pacing_aborted=true;continue;
+                script.pacing_abort_reason=1;script.pacing_valid=false;script.pacing_aborted=true;
+                seal_failure(1,ordinal,first,std::min<std::size_t>(script.pcm.size(),first+16),before,{},deadline,false,false);continue;
             }
             if(ordinal==0)first_begin=before;
             else {
@@ -1414,6 +1496,8 @@ void capture(std::uint32_t fs,const std::string& selected,const CaptureCallback&
             if(accepted)script.delivered=end;
             if(!accepted||after>deadline+20ms) {
                 if(accepted)script.pacing_abort_reason=4;
+                const auto reason=script.pacing_abort_reason.load();
+                seal_failure(reason,ordinal,first,end,before,after,deadline,true,accepted);
                 script.pacing_valid=false;script.pacing_aborted=true;
             }
         }
