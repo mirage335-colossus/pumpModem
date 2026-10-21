@@ -2,6 +2,10 @@ name: Copied Help fixed-input receiver replay
 
 on:
   workflow_call:
+    inputs:
+      diagnostic:
+        type: string
+        default: replay
 
 permissions:
   contents: read
@@ -9,7 +13,7 @@ permissions:
 
 jobs:
   copied-help-replay:
-    name: Ubuntu 24.04 published SDK / source37 four sealed receiver prefixes
+    name: ${{ inputs.diagnostic == 'session' && 'Ubuntu 24.04 published SDK / source37 fresh Session raw32' || 'Ubuntu 24.04 published SDK / source37 four sealed receiver prefixes' }}
     runs-on: ubuntu-24.04
     container: ubuntu:24.04
     timeout-minutes: 40
@@ -22,6 +26,7 @@ jobs:
       LP_NUM_THREADS: '1'
       BASE_SOURCE_SHA: '37f4315c553b9fc3807f2f173d9a0fae3f239ebc'
       EXPECTED_SDK_MANIFEST_SHA256: 4fdcc4b8d57e0a67eeb2ce7fac70667b75f40f01215105de95b771c77c5303c3
+      DIAGNOSTIC_KIND: ${{ inputs.diagnostic }}
     steps:
       - name: Bootstrap current APT helper before installing Git
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,6 +53,7 @@ jobs:
           python3 - <<'PY'
           import os
           assert os.environ['BASE_SOURCE_SHA'] == '37f4315c553b9fc3807f2f173d9a0fae3f239ebc'
+          assert os.environ['DIAGNOSTIC_KIND'] in ('replay', 'session')
           PY
       - name: Checkout pinned source into an isolated tree
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -118,10 +124,19 @@ jobs:
           print('Verified relocated SDK Python and private C++ runtimes')
           PY
       - name: Compare original and matched precomputed controls with two push partitions
+        if: inputs.diagnostic == 'replay'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 tools/copied-help-replay/run.py --tool-root "$GITHUB_WORKSPACE" \
+            --source-root "$GITHUB_WORKSPACE/source-base" --sdk "$GITHUB_WORKSPACE/source-base/build/sdk" \
+            --evidence "$GITHUB_WORKSPACE/replay-evidence" --scratch "$GITHUB_WORKSPACE/.copied-help-replay"
+      - name: Measure default-clock raw32 through the Live bank and production GUI reducer
+        if: inputs.diagnostic == 'session'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/copied-help-session/run.py --tool-root "$GITHUB_WORKSPACE" \
             --source-root "$GITHUB_WORKSPACE/source-base" --sdk "$GITHUB_WORKSPACE/source-base/build/sdk" \
             --evidence "$GITHUB_WORKSPACE/replay-evidence" --scratch "$GITHUB_WORKSPACE/.copied-help-replay"
       - name: Check bounded evidence without deleting failures
@@ -145,7 +160,7 @@ jobs:
         if: always() && steps.upload-bound.outputs.allowed == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: copied-help-replay-${{ github.run_id }}-${{ github.run_attempt }}
+          name: copied-help-${{ inputs.diagnostic }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             replay-evidence/
             evidence/
@@ -157,4 +172,4 @@ jobs:
       - name: State diagnostic limits
         if: always()
         run: |
-          echo 'Four fixed captured receiver prefixes: original and precomputed unsplit controls, ragged and bins512 pushes. Original processing/drain boundaries and projected waveform stay fixed. No EOF completion, old failure attribution, GUI qualification or release claim.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Diagnostic only: fixed-input receiver replay or bounded fresh raw32 Session measurement. No old failure attribution, GUI qualification or release claim. Fresh Session omits prior smoke history; replay variants hold projected input and original processing/drain boundaries fixed.' >> "$GITHUB_STEP_SUMMARY"

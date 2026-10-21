@@ -6,7 +6,7 @@ on:
       scope:
         description: 'Run one SDK scope or the focused FLTK Live validation without repeating other producers and consumers'
         type: choice
-        options: [tests, packages, frontends, web, live, sched-hop-diagnostic, gui-core-diagnostic, binary-capture-diagnostic, binary-capture-continuation, controlled-replay-causal, native-copy-capture-diagnostic, copied-help-causal-diagnostic, copied-help-replay-diagnostic]
+        options: [tests, packages, frontends, web, live, sched-hop-diagnostic, gui-core-diagnostic, binary-capture-diagnostic, binary-capture-continuation, controlled-replay-causal, native-copy-capture-diagnostic, copied-help-causal-diagnostic, copied-help-replay-diagnostic, copied-help-session-diagnostic]
         default: tests
       backend:
         type: choice
@@ -65,7 +65,7 @@ permissions:
 
 jobs:
   application:
-    if: inputs.scope != 'binary-capture-diagnostic' && inputs.scope != 'binary-capture-continuation' && inputs.scope != 'controlled-replay-causal' && inputs.scope != 'native-copy-capture-diagnostic' && inputs.scope != 'copied-help-causal-diagnostic' && inputs.scope != 'copied-help-replay-diagnostic'
+    if: inputs.scope != 'binary-capture-diagnostic' && inputs.scope != 'binary-capture-continuation' && inputs.scope != 'controlled-replay-causal' && inputs.scope != 'native-copy-capture-diagnostic' && inputs.scope != 'copied-help-causal-diagnostic' && inputs.scope != 'copied-help-replay-diagnostic' && inputs.scope != 'copied-help-session-diagnostic'
     name: SDK ${{ inputs.scope }} / ${{ inputs.backend }} / ${{ inputs.image }}
     runs-on: ${{ inputs.linux_runner }}
     container: ${{ inputs.image }}
@@ -492,3 +492,11 @@ jobs:
       contents: read
       actions: read
     uses: ./.github/workflows/copied-help-replay.yml
+  copied-help-session-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && inputs.scope == 'copied-help-session-diagnostic'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/copied-help-replay.yml
+    with:
+      diagnostic: session
