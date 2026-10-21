@@ -14,7 +14,7 @@ Run the adapter against an exclusively owned, exact source archive:
 python3 prepare.py --source-root /absolute/private/source --output-dir /absolute/private/evidence
 ```
 
-It validates the complete 842-file `src/include/tests/cmake/CMakeLists.txt`
+It validates the complete 816-file `src/include/tests/cmake/CMakeLists.txt`
 preimage inventory and every postimage before writing. Only six allowlisted
 source files change. It writes an applied manifest, final source inventory,
 preimages, forward patch and reverse patch to the fresh evidence directory.
@@ -147,3 +147,5 @@ Dedicated measurement clock reads, backpressure clock reads and per-row trace
 clock reads are separately counted. Hook CPU remains explicitly unmeasured;
 whole-child OFF/ON measurements and matching boundaries are still required.
 The current trace implementation, queue limits, footer and seal stay intact.
+
+Source-inventory setup recovery: the first manifest included 26 ignored local Python bytecode files. The corrected inventory pins all 816 tracked compile-relevant files from the exact4e Git archive; no tracked input or source/payload byte was omitted or changed. Original manifests and failed CI39555771884 remain retained. Local ignored bytecode is preserved.
