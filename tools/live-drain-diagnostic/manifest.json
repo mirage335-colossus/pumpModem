@@ -1,0 +1,27 @@
+{
+  "application_source": "3611f0cf0ae066d6d9679cdee8447b73b66468c7",
+  "runtime_source": "be1e1bc60f661be6fcec98a24b477f41cd7ea37b",
+  "classification": "diagnostic only; original outcomes preserved; no qualification or waiver",
+  "luna_assignment": "symbol_burst_live_drain_probe",
+  "luna_repairs_spent": 1,
+  "accepted_luna_test_postimage": "3eba3c6ef651f3f54ca188b5fd55f69244b390a2e8c52977545c3730dc0a6fd7",
+  "root_additions": [
+    "two numeric resume fence events",
+    "bounded filtered existing trace",
+    "exact deterministic PCM retention before original budget start"
+  ],
+  "files": [
+    {
+      "path": "tests/test_symbol_burst_live.cpp",
+      "payload": "payload/test_symbol_burst_live.cpp",
+      "preimage_sha256": "d53b9a13ed76bc2dffc366d6980b5d57303fec5955755a832ad4ec971b87de68",
+      "postimage_sha256": "dcb61f89df1bbfd8f74d36ed2d73a550aa87e2023994978efa720bdf8d32cd08"
+    },
+    {
+      "path": "src/live.cpp",
+      "payload": "payload/live.cpp",
+      "preimage_sha256": "8d24331f48b2d6b56ea4e04b9388b1a610a27451732c74f6df0461ebb2b6dfd9",
+      "postimage_sha256": "b31676269403d2d49a026b4b297034e8513097b0ac32d65ad2d770246d42b90e"
+    }
+  ]
+}
