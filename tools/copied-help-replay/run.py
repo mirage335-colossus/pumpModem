@@ -119,15 +119,14 @@ def main(args):
                      '--namespace', 'case_' + label, '--output', generated / label], 'generate-' + label, 60)
         project = scratch / 'project'
         project.mkdir()
-        cmake = ['cmake_minimum_required(VERSION 3.21)', 'project(CopiedHelpReplay LANGUAGES C CXX)',
-                 'set(CMAKE_CXX_STANDARD 20)', 'set(CMAKE_CXX_STANDARD_REQUIRED ON)',
-                 'set(CMAKE_CXX_EXTENSIONS OFF)', 'set(BUILD_TESTING OFF CACHE BOOL "" FORCE)',
-                 'set(DATAPUMP_BUILD_CLI OFF CACHE BOOL "" FORCE)', 'set(DATAPUMP_BUILD_GUI OFF CACHE BOOL "" FORCE)',
-                 'set(DATAPUMP_BUILD_TUI OFF CACHE BOOL "" FORCE)', 'set(DATAPUMP_BUILD_FB OFF CACHE BOOL "" FORCE)',
-                 'set(DATAPUMP_BUILD_WEB_WORKER OFF CACHE BOOL "" FORCE)',
-                 'set(DATAPUMP_PORTABLE ON CACHE BOOL "" FORCE)',
-                 'include("${APPLICATION_ROOT}/cmake/SdkBuild.cmake")',
-                 'add_subdirectory("${APPLICATION_ROOT}" application EXCLUDE_FROM_ALL)']
+        # Preserve the application's own root/project assumptions. The hook is
+        # called at the end of every project(), so arm only source37 DataPump.
+        cmake = ['if(NOT "${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${APPLICATION_ROOT}" OR NOT "${PROJECT_NAME}" STREQUAL "DataPump")',
+                 '  return()', 'endif()',
+                 'get_property(replay_scheduled GLOBAL PROPERTY COPIED_HELP_REPLAY_SCHEDULED)',
+                 'if(replay_scheduled)', '  return()', 'endif()',
+                 'set_property(GLOBAL PROPERTY COPIED_HELP_REPLAY_SCHEDULED TRUE)',
+                 'function(copied_help_add_replay_targets)']
         for label in labels:
             target = 'replay_' + label
             cmake += ['add_executable(' + target + ' "${REPLAY_ROOT}/adapter.cpp")',
@@ -135,16 +134,20 @@ def main(args):
                       'target_include_directories(' + target + ' PRIVATE "${REPLAY_ROOT}" "${GENERATED_ROOT}")',
                       'target_compile_definitions(' + target + ' PRIVATE COPIED_HELP_FIXTURE_HEADER="' +
                       label + '/fixture.hpp" COPIED_HELP_FIXTURE_NAMESPACE=datapump::diagnostic::copied_help_replay::case_' + label + ')']
-        project_file = project / 'CMakeLists.txt'
+        cmake += ['endfunction()', 'cmake_language(DEFER CALL copied_help_add_replay_targets)']
+        project_file = project / 'replay-targets.cmake'
         project_file.write_text('\n'.join(cmake) + '\n')
-        shutil.copyfile(project_file, evidence / 'replay-CMakeLists.txt')
+        shutil.copyfile(project_file, evidence / 'replay-targets.cmake')
         build = scratch / 'build'
-        execute([sdk / 'bin/cmake', '-S', project, '-B', build, '-G', 'Ninja',
+        execute([sdk / 'bin/cmake', '-S', source, '-B', build, '-G', 'Ninja',
                  '-DCMAKE_MAKE_PROGRAM=' + str(sdk / 'bin/ninja'), '-DCMAKE_BUILD_TYPE=Release',
                  '-DCMAKE_TOOLCHAIN_FILE=' + str(source / 'cmake/toolchains/source-sdk.cmake'),
                  '-DDATAPUMP_SDK_ROOT=' + str(sdk), '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON',
                  '-DAPPLICATION_ROOT=' + str(source), '-DREPLAY_ROOT=' + str(tool / 'tools/copied-help-replay'),
-                 '-DGENERATED_ROOT=' + str(generated)], 'configure', 180)
+                 '-DGENERATED_ROOT=' + str(generated), '-DCMAKE_PROJECT_INCLUDE=' + str(project_file),
+                 '-DBUILD_TESTING=OFF', '-DDATAPUMP_BUILD_CLI=ON', '-DDATAPUMP_BUILD_GUI=OFF',
+                 '-DDATAPUMP_BUILD_TUI=OFF', '-DDATAPUMP_BUILD_FB=OFF', '-DDATAPUMP_BUILD_WEB_WORKER=OFF',
+                 '-DDATAPUMP_PORTABLE=ON'], 'configure', 180)
         execute([sdk / 'bin/cmake', '--build', build, '--parallel', '2', '--target',
                  *['replay_' + label for label in labels]], 'build', 1200, stdout_limit=8 * MIB)
         for name in ('CMakeCache.txt', 'compile_commands.json'):
@@ -183,6 +186,14 @@ def main(args):
     finally:
         reports = list(evidence.glob('*.process.json')) + list(scratch.glob('*.process.json'))
         closed = all(json.loads(path.read_text()).get('process_group_closed') is True for path in reports)
+        build = scratch / 'build'
+        if closed and build.is_dir():
+            for name in ('CMakeCache.txt', 'compile_commands.json', 'CMakeFiles/CMakeConfigureLog.yaml'):
+                path = build / name
+                if path.is_file():
+                    target = evidence / name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(path, target)
         result['writers_closed'] = closed
         result['retention_finalization'] = 'closed' if closed else 'blocked_live_writers'
         process.save(evidence / 'run.json', result)
