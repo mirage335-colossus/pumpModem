@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Matched original/probed Release drain captures; never qualification."""
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -8,6 +9,15 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+
+
+def compatible_sha(path):
+    """The matched Ubuntu 22.04 container provides Python 3.10."""
+    digest = hashlib.sha256()
+    with Path(path).open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def main():
@@ -20,6 +30,9 @@ def main():
     spec = importlib.util.spec_from_file_location('capture', root / 'tools/native-copy-smoke-capture.py')
     capture = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(capture)
+    # Keep the existing capture/closure implementation; adapt only its digest
+    # entry point for the original runner's Python, without changing that tool.
+    capture.sha = compatible_sha
     manifest = json.loads((tool / 'manifest.json').read_text())
     git = ['git', '-c', 'safe.directory=' + str(root), '-C', str(root)]
     def git_read(*arguments):
