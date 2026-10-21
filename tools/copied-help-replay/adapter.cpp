@@ -196,6 +196,7 @@ void compare(Output& out, const replay::Fixture& fixture, const replay::Feed& fe
 
 struct Counts {
     std::uint64_t feeds = 0, active_feeds = 0, native_events = 0, compared_events = 0, terminal_events = 0;
+    std::uint64_t partition_push_calls = 0;
     std::string_view stage = "fixture_setup";
 };
 
@@ -297,17 +298,273 @@ void run(Output& out, const replay::Fixture& fixture, const std::filesystem::pat
     // Do not call finish/flush: captured, fully scored absence supplies completion.
 }
 
+// This comparison is independent of drainable chunk grouping. Symbol addresses
+// and order remain authoritative; samples hidden inside an original chunk are
+// not fabricated by interpolating its endpoints.
+struct Canonical {
+    const replay::Fixture& fixture;
+    Output& out;
+    std::string expected_bits;
+    std::uint64_t cursor = 0, first_symbol = 0, compared_slots = 0;
+    std::uint64_t start_anchors = 0, end_anchors = 0;
+    std::uint64_t unrecorded_start_coordinates = 0, unrecorded_end_witnesses = 0;
+    bool terminal_seen = false;
+    const replay::ExpectedBurst& terminal;
+
+    Canonical(Output& output, const replay::Fixture& value)
+        : fixture(value), out(output), terminal(value.expected.back()) {
+        first_symbol = cursor = value.expected.front().chunk_first_symbol;
+        const auto& first = value.expected.front();
+        if (first.chunk_first_symbol != first.stream_first_symbol || !terminal.frequency_hz)
+            throw SetupError("canonical fixture lacks its stable initial address or terminal frequency");
+        std::uint64_t next = first_symbol, prior_feed = 0;
+        for (std::size_t index=0; index<value.expected.size(); ++index) {
+            const auto& burst = value.expected[index];
+            if (burst.physical_first != first.physical_first || burst.stream_first_symbol != first.stream_first_symbol ||
+                burst.stream_phase_samples != first.stream_phase_samples || burst.chunk_first_symbol != next || (index && burst.feed_first<prior_feed) ||
+                (burst.complete != (index+1==value.expected.size())) ||
+                (!burst.wire_bits.empty() && burst.missing_slots) || !burst.frequency_hz ||
+                !same(*burst.frequency_hz,*terminal.frequency_hz))
+                throw SetupError("canonical fixture is not one contiguous, frequency-stable captured stream");
+            if (burst.missing_slots > maximum_samples-expected_bits.size() || burst.wire_bits.size() > maximum_samples-expected_bits.size()-burst.missing_slots)
+                throw SetupError("canonical symbol inventory exceeds retained sample cap");
+            for (const auto bit : burst.wire_bits) {
+                if (bit!='0' && bit!='1' && bit!='?') throw SetupError("invalid captured wire symbol");
+                expected_bits += bit;
+            }
+            expected_bits.append(static_cast<std::size_t>(burst.missing_slots),'?');
+            const auto count = burst.wire_bits.size()+burst.missing_slots;
+            if (count > UINT64_MAX-next) throw SetupError("canonical captured symbol coordinate overflow");
+            next += count; prior_feed=burst.feed_first;
+        }
+    }
+
+    void end_feed(const replay::Feed& feed) {
+        std::uint64_t expected_slots=0; bool expected_complete=false;
+        for (const auto& burst : fixture.expected) {
+            if (burst.feed_first>feed.first) break;
+            expected_slots+=burst.wire_bits.size()+burst.missing_slots;
+            expected_complete|=burst.complete;
+        }
+        equal_integer(out,"canonical_prefix_slots_at_original_drain",feed.first,expected_slots,compared_slots);
+        equal_integer(out,"canonical_completion_at_original_drain",feed.first,expected_complete,terminal_seen);
+    }
+
+    void accept(const replay::Feed& feed, const datapump::modem::PatternBurst& actual) {
+        if (terminal_seen) difference(out,"canonical_output_after_completion",feed.first,"none","additional output");
+        const auto& first = fixture.expected.front();
+        equal_integer(out,"canonical_physical_first",feed.first,first.physical_first,physical(fixture.input_origin,actual.stream_first_sample));
+        equal_integer(out,"canonical_stream_first_symbol",feed.first,first.stream_first_symbol,actual.stream_first_symbol);
+        equal_integer(out,"canonical_stream_phase_samples",feed.first,first.stream_phase_samples,actual.stream_phase_samples);
+        equal_integer(out,"canonical_chunk_first_symbol",feed.first,cursor,actual.first_stream_symbol);
+        equal_double(out,"canonical_frequency_hz",feed.first,*terminal.frequency_hz,actual.frequency_hz);
+        if (!actual.bits.empty() && actual.missing_slots) throw SetupError("native chunk combines wire symbols and compact missing slots");
+        if (actual.bits.size()>maximum_samples || actual.missing_slots>maximum_samples-actual.bits.size())
+            throw SetupError("native canonical symbol inventory exceeds retained cap");
+        const auto count=static_cast<std::uint64_t>(actual.bits.size()+actual.missing_slots);
+        if (cursor<first_symbol || count>expected_bits.size() || cursor-first_symbol>expected_bits.size()-count)
+            difference(out,"canonical_extra_symbols",feed.first,std::to_string(expected_bits.size()),std::to_string(cursor-first_symbol+count));
+        auto actual_bits=wire(actual);
+        if (actual.missing_slots) actual_bits.append(actual.missing_slots,'?');
+        for (std::size_t index=0;index<actual_bits.size();++index) {
+            const auto address=cursor+index;
+            if (actual_bits[index]!=expected_bits[static_cast<std::size_t>(address-first_symbol)])
+                difference(out,"canonical_wire_at_symbol_"+std::to_string(address),feed.first,
+                    std::string(1,expected_bits[static_cast<std::size_t>(address-first_symbol)]),std::string(1,actual_bits[index]));
+        }
+        bool start_known=false, end_known=false;
+        for (const auto& expected : fixture.expected) {
+            if (expected.chunk_first_symbol==cursor && expected.physical_chunk_first) {
+                equal_integer(out,"canonical_physical_chunk_first",feed.first,*expected.physical_chunk_first,physical(fixture.input_origin,actual.first_sample));
+                start_known=true;
+                break;
+            }
+        }
+        const auto next=cursor+count;
+        for (const auto& expected : fixture.expected) {
+            const auto expected_end=expected.chunk_first_symbol+expected.wire_bits.size()+expected.missing_slots;
+            // An empty terminal is compared separately; pending witnesses at the
+            // same symbol count are meaningful before physical completion too.
+            if (!expected.complete && expected_end==next) {
+                equal_integer(out,"canonical_physical_chunk_end",feed.first,expected.physical_end,physical(fixture.input_origin,actual.end_sample));
+                equal_double(out,"canonical_score_at_symbol_"+std::to_string(next),feed.first,expected.score,actual.score);
+                equal_double(out,"canonical_support_at_symbol_"+std::to_string(next),feed.first,expected.support_samples,actual.support_samples);
+                end_known=true;
+                break;
+            }
+        }
+        start_anchors+=start_known; end_anchors+=end_known;
+        unrecorded_start_coordinates+=!start_known; unrecorded_end_witnesses+=!end_known && !actual.complete;
+        cursor=next; compared_slots+=count;
+        if (actual.complete) {
+            equal_integer(out,"canonical_terminal_feed_first",feed.first,terminal.feed_first,feed.first);
+            equal_integer(out,"canonical_terminal_next_symbol",feed.first,first_symbol+expected_bits.size(),cursor);
+            equal_integer(out,"canonical_terminal_physical_end",feed.first,terminal.physical_end,physical(fixture.input_origin,actual.end_sample));
+            if (terminal.physical_chunk_first)
+                equal_integer(out,"canonical_terminal_physical_chunk_first",feed.first,*terminal.physical_chunk_first,physical(fixture.input_origin,actual.first_sample));
+            equal_double(out,"canonical_terminal_score",feed.first,terminal.score,actual.score);
+            equal_double(out,"canonical_terminal_support_samples",feed.first,terminal.support_samples,actual.support_samples);
+            terminal_seen=true;
+        }
+    }
+
+    void finish() {
+        if (!terminal_seen || compared_slots!=expected_bits.size())
+            difference(out,"canonical_missing_terminal_or_symbols",fixture.feeds.back().first,
+                std::to_string(expected_bits.size())+" slots and physical completion",std::to_string(compared_slots)+" slots; terminal="+(terminal_seen?"true":"false"));
+        std::ostringstream row;
+        row << "{\"event\":\"canonical_result\",\"matched\":true,\"symbol_slots\":" << compared_slots
+            << ",\"wire_bits\":" << quote(expected_bits) << ",\"matched_chunk_start_anchors\":" << start_anchors
+            << ",\"matched_chunk_end_score_support_anchors\":" << end_anchors
+            << ",\"unrecorded_internal_chunk_start_coordinates\":" << unrecorded_start_coordinates
+            << ",\"unrecorded_internal_chunk_end_score_support\":" << unrecorded_end_witnesses
+            << ",\"terminal_fields_exact\":true,\"all_chunk_physical_geometry_claimed\":false}";
+        out.line(row.str());
+    }
+};
+
+void run_partition(Output& out, const replay::Fixture& fixture, const std::filesystem::path& base,
+                   Counts& counts, std::string_view partition) {
+    if (fixture.feeds.empty() || fixture.expected.empty() || !fixture.make_config || !fixture.make_search)
+        throw SetupError("fixture is missing feeds, golden bursts or config builders");
+    if (fixture.feeds.size()>8192 || fixture.expected.size()>maximum_native_events ||
+        !fixture.expected.back().complete || fixture.feeds.back().first!=fixture.expected.back().feed_first)
+        throw SetupError("fixture bounds or retained terminal feed are invalid");
+    const auto pcm=prepare("retained PCM",[&]{return read_pcm(resolve(base,fixture.pcm_path),fixture.pcm_sha256);});
+    const auto keys=prepare("retained keyring",[&]{return datapump::load_keyring(resolve(base,fixture.keyfile_path));});
+    std::optional<datapump::Crypto> selected_key;
+    for (const auto& item : keys) if (key_tag(item.key)==fixture.key_tag_hex) {
+        if (selected_key) throw SetupError("key HMAC tag is ambiguous in retained keyring");
+        selected_key=item.key;
+    }
+    if (!selected_key) throw SetupError("retained keyring has no matching HMAC tag");
+    const auto config=prepare("captured Config",[&]{return fixture.make_config(*selected_key);});
+    const auto search=prepare("captured PatternSearch",[&]{return fixture.make_search();});
+    if (!config.data_key || key_tag(*config.data_key)!=fixture.key_tag_hex || config.stream_epoch!=fixture.epoch ||
+        config.symbol_burst.enabled() || config.fake_hopping || config.scheduled_hopping || search.scheduled_capture || search.compact_clock_search ||
+        search.input_sample_origin!=fixture.input_origin || !fixture.constructor_grant || fixture.constructor_grant>std::numeric_limits<std::size_t>::max())
+        throw SetupError("generated Config/Search/key/epoch/grant context is invalid or unsupported");
+    Canonical canonical(out,fixture);
+    out.line("{\"event\":\"case_begin\",\"label\":"+quote(fixture.label)+",\"partition\":"+quote(partition)+
+        ",\"comparison\":\"addressed canonical stream and retained physical witnesses\",\"receiver_id\":"+std::to_string(fixture.receiver_id)+
+        ",\"pcm_sha256\":"+quote(fixture.pcm_sha256)+",\"input_origin\":"+std::to_string(fixture.input_origin)+
+        ",\"constructor_grant\":"+std::to_string(fixture.constructor_grant)+
+        ",\"native_storage_context_replayed\":false,\"dynamic_workspace_replayed\":false,\"original_projection_schedule\":true,\"exact_original_chunks_required\":"+(partition=="unsplit"?"true":"false")+"}");
+
+    // The entire projected prefix is computed ONCE at the original feed
+    // normalization boundaries, before any partitioned receiver push occurs.
+    counts.stage="original_projection_precompute";
+    std::vector<std::complex<double>> projected;
+    std::complex<double> mixer{1,0};
+    const auto rotation=std::polar(1.,-2*std::numbers::pi*config.carrier_hz/config.sample_rate);
+    std::uint64_t end=0,pcm_end=fixture.feeds.front().pcm_offset;
+    for (const auto& feed : fixture.feeds) {
+        if (feed.first!=end || feed.pcm_offset!=pcm_end || !feed.count || feed.count>2048 || feed.first>UINT64_MAX-feed.count ||
+            feed.pcm_offset>pcm.size() || feed.count>pcm.size()-feed.pcm_offset || feed.count>maximum_samples-projected.size())
+            throw SetupError("noncontiguous or out-of-range retained feed");
+        equal_double(out,"mixer_real_before",feed.first,feed.mixer_real,mixer.real());
+        equal_double(out,"mixer_imag_before",feed.first,feed.mixer_imag,mixer.imag());
+        const auto raw=std::span(pcm).subspan(static_cast<std::size_t>(feed.pcm_offset),static_cast<std::size_t>(feed.count));
+        const auto offset=projected.size(); projected.resize(offset+raw.size());
+        for (std::size_t i=0;i<raw.size();++i) {
+            projected[offset+i]=static_cast<double>(raw[i])*mixer;mixer*=rotation;
+        }
+        mixer/=std::abs(mixer);
+        equal_double(out,"mixer_real_after",feed.first,feed.after_real,mixer.real());
+        equal_double(out,"mixer_imag_after",feed.first,feed.after_imag,mixer.imag());
+        ++counts.feeds; end=feed.first+feed.count;pcm_end=feed.pcm_offset+feed.count;
+    }
+    const auto projected_bytes=std::as_bytes(std::span(projected));
+    std::array<unsigned char,EVP_MAX_MD_SIZE> projected_digest{};unsigned projected_digest_size=0;
+    if (EVP_Digest(projected_bytes.data(),projected_bytes.size(),projected_digest.data(),&projected_digest_size,EVP_sha256(),nullptr)!=1 || projected_digest_size!=32)
+        throw SetupError("fixed projected waveform SHA256 failed");
+    constexpr char digits[]="0123456789abcdef";std::string projected_hash;
+    for (unsigned i=0;i<projected_digest_size;++i) {projected_hash+=digits[projected_digest[i]>>4];projected_hash+=digits[projected_digest[i]&15];}
+    out.line("{\"event\":\"projection_ready\",\"samples\":"+std::to_string(projected.size())+
+        ",\"original_feeds\":"+std::to_string(counts.feeds)+",\"all_mixer_witnesses_exact\":true,\"projected_native_complex_sha256\":"+quote(projected_hash)+"}");
+    std::unique_ptr<datapump::modem::StreamingReceiver> receiver;
+    bool active_seen=false,active_ended=false;
+    std::size_t exact_expected_index=0;
+    constexpr std::array<std::size_t,5> ragged{17,1,233,3,1024};
+    for (const auto& feed : fixture.feeds) {
+        if (!feed.receiver_active) {
+            if (active_seen) {active_ended=true;receiver.reset();}
+            continue;
+        }
+        if (active_ended) throw SetupError("receiver fixture attempts reactivation");
+        if (!receiver) {
+            counts.stage="receiver_construction";
+            if (feed.first!=fixture.input_origin) throw SetupError("first active feed is not the original receiver admission origin");
+            receiver=std::make_unique<datapump::modem::StreamingReceiver>(config,static_cast<std::size_t>(fixture.constructor_grant),search);
+            if (receiver->clock_windowed()) throw SetupError("captured FFT fixture constructed a correlator fallback");
+            out.line("{\"event\":\"receiver_constructed\",\"feed_first\":"+std::to_string(feed.first)+
+                ",\"working_bytes\":"+std::to_string(receiver->working_bytes())+
+                ",\"reserved_workspace_bytes\":"+std::to_string(receiver->reserved_workspace_bytes())+
+                ",\"local_clock_fallback\":"+(receiver->local_clock_fallback()?"true":"false")+"}");
+            active_seen=true;
+        }
+        ++counts.active_feeds;
+        const auto raw=std::span(pcm).subspan(static_cast<std::size_t>(feed.pcm_offset),static_cast<std::size_t>(feed.count));
+        const auto mixed=std::span(projected).subspan(static_cast<std::size_t>(feed.first),static_cast<std::size_t>(feed.count));
+        counts.stage="partitioned_receiver_push";
+        // Keep Live's unobserved query at its original feed boundary. Only push
+        // itself is subdivided; no new pending processing or drain is inserted.
+        if (receiver->try_skip_unobserved(raw.size())) throw SetupError("ordinary FFT fixture unexpectedly skipped input");
+        for (std::size_t offset=0,part=0;offset<raw.size();++part) {
+            const auto count=std::min(raw.size()-offset,partition=="unsplit"?raw.size():(partition=="bins512"?std::size_t{512}:ragged[part%ragged.size()]));
+            out.line("{\"event\":\"receiver_push_partition\",\"original_feed_first\":"+std::to_string(feed.first)+
+                ",\"part\":"+std::to_string(part)+",\"first\":"+std::to_string(feed.first+offset)+",\"count\":"+std::to_string(count)+"}");
+            receiver->push(raw.subspan(offset,count),mixed.subspan(offset,count));
+            ++counts.partition_push_calls;offset+=count;
+        }
+        counts.stage="receiver_process_pending";receiver->process_pending();
+        counts.stage="receiver_public_drain";
+        const auto bursts=receiver->take_pattern_bursts();
+        // Retain the entire public drain batch before comparing its first
+        // difference. No subsequent push occurs after a comparison failure.
+        for (const auto& burst : bursts) {
+            if (++counts.native_events>maximum_native_events) throw SetupError("native output event cap exhausted");
+            native_output(out,fixture,feed,burst,counts.native_events);
+        }
+        for (const auto& burst : bursts) {
+            if (burst.bits.empty() && !burst.missing_slots && !burst.complete) continue;
+            if (partition=="unsplit") {
+                if (exact_expected_index==fixture.expected.size())
+                    difference(out,"unsplit_unexpected_native_burst",feed.first,"no further burst","extra native output");
+                compare(out,fixture,feed,fixture.expected[exact_expected_index],burst);
+                ++exact_expected_index;
+            }
+            canonical.accept(feed,burst);++counts.compared_events;counts.terminal_events+=burst.complete;
+        }
+        if (partition=="unsplit" && exact_expected_index<fixture.expected.size() && fixture.expected[exact_expected_index].feed_first<=feed.first)
+            difference(out,"unsplit_missing_native_burst",feed.first,"retained expected burst","no corresponding native output");
+        canonical.end_feed(feed);
+    }
+    counts.stage="canonical_final_comparison";
+    if (!active_seen) throw SetupError("fixture never admitted its receiver");
+    canonical.finish();
+    if (partition=="unsplit" && exact_expected_index!=fixture.expected.size())
+        throw Difference("unsplit control did not exhaust every exact retained chunk");
+    out.line("{\"event\":\"partition_result\",\"partition\":"+quote(partition)+",\"push_calls\":"+std::to_string(counts.partition_push_calls)+
+        ",\"original_active_feeds\":"+std::to_string(counts.active_feeds)+",\"process_and_drain_only_after_original_feeds\":true,\"eof_completion_used\":false}");
+    counts.stage="matched_canonical_captured_prefix";
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     const auto started = Clock::now();
     const auto cpu_started = std::clock();
     std::filesystem::path base, output_path;
+    std::string_view partition="original";
     for (int i=1;i<argc;++i) {
         const std::string_view option(argv[i]);
         if ((option=="--fixture-base" || option=="--output") && i+1<argc) {
             auto& target = option=="--fixture-base" ? base : output_path; target = argv[++i];
-        } else { std::cerr << "usage: adapter --fixture-base ABS --output NEW_JSONL\n"; return 2; }
+        } else if (option=="--partition" && i+1<argc) {
+            partition=argv[++i];
+            if (partition!="original" && partition!="unsplit" && partition!="ragged" && partition!="bins512") { std::cerr << "invalid partition mode\n"; return 2; }
+        } else { std::cerr << "usage: adapter --fixture-base ABS --output NEW_JSONL [--partition original|unsplit|ragged|bins512]\n"; return 2; }
     }
     if (!base.is_absolute() || !output_path.is_absolute()) { std::cerr << "fixture base and output must be absolute\n"; return 2; }
     std::unique_ptr<Output> output;
@@ -315,7 +572,8 @@ int main(int argc, char** argv) {
     int result = 0; std::string status = "passed", error;
     try {
         output = std::make_unique<Output>(output_path);
-        run(*output,COPIED_HELP_FIXTURE_NAMESPACE::fixture(),base,counts);
+        if (partition=="original") run(*output,COPIED_HELP_FIXTURE_NAMESPACE::fixture(),base,counts);
+        else run_partition(*output,COPIED_HELP_FIXTURE_NAMESPACE::fixture(),base,counts,partition);
     } catch (const Difference& failure) { result=1;status="mismatch";error=failure.what(); }
       catch (const SetupError& failure) { result=2;status="setup_error";error=failure.what(); }
       catch (const std::exception& failure) { result=3;status="receiver_error";error=failure.what(); }
@@ -328,9 +586,9 @@ int main(int argc, char** argv) {
         try {
             std::ostringstream summary;
             summary << std::setprecision(17) << "{\"event\":\"case_result\",\"status\":" << quote(status)
-                << ",\"matched\":" << (result==0?"true":"false") << ",\"error\":" << quote(error) << ",\"stage\":" << quote(counts.stage)
+                << ",\"partition\":" << quote(partition) << ",\"matched\":" << (result==0?"true":"false") << ",\"error\":" << quote(error) << ",\"stage\":" << quote(counts.stage)
                 << ",\"feeds\":" << counts.feeds << ",\"active_feeds\":" << counts.active_feeds << ",\"native_events\":" << counts.native_events
-                << ",\"compared_events\":" << counts.compared_events << ",\"terminal_events\":" << counts.terminal_events
+                << ",\"partition_push_calls\":" << counts.partition_push_calls << ",\"compared_events\":" << counts.compared_events << ",\"terminal_events\":" << counts.terminal_events
                 << ",\"wall_seconds\":" << wall << ",\"process_cpu_seconds\":" << cpu << ",\"rusage_valid\":" << (usage_ok?"true":"false")
                 << ",\"max_rss_kib_linux\":" << resources.ru_maxrss << ",\"eof_completion_used\":false,\"original_C_resolved\":false}";
             output->line(summary.str()); closed=output->close();

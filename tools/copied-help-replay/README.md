@@ -32,3 +32,18 @@ boundary and requires resolving projection/construction/workspace fidelity befor
 changing inputs. Neither result identifies the missing old failed input, fixes C,
 or substitutes for strict GUI and full native/SDK qualification. Original
 assertions, ten-second stop and six-second absence requirements are unchanged.
+
+
+The partition diagnostic runs original, precomputed-unsplit, ragged and bins512
+for each fixed case. The unsplit control must reproduce every exact original
+chunk. All three precomputed modes retain the original projection normalization,
+query, pending-processing and drain boundaries; only push subdivisions differ.
+Their complete projected-waveform hashes must match. Ragged uses17,1,233,3,1024
+within each original feed; bins512 uses at most512. Variants compare addressed
+wire slots, prefix publication at every original drain, stable stream/phase,
+physical terminal fields and all retained boundary/score/support witnesses.
+Unrecorded internal coordinates are reported as coverage limits. Numeric-only
+differences must be classified separately from an explanation of the old failure.
+Closed variant mismatches are retained while independent cases continue; a
+failed original or unsplit control stops the wave. Neither a variant pass nor a
+difference constitutes qualification or identifies the missing old input.

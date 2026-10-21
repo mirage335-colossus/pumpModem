@@ -18,6 +18,7 @@ INPUT_BYTES = 386035397
 SDK_SHA = '4fdcc4b8d57e0a67eeb2ce7fac70667b75f40f01215105de95b771c77c5303c3'
 MIB = 1024 * 1024
 CASES = ((1, 1), (1, 4), (2, 13), (2, 14))
+PARTITIONS = ('original', 'unsplit', 'ragged', 'bins512')
 
 
 def require(value, reason):
@@ -62,7 +63,8 @@ def main(args):
     spec.loader.exec_module(process)
     result = {'purpose': __doc__, 'application_source': BASE, 'input_workflow': INPUT_TOOL,
               'input_run': INPUT_RUN, 'input_artifact': INPUT_ARTIFACT, 'input_sha256': INPUT_SHA,
-              'status': 'setup_incomplete', 'cases': [], 'unexecuted': list(CASES),
+              'status': 'setup_incomplete', 'cases': [],
+              'unexecuted': [('run' + str(a) + '_receiver' + str(r), mode) for a, r in CASES for mode in PARTITIONS],
               'limits': 'Fixed captured prefixes only; no EOF flush, new input, original-failure attribution or qualification.'}
 
     def watch():
@@ -111,9 +113,11 @@ def main(args):
         generated = evidence / 'generated'
         generated.mkdir()
         labels = []
+        capture_labels = {}
         for attempt, receiver in CASES:
             label = 'run' + str(attempt) + '_receiver' + str(receiver)
             labels.append(label)
+            capture_labels[label] = 'run-' + str(attempt) + '-receiver-' + str(receiver)
             execute(['python3', tool / 'tools/copied-help-replay/generate.py', '--capture-root',
                      capture / ('smokes/run-' + str(attempt)), '--receiver-id', receiver,
                      '--namespace', 'case_' + label, '--output', generated / label], 'generate-' + label, 60)
@@ -158,28 +162,61 @@ def main(args):
         result['status'] = 'baseline_incomplete'
         for label in labels:
             shutil.copyfile(build / ('replay_' + label), evidence / ('replay_' + label))
-        for index, label in enumerate(labels):
+        failures = []
+        pending = [(label, mode) for label in labels for mode in PARTITIONS]
+        projection_hashes = {}
+        for index, (label, mode) in enumerate(pending):
             binary = build / ('replay_' + label)
-            output = evidence / (label + '.jsonl')
-            data, stdout, stderr = process.run([str(binary), '--fixture-base', str(capture), '--output', str(output)],
-                                                evidence, label, 180, watch, stdout_limit=8 * MIB)
+            case_label = label + '-' + mode
+            output = evidence / (case_label + '.jsonl')
+            data, stdout, stderr = process.run([str(binary), '--fixture-base', str(capture), '--output', str(output),
+                                               '--partition', mode], evidence, case_label, 180, watch, stdout_limit=8 * MIB)
             rows = [json.loads(line) for line in output.read_text().splitlines()] if output.is_file() else []
             finalizers = [json.loads(line) for line in stdout.read_text().splitlines()
                           if line.startswith('{') and json.loads(line).get('event') == 'replay_output_finalization']
-            result['cases'].append({'label': label, 'process': data, 'binary': record(binary),
+            projected = [row for row in rows if row.get('event') == 'projection_ready']
+            result['cases'].append({'label': label, 'partition': mode, 'process': data, 'binary': record(binary),
                                     'output': record(output) if output.is_file() else None,
-                                    'result': rows[-1] if rows else None, 'external_finalizers': finalizers})
-            result['unexecuted'] = list(CASES[index + 1:])
-            if not process.successful(data):
-                result['status'] = 'native_case_mismatch' if any(row.get('event') == 'first_difference' for row in rows) else 'native_case_error'
-            require(process.successful(data), 'native case failed; original output and exit retained')
+                                    'result': rows[-1] if rows else None, 'external_finalizers': finalizers,
+                                    'projection': projected})
+            result['unexecuted'] = pending[index + 1:]
+            # Process/retention failures stop the wave. A closed native mismatch
+            # retains its evidence while other independent fixed cases proceed.
+            require(data.get('process_group_closed') is True, 'native case has live writers')
             require(output.is_file() and output.stat().st_size < 8 * MIB, 'native case output missing/oversized')
             require(len(finalizers) == 1 and finalizers[0].get('flush_ok') is True and
                     finalizers[0].get('close_ok') is True, 'native output external finalization incomplete')
-            require(rows and rows[-1].get('event') == 'case_result' and rows[-1].get('matched') is True,
-                    'native case did not establish complete output equality')
+            require(rows and rows[-1].get('event') == 'case_result', 'native case final result missing')
+            begins = [row for row in rows if row.get('event') == 'case_begin']
+            require(len(begins) == 1 and begins[0].get('label') == capture_labels[label] and
+                    rows[-1].get('partition') == mode, 'native case/mode identity mismatch')
+            if mode != 'original':
+                require(len(projected) == 1 and projected[0].get('all_mixer_witnesses_exact') is True,
+                        'fixed projected waveform proof missing/invalid; not partition evidence')
+                actual_hash = projected[0]['projected_native_complex_sha256']
+                if mode == 'unsplit':
+                    projection_hashes[label] = actual_hash
+                else:
+                    require(actual_hash == projection_hashes[label], 'projected waveform changed across partitions')
+            if not process.successful(data) or rows[-1].get('matched') is not True:
+                first_difference = next((row for row in rows if row.get('event') == 'first_difference'), None)
+                failures.append({'label': label, 'partition': mode, 'first_difference': first_difference,
+                                 'result': rows[-1]})
+                # A failed original or precomputed control invalidates comparisons
+                # for this case; do not interpret its variants as partition effects.
+                if mode in ('original', 'unsplit'):
+                    result['status'] = 'matched_control_failed'
+                    raise ValueError('matched control failed; native evidence retained')
+                if not (data.get('exit_code') == 1 and data.get('capture_error') is None and
+                        rows[-1].get('status') == 'mismatch' and rows[-1].get('matched') is False and first_difference):
+                    result['status'] = 'native_case_error'
+                    raise ValueError('native setup/receiver/capture error; not a partition comparison result')
+                continue
+        result['failures'] = failures
+        result['projected_waveform_sha256'] = projection_hashes
         require(source_identity(source) == before, 'application inputs changed during replay')
-        result['status'] = 'four_captured_prefixes_matched'
+        result['status'] = 'partition_difference' if failures else 'four_captured_prefixes_all_partitions_matched'
+        require(not failures, 'partition differences retained; diagnostic failure is not qualification')
     except Exception as error:
         result['error'] = type(error).__name__ + ': ' + str(error)
         raise

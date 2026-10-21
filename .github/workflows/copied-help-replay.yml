@@ -117,7 +117,7 @@ jobs:
                   raise SystemExit('SDK Python selected path outside installation: ' + location)
           print('Verified relocated SDK Python and private C++ runtimes')
           PY
-      - name: Generate four sealed cases, build unchanged source37 and compare every receiver output
+      - name: Compare original and matched precomputed controls with two push partitions
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -153,7 +153,8 @@ jobs:
           if-no-files-found: warn
           compression-level: 0
           retention-days: 14
+          include-hidden-files: true
       - name: State diagnostic limits
         if: always()
         run: |
-          echo 'Four fixed captured receiver prefixes only. Exact public outputs and mixer witnesses must match before further experiments; no EOF completion, old failure attribution, GUI qualification or release claim.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Four fixed captured receiver prefixes: original and precomputed unsplit controls, ragged and bins512 pushes. Original processing/drain boundaries and projected waveform stay fixed. No EOF completion, old failure attribution, GUI qualification or release claim.' >> "$GITHUB_STEP_SUMMARY"
