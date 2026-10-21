@@ -1782,16 +1782,36 @@ void parallel_long_tiles_preserve_boundaries() {
         auto budget=tight?base+512:workspace;
         scalar.set_workspace_bytes(budget);tiled.set_workspace_bytes(budget);
         bool accepted=false,completed=false;
+        std::size_t position=0,poll=0;
+        const auto print_evidence=[](const char* label,const modem::PatternEvidence& e) {
+            std::cerr<<label<<"{first_sample="<<e.first_sample<<", end_sample="<<e.end_sample
+                <<", stream_symbol="<<e.stream_symbol<<", frequency_hz="<<std::setprecision(17)
+                <<std::defaultfloat<<e.frequency_hz<<"/"<<std::hexfloat<<e.frequency_hz
+                <<", score="<<std::defaultfloat<<e.score<<"/"<<std::hexfloat<<e.score
+                <<", alternative_score="<<std::defaultfloat<<e.alternative_score<<"/"<<std::hexfloat
+                <<e.alternative_score<<", bit="<<static_cast<unsigned>(e.bit)
+                <<", stream_phase_samples="<<std::defaultfloat<<e.stream_phase_samples<<"/"<<std::hexfloat
+                <<e.stream_phase_samples<<", admission_threshold="<<std::defaultfloat<<e.admission_threshold
+                <<"/"<<std::hexfloat<<e.admission_threshold<<"}";
+        };
         const auto compare=[&] {
+            ++poll;
             check(burst_fields(scalar.provisional())==burst_fields(tiled.provisional()),
                   "long correlation tile changed provisional fields or exact scores");
             check(scalar.acquiring()==tiled.acquiring() && scalar.synchronized()==tiled.synchronized(),
                   "long correlation tile changed acquisition state at a poll");
             const auto a=scalar.candidates(),b=tiled.candidates();
             check(a.size()==b.size(),"long correlation tile changed retained evidence count");
-            for(std::size_t i=0;i<a.size();++i)
+            for(std::size_t i=0;i<a.size();++i) {
+                if(evidence_fields(a[i])!=evidence_fields(b[i])) {
+                    std::cerr<<"long correlation tile evidence mismatch: compact="<<compact<<", mode="<<mode
+                        <<", tight="<<tight<<", consumed_source_samples="<<position<<", poll="<<poll
+                        <<", candidate_index="<<i<<", candidate_count="<<a.size()<<"/"<<b.size()<<" ";
+                    print_evidence("scalar=",a[i]);std::cerr<<" ";print_evidence("tiled=",b[i]);std::cerr<<"\n";
+                }
                 check(evidence_fields(a[i])==evidence_fields(b[i]),
                       "long correlation tile changed evidence order, arithmetic or trial thresholds");
+            }
             const auto x=scalar.diagnostics(),y=tiled.diagnostics();
             check(x.sample_offset==y.sample_offset && x.bit_rate==y.bit_rate && x.pattern_score==y.pattern_score,
                   "long correlation tile changed diagnostics");
@@ -1807,7 +1827,6 @@ void parallel_long_tiles_preserve_boundaries() {
             check(scalar.working_bytes()<=budget && tiled.working_bytes()<=budget,
                   "long correlation tile exceeded its workspace ceiling");
         };
-        std::size_t position=0;
         const auto push_until=[&](std::size_t end) {
             while(position<end) {
                 const auto count=std::min<std::size_t>(4096,end-position);
