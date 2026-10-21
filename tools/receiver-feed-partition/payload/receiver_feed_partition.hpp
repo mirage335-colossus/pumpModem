@@ -17,21 +17,33 @@ namespace datapump::receiver_feed_partition {
 enum class Owner : unsigned {
     bank_admission, bank_owner_prepare, bank_feed, bank_pending, bank_drain,
     bank_publish, input_binning, process_residual, input_fft_prepare, fft_score,
-    track_continue, candidate_admit, candidate_publish, count
+    track_continue, candidate_admit, candidate_publish, template_prepare, fft_transform,
+    scorer_dispatch, scorer_evidence, fft_tables, count
 };
 inline constexpr std::size_t owner_count=static_cast<std::size_t>(Owner::count);
 inline constexpr std::size_t max_blocks=512,max_receivers=32;
 inline constexpr const char* names[owner_count]={
     "bank_admission","bank_owner_prepare","bank_feed","bank_pending","bank_drain",
     "bank_publish","input_binning","process_residual","input_fft_prepare","fft_score",
-    "track_continue","candidate_admit","candidate_publish"};
+    "track_continue","candidate_admit","candidate_publish","template_prepare","fft_transform",
+    "scorer_dispatch","scorer_evidence","fft_tables"};
 struct Stage {std::uint64_t calls=0,wall_ns=0,thread_cpu_ns=0;};
 struct OwnerMeta {
     std::uint64_t receiver_index=0,epoch=0,family=0,sample_origin=0,spreading_factor=0,chip_samples=0;
     std::uint64_t frontier_before=0;bool frontier_before_available=false;
 };
+inline constexpr std::size_t work_count=22,geometry_count=14;
+inline constexpr const char* work_names[work_count]={"input_transforms","template_jobs","exact_reused_template_jobs","skipped_batches","skipped_start_trials","threshold_trials","retained_start_trials","scored_start_trials","early_batches","direct_jobs","fft_jobs","skipped_template_jobs","partitioned_jobs","partitioned_input_transforms","partitioned_transform_points","partitioned_fallbacks","arithmetic_fallback_jobs","native_fp32_transforms","tabulated_fp64_transforms","fp32_retry_fp64_transforms","private_template_builds","private_template_lane_jobs"};
+inline constexpr const char* geometry_names[geometry_count]={"bin_samples","length","transform","hop","initial_stream_symbols","frequency_count","requested_workers","drift_sections","sample_fit","streamed_templates","exact_template_cache_rows","parallel_workspace_count","restricted_timing_active","timing_window"};
+using WorkValues=std::array<std::uint64_t,work_count>;
+using GeometryValues=std::array<std::uint64_t,geometry_count>;
+struct WorkRow {
+    WorkValues delta{};GeometryValues last_geometry{};
+    std::uint64_t snapshots=0,sample_before=0,sample_after=0,bins_before=0,bins_after=0;
+    std::uint64_t next_start_before=0,next_start_after=0,tracks_before=0,tracks_after=0;
+};
 struct OwnerRow {
-    OwnerMeta meta{};bool initialized=false,frontier_after_available=false;
+    OwnerMeta meta{};WorkRow work{};bool initialized=false,frontier_after_available=false;
     std::uint64_t frontier_after=0;
     std::array<Stage,owner_count> stages{};
 };
@@ -85,6 +97,26 @@ inline void frontier_after(int slot,bool available,std::uint64_t value) noexcept
     if(!recording() || slot<0 || std::size_t(slot)>=max_receivers)return;
     auto& row=active.row->owners[std::size_t(slot)];row.frontier_after_available=available;row.frontier_after=value;
 }
+template<class Receiver> class WorkCapture {
+    Receiver* receiver_=nullptr;OwnerRow* row_=nullptr;WorkValues before_{};
+    static WorkValues values(const Receiver& r) noexcept {
+        const auto& w=*r.fft_workload;return {w.input_transforms,w.template_jobs,w.exact_reused_template_jobs,w.skipped_batches,w.skipped_start_trials,r.trials,w.retained_start_trials,w.scored_start_trials,w.early_batches,w.direct_jobs,w.fft_jobs,w.skipped_template_jobs,w.partitioned_jobs,w.partitioned_input_transforms,w.partitioned_transform_points,w.partitioned_fallbacks,w.arithmetic_fallback_jobs,w.native_fp32_transforms,w.tabulated_fp64_transforms,w.fp32_retry_fp64_transforms,w.private_template_builds,w.private_template_lane_jobs};
+    }
+public:
+    explicit WorkCapture(Receiver& r) noexcept {
+        if(!recording() || active.slot<0 || std::size_t(active.slot)>=max_receivers || !r.fft_workload)return;
+        receiver_=&r;row_=&active.row->owners[std::size_t(active.slot)];before_=values(r);
+        auto& w=row_->work;
+        if(!w.snapshots){w.sample_before=r.sample;w.bins_before=r.bins;w.next_start_before=r.next_start;w.tracks_before=r.tracks.size();}
+    }
+    ~WorkCapture() noexcept {
+        if(!receiver_)return;const auto& r=*receiver_;auto& w=row_->work;const auto after=values(r);
+        for(std::size_t i=0;i<work_count;++i){if(after[i]<before_[i]){++state.accounting_failures;continue;}w.delta[i]+=after[i]-before_[i];}
+        w.last_geometry={r.bin_samples,r.length,r.transform,r.hop,r.search.initial_stream_symbols,r.templates.size(),r.search.worker_threads,r.drift_sections,std::uint64_t(r.sample_fit),std::uint64_t(r.streamed_templates),r.cached_templates.size(),r.scoring.empty()?0:r.scoring.front().workspaces.size(),std::uint64_t(r.fft_workload->restricted_timing_active),std::uint64_t(r.fft_workload->timing_window)};
+        w.sample_after=r.sample;w.bins_after=r.bins;w.next_start_after=r.next_start;w.tracks_after=r.tracks.size();++w.snapshots;
+    }
+    WorkCapture(const WorkCapture&)=delete;WorkCapture& operator=(const WorkCapture&)=delete;
+};
 class Block {
     BlockRow* row_=nullptr;Active prior_{};int exceptions_=std::uncaught_exceptions();
 public:
@@ -154,6 +186,16 @@ inline bool seal(const std::string& directory) noexcept {
         for(std::uint64_t i=0;i<trials;++i){bool ok=false;const auto c=cpu_raw(ok),w=wall_raw();sink=c^w;calibration_ok&=ok;}
         const auto calibration_cpu=delta(cpu_raw(ok1),cc),calibration_wall=delta(wall_raw(),cw);calibration_ok&=ok1;(void)sink;
         if(!calibration_ok)++state.clock_failures;
+        // Post-join representative scope bookkeeping cost. This is still a
+        // partial estimate: no cache/scheduling impact or WorkCapture cost.
+        BlockRow calibration_row{};const auto saved_active=active;
+        const auto saved_cpu_reads=state.cpu_clock_reads,saved_wall_reads=state.wall_clock_reads,saved_scope_calls=state.scope_calls;
+        active={&calibration_row,&calibration_row,-1,0,0,0};
+        const auto sw=wall_raw(),sc=cpu_raw(ok0);calibration_ok&=ok0;
+        for(std::uint64_t i=0;i<trials;++i){Scope scope(Owner::fft_score);sink=i;}
+        const auto scope_cpu=delta(cpu_raw(ok1),sc),scope_wall=delta(wall_raw(),sw);calibration_ok&=ok1;
+        active=saved_active;state.cpu_clock_reads=saved_cpu_reads;state.wall_clock_reads=saved_wall_reads;state.scope_calls=saved_scope_calls;
+        if(!calibration_ok)++state.clock_failures;
         std::size_t owners=0,empty_blocks=0,unclosed_blocks=0;
         std::ofstream out(path/"receiver-feed.jsonl");
         const auto stages=[&](const auto& values,std::size_t block,int slot){
@@ -180,6 +222,18 @@ inline bool seal(const std::string& directory) noexcept {
                    <<",\"frontier_before_available\":"<<(m.frontier_before_available?"true":"false")<<",\"frontier_before\":"<<m.frontier_before
                    <<",\"frontier_after_available\":"<<(o.frontier_after_available?"true":"false")<<",\"frontier_after\":"<<o.frontier_after
                    <<",\"local_input_samples_available\":false}\n";
+                const auto& w=o.work;
+                if(w.snapshots) {
+                    out<<"{\"type\":\"receiver_work\",\"block\":"<<b<<",\"receiver_index\":"<<i<<",\"snapshots\":"<<w.snapshots
+                       <<",\"sample_before\":"<<w.sample_before<<",\"sample_after\":"<<w.sample_after
+                       <<",\"bins_before\":"<<w.bins_before<<",\"bins_after\":"<<w.bins_after
+                       <<",\"next_start_before\":"<<w.next_start_before<<",\"next_start_after\":"<<w.next_start_after
+                       <<",\"tracks_before\":"<<w.tracks_before<<",\"tracks_after\":"<<w.tracks_after<<",\"delta\":{";
+                    for(std::size_t j=0;j<work_count;++j){if(j)out<<',';out<<'"'<<work_names[j]<<"\":"<<w.delta[j];}
+                    out<<"},\"last_geometry\":{";
+                    for(std::size_t j=0;j<geometry_count;++j){if(j)out<<',';out<<'"'<<geometry_names[j]<<"\":"<<w.last_geometry[j];}
+                    out<<"}}\n";
+                }
                 stages(o.stages,b,int(i));
             }
         }
@@ -197,6 +251,8 @@ inline bool seal(const std::string& directory) noexcept {
                <<",\"scope_calls\":"<<state.scope_calls<<",\"cpu_clock_reads\":"<<state.cpu_clock_reads<<",\"wall_clock_reads\":"<<state.wall_clock_reads
                <<",\"calibration_trials\":"<<trials<<",\"baseline_cpu_ns\":"<<baseline_cpu<<",\"baseline_wall_ns\":"<<baseline_wall
                <<",\"clock_pair_cpu_ns\":"<<calibration_cpu<<",\"clock_pair_wall_ns\":"<<calibration_wall
+               <<",\"scope_calibration_cpu_ns\":"<<scope_cpu<<",\"scope_calibration_wall_ns\":"<<scope_wall
+               <<",\"scope_calibration_is_partial_estimate\":true"
                <<",\"clock_cost_is_partial_estimate\":true,\"worker_cpu_included\":false,\"files_ok\":"<<(events_ok?"true":"false")
                <<",\"complete\":"<<(complete?"true":"false")<<"}\n";
         summary.close();const bool result=complete&&bool(summary);

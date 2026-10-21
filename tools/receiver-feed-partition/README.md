@@ -34,3 +34,29 @@ establish an instrumentation or production performance effect. Recorded clock
 cost calibration is partial overhead evidence and is never subtracted from
 test latency. A dominant phase selects the next code path to inspect; a large
 unexplained remainder requires better measurement before a production change.
+
+The next refinement follows run `39661504253`: its original controller passed
+with an EU stop of 9.267672915 seconds. Across 64 fully enclosed stop blocks,
+FFT scoring used 6.691242846 of 8.708780651 seconds of foreground thread CPU.
+Work stayed near 23 scoring calls per input block without a rising trend; no
+single receiver identity dominated. That identifies a work region, not waste.
+
+The refined overlay snapshots 22 existing acquisition work counters once per
+concrete raw/projected push, records the receiver's input/bin/acquisition
+coordinates and its last observed execution geometry, and adds exclusive
+source-thread template, FFT kernel, dispatch, evidence and table-preparation
+costs. Worker threads remain outside this recorder. FFT kernel cost includes
+input transforms as well as template/inverse transforms; nested mode wrappers
+mean scope call counts are not transform counts. The existing work counters
+supply execution counts. Last geometry is a snapshot at the end of the push,
+not a claim that optional scratch/cache state was constant throughout it.
+Acquisition `next_start * bin_samples` marks completed acquisition batches;
+it does not certify unfinished-symbol continuation or physical absence.
+
+Decision rule: disproportionate repeated template work or rejected narrow
+ranges selects that specific path for a controlled correction; sustained
+necessary transforms with reconciled counts support reassessing hosted resource
+scheduling. Broad residuals, changed coverage or incomplete capture require
+repairing the measurement. No conclusion follows merely from a passing test.
+The original stop deadline and every assertion remain in force. Expected cost
+is one standard runner for about 25–40 minutes; no additional baseline build.

@@ -10,6 +10,8 @@ from pathlib import Path
 import shutil
 import subprocess
 
+from work_capture_check import check_work_capture
+
 
 SOURCE = "8c54277ca9ec7bf35dee65126ec0d78f3a484f74"
 BASELINE_RUN = 39648615451
@@ -29,7 +31,8 @@ def apply_partition(source: Path, payload: Path, common, report: Path) -> dict:
     manifest = json.loads(manifest_path.read_text())
     if manifest.get("schema") != 1 or manifest.get("source_sha") != SOURCE:
         raise ValueError("partition overlay schema/source mismatch")
-    allowed = {"src/live.cpp", "src/pattern_receiver.cpp", "src/gui_stop_interval.hpp"}
+    allowed = {"src/live.cpp", "src/pattern_receiver.cpp", "src/gui_stop_interval.hpp",
+               "src/pattern_fft_batch.cpp", "src/search_fft.cpp"}
     paths = [e["path"] for e in manifest["files"]]
     if set(paths) != allowed or len(paths) != len(allowed):
         raise ValueError("partition overlay source inventory mismatch")
@@ -136,7 +139,10 @@ def check_capture(capture: Path, summary: dict) -> dict:
                 and flag["wall_ns"] <= r["begin_wall_ns"] <= r["end_wall_ns"] <= result["wall_ns"]]
     if not enclosed:
         raise ValueError("no complete receiver blocks inside original stop window")
-    return {"blocks": len(blocks), "owner_rows": len(owners),
+    work = check_work_capture(rows)
+    if not work["valid"]:
+        raise ValueError("FFT work capture invalid: " + "; ".join(work["errors"][:10]))
+    return {"work_capture": work, "blocks": len(blocks), "owner_rows": len(owners),
             "fully_enclosed_stop_blocks": enclosed, "all_block_cpu_and_wall_reconciled": True,
             "all_blocks_match_original_receiver_markers": True}
 

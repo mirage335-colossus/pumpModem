@@ -52,7 +52,7 @@
     {
       "path": "src/pattern_receiver.cpp",
       "pre_sha256": "129f58767eec9ad383d0d9693f1a55b83c7f420a711711c9c7fc0f61a45ff4a6",
-      "post_sha256": "359a8fbcf3b9a83875a1424b50499e2b4011a7696d42130e5dcc7b49e35b4132",
+      "post_sha256": "6ec4eda59fb390bbdd02e2dc4a1fda32a6f754b844d820829744f6a5327f5f56",
       "replacements": [
         {
           "old": "#include \"datapump/pattern_receiver.hpp\"",
@@ -60,11 +60,11 @@
         },
         {
           "old": "    Impl::ScoringScope scoring{s};\n    if(!s.oscillator_valid) {",
-          "new": "    Impl::ScoringScope scoring{s};/* RFP_DIAGNOSTIC_BEGIN */\n    receiver_feed_partition::Scope partition_input(receiver_feed_partition::Owner::input_binning);\n/* RFP_DIAGNOSTIC_END */\n    if(!s.oscillator_valid) {"
+          "new": "    Impl::ScoringScope scoring{s};/* RFP_DIAGNOSTIC_BEGIN */\n    receiver_feed_partition::WorkCapture partition_work(s);\n    receiver_feed_partition::Scope partition_input(receiver_feed_partition::Owner::input_binning);\n/* RFP_DIAGNOSTIC_END */\n    if(!s.oscillator_valid) {"
         },
         {
           "old": "    Impl::ScoringScope scoring{s};\n    for(std::size_t i=0;i<input.size();++i) {",
-          "new": "    Impl::ScoringScope scoring{s};/* RFP_DIAGNOSTIC_BEGIN */\n    receiver_feed_partition::Scope partition_input(receiver_feed_partition::Owner::input_binning);\n/* RFP_DIAGNOSTIC_END */\n    for(std::size_t i=0;i<input.size();++i) {"
+          "new": "    Impl::ScoringScope scoring{s};/* RFP_DIAGNOSTIC_BEGIN */\n    receiver_feed_partition::WorkCapture partition_work(s);\n    receiver_feed_partition::Scope partition_input(receiver_feed_partition::Owner::input_binning);\n/* RFP_DIAGNOSTIC_END */\n    for(std::size_t i=0;i<input.size();++i) {"
         },
         {
           "old": "        while(bins>=length+next_start && (final || bins-length+1-next_start>=next_count())) {",
@@ -97,6 +97,14 @@
         {
           "old": "    void publish(Track& track,bool complete,bool flush=false,bool draining=false) {",
           "new": "    void publish(Track& track,bool complete,bool flush=false,bool draining=false) {/* RFP_DIAGNOSTIC_BEGIN */\n        receiver_feed_partition::Scope partition_candidate_publish(receiver_feed_partition::Owner::candidate_publish);\n/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "    void prepare_templates(std::uint64_t index,std::stop_token stop) {",
+          "new": "    void prepare_templates(std::uint64_t index,std::stop_token stop) {/* RFP_DIAGNOSTIC_BEGIN */\n        receiver_feed_partition::Scope partition_templates(receiver_feed_partition::Owner::template_prepare);\n/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "            detail::execute_fft_search_cpu(batch,jobs,\n                std::span(scoring_outputs).first(jobs.size()*hop),scoring_workspaces,stop);",
+          "new": "/* RFP_DIAGNOSTIC_BEGIN */{ receiver_feed_partition::Scope partition_dispatch(receiver_feed_partition::Owner::scorer_dispatch);\n/* RFP_DIAGNOSTIC_END */            detail::execute_fft_search_cpu(batch,jobs,\n                std::span(scoring_outputs).first(jobs.size()*hop),scoring_workspaces,stop);/* RFP_DIAGNOSTIC_BEGIN */\n}/* RFP_DIAGNOSTIC_END */"
         }
       ]
     },
@@ -114,13 +122,75 @@
           "new": "        state.active.store(false,std::memory_order_release);\n        if(!datapump::receiver_feed_partition::seal(state.directory))\n            std::fputs(\"RECEIVER_FEED_OUTPUT_ERROR seal returned false\\n\",stderr);\n"
         }
       ]
+    },
+    {
+      "path": "src/pattern_fft_batch.cpp",
+      "pre_sha256": "14cd5c72e43900497538bafb83a8fef3bf55d30d2342ee1e9880286409a7a7ae",
+      "post_sha256": "c48830a83fbdd557bd0d3614b65529d669994319ff5f13c810357346afadb1d7",
+      "replacements": [
+        {
+          "old": "#include \"pattern_fft_batch.hpp\"",
+          "new": "#include \"pattern_fft_batch.hpp\"\n/* RFP_DIAGNOSTIC_BEGIN */#include \"receiver_feed_partition.hpp\"\n/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "void pattern_fft(std::span<FftComplex> a, bool inverse, std::stop_token stop) {",
+          "new": "void pattern_fft(std::span<FftComplex> a, bool inverse, std::stop_token stop) {/* RFP_DIAGNOSTIC_BEGIN */\n    receiver_feed_partition::Scope partition_transform(receiver_feed_partition::Owner::fft_transform);\n/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "void pattern_fft(std::span<FftComplex> a,bool inverse,std::stop_token stop,SearchArithmetic mode) {",
+          "new": "void pattern_fft(std::span<FftComplex> a,bool inverse,std::stop_token stop,SearchArithmetic mode) {/* RFP_DIAGNOSTIC_BEGIN */\n    receiver_feed_partition::Scope partition_transform(receiver_feed_partition::Owner::fft_transform);\n/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "                if(!prepared) {\n                    std::fill(row.begin(),row.end(),Complex{});\n                    for(std::size_t i=0;i<length;++i) {",
+          "new": "                if(!prepared) {/* RFP_DIAGNOSTIC_BEGIN */\n                    { receiver_feed_partition::Scope partition_row(receiver_feed_partition::Owner::template_prepare);\n/* RFP_DIAGNOSTIC_END */                    std::fill(row.begin(),row.end(),Complex{});\n                    for(std::size_t i=0;i<length;++i) {"
+        },
+        {
+          "old": "                        if(geometry.sample_fit)square+=value*value*carrier_square(geometry,i);\n                    }\n                    if(!direct) {",
+          "new": "                        if(geometry.sample_fit)square+=value*value*carrier_square(geometry,i);\n                    }/* RFP_DIAGNOSTIC_BEGIN */\n                    }/* RFP_DIAGNOSTIC_END */\n                    if(!direct) {"
+        },
+        {
+          "old": "                visit([&](std::size_t j) {\n                    Complex dot{};",
+          "new": "/* RFP_DIAGNOSTIC_BEGIN */{ receiver_feed_partition::Scope partition_evidence(receiver_feed_partition::Owner::scorer_evidence);\n/* RFP_DIAGNOSTIC_END */                visit([&](std::size_t j) {\n                    Complex dot{};"
+        },
+        {
+          "old": "                    if(bit==0)output.zero=score;else output.one=score;\n                });",
+          "new": "                    if(bit==0)output.zero=score;else output.one=score;\n                });/* RFP_DIAGNOSTIC_BEGIN */\n}/* RFP_DIAGNOSTIC_END */"
+        }
+      ]
+    },
+    {
+      "path": "src/search_fft.cpp",
+      "pre_sha256": "3d1f4096734625d373a1e6d32f89dceab5746de1050a713a9cd0dc27e9b42fb5",
+      "post_sha256": "4e99f708e94068e0c60e697710cfc70cf750b7e348fb6ae0e49280295546fac7",
+      "replacements": [
+        {
+          "old": "#include \"search_fft.hpp\"",
+          "new": "#include \"search_fft.hpp\"\n/* RFP_DIAGNOSTIC_BEGIN */#include \"receiver_feed_partition.hpp\"\n/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "DoubleTableView prepare_double_tables(std::span<std::complex<double>> forward,\n        std::span<std::complex<double>> inverse,std::stop_token stop){",
+          "new": "DoubleTableView prepare_double_tables(std::span<std::complex<double>> forward,\n        std::span<std::complex<double>> inverse,std::stop_token stop){/* RFP_DIAGNOSTIC_BEGIN */\n    receiver_feed_partition::Scope partition_tables(receiver_feed_partition::Owner::fft_tables);\n/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "void fft(std::span<std::complex<double>> a,bool inverse,const DoubleTableView& view,std::stop_token stop){",
+          "new": "void fft(std::span<std::complex<double>> a,bool inverse,const DoubleTableView& view,std::stop_token stop){/* RFP_DIAGNOSTIC_BEGIN */\n    receiver_feed_partition::Scope partition_transform(receiver_feed_partition::Owner::fft_transform);\n/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "void fft(std::span<std::complex<float>> a,bool inverse,const FloatPlan& p,std::stop_token stop,Kernel k){",
+          "new": "void fft(std::span<std::complex<float>> a,bool inverse,const FloatPlan& p,std::stop_token stop,Kernel k){/* RFP_DIAGNOSTIC_BEGIN */\n    receiver_feed_partition::Scope partition_transform(receiver_feed_partition::Owner::fft_transform);\n/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "void fft(std::span<std::complex<double>> a,bool inverse,const DoublePlan& p,std::stop_token stop,Kernel k){",
+          "new": "void fft(std::span<std::complex<double>> a,bool inverse,const DoublePlan& p,std::stop_token stop,Kernel k){/* RFP_DIAGNOSTIC_BEGIN */\n    receiver_feed_partition::Scope partition_transform(receiver_feed_partition::Owner::fft_transform);\n/* RFP_DIAGNOSTIC_END */"
+        }
+      ]
     }
   ],
   "new_files": [
     {
       "path": "src/receiver_feed_partition.hpp",
       "payload": "payload/receiver_feed_partition.hpp",
-      "sha256": "1bf2221f557458fe2d1cf8d64cb3f123ec1345657c91b7fdf440d87d8aaeb6ac"
+      "sha256": "a9c0088f0c3164a9afd876e10a33ae6613c3ec73e2edf818d3796ae4bad7618d"
     }
   ]
 }
