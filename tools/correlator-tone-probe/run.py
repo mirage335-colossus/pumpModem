@@ -74,7 +74,11 @@ def main():
         cache = (build / 'CMakeCache.txt').read_text()
         assert 'CMAKE_BUILD_TYPE:STRING=Release\n' in cache
         assert 'DATAPUMP_SANITIZERS:BOOL=OFF\n' in cache
-        result['compiler'] = subprocess.check_output(['c++', '--version'], text=True).splitlines()[0]
+        compiler_entries = [line.split('=', 1)[1] for line in cache.splitlines()
+                            if line.startswith(('CMAKE_CXX_COMPILER:FILEPATH=', 'CMAKE_CXX_COMPILER:STRING='))]
+        assert len(compiler_entries) == 1 and Path(compiler_entries[0]).is_file(), compiler_entries
+        result['compiler_path'] = compiler_entries[0]
+        result['compiler'] = subprocess.check_output([compiler_entries[0], '--version'], text=True, timeout=35).splitlines()[0]
         result['manifest'] = manifest
         # Schema is bound after independent review of the private adapter.
         for entry in manifest['files']:
@@ -103,8 +107,8 @@ def main():
         for entry in manifest['files']:
             path = root / entry['path']
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes((tools / entry['payload']).read_bytes())
             changed.append(entry['path'])
+            path.write_bytes((tools / entry['payload']).read_bytes())
         result['rebuild'] = command(['cmake', '--build', str(build), '--target', 'test_pattern_correlator', '--parallel', str(args.jobs)], output, 'rebuild', 1200)
         save(output / 'result.json', result)
         if result['rebuild']['exit_code'] != 0:
@@ -136,6 +140,8 @@ def main():
                 path.write_bytes(original)
         result['restored'] = all((not (root / name).exists()) if data is None else (root / name).read_bytes() == data for name, data in originals.items())
         save(output / 'result.json', result)
+        if not result['restored']:
+            raise RuntimeError('diagnostic sources were not restored; retained result is not accepted')
 
 if __name__ == '__main__':
     raise SystemExit(main())

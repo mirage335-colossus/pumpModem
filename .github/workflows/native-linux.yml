@@ -979,7 +979,7 @@ jobs:
           -DDART_TESTING_TIMEOUT=3600
           -DCMAKE_DISABLE_FIND_PACKAGE_Python3=${{ (inputs.scope == 'frontends' || inputs.scope == 'web') && 'FALSE' || 'TRUE' }}
           -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL=${{ (inputs.scope == 'live' || (inputs.scope == 'gui-core-diagnostic' && inputs.build_type == 'Debug')) && inputs.linux_runner == 'ubuntu-24.04' && 'ON' || 'OFF' }}
-          -DCMAKE_EXPORT_COMPILE_COMMANDS=${{ inputs.scope == 'gui-stop-current-wave' && 'ON' || 'OFF' }}
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=${{ (inputs.scope == 'gui-stop-current-wave' || inputs.scope == 'correlator-tone-diagnostic') && 'ON' || 'OFF' }}
       - name: Prepare focused Symbol Burst Live qualification evidence
         if: inputs.scope == 'symbol-burst-live'
         run: |
