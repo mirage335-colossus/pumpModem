@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "assignment": "instrumented-gui-core-failures-20261018 / correlator_tone_arithmetic_diagnosis",
+  "base_revision": "95cc9b0514d7555103de56723ae7a4adf406bb35",
+  "application_source": "37f4315c553b9fc3807f2f173d9a0fae3f239ebc",
+  "diagnostic_only": true,
+  "environment": "DATAPUMP_CORRELATOR_TONE_TRACE",
+  "output": "absolute, non-existing file; JSONL schema1 header/piece/batch_binding/seal; hex float strings",
+  "flush": "inline global State destructor at normal process exit; all per-piece records remain in bounded memory until then",
+  "capacity": 4096,
+  "arena_limit_bytes": 2097152,
+  "files": [
+    {
+      "path": "src/pattern_correlator.cpp",
+      "payload": "payload/src/pattern_correlator.cpp",
+      "pre_sha256": "34d8c248ee8c55f7eae843ce6f72dd23ef61931a8ee0345fb18702089f731b0f",
+      "pre_absent": false,
+      "post_sha256": "bef6c105ad92cabc05e625a6437def42233e4bca201df48839bb78fea2f267c9",
+      "bytes": 989346
+    },
+    {
+      "path": "src/pattern_correlator_batch.cpp",
+      "payload": "payload/src/pattern_correlator_batch.cpp",
+      "pre_sha256": "c4b8450c2c4a03f0e98e8ad1b21bcc5692bf62d73b45138aea4302188c55b6de",
+      "pre_absent": false,
+      "post_sha256": "d7a84276ed27791fc44fa6252d9de63b46386900d40f7b23739fd0ba4184fe48",
+      "bytes": 30825
+    },
+    {
+      "path": "src/correlator_tone_numeric_probe.hpp",
+      "payload": "payload/src/correlator_tone_numeric_probe.hpp",
+      "pre_sha256": null,
+      "pre_absent": true,
+      "post_sha256": "f238eabc6c64e30b76514fd1e43671d5f9edf6cb6a08e3a5718ec7a297ff1b2e",
+      "bytes": 9285
+    }
+  ],
+  "interpretation": [
+    "Preserve the original and instrumented ELF, source hashes, compiler/configuration, input, exits, test output, trace hash.",
+    "Missing/false seal, zero pieces, drops, unpublished records, stderr CORRELATOR_TONE_TRACE_ERROR, duplicate ambiguous batch bindings, or missing per-owner chains are inconclusive.",
+    "Even a complete seal is storage completeness only; the analyzer must validate target lane identity, required complete source-symbol extent and owner mapping.",
+    "Join batch records to batch_binding by identity,batch_first,batch_end; then join pieces by owner,lane identity,observed,until. Reservation order is not thread order.",
+    "An instrumented pass or a failure different from the retained original mismatch is inconclusive for the production cause.",
+    "The polar argument is deliberately unobserved; the existing polar/remainder expression is unchanged.",
+    "No assertion, trial threshold, pending, bit, cancellation or physical-end behavior is changed by design. Compilation can still be perturbed; retained original ELF is required."
+  ]
+}
