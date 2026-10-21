@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run a disjoint CTest scope and retain timing/coverage evidence for CI."""
 import argparse
+from contextlib import nullcontext
 from collections import Counter
 import hashlib
 import json
@@ -541,34 +542,88 @@ def run(args):
         if omitted:
             print('Omitted instrumented real-time coverage: ' + ', '.join(omitted), flush=True)
         pattern = '^(' + '|'.join(re.escape(test['name']) for test in selected) + ')$'
-        command = base + ['--output-on-failure', '--verbose', '--no-tests=error', '--parallel', str(args.jobs),
-                          '--timeout', str(args.timeout), '--output-junit', str(junit_path), '-R', pattern]
-        report['command'] = command
+        gui_names = {'gui_controller', 'gui_application'}
+        phased = (args.sanitizers and args.scope == 'core' and gui_names.issubset(report['selected']) and
+                  len(selected) > len(gui_names))
+        phases = ([('core', [test for test in selected if test['name'] not in gui_names]),
+                   ('gui', [test for test in selected if test['name'] in gui_names])]
+                  if phased else [('all', selected)])
+        if not phased:
+            command = base + ['--output-on-failure', '--verbose', '--no-tests=error', '--parallel', str(args.jobs),
+                              '--timeout', str(args.timeout), '--output-junit', str(junit_path), '-R', pattern]
+            report['command'] = command
+        else:
+            report['command'] = None
+            report['commands'] = []
+            report['phases'] = []
         # Prevent stale evidence from a previous attempt satisfying this run.
         junit_path.unlink(missing_ok=True)
-        workload_collector = WorkloadWarningCollector(selected)
-        hosted_clock_collector = HostedClockWarningCollector(selected)
+        phase_results = []
+        phase_errors = []
         with log_path.open('w', encoding='utf-8') as log:
-            with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                  text=True, errors='replace') as process:
-                for line in process.stdout:
-                    print(line, end='', flush=True)
-                    log.write(line)
-                    log.flush()
-                    workload_collector.feed(line)
-                    hosted_clock_collector.feed(line)
-                returncode = process.wait()
-                report['ctest_returncode'] = returncode
-        workload_warnings = workload_collector.finish(require_all=(returncode == 0))
-        hosted_clock_warnings = hosted_clock_collector.finish(require_all=(returncode == 0))
-        for record in hosted_clock_warnings.values():
-            if record['limit_seconds'] != (120 if args.sanitizers else 40):
-                raise ValueError('hosted clock limit conflicts with selected sanitizer configuration')
-        if returncode != 0:
-            report['unaccepted_hosted_clock_records'] = hosted_clock_warnings
-        report['tests'] = read_results(junit_path, selected, args.timeout, args.warn_fraction,
-                                       workload_warnings=workload_warnings,
-                                       hosted_clock_warnings=hosted_clock_warnings if returncode == 0 else {})
+            for index, (phase_name, phase_tests) in enumerate(phases, 1):
+                phase_junit = junit_path if not phased else report_path.with_name(
+                    f'{report_path.stem}.phase-{index}.xml')
+                phase_log_path = log_path if not phased else report_path.with_name(
+                    f'{report_path.stem}.phase-{index}.log')
+                phase_pattern = '^(' + '|'.join(re.escape(test['name']) for test in phase_tests) + ')$'
+                command = base + ['--output-on-failure', '--verbose', '--no-tests=error', '--parallel', str(args.jobs),
+                                  '--timeout', str(args.timeout), '--output-junit', str(phase_junit), '-R', phase_pattern]
+                phase_junit.unlink(missing_ok=True)
+                if phased:
+                    phase_log_path.unlink(missing_ok=True)
+                workload_collector = WorkloadWarningCollector(phase_tests)
+                hosted_clock_collector = HostedClockWarningCollector(phase_tests)
+                phase_started = time.monotonic()
+                with (phase_log_path.open('w', encoding='utf-8') if phased else nullcontext()) as phase_log:
+                    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                          text=True, errors='replace') as process:
+                        if phased:
+                            report['commands'].append(command)
+                        for line in process.stdout:
+                            print(line, end='', flush=True)
+                            log.write(line)
+                            log.flush()
+                            if phase_log is not None:
+                                phase_log.write(line)
+                                phase_log.flush()
+                            workload_collector.feed(line)
+                            hosted_clock_collector.feed(line)
+                        phase_rc = process.wait()
+                phase_elapsed = time.monotonic() - phase_started
+                try:
+                    workload_warnings = workload_collector.finish(require_all=(phase_rc == 0))
+                    hosted_clock_warnings = hosted_clock_collector.finish(require_all=(phase_rc == 0))
+                    for record in hosted_clock_warnings.values():
+                        if record['limit_seconds'] != (120 if args.sanitizers else 40):
+                            raise ValueError('hosted clock limit conflicts with selected sanitizer configuration')
+                    phase_results.extend(read_results(
+                        phase_junit, phase_tests, args.timeout, args.warn_fraction,
+                        workload_warnings=workload_warnings,
+                        hosted_clock_warnings=hosted_clock_warnings if phase_rc == 0 else {}))
+                    if phase_rc != 0:
+                        report.setdefault('unaccepted_hosted_clock_records', {}).update(hosted_clock_warnings)
+                except (OSError, ValueError, KeyError, ET.ParseError) as error:
+                    phase_errors.append(str(error))
+                if phased:
+                    report['phases'].append({
+                        'name': phase_name, 'selected': [test['name'] for test in phase_tests],
+                        'command': command, 'returncode': phase_rc, 'log_file': phase_log_path.name,
+                        'junit_file': phase_junit.name, 'elapsed_seconds': phase_elapsed})
+        if phased and not phase_errors and len(phase_results) == len(selected):
+            aggregate = ET.Element('testsuites')
+            for index in range(1, len(phases) + 1):
+                aggregate.append(ET.parse(report_path.with_name(f'{report_path.stem}.phase-{index}.xml')).getroot())
+            ET.ElementTree(aggregate).write(junit_path, encoding='utf-8', xml_declaration=True)
+        if phased:
+            report['ctest_returncode'] = next((phase['returncode'] for phase in report['phases']
+                                               if phase['returncode'] != 0), 0)
+        else:
+            report['ctest_returncode'] = phase_rc
+        returncode = report['ctest_returncode']
+        if phase_errors:
+            raise ValueError('; '.join(phase_errors))
+        report['tests'] = phase_results
         report['result_counts'] = {
             status: sum(test['status'] == status for test in report['tests'])
             for status in ('passed', 'omitted', 'incomplete_or_failed')

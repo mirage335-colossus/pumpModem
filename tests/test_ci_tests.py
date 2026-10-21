@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Coverage partition and failure-preserving timing checks for the CI runner."""
 import argparse
+from collections import Counter
 from contextlib import redirect_stdout
 import hashlib
 import importlib.util
@@ -11,6 +12,7 @@ import shutil
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -562,6 +564,120 @@ class CTestIntegration(unittest.TestCase):
         self.assertEqual(report['inventory_file'], 'report.inventory.json')
         self.assertEqual(report['inventory_sha256'], hashlib.sha256(raw).hexdigest())
         self.assertEqual(report['ctest_returncode'], 0)
+
+    def test_core_gui_cases_run_after_other_core_tests_with_phase_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            trace = root / 'trace'
+            lines = []
+            for name in ('ordinary', 'gui_controller', 'gui_application'):
+                code = f"from pathlib import Path; p=Path({str(trace)!r}); p.write_text(p.read_text()+'{name}\\n' if p.exists() else '{name}\\n')"
+                lines += [f'add_test({name} {json.dumps(sys.executable)} -c {json.dumps(code)})',
+                          f'set_tests_properties({name} PROPERTIES LABELS "regular;contract" TIMEOUT 5)']
+            (root / 'CTestTestfile.cmake').write_text('\n'.join(lines) + '\n')
+            report_path = root / 'report.json'
+            args = argparse.Namespace(build_dir=root, scope='core', config=None, ctest=shutil.which('ctest'),
+                                      jobs=1, sanitizers=True, sanitizer_realtime=False, report=report_path,
+                                      summary=root / 'summary.md', timeout=3600, warn_fraction=.8)
+            with redirect_stdout(io.StringIO()):
+                result = runner.run(args)
+            data = json.loads(report_path.read_text())
+            self.assertEqual(result, 0)
+            self.assertIsNone(data['command'])
+            self.assertEqual([phase['name'] for phase in data['phases']], ['core', 'gui'])
+            self.assertEqual([phase['selected'] for phase in data['phases']],
+                             [['ordinary'], ['gui_controller', 'gui_application']])
+            self.assertEqual([phase['returncode'] for phase in data['phases']], [0, 0])
+            self.assertEqual(trace.read_text().splitlines(), ['ordinary', 'gui_controller', 'gui_application'])
+            self.assertEqual(len(list(ET.parse(report_path.with_suffix('.xml')).getroot().iter('testcase'))), 3)
+            self.assertEqual(data['inventory_sha256'], hashlib.sha256(
+                report_path.with_suffix('.inventory.json').read_bytes()).hexdigest())
+            self.assertTrue(all(Path(root / phase[field]).exists() for phase in data['phases']
+                                for field in ('log_file', 'junit_file')))
+
+    def test_failed_first_core_phase_still_attempts_gui_and_preserves_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            marker = root / 'gui-ran'
+            lines = [f'add_test(ordinary {json.dumps(sys.executable)} -c {json.dumps("raise SystemExit(3)")})',
+                     'set_tests_properties(ordinary PROPERTIES LABELS "regular" TIMEOUT 5)']
+            for name in ('gui_controller', 'gui_application'):
+                code = f"from pathlib import Path; Path({str(marker)!r}).write_text('ran')"
+                lines += [f'add_test({name} {json.dumps(sys.executable)} -c {json.dumps(code)})',
+                          f'set_tests_properties({name} PROPERTIES LABELS "regular" TIMEOUT 5)']
+            (root / 'CTestTestfile.cmake').write_text('\n'.join(lines) + '\n')
+            report_path = root / 'report.json'
+            args = argparse.Namespace(build_dir=root, scope='core', config=None, ctest=shutil.which('ctest'),
+                                      jobs=1, sanitizers=True, sanitizer_realtime=False, report=report_path,
+                                      summary=root / 'summary.md', timeout=3600, warn_fraction=.8)
+            with redirect_stdout(io.StringIO()):
+                result = runner.run(args)
+            data = json.loads(report_path.read_text())
+            self.assertEqual(result, 1)
+            self.assertTrue(marker.exists())
+            self.assertNotEqual(data['phases'][0]['returncode'], 0)
+            self.assertEqual(data['phases'][1]['returncode'], 0)
+            self.assertNotEqual(data['ctest_returncode'], 0)
+            cases = list(ET.parse(report_path.with_suffix('.xml')).getroot().iter('testcase'))
+            self.assertEqual(Counter(case.get('name') for case in cases),
+                             Counter(['ordinary', 'gui_controller', 'gui_application']))
+
+    def test_phases_preserve_declared_omissions_and_each_phase_workload_warning(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            programs = {
+                'declared': 'raise SystemExit(77)',
+                'ordinary': 'print("TEST_WORKLOAD_BUDGET: ordinary completed with extra work")',
+                'gui_controller': 'print("TEST_WORKLOAD_BUDGET: GUI completed with extra work")',
+                'gui_application': 'print("ok")',
+            }
+            lines = []
+            for name, program in programs.items():
+                lines += [f'add_test({name} {json.dumps(sys.executable)} -c {json.dumps(program)})',
+                          f'set_tests_properties({name} PROPERTIES TIMEOUT 5 SKIP_RETURN_CODE 77)']
+            (root / 'CTestTestfile.cmake').write_text('\n'.join(lines) + '\n')
+            report_path = root / 'report.json'
+            args = argparse.Namespace(build_dir=root, scope='core', config=None, ctest=shutil.which('ctest'),
+                                      jobs=2, sanitizers=True, sanitizer_realtime=False, report=report_path,
+                                      summary=root / 'summary.md', timeout=3600, warn_fraction=.8)
+            with redirect_stdout(io.StringIO()):
+                result = runner.run(args)
+            data = json.loads(report_path.read_text())
+            self.assertEqual(result, 0)
+            self.assertEqual(data['status'], 'passed_with_omissions')
+            self.assertEqual(data['runtime_omissions'], ['declared'])
+            self.assertEqual(data['result_counts'], {'passed': 3, 'omitted': 1, 'incomplete_or_failed': 0})
+            by_name = {test['name']: test for test in data['tests']}
+            self.assertEqual(by_name['ordinary']['workload_warnings'],
+                             ['TEST_WORKLOAD_BUDGET: ordinary completed with extra work'])
+            self.assertEqual(by_name['gui_controller']['workload_warnings'],
+                             ['TEST_WORKLOAD_BUDGET: GUI completed with extra work'])
+            self.assertTrue(all(command[command.index('--parallel') + 1] == '2' for command in data['commands']))
+            log = report_path.with_suffix('.log').read_text()
+            self.assertEqual(log, ''.join((root / phase['log_file']).read_text() for phase in data['phases']))
+
+    def test_release_core_retains_single_ctest_process_with_gui_cases(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            lines = []
+            for name in ('ordinary', 'gui_controller', 'gui_application'):
+                lines.append(f'add_test({name} {json.dumps(sys.executable)} -c "print(123)")')
+            (root / 'CTestTestfile.cmake').write_text('\n'.join(lines) + '\n')
+            report_path = root / 'report.json'
+            args = argparse.Namespace(build_dir=root, scope='core', config=None, ctest=shutil.which('ctest'),
+                                      jobs=2, sanitizers=False, sanitizer_realtime=False, report=report_path,
+                                      summary=root / 'summary.md', timeout=3600, warn_fraction=.8)
+            with redirect_stdout(io.StringIO()) as output:
+                result = runner.run(args)
+            data = json.loads(report_path.read_text())
+            self.assertEqual(result, 0)
+            self.assertIsInstance(data['command'], list)
+            self.assertNotIn('commands', data)
+            self.assertNotIn('phases', data)
+            self.assertFalse(list(root.glob('report.phase-*')))
+            self.assertEqual(len(list(ET.parse(report_path.with_suffix('.xml')).getroot().iter('testcase'))), 3)
+            log = report_path.with_suffix('.log').read_text()
+            self.assertEqual(output.getvalue().count(log), 1)
 
     def test_listing_failure_removes_stale_inventory_and_keeps_unavailable_fields_none(self):
         import subprocess

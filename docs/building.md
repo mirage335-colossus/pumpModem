@@ -529,6 +529,14 @@ timeout produce warnings. Assertions, sanitizer findings, skipped mandatory
 tests and unclassified timeouts remain failures; elapsed time alone cannot
 establish correctness.
 
+Instrumented native core runs unrelated core tests first, then runs the original
+`gui_controller` and `gui_application` together at the configured CTest concurrency.
+This reserves the GUI phase for its stop-critical receiver computation. Every
+selected test runs exactly once with its existing assertions and deadlines.
+The report retains the complete inventory, combined results, JUnit and console
+log, plus each phase's actual command, return code, timing, log and JUnit.
+Single-process scopes retain their existing report format.
+
 Conditional arithmetic fixtures remain selected when the current CTest inventory
 explicitly declares integer `SKIP_RETURN_CODE 77`. A matching JUnit `notrun` case
 with exactly `SKIP_RETURN_CODE=77` and no failure, error or disabled condition is
