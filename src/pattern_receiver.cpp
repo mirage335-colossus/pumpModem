@@ -534,7 +534,8 @@ struct PatternReceiver::Impl {
             transform>=65536 && !sample_fit && drift_sections==1 && !differential_window &&
             search.worker_threads==1 && (c.scramble||c.dsss) && symbols>256 &&
             search.initial_stream_symbols>1;
-        if(required>bytes || drift_sections>1 || native_private_rows || (search.prefer_streamed_templates &&
+        // Optional template rows must leave room for at least one retained bit.
+        if(required+2*search.track_limit+2>bytes || drift_sections>1 || native_private_rows || (search.prefer_streamed_templates &&
            (variable_clock || (fft_workload->restricted_timing_active && search.partitioned_timing_search && !sample_fit)))) {
             const auto without_rows=required-2.L*search.frequency_offsets_hz.size()*transform*sizeof(Complex);
             // A wide bank needs every hypothesis, but not every transformed
