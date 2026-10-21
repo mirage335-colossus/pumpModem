@@ -52,6 +52,7 @@ class Selection(unittest.TestCase):
                      test('fast', ('fast', 'contract')), test('legacy', ('legacy',)),
                      test('live', ('regular', 'contract')), test('live_profiles', ('regular', 'contract')),
                      test('calibration', ('regular', 'contract', 'calibration')),
+                     test('scheduled_parallel_preparation', ('regular', 'contract', 'preparation'), timeout=7200),
                      test('terminal', ('frontends',)), test('framebuffer', ('frontends',)),
                      test('web_worker', ('web',)), test('wasm_live', ('web',))]
         owners = []
@@ -62,6 +63,25 @@ class Selection(unittest.TestCase):
             owners += [item['name'] for item in selected]
         self.assertCountEqual(owners, [item['name'] for item in inventory])
         self.assertEqual(len(owners), len(set(owners)))
+
+    def test_preparation_has_one_dedicated_owner_and_retains_its_timeout(self):
+        inventory = [test('ordinary'), test('scheduled_parallel_preparation',
+                                            ('regular', 'contract', 'preparation'), timeout=7200)]
+        selected, omitted, counts = runner.select_tests(inventory, 'preparation')
+        self.assertEqual([item['name'] for item in selected], ['scheduled_parallel_preparation'])
+        self.assertFalse(omitted)
+        self.assertEqual(counts['core'], 1)
+        self.assertEqual(counts['preparation'], 1)
+        self.assertEqual(runner.properties(selected[0])['TIMEOUT'], 7200)
+        core, _, _ = runner.select_tests(inventory, 'core')
+        self.assertEqual([item['name'] for item in core], ['ordinary'])
+
+    def test_preparation_native_scope_runs_with_one_ctest_job(self):
+        workflow = (ROOT / '.github/workflows/native-linux.yml').read_text()
+        self.assertIn(
+            'if [ "$CI_SCOPE" = live ] || [ "$CI_SCOPE" = preparation ] || '
+            '[ "$CI_SCOPE" = frontends ] || [ "$CI_SCOPE" = web ]; then jobs=1; fi',
+            workflow)
 
     def test_frontends_are_disjoint_from_core_and_fast(self):
         inventory = [test('core'), test('terminal', ('gui', 'frontends')),

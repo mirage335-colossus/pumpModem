@@ -16,7 +16,7 @@ on:
       scope:
         description: 'Run one complete native scope without repeating the other shards'
         type: choice
-        options: [core, fast, live, symbol-burst-live, gui-stop-current-wave, calibration, frontends, web, package, cli, eme-diagnostic, receiver, native-peak-lease-diagnostic, correlator-tone-diagnostic, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-first-transition-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, simulation-owner-census-diagnostic, simulation-capacity-shape-diagnostic, simulation-acquisition-partition-diagnostic, fft-normalization-diagnostic]
+        options: [core, preparation, fast, live, symbol-burst-live, gui-stop-current-wave, calibration, frontends, web, package, cli, eme-diagnostic, receiver, native-peak-lease-diagnostic, correlator-tone-diagnostic, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-first-transition-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, simulation-owner-census-diagnostic, simulation-capacity-shape-diagnostic, simulation-acquisition-partition-diagnostic, fft-normalization-diagnostic]
         default: core
       stop_group:
         description: Temporary matched stop experiment group; diagnostic only
@@ -65,7 +65,7 @@ on:
         type: string
         default: Release
       scope:
-        description: 'core, fast, live, symbol-burst-live, gui-stop-current-wave, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, correlator-tone-diagnostic, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-first-transition-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, simulation-owner-census-diagnostic, simulation-capacity-shape-diagnostic, simulation-acquisition-partition-diagnostic, or fft-normalization-diagnostic'
+        description: 'core, preparation, fast, live, symbol-burst-live, gui-stop-current-wave, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, correlator-tone-diagnostic, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-first-transition-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, simulation-owner-census-diagnostic, simulation-capacity-shape-diagnostic, simulation-acquisition-partition-diagnostic, or fft-normalization-diagnostic'
         type: string
         required: true
       stop_group:
@@ -122,7 +122,7 @@ jobs:
     container: ubuntu:22.04
     # Standard runners need room for the full instrumented suite after compilation.
     # Explicit test limits and physical deadlines remain unchanged.
-    timeout-minutes: ${{ inputs.build_type == 'Debug' && (inputs.scope == 'core' || inputs.scope == 'calibration' || inputs.scope == 'preparation-diagnostic' || inputs.scope == 'symbol-burst-live') && 240 || inputs.build_type == 'Debug' && inputs.scope == 'gui-core-diagnostic' && 360 || 120 }}
+    timeout-minutes: ${{ inputs.scope == 'preparation' && 240 || inputs.build_type == 'Debug' && (inputs.scope == 'core' || inputs.scope == 'calibration' || inputs.scope == 'preparation-diagnostic' || inputs.scope == 'symbol-burst-live') && 240 || inputs.build_type == 'Debug' && inputs.scope == 'gui-core-diagnostic' && 360 || 120 }}
     defaults:
       run:
         shell: bash
@@ -1117,6 +1117,7 @@ jobs:
             planner-diagnostic) targets=(test_gui_link_planner test_link_planner_curves) ;;
             sanitizer-gui) targets=(datapump-apps test_gui_smoke_budget test_gui_launch_command) ;;
             core) targets=(datapump-apps datapump-tests-ci-core) ;;
+            preparation) targets=(test_scheduled_parallel_preparation) ;;
             cli) targets=(pump) ;;
             eme-diagnostic) targets=(test_frequency_axis_probability) ;;
             alsa-diagnostic|alsa-radius-diagnostic) targets=(test_alsa_audio) ;;
@@ -1634,7 +1635,7 @@ jobs:
           raise SystemExit(1 if any(r['exit_code']!=0 for r in results) else 0)
           PY_STOP_RUN
       - name: Run the selected native tests
-        if: inputs.scope == 'core' || inputs.scope == 'fast' || inputs.scope == 'live' || inputs.scope == 'calibration' || inputs.scope == 'frontends' || inputs.scope == 'web'
+        if: inputs.scope == 'core' || inputs.scope == 'preparation' || inputs.scope == 'fast' || inputs.scope == 'live' || inputs.scope == 'calibration' || inputs.scope == 'frontends' || inputs.scope == 'web'
         run: |
           options=()
           if [ "$DATAPUMP_SANITIZERS" = ON ]; then
@@ -1644,10 +1645,11 @@ jobs:
             options+=(--sanitizer-realtime)
           fi
           jobs=2
-          if [ "$CI_SCOPE" = live ] || [ "$CI_SCOPE" = frontends ] || [ "$CI_SCOPE" = web ]; then jobs=1; fi
+          if [ "$CI_SCOPE" = live ] || [ "$CI_SCOPE" = preparation ] || [ "$CI_SCOPE" = frontends ] || [ "$CI_SCOPE" = web ]; then jobs=1; fi
           # Instrumented calibration needs compute headroom on standard runners.
           # A complete shaped run retains all fixed seeds and statistical gates.
           test_timeout=3600
+          if [ "$CI_SCOPE" = preparation ]; then test_timeout=7200; fi
           if [ "$DATAPUMP_SANITIZERS" = ON ]; then
             if [ "$CI_SCOPE" = core ]; then test_timeout=7200; fi
             if [ "$CI_SCOPE" = calibration ]; then

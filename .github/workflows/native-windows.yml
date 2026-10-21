@@ -11,7 +11,7 @@ on:
       scope:
         description: 'Run an unchanged native scope or a focused Windows diagnostic'
         type: choice
-        options: [core, fast, live, calibration, frontends, web, gui, package, receiver-baseline, eme-diagnostic, receiver, receiver-diagnostic, startup-guide, sched-hop-diagnostic, receiver-size-boundary, windows-clock-functional-probe]
+        options: [core, preparation, fast, live, calibration, frontends, web, gui, package, receiver-baseline, eme-diagnostic, receiver, receiver-diagnostic, startup-guide, sched-hop-diagnostic, receiver-size-boundary, windows-clock-functional-probe]
         default: live
       calibration_section:
         description: 'Calibration section; used only by the calibration scope'
@@ -24,7 +24,7 @@ on:
         type: string
         default: windows-2022
       scope:
-        description: 'core, fast, live, calibration, frontends, web, gui, package, frozen receiver-baseline, eme-diagnostic, receiver, receiver-diagnostic, startup-guide, sched-hop-diagnostic, or receiver-size-boundary'
+        description: 'core, preparation, fast, live, calibration, frontends, web, gui, package, frozen receiver-baseline, eme-diagnostic, receiver, receiver-diagnostic, startup-guide, sched-hop-diagnostic, or receiver-size-boundary'
         type: string
         required: true
       calibration_section:
@@ -39,7 +39,7 @@ jobs:
     if: inputs.scope != 'windows-clock-functional-probe' || github.event_name != 'workflow_dispatch'
     name: Windows Release / ${{ inputs.scope }} / ${{ inputs.calibration_section }}
     runs-on: ${{ inputs.windows_runner }}
-    timeout-minutes: 120
+    timeout-minutes: ${{ inputs.scope == 'preparation' && 240 || 120 }}
     defaults:
       run:
         shell: pwsh
@@ -134,6 +134,7 @@ jobs:
             'frontends' { $targets = @('datapump-tests-frontends') }
             'web' { $targets = @('datapump-tests-web') }
             'core' { $targets = @('datapump-apps', 'datapump-tests-ci-core') }
+            'preparation' { $targets = @('test_scheduled_parallel_preparation') }
             'gui' { $targets = @('datapump-apps', 'datapump-tests-gui') }
             'receiver-baseline' { $targets = @('test_pattern_correlator', 'test_pattern_drift', 'test_receiver_differential', 'test_clock_sync') }
             'receiver-size-boundary' { $targets = @('test_receiver_strategy', 'test_live_planning_link') }
@@ -153,7 +154,9 @@ jobs:
       - name: Run the selected native tests
         if: inputs.scope != 'package' && inputs.scope != 'receiver-size-boundary' && inputs.scope != 'receiver-baseline' && inputs.scope != 'eme-diagnostic' && inputs.scope != 'receiver' && inputs.scope != 'receiver-diagnostic' && inputs.scope != 'startup-guide' && inputs.scope != 'sched-hop-diagnostic'
         # Separate runners supply parallelism; preserve per-runner live budgets.
-        run: python tools/run-ci-tests.py --build-dir build --scope "$env:CI_SCOPE" --jobs 1 --config Release --report build/ci-test-report.json
+        run: |
+          $timeoutSeconds = if ($env:CI_SCOPE -eq 'preparation') { 7200 } else { 3600 }
+          python tools/run-ci-tests.py --build-dir build --scope "$env:CI_SCOPE" --jobs 1 --config Release --timeout $timeoutSeconds --report build/ci-test-report.json
       - name: Run the production numeric receiver-size boundary regressions
         if: inputs.scope == 'receiver-size-boundary'
         run: |

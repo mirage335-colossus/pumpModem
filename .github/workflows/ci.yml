@@ -297,6 +297,7 @@ jobs:
         build_type: [Release, Debug]
         shard:
           - {scope: core, section: all}
+          - {scope: preparation, section: all}
           - {scope: fast, section: all}
           - {scope: live, section: all}
           - {scope: frontends, section: all}
@@ -431,6 +432,7 @@ jobs:
       matrix:
         shard:
           - {scope: core, section: all}
+          - {scope: preparation, section: all}
           - {scope: fast, section: all}
           - {scope: live, section: all}
           - {scope: frontends, section: all}
