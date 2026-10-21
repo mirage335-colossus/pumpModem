@@ -1,0 +1,126 @@
+{
+  "schema": 1,
+  "source_sha": "8c54277ca9ec7bf35dee65126ec0d78f3a484f74",
+  "files": [
+    {
+      "path": "src/live.cpp",
+      "pre_sha256": "71ad4adedf44acc9565e601ea1bb157388370861cd7c937376c92a086383268b",
+      "post_sha256": "9604d78f73d557fee5435a79a3671098e1c3eb322aa2b917649810ecee67a5f1",
+      "replacements": [
+        {
+          "old": "#include \"gui_stop_interval.hpp\"",
+          "new": "#include \"gui_stop_interval.hpp\"/* RFP_DIAGNOSTIC_BEGIN */\n#include \"receiver_feed_partition.hpp\"\n/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "                        feed_samples(*simulation_bank,input_samples,value,version,wave->stop,nullptr,processing_token);",
+          "new": "/* RFP_DIAGNOSTIC_BEGIN */                        {\n                        receiver_feed_partition::Block partition_block(gui_stop_interval::active(),wave->serial,input_samples.size(),\n                            wave->transmitter->samples_emitted(),wave->transmitter->source_samples_emitted(),wave->transmitted_samples,\n                            simulation_bank->samples,simulation_bank->receivers().size());\n/* RFP_DIAGNOSTIC_END */                        feed_samples(*simulation_bank,input_samples,value,version,wave->stop,nullptr,processing_token);/* RFP_DIAGNOSTIC_BEGIN */\n                        partition_block.finish(simulation_bank->samples,simulation_bank->receivers().size());\n                        }/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "        if(allow_admission)refresh_bank(bank,value);",
+          "new": "/* RFP_DIAGNOSTIC_BEGIN */{ receiver_feed_partition::Scope partition_admission(receiver_feed_partition::Owner::bank_admission);\n/* RFP_DIAGNOSTIC_END */        if(allow_admission)refresh_bank(bank,value);/* RFP_DIAGNOSTIC_BEGIN */\n}/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "        for(unsigned phase=0;phase<2;++phase) {",
+          "new": "        for(unsigned phase=0;phase<2;++phase) {/* RFP_DIAGNOSTIC_BEGIN */\n            std::size_t partition_receiver_index=0;\n/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "            for (auto& receiver : bank.receivers()) {\n                execution::checkpoint();\n                if (stop.stop_requested()) return;",
+          "new": "            for (auto& receiver : bank.receivers()) {\n                execution::checkpoint();\n                if (stop.stop_requested()) return;/* RFP_DIAGNOSTIC_BEGIN */\n                const auto partition_slot=static_cast<int>(partition_receiver_index++);\n                receiver_feed_partition::OwnerMeta partition_meta;\n                if(receiver_feed_partition::recording()) {\n                    partition_meta.receiver_index=partition_slot;partition_meta.epoch=receiver.epoch;partition_meta.family=receiver.family;\n                    partition_meta.sample_origin=receiver.sample_origin;partition_meta.spreading_factor=receiver.options.modem.spreading_factor;\n                    // Exact chip formula on the existing validated configuration, without rerunning validate().\n                    partition_meta.chip_samples=static_cast<std::uint64_t>(std::ceil(2.*receiver.options.modem.sample_rate/modem::waveform_bandwidth_hz(receiver.options.modem)));\n                    const auto frontier=receiver.modem->delayed_processing_frontier();\n                    if(frontier){partition_meta.frontier_before=*frontier;partition_meta.frontier_before_available=true;}\n                }\n                receiver_feed_partition::Scope partition_receiver_scope(phase==0?receiver_feed_partition::Owner::bank_owner_prepare:receiver_feed_partition::Owner::bank_publish,\n                    partition_slot,receiver_feed_partition::recording()?&partition_meta:nullptr);\n/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "                            feed(*receiver.modem,context);",
+          "new": "/* RFP_DIAGNOSTIC_BEGIN */{ receiver_feed_partition::Scope partition_feed(receiver_feed_partition::Owner::bank_feed);\n/* RFP_DIAGNOSTIC_END */                            feed(*receiver.modem,context);/* RFP_DIAGNOSTIC_BEGIN */\n}/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "                            receiver.modem->process_pending(stop);",
+          "new": "/* RFP_DIAGNOSTIC_BEGIN */{ receiver_feed_partition::Scope partition_pending(receiver_feed_partition::Owner::bank_pending);\n/* RFP_DIAGNOSTIC_END */                            receiver.modem->process_pending(stop);/* RFP_DIAGNOSTIC_BEGIN */\n}/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "                            record_history_generation(receiver);\n                        }\n                        if(simulation_media_clock(value))",
+          "new": "                            record_history_generation(receiver);/* RFP_DIAGNOSTIC_BEGIN */\n                            if(receiver_feed_partition::recording()) {\n                                const auto frontier=receiver.modem->delayed_processing_frontier();\n                                receiver_feed_partition::frontier_after(partition_slot,frontier.has_value(),frontier.value_or(0));\n                            }\n/* RFP_DIAGNOSTIC_END */\n                        }\n                        if(simulation_media_clock(value))"
+        },
+        {
+          "old": "                        receiver.bursts=receiver.modem->take_pattern_bursts();",
+          "new": "/* RFP_DIAGNOSTIC_BEGIN */{ receiver_feed_partition::Scope partition_drain(receiver_feed_partition::Owner::bank_drain);\n/* RFP_DIAGNOSTIC_END */                        receiver.bursts=receiver.modem->take_pattern_bursts();/* RFP_DIAGNOSTIC_BEGIN */\n}/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "                        rx_cpu::Scope cpu_publish(rx_cpu::Stage::publication);",
+          "new": "                        rx_cpu::Scope cpu_publish(rx_cpu::Stage::publication);/* RFP_DIAGNOSTIC_BEGIN */\n                        receiver_feed_partition::Scope partition_publish(receiver_feed_partition::Owner::candidate_publish);\n/* RFP_DIAGNOSTIC_END */"
+        }
+      ]
+    },
+    {
+      "path": "src/pattern_receiver.cpp",
+      "pre_sha256": "129f58767eec9ad383d0d9693f1a55b83c7f420a711711c9c7fc0f61a45ff4a6",
+      "post_sha256": "359a8fbcf3b9a83875a1424b50499e2b4011a7696d42130e5dcc7b49e35b4132",
+      "replacements": [
+        {
+          "old": "#include \"datapump/pattern_receiver.hpp\"",
+          "new": "#include \"datapump/pattern_receiver.hpp\"/* RFP_DIAGNOSTIC_BEGIN */\n#include \"receiver_feed_partition.hpp\"\n/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "    Impl::ScoringScope scoring{s};\n    if(!s.oscillator_valid) {",
+          "new": "    Impl::ScoringScope scoring{s};/* RFP_DIAGNOSTIC_BEGIN */\n    receiver_feed_partition::Scope partition_input(receiver_feed_partition::Owner::input_binning);\n/* RFP_DIAGNOSTIC_END */\n    if(!s.oscillator_valid) {"
+        },
+        {
+          "old": "    Impl::ScoringScope scoring{s};\n    for(std::size_t i=0;i<input.size();++i) {",
+          "new": "    Impl::ScoringScope scoring{s};/* RFP_DIAGNOSTIC_BEGIN */\n    receiver_feed_partition::Scope partition_input(receiver_feed_partition::Owner::input_binning);\n/* RFP_DIAGNOSTIC_END */\n    for(std::size_t i=0;i<input.size();++i) {"
+        },
+        {
+          "old": "        while(bins>=length+next_start && (final || bins-length+1-next_start>=next_count())) {",
+          "new": "        while(bins>=length+next_start && (final || bins-length+1-next_start>=next_count())) {/* RFP_DIAGNOSTIC_BEGIN */\n            receiver_feed_partition::Scope partition_batch(receiver_feed_partition::Owner::process_residual);\n/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "            ensure_execution_scratch();\n            std::fill(work.begin(),work.end(),Complex{});energy_prefix[0]=0;\n            for(std::size_t i=0;i<observed+length-1;++i) {\n                work[i]=at(next_start+i);energy_prefix[i+1]=energy_prefix[i]+std::norm(work[i]);\n            }\n            if(acquisition_arithmetic()==SearchArithmetic::fp32 &&\n               !detail::search_fft::float_input_safe(std::span<const Complex>(work),transform)) {\n                // Keep the requested mode but normalize every subsequently\n                // prepared upload before using the range fallback.\n                fp32_exact_fallback=true;drop_template_cache();templates_valid=false;\n                ++fft_workload->arithmetic_fallback_jobs;\n            }\n",
+          "new": "/* RFP_DIAGNOSTIC_BEGIN */{ receiver_feed_partition::Scope partition_observations(receiver_feed_partition::Owner::input_fft_prepare);\n/* RFP_DIAGNOSTIC_END */            ensure_execution_scratch();\n            std::fill(work.begin(),work.end(),Complex{});energy_prefix[0]=0;\n            for(std::size_t i=0;i<observed+length-1;++i) {\n                work[i]=at(next_start+i);energy_prefix[i+1]=energy_prefix[i]+std::norm(work[i]);\n            }\n            if(acquisition_arithmetic()==SearchArithmetic::fp32 &&\n               !detail::search_fft::float_input_safe(std::span<const Complex>(work),transform)) {\n                // Keep the requested mode but normalize every subsequently\n                // prepared upload before using the range fallback.\n                fp32_exact_fallback=true;drop_template_cache();templates_valid=false;\n                ++fft_workload->arithmetic_fallback_jobs;\n            }\n/* RFP_DIAGNOSTIC_BEGIN */\n}/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "            if(!score_frequency_axis(count,stop,startup_guide) && !score_bounded(count,observed,stop,startup_guide) && !score_native_whole(count,stop,startup_guide)) {\n            if(acquisition_arithmetic()==SearchArithmetic::fp32) {\n                // A mixed cohort may reject both bounded execution and the\n                // native whole path. Original operands must be rebuilt before\n                // shared FFT uploads; neither policy enables legacy wide FP32.\n                fp32_exact_fallback=true;drop_template_cache();templates_valid=false;\n                ++fft_workload->arithmetic_fallback_jobs;\n            }\n            prepare_scoring(stop);\n            spectrum=work;pattern_fft(spectrum,false,stop,acquisition_arithmetic());++fft_workload->input_transforms;\n            // The input transform no longer needs work. Reuse it for the\n            // identical carrier Gram phase shared by every bit/frequency/\n            // stream hypothesis at a start, without new allocations or a\n            // phase recurrence that would change the numerical calculation.\n            if(sample_fit && drift_sections<=1)for(std::size_t j=0;j<count;++j)work[j]=carrier_square(next_start+j);\n            if(!scoring.empty())score_parallel(count,stop,startup_guide);\n            else if(drift_sections>1)score_drift_serial(count,stop,startup_guide);\n            else {\n            // Serial acquisition reuses the fallback tracking-cache buffer.\n            // A later measure must rebuild it before any timing refinement.\n            if(tracking_reference.empty())tracking_reference_valid=false;\n            for(std::size_t stream_index=0;stream_index<search.initial_stream_symbols;++stream_index) {\n            std::size_t group_count=0;\n            const auto groups=phase_groups(stream_index,search.search_stream_phases?0:config.stream_phase_samples,phase_upper,group_count);\n            for(std::size_t g=0;g<group_count;++g) {\n            const auto selected=select_starts(stream_index,groups[g],count);\n            if(!selected.selected_count) {\n                const auto skipped=static_cast<std::uint64_t>(count)*templates.size();\n                if(!acquisition_prepaid) {\n                    trials+=skipped;fft_workload->skipped_start_trials+=skipped;\n                    fft_workload->skipped_template_jobs+=templates.size();\n                }\n                continue;\n            }\n            stream_phase(groups[g].lower);\n            prepare_templates(stream_index,stop);\n            const auto& rows=cached_templates.empty()?templates:template_bank(stream_index).rows;\n            const auto& energies=cached_templates.empty()?template_energy:template_bank(stream_index).energy;\n            const auto& squares=cached_templates.empty()?template_square:template_bank(stream_index).square;\n            for(std::size_t f=0;f<templates.size();++f) {\n                ++fft_workload->template_jobs;\n                fft_workload->retained_start_trials+=selected.selected_count;\n                const auto direct=fft_workload->restricted_timing_active && search.restricted_direct_search && streamed_templates &&\n                    detail::pattern_fft_direct_eligible(scoring_geometry(),true,selected.selected_count,!sample_fit);\n                if(direct)++fft_workload->direct_jobs;else ++fft_workload->fft_jobs;\n                for(unsigned b=0;b<2;++b) {\n                    auto norm=energies[f][b];auto square=squares[f][b];\n                    if(streamed_templates) {\n                        std::fill(product.begin(),product.end(),Complex{});norm=0;square={};\n                        for(std::size_t i=0;i<length;++i) {\n                            const auto value=arithmetic_value(template_value(i,stream_index,b,f));\n                            if((i&4095U)==0)cancelled(stop);\n                            product[direct?i:length-1-i]=std::conj(value);norm+=std::norm(value);\n                            if(sample_fit)square+=value*value*carrier_square(i);\n                        }\n                        if(!direct) {\n                            pattern_fft(product,false,stop,acquisition_arithmetic());\n                            for(std::size_t i=0;i<transform;++i)product[i]=arithmetic_product(spectrum[i],product[i]);\n                        }\n                    } else for(std::size_t i=0;i<transform;++i)product[i]=arithmetic_product(spectrum[i],rows[f][b][i]);\n                    if(!direct)pattern_fft(product,true,stop,acquisition_arithmetic());\n                    visit_starts(selected,count,[&](std::size_t j) {\n                        Complex dot{};\n                        if(direct)for(std::size_t i=0;i<length;++i) {\n                            if((i&4095U)==0)cancelled(stop);\n                            dot=arithmetic_value(dot+arithmetic_product(work[j+i],product[i]));\n                        }\n                        else dot=product[length-1+j];\n                        const auto score=pattern_evidence(dot,energy_prefix[j+length]-energy_prefix[j],\n                            norm,evidence_count(length),noise_condition,real_rank,\n                            sample_fit,sample_fit?square*work[j]:Complex{});\n                        if(b==0)reference[j]={score,0};else reference[j].imag(score);\n                    });\n                }\n                fft_workload->scored_start_trials+=selected.selected_count;\n                collect_selected(selected,count,stream_index,groups[g].lower,f,[&](std::size_t j){return reference[j];},startup_guide);\n            }\n            }\n            }\n            }\n            }\n",
+          "new": "/* RFP_DIAGNOSTIC_BEGIN */{ receiver_feed_partition::Scope partition_scoring(receiver_feed_partition::Owner::fft_score);\n/* RFP_DIAGNOSTIC_END */            if(!score_frequency_axis(count,stop,startup_guide) && !score_bounded(count,observed,stop,startup_guide) && !score_native_whole(count,stop,startup_guide)) {\n            if(acquisition_arithmetic()==SearchArithmetic::fp32) {\n                // A mixed cohort may reject both bounded execution and the\n                // native whole path. Original operands must be rebuilt before\n                // shared FFT uploads; neither policy enables legacy wide FP32.\n                fp32_exact_fallback=true;drop_template_cache();templates_valid=false;\n                ++fft_workload->arithmetic_fallback_jobs;\n            }\n            prepare_scoring(stop);\n            spectrum=work;pattern_fft(spectrum,false,stop,acquisition_arithmetic());++fft_workload->input_transforms;\n            // The input transform no longer needs work. Reuse it for the\n            // identical carrier Gram phase shared by every bit/frequency/\n            // stream hypothesis at a start, without new allocations or a\n            // phase recurrence that would change the numerical calculation.\n            if(sample_fit && drift_sections<=1)for(std::size_t j=0;j<count;++j)work[j]=carrier_square(next_start+j);\n            if(!scoring.empty())score_parallel(count,stop,startup_guide);\n            else if(drift_sections>1)score_drift_serial(count,stop,startup_guide);\n            else {\n            // Serial acquisition reuses the fallback tracking-cache buffer.\n            // A later measure must rebuild it before any timing refinement.\n            if(tracking_reference.empty())tracking_reference_valid=false;\n            for(std::size_t stream_index=0;stream_index<search.initial_stream_symbols;++stream_index) {\n            std::size_t group_count=0;\n            const auto groups=phase_groups(stream_index,search.search_stream_phases?0:config.stream_phase_samples,phase_upper,group_count);\n            for(std::size_t g=0;g<group_count;++g) {\n            const auto selected=select_starts(stream_index,groups[g],count);\n            if(!selected.selected_count) {\n                const auto skipped=static_cast<std::uint64_t>(count)*templates.size();\n                if(!acquisition_prepaid) {\n                    trials+=skipped;fft_workload->skipped_start_trials+=skipped;\n                    fft_workload->skipped_template_jobs+=templates.size();\n                }\n                continue;\n            }\n            stream_phase(groups[g].lower);\n            prepare_templates(stream_index,stop);\n            const auto& rows=cached_templates.empty()?templates:template_bank(stream_index).rows;\n            const auto& energies=cached_templates.empty()?template_energy:template_bank(stream_index).energy;\n            const auto& squares=cached_templates.empty()?template_square:template_bank(stream_index).square;\n            for(std::size_t f=0;f<templates.size();++f) {\n                ++fft_workload->template_jobs;\n                fft_workload->retained_start_trials+=selected.selected_count;\n                const auto direct=fft_workload->restricted_timing_active && search.restricted_direct_search && streamed_templates &&\n                    detail::pattern_fft_direct_eligible(scoring_geometry(),true,selected.selected_count,!sample_fit);\n                if(direct)++fft_workload->direct_jobs;else ++fft_workload->fft_jobs;\n                for(unsigned b=0;b<2;++b) {\n                    auto norm=energies[f][b];auto square=squares[f][b];\n                    if(streamed_templates) {\n                        std::fill(product.begin(),product.end(),Complex{});norm=0;square={};\n                        for(std::size_t i=0;i<length;++i) {\n                            const auto value=arithmetic_value(template_value(i,stream_index,b,f));\n                            if((i&4095U)==0)cancelled(stop);\n                            product[direct?i:length-1-i]=std::conj(value);norm+=std::norm(value);\n                            if(sample_fit)square+=value*value*carrier_square(i);\n                        }\n                        if(!direct) {\n                            pattern_fft(product,false,stop,acquisition_arithmetic());\n                            for(std::size_t i=0;i<transform;++i)product[i]=arithmetic_product(spectrum[i],product[i]);\n                        }\n                    } else for(std::size_t i=0;i<transform;++i)product[i]=arithmetic_product(spectrum[i],rows[f][b][i]);\n                    if(!direct)pattern_fft(product,true,stop,acquisition_arithmetic());\n                    visit_starts(selected,count,[&](std::size_t j) {\n                        Complex dot{};\n                        if(direct)for(std::size_t i=0;i<length;++i) {\n                            if((i&4095U)==0)cancelled(stop);\n                            dot=arithmetic_value(dot+arithmetic_product(work[j+i],product[i]));\n                        }\n                        else dot=product[length-1+j];\n                        const auto score=pattern_evidence(dot,energy_prefix[j+length]-energy_prefix[j],\n                            norm,evidence_count(length),noise_condition,real_rank,\n                            sample_fit,sample_fit?square*work[j]:Complex{});\n                        if(b==0)reference[j]={score,0};else reference[j].imag(score);\n                    });\n                }\n                fft_workload->scored_start_trials+=selected.selected_count;\n                collect_selected(selected,count,stream_index,groups[g].lower,f,[&](std::size_t j){return reference[j];},startup_guide);\n            }\n            }\n            }\n            }\n            }\n/* RFP_DIAGNOSTIC_BEGIN */\n}/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "            prepare_scoring(stop);\n            spectrum=work;pattern_fft(spectrum,false,stop,acquisition_arithmetic());++fft_workload->input_transforms;",
+          "new": "/* RFP_DIAGNOSTIC_BEGIN */{ receiver_feed_partition::Scope partition_input_fft(receiver_feed_partition::Owner::input_fft_prepare);\n/* RFP_DIAGNOSTIC_END */            prepare_scoring(stop);\n            spectrum=work;pattern_fft(spectrum,false,stop,acquisition_arithmetic());++fft_workload->input_transforms;/* RFP_DIAGNOSTIC_BEGIN */\n}/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "        for(std::size_t i=0;i<transform;++i){if((i&4095U)==0)cancelled(stop);\n            input[i]={static_cast<Scalar>(work[i].real()),static_cast<Scalar>(work[i].imag())};}\n        transform_row(input,false);++fft_workload->input_transforms;",
+          "new": "/* RFP_DIAGNOSTIC_BEGIN */{ receiver_feed_partition::Scope partition_native_input_fft(receiver_feed_partition::Owner::input_fft_prepare);\n/* RFP_DIAGNOSTIC_END */        for(std::size_t i=0;i<transform;++i){if((i&4095U)==0)cancelled(stop);\n            input[i]={static_cast<Scalar>(work[i].real()),static_cast<Scalar>(work[i].imag())};}\n        transform_row(input,false);++fft_workload->input_transforms;/* RFP_DIAGNOSTIC_BEGIN */\n}/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "    void continue_tracks(std::stop_token stop,bool final=false,\n                         std::uint64_t latest_start=std::numeric_limits<std::uint64_t>::max()) {",
+          "new": "    void continue_tracks(std::stop_token stop,bool final=false,\n                         std::uint64_t latest_start=std::numeric_limits<std::uint64_t>::max()) {/* RFP_DIAGNOSTIC_BEGIN */\n        receiver_feed_partition::Scope partition_tracks(receiver_feed_partition::Owner::track_continue,-2,nullptr,!tracks.empty());\n/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "    void admit(const PatternEvidence& item,std::size_t f,double chain_score,std::stop_token stop) {",
+          "new": "    void admit(const PatternEvidence& item,std::size_t f,double chain_score,std::stop_token stop) {/* RFP_DIAGNOSTIC_BEGIN */\n        receiver_feed_partition::Scope partition_admit(receiver_feed_partition::Owner::candidate_admit);\n/* RFP_DIAGNOSTIC_END */"
+        },
+        {
+          "old": "    void publish(Track& track,bool complete,bool flush=false,bool draining=false) {",
+          "new": "    void publish(Track& track,bool complete,bool flush=false,bool draining=false) {/* RFP_DIAGNOSTIC_BEGIN */\n        receiver_feed_partition::Scope partition_candidate_publish(receiver_feed_partition::Owner::candidate_publish);\n/* RFP_DIAGNOSTIC_END */"
+        }
+      ]
+    },
+    {
+      "path": "src/gui_stop_interval.hpp",
+      "pre_sha256": "c9bb01763d48afcb5bae30d3cd0ee33f64d1ef20be6d464d7fc787136bf47ff8",
+      "post_sha256": "7bfd3cd61ee1dc1557f93752d2560f8bf6500e603dc01695a26e77849c7d1329",
+      "replacements": [
+        {
+          "old": "#pragma once\n",
+          "new": "#pragma once\n#include \"receiver_feed_partition.hpp\"\n"
+        },
+        {
+          "old": "        state.active.store(false,std::memory_order_release);\n",
+          "new": "        state.active.store(false,std::memory_order_release);\n        if(!datapump::receiver_feed_partition::seal(state.directory))\n            std::fputs(\"RECEIVER_FEED_OUTPUT_ERROR seal returned false\\n\",stderr);\n"
+        }
+      ]
+    }
+  ],
+  "new_files": [
+    {
+      "path": "src/receiver_feed_partition.hpp",
+      "payload": "payload/receiver_feed_partition.hpp",
+      "sha256": "1bf2221f557458fe2d1cf8d64cb3f123ec1345657c91b7fdf440d87d8aaeb6ac"
+    }
+  ]
+}
