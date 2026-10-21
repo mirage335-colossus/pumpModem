@@ -6,6 +6,7 @@
 #include "live_receiver_layout.hpp"
 #include "live_mutex_probe.hpp"
 #include "live_snapshot_probe.hpp"
+#include "live_snapshot_copy.hpp"
 #include "receiver_storage_allocator.hpp"
 #include "native_peak_workspace.hpp"
 #include "native_point_workspace.hpp"
@@ -4861,94 +4862,115 @@ void Session::cancel_transmit() {
     impl_->current.status = impl_->idle_status(); impl_->changed.notify_all();
 }
 Snapshot Session::snapshot() {
+    // Preparing a new by-value destination can enter the allocator. Keep that
+    // work outside the capture mutex, then copy one coherent locked revision.
+    Snapshot result;
+    for(;;) {
+        detail::SnapshotCopyCapacity required;
+        {
 #if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
-    snapshot_probe::Observation snapshot_observation;
+            snapshot_probe::Observation snapshot_observation;
 #endif
-    DATAPUMP_MUTEX_CONTEXT(mutex_context,snapshot);
-    std::lock_guard lock(impl_->mutex);
+            DATAPUMP_MUTEX_CONTEXT(mutex_context,snapshot);
+            std::lock_guard lock(impl_->mutex);
 #if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
-    snapshot_observation.acquired(&impl_->mutex);
-    snapshot_observation.census(impl_->recoveries.size(),bool(impl_->active_recovery),impl_->replay.size(),
-        !impl_->selected_transmit_key.empty(),impl_->input.size(),impl_->current.waveform.size(),
-        impl_->current.spectrum_db.size(),impl_->current.constellation.size(),impl_->capture_samples,
-        impl_->current.processed_physical_samples);
+            snapshot_observation.acquired(&impl_->mutex);
+            snapshot_observation.census(impl_->recoveries.size(),bool(impl_->active_recovery),impl_->replay.size(),
+                !impl_->selected_transmit_key.empty(),impl_->input.size(),impl_->current.waveform.size(),
+                impl_->current.spectrum_db.size(),impl_->current.constellation.size(),impl_->capture_samples,
+                impl_->current.processed_physical_samples);
 #endif
-    impl_->update_simulation_elapsed();
-    const auto now = impl_->replay_clock();
-    impl_->advance_replay(now);
+            impl_->update_simulation_elapsed();
+            const auto now = impl_->replay_clock();
+            impl_->advance_replay(now);
 #if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
-    snapshot_observation.mark(snapshot_probe::Phase::clock);
+            snapshot_observation.mark(snapshot_probe::Phase::clock);
 #endif
-    impl_->publish_recovery_progress();
-    impl_->current.recovery_working_bytes=impl_->recovery_bytes();
+            impl_->publish_recovery_progress();
+            impl_->current.recovery_working_bytes=impl_->recovery_bytes();
 #if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
-    snapshot_observation.mark(snapshot_probe::Phase::recovery);
+            snapshot_observation.mark(snapshot_probe::Phase::recovery);
 #endif
-    impl_->current.transmit_key_lock_seconds=impl_->key_lock_seconds(impl_->settings,
-        impl_->settings.transfer.modem,impl_->selected_transmit_key);
-    impl_->current.long_transmit_key_lock_seconds=impl_->key_lock_seconds(impl_->settings,
-        impl_->settings.long_message_modem.value_or(impl_->settings.transfer.modem),impl_->selected_transmit_key);
-    impl_->current.transmit_separation_seconds=impl_->settings.simulation?0:
-        std::max(0.,std::chrono::duration<double>(impl_->next_hardware_send-Clock::now()).count());
-    auto signals = std::move(impl_->current.signals); auto received = std::move(impl_->current.received);
-    impl_->current.signals.clear(); impl_->current.received.clear(); impl_->received_bytes = 0;
-    if (!impl_->pending_points.points.empty() || impl_->pending_points.dropped) {
-        // Publication owns the bounded display history. The fresh-point batch
-        // only accounts for observations omitted before the UI consumed them.
-        impl_->current.constellation_dropped = impl_->pending_points.dropped;
-        if (impl_->current.constellation_source != impl_->pending_source)
-            count_dropped(impl_->current.constellation_dropped, impl_->pending_points.points.size());
-        impl_->pending_points = {}; ++impl_->current.sequence;
+            impl_->current.transmit_key_lock_seconds=impl_->key_lock_seconds(impl_->settings,
+                impl_->settings.transfer.modem,impl_->selected_transmit_key);
+            impl_->current.long_transmit_key_lock_seconds=impl_->key_lock_seconds(impl_->settings,
+                impl_->settings.long_message_modem.value_or(impl_->settings.transfer.modem),impl_->selected_transmit_key);
+            impl_->current.transmit_separation_seconds=impl_->settings.simulation?0:
+                std::max(0.,std::chrono::duration<double>(impl_->next_hardware_send-Clock::now()).count());
+            // Include constructor/scoring work after it has left the queue. No loss is
+            // implied: a large configured buffer may retain minutes of delayed PCM.
+            double pending_seconds=0,oldest_seconds=0;
+            if(impl_->current.running && !impl_->settings.simulation && impl_->decoder_generation==impl_->generation) {
+                pending_seconds=(static_cast<double>(impl_->input_bytes)/sizeof(float)+impl_->decoding_remaining_samples+
+                    impl_->delayed_processing_pcm_samples)/
+                    impl_->settings.transfer.modem.sample_rate;
+                auto oldest=impl_->decoding_remaining_samples?impl_->decoding_queued_at:std::nullopt;
+                if(impl_->delayed_processing_queued_at && (!oldest || *impl_->delayed_processing_queued_at<*oldest))
+                    oldest=impl_->delayed_processing_queued_at;
+                const auto pending=std::find_if(impl_->input.begin(),impl_->input.end(),[](const auto& block){return !block.samples.empty();});
+                if(pending!=impl_->input.end() && (!oldest || pending->queued_at<*oldest))oldest=pending->queued_at;
+                if(oldest)oldest_seconds=std::max(0.,std::chrono::duration<double>(Clock::now()-*oldest).count());
+            }
+            impl_->current.receiver_backlog_seconds=pending_seconds;
+            impl_->current.receiver_oldest_input_seconds=oldest_seconds;
+            const auto delay=std::max(pending_seconds,oldest_seconds);
+            // A transient warning, with hysteresis; only observed loss flags latch.
+            impl_->current.receiver_behind=delay>1. || (impl_->current.receiver_behind && delay>.25);
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+            snapshot_observation.mark(snapshot_probe::Phase::backlog);
+#endif
+            required=detail::snapshot_copy_requirement(impl_->current,impl_->transmit_error);
+            if(detail::snapshot_copy_fits(result,required)) {
+                auto signals = std::move(impl_->current.signals); auto received = std::move(impl_->current.received);
+                impl_->current.signals.clear(); impl_->current.received.clear(); impl_->received_bytes = 0;
+                if (!impl_->pending_points.points.empty() || impl_->pending_points.dropped) {
+                    // Publication owns the bounded display history. The fresh-point batch
+                    // only accounts for observations omitted before the UI consumed them.
+                    impl_->current.constellation_dropped = impl_->pending_points.dropped;
+                    if (impl_->current.constellation_source != impl_->pending_source)
+                        count_dropped(impl_->current.constellation_dropped, impl_->pending_points.points.size());
+                    impl_->pending_points = {}; ++impl_->current.sequence;
+                }
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+                // Preserve the original copy interval after final-fit drainage.
+                snapshot_observation.mark(snapshot_probe::Phase::backlog);
+#endif
+                result = impl_->current; result.signals = std::move(signals); result.received = std::move(received);
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+                snapshot_observation.mark(snapshot_probe::Phase::copy);
+#endif
+                if(result.error.empty())result.error=result.receiver_error;
+                if(!impl_->transmit_error.empty()) {
+                    result.transmission_failed=true;
+                    result.error=impl_->transmit_error;
+                    if(!result.transmitting)result.status="Transmission failed";
+                }
+                result.decoding_samples=impl_->decoder_generation==impl_->generation?impl_->decoding_remaining_samples:0;
+                result.receiver_input_revision=impl_->receive_revision;
+                result.decoding_physical_samples=impl_->decoder_generation==impl_->generation?impl_->decoding_remaining_physical_samples:0;
+                // The ingress counter, committed frontier and in-flight remainder are all
+                // protected by this mutex and share one revision. Do not infer progress by
+                // subtracting only stored PCM: coordinate-only null work is queued too.
+                const auto pending_physical=impl_->capture_samples-std::min(impl_->capture_samples,result.processed_physical_samples);
+                result.queued_physical_samples=pending_physical-std::min(pending_physical,result.decoding_physical_samples);
+                impl_->replay_snapshot(result, now);
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+                snapshot_observation.mark(snapshot_probe::Phase::replay);
+#endif
+                count_dropped(result.constellation_dropped, impl_->replay_omitted); impl_->replay_omitted = 0;
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+                snapshot_observation.before_unlock();
+#endif
+                return result;
+            }
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+            snapshot_observation.before_unlock();
+#endif
+        }
+        // A retry consumes no events, fresh-point accounting or replay omissions.
+        // Source values may change while unlocked; retain only numeric sizes.
+        detail::prepare_snapshot_copy(result,required);
     }
-    // Include constructor/scoring work after it has left the queue. No loss is
-    // implied: a large configured buffer may retain minutes of delayed PCM.
-    double pending_seconds=0,oldest_seconds=0;
-    if(impl_->current.running && !impl_->settings.simulation && impl_->decoder_generation==impl_->generation) {
-        pending_seconds=(static_cast<double>(impl_->input_bytes)/sizeof(float)+impl_->decoding_remaining_samples+
-            impl_->delayed_processing_pcm_samples)/
-            impl_->settings.transfer.modem.sample_rate;
-        auto oldest=impl_->decoding_remaining_samples?impl_->decoding_queued_at:std::nullopt;
-        if(impl_->delayed_processing_queued_at && (!oldest || *impl_->delayed_processing_queued_at<*oldest))
-            oldest=impl_->delayed_processing_queued_at;
-        const auto pending=std::find_if(impl_->input.begin(),impl_->input.end(),[](const auto& block){return !block.samples.empty();});
-        if(pending!=impl_->input.end() && (!oldest || pending->queued_at<*oldest))oldest=pending->queued_at;
-        if(oldest)oldest_seconds=std::max(0.,std::chrono::duration<double>(Clock::now()-*oldest).count());
-    }
-    impl_->current.receiver_backlog_seconds=pending_seconds;
-    impl_->current.receiver_oldest_input_seconds=oldest_seconds;
-    const auto delay=std::max(pending_seconds,oldest_seconds);
-    // A transient warning, with hysteresis; only observed loss flags latch.
-    impl_->current.receiver_behind=delay>1. || (impl_->current.receiver_behind && delay>.25);
-#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
-    snapshot_observation.mark(snapshot_probe::Phase::backlog);
-#endif
-    auto result = impl_->current; result.signals = std::move(signals); result.received = std::move(received);
-#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
-    snapshot_observation.mark(snapshot_probe::Phase::copy);
-#endif
-    if(result.error.empty())result.error=result.receiver_error;
-    if(!impl_->transmit_error.empty()) {
-        result.transmission_failed=true;
-        result.error=impl_->transmit_error;
-        if(!result.transmitting)result.status="Transmission failed";
-    }
-    result.decoding_samples=impl_->decoder_generation==impl_->generation?impl_->decoding_remaining_samples:0;
-    result.receiver_input_revision=impl_->receive_revision;
-    result.decoding_physical_samples=impl_->decoder_generation==impl_->generation?impl_->decoding_remaining_physical_samples:0;
-    // The ingress counter, committed frontier and in-flight remainder are all
-    // protected by this mutex and share one revision. Do not infer progress by
-    // subtracting only stored PCM: coordinate-only null work is queued too.
-    const auto pending_physical=impl_->capture_samples-std::min(impl_->capture_samples,result.processed_physical_samples);
-    result.queued_physical_samples=pending_physical-std::min(pending_physical,result.decoding_physical_samples);
-    impl_->replay_snapshot(result, now);
-#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
-    snapshot_observation.mark(snapshot_probe::Phase::replay);
-#endif
-    count_dropped(result.constellation_dropped, impl_->replay_omitted); impl_->replay_omitted = 0;
-#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
-    snapshot_observation.before_unlock();
-#endif
-    return result;
 }
 void Session::stop() { impl_->halt(); }
 }

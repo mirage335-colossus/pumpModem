@@ -951,7 +951,8 @@ jobs:
               ['git', '-c', 'safe.directory=' + str(root), 'status', '--porcelain=v1', '--untracked-files=all'],
               cwd=root, text=True)
           assert not status, f'focused qualification requires a clean source checkout: {status!r}'
-          paths = ('CMakeLists.txt', 'tests/test_symbol_burst_live.cpp', 'tests/cpu_work_budget.hpp')
+          paths = ('CMakeLists.txt', 'src/live.cpp', 'src/live_snapshot_copy.hpp',
+                   'tests/test_live_snapshot_copy.cpp', 'tests/test_symbol_burst_live.cpp', 'tests/cpu_work_budget.hpp')
           source_inventory = {
               'source_commit': source,
               'source_tree': tree,
@@ -1004,7 +1005,7 @@ jobs:
           case "$CI_SCOPE" in
             calibration|calibration-aggregate) targets=(test_differential_receiver_probability) ;;
             symbol-burst-live)
-              targets=(test_symbol_burst_live)
+              targets=(test_symbol_burst_live test_live_snapshot_copy)
               if [ '${{ inputs.paced_backlog }}' = true ] && [ '${{ inputs.paced_mutex_focus }}' != true ] && [ '${{ inputs.paced_snapshot_focus }}' != true ]; then
                 targets+=(test_pattern_receiver test_pattern_correlator test_pattern_correlator_batch
                           test_search_fft test_pattern_fft_batch test_gui_timing_advice test_gui_controller)
@@ -1043,6 +1044,23 @@ jobs:
             *) echo "Unknown native scope: $CI_SCOPE" >&2; exit 2 ;;
           esac
           cmake --build build --target "${targets[@]}" --parallel "$(python3 -B tools/build_capacity.py)"
+      - name: Check prepared Live snapshot copy storage
+        if: inputs.scope == 'symbol-burst-live' && !cancelled() && steps.build_prerequisites.outcome == 'success'
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          report="$PWD/build/symbol-burst-live-qualification/snapshot-copy"
+          mkdir -p "$report"
+          ctest --test-dir build --show-only=json-v1 -R '^live_snapshot_copy$' > "$report/inventory.json"
+          python3 -B - "$report/inventory.json" <<'PY_SNAPSHOT_INVENTORY'
+          import json,pathlib,sys
+          tests=json.loads(pathlib.Path(sys.argv[1]).read_text())['tests']
+          assert len(tests)==1 and tests[0]['name']=='live_snapshot_copy', tests
+          command=tests[0]['command']
+          assert len(command)==1 and pathlib.Path(command[0]).name=='test_live_snapshot_copy',command
+          PY_SNAPSHOT_INVENTORY
+          ctest --test-dir build --output-on-failure --no-tests=error --parallel 1 --timeout 60 \
+            --output-junit "$report/results.xml" -R '^live_snapshot_copy$' > "$report/test.log" 2>&1
       - name: Run native peak focused registrations and full receiver suite
         if: inputs.scope == 'native-peak-lease-diagnostic' && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 80
@@ -2197,9 +2215,12 @@ jobs:
                              all(row.get('source_resolved') is True for row in mutex_mapping.get('mapped', []))))
               snapshot_value = summary.get('snapshot_probe', {}) if summary else {}
               snapshot_os = summary.get('snapshot_os_probe', {}) if summary else {}
+              # Capacity misses close their ownership interval before unlocked
+              # reservation. Only those attempts omit the copy/replay phases.
+              retry_mask = sum(1 << i for i in (0, 1, 2, 3, 4, 7, 8))
               snapshot_ok = (not snapshot_focus or not enabled or
                              (snapshot_value.get('enabled') is True and snapshot_value.get('dropped') == 0 and
-                              all(row.get('present') == 511 for row in snapshot_value.get('records', [])) and
+                              all(row.get('present') in (retry_mask, 511) for row in snapshot_value.get('records', [])) and
                               snapshot_os.get('enabled') is True and snapshot_os.get('supported') is True and
                               snapshot_os.get('stopped') is True and snapshot_os.get('reader_errors') == 0 and snapshot_os.get('dropped') == 0))
               result = {'index': index, 'probe_enabled': enabled, 'command': command,
