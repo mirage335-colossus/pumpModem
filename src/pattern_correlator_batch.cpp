@@ -125,8 +125,7 @@ void accumulate_lane(const CorrelationBatch& batch,CorrelationLane& lane,Pattern
                     auto phase=pattern.value(chip,bit,fraction);
                     if(g.tone) {
                         const auto tone=batch.bank_frequencies[bank]-g.carrier_hz-batch.frequency_offsets[lane.frequency];
-                        phase*=std::polar(1.,-static_cast<double>(std::remainder(static_cast<long double>(observed)*tau*tone/g.sample_rate,
-                            static_cast<long double>(tau))));
+                        phase=correlation_tone_correct(phase,observed,tone,g.sample_rate);
                     }
                     const auto row=block.projection_offset+bank*(block.count+1);
                     const auto projection=batch.projections[row+right]-batch.projections[row+left];
@@ -141,6 +140,13 @@ void accumulate_lane(const CorrelationBatch& batch,CorrelationLane& lane,Pattern
     }
 }
 } // namespace
+
+std::complex<double> correlation_tone_correct(std::complex<double> phase,
+        std::uint64_t observed,double tone,std::uint32_t sample_rate) {
+    phase*=std::polar(1.,-static_cast<double>(std::remainder(
+        static_cast<long double>(observed)*tau*tone/sample_rate,static_cast<long double>(tau))));
+    return phase;
+}
 
 CorrelationPulseSegment correlation_pulse_segment(long double offset,
         std::uint64_t max_count,long double duration) {

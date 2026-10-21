@@ -49,6 +49,20 @@ struct CorrelationFit {
     }
 };
 
+// One compiled tone correction for scalar and tiled accumulation. Identical
+// inline polar expressions can select sincos versus separate sin/cos calls and
+// differ in their last bit. Keep remainder, polar and complex multiplication
+// together behind this boundary, including under link-time optimization.
+#if defined(_MSC_VER)
+__declspec(noinline)
+#elif defined(__GNUC__) && !defined(__clang__)
+__attribute__((noipa)) // Also prevents context-specific constant-propagation clones.
+#elif defined(__clang__)
+__attribute__((noinline))
+#endif
+std::complex<double> correlation_tone_correct(std::complex<double> phase,
+    std::uint64_t observed,double tone,std::uint32_t sample_rate);
+
 // Presentation support uses fixed source-time partitions of the selected bit,
 // independently of admission and the optional four-section drift detector.
 // At least four original real observations must fit in every complete part.

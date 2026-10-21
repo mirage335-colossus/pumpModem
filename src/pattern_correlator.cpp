@@ -11279,7 +11279,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
                     auto phase=pattern.value(chip,bit,fraction);
                     if(config.spreading_mode==SpreadingMode::tone) {
                         const auto tone=bank.frequency-config.carrier_hz-search.frequency_offsets_hz[h.frequency];
-                        phase*=std::polar(1.,-static_cast<double>(std::remainder(static_cast<long double>(observed)*tau*tone/config.sample_rate,static_cast<long double>(tau))));
+                        phase=detail::correlation_tone_correct(phase,observed,tone,config.sample_rate);
                     }
                     const auto projection=bank.observations(physical_view(bank))[right]-bank.observations(physical_view(bank))[left];
                     fit[bit].add(projection,phase,right-left);
