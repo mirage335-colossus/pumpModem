@@ -32,6 +32,10 @@ on:
         description: 'Include real-time Fast RX checks in instrumented Debug coverage'
         type: boolean
         default: false
+      core_process_observation:
+        description: 'Passively retain and observe the original Burst test during manual Release core coverage'
+        type: boolean
+        default: false
       paced_backlog:
         description: 'Run paced Symbol Burst backlog diagnostics, including four receiver-held cases, after the original qualification'
         type: boolean
@@ -80,6 +84,10 @@ on:
         type: string
         default: ''
       sanitizer_realtime:
+        type: boolean
+        default: false
+      core_process_observation:
+        description: 'Passively retain and observe the original Burst test during manual Release core coverage'
         type: boolean
         default: false
       paced_backlog:
@@ -143,6 +151,13 @@ jobs:
       DATAPUMP_SANITIZERS: ${{ inputs.scope == 'gui-stop-differential' && (inputs.stop_group == 'eu-o1-san-off' || inputs.stop_group == 'eu-o0-san-off' || inputs.stop_group == 'eu-focus-o1-san-off' || inputs.stop_group == 'eu-focus-o0-san-off' || inputs.stop_group == 'eu-kernel-o1-san-off') && 'OFF' || ((inputs.build_type == 'Debug' || inputs.scope == 'simulation-clock-diagnostic' || (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic' || inputs.scope == 'simulation-owner-census-diagnostic' || inputs.scope == 'simulation-capacity-shape-diagnostic' || inputs.scope == 'simulation-acquisition-partition-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic'))) && 'ON' || 'OFF') }}
       SANITIZER_REALTIME: ${{ inputs.sanitizer_realtime }}
     steps:
+      - name: Restrict passive core observation to its matched scope
+        if: inputs.core_process_observation
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ "$CI_SCOPE" != core ] || [ "$DATAPUMP_SANITIZERS" != OFF ] || [ '${{ inputs.linux_runner }}' != ubuntu-24.04 ]; then
+            echo '::error::Passive core observation requires manual Release core coverage on ubuntu-24.04'
+            exit 2
+          fi
       - name: Restrict matched Live drain diagnosis
         if: inputs.scope == 'live-drain-diagnostic' && (github.event_name != 'workflow_dispatch' || inputs.build_type != 'Release' || inputs.linux_runner != 'ubuntu-24.04')
         run: |
@@ -987,7 +1002,7 @@ jobs:
           -DDART_TESTING_TIMEOUT=3600
           -DCMAKE_DISABLE_FIND_PACKAGE_Python3=${{ (inputs.scope == 'frontends' || inputs.scope == 'web') && 'FALSE' || 'TRUE' }}
           -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL=${{ (inputs.scope == 'live' || (inputs.scope == 'gui-core-diagnostic' && inputs.build_type == 'Debug')) && inputs.linux_runner == 'ubuntu-24.04' && 'ON' || 'OFF' }}
-          -DCMAKE_EXPORT_COMPILE_COMMANDS=${{ (inputs.scope == 'gui-stop-current-wave' || inputs.scope == 'correlator-tone-diagnostic') && 'ON' || 'OFF' }}
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=${{ (inputs.core_process_observation || inputs.scope == 'gui-stop-current-wave' || inputs.scope == 'correlator-tone-diagnostic') && 'ON' || 'OFF' }}
       - name: Prepare focused Symbol Burst Live qualification evidence
         if: inputs.scope == 'symbol-burst-live'
         run: |
@@ -1651,6 +1666,23 @@ jobs:
           # Always run both independent processes, preserving every actual nonzero exit.
           raise SystemExit(1 if any(r['exit_code']!=0 for r in results) else 0)
           PY_STOP_RUN
+      - name: Retain original core target provenance
+        if: inputs.core_process_observation
+        run: |
+          set -euo pipefail
+          report="$PWD/build/native-test-provenance"
+          mkdir "$report"
+          git -c safe.directory="$PWD" rev-parse HEAD > "$report/source.txt"
+          git -c safe.directory="$PWD" diff --exit-code HEAD -- src include tests cmake CMakeLists.txt
+          sha256sum tests/test_symbol_burst_live.cpp src/live.cpp src/search_parallel.cpp build/test_symbol_burst_live > "$report/source-and-elf.sha256"
+          ninja -C build -t commands test_symbol_burst_live > "$report/target-commands.txt"
+          g++-11 --version > "$report/compiler-version.txt"
+          readelf -d build/test_symbol_burst_live > "$report/elf-dynamic.txt"
+          ldd build/test_symbol_burst_live > "$report/ldd.txt"
+          cat /proc/cpuinfo > "$report/cpuinfo.txt"
+          for name in cpu.max cpu.stat cpuset.cpus.effective; do
+            if [ -f "/sys/fs/cgroup/$name" ]; then cat "/sys/fs/cgroup/$name" > "$report/$name"; fi
+          done
       - name: Run the selected native tests
         if: inputs.scope == 'core' || inputs.scope == 'preparation' || inputs.scope == 'fast' || inputs.scope == 'live' || inputs.scope == 'calibration' || inputs.scope == 'frontends' || inputs.scope == 'web'
         run: |
@@ -1674,7 +1706,28 @@ jobs:
               if [ -z "${{ inputs.calibration_shard }}" ]; then test_timeout=10800; fi
             fi
           fi
-          python3 tools/run-ci-tests.py --build-dir build --scope "$CI_SCOPE" --jobs "$jobs" --timeout "$test_timeout" --report build/ci-test-report.json "${options[@]}"
+          driver=(python3 tools/run-ci-tests.py --build-dir build --scope "$CI_SCOPE" --jobs "$jobs" --timeout "$test_timeout" --report build/ci-test-report.json "${options[@]}")
+          if [ '${{ inputs.core_process_observation }}' = true ]; then
+            python3 tools/observe-native-test.py --binary "$PWD/build/test_symbol_burst_live" \
+              --output "$PWD/build/native-test-observation" --source "$GITHUB_SHA" \
+              --log "$PWD/build/ci-test-report.log" -- "${driver[@]}"
+          else
+            "${driver[@]}"
+          fi
+      - name: Verify passive observation completeness
+        if: always() && inputs.core_process_observation && steps.build_prerequisites.outcome == 'success'
+        run: |
+          python3 - <<'PY_OBSERVATION'
+          import hashlib, json, pathlib
+          p=pathlib.Path('build/native-test-observation')
+          observation=json.loads((p/'observation.json').read_text())
+          metadata=json.loads((p/'metadata.json').read_text())
+          assert observation['diagnostics_complete'], observation
+          assert observation['driver_reaped'] and observation['target_identity_count']==1
+          retained=p/metadata['retained_binary']['path']
+          assert hashlib.sha256(retained.read_bytes()).hexdigest()==metadata['target_sha256']
+          print('Original core test target and passive process observations retained; test results remain in ci-test-report.json')
+          PY_OBSERVATION
       - name: Run the original no-argument Symbol Burst Live qualification test
         if: inputs.scope == 'symbol-burst-live' && !inputs.paced_callback_focus && !inputs.paced_mutex_focus && !inputs.paced_snapshot_focus && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 125
@@ -3072,6 +3125,8 @@ jobs:
             build/correlator-tone-probe/
             build/symbol-burst-live-qualification/
             build/core-diagnostics/
+            build/native-test-observation/
+            build/native-test-provenance/
             build/gui-stop-diagnostic/
             build/gui-stop-current/
             build/compile_commands.json
