@@ -103,11 +103,68 @@ void matches_generic_environment_view() {
               "prepared monitor frame allocated or freed memory during rendering");
     }
 }
+
+void matches_generic_constellation_view() {
+    for (const auto [rate,capacity]:std::array<std::pair<std::uint32_t,std::size_t>,3>{{
+            {8000,2048},{48000,2048},{480001,8001}}}) {
+        modem::Config config; config.sample_rate=rate; config.bandwidth_hz=1100; config.carrier_hz=973;
+        live::detail::SignalWindow window(config);
+        check(live::detail::SignalWindow::sample_capacity(config)==capacity,
+              "constellation fixture does not match its configured ring capacity");
+        const auto compare=[&](std::uint64_t origin,std::size_t count) {
+            const auto input=samples(origin,count,config);
+            window.reset(origin);
+            window.push(input);
+            const auto retained=std::span(input).last(std::min(input.size(),capacity));
+            const auto retained_origin=origin+(input.size()-retained.size());
+            const auto expected=live::detail::signal_plots(
+                retained,config,retained_origin,live::detail::SignalView::constellation);
+            const auto actual=window.frame(config,live::detail::SignalView::constellation);
+            check(actual.constellation==expected.constellation,
+                  "logical ring constellation differs from generic span rendering");
+        };
+        for (const auto count:{0U,1U,2U,3U}) compare(37,count);
+        compare(37,capacity/2+17); // Partial startup with a nonzero absolute origin.
+        compare(900137,capacity); // Full ring after reset.
+        compare(1700011,capacity+93); // Oversized push wraps and retains the logical tail.
+        for (const auto count:{1U,317U,static_cast<unsigned>(capacity/2+7)}) {
+            const auto tail=samples(window.samples_seen(),count,config);
+            window.push(tail); // Split the logical window across both ends of the physical ring.
+            const auto first=window.samples_seen()-capacity;
+            const auto expected_samples=samples(first,capacity,config);
+            const auto expected=live::detail::signal_plots(
+                expected_samples,config,first,live::detail::SignalView::constellation);
+            const auto actual=window.frame(config,live::detail::SignalView::constellation);
+            check(actual.constellation==expected.constellation,
+                  "wrapped logical ring constellation differs from contiguous samples");
+        }
+
+        if (rate==480001) {
+            modem::Config smaller=config; smaller.sample_rate=8000;
+            window.reset(9);
+            window.push(samples(9,3000,config));
+            bool threw=false;
+            try { (void)window.frame(smaller,live::detail::SignalView::constellation); }
+            catch (const Error&) { threw=true; }
+            check(threw,"constellation frame bypassed generic span capacity validation for a changed config");
+        }
+
+        window.reset(900137);
+        window.push(samples(900137,capacity,config));
+        live::detail::SignalPlots rendered;
+        const auto calls=allocation_probe::measure([&] {
+            rendered=window.frame(config,live::detail::SignalView::constellation);
+        });
+        check(!rendered.constellation.empty() && calls.allocations<=1 && calls.deallocations==0,
+              "prepared constellation render did not limit allocation to its returned output vector");
+    }
+}
 }
 
 int main() {
     try {
         matches_generic_environment_view();
+        matches_generic_constellation_view();
         std::cout<<"live monitor frame workspace checks passed\n";
         return 0;
     } catch (const std::exception& error) {

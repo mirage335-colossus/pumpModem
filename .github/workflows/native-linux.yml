@@ -2446,7 +2446,7 @@ jobs:
               raise SystemExit('FATAL: callback comparison contains a failed/incomplete run or instrumentation capture; inspect exact retained process results')
           PY_CALLBACK_PROBE
       - name: Retain exact paced-context ELF and provenance
-        if: always() && !cancelled() && (inputs.paced_context_focus || inputs.paced_callback_focus) && steps.build_prerequisites.outcome == 'success'
+        if: always() && !cancelled() && (inputs.paced_context_focus || inputs.paced_callback_focus || (inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !inputs.paced_mutex_focus && !inputs.paced_snapshot_focus)) && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 3
         run: |
           set -euo pipefail
