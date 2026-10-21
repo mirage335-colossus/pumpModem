@@ -1,0 +1,85 @@
+name: Capture retained ordinary native ZIP smoke
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  copied-native-smoke:
+    if: github.event_name == 'workflow_dispatch'
+    name: Original source37 FLTK ZIP / one synthetic smoke
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      LP_NUM_THREADS: '1'
+    steps:
+      - name: Bootstrap existing container prerequisite helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
+      - name: Install only checkout and copied-runtime prerequisites
+        run: |
+          set -o pipefail
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          set +e
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git gh python3 cmake binutils file xvfb xauth fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri libxtst6 2>&1 | tee "$RUNNER_TEMP/native-copy-apt.log"
+          setup_status=$?
+          set -e
+          if [ "$(stat -c %s "$RUNNER_TEMP/native-copy-apt.log")" -gt 2097152 ]; then
+            truncate -s 2097152 "$RUNNER_TEMP/native-copy-apt.log"
+          fi
+          exit "$setup_status"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Install the existing pinned dependency scanner
+        run: |
+          sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
+          echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
+      - name: Pin retained archive, verify copied package, and capture one original smoke
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/native-copy-smoke-capture.py \
+            --pins tools/native-copy-smoke-pins.json --evidence evidence \
+            --scratch "$RUNNER_TEMP/native copy capture" --tool-commit "$GITHUB_SHA"
+      - name: Check artifact upload bound without deleting failure evidence
+        if: always()
+        id: upload-bound
+        run: |
+          python3 - <<'PYTHON'
+          import os
+          from pathlib import Path
+          paths = list(Path('evidence').rglob('*')) + [Path(os.environ['RUNNER_TEMP']) / 'native-copy-apt.log']
+          total = sum(path.stat().st_size for path in paths if path.is_file() and not path.is_symlink())
+          safe = total <= 600 * 1024 * 1024 and not any(path.is_symlink() for path in paths)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
+              stream.write('allowed=' + str(safe).lower() + '\n')
+          if not safe:
+              raise SystemExit('Evidence exceeds upload bound or contains a symlink; retained on runner, capture incomplete')
+          PYTHON
+      - name: Preserve bounded synthetic evidence and original assertion result
+        if: always() && steps.upload-bound.outputs.allowed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: native-copy-smoke-capture-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            evidence/
+            ${{ runner.temp }}/native-copy-apt.log
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 14

@@ -1,0 +1,37 @@
+{
+  "source_commit": "37f4315c553b9fc3807f2f173d9a0fae3f239ebc",
+  "run_id": 39568632886,
+  "producer_job_id": 119117001200,
+  "artifact_id": 12331901120,
+  "workflow_path": ".github/workflows/ci.yml",
+  "artifact_name": "DataPump-Linux-x86_64-glibc-2.35",
+  "artifact_size_bytes": 98329399,
+  "artifact_sha256": "28917e441967abca284cfcecfb646d4b6cf6034d5ab019078a6235de0577ae5f",
+  "product_member": "DataPump-1.0.0-Linux-x86_64-native-fltk.zip",
+  "checksums_member": "SHA256SUMS.txt",
+  "product_sha256": "84bffc5781229ebd84e2e007620d610b1130e91e073c4eacc67802c09f27cef6",
+  "checksums_sha256": "fce43f0f33b56b9f471d6bfce4239a7798751d10b40586040288fe9179cd3769",
+  "manifest_sha256": "93acce07ec174371dbd6a94753f76bcac5124ffda3c56f459a4d467d817b23a6",
+  "gui_sha256": "37753ea7a5cbc347be701fa753c70f23d4bbeffa4fcb34a5cac2814fdd5991d3",
+  "outer_members": [
+    {
+      "name": "DataPump-1.0.0-Linux-x86_64-native-fltk.tar.gz",
+      "bytes": 49004957,
+      "crc32": 3910079855
+    },
+    {
+      "name": "DataPump-1.0.0-Linux-x86_64-native-fltk.zip",
+      "bytes": 49323715,
+      "crc32": 1464765761
+    },
+    {
+      "name": "SHA256SUMS.txt",
+      "bytes": 223,
+      "crc32": 1125155121
+    }
+  ],
+  "product_bytes": 49323715,
+  "checksums_bytes": 223,
+  "manifest_bytes": 37378,
+  "gui_bytes": 16813216
+}
