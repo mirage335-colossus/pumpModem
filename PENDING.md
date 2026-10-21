@@ -1,5 +1,39 @@
 # Symbol_Burst: unresolved issues and required validation
 
+## Current branch qualification — 21 October 2026
+
+Current runtime `be1e1bc60f661be6fcec98a24b477f41cd7ea37b` has completed ordinary
+branch qualification using matching accepted full-scope results. CI-only source
+`73656b4452baed90da053fc5b4739bb656fdaa74` passed full Debug/core in
+[39675122030](https://github.com/mirage335-colossus/pumpModem/actions/runs/39675122030):
+250 passed, 17 declared return-77 omissions, zero failures, CLI 39/39. The original
+GUI pair passed together; EU stop was 5.62129 seconds with the original ten-second
+limit and protected source tail intact. The complete affected Release/core
+replacement 39634480555 passed 253/17/0; unchanged native scopes and full SDK
+39611262359 are accepted. Full details, source bindings, limitations and retained
+original failures are in [the validation record](docs/validation.md).
+
+Current-candidate issues 3/9 have the original nine valid paced cases passing
+(including held/unheld plaintext/keyed Off/On, exact input and physical completion;
+max callback 3.551 ms <20 ms). Issues 7/8 have current complete receiver/resource,
+physical-end and full calibration coverage, with bounded storage-accounting source
+review. Issue 10 has original strict serial/parallel passes and all six current
+copied-runtime gates accepted. Issue 11 has the full composite native/SDK matrix
+accepted, including the complete affected replacements. The profile-77 decision
+is closed; declared omissions are not counted as passes. Approved compact hosted
+Live warnings retain mandatory functional coverage and explicitly incomplete
+compact throughput coverage. Optional instrumented desktop/realtime omissions
+remain documented. No stop, producer or physical-absence deadline was waived.
+
+Historical failed producer, drain, GUI-stop and copied-Help results are retained;
+current finite passes do not prove their historical sole causes. Untracked
+`tools/copied-help-application/` diagnostic WIP and all evidence are preserved.
+The original destination request's pinned revisions and 948-entry inventory below
+remain historical request records; no destination execution is inferred or
+fabricated from newer-source qualification.
+
+## Historical status snapshot — 20 October 2026
+
 Updated **2026-10-20, 4:46 p.m. Central (21:46 UTC)** from the saved main-chat
 evidence. This section is the current issue status. The destination execution
 inventory and historical analysis below are preserved separately.

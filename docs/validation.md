@@ -4,6 +4,114 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Symbol_Burst — completed branch qualification, 21 October 2026
+
+The qualified runtime is `be1e1bc60f661be6fcec98a24b477f41cd7ea37b`.
+Candidate `3611f0cf0ae066d6d9679cdee8447b73b66468c7` separated the mandatory
+preparation scope. CI-only correction `73656b4452baed90da053fc5b4739bb656fdaa74`
+isolates the original instrumented core GUI pair from unrelated CTest work.
+Production sources, C++ tests and CMake inputs remain identical to `3611f0c`.
+The following complete affected scopes, together with matching accepted results
+from the full matrices, complete ordinary branch qualification with the warnings
+and coverage limits below. Earlier failed workflows retain their actual results.
+This supersedes the older continuation's current-status statements; their
+measurements and failure provenance remain historical evidence. No release or
+release certification was performed.
+
+| Scope | Retained run | Accepted result |
+| --- | --- | --- |
+| Full affected Linux Debug/core, source `73656b4` | [39675122030](https://github.com/mirage335-colossus/pumpModem/actions/runs/39675122030) | 250 passed, 17 declared return-77 omissions, 0 failed; 267 selected from 308 registrations; CLI 39/39. |
+| Full affected Linux Release/core, source `8c54277` | [39634480555](https://github.com/mirage335-colossus/pumpModem/actions/runs/39634480555) | 253 passed, 17 declared return-77 omissions, 0 failed; CLI 39/39. Its runtime/C++ tests/CMake match `3611f0c`. |
+| Remaining native platform, Live, Fast, preparation, calibration, frontend, web, GUI and package scopes, source `3611f0c` | [39611262671](https://github.com/mirage335-colossus/pumpModem/actions/runs/39611262671) | Accepted unchanged scopes reused. The original workflow remains failed: its Release drain and Debug GUI failures are replaced only by the complete affected scopes above. |
+| Full SDK matrix, source `3611f0c` | [39611262359](https://github.com/mirage335-colossus/pumpModem/actions/runs/39611262359) | Accepted with the documented compact Live coverage warning; FLTK general 196/196, setup 35/35, packaging 4/4, frontend 9/9, web 13/13 and Wasm 5/5. Original calibration seed and aggregate gates passed. |
+
+The new Debug run executes 265 non-GUI core cases first, then the original
+no-argument `gui_controller` and `gui_application` together at parallelism two.
+Both phases returned zero. Their unique result names reconcile exactly with the
+selected inventory; per-phase JUnit/logs and their complete aggregate are retained.
+The GUI tests passed in 194.234 and 30.0478 seconds. FCC stop took 4.37857 seconds,
+EU stop 5.62129 seconds, and immediate list abort 0.00523412 seconds. EU exceeded
+its ordinary five-second advisory, so the successful workload warning remains;
+it passed the unchanged ten-second limit, idle restoration and source-tail checks.
+Its printed transmitted-source advance was 3.18854 seconds, below the 3.26806
+allowance, with protected tail 3.14681 seconds. The `stopped_within_deadline=0`
+field refers to the ordinary five seconds, not the ten-second failure gate.
+`symbol_burst_live` passed in 42.4908 seconds. Artifact **12387623149** has SHA-256
+`026a679d5f630192293451e94defa037182a1d5414e019346a1e8cd70de52ce9`;
+its complete CRC, inventory hash, source/configuration, results, raw GUI output
+and CLI summary were independently checked. GCC11 Debug, ASan/UBSan and
+portable-OFF configuration were retained. There were no new test failures.
+
+Matching original strict GUI serial **2/2** and parallel **2/2** results from
+[39648615451](https://github.com/mirage335-colossus/pumpModem/actions/runs/39648615451)
+remain valid for the unchanged runtime/C++ fixtures/configuration; the new full
+Debug run also supplies a fresh original parallel pair. On runtime `be1e1bc`,
+[39590341419](https://github.com/mirage335-colossus/pumpModem/actions/runs/39590341419)
+passed the original Burst Live test and nine independently paced plaintext/keyed,
+Burst Off/On and held-receiver cases. Exact input, content, completion and rescue
+assertions passed; maximum producer callback was **3.551 ms** against the unchanged
+20 ms guard, at requested period 1.953125 ms. This is finite fixture coverage,
+not a general end-user hardware throughput guarantee.
+
+The faults remain distinct. The first workspace refusal was reconciled against
+all residents and the 32 MiB budget: optional template rows left 19 bytes where
+retained bit candidates require 34. Correction `5e36891` reserves mandatory
+retention before optional rows, streaming rows as needed without increasing the
+budget or dropping acquisition/receiver state. Faithful default-clock
+[39561989590](https://github.com/mirage335-colossus/pumpModem/actions/runs/39561989590)
+matched 236 PCM prefixes, including pre-failure sample 154,038, and crossed the
+earlier refusal at 154,676. Current complete receiver/resource/estimate suites,
+raw/optimized temporal-support fixtures and physical-absence cases passed.
+Source review also binds support-fit storage to resident accounting, estimates
+and explicit insufficient-budget rejection. These are bounded checks, not an
+exhaustive proof of every private byte threshold or workspace-resize boundary.
+The tone-path correction retains one compiled arithmetic expression; its original
+five focused cases and full correlator regressions passed. Neither correction is
+claimed as the cause of the separate stop or copied-Help failures.
+
+For the stop diagnosis, [39668352219](https://github.com/mirage335-colossus/pumpModem/actions/runs/39668352219)
+passed the original controller with a complete diagnostic capture: 64 enclosed
+stop blocks used 8.903593550 source-thread CPU seconds. Existing template caching
+and tabulated FP64 FFTs were active; restricted timing and arithmetic/partitioned/
+FP32 fallback were absent. The proposed restricted-table optimization was therefore
+inapplicable. Sampled simulation deliberately preserves broad acquisition instead
+of applying the hardware UTC prior. Endpoint installation took 6,119 ns and
+completion flags to GUI acknowledgment 2.493519 ms in that passing capture.
+Instrumentation overhead is only partially estimated and is never subtracted.
+Different PCM identities prevent a matched performance comparison. The current
+full gate validates the resource arrangement; the exact peer load/input and sole
+cause of the historical 10.0078-second failure remain unproved. The earlier
+Release drain failure likewise remains retained, with its complete affected
+Release replacement passing the original private computation allowance.
+
+All six current native/SDK copied-runtime gates passed. The old source `37f4315`
+copied-Help failures remain historical unresolved causality: their failed key/PCM
+were not retained, so later passing captures do not explain them. Current Live
+Release/Debug replay-staging retention assertions passed before any compact-clock
+warning branch. Windows `receiver_strategy` and `live_planning_link` passed the
+explicit `SIZE_MAX` saturation boundaries in 2.55263 and 0.0636099 seconds,
+including the 53-bit floating boundary; no Windows sanitizer claim is made.
+SDK `tui_terminal` passed the full PTY test in 23.56 seconds, including oversized
+4 MiB paste rejection/recovery, draft retention, trailing input, resize and
+restoration. Existing corrections and their original failed evidence are preserved.
+
+The accepted limits remain explicit. Compact hosted Live work may reach only its
+typed, healthy, recently progressing 40/120-second limit, recorded as **incomplete
+compact coverage**, with mandatory standard-geometry functional coverage and all
+remaining Live assertions passing. It is not a compact throughput pass. Default
+instrumented Fast omits only `fast_session` and `gui_fast_live`; required Release
+real-time coverage passed. Optional instrumented native desktop smoke remains
+omitted in ordinary CI. The closed profile-77 policy retains arithmetic omissions
+as omissions: Windows core had 232 passed/33 omitted; new Linux Debug core has
+250 passed/17 omitted and no preselected omissions. All fixed calibration seeds
+and original per-case/combined gates passed, including the complete 128-pair
+Debug shaped aggregate. Debug preparation passed in 7,083.12 seconds within its
+unchanged 7,200-second bound. Native FLTK/Rev GUI contracts passed 41/41 and 44/44.
+Six seconds of fully scored physical absence, next-poll accepted bits, pending
+identity, wire/source interpretation and every original receiver/GUI assertion
+remain required. No warning was added for the ten-second stop limit or input
+truncation.
+
 ## Symbol_Burst — continuation, 18 October 2026
 
 The current runtime candidate is `8e72352874e9aa6ad3b3a5cf362e9c733c606344`.

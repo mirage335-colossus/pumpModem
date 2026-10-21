@@ -1,4 +1,51 @@
 {
+  "current_candidate_qualification": {
+    "status": "ordinary_branch_qualified_with_documented_warnings_and_omissions",
+    "recorded_utc": "2026-10-21T23:02:29.715790+00:00",
+    "runtime_revision": "be1e1bc60f661be6fcec98a24b477f41cd7ea37b",
+    "qualification_base_revision": "3611f0cf0ae066d6d9679cdee8447b73b66468c7",
+    "ci_only_correction_revision": "73656b4452baed90da053fc5b4739bb656fdaa74",
+    "runtime_cpp_tests_cmake_unchanged_from_qualification_base": true,
+    "native_debug_core": {
+      "run": 39675122030,
+      "job": 119482870177,
+      "artifact": 12387623149,
+      "sha256": "026a679d5f630192293451e94defa037182a1d5414e019346a1e8cd70de52ce9",
+      "selected": 267,
+      "passed": 250,
+      "runtime_omitted": 17,
+      "preselected_omitted": [],
+      "failed": 0,
+      "cli_passed": 39,
+      "gui_pair_parallel_passed": 2,
+      "eu_stop_seconds": 5.62129,
+      "stop_limit_seconds": 10
+    },
+    "native_release_core": {
+      "run": 39634480555,
+      "passed": 253,
+      "runtime_omitted": 17,
+      "failed": 0,
+      "cli_passed": 39
+    },
+    "remaining_native_run": 39611262671,
+    "remaining_native_note": "Matching unaffected scopes accepted; original failed workflow remains failed. Complete affected scopes above replace only their prior failed scopes.",
+    "sdk_full_run": 39611262359,
+    "matching_strict_gui_serial_and_parallel_run": 39648615451,
+    "matching_original_paced_nine_case_run": 39590341419,
+    "maximum_paced_callback_ms": 3.551,
+    "producer_deadline_ms": 20,
+    "profile_77_decision": "closed; declared omissions retained, not passes",
+    "coverage_limits": [
+      "Approved compact hosted Live typed progressing limits40/120s mean incomplete compact throughput coverage; mandatory functional analogue and remaining assertions passed.",
+      "Only two default instrumented Fast realtime cases omitted; mandatory Release coverage passed. Optional instrumented desktop smoke omitted.",
+      "Conditional arithmetic return77 omissions retain explicit eligibility and count separately.",
+      "Historical GUI10.0078stop and old copiedHelp exact causes remain unproved; no new cause or performance gain inferred."
+    ],
+    "unchanged_historical_destination_inventory": "Original target_revision/profile pins/task results and destination_execution_status remain verbatim below. No948destinationexecutions inferred.",
+    "validation_record": "docs/validation.md",
+    "publication": "No release or certification performed"
+  },
   "schema": "symbol-burst-execution-manifest/v1",
   "created_utc": "2026-10-20T20:20:28.271887+00:00",
   "target_revision": "e231e4daa727e3943dbc3e184ac86c329a2560e2",
