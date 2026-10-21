@@ -1,0 +1,55 @@
+name: Live symbol-burst affinity partition (diagnostic)
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  live-affinity-partition:
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    timeout-minutes: 50
+    defaults:
+      run:
+        shell: bash
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    steps:
+      - name: Bootstrap existing container prerequisite helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
+      - name: Install checkout and artifact API prerequisites
+        run: |
+          set -o pipefail
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates gh python3
+      - name: Check out the diagnostic at the triggering revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Verify retained artifact and run serial ABBA affinity partition
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 tools/live-affinity-partition.py \
+            --root "$GITHUB_WORKSPACE" \
+            --report "$GITHUB_WORKSPACE/evidence" \
+            --scratch "$GITHUB_WORKSPACE/evidence/scratch"
+      - name: Preserve diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: live-affinity-partition-${{ github.run_id }}-${{ github.run_attempt }}
+          path: evidence/
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 14
