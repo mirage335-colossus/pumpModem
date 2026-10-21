@@ -133,6 +133,7 @@ jobs:
         backend: [fltk, rev]
         image: [debian:bookworm-slim, ubuntu:24.04]
     env:
+      DATAPUMP_CI_SMOKE_CAPTURE_FIXTURES: '1'
       DATAPUMP_CI_SMOKE_WARNINGS_DIR: ${{ github.workspace }}/build/ci-smoke-results
       DATAPUMP_CI_SMOKE_RUNNER: ${{ github.workspace }}/tools/run-gui-smoke.py
       DATAPUMP_SMOKE_TARGET: linux-x86_64-${{ matrix.backend }}

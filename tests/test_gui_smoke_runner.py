@@ -270,13 +270,30 @@ class FixtureCaptureTests(unittest.TestCase):
         self.package_manifest = self.root / 'manifest.sha256'
         self.package_manifest.write_text('2' * 64 + '  bin/datapump-gui\n')
 
-    def invoke(self, destination=None):
+    def invoke(self, destination=None, archive_name=ARCHIVE):
         return subprocess.run([
             sys.executable, str(FIXTURE_TOOL), '--source', str(self.source), '--destination',
             str(destination or self.destination), '--log', str(self.log), '--report',
             str(self.report), '--package-manifest', str(self.package_manifest),
-            '--archive-name', ARCHIVE, '--archive-sha256', ARCHIVE_SHA],
+            '--archive-name', archive_name, '--archive-sha256', ARCHIVE_SHA],
             capture_output=True, text=True, check=False)
+
+    def test_retains_fltk_inputs_from_both_copied_archive_formats(self):
+        for suffix in ('tar.gz', 'zip'):
+            with self.subTest(suffix=suffix):
+                destination = self.root / ('fltk-' + suffix)
+                name = 'DataPump-2.0-native-fltk.' + suffix
+                result = self.invoke(destination, name)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                manifest = json.loads((destination / 'capture-manifest.json').read_text())
+                self.assertEqual(manifest['archive_name'], name)
+                self.assertEqual(manifest['synthetic_key']['status'], 'retained')
+                self.assertEqual(manifest['archive_sha256'], ARCHIVE_SHA)
+
+    def test_rejects_unrelated_archive_identity(self):
+        result = self.invoke(archive_name='DataPump-2.0-native-other.zip')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.destination.exists())
 
     def test_retains_bounded_inputs_with_exact_invocation_and_hashes(self):
         result = self.invoke()

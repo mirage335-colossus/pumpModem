@@ -173,7 +173,7 @@ function(check_command command_timeout)
     set(smoke_command ${ARGN})
     set(capture_smoke_fixtures FALSE)
     if("$ENV{DATAPUMP_CI_SMOKE_CAPTURE_FIXTURES}" STREQUAL "1" AND
-        DEFINED GUI_SMOKE_ARCHIVE_NAME AND GUI_SMOKE_ARCHIVE_NAME MATCHES "-native-rev[.](tar[.]gz|zip)$")
+        DEFINED GUI_SMOKE_ARCHIVE_NAME AND GUI_SMOKE_ARCHIVE_NAME MATCHES "-native-(rev|fltk)[.](tar[.]gz|zip)$")
       set(capture_smoke_fixtures TRUE)
       get_filename_component(smoke_fixture_parent "${smoke_directory}" DIRECTORY)
       set(smoke_fixture_source "${smoke_fixture_parent}/.smoke-fixture-${smoke_identifier}")

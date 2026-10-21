@@ -51,8 +51,8 @@ def capture(source, destination, log_path, report_path, package_manifest, archiv
         fail('fixture evidence destination already exists')
     if source == destination or source in destination.parents or destination in source.parents:
         fail('fixture source and destination overlap')
-    if not re.fullmatch(r'DataPump-[A-Za-z0-9_.-]+-native-rev\.(?:tar\.gz|zip)', archive_name):
-        fail('archive identity is not an ordinary Rev native archive name')
+    if not re.fullmatch(r'DataPump-[A-Za-z0-9_.-]+-native-(?:rev|fltk)\.(?:tar\.gz|zip)', archive_name):
+        fail('archive identity is not an ordinary Rev or FLTK native archive name')
     if not re.fullmatch(r'[0-9a-f]{64}', archive_sha256):
         fail('archive SHA-256 identity is missing or malformed')
 
@@ -123,7 +123,7 @@ def capture(source, destination, log_path, report_path, package_manifest, archiv
                                          'reason': 'smoke source directory contained no generated synthetic key'})
         manifest = {
             'format': 1,
-            'capture': 'failed ordinary SDK Rev native archive GUI smoke',
+            'capture': 'failed ordinary native archive GUI smoke',
             'archive_name': archive_name,
             'archive_sha256': archive_sha256,
             'package_inventory_sha256': sha256(Path(package_manifest)),
