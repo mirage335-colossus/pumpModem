@@ -6,10 +6,12 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <iomanip>
 #include <ostream>
+#include <optional>
 
 #if defined(__linux__)
 #include <cerrno>
@@ -27,6 +29,18 @@ class Probe {
 public:
     static constexpr std::size_t retained_capacity = 32;
     enum class Phase : std::uint8_t { provider_timing, monitor, live_callback };
+    struct Owner { std::uint64_t serial{},tid{},start_ns{}; };
+
+    // The tuple identifies a callback interval, not mutex ownership. A sampler
+    // must also join its complete read interval to the sealed retained record.
+    std::optional<Owner> owner() const noexcept {
+        const auto serial=owner_serial_.load(std::memory_order_acquire);
+        if(!serial)return {};
+        const Owner result{serial,owner_tid_.load(std::memory_order_relaxed),
+            owner_start_ns_.load(std::memory_order_relaxed)};
+        if(!result.tid || !result.start_ns || serial!=owner_serial_.load(std::memory_order_acquire))return {};
+        return result;
+    }
 
     explicit Probe(bool enabled = false) noexcept : enabled_(enabled) {}
     Probe(const Probe&) = delete;
@@ -41,8 +55,18 @@ public:
     // sample; ordinal identifies the callback independently of sample spacing.
     void begin(std::uint64_t ordinal, std::uint64_t first_sample) noexcept {
         if (!enabled_) return;
+        owner_serial_.store(0,std::memory_order_release);
         active_ = true;
         current_ = Record{};
+        current_.serial=++next_serial_;
+        if(!current_.serial)current_.serial=++next_serial_;
+#if defined(__linux__)
+        static thread_local const auto tid=[] {
+            const auto value=::syscall(SYS_gettid);
+            return value>0?static_cast<std::uint64_t>(value):std::uint64_t{};
+        }();
+        current_.tid=tid;
+#endif
         current_.ordinal = ordinal;
         current_.first_sample = first_sample;
         current_.start_ns = monotonic_ns(current_.errors);
@@ -51,6 +75,9 @@ public:
         current_.switches_start = context_switches(current_.errors);
         previous_mark_ns_ = monotonic_ns(current_.errors);
         current_.setup_overhead_ns = delta(previous_mark_ns_, current_.start_ns);
+        owner_tid_.store(current_.tid,std::memory_order_relaxed);
+        owner_start_ns_.store(current_.start_ns,std::memory_order_relaxed);
+        owner_serial_.store(current_.serial,std::memory_order_release);
     }
 
     // Record an interval boundary after the named portion. Boundaries are
@@ -75,6 +102,7 @@ public:
     void finish() noexcept {
         if (!enabled_ || !active_) return;
         current_.end_ns = monotonic_ns(current_.errors);
+        owner_serial_.store(0,std::memory_order_release);
         if (current_.phase_count < current_.phase_end_ns.size()) {
             const auto i = current_.phase_count++;
             current_.phase_names[i] = Phase::live_callback;
@@ -126,6 +154,7 @@ public:
             if (i) out << ',';
             const auto& r = retained_[i];
             out << "{\"ordinal\":" << r.ordinal << ",\"first_sample\":" << r.first_sample
+                << ",\"owner_serial\":" << r.serial << ",\"tid\":" << r.tid
                 << ",\"monotonic_start_ns\":" << r.start_ns << ",\"monotonic_end_ns\":" << r.end_ns
                 << ",\"wall_ns\":" << r.wall_ns
                 << ",\"probe_setup_ns\":" << r.setup_overhead_ns
@@ -157,6 +186,7 @@ private:
         phase_overflow = 1U << 4
     };
     struct Record {
+        std::uint64_t serial=0,tid=0;
         std::uint64_t ordinal = 0, first_sample = 0, start_ns = 0, end_ns = 0, wall_ns = 0;
         std::uint64_t teardown_end_ns = 0, setup_overhead_ns = 0, teardown_overhead_ns = 0;
         std::uint64_t cpu_start_ns = 0, cpu_end_ns = 0;
@@ -303,6 +333,8 @@ private:
     }
 
     bool enabled_ = false, active_ = false;
+    std::uint64_t next_serial_{};
+    std::atomic<std::uint64_t> owner_serial_{},owner_tid_{},owner_start_ns_{};
     Record current_{};
     std::uint64_t previous_mark_ns_ = 0;
     std::array<Record, retained_capacity> retained_{};

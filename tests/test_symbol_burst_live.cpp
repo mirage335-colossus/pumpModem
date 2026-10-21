@@ -909,6 +909,12 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
         return snapshot_holder_os_probe::Owner{serial,tid,start};
     });
     CaptureScript capture(probe);
+    std::unique_ptr<snapshot_holder_os_probe::Probe> callback_os;
+    if(probe) callback_os=std::make_unique<snapshot_holder_os_probe::Probe>(true,[&]() -> std::optional<snapshot_holder_os_probe::Owner> {
+        const auto owner=capture.callback_probe.owner();
+        if(!owner)return {};
+        return snapshot_holder_os_probe::Owner{owner->serial,owner->tid,owner->start_ns};
+    });
     struct Reset {~Reset(){capture_script=nullptr;}} reset;
     const auto main_thread=std::this_thread::get_id();
     std::atomic<bool> decoder_armed{false},decoder_open{false},decoder_waiting{false};
@@ -1176,6 +1182,7 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
     session.reset(); // Also join the provider if explicit stop reported an error.
     if(snapshot_os)snapshot_os->stop();
     if(monitor_os)monitor_os->stop();
+    if(callback_os)callback_os->stop();
     const auto elapsed=std::chrono::duration<double>(Steady::now()-wall_start).count();
     if(elapsed>570.&&failure.empty())failure="paced fixture exceeded its 570-second internal wall bound including cleanup";
     if(!cleanup_error.empty()&&failure.empty())failure="paced fixture cleanup failed";
@@ -1286,6 +1293,8 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
         std::cout<<",\"release\":";sample_json(h.release);std::cout<<",\"drain\":";sample_json(h.drain);std::cout<<'}';
     }
     std::cout<<"],\"callback_probe\":";capture.callback_probe.emit_json(std::cout);
+    std::cout<<",\"callback_os_probe\":";
+    if(callback_os)callback_os->emit_json(std::cout);else std::cout<<"{\"enabled\":false}";
     std::cout<<",\"mutex_probe\":";live::mutex_probe::emit_json(std::cout,mutex_scope);
     std::cout<<",\"snapshot_probe\":";live::snapshot_probe::emit_json(std::cout,snapshot_scope);
     std::cout<<",\"snapshot_os_probe\":";

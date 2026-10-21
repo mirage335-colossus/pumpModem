@@ -48,6 +48,10 @@ on:
         description: 'Observe Snapshot phases and holder OS state with the ordinary mutex; diagnostic only'
         type: boolean
         default: false
+      paced_callback_focus:
+        description: 'Focus on three matched plain held keyed-On callback pairs; diagnostic only'
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       linux_runner:
@@ -85,6 +89,10 @@ on:
         type: boolean
         default: false
       paced_snapshot_focus:
+        type: boolean
+        default: false
+      paced_callback_focus:
+        description: 'Focus on three matched plain held keyed-On callback pairs; diagnostic only'
         type: boolean
         default: false
 
@@ -181,6 +189,11 @@ jobs:
         if: always() && inputs.paced_snapshot_focus && (inputs.paced_mutex_focus || !inputs.paced_callback_probe || !inputs.paced_backlog || github.event_name != 'workflow_dispatch' || inputs.scope != 'symbol-burst-live' || inputs.build_type != 'Debug' || inputs.linux_runner != 'ubuntu-24.04')
         run: |
           echo '::error::Snapshot focus requires manual Debug on ubuntu-24.04, callback/backlog enabled and mutex wrapper disabled.'
+          exit 2
+      - name: Restrict paced plain callback focus
+        if: always() && inputs.paced_callback_focus && (!inputs.paced_callback_probe || !inputs.paced_backlog || inputs.paced_mutex_focus || inputs.paced_snapshot_focus || github.event_name != 'workflow_dispatch' || inputs.scope != 'symbol-burst-live' || inputs.build_type != 'Debug' || inputs.linux_runner != 'ubuntu-24.04')
+        run: |
+          echo '::error::Plain callback focus requires manual symbol-burst-live on Debug and ubuntu-24.04 with backlog/callback probes enabled and mutex/Snapshot focus disabled.'
           exit 2
       - name: Validate manual package configuration
         if: github.event_name == 'workflow_dispatch' && inputs.scope == 'package' && inputs.build_type != 'Release'
@@ -1006,11 +1019,15 @@ jobs:
           case "$CI_SCOPE" in
             calibration|calibration-aggregate) targets=(test_differential_receiver_probability) ;;
             symbol-burst-live)
-              targets=(test_symbol_burst_live test_live_snapshot_copy test_live_monitor_frame test_signal_view)
+              if [ '${{ inputs.paced_callback_focus }}' = true ]; then
+                targets=(test_symbol_burst_live)
+              else
+                targets=(test_symbol_burst_live test_live_snapshot_copy test_live_monitor_frame test_signal_view)
+              fi
               if [ '${{ inputs.paced_snapshot_focus }}' = true ]; then
                 targets+=(test_live_profiles test_live_resources)
               fi
-              if [ '${{ inputs.paced_backlog }}' = true ] && [ '${{ inputs.paced_mutex_focus }}' != true ] && [ '${{ inputs.paced_snapshot_focus }}' != true ]; then
+              if [ '${{ inputs.paced_backlog }}' = true ] && [ '${{ inputs.paced_callback_focus }}' != true ] && [ '${{ inputs.paced_mutex_focus }}' != true ] && [ '${{ inputs.paced_snapshot_focus }}' != true ]; then
                 targets+=(test_pattern_receiver test_pattern_correlator test_pattern_correlator_batch
                           test_search_fft test_pattern_fft_batch test_gui_timing_advice test_gui_controller)
               fi
@@ -1049,7 +1066,7 @@ jobs:
           esac
           cmake --build build --target "${targets[@]}" --parallel "$(python3 -B tools/build_capacity.py)"
       - name: Check prepared Live snapshot and monitor storage
-        if: inputs.scope == 'symbol-burst-live' && !cancelled() && steps.build_prerequisites.outcome == 'success'
+        if: inputs.scope == 'symbol-burst-live' && !inputs.paced_callback_focus && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 2
         run: |
           set -euo pipefail
@@ -1571,7 +1588,7 @@ jobs:
           fi
           python3 tools/run-ci-tests.py --build-dir build --scope "$CI_SCOPE" --jobs "$jobs" --timeout "$test_timeout" --report build/ci-test-report.json "${options[@]}"
       - name: Run the original no-argument Symbol Burst Live qualification test
-        if: inputs.scope == 'symbol-burst-live' && !inputs.paced_mutex_focus && !inputs.paced_snapshot_focus && !cancelled() && steps.build_prerequisites.outcome == 'success'
+        if: inputs.scope == 'symbol-burst-live' && !inputs.paced_callback_focus && !inputs.paced_mutex_focus && !inputs.paced_snapshot_focus && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 125
         run: |
           set -uo pipefail
@@ -1651,7 +1668,7 @@ jobs:
           PY_BURST_RESULT
       - name: Run paced Symbol Burst backlog diagnostics and matched selective trace
         id: paced_burst
-        if: success() && inputs.paced_backlog && !inputs.paced_mutex_focus && !inputs.paced_snapshot_focus && !cancelled()
+        if: success() && inputs.paced_backlog && !inputs.paced_callback_focus && !inputs.paced_mutex_focus && !inputs.paced_snapshot_focus && !cancelled()
         timeout-minutes: 95
         env:
           PACED_SCOPE: ${{ inputs.scope }}
@@ -1979,7 +1996,7 @@ jobs:
           PY_MONITOR_REGRESSIONS
       - name: Run actual temporal support component regressions
         id: temporal_support
-        if: inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !inputs.paced_mutex_focus && !inputs.paced_snapshot_focus && !cancelled() && steps.build_prerequisites.outcome == 'success'
+        if: inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !inputs.paced_callback_focus && !inputs.paced_mutex_focus && !inputs.paced_snapshot_focus && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 35
         run: |
           set -euo pipefail
@@ -2076,7 +2093,7 @@ jobs:
           print('All three temporal support component regressions passed; strict original GUI serial and parallel checks follow.')
           PY_TEMPORAL_SUPPORT
       - name: Run focused preparation or GUI core diagnostics
-        if: (success() && (inputs.scope == 'preparation-diagnostic' || inputs.scope == 'gui-core-diagnostic')) || (inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !inputs.paced_mutex_focus && !inputs.paced_snapshot_focus && !cancelled() && steps.build_prerequisites.outcome == 'success')
+        if: (success() && (inputs.scope == 'preparation-diagnostic' || inputs.scope == 'gui-core-diagnostic')) || (inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !inputs.paced_callback_focus && !inputs.paced_mutex_focus && !inputs.paced_snapshot_focus && !cancelled() && steps.build_prerequisites.outcome == 'success')
         run: |
           set -euo pipefail
           report="$PWD/build/core-diagnostics"
@@ -2181,6 +2198,7 @@ jobs:
         env:
           PACED_MUTEX_FOCUS: ${{ inputs.paced_mutex_focus }}
           PACED_SNAPSHOT_FOCUS: ${{ inputs.paced_snapshot_focus }}
+          PACED_CALLBACK_FOCUS: ${{ inputs.paced_callback_focus }}
         run: |
           python3 -B - "$PWD" <<'PY_CALLBACK_PROBE'
           import datetime, hashlib, json, os, pathlib, signal, subprocess, sys, time
@@ -2200,23 +2218,26 @@ jobs:
               'mutex_probe_source_sha256': hashlib.sha256((root / 'src/live_mutex_probe.hpp').read_bytes()).hexdigest() if os.environ.get('PACED_MUTEX_FOCUS') == 'true' else None,
               'cache_sha256': hashlib.sha256((root / 'build/CMakeCache.txt').read_bytes()).hexdigest(),
               'snapshot_probe_source_sha256': hashlib.sha256((root / 'src/live_snapshot_probe.hpp').read_bytes()).hexdigest() if os.environ.get('PACED_SNAPSHOT_FOCUS') == 'true' else None,
-              'os_sampler_source_sha256': hashlib.sha256((root / 'tests/snapshot_holder_os_probe.hpp').read_bytes()).hexdigest() if os.environ.get('PACED_SNAPSHOT_FOCUS') == 'true' else None,
+              'os_sampler_source_sha256': hashlib.sha256((root / 'tests/snapshot_holder_os_probe.hpp').read_bytes()).hexdigest(),
               'live_source_sha256': hashlib.sha256((root / 'src/live.cpp').read_bytes()).hexdigest(),
               'monitor_source_sha256': hashlib.sha256((root / 'src/live_capture_monitor_probe.hpp').read_bytes()).hexdigest(),
               'signal_view_source_sha256': hashlib.sha256((root / 'src/signal_view.cpp').read_bytes()).hexdigest(),
               'comparison': 'sequential matched baseline/probe pairs; same binary, selector, PCM and original pacing bound',
               'qualification': False,
-              'diagnostic_route': 'paced-snapshot-focus' if os.environ.get('PACED_SNAPSHOT_FOCUS') == 'true' else 'paced-mutex-focus' if os.environ.get('PACED_MUTEX_FOCUS') == 'true' else 'paced-callback-probe',
+              'diagnostic_route': 'paced-plain-callback-focus' if os.environ.get('PACED_CALLBACK_FOCUS') == 'true' else 'paced-snapshot-focus' if os.environ.get('PACED_SNAPSHOT_FOCUS') == 'true' else 'paced-mutex-focus' if os.environ.get('PACED_MUTEX_FOCUS') == 'true' else 'paced-callback-probe',
           }
           results = []
           focus = os.environ.get('PACED_MUTEX_FOCUS') == 'true'
           snapshot_focus = os.environ.get('PACED_SNAPSHOT_FOCUS') == 'true'
+          callback_focus = os.environ.get('PACED_CALLBACK_FOCUS') == 'true'
           cache_text = (root / 'build/CMakeCache.txt').read_text()
+          if callback_focus and ('DATAPUMP_LIVE_MUTEX_PROBE:BOOL=OFF' not in cache_text or 'DATAPUMP_LIVE_SNAPSHOT_PROBE:BOOL=OFF' not in cache_text):
+              raise SystemExit('plain callback focus requires both compile-time observers disabled; no qualification run is implied')
           if focus and 'DATAPUMP_LIVE_MUTEX_PROBE:BOOL=ON' not in cache_text:
               raise SystemExit('mutex focus requires the compile-time observer; no qualification run is implied')
           if snapshot_focus and ('DATAPUMP_LIVE_SNAPSHOT_PROBE:BOOL=ON' not in cache_text or 'DATAPUMP_LIVE_MUTEX_PROBE:BOOL=OFF' not in cache_text):
               raise SystemExit('Snapshot focus must retain the ordinary mutex and enable only named phase hooks')
-          pairs = (False, True, False, True, False, True) if snapshot_focus else (False, True, False, True)
+          pairs = (False, True, False, True, False, True) if (snapshot_focus or callback_focus) else (False, True, False, True)
           for index, enabled in enumerate(pairs, 1):
               stem = f'{index:02d}-' + ('probe' if enabled else 'baseline')
               command = [str(binary), '--paced-held-keyed-on']
@@ -2338,6 +2359,11 @@ jobs:
                                  for row in monitor_value.get('records', [])) and
                              monitor_os.get('enabled') is True and monitor_os.get('supported') is True and
                              monitor_os.get('stopped') is True and monitor_os.get('reader_errors') == 0 and monitor_os.get('dropped') == 0))
+              callback_os = summary.get('callback_os_probe', {}) if summary else {}
+              callback_os_ok = (not enabled or
+                                (callback_os.get('enabled') is True and callback_os.get('supported') is True and
+                                 callback_os.get('stopped') is True and callback_os.get('reader_errors') == 0 and
+                                 callback_os.get('dropped') == 0))
               result = {'index': index, 'probe_enabled': enabled, 'command': command,
                         'started_utc': started, 'elapsed_seconds': process_elapsed,
                         'exit_code': code, 'timed_out': timed_out, 'launch_error': launch_error,
@@ -2345,7 +2371,8 @@ jobs:
                         'stdout_sha256': hashlib.sha256(out.read_bytes()).hexdigest(),
                         'stderr_sha256': hashlib.sha256(err.read_bytes()).hexdigest(),
                         'mutex_mapping': mutex_mapping, 'mapping_complete': mapping_ok,
-                        'snapshot_capture_complete': snapshot_ok, 'monitor_capture_complete': monitor_ok}
+                        'snapshot_capture_complete': snapshot_ok, 'monitor_capture_complete': monitor_ok,
+                        'callback_os_capture_complete': callback_os_ok}
               (report / (stem + '.json')).write_text(json.dumps(result, indent=2) + '\n')
               results.append(result)
           (report / 'results.json').write_text(json.dumps({'identity': identity, 'results': results}, indent=2) + '\n')
@@ -2355,15 +2382,19 @@ jobs:
                   value = row['summary'] or {}
                   stream.write(f"- probe={row['probe_enabled']}, exit={row['exit_code']}, functional={value.get('functional')}, "
                                f"pacing_valid={value.get('pacing_valid')}, callback_max_ns={value.get('callback_duration_max_ns')}, mutex_probe_enabled={value.get('mutex_probe', {}).get('enabled')}\n")
-              stream.write('\nTwo pairs retain trace-overhead evidence; they are not a stable performance estimate.\n')
+              stream.write(f"\n{len(results) // 2} matched pairs retain trace-overhead evidence; they are not a stable performance estimate.\n")
           if any(row['exit_code'] != 0 or row['timed_out'] or row['launch_error'] or row['parse_errors'] or
                  row['summary_count'] != 1 or row['summary'].get('functional') != 'pass' or
                  row['summary'].get('pacing_valid') is not True or
                  row['summary'].get('callback_probe', {}).get('enabled') is not row['probe_enabled'] or
                  (focus and row['probe_enabled'] and row['summary'].get('mutex_probe', {}).get('enabled') is not True) or
-                 not row['mapping_complete'] or not row['snapshot_capture_complete'] or not row['monitor_capture_complete'] for row in results):
-              raise SystemExit('FATAL: callback comparison contains a failed/incomplete run or incomplete holder mapping; inspect exact retained process results')
+                 not row['mapping_complete'] or not row['snapshot_capture_complete'] or not row['monitor_capture_complete'] or
+                 not row['callback_os_capture_complete'] for row in results):
+              raise SystemExit('FATAL: callback comparison contains a failed/incomplete run or instrumentation capture; inspect exact retained process results')
           PY_CALLBACK_PROBE
+      - name: Mark plain callback focus omissions
+        if: always() && inputs.paced_callback_focus
+        run: echo 'Plain callback focus selects three matched baseline/probe pairs of the original held keyed-On process; retained results identify which processes completed. The no-argument qualification, other paced selectors, temporal support, FFT, snapshot storage and strict GUI serial/parallel checks were omitted and are not passes.' >> "$GITHUB_STEP_SUMMARY"
       - name: Capture six sequential fixed-bank acquisition partition replays
         if: inputs.scope == 'simulation-acquisition-partition-diagnostic' && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 35
