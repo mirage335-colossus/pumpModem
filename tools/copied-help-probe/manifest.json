@@ -1,0 +1,43 @@
+{
+  "schema": 1,
+  "assignment": "instrumented-gui-core-failures-20261018 / copied Help causal capture",
+  "application_source": "37f4315c553b9fc3807f2f173d9a0fae3f239ebc",
+  "diagnostic_only": true,
+  "files": [
+    {
+      "path": "src/copied_help_candidate_trace.hpp",
+      "pre_sha256": null,
+      "post_sha256": "e28a976fe96315b00e275aa5b3e60ad867950d88d64db7c88d65cd30a9a46aa0",
+      "bytes": 8873,
+      "payload": "payload/src/copied_help_candidate_trace.hpp"
+    },
+    {
+      "path": "src/copied_help_pcm_probe.hpp",
+      "pre_sha256": null,
+      "post_sha256": "a203ad34c845f3c0a750e6b7598ab5fb79c2b69dcb458f52843e5303a24d188e",
+      "bytes": 25496,
+      "payload": "payload/src/copied_help_pcm_probe.hpp"
+    },
+    {
+      "path": "src/gui/gui_smoke.cpp",
+      "pre_sha256": "222a6f0dacb3c92125ab6b119420bd585e411a9e3ec897562b55784752d439d2",
+      "post_sha256": "bb6e65f033b1f32bf0cced9b6f0624c6e2b5907a66c96452f7e03a7c90f89f2d",
+      "bytes": 70722,
+      "payload": "payload/src/gui/gui_smoke.cpp"
+    },
+    {
+      "path": "src/live.cpp",
+      "pre_sha256": "8d24331f48b2d6b56ea4e04b9388b1a610a27451732c74f6df0461ebb2b6dfd9",
+      "post_sha256": "711d3418270b165dff898be9a77742a405de6340274cbb974e706b9a036e04c1",
+      "bytes": 356584,
+      "payload": "payload/src/live.cpp"
+    }
+  ],
+  "target_link": "postboundary.snapshot_transmission_id == PCM source_context.transmission_id ->stablebankquota/generation/revision",
+  "limits": [
+    "Originalassertions/600smoke/10sstop/6scoredabsence intact",
+    "Exacttargetcontinuoussample0PCM/commits/constructorinventory andallglobalcaps/writerseals mandatory",
+    "Complexprojectedbytes andfullSessionstate not retained; replayequality requiresverification",
+    "Newindependentinput, notqualification oroldfailureclosure"
+  ]
+}

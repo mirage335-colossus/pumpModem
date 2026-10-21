@@ -1,0 +1,217 @@
+name: Copied Help causal diagnostic capture
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  copied-help-capture:
+    name: Ubuntu 24.04 published SDK / source37 copied Help capture
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 45
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      LP_NUM_THREADS: '1'
+      DATAPUMP_SMOKE_BINARY_CAPTURE: '1'
+      BASE_SOURCE_SHA: '37f4315c553b9fc3807f2f173d9a0fae3f239ebc'
+      CAPTURE_ATTEMPTS: '2'
+      EXPECTED_SDK_MANIFEST_SHA256: 4fdcc4b8d57e0a67eeb2ce7fac70667b75f40f01215105de95b771c77c5303c3
+    steps:
+      - name: Bootstrap current APT helper before installing Git
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
+      - name: Install Ubuntu container prerequisites
+        run: |
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates git gh python3 file binutils make xvfb xauth fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri libxtst6 2>&1 | tee "$RUNNER_TEMP/sdk-rev-apt.log"
+      - name: Checkout diagnostic tools and the exact source baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize failure evidence directory
+        run: |
+          mkdir -p evidence/metadata
+          cp "$RUNNER_TEMP/sdk-rev-apt.log" evidence/prerequisites.log
+      - name: Validate immutable diagnostic inputs
+        run: |
+          python3 - <<'PY'
+          import os
+          assert os.environ['BASE_SOURCE_SHA'] == '37f4315c553b9fc3807f2f173d9a0fae3f239ebc'
+          assert os.environ['CAPTURE_ATTEMPTS'] == '2'
+          PY
+      - name: Checkout pinned source into an isolated tree
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ env.BASE_SOURCE_SHA }}
+          path: source-base
+      - name: Fetch the exact published SDK from base
+        id: sdk
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/sdk-release.py fetch --binary-only --repo "$GITHUB_REPOSITORY" --directory downloaded-sdk --github-output "$GITHUB_OUTPUT" 2>&1 | tee evidence/sdk-rev-fetch.log
+      - name: Install and verify the published SDK
+        run: |
+          if [ '${{ steps.sdk.outputs.found }}' != true ]; then
+            echo '::error::The base release has no SDK matching this recipe.'
+            exit 1
+          fi
+          set -- downloaded-sdk/datapump-sdk-*-linux-x86_64.tar.gz
+          test "$#" -eq 1
+          python3 tools/build-sdk.py install --archive "$1" --destination "$GITHUB_WORKSPACE/source-base/build/sdk"
+          python3 tools/build-sdk.py verify "$GITHUB_WORKSPACE/source-base/build/sdk" --max-host-glibc 2.36
+      - name: Verify relocated SDK tools and private runtimes
+        run: |
+          python3 - <<'PY'
+          import json
+          import hashlib
+          import os
+          from pathlib import Path
+          import subprocess
+
+          root = (Path(os.environ['GITHUB_WORKSPACE']) / 'source-base/build/sdk').resolve()
+          manifest = json.loads((root / 'share/datapump-sdk/manifest.json').read_text())
+          manifest_path = root / 'share/datapump-sdk/manifest.json'
+          if hashlib.sha256(manifest_path.read_bytes()).hexdigest() != os.environ['EXPECTED_SDK_MANIFEST_SHA256']:
+              raise SystemExit('published SDK manifest differs from the pinned capture configuration')
+          runtimes = {'libstdc++.so.6', 'libgcc_s.so.1'}
+          for name in runtimes:
+              if not (root / 'lib' / name).is_file():
+                  raise SystemExit('SDK host runtime is missing: ' + name)
+          env = os.environ.copy()
+          for name in ('LD_LIBRARY_PATH', 'LD_PRELOAD', 'LD_AUDIT', 'LD_DEBUG'):
+              env.pop(name, None)
+          compiler = root / manifest['target']['cxx_compiler']
+          cc1plus = subprocess.check_output([str(compiler), '-print-prog-name=cc1plus'], env=env, text=True).strip()
+          python = root / 'bin/python3'
+          tools = [root / 'bin/cmake', root / 'bin/ninja', Path(cc1plus), python]
+          if (root / 'bin/patchelf').is_file():
+              tools.append(root / 'bin/patchelf')
+          for tool in tools:
+              if not tool.is_absolute() or not tool.is_file() or root not in tool.resolve().parents:
+                  raise SystemExit('SDK host tool missing/outside root: ' + str(tool))
+              result = subprocess.run(['ldd', str(tool)], env=env, text=True, capture_output=True, check=True)
+              if 'not found' in result.stdout:
+                  raise SystemExit('SDK host dependency missing: ' + result.stdout)
+              for line in result.stdout.splitlines():
+                  fields = line.split()
+                  if fields and fields[0] in runtimes:
+                      expected = (root / 'lib' / fields[0]).resolve()
+                      if len(fields) < 3 or fields[1] != '=>' or Path(fields[2]).resolve() != expected:
+                          raise SystemExit('SDK tool selected non-SDK C++ runtime: ' + str(tool) + '\n' + line)
+          python_paths = json.loads(subprocess.check_output([str(python), '-c',
+              'import json, pathlib, sys, sysconfig; print(json.dumps([sys.executable, sys.prefix, sys.base_prefix, sysconfig.get_path("stdlib")]))'], env=env, text=True))
+          for location in python_paths:
+              resolved = Path(location).resolve()
+              if resolved != root and root not in resolved.parents:
+                  raise SystemExit('SDK Python selected path outside installation: ' + location)
+          print('Verified relocated SDK Python and private C++ runtimes')
+          PY
+      - name: Verify and apply the pinned four-file causal diagnostic overlay
+        run: |
+          mkdir -p evidence/metadata
+          git -c safe.directory="$GITHUB_WORKSPACE/source-base" -C source-base rev-parse HEAD > evidence/metadata/base-source.txt
+          git -c safe.directory="$GITHUB_WORKSPACE" -C "$GITHUB_WORKSPACE" rev-parse HEAD > evidence/metadata/tool-source.txt
+          python3 tools/copied-help-probe/prepare.py --base source-base --record evidence/metadata/overlay.json
+      - name: Record source, SDK, package settings and command identities
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, subprocess
+          from pathlib import Path
+          workspace = Path(os.environ['GITHUB_WORKSPACE'])
+          base_repo = workspace / 'source-base'
+          base = subprocess.check_output(['git','-c','safe.directory='+str(base_repo),'-C',str(base_repo),'rev-parse','HEAD'],text=True).strip()
+          tool = subprocess.check_output(['git','-c','safe.directory='+str(workspace),'-C',str(workspace),'rev-parse','HEAD'],text=True).strip()
+          def record(path):
+              path = Path(path)
+              h = hashlib.sha256()
+              with path.open('rb') as stream:
+                  for chunk in iter(lambda:stream.read(1024*1024),b''):
+                      h.update(chunk)
+              return {'path':str(path),'size_bytes':path.stat().st_size,'sha256':h.hexdigest()}
+          sdk_archive = next((workspace/'downloaded-sdk').glob('datapump-sdk-*-linux-x86_64.tar.gz'))
+          source = {'base_commit':base,'tool_commit':tool,
+                    'overlay':json.loads((workspace/'evidence/metadata/overlay.json').read_text()),
+                    'sdk_manifest':record(workspace/'source-base/build/sdk/share/datapump-sdk/manifest.json'),
+                    'sdk_archive':record(sdk_archive),
+                    'package_build_command':'./build.sh package --tui --fb --web-worker --sdk "$GITHUB_WORKSPACE/source-base/build/sdk" --backend rev --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)"',
+                    'package_verify_command':'xvfb-run -a -s -screen 0 2400x1800x24 -dpi 96 source-base/build/sdk/bin/cmake -DARCHIVE_DIR=... -DBUILD_DIR=... -DGUI_SMOKE=OFF -DMAX_GLIBC=2.36 -DREQUIRE_MANUALS=ON -DREQUIRE_FRONTENDS=ON -P source-base/tools/verify-native-archives.cmake',
+                    'settings':{'container':'ubuntu:24.04','runner':'ubuntu-24.04','backend':'rev','LP_NUM_THREADS':os.environ['LP_NUM_THREADS'],'LIBGL_ALWAYS_SOFTWARE':os.environ['LIBGL_ALWAYS_SOFTWARE'],'instrumentation':'DATAPUMP_SMOKE_BINARY_CAPTURE=1; absolute new candidate journal and PCM directory per attempt','optimization':'SDK package default; no extra optimization or sanitizer switches','capture_attempts':int(os.environ['CAPTURE_ATTEMPTS']),'comparison':'enriched C failure capture only; independent inputs; no qualification or timing comparison; causal binding requires root review'}}
+          (workspace/'evidence/metadata/source-settings.json').write_text(json.dumps(source,indent=2,sort_keys=True)+'\n')
+          PY
+      - name: Build original portable Rev TGZ and verify package assertions
+        shell: bash
+        run: |
+          set -o pipefail
+          (
+            cd source-base
+            ./build.sh package --tui --fb --web-worker --sdk "$GITHUB_WORKSPACE/source-base/build/sdk" --backend rev --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)"
+          ) 2>&1 | tee evidence/package-build.log
+          xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
+            source-base/build/sdk/bin/cmake -DARCHIVE_DIR="$GITHUB_WORKSPACE/source-base/build/sdk-application/releases" \
+            -DBUILD_DIR="$GITHUB_WORKSPACE/source-base/build/sdk-application" -DGUI_SMOKE=OFF \
+            -DMAX_GLIBC=2.36 -DREQUIRE_MANUALS=ON -DREQUIRE_FRONTENDS=ON \
+            -P "$GITHUB_WORKSPACE/source-base/tools/verify-native-archives.cmake" \
+            2>&1 | tee evidence/package-verify.log
+      - name: Capture original copied-TGZ GUI smoke twice, stopping on first failure
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/products evidence/smokes
+          set -- source-base/build/sdk-application/releases/DataPump-*-native-rev.tar.gz
+          test "$#" -eq 1
+          cp "$1" evidence/products/
+          for attempt in 1 2; do
+            if [ "$attempt" -gt "$CAPTURE_ATTEMPTS" ]; then break; fi
+            python3 tools/copied-help-capture.py \
+              --archive evidence/products/"$(basename "$1")" \
+              --evidence "evidence/smokes/run-$attempt" --artifact-root evidence \
+              --scratch "$GITHUB_WORKSPACE/.copied-help-smoke-$attempt/offline destination with spaces" \
+              --attempt "$attempt" --base-commit "$BASE_SOURCE_SHA" \
+              --tool-commit "$GITHUB_SHA" --source-manifest evidence/metadata/source-settings.json
+          done
+      - name: Enforce diagnostic artifact byte bound without truncating failures
+        id: evidence_budget
+        if: always()
+        run: |
+          python3 - <<'PY_BUDGET'
+          import os
+          from pathlib import Path
+          files = list(Path('evidence').rglob('*'))
+          apt = Path(os.environ['RUNNER_TEMP']) / 'sdk-rev-apt.log'
+          if apt.exists():
+              files.append(apt)
+          regular = all(not path.is_symlink() for path in files)
+          size = sum(path.stat().st_size for path in files if path.is_file() and not path.is_symlink())
+          allowed = regular and size <= 600 * 1024 * 1024
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as stream:
+              stream.write('allowed=' + str(allowed).lower() + '\n')
+          print('Diagnostic artifact bytes:', size, 'allowed:', allowed)
+          if not allowed:
+              raise SystemExit('artifact exceeds bound or contains symlink; retaining local data, refusing oversized upload')
+          PY_BUDGET
+      - name: Upload bounded synthetic-only diagnostic evidence
+        if: always() && steps.evidence_budget.outputs.allowed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: copied-help-capture-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            evidence/
+            ${{ runner.temp }}/sdk-rev-apt.log
+          if-no-files-found: warn
+          compression-level: 0
+          retention-days: 14
+      - name: State diagnostic evidence limits
+        if: always()
+        run: |
+          echo 'Source37 copied Help diagnostic: original assertion exits remain fatal. Two independent 600-second smokes stop on first failure. Retained evidence and structural seals require causal readback; this run is not qualification, a timing comparison, or resolution of C.' >> "$GITHUB_STEP_SUMMARY"
