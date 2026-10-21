@@ -1,4 +1,5 @@
 #include "signal_view.hpp"
+#include "live_capture_monitor_probe.hpp"
 #include "datapump/streaming_modem.hpp"
 #include <algorithm>
 #include <cmath>
@@ -61,7 +62,13 @@ SignalPlots signal_plots(std::span<const float> samples,const modem::Config& con
             const auto window=waveform.size()<3?1.:.5-.5*std::cos(2*std::numbers::pi*static_cast<double>(i)/static_cast<double>(waveform.size()-1));
             bins[i]=static_cast<double>(waveform[i])*window; weight+=window;
         }
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+        capture_monitor_probe::mark(capture_monitor_probe::Phase::fft_begin);
+#endif
         fft(bins);
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+        capture_monitor_probe::mark(capture_monitor_probe::Phase::fft_end);
+#endif
         result.spectrum.reserve(signal_window_size/2+1);
         result.spectrum_complex.reserve(signal_window_size/2+1);
         for (std::size_t i=0;i<=signal_window_size/2;++i) {
@@ -69,6 +76,9 @@ SignalPlots signal_plots(std::span<const float> samples,const modem::Config& con
             result.spectrum.push_back(20*std::log10(std::max(1e-12,std::abs(bins[i])*factor/std::max(1.,weight))));
             result.spectrum_complex.emplace_back(bins[i]*factor/std::max(1.,weight));
         }
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+        capture_monitor_probe::mark(capture_monitor_probe::Phase::outputs_ready);
+#endif
     }
     if(view==SignalView::environment)return result;
     const auto chip=integration_samples(samples.size(),config);
@@ -116,6 +126,9 @@ SignalPlots SignalWindow::frame(const modem::Config& config,SignalView view) con
     std::vector<float> ordered(size_);
     const auto first=(next_+samples_.size()-size_)%samples_.size();
     for (std::size_t i=0;i<size_;++i) ordered[i]=samples_[(first+i)%samples_.size()];
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+    capture_monitor_probe::mark(capture_monitor_probe::Phase::ordered_ready);
+#endif
     return signal_plots(ordered,config,total_-size_,view);
 }
 }

@@ -7,6 +7,7 @@
 #include "live_mutex_probe.hpp"
 #include "live_snapshot_probe.hpp"
 #include "live_snapshot_copy.hpp"
+#include "live_capture_monitor_probe.hpp"
 #include "receiver_storage_allocator.hpp"
 #include "native_peak_workspace.hpp"
 #include "native_point_workspace.hpp"
@@ -1115,8 +1116,19 @@ struct Session::Impl {
     void publish_monitor(const detail::SignalWindow& window, const modem::Config& config,
                          std::uint64_t version, Clock::time_point& last_plot) {
         if(Clock::now()-last_plot<std::chrono::milliseconds(50))return;
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+        capture_monitor_probe::mark(capture_monitor_probe::Phase::frame_start);
+        {
+#endif
         auto measured=window.frame(config,detail::SignalView::environment);
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+        capture_monitor_probe::mark(capture_monitor_probe::Phase::frame_ready);
+        {
+#endif
         std::lock_guard lock(mutex);
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+        capture_monitor_probe::mark(capture_monitor_probe::Phase::lock_acquired);
+#endif
         if(!current.running || generation!=version)return;
         publish_spectrum_metadata(measured,static_cast<double>(config.sample_rate)/plot_size,
             std::numeric_limits<std::uint64_t>::max());
@@ -1127,6 +1139,13 @@ struct Session::Impl {
         current.dsp_buffered_bytes=receiver_bytes+queue_storage_bytes()+decoding_bytes+audio_bytes+plot_workspace(settings)+
             (tx_busy?settings.dsp_workspace_bytes/4:0);
         ++current.spectrum_revision;++current.sequence;last_plot=Clock::now();
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+        capture_monitor_probe::mark(capture_monitor_probe::Phase::published);
+        }
+        capture_monitor_probe::mark(capture_monitor_probe::Phase::lock_released);
+        }
+        capture_monitor_probe::mark(capture_monitor_probe::Phase::frame_destroyed);
+#endif
     }
     static std::uint64_t replay_target(const Prepared& wave) {
         const auto samples = wave.transmitter->total_samples();
@@ -4319,13 +4338,26 @@ struct Session::Impl {
                     raw_seconds=logical_seconds=0;raw_end_epoch.reset();logical_origin.reset();timed_chunk.reset();
                 };
                 capture_options.capture_monitor=[&](std::span<const float> raw,std::uint32_t rate) {
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+                    capture_monitor_probe::Observation monitor_observation(
+                        monitor_window?monitor_window->samples_seen():0,raw.size());
+#endif
                     DATAPUMP_MUTEX_CONTEXT(mutex_context,monitor);
                     if(raw.empty())return;
                     raw_end_epoch=current_epoch();
                     raw_seconds+=static_cast<long double>(raw.size())/rate;
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+                    capture_monitor_probe::mark(capture_monitor_probe::Phase::epoch);
+#endif
                     if(!monitor_window)return;
                     monitor_window->push(raw);
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+                    capture_monitor_probe::mark(capture_monitor_probe::Phase::push);
+#endif
                     auto config=value.transfer.modem;config.sample_rate=rate;
+#if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
+                    capture_monitor_probe::mark(capture_monitor_probe::Phase::config);
+#endif
                     publish_monitor(*monitor_window,config,version,last_monitor);
                     monitor_seen=true;
                 };

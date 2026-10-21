@@ -8,6 +8,7 @@
 #include "paced_capture_probe.hpp"
 #include "../src/live_mutex_probe.hpp"
 #include "../src/live_snapshot_probe.hpp"
+#include "../src/live_capture_monitor_probe.hpp"
 #include "snapshot_holder_os_probe.hpp"
 
 #include <algorithm>
@@ -883,6 +884,7 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
     const auto cpu_start=std::clock();
     live::mutex_probe::Scope mutex_scope(mutex_probe);
     live::snapshot_probe::Scope snapshot_scope(snapshot_probe);
+    live::capture_monitor_probe::Scope monitor_scope(snapshot_probe);
     std::unique_ptr<snapshot_holder_os_probe::Probe> snapshot_os;
     if(snapshot_probe) snapshot_os=std::make_unique<snapshot_holder_os_probe::Probe>(true,[&]() -> std::optional<snapshot_holder_os_probe::Owner> {
         const auto* state=snapshot_scope.state();
@@ -893,6 +895,18 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
         const auto acquired=state->owner_acquired_ns.load(std::memory_order_relaxed);
         if(serial!=state->owner_serial.load(std::memory_order_acquire))return {};
         return snapshot_holder_os_probe::Owner{serial,tid,acquired};
+    });
+    std::unique_ptr<snapshot_holder_os_probe::Probe> monitor_os;
+    if(snapshot_probe) monitor_os=std::make_unique<snapshot_holder_os_probe::Probe>(true,[&]() -> std::optional<snapshot_holder_os_probe::Owner> {
+        const auto* state=monitor_scope.state();
+        if(!state)return {};
+        const auto serial=state->owner_serial.load(std::memory_order_acquire);
+        if(!serial)return {};
+        const auto tid=state->owner_tid.load(std::memory_order_relaxed);
+        const auto start=state->owner_acquired_ns.load(std::memory_order_relaxed);
+        if(serial!=state->owner_serial.load(std::memory_order_acquire))return {};
+        // This is the measured callback interval, not a mutex ownership claim.
+        return snapshot_holder_os_probe::Owner{serial,tid,start};
     });
     CaptureScript capture(probe);
     struct Reset {~Reset(){capture_script=nullptr;}} reset;
@@ -1161,6 +1175,7 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
     catch(...){cleanup_error="unknown cleanup exception";}
     session.reset(); // Also join the provider if explicit stop reported an error.
     if(snapshot_os)snapshot_os->stop();
+    if(monitor_os)monitor_os->stop();
     const auto elapsed=std::chrono::duration<double>(Steady::now()-wall_start).count();
     if(elapsed>570.&&failure.empty())failure="paced fixture exceeded its 570-second internal wall bound including cleanup";
     if(!cleanup_error.empty()&&failure.empty())failure="paced fixture cleanup failed";
@@ -1275,6 +1290,9 @@ void paced_burst_case(std::string_view selector,bool keyed,bool burst_on,bool di
     std::cout<<",\"snapshot_probe\":";live::snapshot_probe::emit_json(std::cout,snapshot_scope);
     std::cout<<",\"snapshot_os_probe\":";
     if(snapshot_os)snapshot_os->emit_json(std::cout);else std::cout<<"{\"enabled\":false}";
+    std::cout<<",\"capture_monitor_probe\":";live::capture_monitor_probe::emit_json(std::cout,monitor_scope);
+    std::cout<<",\"capture_monitor_os_probe\":";
+    if(monitor_os)monitor_os->emit_json(std::cout);else std::cout<<"{\"enabled\":false}";
     std::cout<<",\"snapshot_clock_origin_monotonic_ns\":"<<std::chrono::duration_cast<std::chrono::nanoseconds>(wall_start.time_since_epoch()).count()
         <<",\"slow_snapshots\":[";
     for(std::size_t i=0;i<slow_snapshot_count;++i) {if(i)std::cout<<',';sample_json(slow_snapshots[i]);}

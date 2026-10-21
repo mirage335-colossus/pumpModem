@@ -951,7 +951,7 @@ jobs:
               ['git', '-c', 'safe.directory=' + str(root), 'status', '--porcelain=v1', '--untracked-files=all'],
               cwd=root, text=True)
           assert not status, f'focused qualification requires a clean source checkout: {status!r}'
-          paths = ('CMakeLists.txt', 'src/live.cpp', 'src/live_snapshot_copy.hpp',
+          paths = ('CMakeLists.txt', 'src/live.cpp', 'src/signal_view.cpp', 'src/live_capture_monitor_probe.hpp', 'src/live_snapshot_copy.hpp',
                    'tests/test_live_snapshot_copy.cpp', 'tests/test_symbol_burst_live.cpp', 'tests/cpu_work_budget.hpp')
           source_inventory = {
               'source_commit': source,
@@ -2098,7 +2098,9 @@ jobs:
               'snapshot_probe_source_sha256': hashlib.sha256((root / 'src/live_snapshot_probe.hpp').read_bytes()).hexdigest() if os.environ.get('PACED_SNAPSHOT_FOCUS') == 'true' else None,
               'os_sampler_source_sha256': hashlib.sha256((root / 'tests/snapshot_holder_os_probe.hpp').read_bytes()).hexdigest() if os.environ.get('PACED_SNAPSHOT_FOCUS') == 'true' else None,
               'live_source_sha256': hashlib.sha256((root / 'src/live.cpp').read_bytes()).hexdigest(),
-              'comparison': 'two sequential matched baseline/probe pairs; same binary, selector, PCM and original pacing bound',
+              'monitor_source_sha256': hashlib.sha256((root / 'src/live_capture_monitor_probe.hpp').read_bytes()).hexdigest(),
+              'signal_view_source_sha256': hashlib.sha256((root / 'src/signal_view.cpp').read_bytes()).hexdigest(),
+              'comparison': 'sequential matched baseline/probe pairs; same binary, selector, PCM and original pacing bound',
               'qualification': False,
               'diagnostic_route': 'paced-snapshot-focus' if os.environ.get('PACED_SNAPSHOT_FOCUS') == 'true' else 'paced-mutex-focus' if os.environ.get('PACED_MUTEX_FOCUS') == 'true' else 'paced-callback-probe',
           }
@@ -2110,7 +2112,7 @@ jobs:
               raise SystemExit('mutex focus requires the compile-time observer; no qualification run is implied')
           if snapshot_focus and ('DATAPUMP_LIVE_SNAPSHOT_PROBE:BOOL=ON' not in cache_text or 'DATAPUMP_LIVE_MUTEX_PROBE:BOOL=OFF' not in cache_text):
               raise SystemExit('Snapshot focus must retain the ordinary mutex and enable only named phase hooks')
-          pairs = (False, True, False, True)
+          pairs = (False, True, False, True, False, True) if snapshot_focus else (False, True, False, True)
           for index, enabled in enumerate(pairs, 1):
               stem = f'{index:02d}-' + ('probe' if enabled else 'baseline')
               command = [str(binary), '--paced-held-keyed-on']
@@ -2223,6 +2225,15 @@ jobs:
                               all(row.get('present') in (retry_mask, 511) for row in snapshot_value.get('records', [])) and
                               snapshot_os.get('enabled') is True and snapshot_os.get('supported') is True and
                               snapshot_os.get('stopped') is True and snapshot_os.get('reader_errors') == 0 and snapshot_os.get('dropped') == 0))
+              monitor_value = summary.get('capture_monitor_probe', {}) if summary else {}
+              monitor_os = summary.get('capture_monitor_os_probe', {}) if summary else {}
+              monitor_boundary_mask = (1 << 0) | (1 << 14)
+              monitor_ok = (not snapshot_focus or not enabled or
+                            (monitor_value.get('enabled') is True and monitor_value.get('dropped') == 0 and
+                             all((row.get('present', 0) & monitor_boundary_mask) == monitor_boundary_mask
+                                 for row in monitor_value.get('records', [])) and
+                             monitor_os.get('enabled') is True and monitor_os.get('supported') is True and
+                             monitor_os.get('stopped') is True and monitor_os.get('reader_errors') == 0 and monitor_os.get('dropped') == 0))
               result = {'index': index, 'probe_enabled': enabled, 'command': command,
                         'started_utc': started, 'elapsed_seconds': process_elapsed,
                         'exit_code': code, 'timed_out': timed_out, 'launch_error': launch_error,
@@ -2230,7 +2241,7 @@ jobs:
                         'stdout_sha256': hashlib.sha256(out.read_bytes()).hexdigest(),
                         'stderr_sha256': hashlib.sha256(err.read_bytes()).hexdigest(),
                         'mutex_mapping': mutex_mapping, 'mapping_complete': mapping_ok,
-                        'snapshot_capture_complete': snapshot_ok}
+                        'snapshot_capture_complete': snapshot_ok, 'monitor_capture_complete': monitor_ok}
               (report / (stem + '.json')).write_text(json.dumps(result, indent=2) + '\n')
               results.append(result)
           (report / 'results.json').write_text(json.dumps({'identity': identity, 'results': results}, indent=2) + '\n')
@@ -2246,7 +2257,7 @@ jobs:
                  row['summary'].get('pacing_valid') is not True or
                  row['summary'].get('callback_probe', {}).get('enabled') is not row['probe_enabled'] or
                  (focus and row['probe_enabled'] and row['summary'].get('mutex_probe', {}).get('enabled') is not True) or
-                 not row['mapping_complete'] or not row['snapshot_capture_complete'] for row in results):
+                 not row['mapping_complete'] or not row['snapshot_capture_complete'] or not row['monitor_capture_complete'] for row in results):
               raise SystemExit('FATAL: callback comparison contains a failed/incomplete run or incomplete holder mapping; inspect exact retained process results')
           PY_CALLBACK_PROBE
       - name: Capture six sequential fixed-bank acquisition partition replays
