@@ -1,3 +1,16 @@
+# Current candidate fidelity continuation
+
+The current adapter now pins application **5e36891bba8677dc4687488f36961d4ed2b77b03**
+for the same failed default-origin fixture, following the original4e first-loss
+census39558538896. This is the same Sol-owned assignment and diagnostic route;
+its historical framed-4e-census route/directory label does not identify the
+current source. Current manifest and prepared-source identities govern.
+The only production behavior change is the reviewed minimum bit-storage row
+selection condition; every assertion, original40/120deadline, health gate,
+physical absence and source integrity check remains. Observer OFF/ON share the
+same candidate ELF, filtering and input witnesses. Below is retained original
+4e recipe/provenance; its old baseline statements are historical.
+
 # Fixed-origin first-loss adapter for current 4e90487
 
 Parent assignment remains `instrumented-gui-core-failures-20261018`. This is a

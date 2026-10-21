@@ -9,7 +9,7 @@ from pathlib import Path, PurePosixPath
 import tempfile
 
 HERE=Path(__file__).resolve().parent
-COMMIT='4e9048748e8d34ca4f90ef1dd01bd8d4588759b2'
+COMMIT='5e36891bba8677dc4687488f36961d4ed2b77b03'
 ORIGIN=1792561396.3857498
 ALLOWED={'src/live.cpp','src/pattern_receiver.cpp','src/pattern_correlator.cpp',
          'src/audio_trace.hpp','src/first_transition_probe.hpp','src/receiver_storage_allocator.hpp','tests/test_live.cpp'}

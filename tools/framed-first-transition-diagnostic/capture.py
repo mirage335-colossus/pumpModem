@@ -141,7 +141,7 @@ def capture(root: Path, source_root: Path, compiled_source: Path, adapter: Path,
     report.mkdir(parents=True, exist_ok=False)
     manifest_path=compiled_source/"evidence"/"manifest.json"
     manifest=json.loads(manifest_path.read_text())
-    if manifest.get("schema")!=1 or manifest.get("baseline_source_commit")!="4e9048748e8d34ca4f90ef1dd01bd8d4588759b2" or manifest.get("fixed_origin")!=1792561396.3857498 or manifest.get("applied") is not True:
+    if manifest.get("schema")!=1 or manifest.get("baseline_source_commit")!="5e36891bba8677dc4687488f36961d4ed2b77b03" or manifest.get("fixed_origin")!=1792561396.3857498 or manifest.get("applied") is not True:
         raise ValueError("adapter manifest/source/origin not bound")
     source_before = inventory(source_root)
     cache = binary.parent / "CMakeCache.txt"
@@ -174,7 +174,7 @@ def capture(root: Path, source_root: Path, compiled_source: Path, adapter: Path,
     record = {
         "schema": 1,
         "workflow_run":{"id":os.environ.get("GITHUB_RUN_ID"),"attempt":os.environ.get("GITHUB_RUN_ATTEMPT"),"workflow_source":os.environ.get("GITHUB_SHA"),"runner_os":os.environ.get("RUNNER_OS"),"runner_arch":os.environ.get("RUNNER_ARCH")},
-        "baseline_application_source":"4e9048748e8d34ca4f90ef1dd01bd8d4588759b2",
+        "baseline_application_source":"5e36891bba8677dc4687488f36961d4ed2b77b03",
         "scope": "matched census-off/on first-transition diagnostic using current 4e904874 source",
         "classification": "diagnostic variant; never qualification",
         "input_origin": {"expected": "1792561396.3857498", "adapter_manifest_verified": True,

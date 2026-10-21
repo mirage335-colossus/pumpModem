@@ -949,9 +949,9 @@ jobs:
         if: inputs.scope == 'simulation-first-transition-diagnostic' && inputs.stop_group == 'framed-4e-census'
         run: |
           set -euo pipefail
-          git -c safe.directory="$PWD" fetch --no-tags --depth=1 origin 4e9048748e8d34ca4f90ef1dd01bd8d4588759b2
+          git -c safe.directory="$PWD" fetch --no-tags --depth=1 origin 5e36891bba8677dc4687488f36961d4ed2b77b03
           mkdir -p build/current-4e-source
-          git -c safe.directory="$PWD" archive 4e9048748e8d34ca4f90ef1dd01bd8d4588759b2 | tar -x -C build/current-4e-source
+          git -c safe.directory="$PWD" archive 5e36891bba8677dc4687488f36961d4ed2b77b03 | tar -x -C build/current-4e-source
           mkdir -p build/first-transition-source
           cp -a build/current-4e-source build/first-transition-source/source
           python3 -B tools/framed-first-transition-diagnostic/prepare.py \

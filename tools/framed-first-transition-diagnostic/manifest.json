@@ -1,5 +1,5 @@
 {
-  "baseline_source_commit": "4e9048748e8d34ca4f90ef1dd01bd8d4588759b2",
+  "baseline_source_commit": "5e36891bba8677dc4687488f36961d4ed2b77b03",
   "files": {
     "src/audio_trace.hpp": {
       "after_sha256": "424d0352f48a2b73a02280798994a1de5fbe3d261fc21d71bb3e8ac92a60e6b9",
@@ -22,8 +22,8 @@
       "payloadpath": "payload/src/pattern_correlator.cpp"
     },
     "src/pattern_receiver.cpp": {
-      "after_sha256": "cb834ab0f89371d4c619618eb6b450d916f86e24cc055b4b34067d83d7d377ad",
-      "before_sha256": "43b6277c0e54f615bee1755657b983119136df63d57a6531bda4cc0c29c73666",
+      "after_sha256": "1d354adbb2cc39e94af46235e59d0facac137ee97c6fa45aa4bdbe58e3c2f7d7",
+      "before_sha256": "129f58767eec9ad383d0d9693f1a55b83c7f420a711711c9c7fc0f61a45ff4a6",
       "payloadpath": "payload/src/pattern_receiver.cpp"
     },
     "src/receiver_storage_allocator.hpp": {
@@ -311,7 +311,7 @@
     "src/pattern_permutation_cache.hpp": "77ec79cfeafc3336816d921392028a0865ff9435b7c4417cd437474436fc9e43",
     "src/pattern_physical_moment_cache.hpp": "49e8309e1162970ea17d6766a9833687070bbf939c08a29f259d8dfed89bb1e6",
     "src/pattern_projection_cache.hpp": "5ec96963e9c284028105f3af4330bddf309f2f5c570bf39ce7a56cd15dab6ae3",
-    "src/pattern_receiver.cpp": "43b6277c0e54f615bee1755657b983119136df63d57a6531bda4cc0c29c73666",
+    "src/pattern_receiver.cpp": "129f58767eec9ad383d0d9693f1a55b83c7f420a711711c9c7fc0f61a45ff4a6",
     "src/pattern_search.cpp": "cb781547a99044303e3c96b70c8c42a27450d4d13bf765841189dfd3227de59e",
     "src/pattern_shared_source_curve.hpp": "e75ec3011212d5a44f7c773881023bb29c867d0dc7a6dcc5280e13a73710d958",
     "src/pattern_start_geometry.hpp": "b8da96d6f5f7d4646a74acd7c8e90c5c6479007c614862378395bd70a1b2d42c",
@@ -655,7 +655,7 @@
     "tests/test_pattern_shared_source_curve.cpp": "d9e64f877f79dd2191a6c317f3fcea50e14aeb8fc75ebfd37d88246c4ac38c9a",
     "tests/test_pattern_space.cpp": "3ee1a9f4c18f925865007dedf1e34d06003cba94b2804c6470e223bee183bcf4",
     "tests/test_pattern_start_geometry.cpp": "ed39bfb2512fa0582826a7e2181b3300c044af967b829661e28d67c9e8ae43d0",
-    "tests/test_pattern_startup_guide.cpp": "60724a09ff40532415d7f0c80a33e7454db309563cab441d4d32d3caf0d4857c",
+    "tests/test_pattern_startup_guide.cpp": "5a34ad51feb18e590a578f820c608cf611c8808cc8ed7fc3b2c26279e0a6725e",
     "tests/test_pattern_transfer.cpp": "ff797cc52e5d1c3c1a929acea76cb91ddd77a262b720f5e6319c5d719dbde0a7",
     "tests/test_physical_moment_cache.cpp": "c410a1147930bbbf5a54c1ab665fa385aa2fbb31cf19cc188705e53d456d1ea6",
     "tests/test_preview.py": "49b78550b9070fa3a11160c1840260b5f5e07b3f175ff178e327373e9de008b0",
@@ -856,7 +856,7 @@
     "tests/winmm_stub/mmsystem.h": "aca8843249b382056adeb0df254189a41064c31dc57e3566e4a50e4175568e3e",
     "tests/winmm_stub/windows.h": "dc10472193822d3a16f6e2a7c8818d1d81b941655b3646833a0ddf851b6d7df2"
   },
-  "input_source_inventory_sha256": "7fe8853504779d33e90406c3c9c8dc8bc30b76655112220539423df98e0785e1",
+  "input_source_inventory_sha256": "38b5ab585e145d768a0c4df659c236ef716fbd3f5e626ea7b050563e9e7fb4df",
   "schema": 1,
-  "source_inventory_sha256": "2f0d88cb9f346badd36ee5df908aea32757951b33167324c6f145cd3e6557468"
+  "source_inventory_sha256": "bb170ee0f808d841760a135181fc8f736f411faca1c188f9f216446c4d63af69"
 }
