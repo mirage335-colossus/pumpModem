@@ -62,7 +62,7 @@ struct PatternReceiverStartupGuideTestAccess {
             s.peaks.capacity()>=2,"startup guide test lost its exact original cohorts/storage");
         s.trials=s.acquisition_trials(initial);
         PatternEvidence first{s.bin_samples,(1+s.length)*s.bin_samples,0,c.carrier_hz,s.threshold()+.25,1,0,c.stream_phase_samples};
-        s.admit(first,0,first.score);
+        s.admit(first,0,first.score,std::stop_token{});
         s.next_start=initial;s.sample=(initial+s.hop-1+s.length)*s.bin_samples;s.bins=s.sample/s.bin_samples;
         check(s.startup_guide_owner(s.hop,false),"actual first-bit publication did not qualify the startup witness");
         return receiver;

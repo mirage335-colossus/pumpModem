@@ -21,7 +21,7 @@ on:
       stop_group:
         description: Temporary matched stop experiment group; diagnostic only
         type: choice
-        options: [original, eu, fcc, eu-offset, eu-guard, eu-position, eu-o0-san-on, eu-o1-san-off, eu-o0-san-off, eu-focus-o1-san-on, eu-focus-o0-san-on, eu-focus-o1-san-off, eu-focus-o0-san-off, eu-kernel-o1-san-on, eu-kernel-o1-san-off, eu-clock-o1-san-on, eu-worker-one-o1-san-on]
+        options: [original, eu, fcc, eu-offset, eu-guard, eu-position, eu-o0-san-on, eu-o1-san-off, eu-o0-san-off, eu-focus-o1-san-on, eu-focus-o0-san-on, eu-focus-o1-san-off, eu-focus-o0-san-off, eu-kernel-o1-san-on, eu-kernel-o1-san-off, eu-clock-o1-san-on, eu-worker-one-o1-san-on, framed-4e-census]
         default: original
       calibration_section:
         description: 'Calibration section; used only by the calibration scope'
@@ -116,7 +116,7 @@ jobs:
     uses: ./.github/workflows/fft-normalization-diagnostic.yml
   native:
     if: inputs.scope != 'fft-kernel-diagnostic' && inputs.scope != 'fft-normalization-diagnostic'
-    name: Linux ${{ inputs.build_type }} / ${{ inputs.scope }} / ${{ inputs.calibration_section }}${{ inputs.calibration_shard != '' && format(' / part {0}', inputs.calibration_shard) || '' }}${{ inputs.scope == 'gui-stop-differential' && format(' / {0}', inputs.stop_group) || '' }}
+    name: Linux ${{ inputs.build_type }} / ${{ inputs.scope }} / ${{ inputs.calibration_section }}${{ inputs.calibration_shard != '' && format(' / part {0}', inputs.calibration_shard) || '' }}${{ (inputs.scope == 'gui-stop-differential' || (inputs.scope == 'simulation-first-transition-diagnostic' && inputs.stop_group == 'framed-4e-census')) && format(' / {0}', inputs.stop_group) || '' }}
     runs-on: ${{ inputs.linux_runner }}
     # Preserve the portable application's glibc 2.35 baseline in every shard.
     container: ubuntu:22.04
@@ -152,6 +152,11 @@ jobs:
         if: inputs.scope == 'gui-stop-current-wave' && (github.event_name != 'workflow_dispatch' || inputs.build_type != 'Debug' || inputs.linux_runner != 'ubuntu-24.04')
         run: |
           echo '::error::The current-wave GUI stop capture requires manual Debug on ubuntu-24.04.'
+          exit 2
+      - name: Restrict the framed census marker
+        if: always() && inputs.stop_group == 'framed-4e-census' && inputs.scope != 'simulation-first-transition-diagnostic'
+        run: |
+          echo '::error::The framed census marker requires its manual first-transition diagnostic scope.'
           exit 2
       - name: Restrict the first-transition diagnostic
         if: inputs.scope == 'simulation-first-transition-diagnostic' && (github.event_name != 'workflow_dispatch' || inputs.build_type != 'Debug' || inputs.linux_runner != 'ubuntu-24.04')
@@ -936,10 +941,22 @@ jobs:
           --report "$PWD/build/native-peak-lease-diagnostic"
           --patch "$PWD/tools/capacity-shape-diagnostic/peak-lease/native-peak-lease.patch"
       - name: Prepare isolated first-transition diagnostic source
-        if: inputs.scope == 'simulation-first-transition-diagnostic'
+        if: inputs.scope == 'simulation-first-transition-diagnostic' && inputs.stop_group != 'framed-4e-census'
         run: |
           git -c safe.directory="$PWD" fetch --no-tags --depth=1 origin e25748f07be9ec96e8e7f859228f72289ea675ec
           python3 -B tools/first-transition-diagnostic/sourceprep.py --root "$PWD" --overlay-dir "$PWD/tools/first-transition-diagnostic/overlay" --output "$PWD/build/first-transition-source"
+      - name: Prepare current-source framed first-transition diagnostic
+        if: inputs.scope == 'simulation-first-transition-diagnostic' && inputs.stop_group == 'framed-4e-census'
+        run: |
+          set -euo pipefail
+          git -c safe.directory="$PWD" fetch --no-tags --depth=1 origin 4e9048748e8d34ca4f90ef1dd01bd8d4588759b2
+          mkdir -p build/current-4e-source
+          git -c safe.directory="$PWD" archive 4e9048748e8d34ca4f90ef1dd01bd8d4588759b2 | tar -x -C build/current-4e-source
+          mkdir -p build/first-transition-source
+          cp -a build/current-4e-source build/first-transition-source/source
+          python3 -B tools/framed-first-transition-diagnostic/prepare.py \
+            --source-root "$PWD/build/first-transition-source/source" \
+            --output-dir "$PWD/build/first-transition-source/evidence"
       - name: Configure native application and selected test scope
         run: >-
           cmake -S "${{ inputs.scope == 'simulation-first-transition-diagnostic' && 'build/first-transition-source/source' || inputs.scope == 'native-peak-lease-diagnostic' && 'build/native-peak-lease-source' || (inputs.scope == 'simulation-clock-chain-score-diagnostic' && 'build/raw-chain-source' || (inputs.scope == 'simulation-owner-census-diagnostic' && 'build/owner-census-source' || ((inputs.scope == 'simulation-capacity-shape-diagnostic' || inputs.scope == 'simulation-acquisition-partition-diagnostic') && 'build/capacity-shape-source' || '.'))) }}" -B build -G Ninja -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11
@@ -2540,7 +2557,7 @@ jobs:
         if: inputs.scope == 'simulation-clock-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic'
         run: echo 'This focused simulation media clock diagnostic does not replace the complete Live test scope.' >> "$GITHUB_STEP_SUMMARY"
       - name: Capture original Live first-transition census
-        if: inputs.scope == 'simulation-first-transition-diagnostic' && !cancelled() && steps.build_prerequisites.outcome == 'success'
+        if: inputs.scope == 'simulation-first-transition-diagnostic' && inputs.stop_group != 'framed-4e-census' && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 12
         run: >-
           python3 -B tools/first-transition-diagnostic/capture.py
@@ -2548,6 +2565,20 @@ jobs:
           --compiled-source "$PWD/build/first-transition-source"
           --binary "$PWD/build/test_live"
           --report "$PWD/build/simulation-first-transition-diagnostics/capture"
+      - name: Capture matched current-source first-transition census cases
+        if: inputs.scope == 'simulation-first-transition-diagnostic' && inputs.stop_group == 'framed-4e-census' && !cancelled() && steps.build_prerequisites.outcome == 'success'
+        timeout-minutes: 25
+        run: >-
+          python3 -B tools/framed-first-transition-diagnostic/capture.py
+          --root "$PWD"
+          --source-root "$PWD/build/current-4e-source"
+          --compiled-source "$PWD/build/first-transition-source"
+          --adapter "$PWD/tools/framed-first-transition-diagnostic/prepare.py"
+          --binary "$PWD/build/test_live"
+          --report "$PWD/build/simulation-first-transition-diagnostics/framed-4e-census"
+      - name: Mark framed census comparison diagnostic only
+        if: inputs.scope == 'simulation-first-transition-diagnostic' && inputs.stop_group == 'framed-4e-census'
+        run: echo 'Matched census-off/on processes use the exact archived 4e904874 source, the adapter-pinned original input origin, the same instrumented test_live ELF, and unchanged per-case assertions/deadlines. This current-source variant health diagnostic is not qualification.' >> "$GITHUB_STEP_SUMMARY"
       - name: Run default and explicitly traced simulation clock diagnostics
         if: (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic'))
         timeout-minutes: ${{ inputs.scope == 'simulation-clock-geometry-diagnostic' && 35 || 25 }}
@@ -3020,6 +3051,9 @@ jobs:
             build/simulation-clock-diagnostics/
             build/simulation-clock-trace-diagnostics/
             build/simulation-first-transition-diagnostics/
+            ${{ inputs.scope == 'simulation-first-transition-diagnostic' && inputs.stop_group == 'framed-4e-census' && 'build/current-4e-source/' || '' }}
+            ${{ inputs.scope == 'simulation-first-transition-diagnostic' && inputs.stop_group == 'framed-4e-census' && 'build/first-transition-source/' || '' }}
+            ${{ inputs.scope == 'simulation-first-transition-diagnostic' && inputs.stop_group == 'framed-4e-census' && 'build/test_live' || '' }}
             build/first-transition-source/prepared-source.json
             build/first-transition-source/source-inventory.json
             build/first-transition-source/overlay-input-manifest.json
