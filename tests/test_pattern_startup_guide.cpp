@@ -89,6 +89,57 @@ struct PatternReceiverStartupGuideTestAccess {
         const auto before=snapshot(s);check(!s.adopt_startup_guide(s.hop,false),name);
         check(snapshot(s)==before,"refused startup guide mutated receiver state");
     }
+    static std::unique_ptr<PatternReceiver> storage_fixture(std::size_t bytes) {
+        auto c=datapump::tuning::resolve(1,-3.0720996964786846,datapump::tuning::PatternMode::auto_pattern,false,1500).config;
+        c.integration_seconds=128;c.stream_epoch=1800000041;c.receiver_strategy=ReceiverStrategy::existing_only;
+        PatternSearch search;search.hypotheses={{0,-.0003},{1.75,.0003}};
+        search.worker_threads=1;search.chunk_bits=1;search.track_limit=16;search.candidate_limit=8;
+        search.drift_tolerant=false;
+        return std::make_unique<PatternReceiver>(c,bytes,search);
+    }
+    static void storage_boundary() {
+        auto roomy=storage_fixture(8*1024*1024);auto& reference=*roomy->impl_;
+        check(!reference.fallback && !reference.streamed_templates && reference.templates.size()==2,
+            "storage fixture did not retain the optional transformed template rows");
+        const auto row_bytes=2*reference.templates.size()*reference.transform*sizeof(Complex);
+        check(row_bytes>0 && reference.fixed_reservation>row_bytes,
+            "storage fixture did not expose fixed rows and transformed template rows separately");
+        const auto full_fixed=reference.fixed_reservation;
+        const auto minimum=2*reference.search.track_limit+2;
+        check(minimum>0,"storage fixture has no minimum bit-candidate allowance");
+
+        for(const int offset:{-1,0,1}) {
+            const auto allowance=static_cast<std::size_t>(static_cast<std::ptrdiff_t>(minimum)+offset);
+            check(full_fixed<=std::numeric_limits<std::size_t>::max()-allowance,
+                "storage fixture grant arithmetic overflowed");
+            const auto grant=full_fixed+allowance;
+            std::unique_ptr<PatternReceiver> receiver;
+            try { receiver=storage_fixture(grant); }
+            catch(const Error& error) {
+                if(offset==-1 && std::string(error.what())=="pattern workspace cannot retain bit candidates")
+                    throw Error("optional rows were retained at the subminimum bit-storage boundary");
+                throw;
+            }
+            auto& state=*receiver->impl_;
+            check(!state.fallback && !state.local_search_fallback,
+                "storage boundary reduced coverage through a local-clock fallback");
+            check(state.search.hypotheses.size()==2 && state.search.frequency_offsets_hz.size()==2 &&
+                state.search.hypotheses[0].frequency_offset_hz==0 && state.search.hypotheses[0].clock_error_ppm==-.0003 &&
+                state.search.hypotheses[1].frequency_offset_hz==1.75 && state.search.hypotheses[1].clock_error_ppm==.0003,
+                "storage boundary dropped or changed a configured frequency/rate hypothesis");
+            check(state.search.bit_limit>0 && state.working_bytes()<=grant,
+                "storage boundary did not retain positive bit capacity within its grant");
+            check(state.streamed_templates==(offset<0),
+                "optional template rows did not stream only below the minimum cached bit allowance");
+            if(offset<0) {
+                check(state.fixed_reservation<full_fixed && state.fixed_reservation+minimum<=grant,
+                    "streamed fixed reservation did not leave the minimum bit-candidate allowance");
+            } else {
+                check(state.fixed_reservation==full_fixed && grant-state.fixed_reservation>=minimum,
+                    "sufficient cached bit allowance changed the fixed reservation");
+            }
+        }
+    }
     static void run() {
         auto rx=make();auto& s=*rx->impl_;const auto memory=s.working_bytes();collect(s);
         const auto published=publication(s);const auto old=s.tracks.front();const auto span=s.completed.front();
@@ -169,5 +220,5 @@ struct PatternReceiverStartupGuideTestAccess {
     }
 };
 }
-int main(){try{datapump::modem::PatternReceiverStartupGuideTestAccess::run();return 0;}
+int main(){try{datapump::modem::PatternReceiverStartupGuideTestAccess::storage_boundary();datapump::modem::PatternReceiverStartupGuideTestAccess::run();return 0;}
 catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
