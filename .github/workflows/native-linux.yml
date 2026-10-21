@@ -36,6 +36,10 @@ on:
         description: 'Run paced Symbol Burst backlog diagnostics, including four receiver-held cases, after the original qualification'
         type: boolean
         default: false
+      paced_context_focus:
+        description: 'Run original-context paced Symbol Burst diagnostics; retain the ninth process and omit later component/GUI reruns'
+        type: boolean
+        default: false
       paced_callback_probe:
         description: 'Run matched held keyed-On callback timing probes; diagnostic only'
         type: boolean
@@ -80,6 +84,10 @@ on:
         default: false
       paced_backlog:
         description: 'Run paced Symbol Burst backlog diagnostics, including four receiver-held cases, after the original qualification'
+        type: boolean
+        default: false
+      paced_context_focus:
+        description: 'Run original-context paced Symbol Burst diagnostics; retain the ninth process and omit later component/GUI reruns'
         type: boolean
         default: false
       paced_callback_probe:
@@ -174,6 +182,11 @@ jobs:
         if: always() && inputs.paced_backlog && (github.event_name != 'workflow_dispatch' || inputs.scope != 'symbol-burst-live' || inputs.build_type != 'Debug' || inputs.linux_runner != 'ubuntu-24.04')
         run: |
           echo '::error::Paced Symbol Burst diagnostics require manual symbol-burst-live on Debug and ubuntu-24.04.'
+          exit 2
+      - name: Restrict paced original-context focus
+        if: always() && inputs.paced_context_focus && (!inputs.paced_backlog || github.event_name != 'workflow_dispatch' || inputs.scope != 'symbol-burst-live' || inputs.build_type != 'Debug' || inputs.linux_runner != 'ubuntu-24.04' || inputs.paced_mutex_focus || inputs.paced_snapshot_focus || inputs.paced_callback_focus)
+        run: |
+          echo '::error::Paced original-context focus requires manual Debug symbol-burst-live on ubuntu-24.04, backlog enabled, and all other focus modes disabled.'
           exit 2
       - name: Restrict paced callback timing probes
         if: always() && inputs.paced_callback_probe && (!inputs.paced_backlog || github.event_name != 'workflow_dispatch' || inputs.scope != 'symbol-burst-live' || inputs.build_type != 'Debug' || inputs.linux_runner != 'ubuntu-24.04')
@@ -1674,6 +1687,8 @@ jobs:
           PACED_SCOPE: ${{ inputs.scope }}
           PACED_BUILD_TYPE: ${{ inputs.build_type }}
           PACED_LINUX_RUNNER: ${{ inputs.linux_runner }}
+          PACED_CONTEXT_FOCUS: ${{ inputs.paced_context_focus }}
+          PACED_CALLBACK_PROBE: ${{ inputs.paced_callback_probe }}
         run: |
           set -euo pipefail
           python3 -B - "$PWD" <<'PY_PACED_BURST'
@@ -1709,11 +1724,15 @@ jobs:
           (report / 'inputs.json').write_text(json.dumps(inputs, indent=2) + '\n')
           selectors = ('--paced-plain-off', '--paced-plain-on', '--paced-keyed-off', '--paced-keyed-on', '--paced-keyed-on-follow',
                        '--paced-held-plain-off', '--paced-held-plain-on', '--paced-held-keyed-off', '--paced-held-keyed-on')
+          context_focus = os.environ.get('PACED_CONTEXT_FOCUS') == 'true'
+          callback_probe = os.environ.get('PACED_CALLBACK_PROBE') == 'true'
           results = []
           for index, selector in enumerate(selectors, 1):
               stem = f'{index:02d}-{selector[2:]}'
               trace_path = report / f'{stem}.trace.jsonl' if index == 5 else None
               command = [str(binary), selector]
+              if context_focus and index == len(selectors) and callback_probe:
+                  command.append('--pacing-probe')
               if trace_path is not None:
                   command.append('--trace=' + str(trace_path))
               stdout_path, stderr_path = report / f'{stem}.stdout.log', report / f'{stem}.stderr.log'
@@ -1881,10 +1900,13 @@ jobs:
               results.append(result)
           manifest = {'inputs': inputs, 'results': results,
                       'all_functional_runs_complete': all(row['diagnostic_complete'] for row in results)}
+          if context_focus:
+              manifest.update(diagnostic_route='paced-original-context',
+                              runtime_probe_arm='on' if callback_probe else 'off')
           (report / 'results.json').write_text(json.dumps(manifest, indent=2) + '\n')
           summary_path = pathlib.Path(os.environ['GITHUB_STEP_SUMMARY'])
           with summary_path.open('a', encoding='utf-8') as stream:
-              stream.write('Paced Symbol Burst backlog diagnostics (four baseline processes, keyed-On full-input trace, then four receiver-held cases):\n\n')
+              stream.write(('Paced Symbol Burst original-context diagnostics (all nine original selectors and order; only the ninth process may use the pacing probe):\n\n' if context_focus else 'Paced Symbol Burst backlog diagnostics (four baseline processes, keyed-On full-input trace, then four receiver-held cases):\n\n'))
               for row in results:
                   value = row['summary'] or {}
                   stream.write(f"- `{row['selector']}`: exit={row['exit_code']}, timeout={row['timed_out']}, "
@@ -1896,6 +1918,15 @@ jobs:
           if not manifest['all_functional_runs_complete']:
               raise SystemExit('FATAL: one or more paced Symbol Burst runs timed out, failed, or lacked exactly one valid functional summary')
           PY_PACED_BURST
+      - name: Retain exact paced-context ELF and provenance
+        if: always() && !cancelled() && inputs.paced_context_focus && steps.build_prerequisites.outcome == 'success'
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          python3 -B tools/retain-paced-diagnostic.py \
+            --root "$PWD" \
+            --report "$PWD/build/symbol-burst-live-qualification/paced/reproducer" \
+            --runtime-probe "${{ inputs.paced_callback_probe && 'on' || 'off' }}"
       - name: Run monitor admission and retained plot regressions
         id: monitor_regressions
         if: inputs.scope == 'symbol-burst-live' && inputs.paced_snapshot_focus && !cancelled() && steps.build_prerequisites.outcome == 'success'
@@ -1996,7 +2027,7 @@ jobs:
           PY_MONITOR_REGRESSIONS
       - name: Run actual temporal support component regressions
         id: temporal_support
-        if: inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !inputs.paced_callback_focus && !inputs.paced_mutex_focus && !inputs.paced_snapshot_focus && !cancelled() && steps.build_prerequisites.outcome == 'success'
+        if: inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !inputs.paced_callback_focus && !inputs.paced_mutex_focus && !inputs.paced_snapshot_focus && !inputs.paced_context_focus && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 35
         run: |
           set -euo pipefail
@@ -2093,7 +2124,7 @@ jobs:
           print('All three temporal support component regressions passed; strict original GUI serial and parallel checks follow.')
           PY_TEMPORAL_SUPPORT
       - name: Run focused preparation or GUI core diagnostics
-        if: (success() && (inputs.scope == 'preparation-diagnostic' || inputs.scope == 'gui-core-diagnostic')) || (inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !inputs.paced_callback_focus && !inputs.paced_mutex_focus && !inputs.paced_snapshot_focus && !cancelled() && steps.build_prerequisites.outcome == 'success')
+        if: (success() && (inputs.scope == 'preparation-diagnostic' || inputs.scope == 'gui-core-diagnostic')) || (inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !inputs.paced_callback_focus && !inputs.paced_mutex_focus && !inputs.paced_snapshot_focus && !inputs.paced_context_focus && !cancelled() && steps.build_prerequisites.outcome == 'success')
         run: |
           set -euo pipefail
           report="$PWD/build/core-diagnostics"
@@ -2192,8 +2223,11 @@ jobs:
             cp build/Testing/Temporary/LastTest.log "$report/gui-parallel-LastTest.log"
             echo 'Focused GUI core diagnostic completed serially and in parallel. This is not full native matrix qualification.' >> "$GITHUB_STEP_SUMMARY"
           fi
+      - name: Mark paced original-context omissions
+        if: always() && inputs.paced_context_focus
+        run: echo 'The original-context route requires successful original storage unit checks and no-argument qualification, followed by all nine paced selectors in order; the optional callback probe applies only to selector nine. Temporal/FFT component reruns, focused FFT plus GUI serial/parallel reruns, and the standalone matched callback comparison are omitted in this route and are not passes. Per-step results identify which required prefix checks ran and passed.' >> "$GITHUB_STEP_SUMMARY"
       - name: Capture matched held keyed-On callback timing
-        if: inputs.paced_callback_probe && inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !cancelled() && steps.build_prerequisites.outcome == 'success'
+        if: inputs.paced_callback_probe && inputs.scope == 'symbol-burst-live' && inputs.paced_backlog && !inputs.paced_context_focus && !cancelled() && steps.build_prerequisites.outcome == 'success'
         timeout-minutes: 45
         env:
           PACED_MUTEX_FOCUS: ${{ inputs.paced_mutex_focus }}
