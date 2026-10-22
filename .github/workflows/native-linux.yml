@@ -1731,6 +1731,9 @@ jobs:
           test_timeout=3600
           if [ "$CI_SCOPE" = preparation ]; then test_timeout=7200; fi
           if [ "$DATAPUMP_SANITIZERS" = ON ]; then
+            # Full preparation is a CPU-functional sequence. Standard-runner
+            # captures project about 7600s; retain the 7200s warning at 80%.
+            if [ "$CI_SCOPE" = preparation ]; then test_timeout=9000; fi
             if [ "$CI_SCOPE" = core ]; then test_timeout=7200; fi
             if [ "$CI_SCOPE" = calibration ]; then
               test_timeout=7200
