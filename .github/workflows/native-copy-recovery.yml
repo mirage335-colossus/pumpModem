@@ -1,6 +1,16 @@
 name: Native copied-package recovery
 
 on:
+  workflow_call:
+    inputs:
+      source_run_id:
+        description: Exact successful native-linux.yml workflow run containing the package
+        type: string
+        required: true
+      source_sha:
+        description: Exact 40-character source commit of that native workflow run
+        type: string
+        required: true
   workflow_dispatch:
     inputs:
       source_run_id:

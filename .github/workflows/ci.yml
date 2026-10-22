@@ -96,10 +96,18 @@ on:
       diagnostic:
         description: 'Focused check used only with devfast=true'
         type: choice
-        options: [legacy, certification, windows-certification, windows-rev, graphics, arm-rev-package, arm-rev-smoke, arm-rev-adapter, sdk-live, gui-contract, sanitizer-gui, runner-capacity, arm-runner-capacity, ci-tooling, core-partition, preparation-partition]
+        options: [legacy, certification, windows-certification, windows-rev, graphics, arm-rev-package, arm-rev-smoke, arm-rev-adapter, sdk-live, gui-contract, sanitizer-gui, runner-capacity, arm-runner-capacity, ci-tooling, core-partition, preparation-partition, native-copy-recovery]
         default: legacy
       diagnostic_release:
         description: 'Published tag for graphics, or immutable source tag/ref for ARM adapter / SDK live diagnostics'
+        type: string
+        default: ''
+      copy_run_id:
+        description: 'Exact native-linux.yml package run for native-copy-recovery only'
+        type: string
+        default: ''
+      copy_source_sha:
+        description: 'Exact package source SHA for native-copy-recovery only'
         type: string
         default: ''
 
@@ -152,6 +160,16 @@ jobs:
   ctest-utilities:
     if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'ci-tooling'
     uses: ./.github/workflows/ci-tooling.yml
+
+  native-copy-recovery:
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.diagnostic == 'native-copy-recovery'
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/native-copy-recovery.yml
+    with:
+      source_run_id: ${{ inputs.copy_run_id }}
+      source_sha: ${{ inputs.copy_source_sha }}
 
   devfast:
     if: github.event_name != 'workflow_dispatch' || (inputs.devfast && inputs.diagnostic == 'legacy')

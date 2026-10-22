@@ -626,8 +626,11 @@ in the same repository. The retained receipt binds source, producer jobs,
 artifact IDs, sizes and digests; downloads reject digest mismatches. This route
 does not rerun source qualification or establish full SDK or release eligibility.
 
-Manual `native-copy-recovery.yml` similarly checks an existing native package on
-Ubuntu 22.04 and 24.04 using its exact producer run, source and artifact digest.
+Manual `ci.yml` with `devfast=true`, `diagnostic=native-copy-recovery`,
+`copy_run_id` and `copy_source_sha` checks an existing native package on Ubuntu
+22.04 and 24.04 using its exact producer run, source and artifact digest. It calls
+`native-copy-recovery.yml`, which also has a direct manual entry point once
+registered on the default branch.
 It retains all original archive, smoke and ABI checks without rebuilding the
 package; it supplies copied-package coverage only.
 
