@@ -1225,7 +1225,7 @@ jobs:
           set -euo pipefail
           report="$PWD/build/release-drain-scheduling-diagnostic"
           mkdir -p "$report"
-          git -c safe.directory="$PWD" fetch --no-tags --depth=1 origin 6ac28bca6187b6baec799abb9fb9d71cc112431c
+          git -c safe.directory="$PWD" fetch --no-tags --depth=1 origin ed8ba651ac4d9a421d3591e6fb9de33190648ef6
           git -c safe.directory="$PWD" rev-parse HEAD > "$report/source.txt"
           ninja -C build -t commands test_symbol_burst_live test_weak_signal > "$report/target-commands.txt"
           python3 -B tools/release-drain-scheduling-diagnostic.py \

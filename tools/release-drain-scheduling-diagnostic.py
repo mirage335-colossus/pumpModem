@@ -14,7 +14,7 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 
-BASELINE = "6ac28bca6187b6baec799abb9fb9d71cc112431c"
+BASELINE = "ed8ba651ac4d9a421d3591e6fb9de33190648ef6"
 TRIAL_WALL_SECONDS = 900
 
 TRIALS = (
