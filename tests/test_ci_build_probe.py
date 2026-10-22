@@ -14,6 +14,15 @@ SPEC.loader.exec_module(probe)
 
 
 class BuildProbeTests(unittest.TestCase):
+    def test_snapshot_git_trust_is_scoped_and_failure_retains_stderr(self):
+        root = Path('/fixture/checkout')
+        failure = subprocess.CompletedProcess([], 128, b'', b'fatal: snapshot unavailable')
+        with mock.patch.object(probe.subprocess, 'run', return_value=failure) as run:
+            with self.assertRaisesRegex(RuntimeError, 'fatal: snapshot unavailable'):
+                probe.git_output(root, 'archive', '--format=tar', 'abc123')
+        self.assertEqual(run.call_args.args[0], ['git', '-c',
+            'safe.directory=' + str(root), 'archive', '--format=tar', 'abc123'])
+
     def test_source_identity_binds_commit_and_dirty_digest(self):
         identity = probe.source_identity("abc123", " M src/a.cpp\n")
         self.assertEqual(identity["source_commit"], "abc123")

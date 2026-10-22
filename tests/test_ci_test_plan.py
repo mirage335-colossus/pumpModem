@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 from contextlib import redirect_stdout
 
 
@@ -23,8 +24,28 @@ def test(name, labels=()):
     return {'name': name, 'properties': [{'name': 'LABELS', 'value': list(labels)}]}
 
 
-class PartitionPlan(unittest.TestCase):
+class SourceFixture(unittest.TestCase):
     def setUp(self):
+        # Planning binds a real CI checkout. These registration fixtures must
+        # also run from source archives and on hosts without Git installed.
+        real_run = subprocess.run
+
+        def run(command, *args, **kwargs):
+            if command[0] == 'git':
+                value = 'fixture-revision\n' if 'rev-parse' in command else ''
+                if not kwargs.get('text'):
+                    value = value.encode()
+                return subprocess.CompletedProcess(command, 0, stdout=value, stderr='')
+            return real_run(command, *args, **kwargs)
+
+        self.subprocess_patch = patch.object(subprocess, 'run', side_effect=run)
+        self.subprocess_patch.start()
+        self.addCleanup(self.subprocess_patch.stop)
+
+
+class PartitionPlan(SourceFixture):
+    def setUp(self):
+        super().setUp()
         self.tests = [test('ordinary-a'), test('ordinary-b'), test('gui_application', ('regular', 'contract')),
                       test('gui_controller', ('regular', 'contract')), test('native_gui_case', ('native_gui', 'contract')),
                       test('live', ('regular', 'contract')), test('live_profiles', ('regular', 'contract')),
@@ -79,7 +100,7 @@ class PartitionPlan(unittest.TestCase):
                 'add_custom_target(test_${name})\n'
                 'add_test(NAME ${name} COMMAND "${CMAKE_COMMAND}" -E true)\n'
                 'endforeach()\n'
-                f'include("{ROOT / "cmake/TestGroups.cmake"}")\n')
+                f'include("{(ROOT / "cmake/TestGroups.cmake").as_posix()}")\n')
             build = root / 'output with spaces'
             subprocess.run(['cmake', '-S', str(root), '-B', str(build)],
                            check=True, capture_output=True)
@@ -99,14 +120,19 @@ class PartitionPlan(unittest.TestCase):
             (build / 'ci-test-prerequisites.json').write_text(json.dumps({'schema': 1, 'tests': [
                 {'name': item['name'], 'targets': ['target_' + item['name']]}
                 for item in self.tests]}))
-            fake_ctest = root / 'ctest.py'
-            fake_ctest.write_text('#!/usr/bin/env python3\nimport json\nprint(json.dumps({"tests": ' +
-                                  repr(self.tests) + '}))\n')
-            fake_ctest.chmod(0o755)
-            args = SimpleNamespace(build_dir=build, ctest=str(fake_ctest), config='Release',
+            args = SimpleNamespace(build_dir=build, ctest='fixture-ctest', config='Release',
                                    scope='core', part='0', source_root=ROOT,
                                    extra_target=['datapump-apps'], output=root / 'plan.json')
-            planner.prepare(args)
+            real_run = subprocess.run
+
+            def run(command, *values, **kwargs):
+                if command[0] == 'fixture-ctest':
+                    return subprocess.CompletedProcess(command, 0,
+                        stdout=json.dumps({'tests': self.tests}).encode())
+                return real_run(command, *values, **kwargs)
+
+            with patch.object(subprocess, 'run', side_effect=run):
+                planner.prepare(args)
             plan = json.loads(args.output.read_text())
             planner.validate_plan(plan)
             self.assertEqual(plan['selected_tests'], plan['parts']['0'])
@@ -115,7 +141,8 @@ class PartitionPlan(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'registration mismatch'):
                 args2 = SimpleNamespace(**{**vars(args), 'output': root / 'bad.json'})
                 (build / 'ci-test-prerequisites.json').write_text(json.dumps({'schema': 1, 'tests': []}))
-                planner.prepare(args2)
+                with patch.object(subprocess, 'run', side_effect=run):
+                    planner.prepare(args2)
 
     @unittest.skipUnless(shutil.which('ctest'), 'CTest is needed for runner plan integration')
     def test_runner_consumes_plan_and_reports_bound_identity(self):
@@ -123,7 +150,7 @@ class PartitionPlan(unittest.TestCase):
             root = Path(directory)
             build = root / 'build'
             build.mkdir()
-            command = json.dumps(sys.executable)
+            command = json.dumps(Path(sys.executable).as_posix())
             code = json.dumps('print("ok")')
             (build / 'CTestTestfile.cmake').write_text(
                 f'add_test(alpha {command} -c {code})\n'
@@ -151,8 +178,9 @@ class PartitionPlan(unittest.TestCase):
             self.assertEqual(report['canonical_inventory_sha256'], plan['canonical_inventory_sha256'])
 
 
-class Aggregation(unittest.TestCase):
+class Aggregation(SourceFixture):
     def setUp(self):
+        super().setUp()
         inventory = planner.canonical_inventory([test('a'), test('b')])
         registration = {'a': ['test_a'], 'b': ['test_b']}
         self.plan = {'schema': 1, 'scope': 'core', 'selected_part': '0',
@@ -211,7 +239,7 @@ class Aggregation(unittest.TestCase):
     def test_separate_real_plans_preserve_junit_order_and_declared_omissions(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            command = json.dumps(sys.executable)
+            command = json.dumps(Path(sys.executable).as_posix())
             (root / 'CTestTestfile.cmake').write_text(
                 f'add_test(skip {command} -c "raise SystemExit(77)")\n'
                 f'add_test(beta {command} -c "print(1)")\n'

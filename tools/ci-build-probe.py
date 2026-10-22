@@ -36,6 +36,17 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def git_output(root: Path, *args: str) -> bytes:
+    # Match the existing container diagnostics: scoped trust survives checkout's
+    # temporary HOME without changing the host or repository configuration.
+    command = ['git', '-c', 'safe.directory=' + str(root), *args]
+    result = subprocess.run(command, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if result.returncode:
+        raise RuntimeError(f'git {args[0]} failed ({result.returncode}): '
+                           + result.stderr.decode(errors='replace')[-4000:])
+    return result.stdout
+
+
 def cache_stats(ccache: str, cwd: Path, env=None) -> dict:
     try:
         result = run([ccache, "--show-stats", "--format=json"], cwd=cwd, env=env, check=False)
@@ -133,16 +144,19 @@ def main() -> int:
     report.mkdir(parents=True, exist_ok=True)
     source = report / "source"
     build = report / "build"
-    archive = subprocess.run(["git", "archive", "--format=tar", args.source_sha], cwd=root,
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout
+    try:
+        archive = git_output(root, 'archive', '--format=tar', args.source_sha)
+    except RuntimeError as exc:
+        (report / 'snapshot-failure.log').write_text(str(exc) + '\n', encoding='utf-8')
+        raise
     import tarfile
     import io
     source.mkdir(parents=True, exist_ok=True)
     with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as tar:
         # The archive is produced from the verified local Git commit, not an external artifact.
         tar.extractall(source)
-    commit = run(["git", "rev-parse", args.source_sha], cwd=root).stdout.strip()
-    dirty = run(["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=root).stdout
+    commit = git_output(root, 'rev-parse', args.source_sha).decode().strip()
+    dirty = git_output(root, 'status', '--porcelain=v1', '--untracked-files=all').decode()
     marker = source_identity(commit, dirty)
     marker['git_archive_sha256'] = hashlib.sha256(archive).hexdigest()
     (report / "source-snapshot.json").write_text(json.dumps(marker, indent=2) + "\n")

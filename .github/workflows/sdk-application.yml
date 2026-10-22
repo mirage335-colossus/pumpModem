@@ -526,7 +526,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: DataPump-SDK-${{ inputs.scope }}-${{ inputs.backend }}-qualification-logs
+          name: DataPump-SDK-${{ inputs.scope }}-${{ inputs.backend }}${{ inputs.contract_part != 'full' && format('-{0}', inputs.contract_part) || '' }}-qualification-logs
           path: |
             ${{ env.SDK_LOG_DIR }}/*.log
             ${{ env.SDK_LOG_DIR }}/*.xml

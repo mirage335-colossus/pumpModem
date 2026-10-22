@@ -83,12 +83,15 @@ def partition_model(tests, scope):
 
 def source_identity(source_root):
     root = Path(source_root).resolve()
-    rev = subprocess.run(['git', '-C', str(root), 'rev-parse', 'HEAD'], check=True,
+    # Container checkout actions use a temporary HOME for their safe-directory
+    # setting. Trust only this explicitly selected checkout for these reads.
+    git = ['git', '-c', 'safe.directory=' + str(root), '-C', str(root)]
+    rev = subprocess.run(git + ['rev-parse', 'HEAD'], check=True,
                          capture_output=True, text=True).stdout.strip()
-    diff = subprocess.run(['git', '-C', str(root), 'diff', '--binary', 'HEAD', '--'], check=True,
+    diff = subprocess.run(git + ['diff', '--binary', 'HEAD', '--'], check=True,
                           capture_output=True).stdout
-    untracked = subprocess.run([
-        'git', '-C', str(root), 'ls-files', '--others', '--exclude-standard', '-z', '--',
+    untracked = subprocess.run(git + [
+        'ls-files', '--others', '--exclude-standard', '-z', '--',
         'src', 'include', 'tests', 'cmake', 'tools', '.github/workflows', 'CMakeLists.txt', 'build.sh'],
         check=True, capture_output=True).stdout
     extra = {name: digest((root / name).read_bytes())
