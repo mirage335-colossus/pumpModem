@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """Offline container APT recovery and mirror policy fixtures (no system writes)."""
 import json
+import functools
+import http.server
+import threading
 import os
 from pathlib import Path
 import shutil
+import signal
+import time
 import subprocess
 import sys
 import tempfile
@@ -62,10 +67,11 @@ sys.exit(step.get('status', 0))
         path.write_text(text)
         return path
 
-    def run_helper(self, *args, steps=(), expected=0):
+    def run_helper(self, *args, steps=(), expected=0, extra_env=None):
         (self.root / 'steps.json').write_text(json.dumps(list(steps)))
-        result = subprocess.run(['sh', str(HELPER), *args], env=self.env,
-                                capture_output=True, text=True)
+        environment = dict(self.env, **(extra_env or {}))
+        result = subprocess.run(['sh', str(HELPER), *args], env=environment,
+                                capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
         self.assertEqual(json.loads((self.root / 'steps.json').read_text()), [])
         return result
@@ -76,6 +82,255 @@ sys.exit(step.get('status', 0))
     @staticmethod
     def step(command, output='', status=0):
         return dict(command=command, output=output, status=status)
+
+    def enable_timeout(self, *, mode='normal', gnu=True):
+        self.env['TEST_APT_TIMEOUT_MODE'] = mode
+        self.env['TEST_APT_TIMEOUT_GNU'] = '1' if gnu else '0'
+        script = """#!%s
+import json, os, subprocess, sys
+if sys.argv[1:] == ['--version']:
+    print('timeout (GNU coreutils) 9.1' if os.environ['TEST_APT_TIMEOUT_GNU'] == '1' else 'custom timeout')
+    sys.exit(0)
+if sys.argv[1:] == ['--help']:
+    print(' --verbose')
+    sys.exit(0)
+args = sys.argv[1:]
+while args and args[0].startswith('--'):
+    args = args[1:]
+limit = args.pop(0)
+with open(os.path.join(os.environ['TEST_APT_ROOT'], 'timeout-calls'), 'a') as stream:
+    stream.write(json.dumps([limit] + args) + '\\n')
+result = subprocess.run(args, capture_output=True, text=True)
+sys.stdout.write(result.stdout)
+sys.stderr.write(result.stderr)
+if os.environ.get('TEST_APT_TIMEOUT_MODE') in ('expire', 'kill'):
+    print('timeout: sending signal TERM to command', file=sys.stderr)
+    sys.exit(137 if os.environ['TEST_APT_TIMEOUT_MODE'] == 'kill' else 124)
+sys.exit(result.returncode)
+""" % sys.executable
+        self.executable('timeout', script)
+
+    def prepare_real_watchdog(self, resistant_worker=False):
+        timeout = shutil.which('timeout')
+        if not timeout or not Path('/proc').is_dir():
+            self.skipTest('GNU timeout and Linux process observation required')
+        if 'GNU coreutils' not in subprocess.check_output([timeout, '--version'], text=True):
+            self.skipTest('GNU timeout required')
+        self.env['CI_APT_DOWNLOAD_TIMEOUT'] = '1'
+        self.executable('apt-get', f"""#!{sys.executable}
+import json,os,pathlib,subprocess,sys,time
+if 'update' in sys.argv: sys.exit(0)
+if '--no-download' in sys.argv: sys.exit(0)
+child=subprocess.Popen([sys.executable,'-c',{'import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)' if resistant_worker else 'import time; time.sleep(60)'!r}])
+with pathlib.Path(os.environ['TEST_APT_ROOT']).joinpath('acquisition-pids').open('a') as output:
+    output.write(json.dumps(dict(pid=os.getpid(), child=child.pid, pgrp=os.getpgrp()))+'\\n')
+time.sleep(60)
+""")
+
+    def acquisition_identities(self):
+        path = self.root / 'acquisition-pids'
+        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+    def assert_acquisition_closed(self):
+        for identity in self.acquisition_identities():
+            self.assertNotEqual(identity['pgrp'], os.getpgrp())
+            for pid in (identity['pid'], identity['child']):
+                path = Path('/proc') / str(pid) / 'stat'
+                if path.exists():
+                    self.assertEqual(path.read_text().rsplit(')', 1)[1].split()[0], 'Z')
+
+    def close_fixture_processes(self, child):
+        # Failure cleanup only targets process groups created by this fixture.
+        for identity in self.acquisition_identities():
+            if identity['pgrp'] != os.getpgrp():
+                try: os.killpg(identity['pgrp'], signal.SIGKILL)
+                except ProcessLookupError: pass
+        if child.poll() is None:
+            os.killpg(child.pid, signal.SIGKILL)
+        child.wait(timeout=5)
+
+    def test_cancellation_at_watchdog_launch_closes_its_owned_group(self):
+        self.prepare_real_watchdog()
+        self.env['CI_APT_DOWNLOAD_TIMEOUT'] = '60'
+        real_timeout = shutil.which('timeout')
+        self.executable('timeout', f"""#!{sys.executable}
+import json,os,pathlib,signal,sys
+if sys.argv[1:] not in (['--version'], ['--help']):
+    pathlib.Path(os.environ['TEST_APT_ROOT']).joinpath('launch-pid').write_text(str(os.getpid()))
+    os.kill(os.getppid(), signal.SIGTERM)
+os.execv({real_timeout!r}, [{real_timeout!r}]+sys.argv[1:])
+""")
+        child = subprocess.Popen(['sh', str(HELPER), 'install', 'fixture'], env=self.env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                 start_new_session=True)
+        try:
+            stdout, stderr = child.communicate(timeout=5)
+            self.assertEqual(child.returncode, 143, stdout + stderr)
+            pid = int((self.root / 'launch-pid').read_text())
+            for entry in Path('/proc').iterdir():
+                if not entry.name.isdecimal(): continue
+                try: fields = (entry / 'stat').read_text().rsplit(')', 1)[1].split()
+                except (FileNotFoundError, ProcessLookupError, PermissionError): continue
+                self.assertFalse(int(fields[2]) == pid and fields[0] != 'Z')
+            self.assert_acquisition_closed()
+        finally:
+            self.close_fixture_processes(child)
+
+    def test_real_watchdog_expiry_closes_apt_and_its_worker_before_retry(self):
+        self.prepare_real_watchdog()
+        child = subprocess.Popen(['sh', str(HELPER), 'install', 'fixture'], env=self.env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                 start_new_session=True)
+        try:
+            stdout, stderr = child.communicate(timeout=15)
+            self.assertEqual(child.returncode, 124, stdout + stderr)
+            self.assertEqual(len(self.acquisition_identities()), 3)
+            self.assertEqual(stdout.count('exceeded 1s'), 3)
+            self.assert_acquisition_closed()
+        finally:
+            self.close_fixture_processes(child)
+
+    def test_real_watchdog_closes_term_resistant_orphan_holding_stdout(self):
+        self.prepare_real_watchdog(resistant_worker=True)
+        child = subprocess.Popen(['sh', str(HELPER), 'install', 'fixture'], env=self.env,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                 start_new_session=True)
+        try:
+            stdout, stderr = child.communicate(timeout=15)
+            self.assertEqual(child.returncode, 124, stdout + stderr)
+            self.assertEqual(len(self.acquisition_identities()), 3)
+            self.assert_acquisition_closed()
+        finally:
+            self.close_fixture_processes(child)
+
+    def test_parent_signal_closes_real_watchdog_apt_and_worker(self):
+        self.prepare_real_watchdog()
+        self.env['CI_APT_DOWNLOAD_TIMEOUT'] = '60'
+        for sig, expected in ((signal.SIGTERM, 143), (signal.SIGINT, 130)):
+            with self.subTest(signal=sig):
+                path = self.root / 'acquisition-pids'
+                if path.exists(): path.unlink()
+                child = subprocess.Popen(['sh', str(HELPER), 'install', 'fixture'], env=self.env,
+                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                         start_new_session=True)
+                try:
+                    deadline = time.monotonic() + 5
+                    while not path.exists() and time.monotonic() < deadline:
+                        time.sleep(.01)
+                    self.assertTrue(path.exists(), 'acquisition child did not start')
+                    child.send_signal(sig)
+                    stdout, stderr = child.communicate(timeout=5)
+                    self.assertEqual(child.returncode, expected, stdout + stderr)
+                    self.assert_acquisition_closed()
+                finally:
+                    self.close_fixture_processes(child)
+
+    def test_mixed_unknown_and_network_errors_are_not_recovered_by_watchdog(self):
+        self.enable_timeout(mode='expire')
+        self.run_helper('install', 'package', steps=[self.step('update'),
+            self.step('install', 'E: Disk quota exceeded\nE: Failed to fetch http://mirror.invalid/package 503 Service Unavailable')],
+            expected=124, extra_env={'CI_APT_DOWNLOAD_TIMEOUT': '2'})
+        self.assertEqual(len(self.calls()), 2)
+
+    def test_mixed_unknown_and_network_errors_are_fatal_without_expiry_too(self):
+        self.enable_timeout()
+        self.run_helper('install', 'package', steps=[self.step('update'),
+            self.step('install', 'E: Disk quota exceeded\nE: Failed to fetch http://mirror.invalid/package 503 Service Unavailable', 100)],
+            expected=100, extra_env={'CI_APT_DOWNLOAD_TIMEOUT': '2'})
+        self.assertEqual(len(self.calls()), 2)
+
+    def test_opt_in_acquires_then_installs_offline_without_intermediate_update(self):
+        self.enable_timeout()
+        result = self.run_helper('install', 'libexpat1', 'python3', steps=[
+            self.step('update'), self.step('install'), self.step('install')],
+            extra_env={'CI_APT_DOWNLOAD_TIMEOUT': '180'})
+        calls = self.calls()
+        self.assertEqual(['update' if call[-1:] == ['update'] else
+                          call[call.index('install')] for call in calls],
+                         ['update', 'install', 'install'])
+        acquisition, offline = calls[1], calls[2]
+        self.assertEqual(acquisition[-6:], ['install', '--download-only', '-y',
+                         '--no-install-recommends', 'libexpat1', 'python3'])
+        self.assertEqual(offline[-6:], ['install', '--no-download', '-y',
+                         '--no-install-recommends', 'libexpat1', 'python3'])
+        self.assertEqual(len((self.root / 'timeout-calls').read_text().splitlines()), 1)
+        self.assertEqual(json.loads((self.root / 'timeout-calls').read_text())[:1], ['180'])
+        self.assertNotIn('exceeded', result.stdout)
+
+    def test_download_watchdog_recovers_only_verified_expirations_and_is_bounded(self):
+        self.enable_timeout(mode='expire')
+        steps = []
+        for _ in range(3):
+            steps += [self.step('update'), self.step('install')]
+        result = self.run_helper('install', 'package', steps=steps, expected=124,
+                                 extra_env={'CI_APT_DOWNLOAD_TIMEOUT': '1'})
+        calls = self.calls()
+        self.assertEqual(len(calls), 6)
+        self.assertEqual(sum('install' in call for call in calls), 3)
+        self.assertEqual(result.stdout.count('exceeded 1s'), 3)
+        self.assertIn('watchdog recovery exhausted', result.stderr)
+        self.assertFalse((self.root / 'sleeps').exists())
+        mirrors = (self.apt / 'ci-ubuntu-http.mirrors').read_text().splitlines()
+        self.assertEqual(mirrors, ['http://azure.archive.ubuntu.com/ubuntu/\tpriority:1',
+                                   'http://archive.ubuntu.com/ubuntu/\tpriority:2',
+                                   'http://security.ubuntu.com/ubuntu/\tpriority:3'])
+        self.assertEqual(len((self.root / 'timeout-calls').read_text().splitlines()), 3)
+        self.assertIn('Acquire::http::No-Cache=true', calls[3])
+
+    def test_apt_output_cannot_impersonate_watchdog_expiry(self):
+        self.enable_timeout()
+        self.run_helper('install', 'package', steps=[self.step('update'),
+            self.step('install', 'timeout: sending signal TERM to command', 124)],
+            expected=124, extra_env={'CI_APT_DOWNLOAD_TIMEOUT': '2'})
+        self.assertEqual(len(self.calls()), 2)
+
+    def test_hard_watchdog_expiry_preserves_unmanaged_mirror_files(self):
+        self.enable_timeout(mode='kill')
+        unrelated = self.apt / 'ci-unrelated-https.mirrors'
+        unrelated.write_text('https://example.invalid/one\tpriority:1\n'
+                             'https://example.invalid/two\tpriority:2\n')
+        original = unrelated.read_bytes()
+        steps = [self.step(command) for _ in range(3) for command in ('update', 'install')]
+        self.run_helper('install', 'package', steps=steps, expected=137,
+                        extra_env={'CI_APT_DOWNLOAD_TIMEOUT': '1'})
+        self.assertEqual(unrelated.read_bytes(), original)
+        self.assertFalse(any('--no-download' in call for call in self.calls()))
+
+    def test_apt_return_124_without_watchdog_expiry_is_fatal(self):
+        self.enable_timeout()
+        self.run_helper('install', 'package', steps=[self.step('update'),
+                        self.step('install', status=124)], expected=124,
+                        extra_env={'CI_APT_DOWNLOAD_TIMEOUT': '2'})
+        self.assertEqual(len(self.calls()), 2)
+        self.assertFalse((self.root / 'sleeps').exists())
+
+    def test_timeout_does_not_recover_authentication_or_unclassified_apt_errors(self):
+        for error in ['NO_PUBKEY 0123456789ABCDEF', 'E: unusual repository failure']:
+            with self.subTest(error=error):
+                self.enable_timeout(mode='expire')
+                call_log = self.root / 'calls'
+                if call_log.exists():
+                    call_log.unlink()
+                self.run_helper('install', 'package', steps=[self.step('update'),
+                                self.step('install', error)], expected=124,
+                                extra_env={'CI_APT_DOWNLOAD_TIMEOUT': '2'})
+                self.assertEqual(len(self.calls()), 2)
+
+    def test_invalid_or_unavailable_opt_in_fails_before_configuration_mutation(self):
+        source = self.source('deb http://archive.ubuntu.com/ubuntu noble main\n')
+        original = source.read_text()
+        for value in ['', '0', '00', '-1', '1.5', 'one']:
+            with self.subTest(value=value):
+                result = self.run_helper('configure', expected=2,
+                                         extra_env={'CI_APT_DOWNLOAD_TIMEOUT': value})
+                self.assertEqual(source.read_text(), original)
+                self.assertFalse((self.root / 'calls').exists())
+                self.assertIn('CI_APT_DOWNLOAD_TIMEOUT', result.stderr)
+        self.enable_timeout(gnu=False)
+        result = self.run_helper('configure', expected=2,
+                                 extra_env={'CI_APT_DOWNLOAD_TIMEOUT': '10'})
+        self.assertEqual(source.read_text(), original)
+        self.assertIn('requires GNU coreutils timeout', result.stderr)
 
     def test_ubuntu_legacy_sources_keep_options_and_prefer_azure(self):
         source = self.source('deb [arch=amd64 signed-by=/keys/ubuntu.gpg] http://archive.ubuntu.com/ubuntu/ noble main universe\n'
@@ -284,6 +539,7 @@ class NativeAptMirrorTests(unittest.TestCase):
             keyring = root / 'fixture.gpg'
             run(*gpg, '--output', str(keyring), '--export')
             run(*gpg, '--output', str(release_dir / 'InRelease'), '--clearsign', str(release))
+            run('gpgconf', '--homedir', str(keys), '--kill', 'gpg-agent')
             primary = root / 'primary'
             shutil.copytree(fallback, primary)
             (primary / 'pool/datapump-apt-fixture_1_all.deb').unlink()
@@ -314,6 +570,48 @@ class NativeAptMirrorTests(unittest.TestCase):
             self.assertIn('datapump-apt-fixture', output)
             self.assertEqual((downloads / deb.name).read_bytes(), deb.read_bytes())
             self.assertFalse((primary / 'pool' / deb.name).exists())
+            # Exercise the opt-in helper with real signed APT acquisition.
+            # Only the final installation is simulated; this fixture must never
+            # modify the host package database or install its payload.
+            wrapper_dir = root / 'wrapper'
+            wrapper_dir.mkdir()
+            real_apt = shutil.which('apt-get')
+            wrapper = wrapper_dir / 'apt-get'
+            wrapper.write_text(f"""#!{sys.executable}
+import os,sys
+prefix={apt[1:]!r}
+args=sys.argv[1:]
+if 'install' in args and '--no-download' in args: args=['--simulate']+args
+os.execv({real_apt!r}, [{real_apt!r}]+prefix+args)
+""")
+            wrapper.chmod(0o755)
+            # Preserve this fixture's already-configured signed file mirrors.
+            (root / 'etc/os-release').write_text('ID=fixture\nVERSION_CODENAME=stable\n')
+            # file: acquisitions may use the repository payload in place. Use
+            # HTTP for this prefetch/offline-install boundary, as hosted CI does.
+            handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(root))
+            server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
+            server_thread = threading.Thread(target=server.serve_forever)
+            server_thread.start()
+            port = server.server_port
+            (etc / 'ci-debian-http.mirrors').write_text(
+                f'http://127.0.0.1:{port}/primary/\tpriority:1\n'
+                f'http://127.0.0.1:{port}/fallback/\tpriority:2\n')
+            try:
+                helper_result = subprocess.run(['sh', str(HELPER), 'install', 'datapump-apt-fixture=1'],
+                    env=dict(os.environ, CI_APT_ROOT=str(root), CI_APT_DOWNLOAD_TIMEOUT='10',
+                             PATH=str(wrapper_dir)+os.pathsep+os.environ['PATH']),
+                    capture_output=True, text=True, timeout=30)
+            finally:
+                server.shutdown()
+                server.server_close()
+                server_thread.join(timeout=5)
+                self.assertFalse(server_thread.is_alive())
+            self.assertEqual(helper_result.returncode, 0, helper_result.stdout + helper_result.stderr)
+            self.assertEqual((cache / 'archives' / deb.name).read_bytes(), deb.read_bytes())
+            self.assertIn('Download complete and in download only mode', helper_result.stdout)
+            self.assertIn('Inst datapump-apt-fixture', helper_result.stdout)
+            self.assertFalse((Path('/usr/share') / 'apt-fixture.txt').exists())
 
 
 if __name__ == '__main__':

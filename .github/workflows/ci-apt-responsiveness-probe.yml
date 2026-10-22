@@ -1,0 +1,111 @@
+name: CI APT responsiveness probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apt-responsiveness:
+    name: Ubuntu 22.04 package acquisition
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    timeout-minutes: 20
+    env:
+      DEBIAN_FRONTEND: noninteractive
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Initialize bounded diagnostic evidence
+        run: |
+          set -euo pipefail
+          report_dir="$RUNNER_TEMP/ci-apt-responsiveness"
+          mkdir -p "$report_dir"
+          {
+            printf 'source_sha=%s\n' "$GITHUB_SHA"
+            printf 'diagnostic=package acquisition only; not product or release qualification\n'
+          } > "$report_dir/metadata.txt"
+
+      - name: Checkout current APT helper before Git installation
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Acquire the native Linux package set
+        env:
+          CI_APT_DOWNLOAD_TIMEOUT: '180'
+        run: |
+          set -euo pipefail
+          report_dir="$RUNNER_TEMP/ci-apt-responsiveness"
+          helper="$RUNNER_TEMP/ci-apt.sh"
+          cp .ci-bootstrap/tools/ci-apt.sh "$helper"
+          packages=(
+            ca-certificates curl git cmake ninja-build make g++-11 binutils
+            libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev
+            libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev
+            libncurses-dev libsdl2-dev xvfb xauth fontconfig-config
+            fonts-dejavu-core python3
+          )
+          {
+            printf 'helper_sha256=%s\n' "$(sha256sum "$helper" | cut -d ' ' -f 1)"
+            printf 'ci_apt_download_timeout_seconds=%s\n' "$CI_APT_DOWNLOAD_TIMEOUT"
+            printf 'requested_packages=%s\n' "${packages[*]}"
+          } >> "$report_dir/metadata.txt"
+
+          start_wall_utc=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          start_epoch_ns=$(date +%s%N)
+          printf 'start_wall_utc=%s\nstart_epoch_ns=%s\n' \
+            "$start_wall_utc" "$start_epoch_ns" >> "$report_dir/metadata.txt"
+
+          set +e
+          {
+            time -p env CI_APT_DOWNLOAD_TIMEOUT="$CI_APT_DOWNLOAD_TIMEOUT" \
+              sh "$helper" install "${packages[@]}" 2>&1 \
+              | tee "$report_dir/apt.log"
+            pipe_status=("${PIPESTATUS[@]}")
+            apt_status=${pipe_status[0]}
+            if [ "$apt_status" -eq 0 ] && [ "${pipe_status[1]}" -ne 0 ]; then
+              apt_status=${pipe_status[1]}
+            fi
+          } 2> "$report_dir/child-cpu-time.txt"
+          set -e
+
+          end_epoch_ns=$(date +%s%N)
+          end_wall_utc=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          {
+            printf 'end_wall_utc=%s\nend_epoch_ns=%s\n' \
+              "$end_wall_utc" "$end_epoch_ns"
+            printf 'apt_exit_status=%s\n' "$apt_status"
+            printf 'bash_timed_child_cpu_and_elapsed_seconds:\n'
+            cat "$report_dir/child-cpu-time.txt"
+            printf 'installed_requested_package_versions:\n'
+            for package in "${packages[@]}"; do
+              dpkg-query -W -f='${binary:Package} ${Version}\n' "$package" 2>/dev/null \
+                || printf '%s not-installed\n' "$package"
+            done
+            printf 'configured_ci_mirror_lists:\n'
+            for mirror_list in /etc/apt/ci-*.mirrors; do
+              [ -f "$mirror_list" ] || continue
+              printf 'mirror_list=%s\n' "$mirror_list"
+              cat "$mirror_list"
+            done
+            printf 'apt_policy_for_requested_packages:\n'
+            apt-cache policy "${packages[@]}" 2>&1 || true
+          } >> "$report_dir/metadata.txt"
+
+          exit "$apt_status"
+
+      - name: Upload bounded APT evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-apt-responsiveness-${{ github.run_id }}
+          path: ${{ runner.temp }}/ci-apt-responsiveness/
+          if-no-files-found: warn
+          retention-days: 3

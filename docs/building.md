@@ -593,7 +593,9 @@ test properties remain bound.
 
 SDK FLTK qualification runs complete preparation and calibration invocations in
 separate jobs. General and Live share one build, then execute separately with
-their original concurrency. All four logical groups and the build/packaging
+their original concurrency. The general partition runs the original
+`symbol_burst_live` invocation after other CTest processes finish, preserving its
+wall budget while avoiding their measured CPU contention. All four logical groups and the build/packaging
 checks remain required; the full standalone SDK test route remains available.
 Only small plans, reports and logs move between these jobs. Configured build
 trees and sanitizer executables are not transferred. `./build.sh configure`

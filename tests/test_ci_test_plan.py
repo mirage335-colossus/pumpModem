@@ -178,6 +178,45 @@ class PartitionPlan(SourceFixture):
             self.assertEqual(report['canonical_inventory_sha256'], plan['canonical_inventory_sha256'])
 
 
+    @unittest.skipUnless(shutil.which('ctest'), 'CTest needed for SDK phase integration')
+    def test_sdk_general_preserves_original_fixture_after_other_processes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            command = json.dumps(Path(sys.executable).as_posix())
+            done = root / 'weak-completed'
+            weak = json.dumps(f"from pathlib import Path; Path({str(done)!r}).write_text('done')")
+            burst = json.dumps(f"from pathlib import Path; assert Path({str(done)!r}).is_file()")
+            # Put Burst first: the unfixed single invocation could start it
+            # before the competing process has completed.
+            (root / 'CTestTestfile.cmake').write_text(
+                f'add_test(symbol_burst_live {command} -c {burst})\n'
+                f'add_test(weak_signal {command} -c {weak})\n'
+                'set_tests_properties(symbol_burst_live weak_signal PROPERTIES LABELS "contract")\n')
+            (root / 'CMakeCache.txt').write_text('DATAPUMP_SANITIZERS:BOOL=OFF\n')
+            (root / 'ci-test-prerequisites.json').write_text(json.dumps({'schema': 1, 'tests': [
+                {'name': name, 'targets': [f'test_{name}']}
+                for name in ('symbol_burst_live', 'weak_signal')]}))
+            plan = root / 'plan.json'
+            planner.prepare(SimpleNamespace(build_dir=root, source_root=ROOT,
+                ctest=shutil.which('ctest'), config=None, scope='contract', part='general',
+                extra_target=[], output=plan))
+            args = SimpleNamespace(build_dir=root, scope='contract', config=None,
+                ctest=shutil.which('ctest'), jobs=2, sanitizers=False, sanitizer_realtime=False,
+                report=root / 'report.json', summary=None, timeout=30, warn_fraction=.8,
+                selection_plan=plan)
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(runner.run(args), 0)
+            data = json.loads(args.report.read_text())
+            self.assertEqual([phase['selected'] for phase in data['phases']],
+                             [['weak_signal'], ['symbol_burst_live']])
+            self.assertEqual(len(data['tests']), 2)
+            self.assertEqual(data['result_counts']['passed'], 2)
+            original = data['selected_commands']['symbol_burst_live']
+            self.assertEqual(Path(original[0]).resolve(), Path(sys.executable).resolve())
+            self.assertEqual(original[1:], ['-c',
+                f"from pathlib import Path; assert Path({str(done)!r}).is_file()"])
+
+
 class Aggregation(SourceFixture):
     def setUp(self):
         super().setUp()

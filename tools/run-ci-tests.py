@@ -594,11 +594,23 @@ def run(args):
             print('Omitted instrumented real-time coverage: ' + ', '.join(omitted), flush=True)
         pattern = '^(' + '|'.join(re.escape(test['name']) for test in selected) + ')$'
         gui_names = {'gui_controller', 'gui_application'}
-        phased = (args.sanitizers and args.scope == 'core' and gui_names.issubset(report['selected']) and
-                  len(selected) > len(gui_names))
-        phases = ([('core', [test for test in selected if test['name'] not in gui_names]),
-                   ('gui', [test for test in selected if test['name'] in gui_names])]
-                  if phased else [('all', selected)])
+        gui_phased = (args.sanitizers and args.scope == 'core' and gui_names.issubset(report['selected']) and
+                      len(selected) > len(gui_names))
+        # The SDK general partition keeps this original wall-budgeted sampled
+        # fixture out of the other CPU-intensive CTest processes. It still runs
+        # once, with the same registration, assertions and deadlines.
+        burst_phased = (plan is not None and args.scope == 'contract' and
+                        plan['selected_part'] == 'general' and
+                        'symbol_burst_live' in report['selected'] and len(selected) > 1)
+        if gui_phased:
+            phases = [('core', [test for test in selected if test['name'] not in gui_names]),
+                      ('gui', [test for test in selected if test['name'] in gui_names])]
+        elif burst_phased:
+            phases = [('general', [test for test in selected if test['name'] != 'symbol_burst_live']),
+                      ('symbol_burst_live', [test for test in selected if test['name'] == 'symbol_burst_live'])]
+        else:
+            phases = [('all', selected)]
+        phased = gui_phased or burst_phased
         if not phased:
             command = base + ['--output-on-failure', '--verbose', '--no-tests=error', '--parallel', str(args.jobs),
                               '--timeout', str(args.timeout), '--output-junit', str(junit_path), '-R', pattern]
