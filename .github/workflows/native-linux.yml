@@ -16,7 +16,7 @@ on:
       scope:
         description: 'Run one complete native scope without repeating the other shards'
         type: choice
-        options: [core, preparation, fast, live, release-drain-scheduling-diagnostic, gui-receiver-feed-diagnostic, gui-stop-interval-diagnostic, live-drain-diagnostic, symbol-burst-live, gui-stop-current-wave, calibration, frontends, web, package, cli, eme-diagnostic, receiver, native-peak-lease-diagnostic, correlator-tone-diagnostic, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-first-transition-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, simulation-owner-census-diagnostic, simulation-capacity-shape-diagnostic, simulation-acquisition-partition-diagnostic, fft-normalization-diagnostic]
+        options: [ci-build-probe, core, preparation, fast, live, release-drain-scheduling-diagnostic, gui-receiver-feed-diagnostic, gui-stop-interval-diagnostic, live-drain-diagnostic, symbol-burst-live, gui-stop-current-wave, calibration, frontends, web, package, cli, eme-diagnostic, receiver, native-peak-lease-diagnostic, correlator-tone-diagnostic, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-first-transition-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, simulation-owner-census-diagnostic, simulation-capacity-shape-diagnostic, simulation-acquisition-partition-diagnostic, fft-normalization-diagnostic]
         default: core
       stop_group:
         description: Temporary matched stop experiment group; diagnostic only
@@ -27,6 +27,11 @@ on:
         description: 'Calibration section; used only by the calibration scope'
         type: choice
         options: [all, shaped, matrix, 'null', default-window]
+        default: all
+      core_part:
+        description: 'Debug core partition: all preserves the complete entry point; 0 or 1 runs one planned half'
+        type: choice
+        options: [all, '0', '1']
         default: all
       sanitizer_realtime:
         description: 'Include real-time Fast RX checks in instrumented Debug coverage'
@@ -83,6 +88,10 @@ on:
         description: 'Optional shaped capture part: 0 or 1; requires the separate aggregate job'
         type: string
         default: ''
+      core_part:
+        description: 'Debug core partition: all preserves the complete entry point; 0 or 1 runs one planned half'
+        type: string
+        default: all
       sanitizer_realtime:
         type: boolean
         default: false
@@ -116,6 +125,9 @@ permissions:
   contents: read
 
 jobs:
+  ci-build-probe:
+    if: inputs.scope == 'ci-build-probe'
+    uses: ./.github/workflows/ci-build-responsiveness-probe.yml
   gui-receiver-feed-diagnostic:
     if: inputs.scope == 'gui-receiver-feed-diagnostic'
     uses: ./.github/workflows/receiver-feed-partition.yml
@@ -133,7 +145,7 @@ jobs:
     if: inputs.scope == 'fft-normalization-diagnostic'
     uses: ./.github/workflows/fft-normalization-diagnostic.yml
   native:
-    if: inputs.scope != 'fft-kernel-diagnostic' && inputs.scope != 'fft-normalization-diagnostic' && inputs.scope != 'gui-stop-interval-diagnostic' && inputs.scope != 'gui-receiver-feed-diagnostic'
+    if: inputs.scope != 'ci-build-probe' && inputs.scope != 'fft-kernel-diagnostic' && inputs.scope != 'fft-normalization-diagnostic' && inputs.scope != 'gui-stop-interval-diagnostic' && inputs.scope != 'gui-receiver-feed-diagnostic'
     name: Linux ${{ inputs.build_type }} / ${{ inputs.scope }} / ${{ inputs.calibration_section }}${{ inputs.calibration_shard != '' && format(' / part {0}', inputs.calibration_shard) || '' }}${{ (inputs.scope == 'gui-stop-differential' || (inputs.scope == 'simulation-first-transition-diagnostic' && inputs.stop_group == 'framed-4e-census')) && format(' / {0}', inputs.stop_group) || '' }}
     runs-on: ${{ inputs.linux_runner }}
     # Preserve the portable application's glibc 2.35 baseline in every shard.
@@ -157,6 +169,7 @@ jobs:
       CC: gcc-11
       CXX: g++-11
       CI_SCOPE: ${{ inputs.scope }}
+      CORE_PART: ${{ inputs.core_part }}
       CI_STOP_GROUP: ${{ inputs.stop_group }}
       DATAPUMP_SANITIZERS: ${{ inputs.scope == 'gui-stop-differential' && (inputs.stop_group == 'eu-o1-san-off' || inputs.stop_group == 'eu-o0-san-off' || inputs.stop_group == 'eu-focus-o1-san-off' || inputs.stop_group == 'eu-focus-o0-san-off' || inputs.stop_group == 'eu-kernel-o1-san-off') && 'OFF' || ((inputs.build_type == 'Debug' || inputs.scope == 'simulation-clock-diagnostic' || (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic' || inputs.scope == 'simulation-owner-census-diagnostic' || inputs.scope == 'simulation-capacity-shape-diagnostic' || inputs.scope == 'simulation-acquisition-partition-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic'))) && 'ON' || 'OFF') }}
       SANITIZER_REALTIME: ${{ inputs.sanitizer_realtime }}
@@ -166,6 +179,13 @@ jobs:
         run: |
           if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ] || [ "$CI_SCOPE" != core ] || [ "$DATAPUMP_SANITIZERS" != OFF ] || [ '${{ inputs.linux_runner }}' != ubuntu-24.04 ]; then
             echo '::error::Passive core observation requires manual Release core coverage on ubuntu-24.04'
+            exit 2
+          fi
+      - name: Restrict planned Debug core partitions
+        if: inputs.core_part != 'all'
+        run: |
+          if [ "$CI_SCOPE" != core ] || [ '${{ inputs.build_type }}' != Debug ] || { [ "$CORE_PART" != 0 ] && [ "$CORE_PART" != 1 ]; } || [ '${{ inputs.core_process_observation }}' = true ] || [ '${{ inputs.paced_backlog }}' = true ] || [ '${{ inputs.paced_context_focus }}' = true ] || [ '${{ inputs.paced_callback_probe }}' = true ] || [ '${{ inputs.paced_mutex_focus }}' = true ] || [ '${{ inputs.paced_snapshot_focus }}' = true ] || [ '${{ inputs.paced_callback_focus }}' = true ]; then
+            echo '::error::core_part 0/1 requires core on Debug with diagnostic observers disabled.'
             exit 2
           fi
       - name: Restrict matched Live drain diagnosis
@@ -1117,6 +1137,14 @@ jobs:
         id: build_prerequisites
         if: inputs.scope != 'sched-hop-radius-control'
         run: |
+          if [ "$CORE_PART" != all ]; then
+            extra_targets=()
+            if [ "$CORE_PART" = 0 ]; then extra_targets+=(--extra-target datapump-apps); fi
+            python3 -B tools/ci-test-plan.py plan --build-dir build --source-root . --scope core --part "$CORE_PART" --config Debug "${extra_targets[@]}" --output build/ci-selection-plan.json
+            mapfile -t targets < <(python3 -B -c 'import json; print("\n".join(json.load(open("build/ci-selection-plan.json"))["build_targets"]))')
+            cmake --build build --target "${targets[@]}" --parallel "$(python3 -B tools/build_capacity.py)"
+            exit 0
+          fi
           case "$CI_SCOPE" in
             calibration|calibration-aggregate) targets=(test_differential_receiver_probability) ;;
             symbol-burst-live)
@@ -1741,6 +1769,9 @@ jobs:
             fi
           fi
           driver=(python3 tools/run-ci-tests.py --build-dir build --scope "$CI_SCOPE" --jobs "$jobs" --timeout "$test_timeout" --report build/ci-test-report.json "${options[@]}")
+          if [ "$CORE_PART" != all ]; then
+            driver+=(--config Debug --selection-plan build/ci-selection-plan.json)
+          fi
           if [ '${{ inputs.core_process_observation }}' = true ]; then
             python3 tools/observe-native-test.py --binary "$PWD/build/test_symbol_burst_live" \
               --output "$PWD/build/native-test-observation" --source "$GITHUB_SHA" \
@@ -3060,7 +3091,7 @@ jobs:
         run: |
           xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' python3 tools/run-gui-smoke.py --allow-budget-exhaustion --report "$DATAPUMP_CI_SMOKE_WARNINGS_DIR/source-gui.json" --log "build/gui-smoke-${{ inputs.build_type }}-${{ github.run_attempt }}.log" --summary "$GITHUB_STEP_SUMMARY" -- ./build/datapump-gui --smoke-test --smoke-timeout 600
       - name: Developer CLI regressions (Python is not packaged)
-        if: ${{ !cancelled() && (inputs.scope == 'core' || inputs.scope == 'cli') && steps.build_prerequisites.outcome == 'success' }}
+        if: ${{ !cancelled() && (inputs.scope == 'core' || inputs.scope == 'cli') && (inputs.core_part != '1') && steps.build_prerequisites.outcome == 'success' }}
         run: |
           set -o pipefail
           printf 'source_sha=%s\n' "$GITHUB_SHA" | tee build/cli-regressions.log
@@ -3142,7 +3173,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: CI-Linux-${{ inputs.build_type }}-${{ inputs.scope }}-${{ inputs.calibration_section }}${{ inputs.calibration_shard != '' && format('-part-{0}', inputs.calibration_shard) || '' }}-attempt-${{ github.run_attempt }}
+          name: CI-Linux-${{ inputs.build_type }}-${{ inputs.scope }}-${{ inputs.calibration_section }}${{ inputs.calibration_shard != '' && format('-part-{0}', inputs.calibration_shard) || '' }}${{ inputs.core_part != 'all' && format('-core-part-{0}', inputs.core_part) || '' }}-attempt-${{ github.run_attempt }}
           path: |
             build/ci-test-report.*
             build/cli-regressions.log
@@ -3187,4 +3218,20 @@ jobs:
             build/sched-hop-radius-control/
             ${{ github.workspace }}/build/ci-smoke-results/
           if-no-files-found: warn
+          retention-days: 7
+      - name: Publish planned Debug core part metadata
+        if: always() && inputs.scope == 'core' && inputs.build_type == 'Debug' && inputs.core_part != 'all'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Core-Debug-part-${{ inputs.core_part }}
+          path: |
+            build/ci-selection-plan.json
+            build/ci-test-report.json
+            build/ci-test-report.inventory.json
+            build/ci-test-report.xml
+            build/ci-test-report.log
+            build/ci-test-report.phase-*.xml
+            build/ci-test-report.phase-*.log
+          if-no-files-found: warn
+          overwrite: true
           retention-days: 7

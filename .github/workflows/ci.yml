@@ -131,6 +131,8 @@ jobs:
           python3 tests/test_gui_smoke_runner.py
           python3 tests/test_native_tests_runner.py
           python3 tests/test_ci_tests.py
+          python3 tests/test_ci_test_plan.py
+          python3 tests/test_ci_build_probe.py
           python3 tests/test_wasm_sdk.py
           python3 tests/test_package_wasm.py
           python3 tests/test_wasm_sdk_release.py
@@ -309,6 +311,8 @@ jobs:
         exclude:
           - build_type: Debug
             shard: {scope: calibration, section: shaped}
+          - build_type: Debug
+            shard: {scope: core, section: all}
     uses: ./.github/workflows/native-linux.yml
     with:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
@@ -316,6 +320,60 @@ jobs:
       scope: ${{ matrix.shard.scope }}
       calibration_section: ${{ matrix.shard.section }}
       sanitizer_realtime: ${{ inputs.sanitizer_realtime }}
+
+  linux-core-debug:
+    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
+    name: Linux Debug / core / part ${{ matrix.part }}
+    strategy:
+      fail-fast: false
+      matrix:
+        part: ['0', '1']
+    uses: ./.github/workflows/native-linux.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      build_type: Debug
+      scope: core
+      core_part: ${{ matrix.part }}
+      sanitizer_realtime: ${{ inputs.sanitizer_realtime }}
+
+  linux-core-debug-aggregate:
+    if: always() && github.event_name == 'workflow_dispatch' && !inputs.devfast
+    name: Require both planned Debug core partitions
+    needs: linux-core-debug
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Core-Debug-part-0
+          path: build/core-parts/0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Core-Debug-part-1
+          path: build/core-parts/1
+      - name: Require successful producer jobs and every non-CTest check
+        if: always()
+        env:
+          PART_JOBS_RESULT: ${{ needs.linux-core-debug.result }}
+        run: test "$PART_JOBS_RESULT" = success
+      - name: Verify complete Debug core partition results
+        run: >-
+          python3 tools/ci-test-plan.py aggregate
+          --scope core --config Debug
+          --plan build/core-parts/0/ci-selection-plan.json
+          --parts build/core-parts/0/ci-test-report.json build/core-parts/1/ci-test-report.json
+          --output build/core-aggregate.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: Core-Debug-aggregate
+          path: build/core-aggregate.json
+          if-no-files-found: warn
+          overwrite: true
+          retention-days: 7
 
   wasm:
     if: github.event_name == 'workflow_dispatch' && !inputs.devfast

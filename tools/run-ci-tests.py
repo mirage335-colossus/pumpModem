@@ -4,6 +4,7 @@ import argparse
 from contextlib import nullcontext
 from collections import Counter
 import hashlib
+import importlib.util
 import json
 import math
 import os
@@ -47,7 +48,15 @@ def select_tests(tests, scope, sanitizers=False, sanitizer_realtime=False):
         raise ValueError('CTest inventory contains duplicate test names')
     # Every registered test has exactly one owner, including newly added tests
     # without labels. Contract labels overlap functional labels by design.
-    partitions = {name: [test for test in tests if scope_for(test) == name] for name in SCOPES}
+    partitions = {name: [test for test in tests if scope_for(test) == name]
+                  for name in SCOPES if name != 'contract'}
+    if scope == 'contract':
+        candidates = [test for test in tests if 'contract' in properties(test).get('LABELS', [])
+                      and 'native_gui' not in properties(test).get('LABELS', [])]
+        omitted = []
+        if not candidates:
+            raise ValueError('CTest contract selection is empty')
+        return candidates, omitted, {name: len(values) for name, values in partitions.items()}
     candidates = ([test for test in tests if 'gui' in properties(test).get('LABELS', [])]
                   if scope == 'gui' else partitions[scope])
     omitted = [test['name'] for test in candidates
@@ -536,8 +545,50 @@ def run(args):
         report['inventory_sha256'] = hashlib.sha256(listing.stdout).hexdigest()
         report['inventory_file'] = inventory_path.name
         tests = json.loads(listing.stdout)['tests']
-        selected, omitted, counts = select_tests(tests, args.scope, args.sanitizers, args.sanitizer_realtime)
+        plan = None
+        selection_plan_path = getattr(args, 'selection_plan', None)
+        if selection_plan_path:
+            planner_spec = importlib.util.spec_from_file_location(
+                'ci_test_plan', Path(__file__).with_name('ci-test-plan.py'))
+            planner = importlib.util.module_from_spec(planner_spec)
+            planner_spec.loader.exec_module(planner)
+            plan = json.loads(selection_plan_path.read_text(encoding='utf-8'))
+            planner.validate_plan(plan)
+            if plan['scope'] != args.scope:
+                raise ValueError('selection plan scope does not match runner scope')
+            if planner.source_identity(plan['source_root']) != plan['source_identity']:
+                raise ValueError('source inputs changed since planning')
+            if planner.config_identity(args.build_dir / 'CMakeCache.txt', args.config) != plan['config_identity']:
+                raise ValueError('compiler/configuration inputs changed since planning')
+            if args.sanitizers != (plan['config_identity']['sanitizers'] == 'ON'):
+                raise ValueError('sanitizer selection conflicts with configured build')
+            canonical = planner.canonical_inventory(tests)
+            if canonical != plan.get('canonical_inventory'):
+                raise ValueError('configured CTest registration identity changed since planning')
+            registration = planner.load_registration(args.build_dir / 'ci-test-prerequisites.json')
+            if registration != plan.get('registration'):
+                raise ValueError('generated CTest prerequisite identity changed since planning')
+            selected_names = plan['selected_tests']
+            model = planner.partition_model(tests, args.scope)
+            if model != plan['parts'] or model.get(plan['selected_part']) != selected_names:
+                raise ValueError('selection plan does not match authoritative runner selection')
+            selected_by_name = {test['name']: test for test in tests}
+            selected = [selected_by_name[name] for name in selected_names]
+            if not selected or any(not test.get('command') for test in selected):
+                raise ValueError('selected execution prerequisites are missing')
+            omitted = []
+            _, _, counts = select_tests(tests, 'core' if args.scope == 'contract' else args.scope,
+                                        args.sanitizers, args.sanitizer_realtime)
+        else:
+            selected, omitted, counts = select_tests(tests, args.scope, args.sanitizers, args.sanitizer_realtime)
         report.update(selected=[test['name'] for test in selected], omitted=omitted, partitions=counts)
+        if plan:
+            report.update(plan_sha256=plan['plan_sha256'], source_identity=plan['source_identity'],
+                          config_identity=plan['config_identity'], selected_part=plan['selected_part'],
+                          expected_tests=plan['selected_tests'],
+                          canonical_inventory_sha256=plan['canonical_inventory_sha256'],
+                          ci_context=plan['ci_context'],
+                          selected_commands={test['name']: test['command'] for test in selected})
         print('CTest partition sizes: ' + json.dumps(counts, sort_keys=True), flush=True)
         if omitted:
             print('Omitted instrumented real-time coverage: ' + ', '.join(omitted), flush=True)
@@ -624,6 +675,11 @@ def run(args):
         if phase_errors:
             raise ValueError('; '.join(phase_errors))
         report['tests'] = phase_results
+        if plan:
+            if planner.source_identity(plan['source_root']) != plan['source_identity']:
+                raise ValueError('source inputs changed during execution')
+            if planner.config_identity(args.build_dir / 'CMakeCache.txt', args.config) != plan['config_identity']:
+                raise ValueError('compiler/configuration inputs changed during execution')
         report['result_counts'] = {
             status: sum(test['status'] == status for test in report['tests'])
             for status in ('passed', 'omitted', 'incomplete_or_failed')
@@ -677,7 +733,8 @@ def run(args):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build-dir', type=Path, required=True)
-    parser.add_argument('--scope', choices=(*SCOPES, 'gui'), required=True)
+    parser.add_argument('--scope', choices=(*SCOPES, 'gui', 'contract'), required=True)
+    parser.add_argument('--selection-plan', type=Path)
     parser.add_argument('--jobs', type=int, default=2)
     parser.add_argument('--config')
     parser.add_argument('--sanitizers', action='store_true')

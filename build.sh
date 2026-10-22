@@ -6,8 +6,9 @@ set -eu
 
 usage() {
     cat <<'HELP'
-Usage: ./build.sh [build|test GROUP|sanitize [GROUP]|package] [OPTIONS] [-- CMAKE_ARGS...]
+Usage: ./build.sh [configure|build|test GROUP|sanitize [GROUP]|package] [OPTIONS] [-- CMAKE_ARGS...]
 
+  configure            Configure the selected profile without building targets.
   build                Build pump and the FLTK GUI (default).
   test GROUP           Build then run contract, regular, fast, legacy, gui,
                        frontends, web, native, packaging, build, amplitude_probability, amplitude_arrival, or all tests.
@@ -106,7 +107,7 @@ while [ "$#" -gt 0 ]; do
         --wasm-sdk) need_value ${1+"$@"}; [ -n "$2" ] || die "--wasm-sdk needs a nonempty path"; wasm_sdk_root=$2; shift 2 ;;
         --sdk) need_value ${1+"$@"}; [ -n "$2" ] || die "--sdk needs a nonempty path"; sdk_root=$2; shift 2 ;;
         --) shift; break ;;
-        build|test|sanitize|package)
+        configure|build|test|sanitize|package)
             if [ "$command_seen" = no ]; then
                 command_name=$1; command_seen=yes
             elif [ "$1" = build ] && [ -z "$group" ] &&
@@ -385,6 +386,14 @@ if cmake --preset "$preset" -S "$source_dir" -B "$build_dir" \
     :
 else
     die "configuration failed; check dependencies and use a new --build-dir for a different compiler/generator"
+fi
+
+# CI can configure one fresh SDK tree and then build only the test targets
+# selected by the generated CTest plan. All normal SDK/toolchain validation
+# above still applies to this path.
+if [ "$command_name" = configure ]; then
+    printf 'Configured %s in %s\n' "$preset" "$build_dir"
+    exit 0
 fi
 
 target=datapump-apps

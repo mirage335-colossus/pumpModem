@@ -1,0 +1,105 @@
+name: Compiler cache responsiveness probe
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  native-gnu11-debug-sanitizers:
+    name: Native GNU 11 Debug ASan/UBSan
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    timeout-minutes: 45
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      CCACHE_DIR: ${{ github.workspace }}/build/ci-build-probe-native/ccache
+      BUILD_JOBS: '2'
+    steps:
+      - name: Load package-fetch helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
+      - name: Install native probe prerequisites
+        run: |
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git cmake ninja-build make gcc-11 g++-11 ccache libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev libncurses-dev libsdl2-dev python3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Use the same pinned native CMake
+        run: |
+          sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
+          echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
+      - name: Run the diagnostic probe
+        run: python3 -B tools/ci-build-probe.py --profile native --source-sha "$GITHUB_SHA" --report "$GITHUB_WORKSPACE/build/ci-build-probe-native"
+      - name: Retain bounded diagnostic metadata
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-build-probe-native-${{ github.run_id }}
+          path: |
+            build/ci-build-probe-native/*.json
+            build/ci-build-probe-native/*.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  sdk-gnu15-release:
+    name: SDK GNU 15 Release portable FLTK
+    runs-on: ubuntu-24.04
+    container: debian:bookworm-slim
+    timeout-minutes: 45
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      CCACHE_DIR: ${{ github.workspace }}/build/ci-build-probe-sdk/ccache
+      BUILD_JOBS: '2'
+    steps:
+      - name: Load package-fetch helper
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
+      - name: Install SDK retrieval prerequisites
+        run: |
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates git gh python3 ccache file binutils make
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Fetch the exact SDK recipe from durable base
+        id: sdk
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/sdk-release.py fetch --binary-only --repo "$GITHUB_REPOSITORY" --directory downloaded-sdk --github-output "$GITHUB_OUTPUT"
+      - name: Require and install the exact base SDK
+        if: steps.sdk.outputs.found != 'true'
+        run: |
+          echo '::error::The base release has no SDK matching the current recipe.'
+          exit 1
+      - name: Install and verify the exact SDK
+        run: |
+          set -- downloaded-sdk/datapump-sdk-*-linux-x86_64.tar.gz
+          test "$#" -eq 1
+          python3 tools/build-sdk.py install --archive "$1" --destination "$GITHUB_WORKSPACE/build/sdk"
+          python3 tools/build-sdk.py verify "$GITHUB_WORKSPACE/build/sdk" --max-host-glibc 2.36
+      - name: Run the diagnostic probe
+        run: python3 -B tools/ci-build-probe.py --profile sdk --sdk "$GITHUB_WORKSPACE/build/sdk" --source-sha "$GITHUB_SHA" --report "$GITHUB_WORKSPACE/build/ci-build-probe-sdk"
+      - name: Retain bounded diagnostic metadata
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-build-probe-sdk-${{ github.run_id }}
+          path: |
+            build/ci-build-probe-sdk/*.json
+            build/ci-build-probe-sdk/*.log
+          if-no-files-found: warn
+          retention-days: 7

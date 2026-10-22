@@ -66,6 +66,27 @@ if os.environ.get("FAIL_STEP") == ("build" if "--build" in sys.argv else "config
         self.assertNotIn("ctest", [call[0] for call in calls])
         self.assertEqual(calls[1][calls[1].index('--parallel') + 1], '7')
 
+    def test_configure_stops_after_validated_cmake_configuration(self):
+        _, calls = self.run_wrapper('configure', '--build-dir', 'configured SDK tree')
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], 'cmake')
+        self.assertIn(str(self.root / 'configured SDK tree'), calls[0])
+
+    def test_sdk_configure_keeps_sdk_validation_and_skips_build(self):
+        sdk = self.prepare_sdk()
+        (sdk / 'bin').mkdir()
+        for name in ('cmake', 'ctest', 'ninja'):
+            tool = sdk / 'bin' / name
+            tool.write_text((self.bin / name).read_text().replace(
+                'pathlib.Path(sys.argv[0]).name', '"sdk/" + pathlib.Path(sys.argv[0]).name'))
+            tool.chmod(0o755)
+        _, calls = self.run_wrapper('configure', '--sdk', sdk.name,
+                                    '--build-dir', 'configured SDK tree')
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], 'sdk/cmake')
+        self.assertIn(f'-DDATAPUMP_SDK_ROOT={sdk}', calls[0])
+        self.assertIn(f'-DCMAKE_TOOLCHAIN_FILE={self.source}/cmake/toolchains/source-sdk.cmake', calls[0])
+
     def test_automatic_compilation_keeps_tests_at_two(self):
         _, calls = self.run_wrapper('test', 'build')
         self.assertEqual(calls[1][calls[1].index('--parallel') + 1], '7')

@@ -71,21 +71,75 @@ jobs:
 
   tests:
     if: ${{ !inputs.devfast }}
-    name: SDK tests, ${{ matrix.backend }}
+    name: SDK tests, ${{ matrix.backend }}${{ matrix.contract_part != 'full' && format(' / {0}', matrix.contract_part) || '' }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - image: debian:bookworm-slim
             backend: fltk
+            contract_part: general
+          - image: debian:bookworm-slim
+            backend: fltk
+            contract_part: preparation
+          - image: debian:bookworm-slim
+            backend: fltk
+            contract_part: calibration
           - image: ubuntu:24.04
             backend: rev
+            contract_part: full
     uses: ./.github/workflows/sdk-application.yml
     with:
       scope: tests
       backend: ${{ matrix.backend }}
+      contract_part: ${{ matrix.contract_part }}
       image: ${{ matrix.image }}
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+
+  contract-aggregate:
+    if: ${{ !inputs.devfast && always() }}
+    name: SDK FLTK contract aggregate
+    needs: tests
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+    env:
+      TESTS_RESULT: ${{ needs.tests.result }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: always()
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: always()
+        with:
+          pattern: DataPump-SDK-tests-fltk-contract-*
+          path: contract-results
+          merge-multiple: true
+      - name: Require and aggregate every FLTK contract part
+        if: always()
+        run: |
+          aggregate_status=0
+          python3 tools/ci-test-plan.py aggregate --scope contract --config Release \
+            --plan contract-results/contract-general-plan.json \
+            --parts \
+              contract-results/contract-general-report.json \
+              contract-results/contract-preparation-report.json \
+              contract-results/contract-live-report.json \
+              contract-results/contract-calibration-report.json \
+            --output contract-results/contract-aggregate.json || aggregate_status=$?
+          if [ "$TESTS_RESULT" != success ]; then
+            echo "::error::SDK test matrix result was $TESTS_RESULT; its reports cannot qualify this aggregate"
+            exit 1
+          fi
+          exit "$aggregate_status"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: DataPump-SDK-contract-aggregate
+          path: contract-results/*.json
+          if-no-files-found: warn
+          retention-days: 7
+          overwrite: true
 
   frontends:
     if: ${{ !inputs.devfast }}

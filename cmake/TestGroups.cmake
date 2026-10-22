@@ -14,7 +14,7 @@ endforeach()
 set(_script_tests legacy_boundary fast_boundary vendored_lzma_source packaging_cxx_runtime build_capacity
   build_agent_record build_agent_board build_agent_session build_agent_edit build_agent_stress
   build_release_web build_wasm_sdk_release build_native_sdl web_renderer browser_audio web_preview_client build_preview build_wasm_sdk build_package_wasm
-  gui_adapter_boundary gui_boundary_regression packaging_support sdk_packaging build_wrapper build_gui_smoke_runner build_native_tests_runner build_ci_tests build_dependencies build_source_sdk build_sdk_runtime build_release build_release_dependencies build_sdk_release build_certify_release build_verify_latest_release build_windows_certification build_release_rev_tools build_windows_base build_ci_apt build_apt_release build_distro_release build_arch_release build_gentoo_sync)
+  gui_adapter_boundary gui_boundary_regression packaging_support sdk_packaging build_wrapper build_gui_smoke_runner build_native_tests_runner build_ci_tests build_ci_test_plan build_ci_build_probe build_dependencies build_source_sdk build_sdk_runtime build_release build_release_dependencies build_sdk_release build_certify_release build_verify_latest_release build_windows_certification build_release_rev_tools build_windows_base build_ci_apt build_apt_release build_distro_release build_arch_release build_gentoo_sync)
 set(_aliases
   "amplitude_arrival_strategy=test_receiver_strategy"
   "amplitude_live_arrival=test_live_profiles"
@@ -97,6 +97,12 @@ set(_contract
 list(APPEND _contract scheduled_owned_fft_window_filter scheduled_owned_fft_window_hook scheduled_owned_moment_runtime scheduled_owned_moments scheduled_sparse_owned_spans scheduled_owned_moment_correction scheduled_owned_field_errors scheduled_sparse_carrier)
 set(_ci_live_tests live live_profiles)
 
+# Export the resolved registration/prerequisite relation for the CI planner.
+# This is generated from the same loop that validates every CTest entry below,
+# so the planner does not maintain a second test-to-target map.
+set(_ci_prerequisites_json "{\n  \"schema\": 1,\n  \"tests\": [")
+set(_ci_prerequisites_first TRUE)
+
 foreach(_test IN LISTS _tests)
   get_property(_labels TEST ${_test} PROPERTY LABELS)
   if(_test MATCHES "^fast_" OR _test MATCHES "^gui_fast")
@@ -138,6 +144,20 @@ foreach(_test IN LISTS _tests)
       message(FATAL_ERROR "Unknown test prerequisite: ${_test} -> ${_dependency}")
     endif()
   endforeach()
+  if(NOT _ci_prerequisites_first)
+    string(APPEND _ci_prerequisites_json ",")
+  endif()
+  set(_ci_prerequisites_first FALSE)
+  string(APPEND _ci_prerequisites_json "\n    {\"name\": \"${_test}\", \"targets\": [")
+  set(_ci_prerequisite_first TRUE)
+  foreach(_dependency IN LISTS _dependencies)
+    if(NOT _ci_prerequisite_first)
+      string(APPEND _ci_prerequisites_json ", ")
+    endif()
+    set(_ci_prerequisite_first FALSE)
+    string(APPEND _ci_prerequisites_json "\"${_dependency}\"")
+  endforeach()
+  string(APPEND _ci_prerequisites_json "]}")
   foreach(_group IN LISTS _labels)
     list(APPEND _group_${_group} ${_dependencies})
   endforeach()
@@ -150,6 +170,9 @@ foreach(_test IN LISTS _tests)
   endif()
   list(APPEND _all_test_targets ${_dependencies})
 endforeach()
+
+string(APPEND _ci_prerequisites_json "\n  ]\n}\n")
+file(WRITE "${CMAKE_BINARY_DIR}/ci-test-prerequisites.json" "${_ci_prerequisites_json}")
 
 add_custom_target(datapump-tests DEPENDS ${_all_test_targets})
 add_custom_target(datapump-tests-ci-core DEPENDS ${_ci_core_targets})
