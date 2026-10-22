@@ -90,7 +90,7 @@ class GentooSyncTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix='gentoo-sync-test-')
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name)
+        self.root = Path(temporary.name).resolve()
         self.location = self.root / 'installed'
         self.repository = 'owner/project'
         self.fpr = self.fingerprints[0]

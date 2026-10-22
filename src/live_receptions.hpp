@@ -188,13 +188,26 @@ private:
     static bool matches(const Entry& entry, const Candidate& candidate) {
         const auto& owner = entry.owner;
         if (owner.family != candidate.family) return false;
-        const bool amplitude_pair=owner.amplitude_high_hz>owner.amplitude_low_hz&&
-            candidate.amplitude_high_hz>candidate.amplitude_low_hz;
+        const bool owner_amplitude=owner.amplitude_high_hz>owner.amplitude_low_hz;
+        const bool candidate_amplitude=candidate.amplitude_high_hz>candidate.amplitude_low_hz;
+        const bool amplitude_pair=owner_amplitude&&candidate_amplitude;
         if(amplitude_pair) {
             if(owner.amplitude_low_hz>=candidate.amplitude_high_hz||
                candidate.amplitude_low_hz>=owner.amplitude_high_hz)return false;
         } else if(std::abs(owner.frequency-candidate.frequency)>
                   std::max(owner.frequency_tolerance,candidate.frequency_tolerance))return false;
+        if(!owner_amplitude && !candidate_amplitude && owner.symbol_samples && owner.symbol_samples==candidate.symbol_samples &&
+           !owner.burst_first && !candidate.burst_first) {
+            // Overlap alone does not identify one ordinary symbol stream.
+            // Competing epochs may score unrelated clocks over the same PCM;
+            // their extra support must not replace an incompatible stream.
+            const auto symbol=owner.symbol_samples;
+            const auto distance=owner.first>candidate.first?owner.first-candidate.first:candidate.first-owner.first;
+            const auto tolerance=std::min(std::max(owner.timing_tolerance,candidate.timing_tolerance),
+                                          (symbol-1)/2);
+            const auto remainder=distance%symbol;
+            if(remainder>tolerance && symbol-remainder>tolerance)return false;
+        }
         if (candidate.first < owner.end && owner.first < candidate.end) return true;
         if (entry.complete || entry.retired) return false;
         const auto& earlier = candidate.first >= owner.end ? owner : candidate;

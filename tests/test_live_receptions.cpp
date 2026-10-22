@@ -1,6 +1,7 @@
 #include "../src/live_receptions.hpp"
 #include "../src/live_deferred_pattern_history.hpp"
 #include "datapump/pattern_receiver.hpp"
+#include "datapump/pattern_code.hpp"
 #include <iostream>
 #include <array>
 #include <limits>
@@ -96,6 +97,48 @@ void immediate_progress_and_physical_completion() {
     const auto complete = history.observe(stream, allocate);
     check(complete.selected && complete.signal_id == first.signal_id, "physical completion did not update the pending row");
     check(!history.observe(stream, allocate).selected, "the same physical completion was reported twice");
+}
+void incompatible_same_duration_clocks_stay_independent() {
+    datapump::modem::Config geometry;geometry.sample_rate=512;geometry.bandwidth_hz=128;
+    geometry.carrier_hz=128;geometry.spreading_factor=16;
+    const auto tolerance=datapump::modem::pattern_chip_samples(geometry);
+    check(tolerance==8,"compact raw fixture changed its actual chip tolerance");
+    const auto raw=[&](std::uint64_t id,std::uint64_t first,std::uint64_t end,double score) {
+        auto c=candidate(id,first,end,score);c.frequency=128;c.frequency_tolerance=4;
+        c.symbol_samples=128;c.timing_tolerance=tolerance;return c;
+    };
+    for(const bool rival_first:{false,true}) {
+        History history;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
+        auto exact=raw(1,1164,1292,128);
+        auto rival=raw(2,488,1520,789.72522131542394);rival.frequency=127;
+        if(rival_first)history.observe(rival,allocate);
+        const auto initial=history.observe(exact,allocate);
+        exact.end=1548;exact.score=384;
+        // Match the bank's all-candidate pre-observation before publishing an
+        // earlier chunk. A rival's longer span cannot buy this clock's row.
+        const auto exact_row=history.observe(exact,allocate);
+        const auto rival_row=history.observe(rival,allocate);
+        check(initial.selected && exact_row.selected && rival_row.selected && ids==2 &&
+              initial.signal_id==exact_row.signal_id && exact_row.signal_id!=rival_row.signal_id,
+              "an incompatible overlapping clock replaced an accepted raw prefix");
+        auto earlier=raw(1,1164,1292,128);
+        check(history.observe(earlier,allocate).selected,
+              "bank pre-observation withheld an independent clock's earlier chunk");
+        exact.complete=true;rival.complete=true;
+        const auto completed=history.observe(exact,allocate);
+        const auto other_completed=history.observe(rival,allocate);
+        check(completed.selected && other_completed.selected &&
+              completed.signal_id==initial.signal_id && completed.signal_id!=other_completed.signal_id,
+              "a competing clock suppressed exact physical completion");
+    }
+    for(const std::uint64_t offset:std::array<std::uint64_t,6>{0,tolerance,tolerance+1,127-tolerance,128-tolerance,128}) {
+        History history;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
+        const auto initial=history.observe(raw(1,1164,1676,128),allocate);
+        const auto next=history.observe(raw(2,1164+offset,1804,256),allocate);
+        const bool aligned=offset==0 || offset==tolerance || offset==128-tolerance || offset==128;
+        check(next.selected && (next.signal_id==initial.signal_id)==aligned && ids==(aligned?1U:2U),
+              "ordinary overlap ignored its symmetric symbol-clock tolerance");
+    }
 }
 void stronger_profile_replaces_prefix() {
     History history; std::uint64_t ids = 0;
@@ -531,6 +574,7 @@ int main() {
         optional_history_priority();
         deferred_provenance_growth();
         immediate_progress_and_physical_completion();
+        incompatible_same_duration_clocks_stay_independent();
         stronger_profile_replaces_prefix();
         stronger_symbol_after_prefix_completion();
         bridges_retire_every_fragment_in_any_order();

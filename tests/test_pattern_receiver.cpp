@@ -2330,6 +2330,67 @@ void short_template_cache_workspace() {
     check(grown_bits==full && ordinary_bits==full,"draining payload chunks changed cached or uncached decisions");
     check(pressure.working_bytes()<=pressure_budget,"chunked payload retention exceeded workspace");
 }
+void advertised_reservation_roundtrip_retains_bits() {
+    auto c=config(16,true);c.sample_rate=512;c.bandwidth_hz=128;c.carrier_hz=128;c.pulse_shaping=false;
+    c.stream_epoch=1792621400ULL;
+    std::array<std::uint8_t,32> key{};key.fill(0x61);c.data_key=Crypto(key);
+    modem::PatternSearch search;search.frequency_offsets_hz={0,-1,1,-2,2};search.clock_errors_ppm={0};
+    search.expand_clock_search=false;search.couple_clock_to_carrier=false;search.search_stream_phases=false;
+    search.prefer_streamed_templates=true;search.worker_threads=4;search.candidate_limit=2048;
+    search.track_limit=16;search.bit_limit=4096;search.chunk_bits=256;
+    Bytes bits(1216);for(std::size_t i=0;i<bits.size();++i)bits[i]=static_cast<std::uint8_t>((i*7+3)%2);
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    const auto samples=waveform(c,bits,137,6*c.sample_rate+3*symbol,.31,.001,31);
+    constexpr std::size_t grant=8*1024*1024,block=512;
+    modem::PatternReceiver reference(c,grant,search),updated(c,grant,search);
+    std::vector<modem::PatternBurst> expected_events,actual_events;
+    Bytes expected_bits,actual_bits;bool expected_end=false,actual_end=false;
+    bool resized_during_reception=false;
+    const auto drain=[](modem::PatternReceiver& receiver,std::vector<modem::PatternBurst>& events,
+                        Bytes& decisions,bool& physical_end) {
+        for(auto& event:receiver.take_bursts()) {
+            if(event.missing_slots)decisions.insert(decisions.end(),event.missing_slots,modem::missing_pattern_bit);
+            decisions.insert(decisions.end(),event.bits.begin(),event.bits.end());
+            physical_end|=event.complete;events.push_back(std::move(event));
+        }
+    };
+    for(std::size_t offset=0;offset<samples.size();) {
+        const auto count=std::min(block,samples.size()-offset);
+        const auto pcm=std::span(samples).subspan(offset,count);
+        reference.push(pcm);updated.push(pcm);offset+=count;
+        drain(reference,expected_events,expected_bits,expected_end);
+        drain(updated,actual_events,actual_bits,actual_end);
+        if(!resized_during_reception && actual_bits.size()>=32 && !actual_end) {
+            const auto advertised=updated.reserved_workspace_bytes();
+            updated.set_workspace_bytes(advertised);
+            check(updated.working_bytes()<=advertised,"mid-stream reservation did not bound retained state");
+            updated.set_workspace_bytes(grant);
+            resized_during_reception=true;
+        }
+    }
+    check(resized_during_reception,"reservation fixture did not resize before physical END");
+    const auto candidates_before=updated.candidates();
+    check(!candidates_before.empty()&&!actual_bits.empty(),
+          "reservation roundtrip fixture did not retain bit candidates/events before resize");
+    const auto advertised=updated.reserved_workspace_bytes();
+    check(advertised>0&&advertised<=grant,"receiver reported an invalid reservation");
+    updated.set_workspace_bytes(advertised);
+    check(updated.working_bytes()<=advertised,"advertised reservation did not bound retained working state");
+    updated.set_workspace_bytes(grant);
+    check(updated.working_bytes()<=grant,"restored grant did not bound retained working state");
+    const auto candidates_after=updated.candidates();
+    check(candidates_after.size()==candidates_before.size(),"reservation roundtrip changed retained candidates");
+    for(std::size_t i=0;i<candidates_after.size();++i)
+        check(same_evidence(candidates_after[i],candidates_before[i]),"reservation roundtrip changed candidate evidence");
+    check(updated.take_bursts().empty(),"reservation roundtrip exposed duplicate already-drained bursts");
+    check(expected_events.size()==actual_events.size(),"reservation roundtrip changed event count");
+    for(std::size_t i=0;i<expected_events.size();++i)
+        check(same_burst(expected_events[i],actual_events[i]),"reservation roundtrip changed burst data or completion evidence");
+    check(expected_bits==bits&&actual_bits==bits,"reservation roundtrip changed exact retained payload bits");
+    check(expected_end&&actual_end,"reservation roundtrip lost observed physical absence END");
+    check(!reference.candidates().empty()&&reference.candidates().size()==updated.candidates().size(),
+          "reservation roundtrip changed final candidate retention");
+}
 void long_clock_window_fallback() {
     auto c=config(64,true);c.integration_seconds=3600;
     modem::PatternSearch search;search.start_offset_seconds=0;search.start_uncertainty_seconds=0;
@@ -3133,6 +3194,7 @@ int main(int argc,char** argv) {
     run("high-SNR sampled private and public patterns",high_snr_sampled_channel);
     run("orthogonal private pattern bins",orthogonal_private_pattern_bins);
     run("shared projection and workspace updates",shared_projection_and_workspace_update);
+    run("advertised reservation roundtrip retains bits",advertised_reservation_roundtrip_retains_bits);
     run("short pattern shared projection phase",short_pattern_shared_projection_phase);
     run("short template cache workspace and exact equivalence",short_template_cache_workspace);
     run("parallel search exact progress",parallel_search_exact_progress);

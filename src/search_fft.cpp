@@ -1,5 +1,6 @@
 #include "search_fft.hpp"
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <cfenv>
 #include <cfloat>
@@ -109,6 +110,41 @@ __attribute__((target("avx2"))) void borrowed_stage(std::complex<double>* a,
         _mm256_storeu_pd(reinterpret_cast<double*>(a+begin+j+half),_mm256_sub_pd(u,product));
     }
 }
+// Integer-only eligibility scan. It certifies only the normal finite path;
+// any rejected lane falls through to the unchanged scalar scan below.
+__attribute__((target("avx2"))) bool normal_bounded_bits_avx2(
+        __m256i raw,__m256i signless,__m256i smallest_normal,__m256i zero,__m256i limit){
+    const auto magnitude=_mm256_and_si256(raw,signless);
+    const auto too_large=_mm256_cmpgt_epi64(magnitude,limit);
+    const auto nonzero=_mm256_cmpgt_epi64(magnitude,zero);
+    const auto subnormal=_mm256_and_si256(
+        _mm256_cmpgt_epi64(smallest_normal,magnitude),nonzero);
+    const auto bad=_mm256_or_si256(too_large,subnormal);
+    return _mm256_movemask_pd(_mm256_castsi256_pd(bad))!=0;
+}
+__attribute__((target("avx2"))) bool normal_bounded_avx2(
+        const std::complex<double>* values,std::size_t count,std::uint64_t limit_bits,
+        std::stop_token stop){
+    const auto signless=_mm256_set1_epi64x(0x7fffffffffffffffLL);
+    const auto smallest_normal=_mm256_set1_epi64x(0x0010000000000000LL);
+    const auto zero=_mm256_setzero_si256();
+    const auto limit=_mm256_set1_epi64x(static_cast<long long>(limit_bits));
+    std::size_t i=0;
+    for(;i+2<=count;i+=2){
+        if((i&4095U)==0)cancelled(stop);
+        const auto raw=_mm256_loadu_si256(reinterpret_cast<const __m256i_u*>(values+i));
+        if(normal_bounded_bits_avx2(raw,signless,smallest_normal,zero,limit))return false;
+    }
+    if(i<count){
+        if((i&4095U)==0)cancelled(stop);
+        // Tables have n-1 complex values; mask the two absent upper lanes.
+        const auto mask=_mm256_set_epi64x(0,0,-1,-1);
+        const auto raw=_mm256_maskload_epi64(
+            reinterpret_cast<const long long*>(values+i),mask);
+        if(normal_bounded_bits_avx2(raw,signless,smallest_normal,zero,limit))return false;
+    }
+    return true;
+}
 // Restrict the borrowed small-transform SIMD path to finite arithmetic. With
 // table components bounded by two, growth is at most eight per stage including
 // rounding. Since 8^log2(n) = n^3, every product and sum retains headroom.
@@ -122,6 +158,12 @@ bool small_borrowed_simd_safe(std::span<const std::complex<double>> values,
        (_mm_getcsr()&((1U<<15)|(1U<<6)|(3U<<13)|(0x3fU<<7)))!=(0x3fU<<7))return false;
     const auto size=static_cast<double>(values.size());
     const auto limit=std::numeric_limits<double>::max()/(8*size*size*size);
+    if(values.size()>=4 && values.size()<=8192 && table.size()==values.size()-1 &&
+       use_avx2(Kernel::automatic)){
+        if(normal_bounded_avx2(values.data(),values.size(),std::bit_cast<std::uint64_t>(limit),stop) &&
+           normal_bounded_avx2(table.data(),table.size(),std::bit_cast<std::uint64_t>(2.0),stop))
+            return true;
+    }
     for(std::size_t i=0;i<values.size();++i){
         if((i&4095U)==0)cancelled(stop);
         if(!std::isfinite(values[i].real()) || !std::isfinite(values[i].imag()) ||

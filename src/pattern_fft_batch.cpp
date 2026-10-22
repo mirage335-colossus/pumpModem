@@ -28,7 +28,8 @@ template<class A,class B> bool fft_table_overlap(std::span<A> a,std::span<B> b) 
 }
 Complex template_value(PatternCode& code,const FftSearchGeometry& geometry,
                        const FftSearchJob& job,std::size_t bin,unsigned bit,
-                       std::span<const std::array<Complex,2>> nominal_reference={},bool rotate=true) {
+                       std::span<const std::array<Complex,2>> nominal_reference={},bool rotate=true,
+                       std::span<const std::array<Complex,2>> exact_reference={}) {
     const auto& pattern=geometry.pattern;
     const auto sample_position=static_cast<long double>(bin)*geometry.bin_samples+
         static_cast<long double>(geometry.bin_samples-1)/2;
@@ -42,7 +43,7 @@ Complex template_value(PatternCode& code,const FftSearchGeometry& geometry,
     const auto fraction=static_cast<double>(chip_position-local);
     const bool cached=!nominal_reference.empty() && job.clock_ratio==1 &&
         !pattern.scramble && !pattern.dsss && pattern.spreading_mode==static_cast<std::uint32_t>(SpreadingMode::pattern);
-    const auto value=cached?nominal_reference[bin][bit]:pattern.shaped?
+    const auto value=cached?nominal_reference[bin][bit]:!exact_reference.empty()?exact_reference[bin][bit]:pattern.shaped?
         code.shaped_value(job.symbol*pattern.chips_per_symbol,bit,static_cast<double>(source_position)):
         code.value(chip,bit,fraction);
     return rotate?value*std::polar(1.,tau*job.frequency_hz*static_cast<double>(sample_position)/pattern.sample_rate):value;
@@ -442,6 +443,11 @@ void execute_drift_search_job(const FftSearchBatch& batch,const FftSearchJob& jo
 void execute_fft_search_cpu(const FftSearchBatch& batch,std::span<const FftSearchJob> jobs,
                             std::span<FftSearchScore> scores,std::span<FftSearchWorkspace> workspaces,
                             std::stop_token stop) {
+    execute_fft_search_cpu_exact(batch,jobs,scores,workspaces,{},stop);
+}
+void execute_fft_search_cpu_exact(const FftSearchBatch& batch,std::span<const FftSearchJob> jobs,
+                            std::span<FftSearchScore> scores,std::span<FftSearchWorkspace> workspaces,
+                            std::span<const FftExactRawReference> exact_references,std::stop_token stop) {
     const auto& tables=batch.double_tables;
     const bool supplied_tables=tables.maximum||!tables.forward.empty()||!tables.inverse.empty();
     if(jobs.empty()&&!supplied_tables)return;
@@ -513,6 +519,19 @@ void execute_fft_search_cpu(const FftSearchBatch& batch,std::span<const FftSearc
         };
         validate_table(tables.forward);validate_table(tables.inverse);
     }
+    for(const auto& raw:exact_references) {
+        if(raw.pattern!=geometry.pattern || raw.bins!=geometry.bins_per_symbol ||
+           raw.bin_samples!=geometry.bin_samples || raw.values.size()!=length ||
+           !raw.values.data() || !geometry.pattern.shaped || !geometry.pattern.scramble ||
+           geometry.pattern.dsss || geometry.pattern.dsss_factor!=1 ||
+           geometry.pattern.legacy_public || geometry.pattern.fhss_matched_gaps ||
+           geometry.pattern.spreading_mode!=static_cast<std::uint32_t>(SpreadingMode::pattern))
+            throw Error("invalid exact private pattern reference");
+        if(fft_table_overlap(raw.values,scores) || fft_table_overlap(raw.values,jobs))
+            throw Error("exact private pattern reference aliases output or jobs");
+        for(const auto& workspace:workspaces)if(fft_table_overlap(raw.values,std::span(workspace.product)))
+            throw Error("exact private pattern reference aliases worker storage");
+    }
     if(jobs.empty())return;
     // This backend preserves the original within-job floating-point order.
     // A GPU backend can map job/start/bin dimensions to many more execution
@@ -556,6 +575,13 @@ void execute_fft_search_cpu(const FftSearchBatch& batch,std::span<const FftSearc
                     for(std::size_t j=range.first;j<range.first+range.count;++j)action(j);
             };
             const auto mode=effective_search_arithmetic(geometry);
+            std::span<const std::array<Complex,2>> exact_reference;
+            if(!prepared && mode==SearchArithmetic::fp64 && job.clock_ratio==1 &&
+               std::fegetround()==FE_TONEAREST) {
+                for(const auto& raw:exact_references)if(raw.symbol==job.symbol && raw.phase==job.phase) {
+                    exact_reference=raw.values;break;
+                }
+            }
             for(unsigned bit=0;bit<2;++bit) {
                 auto& row=workspace.product;
                 double norm=0;Complex square{};
@@ -563,7 +589,7 @@ void execute_fft_search_cpu(const FftSearchBatch& batch,std::span<const FftSearc
                     std::fill(row.begin(),row.end(),Complex{});
                     for(std::size_t i=0;i<length;++i) {
                         if((i&4095U)==0)cancelled(stop);
-                        auto value=template_value(*workspace.code,geometry,job,i,bit,batch.nominal_reference);
+                        auto value=template_value(*workspace.code,geometry,job,i,bit,batch.nominal_reference,true,exact_reference);
                         if(mode==SearchArithmetic::fp32)value={static_cast<float>(value.real()),static_cast<float>(value.imag())};
                         row[direct?i:length-1-i]=std::conj(value);norm+=std::norm(value);
                         if(geometry.sample_fit)square+=value*value*carrier_square(geometry,i);

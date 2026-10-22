@@ -1,3 +1,4 @@
+#include <openssl/crypto.h>
 #include "datapump/pattern_receiver.hpp"
 #include "native_peak_workspace.hpp"
 #include "native_point_workspace.hpp"
@@ -113,6 +114,18 @@ struct PatternReceiver::Impl {
     };
     std::vector<CachedTemplates> cached_templates;
     std::size_t cache_reservation=0;
+    struct ExactInitialRows {
+        static constexpr std::size_t maximum_symbols=4,maximum_bins=32;
+        std::array<std::array<Complex,2>,maximum_symbols*maximum_bins> values{};
+        std::array<detail::FftExactRawReference,maximum_symbols> references{};
+        std::size_t count=0;
+        bool valid=false;
+        ~ExactInitialRows() {
+            OPENSSL_cleanse(values.data(),sizeof(values));
+            OPENSSL_cleanse(references.data(),sizeof(references));
+        }
+    };
+    std::unique_ptr<ExactInitialRows> exact_initial_rows;
     struct ScoringStorage {
         std::vector<detail::FftSearchJob> jobs;
         std::vector<detail::FftPreparedTemplate> templates;
@@ -644,6 +657,7 @@ struct PatternReceiver::Impl {
             }
             if((deferred_cache && cache_reservation>8*1024*1024) || !cache_fits(bytes,0))drop_template_cache();
         }
+        reserve_exact_initial_rows(bytes);
         stream_phase(search.search_stream_phases?(packed_calendar?packed_phases.front():0):c.stream_phase_samples);prepare_templates(0,{});
         if(packed_calendar)audio::trace::record("packed_complex_constructed",[&](auto& f) {
             f.add("epoch",config.stream_epoch);f.add("sample_rate",config.sample_rate);
@@ -843,7 +857,38 @@ struct PatternReceiver::Impl {
         prepared_template_index=index;templates_valid=true;
         if(cached)template_bank(index).valid=true;
     }
+    bool exact_initial_cache_eligible() const {
+        if(!(shaped && config.scramble && !config.dsss &&
+            config.dsss_factor==1 && !config.fake_hopping && !config.scheduled_hopping &&
+            !config.symbol_burst.enabled() && !legacy_public_pattern(config) &&
+            config.spreading_mode==SpreadingMode::pattern && length<=ExactInitialRows::maximum_bins &&
+            search.initial_stream_symbols>1 && search.initial_stream_symbols<=ExactInitialRows::maximum_symbols &&
+            !sample_fit && !variable_clock && drift_sections==1 && !differential_window &&
+            detail::search_concurrency(search.worker_threads)>=2 &&
+            acquisition_arithmetic()==SearchArithmetic::fp64 && std::fegetround()==FE_TONEAREST))return false;
+        if(!search.search_stream_phases && config.stream_phase_samples!=0)return false;
+        for(std::size_t f=0;f<templates.size();++f)if(clock_ratio(f)==1)return true;
+        return false;
+    }
+    void reserve_exact_initial_rows(std::size_t bytes) {
+        // Preserve the original transformed banks while they fit. A small raw
+        // owner is optional fallback only after those banks are absent.
+        if(exact_initial_rows || !cached_templates.empty() || !exact_initial_cache_eligible() ||
+           !cache_fits(bytes,sizeof(ExactInitialRows)))return;
+        try {
+            exact_initial_rows=std::make_unique<ExactInitialRows>();
+            exact_initial_rows->count=search.initial_stream_symbols;
+            cache_reservation+=sizeof(ExactInitialRows);
+        } catch(const std::bad_alloc&) {
+            // The original uncached route retains its workspace and coverage.
+        }
+    }
+    bool drop_exact_initial_rows() {
+        if(!exact_initial_rows)return false;
+        cache_reservation-=sizeof(ExactInitialRows);exact_initial_rows.reset();return true;
+    }
     void drop_template_cache() {
+        exact_initial_rows.reset();
         std::vector<CachedTemplates>().swap(cached_templates);
         if(!required_tracking_reference)std::vector<std::array<Complex,2>>().swap(tracking_reference);
         templates_valid=false;tracking_reference_valid=false;cache_reservation=0;
@@ -878,7 +923,7 @@ struct PatternReceiver::Impl {
         geometry.private_template_reuse=acquisition_template_reuse();
         return geometry;
     }
-    void prepare_scoring(std::stop_token stop) {
+    void prepare_scoring(std::stop_token stop,bool allow_exact=true) {
         if(!scoring.empty()) {
             if(!scoring.front().jobs.empty())return;
             // A tracking-only owner is optional scratch from an earlier
@@ -886,7 +931,8 @@ struct PatternReceiver::Impl {
             drop_scoring();
         }
         const auto workers=detail::search_concurrency(search.worker_threads);
-        if(workers<2)return;
+        if(workers<2){drop_exact_initial_rows();return;}
+        if(allow_exact)reserve_exact_initial_rows(budget);
         const auto jobs=search.initial_stream_symbols*templates.size()*(phase_upper?3:1);
         const bool needs_code=drift_sections>1 || (cached_templates.empty() && !reuse_single_template());
         const auto worker_bytes=sizeof(detail::FftSearchWorkspace)+
@@ -898,8 +944,10 @@ struct PatternReceiver::Impl {
         long double retained=static_cast<long double>(fixed_reservation)+cache_reservation+latest.bits.capacity();
         for(const auto& track:tracks)retained+=track.burst.bits.capacity();
         for(const auto& burst:bursts)retained+=burst.bits.capacity();
-        if(retained>=budget)return;
-        if(budget-static_cast<std::size_t>(retained)<=sizeof(ScoringStorage))return;
+        if(retained>=budget || budget-static_cast<std::size_t>(retained)<=sizeof(ScoringStorage)) {
+            if(drop_exact_initial_rows())prepare_scoring(stop,false);
+            return;
+        }
         auto spare=budget-static_cast<std::size_t>(retained)-sizeof(ScoringStorage);
         const auto uncached_workers=std::min({workers,jobs,spare/(worker_bytes+job_bytes)});
         bool cache_nominal=false;
@@ -917,7 +965,10 @@ struct PatternReceiver::Impl {
             }
         }
         const auto worker_count=std::min({workers,jobs,spare/(worker_bytes+job_bytes)});
-        if(worker_count<2)return;
+        if(worker_count<2) {
+            if(drop_exact_initial_rows())prepare_scoring(stop,false);
+            return;
+        }
         // Logical batch capacity depends on the search and RAM, not the CPU
         // count. Thousands of jobs can share one dispatch; only CPU-private
         // transform/cache storage is allocated per physical worker slot.
@@ -939,8 +990,37 @@ struct PatternReceiver::Impl {
         for(const auto& workspace:scoring_workspaces)scoring_reservation+=workspace.working_bytes();
         // A vector implementation may reserve more than requested. Optional
         // batching must still fit its measured capacities on that platform.
-        if(!cache_fits(budget,0)){drop_scoring();return;}
+        if(!cache_fits(budget,0)) {
+            drop_scoring();if(drop_exact_initial_rows())prepare_scoring(stop,false);return;
+        }
         if(cache_nominal)detail::prepare_fft_nominal_reference(scoring_geometry(),code,storage.nominal_reference,stop);
+        if(exact_initial_rows && !exact_initial_rows->valid && needs_code && !scoring_workspaces.empty() &&
+           scoring_workspaces.front().code && std::fegetround()==FE_TONEAREST) {
+            auto& owner=*exact_initial_rows;
+            auto& generator=*scoring_workspaces.front().code;
+            const auto geometry=scoring_geometry();
+            generator.set_stream_phase_samples(0);
+            for(std::size_t symbol=0;symbol<owner.count;++symbol) {
+                cancelled(stop);
+                generator.prepare_symbol(symbol*code.chips_per_symbol(),stop);
+                auto row=std::span(owner.values).subspan(symbol*length,length);
+                for(unsigned bit=0;bit<2;++bit)for(std::size_t i=0;i<length;++i) {
+                    if((i&4095U)==0)cancelled(stop);
+                    const auto position=static_cast<long double>(i)*bin_samples+
+                        static_cast<long double>(bin_samples-1)/2;
+                    row[i][bit]=generator.shaped_value(symbol*code.chips_per_symbol(),bit,static_cast<double>(position));
+                }
+                auto& view=owner.references[symbol];
+                view.pattern=geometry.pattern;view.symbol=symbol;view.phase=0;
+                view.bins=length;view.bin_samples=bin_samples;view.values=row;
+            }
+            cancelled(stop);owner.valid=true;
+            audio::trace::record("pattern_exact_initial_rows",[&](auto& fields) {
+                fields.add("epoch",config.stream_epoch);fields.add("symbols",owner.count);
+                fields.add("bins",length);fields.add("bytes",sizeof(ExactInitialRows));
+                fields.add("workers",scoring_workspaces.size());fields.add("workspace",budget);
+            });
+        }
     }
     void drop_scoring() {
         decltype(scoring)().swap(scoring);scoring_reservation=0;
@@ -1029,7 +1109,7 @@ struct PatternReceiver::Impl {
         if(native_active_bytes)throw Error("native FFT scratch crossed admission boundary");
         if(!cache_fits(budget,extra)){native_float_plan.reset();native_double_plan.reset();}
         if(!scoring.empty() && !cache_fits(budget,extra))drop_scoring();
-        if(!cached_templates.empty() && !cache_fits(budget,extra))drop_template_cache();
+        if((!cached_templates.empty() || exact_initial_rows) && !cache_fits(budget,extra))drop_template_cache();
     }
     Complex template_value(std::size_t bin,std::uint64_t index,unsigned bit,std::size_t f) {
         return template_value(code,bin,index,bit,f);
@@ -2502,8 +2582,11 @@ struct PatternReceiver::Impl {
             }
             const auto jobs=unique_jobs.empty()?std::span<const detail::FftSearchJob>(scoring_jobs).first(queued):
                 std::span<const detail::FftSearchJob>(unique_jobs);
-            detail::execute_fft_search_cpu(batch,jobs,
-                std::span(scoring_outputs).first(jobs.size()*hop),scoring_workspaces,stop);
+            const auto exact=exact_initial_rows && exact_initial_rows->valid?
+                std::span<const detail::FftExactRawReference>(exact_initial_rows->references).first(exact_initial_rows->count):
+                std::span<const detail::FftExactRawReference>{};
+            detail::execute_fft_search_cpu_exact(batch,jobs,
+                std::span(scoring_outputs).first(jobs.size()*hop),scoring_workspaces,exact,stop);
             if(batch.double_tables.maximum)for(const auto& job:jobs)
                 fft_workload->tabulated_fp64_transforms+=
                     job.prepared_template==std::numeric_limits<std::uint64_t>::max()?4:2;
@@ -3269,6 +3352,7 @@ struct PatternReceiver::Impl {
             (burst_plan?burst_plan->working_bytes()+burst_cursor->working_bytes()+sizeof(BurstPolicy):0);
         for(const auto& row:templates)for(const auto& v:row)total+=v.capacity()*sizeof(Complex);
         total+=cached_templates.capacity()*sizeof(CachedTemplates);
+        if(exact_initial_rows)total+=sizeof(ExactInitialRows);
         total+=tracking_reference.capacity()*sizeof(decltype(tracking_reference)::value_type);
         for(const auto& bank:cached_templates) {
             total+=bank.rows.capacity()*sizeof(decltype(templates)::value_type)+
@@ -3287,6 +3371,20 @@ struct PatternReceiver::Impl {
             packed_phases.capacity()*sizeof(std::uint64_t)+(packed_calendar?packed_calendar->working_bytes():0)+
             (burst_plan?burst_plan->working_bytes()+burst_cursor->working_bytes()+sizeof(BurstPolicy):0);
     }
+    std::size_t retained_bit_reservation(std::size_t fixed)const {
+        // Match the setter's uniform per-vector capacity proof, including
+        // its nonzero candidate allowance, for current or projected state.
+        std::size_t retained=std::max<std::size_t>(1,latest.bits.capacity());
+        for(const auto& track:tracks)retained=std::max(retained,track.burst.bits.capacity());
+        for(const auto& burst:bursts)retained=std::max(retained,burst.bits.capacity());
+        const auto maximum=std::numeric_limits<std::size_t>::max();
+        if(search.track_limit>(maximum-2)/2)
+            throw Error("pattern retained bit reservation exceeds address space");
+        const auto slots=2*search.track_limit+2;
+        if(retained>(maximum-fixed)/slots)
+            throw Error("pattern retained bit reservation exceeds address space");
+        return fixed+slots*retained;
+    }
     void set_workspace_bytes(std::size_t bytes) {
         if(fallback) {
             const auto wrapper=wrapper_bytes();
@@ -3295,7 +3393,7 @@ struct PatternReceiver::Impl {
         }
         if(!cache_fits(bytes,0)){native_float_plan.reset();native_double_plan.reset();}
         if(!scoring.empty() && !cache_fits(bytes,0))drop_scoring();
-        if(!cached_templates.empty() && !cache_fits(bytes,0))drop_template_cache();
+        if((!cached_templates.empty() || exact_initial_rows) && !cache_fits(bytes,0))drop_template_cache();
         if(bytes<fixed_reservation||working_bytes()>bytes)throw Error("pattern workspace cannot retain current correlation state");
         const auto limit=std::min(configured_bit_limit,(bytes-fixed_reservation)/(2*search.track_limit+2));
         if(!limit)throw Error("pattern workspace cannot retain bit candidates");
@@ -3393,7 +3491,7 @@ detail::NativeDiagnosticHistoryAccess::requirements(const PatternReceiver& recei
     // Do not turn storage compaction into additional arithmetic/cache budget.
     // The original C-entry reservation already covers H+J+control for Live.
     return NativeDiagnosticHistoryRequirements{growth,working+growth,bound,tail_bytes,
-        std::max({bound,s.fixed_reservation,reserved})};
+        std::max(bound,s.retained_bit_reservation(std::max(s.fixed_reservation,reserved)))};
 }
 bool detail::NativeDiagnosticHistoryAccess::bind(PatternReceiver& receiver,std::size_t limit,std::size_t available_growth_bytes) {
     const auto required=requirements(receiver,limit);
@@ -3409,7 +3507,7 @@ bool detail::NativeDiagnosticHistoryAccess::bind(PatternReceiver& receiver,std::
     const auto reserved=std::max(s.fixed_reservation,
         s.fixed_reservation-s.search.candidate_limit*sizeof(PatternEvidence)+growth+
         required->checkpoint_growth_bytes);
-    if(reserved>s.budget)return false;
+    if(s.retained_bit_reservation(reserved)>s.budget)return false;
     s.history.swap(history);s.diagnostic_tail=std::move(tail);s.fixed_reservation=reserved;
     // Bit capacity and every detector/search choice remain exactly as constructed.
     return true;
@@ -3606,8 +3704,8 @@ std::size_t PatternReceiver::working_bytes()const {
     return impl_->working_bytes();
 }
 std::size_t PatternReceiver::reserved_workspace_bytes()const {
-    return impl_->fallback?impl_->wrapper_bytes()+impl_->fallback->reserved_workspace_bytes():
-        std::max(impl_->working_bytes(),impl_->fixed_reservation);
+    if(impl_->fallback)return impl_->wrapper_bytes()+impl_->fallback->reserved_workspace_bytes();
+    return std::max(impl_->working_bytes(),impl_->retained_bit_reservation(impl_->fixed_reservation));
 }
 std::size_t PatternReceiver::projection_cache_headroom(std::size_t input_samples)const {
     return impl_->fallback?impl_->fallback->projection_cache_headroom(input_samples):std::numeric_limits<std::size_t>::max();
@@ -3618,7 +3716,7 @@ std::optional<std::size_t> PatternReceiver::temporal_plan_workers()const {
 void PatternReceiver::set_workspace_bytes(std::size_t bytes){impl_->set_workspace_bytes(bytes);}
 void PatternReceiver::trim_optional_workspace(){
     if(impl_->fallback)impl_->fallback->trim_optional_workspace();
-    else if(impl_->cached_templates.capacity() ||
+    else if(impl_->exact_initial_rows || impl_->cached_templates.capacity() ||
             (!impl_->required_tracking_reference && impl_->tracking_reference.capacity()))
         impl_->drop_template_cache(); // Joined optional storage only; exact bounded recomputation remains.
 }

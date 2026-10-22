@@ -189,6 +189,18 @@ void execute_fft_search_cpu(const FftSearchBatch&,std::span<const FftSearchJob>,
                             std::span<FftSearchScore>,std::span<FftSearchWorkspace>,
                             std::stop_token = {});
 
+// Borrowed exact, unrotated private rows. The owner retains and accounts the
+// storage until this synchronous call joins. These are not transformed rows
+// and do not change job selection, direct eligibility, or evidence arithmetic.
+struct FftExactRawReference {
+    FftPatternParameters pattern{};
+    std::uint64_t symbol=0,phase=0,bins=0,bin_samples=0;
+    std::span<const std::array<FftComplex,2>> values;
+};
+void execute_fft_search_cpu_exact(const FftSearchBatch&,std::span<const FftSearchJob>,
+                            std::span<FftSearchScore>,std::span<FftSearchWorkspace>,
+                            std::span<const FftExactRawReference>,std::stop_token = {});
+
 // A serial receiver uses its already-budgeted transform and start scratch.
 // No allocation, admission or partial-symbol publication occurs here.
 void execute_drift_search_job(const FftSearchBatch&,const FftSearchJob&,
