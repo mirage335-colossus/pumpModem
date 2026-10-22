@@ -34,25 +34,66 @@ on:
         description: 'Run only focused Legacy diagnostics; skip SDK, application and portability qualification'
         type: boolean
         default: false
+      copy_run_id:
+        description: 'Optional source SDK workflow run ID for copied-runtime-only recovery (requires devfast=true and copy_source_sha)'
+        type: string
+        default: ''
+      copy_source_sha:
+        description: 'Exact 40-character source commit for copied-runtime-only recovery'
+        type: string
+        default: ''
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: source-sdk-${{ github.workflow }}-${{ github.ref }}-${{ inputs.devfast && 'devfast' || 'full' }}
+  group: source-sdk-${{ github.workflow }}-${{ github.ref }}-${{ (inputs.copy_run_id || inputs.copy_source_sha) && format('copy-{0}', inputs.copy_run_id) || (inputs.devfast && 'devfast' || 'full') }}
   cancel-in-progress: true
 
 jobs:
   devfast:
-    if: github.event_name == 'workflow_dispatch' && inputs.devfast
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast && !inputs.copy_run_id && !inputs.copy_source_sha
     uses: ./.github/workflows/devfast.yml
     with:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
       windows_runner: ${{ inputs.windows_runner || 'windows-2022' }}
 
+  copy-inputs:
+    if: github.event_name == 'workflow_dispatch' && (inputs.copy_run_id != '' || inputs.copy_source_sha != '')
+    name: Validate copied SDK source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      artifact_ids: ${{ steps.validate.outputs.artifact_ids }}
+      source_sha: ${{ steps.validate.outputs.source_sha }}
+      source_run_id: ${{ steps.validate.outputs.source_run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          sparse-checkout: tools/ci-sdk-copy-inputs.py
+          sparse-checkout-cone-mode: false
+      - name: Validate exact successful producer packages
+        id: validate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          INPUT_DEVFAST: ${{ inputs.devfast }}
+          INPUT_COPY_RUN_ID: ${{ inputs.copy_run_id }}
+          INPUT_COPY_SOURCE_SHA: ${{ inputs.copy_source_sha }}
+        run: python3 tools/ci-sdk-copy-inputs.py
+      - name: Retain immutable copied-input receipt
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: SDK-copied-inputs
+          path: build/sdk-copy-inputs.json
+          if-no-files-found: warn
+          retention-days: 7
+
   packages:
-    if: ${{ !inputs.devfast }}
+    if: ${{ !inputs.devfast && !inputs.copy_run_id && !inputs.copy_source_sha }}
     name: SDK packages, ${{ matrix.backend }}
     strategy:
       fail-fast: false
@@ -70,7 +111,7 @@ jobs:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
 
   tests:
-    if: ${{ !inputs.devfast }}
+    if: ${{ !inputs.devfast && !inputs.copy_run_id && !inputs.copy_source_sha }}
     name: SDK tests, ${{ matrix.backend }}${{ matrix.contract_part != 'full' && format(' / {0}', matrix.contract_part) || '' }}
     strategy:
       fail-fast: false
@@ -97,7 +138,7 @@ jobs:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
 
   contract-aggregate:
-    if: ${{ !inputs.devfast && always() }}
+    if: ${{ !inputs.devfast && !inputs.copy_run_id && !inputs.copy_source_sha && always() }}
     name: SDK FLTK contract aggregate
     needs: tests
     runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
@@ -142,7 +183,7 @@ jobs:
           overwrite: true
 
   frontends:
-    if: ${{ !inputs.devfast }}
+    if: ${{ !inputs.devfast && !inputs.copy_run_id && !inputs.copy_source_sha }}
     name: SDK terminal and framebuffer
     uses: ./.github/workflows/sdk-application.yml
     with:
@@ -152,7 +193,7 @@ jobs:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
 
   web:
-    if: ${{ !inputs.devfast }}
+    if: ${{ !inputs.devfast && !inputs.copy_run_id && !inputs.copy_source_sha }}
     name: SDK native pipe worker and browser adapters
     uses: ./.github/workflows/sdk-application.yml
     with:
@@ -162,7 +203,7 @@ jobs:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
 
   wasm:
-    if: ${{ !inputs.devfast }}
+    if: ${{ !inputs.devfast && !inputs.copy_run_id && !inputs.copy_source_sha }}
     name: Browser SDK / ${{ matrix.scope }}
     strategy:
       fail-fast: false
@@ -175,7 +216,7 @@ jobs:
       artifact_name: DataPump-SDK-Wasm
 
   compatibility:
-    if: ${{ !inputs.devfast }}
+    if: ${{ !inputs.devfast && !inputs.copy_run_id && !inputs.copy_source_sha }}
     name: Copied SDK-built ${{ matrix.backend }} on ${{ matrix.image }}
     needs: packages
     runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
@@ -208,6 +249,7 @@ jobs:
       - name: Install runtime inspection and display tools only
         run: |
           cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          if [ '${{ matrix.image }}' = 'ubuntu:24.04' ]; then export CI_APT_DOWNLOAD_TIMEOUT=180; fi
           sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git python3 cmake binutils xvfb xauth fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri libxtst6
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -247,4 +289,86 @@ jobs:
           {
             printf 'SDK copied runtime **%s / %s**: **%s**.\n\n' "$BACKEND" "$IMAGE" "$RESULT"
             echo 'Both archive formats retain full smoke, checksum, ABI and relocation checks. Source qualification runs independently and remains required for the complete workflow.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  compatibility-recovery:
+    if: github.event_name == 'workflow_dispatch' && inputs.devfast && inputs.copy_run_id != '' && inputs.copy_source_sha != ''
+    name: Copied SDK recovery ${{ matrix.backend }} on ${{ matrix.image }}
+    needs: copy-inputs
+    runs-on: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+    container: ${{ matrix.image }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [fltk, rev]
+        image: [debian:bookworm-slim, ubuntu:24.04]
+    env:
+      DATAPUMP_CI_SMOKE_CAPTURE_FIXTURES: '1'
+      DATAPUMP_SMOKE_TARGET: linux-x86_64-${{ matrix.backend }}
+      DATAPUMP_SMOKE_SCOPE: published/${{ matrix.image }}
+      DATAPUMP_SMOKE_SOURCE_SHA: ${{ needs.copy-inputs.outputs.source_sha }}
+      DATAPUMP_SMOKE_INVENTORY_SHA256: ''
+      DEBIAN_FRONTEND: noninteractive
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      LP_NUM_THREADS: ${{ inputs.linux_runner == 'ubuntu-24.04' && '1' || '2' }}
+    steps:
+      - name: Load current package-fetch helper before installing Git
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .ci-bootstrap
+          sparse-checkout: tools/ci-apt.sh
+          sparse-checkout-cone-mode: false
+      - name: Install runtime inspection and display tools only
+        run: |
+          cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
+          if [ '${{ matrix.image }}' = 'ubuntu:24.04' ]; then export CI_APT_DOWNLOAD_TIMEOUT=180; fi
+          sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git python3 cmake binutils xvfb xauth fonts-dejavu-core fontconfig-config libgl1 libopengl0 libgl1-mesa-dri libxtst6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ needs.copy-inputs.outputs.source_sha }}
+      - name: Set container-local smoke evidence paths
+        run: |
+          printf 'DATAPUMP_CI_SMOKE_WARNINGS_DIR=%s/build/ci-smoke-results\n' "$PWD" >> "$GITHUB_ENV"
+          printf 'DATAPUMP_CI_SMOKE_RUNNER=%s/tools/run-gui-smoke.py\n' "$PWD" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ fromJSON(needs.copy-inputs.outputs.artifact_ids)[matrix.backend] }}
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ needs.copy-inputs.outputs.source_run_id }}
+          digest-mismatch: error
+          path: downloaded
+      - name: Use the pinned dependency scanner with inherited RPATH support
+        run: |
+          sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
+          echo "$GITHUB_WORKSPACE/build/ci-cmake/bin" >> "$GITHUB_PATH"
+      - name: Verify the identical archives on this distribution
+        shell: bash
+        run: xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DGUI_SMOKE_TIMEOUT=600 -DMAX_GLIBC=2.36 -DREQUIRE_MANUALS=ON -DREQUIRE_FRONTENDS=ON -P tools/verify-native-archives.cmake 2>&1 | tee "$RUNNER_TEMP/sdk-compatibility.log"
+      - name: Preserve copied-runtime logs and incomplete coverage
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: DataPump-SDK-compatibility-recovery-${{ strategy.job-index }}-qualification-logs
+          path: |
+            ${{ runner.temp }}/sdk-compatibility.log
+            build/ci-smoke-results/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Summarize copied-runtime-only result
+        if: always()
+        env:
+          RESULT: ${{ job.status }}
+          BACKEND: ${{ matrix.backend }}
+          IMAGE: ${{ matrix.image }}
+          SOURCE_SHA: ${{ needs.copy-inputs.outputs.source_sha }}
+          SOURCE_RUN: ${{ needs.copy-inputs.outputs.source_run_id }}
+        run: |
+          {
+            printf 'SDK copied runtime recovery **%s / %s** from run %s at `%s`: **%s**.\n\n' "$BACKEND" "$IMAGE" "$SOURCE_RUN" "$SOURCE_SHA" "$RESULT"
+            echo 'This copied-runtime-only result is not full SDK qualification and does not establish release eligibility.'
           } >> "$GITHUB_STEP_SUMMARY"

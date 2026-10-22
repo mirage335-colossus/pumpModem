@@ -596,11 +596,19 @@ SDK FLTK qualification runs complete preparation and calibration invocations in
 separate jobs. General and Live share one build, then execute separately with
 their original concurrency. The general partition runs the original
 `symbol_burst_live` invocation after other CTest processes finish, preserving its
-wall budget while avoiding their measured CPU contention. All four logical groups and the build/packaging
+wall budget while avoiding co-scheduling with CPU-intensive tests. All four logical groups and the build/packaging
 checks remain required; the full standalone SDK test route remains available.
 Only small plans, reports and logs move between these jobs. Configured build
 trees and sanitizer executables are not transferred. `./build.sh configure`
 uses the normal profile and SDK validation, then stops before compilation.
+
+If copied SDK checks fail during setup, manual `sdk.yml` accepts `devfast=true`,
+`copy_run_id=RUN_ID` and `copy_source_sha=FULL_SHA` to run only the four original
+copied-runtime cases against existing packages. It requires successful package
+producers and immutable artifacts from that exact manually dispatched SDK run
+in the same repository. The retained receipt binds source, producer jobs,
+artifact IDs, sizes and digests; downloads reject digest mismatches. This route
+does not rerun source qualification or establish full SDK or release eligibility.
 
 The manual `native-linux.yml` scope `ci-build-probe` measures strict cold, warm
 and changed-source compiler-cache builds on standard native and SDK runners.
@@ -609,14 +617,16 @@ runner; it uploads metadata only and does not create persistent GitHub cache
 entries. Publication and exact delivered-binary certification keep their
 existing independent gates.
 
-The native Ubuntu 22.04 shard uses a 180-second package-acquisition watchdog
-for its fixed dependency profile. On expiry, the bootstrap helper closes its
+The native Ubuntu 22.04 shard and SDK copied-runtime Ubuntu 24.04 checks use a
+180-second package-acquisition watchdog for their fixed dependency profiles.
+On expiry, the bootstrap helper closes its
 download workers and rotates only its official signed mirror list within the
 existing three attempts. Offline installation follows successful acquisition
 immediately and has no watchdog. Authentication, hashes and package failures
-remain fatal. Other callers retain the default acquisition path. The manual
-`native-linux.yml` scope `ci-apt-probe` measures this setup without building or
-qualifying the application.
+remain fatal. Other callers retain the default acquisition path. Manual
+`native-linux.yml` scope `ci-apt-probe` accepts `apt_profile=native-ubuntu22` or
+`apt_profile=sdk-runtime-ubuntu24` to measure setup without building or qualifying
+the application. The latter diagnostic uses a conservative 600-second allowance.
 
 Standard GitHub-hosted runners are the defaults. Agents should explicitly select
 H pools when they expect them to save elapsed time:

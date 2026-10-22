@@ -132,6 +132,7 @@ jobs:
           python3 tests/test_native_tests_runner.py
           python3 tests/test_ci_tests.py
           python3 tests/test_ci_test_plan.py
+          python3 tests/test_ci_sdk_copy_inputs.py
           python3 tests/test_ci_build_probe.py
           python3 tests/test_sdk_burst_scheduling_diagnostic.py
           python3 tests/test_wasm_sdk.py
