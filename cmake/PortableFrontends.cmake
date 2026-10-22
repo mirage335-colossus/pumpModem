@@ -195,6 +195,9 @@ if(BUILD_TESTING)
       add_test(NAME tui_terminal COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tui_terminal.py"
         --binary "$<TARGET_FILE:datapump_tui_adapter_test>")
       set_tests_properties(tui_terminal PROPERTIES LABELS "frontends" TIMEOUT 60)
+      add_test(NAME tui_paste_boundaries COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_tui_paste_boundaries.py"
+        --binary "$<TARGET_FILE:datapump_tui_adapter_test>")
+      set_tests_properties(tui_paste_boundaries PROPERTIES LABELS "frontends" TIMEOUT 30)
       if(DATAPUMP_SDK_ROOT)
         set_tests_properties(tui_terminal PROPERTIES ENVIRONMENT "DATAPUMP_TEST_REQUIRE_BUNDLED_TERMINFO=1")
       endif()

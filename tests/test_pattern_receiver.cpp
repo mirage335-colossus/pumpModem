@@ -3142,6 +3142,40 @@ void initial_search_coverage() {
     unbounded.push(std::span(silence).first(4*symbol));
     check(!unbounded.initial_search_complete(),"unbounded FFT search invented a finite initial horizon");
 }
+void ordinary_private_initial_search_coverage() {
+    auto c=config(128,true);c.sample_rate=14400;c.carrier_hz=1500;c.bandwidth_hz=3600;
+    c.stream_epoch=1792697682;c.pulse_shaping=true;
+    modem::PatternSearch search;search.start_offset_seconds=1.0547577497694227;
+    search.start_uncertainty_seconds=1;search.initial_stream_symbols=4;
+    search.search_stream_phases=true;search.hypotheses={{0,0},{-.45,-300},{.45,300}};
+    search.worker_threads=1;
+    modem::PatternReceiver receiver(c,64*1024*1024,search);
+    check(!receiver.clock_windowed(),"private initial coverage unexpectedly used a fallback");
+    const std::vector<float> silence(65536);
+    receiver.push(std::span(silence).first(30884));
+    check(!receiver.initial_search_complete(),
+          "ordinary private acquisition retired before its initial-symbol and phase-cell union");
+    receiver.push(std::span(silence).subspan(30884));
+    check(receiver.initial_search_complete(),"ordinary private acquisition never finished its finite union");
+    check(!receiver.acquiring() && receiver.take_bursts().empty(),"silent private coverage manufactured a reception");
+}
+void qualified_private_initial_search_coverage() {
+    auto c=config(128,true);c.sample_rate=8192;c.carrier_hz=2048;c.bandwidth_hz=1024;
+    c.pulse_shaping=false;
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    modem::PatternSearch search;search.start_offset_seconds=0;search.start_uncertainty_seconds=0;
+    search.initial_stream_symbols=4;search.search_stream_phases=true;search.hypotheses={{0,0}};
+    search.qualified_start_window=modem::PatternStartWindow{16.L*symbol,1,0};
+    search.worker_threads=1;
+    modem::PatternReceiver receiver(c,64*1024*1024,search);
+    check(receiver.fft_work().restricted_timing_active,"qualified coverage fixture lost its actual arrival window");
+    const std::vector<float> silence(36*symbol);
+    receiver.push(std::span(silence).first(14*symbol));
+    check(!receiver.initial_search_complete(),"qualified acquisition retired before its future arrival window");
+    receiver.push(std::span(silence).subspan(14*symbol));
+    check(receiver.initial_search_complete(),"qualified acquisition never finished its finite arrival union");
+    check(!receiver.acquiring() && receiver.take_bursts().empty(),"silent qualified coverage manufactured a reception");
+}
 }
 int main(int argc,char** argv) {
     if(argc>1 && std::string(argv[1])=="--burst-temporal-support") {
@@ -3165,6 +3199,8 @@ int main(int argc,char** argv) {
     run("diagnostic history retention",diagnostic_history_retention);
     run("candidate quota health",candidate_quota_health);
     run("initial search coverage",initial_search_coverage);
+    run("ordinary private initial search coverage",ordinary_private_initial_search_coverage);
+    run("qualified private initial search coverage",qualified_private_initial_search_coverage);
     run("exact blind bits",exact_blind_bits);run("chunk invariance and late start",changing_chunks_and_late_start);
     run("burst temporal support",burst_temporal_support);
     run("continuous long FFT progress",continuous_long_fft_progress);

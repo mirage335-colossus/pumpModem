@@ -53,6 +53,7 @@ set(_aliases
   "gui_workflow=datapump-gui"
   "tui_self_check=datapump-tui"
   "tui_terminal=datapump_tui_adapter_test"
+  "tui_paste_boundaries=datapump_tui_adapter_test"
   "tui_winconsole=test_winconsole"
   "fb_self_check=datapump-fb"
   "fb_headless=datapump-fb"

@@ -3677,11 +3677,27 @@ bool PatternReceiver::initial_search_complete()const {
     if(!s.search.start_offset_seconds)return false;
     auto upper=(static_cast<long double>(*s.search.start_offset_seconds)+
         s.search.start_uncertainty_seconds)*s.config.sample_rate;
-    if(s.calendar_symbols()) {
-        const auto phase=s.phase_upper;
-        upper+=phase+static_cast<long double>(s.source_start(s.search.initial_stream_symbols-1,phase))/s.timing_minimum_rate;
+    const auto phase=s.phase_upper;
+    const auto physical_phase=s.search.search_stream_phases?
+        canonical_phase_cell_upper(s.config,phase):phase;
+    const auto offset=static_cast<long double>(s.source_start(s.search.initial_stream_symbols-1,phase))/s.timing_minimum_rate;
+    upper+=physical_phase+offset;
+    if(s.acquisition_window) {
+        const auto& window=*s.acquisition_window;
+        upper=std::max(upper,window.epoch_origin_samples+window.phase_scale*physical_phase+
+            window.half_width_samples+offset);
     }
     if(s.packed_calendar || s.burst_plan)upper=s.packed_latest_start_samples;
+    // Cover the selected starts' two-bin refinements and precision margin
+    // before retiring their acquisition context.
+    auto magnitude=std::max({1.L,std::abs(upper),std::abs(offset),
+        static_cast<long double>(s.next_start)*s.bin_samples});
+    if(s.acquisition_window) {
+        const auto& window=*s.acquisition_window;
+        magnitude=std::max({magnitude,std::abs(window.epoch_origin_samples),
+            std::abs(window.phase_scale*physical_phase),window.half_width_samples});
+    }
+    upper+=4.L*s.bin_samples+128*std::numeric_limits<double>::epsilon()*magnitude;
     // next_start advances only after a complete FFT acquisition batch. It
     // includes the actual stretched integration and batching lookahead;
     // merely consuming a nominal symbol's PCM is not sufficient.

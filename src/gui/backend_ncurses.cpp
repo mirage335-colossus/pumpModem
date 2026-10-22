@@ -326,22 +326,86 @@ public:
 #ifdef DATAPUMP_NCURSES_ADAPTER_TEST
         TestMeasure measure(test_diagnostics_enabled(),test_input_wall_ns_,test_input_cpu_ns_);++test_input_calls_;
 #endif
+#if defined(__linux__) && defined(FIONREAD)
+        class PasteInputMode {
+        public:
+            explicit PasteInputMode(WINDOW* window):window_(window) {}
+            ~PasteInputMode() {restore();}
+            bool begin() {
+                if(active_)return true;
+                saved_flags_=fcntl(STDIN_FILENO,F_GETFL);
+                if(saved_flags_<0)return false;
+                changed_flags_=(saved_flags_&O_NONBLOCK)==0;
+                if(changed_flags_&&fcntl(STDIN_FILENO,F_SETFL,saved_flags_|O_NONBLOCK)<0) {
+                    changed_flags_=false;return false;
+                }
+                if(nodelay(window_,FALSE)==ERR) {
+                    if(changed_flags_)(void)fcntl(STDIN_FILENO,F_SETFL,saved_flags_);
+                    changed_flags_=false;saved_flags_=-1;
+                    (void)nodelay(window_,TRUE);return false;
+                }
+                active_=true;return true;
+            }
+            bool active() const {return active_;}
+            void restore() noexcept {
+                if(!active_)return;
+                (void)nodelay(window_,TRUE);
+                if(changed_flags_)(void)fcntl(STDIN_FILENO,F_SETFL,saved_flags_);
+                active_=false;changed_flags_=false;saved_flags_=-1;
+            }
+        private:
+            WINDOW* window_;
+            int saved_flags_=-1;
+            bool active_=false,changed_flags_=false;
+        } paste_input_mode(stdscr);
+        unsigned paste_readable_remaining=0;
+#endif
         // Bound input work too: paste or mouse floods cannot starve core polls.
         for(unsigned count=0;count<256;++count) {
 #ifdef DATAPUMP_NCURSES_ADAPTER_TEST
             ++test_input_iterations_;
 #endif
             if(pasting_) {
+#if defined(__linux__) && defined(FIONREAD)
+                if(paste_readable_remaining==0) {
+                    paste_input_mode.restore();
+                    int readable=0;
+                    if(ioctl(STDIN_FILENO,FIONREAD,&readable)==0&&readable>0) {
+                        // Terminal is the sole stdin reader. Consume only this readable prefix through
+                        // ncurses' FIFO/parser, capped by this call's remaining 256 input iterations;
+                        // never enter a blocking getch without known bytes (including GPM/sysmouse waits).
+                        const auto bounded=std::min<unsigned>(static_cast<unsigned>(readable),256-count);
+                        if(bounded>0&&paste_input_mode.begin())paste_readable_remaining=bounded;
+                    }
+                }
+#endif
                 const int byte=wgetch(stdscr);
-                if(byte==ERR)break;
+#if defined(__linux__) && defined(FIONREAD)
+                if(paste_readable_remaining>0) {
+                    --paste_readable_remaining;
+                    if(paste_readable_remaining==0)paste_input_mode.restore();
+                }
+#endif
+                if(byte==ERR) {
+#if defined(__linux__) && defined(FIONREAD)
+                    paste_input_mode.restore();
+#endif
+                    break;
+                }
 #ifdef DATAPUMP_NCURSES_ADAPTER_TEST
                 ++test_input_symbols_;
                 if(byte>=0&&byte<=255) {++test_paste_bytes_;++test_current_paste_bytes_;}
 #endif
                 if(byte==KEY_RESIZE) {resized_=true;continue;}
                 paste_byte(static_cast<unsigned char>(byte),send);
+#if defined(__linux__) && defined(FIONREAD)
+                if(!pasting_)paste_input_mode.restore();
+#endif
                 continue;
             }
+#if defined(__linux__) && defined(FIONREAD)
+            paste_input_mode.restore();
+#endif
             wint_t code=0;const int kind=wget_wch(stdscr,&code);
             if(kind==ERR)break;
 #ifdef DATAPUMP_NCURSES_ADAPTER_TEST
@@ -397,6 +461,9 @@ public:
             }
             send(event);
         }
+#if defined(__linux__) && defined(FIONREAD)
+        paste_input_mode.restore();
+#endif
         capture();
     }
     bool consume_resize() {const bool result=resized_;resized_=false;return resize()||result;}
