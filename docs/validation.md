@@ -4,6 +4,94 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Symbol_Burst — supplemental corrections and qualification, 22 October 2026
+
+The runtime is **`83975bd8054f336a5aaa01205b8f54db6d5b13f9`**. Tested CI source
+**`67db103c2b59f72b97e07447c27c6d453aac68de`** has identical application, test,
+CMake and test-driver sources; its only additional change is the instrumented
+preparation allowance. The reconciled corrections align retained-bit reservations
+with the capacity setter, preserve independent ordinary-clock reception history,
+and add bounded exact reference-row caching and FFT eligibility improvements.
+The final two-file correction avoids storage leases for empty publication batches
+while preserving retirement/accounting, and fingerprints an exclusively restored
+workspace vector once. The Gentoo alias fixture also resolves its temporary path;
+all 12 original methods passed locally. Wire formats, acquisition coverage, pending
+identity, physical-end requirements and individual application deadlines remain intact.
+
+| Required qualification | Exact source | Result |
+| --- | --- | --- |
+| [Native 39742621396](https://github.com/mirage335-colossus/pumpModem/actions/runs/39742621396) | `67db103` | Passed: all 40 jobs; core Linux Release 253 passed/17 declared omissions, Debug 250/17, Windows 232/33; all required remaining scopes and calibration complete. |
+| [SDK 39742625503](https://github.com/mirage335-colossus/pumpModem/actions/runs/39742625503) | `67db103` | Passed: all 12 jobs, including four copied scopes; 196 general tests, Live 2/2, all-section calibration, frontend/web/Wasm, setup and packaging. |
+
+Both full workflows use standard runners and `devfast=false`. Calibration retains
+all fixed seeds and original per-case/combined gates, including complete joined
+Debug shaped captures. All six native/SDK copied-runtime scopes passed both archive
+formats, archive/internal-manifest verification and the complete smoke, including
+exact binary `Help`, invalid drafts, file/text/copy and pending/replay assertions.
+These simulated smoke checks do not establish physical-device audio qualification.
+
+[Strict Debug GUI 39737590447](https://github.com/mirage335-colossus/pumpModem/actions/runs/39737590447)
+on runtime-equivalent `83975bd` passed the original advice/controller pair 2/2
+serially and 2/2 in parallel. EU stops took 8.31634/8.28308 seconds, within the
+unchanged ten-second cap; source-tail and idle checks passed, with ordinary
+five-second warnings. [Paced 39737595013](https://github.com/mirage335-colossus/pumpModem/actions/runs/39737595013)
+passed all nine plaintext/keyed, Burst Off/On and held/unheld cases, the original
+no-argument Burst test and three storage tests. Exact bits, complete input, physical
+END, final frontier/queues and cleanup passed. Held-On cases cleared 14 plaintext
+and eight keyed gaps; Off controls made no rescue claim. Maximum callback duration
+was 0.906497 ms and start lateness 1.323429 ms; both start and completion passed
+the unchanged 20 ms guard against the fixed schedule. Generated/prefetched samples
+are not transmission evidence. Reported PCM/FNV identities match the baseline;
+raw PCM was not retained for independent rehashing.
+
+Warnings and coverage limits remain explicit. Native instrumented compact Live
+framed/clear-after-positive coverage is incomplete at its authorized hosted limit;
+its mandatory functional analogue and remaining Live assertions passed. Release,
+Windows and SDK compact coverage completed. Retain actual declared numeric/ISA
+skips, the two approved instrumented Fast omissions and the opt-in desktop omission.
+GNU 11 preparation retains its existing conditional native-worker-peak coverage
+limit. Rev replay cadence and FLTK Fontconfig advisories remain; no WGL omission
+is inferred. Debug core retained completed ordinary-budget warnings: EU stop
+6.84856 seconds (FCC 4.50645), within the ten-second cap, and delayed arrival
+within its instrumented allowance. Source-tail and idle assertions passed; Linux
+Release and Debug CLI regressions each passed 39/39. There were 67 declared
+numeric/ISA return-77 omissions across the three native core configurations;
+conditional workflow-job skips are not test passes.
+
+The original `6ac28b` native run `39722282353` retains its Release Burst drain
+failure at 27.0508 seconds and Debug preparation timeout at 7200.12 seconds.
+Observed replay `39732755690` on code-equivalent `e345bce` failed Burst at 30.2605
+seconds despite correct content and physical END, because required drain remained.
+Its measured private interval stretched about five CPU seconds across seventeen
+wall seconds; this does not prove the historical sole cause or distinguish blocked
+from descheduled time. The new Release core passed the original no-argument test
+in 25.7489 seconds overall, preserving the private 25-second guard and draining all
+172,723 samples. Instrumented preparation completed every stage in 6812.22 seconds;
+its bounded outer allowance is 9000 seconds, warning at 7200, with no application
+deadline changed. Earlier failures remain failures in their original records.
+
+Both supplied archives passed payload-hash, size, CRC and path checks; reviewed
+patches matched their exact postimages. The second bundle's finite local ABBA
+comparison recorded about 43% lower mean CPU, with overlapping work, reused baseline
+binaries and omitted executables limiting attribution; it is not a universal speed
+claim. The separate local compact-Live failure is preserved despite later passes.
+Earlier integer saturation, replay-history, shared-tone and optional-template-floor
+corrections were already present and were not reapplied; current Windows saturation
+boundary assertions passed. Wine variants remain diagnostic or setup-blocked, and
+the privacy-weakening ACL proposal was rejected. Original GUI and copied-Help failures
+remain retained without sole-cause claims. No archived program was executed during
+reconciliation; no release publication or certification was performed.
+
+After both required full workflows passed and their artifacts were reviewed, the
+temporary tracked `PENDING.md` and `PENDING-TESTS.json` inventories were removed.
+Their exact final dirty bytes and hashes, together with the superseded validation
+WIP, are preserved in an ignored cleanup backup; no durable product documentation
+or test inventory was removed.
+
+Detailed source-bound receipts, original failures and current temporary-list backups
+are retained in the ignored `.agent-work/artifacts/symbol-burst-zip-reconcile-20261022T031009Z/`
+and `.agent-work/artifacts/symbol-burst-bookkeeping-reconcile-20261022T064657Z/` directories.
+
 ## Symbol_Burst — completed branch qualification, 21 October 2026
 
 The qualified runtime is `be1e1bc60f661be6fcec98a24b477f41cd7ea37b`.
