@@ -622,6 +622,76 @@ class CTestIntegration(unittest.TestCase):
             self.assertEqual(Counter(case.get('name') for case in cases),
                              Counter(['ordinary', 'gui_controller', 'gui_application']))
 
+    def test_core_advice_waits_for_dsp_and_preserves_parallel_gui_pair(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture = root / 'phase.py'
+            fixture.write_text(
+                'import sys,time\nfrom pathlib import Path\n'
+                'name=sys.argv[1]\n'
+                'if name=="ordinary":\n'
+                ' Path("dsp-finished").touch()\n'
+                'elif name=="gui_timing_advice":\n'
+                ' assert Path("dsp-finished").exists(),"DSP phase has not completed"\n'
+                ' assert not list(Path(".").glob("ready-*")),"GUI pair overlapped advice"\n'
+                ' Path("advice-finished").touch()\n'
+                'else:\n'
+                ' assert Path("advice-finished").exists(),"advice has not completed"\n'
+                ' Path("ready-"+name).touch()\n'
+                ' deadline=time.monotonic()+3\n'
+                ' while not all(Path("ready-"+n).exists() for n in ("gui_controller","gui_application")):\n'
+                '  assert time.monotonic()<deadline,"parallel GUI peer did not start"\n'
+                '  time.sleep(.005)\n')
+            names = ['ordinary', 'gui_timing_advice', 'gui_controller', 'gui_application']
+            quote = lambda value: json.dumps(str(value).replace('\\', '/'))
+            lines = []
+            for name in names:
+                lines += [f'add_test({name} {quote(sys.executable)} {quote(fixture)} {name})',
+                          f'set_tests_properties({name} PROPERTIES TIMEOUT 5)']
+            (root / 'CTestTestfile.cmake').write_text('\n'.join(lines) + '\n')
+            report_path = root / 'report.json'
+            args = argparse.Namespace(build_dir=root, scope='core', config=None, ctest=shutil.which('ctest'),
+                                      jobs=2, sanitizers=True, sanitizer_realtime=False, report=report_path,
+                                      summary=root / 'summary.md', timeout=3600, warn_fraction=.8)
+            with redirect_stdout(io.StringIO()):
+                result = runner.run(args)
+            data = json.loads(report_path.read_text())
+            self.assertEqual(result, 0)
+            self.assertEqual([phase['name'] for phase in data['phases']], ['core', 'gui_advice', 'gui'])
+            self.assertEqual([phase['selected'] for phase in data['phases']],
+                             [['ordinary'], ['gui_timing_advice'], ['gui_controller', 'gui_application']])
+            self.assertTrue(all(command[command.index('--parallel') + 1] == '2'
+                                for command in data['commands']))
+            self.assertEqual(data['result_counts'], {'passed': 4, 'omitted': 0, 'incomplete_or_failed': 0})
+            self.assertEqual(Counter(case.get('name') for case in
+                                     ET.parse(report_path.with_suffix('.xml')).getroot().iter('testcase')),
+                             Counter(names))
+
+    def test_core_advice_without_gui_pair_runs_after_failed_core_phase(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            marker = root / 'advice-ran'
+            ordinary = f'from pathlib import Path; Path({str(marker)!r}).write_text("core-failed"); raise SystemExit(3)'
+            advice = f'from pathlib import Path; p=Path({str(marker)!r}); assert p.read_text()=="core-failed"; p.write_text("advice-ran")'
+            (root / 'CTestTestfile.cmake').write_text(
+                f'add_test(ordinary {json.dumps(sys.executable)} -c {json.dumps(ordinary)})\n'
+                f'add_test(gui_timing_advice {json.dumps(sys.executable)} -c {json.dumps(advice)})\n')
+            report_path = root / 'report.json'
+            args = argparse.Namespace(build_dir=root, scope='core', config=None, ctest=shutil.which('ctest'),
+                                      jobs=2, sanitizers=True, sanitizer_realtime=False, report=report_path,
+                                      summary=root / 'summary.md', timeout=3600, warn_fraction=.8)
+            with redirect_stdout(io.StringIO()):
+                result = runner.run(args)
+            data = json.loads(report_path.read_text())
+            self.assertEqual(result, 1)
+            self.assertEqual(marker.read_text(), 'advice-ran')
+            self.assertEqual([phase['selected'] for phase in data['phases']],
+                             [['ordinary'], ['gui_timing_advice']])
+            self.assertNotEqual(data['phases'][0]['returncode'], 0)
+            self.assertEqual(data['phases'][1]['returncode'], 0)
+            self.assertNotEqual(data['ctest_returncode'], 0)
+            self.assertEqual(data['result_counts'], {'passed': 1, 'omitted': 0, 'incomplete_or_failed': 1})
+
     def test_phases_preserve_declared_omissions_and_each_phase_workload_warning(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

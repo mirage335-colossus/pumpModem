@@ -594,8 +594,21 @@ def run(args):
             print('Omitted instrumented real-time coverage: ' + ', '.join(omitted), flush=True)
         pattern = '^(' + '|'.join(re.escape(test['name']) for test in selected) + ')$'
         gui_names = {'gui_controller', 'gui_application'}
-        gui_phased = (args.sanitizers and args.scope == 'core' and gui_names.issubset(report['selected']) and
-                      len(selected) > len(gui_names))
+        # Advice has its own short responsiveness assertion. Keep it out of
+        # competing DSP processes too, without separating the controller and
+        # application pair that must still exercise parallel execution.
+        isolated_gui = gui_names if gui_names.issubset(report['selected']) else set()
+        if 'gui_timing_advice' in report['selected']:
+            isolated_gui = isolated_gui | {'gui_timing_advice'}
+        gui_phases = []
+        if args.sanitizers and args.scope == 'core':
+            gui_phases = [
+                ('core', [test for test in selected if test['name'] not in isolated_gui]),
+                ('gui_advice', [test for test in selected if test['name'] == 'gui_timing_advice']),
+                ('gui', [test for test in selected if test['name'] in gui_names & isolated_gui]),
+            ]
+            gui_phases = [(name, cases) for name, cases in gui_phases if cases]
+        gui_phased = len(gui_phases) > 1
         # The SDK general partition keeps this original wall-budgeted sampled
         # fixture out of the other CPU-intensive CTest processes. It still runs
         # once, with the same registration, assertions and deadlines.
@@ -603,8 +616,7 @@ def run(args):
                         plan['selected_part'] == 'general' and
                         'symbol_burst_live' in report['selected'] and len(selected) > 1)
         if gui_phased:
-            phases = [('core', [test for test in selected if test['name'] not in gui_names]),
-                      ('gui', [test for test in selected if test['name'] in gui_names])]
+            phases = gui_phases
         elif burst_phased:
             phases = [('general', [test for test in selected if test['name'] != 'symbol_burst_live']),
                       ('symbol_burst_live', [test for test in selected if test['name'] == 'symbol_burst_live'])]
