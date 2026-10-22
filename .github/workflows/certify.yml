@@ -173,8 +173,6 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.linux_matrix) }}
     env:
-      DATAPUMP_CI_SMOKE_WARNINGS_DIR: ${{ github.workspace }}/build/ci-smoke-results
-      DATAPUMP_CI_SMOKE_RUNNER: ${{ github.workspace }}/.certification-tools/tools/run-gui-smoke.py
       DATAPUMP_SMOKE_TARGET: ${{ matrix.target }}
       DATAPUMP_SMOKE_SCOPE: source/native
       DATAPUMP_SMOKE_SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
@@ -216,6 +214,10 @@ jobs:
           sparse-checkout: |
             tools
             cmake
+      - name: Set container-local smoke evidence paths
+        run: |
+          printf 'DATAPUMP_CI_SMOKE_WARNINGS_DIR=%s/build/ci-smoke-results\n' "$PWD" >> "$GITHUB_ENV"
+          printf 'DATAPUMP_CI_SMOKE_RUNNER=%s/.certification-tools/tools/run-gui-smoke.py\n' "$PWD" >> "$GITHUB_ENV"
       - name: Fetch this release's verified SDK (legacy base fallback, no compiler rebuild)
         if: matrix.sdk
         id: sdk
@@ -459,7 +461,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: certification-smoke-source-${{ matrix.target }}-attempt-${{ github.run_attempt }}
-          path: ${{ github.workspace }}/build/ci-smoke-results/
+          path: build/ci-smoke-results/
           if-no-files-found: warn
           retention-days: 7
 
@@ -582,8 +584,6 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.prepare.outputs.compatibility_matrix) }}
     env:
-      DATAPUMP_CI_SMOKE_WARNINGS_DIR: ${{ github.workspace }}/build/ci-smoke-results
-      DATAPUMP_CI_SMOKE_RUNNER: ${{ github.workspace }}/.certification-tools/tools/run-gui-smoke.py
       DATAPUMP_SMOKE_TARGET: ${{ matrix.target }}
       DATAPUMP_SMOKE_SCOPE: published/${{ matrix.image }}
       DATAPUMP_SMOKE_SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
@@ -628,6 +628,10 @@ jobs:
           sparse-checkout: |
             tools
             cmake
+      - name: Set container-local smoke evidence paths
+        run: |
+          printf 'DATAPUMP_CI_SMOKE_WARNINGS_DIR=%s/build/ci-smoke-results\n' "$PWD" >> "$GITHUB_ENV"
+          printf 'DATAPUMP_CI_SMOKE_RUNNER=%s/.certification-tools/tools/run-gui-smoke.py\n' "$PWD" >> "$GITHUB_ENV"
       - name: Download and verify this target's published archive
         id: binary
         env:
@@ -661,7 +665,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: certification-smoke-copy-${{ strategy.job-index }}-attempt-${{ github.run_attempt }}
-          path: ${{ github.workspace }}/build/ci-smoke-results/
+          path: build/ci-smoke-results/
           if-no-files-found: warn
           retention-days: 7
 

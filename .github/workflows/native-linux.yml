@@ -160,8 +160,6 @@ jobs:
       run:
         shell: bash
     env:
-      DATAPUMP_CI_SMOKE_WARNINGS_DIR: ${{ github.workspace }}/build/ci-smoke-results
-      DATAPUMP_CI_SMOKE_RUNNER: ${{ github.workspace }}/tools/run-gui-smoke.py
       DATAPUMP_SMOKE_TARGET: linux-x86_64-fltk
       DATAPUMP_SMOKE_SCOPE: source/native
       DATAPUMP_SMOKE_SOURCE_SHA: ${{ github.sha }}
@@ -306,6 +304,10 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: ${{ (inputs.scope == 'simulation-capacity-shape-diagnostic' || inputs.scope == 'simulation-acquisition-partition-diagnostic') && 16 || 1 }}
+      - name: Set container-local smoke evidence paths
+        run: |
+          printf 'DATAPUMP_CI_SMOKE_WARNINGS_DIR=%s/build/ci-smoke-results\n' "$PWD" >> "$GITHUB_ENV"
+          printf 'DATAPUMP_CI_SMOKE_RUNNER=%s/tools/run-gui-smoke.py\n' "$PWD" >> "$GITHUB_ENV"
       - name: Fetch the immutable Live drain application preimage
         if: inputs.scope == 'live-drain-diagnostic'
         run: git -c safe.directory="$PWD" fetch --no-tags --depth=1 origin 3611f0cf0ae066d6d9679cdee8447b73b66468c7
@@ -3223,7 +3225,7 @@ jobs:
             build/simulation-acquisition-partition-diagnostics/
             build/native-peak-lease-diagnostic/
             build/sched-hop-radius-control/
-            ${{ github.workspace }}/build/ci-smoke-results/
+            build/ci-smoke-results/
           if-no-files-found: warn
           retention-days: 7
       - name: Publish planned Debug core part metadata

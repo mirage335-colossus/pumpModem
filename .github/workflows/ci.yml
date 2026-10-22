@@ -212,8 +212,6 @@ jobs:
       matrix:
         backend: [fltk, rev]
     env:
-      DATAPUMP_CI_SMOKE_WARNINGS_DIR: ${{ github.workspace }}/build/ci-smoke-results
-      DATAPUMP_CI_SMOKE_RUNNER: ${{ github.workspace }}/tools/run-gui-smoke.py
       DATAPUMP_SMOKE_TARGET: linux-x86_64-${{ matrix.backend }}
       DATAPUMP_SMOKE_SCOPE: source/native
       DATAPUMP_SMOKE_SOURCE_SHA: ${{ github.sha }}
@@ -238,6 +236,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Set container-local smoke evidence paths
+        run: |
+          printf 'DATAPUMP_CI_SMOKE_WARNINGS_DIR=%s/build/ci-smoke-results\n' "$PWD" >> "$GITHUB_ENV"
+          printf 'DATAPUMP_CI_SMOKE_RUNNER=%s/tools/run-gui-smoke.py\n' "$PWD" >> "$GITHUB_ENV"
       - name: Configure the same contract suite for the selected adapter
         # The focused GUI diagnostic runs this same complete scope. Standard
         # runners get bounded cumulative computation headroom, with a warning
@@ -267,7 +269,7 @@ jobs:
           path: |
             build-gui/ci-test-report.*
             build-gui/Testing/Temporary/
-            ${{ github.workspace }}/build/ci-smoke-results/
+            build/ci-smoke-results/
           if-no-files-found: warn
           retention-days: 7
 
@@ -442,8 +444,6 @@ jobs:
         ubuntu: ["22.04", "24.04"]
     env:
       DATAPUMP_CI_SMOKE_CAPTURE_FIXTURES: '1'
-      DATAPUMP_CI_SMOKE_WARNINGS_DIR: ${{ github.workspace }}/build/ci-smoke-results
-      DATAPUMP_CI_SMOKE_RUNNER: ${{ github.workspace }}/tools/run-gui-smoke.py
       DATAPUMP_SMOKE_TARGET: linux-x86_64-fltk
       DATAPUMP_SMOKE_SCOPE: published/ubuntu-${{ matrix.ubuntu }}
       DATAPUMP_SMOKE_SOURCE_SHA: ${{ github.sha }}
@@ -467,6 +467,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Set container-local smoke evidence paths
+        run: |
+          printf 'DATAPUMP_CI_SMOKE_WARNINGS_DIR=%s/build/ci-smoke-results\n' "$PWD" >> "$GITHUB_ENV"
+          printf 'DATAPUMP_CI_SMOKE_RUNNER=%s/tools/run-gui-smoke.py\n' "$PWD" >> "$GITHUB_ENV"
       - name: Install the pinned dependency scanner
         run: |
           sh tools/install-release-cmake.sh "$GITHUB_WORKSPACE/build/ci-cmake"
@@ -482,7 +486,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: CI-copied-Linux-${{ matrix.ubuntu }}-smoke-attempt-${{ github.run_attempt }}
-          path: ${{ github.workspace }}/build/ci-smoke-results/
+          path: build/ci-smoke-results/
           if-no-files-found: warn
           retention-days: 7
 

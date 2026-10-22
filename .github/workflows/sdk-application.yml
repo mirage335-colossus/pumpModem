@@ -81,8 +81,6 @@ jobs:
     # Full FLTK contracts include calibration after the ordinary regressions.
     timeout-minutes: ${{ inputs.scope == 'tests' && inputs.backend == 'fltk' && 180 || 120 }}
     env:
-      DATAPUMP_CI_SMOKE_WARNINGS_DIR: ${{ github.workspace }}/build/ci-smoke-results
-      DATAPUMP_CI_SMOKE_RUNNER: ${{ github.workspace }}/tools/run-gui-smoke.py
       DATAPUMP_SMOKE_TARGET: linux-x86_64-${{ inputs.backend }}
       DATAPUMP_SMOKE_SCOPE: published/sdk-archives
       DATAPUMP_SMOKE_SOURCE_SHA: ${{ github.sha }}
@@ -148,6 +146,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Set container-local smoke evidence paths
+        run: |
+          printf 'DATAPUMP_CI_SMOKE_WARNINGS_DIR=%s/build/ci-smoke-results\n' "$PWD" >> "$GITHUB_ENV"
+          printf 'DATAPUMP_CI_SMOKE_RUNNER=%s/tools/run-gui-smoke.py\n' "$PWD" >> "$GITHUB_ENV"
       - name: Fetch the exact published SDK from base
         id: sdk
         env:
@@ -553,7 +555,7 @@ jobs:
             build/sdk-web/Testing/Temporary/*.log
             build/sdk-application/CMakeFiles/CMakeConfigureLog.yaml
             build/sdk-application/build-info.txt
-            ${{ github.workspace }}/build/ci-smoke-results/
+            build/ci-smoke-results/
           if-no-files-found: warn
           retention-days: 7
       - name: Preserve bounded SDK scheduling diagnostic evidence
