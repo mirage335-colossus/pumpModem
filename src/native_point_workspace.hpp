@@ -165,9 +165,10 @@ public:
     NativePointLease& operator=(const NativePointLease&)=delete;
     ~NativePointLease()noexcept {
         if(!active_)return;
-        if(exclusive_){old_->values.swap(*points_);old_->borrowed=false;old_->hash=NativePointPool::fingerprint(old_->values);}
+        if(exclusive_){old_->values.swap(*points_);old_->borrowed=false;}
         auto& values=exclusive_?old_->values:*points_;
         const auto hash=NativePointPool::fingerprint(values);
+        if(exclusive_)old_->hash=hash;
         auto* match=pool_->find(values,hash,exclusive_?old_:nullptr);
         if(match) {
             if(match!=old_){pool_->retain(match);if(old_)pool_->release(old_);owner_->pool_=pool_;owner_->entry_=match;}

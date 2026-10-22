@@ -2904,7 +2904,10 @@ struct Session::Impl {
                     accounted = actual;
                 };
                 try {
-                    native_storage.emplace(bank,receiver,capacity,accounted);
+                    // Empty publication batches only retire presentation metadata.
+                    // Keep numeric storage pooled until a modem operation needs it.
+                    if(phase==0 || !receiver.bursts.empty())
+                        native_storage.emplace(bank,receiver,capacity,accounted);
                     if(phase==0) {
                         // Resolve/grow provenance before borrowing numeric caches
                         // or computing the modem loan. New heap bytes then reduce
