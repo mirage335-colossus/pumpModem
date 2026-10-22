@@ -33,6 +33,11 @@ on:
         type: choice
         options: [all, '0', '1']
         default: all
+      apt_profile:
+        description: 'Exact package profile used only by ci-apt-probe'
+        type: choice
+        options: [native-ubuntu22, sdk-runtime-ubuntu24]
+        default: native-ubuntu22
       sanitizer_realtime:
         description: 'Include real-time Fast RX checks in instrumented Debug coverage'
         type: boolean
@@ -92,6 +97,10 @@ on:
         description: 'Debug core partition: all preserves the complete entry point; 0 or 1 runs one planned half'
         type: string
         default: all
+      apt_profile:
+        description: 'Exact package profile used only by ci-apt-probe'
+        type: string
+        default: native-ubuntu22
       sanitizer_realtime:
         type: boolean
         default: false
@@ -141,6 +150,8 @@ jobs:
   ci-apt-probe:
     if: inputs.scope == 'ci-apt-probe'
     uses: ./.github/workflows/ci-apt-responsiveness-probe.yml
+    with:
+      profile: ${{ inputs.apt_profile || 'native-ubuntu22' }}
   fft-kernel:
     if: inputs.scope == 'fft-kernel-diagnostic'
     uses: ./.github/workflows/fft-kernel-diagnostic.yml

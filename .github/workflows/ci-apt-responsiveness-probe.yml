@@ -2,19 +2,30 @@ name: CI APT responsiveness probe
 
 on:
   workflow_dispatch:
+    inputs:
+      profile:
+        description: Exact prerequisite profile to measure
+        type: choice
+        options: [native-ubuntu22, sdk-runtime-ubuntu24]
+        default: native-ubuntu22
   workflow_call:
+    inputs:
+      profile:
+        type: string
+        default: native-ubuntu22
 
 permissions:
   contents: read
 
 jobs:
   apt-responsiveness:
-    name: Ubuntu 22.04 package acquisition
+    name: ${{ inputs.profile || 'native-ubuntu22' }} package acquisition
     runs-on: ubuntu-24.04
-    container: ubuntu:22.04
-    timeout-minutes: 20
+    container: ${{ inputs.profile == 'sdk-runtime-ubuntu24' && 'ubuntu:24.04' || 'ubuntu:22.04' }}
+    timeout-minutes: ${{ inputs.profile == 'sdk-runtime-ubuntu24' && 45 || 20 }}
     env:
       DEBIAN_FRONTEND: noninteractive
+      CI_APT_PROFILE: ${{ inputs.profile || 'native-ubuntu22' }}
     defaults:
       run:
         shell: bash
@@ -22,11 +33,17 @@ jobs:
       - name: Initialize bounded diagnostic evidence
         run: |
           set -euo pipefail
+          case "$CI_APT_PROFILE" in
+            native-ubuntu22|sdk-runtime-ubuntu24) ;;
+            *) printf 'Unknown APT probe profile: %s\n' "$CI_APT_PROFILE" >&2; exit 2 ;;
+          esac
           report_dir="$RUNNER_TEMP/ci-apt-responsiveness"
           mkdir -p "$report_dir"
           {
             printf 'source_sha=%s\n' "$GITHUB_SHA"
+            printf 'profile=%s\n' "$CI_APT_PROFILE"
             printf 'diagnostic=package acquisition only; not product or release qualification\n'
+            cat /etc/os-release
           } > "$report_dir/metadata.txt"
 
       - name: Checkout current APT helper before Git installation
@@ -38,21 +55,31 @@ jobs:
           sparse-checkout: tools/ci-apt.sh
           sparse-checkout-cone-mode: false
 
-      - name: Acquire the native Linux package set
+      - name: Acquire the selected exact package set
         env:
-          CI_APT_DOWNLOAD_TIMEOUT: '180'
+          CI_APT_DOWNLOAD_TIMEOUT: ${{ inputs.profile == 'sdk-runtime-ubuntu24' && '600' || '180' }}
         run: |
           set -euo pipefail
           report_dir="$RUNNER_TEMP/ci-apt-responsiveness"
           helper="$RUNNER_TEMP/ci-apt.sh"
           cp .ci-bootstrap/tools/ci-apt.sh "$helper"
-          packages=(
-            ca-certificates curl git cmake ninja-build make g++-11 binutils
-            libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev
-            libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev
-            libncurses-dev libsdl2-dev xvfb xauth fontconfig-config
-            fonts-dejavu-core python3
-          )
+          case "$CI_APT_PROFILE" in
+            native-ubuntu22)
+              packages=(
+                ca-certificates curl git cmake ninja-build make g++-11 binutils
+                libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev
+                libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev
+                libncurses-dev libsdl2-dev xvfb xauth fontconfig-config
+                fonts-dejavu-core python3
+              ) ;;
+            sdk-runtime-ubuntu24)
+              packages=(
+                ca-certificates curl git python3 cmake binutils xvfb xauth
+                fonts-dejavu-core fontconfig-config libgl1 libopengl0
+                libgl1-mesa-dri libxtst6
+              ) ;;
+            *) printf 'Unknown APT probe profile: %s\n' "$CI_APT_PROFILE" >&2; exit 2 ;;
+          esac
           {
             printf 'helper_sha256=%s\n' "$(sha256sum "$helper" | cut -d ' ' -f 1)"
             printf 'ci_apt_download_timeout_seconds=%s\n' "$CI_APT_DOWNLOAD_TIMEOUT"
