@@ -96,7 +96,7 @@ on:
       diagnostic:
         description: 'Focused check used only with devfast=true'
         type: choice
-        options: [legacy, certification, windows-certification, windows-rev, graphics, arm-rev-package, arm-rev-smoke, arm-rev-adapter, sdk-live, gui-contract, sanitizer-gui, runner-capacity, arm-runner-capacity, ci-tooling, core-partition]
+        options: [legacy, certification, windows-certification, windows-rev, graphics, arm-rev-package, arm-rev-smoke, arm-rev-adapter, sdk-live, gui-contract, sanitizer-gui, runner-capacity, arm-runner-capacity, ci-tooling, core-partition, preparation-partition]
         default: legacy
       diagnostic_release:
         description: 'Published tag for graphics, or immutable source tag/ref for ARM adapter / SDK live diagnostics'
@@ -132,7 +132,9 @@ jobs:
           python3 tests/test_native_tests_runner.py
           python3 tests/test_ci_tests.py
           python3 tests/test_ci_test_plan.py
+          python3 tests/test_ci_preparation_plan.py
           python3 tests/test_ci_sdk_copy_inputs.py
+          python3 tests/test_ci_native_copy_inputs.py
           python3 tests/test_ci_build_probe.py
           python3 tests/test_sdk_burst_scheduling_diagnostic.py
           python3 tests/test_wasm_sdk.py
@@ -317,6 +319,8 @@ jobs:
             shard: {scope: calibration, section: shaped}
           - build_type: Debug
             shard: {scope: core, section: all}
+          - build_type: Debug
+            shard: {scope: preparation, section: all}
     uses: ./.github/workflows/native-linux.yml
     with:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
@@ -324,6 +328,71 @@ jobs:
       scope: ${{ matrix.shard.scope }}
       calibration_section: ${{ matrix.shard.section }}
       sanitizer_realtime: ${{ inputs.sanitizer_realtime }}
+
+  linux-preparation-debug:
+    if: github.event_name == 'workflow_dispatch' && (!inputs.devfast || inputs.diagnostic == 'preparation-partition')
+    name: Linux Debug / preparation / part ${{ matrix.part }}
+    strategy:
+      fail-fast: false
+      matrix:
+        part: ['0', '1', '2', '3']
+    uses: ./.github/workflows/native-linux.yml
+    with:
+      linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
+      build_type: Debug
+      scope: preparation
+      preparation_part: ${{ matrix.part }}
+
+  linux-preparation-debug-aggregate:
+    if: always() && github.event_name == 'workflow_dispatch' && (!inputs.devfast || inputs.diagnostic == 'preparation-partition')
+    name: Require all original Debug preparation comparisons
+    needs: linux-preparation-debug
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Preparation-Debug-part-0
+          path: build/preparation-parts/0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Preparation-Debug-part-1
+          path: build/preparation-parts/1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Preparation-Debug-part-2
+          path: build/preparation-parts/2
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Preparation-Debug-part-3
+          path: build/preparation-parts/3
+      - name: Require all producer jobs and the complete original inventory
+        if: always()
+        env:
+          PART_JOBS_RESULT: ${{ needs.linux-preparation-debug.result }}
+        run: test "$PART_JOBS_RESULT" = success
+      - name: Verify every original comparison and assertion completed exactly once
+        run: >-
+          python3 tools/ci-preparation-plan.py aggregate
+          --parts build/preparation-parts/0/ci-preparation-part.json
+          build/preparation-parts/1/ci-preparation-part.json
+          build/preparation-parts/2/ci-preparation-part.json
+          build/preparation-parts/3/ci-preparation-part.json
+          --output build/preparation-aggregate.json
+      - name: Record focused preparation coverage scope
+        if: inputs.devfast && inputs.diagnostic == 'preparation-partition'
+        run: echo 'All four GNU11 Debug ASan/UBSan preparation comparison partitions and their strict aggregate completed. Other native scopes were not selected by this focused run.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: Preparation-Debug-aggregate
+          path: build/preparation-aggregate.json
+          if-no-files-found: error
+          retention-days: 7
 
   linux-core-debug:
     if: github.event_name == 'workflow_dispatch' && (!inputs.devfast || inputs.diagnostic == 'core-partition')

@@ -535,6 +535,8 @@ def run(args):
               'inventory_file': None, 'inventory_sha256': None, 'ctest_returncode': None}
     returncode = 1
     try:
+        if getattr(args, 'isolate_burst', False) and (args.scope != 'core' or args.sanitizers):
+            raise ValueError('explicit Burst isolation requires uninstrumented core scope')
         base = [args.ctest, '--test-dir', str(args.build_dir.resolve())]
         if args.config:
             base += ['--build-config', args.config]
@@ -609,16 +611,22 @@ def run(args):
             ]
             gui_phases = [(name, cases) for name, cases in gui_phases if cases]
         gui_phased = len(gui_phases) > 1
-        # The SDK general partition keeps this original wall-budgeted sampled
-        # fixture out of the other CPU-intensive CTest processes. It still runs
+        # The SDK general partition and explicitly selected native Release
+        # core phase keep this wall-budgeted fixture out of other CPU-intensive
+        # CTest processes. It still runs
         # once, with the same registration, assertions and deadlines.
-        burst_phased = (plan is not None and args.scope == 'contract' and
-                        plan['selected_part'] == 'general' and
+        sdk_burst_phase = (plan is not None and args.scope == 'contract' and
+                           plan['selected_part'] == 'general')
+        native_burst_phase = getattr(args, 'isolate_burst', False)
+        if native_burst_phase and 'symbol_burst_live' not in report['selected']:
+            raise ValueError('explicit Burst isolation requires the original Burst test')
+        burst_phased = ((sdk_burst_phase or native_burst_phase) and
                         'symbol_burst_live' in report['selected'] and len(selected) > 1)
         if gui_phased:
             phases = gui_phases
         elif burst_phased:
-            phases = [('general', [test for test in selected if test['name'] != 'symbol_burst_live']),
+            phases = [('core' if native_burst_phase else 'general',
+                       [test for test in selected if test['name'] != 'symbol_burst_live']),
                       ('symbol_burst_live', [test for test in selected if test['name'] == 'symbol_burst_live'])]
         else:
             phases = [('all', selected)]
@@ -763,6 +771,8 @@ def main(argv=None):
     parser.add_argument('--config')
     parser.add_argument('--sanitizers', action='store_true')
     parser.add_argument('--sanitizer-realtime', action='store_true')
+    parser.add_argument('--isolate-burst', action='store_true',
+                        help='Run the original Burst invocation after other uninstrumented core tests')
     parser.add_argument('--report', type=Path, required=True)
     parser.add_argument('--summary', default=os.environ.get('GITHUB_STEP_SUMMARY'))
     parser.add_argument('--ctest', default='ctest')

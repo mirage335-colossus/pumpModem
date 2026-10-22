@@ -100,7 +100,11 @@ def source_identity(source_root):
             'untracked_input_sha256': digest(extra)}
 
 
-def config_identity(cache_path, config):
+def config_identity(cache_path, config, *, ignored_cache_keys=(), include_cache_values=False):
+    """Hash configured inputs; optional cache detail permits narrow normalization.
+
+    Existing callers retain the same identity and every semantic cache key.
+    """
     entries = {}
     for line in Path(cache_path).read_text(encoding='utf-8', errors='replace').splitlines():
         if not line or line.startswith(('#', '//')) or '=' not in line or ':' not in line.split('=', 1)[0]:
@@ -111,7 +115,7 @@ def config_identity(cache_path, config):
         # not configure compilation or a registered test, and differs between
         # otherwise identical producers. Keep every semantic cache entry and
         # the separately hashed compiler/library inputs in the identity.
-        if key in {'CMAKE_CACHEFILE_DIR', 'CMAKE_HOME_DIRECTORY', 'CMAKE_MAKE_PROGRAM', 'SITE'}:
+        if key in {'CMAKE_CACHEFILE_DIR', 'CMAKE_HOME_DIRECTORY', 'CMAKE_MAKE_PROGRAM', 'SITE'} or key in ignored_cache_keys:
             continue
         entries[key] = value
     if not entries:
@@ -129,9 +133,12 @@ def config_identity(cache_path, config):
                 path = Path(name)
                 if path.is_absolute() and path.is_file():
                     inputs[name] = digest(path.read_bytes())
-    return {'cache_values_sha256': digest(entries), 'config': config or '',
-            'compiler_configuration': compiler_identity, 'compiler_library_inputs': inputs,
-            'sanitizers': entries.get('DATAPUMP_SANITIZERS', 'OFF')}
+    result = {'cache_values_sha256': digest(entries), 'config': config or '',
+              'compiler_configuration': compiler_identity, 'compiler_library_inputs': inputs,
+              'sanitizers': entries.get('DATAPUMP_SANITIZERS', 'OFF')}
+    if include_cache_values:
+        result['cache_values'] = entries
+    return result
 
 
 def load_registration(path):

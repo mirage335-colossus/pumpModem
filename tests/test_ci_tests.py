@@ -726,6 +726,58 @@ class CTestIntegration(unittest.TestCase):
             log = report_path.with_suffix('.log').read_text()
             self.assertEqual(log, ''.join((root / phase['log_file']).read_text() for phase in data['phases']))
 
+    def test_explicit_release_burst_phase_waits_for_core_and_preserves_failures(self):
+        for ordinary_exit in (0, 3):
+            with self.subTest(ordinary_exit=ordinary_exit), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                fixture = root / 'phase.py'
+                fixture.write_text(
+                    'import sys,time\nfrom pathlib import Path\n'
+                    'if sys.argv[1]=="ordinary":\n'
+                    ' Path("ordinary-running").touch()\n'
+                    ' time.sleep(.03)\n'
+                    ' Path("ordinary-running").unlink()\n'
+                    ' Path("ordinary-done").touch()\n'
+                    ' raise SystemExit(int(sys.argv[2]))\n'
+                    'assert Path("ordinary-done").exists(),"ordinary process has not completed"\n'
+                    'assert not Path("ordinary-running").exists(),"ordinary process overlaps Burst"\n'
+                    'Path("burst-ran").touch()\n')
+                quote = lambda value: json.dumps(str(value).replace('\\', '/'))
+                (root / 'CTestTestfile.cmake').write_text(
+                    f'add_test(ordinary {quote(sys.executable)} {quote(fixture)} ordinary {ordinary_exit})\n'
+                    f'add_test(symbol_burst_live {quote(sys.executable)} {quote(fixture)} burst)\n')
+                report_path = root / 'report.json'
+                args = argparse.Namespace(build_dir=root, scope='core', config=None,
+                    ctest=shutil.which('ctest'), jobs=2, sanitizers=False,
+                    sanitizer_realtime=False, isolate_burst=True, report=report_path,
+                    summary=root / 'summary.md', timeout=3600, warn_fraction=.8)
+                with redirect_stdout(io.StringIO()):
+                    result = runner.run(args)
+                data = json.loads(report_path.read_text())
+                self.assertEqual(result, int(ordinary_exit != 0))
+                self.assertTrue((root / 'burst-ran').is_file())
+                self.assertEqual([phase['selected'] for phase in data['phases']],
+                                 [['ordinary'], ['symbol_burst_live']])
+                self.assertEqual(data['phases'][1]['returncode'], 0)
+                self.assertEqual(data['result_counts'], {'passed': 2-int(ordinary_exit != 0),
+                    'omitted': 0, 'incomplete_or_failed': int(ordinary_exit != 0)})
+                self.assertEqual(Counter(case.get('name') for case in
+                    ET.parse(report_path.with_suffix('.xml')).getroot().iter('testcase')),
+                    Counter(['ordinary', 'symbol_burst_live']))
+
+    def test_explicit_burst_isolation_rejects_other_scopes_and_sanitizers(self):
+        for scope, sanitizers in (('preparation', False), ('core', True)):
+            with self.subTest(scope=scope, sanitizers=sanitizers), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                args = argparse.Namespace(build_dir=root, scope=scope, config=None,
+                    ctest=shutil.which('ctest'), jobs=2, sanitizers=sanitizers,
+                    sanitizer_realtime=False, isolate_burst=True, report=root / 'report.json',
+                    summary=root / 'summary.md', timeout=3600, warn_fraction=.8)
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(runner.run(args), 1)
+                self.assertIn('requires uninstrumented core scope',
+                              json.loads(args.report.read_text())['error'])
+
     def test_release_core_retains_single_ctest_process_with_gui_cases(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

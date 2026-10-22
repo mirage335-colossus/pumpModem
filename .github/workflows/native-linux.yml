@@ -33,6 +33,11 @@ on:
         type: choice
         options: [all, '0', '1']
         default: all
+      preparation_part:
+        description: 'Debug preparation comparison partition: all retains the complete original invocation'
+        type: choice
+        options: [all, '0', '1', '2', '3']
+        default: all
       apt_profile:
         description: 'Exact package profile used only by ci-apt-probe'
         type: choice
@@ -95,6 +100,10 @@ on:
         default: ''
       core_part:
         description: 'Debug core partition: all preserves the complete entry point; 0 or 1 runs one planned half'
+        type: string
+        default: all
+      preparation_part:
+        description: 'Debug preparation comparison partition: all retains the complete original invocation'
         type: string
         default: all
       apt_profile:
@@ -160,7 +169,7 @@ jobs:
     uses: ./.github/workflows/fft-normalization-diagnostic.yml
   native:
     if: inputs.scope != 'ci-build-probe' && inputs.scope != 'ci-apt-probe' && inputs.scope != 'fft-kernel-diagnostic' && inputs.scope != 'fft-normalization-diagnostic' && inputs.scope != 'gui-stop-interval-diagnostic' && inputs.scope != 'gui-receiver-feed-diagnostic'
-    name: Linux ${{ inputs.build_type }} / ${{ inputs.scope }} / ${{ inputs.calibration_section }}${{ inputs.calibration_shard != '' && format(' / part {0}', inputs.calibration_shard) || '' }}${{ (inputs.scope == 'gui-stop-differential' || (inputs.scope == 'simulation-first-transition-diagnostic' && inputs.stop_group == 'framed-4e-census')) && format(' / {0}', inputs.stop_group) || '' }}
+    name: Linux ${{ inputs.build_type }} / ${{ inputs.scope }} / ${{ inputs.calibration_section }}${{ inputs.preparation_part != 'all' && format(' / preparation part {0}', inputs.preparation_part) || '' }}${{ inputs.calibration_shard != '' && format(' / part {0}', inputs.calibration_shard) || '' }}${{ (inputs.scope == 'gui-stop-differential' || (inputs.scope == 'simulation-first-transition-diagnostic' && inputs.stop_group == 'framed-4e-census')) && format(' / {0}', inputs.stop_group) || '' }}
     runs-on: ${{ inputs.linux_runner }}
     # Preserve the portable application's glibc 2.35 baseline in every shard.
     container: ubuntu:22.04
@@ -186,6 +195,7 @@ jobs:
       CXX: g++-11
       CI_SCOPE: ${{ inputs.scope }}
       CORE_PART: ${{ inputs.core_part }}
+      PREPARATION_PART: ${{ inputs.preparation_part }}
       CI_STOP_GROUP: ${{ inputs.stop_group }}
       DATAPUMP_SANITIZERS: ${{ inputs.scope == 'gui-stop-differential' && (inputs.stop_group == 'eu-o1-san-off' || inputs.stop_group == 'eu-o0-san-off' || inputs.stop_group == 'eu-focus-o1-san-off' || inputs.stop_group == 'eu-focus-o0-san-off' || inputs.stop_group == 'eu-kernel-o1-san-off') && 'OFF' || ((inputs.build_type == 'Debug' || inputs.scope == 'simulation-clock-diagnostic' || (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic' || inputs.scope == 'simulation-owner-census-diagnostic' || inputs.scope == 'simulation-capacity-shape-diagnostic' || inputs.scope == 'simulation-acquisition-partition-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic'))) && 'ON' || 'OFF') }}
       SANITIZER_REALTIME: ${{ inputs.sanitizer_realtime }}
@@ -1040,6 +1050,13 @@ jobs:
           python3 -B tools/framed-first-transition-diagnostic/prepare.py \
             --source-root "$PWD/build/first-transition-source/source" \
             --output-dir "$PWD/build/first-transition-source/evidence"
+      - name: Validate the independent preparation partition scope
+        if: inputs.preparation_part != 'all'
+        run: |
+          if [ "$CI_SCOPE" != preparation ] || [ '${{ inputs.build_type }}' != Debug ] || [ "$DATAPUMP_SANITIZERS" != ON ] || ! [[ "$PREPARATION_PART" =~ ^[0-3]$ ]]; then
+            echo '::error::Preparation partitions require Debug ASan/UBSan preparation scope and one part 0..3.'
+            exit 2
+          fi
       - name: Configure native application and selected test scope
         run: >-
           cmake -S "${{ inputs.scope == 'simulation-first-transition-diagnostic' && 'build/first-transition-source/source' || inputs.scope == 'native-peak-lease-diagnostic' && 'build/native-peak-lease-source' || (inputs.scope == 'simulation-clock-chain-score-diagnostic' && 'build/raw-chain-source' || (inputs.scope == 'simulation-owner-census-diagnostic' && 'build/owner-census-source' || ((inputs.scope == 'simulation-capacity-shape-diagnostic' || inputs.scope == 'simulation-acquisition-partition-diagnostic') && 'build/capacity-shape-source' || '.'))) }}" -B build -G Ninja -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11
@@ -1054,6 +1071,7 @@ jobs:
           -DDATAPUMP_BUILD_WEB_WORKER=${{ (inputs.scope == 'package' || inputs.scope == 'web') && 'ON' || 'OFF' }}
           -DDATAPUMP_CALIBRATION_SECTION=${{ inputs.calibration_section }}
           -DDATAPUMP_CALIBRATION_SHARD=${{ inputs.calibration_shard }}
+          -DDATAPUMP_CI_PREPARATION_PART=${{ inputs.preparation_part }}
           -DDART_TESTING_TIMEOUT=3600
           -DCMAKE_DISABLE_FIND_PACKAGE_Python3=${{ (inputs.scope == 'frontends' || inputs.scope == 'web') && 'FALSE' || 'TRUE' }}
           -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL=${{ (inputs.scope == 'live' || (inputs.scope == 'gui-core-diagnostic' && inputs.build_type == 'Debug')) && inputs.linux_runner == 'ubuntu-24.04' && 'ON' || 'OFF' }}
@@ -1772,6 +1790,9 @@ jobs:
           if [ "$SANITIZER_REALTIME" = true ]; then
             options+=(--sanitizer-realtime)
           fi
+          if [ "$CI_SCOPE" = core ] && [ "$DATAPUMP_SANITIZERS" = OFF ]; then
+            options+=(--isolate-burst)
+          fi
           jobs=2
           if [ "$CI_SCOPE" = live ] || [ "$CI_SCOPE" = preparation ] || [ "$CI_SCOPE" = frontends ] || [ "$CI_SCOPE" = web ]; then jobs=1; fi
           # Instrumented calibration needs compute headroom on standard runners.
@@ -1799,6 +1820,23 @@ jobs:
           else
             "${driver[@]}"
           fi
+      - name: Bind completed preparation assertions to the original case inventory
+        if: always() && inputs.preparation_part != 'all' && steps.build_prerequisites.outcome == 'success'
+        run: >-
+          python3 tools/ci-preparation-plan.py capture --source-root . --build-dir build
+          --part "$PREPARATION_PART" --report build/ci-test-report.json
+          --output build/ci-preparation-part.json
+      - name: Retain the partial preparation result for required aggregation
+        if: always() && inputs.preparation_part != 'all'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Preparation-Debug-part-${{ inputs.preparation_part }}
+          path: build/ci-preparation-part.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Identify the partial preparation coverage
+        if: always() && inputs.preparation_part != 'all'
+        run: echo 'This job runs complete serial/parallel comparisons for one preparation partition. Full preparation coverage requires all four source/configuration-matched results and their mandatory aggregate.' >> "$GITHUB_STEP_SUMMARY"
       - name: Verify passive observation completeness
         if: always() && inputs.core_process_observation && steps.build_prerequisites.outcome == 'success'
         run: |
@@ -3193,7 +3231,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: CI-Linux-${{ inputs.build_type }}-${{ inputs.scope }}-${{ inputs.calibration_section }}${{ inputs.calibration_shard != '' && format('-part-{0}', inputs.calibration_shard) || '' }}${{ inputs.core_part != 'all' && format('-core-part-{0}', inputs.core_part) || '' }}-attempt-${{ github.run_attempt }}
+          name: CI-Linux-${{ inputs.build_type }}-${{ inputs.scope }}-${{ inputs.calibration_section }}${{ inputs.calibration_shard != '' && format('-part-{0}', inputs.calibration_shard) || '' }}${{ inputs.core_part != 'all' && format('-core-part-{0}', inputs.core_part) || '' }}${{ inputs.preparation_part != 'all' && format('-preparation-part-{0}', inputs.preparation_part) || '' }}-attempt-${{ github.run_attempt }}
           path: |
             build/ci-test-report.*
             build/cli-regressions.log

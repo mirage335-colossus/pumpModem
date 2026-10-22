@@ -592,11 +592,27 @@ The common configuration identity excludes CTest's per-container dashboard
 `SITE` name; compiler flags, sanitizer settings, dependency bytes and registered
 test properties remain bound.
 
+Native Debug preparation uses four comparison partitions. Each keeps a complete
+serial/parallel comparison in one process; reservation, shared-storage, small-loan,
+tiled and the complete partial/zero/stopped-input cancellation sequence remain
+required. The executable's case inventory drives a required aggregate, which
+rejects missing, duplicated, failed or mismatched source/configuration results.
+The only differing configuration entry is the explicit preparation selector.
+The aggregate retains the original 9000-second workload cap using the sum of
+part test times, warning from 7200 seconds after complete success; this sum is
+reported separately from distributed wall-clock time.
+Each producer builds its own small prerequisite set and transfers only its
+result metadata. `preparation_part=all` and the original no-argument invocation
+retain the complete local test; Release, Windows and SDK continue to use it.
+Manual `ci.yml` with `devfast=true` and `diagnostic=preparation-partition` runs all
+four instrumented parts and their aggregate without selecting other native scopes.
+
 SDK FLTK qualification runs complete preparation and calibration invocations in
 separate jobs. General and Live share one build, then execute separately with
 their original concurrency. The general partition runs the original
 `symbol_burst_live` invocation after other CTest processes finish, preserving its
-wall budget while avoiding co-scheduling with CPU-intensive tests. All four logical groups and the build/packaging
+wall budget while avoiding co-scheduling with CPU-intensive tests. Native Linux
+Release core uses the same isolated Burst phase. All four logical groups and the build/packaging
 checks remain required; the full standalone SDK test route remains available.
 Only small plans, reports and logs move between these jobs. Configured build
 trees and sanitizer executables are not transferred. `./build.sh configure`
@@ -609,6 +625,11 @@ producers and immutable artifacts from that exact manually dispatched SDK run
 in the same repository. The retained receipt binds source, producer jobs,
 artifact IDs, sizes and digests; downloads reject digest mismatches. This route
 does not rerun source qualification or establish full SDK or release eligibility.
+
+Manual `native-copy-recovery.yml` similarly checks an existing native package on
+Ubuntu 22.04 and 24.04 using its exact producer run, source and artifact digest.
+It retains all original archive, smoke and ABI checks without rebuilding the
+package; it supplies copied-package coverage only.
 
 The manual `native-linux.yml` scope `ci-build-probe` measures strict cold, warm
 and changed-source compiler-cache builds on standard native and SDK runners.

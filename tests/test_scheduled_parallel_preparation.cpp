@@ -10,6 +10,10 @@
 #include <string>
 #include <limits>
 #include <stop_token>
+#include <iostream>
+#include <cstring>
+#include <optional>
+#include <utility>
 
 namespace {
 constexpr std::size_t global_loan=192*1024*1024;
@@ -147,45 +151,92 @@ void reservation_policy() {
     catch(const Error&){rejected=true;}
     check(rejected,"worker reservation addition wrapped its size bound");
 }
-void identical_pcm() {
-    PreparationTiming timing{"identical_pcm"};
-    auto c=configuration();const Bytes bits{0,1};const auto pcm=capture(c,bits,true);
-    auto s=search(c,pcm,true);s.search_stream_phases=true;
-    s.start_uncertainty_seconds=.5*modem::pattern_chip_samples(c)/c.sample_rate;
-    s.clock_errors_ppm={-.0003,0,.0003};s.admitted_clock_half_width_ppm=.0003;
-    s.chunk_bits=1;s.retain_score=0;s.candidate_limit=65536;
-    for(const auto arithmetic:{modem::SearchArithmetic::default_mode,modem::SearchArithmetic::fp32,modem::SearchArithmetic::fp64}) {
-        c.search_arithmetic=arithmetic;
-        std::cerr<<"parallel preparation fixture: arithmetic="<<static_cast<int>(arithmetic)<<" serial/parallel pair beginning\n";
-        const auto serial=run("arithmetic.serial",c,pcm,s,false),parallel=run("arithmetic.parallel",c,pcm,s,true);
-        check(serial.bits==bits && serial.complete,"serial native fixture lacks full payload/physical END");
-        compare_events(serial,parallel,"compare.arithmetic");
-        if(native_certified_environment()) {
-            check(parallel.work.implicit_input_transforms>0 && parallel.work.implicit_template_transforms>0,
-                "parallel fixture did not execute native numerical preparation");
-            if(modem::detail::search_concurrency(9)>1) {
-                check(parallel.work.scheduled_worker_preparations>0,"parallel native worker contexts were never prepared");
-                check(parallel.prepared_workers_peak==modem::detail::search_concurrency(9),
-                    "actual 192MiB loan did not dispatch every affordable requested worker");
-            }
-        }
-        check(parallel.work.implicit_eligible_ranges==serial.work.implicit_eligible_ranges &&
-            parallel.work.implicit_fp32_ranges==serial.work.implicit_fp32_ranges &&
-            parallel.work.implicit_fp64_ranges==serial.work.implicit_fp64_ranges,
-            "worker isolation changed arithmetic eligibility or certified proxy scope");
+struct IdenticalPcmFixture {
+    modem::Config c;
+    Bytes bits{0,1};
+    Capture pcm;
+    modem::PatternSearch s;
+    IdenticalPcmFixture():c(configuration()),pcm(capture(c,bits,true)),s(search(c,pcm,true)) {
+        s.search_stream_phases=true;
+        s.start_uncertainty_seconds=.5*modem::pattern_chip_samples(c)/c.sample_rate;
+        s.clock_errors_ppm={-.0003,0,.0003};s.admitted_clock_half_width_ppm=.0003;
+        s.chunk_bits=1;s.retain_score=0;s.candidate_limit=65536;
     }
+};
+enum class Case { reservation, arithmetic_default, arithmetic_fp32, arithmetic_fp64,
+                  shared, small_loan, tiled, cancellation };
+struct CaseInfo { Case which; const char* id; int part; };
+constexpr CaseInfo cases[]={
+    {Case::reservation,"reservation_policy",3},
+    {Case::arithmetic_default,"arithmetic_default",0},
+    {Case::arithmetic_fp32,"arithmetic_fp32",1},
+    {Case::arithmetic_fp64,"arithmetic_fp64",2},
+    {Case::shared,"shared",3},{Case::small_loan,"small",3},{Case::tiled,"tiled",3},
+    {Case::cancellation,"cancellation_and_no_false_end",3}
+};
+template<class F> void semantic_case(const char* id,F&& f) {
+    std::cout<<"PREPARATION_CASE_BEGIN: "<<id<<std::endl;
+    f();
+    std::cout<<"PREPARATION_CASE_END: "<<id<<std::endl;
+}
+void arithmetic_case(IdenticalPcmFixture& fixture,Case which) {
+    auto& c=fixture.c;auto& pcm=fixture.pcm;auto& s=fixture.s;
+    const auto arithmetic=which==Case::arithmetic_default?modem::SearchArithmetic::default_mode:
+        which==Case::arithmetic_fp32?modem::SearchArithmetic::fp32:modem::SearchArithmetic::fp64;
+    c.search_arithmetic=arithmetic;
+    const Bytes bits{0,1};
+    std::cerr<<"parallel preparation fixture: arithmetic="<<static_cast<int>(arithmetic)<<" serial/parallel pair beginning\n";
+    const auto serial=run("arithmetic.serial",c,pcm,s,false),parallel=run("arithmetic.parallel",c,pcm,s,true);
+    check(serial.bits==bits && serial.complete,"serial native fixture lacks full payload/physical END");
+    compare_events(serial,parallel,"compare.arithmetic");
+    if(native_certified_environment()) {
+        check(parallel.work.implicit_input_transforms>0 && parallel.work.implicit_template_transforms>0,
+            "parallel fixture did not execute native numerical preparation");
+        if(modem::detail::search_concurrency(9)>1) {
+            check(parallel.work.scheduled_worker_preparations>0,"parallel native worker contexts were never prepared");
+            check(parallel.prepared_workers_peak==modem::detail::search_concurrency(9),
+                "actual 192MiB loan did not dispatch every affordable requested worker");
+        }
+    }
+    check(parallel.work.implicit_eligible_ranges==serial.work.implicit_eligible_ranges &&
+        parallel.work.implicit_fp32_ranges==serial.work.implicit_fp32_ranges &&
+        parallel.work.implicit_fp64_ranges==serial.work.implicit_fp64_ranges,
+        "worker isolation changed arithmetic eligibility or certified proxy scope");
+}
+std::pair<Result,Result> shared_case(IdenticalPcmFixture& fixture) {
+    auto& c=fixture.c;auto& pcm=fixture.pcm;auto& s=fixture.s;
     c.search_arithmetic=modem::SearchArithmetic::default_mode;
-    const auto serial_shared=run("shared.serial",c,pcm,s,false,global_loan,true),parallel_shared=run("shared.parallel",c,pcm,s,true,global_loan,true);
-    compare_events(serial_shared,parallel_shared,"compare.shared");
+    std::pair<Result,Result> results{run("shared.serial",c,pcm,s,false,global_loan,true),run("shared.parallel",c,pcm,s,true,global_loan,true)};
+    compare_events(results.first,results.second,"compare.shared");return results;
+}
+std::pair<Result,Result> small_case(IdenticalPcmFixture& fixture) {
+    auto& c=fixture.c;auto& pcm=fixture.pcm;auto& s=fixture.s;
     auto narrow=s;narrow.search_stream_phases=false;narrow.clock_errors_ppm={0};narrow.frequency_offsets_hz={0};
     narrow.start_uncertainty_seconds=0;narrow.candidate_limit=4096;
-    const auto small_serial=run("small.serial",c,pcm,narrow,false,8*1024*1024),small_parallel=run("small.parallel",c,pcm,narrow,true,8*1024*1024);
-    compare_events(small_serial,small_parallel,"compare.small");
+    std::pair<Result,Result> results{run("small.serial",c,pcm,narrow,false,8*1024*1024),run("small.parallel",c,pcm,narrow,true,8*1024*1024)};
+    compare_events(results.first,results.second,"compare.small");return results;
+}
+std::pair<Result,Result> tiled_case(IdenticalPcmFixture& fixture) {
+    auto& c=fixture.c;auto& pcm=fixture.pcm;auto& s=fixture.s;
+    auto narrow=s;narrow.search_stream_phases=false;narrow.clock_errors_ppm={0};narrow.frequency_offsets_hz={0};
+    narrow.start_uncertainty_seconds=0;narrow.candidate_limit=4096;
     auto large_span=narrow;large_span.start_uncertainty_seconds=3000./c.sample_rate;
-    const auto tiled_serial=run("tiled.serial",c,pcm,large_span,false,7899971,false,false),tiled_parallel=run("tiled.parallel",c,pcm,large_span,true,7899971,false,false);
-    compare_events(tiled_serial,tiled_parallel,"compare.tiled");
-    if(native_certified_environment())check(tiled_parallel.work.implicit_input_transforms>0,
+    std::pair<Result,Result> results{run("tiled.serial",c,pcm,large_span,false,7899971,false,false),run("tiled.parallel",c,pcm,large_span,true,7899971,false,false)};
+    compare_events(results.first,results.second,"compare.tiled");
+    if(native_certified_environment())check(results.second.work.implicit_input_transforms>0,
         "bounded numerical subdivision left the P8192 workspace fallback cliff unchanged");
+    return results;
+}
+void identical_pcm(bool arithmetic,bool remainder,int only_part=-1) {
+    PreparationTiming timing{"identical_pcm"};
+    IdenticalPcmFixture fixture;
+    std::optional<std::pair<Result,Result>> shared_results,small_results,tiled_results;
+    if(arithmetic)for(const auto& info:cases)if(info.part<3 && (only_part<0 || info.part==only_part))
+        semantic_case(info.id,[&]{arithmetic_case(fixture,info.which);});
+    if(remainder)for(const auto& info:cases)if(info.which==Case::shared || info.which==Case::small_loan || info.which==Case::tiled) {
+        auto invoke=[&]{switch(info.which){case Case::shared:shared_results=shared_case(fixture);break;case Case::small_loan:small_results=small_case(fixture);break;case Case::tiled:tiled_results=tiled_case(fixture);break;default:break;}};
+        semantic_case(info.id,invoke);
+    }
 }
 void cancellation_and_no_false_end() {
     PreparationTiming timing{"cancellation_and_no_false_end"};
@@ -210,12 +261,46 @@ void cancellation_and_no_false_end() {
     check(rx.work().peak_workspace_bytes<=global_loan,"cancelled worker scratch escaped its loan");
 }
 }
-int main(){try {
+int main(int argc,char** argv){
+    int part=-1;bool inventory=false;
+    if(argc>1) {
+        if(argc==2 && std::strcmp(argv[1],"--ci-inventory")==0)inventory=true;
+        else if(argc==3 && std::strcmp(argv[1],"--ci-part")==0) {
+            if(std::strcmp(argv[2],"all")==0)part=-1;
+            else if(std::strcmp(argv[2],"0")==0)part=0;
+            else if(std::strcmp(argv[2],"1")==0)part=1;
+            else if(std::strcmp(argv[2],"2")==0)part=2;
+            else if(std::strcmp(argv[2],"3")==0)part=3;
+            else {std::cerr<<"invalid --ci-part selector\n";return 2;}
+        } else {std::cerr<<"usage: test_scheduled_parallel_preparation [--ci-part {all,0,1,2,3}|--ci-inventory]\n";return 2;}
+    }
+    if(inventory) {
+        std::cout<<"{\"schema\":1,\"parts\":{";
+        for(int p=0;p<4;++p) {
+            if(p)std::cout<<',';
+            std::cout<<'"'<<p<<"\":[";bool first=true;
+            for(const auto& info:cases)if(info.part==p) {
+                if(!first)std::cout<<',';first=false;std::cout<<'"'<<info.id<<'"';
+            }
+            std::cout<<']';
+        }
+        std::cout<<"},\"all_cases\":[";
+        for(std::size_t i=0;i<std::size(cases);++i) {
+            if(i)std::cout<<',';std::cout<<'"'<<cases[i].id<<'"';
+        }
+        std::cout<<"]}\n";return 0;
+    }
+    try {
     set_test_env("DATAPUMP_SCHED_LAZY_ACQUISITION","1",1);set_test_env("DATAPUMP_SCHED_LAZY_BATCH_SAMPLES","1024",1);
-    reservation_policy();identical_pcm();cancellation_and_no_false_end();
+    if(part<0 || part==3)semantic_case("reservation_policy",reservation_policy);
+    if(part<0)identical_pcm(true,true);
+    else if(part<3) {unset_test_env("DATAPUMP_SCHED_LAZY_FRAGMENT");identical_pcm(true,false,part);}
+    else identical_pcm(false,true);
+    if(part<0 || part==3)semantic_case("cancellation_and_no_false_end",cancellation_and_no_false_end);
     unset_test_env("DATAPUMP_SCHED_LAZY_ACQUISITION");unset_test_env("DATAPUMP_SCHED_LAZY_BATCH_SAMPLES");unset_test_env("DATAPUMP_SCHED_LAZY_PARALLEL");
     std::cout<<"scheduled parallel native preparation tests passed\n";return 0;
-} catch(const std::exception& error) {
+    } catch(const std::exception& error) {
     unset_test_env("DATAPUMP_SCHED_LAZY_ACQUISITION");unset_test_env("DATAPUMP_SCHED_LAZY_BATCH_SAMPLES");unset_test_env("DATAPUMP_SCHED_LAZY_PARALLEL");
     std::cerr<<error.what()<<'\n';return 1;
-}}
+    }
+}

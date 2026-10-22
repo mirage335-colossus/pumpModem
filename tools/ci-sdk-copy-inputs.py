@@ -30,7 +30,14 @@ def positive_run_id(value: str) -> int:
 
 
 def validate_metadata(repository: str, run_id: int, expected_sha: str,
-                      run: dict, jobs: list[dict], artifacts: list[dict]) -> dict:
+                      run: dict, jobs: list[dict], artifacts: list[dict], *,
+                      workflow_path: str = ".github/workflows/sdk.yml",
+                      package_jobs: dict | None = None,
+                      artifact_names: dict | None = None) -> dict:
+    package_jobs = PACKAGE_JOBS if package_jobs is None else package_jobs
+    artifact_names = ARTIFACTS if artifact_names is None else artifact_names
+    if not package_jobs or set(package_jobs) != set(artifact_names):
+        raise ValueError("producer jobs and artifacts require the same nonempty inventory")
     if not re.fullmatch(r"[0-9a-fA-F]{40}", expected_sha):
         raise ValueError("copy_source_sha must be exactly 40 hexadecimal characters")
     if run.get("id") != run_id:
@@ -41,12 +48,11 @@ def validate_metadata(repository: str, run_id: int, expected_sha: str,
         raise ValueError("source run must belong to this repository; fork runs are rejected")
     if run.get("head_sha", "").lower() != expected_sha.lower():
         raise ValueError("source run head SHA does not match copy_source_sha")
-    if run.get("path") != ".github/workflows/sdk.yml" or run.get("event") != "workflow_dispatch":
-        raise ValueError("source must be a manually dispatched .github/workflows/sdk.yml run")
+    if run.get("path") != workflow_path or run.get("event") != "workflow_dispatch":
+        raise ValueError(f"source must be a manually dispatched {workflow_path} run")
 
     selected = {}
-    for backend in BACKENDS:
-        job_name = PACKAGE_JOBS[backend]
+    for backend, job_name in package_jobs.items():
         matches = [job for job in jobs if job.get("name") == job_name]
         if len(matches) != 1:
             raise ValueError(f"required package producer is missing or duplicated: {job_name}")
@@ -56,7 +62,7 @@ def validate_metadata(repository: str, run_id: int, expected_sha: str,
         if (type(job.get("id")) is not int or job["id"] <= 0 or
                 job.get("run_id") != run_id or job.get("head_sha", "").lower() != expected_sha.lower()):
             raise ValueError(f"package producer is not bound to the validated source run: {job_name}")
-        artifact_name = ARTIFACTS[backend]
+        artifact_name = artifact_names[backend]
         matches = [artifact for artifact in artifacts if artifact.get("name") == artifact_name]
         if len(matches) != 1:
             raise ValueError(f"required immutable artifact is missing or duplicated: {artifact_name}")
