@@ -18,6 +18,16 @@ SPEC.loader.exec_module(diagnostic)
 
 
 class DiagnosticScopeTests(unittest.TestCase):
+    def test_manifest_binds_cpp_inputs_and_excludes_only_orchestration_fixtures(self):
+        def identity(cpp, fixture):
+            raw = (b'100644 blob ' + cpp + b'\ttests/test_symbol_burst_live.cpp\0'
+                   b'100644 blob ' + fixture + b'\ttests/test_ci_test_plan.py\0')
+            with mock.patch.object(diagnostic.subprocess, 'run',
+                                   return_value=subprocess.CompletedProcess([], 0, stdout=raw)):
+                return diagnostic.application_manifest(Path('/fixture'), 'revision')
+        self.assertEqual(identity(b'original', b'fixture-a'), identity(b'original', b'fixture-b'))
+        self.assertNotEqual(identity(b'original', b'fixture-a'), identity(b'changed', b'fixture-a'))
+
     @unittest.skipUnless(Path("/proc").is_dir(), "Linux process groups required")
     def test_outer_cutoff_closes_owned_process_group(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -108,6 +118,28 @@ class DiagnosticScopeTests(unittest.TestCase):
             cache["DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL"] = "OFF"
             with self.assertRaises(RuntimeError):
                 diagnostic.validate_profile(cache, sdk)
+
+    @unittest.skipUnless(hasattr(Path, 'symlink_to'), 'symlinks required')
+    def test_compiler_invocation_preserves_sdk_wrapper_symlink_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            sdk = Path(directory) / 'sdk'
+            sdk.mkdir()
+            wrapper = sdk / 'toolchain-wrapper'
+            wrapper.write_text('placeholder')
+            cc, cxx = sdk / 'gcc', sdk / 'g++'
+            try:
+                cc.symlink_to(wrapper.name)
+                cxx.symlink_to(wrapper.name)
+            except OSError as error:
+                self.skipTest(f'host cannot create fixture symlinks: {error}')
+            cache = {'CMAKE_BUILD_TYPE': 'Release', 'DATAPUMP_GUI_BACKEND': 'fltk',
+                     'DATAPUMP_PORTABLE': 'ON', 'DATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL': 'ON',
+                     'DATAPUMP_SANITIZERS': 'OFF', 'DATAPUMP_BUILD_TUI': 'ON',
+                     'DATAPUMP_BUILD_FB': 'ON', 'DATAPUMP_TEST_NATIVE_GUI': 'OFF',
+                     'CMAKE_C_COMPILER': str(cc), 'CMAKE_CXX_COMPILER': str(cxx)}
+            _, compilers = diagnostic.validate_profile(cache, sdk)
+            self.assertEqual(compilers, {'C': cc, 'CXX': cxx})
+            self.assertNotEqual(compilers['CXX'], wrapper)
 
 
 if __name__ == "__main__":

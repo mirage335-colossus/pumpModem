@@ -235,6 +235,28 @@ class Aggregation(SourceFixture):
         changed['canonical_inventory'][0]['properties'].append({'name': 'TIMEOUT', 'value': 10})
         self.assertNotEqual(planner.model_digest(changed), self.plan['plan_sha256'])
 
+    def test_container_site_is_incidental_but_flags_and_compiler_bytes_are_not(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            compiler = root / 'compiler'
+            compiler.write_bytes(b'compiler identity one')
+            cache = root / 'CMakeCache.txt'
+
+            def identity(site, flags='-O1', sanitizers='ON'):
+                cache.write_text(
+                    f'CMAKE_CXX_COMPILER:FILEPATH={compiler}\n'
+                    f'CMAKE_CXX_FLAGS:STRING={flags}\n'
+                    f'DATAPUMP_SANITIZERS:BOOL={sanitizers}\n'
+                    f'SITE:STRING={site}\n')
+                return planner.config_identity(cache, 'Debug')
+
+            first = identity('container-a')
+            self.assertEqual(first, identity('container-b'))
+            self.assertNotEqual(first, identity('container-b', flags='-O2'))
+            self.assertNotEqual(first, identity('container-b', sanitizers='OFF'))
+            compiler.write_bytes(b'compiler identity two')
+            self.assertNotEqual(first, identity('container-a'))
+
     @unittest.skipUnless(shutil.which('ctest'), 'CTest is needed for complete aggregation integration')
     def test_separate_real_plans_preserve_junit_order_and_declared_omissions(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -107,7 +107,11 @@ def config_identity(cache_path, config):
             continue
         key, value = line.split('=', 1)
         key = key.rsplit(':', 1)[0]
-        if key in {'CMAKE_CACHEFILE_DIR', 'CMAKE_HOME_DIRECTORY', 'CMAKE_MAKE_PROGRAM'}:
+        # CTest's dashboard SITE defaults to the container hostname. It does
+        # not configure compilation or a registered test, and differs between
+        # otherwise identical producers. Keep every semantic cache entry and
+        # the separately hashed compiler/library inputs in the identity.
+        if key in {'CMAKE_CACHEFILE_DIR', 'CMAKE_HOME_DIRECTORY', 'CMAKE_MAKE_PROGRAM', 'SITE'}:
             continue
         entries[key] = value
     if not entries:

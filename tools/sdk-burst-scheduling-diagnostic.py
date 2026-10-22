@@ -22,6 +22,7 @@ import xml.etree.ElementTree as ET
 
 
 BASELINE = "1cda521e3b5938fa7c9a62cd70c5f887ecc8d373"
+APPLICATION_MANIFEST_SHA256 = "65de6160eb3b9912eb3e7c414617bf6cda97a283cef8c3b440b914cbb65ec56b"
 SDK_MANIFEST_SHA256 = "4fdcc4b8d57e0a67eeb2ce7fac70667b75f40f01215105de95b771c77c5303c3"
 TRIAL_WALL_SECONDS = 900
 APP_PATHS = ("src", "include", "tests", "cmake", "CMakeLists.txt")
@@ -109,10 +110,12 @@ def validate_profile(cache, sdk):
                 "DATAPUMP_SANITIZERS": "OFF", "DATAPUMP_BUILD_TUI": "ON",
                 "DATAPUMP_BUILD_FB": "ON", "DATAPUMP_TEST_NATIVE_GUI": "OFF"}
     mismatches = {key: cache.get(key) for key, value in expected.items() if cache.get(key) != value}
-    compilers = {kind: Path(cache.get(f"CMAKE_{kind}_COMPILER", "")).resolve()
+    # SDK tool names select the compiler through argv[0]. Resolving their
+    # symlinks to toolchain-wrapper changes the command being measured.
+    compilers = {kind: Path(cache.get(f"CMAKE_{kind}_COMPILER", ""))
                  for kind in ("C", "CXX")}
     outside = {kind: str(path) for kind, path in compilers.items()
-               if sdk not in path.parents or not path.is_file()}
+               if not path.is_absolute() or sdk not in path.resolve().parents or not path.is_file()}
     if mismatches or outside:
         raise RuntimeError(f"unexpected SDK application configuration/compiler: {mismatches!r}, {outside!r}")
     return expected, compilers
@@ -206,16 +209,27 @@ def verify_source(root, source):
         raise RuntimeError("--source must be a full Git commit")
     if checked(["git", "rev-parse", "HEAD"], root) != source:
         raise RuntimeError("--source must identify this workflow checkout")
-    if checked(["git", "cat-file", "-t", BASELINE], root) != "commit":
-        raise RuntimeError(f"pinned application baseline is unavailable: {BASELINE}")
     checked(["git", "diff", "--exit-code", "HEAD", "--", *APP_PATHS,
              "build.sh", "tools/observe-native-test.py",
              "tools/sdk-burst-scheduling-diagnostic.py", ".github/workflows/sdk-application.yml"], root)
-    pathspecs = [*APP_PATHS, ":(exclude)tests/test_sdk_burst_scheduling_diagnostic.py"]
-    mismatch = subprocess.run(["git", "-c", f"safe.directory={root}", "diff", "--quiet",
-                               BASELINE, source, "--", *pathspecs], cwd=root, check=False)
-    if mismatch.returncode != 0:
+    if application_manifest(root, source) != APPLICATION_MANIFEST_SHA256:
         raise RuntimeError("application/test source differs from pinned diagnostic baseline 1cda521")
+
+
+def application_manifest(root, revision):
+    # Bind every tracked application/test/fixture/CMake blob and mode, except
+    # the two Python orchestration fixtures changed by this CI-only repair.
+    # This needs only the shallow checkout's tree, avoiding a history fetch or
+    # extra credentials while retaining the immutable baseline input identity.
+    raw = subprocess.run(["git", "-c", f"safe.directory={root}", "ls-tree", "-r", "-z",
+                          revision, "--", *APP_PATHS], cwd=root,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         check=True, timeout=30).stdout
+    excluded = {b"tests/test_sdk_burst_scheduling_diagnostic.py", b"tests/test_ci_test_plan.py"}
+    entries = [entry for entry in raw.split(b"\0")
+               if entry and entry.split(b"\t", 1)[1] not in excluded]
+    return hashlib.sha256(b"\0".join(entries)).hexdigest()
+
 
 
 def main():
@@ -249,7 +263,7 @@ def main():
     manifest = json.loads(manifest_path.read_text())
     for kind, field in (("C", "c_compiler"), ("CXX", "cxx_compiler")):
         target_compiler = manifest.get("target", {}).get(field)
-        if not isinstance(target_compiler, str) or (sdk / target_compiler).resolve() != compilers[kind]:
+        if not isinstance(target_compiler, str) or (sdk / target_compiler) != compilers[kind]:
             raise RuntimeError(f"configured {kind} compiler does not match the installed prepared SDK manifest")
     compiler_version = checked([str(compilers["CXX"]), "-dumpfullversion"], root)
     if compiler_version != "15.3.0":
@@ -265,6 +279,8 @@ def main():
         "schema": 1, "diagnostic_only": True, "qualification": False,
         "source_commit": args.source,
         "application_baseline": BASELINE,
+        "application_manifest_sha256": APPLICATION_MANIFEST_SHA256,
+        "manifest_exclusions": ["tests/test_sdk_burst_scheduling_diagnostic.py", "tests/test_ci_test_plan.py"],
         "driver_revision": checked(["git", "rev-parse", "HEAD"], root),
         "application_trees": {name: checked(["git", "rev-parse", f"{args.source}:{name}"], root)
                                for name in APP_PATHS},

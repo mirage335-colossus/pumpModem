@@ -96,7 +96,7 @@ on:
       diagnostic:
         description: 'Focused check used only with devfast=true'
         type: choice
-        options: [legacy, certification, windows-certification, windows-rev, graphics, arm-rev-package, arm-rev-smoke, arm-rev-adapter, sdk-live, gui-contract, sanitizer-gui, runner-capacity, arm-runner-capacity, ci-tooling]
+        options: [legacy, certification, windows-certification, windows-rev, graphics, arm-rev-package, arm-rev-smoke, arm-rev-adapter, sdk-live, gui-contract, sanitizer-gui, runner-capacity, arm-runner-capacity, ci-tooling, core-partition]
         default: legacy
       diagnostic_release:
         description: 'Published tag for graphics, or immutable source tag/ref for ARM adapter / SDK live diagnostics'
@@ -133,6 +133,7 @@ jobs:
           python3 tests/test_ci_tests.py
           python3 tests/test_ci_test_plan.py
           python3 tests/test_ci_build_probe.py
+          python3 tests/test_sdk_burst_scheduling_diagnostic.py
           python3 tests/test_wasm_sdk.py
           python3 tests/test_package_wasm.py
           python3 tests/test_wasm_sdk_release.py
@@ -322,7 +323,7 @@ jobs:
       sanitizer_realtime: ${{ inputs.sanitizer_realtime }}
 
   linux-core-debug:
-    if: github.event_name == 'workflow_dispatch' && !inputs.devfast
+    if: github.event_name == 'workflow_dispatch' && (!inputs.devfast || inputs.diagnostic == 'core-partition')
     name: Linux Debug / core / part ${{ matrix.part }}
     strategy:
       fail-fast: false
@@ -337,7 +338,7 @@ jobs:
       sanitizer_realtime: ${{ inputs.sanitizer_realtime }}
 
   linux-core-debug-aggregate:
-    if: always() && github.event_name == 'workflow_dispatch' && !inputs.devfast
+    if: always() && github.event_name == 'workflow_dispatch' && (!inputs.devfast || inputs.diagnostic == 'core-partition')
     name: Require both planned Debug core partitions
     needs: linux-core-debug
     runs-on: ubuntu-24.04
@@ -366,6 +367,9 @@ jobs:
           --plan build/core-parts/0/ci-selection-plan.json
           --parts build/core-parts/0/ci-test-report.json build/core-parts/1/ci-test-report.json
           --output build/core-aggregate.json
+      - name: Record focused core coverage scope
+        if: inputs.devfast && inputs.diagnostic == 'core-partition'
+        run: echo 'Both planned GNU11 Debug core partitions, their strict aggregate, and the part-0 CLI regression completed. This focused route does not qualify full native regression; all other scopes remain unrun.' >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

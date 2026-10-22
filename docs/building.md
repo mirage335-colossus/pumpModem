@@ -584,6 +584,12 @@ CLI regressions run once in part zero. A required aggregate checks both parts
 against the original unpartitioned inventory and matching source, compiler,
 dependency and configuration identities. Declared omissions and hosted coverage
 warnings remain explicit. The standalone native `core_part=all` route is unchanged.
+For an affected-core rerun, manual `ci.yml` with `devfast=true` and
+`diagnostic=core-partition` runs both full Debug partitions, the CLI regressions
+and their required aggregate. It supplies only that scope's coverage.
+The common configuration identity excludes CTest's per-container dashboard
+`SITE` name; compiler flags, sanitizer settings, dependency bytes and registered
+test properties remain bound.
 
 SDK FLTK qualification runs complete preparation and calibration invocations in
 separate jobs. General and Live share one build, then execute separately with

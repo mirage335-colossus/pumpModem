@@ -232,9 +232,6 @@ jobs:
         if: inputs.scope == 'sdk-burst-scheduling-diagnostic'
         run: |
           {
-            # Fetch just the immutable failing source; checkout/driver remain at
-            # this run's commit. No full history or alternate SDK is downloaded.
-            git -c safe.directory="$GITHUB_WORKSPACE" fetch --no-tags --depth=1 origin 1cda521e3b5938fa7c9a62cd70c5f887ecc8d373
             ./build.sh configure --tui --fb --sdk "$GITHUB_WORKSPACE/build/sdk" --backend fltk --build-dir build/sdk-application --jobs 2 --build-jobs "$(python3 -B tools/build_capacity.py)" -- -DCMAKE_BUILD_TYPE=Release -DDART_TESTING_TIMEOUT=3600 -DDATAPUMP_PORTABLE=ON -DDATAPUMP_CI_HOSTED_CLOCK_FUNCTIONAL=ON
             build/sdk/bin/cmake --build build/sdk-application --config Release --target test_symbol_burst_live test_weak_signal --parallel "$(python3 -B tools/build_capacity.py)"
             python3 -B tools/sdk-burst-scheduling-diagnostic.py \
