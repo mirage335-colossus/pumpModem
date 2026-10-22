@@ -167,6 +167,10 @@ jobs:
       DATAPUMP_SMOKE_SOURCE_SHA: ${{ github.sha }}
       DATAPUMP_SMOKE_INVENTORY_SHA256: ''
       DEBIAN_FRONTEND: noninteractive
+      # This fixed Ubuntu 22.04 package profile is about 165 MB. Bound slow
+      # successful acquisition before trying another signed official mirror;
+      # the installer itself remains outside the watchdog.
+      CI_APT_DOWNLOAD_TIMEOUT: '180'
       ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
       UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
       CC: gcc-11

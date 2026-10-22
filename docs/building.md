@@ -608,6 +608,15 @@ runner; it uploads metadata only and does not create persistent GitHub cache
 entries. Publication and exact delivered-binary certification keep their
 existing independent gates.
 
+The native Ubuntu 22.04 shard uses a 180-second package-acquisition watchdog
+for its fixed dependency profile. On expiry, the bootstrap helper closes its
+download workers and rotates only its official signed mirror list within the
+existing three attempts. Offline installation follows successful acquisition
+immediately and has no watchdog. Authentication, hashes and package failures
+remain fatal. Other callers retain the default acquisition path. The manual
+`native-linux.yml` scope `ci-apt-probe` measures this setup without building or
+qualifying the application.
+
 Standard GitHub-hosted runners are the defaults. Agents should explicitly select
 H pools when they expect them to save elapsed time:
 
