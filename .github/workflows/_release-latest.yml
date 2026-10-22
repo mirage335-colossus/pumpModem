@@ -102,6 +102,9 @@ jobs:
 
   native:
     name: _Full native regression
+    permissions:
+      contents: read
+      actions: read
     needs: [prepare, base]
     # Only optional base maintenance may be skipped. Failure/cancellation must
     # never turn into an ordinary release with missing source qualification.
@@ -117,6 +120,9 @@ jobs:
 
   sdk:
     name: _Full SDK qualification
+    permissions:
+      contents: read
+      actions: read
     needs: [prepare, base]
     if: ${{ !cancelled() && needs.prepare.result == 'success' && (needs.base.result == 'success' || needs.base.result == 'skipped') }}
     uses: ./.github/workflows/sdk.yml
