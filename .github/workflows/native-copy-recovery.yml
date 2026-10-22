@@ -91,9 +91,10 @@ jobs:
           sparse-checkout: tools/ci-apt.sh
           sparse-checkout-cone-mode: false
       - name: Prepare copied archive checks
+        env:
+          CI_APT_DOWNLOAD_TIMEOUT: '180'
         run: |
           cp .ci-bootstrap/tools/ci-apt.sh "$RUNNER_TEMP/ci-apt.sh"
-          if [ '${{ matrix.ubuntu }}' = '24.04' ]; then export CI_APT_DOWNLOAD_TIMEOUT=180; fi
           sh "$RUNNER_TEMP/ci-apt.sh" install ca-certificates curl git python3 cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

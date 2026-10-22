@@ -641,8 +641,9 @@ runner; it uploads metadata only and does not create persistent GitHub cache
 entries. Publication and exact delivered-binary certification keep their
 existing independent gates.
 
-The native Ubuntu 22.04 shard and SDK copied-runtime Ubuntu 24.04 checks use a
-180-second package-acquisition watchdog for their fixed dependency profiles.
+The native Ubuntu 22.04 shard, native copied-runtime Ubuntu 22.04/24.04 checks
+(including exact-package recovery), and SDK copied-runtime Ubuntu 24.04 checks
+use a 180-second package-acquisition watchdog for their fixed dependency profiles.
 On expiry, the bootstrap helper closes its
 download workers and rotates only its official signed mirror list within the
 existing three attempts. Offline installation follows successful acquisition
