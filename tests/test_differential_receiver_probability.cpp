@@ -27,7 +27,8 @@ constexpr std::size_t workspace=8*1024*1024;
 constexpr std::size_t receiver_workspace=workspace/2;
 constexpr unsigned captures_per_case=64;
 constexpr unsigned maximum_workers=16;
-constexpr unsigned shaped_shards=2;
+constexpr unsigned legacy_shaped_shards=2;
+constexpr unsigned maximum_shaped_shards=4;
 constexpr double local_seconds=1;
 
 unsigned bounded_workers(unsigned available) {
@@ -40,10 +41,10 @@ void for_worker_seeds(unsigned worker,unsigned workers,Function&& function) {
 }
 
 template<class Function>
-void for_shard_worker_seeds(unsigned shard,unsigned worker,unsigned workers,Function&& function) {
+void for_shard_worker_seeds(unsigned shard,unsigned shard_count,unsigned worker,unsigned workers,Function&& function) {
     // Partition the selected seeds among all workers, including when the
     // number of workers is itself divisible by the number of shards.
-    for(unsigned seed=shard+shaped_shards*worker;seed<captures_per_case;seed+=shaped_shards*workers)
+    for(unsigned seed=shard+shard_count*worker;seed<captures_per_case;seed+=shard_count*workers)
         function(seed);
 }
 
@@ -212,7 +213,7 @@ CasePrediction predict(const Case& fixture) {
 
 struct CaptureOutcome {unsigned case_index,seed,recovered,baseline;};
 std::vector<CaptureOutcome> sampled_case(const Case& fixture,unsigned case_index,unsigned workers,
-                                        unsigned shard=shaped_shards) {
+                                        unsigned shard=maximum_shaped_shards,unsigned shard_count=legacy_shaped_shards) {
     const auto configured=options(fixture);
     // Independent complete captures do not share receiver state or random
     // streams. Each receiver still has one DSP worker. A shard assigns all
@@ -233,7 +234,7 @@ std::vector<CaptureOutcome> sampled_case(const Case& fixture,unsigned case_index
                 }
                 results.push_back(result);
             };
-            if(shard<shaped_shards)for_shard_worker_seeds(shard,worker,workers,run);
+            if(shard<shard_count)for_shard_worker_seeds(shard,shard_count,worker,workers,run);
             else for_worker_seeds(worker,workers,run);
             return results;
         });
@@ -336,33 +337,38 @@ void sampled_shaped_matrix(unsigned workers) {
     check_matrix(shaped_cases,false,workers);
 }
 
-struct ShapedResult {unsigned shard;std::vector<CaptureOutcome> outcomes;};
+struct ShapedResult {unsigned shard,shard_count=legacy_shaped_shards;std::vector<CaptureOutcome> outcomes;};
 using ShapedCounts=std::array<std::pair<unsigned,unsigned>,shaped_cases.size()>;
 
 void validate_shaped_result(const ShapedResult& result) {
-    check(result.shard<shaped_shards,"shaped result has an invalid shard identity");
-    check(result.outcomes.size()==shaped_cases.size()*captures_per_case/shaped_shards,
+    check((result.shard_count==legacy_shaped_shards||result.shard_count==maximum_shaped_shards) &&
+          result.shard<result.shard_count,"shaped result has an invalid shard identity or cardinality");
+    check(captures_per_case%result.shard_count==0 &&
+          result.outcomes.size()==shaped_cases.size()*captures_per_case/result.shard_count,
           "shaped result is missing or has extra captures");
     std::array<std::array<unsigned,captures_per_case>,shaped_cases.size()> visits{};
     for(const auto& outcome:result.outcomes) {
         check(outcome.case_index<shaped_cases.size() && outcome.seed<captures_per_case,
               "shaped result has an unknown case or seed");
-        check(outcome.seed%shaped_shards==result.shard,"shaped result contains another shard's seed");
+        check(outcome.seed%result.shard_count==result.shard,"shaped result contains another shard's seed");
         check(outcome.recovered<=1 && outcome.baseline==0,"shaped result has an invalid capture outcome");
         check(++visits[outcome.case_index][outcome.seed]==1,"shaped result repeats a case/seed identity");
     }
     for(const auto& seeds:visits)
         for(unsigned seed=0;seed<captures_per_case;++seed)
-            check(seeds[seed]==static_cast<unsigned>(seed%shaped_shards==result.shard),
+            check(seeds[seed]==static_cast<unsigned>(seed%result.shard_count==result.shard),
                   "shaped result omits a required case/seed identity");
 }
 
 ShapedCounts join_shaped_results(std::span<const ShapedResult> results) {
-    check(results.size()==shaped_shards,"shaped aggregation requires exactly two shard results");
-    std::array<unsigned,shaped_shards> shards{};
+    check(results.size()==legacy_shaped_shards||results.size()==maximum_shaped_shards,
+          "shaped aggregation requires exactly two or four shard results");
+    const auto shard_count=static_cast<unsigned>(results.size());
+    std::vector<unsigned> shards(shard_count);
     ShapedCounts counts{};
     for(const auto& result:results) {
         validate_shaped_result(result);
+        check(result.shard_count==shard_count,"shaped aggregation mixes shard cardinalities");
         check(++shards[result.shard]==1,"shaped aggregation repeats a shard identity");
         for(const auto& outcome:result.outcomes) {
             counts[outcome.case_index].first+=outcome.recovered;
@@ -394,9 +400,15 @@ void write_shaped_result(std::ostream& output,const ShapedResult& result) {
     validate_shaped_result(result);
     // Bump the format version if capture or reduction semantics change. The
     // fixture and seed identities also reject results from a different plan.
-    output<<"DATAPUMP_SHAPED_CALIBRATION_V1\n"
-          <<"capture-plan 2 64 0x7389b0741 1301081\n"
-          <<"shard "<<result.shard<<'\n';
+    if(result.shard_count==legacy_shaped_shards) {
+        output<<"DATAPUMP_SHAPED_CALIBRATION_V1\n"
+              <<"capture-plan 2 64 0x7389b0741 1301081\n";
+    } else {
+        output<<"DATAPUMP_SHAPED_CALIBRATION_V2\n"
+              <<"capture-plan 2 64 0x7389b0741 1301081\n"
+              <<"shard-count 4\n";
+    }
+    output<<"shard "<<result.shard<<'\n';
     for(unsigned index=0;index<shaped_cases.size();++index)output<<shaped_case_identity(index)<<'\n';
     for(const auto& outcome:result.outcomes)
         output<<"capture "<<outcome.case_index<<' '<<outcome.seed<<' '
@@ -412,9 +424,15 @@ ShapedResult read_shaped_result(std::istream& input) {
         check(static_cast<bool>(std::getline(input,value)),"shaped calibration result is truncated");
         return value;
     };
-    check(line()=="DATAPUMP_SHAPED_CALIBRATION_V1","unsupported shaped calibration result version");
+    const auto version=line();
+    check(version=="DATAPUMP_SHAPED_CALIBRATION_V1"||version=="DATAPUMP_SHAPED_CALIBRATION_V2",
+          "unsupported shaped calibration result version");
     check(line()=="capture-plan 2 64 0x7389b0741 1301081","inconsistent shaped calibration capture plan");
     ShapedResult result{};
+    if(version=="DATAPUMP_SHAPED_CALIBRATION_V2") {
+        check(line()=="shard-count 4","inconsistent shaped calibration shard cardinality");
+        result.shard_count=maximum_shaped_shards;
+    }
     {
         std::istringstream header(line());
         std::string tag;
@@ -425,7 +443,7 @@ ShapedResult read_shaped_result(std::istream& input) {
     }
     for(unsigned index=0;index<shaped_cases.size();++index)
         check(line()==shaped_case_identity(index),"inconsistent shaped calibration fixture");
-    for(unsigned capture_index=0;capture_index<shaped_cases.size()*captures_per_case/shaped_shards;++capture_index) {
+    for(unsigned capture_index=0;capture_index<shaped_cases.size()*captures_per_case/result.shard_count;++capture_index) {
         std::istringstream record(line());
         std::string tag;
         CaptureOutcome outcome{};
@@ -452,17 +470,17 @@ void reduce_shaped_results(std::span<const ShapedResult> results,
     reduction.finish(false,seconds,output);
 }
 
-void sampled_shaped_shard(unsigned workers,unsigned shard,const std::string& path) {
+void sampled_shaped_shard(unsigned workers,unsigned shard,unsigned shard_count,const std::string& path) {
     // Fail early for an unusable path and invalidate any previous result.
     // Only fully completed captures receive the required completion record.
     std::ofstream output(path,std::ios::trunc);
     check(output.is_open(),"could not open shaped calibration result path");
-    ShapedResult result{shard,{}};
+    ShapedResult result{shard,shard_count,{}};
     for(unsigned index=0;index<shaped_cases.size();++index) {
         // Keep the implemented-detector geometry checks in the capture job;
         // statistical assertions require both shards and run in aggregation.
         (void)predict(shaped_cases[index]);
-        const auto part=sampled_case(shaped_cases[index],index,workers,shard);
+        const auto part=sampled_case(shaped_cases[index],index,workers,shard,shard_count);
         result.outcomes.insert(result.outcomes.end(),part.begin(),part.end());
         std::cout<<shaped_cases[index].name<<": completed "<<part.size()
                  <<"/64 captures in shard "<<shard<<"; aggregate validation required"<<std::endl;
@@ -473,10 +491,10 @@ void sampled_shaped_shard(unsigned workers,unsigned shard,const std::string& pat
     std::cout<<"shaped capture coverage completed; aggregate validation required: "<<path<<'\n';
 }
 
-void aggregate_shaped_results(const std::array<std::string,shaped_shards>& paths) {
+void aggregate_shaped_results(const std::vector<std::string>& paths) {
     const auto begun=std::chrono::steady_clock::now();
-    std::array<ShapedResult,shaped_shards> results;
-    for(unsigned index=0;index<shaped_shards;++index) {
+    std::vector<ShapedResult> results(paths.size());
+    for(unsigned index=0;index<paths.size();++index) {
         std::ifstream input(paths[index]);
         check(input.is_open(),"could not open required shaped calibration result");
         results[index]=read_shaped_result(input);
@@ -491,29 +509,35 @@ void aggregate_shaped_results(const std::array<std::string,shaped_shards>& paths
 
 void check_shard_plan() {
     for(unsigned workers=1;workers<=maximum_workers;++workers) {
-        std::array<unsigned,captures_per_case> visits{};
-        for(unsigned shard=0;shard<shaped_shards;++shard)
-            for(unsigned worker=0;worker<workers;++worker)
-                for_shard_worker_seeds(shard,worker,workers,[&](unsigned seed) {
-                    ++visits[seed];
-                    check(seed%shaped_shards==shard && (seed/shaped_shards)%workers==worker,
-                          "shaped shard changed fixed seed assignment");
-                });
-        check(std::all_of(visits.begin(),visits.end(),[](unsigned count){return count==1;}),
-              "shaped shards repeat or omit fixed seeds");
+        for(const unsigned shard_count:{legacy_shaped_shards,maximum_shaped_shards}) {
+            std::array<unsigned,captures_per_case> visits{};
+            for(unsigned shard=0;shard<shard_count;++shard)
+                for(unsigned worker=0;worker<workers;++worker)
+                    for_shard_worker_seeds(shard,shard_count,worker,workers,[&](unsigned seed) {
+                        ++visits[seed];
+                        check(seed%shard_count==shard && (seed/shard_count)%workers==worker,
+                              "shaped shard changed fixed seed assignment");
+                    });
+            check(std::all_of(visits.begin(),visits.end(),[](unsigned count){return count==1;}),
+                  "shaped shards repeat or omit fixed seeds");
+        }
     }
     const auto rejects=[](auto&& operation,const char* message) {
         bool rejected=false;
         try {operation();} catch(const Error&) {rejected=true;}
         check(rejected,message);
     };
-    std::array<ShapedResult,shaped_shards> results;
-    for(unsigned shard=0;shard<shaped_shards;++shard) {
-        results[shard].shard=shard;
-        for(unsigned index=0;index<shaped_cases.size();++index)
-            for(unsigned seed=shard;seed<captures_per_case;seed+=shaped_shards)
-                results[shard].outcomes.push_back({index,seed,static_cast<unsigned>(seed<32),0});
-    }
+    const auto make_results=[](unsigned shard_count) {
+        std::vector<ShapedResult> values(shard_count);
+        for(unsigned shard=0;shard<shard_count;++shard) {
+            values[shard].shard=shard;values[shard].shard_count=shard_count;
+            for(unsigned index=0;index<shaped_cases.size();++index)
+                for(unsigned seed=shard;seed<captures_per_case;seed+=shard_count)
+                    values[shard].outcomes.push_back({index,seed,static_cast<unsigned>(seed<32),0});
+        }
+        return values;
+    };
+    auto results=make_results(legacy_shaped_shards);
     std::ostringstream encoded;
     for(auto& result:results) {
         std::ostringstream serialized;
@@ -555,7 +579,7 @@ void check_shard_plan() {
     invalid_result([](auto& result){result.outcomes[0].case_index=2;});
     invalid_result([](auto& result){result.outcomes[0].recovered=2;});
     invalid_result([](auto& result){result.outcomes[0].baseline=1;});
-    invalid_result([](auto& result){result.shard=2;});
+    invalid_result([](auto& result){result.shard=legacy_shaped_shards;});
     const auto invalid_text=[&](const std::string& old,const std::string& replacement) {
         auto text=encoded.str();
         const auto found=text.find(old);
@@ -572,6 +596,43 @@ void check_shard_plan() {
     invalid_text("capture 0 0 1 0","capture 0 0 invalid 0");
     invalid_text("end\n","");
     invalid_text("end\n","end\nextra\n");
+    auto four_results=make_results(maximum_shaped_shards);
+    std::ostringstream four_encoded;
+    for(auto& result:four_results) {
+        std::ostringstream serialized;
+        write_shaped_result(serialized,result);
+        std::istringstream input(serialized.str());
+        result=read_shaped_result(input);
+        if(result.shard==0)four_encoded<<serialized.str();
+    }
+    check(join_shaped_results(four_results)==counts,"four-shard aggregation changed complete-case counts");
+    rejects([&]{join_shaped_results(std::span(four_results).first(3));},
+            "four-shard aggregate accepted a missing shard");
+    auto four_duplicate=four_results;
+    four_duplicate[3]=four_duplicate[0];
+    rejects([&]{join_shaped_results(four_duplicate);},"four-shard aggregate accepted duplicate shards");
+    auto four_incomplete=four_results;
+    four_incomplete[0].outcomes.pop_back();
+    rejects([&]{join_shaped_results(four_incomplete);},"four-shard aggregate accepted incomplete coverage");
+    auto four_wrong_owner=four_results;
+    four_wrong_owner[0].outcomes[0].seed=1;
+    rejects([&]{join_shaped_results(four_wrong_owner);},"four-shard aggregate accepted a seed owned by another shard");
+    auto mixed=four_results;
+    mixed[0]=results[0];
+    rejects([&]{join_shaped_results(mixed);},"shaped aggregate accepted mixed shard cardinalities");
+    const auto invalid_four_text=[&](const std::string& old,const std::string& replacement) {
+        auto text=four_encoded.str();
+        const auto found=text.find(old);
+        check(found!=std::string::npos,"four-shard parser fixture could not locate its mutation");
+        text.replace(found,old.size(),replacement);
+        std::istringstream malformed(text);
+        rejects([&]{read_shaped_result(malformed);},"four-shard parser accepted malformed cardinality data");
+    };
+    invalid_four_text("shard-count 4","shard-count 2");
+    invalid_four_text("capture-plan 2 64","capture-plan 2 63");
+    invalid_four_text("case 0","case 9");
+    invalid_four_text("DATAPUMP_SHAPED_CALIBRATION_V2","DATAPUMP_SHAPED_CALIBRATION_V1");
+    invalid_four_text("end\n","");
     // Both cases separately pass the original uncertainty bound at 40/64,
     // but their joined RMS fails. Do not replace this gate with per-shard or
     // per-case limits, or accidentally dilute it with the unshaped matrix.
@@ -645,10 +706,11 @@ int main(int argc,char** argv) {
     try {
         auto workers=bounded_workers(std::thread::hardware_concurrency());
         bool worker_plan=false,shard_plan=false,workers_set=false,section_set=false;
-        bool shard_set=false,result_set=false,aggregate=false;
+        bool shard_set=false,result_set=false,aggregate=false,shard_count_set=false;
         unsigned shard=0;
+        unsigned shard_count=legacy_shaped_shards;
         std::string result_path;
-        std::array<std::string,shaped_shards> aggregate_paths;
+        std::vector<std::string> aggregate_paths;
         std::string_view section="all";
         for(int arg=1;arg<argc;++arg) {
             const std::string_view option=argv[arg];
@@ -668,23 +730,41 @@ int main(int argc,char** argv) {
                 section_set=true;
             } else if(option=="--shaped-shard"&&!shard_set&&arg+1<argc) {
                 const std::string_view value=argv[++arg];
-                check(value=="0"||value=="1","calibration --shaped-shard must be 0 or 1");
-                shard=static_cast<unsigned>(value[0]-'0');shard_set=true;
+                const auto parsed=std::from_chars(value.data(),value.data()+value.size(),shard);
+                check(parsed.ec==std::errc{}&&parsed.ptr==value.data()+value.size(),
+                      "calibration --shaped-shard must be an integer");
+                shard_set=true;
+            } else if(option=="--shaped-shards"&&!shard_count_set&&arg+1<argc) {
+                const std::string_view value=argv[++arg];
+                const auto parsed=std::from_chars(value.data(),value.data()+value.size(),shard_count);
+                check(parsed.ec==std::errc{}&&parsed.ptr==value.data()+value.size()&&
+                      (shard_count==legacy_shaped_shards||shard_count==maximum_shaped_shards),
+                      "calibration --shaped-shards must be 2 or 4");
+                shard_count_set=true;
             } else if(option=="--shaped-result"&&!result_set&&arg+1<argc) {
                 result_path=argv[++arg];result_set=true;
                 check(!result_path.empty(),"calibration --shaped-result requires a nonempty path");
             } else if(option=="--aggregate-shaped"&&!aggregate&&arg+2<argc) {
-                aggregate_paths[0]=argv[++arg];aggregate_paths[1]=argv[++arg];aggregate=true;
-            } else throw Error("Usage: test_differential_receiver_probability [--workers 1..16] [--section all|matrix|shaped|null|default-window] [--check-worker-plan] [--check-shard-plan] [--shaped-shard 0|1 --shaped-result PATH] | --aggregate-shaped PATH0 PATH1");
+                aggregate=true;
+                // Cardinality may be specified after the paths. Collect the
+                // bounded path list first, then validate its final count.
+                for(unsigned index=0;index<maximum_shaped_shards&&arg+1<argc;++index) {
+                    if(std::string_view(argv[arg+1]).starts_with("--"))break;
+                    aggregate_paths.emplace_back(argv[++arg]);
+                }
+            } else throw Error("Usage: test_differential_receiver_probability [--workers 1..16] [--section all|matrix|shaped|null|default-window] [--check-worker-plan] [--check-shard-plan] [--shaped-shards 2|4] [--shaped-shard INDEX --shaped-result PATH] | --aggregate-shaped PATH...");
         }
         check(!aggregate || !(workers_set||section_set||shard_set||result_set||worker_plan||shard_plan),
               "calibration --aggregate-shaped cannot be combined with capture or plan options");
+        check(!aggregate||aggregate_paths.size()==shard_count,
+              "calibration --aggregate-shaped requires exactly the selected number of result paths");
         check(shard_set==result_set,"calibration --shaped-shard and --shaped-result must be specified together");
         check(!shard_set || section=="shaped","calibration sharding requires --section shaped");
+        check(!shard_set||shard<shard_count,"calibration --shaped-shard is outside the selected shard cardinality");
         check_worker_plan();
         check_shard_plan();
         if(aggregate) {
-            std::cout<<"Differential receiver calibration: aggregate two shaped shards, "
+            std::cout<<"Differential receiver calibration: aggregate "<<shard_count<<" shaped shards, "
                      <<captures_per_case<<" fixed seeds per case"<<std::endl;
             aggregate_shaped_results(aggregate_paths);
             std::cout<<"shaped differential receiver probability aggregate tests passed\n";
@@ -692,15 +772,16 @@ int main(int argc,char** argv) {
         }
         std::cout<<"Differential receiver calibration: "<<workers<<" independent capture workers, "
                  <<captures_per_case<<" fixed seeds per matrix case; section "<<section;
-        if(shard_set)std::cout<<"; shaped shard "<<shard<<'/'<<shaped_shards<<" (32 seeds per case; aggregate required)";
+        if(shard_set)std::cout<<"; shaped shard "<<shard<<'/'<<shard_count<<" ("
+                              <<captures_per_case/shard_count<<" seeds per case; aggregate required)";
         std::cout<<std::endl;
         if(worker_plan||shard_plan) {
-            std::cout<<"worker partitions 1..16 and both shaped shards preserve all fixed seeds; "
+            std::cout<<"worker partitions 1..16 and both supported shaped shard plans preserve all fixed seeds; "
                      <<"strict result parsing and shared aggregate gates checked; no calibration run\n";
             return 0;
         }
         if(shard_set) {
-            sampled_shaped_shard(workers,shard,result_path);
+            sampled_shaped_shard(workers,shard,shard_count,result_path);
             return 0;
         }
         // Keep each matrix whole: its aggregate error and improvement checks

@@ -16,7 +16,7 @@ on:
       scope:
         description: 'Run one complete native scope without repeating the other shards'
         type: choice
-        options: [ci-build-probe, ci-apt-probe, core, preparation, fast, live, release-drain-scheduling-diagnostic, gui-receiver-feed-diagnostic, gui-stop-interval-diagnostic, live-drain-diagnostic, symbol-burst-live, gui-stop-current-wave, calibration, frontends, web, package, cli, eme-diagnostic, receiver, native-peak-lease-diagnostic, correlator-tone-diagnostic, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-first-transition-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, simulation-owner-census-diagnostic, simulation-capacity-shape-diagnostic, simulation-acquisition-partition-diagnostic, fft-normalization-diagnostic]
+        options: [ci-build-probe, ci-apt-probe, core, preparation, fast, live, release-drain-scheduling-diagnostic, gui-receiver-feed-diagnostic, gui-stop-interval-diagnostic, live-drain-diagnostic, symbol-burst-live, gui-stop-current-wave, calibration, calibration-plan, frontends, web, package, cli, eme-diagnostic, receiver, native-peak-lease-diagnostic, correlator-tone-diagnostic, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-first-transition-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, simulation-owner-census-diagnostic, simulation-capacity-shape-diagnostic, simulation-acquisition-partition-diagnostic, fft-normalization-diagnostic]
         default: core
       stop_group:
         description: Temporary matched stop experiment group; diagnostic only
@@ -84,7 +84,7 @@ on:
         type: string
         default: Release
       scope:
-        description: 'core, preparation, fast, live, symbol-burst-live, gui-stop-current-wave, calibration, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, correlator-tone-diagnostic, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-first-transition-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, simulation-owner-census-diagnostic, simulation-capacity-shape-diagnostic, simulation-acquisition-partition-diagnostic, or fft-normalization-diagnostic'
+        description: 'core, preparation, fast, live, symbol-burst-live, gui-stop-current-wave, calibration, calibration-plan, calibration-aggregate, frontends, web, package, cli, sanitizer-gui, eme-diagnostic, receiver, correlator-tone-diagnostic, startup-guide, sched-hop-diagnostic, sched-hop-radius-control, alsa-diagnostic, alsa-radius-diagnostic, preparation-diagnostic, gui-core-diagnostic, gui-stop-diagnostic, fft-diagnostic, planner-diagnostic, eme-probability-diagnostic, gui-stop-differential, fft-kernel-diagnostic, simulation-clock-diagnostic, continuation-carrier-diagnostic, simulation-first-transition-diagnostic, simulation-clock-trace-diagnostic, simulation-clock-geometry-diagnostic, simulation-clock-raw-component-diagnostic, simulation-clock-chain-score-diagnostic, simulation-owner-census-diagnostic, simulation-capacity-shape-diagnostic, simulation-acquisition-partition-diagnostic, or fft-normalization-diagnostic'
         type: string
         required: true
       stop_group:
@@ -95,9 +95,13 @@ on:
         type: string
         default: all
       calibration_shard:
-        description: 'Optional shaped capture part: 0 or 1; requires the separate aggregate job'
+        description: 'Optional shaped capture part below calibration_shards; requires the separate aggregate job'
         type: string
         default: ''
+      calibration_shards:
+        description: 'Shaped capture partition count: 2 preserves the legacy route; 4 requires Debug shaped scope'
+        type: string
+        default: '2'
       core_part:
         description: 'Debug core partition: all preserves the complete entry point; 0 or 1 runs one planned half'
         type: string
@@ -196,10 +200,22 @@ jobs:
       CI_SCOPE: ${{ inputs.scope }}
       CORE_PART: ${{ inputs.core_part }}
       PREPARATION_PART: ${{ inputs.preparation_part }}
+      CALIBRATION_SHARDS: ${{ inputs.calibration_shards || '2' }}
       CI_STOP_GROUP: ${{ inputs.stop_group }}
       DATAPUMP_SANITIZERS: ${{ inputs.scope == 'gui-stop-differential' && (inputs.stop_group == 'eu-o1-san-off' || inputs.stop_group == 'eu-o0-san-off' || inputs.stop_group == 'eu-focus-o1-san-off' || inputs.stop_group == 'eu-focus-o0-san-off' || inputs.stop_group == 'eu-kernel-o1-san-off') && 'OFF' || ((inputs.build_type == 'Debug' || inputs.scope == 'simulation-clock-diagnostic' || (inputs.scope == 'simulation-clock-trace-diagnostic' || inputs.scope == 'simulation-clock-geometry-diagnostic' || (inputs.scope == 'simulation-clock-raw-component-diagnostic' || inputs.scope == 'simulation-clock-chain-score-diagnostic' || inputs.scope == 'simulation-owner-census-diagnostic' || inputs.scope == 'simulation-capacity-shape-diagnostic' || inputs.scope == 'simulation-acquisition-partition-diagnostic' || inputs.scope == 'continuation-carrier-diagnostic'))) && 'ON' || 'OFF') }}
       SANITIZER_REALTIME: ${{ inputs.sanitizer_realtime }}
     steps:
+      - name: Validate shaped capture partition cardinality
+        run: |
+          case "$CALIBRATION_SHARDS" in
+            2) ;;
+            4)
+              if [ '${{ inputs.build_type }}' != Debug ] || [ '${{ inputs.calibration_section }}' != shaped ] || { [ "$CI_SCOPE" != calibration ] && [ "$CI_SCOPE" != calibration-aggregate ]; }; then
+                echo '::error::Four shaped parts require Debug shaped calibration or its aggregate.'
+                exit 2
+              fi ;;
+            *) echo '::error::calibration_shards must be 2 or 4.'; exit 2 ;;
+          esac
       - name: Restrict passive core observation to its matched scope
         if: inputs.core_process_observation
         run: |
@@ -1071,6 +1087,7 @@ jobs:
           -DDATAPUMP_BUILD_WEB_WORKER=${{ (inputs.scope == 'package' || inputs.scope == 'web') && 'ON' || 'OFF' }}
           -DDATAPUMP_CALIBRATION_SECTION=${{ inputs.calibration_section }}
           -DDATAPUMP_CALIBRATION_SHARD=${{ inputs.calibration_shard }}
+          -DDATAPUMP_CALIBRATION_SHARDS="$CALIBRATION_SHARDS"
           -DDATAPUMP_CI_PREPARATION_PART=${{ inputs.preparation_part }}
           -DDART_TESTING_TIMEOUT=3600
           -DCMAKE_DISABLE_FIND_PACKAGE_Python3=${{ (inputs.scope == 'frontends' || inputs.scope == 'web') && 'FALSE' || 'TRUE' }}
@@ -1184,7 +1201,7 @@ jobs:
             exit 0
           fi
           case "$CI_SCOPE" in
-            calibration|calibration-aggregate) targets=(test_differential_receiver_probability) ;;
+            calibration|calibration-plan|calibration-aggregate) targets=(test_differential_receiver_probability) ;;
             symbol-burst-live)
               if [ '${{ inputs.paced_callback_focus }}' = true ]; then
                 targets=(test_symbol_burst_live)
@@ -1780,6 +1797,13 @@ jobs:
           for name in cpu.max cpu.stat cpuset.cpus.effective; do
             if [ -f "/sys/fs/cgroup/$name" ]; then cat "/sys/fs/cgroup/$name" > "$report/$name"; fi
           done
+      - name: Check both complete shaped capture plans before qualification
+        if: inputs.scope == 'calibration-plan'
+        timeout-minutes: 2
+        run: |
+          python3 -B tests/test_calibration_cli.py
+          python3 -B tools/check-calibration-cli.py --binary ./build/test_differential_receiver_probability --report build/calibration-plan-cli.json 2>&1 | tee build/calibration-plan.log
+          echo 'Legacy two-part and four-part fixed-seed coverage, strict parsing and original aggregate-gate fixtures passed. This plan-only scope is not sampled calibration qualification.' >> "$GITHUB_STEP_SUMMARY"
       - name: Run the selected native tests
         if: inputs.scope == 'core' || inputs.scope == 'preparation' || inputs.scope == 'fast' || inputs.scope == 'live' || inputs.scope == 'calibration' || inputs.scope == 'frontends' || inputs.scope == 'web'
         run: |
@@ -3103,14 +3127,14 @@ jobs:
       - name: Record partial capture scope
         if: inputs.calibration_shard != ''
         run: |
-          echo 'This job completed half of the fixed shaped captures. It is not full calibration qualification: the required aggregate job checks complete seed coverage and the original per-case and joined statistical assertions.' >> "$GITHUB_STEP_SUMMARY"
+          echo "This job completed one of $CALIBRATION_SHARDS fixed shaped capture parts. It is not full calibration qualification: the required aggregate job checks complete seed coverage and the original per-case and joined statistical assertions." >> "$GITHUB_STEP_SUMMARY"
       - name: Publish the completed capture part for required aggregation
         if: inputs.calibration_shard != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           # Stable within this exact-source run, so rerunning only a failed
           # part can reuse its successful sibling from an earlier attempt.
-          name: Shaped-Debug-captures-part-${{ inputs.calibration_shard }}
+          name: ${{ inputs.calibration_shards == '4' && format('Shaped-Debug-captures-4-parts-part-{0}', inputs.calibration_shard) || format('Shaped-Debug-captures-part-{0}', inputs.calibration_shard) }}
           path: build/shaped-result.txt
           if-no-files-found: error
           overwrite: true
@@ -3119,19 +3143,37 @@ jobs:
         if: inputs.scope == 'calibration-aggregate'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: Shaped-Debug-captures-part-0
+          name: ${{ inputs.calibration_shards == '4' && 'Shaped-Debug-captures-4-parts-part-0' || 'Shaped-Debug-captures-part-0' }}
           path: build/calibration-results/0
       - name: Download shaped capture part one
         if: inputs.scope == 'calibration-aggregate'
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: Shaped-Debug-captures-part-1
+          name: ${{ inputs.calibration_shards == '4' && 'Shaped-Debug-captures-4-parts-part-1' || 'Shaped-Debug-captures-part-1' }}
           path: build/calibration-results/1
+      - name: Download shaped capture part two
+        if: inputs.scope == 'calibration-aggregate' && inputs.calibration_shards == '4'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Shaped-Debug-captures-4-parts-part-2
+          path: build/calibration-results/2
+      - name: Download shaped capture part three
+        if: inputs.scope == 'calibration-aggregate' && inputs.calibration_shards == '4'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: Shaped-Debug-captures-4-parts-part-3
+          path: build/calibration-results/3
       - name: Require every shaped capture and the unchanged aggregate assertions
         if: inputs.scope == 'calibration-aggregate'
         timeout-minutes: 5
         run: |
-          ./build/test_differential_receiver_probability --aggregate-shaped build/calibration-results/0/shaped-result.txt build/calibration-results/1/shaped-result.txt 2>&1 | tee build/calibration-aggregate.log
+          paths=(build/calibration-results/0/shaped-result.txt build/calibration-results/1/shaped-result.txt)
+          options=()
+          if [ "$CALIBRATION_SHARDS" = 4 ]; then
+            options+=(--shaped-shards 4)
+            paths+=(build/calibration-results/2/shaped-result.txt build/calibration-results/3/shaped-result.txt)
+          fi
+          ./build/test_differential_receiver_probability "${options[@]}" --aggregate-shaped "${paths[@]}" 2>&1 | tee build/calibration-aggregate.log
           echo 'All 64 original seeds for each shaped case are present exactly once. The original per-case probability and combined RMS assertions passed using the instrumented capture results.' >> "$GITHUB_STEP_SUMMARY"
       - name: Record separate instrumented desktop coverage
         if: always() && inputs.scope == 'core' && inputs.build_type == 'Debug'
@@ -3240,6 +3282,8 @@ jobs:
             build/package-*.log
             build/shaped-result.txt
             build/calibration-aggregate.log
+            build/calibration-plan.log
+            build/calibration-plan-cli.json
             build/eme-diagnostic*
             build/alsa-diagnostic*
             build/alsa-radius-diagnostic/

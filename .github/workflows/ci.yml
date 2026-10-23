@@ -141,6 +141,7 @@ jobs:
           python3 tests/test_ci_tests.py
           python3 tests/test_ci_test_plan.py
           python3 tests/test_ci_preparation_plan.py
+          python3 tests/test_calibration_cli.py
           python3 tests/test_ci_sdk_copy_inputs.py
           python3 tests/test_ci_native_copy_inputs.py
           python3 tests/test_ci_build_probe.py
@@ -488,7 +489,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: ['0', '1']
+        part: ['0', '1', '2', '3']
     uses: ./.github/workflows/native-linux.yml
     with:
       linux_runner: ${{ inputs.linux_runner || 'ubuntu-24.04' }}
@@ -496,6 +497,7 @@ jobs:
       scope: calibration
       calibration_section: shaped
       calibration_shard: ${{ matrix.part }}
+      calibration_shards: '4'
 
   linux-shaped-aggregate:
     if: github.event_name == 'workflow_dispatch' && !inputs.devfast
@@ -507,6 +509,7 @@ jobs:
       build_type: Debug
       scope: calibration-aggregate
       calibration_section: shaped
+      calibration_shards: '4'
 
   sanitizer-gui:
     if: github.event_name == 'workflow_dispatch' && ((inputs.devfast && inputs.diagnostic == 'sanitizer-gui') || (!inputs.devfast && inputs.sanitizer_smoke))

@@ -512,13 +512,22 @@ CPU-intensive `live` and `live_profiles` suites and runs them serially on its
 own runner. Calibration runs its four existing independent sections
 (`matrix`, `shaped`, `null`, `default-window`) on
 separate runners; each preserves all its fixed seeds and aggregate assertions.
-The instrumented shaped section additionally divides its seeds across two
-runners. Each captures both original cases, and a required aggregation job
+The instrumented shaped section additionally divides its seeds across four
+runners, sixteen seeds per case. Each captures both original cases with fresh
+PCM and receiver state, and a required aggregation job
 rejects missing/duplicate seeds before applying the same per-case probability
 and combined RMS limits to all 64 seeds per case. Partial capture success is
 not full calibration qualification. Release and Windows retain whole sections.
 Local calibration still defaults to `all` and the existing CTest name. The
 `DATAPUMP_CALIBRATION_SECTION` CMake setting selects a section for CI.
+
+Local complete runs and the legacy two-part format remain available;
+`DATAPUMP_CALIBRATION_SHARDS` defaults to `2`, with `4` the
+explicit alternative for shaped parts. Four-part results declare their count
+separately from the two-case capture-plan identity and cannot mix with legacy
+results. The native Linux `calibration-plan` scope checks both plans and direct
+CLI parsing, including both placements of the count option, without sampled
+captures; it is a focused prerequisite check, not calibration qualification.
 
 [`tools/run-ci-tests.py`](../tools/run-ci-tests.py) assigns every registered test
 to exactly one functional scope. Contract labels intentionally overlap these
