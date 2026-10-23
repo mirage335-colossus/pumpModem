@@ -4,6 +4,218 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## CI elapsed time and supplemental corrections, 23 October 2026
+
+Both required full workflows completed on standard runners with `devfast=false`;
+source-bound reports and the complete required inventories were independently read.
+
+The CI candidate is `cefdac53617105aa120e425f1b270a9035777493`; its application
+sources match runtime correction `c51183182c6c68b5a260fba4712bb9819f943996`.
+Intermediate source `21ceaa3b3696179dccd53be36447853fa3287805` adds only the
+existing 180-second acquisition watchdog to native copied-package setup. That
+watchdog bounds downloads, retaining signed-mirror recovery and unchanged offline
+installation, fatal errors, application deadlines and binary checks.
+
+| Required current qualification | Result |
+| --- | --- |
+| [Native 39880745813](https://github.com/mirage335-colossus/pumpModem/actions/runs/39880745813) | Passed all 48 required jobs in 94m07s; 1171.93 unweighted runner-minutes. |
+| [SDK 39880749070](https://github.com/mirage335-colossus/pumpModem/actions/runs/39880749070) | Passed all 15 required jobs in 113m09s; 290.47 unweighted runner-minutes; strict 199-test union complete. |
+
+The concurrent pair took **113m11s**, from 00:52:59 to 02:46:10 UTC. The
+baseline `67db103` pair was also concurrent (07:44:33/07:44:36 UTC), completing
+at 10:38:19: **173m46s**. The observed reduction is **60m35s (34.86%)**.
+Combined unweighted runner use was **1462.40 versus 1396.43 minutes (+4.72%)**.
+This includes actual queueing and setup. Different source epochs and runner
+cohorts limit attribution; the current runtime contains the supplemental receiver
+and TUI corrections. These are representative observations, not a stable causal
+percentage for scheduling changes alone.
+
+CI builds the precise prerequisites for each independent scope. Debug core has
+two disjoint parts and a required configured-inventory aggregate; SDK FLTK has
+three producers for four logical parts and a complete configured union. Four
+Debug preparation parts retain all eight stateful cases, complete serial/parallel
+pairs and all 22 original checks. Their aggregate binds source, compiler,
+configuration, libraries and exact executable identity, retaining the 9000-second
+combined limit and 7200-second warning. Independent packages and copied-binary
+checks proceed without waiting for core, calibration or instrumented desktop
+simulation. GUI isolation and conservative within-runner concurrency remain;
+compile and test concurrency are separate. Native Release Burst runs after
+unrelated tests and keeps its private 25-second drain assertion.
+
+Full native Debug shaped calibration now uses four independent capture parts.
+Every original case and all 64 fixed seeds per case remain: exactly 128 unique
+records. Each part contains 16 seeds from each case. V2 capture metadata declares
+four parts; the default two-part V1 and original complete invocation remain.
+The required aggregate rejects missing, duplicate, extra or mismatched results
+and applies the original per-case and combined statistical gates. Independent
+review found a CLI option-order defect in the initial Luna patch. The main Sol
+owner took over `ci_shaped_capture_cardinality` and repaired parsing under its
+original history. Same-source
+[focused 39879327216](https://github.com/mirage335-colossus/pumpModem/actions/runs/39879327216)
+passed four helper fixtures and nine direct-main CLI cases under GNU 11 Debug
+ASan/UBSan. This was focused evidence, not sampled qualification.
+
+All 128 candidate per-seed outcomes and both fixture identities match the
+completed two-part `21ceaa3` capture exactly: 41/64 public and 40/64 private
+recoveries, with matching baseline-control outcomes. The four observed capture
+steps took 2905–2989 seconds; their prerequisite builds took 693–727 seconds.
+The slower matched two-part capture took 5959 seconds. These are source/fixture/
+seed comparisons, not a newly performed raw-PCM hash comparison or a universal
+performance guarantee. The four-part aggregate passed the original gates: RMS
+error 0.00842595, maximum 0.010376, in 13.4087 seconds.
+
+There is a confirmed 20-job Actions limit. The new pair has 43 native plus ten
+SDK initially ready jobs; all 53 obtained actual runners within 51m42s. Four
+shaped producers and both Debug core halves started almost immediately. SDK
+calibration was admitted last. By about one hour, the initial queue had cleared
+and 13 current jobs plus the older aggregate were running, leaving six slots.
+Skipped reusable-workflow placeholders and queued synthetic start timestamps
+are excluded from these counts. Queue time stays in the elapsed results; an
+overlapping investigation is identified separately. No FIFO scheduling or exact
+counterfactual queue-free start is inferred. A slower individual SDK admission
+is judged against the combined qualification finish, rather than in isolation.
+
+For context, CI-only source `63283547` native
+[39851690903](https://github.com/mirage335-colossus/pumpModem/actions/runs/39851690903)
+passed all 46 required jobs in 155m58s, versus 173m46s for qualified baseline
+`67db103`
+[39742621396](https://github.com/mirage335-colossus/pumpModem/actions/runs/39742621396).
+Unweighted runner use was 1198.67 versus 1134.48 minutes. Its final aggregate
+queued 28m22s, built for 662 seconds, transferred for two and asserted for 14.
+This comparison holds application behavior constant, but cohorts and overlapping
+investigation limit attribution. It does not qualify the later runtime changes.
+
+Runtime-equivalent source `21ceaa3` native
+[39865088456](https://github.com/mirage335-colossus/pumpModem/actions/runs/39865088456)
+passed all 46 required jobs in 213m07s with 1142.77 unweighted runner-minutes.
+Its final aggregate queued 43m09s while the newer full pair ran; that overlap is
+retained in its elapsed time and makes it unsuitable as an uncontended baseline.
+Source `21ceaa3` SDK [39865092849](https://github.com/mirage335-colossus/pumpModem/actions/runs/39865092849)
+passed all 15 required jobs in 79m39s with 241.10 unweighted runner-minutes,
+versus the recorded baseline 140m37s and 261.95 minutes. Its calibration queued
+22m59s, used a 56m20s runner interval and ran the original CTest for 3157.31s.
+These SDK Release results never replace GNU 11 Debug sanitizer coverage.
+
+The candidate native finish was Debug calibration matrix: 45m59s queued, then
+48m04s on a runner, including 11m20s building and 35m54s testing. Core part 0
+built for 64m52s and tested for 23m03s; the required core aggregate finished
+only 2m11s before matrix. Removing the matrix queue would not remove that much
+from native elapsed time because the roughly 92-minute core path competes.
+Native explicit artifact-action steps summed to 78 seconds across jobs, including
+49 seconds of report retention omitted by the older name-only transfer heuristic.
+That is summed action wall time, not total network cost or a critical-path sum.
+
+Current Debug core reconciles all 267 required names against 308 configured
+registrations: 250 passed, 17 declared return-77 omissions, zero failed/incomplete.
+Both parts share source, plan, configuration, compiler and library identities.
+Linux Release core is 253 passed/17 omitted; Windows is 232/33. Debug CLI passed
+39/39 in 164.465 seconds; its binary SHA256 is
+`bfb6ec3297faf2de5d1fabc1e8120ed3ef3444bee001995bd17556554251a206`.
+Release passed 39/39 in 38.856 seconds. Debug EU stop was 8.51315 seconds, below
+ten seconds, with the
+ordinary five-second and delayed-arrival warnings and protected source-tail
+assertion retained. Debug preparation's exact eight-case union on one executable
+completed a 5891.687-second serial equivalent, below its 7200-second warning.
+Original Release and Windows no-argument preparation completed all eight cases.
+All matrix, shaped, null and default-window calibration gates passed. Linux
+frontends passed 10/10 in Debug and Release; Windows passed its nine platform
+cases. GUI FLTK passed 42 checks and Rev 45, plus typed smoke; native package
+checks
+and both copied distributions passed every required typed result. Web and Wasm
+scopes passed. The native Debug sanitizer result is independently established.
+
+Current SDK's strict union is 195 general, two Live, one preparation and one
+all-section calibration test: 199 passed, zero omitted/incomplete/failed. Original
+no-argument preparation covered all eight cases. Calibration retained all 64
+fixed seeds per case, 13 modeled cases and two shaped cases, original per-case
+and group RMS gates, prior-detector improvement, null and default-window controls.
+Frontends passed 10/10, web 13/13, Wasm 5/5 and source Rev five checks (four CTest
+plus separate GUI workflow). Four source-package archive smokes and all eight
+copied-runtime typed reports passed. The original 4 MiB TUI fixture took 8.96s
+overall and passed the unchanged 20-second send limit; its exact standalone send
+interval remains unmeasured. Rev cadence and Fontconfig advisories, compiler
+warnings and the `fluid` build notice remain in retained logs.
+
+Native instrumented compact Live is still **incomplete coverage**, not a compact
+pass: raw/short completed, framed/clear-after-positive did not finish within the
+120-second allowance. Mandatory functional and remaining Live assertions passed;
+Release and Windows compact cases completed. The existing two instrumented Fast
+exclusions, opt-in sanitizer desktop omission, 67 numeric/ISA return-77 omissions
+across core configurations and compiler-dependent native worker-peak limitation
+remain explicit. Conditional workflow-row skips are not test passes.
+
+SDK calibration determines the paired finish: 51m38s queued, then 61m12s on a
+runner, followed by a three-second aggregate queue and 13-second aggregate job.
+Its combined configure/build/test step took 3601s; CTest took 3437.14s, leaving
+about 164s of combined configuration/build/report overhead. That residual is not
+a CPU measurement. SDK preparation took 2481.60s versus 1351.82s in `21ceaa3`;
+calibration took 3437.14s versus 3157.31s. These slower individual executions
+are retained as cohort observations, without asserting that parallelism caused
+them or treating them as failures. The combined required finish still improved.
+
+No persistent compiler cache was deployed. The bounded SDK probe measured 98
+cold misses, 98 warm hits, and 96 hits/two misses after a source change, with
+246.793/0.644/110.080-second builds and matching cold/warm ELF bytes; native cache
+benefit and uncacheable work remain unmeasured. Configured build trees and
+sanitizer binary bundles
+are not transferred.
+
+The pair stored 83 artifacts totaling 365,693,424 bytes. Only 77 small reports
+(3,212,787 bytes) were downloaded for this readback; existing verified ZIPs were
+reused. From producer bundle sizes and two consumers per Linux application
+bundle, copied-binary downloads account for about 593.59 MB of payload, in
+addition to report transfers and prepared-dependency downloads. Dependency
+transfer bytes and total wire overhead are not fully metered. Recent retained
+qualification cohorts were estimated at 0.9–1.1 GB; that excludes any uninventoried
+older failure artifacts and is not an account-quota headroom claim. The candidate
+monitor made 72 direct API requests with ten-minute, fully paginated snapshots;
+there was no per-test polling. A final shared-token snapshot had 4986/5000 REST
+requests remaining; this is not task-specific usage. Normal packages retain one
+day and reports seven days; no immutable persistent cache generations were added.
+Per-run totals are not a claim about unused account-wide storage or API quota.
+
+The reconciled archive supplied a receiver acquisition-completion correction and
+an ncurses readable-prefix optimization. Independent source review required
+`4.L * bin_samples` in the new receiver margin to avoid supported 32-bit integer
+wrapping. Phase/origin margins, synchronized-state protection, physical absence,
+backlog frontiers and input integrity remain. A matched complete PCM fixture
+recovered all 32 Help bits where baseline retained a 17-bit suffix; that does not
+prove the sole historical GUI cause. TUI input work retains the original
+256-iteration cap, ncurses ordering and restored input flags. Independently
+reviewed paste-boundary coverage supplements the unchanged original fixture.
+Native GNU 11 sanitizer and GNU 15 SDK focused frontends each passed 10/10;
+receiver coverage retained 71 original methods plus two regressions.
+
+[Original strict GUI 39859510712](https://github.com/mirage335-colossus/pumpModem/actions/runs/39859510712)
+on runtime-equivalent `c511831` passed the original pair 2/2 serially and 2/2 in
+parallel: EU stops 8.5334/8.2779 seconds, unchanged ten-second cap, protected
+source-tail and idle assertions passed. Ordinary five-second warnings remain.
+Its source and fixtures match the candidate, so this evidence is reused under
+its actual identity. Physical GPM and device audio remain unexecuted.
+
+Original failures remain failures: SDK paste-send at its 20-second deadline,
+native Release Burst at 51.83 seconds, timing advice beyond three seconds,
+copied Help, cancelled APT setup and strict compact Live compute failures.
+Passing reruns do not establish a unique historical cause. Prior SDK run
+`39844120380`
+qualified only after one exact failed-frontend retry; its 75m47s includes the
+failure, wait and queue. Its 47m08s first attempt remained failed.
+
+Normal Latest runs native and SDK concurrently, then seven release package
+producers, publication, exact delivered-source/binary certification and final
+verification. Those seven producers fit within 20 slots after qualification has
+finished; certification has a wider fan-out and can queue again. This is the
+source-derived DAG, not a measured complete-release timing result. No global
+five-runner throttle was added. No release was published or certified. The two
+nested Actions-read grants are independently static-checked;
+the exact Latest route proceeds into publication and has no nonpublishing bypass.
+Server validation of that caller and current complete-release elapsed remain
+unmeasured. Certification/source/binary identities, eligibility and publication
+permissions are unchanged. No temporary tracked pending-work lists were added.
+
+Detailed source-bound reports, failed originals, review corrections and restart
+evidence remain in ignored `.agent-work/artifacts/ci-responsiveness-20261022/`.
+
 ## Symbol_Burst — supplemental corrections and qualification, 22 October 2026
 
 The runtime is **`83975bd8054f336a5aaa01205b8f54db6d5b13f9`**. Tested CI source
