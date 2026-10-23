@@ -230,10 +230,8 @@ receiver reconstructs one affine physical-time map across all nonzero samples.
 Moving successive bursts by `0, +5 ms, 0` at `0,40,80 s` leaves at least 2.5 ms
 error against every affine map, despite making every adjustment inside zero
 PCM. The current 6120 Hz waveform guard is about 1.634 microseconds. Ordinary
-10–16 ms timestamp radii cannot certify that invariant. A future implementation
-needs final-FIR zero certificates, forward-only advancement/zero holding, and
-precise provider dates validating each resumed nonzero sample against the
-original calendar. Resetting a finite guard at each hop is not a valid substitute.
+10–16 ms timestamp radii cannot certify that invariant. Resetting a finite
+guard at each hop is not a valid substitute.
 
 The tighter scheduled support bound and runtime keyed payload endpoints remove
 unnecessary reservations. A real valid-pulse contribution that spans a long null

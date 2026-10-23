@@ -7,8 +7,8 @@ qualification of new source or binaries.
 
 ## Robust and receive processing
 
-[Retained receiver data](../validation-data/robust/) supports the unfinished
-[receiver and Sched_Hop work](../future-work.md). The
+[Retained receiver data](../validation-data/robust/) supports the
+[receiver-efficiency prompt](../../FURTHER-agents.txt). The
 [Bookworm baseline](../validation-data/bookworm-offline-20260930/) supports the
 remaining offline-build qualification. Keep specific useful fixtures and
 findings, not whole build histories.

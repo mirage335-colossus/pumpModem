@@ -16,7 +16,7 @@ assumptions and limits before applying their findings.
 | Legacy Modem | [BPSK31, BPSK125 and Olivia reference](legacy-modem.md), [Olivia interoperability fixtures](../tests/fixtures/legacy/README.md), [BPSK fixture provenance](../tests/fixtures/legacy/PSK-fixtures.md) |
 | GUI, terminal, framebuffer and browser | [Interfaces and inspection](indexes/interfaces.md): shared behavior, adapters, plots, Link Planner, browser/worker protocols and QR |
 | Security and compatibility | [Contracts, cryptography and security analysis](indexes/security.md): wire/receiver preservation, key and storage boundaries, receive hardening, LPI models and historical reviews |
-| Unfinished implementation goals | [Future work](future-work.md): offline ARM64 rebuilds, receiver efficiency and practical Sched_Hop. |
+| Future prompts | [Human-maintained prompts](../FURTHER-agents.txt): offline ARM64 rebuilds and receiver efficiency. |
 | Validation and supporting evidence | [Evidence index](indexes/evidence.md): current qualification, relevant studies, captures and release history |
 
 ## Command and interface manuals

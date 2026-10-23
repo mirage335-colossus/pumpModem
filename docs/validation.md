@@ -71,8 +71,7 @@ beyond three seconds, and cancelled APT setup. Passing later results neither era
 those failures nor identify a sole cause. Earlier compact-Live incomplete coverage
 is historical, not a pass and not the result of the current completed cohort.
 Detailed original records remain in the pre-cleanup Git history and retained local
-reports. Sched_Hop's separate sustained-performance objective remains unfinished;
-see [future work](future-work.md).
+reports. Sched_Hop has not demonstrated the separate sustained-performance objective.
 
 ## CI elapsed time and remaining uncertainty
 

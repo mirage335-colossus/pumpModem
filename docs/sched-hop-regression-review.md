@@ -166,7 +166,7 @@ Both backend archive pairs pass inventory, isolated-command, frontend and ABI
 checks. The root GUI executable is rebuilt and passes self-check/help.
 Detailed outcomes are recorded in [validation.md](validation.md).
 The older failures and incomplete experimental qualification remain in the
-[implementation runbook](sched-hop-implementation-runbook.md); matching a prior
+[historical implementation runbook](https://github.com/mirage335-colossus/pumpModem/blob/2ca0fb563fd26673d509f80f3600f885a71584d3/docs/sched-hop-implementation-runbook.md); matching a prior
 failure is not evidence that it predates Sched_Hop. The independently documented
 ALSA clipping failure does predate the reviewed range.
 

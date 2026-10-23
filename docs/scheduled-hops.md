@@ -15,10 +15,6 @@ real-time reception. The [receiver strategies](receiver-strategies.md),
 and [transmit cover](transmit-cover.md) describe the underlying paths and their
 separate evidence.
 
-The [practical processing implementation runbook](sched-hop-implementation-runbook.md)
-specifies the next local development attempt from the calendar30 baseline. It is
-a planning document, not evidence of an implemented optimization or sustained rescue.
-
 ## Controls and timing
 
 Developer mode places **Sched_Hop** in the Link planner footer, with **Dilution**
@@ -29,8 +25,7 @@ mean one active hop per three or five total hops. Each base hop is 0.4 seconds;
 the setting is a nominal total-time multiplier, not additional frequency spread.
 The choices above 1x are dimmed red (muted in monochrome) but remain selectable
 for development. They have not demonstrated a practically useful improvement to
-the receiver CPU ceiling near the decoding limit; the code is retained for
-future development.
+the receiver CPU ceiling near the decoding limit.
 
 The adjacent **Dilution** control offers exactly **0** and **3**. Zero means
 one active hop (`G=1` internally); three means three consecutive active hops
