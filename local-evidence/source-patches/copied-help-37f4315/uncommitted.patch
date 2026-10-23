@@ -1,0 +1,658 @@
+diff --git a/src/gui/gui_smoke.cpp b/src/gui/gui_smoke.cpp
+index 0a44d54..7f28996 100644
+--- a/src/gui/gui_smoke.cpp
++++ b/src/gui/gui_smoke.cpp
+@@ -1,3 +1,5 @@
++#include "../copied_help_candidate_trace.hpp"
++#include "../copied_help_pcm_probe.hpp"
+ #include "gui_smoke.hpp"
+ #include "gui_smoke_replay.hpp"
+ #include "gui_smoke_pending.hpp"
+@@ -5,9 +7,14 @@
+ #include "datapump/runtime.hpp"
+ #include "datapump/received_text.hpp"
+ #include <cmath>
++#include <cstdlib>
++#include <ctime>
+ #include <fstream>
++#include <iomanip>
+ #include <iostream>
++#include <locale>
+ #include <set>
++#include <sstream>
+ #include <tuple>
+ #include <thread>
+ 
+@@ -36,6 +43,66 @@ std::vector<unsigned char> preview_pixels(const plots::PlotSnapshot& source) {
+     source.paint(full_bitmap_request(96,64,false,true),[&](unsigned x,unsigned y,PixelBlock block){pixels.blit(x,y,block);});
+     return pixels.pixels();
+ }
++constexpr std::size_t binary_capture_row_limit=128;
++constexpr std::size_t binary_capture_text_limit=4096;
++constexpr char hex_digits[]="0123456789abcdef";
++double steady_seconds(Clock::time_point value) {
++    return std::chrono::duration<double>(value.time_since_epoch()).count();
++}
++double wall_seconds(std::chrono::system_clock::time_point value) {
++    return std::chrono::duration<double>(value.time_since_epoch()).count();
++}
++double cpu_seconds(std::clock_t value) {
++    return value==static_cast<std::clock_t>(-1)?-1.0:static_cast<double>(value)/CLOCKS_PER_SEC;
++}
++void json_number(std::ostream& out,double value) {
++    if(std::isfinite(value))out<<value;else out<<"null";
++}
++void json_byte_string(std::ostream& out,std::string_view value) {
++    out<<'"';
++    for(const unsigned char byte:value) {
++        if(byte=='"')out<<"\\\"";
++        else if(byte=='\\')out<<"\\\\";
++        else if(byte=='\b')out<<"\\b";
++        else if(byte=='\f')out<<"\\f";
++        else if(byte=='\n')out<<"\\n";
++        else if(byte=='\r')out<<"\\r";
++        else if(byte=='\t')out<<"\\t";
++        else if(byte<0x20||byte>=0x7f)out<<"\\u00"<<hex_digits[byte>>4]<<hex_digits[byte&15];
++        else out<<static_cast<char>(byte);
++    }
++    out<<'"';
++}
++void captured_bytes(std::ostream& out,std::string_view bytes,bool& incomplete) {
++    const auto count=std::min(bytes.size(),binary_capture_text_limit);
++    const auto prefix=bytes.substr(0,count);
++    const bool truncated=count<bytes.size();
++    incomplete=incomplete||truncated;
++    out<<"{\"byte_length\":"<<bytes.size()<<",\"prefix_bytes\":"<<count<<",\"truncated\":"<<std::boolalpha<<truncated<<",\"value_prefix\":";
++    json_byte_string(out,prefix);
++    out<<",\"hex_prefix\":\"";
++    for(const unsigned char byte:prefix)out<<hex_digits[byte>>4]<<hex_digits[byte&15];
++    out<<"\"}";
++}
++void captured_byte_vector(std::ostream& out,std::span<const std::uint8_t> bytes,bool& incomplete) {
++    const auto count=std::min(bytes.size(),binary_capture_text_limit);
++    const bool truncated=count<bytes.size();
++    incomplete=incomplete||truncated;
++    out<<"{\"present\":true,\"byte_length\":"<<bytes.size()<<",\"prefix_bytes\":"<<count<<",\"truncated\":"<<std::boolalpha<<truncated<<",\"hex_prefix\":\"";
++    for(std::size_t index=0;index<count;++index)out<<hex_digits[bytes[index]>>4]<<hex_digits[bytes[index]&15];
++    out<<"\"}";
++}
++const char* recovery_state_name(transfer::RecoveryState state) {
++    using transfer::RecoveryState;
++    switch(state) {
++    case RecoveryState::none:return "none";case RecoveryState::ready:return "ready";
++    case RecoveryState::running:return "running";case RecoveryState::incomplete:return "incomplete";
++    case RecoveryState::recovered:return "recovered";case RecoveryState::exhausted:return "exhausted";
++    case RecoveryState::ambiguous:return "ambiguous";case RecoveryState::cancelled:return "cancelled";
++    case RecoveryState::unavailable:return "unavailable";
++    }
++    return "unknown";
++}
+ }
+ struct Smoke::Impl {
+     enum class Phase {
+@@ -58,6 +125,18 @@ struct Smoke::Impl {
+     Phase phase=Phase::initialize;
+     smoke_detail::SampledWorkProgress work_progress;
+     bool done=false,launched_binary=false,saw_idle_change=false,key_reception=false,owns_directory=false;
++    bool binary_capture_enabled=false,binary_capture_tx_captured=false,binary_capture_rx_captured=false;
++    std::vector<std::uint64_t> binary_capture_pre_tx_ids;
++    std::size_t binary_capture_pre_tx_signal_count=0;
++    std::string binary_capture_pre_tx_record;
++    // Diagnostic-only: Session snapshots are deltas. Retain terminal-delivery
++    // polls in memory so a later empty poll cannot hide an earlier delivery.
++    std::vector<std::string> binary_capture_terminal_polls;
++    std::size_t binary_capture_terminal_bytes=0,binary_capture_polls_scanned=0,
++        binary_capture_signal_checks=0,binary_capture_terminal_polls_seen=0;
++    bool binary_capture_terminal_incomplete=false;
++    static constexpr std::size_t terminal_poll_cap=32,terminal_byte_cap=512*1024,
++        terminal_scan_poll_cap=8192;
+     std::uint64_t polls=0,completed_replay=0,key_samples=0,cancel_samples=0;
+     std::uint64_t noise_revision=0;
+     std::shared_ptr<const Inspection> noise_inspection;
+@@ -71,6 +150,7 @@ struct Smoke::Impl {
+     explicit Impl(std::shared_ptr<smoke_detail::InterruptionClock> clock,std::filesystem::path path,double seconds):
+         directory(std::move(path)),timeout(seconds),replay_clock(std::move(clock)) {
+         require(bool(replay_clock),"Smoke requires its interruption presentation clock");
++        if(const auto* capture=std::getenv("DATAPUMP_SMOKE_BINARY_CAPTURE"))binary_capture_enabled=std::string_view(capture)=="1";
+         if(directory.empty()) {
+             directory=std::filesystem::temp_directory_path()/("datapump-shared-smoke-"+std::to_string(started.time_since_epoch().count()));
+             owns_directory=std::filesystem::create_directory(directory);
+@@ -108,6 +188,282 @@ struct Smoke::Impl {
+         controller.activate(C::transmit);
+         require(!controller.enabled(C::transmit)&&controller.enabled(C::cancel),"Transmission did not immediately claim its single active slot");
+     }
++    std::string binary_capture_record(Controller& controller,std::string_view boundary,bool* limited=nullptr) {
++        const auto collection_start=Clock::now();
++        const auto wall_start=std::chrono::system_clock::now();
++        const auto cpu_start=std::clock();
++        if(boundary=="phase20_before_binary_transmit") {
++            binary_capture_pre_tx_signal_count=controller.signals().lines().size();
++            binary_capture_pre_tx_ids.reserve(std::min(controller.signals().lines().size(),binary_capture_row_limit));
++            for(const auto& line:controller.signals().lines()) {
++                if(binary_capture_pre_tx_ids.size()==binary_capture_row_limit)break;
++                binary_capture_pre_tx_ids.push_back(line.id);
++            }
++        }
++        bool incomplete=false;
++        std::ostringstream data;
++        data.imbue(std::locale::classic());
++        data<<std::setprecision(17)<<"{\"event\":\"gui_smoke_binary_boundary_capture\",\"boundary\":";
++        json_byte_string(data,boundary);
++        data<<",\"cpu_scope\":\"process_std_clock\"";
++        const auto& snapshot=controller.snapshot();
++        const auto& settings=controller.settings();
++        const auto& inspection=controller.inspection();
++        const auto& estimate=controller.estimate();
++        data<<",\"smoke_elapsed_seconds\":"<<std::chrono::duration<double>(collection_start-started).count()
++            <<",\"snapshot_transmission_id\":"<<snapshot.transmission_id
++            <<",\"snapshot_sequence\":"<<snapshot.sequence
++            <<",\"snapshot\":{\"transmitting\":"<<std::boolalpha<<snapshot.transmitting
++            <<",\"simulation_replay\":"<<snapshot.simulation_replay
++            <<",\"transmission_finished\":"<<snapshot.transmission_finished
++            <<",\"simulation_receiving_tail\":"<<snapshot.simulation_receiving_tail
++            <<",\"transmission_failed\":"<<snapshot.transmission_failed
++            <<",\"transmission_cancelled\":"<<snapshot.transmission_cancelled
++            <<",\"error\":";
++        captured_bytes(data,snapshot.error,incomplete);
++        data<<",\"simulation_compute_seconds\":";json_number(data,snapshot.simulation_compute_seconds);
++        data<<",\"samples_received\":"<<snapshot.samples_received<<",\"virtual_seconds\":";json_number(data,snapshot.virtual_seconds);
++        data<<",\"transmission_seconds\":";json_number(data,snapshot.transmission_seconds);
++        data<<",\"transmission_fraction\":";json_number(data,snapshot.transmission_fraction);
++        data<<",\"receiver_health\":{\"input_overruns\":"<<snapshot.receiver_health.input_overruns
++            <<",\"dropped_samples\":"<<snapshot.receiver_health.dropped_samples
++            <<",\"input_interrupted\":"<<snapshot.receiver_health.input_interrupted
++            <<",\"search_limited\":"<<snapshot.receiver_health.search_limited
++            <<",\"receiver_reset\":"<<snapshot.receiver_health.receiver_reset<<"}"
++            <<",\"receiver_instances\":"<<snapshot.receiver_instances<<",\"peak_receiver_instances\":"<<snapshot.peak_receiver_instances
++            <<",\"receiver_admissions\":"<<snapshot.receiver_admissions<<",\"receiver_retirements\":"<<snapshot.receiver_retirements
++            <<",\"receiver_error\":";
++        captured_bytes(data,snapshot.receiver_error,incomplete);
++        const auto& trace=snapshot.transmit_trace;
++        data<<",\"transmit_trace\":{\"active\":"<<trace.active<<",\"raw\":"<<trace.raw
++            <<",\"short_text\":"<<trace.short_text<<",\"source_available\":"<<trace.source_available
++            <<",\"compressed_available\":"<<trace.compressed_available<<",\"generated_bits\":"<<trace.generated_bits
++            <<",\"total_wire_bits\":"<<trace.total_wire_bits<<",\"revision\":"<<trace.revision
++            <<",\"source\":";
++        captured_byte_vector(data,trace.source,incomplete);
++        data<<",\"wire_plain_bits\":";captured_byte_vector(data,trace.wire_plain_bits,incomplete);
++        data<<",\"wire_bits\":";captured_byte_vector(data,trace.wire_bits,incomplete);
++        data<<",\"data_key_bits\":";captured_byte_vector(data,trace.data_key_bits,incomplete);
++        data<<",\"pattern_private\":"<<trace.pattern_private<<",\"pattern_available\":"<<trace.pattern_available
++            <<",\"dsss\":"<<trace.dsss<<",\"outer_dsss_factor\":"<<trace.outer_dsss_factor
++            <<",\"outer_dsss_version\":"<<trace.outer_dsss_version<<",\"outer_dsss_epoch\":"<<trace.outer_dsss_epoch
++            <<",\"outer_dsss_byte_offset\":"<<trace.outer_dsss_byte_offset<<"}}"
++            <<",\"fixture_settings\":{\"simulation\":"<<settings.simulation
++            <<",\"pattern_symbols\":"<<settings.transfer.modem.pattern_symbols
++            <<",\"sample_rate\":"<<settings.transfer.modem.sample_rate
++            <<",\"carrier_hz\":";json_number(data,settings.transfer.modem.carrier_hz);
++        data<<",\"bandwidth_hz\":";json_number(data,settings.transfer.modem.bandwidth_hz);
++        data
++            <<",\"spreading_factor\":"<<settings.transfer.modem.spreading_factor
++            <<",\"pulse_shaping\":"<<settings.transfer.modem.pulse_shaping
++            <<",\"dsss\":"<<settings.transfer.modem.dsss
++            <<",\"fec_selection\":";
++        json_byte_string(data,controller.field(F::fec).selected);
++        data<<",\"compression\":"<<settings.transfer.compression
++            <<",\"clock_sync_present\":"<<settings.transfer.clock_sync.has_value()<<",\"clock_accuracy_seconds\":";
++        if(settings.transfer.clock_sync)json_number(data,settings.transfer.clock_sync->accuracy_seconds);else data<<"null";
++        data<<",\"clock_region_seconds\":";
++        if(settings.transfer.clock_sync)json_number(data,settings.transfer.clock_sync->region_seconds);else data<<"null";
++        data<<",\"clock_offset_seconds\":";
++        if(settings.transfer.clock_sync)json_number(data,settings.transfer.clock_sync->offset_seconds);else data<<"null";
++        data<<",\"raw_binary_inspection_present\":"<<(inspection&&inspection->binary)
++            <<",\"meaningful_bits\":";
++        if(inspection&&inspection->binary)json_byte_string(data,inspection_field(*inspection,"Meaningful bits"));else data<<"null";
++        data<<",\"estimate_present\":"<<estimate.has_value()<<",\"estimate_wire_bits\":";
++        if(estimate)data<<estimate->wire_bits;else data<<"null";
++        data
++            <<",\"key_path_label\":";
++        json_byte_string(data,controller.field(F::key_path).text);
++        data<<",\"synthetic_key_mac\":\"";
++        for(const auto byte:first_key_mac)data<<hex_digits[byte>>4]<<hex_digits[byte&15];
++        data<<"\"},\"pre_tx_signal_count\":"<<binary_capture_pre_tx_signal_count<<",\"pre_tx_signal_ids\":[";
++        const auto pre_count=std::min(binary_capture_pre_tx_ids.size(),binary_capture_row_limit);
++        if(pre_count<binary_capture_pre_tx_ids.size()||binary_capture_pre_tx_signal_count>pre_count)incomplete=true;
++        for(std::size_t index=0;index<pre_count;++index) {
++            if(index)data<<',';
++            data<<binary_capture_pre_tx_ids[index];
++        }
++        data<<"],\"snapshot_signal_scope\":\"current_poll_events\",\"snapshot_signal_count\":"<<snapshot.signals.size()<<",\"snapshot_signals\":[";
++        const auto signal_count=std::min(snapshot.signals.size(),binary_capture_row_limit);
++        if(signal_count<snapshot.signals.size())incomplete=true;
++        for(std::size_t index=0;index<signal_count;++index) {
++            if(index)data<<',';
++            const auto& signal=snapshot.signals[index];
++            data<<"{\"id\":"<<signal.id<<",\"revision\":"<<signal.revision<<",\"sequence\":"<<signal.sequence
++                <<",\"binary\":"<<signal.binary<<",\"complete\":"<<signal.complete<<",\"validated\":"<<signal.validated
++                <<",\"received_bits\":"<<signal.received_bits<<",\"expected_bits\":"<<signal.expected_bits
++                <<",\"missing_symbols\":"<<signal.missing_symbols<<",\"pre_tx_id_match\":"
++                <<(std::find(binary_capture_pre_tx_ids.begin(),binary_capture_pre_tx_ids.end(),signal.id)!=binary_capture_pre_tx_ids.end())
++                <<",\"text\":";
++            captured_bytes(data,signal.text,incomplete);
++            data<<",\"raw_bits\":";captured_bytes(data,signal.raw_bits,incomplete);
++            data<<",\"recovery_state\":";json_byte_string(data,recovery_state_name(signal.recovery_progress.state));
++            data<<",\"recovery_attempts\":"<<signal.recovery_progress.attempts<<",\"recovery_total\":"<<signal.recovery_progress.total
++                <<",\"pattern_score_present\":"<<signal.pattern_score.has_value()
++                <<",\"pattern_score_finite\":"<<(signal.pattern_score&&std::isfinite(*signal.pattern_score))<<",\"pattern_score\":";
++            if(signal.pattern_score)json_number(data,*signal.pattern_score);else data<<"null";
++            data<<",\"superseded_count\":"<<signal.superseded_ids.size()<<",\"superseded_ids\":[";
++            const auto superseded_count=std::min(signal.superseded_ids.size(),binary_capture_row_limit);
++            if(superseded_count<signal.superseded_ids.size())incomplete=true;
++            for(std::size_t retired=0;retired<superseded_count;++retired) {
++                if(retired)data<<',';
++                data<<signal.superseded_ids[retired];
++            }
++            data<<"]}";
++        }
++        data<<"],\"gui_line_scope\":\"retained_cumulative_rows\",\"gui_line_count\":"<<controller.signals().lines().size()<<",\"gui_lines\":[";
++        const auto line_count=std::min(controller.signals().lines().size(),binary_capture_row_limit);
++        if(line_count<controller.signals().lines().size())incomplete=true;
++        for(std::size_t index=0;index<line_count;++index) {
++            if(index)data<<',';
++            const auto& line=controller.signals().lines()[index];
++            const auto display=signal_display_text(line);
++            const auto copy_text=controller.signals().copy_text(index);
++            const auto copy_bytes=controller.signals().copy_bytes(index);
++            const auto copy_bits=controller.signals().copy_bits(index);
++            const auto snapshot_update=std::find_if(snapshot.signals.begin(),snapshot.signals.end(),[&](const auto& value) {
++                return value.id==line.id;
++            });
++            data<<"{\"id\":"<<line.id<<",\"revision\":"<<line.revision<<",\"binary\":"<<line.binary
++                <<",\"complete\":"<<line.complete<<",\"validated\":"<<line.validated
++                <<",\"received_bits\":"<<line.received_bits<<",\"expected_bits\":"<<line.expected_bits
++                <<",\"missing_symbols\":"<<line.missing_symbols
++                <<",\"recovery_state\":";json_byte_string(data,recovery_state_name(line.recovery_progress.state));
++            data<<",\"status\":";json_byte_string(data,signal_status_label(line));
++            data<<",\"matching_snapshot_update_present\":"<<(snapshot_update!=snapshot.signals.end())
++                <<",\"matching_snapshot_sequence\":";
++            if(snapshot_update!=snapshot.signals.end())data<<snapshot_update->sequence;else data<<"null";
++            data
++                <<",\"pre_tx_id_match\":"<<(std::find(binary_capture_pre_tx_ids.begin(),binary_capture_pre_tx_ids.end(),line.id)!=binary_capture_pre_tx_ids.end())
++                <<",\"text\":";
++            captured_bytes(data,line.text,incomplete);
++            data<<",\"raw_bits\":";captured_bytes(data,line.raw_bits,incomplete);
++            data<<",\"raw_presentation_text\":";captured_bytes(data,display,incomplete);
++            data<<",\"copy_text_present\":"<<copy_text.has_value()<<",\"copy_text\":";
++            if(copy_text)captured_bytes(data,*copy_text,incomplete);else data<<"null";
++            data<<",\"copy_bytes_present\":"<<copy_bytes.has_value()<<",\"copy_bytes\":";
++            if(copy_bytes)captured_byte_vector(data,*copy_bytes,incomplete);else data<<"null";
++            data<<",\"copy_bits_present\":"<<copy_bits.has_value()<<",\"copy_bits\":";
++            if(copy_bits)captured_bytes(data,*copy_bits,incomplete);else data<<"null";
++            const auto record=std::find_if(controller.field(F::signals).records.begin(),controller.field(F::signals).records.end(),[&](const auto& value) {
++                return value.id==std::to_string(line.id);
++            });
++            data<<",\"record_present\":"<<(record!=controller.field(F::signals).records.end());
++            if(record!=controller.field(F::signals).records.end()) {
++                data<<",\"record_enabled\":"<<record->enabled<<",\"record_activatable\":"<<record->activatable
++                    <<",\"record_cell_count\":"<<record->cells.size()<<",\"record_cells\":[";
++                const auto cell_count=std::min<std::size_t>(record->cells.size(),32);
++                if(cell_count<record->cells.size())incomplete=true;
++                for(std::size_t cell=0;cell<cell_count;++cell) {
++                    if(cell)data<<',';
++                    captured_bytes(data,record->cells[cell].text,incomplete);
++                }
++                data<<']';
++            }
++            data<<'}';
++        }
++        data<<']';
++        if(boundary=="phase21_after_replay_before_help_evaluation") {
++            data<<",\"terminal_history_scope\":\"complete event polls delivered to Controller during phase21; GUI rows after the same apply_receptions call\""
++                <<",\"terminal_history_polls_scanned\":"<<binary_capture_polls_scanned
++                <<",\"terminal_history_signal_checks\":"<<binary_capture_signal_checks
++                <<",\"terminal_history_polls_seen\":"<<binary_capture_terminal_polls_seen
++                <<",\"terminal_history_records\":"<<binary_capture_terminal_polls.size()
++                <<",\"terminal_history_bytes\":"<<binary_capture_terminal_bytes
++                <<",\"terminal_history_max_records\":"<<terminal_poll_cap
++                <<",\"terminal_history_max_bytes\":"<<terminal_byte_cap
++                <<",\"terminal_history_max_polls\":"<<terminal_scan_poll_cap
++                <<",\"terminal_history_incomplete\":"<<std::boolalpha<<binary_capture_terminal_incomplete
++                <<",\"terminal_history_scan_cpu_measured\":false,\"terminal_history\":[";
++            for(std::size_t i=0;i<binary_capture_terminal_polls.size();++i) {
++                if(i)data<<',';
++                data<<binary_capture_terminal_polls[i];
++            }
++            data<<']';
++        }
++        if(limited)*limited=incomplete;
++        const auto body=data.str();
++        const auto collection_end=Clock::now();
++        const auto wall_end=std::chrono::system_clock::now();
++        const auto cpu_end=std::clock();
++        std::ostringstream record;
++        record.imbue(std::locale::classic());
++        record<<std::setprecision(17)<<body<<",\"capture_incomplete\":"<<std::boolalpha<<incomplete
++            <<",\"collection_start_monotonic_seconds\":"<<steady_seconds(collection_start)
++            <<",\"collection_end_monotonic_seconds\":"<<steady_seconds(collection_end)
++            <<",\"collection_start_wall_seconds\":"<<wall_seconds(wall_start)
++            <<",\"collection_end_wall_seconds\":"<<wall_seconds(wall_end)
++            <<",\"collection_start_cpu_seconds\":"<<cpu_seconds(cpu_start)
++            <<",\"collection_end_cpu_seconds\":"<<cpu_seconds(cpu_end)
++            <<",\"collection_wall_seconds\":"<<std::chrono::duration<double>(collection_end-collection_start).count()
++            <<",\"collection_cpu_seconds\":"<<(cpu_start==static_cast<std::clock_t>(-1)||cpu_end==static_cast<std::clock_t>(-1)?-1.0:cpu_seconds(cpu_end)-cpu_seconds(cpu_start))<<"}\n";
++        return record.str();
++    }
++    void collect_binary_terminal_poll(Controller& controller) {
++        if(!binary_capture_enabled||!binary_capture_tx_captured||binary_capture_rx_captured||
++           phase!=Phase::binary_received||binary_capture_terminal_incomplete)return;
++        try {
++            if(++binary_capture_polls_scanned>terminal_scan_poll_cap) {
++                binary_capture_terminal_incomplete=true;return;
++            }
++            const auto& signals=controller.snapshot().signals;
++            if(signals.size()>binary_capture_row_limit) {binary_capture_terminal_incomplete=true;return;}
++            bool terminal=false;
++            for(const auto& signal:signals) {
++                ++binary_capture_signal_checks;
++                terminal=terminal||signal.complete;
++            }
++            if(!terminal)return;
++            ++binary_capture_terminal_polls_seen;
++            if(binary_capture_terminal_polls.size()>=terminal_poll_cap) {
++                binary_capture_terminal_incomplete=true;return;
++            }
++            bool limited=false;
++            auto record=binary_capture_record(controller,"phase21_terminal_delivery_poll",&limited);
++            if(limited||record.empty()||record.back()!='\n'||record.size()>terminal_byte_cap-binary_capture_terminal_bytes) {
++                binary_capture_terminal_incomplete=true;return;
++            }
++            record.pop_back();
++            binary_capture_terminal_bytes+=record.size();
++            binary_capture_terminal_polls.push_back(std::move(record));
++        } catch(...) {binary_capture_terminal_incomplete=true;}
++    }
++    void emit_binary_capture(Controller& controller) {
++        if(!binary_capture_enabled||binary_capture_rx_captured)return;
++        try {
++            binary_capture_rx_captured=true;
++            const auto rx_record=binary_capture_record(controller,"phase21_after_replay_before_help_evaluation");
++            const auto emit_start=Clock::now();
++            const auto wall_start=std::chrono::system_clock::now();
++            const auto cpu_start=std::clock();
++            std::cerr<<binary_capture_pre_tx_record<<rx_record;
++            std::cerr.flush();
++            const auto emit_end=Clock::now();
++            const auto wall_end=std::chrono::system_clock::now();
++            const auto cpu_end=std::clock();
++            std::ostringstream emission;
++            emission.imbue(std::locale::classic());
++            emission<<std::setprecision(17)<<"{\"event\":\"gui_smoke_binary_boundary_capture_emission\",\"start_monotonic_seconds\":"
++                <<steady_seconds(emit_start)<<",\"end_monotonic_seconds\":"<<steady_seconds(emit_end)
++                <<",\"start_wall_seconds\":"<<wall_seconds(wall_start)<<",\"end_wall_seconds\":"<<wall_seconds(wall_end)
++                <<",\"start_cpu_seconds\":"<<cpu_seconds(cpu_start)<<",\"end_cpu_seconds\":"<<cpu_seconds(cpu_end)
++                <<",\"wall_seconds\":"<<std::chrono::duration<double>(emit_end-emit_start).count()
++                <<",\"cpu_seconds\":"<<(cpu_start==static_cast<std::clock_t>(-1)||cpu_end==static_cast<std::clock_t>(-1)?-1.0:cpu_seconds(cpu_end)-cpu_seconds(cpu_start))<<"}\n";
++            std::cerr<<emission.str();
++            std::cerr.flush();
++        } catch(...) {
++            // Optional evidence collection must never replace smoke assertions.
++        }
++    }
++    void collect_binary_capture_before_tx(Controller& controller) {
++        if(!binary_capture_enabled||binary_capture_tx_captured)return;
++        try {
++            binary_capture_tx_captured=true;
++            binary_capture_pre_tx_record=binary_capture_record(controller,"phase20_before_binary_transmit");
++        } catch(...) {
++            binary_capture_pre_tx_record.clear();
++        }
++    }
+     ui::ServiceRequest copy(Controller& controller,std::string_view expected) {
+         require(controller.enabled(C::copy_signal),"Completed signal did not enable its clipboard action");
+         controller.activate(C::copy_signal);const auto request=take(controller,ui::ServiceKind::clipboard);
+@@ -248,6 +604,7 @@ struct Smoke::Impl {
+             snapshot.simulation,snapshot.transmitting,snapshot.transmitting_noise,snapshot.simulation_replay,
+             snapshot.simulation_receiving_tail,snapshot.transmission_finished,!snapshot.error.empty()};
+         work_progress.observe(work,Clock::now());
++        collect_binary_terminal_poll(controller);
+         inspect_replay(controller,bitmaps);inspect_streams(controller);inspect_records(controller);
+         if(!snapshot.waveform.empty()) {
+             if(!idle_waveform.empty()&&idle_waveform!=snapshot.waveform)saw_idle_change=true;
+@@ -443,6 +800,8 @@ struct Smoke::Impl {
+         case Phase::binary_attachment:
+             if(!controller.field(F::message_label).text.starts_with("Attached:")||!controller.estimate())break;
+             require(!controller.field(F::binary).enabled,"Attachment left its inactive binary draft editable");
++            ::datapump::diagnostic::copied_help_candidate::arm();
++            ::datapump::diagnostic::copied_help_pcm::arm();
+             controller.activate(C::use_text);controller.toggle(F::repeatable,false);
+             controller.edit(F::binary,"001x");
+             require(!controller.enabled(C::transmit)&&!controller.estimate()&&controller.field(F::message).text=="help",
+@@ -461,10 +820,12 @@ struct Smoke::Impl {
+                     controller.field(F::callsign).enabled&&controller.field(F::grid).enabled&&
+                     controller.field(F::fec).selected=="rs20"&&controller.field(F::fec).display_text=="Off (raw bits)",
+                     "Synchronized editors changed stream settings or disabled the other editor");
++            collect_binary_capture_before_tx(controller);
+             transmit(controller);phase=Phase::binary_received;break;
+         }
+         case Phase::binary_received:
+             if(snapshot.transmitting||snapshot.simulation_replay||completed_replay!=snapshot.transmission_id)break;
++            emit_binary_capture(controller);
+             require(controller.inbox().items().empty()&&verified_ids.size()==2,"Raw binary reception acquired a stream identity");
+             { bool recovered=false;for(std::size_t i=0;i<controller.signals().lines().size();++i)
+                 recovered=recovered||(controller.signals().copy_text(i)=="Help"&&controller.signals().copy_bytes(i)==Bytes({'H','e','l','p'})&&!controller.signals().copy_bits(i));
+diff --git a/src/live.cpp b/src/live.cpp
+index 3e8d2dd..22e0350 100644
+--- a/src/live.cpp
++++ b/src/live.cpp
+@@ -31,6 +31,7 @@
+ #include "live_pattern_scores.hpp"
+ #include "live_receptions.hpp"
+ #include "live_replay_staging.hpp"
++#include "copied_help_candidate_trace.hpp" // private diagnostic overlay
+ #include "live_scheduling.hpp"
+ #include "live_simulation_clock.hpp"
+ #include "live_deferred_input.hpp"
+@@ -43,6 +44,7 @@
+ #include "scheduled_exact_source_points.hpp"
+ #include <charconv>
+ #include "audio_trace.hpp"
++#include "copied_help_pcm_probe.hpp"
+ #include <algorithm>
+ #include <atomic>
+ #include <chrono>
+@@ -66,6 +68,7 @@
+ 
+ namespace datapump::live {
+ namespace rx_cpu = ::datapump::detail::cpu_profile;
++namespace copied_help_trace_ns = datapump::diagnostic::copied_help_candidate;
+ namespace {
+ using Clock = std::chrono::steady_clock;
+ #if !defined(DATAPUMP_LIVE_MUTEX_PROBE) || defined(DATAPUMP_EXECUTION_FIBERS)
+@@ -780,6 +783,7 @@ struct Session::Impl {
+     ~Impl() {
+         halt(); source.request_stop(); capture_worker.request_stop(); encoder.request_stop(); decoder.request_stop(); recovery_worker.request_stop(); changed.notify_all();
+         source.join(); capture_worker.join(); encoder.join(); decoder.join(); recovery_worker.join();
++        diagnostic::copied_help_pcm::session_closed(this);
+         if(rx_cpu::global().mode!=rx_cpu::Mode::disabled)audio::trace::record("receiver_component_cpu",[&](auto& f) {rx_cpu::write_fields(f,rx_cpu::global().snapshot());});
+     }
+     double current_epoch() const {
+@@ -1933,6 +1937,7 @@ struct Session::Impl {
+                         note_oscillator_coverage(bank,*declared_search);
+                     std::size_t minimum_reclaim=std::numeric_limits<std::size_t>::max();
+                     std::size_t failed_native_loan_grant=0;
++                    std::size_t copied_help_actual_grant=0;
+                     const auto construct=[&] {
+                         minimum_reclaim=std::numeric_limits<std::size_t>::max();
+                         failed_native_loan_grant=0;
+@@ -1945,6 +1950,7 @@ struct Session::Impl {
+                         const auto ordinary_grant=grant();
+                         auto loan_grant=ordinary_grant;
+                         const auto factory=[&](std::size_t actual_grant) {
++                            copied_help_actual_grant=actual_grant;
+                             return std::make_unique<modem::StreamingReceiver>(config,actual_grant,search);
+                         };
+                         try {
+@@ -1990,6 +1996,9 @@ struct Session::Impl {
+                         // factory. Required state and the single retry are unchanged.
+                         receiver.modem=construct();
+                     }
++                    if(value.simulation)diagnostic::copied_help_pcm::constructed(this,bank.source_quota.get(),diagnostic::copied_help_pcm::source_generation(this),bank.revision,bank.samples,
++                        receiver.point_consumer,receiver.epoch,receiver.family,receiver.sample_origin,copied_help_actual_grant,
++                        receiver.key_tag,config,search);
+                 } catch(const Error& error) {
+                     unavailable(error.what());continue;
+                 }
+@@ -2001,6 +2010,7 @@ struct Session::Impl {
+                 if (bank.working_bytes > bank_capacity(value))
+                     throw Error("key and epoch receiver bank exceeds the configured DSP workspace");
+                 staged.commit();
++                if(value.simulation)diagnostic::copied_help_pcm::admitted(this,bank.source_quota.get(),diagnostic::copied_help_pcm::source_generation(this),bank.revision,bank.samples,receiver.point_consumer);
+                 ++bank.admissions;
+                 audio::trace::record("receiver_bank_admitted",[&](auto& f) {
+                     f.add("revision",bank.revision);f.add("epoch",epoch);f.add("family",family);
+@@ -2440,6 +2450,8 @@ struct Session::Impl {
+                                         std::stop_token stop, std::span<const float> samples, Feed feed,
+                                         Prepared* simulation_wave = nullptr,bool allow_admission=true,
+                                         bool account_frontier=true,std::optional<std::uint64_t> coordinate_count={}) {
++        auto copied_help_feed=value.simulation?diagnostic::copied_help_pcm::feed(this,bank.source_quota.get(),version,bank.revision,bank.samples,
++            samples,bank.mixer,bank.receivers(),allow_admission,account_frontier,coordinate_count):diagnostic::copied_help_pcm::Feed{};
+         DATAPUMP_MUTEX_CONTEXT(mutex_context,feed_bank);
+         rx_cpu::Context cpu_context(rx_cpu::Stage::control_residual);
+         // Admit the receiver's current clock epoch before consuming this PCM
+@@ -3040,11 +3052,74 @@ struct Session::Impl {
+                                 receiver.last_confident_at=observation_epoch(bank,value,receiver.sample_origin+burst.end_sample);
+                             }
+                             auto presentation=receiver.presentations.find(physical_id);
+-                            if(presentation==receiver.presentations.end())continue;
++                            if(presentation==receiver.presentations.end()) {
++                                if(copied_help_trace_ns::active())copied_help_trace_ns::state().missing_presentations.fetch_add(1,std::memory_order_relaxed);
++                                continue;
++                            }
+                             auto& display=presentation->second;
+                             const auto candidate=reception_candidate(receiver,burst,display);
++                            copied_help_trace_ns::Record copied_help_trace{};
++                            const bool copied_help_capture=copied_help_trace_ns::active();
++                            if(copied_help_capture) {
++                                copied_help_trace.ordinal=copied_help_trace_ns::state().candidate_seen();
++                                copied_help_trace.generation=version;copied_help_trace.input_revision=bank.revision;
++                                copied_help_trace.bank_identity=reinterpret_cast<std::uintptr_t>(bank.source_quota.get());
++                                copied_help_trace.receiver_identity=receiver.point_consumer;
++                                std::uint64_t copied_key_hash=1469598103934665603ULL;
++                                const auto copied_mix=[&](std::uint64_t value) {
++                                    for(unsigned i=0;i<8;++i){copied_key_hash^=(value>>(i*8))&0xffU;copied_key_hash*=1099511628211ULL;}
++                                };
++                                for(const auto byte:receiver.key_tag){copied_key_hash^=byte;copied_key_hash*=1099511628211ULL;}
++                                const auto& copied_config=receiver.options.modem;
++                                copied_mix(std::bit_cast<std::uint64_t>(copied_config.carrier_hz));
++                                copied_mix(std::bit_cast<std::uint64_t>(copied_config.bandwidth_hz));
++                                copied_mix(copied_config.spreading_factor);copied_mix(static_cast<std::uint64_t>(copied_config.spreading_mode));
++                                copied_mix(copied_config.pulse_shaping);copied_mix(copied_config.scramble);copied_mix(copied_config.dsss);
++                                copied_mix(copied_config.symbol_burst.wait_symbols);copied_mix(copied_config.symbol_burst.random_limit);
++                                copied_mix(static_cast<std::uint64_t>(receiver.options.fec));copied_mix(receiver.options.compression);
++                                for(const auto byte:copied_config.spreading_seed){copied_key_hash^=byte;copied_key_hash*=1099511628211ULL;}
++                                for(const auto byte:copied_config.dsss_seed){copied_key_hash^=byte;copied_key_hash*=1099511628211ULL;}
++                                const std::uint64_t copied_flags=(receiver.options.key?1ULL:0ULL)|
++                                    (copied_config.symbol_burst.enabled()?2ULL:0ULL)|
++                                    (static_cast<std::uint64_t>(copied_config.dsss_factor)<<8)|
++                                    (static_cast<std::uint64_t>(copied_config.outer_dsss_version)<<32);
++                                copied_help_trace.config_identity=copied_help_trace_ns::config_identity(receiver.epoch,receiver.family,
++                                    receiver.sample_origin,candidate.symbol_samples,copied_config.sample_rate,
++                                    copied_config.stream_phase_samples,copied_flags,copied_key_hash);
++                                copied_help_trace.epoch=receiver.epoch;copied_help_trace.family=receiver.family;
++                                copied_help_trace.sample_origin=receiver.sample_origin;
++                                copied_help_trace.candidate_id=candidate.id;copied_help_trace.prior_signal_id=candidate.signal_id;
++                                copied_help_trace.physical_first=candidate.first;copied_help_trace.physical_end=candidate.end;
++                                copied_help_trace.symbol_samples=candidate.symbol_samples;
++                                copied_help_trace.first_stream_symbol=burst.first_stream_symbol;
++                                copied_help_trace.stream_phase_samples=burst.stream_phase_samples;
++                                copied_help_trace.score=score;copied_help_trace.support_samples=burst.support_samples;
++                                copied_help_trace.chunk_first_symbol=burst.first_stream_symbol;
++                                copied_help_trace.chunk_count=burst.bits.size()+burst.missing_slots;
++                                copied_help_trace.chunk_prefix_count=std::min<std::size_t>(burst.bits.size(),copied_help_trace_ns::chunk_capacity);
++                                for(std::size_t i=0;i<copied_help_trace.chunk_prefix_count;++i) {
++                                    const auto bit=burst.bits[i];
++                                    copied_help_trace.chunk_bits[i]=bit==0?'0':bit==1?'1':'?';
++                                    if(bit>1)++copied_help_trace.chunk_unknown_count;
++                                }
++                                copied_help_trace.chunk_unknown_count+=burst.missing_slots;
++                                if(copied_help_trace.chunk_count>copied_help_trace_ns::chunk_capacity)
++                                    copied_help_trace_ns::state().capped_records.fetch_add(1,std::memory_order_relaxed);
++                            }
+                             auto result=transfer::detail::push_live_pending(
+                                 *receiver.content,std::move(burst),receiver.modem->diagnostics());
++                            if(copied_help_capture) {
++                                copied_help_trace.observed_bits=result.observed_bits;
++                                copied_help_trace.missing_symbols=result.missing_symbols;
++                                copied_help_trace.complete=result.stream_complete;
++                                copied_help_trace.content_validated=result.content_validated;
++                                copied_help_trace.short_text_decoded=result.short_text_decoded;
++                                copied_help_trace.raw_count=std::min<std::size_t>(result.raw_bits.size(),copied_help_trace_ns::raw_prefix_capacity);
++                                for(std::size_t i=0;i<copied_help_trace.raw_count;++i)
++                                    copied_help_trace.raw_prefix[i]=result.raw_bits[i]?'1':'0';
++                                if(result.raw_bits.size()>copied_help_trace_ns::raw_prefix_capacity)
++                                    copied_help_trace_ns::state().capped_records.fetch_add(1,std::memory_order_relaxed);
++                            }
+                             update_workspace();
+                             if(bank.working_bytes>capacity)throw Error("receive content diagnostics exceed the configured DSP workspace");
+                             std::string bits;bits.reserve(result.raw_bits.size());
+@@ -3052,8 +3127,20 @@ struct Session::Impl {
+                             DATAPUMP_MUTEX_CONTEXT(mutex_context,phase1);
+                             std::lock_guard lock(mutex);
+                             if(!current.running || generation!=version || bank.revision!=receive_revision || stop.stop_requested())return;
++                            if(copied_help_capture)copied_help_trace.captured_samples=current.samples_received;
+                             const auto complete=result.stream_complete;
+                             const auto decision=bank.receptions.observe(candidate,[&]{return next_signal++;});
++                            if(copied_help_capture) {
++                                copied_help_trace.decision_selected=decision.selected;
++                                copied_help_trace.decision_limited=decision.limited;
++                                copied_help_trace.signal_id=decision.signal_id;
++                                copied_help_trace.winner_revision=decision.revision;
++                                copied_help_trace.superseded_count=std::min<std::size_t>(decision.superseded_ids.size(),copied_help_trace.superseded.size());
++                                for(std::size_t i=0;i<copied_help_trace.superseded_count;++i)
++                                    copied_help_trace.superseded[i]=decision.superseded_ids[i];
++                                if(decision.superseded_ids.size()>copied_help_trace.superseded.size())
++                                    copied_help_trace_ns::state().capped_records.fetch_add(1,std::memory_order_relaxed);
++                            }
+                             bank.limited|=decision.limited;
+                             if(decision.limited && !decision.selected)bank.coverage_limited=true;
+                             display.signal_id=decision.signal_id;
+@@ -3102,7 +3189,10 @@ struct Session::Impl {
+                                 });
+                                 std::optional<transfer::Received> staged_result;
+                                 if(simulation_wave && (recovery || report_content))staged_result=std::move(result);
+-                                if(add_signal(std::move(event),simulation_wave,std::move(staged_result),simulation_wave && revised)) {
++                                if(copied_help_capture)copied_help_trace.add_signal_called=true;
++                                const bool copied_help_add_accepted=add_signal(std::move(event),simulation_wave,std::move(staged_result),simulation_wave && revised);
++                                if(copied_help_capture)copied_help_trace.add_signal_accepted=copied_help_add_accepted;
++                                if(copied_help_add_accepted) {
+                                     if(revised)display.published_revision=decision.revision;
+                                     if(report_content) {
+                                         if(!simulation_wave) {
+@@ -3113,6 +3203,7 @@ struct Session::Impl {
+                                     }
+                                 }
+                             }
++                            if(copied_help_capture)copied_help_trace_ns::state().append(copied_help_trace);
+                             if(complete) {
+                                 receiver.presentations.erase(presentation);bank.reception_history_dirty=true;
+                             }
+@@ -3407,6 +3498,7 @@ struct Session::Impl {
+             if(stop.stop_requested())return;
+         }
+         bank.samples+=sample_count;
++        copied_help_feed.commit(bank.samples);
+         if(simulation_media_clock(value))
+             detail::simulation_checkpoint(detail::SimulationPhase::after_commit,0,bank.samples,bank.revision);
+         // Receiver histories are updated even while another receiver wins the
+@@ -3753,6 +3845,7 @@ struct Session::Impl {
+         const auto rotation=std::polar(1.,-2*std::numbers::pi*value.transfer.modem.carrier_hz/value.transfer.modem.sample_rate);
+         for(std::size_t offset=0;offset<samples.size();) {
+             const auto count=std::min(projected.size(),samples.size()-offset);
++            if(value.simulation)diagnostic::copied_help_pcm::projection(this,bank.source_quota.get(),version,bank.revision,bank.samples,count,bank.mixer);
+             for(std::size_t i=0;i<count;++i) {
+                 projected[i]=static_cast<double>(samples[offset+i])*bank.mixer;bank.mixer*=rotation;
+             }
+@@ -3894,10 +3987,13 @@ struct Session::Impl {
+             };
+             const std::unique_ptr<Impl,decltype(release_activity)> activity(this,release_activity);
+             const bool media_clock=simulation_media_clock(value);
++            if(value.simulation)diagnostic::copied_help_pcm::source_generation(this,version);
+             bool preparing_media_transmitter=false;
+             std::optional<detail::SimulationInputTransaction> simulation_input;
+             const auto begin_simulation_input=[&] {
+                 if(!media_clock)return;
++                diagnostic::copied_help_pcm::context(this,simulation_bank->source_quota.get(),version,simulation_bank->revision,
++                    simulation_channel->received_samples(),simulation_bank->samples,simulation_origin,value,wave?wave->serial:0);
+                 simulation_input=detail::SimulationInputTransaction{simulation_channel->received_samples(),
+                     simulation_bank->samples,simulation_bank->revision};
+                 detail::simulation_checkpoint(detail::SimulationPhase::before_read,simulation_input->source,

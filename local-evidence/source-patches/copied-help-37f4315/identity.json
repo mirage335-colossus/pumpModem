@@ -1,0 +1,10 @@
+{
+  "base": "37f4315c553b9fc3807f2f173d9a0fae3f239ebc",
+  "origin": "/home/user/___quick/p/_cur/dataPump/pumpModem/.agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/framed-first-transition-4e90487/copied-help-integration-root/source-base",
+  "patch_sha256": "27fd61cac393ed2ba2219d86ea05e8de00ec82d0b7781f2d708dba811c3333c0",
+  "untracked_sha256": {
+    "src/copied_help_candidate_trace.hpp": "e28a976fe96315b00e275aa5b3e60ad867950d88d64db7c88d65cd30a9a46aa0",
+    "src/copied_help_pcm_probe.hpp": "a203ad34c845f3c0a750e6b7598ab5fb79c2b69dcb458f52843e5303a24d188e"
+  },
+  "status": "unaccepted historical diagnostic WIP; preserved before deleting stale worktree"
+}
