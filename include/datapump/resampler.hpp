@@ -27,6 +27,10 @@ public:
     // source coordinate AFTER interpolation. It never changes sample timing.
     // Applied only by the final stage; no callback for capture unless requested.
     void set_output_gain(std::function<double(long double)> gain);
+    // Optional final hardware-rate composition after the output safety gain.
+    // Receives payload PCM, continuous logical source seconds, and output rate.
+    // Set before processing; multistage conversion invokes only at its output.
+    void set_output_transform(std::function<float(float,long double,std::uint32_t)> transform);
     long double source_seconds() const noexcept;
     double rate_correction() const noexcept;
     // Original affine reference and actual generated-frame extrema. The map is
@@ -50,6 +54,7 @@ private:
     std::uint64_t first_=0, received_=0, source_=0, produced_=0;
     std::uint32_t remainder_=0;
     std::function<double(long double)> output_gain_;
+    std::function<float(float,long double,std::uint32_t)> output_transform_;
     bool ending_=false;
     bool adjustable_=false, started_=false;
     double fraction_=0, correction_=0, target_correction_=0, correction_step_=0;

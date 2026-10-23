@@ -32,21 +32,32 @@ struct SampledSimulationChannel::Impl {
     std::uint64_t received=0,origin=0,total=0,buffer_start=0;
     std::size_t buffer_count=0;
     StreamingTransmitter* source=nullptr;
-    bool complete=false;
+    bool complete=false,helper_only=false;
     Complex oscillator{},step{},burst_rotation{};
     double diffusion=0,sigma=0;
     std::mt19937_64 startup_random,phase_random,noise_random;
     std::normal_distribution<double> phase_normal{0,1},noise_normal{0,1};
     std::array<Complex,1024> buffer{};
     std::array<std::array<double,taps>,phases+1> coefficients{};
-    Impl(Config value,ChannelConfig impairment):config(value),channel(impairment),
+    std::optional<helper::Generator> helper_generator;
+    helper::Options helper_options;
+    std::optional<helper::Plan> helper_plan;
+    long double helper_origin=0;
+    Impl(Config value,ChannelConfig impairment,helper::Options helper_value,double helper_bandwidth):config(value),channel(impairment),
         startup_random(impairment.seed^0x8ebc6af09c88c6e3ULL),
-        phase_random(impairment.seed^0xa0761d6478bd642fULL),noise_random(impairment.seed) {
-        static_assert(sizeof(Impl)+sizeof(SampledSimulationChannel)<=SampledSimulationChannel::workspace_bound);
+        phase_random(impairment.seed^0xa0761d6478bd642fULL),noise_random(impairment.seed),helper_options(std::move(helper_value)) {
+        static_assert(sizeof(Impl)+sizeof(SampledSimulationChannel)+
+            SampledSimulationChannel::auxiliary_workspace_bound<=SampledSimulationChannel::workspace_bound);
         validate(config);validate_channel(config,channel);
         rate=1+static_cast<long double>(channel.clock_error_ppm)*1e-6L;
         diffusion=channel.phase_noise_degrees_per_sqrt_second*std::numbers::pi/180/std::sqrt(config.sample_rate);
         sigma=std::sqrt(nominal_signal_power*std::pow(10.,-channel.snr_db/10));
+        if(helper_options.power_w>0) {
+            const auto plan=helper::plan(helper_options,config.carrier_hz,
+                helper_bandwidth>0?helper_bandwidth:waveform_bandwidth_hz(config)+waveform_gate_bandwidth_allowance_hz(config),config.sample_rate);
+            helper_plan=plan;
+            sigma*=plan.data_gain;
+        }
         oscillator=phase_rotation(tau*(uniform()-.5L));
         step=phase_rotation(tau*channel.frequency_offset_hz/config.sample_rate);
         // Interpolated polyphase Blackman-windowed sinc coefficients avoid
@@ -102,11 +113,18 @@ struct SampledSimulationChannel::Impl {
         return value;
     }
 };
-SampledSimulationChannel::SampledSimulationChannel(Config config,ChannelConfig channel):impl_(std::make_unique<Impl>(config,channel)){}
+SampledSimulationChannel::SampledSimulationChannel(Config config,ChannelConfig channel,helper::Options helper,double helper_bandwidth):impl_(std::make_unique<Impl>(config,channel,std::move(helper),helper_bandwidth)){}
 SampledSimulationChannel::~SampledSimulationChannel()=default;
 SampledSimulationChannel::SampledSimulationChannel(SampledSimulationChannel&&)noexcept=default;
 SampledSimulationChannel& SampledSimulationChannel::operator=(SampledSimulationChannel&&)noexcept=default;
-void SampledSimulationChannel::begin_burst(){impl_->begin();}
+void SampledSimulationChannel::begin_burst(bool helper_only){
+    if(helper_only&&!impl_->helper_plan)throw Error("Helper-only sampled output requires an enabled helper");
+    impl_->helper_only=helper_only;impl_->begin();
+}
+void SampledSimulationChannel::set_helper_callsign(std::string callsign) {
+    auto options=impl_->helper_options;options.callsign=std::move(callsign);helper::validate(options);
+    impl_->helper_options=std::move(options);
+}
 std::uint64_t SampledSimulationChannel::received_samples()const{return impl_->received;}
 std::uint64_t SampledSimulationChannel::transmitted_samples()const {
     const auto& s=*impl_;
@@ -126,6 +144,11 @@ std::size_t SampledSimulationChannel::read(StreamingTransmitter& source,std::spa
     if(!s.source) {
         if(source.samples_emitted())throw Error("sampled simulation requires a fresh transmitter for each burst");
         s.source=&source;s.total=source.total_samples();
+        if(s.helper_plan) {
+            const auto origin=source.physical_output_origin();
+            s.helper_origin=static_cast<long double>(origin%s.config.sample_rate)/s.config.sample_rate;
+            s.helper_generator.emplace(s.helper_options,*s.helper_plan,origin/s.config.sample_rate,false);
+        }
         const auto duration=std::ceil(s.startup+static_cast<long double>(s.total)/s.rate);
         if(duration>=static_cast<long double>(std::numeric_limits<std::uint64_t>::max()-s.origin))
             throw Error("sampled simulation duration exceeds the receiver counter");
@@ -143,7 +166,12 @@ std::size_t SampledSimulationChannel::read(StreamingTransmitter& source,std::spa
         if((written&4095U)==0 && stop.stop_requested())throw Error("modem operation cancelled");
         const auto position=(static_cast<long double>(s.received-s.origin)-s.startup)*s.rate;
         if(position>=s.total){s.complete=true;break;}
-        const auto value=position<0?Complex{}:s.interpolate(source,position,stop)*s.oscillator*s.burst_rotation;
+        auto value=position<0?Complex{}:s.interpolate(source,position,stop);
+        if(position>=0 && s.helper_generator) {
+            value=s.helper_generator->mix_analytic(s.helper_only?Complex{}:value,s.helper_origin+position/s.config.sample_rate,s.config.sample_rate,
+                s.helper_origin+static_cast<long double>(s.total)/s.config.sample_rate,s.helper_origin);
+        }
+        if(position>=0)value=value*s.oscillator*s.burst_rotation;
         output[written++]=static_cast<float>(value.real()+s.noise());s.advance();
         if(written==1)live::detail::simulation_checkpoint(live::detail::SimulationPhase::read_progress,s.received);
     }

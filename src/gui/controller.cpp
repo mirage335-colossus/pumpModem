@@ -135,6 +135,27 @@ double power_dbm(std::string value) {
     if(amount<=0)throw Error("Transmit power must be positive in watts");
     return 10*(std::log10(amount)+std::log10(milliwatts));
 }
+double helper_power_w(std::string value) {
+    value=compact_units(std::move(value));
+    if(value=="0"||value=="0W")return 0;
+    if(!value.ends_with("W")&&!value.ends_with("dBm"))value+="W";
+    const auto watts=std::pow(10.,(power_dbm(value)-30)/10);
+    if(!std::isfinite(watts)||watts<=0)throw Error("Helper power must be finite nonnegative watts");
+    return watts;
+}
+void validate_helper_callsign(std::string_view value) {
+    if(value.size()>19||std::any_of(value.begin(),value.end(),[](unsigned char ch){return ch<32||ch>126;}))
+        throw Error("Helper carrier callsign must contain at most 19 printable ASCII characters");
+}
+helper::Frequency helper_frequency(std::string_view value) {
+    if(value=="high")return helper::Frequency::high;
+    if(value=="low")return helper::Frequency::low;
+    if(value=="0")return helper::Frequency::cochannel;
+    throw Error("Helper frequency must be high, low, or 0");
+}
+std::string helper_frequency_id(helper::Frequency value) {
+    return value==helper::Frequency::high?"high":value==helper::Frequency::low?"low":"0";
+}
 double level(std::string value,std::string_view suffix,const char* name) {
     value=compact_units(std::move(value));
     if(value.ends_with(suffix))value.resize(value.size()-suffix.size());
@@ -221,7 +242,7 @@ struct Controller::Impl {
     PlotUpdate plot_update;
     bool started=false,closing=false,preparing=false,key_loading=false,key_failed=false,file_loading=false;
     std::vector<audio::Device> audio_devices;
-    bool need_devices=true,settings_valid=true,transmit_requested=false,noise_requested=false,was_encrypted=false;
+    bool need_devices=true,settings_valid=true,transmit_requested=false,noise_requested=false,helper_requested=false,was_encrypted=false;
     bool attachment_image=false,target_supported=true;
     bool shellcode_mode=false,composer_received=false,previous_received=false;
     BinaryEditor composer;
@@ -342,6 +363,15 @@ struct Controller::Impl {
         for(const auto* value:{"-174 dBm/Hz","-170 dBm/Hz","-164 dBm/Hz","-150 dBm/Hz","-130 dBm/Hz"})
             f(UiField::link_noise).options.push_back({value,value});
         sync_link_fields();
+        f(UiField::helper_power).options={{"0","0 (disabled)"}};
+        for(const auto* value:{"1.5 kW","100 W","40 W","4 W","1 W","100 mW","2 mW","1 mW","30 µW","1 µW"})
+            f(UiField::helper_power).options.push_back({value,value});
+        f(UiField::helper_power).selected="0";
+        for(const auto* value:{"10","20","40","60","80","90"})
+            f(UiField::helper_ratio_limit).options.push_back({value,std::string(value)+" dB"});
+        f(UiField::helper_ratio_limit).selected="90";
+        f(UiField::helper_frequency).options={{"high","High"},{"low","Low"},{"0","0 Hz (discouraged)",true,ui::TextTone::discouraged}};
+        f(UiField::helper_frequency).selected="high";
         for(const auto field:{UiField::clock_accuracy,UiField::clock_region,UiField::clock_offset,UiField::audio_error}) {
             f(field).text="Default";f(field).options={{"Default","Default"}};
         }
@@ -545,6 +575,7 @@ struct Controller::Impl {
         // The channel fixes source amplitude and varies noise to model SNR.
         // Undo that normalization for the waterfall, using the default received
         // power (-117 dBm) as a fixed display reference. Never scale RX samples.
+        value.helper.data_power_w=std::pow(10.,(input.tx_dbm-30)/10);
         value.simulation_spectrum_gain_db=input.tx_dbm-input.path_loss_db+117;
         // ChannelConfig's sampled-noise model accepts only this finite range.
         // Retain the exact budget above for the planner's power and margin.
@@ -573,7 +604,7 @@ struct Controller::Impl {
         invalid_link_inputs[link_input_index(field)]=false;
         sync_link_fields(editing);update_link_channel(settings);dirty();
         // A hypothetical power edit must not discard a live pending symbol.
-        if(started&&settings_valid&&settings.simulation)session.configure(settings);
+        if(started&&settings_valid&&(settings.simulation||settings.helper.power_w>0))session.configure(settings);
     }
     void edit_link_budget(UiField field,const std::string& text,bool editing=false) {
         if(editing)f(field).text=text;
@@ -904,6 +935,13 @@ struct Controller::Impl {
                     validate_link_value(field,field==UiField::link_power?next_planner.tx_dbm:
                         field==UiField::link_loss?next_planner.path_loss_db:next_planner.noise_density_dbm_hz);
             }
+            next.helper.power_w=load&&load->helper_power_w?*load->helper_power_w:helper_power_w(f(UiField::helper_power).selected);
+            next.helper.ratio_limit_db=load&&load->helper_ratio_limit_db?*load->helper_ratio_limit_db:
+                number(f(UiField::helper_ratio_limit).selected,"Helper ratio limit");
+            next.helper.frequency=helper_frequency(load&&load->helper_frequency?*load->helper_frequency:f(UiField::helper_frequency).selected);
+            next.helper.callsign=load&&load->helper_callsign?*load->helper_callsign:f(UiField::helper_callsign).text;
+            next.helper.data_power_w=std::pow(10.,(next_planner.tx_dbm-30)/10);
+            validate_helper_callsign(next.helper.callsign);
             next.transfer.timestamp=0;
             next.transfer.automatic_receive_profiles=true;
             next.transfer.receive_pattern_mode=mode;
@@ -1122,6 +1160,16 @@ struct Controller::Impl {
                 f(UiField::dsp_workspace).selected="ram-"+std::to_string(workspace_percent);
                 f(UiField::simulation).selected=next.simulation?"yes":"no";
                 f(UiField::live_duplex).checked=next.full_duplex;
+                auto& helper_power=f(UiField::helper_power);
+                const auto loaded_power=next.helper.power_w==0?std::string("0"):planner_number(next.helper.power_w)+" W";
+                auto power_choice=std::find_if(helper_power.options.begin(),helper_power.options.end(),[&](const auto& option){
+                    const auto watts=helper_power_w(option.id);
+                    return std::abs(watts-next.helper.power_w)<=std::max(watts,next.helper.power_w)*1e-12;});
+                if(power_choice==helper_power.options.end()){helper_power.options.push_back({loaded_power,loaded_power});helper_power.selected=loaded_power;}
+                else helper_power.selected=power_choice->id;
+                f(UiField::helper_ratio_limit).selected=planner_number(next.helper.ratio_limit_db);
+                f(UiField::helper_frequency).selected=helper_frequency_id(next.helper.frequency);
+                f(UiField::helper_callsign).text=next.helper.callsign;
                 f(UiField::pattern).selected=pattern;
                 clock_fields(next.transfer.clock_sync);
                 f(UiField::audio_error).text=!next.transfer.clock_sync &&
@@ -1268,6 +1316,10 @@ struct Controller::Impl {
     void sync_launch_command(bool force=false) {
         if(!settings_valid||!link_inputs_valid()||!planner_target_valid)return;
         launch_command::Patch values;
+        values.helper_power_w=settings.helper.power_w;
+        values.helper_ratio_limit_db=settings.helper.ratio_limit_db;
+        values.helper_frequency=helper_frequency_id(settings.helper.frequency);
+        values.helper_callsign=settings.helper.callsign;
         values.tx_dbm=planner_inputs.tx_dbm;values.path_loss_db=planner_inputs.path_loss_db;
         values.noise_dbm_hz=planner_inputs.noise_density_dbm_hz;
         values.oscillator=f(UiField::simulation_oscillator).selected;
@@ -1314,6 +1366,13 @@ struct Controller::Impl {
             generated_launch_command=std::move(command);
             f(UiField::planner_command).text=generated_launch_command;
         }
+    }
+    void helper_callsign_changed(std::string text) {
+        validate_helper_callsign(text);
+        f(UiField::helper_callsign).text=text;
+        settings.helper.callsign=text;
+        if(started)session.set_helper_callsign(std::move(text));
+        dirty();sync_launch_command();
     }
     void message_label() {
         if(!attachment) f(UiField::message_label).text=composer.raw_bits()?
@@ -1551,6 +1610,7 @@ struct Controller::Impl {
         case Command::transmit: return transmit_ready()&&key_lock_seconds()<=0&&separation_seconds()<=0;
         case Command::force_transmit: return transmit_ready()&&(key_lock_seconds()>0||separation_seconds()>0);
         case Command::transmit_noise: return !busy && !key_loading && settings_valid && transmit_hop_ready();
+        case Command::transmit_helper: return settings.helper.power_w>0&&!busy&&!key_loading&&settings_valid&&transmit_hop_ready();
         case Command::cancel: return busy||snapshot.simulation_replay;
         case Command::open_keyfile: case Command::generate_keyfile: return !busy&&!key_loading;
         case Command::show_key_folder: return !busy&&!key_loading&&!key_path.empty();
@@ -1606,6 +1666,14 @@ struct Controller::Impl {
         sync_launch_command();
         for(auto id:{UiField::clock_accuracy,UiField::clock_region,UiField::clock_offset,UiField::audio_error,UiField::dsss_factor,UiField::dsss_version,UiField::search_arithmetic,UiField::receiver_strategy,UiField::receiver_cpu_budget,UiField::fhss,UiField::sched_hop,UiField::sched_frequency_search,UiField::sched_hop_dilution,UiField::fhss_list,UiField::simulation,UiField::simulation_oscillator,UiField::rf_oscillator,UiField::rf_shift,UiField::doppler,UiField::search_margin,
             UiField::link_power,UiField::link_loss,UiField::link_noise,UiField::key,UiField::device,UiField::mono,UiField::live_duplex,UiField::volume,UiField::exclusive,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
+        f(UiField::helper_power).enabled=!busy;
+        const bool helper_enabled=f(UiField::helper_power).selected!="0";
+        for(const auto id:{UiField::helper_ratio_limit,UiField::helper_frequency,UiField::helper_callsign})f(id).enabled=!busy&&helper_enabled;
+        f(UiField::helper_power).display_text.clear();
+        if(helper_enabled&&settings_valid) {
+            const auto limit=settings.helper.data_power_w*std::pow(10.,settings.helper.ratio_limit_db/10);
+            if(limit<settings.helper.power_w)f(UiField::helper_power).display_text=power_text(10*std::log10(limit)+30)+" effective (ratio limit)";
+        }
         f(UiField::dsss_factor).enabled=!busy&&encrypted()&&selected_key();
         f(UiField::dsss_version).enabled=!busy&&encrypted()&&selected_key();
         f(UiField::fhss).enabled=!busy&&encrypted()&&selected_key();
@@ -2005,7 +2073,7 @@ struct Controller::Impl {
             f(UiField::transmit_scope).records=transmit_scope_records(next.transmit_trace,f(UiField::transmit_scope_format).selected=="bits");
         const auto scope_status=next.simulation_replay?"replay":next.transmission_cancelled?"cancelled":
             !next.error.empty()?"interrupted":next.transmitting?"generating":"complete";
-        f(UiField::transmit_scope_caption).text=next.transmitting_noise?
+        f(UiField::transmit_scope_caption).text=helper_requested?"Helper carrier only / no Robust data or tuning noise":next.transmitting_noise?
             "Tuning noise / ordinary encrypted modulation / temporary keys are not saved":
             transmit_scope_caption(next.transmit_trace,scope_status);
         const auto changed=plot_policy.observe(next.sequence,next.transmission_id,next.simulation_replay,next.replay_frame_index);
@@ -2018,11 +2086,12 @@ struct Controller::Impl {
         }
         if(transmit_requested&&!next.transmitting&&next.transmission_finished) {
             if(!noise_requested)gate.finished();
-            transmit_requested=false; noise_requested=false;
+            transmit_requested=false; noise_requested=false;helper_requested=false;
         }
         const auto mode=next.simulation?"Simulation / continuous receive":"Listening / "+settings.device;
         const auto audio_percent=std::to_string(static_cast<int>(std::clamp(next.transmission_fraction,0.0,1.0)*100));
-        const auto tx_mode=next.transmitting_noise?
+        const auto tx_mode=helper_requested?
+            std::string(next.simulation?"Simulating helper / ":"Transmitting helper / ")+seconds_text(next.transmission_seconds)+" elapsed":next.transmitting_noise?
             std::string(next.simulation?"Simulating noise / ":"Transmitting noise / ")+seconds_text(next.transmission_seconds)+" elapsed":
             next.simulation?(next.simulation_receiving_tail?std::string("Checking reception after transmission"):
                 "Simulating / audio "+audio_percent+"%")+" / "+elapsed_text(next.simulation_compute_seconds)+" elapsed":
@@ -2066,6 +2135,7 @@ struct Controller::Impl {
                 diagnostics<<" | UTC capture timestamps bounded; full search: peer TX timing is not qualified";
         }
         if(!next.simulation&&next.audio_passband_hz>0&&settings.transfer.modem.carrier_hz+modem::waveform_bandwidth_hz(settings.transfer.modem)/2>next.audio_passband_hz) diagnostics<<" | Nominal envelope exceeds audio passband; reduce Rate or Carrier - Shift, or choose a wider device";
+        if(!next.helper_status.empty())diagnostics<<" | "<<next.helper_status;
         if(!target_supported) diagnostics<<" | "<<tuning_explanation;
         fake_display(next);
         f(UiField::diagnostics).text=diagnostics.str(); snapshot=std::move(next);
@@ -2203,6 +2273,13 @@ struct Controller::Impl {
             if(sent) { previous_received=composer_received; previous_message=std::move(sent); previous_repeatable_prefix=has_repeatable_prefix()?repeatable_prefix:std::string{}; seed_composer(); }
             notice(settings.simulation?"Calculating the simulated transmission...":"Transmitting audio..."); break;
         }
+        case Command::transmit_helper:
+            transmit_requested=true;noise_requested=true;helper_requested=true;
+            try {session.transmit_helper(fake_plan(transmit_config()));}
+            catch(...) {transmit_requested=false;noise_requested=false;helper_requested=false;throw;}
+            if(!settings.simulation)cancel_advisory();
+            notice(settings.simulation?"Simulating helper carrier only. Cancel TX to finish.":
+                "Transmitting helper carrier only. Cancel TX to finish.");break;
         case Command::transmit_noise:
             transmit_requested=true; noise_requested=true;
             try { session.transmit_noise(fake_plan(transmit_config()),!short_draft()); }
@@ -2428,6 +2505,9 @@ void Controller::edit(UiField field,std::string text) {
             catch(...) {p.clock_fields(previous);p.f(UiField::audio_error).text=previous_audio;p.configure();throw;}
             p.controls();return;
         }
+        if(field==UiField::helper_callsign) {
+            p.helper_callsign_changed(std::move(text));p.controls();return;
+        }
         const bool untouched=!p.composer.raw_bits()&&p.draft_error.empty()&&p.f(UiField::message).text==p.seeded_message;
         p.f(field).text=std::move(text);
         if(field==UiField::short_bits)p.short_bits_changed();
@@ -2440,7 +2520,13 @@ void Controller::edit(UiField field,std::string text) {
         else if(field==UiField::snr||field==UiField::long_snr) p.configure(true,false,field);
         else if(field==UiField::bandwidth) p.configure(false,true);
         else if(field==UiField::device||field==UiField::carrier||field==UiField::rf_shift||field==UiField::doppler||field==UiField::search_margin||field==UiField::receiver_cpu_budget) p.configure();
-        else if(field==UiField::callsign||field==UiField::grid) { if(untouched&&!p.attachment&&!p.file_loading)p.seed_composer(); }
+        else if(field==UiField::callsign||field==UiField::grid) {
+            if(field==UiField::callsign) {
+                try {p.helper_callsign_changed(p.f(field).text);}
+                catch(const Error&) {p.notice("Developer Callsign was retained; Helper Callsign requires at most 19 printable ASCII characters.",10);}
+            }
+            if(untouched&&!p.attachment&&!p.file_loading)p.seed_composer();
+        }
         else p.dirty();
     } catch(const std::exception& e) {
         p.notice(e.what(),10);
@@ -2515,7 +2601,7 @@ void Controller::select(UiField field,std::string id) {
             p.f(UiField::bandwidth).text=exact_frequency_text(3600./factor);
             p.reset_carrier(3600,frequency(p.f(UiField::rf_shift).text,"Shift"));p.configure();
         }
-        else if(field==UiField::simulation||field==UiField::simulation_oscillator||field==UiField::rf_oscillator||
+        else if(field==UiField::helper_power||field==UiField::helper_ratio_limit||field==UiField::helper_frequency||field==UiField::simulation||field==UiField::simulation_oscillator||field==UiField::rf_oscillator||
             field==UiField::fec||field==UiField::dsp_workspace||field==UiField::fhss||field==UiField::sched_hop||
             field==UiField::symbol_burst||field==UiField::symbol_burst_random||
             field==UiField::sched_frequency_search||field==UiField::sched_hop_dilution||field==UiField::dsss_version||field==UiField::search_arithmetic||field==UiField::receiver_strategy) p.configure();
@@ -2560,6 +2646,7 @@ const ui::FieldState& Controller::field(UiField field) const { return impl_->f(f
 bool Controller::enabled(Command command) const { return impl_->enabled(command); }
 std::string Controller::command_label(Command command) const {
     if(command==Command::cancel && impl_->snapshot.transmission_stopping)return "Abort now";
+    if(command==Command::cancel&&impl_->helper_requested)return "Stop helper";
     if(command==Command::cancel)return impl_->noise_requested||impl_->snapshot.transmitting_noise?
         "Stop noise":impl_->snapshot.simulation_replay?"Stop replay":"Cancel TX";
     if((command==Command::transmit||command==Command::transmit_short_bits)&&

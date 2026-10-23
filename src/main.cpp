@@ -17,6 +17,7 @@
 #include "datapump/tuning.hpp"
 #include "datapump/sched_hop.hpp"
 #include "datapump/live.hpp"
+#include "datapump/resampler.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "transmit_timing.hpp"
 #include <algorithm>
@@ -112,6 +113,13 @@ Modem:
   --symbol-burst-random N  0, 1, 2, 3 additional whole-symbol waits; effective zero without encryption
   --clock-sync SPEC     default or GPS_1ms-400ms_region-2564ms_offset
   --audio-error TIME    Per-station audio lag 0..+TIME; default or duration (70ms)
+  --helper-power WATTS  Independent helper carrier power; default0 (disabled)
+                        Numeric watts or W/kW/mW/uW, e.g. 1.5kW; tx/rx/status/listen
+  --helper-data-power WATTS  Robust power for helper amplitude calibration; default4W
+  --helper-ratio-limit DB  10, 20, 40, 60, 80, 90 (default); caps helper power
+  --helper-frequency high|low|0  Automatic placement; default high; 0 overlaps data
+  --helper-callsign TEXT  Up to19 printable ASCII characters; defaults to --callsign
+  --helper-only         listen: transmit the helper without Robust data/noise
   --fec 20|60|off        Reed-Solomon parity overhead, default60
   --no-compression      Diagnostic override; both peers must select the same source codec
   --memory-mb N         Legacy batch PCM workspace budget, default256 MiB
@@ -187,12 +195,13 @@ class Args {
 public:
     std::string command;
     Args(int argc,char** argv) {
-        const std::set<std::string> booleans={"json","repeatable","no-compression","no-mono","right-mono","scramble","dsss","progress","help","version"};
+        const std::set<std::string> booleans={"json","repeatable","no-compression","no-mono","right-mono","scramble","dsss","progress","help","version","helper-only"};
         const std::set<std::string> valued={"text","input","output","save","kind","filename","callsign","grid",
             "bw","sample-rate","carrier","doppler","spreading","dsss-factor","dsss-version","dsss-mode","search-arithmetic","receiver-strategy","receiver-cpu-budget","sched-hop","sched-hop-dilution","sched-frequency-search","symbol-burst","symbol-burst-random","clock-sync","audio-error","fec","memory-mb","keyfile","pad","time","search-seconds",
             "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format",
             "target-snr","receive-targets","pattern","simulation","oscillator","rf-oscillator","shift","rf-shift","rf-carrier","search-margin","reference","sideband","lf-reference","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise","receiver-time",
             "recovery-seconds","recovery-threads","recovery-bits","recovery-errors",
+            "helper-power","helper-data-power","helper-ratio-limit","helper-frequency","helper-callsign",
             "tx-dbm","attenuation-db","noise-figure-db","symbol-seconds","coherent-seconds",
             "trials","hypotheses","false-alarm","residual-frequency-hz","template-correlation"};
         for(int i=1;i<argc;++i) {
@@ -275,6 +284,53 @@ public:
         if(command=="tx" && has("output") && has("device")) throw Error("choose one TX destination: --output or --device");
     }
 };
+double helper_power(const Args& a,const std::string& name,double fallback) {
+    if(!a.has(name))return fallback;
+    auto value=a.get(name);
+    std::erase_if(value,[](unsigned char ch){return std::isspace(ch)!=0;});
+    double multiplier=1;
+    if(value.ends_with("kW")){value.resize(value.size()-2);multiplier=1000;}
+    else if(value.ends_with("mW")){value.resize(value.size()-2);multiplier=.001;}
+    else if(value.ends_with("uW")){value.resize(value.size()-2);multiplier=.000001;}
+    else if(value.ends_with("µW")||value.ends_with("μW")){value.resize(value.size()-3);multiplier=.000001;}
+    else if(value.ends_with("W"))value.pop_back();
+    std::size_t end=0;double watts=0;
+    try {watts=std::stod(value,&end)*multiplier;}catch(...) {throw Error("invalid watts for --"+name);}
+    if(end!=value.size()||!std::isfinite(watts)||watts<0)
+        throw Error("--"+name+" requires finite nonnegative watts");
+    return watts;
+}
+helper::Options helper_options(const Args& a) {
+    helper::Options result;
+    result.power_w=helper_power(a,"helper-power",0);
+    result.data_power_w=helper_power(a,"helper-data-power",4);
+    if(a.has("helper-ratio-limit")) {
+        auto value=a.get("helper-ratio-limit");
+        std::erase_if(value,[](unsigned char ch){return std::isspace(ch)!=0;});
+        if(value.ends_with("dB"))value.resize(value.size()-2);
+        std::size_t end=0;
+        try {result.ratio_limit_db=std::stod(value,&end);}catch(...) {throw Error("invalid helper ratio limit");}
+        if(end!=value.size())throw Error("invalid helper ratio limit");
+    }
+    if(result.ratio_limit_db!=10&&result.ratio_limit_db!=20&&result.ratio_limit_db!=40&&
+       result.ratio_limit_db!=60&&result.ratio_limit_db!=80&&result.ratio_limit_db!=90)
+        throw Error("--helper-ratio-limit must be 10, 20, 40, 60, 80, or 90 dB");
+    const auto frequency=a.get("helper-frequency","high");
+    if(frequency=="high")result.frequency=helper::Frequency::high;
+    else if(frequency=="low")result.frequency=helper::Frequency::low;
+    else if(frequency=="0")result.frequency=helper::Frequency::cochannel;
+    else throw Error("--helper-frequency must be high, low, or 0");
+    result.callsign=a.get("helper-callsign",result.power_w>0?a.get("callsign"):"");
+    if(result.callsign.size()>19||std::any_of(result.callsign.begin(),result.callsign.end(),
+        [](unsigned char ch){return ch<32||ch>126;}))
+        throw Error("helper carrier callsign must contain at most 19 printable ASCII characters");
+    helper::validate(result);
+    if(a.has("helper-only") && (a.command!="listen" || result.power_w<=0 || a.has("text") || a.has("input")))
+        throw Error("--helper-only requires listen, positive --helper-power, and no message input");
+    if(result.power_w>0 && a.command!="tx" && a.command!="status-tx" && a.command!="listen" && a.command!="rx" && a.command!="status-rx")
+        throw Error("enabled helper carrier is supported only by tx, status-tx, listen, rx and status-rx; use --helper-power 0 to disable it");
+    return result;
+}
 tuning::OscillatorPreset oscillator_config(const Args& a) {
     auto result=tuning::parse_oscillator_preset(a.get("oscillator","crystal"));
     result.clock_error_ppm=a.number("clock-error-ppm",result.clock_error_ppm);
@@ -418,11 +474,27 @@ audio::StreamFormatCallback audio_passband_guard(const modem::Config& config) {
                         " Hz). Choose a narrower band, a wider audio device, or simulation.");
     };
 }
+long double helper_source_origin(const modem::Config& c,std::uint64_t timestamp,
+                                const modem::StreamingTransmitter* source=nullptr) {
+    if(c.symbol_burst.enabled() || (c.scheduled_hopping&&c.scheduled_hopping->enabled()&&!c.scheduled_hopping->continuous())) {
+        if(!source)throw Error("helper carrier requires the prepared physical transmit origin");
+        return static_cast<long double>(source->physical_output_origin())/c.sample_rate-timestamp;
+    }
+    return (static_cast<long double>(c.stream_phase_samples)-modem::training_sample_count(c)-
+        modem::pattern_pulse_padding_samples(c))/c.sample_rate;
+}
 template<class Factory>
-void play_transmission(const Args& a, transfer::Options& options, Factory make) {
+void play_transmission(const Args& a, transfer::Options& options,const helper::Options& helper_settings, Factory make) {
     std::unique_ptr<modem::StreamingTransmitter> source;
     bool protected_stop=false;
     audio::Options output;
+    std::optional<helper::Generator> helper_generator;
+    if(helper_settings.power_w>0)output.playback_output_transform=[&](float payload,long double seconds,std::uint32_t rate) {
+        if(!helper_generator||!source)throw Error("helper carrier output was not prepared");
+        const auto origin=helper_source_origin(options.modem,options.timestamp,source.get());
+        return helper_generator->mix(payload,origin+seconds,rate,
+            origin+static_cast<long double>(source->total_samples())/options.modem.sample_rate,origin);
+    };
     const auto clock_policy=transfer::effective_clock_sync(options);
     output.maximum_utc_error_seconds=clock_sync::audio_lag_radius(options.audio_timing_error_seconds);
     output.presentation_lag_seconds=clock_sync::audio_lag_radius(options.audio_timing_error_seconds);
@@ -482,11 +554,19 @@ void play_transmission(const Args& a, transfer::Options& options, Factory make) 
         return source->read(chunk);
     },{},[&](const auto& format) {
         audio_passband_guard(options.modem)(format);
-        if(a.has("time"))return;
-        const auto clock=[] {return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();};
-        auto scheduled=detail::schedule_transfer_transmission(options,make,clock,{},0,audio::minimum_lead_seconds());
-        source=std::move(scheduled.transmitter);
-        audio::schedule_output(scheduled.playback_epoch);
+        std::optional<helper::Plan> helper_plan;
+        if(helper_settings.power_w>0) {
+            helper_plan=helper::plan(helper_settings,options.modem.carrier_hz,
+                modem::waveform_bandwidth_hz(options.modem)+modem::waveform_gate_bandwidth_allowance_hz(options.modem),
+                format.hardware_rate,options.modem.sample_rate+250.);
+        }
+        if(!a.has("time")) {
+            const auto clock=[] {return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();};
+            auto scheduled=detail::schedule_transfer_transmission(options,make,clock,{},0,audio::minimum_lead_seconds());
+            source=std::move(scheduled.transmitter);
+            audio::schedule_output(scheduled.playback_epoch);
+        }
+        if(helper_plan)helper_generator.emplace(helper_settings,*helper_plan,options.timestamp,false);
     },a.has("no-mono")?audio::ChannelMode::stereo:a.has("right-mono")?audio::ChannelMode::right_mono:audio::ChannelMode::left_mono,output);
     if(protected_stop)throw Error("transmission truncated by UTC timing protection; cover and device drain completed");
 }
@@ -577,28 +657,83 @@ void output_bytes(const Args& a,const Bytes& data) {
         std::cout.write(reinterpret_cast<const char*>(data.data()),static_cast<std::streamsize>(data.size()));if(!std::cout)throw Error("stdout write failed");
     }
 }
+void preselect_helper_wav(modem::Wav& wav,const modem::Config& config,const helper::Options& options) {
+    (void)helper::plan(options,config.carrier_hz,
+        modem::waveform_bandwidth_hz(config)+modem::waveform_gate_bandwidth_allowance_hz(config),
+        wav.sample_rate,config.sample_rate+250.);
+    audio::Resampler converter(wav.sample_rate,config.sample_rate);
+    std::vector<float> selected;
+    const auto count=(static_cast<std::uint64_t>(wav.samples.size())*config.sample_rate+wav.sample_rate-1)/wav.sample_rate;
+    if(count>config.memory_limit/sizeof(float))throw Error("helper receive conversion exceeds waveform memory limit");
+    selected.reserve(static_cast<std::size_t>(count));
+    std::array<float,4096> output{};
+    std::size_t offset=0;
+    while(!converter.finished()) {
+        const auto available=std::min<std::size_t>(4096,wav.samples.size()-offset);
+        const auto result=converter.process(std::span(wav.samples).subspan(offset,available),output,
+            offset+available==wav.samples.size());
+        if(!result.consumed&&!result.produced&&!converter.finished())throw Error("helper receive resampler stalled");
+        offset+=result.consumed;
+        selected.insert(selected.end(),output.begin(),output.begin()+static_cast<std::ptrdiff_t>(result.produced));
+    }
+    wav.samples=std::move(selected);wav.sample_rate=config.sample_rate;
+}
 double hardware_delay(const Args& a,const modem::Config& c) {
     const auto requested=a.number("tx-delay",6);
     if(!std::isfinite(requested) || requested<6 || requested>3600)
         throw Error("tx-delay must be 6..3600 seconds");
     return std::max(requested,static_cast<double>(modem::pattern_absence_capture_samples(c))/c.sample_rate+1.);
 }
-void output_wave(const Args& a,std::vector<float> samples,const modem::Config& c,bool add_tail=true) {
+void output_wave(const Args& a,std::vector<float> samples,const modem::Config& c,bool add_tail=true,
+                 const helper::Options& helper_settings={},std::uint64_t helper_epoch=0,
+                 long double helper_origin=0) {
+    auto output_rate=c.sample_rate;
+    if(helper_settings.power_w>0) {
+        const auto physical_rate=std::max<std::uint64_t>(48000,4ULL*c.sample_rate);
+        if(physical_rate>120000000)throw Error("helper WAV requires a separate supported physical sample rate");
+        output_rate=static_cast<std::uint32_t>(physical_rate);
+        const auto plan=helper::plan(helper_settings,c.carrier_hz,
+            modem::waveform_bandwidth_hz(c)+modem::waveform_gate_bandwidth_allowance_hz(c),output_rate,c.sample_rate+250.);
+        const helper::Generator generator(helper_settings,plan,helper_epoch);
+        const auto helper_end=helper_origin+static_cast<long double>(samples.size())/c.sample_rate;
+        const auto count=(static_cast<std::uint64_t>(samples.size())*output_rate+c.sample_rate-1)/c.sample_rate;
+        if(count>c.memory_limit/sizeof(float))throw Error("helper WAV exceeds the configured waveform memory limit");
+        audio::Resampler converter(c.sample_rate,output_rate);
+        converter.set_output_transform([&](float payload,long double seconds,std::uint32_t rate) {
+            return generator.mix(payload,helper_origin+seconds,rate,helper_end,helper_origin);
+        });
+        std::vector<float> mixed; mixed.reserve(static_cast<std::size_t>(count));
+        std::array<float,4096> block{};
+        std::size_t offset=0;
+        while(!converter.finished()) {
+            const auto available=std::min<std::size_t>(4096,samples.size()-offset);
+            const auto progress=converter.process(std::span(samples).subspan(offset,available),block,
+                offset+available==samples.size());
+            if(!progress.consumed&&!progress.produced&&!converter.finished())throw Error("helper WAV resampler stalled");
+            offset+=progress.consumed;
+            mixed.insert(mixed.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(progress.produced));
+        }
+        samples=std::move(mixed);
+    }
     // A generated capture includes actual quiet samples for the receiver's
     // sole end rule. Reading a truncated external WAV never invents this tail.
-    const auto tail=add_tail?modem::pattern_absence_capture_samples(c)+c.sample_rate:0;
+    // The helper is mixed above, so this separation contains actual silence.
+    const auto logical_tail=add_tail?modem::pattern_absence_capture_samples(c)+c.sample_rate:0;
+    if(logical_tail>c.memory_limit/sizeof(float))throw Error("WAV including receive separation exceeds memory limit");
+    const auto tail=output_rate==c.sample_rate?logical_tail:
+        (logical_tail*output_rate+c.sample_rate-1)/c.sample_rate;
     if(tail>c.memory_limit/sizeof(float) || samples.size()>c.memory_limit/sizeof(float)-tail)
         throw Error("WAV including receive separation exceeds memory limit");
     samples.resize(samples.size()+tail,0);
 
     if(a.has("output")) {
         std::ostringstream wav(std::ios::out|std::ios::binary);
-        modem::write_wav(wav,samples,c.sample_rate);auto bytes=wav.str();
+        modem::write_wav(wav,samples,output_rate);auto bytes=wav.str();
         write_new_file(a.get("output"),std::span(reinterpret_cast<const std::uint8_t*>(bytes.data()),bytes.size()));
     }
     if(a.has("device")) {
         const auto delay=hardware_delay(a,c);
-        audio::play(samples,c.sample_rate,a.get("device"),{},audio_passband_guard(c),a.has("no-mono")?audio::ChannelMode::stereo:a.has("right-mono")?audio::ChannelMode::right_mono:audio::ChannelMode::left_mono);
+        audio::play(samples,output_rate,a.get("device"),{},audio_passband_guard(c),a.has("no-mono")?audio::ChannelMode::stereo:a.has("right-mono")?audio::ChannelMode::right_mono:audio::ChannelMode::left_mono);
         std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
     }
 }
@@ -954,8 +1089,9 @@ void analyze_link(const Args& a,transfer::Options options) {
 }
 volatile std::sig_atomic_t interrupted=0;
 void interrupt_handler(int) {interrupted=1;}
-void listen(const Args& a,const transfer::Options& options) {
+void listen(const Args& a,const transfer::Options& options,const helper::Options& helper_settings) {
     live::Settings settings;
+    settings.helper=helper_settings;
     settings.transfer=options;
     settings.content_limit=content_budget(a);
     settings.dsp_workspace_bytes=dsp_budget(a);
@@ -987,6 +1123,7 @@ void listen(const Args& a,const transfer::Options& options) {
     live::Session session;
     session.start(settings);
     if(outgoing) session.transmit(*outgoing);
+    if(a.has("helper-only"))session.transmit_helper();
     interrupted=0;
     const auto previous=std::signal(SIGINT,interrupt_handler);
     struct RestoreSignal {decltype(previous) handler;~RestoreSignal(){std::signal(SIGINT,handler);}} restore{previous};
@@ -1007,14 +1144,20 @@ void listen(const Args& a,const transfer::Options& options) {
                 <<",\"dsp_buffered_bytes\":"<<snapshot.dsp_buffered_bytes
                 <<",\"simulation\":"<<(snapshot.simulation?"true":"false")
                 <<",\"transmitting\":"<<(snapshot.transmitting?"true":"false")<<"}\n";
-            for(const auto& signal:snapshot.signals) if(!signal.binary && !signal.validated && !signal.complete) {
+            for(const auto& signal:snapshot.signals) if(!signal.helper_carrier && !signal.binary && !signal.validated && !signal.complete) {
                 std::cout<<"{\"event\":\"preview\",\"validated\":false,\"frequency_hz\":"<<signal.frequency_hz
                     <<",\"data_text\":\""<<json_escape(received_text(signal.text))<<'"';
                 report_signal_identity(signal);std::cout<<"}\n";
             }
         }
         if(a.has("json"))for(const auto& signal:snapshot.signals) {
-            if(signal.binary) {
+            if(signal.helper_carrier) {
+                std::cout<<"{\"event\":\"helper_carrier\",\"type\":\"helper\",\"content_validated\":false,\"authenticated\":false";
+                report_signal_identity(signal);
+                std::cout<<",\"complete\":"<<(signal.complete?"true":"false")
+                    <<",\"frequency_hz\":"<<signal.frequency_hz<<",\"snr_db\":"<<signal.snr_db
+                    <<",\"state\":\""<<(signal.complete?"received":"pending")<<"\"}\n";
+            } else if(signal.binary) {
                 std::cout<<"{\"event\":\"raw_bits\",\"content_validated\":false,\"authenticated\":false";
                 report_signal_identity(signal);
                 std::cout<<",\"complete\":"<<(signal.complete?"true":"false")<<",\"raw_bits\":\"";
@@ -1034,6 +1177,11 @@ void listen(const Args& a,const transfer::Options& options) {
             }
         }
         else for(const auto& signal:snapshot.signals) {
+            if(signal.helper_carrier) {
+                std::cout<<"Helper carrier "<<(signal.complete?"received":"pending")
+                    <<" at "<<signal.frequency_hz<<" Hz ("<<signal.snr_db<<" dB)\n";
+                continue;
+            }
             const auto state=signal.recovery_progress.state;
             if(state!=transfer::RecoveryState::none && state!=transfer::RecoveryState::running &&
                !(state==transfer::RecoveryState::recovered && signal.validated)) {
@@ -1066,6 +1214,7 @@ int main(int argc,char** argv) {
         Args a(argc,argv);
         if(a.has("version")) {std::cout<<"Data Pump "<<DATAPUMP_VERSION<<'\n';return 0;}
         if(a.has("help") || a.command.empty()) {std::cout<<usage;return 0;}
+        const auto helper_settings=helper_options(a);
         a.validate_options();
         if(a.command=="qr") {
             auto content=message(a).data;
@@ -1155,24 +1304,27 @@ int main(int argc,char** argv) {
             std::cout<<"}\n";
             return 0;
         }
-        if(a.command=="listen") {listen(a,settings);return 0;}
+        if(a.command=="listen") {listen(a,settings,helper_settings);return 0;}
         if(a.command=="status-tx" || a.command=="status-rx") {
             const auto plain=status_bits(a,{},timestamp);
             if(a.command=="status-tx") {
                 if(!a.has("output") && !a.has("device"))throw Error("status-tx requires --output or --device");
                 if(a.has("output")) {
                     auto source=transfer::binary_transmitter(plain,settings);
+                    const auto origin=helper_settings.power_w>0?helper_source_origin(c,settings.timestamp,source.get()):0;
                     if(source->total_samples()>c.memory_limit/sizeof(float))throw Error("status WAV exceeds the configured waveform memory limit");
                     std::vector<float> samples(static_cast<std::size_t>(source->total_samples()));
                     for(std::size_t offset=0;offset<samples.size();)offset+=source->read(std::span(samples).subspan(offset,std::min<std::size_t>(4096,samples.size()-offset)));
-                    output_wave(a,samples,c);
+                    output_wave(a,std::move(samples),c,true,helper_settings,settings.timestamp,origin);
                 } else {
                     const auto delay=hardware_delay(a,c);
-                    play_transmission(a,settings,[&](const auto& options){return transfer::binary_transmitter(plain,options);});
+                    play_transmission(a,settings,helper_settings,[&](const auto& options){return transfer::binary_transmitter(plain,options);});
                     std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
                 }
             } else {
-                auto wav=input_wav(a);settings.modem.sample_rate=wav.sample_rate;modem::validate(settings.modem);
+                auto wav=input_wav(a);
+                if(helper_settings.power_w>0)preselect_helper_wav(wav,settings.modem,helper_settings);
+                settings.modem.sample_rate=wav.sample_rate;modem::validate(settings.modem);
                 const auto result=transfer::receive(wav.samples,settings,progress);
                 std::cout<<"{\"authenticated\":false,\"content_validated\":false,\"known_bits\":\""<<a.get("bits")<<"\",\"raw_bits\":\"";
                 for(auto bit:result.raw_bits)std::cout<<(bit?'1':'0');
@@ -1196,7 +1348,11 @@ int main(int argc,char** argv) {
                     }
                 });
             }
-            else {auto wav=input_wav(a);c.sample_rate=wav.sample_rate;modem::validate(c);samples=std::move(wav.samples);}
+            else {
+                auto wav=input_wav(a);
+                if(helper_settings.power_w>0)preselect_helper_wav(wav,c,helper_settings);
+                c.sample_rate=wav.sample_rate;modem::validate(c);samples=std::move(wav.samples);
+            }
             settings.modem=c;
             auto result=transfer::receive(samples,settings,progress);report_received(a,result);return 0;
         }
@@ -1207,8 +1363,17 @@ int main(int argc,char** argv) {
             const auto estimate=transfer::estimate(outgoing,settings);
             if(a.has("device")) {
                 const auto delay=hardware_delay(a,c);
-                play_transmission(a,settings,[&](const auto& options){return transfer::message_transmitter(outgoing,options);});
+                play_transmission(a,settings,helper_settings,[&](const auto& options){return transfer::message_transmitter(outgoing,options);});
                 std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
+            } else if(helper_settings.power_w>0) {
+                auto source=transfer::message_transmitter(outgoing,settings);
+                const auto origin=helper_source_origin(c,settings.timestamp,source.get());
+                if(source->total_samples()>c.memory_limit/sizeof(float))throw Error("pattern waveform exceeds batch memory limit; use streaming output");
+                std::vector<float> samples(static_cast<std::size_t>(source->total_samples()));
+                std::size_t offset=0;
+                while(offset<samples.size())offset+=source->read(std::span(samples).subspan(offset,
+                    std::min<std::size_t>(4096,samples.size()-offset)));
+                output_wave(a,std::move(samples),c,true,helper_settings,settings.timestamp,origin);
             } else output_wave(a,transfer::transmit(outgoing,settings),c);
             std::cerr<<"Transmitted ";
             std::cerr<<estimate.wire_bits<<" pattern bits, ";

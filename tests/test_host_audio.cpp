@@ -19,19 +19,32 @@ template<class Predicate>void until(AudioEndpoint& endpoint,Predicate consume) {
     }
     throw std::runtime_error("audio event deadline expired");
 }
-void playback(std::uint32_t output_rate) {
+void playback(std::uint32_t output_rate,bool composed=false) {
     AudioEndpoint endpoint;endpoint.configure(1,output_rate);std::atomic<unsigned> calls=0;std::size_t source=0;
-    auto task=std::async(std::launch::async,[&]{endpoint.playback(8000,[&](std::span<float> out){++calls;const auto n=std::min<std::size_t>(out.size(),1001-source);std::fill_n(out.begin(),n,.125f);source+=n;return n;},{},{},audio::ChannelMode::right_mono,{1.5,false});});
+    audio::Options options;options.transmit_gain=1.5;
+    std::uint64_t transformed=0;bool formatted=false;
+    if(composed) {
+        options.playback_output_gain=[](long double){return 0.;};
+        options.playback_output_transform=[&](float payload,long double seconds,std::uint32_t rate) {
+            require(formatted,"host output composition preceded format notification");
+            require(payload==0,"host output composition preceded the payload safety gain");
+            require(rate==output_rate && std::abs(seconds-static_cast<long double>(transformed)/output_rate)<1e-15L,
+                "host output composition used the wrong rate or source coordinate");
+            ++transformed;return .375f;
+        };
+    }
+    auto task=std::async(std::launch::async,[&]{endpoint.playback(8000,[&](std::span<float> out){++calls;const auto n=std::min<std::size_t>(out.size(),1001-source);std::fill_n(out.begin(),n,.125f);source+=n;return n;},{},[&](const auto&){formatted=true;},audio::ChannelMode::right_mono,options);});
     std::uint64_t stream=0,frames=0;bool started=false;
     until(endpoint,[&](const AudioEndpoint::Event& e){
         if(e.kind==AudioEndpoint::Kind::playback_start){stream=e.stream;require(calls==0,"callback ran before device readiness");require(e.channels==audio::ChannelMode::right_mono&&e.gain==1.5,"output routing/gain lost");endpoint.playback_ready(1,stream);}
-        if(e.kind==AudioEndpoint::Kind::playback_pcm){require(e.position==frames,"output PCM discontinuity");if(!started){require(e.presentation_epoch>0,"first output lacks presentation time");started=true;}frames+=e.samples.size();endpoint.playback_progress(1,stream,frames,false);}
+        if(e.kind==AudioEndpoint::Kind::playback_pcm){require(e.position==frames,"output PCM discontinuity");if(!started){require(e.presentation_epoch>0,"first output lacks presentation time");started=true;}if(composed)require(std::all_of(e.samples.begin(),e.samples.end(),[](float sample){return sample==.375f;}),"host lost or scaled the composed output before final volume");frames+=e.samples.size();endpoint.playback_progress(1,stream,frames,false);}
         if(e.kind==AudioEndpoint::Kind::playback_end){require(e.position==frames,"wrong final output count");return true;}return false;
     });
     require(frames==(1001ULL*output_rate+7999)/8000,"resampling changed finite-stream duration");
     require(task.wait_for(10ms)==std::future_status::timeout,"playback returned before device drain");
     fails([&]{endpoint.playback_progress(1,stream,frames+1,true);});
     endpoint.playback_progress(1,stream,frames,true);require(task.wait_for(2s)==std::future_status::ready,"playback did not finish after drain");task.get();
+    require(!composed || transformed==frames,"host composition did not run once per hardware frame");
 }
 void gap_and_close() {
     AudioEndpoint endpoint;endpoint.configure(1,48000);std::atomic<std::size_t> frames=0;
@@ -167,4 +180,4 @@ void paced_capture_stops() {
     }
 }
 }
-int main(){try{playback(8000);playback(44100);playback(48000);gap_and_close();capture_monitor_pair();capture_restart();stopped_capture();cancellation();failed_output_keeps_capture();paced_capture_stops();std::cout<<"Host audio bounds, continuity, resampling, readiness, drain, cancellation and output recovery passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{playback(8000);playback(44100);playback(48000);playback(8000,true);playback(44100,true);playback(48000,true);gap_and_close();capture_monitor_pair();capture_restart();stopped_capture();cancellation();failed_output_keeps_capture();paced_capture_stops();std::cout<<"Host audio bounds, continuity, resampling, readiness, drain, cancellation and output recovery passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

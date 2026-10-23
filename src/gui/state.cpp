@@ -197,6 +197,7 @@ std::string signal_display_text(const SignalLine& line, bool shellcode) {
     return received_text(line.text,shellcode && line.text_message && !line.binary);
 }
 std::string signal_status_label(const SignalLine& line) {
+    if(line.helper_carrier)return line.complete?"helper received":"helper pending";
     using transfer::RecoveryState;
     if(line.recovery_progress.state==RecoveryState::recovered && !line.validated)return "source invalid";
     if(line.recovery_progress.state==RecoveryState::ready || line.recovery_progress.state==RecoveryState::running)return "recovering";
@@ -247,6 +248,7 @@ std::string signal_repair_label(const SignalLine& line) {
     return label+")";
 }
 std::string signal_preamble_label(const SignalLine& line) {
+    if(line.helper_carrier)return "Helper carrier";
     if(line.pattern_score && std::isfinite(*line.pattern_score)) {
         std::ostringstream text;text.imbue(std::locale::classic());
         text<<"Pattern score "<<std::fixed<<std::setprecision(1)<<*line.pattern_score;
@@ -261,6 +263,7 @@ std::string signal_preamble_label(const SignalLine& line) {
     return text.str();
 }
 std::string signal_data_label(const SignalLine& line) {
+    if(line.helper_carrier)return "Metadata undecoded";
     if(recovery_pending(line))return "Source not recovered";
     if(line.complete&&!line.validated&&!line.binary&&!line.raw_bits.empty())return "No checksum / FEC";
     if (line.binary || (line.pattern_score && line.complete && !line.validated))
@@ -280,6 +283,11 @@ std::string signal_data_label(const SignalLine& line) {
 
 bool Signals::update(SignalLine line) {
     if(std::find(retired_ids_.begin(),retired_ids_.end(),line.id)!=retired_ids_.end())return false;
+    if(line.helper_carrier) {
+        line.validated=false;line.binary=false;line.reception_id.clear();line.text_message=false;
+        line.received_bits=line.expected_bits=0;line.raw_bits.clear();line.pattern_score.reset();
+        line.preamble_received_percent.reset();line.pre_fec_accuracy.reset();line.fec_stats={};
+    }
     if (line.binary) {
         line.validated=false; line.reception_id.clear(); line.text_message=false;
         line.preamble_received_percent.reset(); line.pre_fec_accuracy.reset();line.fec_stats={};
@@ -292,7 +300,7 @@ bool Signals::update(SignalLine line) {
     if (found!=lines_.end()) {
         if(line.revision<found->revision)return false;
         if(line.revision==found->revision && ((found->validated && !line.validated) ||
-            ((found->binary || found->pattern_score) && found->complete && !line.complete)))return false;
+            ((found->binary || found->pattern_score || found->helper_carrier) && found->complete && !line.complete)))return false;
         *found=std::move(line);
     } else {
         if (lines_.size()>=64) lines_.pop_front();
@@ -336,6 +344,7 @@ void apply_receptions(Inbox& inbox, Signals& signals, live::Snapshot& snapshot) 
         SignalLine line{signal.id,signal.frequency_hz,signal.text,signal.validated,signal.reception_id,short_text,
             signal.preamble_received_percent,signal.pre_fec_accuracy,signal.binary,signal.complete,
             signal.received_bits,signal.expected_bits,signal.pattern_score};
+        line.helper_carrier=signal.helper_carrier;
         line.raw_bits=signal.raw_bits;line.missing_symbols=signal.missing_symbols;
         line.fec_stats=signal.fec_stats;line.revision=signal.revision;line.recovery_progress=signal.recovery_progress;
         if(!staged.update(std::move(line)))continue;
@@ -388,18 +397,20 @@ void apply_receptions(Inbox& inbox, Signals& signals, live::Snapshot& snapshot) 
     signals=std::move(staged);
 }
 std::optional<std::string> Signals::copy_id(std::size_t index) const {
-    if (index>=lines_.size() || recovery_pending(lines_[index]) || lines_[index].binary || !lines_[index].validated || !lines_[index].text_message || lines_[index].reception_id.empty()) return std::nullopt;
+    if (index>=lines_.size() || lines_[index].helper_carrier || recovery_pending(lines_[index]) || lines_[index].binary || !lines_[index].validated || !lines_[index].text_message || lines_[index].reception_id.empty()) return std::nullopt;
     return lines_[index].reception_id;
 }
 std::optional<std::string> Signals::copy_bits(std::size_t index) const {
     if (index>=lines_.size()) return std::nullopt;
     const auto& line=lines_[index];
+    if(line.helper_carrier)return {};
     if (signal_byte_aligned(line) || !complete_bits(line)) return std::nullopt;
     return line.text;
 }
 std::optional<std::string> Signals::copy_raw_bits(std::size_t index) const {
     if (index>=lines_.size()) return {};
     const auto& line=lines_[index];
+    if(line.helper_carrier)return {};
     // Exact admitted observations are a diagnostic/raw operation, independent
     // of whether a possible coded-source search has completed.
     if (physical_complete_bits(line)) return line.text;
@@ -416,6 +427,7 @@ std::optional<std::string> Signals::copy_text(std::size_t index, bool shellcode)
 std::optional<Bytes> Signals::copy_bytes(std::size_t index) const {
     if(index>=lines_.size())return {};
     const auto& line=lines_[index];
+    if(line.helper_carrier)return {};
     if(recovery_pending(line))return {};
     if(signal_byte_aligned(line) && complete_bits(line))return signal_byte_prefix(line);
     if(line.binary || !line.complete || line.validated || !line.text_message || !line.pattern_score ||

@@ -9,7 +9,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     case Slot::fast_mode:case Slot::bandwidth:case Slot::carrier:case Slot::rf_shift:case Slot::doppler:case Slot::snr:
     case Slot::long_snr:case Slot::volume:
         control.purpose=ControlPurpose::operating_parameter;break;
-    case Slot::clear:case Slot::transmit:case Slot::transmit_noise:case Slot::cancel:
+    case Slot::clear:case Slot::transmit:case Slot::transmit_noise:case Slot::transmit_helper:case Slot::cancel:
         control.purpose=ControlPurpose::operation;break;
     case Slot::simulation:case Slot::link_power:case Slot::link_loss:case Slot::link_noise:
     case Slot::simulation_oscillator:case Slot::rf_oscillator:
@@ -18,6 +18,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     case Slot::device:case Slot::mono:case Slot::live_duplex:case Slot::exclusive:case Slot::key:case Slot::key_actions:
     case Slot::dsss_factor:case Slot::dsss_version:case Slot::fhss:case Slot::sched_hop:case Slot::sched_hop_dilution:case Slot::sched_frequency_search:
     case Slot::symbol_burst:case Slot::symbol_burst_random:
+    case Slot::helper_power:case Slot::helper_ratio_limit:case Slot::helper_frequency:case Slot::helper_callsign:
     case Slot::pattern:case Slot::fec:case Slot::dsp_workspace:case Slot::receive_snr:
     case Slot::developer_mode:case Slot::shellcode_mode:case Slot::send_key:
         control.purpose=ControlPurpose::setup;break;
@@ -34,7 +35,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         slot==Slot::receive_snr||slot==Slot::profile_reference||slot==Slot::callsign||
         slot==Slot::grid||slot==Slot::repeatable;
     control.open_upward=slot>=Slot::device;
-    if(slot==Slot::symbol_burst||slot==Slot::symbol_burst_random)control.open_upward=false;
+    if(slot==Slot::symbol_burst||slot==Slot::symbol_burst_random||slot==Slot::helper_power||slot==Slot::helper_ratio_limit||slot==Slot::helper_frequency||slot==Slot::helper_callsign)control.open_upward=false;
     control.font_size=control.multiline?16:13;
     if(control.kind==Kind::bitmap)control.font_size=11;
     if(menu==Menu::keyfile)control.menu_label="Keyfile";
@@ -47,7 +48,12 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::developer_mode||slot==Slot::shellcode_mode)control.scope=ScreenScope::shared;
     if(slot==Slot::shellcode_mode) {control.developer_only=true;control.help="Allow printable English ASCII in received text. Newlines are allowed in both modes; other controls and non-ASCII bytes remain underscores. Turning Developer mode off resets this exception.";}
     if(slot==Slot::developer_mode)control.help="Show advanced controls and inspection tabs. Hiding them keeps their current settings, including command-line overrides.";
-    if(slot==Slot::callsign||slot==Slot::grid)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. Sent only as message text.";
+    if(slot==Slot::helper_power)control.help="Separate helper tone power relative to Transmit power. 0 disables it. This scales audio; it does not control RF transmitter power. The ratio limit reduces helper power when necessary, preserving the Robust data setting. Unsupported placement stops enabled-helper transmission before payload output.";
+    if(slot==Slot::helper_ratio_limit)control.help="Maximum helper/data power ratio in dB. Amplitude ratio is the square root of the power ratio. Constrain this to the measured dynamic range of the sound card and radio; exceeding the limit reduces helper power. Robust target SNR and transmit power retain their meanings.";
+    if(slot==Slot::helper_frequency)control.help="High automatically places the helper above the Robust capture band with a power-dependent guard. The radio and audio route must pass that frequency. Low and 0 Hz offset are retained but unavailable until interference isolation is qualified. 0 Hz overlaps the Robust carrier. Tone observation does not require metadata decoding.";
+    if(slot==Slot::helper_callsign)control.help="Up to 19 printable 7-bit ASCII characters, transmitted separately on the helper every 400 ms. Editing Developer Callsign copies a valid value here; editing this field does not change Developer Callsign or the Robust message. Operator selects settings appropriate to their authorization.";
+    if(slot==Slot::grid)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. Sent only as message text.";
+    if(slot==Slot::callsign)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. A valid value of at most 19 printable ASCII characters also copies to Helper Carrier Callsign. Helper-only edits never change this value or the message.";
     if(slot==Slot::repeatable)control.help="Prepends REPEATABLE-XXXXXXXX and a space before the CQ greeting. Each message edit generates 8 random consonants or digits. Automatically turns off for attachments or messages over 256 bytes, including the prefix.";
     if(slot==Slot::simulation_confidence||slot==Slot::simulation_cpu_time||slot==Slot::simulation_gpu_time)control.font_size=12;
     if(slot==Slot::simulation)
@@ -118,6 +124,8 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::short_bits_detail)control.help="Raw patterns preserve the exact entered bits. Stream completion requires six seconds without symbols.";
     if(slot==Slot::transmit_noise||slot==Slot::short_transmit_noise)
         control.help="Continuously transmit noise with the usual encrypted modulation and fresh temporary keys for all active keystreams until Stop noise is pressed. Keeps your message and selected keys. Uses the selected rate, carrier and audio routing.";
+    if(slot==Slot::transmit_helper)
+        control.help="Transmit helper only: continuously transmit the configured helper tone and callsign without Robust data or noise. Requires Simulation No, High placement and nonzero Helper Carrier Power. Stop helper ends it. Keeps your message and selected keys. Helper frequency and radio power settings remain the operator's responsibility.";
     if(slot==Slot::copy_raw_signal)control.help="Copy the selected completed reception's exact transport bits, including leading zeros and compression bits.";
     if(slot==Slot::paste_raw_signal)control.help="Load the selected reception's exact bits (up to 208) into the raw editor for retransmission.";
     if(slot==Slot::signals) {
@@ -234,6 +242,11 @@ const std::vector<Control>& console_screen() {
         placed({Kind::choice,Field::simulation_oscillator,Command::none,Bitmap::none,Page::console,3,"Baseband Osc"}, Slot::simulation_oscillator),
         placed({Kind::choice,Field::rf_oscillator,Command::none,Bitmap::none,Page::console,3,"Shift Osc"}, Slot::rf_oscillator),
         placed({Kind::text,Field::search_margin,Command::none,Bitmap::none,Page::console,3,"Margin",1,false,64}, Slot::search_margin),
+        placed({Kind::choice,Field::helper_power,Command::none,Bitmap::none,Page::console,4,"Helper Carrier Power"}, Slot::helper_power),
+        placed({Kind::choice,Field::helper_ratio_limit,Command::none,Bitmap::none,Page::console,4,"Helper Carrier Ratio Limit"}, Slot::helper_ratio_limit),
+        placed({Kind::choice,Field::helper_frequency,Command::none,Bitmap::none,Page::console,4,"Helper Carrier Frequency"}, Slot::helper_frequency),
+        placed({Kind::text,Field::helper_callsign,Command::none,Bitmap::none,Page::console,4,"Helper Carrier Callsign",1,false,19}, Slot::helper_callsign),
+        placed({Kind::action,Field::count,Command::transmit_helper,Bitmap::none,Page::console,4,"Helper"}, Slot::transmit_helper),
         placed({Kind::text,Field::planner_target,Command::none,Bitmap::none,Page::planner,3,"Target SNR (dB-Hz)",1,false,64}, Slot::none),
         placed({Kind::text,Field::planner_command,Command::none,Bitmap::none,Page::planner,3,"Launch command",1,true,8192}, Slot::none),
         placed({Kind::choice,Field::search_arithmetic,Command::none,Bitmap::none,Page::planner,4,"Search arithmetic"}, Slot::none),

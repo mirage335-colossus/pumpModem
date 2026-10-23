@@ -66,8 +66,79 @@ std::vector<float> adjusted(std::span<const float> input,std::uint32_t from,std:
         "UTC correction manufactured an extended EOF");
     return result;
 }
+struct ComposedOutput {
+    std::vector<float> samples,payload;
+    std::vector<long double> seconds;
+};
+ComposedOutput composed(std::span<const float> input,std::uint32_t from,std::uint32_t to,
+                       std::size_t in_chunk,std::size_t out_chunk,bool adjustable,bool enabled) {
+    Resampler converter(from,to,adjustable);
+    if(adjustable) {
+        converter.initialize_timing(.375,-.0001);
+        converter.set_rate_correction(.00015,.00001);
+    }
+    ComposedOutput result;
+    std::size_t gain_calls=0;
+    long double gain_seconds=-1;
+    if(enabled) {
+        converter.set_output_gain([&](long double seconds) {++gain_calls;gain_seconds=seconds;return .25;});
+        converter.set_output_transform([&](float payload,long double seconds,std::uint32_t rate) {
+            require(rate==to,"output transform received an intermediate sample rate");
+            require(gain_calls==result.seconds.size()+1 && seconds==gain_seconds,
+                "output transform did not follow the final safety gain");
+            result.payload.push_back(payload);result.seconds.push_back(seconds);
+            return payload+static_cast<float>(.1*std::cos(2*std::numbers::pi_v<long double>*17*seconds));
+        });
+    } else converter.set_output_transform({});
+    const auto workspace=converter.workspace_bytes();
+    std::vector<float> output(out_chunk);
+    std::size_t offset=0;
+    while(!converter.finished()) {
+        const auto count=std::min(in_chunk,input.size()-offset);
+        const auto progress=converter.process(input.subspan(offset,count),output,offset+count==input.size());
+        require(progress.consumed || progress.produced || converter.finished(),"output composition stalled");
+        offset+=progress.consumed;
+        result.samples.insert(result.samples.end(),output.begin(),output.begin()+static_cast<std::ptrdiff_t>(progress.produced));
+        require(converter.workspace_bytes()==workspace,"output composition grew converter workspace");
+    }
+    require(offset==input.size(),"output composition dropped input");
+    require(!enabled || result.seconds.size()==result.samples.size(),"output transform did not run once per final frame");
+    rejects([&]{converter.set_output_transform({});});
+    return result;
+}
 }
 int main(){try {
+    // Composition happens after all conversion and the payload safety gain.
+    // This permits an independent hardware-rate tone while keeping payload PCM
+    // and its clock unchanged, including multistage and corrected conversion.
+    for(auto rates:{std::pair{48000U,48000U},std::pair{44100U,48000U},
+                   std::pair{64U,48000U},std::pair{48000U,1024U}})
+    for(bool adjustable:{false,true}) {
+        const auto input=sine(rates.first,12,rates.first/4+3);
+        const auto baseline=adjustable?adjusted(input,rates.first,rates.second,input.size(),4096):
+            convert(input,rates.first,rates.second,input.size(),4096);
+        const auto disabled=composed(input,rates.first,rates.second,17,31,adjustable,false);
+        require(disabled.samples==baseline,"disabled output transform changed PCM");
+        const auto large=composed(input,rates.first,rates.second,input.size(),4096,adjustable,true);
+        const auto small=composed(input,rates.first,rates.second,17,31,adjustable,true);
+        require(large.samples==small.samples && large.payload==small.payload && large.seconds==small.seconds,
+            "output composition depends on callback chunk boundaries");
+        require(large.samples.size()==baseline.size(),"output transform changed stream duration");
+        for(std::size_t i=0;i<baseline.size();++i) {
+            require(large.payload[i]==static_cast<float>(.25*baseline[i]),"output transform received unmasked/intermediate payload");
+            const long double t=static_cast<long double>(i)/rates.second;
+            const auto expected=adjustable?.375L/rates.first+t*(1-.0001L)+.5L*.00001L*t*t:t;
+            require(std::abs(large.seconds[i]-expected)<1e-12L,"output transform source coordinate lost clock correction");
+            require(large.samples[i]==large.payload[i]+static_cast<float>(.1*std::cos(2*std::numbers::pi_v<long double>*17*large.seconds[i])),
+                "output transform result changed before final output");
+        }
+    }
+    for(auto rates:{std::pair{48000U,48000U},std::pair{44100U,48000U},std::pair{48000U,1024U}})
+    for(const auto bad:{std::numeric_limits<float>::infinity(),std::numeric_limits<float>::quiet_NaN()})
+        rejects([&]{Resampler converter(rates.first,rates.second);
+            converter.set_output_transform([=](float,long double,std::uint32_t){return bad;});
+            std::array<float,3> input{},output{};converter.process(input,output,true);});
+
     // The final-stage mask must remain exact even when FIR interpolation fills
     // a source-side zero. Include multistage conversion and adjustable clocks.
     for(auto rates:{std::pair{64U,48000U},std::pair{1024U,48000U},std::pair{48000U,48000U},std::pair{48000U,1024U}})

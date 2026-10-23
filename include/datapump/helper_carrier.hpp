@@ -1,0 +1,98 @@
+#pragma once
+#include <array>
+#include <complex>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace datapump::helper {
+enum class Frequency { high, low, cochannel };
+struct Options {
+    double power_w=0, data_power_w=4, ratio_limit_db=90;
+    Frequency frequency=Frequency::high;
+    std::string callsign;
+    bool operator==(const Options&) const = default;
+};
+struct Plan {
+    double frequency_hz=0, helper_gain=0, data_gain=1, effective_power_w=0;
+};
+void validate(const Options&);
+// Throws when the helper cannot fit; callers may retain their unchanged Robust
+// path and report that helper configuration unavailable. Never retunes data.
+// A nonzero minimum_high_frequency_hz requires High and adds a caller-supplied
+// placement floor (e.g. a separately qualified capture-converter stopband).
+// It is a geometry constraint, not a general anti-alias rejection certificate.
+Plan plan(const Options&,double data_carrier_hz,double occupied_bandwidth_hz,
+          std::uint32_t output_rate,double minimum_high_frequency_hz=0);
+
+// Public v1 metadata: five length bits, nineteen padded seven-bit ASCII bytes,
+// CRC-16/CCITT-FALSE over the twenty bytes [length, padded callsign], then
+// fourteen zero bits. All fields and each 21-bit symbol are MSB first.
+std::array<std::uint32_t,8> metadata_symbols(std::string_view callsign);
+// 1024 radii [0.9,1], 2048 phases; high ten bits select radius, low eleven phase.
+std::complex<double> apsk_point(std::uint32_t symbol);
+
+class Generator {
+public:
+    // Disable optional punctuation when the endpoint can shorten during output.
+    Generator(Options,Plan,std::uint64_t epoch=0,bool punctuate=true);
+    // seconds is physical time since epoch, independent of payload source time.
+    // Payload PCM is assumed bounded by [-1,1]. Disabled mixing is bit exact.
+    float mix(float payload,long double seconds,std::uint32_t rate,
+              std::optional<long double> end_seconds={},
+              std::optional<long double> start_seconds={}) const;
+    std::complex<double> mix_analytic(std::complex<double> payload,long double seconds,
+                                     std::uint32_t rate,std::optional<long double> end_seconds={},
+                                     std::optional<long double> start_seconds={}) const;
+private:
+    Options options_;
+    Plan plan_;
+    std::uint64_t epoch_;
+    bool punctuate_;
+    std::array<std::complex<double>,8> symbols_{};
+};
+
+struct Observation {
+    bool present=false, confirmed=false;
+    double frequency_hz=0, snr_db=0, observed_seconds=0, absent_seconds=0;
+};
+// Bounded independent observer: 100 ms matched fits. New evidence groups use
+// K=4+ceil(2*log1p(completed_groups)) windows, bounded by 96, to accumulate more
+// evidence as the lifetime multiple-look admission threshold becomes stricter.
+// snr_db is excess fitted tone power / noise in a 10 Hz resolution cell,
+// not payload SNR. observed_seconds is consecutive qualifying group duration;
+// confirmed means >=6 s. Missing PCM must be signalled with reset(), never zeros.
+// AWGN familywise false-admission probability <=.01 per reset, including all
+// searched frequency cells and an unlimited sequence of evidence groups.
+// Once admitted, the >=6dB level gate maintains presence without another
+// multiple-look admission test. Six seconds of observed absence retires that
+// admission; a later signal must pass the original lifetime gate again.
+// This is a noise-model gate, not a posterior/authentication claim. Other tones
+// and colored interference can be present; metadata decoding is independent.
+class Tracker {
+public:
+    static constexpr std::size_t workspace_bound=6*1024;
+    explicit Tracker(double expected_frequency,double search_half_width_hz=20);
+    void push(std::span<const float>,std::uint32_t rate);
+    std::optional<Observation> take_update();
+    void reset();
+private:
+    struct Bin {
+        double frequency=0, cc=0, ss=0, cs=0, log_evidence=0, snr_sum=0, power=0;
+        std::complex<double> step{},oscillator{1,0},sum{};
+    };
+    double expected_,half_width_,present_seconds_=0,absent_seconds_=0;
+    bool admitted_=false;
+    std::uint32_t rate_=0;
+    std::size_t window_size_=0,window_count_=0,group_windows_=0;
+    std::uint64_t groups_=0;
+    double energy_=0;
+    std::vector<Bin> bins_;
+    std::optional<Observation> update_;
+    void configure(std::uint32_t rate);
+    void finish_window();
+};
+}

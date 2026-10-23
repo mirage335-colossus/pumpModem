@@ -271,6 +271,25 @@ void parsing_and_formatting() {
     const auto exact=launch_command::parse_arguments(tokens);
     check(exact.oscillator=="gpsdo-ocxo"&&exact.rate_hz==3600,"startup tokens must be used without another shell parse");
 }
+void helper_settings() {
+    for(const auto& value:std::vector<std::pair<std::string,double>>{{"1.5kW",1500},{"100 W",100},{"40W",40},{"2mW",.002},{"30uW",.00003},{"1 µW",.000001},{"1500",1500},{"0",0}}) {
+        auto patch=launch_command::parse("--helper-power '"+value.first+"' --helper-ratio-limit 90dB --helper-frequency high --helper-callsign 'N0CALL/P'");
+        check(patch.helper_power_w&&std::abs(*patch.helper_power_w-value.second)<1e-12&&patch.helper_ratio_limit_db==90&&
+              patch.helper_frequency=="high"&&patch.helper_callsign=="N0CALL/P","Helper options lost units or values");
+        check(launch_command::parse(launch_command::format(patch))==patch,"Helper settings do not round trip");
+    }
+    for(const auto* frequency:{"high","low","0"}) {
+        const auto patch=launch_command::parse(std::string("--helper-frequency ")+frequency+" --helper-callsign=''");
+        check(patch.helper_callsign==""&&launch_command::parse(launch_command::format(patch))==patch,
+              "Helper empty callsign or frequency selection was discarded");
+    }
+    for(const auto* value:{"--helper-power -1","--helper-power nan","--helper-power 1e308kW",
+        "--helper-ratio-limit 30","--helper-ratio-limit 91","--helper-frequency middle",
+        "--helper-callsign 12345678901234567890","--helper-callsign 'N0CÄLL'"})
+        rejects([&]{launch_command::parse(value);},"Invalid helper setting accepted");
+    check(!launch_command::parse("--rate 1200").helper_power_w,"Older partial commands must preserve helper settings");
+}
+
 void invalid_commands() {
     for(const auto* command:{"", "  \n\t", "./datapump-gui", "\"\" --tx-dbm 3", "--unknown 1", "--tx-dbm", "--tx-dbm=",
             "--tx-dbm --path-loss-db 170", "--rate 3600 trailing", "--rate '3600", "--auto-pattern=yes",
@@ -370,6 +389,6 @@ void startup() {
 }
 }
 int main() {
-    try {parsing_and_formatting();invalid_commands();startup();std::cout<<"GUI launch command tests passed\n";return 0;}
+    try {parsing_and_formatting();helper_settings();invalid_commands();startup();std::cout<<"GUI launch command tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"GUI launch command tests failed: "<<error.what()<<'\n';return 1;}
 }

@@ -349,6 +349,15 @@ replay. Automatic transmission capture stays hidden during noise; manual Hex/Bit
 show bounded generated private/DSSS/FHSS purpose bytes, without temporary root
 keys or encoded message content. See [transmitter cover](transmit-cover.md).
 
+The **Helper** action beside Helper Carrier Callsign in the persistent header
+transmits only the configured Helper Carrier,
+without Robust data or tuning noise. It requires nonzero Helper Carrier Power,
+High placement, Simulation No and an idle transmitter. **Stop helper** ends it;
+**Abort now** cancels immediately.
+The message draft and saved keys stay available. **Transmit noise** retains its
+separate action in the ordinary transmit row. The compact **Helper** button
+exposes its full transmit description in its tooltip.
+
 Regular hardware transmission keeps an in-memory usage record for each selected
 key. When prior output has already used a future symbol epoch, including its
 leading shaped pulse, normal transmission is locked. The button shows a compact
@@ -946,14 +955,16 @@ and transmitted constellation display the generated signal from those stages.
 
 ## Layout and documents
 
-`desktop_layout.hpp` defines the desktop arrangement at 1180 by 1072 logical
-pixels, with a 1130 by 992 minimum. A persistent simulation row holds the
+`desktop_layout.hpp` defines the desktop arrangement at 1180 by 1120 logical
+pixels, with a 1130 by 1040 minimum. A persistent simulation row holds the
 dropdown, modeled receive probability and reference CPU/GPU compute estimates.
 The following compact persistent row holds editable Clock accuracy, Clock region
 and Clock offset, followed by Audio error, to the left of Baseband Osc, Shift Osc and Margin;
 Carrier and Shift share the existing modem row. Detailed oscillator/search
 values appear under the Link planner's hideable Model limits and references,
 and LPI assumptions remain in inspection.
+A further persistent row holds Helper Carrier Power, Ratio Limit, Frequency
+and editable Callsign; power zero disables the other helper controls.
 The wider minimum retains readable oscillator choices alongside all four timing
 fields, preserving the existing composition, reception and plot allocations.
 `control_layout.hpp` computes frame, label,

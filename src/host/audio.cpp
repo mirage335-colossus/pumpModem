@@ -205,6 +205,8 @@ void AudioEndpoint::playback(std::uint32_t logical,const audio::PlaybackCallback
             p.valid_playback(generation,stop);if(!ready)throw Error("host playback readiness timed out");
         }
         audio::Resampler converter(logical,rate);std::vector<float> input(std::max<std::size_t>(1,std::min<std::size_t>(4096,logical/20))),output(std::min<std::size_t>(2048,rate/20));
+        converter.set_output_gain(options.playback_output_gain);
+        converter.set_output_transform(options.playback_output_transform);
         if(format)format({logical,rate,converter.passband_hz(),converter.workspace_bytes()+(input.capacity()+output.capacity()+max_queue_frames)*sizeof(float)});
         std::size_t offset=0,count=0;bool ending=false;
         while(!converter.finished()) {

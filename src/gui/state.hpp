@@ -109,6 +109,7 @@ struct SignalLine {
     // interpretation while retaining this reception's row identity.
     std::uint64_t revision = 0;
     transfer::RecoveryProgress recovery_progress;
+    bool helper_carrier = false;
 };
 bool signal_byte_aligned(const SignalLine& line);
 std::string signal_display_text(const SignalLine& line, bool shellcode = false);

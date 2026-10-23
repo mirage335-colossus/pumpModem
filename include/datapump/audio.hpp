@@ -157,6 +157,11 @@ struct Options {
     // stays undated after device recovery until a new capture call establishes
     // its stream-coordinate binding. Playback ignores this request.
     bool request_capture_timing=false;
+    // Optional hardware-rate composition, after playback_output_gain and before
+    // transmit_gain/channel mapping. Receives payload PCM, continuous logical
+    // source seconds (including clock correction), and the hardware sample rate.
+    // It cannot change source timing or extend playback beyond its source end.
+    std::function<float(float,long double,std::uint32_t)> playback_output_transform={};
 };
 // Capabilities belong to the selected audio provider, not the UI or target OS.
 bool exclusive_supported();

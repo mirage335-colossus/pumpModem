@@ -77,6 +77,68 @@ void receiver_health_indicator() {
     snapshot={};snapshot.running=true;show();
     check(field.text=="Listening / default"&&field.text_tone==ui::TextTone::normal,"fresh request retained the transmit failure");
 }
+void helper_controls() {
+    using F=ui::Field;
+    Controller controller;
+    check(controller.settings().helper.power_w==0&&controller.field(F::helper_power).selected=="0"&&
+          controller.field(F::helper_ratio_limit).selected=="90"&&controller.field(F::helper_frequency).selected=="high",
+          "Helper defaults changed");
+    for(const auto field:{F::helper_ratio_limit,F::helper_frequency,F::helper_callsign})
+        check(!controller.field(field).enabled,"Disabled helper leaves a companion editable");
+    check(!controller.enabled(ui::Command::transmit_helper),"Disabled helper permits helper-only transmission");
+    const auto original=controller.settings().transfer.modem;
+    controller.select(F::helper_power,"1.5 kW");
+    check(std::abs(controller.settings().helper.power_w-1500)<1e-9&&controller.field(F::helper_callsign).enabled,
+          "Helper power did not enable the independent controls");
+    check(controller.enabled(ui::Command::transmit_helper),"Enabled helper cannot transmit independently");
+    controller.select(F::helper_ratio_limit,"20");controller.select(F::helper_frequency,"low");
+    (void)controller.plot_update();
+    controller.edit(F::helper_callsign,"N0HELP/P");
+    check(!controller.plot_update().clear_waterfall,"Helper callsign-only edit restarted receive plots");
+    check(controller.settings().helper.ratio_limit_db==20&&controller.settings().helper.frequency==helper::Frequency::low&&
+          controller.settings().helper.callsign=="N0HELP/P"&&controller.field(F::callsign).text.empty(),
+          "Helper edits changed developer callsign or failed to reach settings");
+    controller.edit(F::callsign,"N0DEV");
+    check(!controller.plot_update().clear_waterfall,"Developer callsign helper copy reconfigured receive settings");
+    check(controller.field(F::helper_callsign).text=="N0DEV"&&controller.settings().helper.callsign=="N0DEV",
+          "Developer Callsign did not copy one way to helper");
+    controller.edit(F::helper_callsign,"N0HELP");
+    controller.edit(F::helper_callsign,"12345678901234567890");
+    check(controller.settings().helper.callsign=="N0HELP"&&controller.field(F::helper_callsign).text=="N0HELP"&&
+          controller.field(F::callsign).text=="N0DEV","Invalid helper callsign truncated or changed identity");
+    controller.edit(F::callsign,"12345678901234567890");
+    check(controller.field(F::helper_callsign).text=="N0HELP","Long developer callsign silently truncated into helper");
+    controller.edit(F::link_power,"2 mW");
+    check(std::abs(controller.settings().helper.data_power_w-.002)<1e-15&&
+          controller.field(F::helper_power).display_text.find("effective")!=std::string::npos,
+          "Helper scaling lost the data transmit power or effective ratio label");
+    check(controller.settings().transfer.modem.sample_rate==original.sample_rate&&
+          controller.settings().transfer.modem.bandwidth_hz==original.bandwidth_hz&&
+          controller.settings().transfer.modem.carrier_hz==original.carrier_hz,
+          "Helper controls changed Robust modem geometry");
+    const auto exported=launch_command::parse(controller.field(F::planner_command).text);
+    check(exported.helper_power_w&&std::abs(*exported.helper_power_w-1500)<1e-9&&
+          exported.helper_callsign=="N0HELP"&&exported.helper_ratio_limit_db==20&&exported.helper_frequency=="low",
+          "Helper values omitted from settings export");
+    Controller target;
+    target.edit(F::planner_command,controller.field(F::planner_command).text);
+    target.activate(ui::Command::planner_load_command);
+    check(target.settings().helper==controller.settings().helper&&target.field(F::helper_callsign).text=="N0HELP"&&
+          target.field(F::helper_frequency).selected=="low","Helper settings failed transactional GUI import");
+    const auto before=target.settings().helper;
+    target.edit(F::planner_command,"--helper-power 100 --helper-callsign '12345678901234567890'");
+    target.activate(ui::Command::planner_load_command);
+    check(target.settings().helper==before,"Invalid helper command partially changed accepted settings");
+    controller.select(F::helper_power,"0");
+    for(const auto field:{F::helper_ratio_limit,F::helper_frequency,F::helper_callsign})
+        check(!controller.field(field).enabled,"Disabling helper did not disable companions");
+    check(!controller.enabled(ui::Command::transmit_helper),"Disabling helper leaves helper-only action enabled");
+    check(controller.settings().helper.callsign=="N0HELP","Disabling helper discarded its callsign");
+    (void)controller.plot_update();controller.edit(F::callsign,"N0OFF");
+    check(controller.settings().helper.callsign=="N0OFF"&&!controller.plot_update().clear_waterfall,
+          "Disabled helper callsign copy reconfigured the receiver");
+}
+
 void search_arithmetic_controls() {
     using F=ui::Field;using A=modem::SearchArithmetic;
     Controller controller;
@@ -473,10 +535,25 @@ void lpi_estimate_controls() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});
     const auto text=[&] {return controller.field(F::lpi_estimate).text;};
+    std::string advisory_context="initial";
+    unsigned advisory_comparison=0;
     const auto same_advisory=[&](const Inspection& expected) {
+        ++advisory_comparison;
         const auto actual=controller.inspection();
-        check(actual&&actual->lpi_summary==expected.lpi_summary&&actual->lpi_description==expected.lpi_description&&
-              text()==expected.lpi_summary,"Link or oscillator settings changed the relative LPI advisory");
+        const bool unchanged=actual&&actual->lpi_summary==expected.lpi_summary&&actual->lpi_description==expected.lpi_description&&
+              text()==expected.lpi_summary;
+        if(!unchanged) {
+            std::cerr<<"LPI advisory mismatch: context="<<advisory_context<<" comparison="<<advisory_comparison
+                <<" inspection="<<bool(actual)<<" revision="<<controller.revision()
+                <<"\nexpected summary="<<std::quoted(expected.lpi_summary)
+                <<"\nactual summary="<<std::quoted(actual?actual->lpi_summary:"<missing>")
+                <<"\nfield text="<<std::quoted(text())
+                <<"\nCPU advice="<<std::quoted(controller.field(F::simulation_cpu_time).text)<<'\n';
+            if(actual&&actual->lpi_description!=expected.lpi_description)
+                std::cerr<<"expected description="<<std::quoted(expected.lpi_description)
+                    <<"\nactual description="<<std::quoted(actual->lpi_description)<<'\n';
+        }
+        check(unchanged,"Link or oscillator settings changed the relative LPI advisory");
         for(const auto& item:expected.fields)if(item.name.starts_with("LPI ")) {
             const auto found=std::find_if(actual->fields.begin(),actual->fields.end(),[&](const auto& field) {
                 return field.name==item.name;
@@ -538,6 +615,7 @@ void lpi_estimate_controls() {
           reference->lpi_description.find("no guaranteed hidden traffic")!=std::string::npos,
           "Private GUI estimate must use the one-bit receiver reference and shared inspection model");
     for(const auto& preset:tuning::simulation_presets()) {
+        advisory_context="simulation: "+std::string(preset.name);
         controller.select(F::simulation,std::string(preset.name));prepare(controller);
         check(controller.settings().simulation==preset.enabled&&
               controller.estimate()->waveform_samples==reference->estimate.waveform_samples,
@@ -546,6 +624,7 @@ void lpi_estimate_controls() {
     }
     for(const auto& preset:tuning::oscillator_presets()) {
         if(preset.id=="ic-7100")continue;
+        advisory_context="oscillator: "+std::string(preset.id);
         controller.select(F::simulation_oscillator,std::string(preset.id));prepare(controller);
         same_advisory(*reference);
     }
@@ -555,10 +634,13 @@ void lpi_estimate_controls() {
     check(controller.inspection()->lpi_estimate.symbol_seconds>reference->lpi_estimate.symbol_seconds&&
           controller.inspection()->lpi_estimate.equivalent_symbols>reference->lpi_estimate.equivalent_symbols,
           "A longer automatic symbol failed to improve the relative observer-to-receiver ratio");
+    advisory_context="restore TX target";
     controller.edit(F::snr,"0");prepare(controller);same_advisory(*reference);
+    advisory_context="exact raw bits";
     controller.edit(F::short_bits,"001");prepare(controller);
     check(controller.estimate()->wire_bits==3,"Exact three-bit draft changed the wire endpoint");
     same_advisory(*reference);
+    advisory_context="RX target edit";
     controller.edit(F::receive_snr,"-100, 55");
     const auto rx_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
     while((controller.settings().transfer.receive_targets_db_hz!=std::vector<double>{-100,55}||!controller.estimate())&&
@@ -3470,7 +3552,7 @@ int main(int argc,char** argv) {
             std::cout<<"Delayed replay interruption checks passed\n";
             return 0;
         }
-        search_arithmetic_controls();
+        helper_controls();search_arithmetic_controls();
         datapump::gui::controller_self_check();
         simulation_estimate_controls();
         empty_composer_preview();

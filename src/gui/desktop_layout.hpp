@@ -4,11 +4,12 @@
 #include <cstddef>
 
 namespace datapump::gui::ui {
-inline constexpr int default_width = 1180, default_height = 1072;
-inline constexpr int min_width = 1130, min_height = 992;
+inline constexpr int default_width = 1180, default_height = 1120;
+inline constexpr int min_width = 1130, min_height = 1040;
 // Preserve established body sizing when the header requires a wider minimum.
 inline constexpr int body_growth_width = 1030;
 inline constexpr int oscillator_row_height = 48;
+inline constexpr int helper_row_height = 48;
 inline constexpr int key_path_row_height = 24;
 inline constexpr int simulation_estimate_row_height = 48;
 inline constexpr int margin = 16, field_height = 27, label_height = 16;
@@ -18,7 +19,7 @@ enum class Slot {
     none, header, fast_mode, mode, developer_mode, shellcode_mode, clear, callsign, grid, repeatable, simulation,
     link_power, link_loss, link_noise,
     simulation_confidence, simulation_cpu_time, simulation_gpu_time,
-    simulation_oscillator, rf_oscillator, search_margin, key_actions,
+    simulation_oscillator, rf_oscillator, search_margin, helper_power, helper_ratio_limit, helper_frequency, helper_callsign, transmit_helper, key_actions,
     key_path, key, clock_accuracy, clock_region, clock_offset, audio_error, dsss_factor, dsss_version, fhss, tabs, page, message_label, paste_previous, force_transmit, binary_label, message,
     binary, qr_brightness, qr, attach_file, use_text, send_key, transmit, transmit_noise,
     cancel, airtime, transmit_scope_caption, transmit_scope_format, transmit_scope, profile_reference, signal_label, signals, copy_signal, paste_signal, recovery_actions, file_label, files,
@@ -45,6 +46,7 @@ inline constexpr bool persistent_slot(Slot slot) {
     case Slot::link_power: case Slot::link_loss: case Slot::link_noise:
     case Slot::simulation_confidence: case Slot::simulation_cpu_time: case Slot::simulation_gpu_time:
     case Slot::simulation_oscillator: case Slot::rf_oscillator:
+    case Slot::helper_power: case Slot::helper_ratio_limit: case Slot::helper_frequency: case Slot::helper_callsign: case Slot::transmit_helper:
     case Slot::search_margin: case Slot::clock_accuracy: case Slot::clock_region: case Slot::clock_offset: case Slot::audio_error:
     case Slot::dsss_factor: case Slot::dsss_version: case Slot::fhss:
     case Slot::symbol_burst: case Slot::symbol_burst_random:
@@ -74,7 +76,7 @@ struct DesktopLayout {
                            bool transmit_scope_visible = true, bool simulation_estimates_visible = true,
                            bool force_transmit_visible = false) {
         auto& out = *this;
-        const int header_rows = key_path_row_height + oscillator_row_height +
+        const int header_rows = key_path_row_height + oscillator_row_height + helper_row_height +
             (simulation_estimates_visible ? simulation_estimate_row_height : 0);
         const int content_height = height - header_rows;
         out[Slot::header] = {margin, 10, 145, 32};
@@ -190,13 +192,20 @@ struct DesktopLayout {
         out[Slot::simulation_oscillator] = {396, 153, baseband_width, field_height};
         out[Slot::rf_oscillator] = {shift_x, 153, shift_oscillator_width, field_height};
         out[Slot::search_margin] = {shift_x + shift_oscillator_width + group_gap, 153, 90, field_height};
+        const int helper_column=(width-2*margin-3*group_gap)/4;
+        out[Slot::helper_power]={margin,201,helper_column,field_height};
+        out[Slot::helper_ratio_limit]={margin+helper_column+group_gap,201,helper_column,field_height};
+        out[Slot::helper_frequency]={margin+2*(helper_column+group_gap),201,helper_column,field_height};
+        out[Slot::helper_callsign]={margin+3*(helper_column+group_gap),201,width-margin-(margin+3*(helper_column+group_gap))-69,field_height};
+        out[Slot::transmit_helper]={width-margin-61,201,61,field_height};
         const int cpu_width = (width - 2 * margin - group_gap) * 42 / 100;
-        out[Slot::simulation_cpu_time] = {margin, 185, cpu_width, simulation_estimates_visible ? 43 : 0};
+        out[Slot::simulation_cpu_time] = {margin, 185+helper_row_height, cpu_width, simulation_estimates_visible ? 43 : 0};
         const int gpu_x = margin + cpu_width + group_gap;
-        out[Slot::simulation_gpu_time] = {gpu_x, 185, width - margin - gpu_x, simulation_estimates_visible ? 43 : 0};
+        out[Slot::simulation_gpu_time] = {gpu_x, 185+helper_row_height, width - margin - gpu_x, simulation_estimates_visible ? 43 : 0};
         for(const auto slot:{Slot::simulation,Slot::link_power,Slot::link_loss,Slot::link_noise,
             Slot::simulation_confidence,Slot::clock_accuracy,Slot::clock_region,Slot::clock_offset,Slot::audio_error,
             Slot::simulation_oscillator,Slot::rf_oscillator,Slot::search_margin,
+            Slot::helper_power,Slot::helper_ratio_limit,Slot::helper_frequency,Slot::helper_callsign,Slot::transmit_helper,
             Slot::simulation_cpu_time,Slot::simulation_gpu_time})out[slot].y+=key_path_row_height;
         out[Slot::tabs] = {margin, 137, width - 2 * margin, content_height - 296};
         out[Slot::page] = {margin, 169, width - 2 * margin, content_height - 328};

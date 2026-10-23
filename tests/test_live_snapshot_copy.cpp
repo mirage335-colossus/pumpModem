@@ -50,6 +50,7 @@ void populate(Snapshot& value) {
     value.clock_timing_status = "clock timing detail with enough content to exceed SSO";
     value.status = "transmitting with a deliberately long status value";
     value.error = "current error with enough content to exceed SSO";
+    value.helper_status = "Helper carrier tracked; full Robust frequency search retained";
     value.waveform = {1.f, -2.f, 3.5f};
     value.spectrum_db = {-10., -20., -30.};
     value.spectrum_complex = {{1.f, 2.f}, {3.f, 4.f}};
@@ -89,7 +90,8 @@ void prepared_copy_covers_every_owned_dynamic_field() {
           "prepared snapshot assignment entered the allocator");
     check(destination.receiver_error == source.receiver_error &&
           destination.clock_timing_status == source.clock_timing_status &&
-          destination.status == source.status && destination.error == source.error,
+          destination.status == source.status && destination.error == source.error &&
+          destination.helper_status == source.helper_status,
           "snapshot string fields did not copy exactly");
     check(destination.waveform == source.waveform &&
           destination.spectrum_db == source.spectrum_db &&
@@ -142,6 +144,7 @@ void empty_and_short_string_sources_fit() {
     retained_capacity_source.clock_timing_status.clear();
     retained_capacity_source.status = "ok";
     retained_capacity_source.error.clear();
+    retained_capacity_source.helper_status.clear();
     retained_capacity_source.waveform.clear();
     retained_capacity_source.spectrum_db.clear();
     retained_capacity_source.spectrum_complex.clear();

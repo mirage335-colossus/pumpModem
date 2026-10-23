@@ -89,6 +89,7 @@ unsigned effective_epoch_search_seconds(const transfer::Options& options,bool st
     return seconds;
 }
 Settings normalized_layout(Settings value) {
+    helper::validate(value.helper);
     audio::validate_option_values({value.transmit_gain,value.exclusive});
     clock_sync::validate_audio_error(value.transfer.audio_timing_error_seconds);
     if (value.content_limit == default_memory_limit) value.content_limit = value.transfer.content_limit;

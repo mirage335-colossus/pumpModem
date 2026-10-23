@@ -10,7 +10,7 @@
 namespace datapump::gui::ui {
 enum class Page { console, compression, flow, transmission, planner, fast_modem, fhss, count };
 enum class Field {
-    callsign, grid, repeatable, simulation, link_power, link_loss, link_noise,
+    callsign, grid, repeatable, helper_power, helper_ratio_limit, helper_frequency, helper_callsign, simulation, link_power, link_loss, link_noise,
     simulation_confidence, simulation_cpu_time, simulation_gpu_time,
     simulation_oscillator, simulation_oscillator_detail, rf_oscillator, rf_shift, search_margin, oscillator_reference, oscillator_sideband,
     clock_accuracy, clock_region, clock_offset, audio_error, dsss_factor, dsss_version, fhss,
@@ -29,7 +29,7 @@ enum class Field {
     symbol_burst, symbol_burst_random, count
 };
 enum class Command {
-    none, transmit, force_transmit, transmit_noise, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,
+    none, transmit, force_transmit, transmit_noise, transmit_helper, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,
     generate_keyfile, show_key_folder, acknowledge_key_failure, save_file,
     copy_signal, paste_signal, zoom_in, zoom_out, reset_zoom, clear_waterfall,
     pattern_first, pattern_previous, pattern_next, pattern_last, toggle_qr_expanded, dismiss_overlay,

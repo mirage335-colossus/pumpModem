@@ -9,6 +9,8 @@ namespace datapump::gui::launch_command {
 // a complete, validated patch before the application changes any state.
 struct Patch {
     std::optional<double> tx_dbm,path_loss_db,noise_dbm_hz,target_db_hz;
+    std::optional<double> helper_power_w,helper_ratio_limit_db;
+    std::optional<std::string> helper_frequency,helper_callsign;
     std::optional<double> short_target_db_hz,long_target_db_hz,rate_hz,carrier_hz;
     // Carrier is the absolute physical frequency; rf_shift_hz stores the
     // translation Shift. Doppler adjusts physical Carrier before subtracting

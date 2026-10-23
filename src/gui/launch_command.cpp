@@ -70,6 +70,28 @@ double number(std::string_view text,std::string_view flag,double low,double high
         invalid(std::string(flag)+" is outside its supported range.");
     return value==0?0:value;
 }
+double helper_power(std::string_view input) {
+    std::string text(input);
+    std::erase_if(text,[](unsigned char ch){return std::isspace(ch)!=0;});
+    double scale=1;
+    for(const auto& [unit,factor]:std::array<std::pair<std::string_view,double>,6>{{{"kW",1000},{"mW",.001},{"uW",.000001},{"µW",.000001},{"μW",.000001},{"W",1}}})
+        if(text.ends_with(unit)){text.resize(text.size()-unit.size());scale=factor;break;}
+    const auto value=number(text,"--helper-power",0,std::numeric_limits<double>::max())*scale;
+    if(!std::isfinite(value))invalid("--helper-power requires finite nonnegative watts.");
+    return value;
+}
+double helper_ratio(std::string_view text) {
+    if(text.ends_with("dB"))text.remove_suffix(2);
+    while(!text.empty()&&space(text.back()))text.remove_suffix(1);
+    const auto value=number(text,"--helper-ratio-limit",10,90);
+    if(value!=10&&value!=20&&value!=40&&value!=60&&value!=80&&value!=90)
+        invalid("--helper-ratio-limit must be 10, 20, 40, 60, 80, or 90 dB.");
+    return value;
+}
+void helper_callsign(std::string_view text) {
+    if(text.size()>19||std::any_of(text.begin(),text.end(),[](unsigned char ch){return ch<32||ch>126;}))
+        invalid("Helper carrier callsign must contain at most 19 printable ASCII characters.");
+}
 double sched_frequency_search(std::string_view text) {
     const auto value=number(text,"--sched-frequency-search",1,32);
     if(value!=1&&value!=2&&value!=4&&value!=8&&value!=16&&value!=32)
@@ -147,7 +169,8 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             flag=="--reference"||flag=="--sideband"||flag=="--lf-reference"||
             flag=="--clock-sync"||flag=="--audio-error"||flag=="--dsss-factor"||flag=="--dsss-version"||flag=="--dsss-mode"||flag=="--search-arithmetic"||flag=="--receiver-strategy"||flag=="--receiver-cpu-budget"||flag=="--doppler"||flag=="--fhss"||flag=="--sched-hop"||flag=="--sched-hop-dilution"||flag=="--sched-frequency-search"||flag=="--fhss-list"||flag=="--fhss-list-file"||flag=="--live-duplex"||
             flag=="--keyfile"||flag=="--key-name"||flag=="--tx-key"||
-            flag=="--symbol-burst"||flag=="--symbol-burst-random";
+            flag=="--symbol-burst"||flag=="--symbol-burst-random"||
+            flag=="--helper-power"||flag=="--helper-ratio-limit"||flag=="--helper-frequency"||flag=="--helper-callsign";
         if(!known)invalid("Unknown launch option: "+std::string(flag));
         std::string_view value;
         if(equal!=std::string_view::npos)value=argument.substr(equal+1);
@@ -156,8 +179,15 @@ Patch parse_arguments(std::span<const std::string> arguments) {
                 invalid("Missing value for "+std::string(flag)+".");
             value=arguments[++i];
         }
-        if(value.empty())invalid("Missing value for "+std::string(flag)+".");
+        if(value.empty()&&flag!="--helper-callsign")invalid("Missing value for "+std::string(flag)+".");
         if(flag=="--tx-dbm")result.tx_dbm=number(value,flag,-200,100);
+        else if(flag=="--helper-power")result.helper_power_w=helper_power(value);
+        else if(flag=="--helper-ratio-limit")result.helper_ratio_limit_db=helper_ratio(value);
+        else if(flag=="--helper-frequency") {
+            if(value!="high"&&value!="low"&&value!="0")invalid("--helper-frequency must be high, low, or 0.");
+            result.helper_frequency=value;
+        }
+        else if(flag=="--helper-callsign"){helper_callsign(value);result.helper_callsign=value;}
         else if(flag=="--path-loss-db")result.path_loss_db=number(value,flag,0,500);
         else if(flag=="--noise-dbm-hz")result.noise_dbm_hz=number(value,flag,-250,0);
         else if(flag=="--target-snr")result.target_db_hz=number(value,flag,-200,200);
@@ -278,6 +308,10 @@ std::string format(const Patch& settings) {
         else add("--pattern",*settings.pattern);
     }
     if(settings.tx_dbm)add("--tx-dbm",numeric(*settings.tx_dbm));
+    if(settings.helper_power_w)add("--helper-power",numeric(*settings.helper_power_w));
+    if(settings.helper_ratio_limit_db)add("--helper-ratio-limit",numeric(*settings.helper_ratio_limit_db));
+    if(settings.helper_frequency)add("--helper-frequency",*settings.helper_frequency);
+    if(settings.helper_callsign)arguments.push_back("--helper-callsign="+*settings.helper_callsign);
     if(settings.path_loss_db)add("--path-loss-db",numeric(*settings.path_loss_db));
     if(settings.noise_dbm_hz)add("--noise-dbm-hz",numeric(*settings.noise_dbm_hz));
     if(settings.oscillator)add("--oscillator",std::string(tuning::parse_oscillator_preset(*settings.oscillator).id));

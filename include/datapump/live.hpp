@@ -1,6 +1,7 @@
 #pragma once
 #include "datapump/audio.hpp"
 #include "datapump/transfer.hpp"
+#include "datapump/helper_carrier.hpp"
 #include <chrono>
 #include <complex>
 #include <cstdint>
@@ -45,6 +46,8 @@ struct Settings {
     // Hardware playback gain; unity leaves existing normalization unchanged.
     double transmit_gain = 1.0;
     bool exclusive = false;
+    // Append optional extension fields to preserve existing aggregate positions.
+    helper::Options helper;
     // Selecting a transmit key restricts reception to matching keyed streams.
     // Pattern-only raw results carry no separate authentication tag.
     bool permits_plaintext() const noexcept {
@@ -98,6 +101,7 @@ struct SignalUpdate {
     std::vector<std::uint64_t> superseded_ids;
     // Physical completion is independent of the bounded, post-end search.
     transfer::RecoveryProgress recovery_progress;
+    bool helper_carrier = false;
 };
 enum class ConstellationSource { input, transmitted, received };
 struct PatternScoreObservation {
@@ -235,6 +239,9 @@ struct Snapshot {
     // A separate bounded post-reception search pool; it never consumes the
     // waveform/receiver workspace reserved by dsp_buffered_bytes.
     std::size_t recovery_working_bytes = 0;
+    std::string helper_status;
+    std::optional<double> helper_frequency_offset_hz;
+    std::optional<double> helper_snr_db;
 };
 
 // Audio callbacks and modem work never run on the caller/UI thread. configure
@@ -267,6 +274,8 @@ public:
     void set_channel_mode(audio::ChannelMode channels);
     // Output-only gain changes leave ongoing reception and prepared PCM intact.
     void set_transmit_gain(double gain);
+    // Future transmissions only; does not replace live receivers or active PCM.
+    void set_helper_callsign(std::string callsign);
     // Release only idle hardware capture for another local engine. Refuses
     // pending RX/TX; repeated polls acknowledge actual device closure. Does
     // not cancel recovery, complete a reception, or change saved settings.
@@ -288,6 +297,8 @@ public:
     // or use/register saved keys. Stop with cancel_transmit().
     // Use the same short/long profile as the current draft; secrets remain temporary.
     void transmit_noise(std::shared_ptr<const modem::FhssPlan> hopping = {}, bool long_profile = false);
+    // Independent helper only; no Robust payload/noise is added to the output.
+    void transmit_helper(std::shared_ptr<const modem::FhssPlan> hopping = {});
     // First request finishes already-generated pulse support. Repeating aborts
     // immediately, as does cancel_transmit(). Before PCM starts it cancels
     // preparation immediately. Neither operation completes a receiver burst.

@@ -15,31 +15,31 @@ bool contains(Rect outer, Rect inner) {
 }
 void established_default() {
     const DesktopLayout layout;
-    check(DesktopLayout::default_width == 1180 && DesktopLayout::default_height == 1072 &&
-          DesktopLayout::min_width == 1130 && DesktopLayout::min_height == 992,
+    check(DesktopLayout::default_width == 1180 && DesktopLayout::default_height == 1120 &&
+          DesktopLayout::min_width == 1130 && DesktopLayout::min_height == 1040,
           "desktop default or minimum size changed");
-    check(layout[Slot::tabs] == Rect{16, 257, 1148, 656}, "header must reserve a separate row for simulation computation estimates");
-    check(layout[Slot::page] == Rect{16, 289, 1148, 624}, "page viewport must start below every persistent header control");
-    check(layout[Slot::message] == Rect{16, 315, 785, 78}, "compact message composition size changed");
-    check(layout[Slot::paste_previous] == Rect{561, 293, 240, 20}, "previous-message button moved");
-    check(layout[Slot::binary] == Rect{815, 315, 220, 78}, "binary editor moved");
-    check(layout[Slot::qr] == Rect{1049, 315, 115, 115}, "QR preview must span the editor and action rows");
-    check(layout[Slot::transmit_scope] == Rect{16, 452, 1148, 206}, "generation scope size changed");
-    check(layout[Slot::profile_reference] == Rect{884, 814, 280, 91}, "profile reference must share the plot row at the right edge");
-    check(layout[Slot::signals] == Rect{16, 681, 882, 110}, "received signals size changed");
-    check(layout[Slot::files] == Rect{912, 681, 252, 74}, "received files size changed");
-    check(layout[Slot::waterfall] == Rect{16, 814, 205, 91}, "header must preserve usable plot height");
-    check(layout[Slot::device] == Rect{16, 937, 200, 27}, "persistent modem controls moved");
-    check(layout[Slot::bandwidth] == Rect{226, 937, 127, 27} &&
-          layout[Slot::carrier] == Rect{363, 937, 150, 27} &&
-          layout[Slot::rf_shift] == Rect{523, 937, 135, 27}, "Rate, Carrier and Shift editors lost their reserved widths");
-    check(layout[Slot::snr] == Rect{16, 980, 260, 27} &&
-          layout[Slot::long_snr] == Rect{286, 980, 260, 27} &&
-          layout[Slot::receive_snr] == Rect{556, 980, 180, 27}, "separate transmit targets lost their persistent row");
-    check(layout[Slot::doppler]==Rect{668,937,220,27}&&layout[Slot::dsp_workspace]==Rect{898,937,266,27}&&
-        layout[Slot::pattern]==Rect{746,980,140,27}&&layout[Slot::fec]==Rect{896,980,268,27},
+    check(layout[Slot::tabs] == Rect{16, 305, 1148, 656}, "header must reserve a separate row for simulation computation estimates");
+    check(layout[Slot::page] == Rect{16, 337, 1148, 624}, "page viewport must start below every persistent header control");
+    check(layout[Slot::message] == Rect{16, 363, 785, 78}, "compact message composition size changed");
+    check(layout[Slot::paste_previous] == Rect{561, 341, 240, 20}, "previous-message button moved");
+    check(layout[Slot::binary] == Rect{815, 363, 220, 78}, "binary editor moved");
+    check(layout[Slot::qr] == Rect{1049, 363, 115, 115}, "QR preview must span the editor and action rows");
+    check(layout[Slot::transmit_scope] == Rect{16, 500, 1148, 206}, "generation scope size changed");
+    check(layout[Slot::profile_reference] == Rect{884, 862, 280, 91}, "profile reference must share the plot row at the right edge");
+    check(layout[Slot::signals] == Rect{16, 729, 882, 110}, "received signals size changed");
+    check(layout[Slot::files] == Rect{912, 729, 252, 74}, "received files size changed");
+    check(layout[Slot::waterfall] == Rect{16, 862, 205, 91}, "header must preserve usable plot height");
+    check(layout[Slot::device] == Rect{16, 985, 200, 27}, "persistent modem controls moved");
+    check(layout[Slot::bandwidth] == Rect{226, 985, 127, 27} &&
+          layout[Slot::carrier] == Rect{363, 985, 150, 27} &&
+          layout[Slot::rf_shift] == Rect{523, 985, 135, 27}, "Rate, Carrier and Shift editors lost their reserved widths");
+    check(layout[Slot::snr] == Rect{16, 1028, 260, 27} &&
+          layout[Slot::long_snr] == Rect{286, 1028, 260, 27} &&
+          layout[Slot::receive_snr] == Rect{556, 1028, 180, 27}, "separate transmit targets lost their persistent row");
+    check(layout[Slot::doppler]==Rect{668,985,220,27}&&layout[Slot::dsp_workspace]==Rect{898,985,266,27}&&
+        layout[Slot::pattern]==Rect{746,1028,140,27}&&layout[Slot::fec]==Rect{896,1028,268,27},
         "Doppler or advanced controls lost their separate usable row widths");
-    check(layout[Slot::status] == Rect{16, 1041, 876, 24}, "persistent status must reserve the volume controls");
+    check(layout[Slot::status] == Rect{16, 1089, 876, 24}, "persistent status must reserve the volume controls");
 }
 void document_widths() {
     for(const auto viewport:{480,1000,1400}) {
@@ -54,7 +54,7 @@ void supported_sizes() {
     for (const auto size : {Rect{0, 0, min_width, min_height}, Rect{0, 0, min_width, default_height},
                             Rect{0, 0, min_width, 1200}, Rect{0, 0, 1920, min_height},
                             Rect{0, 0, default_width, default_height},
-                            Rect{0, 0, 1387, 1001}, Rect{0, 0, 1920, 1080}}) {
+                            Rect{0, 0, 1387, 1049}, Rect{0, 0, 1920, 1080}}) {
         const DesktopLayout layout(size.w, size.h);
         const auto fast_qr=layout[Slot::fast_qr],fast_brightness=layout[Slot::fast_qr_brightness];
         check(fast_brightness.x==fast_qr.x&&fast_brightness.w==fast_qr.w&&
@@ -107,6 +107,23 @@ void supported_sizes() {
               confidence.y+confidence.h==simulation.y+simulation.h&&confidence.w>=320&&
               confidence.x+confidence.w==size.w-margin,
               "RX confidence must remain readable at the right of the persistent link inputs");
+        auto previous_helper=layout[Slot::helper_power];
+        check(previous_helper.y-label_height>layout[Slot::simulation_oscillator].y+field_height,
+              "Helper row must follow clock and oscillator controls with clear labels");
+        for(const auto slot:{Slot::helper_power,Slot::helper_ratio_limit,Slot::helper_frequency,Slot::helper_callsign}) {
+            const auto helper=layout[slot];
+            check(persistent_slot(slot)&&helper.y==previous_helper.y&&helper.w>=(slot==Slot::helper_callsign?190:250)&&helper.h==field_height&&
+                  helper.y+helper.h<layout[Slot::simulation_cpu_time].y&&helper.y+helper.h<layout[Slot::tabs].y,
+                  "Helper controls must be readable on their own persistent row");
+            if(slot!=Slot::helper_power)check(helper.x>=previous_helper.x+previous_helper.w+10,
+                "Helper controls overlap");
+            previous_helper=helper;
+        }
+        const auto helper_action=layout[Slot::transmit_helper],helper_callsign=layout[Slot::helper_callsign];
+        check(persistent_slot(Slot::transmit_helper)&&helper_action.y==helper_callsign.y&&
+              helper_action.h==field_height&&helper_action.w==61&&
+              helper_action.x==helper_callsign.x+helper_callsign.w+8&&helper_action.x+helper_action.w==size.w-margin,
+              "Helper action must fit beside Callsign in the persistent helper row on every page");
         auto previous_estimate=layout[Slot::simulation_cpu_time];
         for(const auto slot:{Slot::simulation_cpu_time,Slot::simulation_gpu_time}) {
             const auto estimate=layout[slot];
@@ -158,10 +175,12 @@ void supported_sizes() {
         for(const auto slot:{Slot::simulation,Slot::link_power,Slot::link_loss,Slot::link_noise,
                              Slot::simulation_confidence,Slot::simulation_cpu_time,Slot::simulation_gpu_time,
                              Slot::clock_accuracy,Slot::clock_region,Slot::clock_offset,Slot::audio_error,
-                             Slot::simulation_oscillator,Slot::rf_oscillator,Slot::search_margin}) {
+                             Slot::simulation_oscillator,Slot::rf_oscillator,Slot::search_margin,
+                             Slot::helper_power,Slot::helper_ratio_limit,Slot::helper_frequency,Slot::helper_callsign}) {
             auto rect=layout[slot];
             if(slot==Slot::simulation||slot==Slot::link_power||slot==Slot::link_loss||slot==Slot::link_noise||
                slot==Slot::simulation_oscillator||slot==Slot::rf_oscillator||
+               slot==Slot::helper_power||slot==Slot::helper_ratio_limit||slot==Slot::helper_frequency||slot==Slot::helper_callsign||
                slot==Slot::search_margin||slot==Slot::clock_accuracy||slot==Slot::clock_region||slot==Slot::clock_offset||slot==Slot::audio_error) {rect.y-=label_height;rect.h+=label_height;}
             for(const auto prior:occupied_header)
                 check(rect.x+rect.w<=prior.x||prior.x+prior.w<=rect.x||rect.y+rect.h<=prior.y||prior.y+prior.h<=rect.y,
@@ -326,7 +345,7 @@ void hidden_scope_reclaims_space() {
                (slot>=Slot::compression_explanation&&slot<=Slot::received_raw_bits))
                 check(rect==visible[slot],"Console scope visibility moved another page or persistent controls");
         }
-        for(const auto slot:{Slot::message,Slot::binary,Slot::qr,Slot::transmit,Slot::transmit_noise,Slot::cancel,Slot::transmit_scope_format})
+        for(const auto slot:{Slot::message,Slot::binary,Slot::qr,Slot::transmit,Slot::transmit_noise,Slot::transmit_helper,Slot::cancel,Slot::transmit_scope_format})
             check(hidden[slot]==visible[slot],"Scope reflow moved composition or its always-available display choice");
         const auto signals=hidden[Slot::signals],files=hidden[Slot::files],save=hidden[Slot::save_file];
         const auto format=hidden[Slot::transmit_scope_format];

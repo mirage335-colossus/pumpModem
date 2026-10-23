@@ -93,9 +93,10 @@ class PlaybackSource {
     std::optional<std::uint64_t> declared_end_;
 public:
     PlaybackSource(std::uint32_t logical,std::uint32_t hardware,const PlaybackCallback& next,std::stop_token stop,bool timed=false,
-            std::function<double(long double)> gain={})
+            std::function<double(long double)> gain={},std::function<float(float,long double,std::uint32_t)> transform={})
         :next_(next),stop_(stop),converter_(logical,hardware,timed),input_(std::min<std::size_t>(4096,logical/20)) {
         converter_.set_output_gain(std::move(gain));
+        converter_.set_output_transform(std::move(transform));
     }
     Resampler& converter() {return converter_;}
     std::uint64_t supplied_samples() const noexcept {return supplied_;}
@@ -897,7 +898,9 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
         if(options->estimated_timing && floor+options->estimated_timing->variable_timestamp_error_seconds>=limit)
             throw TimingPreflightUnavailable(floor,"estimated UTC model has no remaining error budget; ordinary playback; UTC presentation unqualified");
     }
-    PlaybackSource source(rate,stream.hardware_rate,next_samples,stop,timed,options?options->playback_output_gain:std::function<double(long double)>{});
+    PlaybackSource source(rate,stream.hardware_rate,next_samples,stop,timed,
+        options?options->playback_output_gain:std::function<double(long double)>{},
+        options?options->playback_output_transform:std::function<float(float,long double,std::uint32_t)>{});
     const auto chunk_limit=std::min<std::size_t>(4096,stream.hardware_rate/20);
     std::vector<std::int16_t> block(chunk_limit*stream.channels);
     std::vector<float> samples(chunk_limit);
@@ -1591,7 +1594,9 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
     if(options && options->follow_system_clock)throw TimingPreflightUnavailable(std::numeric_limits<double>::infinity(),"Windows audio provider has no UTC presentation timestamps");
     if(!next_samples)throw Error("playback callback is required");
     WaveSession session(false,rate,device);
-    PlaybackSource source(rate,session.hardware_rate,next_samples,stop,false,options?options->playback_output_gain:std::function<double(long double)>{});
+    PlaybackSource source(rate,session.hardware_rate,next_samples,stop,false,
+        options?options->playback_output_gain:std::function<double(long double)>{},
+        options?options->playback_output_transform:std::function<float(float,long double,std::uint32_t)>{});
     session.prepare();
     mm_check(waveOutPause(session.output),"waveOut pause failed");
     std::vector<float> samples(std::min<std::size_t>(WaveSession::block_frames,session.hardware_rate/20));

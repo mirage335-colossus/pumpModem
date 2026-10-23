@@ -46,6 +46,68 @@ class StreamCLI(unittest.TestCase):
         self.assertNotIn(b'pack/unpack',helptext)
         for command in ('pack','unpack'):
             self.run_pump(command,'--text','x',ok=False)
+    def test_helper_options_and_disabled_preservation(self):
+        helptext=self.run_pump('--help').stdout
+        for flag in (b'--helper-power',b'--helper-data-power',b'--helper-ratio-limit',
+                     b'--helper-frequency',b'--helper-callsign'):
+            self.assertIn(flag,helptext)
+        baseline=self.run_pump('estimate','--text','e',*AUDIO).stdout
+        self.assertEqual(self.run_pump('estimate','--text','e','--helper-power','0',*AUDIO).stdout,baseline)
+        for command in ('estimate','simulate','analyze-link','devices','qr','keygen'):
+            # Reject before source/device/file operations and analysis requirements.
+            error=self.run_pump(command,'--helper-power','1.5kW',ok=False)
+            self.assertIn(b'helper',error.stderr)
+        for flag,value in (('--helper-power','nan'),('--helper-power','-1W'),
+                           ('--helper-power','1horsepower'),('--helper-data-power','0'),
+                           ('--helper-ratio-limit','11'),('--helper-ratio-limit','nan'),
+                           ('--helper-frequency','middle'),('--helper-callsign','A'*20),
+                           ('--helper-callsign','bad\ncall')):
+            self.run_pump('tx','--text','e',flag,value,*AUDIO,ok=False)
+        with tempfile.TemporaryDirectory() as directory:
+            original=pathlib.Path(directory)/'original.wav'
+            disabled=pathlib.Path(directory)/'disabled.wav'
+            self.run_pump('tx','--text','e','--output',original,*AUDIO)
+            self.run_pump('tx','--text','e','--output',disabled,'--helper-power','0',
+                '--helper-data-power','2uW','--helper-ratio-limit','10dB',
+                '--helper-frequency','low','--helper-callsign','W1ABC',*AUDIO)
+            self.assertEqual(original.read_bytes(),disabled.read_bytes())
+    def test_helper_wav_composition_and_separation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            directory=pathlib.Path(directory)
+            original=directory/'original.wav'
+            self.run_pump('status-tx','--bits','001','--output',original,*AUDIO)
+            with wave.open(str(original),'rb') as source:
+                original_frames=source.getnframes()
+                original_rate=source.getframerate()
+            for frequency in ('high',):
+                output=directory/(frequency+'.wav')
+                self.run_pump('status-tx','--bits','001','--output',output,
+                    '--helper-power','1.5kW','--helper-data-power','4W',
+                    '--helper-ratio-limit','90dB','--helper-frequency',frequency,
+                    '--helper-callsign','W1ABC',*AUDIO)
+                with wave.open(str(output),'rb') as source:
+                    self.assertEqual(source.getframerate(),48000)
+                    self.assertEqual(source.getnframes(),original_frames*48000//original_rate)
+                    pcm=source.readframes(source.getnframes())
+                    # Tail silence is actual PCM, and never includes the helper.
+                    self.assertEqual(pcm[-6*48000*source.getsampwidth():],b'\0'*(6*48000*source.getsampwidth()))
+                    self.assertTrue(any(pcm[:48000*source.getsampwidth()]))
+                decoded=self.run_pump('status-rx','--bits','001','--input',output,
+                    '--helper-power','1.5kW','--helper-data-power','4W',*AUDIO)
+                self.assertTrue(json.loads(decoded.stdout)['known_bits_match'])
+            self.run_pump('status-tx','--bits','001','--output',directory/'low.wav',
+                '--helper-power','100W','--helper-frequency','low',*AUDIO,ok=False)
+            rejected=self.run_pump('status-tx','--bits','001','--output',directory/'cochannel.wav',
+                '--helper-power','100W','--helper-frequency','0',*AUDIO,ok=False)
+            self.assertIn(b'helper',rejected.stderr.lower())
+            # Helper identification copies the local callsign unless overridden.
+            copied=directory/'copied.wav'; explicit=directory/'explicit.wav'
+            for output,extra in ((copied,()),(explicit,('--helper-callsign','W1ABC'))):
+                self.run_pump('tx','--text','e','--callsign','W1ABC','--output',output,
+                    '--helper-power','100W',*extra,*AUDIO)
+            self.assertEqual(copied.read_bytes(),explicit.read_bytes())
+            self.run_pump('tx','--text','e','--callsign','A'*20,'--helper-power','100W',
+                '--output',directory/'invalid.wav',*AUDIO,ok=False)
     def test_short_text_dictionary_threshold(self):
         for size in (1,15,16,17):
             for fec in ('off','20','60'):

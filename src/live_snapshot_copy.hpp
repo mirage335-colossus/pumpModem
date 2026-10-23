@@ -13,7 +13,7 @@ namespace datapump::live::detail {
 // Numeric destination requirements only. They deliberately retain no source
 // references, so a caller can measure under its lock and prepare after unlock.
 struct SnapshotCopyCapacity {
-    std::array<std::size_t, 4> strings{};
+    std::array<std::size_t, 5> strings{};
     std::array<std::size_t, 6> vectors{};
     std::array<std::size_t, 12> transmit_trace{};
 };
@@ -22,11 +22,11 @@ namespace snapshot_copy_detail {
 
 inline auto strings(Snapshot& value) noexcept {
     return std::tie(value.receiver_error, value.clock_timing_status,
-                    value.status, value.error);
+                    value.status, value.error, value.helper_status);
 }
 inline auto strings(const Snapshot& value) noexcept {
     return std::tie(value.receiver_error, value.clock_timing_status,
-                    value.status, value.error);
+                    value.status, value.error, value.helper_status);
 }
 
 inline auto vectors(Snapshot& value) noexcept {

@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/streaming_modem.hpp"
+#include "datapump/helper_carrier.hpp"
 #include <memory>
 
 namespace datapump::modem {
@@ -10,14 +11,23 @@ namespace datapump::modem {
 class SampledSimulationChannel {
 public:
     static constexpr std::size_t workspace_bound=80*1024;
-    SampledSimulationChannel(Config config, ChannelConfig channel);
+    // Guaranteed slack for bounded auxiliary observation during mode handoff.
+    static constexpr std::size_t auxiliary_workspace_bound=16*1024;
+    // Optional helper shares the exact sampled channel before AWGN. Its linear
+    // data scale also scales noise, preserving the configured payload SNR.
+    // Unsupported helper placements throw; the Live caller can disable only
+    // the helper and retain the original channel at its unchanged sample rate.
+    SampledSimulationChannel(Config config, ChannelConfig channel, helper::Options helper = {},
+                             double helper_occupied_bandwidth_hz = 0);
     ~SampledSimulationChannel();
     SampledSimulationChannel(SampledSimulationChannel&&) noexcept;
     SampledSimulationChannel& operator=(SampledSimulationChannel&&) noexcept;
     // The constructor prepares the first burst. Call this before each later
     // source, after any idle noise. Only the waveform queue and its independent
     // start schedule reset; receiver time and both oscillators keep running.
-    void begin_burst();
+    void begin_burst(bool helper_only = false);
+    // Takes effect at the next burst; current sampled output stays immutable.
+    void set_helper_callsign(std::string callsign);
     std::size_t read(StreamingTransmitter& source, std::span<float> output,
                      std::stop_token stop = {});
     void read_noise(std::span<float> output, std::stop_token stop = {});

@@ -155,6 +155,11 @@ void Resampler::set_output_gain(std::function<double(long double)> gain) {
     if(last_stage_)last_stage_->set_output_gain(std::move(gain));
     else output_gain_=std::move(gain);
 }
+void Resampler::set_output_transform(std::function<float(float,long double,std::uint32_t)> transform) {
+    if(started_)throw Error("resampler output transform must be set before processing");
+    if(last_stage_)last_stage_->set_output_transform(std::move(transform));
+    else output_transform_=std::move(transform);
+}
 Resampler::Progress Resampler::process(std::span<const float> input,std::span<float> output,bool end) {
     if(ending_ && !input.empty())throw Error("cannot append to a finished resampler");
     started_=true;
@@ -167,6 +172,10 @@ Resampler::Progress Resampler::process(std::span<const float> input,std::span<fl
             const auto gain=output_gain_?output_gain_((static_cast<long double>(source_)+i)/input_rate_):1.;
             if(!std::isfinite(gain)||gain<0||gain>1)throw Error("invalid output safety gain");
             output[i]=static_cast<float>(gain*input[i]);
+            if(output_transform_) {
+                output[i]=output_transform_(output[i],(static_cast<long double>(source_)+i)/input_rate_,output_rate_);
+                if(!std::isfinite(output[i]))throw Error("nonfinite resampler output transform");
+            }
         }
         if(received_>std::numeric_limits<std::uint64_t>::max()-count)throw Error("resampler duration exceeds counter range");
         received_+=count;source_=received_;produced_=received_;
@@ -181,7 +190,12 @@ Resampler::Progress Resampler::process(std::span<const float> input,std::span<fl
             if(!std::isfinite(sample))throw Error("resampler output overflow");
             const auto gain=output_gain_?output_gain_(source_seconds()):1.;
             if(!std::isfinite(gain)||gain<0||gain>1)throw Error("invalid output safety gain");
-            output[progress.produced++]=static_cast<float>(gain*sample);
+            auto value=static_cast<float>(gain*sample);
+            if(output_transform_) {
+                value=output_transform_(value,source_seconds(),output_rate_);
+                if(!std::isfinite(value))throw Error("nonfinite resampler output transform");
+            }
+            output[progress.produced++]=value;
             const auto before=observe_timing_?std::fma(-(1.L+timing_rate_),static_cast<long double>(produced_)/output_rate_,source_seconds()-timing_origin_):0;
             const auto previous_rate=correction_;
             ++produced_;
