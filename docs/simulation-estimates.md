@@ -236,7 +236,7 @@ target, Ryzen 5 PRO 5650U CPU-0 affinity and Release GCC14.2. Input was paced to
 drain all work, not to demonstrate real-time queue behavior. Device resampling,
 hardware loopback, reception latency and population timing uncertainty were not
 measured. Full evidence: the local `MANUAL-FHSS-PLANNER.md` and paired probe logs
-under `.agent-work/artifacts/receiver-opt-20261008/`.
+under `local-evidence/research/receiver-opt-20261008/`.
 
 In the rate 10 Hz, target 40 dB-Hz, DSSS 1000×, 7500 Hz stream-carrier example,
 resolution gives 40000 samples/s, 8 samples/fine chip, 512000 samples/symbol
@@ -1081,7 +1081,7 @@ conditional on the retained start set and a qualified arrival map; rejecting
 out-of-prior alternatives can change competition against an out-of-prior signal
 or interferer. Timing telemetry and measurements remain distinct from estimates.
 
-The [UTC follow-up execution measurements](validation.md#utc-fft-launch-keys-and-audio-follow-up--manual-checkpoint-9-october-2026)
+The [UTC follow-up execution measurements](https://github.com/mirage335-colossus/pumpModem/blob/0751ac847096de8017d7028d14f22037abce445e/docs/validation.md#utc-fft-launch-keys-and-audio-follow-up--manual-checkpoint-9-october-2026)
 measure about4.93x additional speedup for one qualified50ms acquisition bank at
 48kHz, with unchanged input PCM and retained thresholds. They do not calibrate
 the full Live key/epoch bank or GPU projection. Ordinary/wider no-prior cases

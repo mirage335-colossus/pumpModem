@@ -98,7 +98,7 @@ offset, a 500-second UTC step and return, explicit dated arrivals and the
 insufficient-Audio fallback. It preserves exact pending `0`/`01`, one row and
 full-symbol absence. The Default cases admit 3–5 banks rather than one per second.
 The target-edit support check accepts the slower target without clamping it.
-Evidence is under `.agent-work/artifacts/eme-launch-100w-20261017/`.
+Evidence is under `local-evidence/research/eme-launch-100w-20261017/`.
 
 No long-duration 100 W sampled capture or probability qualification was run.
 Broad regression, calibration, sanitizer, SDK, native GUI, platform, packaging
@@ -192,7 +192,7 @@ rolling-resource accounting. The root-level historical executable is unchanged;
 run the affected build at `build/dev/datapump-gui`.
 
 Evidence is retained under
-`.agent-work/artifacts/amplitude-rx-model-20261016/`: frozen seeds and harness hashes
+`local-evidence/research/amplitude-rx-model-20261016/`: frozen seeds and harness hashes
 in `heldout-freeze.json`, exact aggregate gate in `heldout-result.json`, native
 capture logs, Live logs and traces. These are local candidate evidence, not
 release certification.

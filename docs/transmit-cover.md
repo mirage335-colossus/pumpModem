@@ -189,7 +189,7 @@ is the preceding cover/audio-default source rebuilt before edits, including the
 released short-dictionary fix. Source is HEAD `889bb4a2325ca9b249eb33dd19d5e56579acdf60`
 plus preserved local overlays. Frozen source, compiler/configuration, libraries,
 probes and raw results are under the ignored
-`.agent-work/artifacts/receiver-opt-20261008/timing-echo-baseline/` and adjacent
+`local-evidence/research/receiver-opt-20261008/timing-echo-baseline/` and adjacent
 `timing-*` captures. The manual report is `MANUAL-TRANSMIT-TIMING-ECHO.md` there.
 This checkpoint is not full timing, receiver, security or platform qualification.
 
@@ -415,7 +415,7 @@ and a 0.03-amplitude tone interferer, a strong-signal regression rather than a
 threshold qualification.
 
 Exact programs, JSON captures, spectrum summaries, logs and source/build manifest
-are retained under `.agent-work/artifacts/receiver-opt-20261008/` (`cover-*`,
+are retained under `local-evidence/research/receiver-opt-20261008/` (`cover-*`,
 `transmit-cover-final`, `MANUAL-TRANSMIT-COVER.md`). The launcher is
 `manual-transmit-cover.sh`. Broader qualification remains outstanding: full acquisition-bank sensitivity and rare-event calibration,
 multiple keys/rolling epochs, broad impairments/interference, native physical

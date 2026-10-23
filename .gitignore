@@ -1,7 +1,7 @@
 /build/
 /build-*/
-# Local cross-tool agent coordination and temporary findings.
-/.agent-work/
+# Local source-bound reports and reproduction inputs; never coordination state.
+/local-evidence/
 /third_party/build-support/cache/
 /CMakeUserPresets.json
 __pycache__/
@@ -13,3 +13,6 @@ __pycache__/
 /:memory:.ses
 *verbose*.jsonl
 
+
+# Locally copied application binary; build outputs belong under build/.
+/datapump-gui

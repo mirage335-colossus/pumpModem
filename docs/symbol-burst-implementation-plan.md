@@ -1,4 +1,10 @@
-# Symbol_Burst implementation handoff
+# Symbol_Burst implementation plan
+
+**Current status:** implementation and reconciliation are complete. See the
+[maintained Symbol_Burst behavior](symbol-burst.md) and
+[validation record](validation.md). This retained plan records accepted
+requirements and historical implementation detail; it is not a restart
+instruction.
 
 Implement an optional Robust Modem mode that transmits a complete existing symbol,
 leaves a predictable silent interval for receive processing, and starts the next
@@ -6,12 +12,11 @@ symbol on a 30-second UTC boundary. Reuse the existing numerical receivers. The
 success criterion is actual recovery of nearly feasible receiver workloads through
 bounded backlog draining, with matching truthful Link planner estimates.
 
-This is a planning handoff for GPT-6.1 Sol at Ultra effort. It specifies proposed
-implementation work, not an implemented or qualified feature. Source baseline:
+Original planning baseline:
 `c9b5ae9bacad657fa9a3cf65ad988edc1173883b`, branch `codex/pulse-moments`, inspected
-17 October 2026. Recheck current source before implementation; symbol/function
-names below are more durable than line numbers. This handoff changes documentation
-only and does not authorize a release.
+17 October 2026. The technical detail below describes the proposal at that
+baseline. Current implementation and qualification are recorded in the maintained
+topic and validation history above.
 
 ## User requirements and accepted decisions
 
@@ -31,9 +36,8 @@ The following requirements are authoritative for this work:
 | Completion | Preserve the development contract: only complete failed expected symbols, totaling at least six seconds of symbol duration, establish physical END. |
 | Preservation | Keep earlier fixes and retain roughly comparable feasibility for Default 32/55 dB, the supplied −8 dB configuration, Spread, Weak, Sub-9 kHz and EME, including nearby CPU-curve points and plaintext/encrypted variants. |
 
-Read [AGENTS.md](../AGENTS.md), [coordination](agent-coordination.md),
-[building](building.md) and the [development contract](development.md) before
-editing. This plan does not override their compatibility or validation rules.
+Any future changes must follow the current [project requirements](../AGENTS.md),
+[build guide](building.md) and [development contract](development.md).
 
 ## Scope and important consequences
 
@@ -416,8 +420,8 @@ because Tune needs additional work.
 
 ## Code ownership and integration map
 
-These are locations to inspect and likely edit, not permission to claim every
-file at once. Use the current source and claim each exact path before writing.
+These are locations to inspect and likely edit. Recheck current source and keep
+coupled changes together through review and validation.
 
 | Area | Current entry points and work |
 | --- | --- |
@@ -438,12 +442,9 @@ file at once. Use the current source and claim each exact path before writing.
 | Frontend transport | Inspect `src/gui/web_bridge.cpp`, `src/host/runtime.cpp`, `src/host/worker.cpp`, `web/protocol.mjs`; generic controls already carry settings, so do not invent unnecessary IPC fields. |
 | Tests and documentation | `CMakeLists.txt`, `cmake/TestGroups.cmake`, focused new fixtures and existing preservation tests; update relevant manuals and timing/planner docs after behavior is verified. |
 
-Freeze the calendar, address and capture/absence invariants before parallel edits.
-One coordinator integrates coupled TX/RX/transport/live changes. A separate worker
-can prepare pure calendar tests or UI work after interfaces are fixed. Another can
-own a baseline harness in isolated outputs. File disjointness alone does not make
-search state or final validation independent. Give every agent AGENTS.md, the
-coordination workflow, exact checkout and board path; do not assume discovery.
+Freeze the calendar, address and capture/absence invariants before implementation.
+TX/RX/transport/live changes share these contracts, so validate combined behavior
+even when edits are in separate files.
 
 ## UI and settings details
 
@@ -496,7 +497,7 @@ The exact supplied command is:
 ./datapump-gui --pattern auto-keystream --tx-dbm 3 --path-loss-db 170 --noise-dbm-hz -164 --oscillator crystal --shift 0 --search-margin 3 --reference independent --target-snr -8 --short-target-snr 32 --long-target-snr 55 --rate 3600 --carrier 1500 --doppler 0.000000c --dsp-workspace 50% --clock-sync default --audio-error 70ms --dsss-mode off --dsss-factor 10 --dsss-version interleave --search-arithmetic default --receiver-strategy auto --receiver-cpu-budget 0.6 --live-duplex yes --sched-hop-dilution 0 --sched-hop 0 --sched-frequency-search 1 --fhss off --keyfile=/tmp/demoKey --key-name=Default --tx-key named
 ```
 
-Use the freshly built executable in its stable/claimed build directory; the
+Use the freshly built executable in its stable build directory; the
 literal command above records input semantics, not authority to use a stale root
 binary. Automated fixtures should use existing synthetic in-memory key facilities
 or properly scoped fixture keyfiles, without reading real user secrets. Assert
@@ -510,10 +511,10 @@ Public FHSS follows existing inactive/unsupported behavior and must not quietly
 acquire a key for a comparison.
 
 The historical source harness at
-`.agent-work/artifacts/sched-regression-review-20261016/planner_matrix.cpp` is a
+`local-evidence/research/sched-regression-review-20261016/planner_matrix.cpp` is a
 useful local starting point, if present. It exports every CPU curve point plus
-target/short/long ±1 dB neighbors. Copy/adapt its source under new claims and build
-it against current code; never use its old executables or obsolete compatibility
+target/short/long ±1 dB neighbors. Copy/adapt its source into a new output
+directory and build it against current code; never use its old executables or obsolete compatibility
 macros as current evidence. The maintained tests are also sufficient starting
 points when this ignored historical artifact is unavailable.
 
@@ -614,13 +615,13 @@ has been achieved.
 ## Ordered implementation stages
 
 Complete the exit check for each stage before broadening edits. Keep each stage's
-source/configuration identity and useful failures in claimed evidence. Stop an
+source/configuration identity and useful failures with its evidence. Stop an
 expensive attempt that has already answered its discriminating question; then
 fix the identified fault before repeating it.
 
 | Stage | Deliverable | Exit check |
 | --- | --- | --- |
-| 0 Baseline | Coordination record, stable source, isolated claimed outputs, rebuilt matrix and representative sampled baseline. | Exact user targets/configurations preserved; current feasible and unsupported cases distinguished; earlier fixes inventoried. |
+| 0 Baseline | Stable source identity, separate outputs, rebuilt matrix and representative sampled baseline. | Exact user targets/configurations preserved; current feasible and unsupported cases distinguished; earlier fixes inventoried. |
 | 1 Calendar | Pure options, support/core coordinates, immutable successor/cursor, domain-separated waits, independent oracle/vector tests. | All boundaries, N/R/J combinations, overflow, plaintext and address tests pass; Off unchanged. |
 | 2 Streaming TX | Sparse symbols with literal inter-symbol silence, physical UTC/FHSS, correct masking and durations, bounded cancellation/Tune. | Independent PCM/support/address vectors, gap zeros, P=0, FHSS, cover and stop tests pass; construction/streaming avoid quadratic or duration-sized work. |
 | 3 Existing RX | Shared calendar continuation in selected FFT/compact/amplitude paths, complete-symbol admission, explicit expected-slot absence. | Raw `001`, missing-slot identities and physical END work from independently constructed PCM; next-poll progress preserved. |
@@ -671,35 +672,34 @@ Existing useful fixtures include `test_pattern_receiver`,
 `test_web_bridge`. Preserve the scheduled/FHSS and amplitude-arrival suites too.
 
 Use `./build.sh` to configure/build the application and
-`./build.sh test GROUP` for appropriate groups. From the absolute checkout, with
-all outputs/resources claimed and stable source inputs, a valid shared-GUI command
-is:
+`./build.sh test GROUP` for appropriate groups. With stable source inputs, a
+focused shared-GUI command is:
 
 ```sh
-./build.sh test gui --build-dir build/agents/SESSION/gui --jobs 2
+./build.sh test gui --build-dir build/future-work/symbol-burst/gui --jobs 2
 ```
 
 For narrower diagnosis after that tree is configured, build the specific targets
 before CTest. This existing selection is valid:
 
 ```sh
-cmake --build build/agents/SESSION/gui --target \
+cmake --build build/future-work/symbol-burst/gui --target \
   test_gui_launch_command test_gui_launch_settings \
   test_link_planner_curves test_gui_link_planner --parallel 2
-ctest --test-dir build/agents/SESSION/gui --output-on-failure \
+ctest --test-dir build/future-work/symbol-burst/gui --output-on-failure \
   -R '^(gui_launch_command|gui_launch_settings|link_planner_curves|gui_link_planner)$' -j 2
 ```
 
-Use the new Burst targets similarly after registering them; do not run full
-calibration during each calendar edit. Native display and timing work must not
-compete with another heavy local run. Current relevant full group names include
+Use the new Burst targets similarly after adding them; do not run full calibration
+during each calendar edit. Native display and timing measurements must not compete
+with another heavy local workload. Current relevant full group names include
 `contract`, `regular`, `gui`, `frontends`, `web`, `native`, `packaging`,
 `amplitude_arrival`, `amplitude_probability` and `all`. Groups overlap; reuse
 matching completed evidence instead of duplicating expensive suites.
 
-The completed runtime candidate needs ordinary full CI and SDK qualification,
-including applicable native/platform/packaging scopes. Current documented manual
-dispatches are:
+The original plan required full CI and SDK qualification, including applicable
+native/platform/packaging scopes. The snapshot documented these manual dispatch
+commands:
 
 ```sh
 gh workflow run ci.yml --ref REF -f devfast=false \
@@ -708,18 +708,16 @@ gh workflow run sdk.yml --ref REF -f devfast=false \
   -f linux_runner=ubuntu-latest-h
 ```
 
-Substitute the actual reviewed candidate ref and verify current workflow schemas
-before dispatch. Use shared Git/CI claims and the repository's normal publication
-authorization. These commands are instructions for the implementation stage, not
-a dispatch requested by this planning turn. Wait for real results. Automatic
-push/PR green checks are lightweight and do not replace this qualification.
+These commands are historical. Consult current workflow schemas and project
+policy before any future dispatch. The original plan required real results;
+automatic push/PR checks did not replace that qualification.
 Reuse durable base dependency recipes. Preserve mandatory Release real-time
 tests; ordinary instrumented omissions are omitted coverage, not passes. Apply
 only the exact typed workload/hosted-WGL exceptions already documented in AGENTS
 and the build/release guides. A release, if separately requested, needs exact
 source/binary certification after publication.
 
-## Completion and next agent handoff
+## Completion criteria
 
 The implementation is complete only when all of the following are supported:
 
@@ -738,19 +736,5 @@ The implementation is complete only when all of the following are supported:
 * Off preserves existing behavior and cost; required final regression and
   qualification complete for the exact delivered source/configuration.
 
-Update maintained behavior/man pages only after their statements match the
-implementation. Preserve historical evidence and its limits. Keep compact
-unresolved facts in claimed `.agent-work/notes/`, then release source/resource
-claims promptly after their last writer and required validation. No blanket
-cleanup, reset or staging of another session's work.
-
-Suggested prompt for the implementing chat:
-
-> Implement `docs/symbol-burst-implementation-plan.md` from the current checkout.
-> Read AGENTS.md and the coordination workflow first; verify the current baseline
-> and preserve existing changes. Follow the exact timing, acquisition, capture,
-> absence and crypto invariants. Complete the production backlog-draining slice
-> before broad UI/planner work. Keep the specified examples and nearby CPU curves
-> honest and roughly feasible; fix demonstrated underlying regressions. Finish
-> the required full validation rather than stopping at focused passes. Report
-> actual results and remaining limits. Do not publish a release unless requested.
+Update maintained behavior/man pages only when their statements match the
+implementation. Preserve historical evidence and its limits.

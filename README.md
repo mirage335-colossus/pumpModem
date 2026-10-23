@@ -9,11 +9,8 @@ for dependencies, stable profiles, focused tests and portable release limits.
 performance studies, interfaces, security, build/release procedures and supporting
 evidence. Existing investigations include both measured results and open proposals.
 
-**AI contributors:** read [AGENTS.md](AGENTS.md) and the
-[shared agent coordination workflow](docs/agent-coordination.md) before editing
-or shared build/Git operations. Temporary ownership and findings live in the
-gitignored `.agent-work/` directory; the workflow links bounded readers and
-publication recipes for simultaneous chats and tools.
+**Contributors:** read [AGENTS.md](AGENTS.md) for development requirements and
+build/test checks.
 
 **Manuals:** [pump(1)](docs/man/pump.1), [pump-fast(1)](docs/man/pump-fast.1)
 and [datapump-gui(1)](docs/man/datapump-gui.1). Read a source page with

@@ -1,7 +1,7 @@
 # Validation, research evidence and release history
 
 [Documentation index](../README.md) · [Robust studies](robust.md) ·
-[Fast studies](fast.md) · [Coordination studies](coordination.md#studies-and-the-reasons-for-later-changes)
+[Fast studies](fast.md)
 
 These collections preserve measurements, methods, models, negative results,
 fixtures and original reports. Dated evidence is not automatically obsolete;
@@ -80,3 +80,13 @@ remain directly accessible:
 The [release-history directory](../release-history/) provides the parent
 collection. Historical assurance reports describe their exact releases; they
 are not interchangeable with qualification of later source or binaries.
+
+## Local historical reports
+
+Local research reports and fixture sources were retained separately from retired
+application binaries in `local-evidence/`. Its compact README explains how to read
+a specific member of the compressed historical capture. Maintained topics use
+`local-evidence/research/` paths; some members need extraction first. These are
+optional local evidence, not installed documentation or current runnable builds.
+Raw tracked reports retain original paths/hashes as historical provenance; old
+commands must be adapted to a fresh source/configuration/output tree before reuse.

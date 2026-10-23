@@ -333,15 +333,25 @@ the host. Use `./build.sh sanitize GROUP` with the native development toolchain,
 or prepare an SDK that supplies the target sanitizer runtimes explicitly.
 
 Do not run simultaneous configure/build operations against the same directory.
-Separate agents must follow the [coordination workflow](agent-coordination.md):
-claim every output tree for the entire configure/build/test operation. Use
-`--build-dir build/agents/SESSION/PROFILE` to avoid contention; unique paths still
-need claims. A completed incremental build can be handed off after recording its
-source/configuration; separate output trees still need stable source inputs and coordinated access to
-timing-sensitive tests and devices. Old top-level `build-native`, `build-agent-*`
-and similar directories are not current presets. They may contain unique logs,
-captures or dependencies, so the wrapper never deletes them. Archive useful
-evidence before removing them yourself.
+Concurrent contributors should use separate output directories under `build/`,
+keep source inputs stable during checks, and coordinate access to timing-sensitive
+tests and devices. Serialize shared Git mutations and final integration. Old
+top-level `build-native`, `build-agent-*` and similar directories are not current
+presets. They may contain unique logs, captures or dependencies, so the wrapper
+never deletes them. Inspect useful contents before removing them.
+
+Workspace contents have separate purposes:
+
+- `build/`: reproducible configure, compile and package outputs. Rebuild an old
+  application against known source/configuration instead of guessing a binary's
+  identity. Prepared SDKs and dependency caches can remain useful across source
+  revisions; keep their recipe, checksum and provenance requirements.
+- `local-evidence/` (ignored): only selected source-bound reports, failure captures,
+  reproduction inputs and unaccepted source patches. Never use it for session,
+  ownership or task registries. It is not routine startup reading. Promote useful
+  conclusions to maintained docs; remove redundant captures once their purpose ends.
+- `docs/`: current contracts, concise validation status and useful unfinished plans.
+  Git history retains superseded tracked narratives; do not append session diaries.
 
 Every configuration writes `build-info.txt` with source revision, compiler,
 backend and build flags; packaging includes it. This is configure-time
@@ -1196,7 +1206,6 @@ all required notices and ordinary documentation remain installed. See
 | Shared GUI behavior | [GUI architecture](gui-architecture.md), `src/gui/application.cpp`, `src/gui/controller.cpp` | `gui`, then affected native backends |
 | Native widgets/platform services | `src/gui/backend_fltk*`, `src/gui/backend_rev*` | `gui`, `native` |
 | Build/dependencies/packaging | `CMakeLists.txt`, `cmake/`, `build.sh`, `third_party/README.md` | `build`, `packaging` |
-| Simultaneous agents, reservations, guarded edits and messages | [coordination workflow](agent-coordination.md), [recipes](agent-coordination-recipes.md), `tools/check-agent-record.py`, `tools/agent-board.py`, `tools/agent-session.py`, `tools/agent-edit.py` | `python3 -B tests/test_agent_record.py`, `test_agent_board.py`, `test_agent_session.py`, `test_agent_edit.py` and `test_agent_stress.py` under `tests/`, then `build` |
 
 When locating implementation, search maintained `src/`, `include/`, `tests/`
 and `cmake/` first. Vendored trees and `docs/validation-data` are reference

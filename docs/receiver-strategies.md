@@ -593,7 +593,7 @@ ceiling. The maintained probability limitation also remains: no full-bank
 amplitude detection curve is substituted from coherent or conditional evidence.
 Detailed bounded precision/sensitivity experiments and source/binary identities
 are retained with the local manual-checkpoint report under
-`.agent-work/artifacts/amplitude-opt-20261012/`.
+`local-evidence/research/amplitude-opt-20261012/`.
 
 
 The final paired 512-chip/256-second standalone fixture reduces candidate work

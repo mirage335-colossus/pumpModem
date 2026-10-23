@@ -1,7 +1,7 @@
 # Build, test, install and release
 
 [Documentation index](../README.md) · [Interfaces](interfaces.md) ·
-[Coordination](coordination.md) · [Evidence and release history](evidence.md)
+[Evidence and release history](evidence.md)
 
 ## Maintained procedures
 
@@ -13,9 +13,9 @@
 | [Offline installation](../offline-installation.md) | Portable installation, manual pages, dependency provenance and optional evidence bundles. |
 | [Release procedure](../../RELEASE) | Ordered release-delivery instructions. |
 | [Release guide](../releases.md) | Publication, exact source/binary assurance, reusable dependency recipes and certification policy. |
-| [Validation ledger](../validation.md) | Dated checks, failures, omissions and limits; locate the relevant revision, topic or heading. |
+| [Validation ledger](../validation.md) | Current qualification, coverage limits and links to historical evidence. |
 | [Development contract](../development.md) | Compatibility and preservation tests required by implementation changes. |
-| [Contributor requirements](../../AGENTS.md) | Repository instructions, testing stages and coordination requirements. |
+| [Contributor requirements](../../AGENTS.md) | Repository instructions and testing stages. |
 
 ## Dependencies and provenance
 

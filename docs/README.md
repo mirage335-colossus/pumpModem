@@ -25,8 +25,8 @@ useful after settings or implementations change.
 | Legacy Modem | [BPSK31, BPSK125 and Olivia reference](legacy-modem.md), [Olivia interoperability fixtures](../tests/fixtures/legacy/README.md), [BPSK fixture provenance](../tests/fixtures/legacy/PSK-fixtures.md) |
 | GUI, terminal, framebuffer and browser | [Interfaces and inspection](indexes/interfaces.md): shared behavior, adapters, plots, Link Planner, browser/worker protocols and QR |
 | Security and compatibility | [Contracts, cryptography and security analysis](indexes/security.md): wire/receiver preservation, key and storage boundaries, receive hardening, LPI models and historical reviews |
+| Unfinished implementation goals | [Future work](future-work.md): offline ARM64 rebuilds, receiver efficiency and practical Sched_Hop; detailed technical plans remain linked. |
 | Validation and research evidence | [Studies, captures and release history](indexes/evidence.md): raw results, reproduction methods, independent vectors, failed attempts, warnings and certification records |
-| Concurrent development and agent work | [Coordination procedures and studies](indexes/coordination.md): current workflow, helper recipes, lifecycle, temporary findings and empirical evaluations |
 
 ## Command and interface manuals
 
@@ -52,13 +52,10 @@ Raw validation captures require a source checkout or an
 
 Topic entries are starting points, not exclusions. Search document filenames,
 headings and text when a question crosses branches or an entry is too broad.
-For a large ledger such as [validation](validation.md), locate the relevant
-heading/date and read the associated record and evidence rather than assuming
-that its size makes the evidence irrelevant.
+[Validation](validation.md) gives current qualification and links to historical
+records. Read those records only when relevant to a concrete question.
 
 When adding or substantially changing documentation, update the relevant topic
 page and cross-link other useful branches. Keep existing paths and inbound links
 working, retain original evidence and its limitations, and describe superseded
-work accurately rather than silently dropping it from navigation. Temporary
-local findings follow the [coordination workflow](agent-coordination.md); they
-are separate from this maintained, distributable documentation map.
+work accurately rather than silently dropping it from navigation.

@@ -57,10 +57,11 @@ algorithms, not proof that all timing/carrier/clock alternatives are separable.
 
 Frozen baseline: `b581d41f494362dc3068fd594f560d67ba245395`, local Release
 GCC 14.2/FLTK build on AMD Ryzen 5 PRO 5650U. The preceding GUI, static library,
-source archive and CMake configuration remain in
-`.agent-work/artifacts/public-alphabet-20261012/baseline/manifest.json`.
-The new source overlay, binary identity, launcher, measurement programs and raw
-results are retained in that artifact directory. Nothing was published.
+source archive and CMake configuration identities were recorded in
+`local-evidence/research/public-alphabet-20261012/baseline/manifest.json`.
+Retained reports/fixture sources describe the new overlay, binary identity and
+measurements. Old executables and build trees have been retired; rebuild matching
+source/configuration before reproduction. Nothing was published.
 
 ### Shaped waveform measurements
 

@@ -144,7 +144,7 @@ def prepare(root, report):
     for p in PATHS:
         q=report/'originals'/p;q.parent.mkdir(parents=True,exist_ok=True);q.write_bytes((root/p).read_bytes())
     source=git(root,'rev-parse','HEAD') if (root/'.git').exists() else None
-    inventory={str(p.relative_to(root)):sha(p.read_bytes()) for p in root.rglob('*') if p.is_file() and not any(x in {'.git','.agent-work','build','__pycache__'} for x in p.relative_to(root).parts)}
+    inventory={str(p.relative_to(root)):sha(p.read_bytes()) for p in root.rglob('*') if p.is_file() and not any(x in {'.git','local-evidence','build','__pycache__'} for x in p.relative_to(root).parts)}
     manifest={'schema':1,'assignment':'gui-stop-current-identity-wave','runtime':RUNTIME,'source_commit':source,'read_pins':pins,'originals':{p:sha((root/p).read_bytes()) for p in PATHS},'postimages':{p:sha(v.encode()) for p,v in changed.items()},'private_header':HEADER,'header_sha256':sha((SUPPORT/'probe.hpp').read_bytes()),'support':support_hashes(),'source_inventory':inventory,'qualification':False,'matched':False,'source_semantics':'original full noarg fixture, natural inputs/default clock/stop; coarse observation only'}
     write(report/'manifest.json',manifest)
     (report/'overlay.patch').write_text(''.join(''.join(difflib.unified_diff(original[p].splitlines(True),changed[p].splitlines(True),fromfile='a/'+p,tofile='b/'+p)) for p in PATHS))

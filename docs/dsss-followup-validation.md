@@ -10,8 +10,7 @@ or hosted CI was performed. Broader qualification waits for the user's request.
 
 Both builds are local overlays on `ac63e3ab18850daf4f093c9dfeb1bcb6541abf27`,
 branch `codex/pulse-moments`. The preceding optimized receiver is the frozen
-clock/spread candidate, not the original raw implementation. Its runnable GUI
-remains `.agent-work/artifacts/receiver-opt-20261008/clock-spread-manual-gui`,
+clock/spread candidate, not the original raw implementation. Its former GUI was `clock-spread-manual-gui` (now retired),
 SHA256 `24ec8757fc613c62b821db08660af9effa67bb0965a4487ef7e95b03397d89f4`.
 Baseline library SHA256 is
 `13cc4ae7428e1a5afa6813445b79b5cf1c8f130cdee63e8fc0903851bee54995`;
@@ -25,10 +24,11 @@ Final GUI SHA256 is
 `7a88d9496158fcb626abf8973bd40e6c603a992bd81d027de11a8f5efc2115e7`.
 Build: GCC 14.2, Release/O3, FP contraction disabled, FLTK; native graphical tests,
 sanitisers and web-worker build are OFF in this prepared build. The source overlay,
-CMake cache, executables, test evidence and baseline hashes are retained in
-`dsss-followup-manual-manifest.json`. The build directory is
+CMake configuration, executable identities, test evidence and baseline hashes
+were recorded in `dsss-followup-manual-manifest.json`. The former build directory was
 `build/agents/receiver-opt-20261008/native`; `./build.sh` was used to build it.
-Raw diagnostic modes and earlier raw/optimized baselines remain available.
+Rebuild the recorded source/configuration to reproduce these raw/optimized
+comparisons; old executables and build trees have been removed.
 
 ## Implemented changes and bounds
 
@@ -421,7 +421,7 @@ once per fine chip and increases outer-stream bytes substantially. Neither its
 low CPU cost nor loss below 0.1 dB has been established.
 
 Local reproducible probes, CSVs, PCM and stage analyses are retained in
-`.agent-work/artifacts/receiver-envelope-20261009/REPORT.md` and its manifest
+`local-evidence/research/receiver-envelope-20261009/REPORT.md` and its manifest
 SHA256 `19dadd8c1710b82da1d7af19f5954def44de5eb0bdd3cb2a2d1fe53bbce5bfc8`.
 The report records exact compiler commands and hashes. That checkpoint preceded
 the versioned construction below.
@@ -468,7 +468,7 @@ bytes; this does not measure receiver peak memory.
 Full-burst production/instrumented byte identity, legacy compatibility,
 coefficient norm multisets, Parseval consistency and a three-sample partial
 final chip pass. Pulse tails and bit-boundary windows are included. The local
-report `.agent-work/artifacts/outer-envelope-spectrum-20261009/REPORT.md` records
+report `local-evidence/research/outer-envelope-spectrum-20261009/REPORT.md` records
 the exact input, stage controls, metrics and limitations; `results.json` SHA256 is
 `e22e0126b2e22f74a5a9c29b4687dbe40c9c7aad7f011628a872f6c3482e6706`.
 Overlapping deterministic windows do not support a population confidence
@@ -493,5 +493,5 @@ loss, full acquisition/active-guard behavior, raw-reference cumulative loss or a
 hardware power budget. V2 numerical RX probability remains withheld. Exact case
 intervals, saved curves, production replay scope, source hashes and remaining
 qualification are in
-`.agent-work/artifacts/receiver-opt-20261008/MANUAL-BOUNDED-ACQUISITION.md` and
-`.agent-work/artifacts/receiver-tight-envelope-measure-20261009/final5-mc-analysis2-*.json`.
+`local-evidence/research/receiver-opt-20261008/MANUAL-BOUNDED-ACQUISITION.md` and
+`local-evidence/research/receiver-tight-envelope-measure-20261009/final5-mc-analysis2-*.json`.

@@ -1,9 +1,13 @@
 # Sched Hop implementation runbook for practical processing headroom
 
-Planning baseline: **15 October 2026**, `codex/pulse-moments`,
-`7a9640764e2a0249e5dbd64f039cd8df987350e7`. Audience: the subsequent GPT-6.1 Sol
-implementation pass. This is a proposed implementation and decision procedure,
+Original planning baseline: **15 October 2026**, `codex/pulse-moments`,
+`7a9640764e2a0249e5dbd64f039cd8df987350e7`. This is a retained technical plan,
 not an implemented receiver, passing measurement, or qualification report.
+
+**Current status:** the matched sustained-reception rescue remains unfinished.
+This historical plan is not an instruction to restart work. Check the current
+[Sched_Hop topic](scheduled-hops.md) and [validation record](validation.md)
+before using its measurements or implementation sequence.
 
 The selected architecture is **bounded Original numerical cohorts with shared
 physical projections and exact source reuse, followed by ordered commits**.
@@ -27,27 +31,26 @@ drain. A useful manual checkpoint with an unmet rescue must say **unfinished**.
 | I4 Ordered executable work | [Cards 0–12](#ordered-implementation-cards) |
 | I5 Decisive experiments and branches | [Fixture recipes](#fixture-recipes-and-independent-producer) and [critical path](#critical-path-and-bounded-decisions) |
 | I6 Every serious strategy | [Disposition matrix](#strategy-disposition-matrix) |
-| I7 Stop and escalation rules | [Sol rules](#stop-and-escalation-rules-for-sol) |
+| I7 Technical stop conditions | [Stop conditions](#technical-stop-conditions) |
 | I8 Final evidence and delivery | [Report template](#required-implementation-report-and-machine-readable-outputs), [tests](#build-and-test-matrix) and [GUI](#gui-and-manual-testing-checkpoint) |
 
 ## Scope and execution contract
 
-Follow [AGENTS](../AGENTS.md), [coordination](agent-coordination.md),
-[development](development.md) and [building](building.md). Read the relevant
-source again before every card; symbol names below are authoritative over line
-numbers. Later source changes require reconciliation, not forced patches.
+Any future work must follow the current [project requirements](../AGENTS.md),
+[development contract](development.md) and [build guide](building.md). Read the
+relevant source again before using a card; symbol names below are more durable
+than line numbers. Later source changes require reconciliation, not forced
+patches.
 
-This planning pass changed no runtime code and ran no receiver benchmarks or
-application tests. Its checks were source inspection, retained artifact hashes,
-manifest reconciliation and documentation review. The implementation pass is
-authorized to work locally, build, run the affected local tests, and deliver a
-rebuilt GUI with normal, verbose and bounded debug launchers. It is not authorized
-to push, publish, dispatch hosted CI, introduce GPU execution, change mixer/driver
-routing, or begin hours-long platform/SDK qualification.
+The original planning pass changed no runtime code and ran no receiver benchmarks
+or application tests. Its checks were source inspection, retained artifact hashes,
+manifest reconciliation and documentation review. Any future implementation
+requires its own current authorization and validation scope; this document grants
+none.
 
-Preserve the optimized continuous receiver, preceding scheduled binaries,
-Original scalar diagnostic path, failing fixtures, raw measurements, assertions,
-other sessions' files and all existing wire/progress behavior. In particular:
+Preserve the optimized continuous receiver and the recorded scheduled results,
+Original scalar diagnostic path, failing fixtures, raw measurements, assertions
+and all existing wire/progress behavior. In particular:
 
 - Text of 1–16 source bytes keeps its exact short dictionary codes and endpoint;
   raw binary keeps every entered bit. Add no wire metadata or padding.
@@ -67,8 +70,9 @@ other sessions' files and all existing wire/progress behavior. In particular:
 
 ### What was verified
 
-`a0143115..7a964076` changes only `FURTHER-agents.txt`. The worktree/index were
-clean at planning startup. At that point all 2,278 entries in the amended
+The planning snapshot from `a0143115..7a964076` changed only the future-work
+ledger. The worktree/index were clean at planning startup. At that point all
+2,278 entries in the amended
 calendar30 validation manifest matched the covered files. The planning diff adds
 this runbook and its topic navigation link; runtime inputs remain unchanged.
 The newer commit therefore does not
@@ -76,7 +80,10 @@ invalidate the calendar30 runtime evidence, although a commit alone remains
 insufficient build identity.
 
 Let `A` denote the local ignored evidence directory
-`.agent-work/artifacts/sched-fft-rescue-20261014/`. Preserve it read-only.
+`local-evidence/research/sched-fft-rescue-20261014/`. These are historical
+reports/fixture sources (some in the local compressed capture). Old executable
+and library hashes below identify former runs; their local binaries and build
+trees were retired. Rebuild the matching source/configuration for a new comparison.
 
 | Item | Verified identity or scope |
 | --- | --- |
@@ -87,13 +94,12 @@ Let `A` denote the local ignored evidence directory
 | Amendment | `A/source30-validation-amendment/IDENTITY.json`; reconcile its parent and changed files |
 | Build/candidate provenance | `A/source30-delta/IDENTITY.json`, `calendar30-root-promotion.json`, `calendar30-delivery-checks.json` |
 | Earlier baseline | `A/baseline/identity.json` describes earlier GUI `253c0dd7…` / core `87488a2b…`, not calendar30 |
-| Planning read dependencies | `.agent-work/artifacts/sched-astra-runbook-20261015/baseline-read-dependencies.json` |
+| Planning read dependencies | `local-evidence/research/sched-astra-runbook-20261015/baseline-read-dependencies.json` |
 
 The earlier baseline used GCC 14.2, Linux Release/FLTK and
-`-O3 -ffp-contract=off -fno-fast-math`. Re-extract each retained candidate's own
-cache and compile commands; do not attach those flags to a different binary by
-assumption. Preserve runtime dependency hashes and loader paths as well as the
-GUI, static core, source manifest and fixture sources.
+`-O3 -ffp-contract=off -fno-fast-math`. Use each report's own compiler/configuration identity; do not attach those flags
+to a newly rebuilt binary by assumption. Re-establish dependency hashes, loader
+paths and build provenance before reusing a fixture.
 
 ### Measurements that may be reused with their original scope
 
@@ -122,7 +128,7 @@ targets. Reconcile `calendar30-regular-final-summary.json` and amendment members
 before quoting counts for a rebuilt candidate.
 
 The M10 evidence is in
-`.agent-work/artifacts/sched-practical-20261013/EFFICIENCY-FOLLOWUP.md`.
+`local-evidence/research/sched-practical-20261013/EFFICIENCY-FOLLOWUP.md`.
 The 5.1%-slower native curve variant, 9.8%-slower packed-Gram variant and
 21.4%-slower combined signal/Gram variant reject those implementations in their
 measured scopes. They do not reject every FP32, temporal or family transform.
@@ -770,35 +776,30 @@ reuse. Do not log keys, plaintext PCM or private template values.
 
 ## Ordered implementation cards
 
-Each card uses the exact frozen source/build/configuration manifest from Card0
-plus its prerequisite cards' reviewed hashes. Re-read those inputs at the start;
-changed dependencies invalidate affected evidence. The integration owner owns
-`invariant:project:receiver-search` through coupled numerical/commit changes and
-their validation. Other agents may analyze/review in parallel. Do not assign
-different halves of the state ABI to independent shared-checkout writers.
-
-For every card, first claim its exact files, new tests, output tree and artifact
-namespace through the checked coordination helper. Builds require stable inputs
-or an isolated snapshot. Timed runs require `workload:host:timing-sensitive` and
-must run without concurrent compilation or other benchmarks. Audio/display claims
-are needed only for actual device/native work. Keep a working reference executable
-and an explicit scalar/previous-backend override until final validation.
+Each card uses a frozen source/build/configuration manifest plus its prerequisite
+cards' accepted results. Re-read those inputs at the start; changed dependencies
+invalidate affected evidence. Keep coupled numerical and commit changes under
+one coherent implementation and validate their combined behavior. Run timed
+measurements without concurrent compilation or other benchmarks. Preserve a
+working reference executable and an explicit scalar/previous-backend override
+until final validation.
 
 ### Card 0 Freeze the actual candidate and prepare isolated outputs
 
 **Purpose/prerequisites:** no prerequisites; establish runnable references, not
-just Git labels. Read current HEAD/status/diffs, session claims/inbox, relevant
-closed handoffs, the source30 amendment and the build instructions.
+just Git labels. Read current source changes, the source30 amendment and the
+build instructions.
 
-**Files/resources/API:** own artifact/TMPDIR/build namespaces; no runtime edits.
+**Files/resources/API:** use separate artifact, temporary and build directories;
+no runtime edits.
 Read GUI/core files, `build-info.txt`, CMake cache/compile commands, dynamic loader
-dependencies and fixture sources. Use tested `agent-session.py` operations.
+dependencies and fixture sources.
 
-**Algorithm:** capture HEAD, index/worktree diff hashes, compiler version/flags,
+**Algorithm:** capture source/index/worktree identity, compiler version/flags,
 CPU model, available cpuset/affinity, worker count, memory limit, load, all
 `DATAPUMP_*` names/values that are not secrets, dependency path/hashes and fixture
-input hashes. Copy binaries/dependencies/source inputs into a **new** claimed
-reference directory; do not overwrite root launchers or earlier references.
+input hashes. Copy binaries/dependencies/source inputs into a **new** reference
+directory; do not overwrite root launchers or earlier references.
 Record synthetic key generation, seed, rates, geometry and original PCM hash.
 Do not bundle a private developer key. Verify the copied executable actually
 loads its intended dependencies. A source archive must include intended dirty
@@ -823,13 +824,12 @@ of the frozen preceding GUI/core; no source rollback required for this card.
 **Purpose/prerequisites:** Card0. Produce one machine-readable census per F1/F2
 M0/M3/M5 and M3/G3 before new timing claims.
 
-**Read/edit/claims:** read `src/gui/controller.cpp`, `launch_command.cpp`,
+**Relevant source:** read `src/gui/controller.cpp`, `launch_command.cpp`,
 `application.cpp`, `src/main.cpp`, `receiver_strategy.cpp`, `simulation_estimate.cpp`,
 `tuning.cpp`, `pattern_search.cpp`, `scheduled_complex_search.cpp`,
-`pattern_receiver.cpp`, `pattern_correlator.cpp`, `live.cpp`. Edit only bounded
-census/trace fields, relevant test cases and new copied fixture sources; claim
-each edited file and search invariant. Preserve GUI example settings unless a
-round-trip defect is actually reproduced.
+`pattern_receiver.cpp`, `pattern_correlator.cpp`, `live.cpp`. Limit edits to
+bounded census/trace fields, relevant test cases and copied fixture sources.
+Preserve GUI example settings unless a round-trip defect is actually reproduced.
 
 **API/algorithm:** use existing strategy resolution and work counters. At
 configuration resolution and first bank admission emit: requested/effective
@@ -864,10 +864,10 @@ prior binary as control; no speed claim from this card.
 **Purpose/prerequisites:** Cards0–1. Split the actual residual bucket before
 writing another kernel.
 
-**Read/edit/claims:** `scheduled_work_profile.hpp`,
+**Relevant source:** `scheduled_work_profile.hpp`,
 `scheduled_template_cpu_attribution.hpp`, lazy replay/materialize/complete and
 diagnostic-history paths in `pattern_correlator.cpp`, admission/loans in
-`live.cpp`. Claim only necessary instrumentation files plus measurement resource.
+`live.cpp`. Add only the necessary instrumentation and measurement.
 
 **API/algorithm:** add mutually exclusive coarse categories for calendar/Piece
 construction; source crypto/permutation/shaping; carrier/projection; whole
@@ -912,7 +912,7 @@ the entire residual to a convenient kernel. Preserve old profiling scope and log
 **Purpose/prerequisites:** Cards1–2. Refactor with no performance or detector
 change; this is the correctness substrate for every later fast path.
 
-**Read/edit/claims:** `src/pattern_correlator_batch.hpp/.cpp`,
+**Relevant source:** `src/pattern_correlator_batch.hpp/.cpp`,
 `pattern_correlator.cpp::accumulate_scheduled/complete`,
 `scheduled_original_boundary_partition.hpp`, `scheduled_default_linear_events.hpp`,
 `scheduled_resume_state.hpp`; new `scheduled_original_event.hpp` and
@@ -960,7 +960,7 @@ transfer and exactly-once chip/pulse finalization.
 **Purpose/prerequisites:** Card3. Change execution scheduling while using the
 same scalar numerical function first.
 
-**Read/edit/claims:** `scheduled_parallel_preparation.hpp`,
+**Relevant source:** `scheduled_parallel_preparation.hpp`,
 `scheduled_processing_journal.hpp`, `scheduled_resume_state.hpp`,
 `scheduled_acquisition_catalog.hpp`, `pattern_correlator.cpp::lazy_plan`,
 `lazy_for_each_due`, `lazy_replay_to`, `flush_lazy`, `lazy_prepare_detached`,
@@ -1011,7 +1011,7 @@ uses synchronous scalar job execution through the same ABI.
 **Purpose/prerequisites:** Card4. Remove duplicated key-independent mixing and
 projection without changing capture or calendar semantics.
 
-**Read/edit/claims:** `shared_scheduled_capture.hpp`,
+**Relevant source:** `shared_scheduled_capture.hpp`,
 `scheduled_original_projection_cache.hpp`, `scheduled_carrier_restart.hpp`,
 `scheduled_shared_input.hpp`, `scheduled_frequency_recurrence.hpp`,
 `live.cpp` source/loan/pool lifecycle, new tile-cache tests.
@@ -1058,7 +1058,7 @@ checks broadest safe key independence and narrowest correct phase identity.
 **Purpose/prerequisites:** Cards3–5. This is the mandatory first complete vertical
 implementation. It must change the measured hot replay, not just add scaffolding.
 
-**Read/edit/claims:** `pattern_correlator_batch.hpp/.cpp`,
+**Relevant source:** `pattern_correlator_batch.hpp/.cpp`,
 `scheduled_private_batch.hpp`, `scheduled_mapped_piece_groups.hpp`,
 `scheduled_ordered_pulse_candidates.hpp`, `scheduled_pulse_moments.hpp`,
 exact source sample/permutation pool helpers and lazy job executor in
@@ -1135,7 +1135,7 @@ through the ABI; frozen binaries remain independent references.
 **Purpose/prerequisites:** Card6, Card2's guard-cost evidence. First optional
 accelerator when outer/public pulse work is material; it targets guards directly.
 
-**Read/edit/claims:** `CorrelationOuterEvidence`,
+**Relevant source:** `CorrelationOuterEvidence`,
 `scheduled_outer_public_replay.hpp`, `scheduled_pulse_moments.hpp`,
 `scheduled_temporal_templates.hpp`, `scheduled_temporal_normalization.hpp`,
 `scheduled_original_boundary_partition.hpp`, new Original cohort executor/tests.
@@ -1195,7 +1195,7 @@ support endpoint and outer versus private-limiter distinction.
 only under Card2's documented cost choice. Reuse valid engines rather than build
 conversion-heavy FFT machinery.
 
-**Read/edit/claims:** `pattern_fft_batch.cpp`, `pattern_correlator_batch.cpp`,
+**Relevant source:** `pattern_fft_batch.cpp`, `pattern_correlator_batch.cpp`,
 `search_fft.hpp/.cpp`, `scheduled_acquisition_tile.hpp`,
 `scheduled_default_point_fft.hpp`, `scheduled_spectral_products.hpp`,
 `scheduled_frequency_recurrence/fusion/postinverse.hpp`, source/template caches,
@@ -1253,7 +1253,7 @@ Reviewer checks physical phase, full Gram, guards and inverse normalization.
 **Purpose/prerequisites:** Cards6–8 complete baseline; this is contingent, not an
 excuse to bypass exact fallback. Existing code is retained and reused where useful.
 
-**Read/edit/claims:** `scheduled_default_point_family.hpp`,
+**Relevant source:** `scheduled_default_point_family.hpp`,
 `scheduled_default_linear_events.hpp`, point FFT/bulk/archive/summary/compact
 headers and lazy include files, guard prepass/reference recipe and policy selector.
 
@@ -1292,7 +1292,7 @@ an Original certificate from chord arithmetic. Rollback is exact family route.
 **Purpose/prerequisites:** Card6 plus whichever qualified specialization won.
 Full rolling execution is required; one-bank success cannot close this card.
 
-**Read/edit/claims:** `src/live.cpp` Bank/Receiver admission/loans,
+**Relevant source:** `src/live.cpp` Bank/Receiver admission/loans,
 `shared_scheduled_capture.hpp`, exact source/permutation/curve/temporal pools,
 `scheduled_processing_journal.hpp`, `scheduled_diagnostic_journal.hpp`,
 `scheduled_default_point_diagnostics.hpp` and lazy history queries.
@@ -1334,7 +1334,7 @@ and runtime. Rollback uses per-bank exact cohorts with optional caches disabled.
 **Purpose/prerequisites:** Cards6–10 and matching measurements. Consolidate
 accidental precedence without deleting reproducible diagnostic routes.
 
-**Read/edit/claims:** `scheduled_acquisition_policy.hpp`, new small
+**Relevant source:** `scheduled_acquisition_policy.hpp`, new small
 `choose_scheduled_execution` helper, `receiver_strategy.cpp`,
 `scheduled_complex_search.cpp`, planner/tuning owners only where the verified
 model actually resides, GUI backend/status display tests.
@@ -1367,8 +1367,8 @@ override; no historical controls removed until their evidence is reconciled.
 explicitly recorded. No new architecture at this stage without returning to its
 focused gate.
 
-**Claims/files:** stable candidate source/invariant, claimed Release test/build
-tree, fresh artifacts/launchers; serialized measurement resource, native display
+**Relevant inputs:** stable candidate source/invariant, separate Release test/build
+tree, fresh artifacts/launchers; serialized measurement, native display
 and audio device only when exercised. Edit maintained result documentation after
 actual outcomes, not beforehand.
 
@@ -1425,14 +1425,14 @@ sensitivity qualification. F1 uses its `noise example` link-budget setting.
 
 ### Current and historical harness distinction
 
-The older `.agent-work/artifacts/sched-moderate-20261014/fixture/user36-multicycle.cpp`
+The older `local-evidence/research/sched-moderate-20261014/fixture/user36-multicycle.cpp`
 accepts `--sched-hop off` and internal dilution1, disables automatic receive
 profiles and hardcodes full-receive Fs6120/rate36. Its moderate scope has120s
 backlog/900s workload limits. It is a useful historical diagnostic, not the current
 24s production acceptance harness.
 
 Use these preserved current fixture sources as the starting point, copied into
-the implementation's newly claimed namespace before any modification:
+a new output directory before any modification:
 
 ```text
 A/calendar29-live/spread-calendar.cpp
@@ -1446,7 +1446,7 @@ A/firstbank-calendar26.cpp
 A/firstbank-full-profile.cpp
 ```
 
-Also copy `.agent-work/artifacts/spread-live-fixture-20261014/spread-tail.hpp`.
+Also copy `local-evidence/research/spread-live-fixture-20261014/spread-tail.hpp`.
 The Spread source currently includes that header by absolute historical path;
 in the copied fixture only, change that include to `"spread-tail.hpp"` and
 record the path-only diff. Place these headers beside the copied `.cpp` files
@@ -1475,23 +1475,23 @@ Audio70/default and other rates similarly require separately named fixture
 variants where the current strict Audio0/rate assertions intentionally reject
 them. Preserve the original F1/F2 assertions and recipes.
 
-Do **not** run historical Python runners in place. Some import old coordination
-code, mutate the old session, compile, or overwrite fixed `results.json`, trace,
-`.run.json` and temporary paths. Extract inspected argv/environment into a fresh
-runner. `run-bounded.py` inherits arbitrary DATAPUMP overrides and has a45s
-external kill; it cannot establish production completion.
+Do **not** run historical Python runners in place. Some mutate historical
+fixtures, compile, or overwrite fixed `results.json`, trace, `.run.json` and
+temporary paths. Extract the inspected argv/environment into a fresh runner.
+`run-bounded.py` inherits arbitrary DATAPUMP overrides and has a45s external
+kill; it cannot establish production completion.
 
 ### Build and compile commands
 
-The following are future execution recipes. Bind the shell's actual cwd to the
-checkout. Replace SESSION with the registered implementation ID and claim B/O/
-TMPDIR before creating or writing them. Do not reuse an old build owner's tree.
+The following are historical execution recipes. Bind the shell's actual cwd to
+the checkout and use separate build, output and temporary directories. Do not
+reuse an existing build tree whose source/configuration identity is unknown.
 
 ```sh
 R=/home/user/___quick/p/_cur/dataPump/pumpModem
-SESSION=YOUR_REGISTERED_IMPLEMENTATION_ID
-B="$R/build/agents/$SESSION/release"
-O="$R/.agent-work/artifacts/$SESSION"
+TASK=sched-hop-run
+B="$R/build/future-work/$TASK/release"
+O="$R/local-evidence/research/$TASK"
 mkdir -p "$O/tmp"
 export TMPDIR="$O/tmp"
 ./build.sh build --build-dir "$B" --build-jobs 2 --jobs 1
@@ -1557,12 +1557,12 @@ receiver overrides; keep that protection. Record explicit worker affinity:
 effective worker count fixed across variants rather than relying on `auto` while
 host limits change.
 
-A fresh runner must first create a fresh per-run directory under the claimed
+A fresh runner must first create a fresh per-run directory under the separate
 `$O/runs/<run-id>` and use `subprocess.Popen(argv, cwd=run_dir,
 env=sanitized_env, start_new_session=True)` with absolute executable/input paths
 and exclusive new output files. These fixtures require `--trace` to be a local
 filename; pass a fresh basename such as `trace.jsonl`. Do not launch them with
-the repository as cwd, which would write unclaimed traces into the checkout.
+the repository as cwd, which would write traces into the checkout.
 Record monotonic start,
 actual exit/status and complete stdout/stderr. On outer timeout terminate only
 that owned process group, join it and retain first causal stderr/trace failure.
@@ -1612,7 +1612,7 @@ Auto without these switches and report which operators actually ran.
 
 The historical4.8GHz lead is documented in
 [the earlier checkpoint](scheduled-hops.md#october-14-bounded-acquisition-manual-checkpoint)
-and `.agent-work/artifacts/sched-finish-20261014/MANUAL-SCHED-FINISH.md`.
+and `local-evidence/research/sched-finish-20261014/MANUAL-SCHED-FINISH.md`.
 Its unpaced continuous result used856.7409 CPU/133.5796 processing wall s over
 98.933333 physical s, while independently paced input hit backlog24s at about
 70.88s. That is a lead for current revalidation, not a selected current F3.
@@ -1640,7 +1640,7 @@ Historical commands, shown only to define the lead (run copies in new outputs):
 
 These old binaries accept `off`; that spelling must not be transplanted blindly
 to a current public0 fixture. The historical complete source is
-`.agent-work/artifacts/sched-calendar-20261013/user36-001.cpp`, SHA256
+`local-evidence/research/sched-calendar-20261013/user36-001.cpp`, SHA256
 `4e4b4c16642f220e76acb037b47c857d8ce3f3789d84df113ef3913c7ec54962`;
 paced source is `sched-finish-20261014/sustained-source/user36-sustained.cpp`,
 SHA256`75d15c59996d68a399e02ed0358d9153c33bbe54e3c65957a6a36f837c3f6b7a`.
@@ -1773,7 +1773,7 @@ Proposed new interface, not options accepted by the old fixture:
 ```
 
 Use the selected F3 shift and fixed worker count, rather than these lead
-placeholders. Create claimed fresh plan/run directories first and launch with
+placeholders. Create separate plan/run directories first and launch with
 the per-run cwd rule above. The plan freezes loaded Config, all addresses,
 anchors/origins/endpoints, seeds, PCM/source hashes, worker/cpuset/workspace and
 the expected producer/observation deadlines. Record reference/candidate binary
@@ -2064,11 +2064,11 @@ xvfb-run -a ./build.sh test native --build-dir "$B" \
   --build-jobs 2 --jobs 1 -- -DGUI_SMOKE_TIMEOUT=600
 ```
 
-Claim display/resource and use an available qualified local backend. Missing
+Use a qualified local backend. Missing
 display/Xvfb means zero executed native assertions until repaired or reported.
 Shared GUI tests need no display but do not establish native rendering. Package
 or sanitizer checks are scoped to changed responsibilities and run in separate
-claimed trees; they do not justify an hours-long platform/SDK campaign here.
+separate trees; they do not justify an hours-long platform/SDK campaign here.
 
 Many actual Original tests use exit77 with CMake skip handling. Record skips by
 name/reason and supply a bounded valid Original case for each new numeric route.
@@ -2086,7 +2086,7 @@ extend individual physical/backlog/cancellation deadlines to clear a red result.
 
 Rebuild from final source with the application wrapper and record the GUI binary,
 runtime collection, build-info/compiler/environment and source hashes. Save new
-normal, verbose and debug launchers in the claimed delivery directory, pointing
+normal, verbose and debug launchers in the delivery directory, pointing
 to that exact binary. Preserve preceding launchers. Shell launchers use safely
 quoted absolute arguments or a Python argv array, never concatenated untrusted
 command text.
@@ -2170,7 +2170,7 @@ strategy left unattempted without a bound or concrete blocker keeps the objectiv
 open. Another bottleneck alone is not a reason to leave a cheap material gain
 unexamined.
 
-## Stop and escalation rules for Sol
+## Technical stop conditions
 
 - Revalidate baseline and the relevant API/invariant before each edit. If they
   changed, reconcile the new source/evidence and retain unrelated work.
@@ -2182,8 +2182,8 @@ unexamined.
   the specified fallback/diagnostic branch.
 - When a proposed equivalence is false, retain exact Original cohorts. Record the
   smallest counterexample: identity, rate/phase/mask, first differing row/state,
-  expected versus actual dependency. Escalate that concrete mathematical issue
-  for stronger-model review before replacing the detector or claiming equivalence.
+  expected versus actual dependency. Resolve the concrete mathematical issue
+  before replacing the detector or claiming equivalence.
 - If complete cost fails, identify actual limiting work, relevant Amdahl/byte
   bound and the next applicable strategy from the matrix. Do not claim a planner
   estimate, kernel gain, one-bank result or parallel CPU redistribution as rescue.
@@ -2281,10 +2281,9 @@ this runbook supersedes no measurement and claims no new receiver result.
 
 ## October 15 implementation amendment: bounded lower F3 selection
 
-This is an explicit implementation-phase design amendment reviewed by Astra
-(`f3_gate_review`). The original selector, baseline identities and failed
-measurements above remain unchanged. Interpolation does not itself establish
-production support or practical rescue.
+This is an implementation-phase design amendment. The original selector,
+baseline identities and failed measurements above remain unchanged.
+Interpolation does not itself establish production support or practical rescue.
 
 The separate startup-qualified three-cycle fixture retains the original strict
 prefix, poll, source-address, END, all-stream and drain assertions. Its common
@@ -2332,7 +2331,7 @@ exposure limit an observable completing ratio to roughly 1.167. The reachable
 selection band is therefore approximately 1.05–1.16; do not extend the deadline
 or reinterpret a slower incomplete run as a complete measurement.
 
-Evidence is retained under `.agent-work/artifacts/sched-cohorts-20261015/`,
+Evidence is retained under `local-evidence/research/sched-cohorts-20261015/`,
 including `f3-startup/selection-amendment.json`, frozen identities, plans and raw
 service/paced failures. At this amendment checkpoint M0's 2.4 GHz metadata plan
 passed, while M3/M5 preflight failed with an audit coordinate error. Selection
@@ -2439,7 +2438,7 @@ adoption, remain unqualified. Choose the next specialization from complete cost
 attribution. A Default point-operator replacement remains contingent on its own
 proof; these failed filters do not justify changing the Original reference.
 
-Evidence lives under `.agent-work/artifacts/sched-cohorts-20261015/`, especially
+Evidence lives under `local-evidence/research/sched-cohorts-20261015/`, especially
 `candidates/native8/`, `native8-f1-crossover.json`,
 `native8-focused-summary.json`, `f3-initial/rf2400-service-summary.json` and
 `f3-rf3000/final-selector-summary.json`. Compact notes preserve failed attempts,
@@ -2506,19 +2505,12 @@ reported 17, 12, 12 and 16 nested unittest cases respectively; the Arch total
 includes two native pacman cases skipped by the existing disposable-root/
 container/tool guard. Those two cases did not pass and were not exercised.
 
-The retry also disproved an infrastructure assumption: installed GnuPG 2.4.7's
-`gpgconf --dry-run --list-dirs` can create its runtime child directory. Two
-guarded attempts stopped before real GPG work; their five empty child
-directories were recovered with fresh exact claims and verified inode/UID/
-emptiness checks. The corrected retry derived and claimed each exact child
-before invoking the query, then required the actual socket path to match.
-Three retained home/path pairs verified the derivation against the upstream
-[GnuPG 2.4.7 implementation](https://raw.githubusercontent.com/gpg/gnupg/gnupg-2.4.7/common/homedir.c).
-The final four-case retry passed with 201
-accepted GPG preflights. Its subreaper stopped and joined all owned descendants,
-removed 88 exact disposable runtime directories, released those claims and
-removed its temporary namespace. Unrelated user GPG socket entries were
-preserved. No key publication or host package installation occurred.
+An unrelated infrastructure retry showed that installed GnuPG 2.4.7's
+`gpgconf --dry-run --list-dirs` can create its runtime child directory. The
+corrected four-case retry passed with 201 accepted GPG preflights. No key
+publication or host package installation occurred. This setup finding is
+preserved here because it affected the final validation record, not as a required
+Sched_Hop implementation step.
 
 The selected sanitizer replacement kernel run passed all eleven cases. The
 remaining instrumented `live_exact_source` failed the same partial-queue drain
@@ -2555,7 +2547,7 @@ adoption route remain open.
 
 Exact commands, source identities, original failures, focused retry results,
 internal skips and cleanup receipts are retained under
-`.agent-work/artifacts/sched-cohorts-20261015/final-release-all/`,
+`local-evidence/research/sched-cohorts-20261015/final-release-all/`,
 `final-release-infra/`, `final-release-infra-attempt2/`,
 `final-release-infra-attempt3/`, `final-sanitize/` and `final-native/`.
 

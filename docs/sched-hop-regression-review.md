@@ -114,7 +114,7 @@ The earlier full-host inventory, `final-source-inputs.json`, SHA-256
 `002f444f3b55e8892d76305ee0bba8638c2b502cec34e47154da97d09ccb5457`,
 is also preserved.
 The inventory and raw outputs are retained in the local review artifacts under
-`.agent-work/artifacts/sched-regression-review-20261016/`.
+`local-evidence/research/sched-regression-review-20261016/`.
 
 | Configuration / target | Before | Corrected candidate | Result |
 | --- | ---: | ---: | --- |

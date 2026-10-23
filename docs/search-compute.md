@@ -506,13 +506,13 @@ is available. These stub runs do not qualify real audio-device deadlines.
 
 Exact source/build hashes, all 54 timing runs, power/spectrum evidence, final-source
 spot checks and remaining qualification are recorded in
-`.agent-work/artifacts/receiver-opt-20261008/MANUAL-BOUNDED-ACQUISITION.md` and
+`local-evidence/research/receiver-opt-20261008/MANUAL-BOUNDED-ACQUISITION.md` and
 `../receiver-tight-envelope-measure-20261009/paired3-width-matrix-summary.json`
 (relative to that artifact directory). This is a local manual-test checkpoint.
 Retained-score agreement does not alone qualify full acquisition sensitivity,
 changed continuation order, interference or cumulative raw-reference loss.
 
-The current [local UTC benchmark](validation.md#utc-fft-launch-keys-and-audio-follow-up--manual-checkpoint-9-october-2026)
+The current [local UTC benchmark](https://github.com/mirage335-colossus/pumpModem/blob/0751ac847096de8017d7028d14f22037abce445e/docs/validation.md#utc-fft-launch-keys-and-audio-follow-up--manual-checkpoint-9-october-2026)
 measures complete three-bit receptions against the frozen preceding optimized
 receiver. The supplied1200x10 case reduces total CPU from1.389 to0.284s for13s PCM
 (three pairs;48-byte retained-state increase). This is one key/epoch bank; it is
@@ -678,8 +678,9 @@ without global VNNI, DOTPROD or I8MM requirements. ARM execution is untested her
 
 Near-threshold tests and whole-receiver measurements are reported in the local
 `MANUAL-CPU-ARITHMETIC.md` artifact under
-`.agent-work/artifacts/receiver-opt-20261008/`. This stage preserves the preceding
-optimized runnable GUI and raw diagnostic reference. It is an experimental
+`local-evidence/research/receiver-opt-20261008/`. That stage recorded the preceding
+optimized GUI and raw diagnostic reference; their local binaries have since been
+retired and must be rebuilt from the matching source/configuration. It is an experimental
 manual-testing checkpoint, not full sensitivity/platform qualification. In
 particular, exact conditional retained-statistic agreement does not supply a
 full acquisition-bank or cumulative raw-reference 0.1 dB sensitivity bound.
@@ -801,7 +802,7 @@ latency. No new frontend, waveform, receiver optimization or detection-sensitivi
 claim follows from this experiment.
 
 The complete local report and raw paired results are retained in
-`.agent-work/artifacts/receiver-aes-benchmark-20261009/report.md`, `summary7.json`
+`local-evidence/research/receiver-aes-benchmark-20261009/report.md`, `summary7.json`
 and evidence manifest SHA256
 `5c04b72cd80f1b5de0ae7e0590aa157fd1218445cea306acaefc3bb5b13d4671`.
 Frozen source is `1e016a0dffe033c36fc71afad5241d16dc8957e5`, library SHA256

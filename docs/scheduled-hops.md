@@ -176,7 +176,7 @@ that is not whole-reception throughput or sensitivity evidence. Numerical
 parity in full one-bank captures and successful GUI startup do not resolve
 that limitation. Current measurements, identities, launchers and outstanding
 strategies are recorded in the local
-[manual checkpoint](../.agent-work/artifacts/sched-moderate-20261014/MANUAL-SCHED-MODERATE.md).
+[manual checkpoint](../local-evidence/research/sched-moderate-20261014/MANUAL-SCHED-MODERATE.md).
 
 ## Split symbols and cryptographic coordinates
 
@@ -749,7 +749,7 @@ sensitivity, BER or cumulative loss below 0.1 dB. The conditional AWGN evidence
 below predates these interpolation changes and does not qualify them.
 
 Exact manifests, timing logs, arithmetic experiment and retained failures live in
-`.agent-work/artifacts/sched-practical-20261013/EFFICIENCY-FOLLOWUP.md`. Dense/tiled
+`local-evidence/research/sched-practical-20261013/EFFICIENCY-FOLLOWUP.md`. Dense/tiled
 correlation, shared rolling-bank moment caches, reduced-precision contraction,
 broader timing/high-DSSS/multiple-key performance, hardware, ARM and long-duration
 qualification remain outstanding. The continuous reference's different waveform,
@@ -829,7 +829,7 @@ statistic. Adaptive reconstruction of an aging clock grid remains outstanding.
 
 ### Shared execution: measured diagnosis (2026-10-13)
 
-The preserved runnable baseline has GUI SHA256 `a4303d6c…` and core
+The historical baseline had GUI SHA256 `a4303d6c…` and core
 `8bfa035c…`, with source preserved at `fe3e2c28…`. An instrumented copy of that
 receiver processed the same 348-second, 6,000 Hz private capture used above:
 PCM hash `12980061178210671347`, M10/G1, DSSS/FHSS Off, 16-source-second symbols,
@@ -1049,7 +1049,7 @@ was separately bounded and retained as partial evidence.
 Detailed build identities, raw-result hashes, arithmetic costs, opportunity
 bounds, preserved failures and strategy dispositions are in the maintained
 [data summary](validation-data/robust/shared-scheduled-20261013/component-summary.json)
-and local `.agent-work/artifacts/sched-shared-20261013/MANUAL-CHECKPOINT.md`.
+and local `local-evidence/research/sched-shared-20261013/MANUAL-CHECKPOINT.md`.
 Integrated large-frequency fusion, candidate-axis integer arithmetic, adaptive
 transform batches and guard convolutions remain explicit substantial work;
 small kernel prototypes do not complete those strategies. This rebuilt GUI is
@@ -1106,7 +1106,7 @@ again. The receiver still accounts for 144 bytes more than its preceding
 baseline. The 8 KiB `PatternCode` assertion also remains intact; its measured
 count is 5,448 bytes versus 5,424 in the baseline. Exact fixture commands and
 before/after readouts are in `memory-probe-results.json`, `memory-after-result.json`
-and `memory-probe.cpp` under `.agent-work/artifacts/sched-hop-20261012/`.
+and `memory-probe.cpp` under `local-evidence/research/sched-hop-20261012/`.
 This storage correction changes no waveform, cryptographic address, arithmetic,
 search geometry or detection threshold.
 
@@ -1214,7 +1214,7 @@ wrong-key banks, hardware timestamps or threshold-region sensitivity. They do
 not establish that DSSS100/1000 rolling reception is feasible at those costs.
 
 Raw logs, exact commands and identities are under
-`.agent-work/artifacts/sched-hop-20261012/`. Final `probe-5/` contains
+`local-evidence/research/sched-hop-20261012/`. Final `probe-5/` contains
 `live-tight.log`, `live-fhss.log`, `live-broad.log`, `execution-results.json`,
 `identity.json` and `digest-comparison.json`. Its library SHA256 is
 `79ef2c1202c284f1cdfde0eee5a362abe2de0fa724136dbeb6c901ce2a8cbb31`;
@@ -1229,7 +1229,7 @@ and its captures remain historical references. Its `dsss10.log`, plus parent
 `dsss100.log`/`dsss1000.log`, identify the conditional DSSS results above;
 those isolated receiver captures were not rerun on the storage-only revision.
 The earlier `probe-2`/`probe-3` captures and
-`.agent-work/artifacts/sched-hop-rx-refine-20261012/` prototype remain diagnostic
+`local-evidence/research/sched-hop-rx-refine-20261012/` prototype remain diagnostic
 references. The probe-2 instrument source was edited after its receipt, so that
 older receipt does not identify its current instrument bytes. No capture here
 measures sensitivity loss or physical sound-card behavior.
@@ -1307,7 +1307,7 @@ general real-time ceiling. Every pair adds only 32 bytes to accounted workspace.
 Encrypted TX digests match for DSSS Off/10/100/1000.
 
 Exact timing replay, native mocks, paired builds and final local test receipts
-are linked from `.agent-work/artifacts/sched-utc-20261012/MANUAL-SCHED-UTC.md`.
+are linked from `local-evidence/research/sched-utc-20261012/MANUAL-SCHED-UTC.md`.
 The rebuilt timing candidate passed 38/38 GUI and 63/64 local regular cases
 (calibration and native-display labels deferred). The unchanged ALSA clipping
 failure remains: peak 1.00944, 63 clipped samples, energy fraction 2.47619e-8
@@ -1528,8 +1528,8 @@ This is an **unfinished implementation checkpoint**, not a demonstrated rescue
 of the requested rate 36/DSSS10/target 8 link. The frozen preceding GUI
 `97d92eb573469892ad01f969571a02b6a7fa2210a1455c2b6f5ffbda874c855e`
 and core `05696f6f26bb242b4fe9409af6428e6e055739e41bac456a2e2f912f6eefbdd6`
-remain runnable. Local captures and exact build/source identities are retained
-under `.agent-work/artifacts/sched-calendar-20261013/`. No hosted or platform
+identify historical binaries, now retired. Retained reports and exact build/source identities are
+under `local-evidence/research/sched-calendar-20261013/`. No hosted or platform
 qualification is implied.
 
 The supplied rate 36, target 8, interleaved DSSS10 command resolves at unchanged
@@ -1673,7 +1673,7 @@ can resolve the eager acquisition cliff. Additional sensitivity loss has not bee
 measured in dB; no negligible-loss or full-bank probability claim is made.
 
 The detailed local checkpoint report is
-`.agent-work/artifacts/sched-calendar-20261013/MANUAL-CALENDAR-ACQUISITION.md`,
+`local-evidence/research/sched-calendar-20261013/MANUAL-CALENDAR-ACQUISITION.md`,
 with exact identities, strategies, failed captures and launchers. No planner CPU
 coefficient or probability discount is inferred from these partial measurements.
 The requested broad rate 36/DSSS10 example and central sustained-headroom objective
@@ -1775,7 +1775,7 @@ physical hardware and long-duration qualification remain outstanding.
 
 Detailed identities, failed captures, component scope, checks and strategy
 status are recorded in
-`.agent-work/artifacts/sched-finish-20261014/MANUAL-SCHED-FINISH.md`.
+`local-evidence/research/sched-finish-20261014/MANUAL-SCHED-FINISH.md`.
 This is a local partial manual-test checkpoint, not completion of the
 Sched_Hop efficiency objective or overall qualification.
 
@@ -1871,8 +1871,9 @@ remaining practical headroom failure are retained in the manual report above.
 
 ### Practical examples and shared preparation, 14 October
 
-The next local pass preserves the preceding runnable GUI and all716 source
-inputs under `.agent-work/artifacts/sched-practical-20261014/baseline/`. Acceptance
+That local pass recorded the preceding GUI and all716 source inputs in the
+baseline manifest under `local-evidence/research/sched-practical-20261014/baseline/`.
+The old binary/build tree has since been retired. Acceptance
 fixtures and exact build identities are recorded in the parent artifact directory's
 `MANUAL-SCHED-PRACTICAL.md`. **Practical scheduled-reception rescue remains
 unfinished.** The approximately0.54 processing-seconds ratio reported for the
@@ -1955,7 +1956,7 @@ The short-symbol implicit lifecycle and smooth FHSS gain exclusions described
 in the preceding practical checkpoint have since been corrected and covered by
 focused tests. Their removal did **not** establish practical scheduling headroom.
 The exact current frozen source and numerical captures are under
-`.agent-work/artifacts/sched-fft-rescue-20261014/`; `source24-manifest.json` and
+`local-evidence/research/sched-fft-rescue-20261014/`; `source24-manifest.json` and
 `binary24.json` identify the latest frozen intermediate build. The original
 failing captures remain intact. These intermediate FFT paths are opt-in
 experiments, not an automatically selected or qualified receiver.
@@ -2032,7 +2033,7 @@ undated legacy diagnostic construction keep their previous interpretation.
 
 The frozen preceding candidate is `datapump-gui-integrated25` and its exact
 source/build references remain under
-`.agent-work/artifacts/sched-fft-rescue-20261014/`. A calendar-only comparison
+`local-evidence/research/sched-fft-rescue-20261014/`. A calendar-only comparison
 against that same frozen receiver core used identical original PCM
 (hash4107871339971228541), synthetic key, target8/rate36/DSSS10/M3 and a14-second
 message-origin domain. An exact synthetic capture date with Audio0 and the
@@ -2075,7 +2076,7 @@ small-loan rejection, successful growth after a loan, stable owner addresses,
 preserved pending evidence and rejection of a destructive loan reduction.
 
 The measured frozen29 and rebuilt30 GUI/core/source identities and results are in
-`.agent-work/artifacts/sched-fft-rescue-20261014/CALENDAR-CHECKPOINT.md` and its
+`local-evidence/research/sched-fft-rescue-20261014/CALENDAR-CHECKPOINT.md` and its
 linked identities. **Practical scheduling rescue remains unmet.** The full
 continuous Spread fixture completes at 0.104642 CPU seconds per physical second
 (5.474223 CPU seconds over 52.313958 seconds, synthetic dated input). The 3x/5x

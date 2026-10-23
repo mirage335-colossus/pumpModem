@@ -2,7 +2,7 @@
 
 **Status:** historical migration plan; the fixed-interval transport is implemented.
 [protocol.md](protocol.md) describes current behavior and
-[validation.md](validation.md#earlier-fixed-interval-migration--september-2026)
+[validation.md](https://github.com/mirage335-colossus/pumpModem/blob/0751ac847096de8017d7028d14f22037abce445e/docs/validation.md#earlier-fixed-interval-migration--september-2026)
 records the migration checks. The code-path audit and staged recommendations
 below describe the pre-migration checkout, not current development requirements.
 The fixed short dictionary was subsequently restored and extended to **1–16

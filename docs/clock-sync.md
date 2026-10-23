@@ -143,7 +143,7 @@ cancellation, and source-before-qualification ordering. A real ALSA `null` endpo
 confirms parameter negotiation and rollback, **not physical timing**. The reported
 PC loopback and IC-7100 remain unmeasured in this follow-up. Plugins can reject the
 new period, and later uncertainty, discontinuities or rate-model checks can still
-force the documented fallback. See the [validation record](validation.md#native-audio-period-and-total-lag-allowance--local-manual-checkpoint-11-october-2026).
+force the documented fallback. See the [validation record](https://github.com/mirage335-colossus/pumpModem/blob/0751ac847096de8017d7028d14f22037abce445e/docs/validation.md#native-audio-period-and-total-lag-allowance--local-manual-checkpoint-11-october-2026).
 
 Native running timestamps use interval prediction. Each provider observation
 `(frame_i, utc_i, U_i)` gives an interval at the requested frame after propagation
@@ -675,7 +675,7 @@ contribute21.333ms at48kHz before codec and stopping-forecast uncertainty; it do
 not fit this25ms-radius example. Increasing an application queue cannot prevent
 a missed graph/driver cycle. The512-frame request remains; the forward-realignment follow-up below increases the prepared ring to 750 ms.
 Physical stress outcomes and the separate capture-validation limitation are
-recorded in [validation](validation.md#2026-10-12--acknowledged-audio-callback-priority-local-checkpoint).
+recorded in [validation](https://github.com/mirage335-colossus/pumpModem/blob/0751ac847096de8017d7028d14f22037abce445e/docs/validation.md#2026-10-12--acknowledged-audio-callback-priority-local-checkpoint).
 
 Before either message or open-ended noise constructs its private source, at least
 four seconds of public silence provide an initial stationary-rate estimate.

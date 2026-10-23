@@ -537,7 +537,7 @@ full-bank sensitivity equivalence. The test also retains the slowest clock's
 complete absent-symbol endpoint.
 
 Local evidence is retained under
-`.agent-work/artifacts/receiver-opt-20261008/`: the `rf*-performance.csv` and
+`local-evidence/research/receiver-opt-20261008/`: the `rf*-performance.csv` and
 `sub9-performance.csv` captures, component captures, joint aligned statistics,
 analysis JSON, resolved geometry/probes, test logs and source-release manifest.
 The `manual-rf30.sh` and `manual-sub9.sh` launchers use the rebuilt GUI and the
@@ -563,7 +563,7 @@ This stage starts from **`6330e94aadce8a5c4588f10218c8984be1097341`**,
 including its preceding pulse-moment and affine optimizations. That candidate
 was not fully qualified. Before editing, its source, Release configuration,
 static library, GUI and measurement executables were frozen under
-`.agent-work/artifacts/receiver-opt-20261008/optimized-baseline-6330e94/`.
+`local-evidence/research/receiver-opt-20261008/optimized-baseline-6330e94/`.
 The copied GUI passed its self-check. New measurements compare with that actual
 frozen library, not just a switch in the new executable. The raw diagnostic
 path remains available for cumulative comparisons.
@@ -860,13 +860,11 @@ qualifying that policy is separate from this arithmetic optimization.
 
 ### Manual checkpoint and remaining qualification
 
-The rebuilt local GUI is
-`build/agents/receiver-opt-20261008/native/datapump-gui`.
-Launchers under `.agent-work/artifacts/receiver-opt-20261008/` are
-`manual-interval-reproduction.sh [1500|0.5|0.005]`, `manual-interval-strong.sh`,
-`manual-interval-rf30.sh` and `manual-interval-sub9.sh`. Select a key in the GUI;
-the exported command does not include it. The preceding GUI remains runnable
-under `optimized-baseline-6330e94/bin/datapump-gui` for comparison.
+This checkpoint used `build/agents/receiver-opt-20261008/native/datapump-gui`
+and the `manual-interval-*` launchers. Those binaries/builds have been retired;
+rebuild the matching source/configuration and adapt the recorded commands before
+comparing against `optimized-baseline-6330e94`. The original exported commands
+did not include a selected key.
 
 The application build through `./build.sh` and GUI self-check pass. After the
 focused receiver, planner and analysis checks, all 14 complete selected affected

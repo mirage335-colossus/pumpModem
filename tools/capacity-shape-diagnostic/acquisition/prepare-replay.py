@@ -6,9 +6,8 @@ from pathlib import Path
 OUT = Path(__file__).resolve().parent
 ROOT = OUT.parents[2]
 PRODUCER = OUT / 'producer-output'
-CAPTURE = ROOT / '.agent-work/artifacts/symbol-burst-postupdate-20261018/default-media-clock-implementation/ci-39269648667/artifact-12195068784/__w/pumpModem/pumpModem/build/simulation-capacity-shape-diagnostics/outputs'
-PCM = CAPTURE / 'source-input.f32'
-SIDECAR = CAPTURE / 'source-input.f32.partitions.json'
+# main() resolves the explicit fixture directory before reading either input.
+CAPTURE = PCM = SIDECAR = None
 REVISION = '34fcedb04d00363943f9a4a7439bbbf180e3e1cd'
 PCM_SHA = '3f1ecd6bb83ebfd9b1314d25b7b1fcc77f8bf282503171bb2e0e59c921e6ddd1'
 SIDECAR_SHA = 'afe4936afe0241d23823384e3f0c4b3f7c6dcfe21587401996362e83cb126a9d'

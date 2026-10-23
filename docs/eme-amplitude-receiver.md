@@ -439,11 +439,11 @@ library reproduces **the identical failure and measurements**. No assertion was
 weakened; this pre-existing audio issue remains unresolved, and later assertions
 in that executable are not counted as passing. This is not full qualification.
 
-Local evidence is in `.agent-work/artifacts/eme-envelope-20261012/`: exact
+Local evidence is in `local-evidence/research/eme-envelope-20261012/`: exact
 geometry CSVs, standalone C++ source sampling/probes, `statistics.py`, raw paired
 success arrays, thresholds and bootstrap results. The current source retains
 only the clock-cell eligibility fix and regressions; the statistical and CZT
-prototypes are not hidden production fallbacks. The preceding runnable GUI and
-raw receiver references remain preserved. Full-bank sensitivity for a new
+prototypes are not hidden production fallbacks. Reports preserve the preceding GUI and
+raw receiver identities; their executables have been retired and must be rebuilt. Full-bank sensitivity for a new
 amplitude/segmented decoder, end-to-end CPU crossover, live EME, ARM and broader
 platform/SDK qualification remain outstanding. No hosted jobs were dispatched.

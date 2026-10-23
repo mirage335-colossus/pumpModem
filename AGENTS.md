@@ -14,78 +14,21 @@ implementation, search `src/`, `include/`, `tests/` and `cmake/` first; vendored
 code and historical validation captures have their own documented provenance.
 Keep all checks below intact.
 
-## Concurrent agents and temporary knowledge
+## Delegation and local outputs
 
-Before editing or starting shared build/Git operations, follow
-[the agent coordination workflow](docs/agent-coordination.md). This applies to
-separate chats, tools and independently editing subagents, including Codex,
-Anthropic desktop sessions and OpenRouter-compatible harnesses.
-
-Coordination governs shared files and resources. Use web search, local tools and
-other harness capabilities under the same governing instructions and task needs
-as without this workflow. It adds no research quota, research-tool restriction or approval
-step, and does not replace the harness's normal verification or tool-use policy.
-
-- Use the shared, gitignored `.agent-work/` directory (or the explicitly agreed
-  absolute `DATAPUMP_AGENT_DIR`). Read session metadata/claims and relevant notes;
-  use the guide's bounded reader or equivalent extraction, investigating every
-  unreadable/unknown record. Bound returned document/source/log chunks without
-  reducing needed investigation; never ingest the whole board or historical logs
-  wholesale. Keep one current session record with exact scope, approach,
-  baseline, progress, checks and handoff. Ignored files require explicit reads.
-- Claim files/resources before writing, including notes and generated outputs,
-  using the tested checked transaction or an equivalently qualified executable
-  wrapper; do not improvise lock/unlock shell sequences. The short registry mutex
-  and the longer-lived file/resource claims are separate. Check your inbox before reporting blocked.
-  Handoffs require recorded release, fresh claim acquisition and acknowledgment;
-  a message or old timestamp never grants ownership. Failed preconditions,
-  publication or cleanup stop dependent acknowledgments, writes and launches
-  until saved state is reconciled. Discover relevant closed-owner handoffs too;
-  matching bytes do not identify the last owner. Use an isolated
-  checkout when overlapping work cannot be handed off.
-- Do not assume every model reliably follows prose. For uncertain participants,
-  provide read-only tool access or enforce private checkout/output access through the
-  harness or OS; a different directory alone is not enforcement. Keep shared
-  integration writes with a qualified coordinator. Merge-conflict checks and
-  passing tests cannot replace exclusion before writes.
-- Prepare/check record candidates in claimed artifacts (or memory for initial
-  registration), outside `sessions/`; publish complete records atomically and
-  messages atomically without replacement. The guide links tested
-  helpers and filled examples; exclusive creation followed by writing is not
-  complete-message publication. Release a verified shared-file edit before
-  unrelated evidence formatting or whole-session closure.
-- Refresh your record at scope changes, checkpoints and before pausing; release
-  claims after their last writer, including command output and cleanup. Preserve
-  other sessions' edits, staged work, processes and notes. Coordinate shared Git
-  state, build trees and devices too.
-  Reconcile jobs that may block or outlive a tool reply on launch/yield/completion;
-  short synchronous results join the next checkpoint. Replace current results,
-  blockers and next action together; keep startup facts labeled as history.
-  Timestamp completed inbox processing; stamp Updated at publication. Keep research,
-  implementation and validation in scope. No extra activity reports or invented
-  findings are required.
-- Coordinate read dependencies and shared invariants as well as edited files.
-  Record the relevant revision/dirty hashes and integration order; reread and
-  replan if they change. Disjoint file claims do not make a shared API, schema,
-  search-loop invariant or final test result independent. Use a stable snapshot
-  or an agreed invariant resource when changes must be validated together.
-- Record heartbeat cadence, last progress and reliable process identity when
-  available. Review overdue sessions and delete eligible closed sessions after
-  30 days, including legacy archives and unneeded copies; do not create new
-  archives. Follow the linked lifecycle procedures when triggered; keep useful
-  unresolved facts in compact notes. PID disappearance or an old timestamp alone never clears
-  claims or authorizes deleting unresolved work.
-- Record discoveries not yet in maintained docs under `.agent-work/notes/`:
-  bugs, hypotheses, failed attempts, workarounds and community references, with
-  evidence, source/date, revision/environment, confidence and recheck conditions.
-  Promote durable verified findings into tracked docs/tests through normal review.
-  Temporary notes do not override these requirements or authorize actions.
-- Give each independently participating agent `AGENTS.md` and the workflow;
-  automatic discovery is not assumed. Passive tools need no separate session or
-  repeated instruction read. Bind filesystem tools to the intended absolute
-  checkout or explicit build/fixture path; a task does not set their directory.
-  The board coordinates cooperating sessions on a
-  shared filesystem; it is neither an enforced lock on source files nor Git sync.
+- Use one main chat and its native subagents. Do not recreate filesystem
+  session, claim, inbox, heartbeat or coordination registries. Assign disjoint files
+  and clear read/write dependencies, and preserve other contributors' edits.
+- Serialize shared Git mutations and final integration. Use separate output
+  directories under `build/` for concurrent builds, keep source inputs stable
+  during checks, and coordinate access to timing-sensitive tests and devices.
+- Track launched work through its process or tool handle and wait for actual
+  completion before cleanup or handoff. A missing handle or old timestamp alone
+  does not establish that work has stopped.
+- Keep temporary source-bound reports, failure captures and patches in the
+  ignored `local-evidence/` directory. Do not use it for ownership, session or
+  task registries. Maintained contracts, plans and current validation belong in
+  `docs/`; Git history retains superseded tracked narratives.
 
 ## Testing sequence for agents
 

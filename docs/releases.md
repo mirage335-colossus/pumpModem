@@ -1099,7 +1099,7 @@ passed on 2026-09-23 and retained an experiment draft. Windows FLTK/Rev whole
 jobs took **2m15s/2m32s**, with existing base restore in **15s/20s**; the preceding
 standard-runner publication took **5m43s/6m49s** for those jobs. ARM64 FLTK/Rev
 took **3m30s/5m03s**. These are observed results, not a speed guarantee or full
-certification. See the [validation record](validation.md#larger-runners-and-independent-compilation-concurrency--23-september-2026)
+certification. See the [validation record](https://github.com/mirage335-colossus/pumpModem/blob/0751ac847096de8017d7028d14f22037abce445e/docs/validation.md#larger-runners-and-independent-compilation-concurrency--23-september-2026)
 for source/run identities and the separate certification limitations.
 
 Base reuse remains the first optimization. Cold SDK builds use the CPU/RAM budget
