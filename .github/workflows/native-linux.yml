@@ -1810,7 +1810,7 @@ jobs:
         run: |
           python3 -B tests/test_resource_results.py
           python3 -B tools/resource-results.py check docs/ci-resource-results.json
-          ctest --test-dir build --output-on-failure --verbose --no-tests=error --parallel 1 --timeout 3600 --output-junit build/resource-margin.xml -R '^(ci_resource_margin|channel|symbol_burst_transmit|gui_timing_advice)$' 2>&1 | tee build/resource-margin.log
+          ctest --test-dir build --output-on-failure --verbose --no-tests=error --parallel 1 --timeout 3600 --output-junit "$PWD/build/resource-margin.xml" -R '^(ci_resource_margin|channel|symbol_burst_transmit|gui_timing_advice)$' 2>&1 | tee build/resource-margin.log
           sha256sum tests/resource_test_margin.hpp tests/cpu_work_budget.hpp build/test_ci_resource_margin build/test_channel build/test_symbol_burst_transmit build/test_gui_timing_advice > build/resource-margin.sha256
           echo 'Focused policy boundaries and original functional assertions passed; this scope does not substitute for full native or SDK qualification.' >> "$GITHUB_STEP_SUMMARY"
       - name: Run the selected native tests
