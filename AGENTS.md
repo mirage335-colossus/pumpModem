@@ -1,177 +1,46 @@
 # Development requirements
 
-Documentation topics: [docs/README.md](docs/README.md). Explore relevant branches
-for implementation explanations, prior investigations, measurements and proposals
-as useful to the task. Evaluate their applicability and evidence against current
-source; continue independent research and experiments where needed. The index
-provides navigation, not a required reading sequence.
+Use the [documentation index](docs/README.md) to find maintained guidance.
+Current compatibility requirements are in [the development contract](docs/development.md);
+build and test stages are in [the build guide](docs/building.md#testing-stages).
+Search `src/`, `include/`, `tests/` and `cmake/` first when locating implementation.
 
-Build entry point: [docs/building.md](docs/building.md).
-Use `./build.sh` for the application and `./build.sh test GROUP` to build and
-run the appropriate tests. Stable profiles live under `build/`; older top-level
-`build-*` trees are historical and may contain stale binaries. When locating
-implementation, search `src/`, `include/`, `tests/` and `cmake/` first; vendored
-code and historical validation captures have their own documented provenance.
-Keep all checks below intact.
+## Changes and validation
 
-## Delegation and local outputs
+- Preserve wire formats and bit progress: 1–16 source-byte text keeps its fixed
+  dictionary and exact endpoint; explicit binary input sends exactly its bits;
+  longer text and attachments keep the configured 192-bit marker plus 128-coded-byte
+  intervals. Do not add short-path overhead or let received lengths choose framing,
+  allocation or completion.
+- Decode source data only after physical completion. Reception ends only after
+  consecutive fully scored absent-symbol durations cover six seconds. Expose each
+  accepted bit on the next progress poll and update the same pending GUI row;
+  preserve exact prefixes and distinguish pending from completed data. Keep the
+  independent wire, physical-end and shared GUI regressions intact.
+- For runtime changes, use focused checks during diagnosis, then complete the
+  applicable regression and qualification stages. Never weaken a contract or
+  report skipped, incomplete or omitted coverage as passed. See the build guide's
+  [resource margins](docs/building.md#resource-benchmark-margins) and
+  [sanitizer coverage policy](docs/building.md#sanitizer-throughput-scope).
+- Build with `./build.sh`; run a group with `./build.sh test GROUP`. Reuse stable
+  compatible profiles under `build/`; do not rely on historical top-level
+  `build-*` trees as current results.
+- When release assurance is in scope, follow [release validation](docs/releases.md#diagnose-a-branch-before-full-validation)
+  and record actual results and limits in [validation](docs/validation.md).
+  Certification binds to the exact published source and binary hashes. Publication,
+  certification and promotion are separate release operations; diagnosis alone
+  authorizes none.
 
-- Use one main chat and its native subagents. Do not recreate filesystem
-  session, claim, inbox, heartbeat or coordination registries. Assign disjoint files
-  and clear read/write dependencies, and preserve other contributors' edits.
-- Serialize shared Git mutations and final integration. Use separate output
-  directories under `build/` for concurrent builds, keep source inputs stable
-  during checks, and coordinate access to timing-sensitive tests and devices.
-- For sequential work, reuse the standard `build/` profile incrementally across
-  source revisions while its compiler, generator, configuration and SDK remain
-  compatible; do not make date-, revision- or session-named copies. Keep a
-  concurrent comparison in bounded scratch output only until its process ends
-  and useful source/input/configuration plus compact result evidence is saved,
-  then remove its compiled outputs. A failed run alone is not a reason to keep
-  its whole build tree. Remove superseded local SDK installations, work trees
-  and archives after active processes are closed and dependents are migrated or
-  reconfigured. Retain only compatible SDK/dependency caches in current use,
-  plus downloaded inputs needed for offline rebuilding; native and Wasm SDKs
-  remain separate. Never delete immutable published assets or required original
-  failure reports. Use explicit bounded paths, not broad cleanup globs or
-  automatic age-based deletion.
-- Track launched work through its process or tool handle and wait for actual
-  completion before cleanup or handoff. A missing handle or old timestamp alone
-  does not establish that work has stopped.
-- Keep temporary source-bound reports, failure captures and patches in the
-  ignored `local-evidence/` directory. Do not use it for ownership, session or
-  task registries or as a binary archive. Keep only compact results, pending
-  source patches and essential reproducer inputs; remove redundant captures
-  when their purpose ends. Maintained contracts, plans and current validation
-  belong in `docs/`; Git history retains superseded tracked narratives.
+## Shared work and outputs
 
-## Testing sequence for agents
+- Use the main chat and native subagents for delegated work. Keep write ownership
+  disjoint, preserve other contributors' edits, and serialize shared Git changes
+  and final integration. Coordinate timing-sensitive tests and device access.
+- Track launched processes until completion. Reuse compatible build outputs;
+  keep temporary evidence compact in ignored `local-evidence/`. Maintained
+  contracts, plans and current validation belong in `docs/`; use Git history for
+  superseded narratives. Do not create session or coordination registries.
 
-- CI-only CPU-work and absolute footprint benchmarks retain their nominal
-  targets but get at least 25% allowance before blocking: warn above the target,
-  fail beyond the CI ceiling, and retain larger established allowances. This is
-  opt-in at the measured resource predicate, never a blanket timeout multiplier.
-  Ordinary functional tests, allocation/accounting invariants, statistical
-  gates, cancellation and physical deadlines stay strict. See
-  [resource margins and latest measurements](docs/building.md#resource-benchmark-margins).
-  Replace the bounded latest-results snapshot rather than accumulating tracked
-  investigation lists or run histories; reuse matching evidence before reruns.
-- During diagnosis and implementation, build and run the smallest meaningful
-  reproducer or affected test group. Use `devfast=true` only when its focused
-  cases cover the fault; it is not general coverage. Avoid repeatedly running
-  calibration, every platform or SDK builds while the same fault is unresolved.
-- Once the bug is fixed and requested features are complete, advance to the
-  normal full regression/general coverage for the final candidate. For CI use
-  `devfast=false` (the default), including the applicable contract, GUI/native,
-  platform, SDK and packaging checks. Do not finish a runtime change with only
-  focused passes because broader checks are slower. Pure documentation changes
-  need proportionate checks unless earlier code changes still await validation.
-- Reuse completed evidence for the same source/configuration and avoid duplicate
-  push, PR and manual runs. A temporary `[skip ci]` during diagnosis must be
-  followed by an explicit full manual run or ordinary CI before completion.
-  Wait for results; investigate failures with focused tests, then rerun the
-  affected full checks. Do not count skipped, cancelled or queued jobs as passes.
-  Automatic CI is deliberately lightweight on PRs and pushes to main; full
-  native and SDK qualification require explicit manual dispatch after fixes.
-  Workflow defaults and automatic push/PR jobs use standard GitHub-hosted
-  runners (free for public repositories). Heavy H pools require an explicit
-  runner selection. Agents should explicitly select heavy runners when they
-  expect them to save elapsed time; that decision needs no separate user request.
-  Reuse matching evidence instead of repeating checks solely to compare pools.
-- Optimize CI elapsed time with independent package producers and disjoint test
-  jobs. Keep the serial Live scope, calibration sections and expensive sanitizer
-  GUI simulation off the dependency path for ordinary regressions and
-  copied-package checks.
-  Prefer modest repeated setup/compilation over transferring configured build
-  trees; keep total runner minutes and workflow complexity within a few times
-  the unsplit work. Retain conservative within-runner test concurrency so the
-  same workflows remain usable on standard runners. Near-timeout passing tests
-  should produce timing warnings, not failures. Instrumented functional Live
-  fixtures have bounded extra computation allowances and warn when they exceed
-  the normal budget; they must still complete every assertion. Preserve actual
-  real-time, cancellation and physical-absence deadlines.
-  Distributed calibration must retain every fixed seed and require the original
-  per-case and combined statistical gates after complete result aggregation;
-  successful partial captures alone are not qualification.
-  Standard-runner GUI contracts permit a bounded 1200-second cumulative smoke
-  workload, warning after complete success exceeds 600 seconds. H and portable
-  package scopes keep their existing budgets. This changes no individual
-  assertion or physical deadline. The typed progressing workload limit follows
-  the explicit incomplete-coverage policy below.
-- Native CI excludes only `fast_session` and `gui_fast_live` from its instrumented
-  Debug job unless `sanitizer_realtime=true` is explicitly requested. Their
-  real-time audio budgets are sensitive to sanitizer overhead; this is omitted
-  instrumented coverage, not proof of a hardware-only problem or a test pass.
-  Keep both mandatory in Release and retain their existing assertions. The
-  instrumented native GUI smoke is an independent opt-in job (`sanitizer_smoke`
-  or the `sanitizer-gui` diagnostic); ordinary CI records that coverage as
-  omitted. Every CI smoke scope, including Release, SDK, packaging and
-  certification, may report an exhausted cumulative workload budget as
-  **incomplete coverage with a warning** only for exit 75 with the validated
-  typed budget result and recent sampled-transmission progress. That is not a
-  smoke pass, but does not block workflow success or an otherwise qualified
-  ordinary release from Latest. Retain the exact source/inventory identity,
-  progress evidence and omitted scope in logs and certification reports. Stalls,
-  assertions, sanitizer reports, external timeouts and other failures remain
-  fatal; do not extend this exception to other tests.
-  Local tests remain available unchanged. See [sanitizer throughput scope](docs/building.md#sanitizer-throughput-scope).
-- Reuse the exact prepared Linux SDK and Windows dependency recipes from the
-  durable `base` release where applicable in ordinary release, certification
-  and full CI jobs.
-  Missing recipes require explicit base maintenance, not an implicit cold
-  dependency build. Preserve source inputs, provenance and checksums, and never
-  overwrite existing recipe assets. Windows reuses the runner's MSVC/Windows
-  SDK separately; do not redistribute them. See [base maintenance](docs/releases.md#windows-dependency-base).
-- When release delivery or assurance is in scope, follow publication with full
-  certification of that release's exact source and binary hashes. A branch fix
-  does not fix an older release; publish new binaries when needed. Diagnostic
-  success cannot certify or promote a release. Preserve earlier release assets
-  and reports, and record actual results and remaining limits in
-  [docs/validation.md](docs/validation.md).
-- Rev replay/waterfall display cadence is an advisory warning, not a build or
-  certification gate. Keep it visible in logs/release `warning.log`, and do not
-  spend long diagnostic runs tuning this known presentation limitation unless
-  requested. Data integrity, physical completion, pending identity and source/
-  bitmap correctness remain mandatory; see [release warnings](docs/releases.md#rev-display-warnings).
-- The exact Windows Rev probe error `Required WGL ARB extensions not available`
-  is an explicitly accepted hosted-environment warning. Only the four OpenGL
-  source cases and published GUI smoke may be omitted under that classifier;
-  clipboard, compilation, headless GUI/CLI, modem, packaging and calibration
-  remain required. Reports must say `passed_with_warnings`, enumerate omitted
-  graphics coverage and retain a per-run warning log. Such a green workflow is
-  not full Windows Rev graphics qualification, but the documented hosted-runner
-  limitation does not block certification or Latest eligibility for an otherwise
-  qualified ordinary release. Experiments remain prereleases. Other graphics
-  errors, assertions, crashes and timeouts remain failures.
-
-See [testing stages](docs/building.md#testing-stages) and
-[release validation](docs/releases.md#diagnose-a-branch-before-full-validation).
-
-## Compatibility requirements
-
-Preserve the existing short-message, fixed-interval and pending-reception behavior.
-Read [the development contract](docs/development.md) before changing transport,
-compression, receiver progress, CLI messaging or GUI message presentation.
-
-- Nonempty text of **1–16 source bytes inclusive** uses the existing fixed short
-  dictionary with its exact codes and bit endpoint. Explicit binary input sends
-  exactly its entered bits, including leading zeros and partial bytes.
-- Neither short path gains a header, marker, padding, transmitted length, FEC or
-  MAC. Each extra bit may cost hours or longer to transmit.
-- Longer text and every attachment retain the locally configured, fixed
-  **192-bit marker + 128 coded bytes** interval format. Received lengths must not
-  choose modem framing, allocation or completion. Source interpretation stays
-  behind physical completion.
-- Only observed absence across fully scored symbols ends reception: consecutive
-  failed durations must cover six seconds. An hours-long symbol must finish
-  before being classified absent. EOF, cancellation, codec ends and successful
-  correction/authentication do not substitute for this event.
-- Expose every newly accepted bit on the next progress poll and update the same
-  pending GUI row. Never batch behind a byte, interval, dictionary token or full
-  message. Preserve exact prefixes within the existing diagnostic retention
-  bound and distinguish pending from completed data.
-
-These are compatibility requirements for ordinary development and refactoring.
-Keep the independent wire vectors, physical-end tests and shared GUI regressions
-listed in the contract; do not weaken them to accommodate an unintended change.
-Documentation/test-only work must leave runtime behavior unchanged.
+Documentation-only changes leave runtime behavior unchanged and need proportionate
+checks. Detailed compatibility, testing, release and platform requirements remain
+in their linked authoritative documents.

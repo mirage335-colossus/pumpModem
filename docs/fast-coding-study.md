@@ -6,7 +6,7 @@ paths and physical-completion behavior are unchanged.
 
 Development entry points: [current Fast format](fast-mode.md),
 [compatibility contract](development.md),
-[evidence inventory and reproduction](validation-data/fast/coding-study-20260919/README.md).
+[evidence inventory and reproduction](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/coding-study-20260919/README.md).
 The measurements describe the 2026-09-19 baseline; reassess them when waveform,
 decoder, mapping or framing changes. Findings below are research inputs, not
 new default settings or a replacement wire specification.
@@ -126,10 +126,10 @@ the symbol-stream Gaussian bound is about 153.45 kbit/s. Even uncoded
 Consequently changing FEC alone cannot bring the existing waveform close to
 the occupied-band bound at high SNR.
 
-Raw results: [capacity.csv](validation-data/fast/coding-study-20260919/capacity.csv),
-[independent cross-check](validation-data/fast/coding-study-20260919/gmi-crosscheck.csv).
+Raw results: [capacity.csv](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/coding-study-20260919/capacity.csv),
+[independent cross-check](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/coding-study-20260919/gmi-crosscheck.csv).
 
-![Information-rate limits before waveform and source overhead](validation-data/fast/coding-study-20260919/capacity.png)
+![Information-rate limits before waveform and source overhead](https://raw.githubusercontent.com/mirage335-colossus/pumpModem/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/coding-study-20260919/capacity.png)
 
 ## Finite LDPC experiment
 
@@ -189,9 +189,9 @@ word on a Ryzen 5 PRO 5650U under concurrent load. Exact separable QAM demapping
 added 8–17 ms. This demonstrates computational feasibility at the proposed
 symbol rates in this idealized experiment, not a complete real-time modem test.
 
-Evidence: [all LDPC trials](validation-data/fast/coding-study-20260919/ldpc-all.csv),
-[final candidates](validation-data/fast/coding-study-20260919/ldpc-candidates.csv),
-[method and reproduction](validation-data/fast/coding-study-20260919/ldpc-method.md).
+Evidence: [all LDPC trials](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/coding-study-20260919/ldpc-all.csv),
+[final candidates](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/coding-study-20260919/ldpc-candidates.csv),
+[method and reproduction](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/coding-study-20260919/ldpc-method.md).
 
 Zero failures in a short run are not a zero error rate. For zero failures in
 F trials the one-sided 95% upper bound is `1 - 0.05^(1/F)`. Establishing an
@@ -252,8 +252,8 @@ framing, versus 0.751 seconds at wire 256-APSK, when padded to 32 physical
 intervals. A 16,200-bit code would approximately quarter
 that latency but needs a separate throughput/error comparison.
 
-Evidence: [sampled results](validation-data/fast/coding-study-20260919/sampled-channel.csv),
-[method, normalization and limits](validation-data/fast/coding-study-20260919/sampled-channel-method.md).
+Evidence: [sampled results](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/coding-study-20260919/sampled-channel.csv),
+[method, normalization and limits](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/coding-study-20260919/sampled-channel-method.md).
 
 ## Outer Reed–Solomon selection
 
@@ -338,7 +338,7 @@ choice to accept retransmission for shorter transfers can justify accepting
 that risk. Interleaving can let LDPC recover partially damaged words, but
 requires burst tests before assigning a smaller repair budget.
 
-The [confidence-based RS model](validation-data/fast/coding-study-20260919/rs-model.csv)
+The [confidence-based RS model](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/coding-study-20260919/rs-model.csv)
 also optimizes at the statistical upper FER bound rather than pretending the
 observed zero failures establish zero risk. Its larger parity result reflects
 limited measurements, not proof that the channel needs that much parity.
@@ -487,11 +487,13 @@ Use a different output path to preserve recorded evidence. Changing the
 sample count changes Monte Carlo uncertainty; no result from this tool is an
 actual PCM transfer success probability.
 
-For the modeled RS tradeoff:
+For the modeled RS tradeoff, retrieve `ldpc-candidates.csv` from the pinned
+[evidence directory](https://github.com/mirage335-colossus/pumpModem/tree/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/coding-study-20260919)
+and supply its local path to the current analysis tool:
 
 ```sh
 python3 tools/fast_coding_analysis.py \
-  docs/validation-data/fast/coding-study-20260919/ldpc-candidates.csv \
+  /path/to/ldpc-candidates.csv \
   --bytes 5000000 --integrity-bytes 8
 ```
 

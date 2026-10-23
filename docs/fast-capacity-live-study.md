@@ -144,7 +144,7 @@ those fixed alignment observations, so neither number is an exact code threshold
 This residual includes noise, distortion and receiver error; it is not a
 measurement of pure AWGN or Shannon capacity. Decision-directed displayed EVM
 was smaller and must not be substituted for the known-source measurement.
-See the [reproducible known-symbol analysis](validation-data/fast/capacity-20260920/qam-known-symbol-method.md).
+See the [reproducible known-symbol analysis](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/capacity-20260920/qam-known-symbol-method.md).
 
 ## Throughput and remaining overhead
 
@@ -164,7 +164,7 @@ device startup/queue-drain time. Estimates do not assert successful reception.
 
 The classic 256-APSK / 7/8 / high-rate-RS / depth-62 profile estimated 7,275.60
 seconds for 50 MB. New dense candidates are roughly 5.3–5.7 times faster.
-The [machine-readable geometry](validation-data/fast/capacity-20260920/airtime-geometry.json)
+The [machine-readable geometry](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/capacity-20260920/airtime-geometry.json)
 retains exact samples and cycle counts.
 
 At 4M-QAM / 8/9 the mapper carries 22 bits/symbol, or 388.235 kbit/s. Each interval
@@ -211,7 +211,7 @@ An exhaustive geometry calculation for depths 1–16 finds depth 6 marginally
 fastest for an exact 50 MB public source: 1,283.610 seconds versus 1,287.337
 at depth 4, a 0.29% gain. Depth 4 is the whole-file live-test setting; the deeper
 cycle changes burst distribution and decoder work per callback, so arithmetic
-alone is insufficient to promote it. The [depth sweep](validation-data/fast/capacity-20260920/interleave-airtime.json)
+alone is insufficient to promote it. The [depth sweep](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/capacity-20260920/interleave-airtime.json)
 records every result. These arithmetic comparisons are not measured
 throughput gains.
 
@@ -226,7 +226,7 @@ violation: the measured cable under these conditions has substantially better
 signal/error performance. Best-case near-full-scale tone SNR cannot simply be
 inserted as the modem's effective noise margin.
 
-The [production LDPC AWGN benchmark](validation-data/fast/capacity-20260920/ldpc-awgn-method.md)
+The [production LDPC AWGN benchmark](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/capacity-20260920/ldpc-awgn-method.md)
 retains 1,560 frames over 104 invocations, including failures. On its tested grid,
 4M-QAM / 8/9 first passed 64/64 independent frames at 62 dB Es/N0; 9/10 did so
 at 63 dB. Both failed 8/8 one dB below those respective points. Choosing 9/10
@@ -265,7 +265,7 @@ local settings; the default uses the whole-file-tested 8/9 setting. For a less
 stable cable, 1M-QAM / 9/10 trades about 7% nominal throughput for substantially
 more margin in the independent AWGN tests.
 
-[Known-source analysis of the margin recordings](validation-data/fast/capacity-20260920/qam-margin-method.md)
+[Known-source analysis of the margin recordings](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/capacity-20260920/qam-margin-method.md)
 measured roughly 63.7–63.9 dB signal/error power at the passing 0.27 level and
 about 63.0 dB at failing 0.24. Timing and mean phase remained controlled, and
 amplitude times true EVM stayed nearly constant, consistent with a fixed residual
@@ -305,7 +305,7 @@ literal uint8 values 0 or 1, not packed bytes. `--replay` reads a saved mono
 float32 capture with the matching profile, fixture and wire revision. Replay is
 an offline diagnostic, not another independent live trial.
 
-[Archived run records](validation-data/fast/capacity-20260920/live-run-index.json)
+[Archived run records](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/capacity-20260920/live-run-index.json)
 include failures, raw-format capture hashes and software-development stages.
 Early captures used the old frame mapping and/or 128-symbol preamble; they must
 not be decoded as if they used the final format. The known-symbol archive includes

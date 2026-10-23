@@ -92,7 +92,7 @@ queued audio was 42.7 ms and maximum DSP chunk time 45.3 ms.
 Replay through the final build recovered the same source and correction count,
 with physical completion at 526.9 seconds within replay chunk resolution.
 
-The [test records](validation-data/fast/acoustic-low-snr-recovery-20260921/README.md)
+The [test records](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/acoustic-low-snr-recovery-20260921/README.md)
 include commands, results and recording hashes. These tests diagnose a real
 channel defect; they do not establish a whole-file success probability or
 qualify reception at a calibrated −10 dB reference-band SNR.

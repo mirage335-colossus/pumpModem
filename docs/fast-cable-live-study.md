@@ -24,7 +24,7 @@ not a measured 50 MB transfer time.
 
 This report records a bounded, approximately 30-minute live investigation.
 Sizes are decimal: **100 KB = 100,000 bytes; 5 MB = 5,000,000 bytes;
-50 MB = 50,000,000 bytes**. The [evidence inventory](validation-data/fast/cable-live-20260920/README.md)
+50 MB = 50,000,000 bytes**. The [evidence inventory](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-live-20260920/README.md)
 links trial JSON, logs, models and reproduction commands. The
 [Fast format](fast-mode.md) and [development contract](development.md) continue
 to define runtime behavior.
@@ -50,7 +50,7 @@ but their raw capture was not archived; they are not part of the success-rate
 denominator. Reducing the PulseAudio source control to **10%** removed that boost;
 the resulting hardware Capture and Digital controls were **0 dB**, with Mic
 Boost also 0 dB. Playback was set to **95%**. Pulse percentages and ALSA mixer
-percentages have different scales; the saved [mixer state](validation-data/fast/cable-live-20260920/mixer-calibrated.txt)
+percentages have different scales; the saved [mixer state](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-live-20260920/mixer-calibrated.txt)
 shows the actual hardware dB values. These settings describe this host, not a
 universal microphone percentage.
 
@@ -71,7 +71,7 @@ floating-point PCM directly and therefore do not reproduce that clamp. The
 observed error increase cannot be attributed solely to analog noise or baud rate.
 
 The selected amplitude 0.35 addresses this issue separately from microphone
-gain. The [peak-bound calculation](validation-data/fast/cable-live-20260920/tx-peak-bound.py)
+gain. The [peak-bound calculation](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-live-20260920/tx-peak-bound.py)
 uses `peak <= amplitude × max_symbol_radius × sum(abs(RRC pulses))` and covers
 every fractional phase of the production interpolated pulse table. At 256-APSK
 and rolloff 0.20, the factors are 1.32853747 and 1.92446484, giving a generated
@@ -110,7 +110,7 @@ receiver process exits. It excludes the 1.5-second receiver startup allowance.
 The receiver can finish before the transmitter drains its full 6.25 seconds
 of silence because physical completion requires six seconds of scored absence.
 Complete elapsed times, including startup, are retained separately in the
-[screening records](validation-data/fast/cable-live-20260920/screen-100k/trials.jsonl).
+[screening records](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-live-20260920/screen-100k/trials.jsonl).
 Small timing differences are not evidence that the estimator omitted framing.
 
 These successes do not mean all profiles have identical reliability. One
@@ -118,7 +118,7 @@ success at a selected operating point gives only a 5% one-sided 95% lower
 confidence bound on its whole-file success probability under independent,
 stationary trials. Pooling different settings would misrepresent that evidence.
 
-The separate [5 MB trial](validation-data/fast/cable-live-20260920/long-5mb/trials.jsonl)
+The separate [5 MB trial](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-live-20260920/long-5mb/trials.jsonl)
 delivered **5,000,000 exact bytes in 735.879 seconds**, measured from transmitter
 launch to completed receiver process, or **54,356.78 bit/s**. Source and received
 SHA-256 matched. It reported seven corrected bytes and zero erased bytes, with
@@ -127,7 +127,7 @@ run used the selected coding/waveform settings but **amplitude 0.5** and both
 output channels. Its single success gives a 5% one-sided 95% lower confidence
 bound under the binomial assumptions; it does not validate the final amplitude.
 
-The held-out [100 KB validation set](validation-data/fast/cable-live-20260920/repeat-100k/summary.json)
+The held-out [100 KB validation set](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-live-20260920/repeat-100k/summary.json)
 used the final **amplitude 0.35**, the selected settings and both output channels.
 All **14 of 14** fresh-seed files matched SHA-256 and completed physically,
 with **zero corrected or erased bytes**. Delivery times ranged from 22.749 to
@@ -140,7 +140,7 @@ The 0.5-amplitude screening and 5 MB results are not pooled into this bound.
 **No 50 MB live file was tested**, and no 5 MB trial at the final amplitude
 was completed in this investigation.
 
-The separate [right-channel-only check](validation-data/fast/cable-live-20260920/default-route-100k/trials.jsonl)
+The separate [right-channel-only check](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-live-20260920/default-route-100k/trials.jsonl)
 at amplitude 0.35 **failed its 100 KB transfer** with `Too many Reed-Solomon
 erasures`. It received 710 physical intervals and observed physical completion,
 but produced no verified file; final EVM was 6.92%. The runner then cancelled
@@ -150,7 +150,7 @@ treating the both-channel result as qualification of the former right-only
 application routing; its cause was not isolated by this single check.
 
 After making both-channel output the cable default, a separate
-[final default-route check](validation-data/fast/cable-live-20260920/final-default-100k/trials.jsonl)
+[final default-route check](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-live-20260920/final-default-100k/trials.jsonl)
 ran with **neither `--mono` nor `--stereo`**. It delivered 100,000 exact bytes
 in **22.796 seconds**, with zero corrected or erased bytes, all 710 intervals,
 observed physical completion and zero process errors. Its saved `fast-info`
@@ -185,7 +185,7 @@ The matched noiseless controls already show errors at the tighter rolloff.
 Thus increased waveform/DSP error is present before adding the physical path.
 Live mean polled EVM rises from approximately 1.02% at the baseline to 2.35%,
 2.40% and 2.72% at the faster points. EVM is a receiver diagnostic, not a
-calibrated SNR estimate. See the [offline method](validation-data/fast/cable-live-20260920/offline-probe-method.md)
+calibrated SNR estimate. See the [offline method](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-live-20260920/offline-probe-method.md)
 for sample alignment, the additional twelve-point exploration and its limits.
 
 Three final headroom probes repeated selected settings with lower amplitudes,
@@ -205,9 +205,9 @@ baseline raw tests were exact at both logical rates. The tighter 19,200-symbol/s
 waveform still had substantial errors with headroom, so the earlier clipping
 does not account for all of its loss of margin. These three finite probes do
 not measure long-file reliability. Full records are
-[48 kHz baseline](validation-data/fast/cable-live-20260920/raw-headroom.json),
-[44.1 kHz baseline](validation-data/fast/cable-live-20260920/raw-headroom44100.json)
-and [19,200-symbol/s headroom](validation-data/fast/cable-live-20260920/raw-tight19200-headroom.json).
+[48 kHz baseline](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-live-20260920/raw-headroom.json),
+[44.1 kHz baseline](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-live-20260920/raw-headroom44100.json)
+and [19,200-symbol/s headroom](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-live-20260920/raw-tight19200-headroom.json).
 
 Three further **coded 100 KB live trials**, all at 256-APSK, 7/8, high-rate RS,
 depth 62 and amplitude **0.5**, used those faster symbol rates. All three produced exact files:
@@ -224,9 +224,9 @@ geometry, with the candidate carrier/rolloff settings above and logical 48 kHz.
 It includes bootstrap/final fill, markers, pilots, pulse tail and 6.25 seconds of
 end silence; startup, queues, failed attempts and retries are excluded. The
 15,000-symbol/s baseline is 7,275.599 s. The standalone
-[estimator source](validation-data/fast/cable-live-20260920/waveform-airtime.cpp),
-[CSV](validation-data/fast/cable-live-20260920/waveform-airtime.csv) and
-[JSON](validation-data/fast/cable-live-20260920/waveform-airtime.json) also retain
+[estimator source](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-live-20260920/waveform-airtime.cpp),
+[CSV](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-live-20260920/waveform-airtime.csv) and
+[JSON](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-live-20260920/waveform-airtime.json) also retain
 the 100 KB and 5 MB projections for all four waveforms. No audio was generated
 by this calculation.
 
@@ -249,7 +249,7 @@ levels with adequate transmit headroom remains unmeasured.
 
 ## Exact airtime and the depth-62 choice
 
-The [production estimator sweep](validation-data/fast/cable-live-20260920/airtime.csv)
+The [production estimator sweep](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-live-20260920/airtime.csv)
 covers all depths 1–64, existing rates, RS choices and 16/64/256-APSK. These
 figures include source cells, integrity, coding, bootstrap/final fill, markers,
 pilots, pulse tail and 6.25 seconds of end silence. They exclude device startup,
@@ -327,7 +327,7 @@ words to 7,947 data words for 50 MB: 0.3020% parity/data. It gives 80% success
 only below approximately 0.2601% independent residual word failure. At 0.3%
 it predicts only 56.1% file success. These are model outputs, not measured
 LDPC/cable results. Full assumptions and exact calculations are retained in the
-[reliability model](validation-data/fast/cable-live-20260920/reliability-model.md).
+[reliability model](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-live-20260920/reliability-model.md).
 
 The requested accidental-marker probability must apply to the complete search
 budget, not merely the marker's nominal bit count. For the current tolerant

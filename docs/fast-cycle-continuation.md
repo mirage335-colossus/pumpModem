@@ -99,5 +99,5 @@ build/fast_cable_probe --profile acoustic --capacity --mode codec \
 Do not use the diagnostic `--abort-on-failure` option for continuation tests.
 The replay reports an incomplete file intentionally; `--require-success` would
 make that negative whole-file result exit nonzero. No new audio is emitted.
-The [evidence archive](validation-data/fast/cycle-continuation-20260921/README.md)
+The [evidence archive](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cycle-continuation-20260921/README.md)
 contains replay JSON, logs, source/input hashes and the final validation record.

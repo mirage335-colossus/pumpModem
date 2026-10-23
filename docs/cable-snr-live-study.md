@@ -14,10 +14,10 @@ audio API measured less than the desktop float path. A simultaneous wideband
 multitone also gave a lower residual ratio than the single sine. These
 distinctions matter when interpreting a high SNR as modem operating margin.
 
-The [evidence directory](validation-data/fast/cable-snr-20260920/README.md)
+The [evidence directory](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-snr-20260920/README.md)
 contains analyses, device metadata, sample-window indices and retained PCM
 windows. Playback was restored to **95%** and capture to **0 dB**, verified in
-[environment-after.json](validation-data/fast/cable-snr-20260920/environment-after.json).
+[environment-after.json](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-snr-20260920/environment-after.json).
 This investigation changed no modem defaults.
 
 ## Conditions and definitions
@@ -47,7 +47,7 @@ discarded 0.5 seconds at each end. Separate one-second windows check stability
 alongside the longer fits. PCM was not coherently averaged across repetitions.
 
 Fits remove few parameters from tens of thousands of samples; the uncorrected
-noise-projection fraction is recorded. An [independent FFT-mask check](validation-data/fast/cable-snr-20260920/independent-check.json)
+noise-projection fraction is recorded. An [independent FFT-mask check](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-snr-20260920/independent-check.json)
 of 21 strong-tone windows agreed within 0.023 dB for SNR and 0.016 dB for SINAD.
 Eleven synthetic analysis tests passed. Overlapping diagnostic windows were
 not pooled as independent observations.
@@ -75,8 +75,8 @@ the five original-volume repetitions ranged from **79.90 to 79.94 dB**.
 The maximum-level capture peak was approximately 0.2344, with no near-full-scale
 capture samples. Thus the best result was not obtained by clipping the ADC.
 The analyses and exact settings are retained in
-[maximum-g0](validation-data/fast/cable-snr-20260920/runs/maximum-g0/analysis-mono.json)
-and [repeat-g0](validation-data/fast/cable-snr-20260920/runs/repeat-g0/analysis-mono.json).
+[maximum-g0](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-snr-20260920/runs/maximum-g0/analysis-mono.json)
+and [repeat-g0](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-snr-20260920/runs/repeat-g0/analysis-mono.json).
 
 Eight separate tones from 313 to 18,203 Hz, at amplitude 0.95 and 95% playback,
 gave full-audio SNRs of approximately **79.95–80.18 dB**. Their measured signal
@@ -94,7 +94,7 @@ on an excited tone cannot be separated from that tone by this measurement.
 Consequently **71.62 dB is a linear multitone residual ratio, not an AWGN SNR**
 or a calibrated prediction of modem decoding performance.
 
-The [production-path comparison](validation-data/fast/cable-snr-20260920/runs/levels-g0/analysis-production-mono.json)
+The [production-path comparison](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-snr-20260920/runs/levels-g0/analysis-production-mono.json)
 used the actual application's audio API, including S16 playback/capture
 conversion. The desktop and production paths also differ in channel handling;
 the observed difference cannot be attributed solely to nominal PCM bit depth.

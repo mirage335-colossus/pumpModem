@@ -1,13 +1,11 @@
-# Historical validation captures
+# Retained development inputs
 
-These source-bound reports and fixtures preserve original measurements, failures
-and reproduction methods. Their dates, revision hashes, recorded commands and
-paths are historical evidence, not current development instructions. In
-particular, old coordination-store paths do not request recreation of that system;
-compiled local snapshots and large traces may have been retired. Rebuild the
-matching source/configuration in a fresh build directory for new measurements.
+This directory keeps selected receiver evidence for unfinished work and the
+Bookworm offline-build baseline. Active regression fixtures live under `tests/`.
+These records are source-bound measurements, not current qualification or
+instructions to reproduce an old development environment.
 
-Use [current validation](../validation.md) for qualification and release status
-and the [evidence index](../indexes/evidence.md) to find a relevant study. Do not
-scan this entire directory as routine task setup or edit original captures to
-make their outcomes appear current. Generic build/process tools remain in tools/.
+Completed Fast studies and other superseded captures are available in
+[Git history](https://github.com/mirage335-colossus/pumpModem/tree/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data), rather than copied or
+compressed again here. See [current validation](../validation.md),
+[future work](../future-work.md) and [evidence navigation](../indexes/evidence.md).

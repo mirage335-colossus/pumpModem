@@ -81,7 +81,7 @@ insufficient build identity.
 
 Let `A` denote the local ignored evidence directory
 `local-evidence/research/sched-fft-rescue-20261014/`. These are historical
-reports/fixture sources (some in the local compressed capture). Old executable
+selected reports/fixture sources. Old executable
 and library hashes below identify former runs; their local binaries and build
 trees were retired. Rebuild the matching source/configuration for a new comparison.
 
@@ -2454,108 +2454,12 @@ declared allowances. OpenSSL, libm, allocator and unwind transitive stack use wa
 not fully measured. This is not a formal complete-callee stack proof; retain that
 qualification limit alongside workspace accounting and sanitizer results.
 
-### Final local validation
+### Historical validation
 
-This is a **manual checkpoint with failed validation**, not a qualified release.
-All test assertions, physical deadlines and existing workload limits were
-retained. Application source and delivered core/GUI hashes stayed fixed across
-the final checks. The normal Release run used `devfast=false`, three build jobs
-and serial tests. Its complete calibration cases passed, including the
-762.75-second differential receiver probability case. Real-time fast session and
-GUI fast Live cases also passed in Release.
-
-| Scope | Actual result | Qualification |
-| --- | --- | --- |
-| Initial full Release | 320 passed, 9 failed; all 329 cases executed | Failed; original result retained |
-| Selected ASan/UBSan/LeakSanitizer | 11 passed, 1 failed; all 12 selected cases executed | Failed; scoped coverage only |
-| Full local native GUI | 1 passed, 2 failed; all 3 cases executed | Failed; no native case omitted |
-
-Four Release test/workload failures remain unresolved:
-
-- `scheduled_point_source_nodes` failed during calendar construction: no complete
-  shaped symbol fits the scheduled-hop/FHSS full-power windows. Its subsequent
-  numerical assertions were not reached.
-- `scheduled_parallel_preparation` hit the existing global CTest timeout at
-  1500.11 seconds during its first arithmetic serial/parallel pair. Later cases
-  were not executed. The earlier 360-second externally interrupted attempt is
-  incomplete evidence, not a successful or matching 1500-second baseline. A
-  bounded source audit found advancing loops but does not establish the live
-  cause; no deadline was extended.
-- `live_exact_source` failed its partial bounded-capture-queue drain check at
-  30.02 seconds. Its trace finalized completely with zero dropped records,
-  1,544,507 exact-point queries, 8,192 Original row builds and no capacity,
-  address-mismatch or exhaustion failures. At the last relevant receiver record,
-  41,187 samples were processed and 469 queued. The binding was exercised; these
-  failed-prefix counts are not a throughput measurement. Later pending-zero and
-  caller-TLS assertions were not reached.
-- `alsa_audio_contract` failed the deterministic injected-stub clipping check:
-  peak 1.00944, 63 clipped samples and distortion 2.47619e-8 above 1e-8. This is a
-  software test failure, not an accepted hardware-absence exception.
-
-The selected sanitizer kernel work overlapped general Release work on three
-logical CPUs, including approximately the final 50 seconds of the preparation
-timeout. That scheduling fact is retained with the failure; these regressions
-were not performance comparisons.
-
-The other five initial failures were socket/signing fixture setup failures.
-Focused local retries passed `build_preview`, `build_ci_apt`,
-`build_arch_release`, `build_gentoo_sync` and `build_apt_release`. Their original
-failures remain unchanged in the full-run receipt. The four signing scripts
-reported 17, 12, 12 and 16 nested unittest cases respectively; the Arch total
-includes two native pacman cases skipped by the existing disposable-root/
-container/tool guard. Those two cases did not pass and were not exercised.
-
-An unrelated infrastructure retry showed that installed GnuPG 2.4.7's
-`gpgconf --dry-run --list-dirs` can create its runtime child directory. The
-corrected four-case retry passed with 201 accepted GPG preflights. No key
-publication or host package installation occurred. This setup finding is
-preserved here because it affected the final validation record, not as a required
-Sched_Hop implementation step.
-
-The selected sanitizer replacement kernel run passed all eleven cases. The
-remaining instrumented `live_exact_source` failed the same partial-queue drain
-assertion at 91.01 seconds under its existing 30-second normal/90-second
-instrumented work allowance; its trace was complete with zero drops. **No
-sanitizer finding was observed in this scope**, but the Live assertion failed
-and its later assertions were not reached. The initial restricted launch's
-LeakSanitizer process-inspection errors and subsequent cancellation remain
-recorded separately; they were not passes. Replacement process access retained
-leak detection and all ASan/UBSan options. This was not full sanitizer regression
-or instrumented native GUI qualification.
-
-Native GUI testing used an authenticated private software Xwayland display with
-the existing 600-second smoke setting. Document conformance passed in 0.04
-seconds. Workflow smoke failed at 50.03 seconds because its replay-mode label did
-not identify displayed frames; preceding replay frame/fraction checks passed.
-This is a shared GUI state/label assertion with unresolved cause, not the
-accepted Rev cadence warning or an established Xwayland limitation. Adapter
-conformance failed at 79.17 seconds: an empty editor retained focus or hid its
-allocated preset button. Subsequent assertions in both failed cases were not
-executed. The full three-case inventory and all outcomes were captured; owned
-test descendants were absent at completion. The display manager stopped and
-joined, and its exact lock/socket outputs were absent before claim release.
-
-The delivered GUI passed version reporting, its headless shared-GUI self-check
-and library resolution. It is the exact tested native8 binary with verified
-normal, verbose and debug launchers, preserved F1/F2 presets and a synthetic key.
-Physical sound-card operation was not exercised. Cross-platform, SDK,
-copied-package, full sanitizer and instrumented native GUI qualification were
-not performed; no release was published or certified. No test failure here has
-been proved inherited or a new regression solely by resemblance to earlier
-logs. The sustained-reception objective and complete Original extraction/
-adoption route remain open.
-
-Exact commands, source identities, original failures, focused retry results,
-internal skips and cleanup receipts are retained under
-`local-evidence/research/sched-cohorts-20261015/final-release-all/`,
-`final-release-infra/`, `final-release-infra-attempt2/`,
-`final-release-infra-attempt3/`, `final-sanitize/` and `final-native/`.
-
-The original passing `build_source_sdk` CTest script reported 28 nested unittest
-cases with three skips. Its `HostCxxRuntimeIntegrationTests` did not run because
-`patchelf` is absent on this host. The omitted cases cover relocated private C++
-runtimes/deep plugins, missing target-runtime rejection and unpreserved host-
-library rejection. The other 25 nested cases executed; the three omitted cases
-are not passes. This is additional omitted SDK fixture coverage, independent of
-the two native pacman skips in the signing retry and the broader untested SDK
-qualification scope.
+The October 15–16 local pass/failure details are retained in
+[the original checkpoint](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/sched-hop-implementation-runbook.md#final-local-validation).
+Those results describe that source and environment; they are not current open
+regressions. Current native/SDK qualification is recorded in [validation](validation.md).
+The sustained-reception objective and complete Original extraction/adoption route
+remain unfinished. Use the design, fixtures and acceptance criteria above against
+current source; former binary paths and build receipts are not prerequisites.

@@ -61,7 +61,7 @@ bytes. It does not implement an IEEE 802.11 PHY. The existing DVB-S2 short
 matrices and terminated K=7 convolutional paths remain supported. All retain
 outer Reed–Solomon correction, complete-cycle SHA-256 or HMAC integrity,
 bootstrap salt and XZ compression. See the [LDPC comparison and independent
-fixtures](validation-data/fast/short-ldpc-20260922/README.md) for exact geometry,
+fixtures](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/short-ldpc-20260922/README.md) for exact geometry,
 error-rate measurements, alternatives and rejected candidates.
 
 Small LDPC single carrier shares the compact 256-symbol startup and 192-symbol
@@ -90,6 +90,6 @@ The previous convolutional waveform retains its own frozen regression fixture.
 
 These deterministic checks and the ideal inner-code noise comparison do not
 measure statistical whole-file reliability or qualify a physical room. The
-[current record](validation-data/fast/short-ldpc-20260922/README.md) includes the
-results and reproduction commands; the [previous convolutional record](validation-data/fast/acoustic-short-20260922/README.md)
+[current record](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/short-ldpc-20260922/README.md) includes the
+results and reproduction commands; the [previous convolutional record](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/acoustic-short-20260922/README.md)
 remains available.

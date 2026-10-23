@@ -185,7 +185,7 @@ training, LDPC rate and nonuniform subcarrier quality all consume capacity;
 actual live file trials determine the useful rate.
 
 The compact evidence archive is in
-[`validation-data/fast/acoustic-capacity-20260920/`](validation-data/fast/acoustic-capacity-20260920/).
+[`validation-data/fast/acoustic-capacity-20260920/`](https://github.com/mirage335-colossus/pumpModem/tree/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/acoustic-capacity-20260920/).
 Raw PCM and full-resolution channel arrays remain at the recorded `/tmp` paths,
 with hashes in the archive. Long-file predictions must remain explicitly
 separate from completed physical transfers.

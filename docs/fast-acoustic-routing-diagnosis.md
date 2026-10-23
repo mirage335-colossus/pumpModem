@@ -97,7 +97,7 @@ The reduced-amplitude run illustrates the finite-code caveat directly: its
 failed cycle exceeded 0.75 GMI/bit, but did not provide enough margin for the
 actual rate-3/4 LDPC decoder.
 
-![Measured coded-bit information for the four initial live recordings](validation-data/fast/acoustic-routing-20260921/coded-bit-information.svg)
+![Measured coded-bit information for the four initial live recordings](https://raw.githubusercontent.com/mirage335-colossus/pumpModem/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/acoustic-routing-20260921/coded-bit-information.svg)
 
 A post-capture scan of common LLR scales barely changed the worst failed
 cycle's GMI, from 0.4862 to 0.4880. Confidence rescaling alone cannot recover
@@ -229,5 +229,5 @@ Both Release GUI targets built successfully, and the Rev headless toolkit
 self-check passed. These checks do not substitute for native visual inspection.
 
 Compact results, source snapshots, hashes, and reproduction instructions are
-in [the evidence archive](validation-data/fast/acoustic-routing-20260921/README.md).
+in [the evidence archive](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/acoustic-routing-20260921/README.md).
 Raw audio is retained outside the repository.

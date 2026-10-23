@@ -109,19 +109,13 @@ completion), `src/fast/codec.cpp` (`StreamDecoder::push_interval`), and
 
 ## Reproduction
 
-The [evidence directory](validation-data/fast/ldpc-rate-margin-20260921/)
+The [evidence directory](https://github.com/mirage335-colossus/pumpModem/tree/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/ldpc-rate-margin-20260921/)
 contains the helper, all sweep rows, exact build/source hashes, theory script,
-and theory results. Run from the repository root with matching Release libraries:
+and theory results.
 
-```sh
-c++ -std=c++20 -O3 -Iinclude \
-  docs/validation-data/fast/ldpc-rate-margin-20260921/ldpc_qam16_margin.cpp \
-  build/libdatapump_fast.a build/libdatapump.a \
-  -lcrypto -ldl build/third_party/xz/liblzma.a -pthread \
-  -o /tmp/ldpc_qam16_margin
-/tmp/ldpc_qam16_margin 3/4 9.8 3 7102
-python3 docs/validation-data/fast/ldpc-rate-margin-20260921/ldpc-rate-theory.py
-```
+[Historical build and reproduction commands](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/fast-ldpc-rate-margin.md#reproduction)
+use the archived inputs and their matching source/configuration; they are not
+a current-checkout build recipe.
 
 The helper arguments are rate, Es/N0 in dB, cycles, and seed; each cycle tests
 eight LDPC frames. Each CSV row records its actual rate, SNR, frame count and

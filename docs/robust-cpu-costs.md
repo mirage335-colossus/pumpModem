@@ -53,7 +53,7 @@ regression or speedup. The planning increase is more consistent: +3.43% and
 +3.65%. These are repeated local timings, not confidence intervals or a bound
 for all data, thermal states, compilers or processors.
 
-[Raw samples, summary, calculation script and reproduction details](validation-data/robust-mitigations-2026-09-22/README.md)
+[Raw samples, summary, calculation script and reproduction details](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/robust-mitigations-2026-09-22/README.md)
 retain both wall time and total process CPU time. Four-worker recovery uses
 about 274 ms of process CPU time in 69 ms of elapsed time; wall time is the
 appropriate denominator for its wall-clock search budget. It would be incorrect

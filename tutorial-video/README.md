@@ -25,8 +25,8 @@ does not install packages, change audio settings or compile application sources.
 The reviewed render used FFmpeg 7.1.5 and the Python versions pinned in
 `requirements.txt`.
 
-1. Follow the repository's coordination instructions and claim the production
-   directory, external outputs, chosen display, audio device and timing workload.
+1. Reserve the production directory and external outputs. Confirm the chosen
+   display, audio device and timing-sensitive workload are available for the takes.
 2. Copy existing application binaries into a fresh external working directory.
    Provide a disposable demo key named `Tutorial` and a 30,000-byte text fixture.
    `scripts/make_demo_file.py EXTERNAL_FILE.txt` recreates the reviewed fixture.
@@ -69,8 +69,8 @@ The audible Robust excerpt gets a six-second narration gap and a slightly higher
 level than the background Fast/Legacy recordings.
 The output size gate is 30 MB. Check the final encoded video visually, decode
 both complete streams, inspect speech/tone balance, and confirm source/media
-separation before delivery. Stop all capture, GUI and display children, verify
-audio settings, then release the coordination claims.
+separation before delivery. Stop and reap capture, GUI and display children,
+verify audio settings, and close timing-sensitive processes before reusing them.
 
 ## Scope of the demonstrations
 

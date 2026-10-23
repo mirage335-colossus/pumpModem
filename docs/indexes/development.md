@@ -29,7 +29,5 @@
 | [QR integration notes](../../third_party/qrcodegen/README.datapump.md) | Local QR dependency provenance. |
 | [LDPC source notes](../../third_party/ldpc/README.md) | Vendored coding source context. |
 
-Upstream manuals, notices and other documentation remain with their dependency
-trees. These entry points complement those retained materials. See the
-[evidence index](evidence.md) for historical commands, captured results and
-release records whose revision/environment must be considered before reuse.
+Upstream manuals and notices remain with their dependency trees. The
+[evidence index](evidence.md) links supporting captures and release records.

@@ -127,7 +127,7 @@ All four fresh live transfers using the new presets recovered exact sources:
 
 There were no audio-device errors or capture overruns. Maximum queued capture
 was 0.385 seconds, below the production four-second OFDM allowance. The
-[reproduction records](validation-data/fast/acoustic-ofdm-recovery-20260921/README.md)
+[reproduction records](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/acoustic-ofdm-recovery-20260921/README.md)
 contain each result, source hashes, timing, queue occupancy and the retained
 capture hashes. The menu labels describe expected reference-band SNR; no
 calibrated 0 dB or 3 dB acoustic noise condition was imposed on these live runs.

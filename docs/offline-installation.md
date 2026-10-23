@@ -81,10 +81,11 @@ also need to rebuild offline. Transferring an existing working installation does
 not require those build tools or source packages.
 
 Normal bundles include dependency provenance, build configuration and all
-required notices. Historical validation captures stay in the source repository;
-use `-DDATAPUMP_INSTALL_VALIDATION_DATA=ON` to include them in an offline evidence
-bundle. References into `docs/validation-data` in developer documents require
-that option or a matching source checkout.
+required notices. `-DDATAPUMP_INSTALL_VALIDATION_DATA=ON` includes the selected
+supporting inputs still under `docs/validation-data`; it does not restore retired
+studies. Older captures are available through the pinned Git links in the
+[evidence index](indexes/evidence.md). Retrieve only the records needed for a
+specific offline investigation.
 
 ## Copy and run
 

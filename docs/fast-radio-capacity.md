@@ -133,4 +133,4 @@ not finish the reception. None of these experiments establishes performance
 under real HF fading, AGC changes, RF frequency drift, FM threshold noise,
 nonlinear audio processing, or arbitrary interference.
 
-[Reproduction source and logs](validation-data/fast/radio-capacity-20260921/README.md)
+[Reproduction source and logs](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/radio-capacity-20260921/README.md)

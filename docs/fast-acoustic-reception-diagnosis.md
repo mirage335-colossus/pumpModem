@@ -154,4 +154,4 @@ restart was performed, preserving the user's open application state.
 
 Detailed logs, before/after outputs, harness source, exact settings and hashes of
 retained raw PCM/bits are in
-[`validation-data/fast/acoustic-reception-20260921/`](validation-data/fast/acoustic-reception-20260921/).
+[`validation-data/fast/acoustic-reception-20260921/`](https://github.com/mirage335-colossus/pumpModem/tree/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/acoustic-reception-20260921/).

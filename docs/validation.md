@@ -133,41 +133,20 @@ loopbacks are not a requirement or evidence of general tone reliability.
 Historical tone results below are retained as records, not current regression
 requirements or hardware validation.
 
-## Workspace cleanup, 23 October 2026
-
-Removed the obsolete cross-chat coordination implementation, its four tools,
-five dedicated test registrations, and twenty procedure/study documents. Native
-subagent work uses disjoint edits, stable inputs, separate outputs and serialized
-integration. No application, numerical, physical-deadline or product test changed.
-The obsolete tracked Oct16 GUI executable was removed; build current source with
-`./build.sh`. The installed SDK recipe `6c4884fdff9c745ab0a0` still matches the
-current helper and is retained with current dependency inputs. Detached Buildroot
-source trees and obsolete SDK metadata were also removed from the active cache;
-their small original source inventories remain with local evidence. The
-[retention policy](building.md#local-output-retention) now requires compatible
-incremental build reuse and removal of completed scratch binaries and superseded
-local SDK copies. Published release assets remain immutable.
-
-Focused offline checks passed: CI partition 14, CI runner 56, build wrapper 58,
-native runner 12 and resource-result 5 cases. Independent review and exact wiring
-diffs verified that only the five coordination checks were removed. Documentation
-links, helper syntax/help, the latest metric schema and whitespace checks passed.
-Matching full native/SDK evidence above is reused; this maintenance change did not
-run another application matrix or publish a release.
-
 ## Historical evidence
 
 The former run-by-run ledger is recoverable at
 [0751ac8:docs/validation.md](https://github.com/mirage335-colossus/pumpModem/blob/0751ac847096de8017d7028d14f22037abce445e/docs/validation.md).
 Read the relevant dated section when investigating a regression; it is not a
 startup reading requirement. [Release history](release-history/2026-09-30/README.md),
-tracked numerical captures and independent fixtures remain intact. Historical
+active independent fixtures remain intact. Retired numerical captures remain
+available through pinned Git history. Historical
 binary hashes identify former executions; removed local binaries must be rebuilt
 from their matching source/configuration before a new experiment.
 
-Local `local-evidence/` contains only retained reports, reproduction inputs and
-unaccepted source patches. Its README identifies the compressed historical
-capture and directly available latest qualification reports. It is ignored,
-not a task registry or a distributable qualification substitute. Bulk builds,
-SDK application outputs, old verbose traces and coordination records are not
-required to understand or change current source.
+Ignored `local-evidence/` retains the latest qualification reports, unaccepted
+patches and selected receiver/CI inputs needed by unfinished work. It is not a
+build-history archive. Completed study data and superseded tracked narratives
+are available through [pinned Git references](indexes/evidence.md); old local
+artifact paths may have been retired. Current development needs current source
+and focused evidence, not reconstruction of former build environments.

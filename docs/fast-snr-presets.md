@@ -77,7 +77,7 @@ remain available manually. This is one reason an information bound alone is
 insufficient to select a practical mode. The replacement at 36 dB is
 4096-QAM/LDPC 7/9, passing four frames with about 3.46% lower estimated
 throughput. All corrected cable menu settings passed four production-code
-AWGN frames each. The [104-frame screen and exact sources](validation-data/fast/wire-snr-screen-20260921/README.md)
+AWGN frames each. The [104-frame screen and exact sources](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/wire-snr-screen-20260921/README.md)
 include deliberate failed candidates and additional nearby points; these
 decoder tests do not constitute full acoustic or cable waveform trials.
 
@@ -178,7 +178,7 @@ real trailing silence, and EOF does not complete reception. That run processes
 1,837.68 seconds of sampled 48 kHz audio with about 1.32 MB of RX workspace.
 It tests one corrected frame, not a complete file or a success probability.
 No new live audio or RF qualification is implied by adding these controls.
-The final [integration logs](validation-data/fast/snr-presets-20260921/README.md)
+The final [integration logs](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/snr-presets-20260921/README.md)
 record the completed Fast/GUI and native checks.
 
 The reported premature completion at acoustic −10 dB was subsequently

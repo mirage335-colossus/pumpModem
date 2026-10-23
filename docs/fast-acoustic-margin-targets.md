@@ -88,19 +88,10 @@ a numerical noise-margin target is not a guarantee against that condition.
 
 ## Reproduction
 
-The [evidence directory](validation-data/fast/acoustic-margin-targets-20260921/)
+The [evidence directory](https://github.com/mirage335-colossus/pumpModem/tree/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/acoustic-margin-targets-20260921/)
 contains the helper, all screening rows, formula, actual CLI rates, and source
 hashes. No runtime files or defaults changed, and no audio device was opened.
 
-```sh
-c++ -std=c++20 -O3 -Iinclude \
-  docs/validation-data/fast/acoustic-margin-targets-20260921/ldpc_qam_margin_modes.cpp \
-  build/libdatapump_fast.a build/libdatapump.a \
-  -lcrypto -ldl build/third_party/xz/liblzma.a -pthread \
-  -o /tmp/ldpc_qam_margin_modes
-/tmp/ldpc_qam_margin_modes 1/2 7 3 96001 16
-/tmp/ldpc_qam_margin_modes 2/3 7 3 96002 16
-/tmp/ldpc_qam_margin_modes 2/3 3 3 96003 4
-/tmp/ldpc_qam_margin_modes 1/2 3 3 96004 4
-build/pump fast-info --profile acoustic --qam 4 --code-rate 2/3 --estimate-bytes 50000000
-```
+[Historical build and reproduction commands](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/fast-acoustic-margin-targets.md#reproduction)
+use the archived inputs and their matching source/configuration; they are not
+a current-checkout build recipe.

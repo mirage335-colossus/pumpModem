@@ -17,7 +17,7 @@ bits and respectively 7,200, 10,800, and 11,880 information bits. Their nominal
 rate labels are 1/2, 2/3, and 3/4; the first and last actual short-frame rates
 are 4/9 and 11/15. Only the separate `acoustic-short` capacity profile uses
 these frames. Existing profiles retain the normal matrices and permutation.
-The [independent short-frame fixtures and checks](../../docs/validation-data/fast/acoustic-short-20260921/ldpc-short-method.md)
+The [independent short-frame fixtures and checks](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/acoustic-short-20260921/ldpc-short-method.md)
 document their upstream provenance and deterministic validation.
 
 `wifi_tables.hpp` contains the nine IEEE 802.11 QC matrices (648, 1,296 and
@@ -31,7 +31,7 @@ information coordinates to zero and accepts exactly `floor(K / 8)` bytes.
 Those known zero coordinates remain in the transmitted codeword (no puncturing).
 The decoder enforces their fixed values; they cannot turn absent likelihoods
 into successful reception. See the [independent back-substitution fixtures and
-comparison](../../docs/validation-data/fast/short-ldpc-20260922/README.md).
+comparison](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/short-ldpc-20260922/README.md).
 
 `src/fast/ldpc.cpp` constructs an immutable sparse check graph and supplies a
 bounded, thread-safe layered log-domain sum-product decoder. The upstream
@@ -40,7 +40,7 @@ compiled: there are no variable-length stack arrays or shared mutable decoder
 objects. `tests/test_fast_ldpc.cpp` freezes codeword hashes made by the separately
 compiled upstream encoder and independently checks its parity-check equations.
 The rate-1/2 acoustic extension uses the same normal frame and decoder; its
-[independent fixture and validation](../../docs/validation-data/fast/acoustic-capacity-20260920/ldpc-half-method.md)
+[independent fixture and validation](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/acoustic-capacity-20260920/ldpc-half-method.md)
 are recorded separately from the earlier cable sweep.
 
 ## Decoder contract and checks
@@ -77,7 +77,7 @@ and 42 dB (9/10). Those frames require 3–11 decoding iterations and approximat
 26–96 ms per frame. These small deterministic checks detect implementation
 regressions; they do not establish a low error floor or real cable performance.
 A further 65,536-QAM 9/10 frame at 48 dB also decodes correctly. The larger
-[production-decoder capacity sweep](../../docs/validation-data/fast/capacity-20260920/ldpc-awgn-method.md)
+[production-decoder capacity sweep](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/capacity-20260920/ldpc-awgn-method.md)
 extends the ideal-channel evidence through 4,194,304-QAM.
 Concurrent calls, boundary-bit flips, invalid inputs, a bounded noise-only
 failure, and separately generated frozen codeword hashes are also checked.
@@ -87,4 +87,4 @@ BPSK frames per rate. This container requires `ASAN_OPTIONS=detect_leaks=0`
 because LeakSanitizer cannot run under its ptrace supervision; leak scanning is
 therefore not part of that validation result.
 
-The acoustic 2/3 extension uses B6, with an [independent upstream fixture](../../docs/validation-data/fast/acoustic-capacity-20260920/ldpc-twothirds-method.md).
+The acoustic 2/3 extension uses B6, with an [independent upstream fixture](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/acoustic-capacity-20260920/ldpc-twothirds-method.md).

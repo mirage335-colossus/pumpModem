@@ -148,5 +148,5 @@ No 50 MB file-success probability, universal device calibration or optimal
 level to arbitrary precision is claimed. The deliverables are a measured
 operating point, evidence against increasing the default, and a reusable
 known-source analysis tool. Runtime behavior, GUI controls and wire formats
-are unchanged. [Complete tables, commands, tests and hashes](validation-data/fast/cable-level-calibration-20260921/README.md)
+are unchanged. [Complete tables, commands, tests and hashes](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/validation-data/fast/cable-level-calibration-20260921/README.md)
 are retained with the study.

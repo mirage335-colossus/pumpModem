@@ -22,29 +22,9 @@ negative results remain relevant when investigating related behavior.
 | [Short acoustic transfers](../fast-acoustic-short.md) | Profiles, coding alternatives, preset models and measured/tested limits. |
 | [Original Fast mode plan](../fast-mode-plan.md) | Historical isolated APSK design and audit; the implementation subsequently evolved. |
 
-## Coding, cable and radio studies
+## Historical studies
 
-| Document | Context and contents |
-| --- | --- |
-| [Coding study](../fast-coding-study.md) | Offline comparisons and historical capacity/coding optimization candidates. |
-| [Cable live study](../fast-cable-live-study.md) | Earlier APSK throughput, routing, headroom and small-file reliability evidence. |
-| [Capacity live study](../fast-capacity-live-study.md) | QAM/LDPC implementation context and live cable-transfer measurements. |
-| [Cable SNR study](../cable-snr-live-study.md) | Measured SNR/SINAD, levels and hardware/measurement-path distinctions. |
-| [Cable level calibration](../fast-cable-level-calibration.md) | Waveform-level measurements and a configuration-specific amplitude recommendation. |
-| [LDPC rate and margin](../fast-ldpc-rate-margin.md) | Offline production-LDPC comparisons and acoustic-lock limitations; no measured fade-margin claim. |
-
-## Acoustic measurements and failure investigations
-
-| Document | Context and contents |
-| --- | --- |
-| [Acoustic live study](../fast-acoustic-live-study.md) | Physical-channel measurements and earlier OFDM bulk-transfer experiments. |
-| [Acoustic reception diagnosis](../fast-acoustic-reception-diagnosis.md) | Reproduced startup, acquisition and channel-estimation faults and fixes. |
-| [Acoustic routing diagnosis](../fast-acoustic-routing-diagnosis.md) | 16/64-QAM and mono/stereo route comparisons, failures and selected defaults. |
-| [Acoustic margin targets](../fast-acoustic-margin-targets.md) | Historical noise-margin/throughput models and bounded decoder screening. |
-| [Low-SNR recovery](../fast-acoustic-low-snr-recovery.md) | Single-carrier −10 dB premature-end diagnosis, continued-presence handling and checks. |
-| [OFDM recovery](../fast-acoustic-ofdm-recovery.md) | Auto 3/0 dB premature-end diagnosis, tracking/interleave changes and reproduction. |
-
-The [evidence index](evidence.md#fast-measurements-and-reproduction) exposes
-supporting inventories and method documents, including collections without a
-directory README. Physical success, offline replay, modeled probability and
-decoder-only measurements have different scopes; retain those distinctions.
+Completed coding, cable, radio and acoustic investigations are indexed in
+[the historical study map](https://github.com/mirage335-colossus/pumpModem/blob/5b343de5ac5a3e33ac404b796c9ade0ba90d9409/docs/indexes/fast.md).
+Their raw captures remain in Git. Use them for a specific current question;
+physical measurements, offline replay and models have different scopes.
