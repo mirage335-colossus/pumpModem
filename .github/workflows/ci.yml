@@ -140,6 +140,8 @@ jobs:
           python3 tests/test_native_tests_runner.py
           python3 tests/test_ci_tests.py
           python3 tests/test_ci_test_plan.py
+          python3 -B tests/test_resource_results.py
+          python3 -B tools/resource-results.py check docs/ci-resource-results.json
           python3 tests/test_ci_preparation_plan.py
           python3 tests/test_calibration_cli.py
           python3 tests/test_ci_sdk_copy_inputs.py

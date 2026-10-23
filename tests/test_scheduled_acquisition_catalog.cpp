@@ -2,6 +2,7 @@
 #include "datapump/tuning.hpp"
 #include "datapump/clock_sync.hpp"
 #include "../src/scheduled_acquisition_catalog.hpp"
+#include "resource_test_margin.hpp"
 
 #include <iostream>
 #include <map>
@@ -231,7 +232,7 @@ void user36() {
     Catalog catalog(c,s,refined.geometry,256*1024);
     check(catalog.size()==1179702&&catalog.pairs().size()==13&&catalog.families().size()==234,
         "user36 original full bank changed");
-    check(catalog.working_bytes()<64*1024,"user36 catalog allocated origin/lane-sized metadata");
+    check(testing::benchmark_below(catalog.working_bytes(),std::size_t{64*1024},"test_scheduled_acquisition_catalog.catalog_working_bytes","workspace_bytes"),"user36 catalog allocated origin/lane-sized metadata");
     auto cursor=catalog.make_cursor();const std::set<std::size_t> samples{0,1,17,18,5041,catalog.size()/2,catalog.size()-2,catalog.size()-1};
     std::size_t checked=0;
     const auto count=original(c,s,refined.geometry,[&](std::size_t id,const Original& expected) {

@@ -1,3 +1,4 @@
+#include "resource_test_margin.hpp"
 #include "datapump/audio.hpp"
 #include <mmsystem.h>
 #include <cmath>
@@ -224,7 +225,7 @@ int main() {
             audio::play(tone,96000,"7",{},[&](const auto& info){observed=info;});
             direct_format();
             require(observed.logical_rate==96000 && observed.hardware_rate==hardware,"Windows rate metadata missing");
-            require(observed.workspace_bytes>0 && observed.workspace_bytes<512*1024,"Windows converter workspace metadata invalid");
+            require(observed.workspace_bytes>0 && datapump::testing::benchmark_below(observed.workspace_bytes,std::size_t{512*1024},"test_windows_audio.observed_workspace_bytes","workspace_bytes"),"Windows converter workspace metadata invalid");
             require(fake::state.selected_device==7,"sample-rate fallback changed selected Windows device");
             require(fake::state.played.size()==(tone.size()*hardware+95999)/96000,"Windows resampled playback duration changed");
             require(fake::state.initial_queue==2 && !fake::state.gap,"resampled output did not keep buffers queued");
@@ -262,7 +263,7 @@ int main() {
             fake::state.sample=[&](std::size_t index,unsigned clock){return static_cast<std::int16_t>(15000*std::sin(2*std::numbers::pi*frequency*static_cast<double>(index)/clock));};
             const auto converted=audio::record(4,logical,"7",1024*1024,{},[&](const auto& info){observed=info;});
             direct_format();
-            require(converted.size()==logical*4 && observed.hardware_rate==hardware && observed.workspace_bytes<5*1024*1024,"Windows bounded low-rate capture contract failed");
+            require(converted.size()==logical*4 && observed.hardware_rate==hardware && datapump::testing::benchmark_below(observed.workspace_bytes,std::size_t{5*1024*1024},"test_windows_audio.observed_workspace_bytes","workspace_bytes"),"Windows bounded low-rate capture contract failed");
             error=0;
             for(std::size_t i=logical;i<converted.size();++i)
                 error=std::max(error,std::abs(converted[i]-(15000./32768)*std::sin(2*std::numbers::pi*frequency*static_cast<double>(i)/logical)));

@@ -1,3 +1,4 @@
+#include "resource_test_margin.hpp"
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/compression.hpp"
 #include "datapump/fast/modem.hpp"
@@ -236,7 +237,7 @@ void sampled_completion(const char* label,bool encrypted,bool attachment,bool sh
     require(hard_errors>0,"weak short acoustic noisy case did not exercise error correction");
     if(legacy_convolutional)require(!state.ldpc_frames&&!state.ldpc_iterations&&!state.ldpc_changed_bits,
         "compact convolutional correction was mislabeled as LDPC evidence");
-    require(receiver.workspace_bytes()<8*1024*1024,"short acoustic receiver retained unbounded PCM");
+    require(datapump::testing::benchmark_below(receiver.workspace_bytes(),std::size_t{8*1024*1024},"test_fast_acoustic_short_weak.receiver_workspace_bytes","workspace_bytes"),"short acoustic receiver retained unbounded PCM");
 }
 
 void incomplete_controls() {
@@ -314,7 +315,7 @@ void noise_only() {
     require(!receiver.progress().acquired&&!receiver.progress().physical_complete&&!intervals&&
         !decoder.snapshot().complete&&!decoder.result(),
         "short acoustic noise-only recording invented acquisition, intervals or a source");
-    require(receiver.workspace_bytes()<8*1024*1024,"short acoustic noise-only PCM grew without bound");
+    require(datapump::testing::benchmark_below(receiver.workspace_bytes(),std::size_t{8*1024*1024},"test_fast_acoustic_short_weak.receiver_workspace_bytes","workspace_bytes"),"short acoustic noise-only PCM grew without bound");
     std::cout<<"noise_only acquired=0 intervals=0 complete=0\n";
 }
 }

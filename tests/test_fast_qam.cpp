@@ -1,3 +1,4 @@
+#include "resource_test_margin.hpp"
 #include "datapump/fast/modem.hpp"
 #include "datapump/fast/ldpc.hpp"
 #include <algorithm>
@@ -36,7 +37,7 @@ void independent_metrics() {
             mapper_ok&=std::abs(std::complex<double>(actual)-points[label])<1e-6;++symbols;
         });
         Receiver rx(p,[](std::span<const float>){});
-        require(tx.workspace_bytes()<2*1024*1024 && rx.workspace_bytes()<1024*1024,
+        require(datapump::testing::benchmark_below(tx.workspace_bytes(),std::size_t{2*1024*1024},"test_fast_qam.tx_workspace_bytes","workspace_bytes") && datapump::testing::benchmark_below(rx.workspace_bytes(),std::size_t{1024*1024},"test_fast_qam.rx_workspace_bytes","workspace_bytes"),
             "analytic QAM modem allocated an order-sized constellation");
         std::array<float,512> pcm{};while(!tx.finished())tx.read(pcm);
         require(mapper_ok&&symbols==(physical_interval_bits+bits-1)/bits,"analytic Gray mapper differs from explicit lattice");

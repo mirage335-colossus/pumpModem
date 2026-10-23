@@ -1,3 +1,4 @@
+#include "resource_test_margin.hpp"
 #include "datapump/fast/modem.hpp"
 #include "datapump/fast/codec.hpp"
 #include <algorithm>
@@ -75,7 +76,7 @@ void coded_and_absence() {
     require(decoder.snapshot().complete,"OFDM full coded recovery");
     require(std::equal(source.begin(),source.end(),decoder.result()->bytes().begin(),decoder.result()->bytes().end()),"OFDM source mismatch");
     require(rx.progress().intervals==bits.size(),"OFDM phantom tail intervals");
-    require(rx.workspace_bytes()<8*1024*1024,"OFDM workspace scales with caller chunk");
+    require(datapump::testing::benchmark_below(rx.workspace_bytes(),std::size_t{8*1024*1024},"test_fast_acoustic.rx_workspace_bytes","workspace_bytes"),"OFDM workspace scales with caller chunk");
     const auto retained=rx.workspace_bytes(),intervals=rx.progress().intervals,symbols=rx.progress().symbols;
     rx.push(std::vector<float>(48000*30));
     require(rx.workspace_bytes()==retained&&rx.progress().intervals==intervals&&rx.progress().symbols==symbols,
@@ -181,12 +182,12 @@ void bad_training() {
     pcm.resize(2*(p.ofdm_fft_size+p.ofdm_prefix_samples));pcm.insert(pcm.begin(),1371,0);pcm.resize(pcm.size()+48000*8,0);
     std::size_t delivered=0,input_points=0;Receiver rx(p,[&](std::span<const float>){++delivered;},{},[&](std::complex<float>){++input_points;});rx.push(pcm);
     require(!rx.progress().acquired&&!delivered,"OFDM rejected held-out marker admitted a stream");
-    require(rx.workspace_bytes()<8*1024*1024,"OFDM failed acquisition retained unbounded PCM");
+    require(datapump::testing::benchmark_below(rx.workspace_bytes(),std::size_t{8*1024*1024},"test_fast_acoustic.rx_workspace_bytes","workspace_bytes"),"OFDM failed acquisition retained unbounded PCM");
     std::vector<float> noise(48000*12);std::mt19937 rng(378);std::normal_distribution<float> normal(0,.1F);
     for(auto& value:noise)value=normal(rng);
     rx.push(noise);require(!rx.progress().acquired&&!delivered,"OFDM noise acquired");
     require(input_points>0,"OFDM unsynchronized input observations missing");
-    require(rx.workspace_bytes()<8*1024*1024,"OFDM noise workspace unbounded");
+    require(datapump::testing::benchmark_below(rx.workspace_bytes(),std::size_t{8*1024*1024},"test_fast_acoustic.rx_workspace_bytes","workspace_bytes"),"OFDM noise workspace unbounded");
 }
 void missing_block() {
     auto p=config();std::mt19937 rng(3882);

@@ -1,3 +1,4 @@
+#include "resource_test_margin.hpp"
 #include "../src/scheduled_origin_gram.hpp"
 #include <cfenv>
 #include <iostream>
@@ -50,7 +51,7 @@ void powers_and_carrier(){Data data;for(const auto n:std::array<std::int64_t,7>{
 }
 void prefix_and_crops(){Data data;const std::array<std::uint64_t,8> points{0,83,491,2448,7344,8000,9792,N};
     g::Prefix<3> prefix(data.powers,0x1001,points,budget);for(std::size_t at=0;at<N;){const auto count=std::min<std::size_t>(777,N-at);
-        prefix.append(at,std::span<const g::Prefix<3>::Row>(data.rows).subspan(at,count),std::span<const std::uint8_t>(data.mask).subspan(at,count));at+=count;}prefix.finish(N);CHECK(prefix.valid());CHECK(prefix.working_bytes()<2*1024*1024);
+        prefix.append(at,std::span<const g::Prefix<3>::Row>(data.rows).subspan(at,count),std::span<const std::uint8_t>(data.mask).subspan(at,count));at+=count;}prefix.finish(N);CHECK(prefix.valid());CHECK(datapump::testing::benchmark_below(prefix.working_bytes(),std::size_t{2*1024*1024},"test_scheduled_origin_gram.prefix_working_bytes","workspace_bytes"));
     for(const auto origin:std::array<std::size_t,3>{0,7,32})for(const auto cut:std::array<std::pair<std::size_t,std::size_t>,4>{{{0,N},{83,9792},{491,N},{2448,7344}}}){
         const auto rounding=c::scalar_reference_errors(N,0,16*N,0).gram;
         const auto result=prefix.query(cut.first,cut.second,origin,data.reference,true,0,rounding);

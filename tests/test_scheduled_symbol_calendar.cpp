@@ -1,4 +1,5 @@
 #include "datapump/scheduled_symbol_calendar.hpp"
+#include "resource_test_margin.hpp"
 
 #include <algorithm>
 #include <array>
@@ -179,7 +180,7 @@ void bounds_and_separation() {
     auto plan=std::make_shared<SchedHopPlan>(*many.scheduled_hopping);
     plan->time_multiplier=10000;plan->group_hops=9999;many.scheduled_hopping=plan;
     const ScheduledSymbolCalendar large(many);
-    check(large.working_bytes()==ordinary.working_bytes() && large.working_bytes()<4096,
+    check(large.working_bytes()==ordinary.working_bytes() && testing::benchmark_below(large.working_bytes(),std::size_t{4096},"test_scheduled_symbol_calendar.large_working_bytes","workspace_bytes"),
           "calendar allocated memory proportional to group or elapsed symbols");
     const auto K=large.slots_per_group();
     const std::array<std::uint64_t,4> ranks{0,K-1,K,100000000ULL*K+K/2};

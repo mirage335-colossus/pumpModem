@@ -1,3 +1,4 @@
+#include "resource_test_margin.hpp"
 #include "datapump/fast/modem.hpp"
 #include "datapump/fast/preset.hpp"
 #include "datapump/fast/ldpc.hpp"
@@ -150,8 +151,8 @@ void minimum_baud_bounds() {
     p.pilot_spacing_symbols=1024;validate(p);
     Transmitter tx(p,[](std::span<std::uint8_t>){return false;});
     Receiver rx(p,[](std::span<const float>){throw std::runtime_error("quiet input emitted an interval");});
-    require(rx.workspace_bytes()<4*1024*1024,"one-baud receiver memory is not bounded");
-    require(tx.workspace_bytes()<6*1024*1024,"one-baud transmitter memory is not bounded");
+    require(datapump::testing::benchmark_below(rx.workspace_bytes(),std::size_t{4*1024*1024},"test_fast_low_rate.rx_workspace_bytes","workspace_bytes"),"one-baud receiver memory is not bounded");
+    require(datapump::testing::benchmark_below(tx.workspace_bytes(),std::size_t{6*1024*1024},"test_fast_low_rate.tx_workspace_bytes","workspace_bytes"),"one-baud transmitter memory is not bounded");
     require(end_silence_samples(p)>static_cast<std::uint64_t>(p.sample_rate)*1024,
         "one-baud sparse pilots need a complete observation window");
     std::array<float,8191> block{};require(tx.read(block)==block.size(),"one-baud streaming TX failed");

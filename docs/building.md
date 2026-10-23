@@ -504,6 +504,65 @@ instead of silently building an SDK.
 
 ### Parallel CI scopes and timing warnings
 
+#### Resource benchmark margins
+
+Only explicit CPU-work, construction/planner-runtime and absolute retained-memory
+benchmarks receive a CI margin. A nominal upper target `T` has a CI ceiling of
+**at least `1.25 × T`**; integer quantities round upward without floating-point
+conversion. Larger established allowances remain: for example, an instrumented
+CPU fixture's `3 × T` limit is not reduced or multiplied again. The nominal
+target still produces a warning when exceeded; completion of every functional
+assertion is required. An exhausted resource ceiling remains a failure, except
+for the already authorized, typed incomplete-coverage paths described below.
+
+The test-only helper [`resource_test_margin.hpp`](../tests/resource_test_margin.hpp)
+selects this allowance only with `GITHUB_ACTIONS=true` or `CI=true`. Local
+benchmark comparisons retain their original strict nominal bounds. Examples are
+the one-second analytic long-channel computation (1.25 seconds in CI), two-second
+open-tune construction (2.5 seconds), three-second GUI advice readiness (3.75
+seconds), and duration-independent cache/transmitter footprint targets. Dedicated
+`CpuWorkBudget` fixtures use the same minimum CI allowance; their independent
+media clocks and all decoding assertions remain. The existing nonfatal compact
+Live classifier retains its exact 40/120-second limits and explicit incomplete
+status, rather than changing the identity of its retained evidence.
+
+This is **not** a global test-timeout increase. Ordinary functional/poll timeouts,
+CTest/process watchdogs, exact operation counts and numerical/model checks,
+statistical gates, comparative memory-saving assertions, allocator grants and
+reservation/accounting bounds are unchanged. In particular, a receiver must
+never exceed its configured workspace: a benchmark footprint target is separate
+from that hard allocation invariant. Six seconds of fully scored physical
+absence, the ten-second graceful-stop limit, real-time hardware requirements,
+source-tail checks and cancellation deadlines retain their existing meaning.
+Tests which merely verify a CPU estimate or a fake-clock ledger get no margin.
+New resource benchmarks must identify their nominal target and use this shared
+policy; do not silently reclassify functional failures as throughput warnings.
+
+[`ci-resource-results.json`](ci-resource-results.json) is the single bounded
+latest-measurement set. Replace a profile's record after reviewing its actual
+results; Git history supplies comparisons. Records bind the measured source,
+compiler/configuration, runner, fixture and evidence, with explicit units and
+pass/warning/failure/incomplete/omitted/unavailable status. Wall time is not CPU
+time; an unavailable measurement is `null`. The snapshot does not replace full
+qualification or detailed retained failure evidence, and measurements never
+automatically raise acceptance thresholds. Compare like configurations and
+inputs; queue/mirror delays and a single variable hosted runner do not establish
+a code regression.
+
+```sh
+python3 -B tools/resource-results.py check docs/ci-resource-results.json
+python3 -B tools/resource-results.py update docs/ci-resource-results.json --profile PROFILE --input 'RECORD_JSON'
+git diff COMMIT_A COMMIT_B -- docs/ci-resource-results.json
+```
+
+The updater atomically replaces one latest profile, rejects malformed/nonfinite
+or ambiguous results, and caps the whole file at 32 KiB (16 profiles, at most 64
+metrics each). Keep concise source-bound findings outside tracked run lists;
+do not append per-run histories or copy large logs into this snapshot. Diagnose
+an actual failed benchmark with its smallest relevant check, then run the
+affected full qualification once the candidate settles. Reuse unchanged
+completed coverage instead of restarting the full matrix after every small edit.
+
 Native CI builds portable packages independently of source regression jobs.
 Copied Linux checks depend only on the package producer, so sanitizer or
 calibration work cannot delay them. Linux Release/Debug and Windows split

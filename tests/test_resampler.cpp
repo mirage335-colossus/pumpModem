@@ -1,3 +1,4 @@
+#include "resource_test_margin.hpp"
 #include "datapump/resampler.hpp"
 #include "datapump/fhss_schedule.hpp"
 #include <algorithm>
@@ -141,7 +142,7 @@ int main(){try {
     require(std::abs(long_tone[long_tone.size()-1000]-ideal[ideal.size()-1000])<.00012,"resampler accumulated timing drift");
     for(const auto& pair:{std::pair{8000u,384000u},std::pair{384000u,8000u}}) {
         Resampler converter(pair.first,pair.second);
-        require(converter.workspace_bytes()<5*1024*1024,"rate conversion workspace is unbounded");
+        require(datapump::testing::benchmark_below(converter.workspace_bytes(),std::size_t{5*1024*1024},"test_resampler.converter_workspace_bytes","workspace_bytes"),"rate conversion workspace is unbounded");
         const auto output=convert(sine(pair.first,200,pair.first/10),pair.first,pair.second,73,53);
         require(!output.empty(),"extreme supported rate ratio failed");
     }
@@ -154,7 +155,7 @@ int main(){try {
     // one coefficient table proportional to the entire hardware/DSP ratio.
     for(const auto& pair:{std::pair{48000u,64u},std::pair{64u,48000u},std::pair{120000000u,64u}}) {
         Resampler converter(pair.first,pair.second);
-        require(converter.workspace_bytes()<5*1024*1024,"wide rate range creates an oversized filter table");
+        require(datapump::testing::benchmark_below(converter.workspace_bytes(),std::size_t{5*1024*1024},"test_resampler.converter_workspace_bytes","workspace_bytes"),"wide rate range creates an oversized filter table");
     }
     const auto low_input=sine(48000,12,48000*4+3);
     const auto low_large=convert(low_input,48000,64,low_input.size(),4096);

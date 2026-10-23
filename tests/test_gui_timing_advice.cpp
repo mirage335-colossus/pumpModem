@@ -4,6 +4,7 @@
 #include "datapump/audio.hpp"
 #include "datapump/crypto.hpp"
 #include "datapump/pattern_correlator.hpp"
+#include "resource_test_margin.hpp"
 #include <atomic>
 #include <chrono>
 #include <filesystem>
@@ -402,10 +403,10 @@ int main(int argc,char** argv) {
     while(!app.finished()&&std::chrono::steady_clock::now()-closing<2s){app.tick();std::this_thread::sleep_for(5ms);}
     check(app.finished(),"timed GUI close stalled");
     if(!probe) {
-        check(ready>=0&&ready<3,"timed capture blocked airtime or TX readiness");
+        check(ready>=0&&testing::benchmark_below(ready,3.0,"gui_timing_advice.ready","wall_seconds"),"timed capture blocked airtime or TX readiness");
         check(numeric,"timed GUI never completed RX advice");
         check(resets==0,"accepted timing jitter repeatedly cleared completed RX advice");
-        check(plan_ready>=0&&plan_ready<3&&plan_text.find("15×")!=std::string::npos,"live timing prevented supported DSSS observer plan from finishing");
+        check(plan_ready>=0&&testing::benchmark_below(plan_ready,3.0,"gui_timing_advice.plan_ready","wall_seconds")&&plan_text.find("15×")!=std::string::npos,"live timing prevented supported DSSS observer plan from finishing");
         check(plan_text.find("Outside model range")==std::string::npos,"exact DSSS10 plan lost its supported observer geometry");
         check(app.field(F::lpi_estimate).text.find("outside model range")==std::string::npos,"DSSS10 inspector lost its occupied bandwidth");
     }

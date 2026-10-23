@@ -7,6 +7,7 @@
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/channel.hpp"
+#include "resource_test_margin.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "datapump/symbol_burst.hpp"
 #include "../src/native_peak_workspace.hpp"
@@ -2577,12 +2578,12 @@ void application_local_fallback_preserves_original_search() {
     modem::PatternReceiver shared_bank(narrow,64*1024*1024,cached);
     check(!shared_bank.clock_windowed() && !shared_bank.local_clock_fallback(),
           "sharing template memory must retain complete expanded FFT coverage");
-    check(shared_bank.working_bytes()<2*1024*1024 && cached_bank.working_bytes()>8*1024*1024,
+    check(testing::benchmark_below(shared_bank.working_bytes(),std::size_t{2*1024*1024},"test_pattern_receiver.shared_bank_working_bytes","workspace_bytes") && cached_bank.working_bytes()>8*1024*1024,
           "multi-bank streaming preference did not leave cached-row RAM for peer receivers");
     cached.drift_tolerant=true;cached.prefer_streamed_templates=false;
     modem::PatternReceiver section_bank(narrow,64*1024*1024,cached);
     check(!section_bank.clock_windowed()&&!section_bank.local_clock_fallback()&&
-          section_bank.working_bytes()<2*1024*1024,
+          testing::benchmark_below(section_bank.working_bytes(),std::size_t{2*1024*1024},"test_pattern_receiver.section_bank_working_bytes","workspace_bytes"),
           "drift section scoring must retain full clock coverage without allocating full template rows");
 }
 }

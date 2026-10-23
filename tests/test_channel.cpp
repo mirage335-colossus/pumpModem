@@ -1,6 +1,7 @@
 #include "datapump/channel.hpp"
 #include "datapump/stream_codec.hpp"
 #include "datapump/transfer.hpp"
+#include "resource_test_margin.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -52,7 +53,8 @@ void long_coherence(){
     const auto expected=reference.process({{.7,0},samples}),actual=channel.process({{.7,0},samples});
     require(std::abs(expected->value-.7)<1e-10,"ideal long coherent integration lost signal");
     require(std::abs(actual->value)<.001,"three-hour100ppm integration retained impossible carrier coherence");
-    require(std::chrono::steady_clock::now()-before<std::chrono::seconds(1),"long simulation iterated through samples or carrier cycles");
+    const auto wall=std::chrono::duration<double>(std::chrono::steady_clock::now()-before).count();
+    require(testing::benchmark_below(wall,1.0,"channel.long_coherence","wall_seconds"),"long simulation iterated through samples or carrier cycles");
 }
 void phase_diffusion(){
     const auto cfg=config();auto impairment=ideal();impairment.phase_noise_degrees_per_sqrt_second=4;

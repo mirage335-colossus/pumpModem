@@ -1,3 +1,4 @@
+#include "resource_test_margin.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
@@ -179,7 +180,7 @@ void continuous_private_noise() {
     const auto original=config.data_key->stream(StreamPurpose::Data,0,0,32);
     modem::StreamingTransmitter long_noise(modem::Noise{},config);
     long_noise.read_analytic(a);
-    if(long_noise.working_bytes()>128*1024 || long_noise.samples_emitted()!=a.size() ||
+    if(!datapump::testing::benchmark_at_most(long_noise.working_bytes(),std::size_t{128*1024},"streaming_modem.long_noise","workspace_bytes") || long_noise.samples_emitted()!=a.size() ||
        long_noise.take_payload_constellation().points.empty() ||
        original!=config.data_key->stream(StreamPurpose::Data,0,0,32) ||
        config.spreading_seed.front()!=0xa5 || config.dsss_seed.front()!=0x59)
@@ -237,7 +238,7 @@ void exact_suppression_noise() {
     modem::PatternTransmitter long_source({0},long_config);
     const auto content=modem::symbol_sample_count(long_config);
     if(modem::training_sample_count(long_config) || long_source.total_samples()!=content+192 ||
-       long_source.working_bytes()>16384)
+       !datapump::testing::benchmark_at_most(long_source.working_bytes(),std::size_t{16384},"streaming_modem.long_source","workspace_bytes"))
         throw std::runtime_error("hour-long symbols must retain a three-second tail with bounded state");
     std::array<Complex,317> block{};
     while(long_source.samples_emitted()<content) {
@@ -357,7 +358,7 @@ void pattern_transmit_constellation() {
         const auto empty=overflow.take_payload_constellation();
         if(!empty.points.empty() || empty.dropped || !source.take_payload_constellation().points.empty())
             throw std::runtime_error("finished pattern transmitter replayed constellation points");
-        if(source.working_bytes()>128*1024)throw std::runtime_error("pattern constellation exceeded fixed DSP workspace");
+        if(!datapump::testing::benchmark_at_most(source.working_bytes(),std::size_t{128*1024},"streaming_modem.source","workspace_bytes"))throw std::runtime_error("pattern constellation exceeded fixed DSP workspace");
     }
 }
 

@@ -5,6 +5,7 @@
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "datapump/tuning.hpp"
+#include "resource_test_margin.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -1627,7 +1628,7 @@ void compact_clock_search_preserves_evidence_and_bounds() {
     const auto bytes=long_receiver.working_bytes();
     check(long_receiver.reserved_workspace_bytes()>=bytes+std::min<std::size_t>(full.candidate_limit,32)*sizeof(modem::PatternEvidence),
           "cold compact receiver must preserve its full future diagnostic FIFO reservation");
-    check(long_receiver.clock_windowed() && bytes<64*1024,
+    check(long_receiver.clock_windowed() && datapump::testing::benchmark_below(bytes,std::size_t{64*1024},"test_pattern_correlator.bytes","workspace_bytes"),
           "four-hour minimum-bandwidth epoch must retain full timing/frequency coverage within 64 KiB");
     std::array<float,4096> noise{};std::mt19937 random(3181);std::normal_distribution<float> distribution(0,.1F);
     for(auto& sample:noise)sample=distribution(random);
@@ -1636,7 +1637,7 @@ void compact_clock_search_preserves_evidence_and_bounds() {
     hours.integration_seconds+=.3;
     modem::PatternReceiver fractional_hours(hours,2*1024*1024,full);
     const auto fractional_bytes=fractional_hours.working_bytes();
-    check(fractional_bytes<64*1024,"compact four-hour phase search must retain its additional fits within 64 KiB");
+    check(datapump::testing::benchmark_below(fractional_bytes,std::size_t{64*1024},"test_pattern_correlator.fractional_bytes","workspace_bytes"),"compact four-hour phase search must retain its additional fits within 64 KiB");
     fractional_hours.push(noise);
     check(fractional_hours.working_bytes()==fractional_bytes,"unresolved subsecond phase must not grow idle compact state");
 }
@@ -1653,7 +1654,7 @@ void bounded_hours_and_noise() {
     std::array<float,4096> noise{};std::mt19937 rng(8927);std::normal_distribution<float> normal(0,.1F);
     for(auto& sample:noise)sample=normal(rng);
     for(unsigned i=0;i<6;++i)long_receiver.push(noise);
-    check(long_receiver.working_bytes()==initial && initial<256*1024,
+    check(long_receiver.working_bytes()==initial && testing::benchmark_below(initial,std::size_t{256*1024},"test_pattern_correlator.initial","workspace_bytes"),
           "hour-long symbol accumulation with unresolved epoch phase must retain only the finite hypothesis bank");
     long_receiver.finish();check(long_receiver.take_bursts().empty(),"a short prefix cannot fabricate a completed hour-long symbol");
     auto enormous=search;enormous.start_uncertainty_seconds=1000000;

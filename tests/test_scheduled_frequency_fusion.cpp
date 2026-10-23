@@ -1,6 +1,7 @@
 #include "../src/scheduled_frequency_fusion.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "resource_test_margin.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -72,7 +73,7 @@ void arithmetic_and_boundaries() {
                     contains(fragmented.evaluate(a,phase),original,"block boundary changed error certificate");
                     ++checked;
                 }
-                check(one.count()==n && one.working_bytes()<1024 && one.scratch_bytes()<10000,
+                check(one.count()==n && testing::benchmark_below(one.working_bytes(),std::size_t{1024},"test_scheduled_frequency_fusion.one_working_bytes","workspace_bytes") && testing::benchmark_below(one.scratch_bytes(),std::size_t{10000},"test_scheduled_frequency_fusion.one_scratch_bytes","workspace_bytes"),
                     "fusion state or scratch grew with frequency or observation duration");
             }
     std::cout<<"conditional certificate comparisons="<<checked<<'\n';

@@ -3,6 +3,7 @@
 #include "datapump/symbol_burst.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "datapump/transfer.hpp"
+#include "resource_test_margin.hpp"
 #include "../src/transmit_timing.hpp"
 #include <algorithm>
 #include <array>
@@ -140,7 +141,8 @@ void stopping_and_tune() {
     auto tune_config=modem::NoiseTransmitter::prepare_config(config);
     const auto began=std::chrono::steady_clock::now();
     modem::NoiseTransmitter open(tune_config,modem::NoiseTransmitter::PreparedTemporaryKeys{},0);
-    check(std::chrono::steady_clock::now()-began<std::chrono::seconds(2),"Open Burst Tune enumerated its huge future horizon");
+    const auto construction_seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-began).count();
+    check(testing::benchmark_below(construction_seconds,2.0,"symbol_burst_transmit.open_tune","wall_seconds"),"Open Burst Tune enumerated its huge future horizon");
     check(open.total_samples()==modem::NoiseTransmitter::sample_target,"Open Burst Tune lost its hard physical safety horizon");
     check(open.read_analytic(block)!=0,"Open Burst Tune could not produce its prefix");
     open.request_finish();

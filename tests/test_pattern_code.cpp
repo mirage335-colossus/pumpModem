@@ -5,6 +5,7 @@
 #include "datapump/streaming_modem.hpp"
 #include "datapump/crypto.hpp"
 #include "datapump/symbol_schedule.hpp"
+#include "resource_test_margin.hpp"
 
 #include <algorithm>
 #include <array>
@@ -373,7 +374,7 @@ void symbol_epoch_schedule() {
     verify(long_chips,epoch+14400,0);
     verify(0,epoch,0); // Reuse byte offset zero while switching back to an old epoch.
     verify(long_chips,epoch+14400,0);
-    check(long_code.working_bytes()<8192,
+    check(testing::benchmark_below(long_code.working_bytes(),std::size_t{8192},"pattern_code.random_seek_cache","workspace_bytes"),
           "epoch rollover and random seeks must retain fixed-size keystream caches");
 }
 void symbol_schedule_integer_bounds() {
@@ -585,7 +586,7 @@ void independent_private_candidates() {
             code.set_stream_phase_samples(0);
             check(code.shaped_value(chips,bit,code.chip_samples())==before,"phase revisit changed a private candidate");
         }
-        check(code.working_bytes()<8192,"independent candidates must keep bounded cache storage");
+        check(testing::benchmark_below(code.working_bytes(),std::size_t{8192},"pattern_code.candidate_cache","workspace_bytes"),"independent candidates must keep bounded cache storage");
     }
 }
 void public_waveform_uses_amplitude_and_phase() {
@@ -771,7 +772,7 @@ void tones_and_bounded_state() {
     c = config(); c.scramble = true; c.integration_seconds = 4 * 3600;
     modem::PatternCode long_code(c, 73);
     modem::PatternTransmitter long_tx({0,1,0}, c, 73);
-    check(long_code.working_bytes() < 8192 && long_tx.working_bytes() < 16384,
+    check(testing::benchmark_below(long_code.working_bytes(),std::size_t{8192},"test_pattern_code.long_code_working_bytes","workspace_bytes") && testing::benchmark_below(long_tx.working_bytes(),std::size_t{16384},"test_pattern_code.long_tx_working_bytes","workspace_bytes"),
           "multi-hour symbols must not allocate waveform or complete keystream history");
     check(long_tx.total_samples() == 12ULL * 3600 * c.sample_rate+2*modem::pattern_pulse_padding_samples(c)+modem::suppression_sample_count(c),
           "multi-hour symbol durations must remain exact with bounded state");
@@ -783,7 +784,7 @@ void tones_and_bounded_state() {
           estimate.waveform_samples==12ULL*3600*c.sample_rate+2*modem::pattern_pulse_padding_samples(c)+modem::suppression_sample_count(c),
           "three multi-hour pattern bits require bounded transmitter state, not retained chips or PCM");
     modem::StreamingTransmitter wrapped(modem::RawBits{{0,0,1}},c,options.dsp_workspace_bytes/4);
-    check(wrapped.working_bytes()<128*1024,"streaming wrapper memory must remain independent of integration duration");
+    check(testing::benchmark_below(wrapped.working_bytes(),std::size_t{128*1024},"test_pattern_code.wrapped_working_bytes","workspace_bytes"),"streaming wrapper memory must remain independent of integration duration");
     rejects([&] { modem::PatternTransmitter invalid({0,2}, c); }, "invalid raw bit must be rejected");
     rejects([&] { modem::PatternTransmitter invalid({}, c); }, "empty transmission must be rejected");
     rejects([&] { modem::PatternTransmitter invalid({0}, c, 0, std::numeric_limits<std::uint64_t>::max()); },

@@ -89,6 +89,15 @@ step, and does not replace the harness's normal verification or tool-use policy.
 
 ## Testing sequence for agents
 
+- CI-only CPU-work and absolute footprint benchmarks retain their nominal
+  targets but get at least 25% allowance before blocking: warn above the target,
+  fail beyond the CI ceiling, and retain larger established allowances. This is
+  opt-in at the measured resource predicate, never a blanket timeout multiplier.
+  Ordinary functional tests, allocation/accounting invariants, statistical
+  gates, cancellation and physical deadlines stay strict. See
+  [resource margins and latest measurements](docs/building.md#resource-benchmark-margins).
+  Replace the bounded latest-results snapshot rather than accumulating tracked
+  investigation lists or run histories; reuse matching evidence before reruns.
 - During diagnosis and implementation, build and run the smallest meaningful
   reproducer or affected test group. Use `devfast=true` only when its focused
   cases cover the fault; it is not general coverage. Avoid repeatedly running

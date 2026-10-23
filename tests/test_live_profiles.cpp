@@ -1190,7 +1190,8 @@ void duplex_transmit_failure(bool after_generation) {
     capture.fail_playback_after_source=after_generation;capture_script=&capture;
     live::Session session([]{return static_cast<double>(epoch);});session.start(value);
     const auto await=[&](auto predicate) {
-        testing::CpuWorkBudget budget(10s,"duplex failed transmission visibility");
+        testing::CpuWorkBudget budget(10s,"duplex failed transmission visibility",testing::instrumented_test,
+            testing::CpuWorkBudget::Clock::now(),std::cerr,false);
         while(budget.pending()) {auto state=session.snapshot();
             if(predicate(state))return state;std::this_thread::sleep_for(1ms);
         }

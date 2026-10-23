@@ -2,6 +2,7 @@
 #include "datapump/transfer.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_search.hpp"
+#include "resource_test_margin.hpp"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -348,7 +349,7 @@ void sub_hertz_patterns() {
           "sub-hertz short text and exact raw bits must have identical framing and airtime");
     near(estimate.coded_seconds,38400,"sub-hertz payload estimate lost the exact three-bit duration");
     auto source=transfer::message_transmitter(message,options);
-    check(source->total_samples()==estimate.waveform_samples && source->working_bytes()<1024*1024,
+    check(source->total_samples()==estimate.waveform_samples && testing::benchmark_below(source->working_bytes(),std::size_t{1024*1024},"test_tuning.source_working_bytes","workspace_bytes"),
           "sub-hertz transmission must stay bounded independently of waveform duration");
     std::array<float,2048> samples{};
     check(source->read(samples)==samples.size() &&
@@ -372,7 +373,7 @@ void sub_hertz_patterns() {
     near(minimum_estimate.coded_seconds,384000,"minimum rate lost exact three-bit airtime");
     auto minimum_source=transfer::message_transmitter(message,minimum);
     check(minimum_source->total_samples()==minimum_estimate.waveform_samples&&
-          minimum_source->working_bytes()<1024*1024&&minimum_source->read(samples)==samples.size(),
+          testing::benchmark_below(minimum_source->working_bytes(),std::size_t{1024*1024},"test_tuning.minimum_source_working_bytes","workspace_bytes")&&minimum_source->read(samples)==samples.size(),
           "minimum rate transmitter must remain incremental and bounded");
     for(const auto bandwidth:{0.,.0009,std::nextafter(tuning::minimum_bandwidth_hz,0.)}) {
         rejects([&]{tuning::resolve(bandwidth,32,tuning::PatternMode::auto_pattern,false);},

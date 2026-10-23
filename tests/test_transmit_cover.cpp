@@ -4,6 +4,7 @@
 #include "datapump/symbol_schedule.hpp"
 #include "datapump/fhss_schedule.hpp"
 #include "datapump/channel.hpp"
+#include "resource_test_margin.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -179,7 +180,7 @@ void finish_paths() {
     check(long_bit.total_samples()==first.size()+4*modem::pattern_pulse_padding_samples(c)+3*c.sample_rate+1,
         "long-symbol stop shortened useful cover to fit pulse support");
     check(long_bit.total_samples()<modem::symbol_sample_count(c),"four-hour bit finish waited for its endpoint");
-    check(long_bit.working_bytes()<2*1024*1024,"long bit allocated whole-symbol PCM");
+    check(testing::benchmark_below(long_bit.working_bytes(),std::size_t{2*1024*1024},"test_transmit_cover.long_bit_working_bytes","workspace_bytes"),"long bit allocated whole-symbol PCM");
     std::cout<<"four-hour symbol: fine chip "<<modem::pattern_chip_samples(c)/double(c.sample_rate)
              <<" s; graceful tail "<<(long_bit.total_samples()-first.size())/double(c.sample_rate)<<" s; immediate abort retained\n";
 }
@@ -556,7 +557,7 @@ void hop_power_boundaries() {
         for(std::size_t i=prefix.size()+2*h;i+2*h+1<stopped.total_samples();++i)
             if(!schedule.near_change(i,shape.affected_radius(),shape))++stopped_cover;
         check(stopped_cover>=3*c.sample_rate,"hop cancellation consumed protected cover");
-        check(stopped.working_bytes()<256*1024,"hop envelopes allocated a PCM symbol");
+        check(testing::benchmark_below(stopped.working_bytes(),std::size_t{256*1024},"test_transmit_cover.stopped_working_bytes","workspace_bytes"),"hop envelopes allocated a PCM symbol");
         auto impossible=*plan;impossible.audio_error_seconds=1;
         bool rejected=false;try{modem::FhssPowerShape bad(impossible,c.sample_rate,h,symbol);}catch(const Error&){rejected=true;}
         check(rejected,"impossible FHSS guard silently changed the waveform policy");
@@ -989,7 +990,7 @@ void smooth_envelope() {
             if(i<pre+2*sym)check(std::abs(whole[i]-reference[i]*gain)<1e-7,"source envelope changed carrier/shaper before multiplication");
         }
         check(zeros>100,"quiet interval oracle exercised no samples");
-        check(tx.working_bytes()<500000,"smooth envelope buffered a full long waveform");
+        check(testing::benchmark_below(tx.working_bytes(),std::size_t{500000},"test_transmit_cover.tx_working_bytes","workspace_bytes"),"smooth envelope buffered a full long waveform");
     }
     auto c=configuration(1,120);c.bandwidth_hz=1;c.sample_rate=1024;c.carrier_hz=256;
     modem::FhssPlan p;p.channels=3;p.dwell_seconds=.4;p.shifts[0]=10;p.shifts[1]=20;p.shifts[2]=30;

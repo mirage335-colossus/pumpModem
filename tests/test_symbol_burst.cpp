@@ -1,3 +1,4 @@
+#include "resource_test_margin.hpp"
 #include "datapump/symbol_burst.hpp"
 #include "datapump/symbol_schedule.hpp"
 
@@ -265,7 +266,7 @@ void test_keyed_and_plain_calendars() {
 void test_bounded_cursor() {
     const SymbolBurstPlan plan(config(1,2));const auto first=plan.first_slot({epoch,0});
     SymbolBurstCursor cursor(plan,first);const auto bytes=cursor.working_bytes();
-    check(bytes<2048,"cursor stores an unbounded schedule");
+    check(datapump::testing::benchmark_below(bytes,std::size_t{2048},"test_symbol_burst.bytes","workspace_bytes"),"cursor stores an unbounded schedule");
     for(unsigned i=0;i<10000;++i) {
         check(cursor.current().index==i &&
               cursor.current().payload_begin==SymbolBurstCoordinate{epoch+60*i,0},

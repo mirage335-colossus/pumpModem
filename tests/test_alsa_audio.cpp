@@ -1,3 +1,4 @@
+#include "resource_test_margin.hpp"
 #include "datapump/audio.hpp"
 #include "datapump/resampler.hpp"
 #include "datapump/pattern_code.hpp"
@@ -2894,7 +2895,7 @@ int main(int argc,char** argv){try{
         a::play(tone,logical,"explicit-card",{},[&](const auto& info){observed=info;});
         check(observed.logical_rate==logical && observed.hardware_rate==hardware,"negotiated clock metadata missing");
         check(observed.usable_passband_hz<=hardware*.5,"reported recoverable spectrum above hardware Nyquist");
-        check(observed.workspace_bytes>0 && observed.workspace_bytes<512*1024,"converter workspace metadata invalid");
+        check(observed.workspace_bytes>0 && datapump::testing::benchmark_below(observed.workspace_bytes,std::size_t{512*1024},"test_alsa_audio.observed_workspace_bytes","workspace_bytes"),"converter workspace metadata invalid");
         check(f::state.played.size()==(tone.size()*hardware+logical-1)/logical,"playback resampling changed duration/EOF");
         check(std::all_of(f::state.attempts.begin(),f::state.attempts.end(),[](const auto& id){return id=="explicit-card";}),"rate negotiation changed an explicit device");
         double error=0;
@@ -2934,7 +2935,7 @@ int main(int argc,char** argv){try{
         f::state.read_limit=73;
         f::state.sample=[&](std::size_t index,unsigned clock){return static_cast<std::int16_t>(16000*std::sin(2*std::numbers::pi*frequency*static_cast<double>(index)/clock));};
         const auto received=a::record(4,logical,"default",1024*1024,{},[&](const auto& info){observed=info;});
-        check(received.size()==logical*4 && observed.workspace_bytes<5*1024*1024,"low-rate capture lost duration or exceeded bounded DSP memory");
+        check(received.size()==logical*4 && datapump::testing::benchmark_below(observed.workspace_bytes,std::size_t{5*1024*1024},"test_alsa_audio.observed_workspace_bytes","workspace_bytes"),"low-rate capture lost duration or exceeded bounded DSP memory");
         error=0;
         for(std::size_t i=logical;i<received.size();++i)
             error=std::max(error,std::abs(received[i]-(16000./32768)*std::sin(2*std::numbers::pi*frequency*static_cast<double>(i)/logical)));

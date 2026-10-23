@@ -299,10 +299,10 @@ void cpu_work_budget_boundaries() {
     using Budget=testing::CpuWorkBudget;
     const auto origin=Budget::Clock::time_point{};
     std::ostringstream plain_log,instrumented_log;
-    Budget plain(30s,"ordinary fixture",false,origin,plain_log);
+    Budget plain(30s,"ordinary fixture",false,origin,plain_log,false);
     check(plain.pending(origin+29999ms)&&!plain.pending(origin+30s)&&plain_log.str().empty(),
           "noninstrumented workload changed its original deadline or emitted an allowance warning");
-    Budget instrumented(30s,"instrumented fixture",true,origin,instrumented_log);
+    Budget instrumented(30s,"instrumented fixture",true,origin,instrumented_log,false);
     check(instrumented.pending(origin+29999ms)&&instrumented_log.str().empty(),
           "instrumented workload warned before its normal deadline");
     check(instrumented.pending(origin+30s)&&instrumented.pending(origin+89999ms)&&
@@ -552,7 +552,8 @@ bool same_capture(const modem::TransmitTrace& a,const modem::TransmitTrace& b) {
 }
 template<class Predicate>
 live::Snapshot wait_for(live::Session& session,std::string_view stage,Predicate predicate,bool sampled_work=false) {
-    testing::CpuWorkBudget budget(40s,stage,sampled_work&&testing::instrumented_test);
+    testing::CpuWorkBudget budget(40s,stage,sampled_work&&testing::instrumented_test,
+        testing::CpuWorkBudget::Clock::now(),std::cerr,sampled_work&&testing::is_ci_environment());
     live::Snapshot last;
     while(budget.pending()) {
         last=session.snapshot();
@@ -1153,7 +1154,9 @@ live::Snapshot wait_for_media_clock(live::Session& session,std::string_view mode
     }
     const auto started=std::chrono::steady_clock::now();
     const auto limit=std::chrono::seconds(permit_compact_budget_expiry&&testing::instrumented_test?120:40);
-    testing::CpuWorkBudget budget(40s,"default media clock transmission",testing::instrumented_test,started);
+    // This route already has an authorized nonblocking 40/120-second coverage
+    // classifier. Preserve the exact limit bound into its typed evidence.
+    testing::CpuWorkBudget budget(40s,"default media clock transmission",testing::instrumented_test,started,std::cerr,false);
     HostedClockProgressProof proof(pre_enqueue_transmission);
     try {
         while(budget.pending()) {
@@ -1451,7 +1454,8 @@ void simulation_media_clock_error_reporting() {
     script.released=true;
     // This is an actual channel failure, without cancel_transmit or Clear.
     // Its own receive-revision invalidation must not be classified as Clear.
-    testing::CpuWorkBudget budget(10s,"media clock input error reporting");
+    testing::CpuWorkBudget budget(10s,"media clock input error reporting",testing::instrumented_test,
+        testing::CpuWorkBudget::Clock::now(),std::cerr,false);
     live::Snapshot failed;
     while(budget.pending()) {
         failed=session.snapshot();
