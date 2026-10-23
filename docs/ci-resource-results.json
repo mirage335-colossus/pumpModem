@@ -26,10 +26,10 @@
         }
       },
       "provenance": {
-        "report_reference": "artifact 12474320938 sha256:5073b4662e083b8ff1b608b848031d3237dcc3093c038073bf59b3286c77e0ee / ci-test-report.log lines 886,895",
-        "run_id": "39880745813"
+        "report_reference": "artifact12482258595 sha256:58d53bae5b3d7de53fad4135bd2a93c5f5398eea99c12b0c3012bd2f2d64278f / ci-test-report.log lines886,895",
+        "run_id": "39899129455"
       },
-      "source": "cefdac53617105aa120e425f1b270a9035777493"
+      "source": "e9763dc0ab84b31d3933a54f3547690a2a7fbbde"
     },
     "native-debug-preparation-0": {
       "configuration": {
@@ -43,39 +43,39 @@
         "arithmetic.parallel.process_cpu_seconds": {
           "status": "passed",
           "unit": "process_cpu_seconds",
-          "value": 754.804
+          "value": 704.994
         },
         "arithmetic.parallel.wall_seconds": {
           "status": "passed",
           "unit": "wall_seconds",
-          "value": 754.121
+          "value": 704.304
         },
         "arithmetic.serial.process_cpu_seconds": {
           "status": "passed",
           "unit": "process_cpu_seconds",
-          "value": 756.187
+          "value": 705.835
         },
         "arithmetic.serial.wall_seconds": {
           "status": "passed",
           "unit": "wall_seconds",
-          "value": 756.294
+          "value": 705.901
         },
         "identical_pcm.process_cpu_seconds": {
           "status": "passed",
           "unit": "process_cpu_seconds",
-          "value": 1511.05
+          "value": 1410.9
         },
         "identical_pcm.wall_seconds": {
           "status": "passed",
           "unit": "wall_seconds",
-          "value": 1510.48
+          "value": 1410.27
         }
       },
       "provenance": {
-        "report_reference": "artifact 12471817392 sha256:05b26532f0194018813127a66a65d5f904bb69dd8d2382ebf94150b7430ed4bf / ci-test-report.log; executable sha256:05bf348407148a36a95b6a474c8210d51bcc51d3c03d1ffae186a1a5fda4b530",
-        "run_id": "39880745813"
+        "report_reference": "artifact 12479271728 sha256:7ac4f8c9e4a9e95947f2511956eeb4c942ed77d7e55c9e3349b3cfdec5bef3d9 / ci-test-report.log explicit returned phase records; executable05bf348407148a36a95b6a474c8210d51bcc51d3c03d1ffae186a1a5fda4b530",
+        "run_id": "39899129455"
       },
-      "source": "cefdac53617105aa120e425f1b270a9035777493"
+      "source": "e9763dc0ab84b31d3933a54f3547690a2a7fbbde"
     },
     "native-debug-preparation-1": {
       "configuration": {
@@ -89,39 +89,39 @@
         "arithmetic.parallel.process_cpu_seconds": {
           "status": "passed",
           "unit": "process_cpu_seconds",
-          "value": 893.273
+          "value": 890.205
         },
         "arithmetic.parallel.wall_seconds": {
           "status": "passed",
           "unit": "wall_seconds",
-          "value": 892.216
+          "value": 889.096
         },
         "arithmetic.serial.process_cpu_seconds": {
           "status": "passed",
           "unit": "process_cpu_seconds",
-          "value": 887.37
+          "value": 888.729
         },
         "arithmetic.serial.wall_seconds": {
           "status": "passed",
           "unit": "wall_seconds",
-          "value": 887.466
+          "value": 888.829
         },
         "identical_pcm.process_cpu_seconds": {
           "status": "passed",
           "unit": "process_cpu_seconds",
-          "value": 1780.75
+          "value": 1779.0
         },
         "identical_pcm.wall_seconds": {
           "status": "passed",
           "unit": "wall_seconds",
-          "value": 1779.79
+          "value": 1777.99
         }
       },
       "provenance": {
-        "report_reference": "artifact 12471704234 sha256:6b9136171a765d6d9c83ff45a94a8f80bce94d92c50dc449d8639f1cf838b903 / ci-test-report.log; executable sha256:05bf348407148a36a95b6a474c8210d51bcc51d3c03d1ffae186a1a5fda4b530",
-        "run_id": "39880745813"
+        "report_reference": "artifact 12479886005 sha256:9eeb69f0a7899c4af34ad6cc82b563d63ed34ab836b81a550f164244a967a913 / ci-test-report.log explicit returned phase records; executable05bf348407148a36a95b6a474c8210d51bcc51d3c03d1ffae186a1a5fda4b530",
+        "run_id": "39899129455"
       },
-      "source": "cefdac53617105aa120e425f1b270a9035777493"
+      "source": "e9763dc0ab84b31d3933a54f3547690a2a7fbbde"
     },
     "native-debug-preparation-2": {
       "configuration": {
@@ -135,39 +135,39 @@
         "arithmetic.parallel.process_cpu_seconds": {
           "status": "passed",
           "unit": "process_cpu_seconds",
-          "value": 460.423
+          "value": 846.486
         },
         "arithmetic.parallel.wall_seconds": {
           "status": "passed",
           "unit": "wall_seconds",
-          "value": 460.219
+          "value": 845.393
         },
         "arithmetic.serial.process_cpu_seconds": {
           "status": "passed",
           "unit": "process_cpu_seconds",
-          "value": 461.177
+          "value": 843.787
         },
         "arithmetic.serial.wall_seconds": {
           "status": "passed",
           "unit": "wall_seconds",
-          "value": 461.216
+          "value": 843.867
         },
         "identical_pcm.process_cpu_seconds": {
           "status": "passed",
           "unit": "process_cpu_seconds",
-          "value": 921.647
+          "value": 1690.36
         },
         "identical_pcm.wall_seconds": {
           "status": "passed",
           "unit": "wall_seconds",
-          "value": 921.481
+          "value": 1689.35
         }
       },
       "provenance": {
-        "report_reference": "artifact 12471342712 sha256:e6a9b9859c5ab79b6f69178bf0318261647eaf98fc671cdfcab50766a119a167 / ci-test-report.log; executable sha256:05bf348407148a36a95b6a474c8210d51bcc51d3c03d1ffae186a1a5fda4b530",
-        "run_id": "39880745813"
+        "report_reference": "artifact 12479119528 sha256:2d1e195eb66517d0776e7af85798a2e00e7c4141854939c265f441b6de1dda2a / ci-test-report.log explicit returned phase records; executable05bf348407148a36a95b6a474c8210d51bcc51d3c03d1ffae186a1a5fda4b530",
+        "run_id": "39899129455"
       },
-      "source": "cefdac53617105aa120e425f1b270a9035777493"
+      "source": "e9763dc0ab84b31d3933a54f3547690a2a7fbbde"
     },
     "native-debug-preparation-3": {
       "configuration": {
@@ -181,47 +181,175 @@
         "identical_pcm.process_cpu_seconds": {
           "status": "passed",
           "unit": "process_cpu_seconds",
-          "value": 1555.73
+          "value": 1844.77
         },
         "identical_pcm.wall_seconds": {
           "status": "passed",
           "unit": "wall_seconds",
-          "value": 1555.2
+          "value": 1843.04
         },
         "shared.parallel.process_cpu_seconds": {
           "status": "passed",
           "unit": "process_cpu_seconds",
-          "value": 768.919
+          "value": 912.044
         },
         "shared.parallel.wall_seconds": {
           "status": "passed",
           "unit": "wall_seconds",
-          "value": 768.328
+          "value": 910.194
         },
         "shared.serial.process_cpu_seconds": {
           "status": "passed",
           "unit": "process_cpu_seconds",
-          "value": 768.665
+          "value": 910.666
         },
         "shared.serial.wall_seconds": {
           "status": "passed",
           "unit": "wall_seconds",
-          "value": 768.733
+          "value": 910.802
         }
       },
       "provenance": {
-        "report_reference": "artifact 12472286545 sha256:3338d8cc1e816c10a52561c180ab10fb5c2c0fb6bb9f46d7b00d912db8eab6d9 / ci-test-report.log; executable sha256:05bf348407148a36a95b6a474c8210d51bcc51d3c03d1ffae186a1a5fda4b530",
-        "run_id": "39880745813"
+        "report_reference": "artifact 12479414331 sha256:6b2f818fb020d490ba1ca123936c22aa0302c77e4e4c2d7fa0ea0e280aaf43eb / ci-test-report.log explicit returned phase records; executable05bf348407148a36a95b6a474c8210d51bcc51d3c03d1ffae186a1a5fda4b530",
+        "run_id": "39899129455"
       },
-      "source": "cefdac53617105aa120e425f1b270a9035777493"
+      "source": "e9763dc0ab84b31d3933a54f3547690a2a7fbbde"
+    },
+    "native-debug-runtime": {
+      "configuration": {
+        "build_type": "Debug",
+        "compiler": "GNU 11",
+        "fixture": "selected core analytic channel, open-tune construction and GUI advice wall-time benchmarks; nominal targets 1, 2 and 3 seconds",
+        "runner": "ubuntu-24.04; ubuntu:22.04 container",
+        "sanitizers": "ASan/UBSan"
+      },
+      "metrics": {
+        "channel.long_coherence": {
+          "status": "passed",
+          "unit": "wall_seconds",
+          "value": 8.093e-06
+        },
+        "gui_timing_advice.plan_ready": {
+          "status": "passed",
+          "unit": "wall_seconds",
+          "value": 2.44498
+        },
+        "gui_timing_advice.ready": {
+          "status": "passed",
+          "unit": "wall_seconds",
+          "value": 0.292192
+        },
+        "process_cpu": {
+          "status": "unavailable",
+          "unit": "process_cpu_seconds",
+          "value": null
+        },
+        "symbol_burst_transmit.open_tune": {
+          "status": "passed",
+          "unit": "wall_seconds",
+          "value": 0.000130928
+        }
+      },
+      "provenance": {
+        "report_reference": "artifacts 12480323811 sha256:2dc4303d9f8508be52ac9737e4f4a20c8329f3aac43ef62877695bafbd634a71; 12482258595 sha256:58d53bae5b3d7de53fad4135bd2a93c5f5398eea99c12b0c3012bd2f2d64278f / ci-test-report.log TEST_RESOURCE_METRIC",
+        "run_id": "39899129455"
+      },
+      "source": "e9763dc0ab84b31d3933a54f3547690a2a7fbbde"
+    },
+    "native-linux-release-core": {
+      "configuration": {
+        "build_type": "Release",
+        "compiler": "GNU 11",
+        "fixture": "selected core analytic channel, open-tune construction and GUI advice wall-time benchmarks; nominal targets 1, 2 and 3 seconds",
+        "runner": "ubuntu-24.04; ubuntu:22.04 container",
+        "sanitizers": "off"
+      },
+      "metrics": {
+        "channel.long_coherence": {
+          "status": "passed",
+          "unit": "wall_seconds",
+          "value": 6.522e-06
+        },
+        "gui_timing_advice.plan_ready": {
+          "status": "passed",
+          "unit": "wall_seconds",
+          "value": 2.99625
+        },
+        "gui_timing_advice.ready": {
+          "status": "passed",
+          "unit": "wall_seconds",
+          "value": 0.372233
+        },
+        "process_cpu": {
+          "status": "unavailable",
+          "unit": "process_cpu_seconds",
+          "value": null
+        },
+        "symbol_burst_transmit.open_tune": {
+          "status": "passed",
+          "unit": "wall_seconds",
+          "value": 6.423e-05
+        }
+      },
+      "provenance": {
+        "report_reference": "artifacts 12481087779 sha256:2a42bb287aee22b2fbf5c1a6981d3fb5bcf7218ceb4a36501f7c5dbf76b79eaf / ci-test-report.log TEST_RESOURCE_METRIC",
+        "run_id": "39899129455"
+      },
+      "source": "e9763dc0ab84b31d3933a54f3547690a2a7fbbde"
+    },
+    "native-linux-release-fast": {
+      "configuration": {
+        "build_type": "Release",
+        "compiler": "GNU 11",
+        "fixture": "native fast selected scope; 33 tests passed; report has workspace markers but no runtime resource marker",
+        "runner": "ubuntu-24.04; ubuntu:22.04 container",
+        "sanitizers": "off"
+      },
+      "metrics": {
+        "fast_acoustic.rx_workspace": {
+          "status": "passed",
+          "unit": "workspace_bytes",
+          "value": 3605208
+        },
+        "fast_acoustic_short.receiver_workspace": {
+          "status": "passed",
+          "unit": "workspace_bytes",
+          "value": 3269848
+        },
+        "fast_low_rate.tx_workspace": {
+          "status": "passed",
+          "unit": "workspace_bytes",
+          "value": 5260912
+        },
+        "fast_qam.tx_workspace": {
+          "status": "passed",
+          "unit": "workspace_bytes",
+          "value": 528496
+        },
+        "process_cpu": {
+          "status": "unavailable",
+          "unit": "process_cpu_seconds",
+          "value": null
+        },
+        "runtime_wall": {
+          "status": "unavailable",
+          "unit": "wall_seconds",
+          "value": null
+        }
+      },
+      "provenance": {
+        "report_reference": "artifact 12479590411 sha256:e30f54ae85b8cc6f0c43ada027f0ec12ec39836f51d3a8dcf2decf50577d9772; report ci-test-report.log; inventory ci-test-report.inventory.json sha256:9a689fb475e06841a36cdd9113d6283b54ea067e369de05a6c08c181299569e4",
+        "run_id": "39899129455"
+      },
+      "source": "e9763dc0ab84b31d3933a54f3547690a2a7fbbde"
     },
     "native-qualification": {
       "configuration": {
         "build_type": "full devfast=false",
-        "compiler": "GNU 11 Debug/Release and MSVC v143 Release",
-        "fixture": "complete required workflow; elapsed includes actual queue, setup and transfer; approved omissions/incomplete remain explicit in qualification reports",
-        "runner": "standard ubuntu-24.04/ubuntu-24.04-arm/windows-2022 matrix",
-        "sanitizers": "native Debug ASan/UBSan; SDK/Release off"
+        "compiler": "GNU 11 native Debug/Release; MSVC v143 Release; separate Clang GUI/Wasm toolchains",
+        "fixture": "all 48 required native jobs; Debug core 251 passed and 17 return-77 omissions; Release/Windows omissions 17/33; compact Live completed, isolated duration unrecorded; two sanitizer Fast and opt-in sanitizer desktop scopes omitted as authorized",
+        "runner": "ubuntu-24.04 and windows-2022",
+        "sanitizers": "native Debug ASan/UBSan; Release and Wasm off"
       },
       "metrics": {
         "instrumented.fast_session.wall": {
@@ -235,9 +363,9 @@
           "value": null
         },
         "live.compact.wall": {
-          "status": "incomplete",
+          "status": "unavailable",
           "unit": "wall_seconds",
-          "value": 120.000041
+          "value": null
         },
         "peak_workspace": {
           "status": "unavailable",
@@ -252,22 +380,159 @@
         "workflow.elapsed": {
           "status": "passed",
           "unit": "wall_seconds",
-          "value": 5647
+          "value": 7308
         }
       },
       "provenance": {
-        "report_reference": "https://github.com/mirage335-colossus/pumpModem/actions/runs/39880745813",
-        "run_id": "39880745813"
+        "report_reference": "terminal-metadata.json fully paginated48requiredsuccessjobs; coreaggregate artifact12482189064; LiveDebug artifact12479348954 compact=passed",
+        "run_id": "39899129455"
       },
-      "source": "cefdac53617105aa120e425f1b270a9035777493"
+      "source": "e9763dc0ab84b31d3933a54f3547690a2a7fbbde"
+    },
+    "sdk-linux-release-contract-general": {
+      "configuration": {
+        "build_type": "Release",
+        "compiler": "GNU 15.3.0 x86_64-buildroot-linux-gnu",
+        "fixture": "SDK contract general selected scope; report passed; runtime resource markers are wall time",
+        "runner": "ubuntu-24.04; debian:bookworm-slim container",
+        "sanitizers": "off"
+      },
+      "metrics": {
+        "gui_timing_advice.plan_ready": {
+          "status": "passed",
+          "unit": "wall_seconds",
+          "value": 1.60053
+        },
+        "gui_timing_advice.ready": {
+          "status": "passed",
+          "unit": "wall_seconds",
+          "value": 0.288766
+        },
+        "pattern_correlator.initial_workspace": {
+          "status": "passed",
+          "unit": "workspace_bytes",
+          "value": 258000
+        },
+        "pattern_receiver.section_bank_workspace": {
+          "status": "passed",
+          "unit": "workspace_bytes",
+          "value": 320760
+        },
+        "process_cpu": {
+          "status": "unavailable",
+          "unit": "process_cpu_seconds",
+          "value": null
+        },
+        "scheduled_origin_gram.prefix_workspace": {
+          "status": "passed",
+          "unit": "workspace_bytes",
+          "value": 70480
+        },
+        "symbol_burst_transmit.open_tune": {
+          "status": "passed",
+          "unit": "wall_seconds",
+          "value": 2.602e-05
+        }
+      },
+      "provenance": {
+        "report_reference": "artifact 12479211419 sha256:6411fcd8efadfc9a3eca83e8f912484984a79c8f065e73221c57ec877cbf9905; report _temp/datapump-sdk-tests-fltk/contract-general-report.log; inventory _temp/datapump-sdk-tests-fltk/contract-general-report.inventory.json sha256:dfa12b4ae887f492c54bf96f3f7305227e1fa507ce0ceed189415b2ab1506ac5",
+        "run_id": "39899129083"
+      },
+      "source": "e9763dc0ab84b31d3933a54f3547690a2a7fbbde"
+    },
+    "sdk-linux-release-preparation": {
+      "configuration": {
+        "build_type": "Release",
+        "compiler": "GNU 15.3.0 x86_64-buildroot-linux-gnu",
+        "fixture": "scheduled_parallel_preparation original eight-case invocation; identical PCM; serial one thread, parallel nine requested/four effective; 192 MiB loan is input, not measured usage",
+        "runner": "ubuntu-24.04; debian:bookworm-slim container",
+        "sanitizers": "off"
+      },
+      "metrics": {
+        "default.parallel.process_cpu_seconds": {
+          "status": "passed",
+          "unit": "process_cpu_seconds",
+          "value": 278.431
+        },
+        "default.serial.process_cpu_seconds": {
+          "status": "passed",
+          "unit": "process_cpu_seconds",
+          "value": 277.347
+        },
+        "fp32.parallel.process_cpu_seconds": {
+          "status": "passed",
+          "unit": "process_cpu_seconds",
+          "value": 277.978
+        },
+        "fp32.serial.process_cpu_seconds": {
+          "status": "passed",
+          "unit": "process_cpu_seconds",
+          "value": 277.006
+        },
+        "fp64.parallel.process_cpu_seconds": {
+          "status": "passed",
+          "unit": "process_cpu_seconds",
+          "value": 276.39
+        },
+        "fp64.serial.process_cpu_seconds": {
+          "status": "passed",
+          "unit": "process_cpu_seconds",
+          "value": 253.209
+        },
+        "identical_pcm.process_cpu_seconds": {
+          "status": "passed",
+          "unit": "process_cpu_seconds",
+          "value": 2205.9
+        },
+        "identical_pcm.wall_seconds": {
+          "status": "passed",
+          "unit": "wall_seconds",
+          "value": 2041.17
+        },
+        "shared.parallel.process_cpu_seconds": {
+          "status": "passed",
+          "unit": "process_cpu_seconds",
+          "value": 278.836
+        },
+        "shared.serial.process_cpu_seconds": {
+          "status": "passed",
+          "unit": "process_cpu_seconds",
+          "value": 276.995
+        },
+        "small.parallel.process_cpu_seconds": {
+          "status": "passed",
+          "unit": "process_cpu_seconds",
+          "value": 0.100009
+        },
+        "small.serial.process_cpu_seconds": {
+          "status": "passed",
+          "unit": "process_cpu_seconds",
+          "value": 0.099079
+        },
+        "tiled.parallel.process_cpu_seconds": {
+          "status": "passed",
+          "unit": "process_cpu_seconds",
+          "value": 4.75692
+        },
+        "tiled.serial.process_cpu_seconds": {
+          "status": "passed",
+          "unit": "process_cpu_seconds",
+          "value": 4.72989
+        }
+      },
+      "provenance": {
+        "report_reference": "artifact12479945173 sha256:bd9861ed92c57d74ca1f04780ccc92470d2fb7a1e37f1e399a4994295d375380 / _temp/datapump-sdk-tests-fltk/contract-preparation-report.log; explicit returned phase markers",
+        "run_id": "39899129083"
+      },
+      "source": "e9763dc0ab84b31d3933a54f3547690a2a7fbbde"
     },
     "sdk-qualification": {
       "configuration": {
         "build_type": "full devfast=false",
-        "compiler": "prepared SDK GNU 15 Release and MSVC v143 Release",
-        "fixture": "complete required workflow; elapsed includes actual queue, setup and transfer; approved omissions/incomplete remain explicit in qualification reports",
-        "runner": "standard ubuntu-24.04/ubuntu-24.04-arm/windows-2022 matrix",
-        "sanitizers": "native Debug ASan/UBSan; SDK/Release off"
+        "compiler": "prepared GNU 15 SDK; separate Emscripten Wasm toolchain",
+        "fixture": "complete 15-job workflow; strict 200-test FLTK contract union and eight copied archive smokes passed; elapsed includes queue, setup and transfer",
+        "runner": "ubuntu-24.04; Debian Bookworm and Ubuntu 24.04 containers",
+        "sanitizers": "off"
       },
       "metrics": {
         "peak_workspace": {
@@ -283,14 +548,14 @@
         "workflow.elapsed": {
           "status": "passed",
           "unit": "wall_seconds",
-          "value": 6789
+          "value": 3505
         }
       },
       "provenance": {
-        "report_reference": "https://github.com/mirage335-colossus/pumpModem/actions/runs/39880749070",
-        "run_id": "39880749070"
+        "report_reference": "terminal-metadata.json fully paginated15requiredsuccessfuljobs; strict200contractunion and8copiedarchivepasses",
+        "run_id": "39899129083"
       },
-      "source": "cefdac53617105aa120e425f1b270a9035777493"
+      "source": "e9763dc0ab84b31d3933a54f3547690a2a7fbbde"
     }
   },
   "schema_version": 1

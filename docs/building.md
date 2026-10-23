@@ -549,6 +549,10 @@ automatically raise acceptance thresholds. Compare like configurations and
 inputs; queue/mirror delays and a single variable hosted runner do not establish
 a code regression.
 
+Use `provenance.local_command` for local measurements and retain any dirty-input
+digest in `report_reference`. Keep unmeasured values unavailable; a configured
+budget or workspace loan is not an observed measurement.
+
 ```sh
 python3 -B tools/resource-results.py check docs/ci-resource-results.json
 python3 -B tools/resource-results.py update docs/ci-resource-results.json --profile PROFILE --input 'RECORD_JSON'

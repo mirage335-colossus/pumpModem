@@ -4,6 +4,39 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## CI resource benchmark margins, 23 October 2026
+
+Source `e9763dc0ab84b31d3933a54f3547690a2a7fbbde` completed
+[native 39899129455](https://github.com/mirage335-colossus/pumpModem/actions/runs/39899129455)
+(48 required jobs, 121m48s) and
+[SDK 39899129083](https://github.com/mirage335-colossus/pumpModem/actions/runs/39899129083)
+(15 required jobs, 58m25s) on standard runners. Debug ASan/UBSan core reconciles
+268 configured tests: 251 passed, 17 declared return-77 omissions, zero failed or
+incomplete. Linux Release core passed 254 tests with 17 such omissions; Windows
+Release passed 233 with 33 omissions.
+SDK's complete 200-test contract union and eight copied-archive smokes passed.
+Live compact coverage completed in all three native configurations; the existing
+two instrumented Fast omissions and opt-in sanitizer desktop omission remain.
+The unchanged instrumented EU stop was 8.48064s below ten seconds, with protected
+source-tail assertions passing. Original workload and Rev cadence warnings remain
+visible. Independent review and the sanitizer boundary fixture verified that the
+25% CI allowance affects explicit runtime/footprint benchmarks only; ordinary
+functional assertions, physical deadlines and configured allocation bounds stay
+strict. No application source changed.
+
+The concurrent pair took 121m49s versus the preceding pair's 113m11s; this is
+an observed 8m38s increase, not a matched causal performance estimate. Combined
+unweighted runner use was 1424.33 minutes and artifacts totaled 365775353 bytes.
+Debug core part 0 was the final path. Adding the boundary test changed 245
+existing round-robin assignments; old per-test wall-time sums shift about 882s
+toward part 0. Those sums do not predict job elapsed time or separate compilation,
+runner variation and contention, so no persistent performance regression is
+claimed from this pair. The complete results remain qualified. Latest measured
+CPU, wall-time and workspace values replace the previous profiles in the bounded
+[resource snapshot](ci-resource-results.json); Git history provides comparisons.
+Detailed original failures and source-bound reports remain retained outside this
+snapshot. These documentation/data updates reuse the unchanged tested inputs.
+
 ## CI elapsed time and supplemental corrections, 23 October 2026
 
 Both required full workflows completed on standard runners with `devfast=false`;
@@ -16,7 +49,7 @@ existing 180-second acquisition watchdog to native copied-package setup. That
 watchdog bounds downloads, retaining signed-mirror recovery and unchanged offline
 installation, fatal errors, application deadlines and binary checks.
 
-| Required current qualification | Result |
+| Required qualification of `cefdac5` | Result |
 | --- | --- |
 | [Native 39880745813](https://github.com/mirage335-colossus/pumpModem/actions/runs/39880745813) | Passed all 48 required jobs in 94m07s; 1171.93 unweighted runner-minutes. |
 | [SDK 39880749070](https://github.com/mirage335-colossus/pumpModem/actions/runs/39880749070) | Passed all 15 required jobs in 113m09s; 290.47 unweighted runner-minutes; strict 199-test union complete. |
