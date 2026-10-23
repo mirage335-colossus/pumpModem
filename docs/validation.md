@@ -140,8 +140,13 @@ five dedicated test registrations, and twenty procedure/study documents. Native
 subagent work uses disjoint edits, stable inputs, separate outputs and serialized
 integration. No application, numerical, physical-deadline or product test changed.
 The obsolete tracked Oct16 GUI executable was removed; build current source with
-`./build.sh`. The installed SDK recipe still matches the current helper and is
-retained with dependency inputs.
+`./build.sh`. The installed SDK recipe `6c4884fdff9c745ab0a0` still matches the
+current helper and is retained with current dependency inputs. Detached Buildroot
+source trees and obsolete SDK metadata were also removed from the active cache;
+their small original source inventories remain with local evidence. The
+[retention policy](building.md#local-output-retention) now requires compatible
+incremental build reuse and removal of completed scratch binaries and superseded
+local SDK copies. Published release assets remain immutable.
 
 Focused offline checks passed: CI partition 14, CI runner 56, build wrapper 58,
 native runner 12 and resource-result 5 cases. Independent review and exact wiring

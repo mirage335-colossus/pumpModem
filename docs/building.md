@@ -332,24 +332,43 @@ with that SDK fails with an explanation rather than taking those libraries from
 the host. Use `./build.sh sanitize GROUP` with the native development toolchain,
 or prepare an SDK that supplies the target sanitizer runtimes explicitly.
 
+### Local output retention
+
 Do not run simultaneous configure/build operations against the same directory.
 Concurrent contributors should use separate output directories under `build/`,
 keep source inputs stable during checks, and coordinate access to timing-sensitive
 tests and devices. Serialize shared Git mutations and final integration. Old
-top-level `build-native`, `build-agent-*` and similar directories are not current
-presets. They may contain unique logs, captures or dependencies, so the wrapper
-never deletes them. Inspect useful contents before removing them.
+top-level `build-native`, `build-agent-*` and similar directories are historical,
+not current presets. For sequential work, use the standard `build/` profile and
+let it rebuild incrementally across source revisions while the compiler,
+generator, configuration and SDK stay compatible. Avoid date-, revision- or
+session-named build copies. Use separate output under `build/` for a concurrent
+comparison; after its process exits, save only useful source, input,
+configuration and compact result evidence, then remove its compiled outputs. A
+failed run alone is not a reason to retain its whole build tree.
+
+Keep only compatible local SDK/dependency caches that current work uses, plus
+downloaded inputs needed for offline rebuilding. Native and Wasm SDK caches are
+separate families. Before removing a superseded local SDK installation, build
+work tree or archive, close processes using it and migrate or reconfigure its
+dependents. Use explicit bounded paths; do not use broad cleanup globs or
+automatic age-based deletion. Immutable published assets and required original
+failure reports are preserved.
 
 Workspace contents have separate purposes:
 
-- `build/`: reproducible configure, compile and package outputs. Rebuild an old
-  application against known source/configuration instead of guessing a binary's
-  identity. Prepared SDKs and dependency caches can remain useful across source
-  revisions; keep their recipe, checksum and provenance requirements.
-- `local-evidence/` (ignored): only selected source-bound reports, failure captures,
-  reproduction inputs and unaccepted source patches. Never use it for session,
-  ownership or task registries. It is not routine startup reading. Promote useful
-  conclusions to maintained docs; remove redundant captures once their purpose ends.
+- `build/`: reusable configure, compile and package outputs for compatible
+  profiles. Its `build-info.txt` records the configured source and toolchain
+  context; reconfigure through `build.sh` when building newer source. Keep
+  historical binary output only while a concrete comparison or diagnosis needs
+  it. Prepared SDK/dependency caches remain useful only while compatible with
+  current work or needed for offline rebuilding; follow their recipe, checksum
+  and provenance requirements.
+- `local-evidence/` (ignored): compact source-bound results, required original
+  failure reports, essential reproduction inputs and pending source patches.
+  It is not a binary archive or a session, ownership or task registry, and is
+  not routine startup reading. Promote useful conclusions to maintained docs;
+  remove redundant captures once their purpose ends.
 - `docs/`: current contracts, concise validation status and useful unfinished plans.
   Git history retains superseded tracked narratives; do not append session diaries.
 

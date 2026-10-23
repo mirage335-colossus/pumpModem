@@ -150,8 +150,10 @@ The `releases/` directory contains:
 - `SHA256SUMS`: checksums for the release archives.
 
 The source archive includes only the recipe's resolved downloads and pinned
-Buildroot archive. Older versions may remain cached for other recipes but do
-not inflate new release archives.
+Buildroot archive. Keep local work trees, SDK installations and compiled archives
+only for recipes currently in use. After migrating dependent builds, remove
+superseded local copies; retain verified inputs needed for current offline work.
+See [local output retention](../../docs/building.md#local-output-retention).
 
 Preserve the compiled SDK and source archive together in durable release
 storage. Mirror these archives if long-term availability matters. Hashes verify

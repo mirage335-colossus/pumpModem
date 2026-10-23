@@ -22,13 +22,28 @@ Keep all checks below intact.
 - Serialize shared Git mutations and final integration. Use separate output
   directories under `build/` for concurrent builds, keep source inputs stable
   during checks, and coordinate access to timing-sensitive tests and devices.
+- For sequential work, reuse the standard `build/` profile incrementally across
+  source revisions while its compiler, generator, configuration and SDK remain
+  compatible; do not make date-, revision- or session-named copies. Keep a
+  concurrent comparison in bounded scratch output only until its process ends
+  and useful source/input/configuration plus compact result evidence is saved,
+  then remove its compiled outputs. A failed run alone is not a reason to keep
+  its whole build tree. Remove superseded local SDK installations, work trees
+  and archives after active processes are closed and dependents are migrated or
+  reconfigured. Retain only compatible SDK/dependency caches in current use,
+  plus downloaded inputs needed for offline rebuilding; native and Wasm SDKs
+  remain separate. Never delete immutable published assets or required original
+  failure reports. Use explicit bounded paths, not broad cleanup globs or
+  automatic age-based deletion.
 - Track launched work through its process or tool handle and wait for actual
   completion before cleanup or handoff. A missing handle or old timestamp alone
   does not establish that work has stopped.
 - Keep temporary source-bound reports, failure captures and patches in the
   ignored `local-evidence/` directory. Do not use it for ownership, session or
-  task registries. Maintained contracts, plans and current validation belong in
-  `docs/`; Git history retains superseded tracked narratives.
+  task registries or as a binary archive. Keep only compact results, pending
+  source patches and essential reproducer inputs; remove redundant captures
+  when their purpose ends. Maintained contracts, plans and current validation
+  belong in `docs/`; Git history retains superseded tracked narratives.
 
 ## Testing sequence for agents
 
