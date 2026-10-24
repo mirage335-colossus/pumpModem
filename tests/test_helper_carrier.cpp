@@ -36,6 +36,11 @@ void power_and_placement() {
     options.power_w=1500;
     require(h::minimum_output_rate(options,1500,36,6000)==48000,
             "helper did not negotiate independently of the low-rate modem");
+    require(h::minimum_output_rate(options,1500,36,48000)==48000&&
+            h::minimum_output_rate(options,1500,36,96000)==96000,
+            "logical sample clock pushed an adjacent helper into a remote audio band");
+    require(h::minimum_output_rate(options,1700,3000,6000)==48000,
+            "hardware negotiation applied logical Nyquist to the physical helper geometry");
     const auto high=h::plan(options,1000,200,8000);
     const auto backed_off=h::plan(options,1000,200,8000,0,.5);
     require(backed_off.helper_gain==high.helper_gain*.5&&backed_off.data_gain==high.data_gain&&
@@ -43,7 +48,11 @@ void power_and_placement() {
             "payload backoff calibration changed Robust PCM or failed to reduce only helper amplitude");
     rejects([&]{h::plan(options,1000,200,8000,0,0);});
     rejects([&]{h::plan(options,1000,200,8000,0,std::numeric_limits<double>::quiet_NaN());});
-    require(high.frequency_hz>=1550,"high helper band geometry changed");
+    require(high.frequency_hz==1750,
+            "High helper did not use the nearest leakage-qualified 50Hz separation");
+    const auto ssb=h::plan(options,1500,36,48000);
+    require(ssb.frequency_hz==2118&&ssb.frequency_hz-150>1518,
+            "narrow Robust signal did not retain a close nonoverlapping High helper");
     require(std::abs(high.helper_gain/high.data_gain-
         std::sqrt(2*datapump::modem::nominal_signal_power*1500/4))<1e-12,"power ratio used as amplitude ratio");
     const auto outside_capture=h::plan(options,1000,200,48000,8250);

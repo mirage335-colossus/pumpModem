@@ -321,7 +321,17 @@ these effective helper powers, 40 W through 180 dB loss gives 20.02 dB tone SNR;
 5.76 dB, below the 6 dB presence level. An adequate predicted level still needs
 measured confidence/coherence and a supported route. The helper budget does not
 change payload SNR, receive-probability curves or CPU estimates, and does not
-claim a quantified assistance gain. Low/0 retain their interference cautions.
+claim a quantified assistance gain. For a large oscillator search it also shows
+prospective conditional frequency/clock counts, retained clock rates and the
+measured frequency-uncertainty threshold needed to fit at most 257 alternatives
+per narrowed profile. This is a geometry condition, not a received measurement,
+C/N0-to-latency prediction or measured CPU speedup. All original epoch/start
+alternatives remain; runtime eligibility, snapshot/history and workspace limits
+still apply. Primary replacement requires explicit **Complex only** and a fixed
+timestamp, with actual backend and recovery eligibility checked at runtime.
+Auto and rolling epochs retain the ordinary bank and consider only an
+independently eligible additional helper search. Adjacent High/Low retain real interference in capture; 0 Hz
+overlap is discouraged.
 
 These hardware budgets use measured/calibrated RF power; 4 W data and 40 W
 helper retain a 10 dB reference ratio. The helper follows existing interleaved
@@ -330,22 +340,50 @@ simulation still uses its nominal signal-power convention, under which that
 waveform's actual data and calibrated helper C/N0 both include a 6.02 dB backoff;
 helper dwell duty and route response can further affect measured average power.
 
-A visible helper reference does not imply immediate payload acquisition. Runtime
-assistance preserves the selected backend and native FFT startup fill; bounded
-pre-roll can recover only PCM still retained. It ranks one advisory private epoch
-with ordinary fallback, using the earliest qualified evidence retained privately
-from observer slices of at most 40 ms and its original sample date. Public
-callbacks retain their last-update cadence. This is an onset hint, not UTC or a
-guaranteed first physical tone start. Weak unknown-epoch late starts can select
-the wrong second and fail assisted acquisition; the full ordinary bank remains
-unchanged. Fixed-epoch frequency assistance does not establish a general GPS
-Clock sync replacement. Phase assistance may become active after
-admission through a continuous committed-frontier reanchor that preserves the
-initial template carrier offset. Timing-search bounds stay fixed at admission;
-later phase qualification does not narrow them. Full ordinary payload handling
-remains unchanged. This does not certify complete epoch coverage. Observer-only
-CPU measurements do not qualify the whole Live receiver or change the displayed
-ordinary CPU curves.
+A visible helper reference does not imply immediate payload acquisition.
+Primary replacement is restricted to a fixed configured transmit timestamp and
+unchanging epoch-admission bank, using the same fixed-bank condition as ordinary
+refresh. It also requires explicit **Complex only**, an actual native continuous
+backend without Clock sync, FHSS, DSSS/Interleave, calendar, compact, configured
+drift or differential processing, with the same structurally bounded ordinary
+receiver-error recovery recipe. Immutable cold-start and replay grants preserve
+that normal error recovery. Auto, energy, differential, compact/
+correlator, scheduled and rolling/unknown-epoch cases retain their ordinary bank;
+an additional helper lane remains subject to its separate eligibility. Within an eligible large fixed bank, measured frequency narrows
+acquisition while preserving every admitted key/profile/epoch and original
+start alternative. Original clock-domain coverage includes continuous
+residual uncertainty; only an equivalent quarter-chip-sized domain can share a
+clock hypothesis. Before qualification, large-search history attempts to retain
+the full original initial FFT/acquisition aperture within min(64 MiB, bank
+capacity/8) and actual surplus. Switching declines if history starts after any
+original receiver origin. Precommit replay eligibility bounds the configured
+physical capture aperture and its resources, retaining full configured source
+quotas. Received lengths and total message size do not choose eligibility. The
+bank retains exact dormant ordinary receiver state and raw PCM until the first
+bit accepted by an ordinary detector. Reference loss, failed initial search or
+unavailable bounds restore that state and replay real input. The dormant bank remains a required processing consumer while it
+awaits replay. Tone presence, punctuation and metadata cannot commit acquisition.
+The first ordinary accepted bit commits that same full receiver and releases
+the backup; the precommit aperture bound no longer constrains payload lifetime.
+Helper loss retains accepted contexts and can broaden future acquisition. Long
+text, attachments, framing, decompression, recovery, next-poll progress and fully
+scored physical completion retain ordinary configured limits. No helper-specific
+message-size or source quota is added.
+
+The separate additional optional lane preserves its selected backend and native
+FFT startup fill. This smaller lane's pre-roll is bounded to 16 seconds/1 MiB
+and can recover only PCM still retained. This
+lane ranks one advisory private epoch, using the earliest qualified evidence
+retained privately from observer slices of at most 40 ms and its original date;
+public callbacks keep their normal cadence. Weak late starts can rank the wrong
+second, while its ordinary bank remains available. The primary conditional
+route does not discard epochs using that ranking. Neither route establishes UTC
+or a general GPS Clock sync replacement. Qualified phase assistance can activate
+after admission through a continuous committed-frontier reanchor that preserves
+initial template carrier offset; timing-search bounds stay fixed. Adjacent
+helper suppression uses a real optional FIR with fully observed centered input
+windows, dated delay and no EOF zero padding. Observer-only CPU measurements do
+not qualify the full Live receiver or alter the ordinary CPU curves.
 
 Link Planner publishes completed selected-target values before the full graph
 sweep. **Calculating graphs...** identifies that intermediate view; it is not a
@@ -1006,16 +1044,35 @@ and Clock offset, followed by Audio error, to the left of Baseband Osc, Shift Os
 Carrier and Shift share the existing modem row. Detailed oscillator/search
 values appear under the Link planner's hideable Model limits and references,
 and LPI assumptions remain in inspection.
-A further persistent row holds Helper Carrier Power, Ratio Limit, Frequency
-and editable Callsign; power zero disables the other helper controls. Encryption
-hides the helper callsign field and ignores its stored value for transmission;
-the saved preference returns when encryption is disabled. Unencrypted output
-uses a nonempty callsign or otherwise clear time; encrypted output uses encrypted
-time, with no public callsign. The helper-only action is visible in Developer
-mode. Helper audio negotiates a physical-rate floor independently of the
-unchanged logical modem rate. If higher-rate capture cannot open, optional
-helper observation yields during pre-PCM setup and ordinary capture continues;
-transmission fails before PCM if the selected helper cannot fit.
+A further persistent row holds editable Helper Carrier Power with presets,
+Ratio Limit, Frequency and editable Callsign; power zero disables the other
+helper controls. Finite nonnegative watts are accepted, with 10 kW and 15 kW
+presets alongside lower powers. Invalid edits retain the last valid value and
+block transmission until corrected. Encryption hides the helper callsign field
+and ignores its stored value for transmission, including invalid inactive text;
+the preference is preserved. Clear-mode callsign validation resumes when
+encryption is disabled. This normalization passed source review and focused
+shared controller/parser/planner checks. Broader GUI/native-adapter qualification
+remains separate, and focused receiver sanitizer coverage does not qualify GUI
+entry points. Unencrypted output uses a nonempty callsign or
+otherwise clear time; encrypted output uses encrypted time, with no public
+callsign. The helper-only action is visible in Developer mode.
+
+Placement uses actual shaped occupied data bandwidth plus gating allowance and
+the nearest power-qualified leakage guard. High has no logical-sample-rate
+floor. The selected Rate, carrier and logical modem geometry stay unchanged;
+there is no automatic Rate reduction for narrow, wide or 3.6 kHz SSB settings.
+The radio/audio route must still pass the complete data/helper bands and guard;
+closest placement does not guarantee a fit inside a narrow SSB filter. Helper
+audio negotiates a physical-rate floor independently of the logical modem rate.
+If higher-rate capture cannot open, optional helper observation yields during
+pre-PCM setup and ordinary capture continues. Mixed Live transmission likewise
+reports an unavailable helper and retains original ordinary payload PCM when
+helper geometry/setup cannot fit. A provider setup retry without the helper
+rate request is permitted only before any PCM callback; actual output gaps
+still fail transmission. Helper-only transmission fails when its helper cannot
+be generated.
+
 The wider minimum retains readable oscillator choices alongside all four timing
 fields, preserving the existing composition, reception and plot allocations.
 `control_layout.hpp` computes frame, label,

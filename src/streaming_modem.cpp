@@ -243,6 +243,26 @@ Diagnostics StreamingReceiver::diagnostics()const{return impl_->pattern.diagnost
 ConstellationBatch StreamingReceiver::take_payload_constellation(){return {impl_->pattern.take_chip_constellation(),0};}
 std::size_t StreamingReceiver::working_bytes()const{return sizeof(StreamingReceiver)+sizeof(Impl)+impl_->pattern.working_bytes();}
 std::size_t StreamingReceiver::reserved_workspace_bytes()const{return sizeof(StreamingReceiver)+sizeof(Impl)+impl_->pattern.reserved_workspace_bytes();}
+std::optional<HelperReplayBudget> StreamingReceiver::helper_replay_budget(std::size_t future_samples,
+        const PatternSearch* reset_search)const {
+    auto result=impl_->pattern.helper_replay_budget(future_samples,reset_search);
+    if(result) {
+        const auto control=sizeof(StreamingReceiver)+sizeof(Impl);
+        if(result->workspace_bytes>SIZE_MAX-control)return std::nullopt;
+        result->workspace_bytes+=control;
+        if(result->steady_workspace_bytes) {
+            if(result->steady_workspace_bytes>SIZE_MAX-control)return std::nullopt;
+            result->steady_workspace_bytes+=control;
+        }
+        if(result->cold_constructor_bytes) {
+            // Impl passes constructor budget-sizeof(Impl) to PatternReceiver.
+            // The outer StreamingReceiver shell is actual storage only.
+            if(result->cold_constructor_bytes>SIZE_MAX-sizeof(Impl))return std::nullopt;
+            result->cold_constructor_bytes+=sizeof(Impl);
+        }
+    }
+    return result;
+}
 std::size_t StreamingReceiver::projection_cache_headroom(std::size_t input_samples)const{return impl_->pattern.projection_cache_headroom(input_samples);}
 std::optional<std::size_t> StreamingReceiver::temporal_plan_workers()const{return impl_->pattern.temporal_plan_workers();}
 void StreamingReceiver::trim_optional_workspace(){impl_->pattern.trim_optional_workspace();}

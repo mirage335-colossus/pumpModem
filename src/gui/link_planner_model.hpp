@@ -73,6 +73,9 @@ struct HelperReferencePlan {
     double simulation_cn0_db_hz=0;
     double simulation_tone_snr_db=0;
     double frequency_hz=0;
+    bool conditional_strip_available=false;
+    std::size_t ordinary_pairs=0,conditional_pair_limit=257,retained_clock_rates=0;
+    double required_frequency_uncertainty_hz=0;
     std::string status;
 };
 struct Model {

@@ -89,7 +89,6 @@ unsigned effective_epoch_search_seconds(const transfer::Options& options,bool st
     return seconds;
 }
 Settings normalized_layout(Settings value) {
-    helper::validate(value.helper);
     audio::validate_option_values({value.transmit_gain,value.exclusive});
     clock_sync::validate_audio_error(value.transfer.audio_timing_error_seconds);
     if (value.content_limit == default_memory_limit) value.content_limit = value.transfer.content_limit;
@@ -106,6 +105,10 @@ Settings normalized_layout(Settings value) {
             value.transfer.receive_pattern_mode < tuning::PatternMode::tone_1)
             value.transfer.receive_pattern_mode = tuning::PatternMode::auto_tone;
     } else if (value.transfer.key) value.transfer.modem.scramble = true;
+    // The controller retains the preference for a later clear transmission.
+    // Keyed sessions only use encrypted helper metadata.
+    if(value.transfer.key)value.helper.callsign.clear();
+    helper::validate(value.helper);
     modem::validate(value.transfer.modem);
     if(value.transfer.modem.oscillator_search)
         modem::validate_oscillator_search(*value.transfer.modem.oscillator_search);

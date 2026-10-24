@@ -290,6 +290,7 @@ public:
     static std::size_t symbol_burst_control_bytes(std::size_t hypotheses,std::size_t pulse_lattices=0);
     // Includes promised optional detector state not yet materialized by a push.
     std::size_t reserved_workspace_bytes() const;
+    std::optional<HelperReplayBudget> helper_replay_budget(std::size_t future_samples) const;
     // Additional allocation bound for one finite PCM push and its next drain.
     // SIZE_MAX disables optional shared preprocessing for unsupported geometry.
     std::size_t projection_cache_headroom(std::size_t input_samples) const;

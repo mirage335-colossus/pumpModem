@@ -97,6 +97,43 @@ void metadata() {
         check(found);metadata_has_no_timing_authority(result);
     }
 }
+void metadata_carrier_images() {
+    // The finite real-carrier projection of a reversal depends on carrier
+    // phase. A scalar bin-envelope average either rejected these clean tones
+    // or biased the dwell enough to move a metadata point by one radial cell.
+    struct Case {std::uint32_t rate;double frequency,phase;};
+    for(const auto test:{Case{32000,2450,0},Case{32000,2262.5,.81},
+                         Case{48000,2262.5,2.2},Case{48000,2462.5,.81}}) {
+        helper::Options options;options.power_w=1500;options.callsign="N0CALL";
+        helper::Generator generator(options,{test.frequency,.7,.1,1500},1800000000,true);
+        helper::Receiver receiver(test.frequency,20);
+        constexpr double delay=.03719;
+        std::array<float,512> samples{};Result result;
+        const auto total=static_cast<std::uint64_t>(3.2*test.rate);
+        for(std::uint64_t first=0;first<total;first+=samples.size()) {
+            const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(),total-first));
+            for(std::size_t i=0;i<count;++i) {
+                const auto time=static_cast<long double>(first+i)/test.rate-delay;
+                const auto value=time<0?0.:std::real(generator.mix_analytic({},time,test.rate)*
+                    std::polar(1.,test.phase));
+                samples[i]=static_cast<float>(std::round(value*32767)/32767);
+            }
+            receiver.push(std::span<const float>(samples).first(count),test.rate,first);
+            if(auto update=receiver.take_update()) {
+                check(update->sample<first+count);
+                result.updates.push_back(std::move(*update));
+            }
+        }
+        bool decoded=false;
+        for(const auto& reference:result.updates)if(reference.metadata) {
+            check(reference.timing_valid);
+            check(std::abs(std::remainder(reference.dwell_start_seconds-delay,.4))<2e-6);
+            check(reference.metadata->kind==helper::MetadataKind::callsign);
+            check(reference.metadata->callsign=="N0CALL");decoded=true;
+        }
+        check(decoded);metadata_has_no_timing_authority(result);
+    }
+}
 void timecodes_and_corruption() {
     std::array<std::uint8_t,32> master{};
     const Crypto key(master);master[0]=1;const Crypto wrong(master);
@@ -280,6 +317,89 @@ void realistic_frequency() {
     // do not turn that floor into a confidence claim on the true C/N0.
     check(second.usable==0);
 }
+void weak_timecode_frequency() {
+    // Weak existence evidence must not turn unresolved dwell modulation into
+    // false fine frequency precision. Narrow intervals, if any, must cover the
+    // real carrier; this vector does not promise useful acquisition latency.
+    constexpr std::uint32_t rate=48000;
+    constexpr double expected=6380,frequency=6380.37,amplitude=.01,cn0=20.7609125906;
+    const Crypto key{std::array<std::uint8_t,32>{}};
+    for(const bool signal:{false,true}) {
+        helper::Options options;options.power_w=1500;options.timecode=true;
+        helper::Generator generator(options,{frequency,amplitude,0,1500},1700000000,true,key);
+        helper::Receiver receiver(expected,20,{key});
+        const auto sigma=std::sqrt(amplitude*amplitude*rate/(4*std::pow(10.,cn0/10)));
+        std::mt19937 random(5181);std::normal_distribution<double> noise(0,sigma);
+        std::array<float,137> samples{};std::size_t references=0;
+        for(std::uint64_t first=0;first<20*rate;first+=samples.size()) {
+            const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(),20*rate-first));
+            for(std::size_t i=0;i<count;++i) {
+                const auto time=static_cast<long double>(first+i)/rate-.03719L;
+                samples[i]=static_cast<float>((signal&&time>=0?generator.mix(0,time,rate):0.)+noise(random));
+            }
+            receiver.push(std::span<const float>(samples).first(count),rate,first);
+            if(const auto reference=receiver.take_update()) {
+                ++references;
+                check(reference->sample<first+count && reference->frequency_sample<=reference->sample);
+                check(reference->frequency_valid && !reference->phase_valid && !reference->timing_valid && !reference->metadata);
+                if(reference->frequency_uncertainty_hz<=.25) {
+                    check(std::abs(reference->frequency_hz-frequency)<=reference->frequency_uncertainty_hz);
+                }
+            }
+        }
+        if(signal)check(references>0);else check(references==0);
+    }
+}
+LinkResult shifted_helper_frequency(bool signal,std::size_t chunk) {
+    constexpr std::uint32_t rate=48000;
+    constexpr double expected=2262.5,offset=30,ppm=100,amplitude=.01,cn0=39.7403126773;
+    constexpr double frequency=expected*(1+ppm*1e-6)+offset;
+    const Crypto key{std::array<std::uint8_t,32>{}};
+    helper::Options options;options.power_w=1500;options.timecode=true;
+    helper::Generator generator(options,{expected,amplitude,0,1500},1800000000,true,key);
+    helper::Receiver receiver(expected,100,{key});
+    const auto sigma=std::sqrt(amplitude*amplitude*rate/(4*std::pow(10.,cn0/10)));
+    std::mt19937 noise_random(581),phase_random(7181);
+    std::normal_distribution<double> noise(0,sigma),phase_step(0,
+        .50249378105604448*std::numbers::pi/180/std::sqrt(rate));
+    double phase=.81;std::vector<float> samples(chunk);LinkResult result;
+    for(std::uint64_t first=0;first<6*rate;first+=samples.size()) {
+        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(),6*rate-first));
+        for(std::size_t i=0;i<count;++i) {
+            const auto time=static_cast<long double>(first+i)/rate;
+            const auto source_time=time*(1+ppm*1e-6)-.03719L;phase+=phase_step(phase_random);
+            const auto value=!signal||source_time<0?0.:std::real(generator.mix_analytic({},source_time,rate)*
+                std::polar(1.,phase+tau*offset*static_cast<double>(time)));
+            samples[i]=static_cast<float>(value+noise(noise_random));
+        }
+        receiver.push(std::span<const float>(samples).first(count),rate,first);
+        if(auto reference=receiver.take_update()) {
+            check(reference->sample<first+count && reference->frequency_sample<=reference->sample);
+            check(reference->frequency_valid && !reference->phase_valid && !reference->timing_valid && !reference->metadata);
+            ++result.references;result.last=reference;
+            // This fixed drift/noise realization must retain the known mean
+            // carrier within every published interval, including after retune.
+            check(std::abs(reference->frequency_hz-frequency)<=reference->frequency_uncertainty_hz);
+            if(reference->frequency_uncertainty_hz<=.1) {
+                if(!result.usable)result.first_usable=static_cast<double>(reference->sample)/rate;
+                ++result.usable;
+            }
+        }
+    }
+    return result;
+}
+void shifted_frequency() {
+    // At this actual HF-helper C/N0, punctuation/metadata may be undecodable.
+    // A 30 Hz offset must still permit measured frequency-only assistance.
+    const auto result=shifted_helper_frequency(true,137);
+    check(result.usable>0 && result.first_usable<3);
+    const auto batched=shifted_helper_frequency(true,4096);
+    check(batched.usable>0 && result.last && batched.last);
+    check(result.last->sample==batched.last->sample);
+    check(result.last->frequency_hz==batched.last->frequency_hz);
+    check(result.last->frequency_uncertainty_hz==batched.last->frequency_uncertainty_hz);
+    check(shifted_helper_frequency(false,137).references==0);
+}
 void chunks_and_gaps() {
     const auto a=run(true,"N0CALL",2100,.2,.034,1,0,true);
     const auto b=run(true,"N0CALL",2100,.2,.034,4096,0,true);
@@ -293,6 +413,6 @@ void chunks_and_gaps() {
 }
 }
 int main() {
-    clean_precision();metadata();timecodes_and_corruption();clock_skew();frequency_drift();fallback_and_noise();realistic_frequency();chunks_and_gaps();
+    clean_precision();metadata();metadata_carrier_images();timecodes_and_corruption();clock_skew();frequency_drift();fallback_and_noise();realistic_frequency();weak_timecode_frequency();shifted_frequency();chunks_and_gaps();
     std::cout<<"helper precision receiver passed\n";
 }

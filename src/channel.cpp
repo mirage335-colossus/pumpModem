@@ -54,7 +54,7 @@ struct SampledLegacy {
         sigma=std::sqrt(nominal_signal_power*std::pow(10.,-channel.snr_db/10));
         if(helper_options.power_w>0) {
             const auto plan=helper::plan(helper_options,config.carrier_hz,
-                helper_bandwidth>0?helper_bandwidth:waveform_bandwidth_hz(config)+waveform_gate_bandwidth_allowance_hz(config),
+                helper_bandwidth>0?helper_bandwidth:helper::occupied_bandwidth(config),
                 config.sample_rate,0,outer_dsss_transmit_gain(config));
             helper_plan=plan;
             sigma*=plan.data_gain;
@@ -174,16 +174,17 @@ struct SampledPhysical {
          startup_random(impairment.seed^0x8ebc6af09c88c6e3ULL),
          phase_random(impairment.seed^0xa0761d6478bd642fULL),noise_random(impairment.seed) {
         validate(config);validate_channel(config,channel);helper::validate(options);
-        const auto occupied=bandwidth>0?bandwidth:waveform_bandwidth_hz(config)+waveform_gate_bandwidth_allowance_hz(config);
-        // At least 4x permits an unaliased helper above the original logical
-        // Nyquist interval. Unusual small-rate/high-power routes may need more.
+        const auto occupied=bandwidth>0?bandwidth:helper::occupied_bandwidth(config);
+        // The physical clock carries the closest power-qualified helper,
+        // independently of the logical modem clock. Small-rate/high-power
+        // routes can place it beyond logical Nyquist and may need more stages.
         for(stage_count=2;stage_count<=max_stages;++stage_count) {
             factor=1U<<stage_count;
             if(config.sample_rate>120000000U/factor)break;
             physical_rate=config.sample_rate*factor;
             try {
                 plan=helper::plan(options,config.carrier_hz,occupied,physical_rate,
-                                  static_cast<double>(config.sample_rate)+250,outer_dsss_transmit_gain(config));
+                                  0,outer_dsss_transmit_gain(config));
                 break;
             } catch(const Error&) {
                 if(stage_count==max_stages)throw;
@@ -205,7 +206,8 @@ struct SampledPhysical {
         }
         for(auto& coefficient:fir)coefficient/=sum;
         // Admit only geometry whose actual FIR cascade preserves the payload
-        // band and rejects the much brighter helper. No logical modem retune.
+        // band. In-band helpers remain a real linear mixture, as in physical
+        // audio; do not move or subtract them to hide their interference.
         const auto clock_rate=1+channel.clock_error_ppm*1e-6;
         const auto low=(config.carrier_hz-occupied/2)*clock_rate+channel.frequency_offset_hz;
         const auto high=(config.carrier_hz+occupied/2)*clock_rate+channel.frequency_offset_hz;
@@ -216,7 +218,10 @@ struct SampledPhysical {
         }
         const auto power_ratio=plan.effective_power_w/options.data_power_w;
         for(unsigned i=0;options.frequency==helper::Frequency::high&&i<=120;++i) {
-            const auto gain=std::abs(response((plan.frequency_hz-150+300.*i/120)*clock_rate+channel.frequency_offset_hz));
+            const auto frequency=(plan.frequency_hz-150+300.*i/120)*clock_rate+channel.frequency_offset_hz;
+            const auto alias=std::abs(std::remainder(frequency,static_cast<double>(config.sample_rate)));
+            if(std::abs(frequency)<=config.sample_rate/2. || alias<low || alias>high)continue;
+            const auto gain=std::abs(response(frequency));
             if(gain*gain*power_ratio>1e-6)
                 throw Error("Helper Carrier simulation cannot isolate this helper from the original data passband");
         }

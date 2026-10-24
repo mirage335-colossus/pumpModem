@@ -12923,6 +12923,34 @@ bool PatternCorrelator::initial_search_complete()const {
 }
 bool PatternCorrelator::drift_tolerant()const{return impl_->drift_sections>1;}
 std::size_t PatternCorrelator::working_bytes()const{return sizeof(PatternCorrelator)+impl_->working_bytes();}
+std::optional<HelperReplayBudget> PatternCorrelator::helper_replay_budget(std::size_t future_samples)const {
+    const auto& s=*impl_;
+    if(s.lazy_state() || s.burst || s.scheduled_map() || s.options.amplitude_only || s.hypotheses.empty() ||
+       (s.config.fake_hopping && s.config.fake_hopping->defer_symbols) || future_samples>UINT64_MAX-s.sample)
+        return std::nullopt;
+    if(s.sample+future_samples>(std::uint64_t{1}<<52))return std::nullopt;
+    long double rate=0;
+    for(const auto& h:s.hypotheses)rate=std::max(rate,h.rate);
+    const auto count=std::ceil(static_cast<long double>(s.sample+future_samples)*rate/s.code.symbol_samples())+2;
+    if(!std::isfinite(count) || count<0 || count>static_cast<long double>(SIZE_MAX-2))return std::nullopt;
+    const auto observed=static_cast<std::size_t>(count);
+    auto bits=std::size_t{1};
+    while(bits<observed){if(bits>SIZE_MAX/2)return std::nullopt;bits*=2;}
+    for(const auto& h:s.hypotheses)bits=std::max(bits,h.burst.bits.capacity());
+    for(const auto& b:s.bursts)bits=std::max(bits,b.bits.capacity());
+    auto bytes=std::max(working_bytes(),reserved_workspace_bytes());
+    const auto add=[&](std::size_t n,std::size_t size) {
+        if(n>(SIZE_MAX-bytes)/size)return false;bytes+=n*size;return true;
+    };
+    // Every eager lane can retain a prefix. Full timing capacity plus old/new
+    // overlap covers ALL intermediate drains, not just one finite push.
+    if(s.search.track_limit>(SIZE_MAX-6)/2 || s.hypotheses.size()>SIZE_MAX-2*s.search.track_limit-6)return std::nullopt;
+    if(!add(s.hypotheses.size()+2*s.search.track_limit+6,bits) ||
+       !add(s.search.track_limit,sizeof(PatternBurst)))return std::nullopt;
+    if(s.timing_enabled && (!add(s.hypotheses.size(),2*sizeof(Impl::TimingEntry)) ||
+       !add(1,sizeof(std::vector<Impl::TimingEntry>))))return std::nullopt;
+    return HelperReplayBudget{observed,bytes};
+}
 std::size_t PatternCorrelator::projection_cache_headroom(std::size_t input_samples)const{return impl_->projection_cache_headroom(input_samples);}
 std::optional<std::size_t> PatternCorrelator::temporal_plan_workers()const{return impl_->temporal_plan_workers();}
 std::size_t PatternCorrelator::reserved_workspace_bytes()const{return sizeof(PatternCorrelator)+impl_->accounted_bytes;}

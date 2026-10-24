@@ -69,8 +69,6 @@ AssistancePlan plan_assistance(const modem::Config& c,const modem::PatternSearch
        request.residual_clock_uncertainty_ppm>10000 || !std::isfinite(c.carrier_hz) || c.carrier_hz<=0)
         return reject("helper assistance bounds are invalid");
     result.helper_offset_hz=reference.frequency_hz-request.expected_helper_hz;
-    result.frequency_uncertainty_hz=reference.frequency_uncertainty_hz+
-        std::abs(c.carrier_hz-request.expected_helper_hz)*request.residual_clock_uncertainty_ppm*1e-6;
     const auto symbol_samples=modem::symbol_sample_count(c);
     if(!symbol_samples)return reject("helper assistance has no finite observation aperture");
     // Nondeferred illustrative FHSS only gates the unchanged physical symbol;
@@ -79,12 +77,35 @@ AssistancePlan plan_assistance(const modem::Config& c,const modem::PatternSearch
     if((c.scheduled_hopping && c.scheduled_hopping->enabled() && !c.scheduled_hopping->continuous()) ||
        c.symbol_burst.enabled() || (c.fake_hopping && c.fake_hopping->defer_symbols))
         return reject("helper assistance for split physical symbols requires a resolved aperture");
+    auto rates=original_rates(c,original);
+    auto residual_clock=request.residual_clock_uncertainty_ppm;
+    if(rates.empty())return reject("helper assistance has no original clock domain");
+    if(request.cover_continuous_clock) {
+        auto low=rates.front(),high=rates.back();
+        if(original.admitted_clock_half_width_ppm) {
+            const auto width=*original.admitted_clock_half_width_ppm;
+            if(!std::isfinite(width)||width<0||width>10000)
+                return reject("original continuous clock bounds are invalid");
+            low=std::min(low,-width);high=std::max(high,width);
+        }
+        const auto maximum_step=.25*modem::pattern_chip_samples(c)/static_cast<double>(symbol_samples)*1e6;
+        if(high-low<=maximum_step) {
+            rates={.5*(low+high)};
+            residual_clock=std::max(residual_clock,.5*(high-low));
+        } else {
+            auto remaining=std::max(rates.front()-low,high-rates.back());
+            for(std::size_t i=1;i<rates.size();++i)
+                remaining=std::max(remaining,.5*(rates[i]-rates[i-1]));
+            residual_clock=std::max(residual_clock,remaining);
+        }
+    }
+    result.frequency_uncertainty_hz=reference.frequency_uncertainty_hz+
+        std::abs(c.carrier_hz-request.expected_helper_hz)*residual_clock*1e-6;
     const auto step=.25*c.sample_rate/static_cast<double>(symbol_samples);
     const auto intervals=std::ceil(result.frequency_uncertainty_hz/step);
     if(!std::isfinite(intervals) || intervals>request.maximum_hypotheses)
         return reject("helper residual uncertainty exceeds the optional lane limit");
     const auto side=static_cast<std::size_t>(intervals);
-    const auto rates=original_rates(c,original);
     const auto per_rate=1+2*side;
     if(rates.empty() || rates.size()>request.maximum_hypotheses/per_rate)
         return reject("all original clock alternatives cannot fit the optional helper bank");

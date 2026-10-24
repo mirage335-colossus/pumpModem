@@ -187,7 +187,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
             if(value!="high"&&value!="low"&&value!="0")invalid("--helper-frequency must be high, low, or 0.");
             result.helper_frequency=value;
         }
-        else if(flag=="--helper-callsign"){helper_callsign(value);result.helper_callsign=value;}
+        else if(flag=="--helper-callsign")result.helper_callsign=value;
         else if(flag=="--path-loss-db")result.path_loss_db=number(value,flag,0,500);
         else if(flag=="--noise-dbm-hz")result.noise_dbm_hz=number(value,flag,-250,0);
         else if(flag=="--target-snr")result.target_db_hz=number(value,flag,-200,200);
@@ -286,6 +286,10 @@ Patch parse_arguments(std::span<const std::string> arguments) {
     }
     if(lf_zero_reference&&explicit_reference=="independent")invalid("--lf-reference 0 conflicts with independent reference.");
     if(result.tx_key=="none"&&result.key_name)invalid("--key-name conflicts with --tx-key none.");
+    // Partial patches inherit the destination key selection. Callsign syntax
+    // belongs to the Controller when that context is unknown, and is inactive
+    // with encryption. Preserve the saved preference in keyed round trips.
+    if(result.tx_key=="none"&&result.helper_callsign)helper_callsign(*result.helper_callsign);
     if(result.dsss_mode=="interleave"&&(result.dsss_factor==1||result.dsss_version=="legacy"))
         invalid("Interleave mode requires a spreading factor above one and the interleave construction.");
     return result;

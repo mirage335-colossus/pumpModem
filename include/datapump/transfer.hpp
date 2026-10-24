@@ -46,6 +46,10 @@ struct Options {
     RepeatPolicy repeat_policy;
     // Receiver-only hard-bit search after physical completion. No wire fields.
     RecoveryOptions recovery_options;
+    // Receive-only logical sample coordinate of the supplied buffer's sample
+    // zero within the original physical capture. This is an offset, not UTC
+    // authority; canonical source epochs/phases and capture_epoch stay fixed.
+    std::uint64_t input_sample_origin_samples = 0;
 };
 inline bool shared_hop_calendar(const modem::Config& config) {
     return config.symbol_burst.enabled() || bool(config.fake_hopping) || (config.scheduled_hopping && config.scheduled_hopping->enabled());
@@ -152,6 +156,10 @@ public:
     void discard(std::uint64_t first_sample, std::uint64_t first_symbol);
     std::size_t working_bytes() const;
     std::size_t source_buffer_bytes() const;
+    // Helper-only reservation for empty candidates over a finite native PCM
+    // replay. nullopt when any framed source interpretation could be reached.
+    // Native callers supply at most 2048 constellation points and no waveform.
+    std::optional<std::size_t> helper_replay_storage_bound(std::size_t maximum_stream_bits) const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

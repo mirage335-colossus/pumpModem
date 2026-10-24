@@ -81,11 +81,48 @@ void helper_controls() {
     using F=ui::Field;
     Controller controller;
     check(controller.settings().helper.power_w==0&&controller.field(F::helper_power).selected=="0"&&
+          controller.field(F::helper_power).text=="0"&&
           controller.field(F::helper_ratio_limit).selected=="90"&&controller.field(F::helper_frequency).selected=="high",
           "Helper defaults changed");
     for(const auto field:{F::helper_ratio_limit,F::helper_frequency,F::helper_callsign})
         check(!controller.field(field).enabled,"Disabled helper leaves a companion editable");
     check(!controller.enabled(ui::Command::transmit_helper),"Disabled helper permits helper-only transmission");
+    for(const auto& [preset,watts]:std::array<std::pair<const char*,double>,2>{{{"10 kW",10000},{"15 kW",15000}}}) {
+        controller.select(F::helper_power,preset);
+        check(std::abs(controller.settings().helper.power_w-watts)<1e-8&&
+              controller.field(F::helper_power).text==preset,
+              "High-power helper preset did not populate the editable field");
+    }
+    for(const auto& [text,watts]:std::array<std::pair<const char*,double>,3>{{{"275.125 W",275.125},{"2.25 kW",2250},{".125",.125}}}) {
+        controller.edit(F::helper_power,text);
+        check(std::abs(controller.settings().helper.power_w-watts)<1e-9&&
+              controller.field(F::helper_power).text==text,
+              "Custom helper power did not reach settings or retain its edit buffer");
+    }
+    const auto custom_export=launch_command::parse(controller.field(F::planner_command).text);
+    check(custom_export.helper_power_w&&std::abs(*custom_export.helper_power_w-.125)<1e-12,
+          "Custom helper power was omitted from command export");
+    Controller custom_target;
+    custom_target.edit(F::planner_command,controller.field(F::planner_command).text);
+    custom_target.activate(ui::Command::planner_load_command);
+    check(std::abs(custom_target.settings().helper.power_w-.125)<1e-12&&
+          custom_target.field(F::helper_power).text==custom_target.field(F::helper_power).selected,
+          "Imported custom helper power did not populate its editable control");
+    controller.select(F::helper_power,"1.5 kW");
+    for(const auto* invalid:{"","-","-1 W","nan","inf","1e309 W"}) {
+        controller.edit(F::helper_power,invalid);
+        check(controller.field(F::helper_power).text==invalid&&
+              std::abs(controller.settings().helper.power_w-1500)<1e-9&&
+              !controller.enabled(ui::Command::transmit_noise),
+              "Invalid helper power changed accepted power or permitted transmission");
+        controller.select(F::helper_power,"1.5 kW");
+        check(controller.field(F::helper_power).text=="1.5 kW"&&controller.enabled(ui::Command::transmit_noise),
+              "Reselecting the accepted helper preset did not repair an invalid edit");
+    }
+    controller.edit(F::helper_power,"0W");
+    check(controller.settings().helper.power_w==0&&controller.field(F::helper_power).selected=="0"&&
+          !controller.field(F::helper_ratio_limit).enabled,
+          "Custom zero helper power did not disable the helper controls");
     const auto original=controller.settings().transfer.modem;
     controller.select(F::helper_power,"1.5 kW");
     check(std::abs(controller.settings().helper.power_w-1500)<1e-9&&controller.field(F::helper_callsign).enabled,
@@ -168,6 +205,58 @@ void helper_controls() {
     controller.select(F::key,"none");
     check(controller.field(F::helper_callsign).visible&&controller.field(F::helper_callsign).enabled&&
           controller.field(F::helper_callsign).text=="N0OFF","Disabling encryption did not restore Helper Callsign");
+    controller.select(F::key,"key:Helper privacy");
+    const auto keyed_geometry=controller.settings().transfer.modem;
+    constexpr auto inactive_callsign="12345678901234567890";
+    controller.edit(F::planner_command,std::string("--helper-callsign ")+inactive_callsign);
+    controller.activate(ui::Command::planner_load_command);
+    check(controller.settings().transfer.key&&controller.settings().helper.callsign==inactive_callsign&&
+          !controller.field(F::helper_callsign).visible&&
+          controller.settings().transfer.modem.sample_rate==keyed_geometry.sample_rate&&
+          controller.settings().transfer.modem.bandwidth_hz==keyed_geometry.bandwidth_hz&&
+          controller.settings().transfer.modem.carrier_hz==keyed_geometry.carrier_hz,
+          "Invalid inactive Helper Callsign rejected or changed an encrypted profile");
+    const auto inactive_export=launch_command::parse(controller.field(F::planner_command).text);
+    check(inactive_export.helper_callsign==inactive_callsign&&inactive_export.tx_key=="named",
+          "Encrypted export discarded its inactive stored callsign");
+    controller.edit(F::helper_callsign,"STALE");
+    check(controller.settings().helper.callsign==inactive_callsign,
+          "Hidden inactive callsign accepted a direct edit");
+    controller.edit(F::planner_command,"--tx-key none");
+    controller.activate(ui::Command::planner_load_command);
+    check(controller.settings().transfer.key&&controller.settings().helper.callsign==inactive_callsign,
+          "An invalid clear-mode callsign partially committed a key change");
+    controller.select(F::key,"none");
+    check(controller.field(F::helper_callsign).visible&&!controller.enabled(ui::Command::transmit_helper),
+          "Invalid clear-mode callsign did not expose a correctable error");
+    controller.edit(F::helper_callsign,"N0RESTORED");
+    check(!controller.settings().transfer.key&&controller.settings().helper.callsign=="N0RESTORED"&&
+          controller.enabled(ui::Command::transmit_helper),
+          "Valid Helper Callsign edit did not recover clear-mode settings");
+    auto startup_patch=inactive_export;
+    startup_patch.keyfile=fixture.path.string();startup_patch.helper_callsign="N0CÄLL";
+    Controller startup({false,false,startup_patch});
+    const auto startup_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+    while(!startup.settings().transfer.key&&std::chrono::steady_clock::now()<startup_deadline) {
+        startup.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(startup.settings().transfer.key&&startup.settings().helper.callsign=="N0CÄLL"&&
+          !startup.field(F::helper_callsign).visible,
+          "Keyed startup validated its inactive saved callsign before loading the key");
+    auto live_settings=startup.settings();live_settings.helper.callsign=inactive_callsign;
+    live::validate_settings(live_settings);
+    check(live_settings.helper.callsign==inactive_callsign,
+          "Live validation mutated the caller's inactive callsign preference");
+    const auto rejects_clear_callsign=[](const live::Settings& settings) {
+        bool rejected=false;
+        try {live::validate_settings(settings);}
+        catch(const Error& error) {rejected=std::string_view(error.what()).find("callsign")!=std::string_view::npos;}
+        check(rejected,"Clear Live settings did not validate the active Helper Callsign");
+    };
+    auto clear_settings=live_settings;clear_settings.transfer.key.reset();
+    rejects_clear_callsign(clear_settings);
+    auto tone_settings=live_settings;tone_settings.transfer.modem.spreading_mode=modem::SpreadingMode::tone;
+    rejects_clear_callsign(tone_settings);
 }
 
 void search_arithmetic_controls() {

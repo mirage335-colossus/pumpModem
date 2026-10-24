@@ -1,4 +1,5 @@
 #include "datapump/channel.hpp"
+#include "datapump/helper_filter.hpp"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -7,6 +8,7 @@
 #include <limits>
 #include <map>
 #include <numbers>
+#include <string_view>
 
 using namespace datapump;
 namespace {
@@ -78,36 +80,49 @@ void helper_only_graceful_finish() {
 }
 void unsupported_geometry_preserves_plain_channel() {
     auto c=config();c.carrier_hz=3400;
+    // This shaped waveform occupies625Hz, so3400Hz has a flat preserved
+    // upper edge at3712.5Hz. Do not reject it using the wider nominal rate.
+    modem::SampledSimulationChannel preserved(c,model(),helper_options());
+    check(preserved.physical_sample_rate()>c.sample_rate,
+          "helper rejected a data passband preserved by the actual capture FIR");
+    c.carrier_hz=3600;
+    const auto upper=c.carrier_hz+helper::occupied_bandwidth(c)/2;
+    check(upper>3900&&upper<c.sample_rate/2.,
+          "negative fixture no longer places a valid waveform in the FIR transition");
     modem::SampledSimulationChannel ordinary(c,model());
     check(ordinary.physical_sample_rate()==c.sample_rate,"plain simulation changed unsupported helper geometry");
     bool rejected=false;
-    try {modem::SampledSimulationChannel unsupported(c,model(),helper_options());}catch(const Error&) {rejected=true;}
+    try {modem::SampledSimulationChannel unsupported(c,model(),helper_options());}
+    catch(const Error& error) {
+        rejected=std::string_view(error.what())=="Helper Carrier simulation cannot preserve this near-Nyquist data passband";
+    }
     check(rejected,"helper silently filtered a near-Nyquist Robust passband");
 }
-void low_and_cochannel_are_physical_mixtures() {
+void adjacent_helpers_are_physical_mixtures() {
     const auto c=config();auto impairment=model();impairment.snr_db=100;
-    for(const auto placement:{helper::Frequency::low,helper::Frequency::cochannel}) {
+    for(const auto placement:{helper::Frequency::high,helper::Frequency::low,helper::Frequency::cochannel}) {
         auto h=helper_options(40);h.frequency=placement;h.callsign.clear();h.timecode=false;
         modem::SampledSimulationChannel channel(c,impairment,h);channel.begin_burst(true);
         Observer raw;channel.set_physical_observer(std::ref(raw));
         modem::StreamingTransmitter source(modem::Noise{32},c);
         const auto logical=capture(channel,source,137);
-        const auto plan=helper::plan(h,c.carrier_hz,modem::waveform_bandwidth_hz(c)+
-            modem::waveform_gate_bandwidth_allowance_hz(c),channel.physical_sample_rate(),c.sample_rate+250.,modem::outer_dsss_transmit_gain(c));
+        const auto plan=helper::plan(h,c.carrier_hz,helper::occupied_bandwidth(c),channel.physical_sample_rate(),0,modem::outer_dsss_transmit_gain(c));
+        if(placement==helper::Frequency::high)
+            check(plan.frequency_hz==2262.5&&plan.frequency_hz+150<c.sample_rate/2.,
+                  "High helper was not adjacent inside the logical capture passband");
         std::complex<double> sum{};
         for(std::size_t i=0;i<raw.samples.size();++i)
             sum+=static_cast<double>(raw.samples[i])*std::polar(1.,-2*std::numbers::pi*plan.frequency_hz*i/raw.rate);
-        check(std::norm(sum)>raw.samples.size(),"Low/cochannel helper missing from physical PCM");
+        check(std::norm(sum)>raw.samples.size(),"adjacent helper missing from physical PCM");
         double energy=0;for(const auto sample:logical)energy+=static_cast<double>(sample)*sample;
-        check(energy/logical.size()>.01,"simulator hid the in-band Low/cochannel helper interference");
+        check(energy/logical.size()>.01,"simulator hid an in-band helper from logical PCM");
     }
 }
 void calibrated_data_band_noise() {
     for(const auto sample_rate:{2000U,8000U})for(const auto power:{1500.,4000000000.}) {
         const auto c=config(sample_rate);const auto impairment=model();const auto h=helper_options(power);
         modem::SampledSimulationChannel channel(c,impairment,h);
-        const auto plan=helper::plan(h,c.carrier_hz,modem::waveform_bandwidth_hz(c)+
-            modem::waveform_gate_bandwidth_allowance_hz(c),channel.physical_sample_rate(),c.sample_rate+250.,modem::outer_dsss_transmit_gain(c));
+        const auto plan=helper::plan(h,c.carrier_hz,helper::occupied_bandwidth(c),channel.physical_sample_rate(),0,modem::outer_dsss_transmit_gain(c));
         Observer physical;channel.set_physical_observer(std::ref(physical));
         std::vector<float> noise(100000);channel.read_noise(noise);
         modem::SampledSimulationChannel original(c,impairment);
@@ -145,8 +160,7 @@ void physical_phase_noise_sidebands() {
         auto impairment=model();impairment.snr_db=100;
         impairment.phase_noise_degrees_per_sqrt_second=trial?.5:0;
         modem::SampledSimulationChannel channel(c,impairment,h);channel.begin_burst(true);
-        const auto plan=helper::plan(h,c.carrier_hz,modem::waveform_bandwidth_hz(c)+
-            modem::waveform_gate_bandwidth_allowance_hz(c),channel.physical_sample_rate(),c.sample_rate+250.,modem::outer_dsss_transmit_gain(c));
+        const auto plan=helper::plan(h,c.carrier_hz,helper::occupied_bandwidth(c),channel.physical_sample_rate(),0,modem::outer_dsss_transmit_gain(c));
         modem::StreamingTransmitter source(modem::Noise{64},c);std::array<float,800> pcm{};
         double energy=0;std::size_t samples=0;
         for(unsigned block=0;block<100;++block) {
@@ -171,8 +185,7 @@ void physical_frequency_and_helper_only_rejection() {
     modem::SampledSimulationChannel channel(c,impairment,h);channel.begin_burst(true);
     Observer physical;channel.set_physical_observer(std::ref(physical));
     modem::StreamingTransmitter source(modem::Noise{32},c);const auto logical=capture(channel,source,137);
-    const auto plan=helper::plan(h,c.carrier_hz,modem::waveform_bandwidth_hz(c)+
-        modem::waveform_gate_bandwidth_allowance_hz(c),channel.physical_sample_rate(),c.sample_rate+250.,modem::outer_dsss_transmit_gain(c));
+    const auto plan=helper::plan(h,c.carrier_hz,helper::occupied_bandwidth(c),channel.physical_sample_rate(),0,modem::outer_dsss_transmit_gain(c));
     const auto expected=plan.frequency_hz*(1+impairment.clock_error_ppm*1e-6)+impairment.frequency_offset_hz;
     double strongest=-1,best=0;
     const auto window=physical.rate/10;
@@ -198,12 +211,18 @@ void payload_progress_and_completion() {
         modem::SampledSimulationChannel channel(c,impairment,h);
         modem::StreamingTransmitter source(modem::RawBits{{0,0,1}},c);
         modem::PatternSearch search;search.worker_threads=1;search.start_offset_seconds=0;search.start_uncertainty_seconds=6;
+        const auto placement=helper::plan(h,c.carrier_hz,helper::occupied_bandwidth(c),channel.physical_sample_rate(),0,
+            modem::outer_dsss_transmit_gain(c));
+        helper::PayloadFilter filter;
+        if(placement.frequency_hz+225<c.sample_rate/2.)filter=helper::PayloadFilter(c.sample_rate,placement.frequency_hz);
         modem::PatternReceiver receiver(c,16*1024*1024,search);
         std::map<std::pair<std::uint64_t,std::uint64_t>,Bytes> streams;
         std::vector<std::string> prefixes;std::size_t completions=0;std::uint64_t last_bit=0,completed=0;
         std::array<float,173> pcm{};
         const auto feed=[&](std::span<const float> block) {
-            receiver.push(block);
+            std::array<float,173> filtered{};
+            const auto count=filter.push(block,filtered);
+            receiver.push(std::span(filtered).first(count));
             for(auto& burst:receiver.take_bursts()) {
                 auto& bits=streams[{burst.stream_first_sample,burst.stream_first_symbol}];
                 for(const auto bit:burst.bits) {
@@ -282,7 +301,7 @@ void outer_dsss_helper_power_calibration() {
 }
 }
 int main() {
-    try {logical_contract_and_chunking();helper_only_graceful_finish();unsupported_geometry_preserves_plain_channel();low_and_cochannel_are_physical_mixtures();calibrated_data_band_noise();physical_phase_noise_sidebands();physical_frequency_and_helper_only_rejection();payload_progress_and_completion();outer_dsss_helper_power_calibration();
+    try {logical_contract_and_chunking();helper_only_graceful_finish();unsupported_geometry_preserves_plain_channel();adjacent_helpers_are_physical_mixtures();calibrated_data_band_noise();physical_phase_noise_sidebands();physical_frequency_and_helper_only_rejection();payload_progress_and_completion();outer_dsss_helper_power_calibration();
         std::cout<<"physical helper simulation passed\n";return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

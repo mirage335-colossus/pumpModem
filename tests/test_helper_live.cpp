@@ -39,13 +39,13 @@ void helper_placement_covers_both_profiles() {
     live::Settings settings;settings.transfer.modem=config();settings.transfer.modem.bandwidth_hz=100;
     auto longer=settings.transfer.modem;longer.dsss_factor=10;longer.scramble=true;settings.long_message_modem=longer;
     const auto width=live::detail::helper_occupied_bandwidth(settings);
-    check(width>=modem::waveform_bandwidth_hz(longer)+modem::waveform_gate_bandwidth_allowance_hz(longer),
+    check(width>=helper::occupied_bandwidth(longer),
         "common helper placement omitted long-message occupied band");
     helper::Options options;options.power_w=100;
     modem::ChannelConfig impairment;impairment.clock_error_ppm=0;impairment.phase_noise_degrees_per_sqrt_second=0;
     modem::SampledSimulationChannel channel(settings.transfer.modem,impairment,options,width);
     const auto plan=helper::plan(options,settings.transfer.modem.carrier_hz,width,channel.physical_sample_rate(),
-        settings.transfer.modem.sample_rate+250.,modem::outer_dsss_transmit_gain(settings.transfer.modem));
+        0,modem::outer_dsss_transmit_gain(settings.transfer.modem));
     check(plan.frequency_hz-150>longer.carrier_hz+width/2,
         "helper overlapped long-message data band");
     modem::StreamingTransmitter source(modem::RawBits{{0,0,1}},longer);
@@ -66,7 +66,7 @@ void sampled_composite() {
     helper::Options options;options.power_w=1500;options.data_power_w=4;
     modem::SampledSimulationChannel baseline(c,impairment),disabled(c,impairment,{}),assisted(c,impairment,options);
     const auto plan=helper::plan(options,c.carrier_hz,
-        modem::waveform_bandwidth_hz(c)+modem::waveform_gate_bandwidth_allowance_hz(c),assisted.physical_sample_rate(),c.sample_rate+250.,
+        helper::occupied_bandwidth(c),assisted.physical_sample_rate(),0,
         modem::outer_dsss_transmit_gain(c));
     std::array<float,800> a{},b{},h{};
     baseline.read_noise(a);disabled.read_noise(b);assisted.read_noise(h);
@@ -225,7 +225,7 @@ void payload_survives_physical_helper_preselection() {
             auto input=logical;
             if(only) {modem::SampledSimulationChannel noise(c,impairment);noise.read_noise(input);}
             helper::Options options;options.power_w=power;options.data_power_w=4;options.callsign=test.callsign;
-            const auto occupied=modem::waveform_bandwidth_hz(c)+modem::waveform_gate_bandwidth_allowance_hz(c);
+            const auto occupied=helper::occupied_bandwidth(c);
             const auto plan=helper::plan(options,c.carrier_hz,occupied,physical_rate,static_cast<double>(c.sample_rate)+250,
                 modem::outer_dsss_transmit_gain(c));
             helper::Generator generator(options,plan,0);

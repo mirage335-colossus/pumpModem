@@ -37,15 +37,6 @@ double dot(Pair a,Pair b) {return a[0]*b[0]+a[1]*b[1];}
 double phase_wrap(double x) {return std::remainder(x,tau);}
 double smooth(double x) {x=std::clamp(x,0.,1.);return x*x*x*(10+x*(-15+6*x));}
 double smooth_derivative(double x) {return x<=0||x>=1?0:30*x*x*(1-x)*(1-x);}
-double smooth_integral(double x) {
-    if(x<=0)return 0;
-    if(x>=1)return x-.5;
-    return x*x*x*x*(2.5+x*(-3+x));
-}
-double reversal_average(double begin,double end,double center) {
-    return 1-2*.008*(smooth_integral((end-center+.004)/.008)-
-                         smooth_integral((begin-center+.004)/.008))/(end-begin);
-}
 bool solve3(std::array<std::array<double,3>,3> a,std::array<double,3> b,
             std::array<double,3>& x) {
     for(unsigned i=0;i<3;++i) {
@@ -100,8 +91,18 @@ struct Receiver::Impl {
         std::uint64_t bin_first=0;
         std::complex<double> bin_osc{1,0},bin_step{},bin_sum{};
         double bin_cc=0,bin_ss=0,bin_cs=0,coarse_hz=0;
+        // The physical search grid remains centered on immutable expected.
+        // A basis chosen from past PCM is used only for later complete bins.
+        double basis_hz=0,pending_basis_hz=0;
+        std::uint64_t last_basis_sample=0;
         std::array<Bin,narrow_bins> ring{};
         std::array<FrequencyPoint,12> frequency_points{};
+        // Fixed-grid Fisher evidence uses disjoint raw windows. It can qualify
+        // a weak beacon without demanding significance in one 144 ms window.
+        std::array<double,81> group_evidence{};
+        std::uint64_t group_last_end=0,completed_groups=0,group_admitted_sample=0;
+        std::size_t group_windows=0;
+        double group_frequency=0;
         std::size_t frequency_count=0,frequency_position=0,frequency_tick=0;
         std::uint64_t frequency_groups=0,last_frequency_end=0;
         double bin_energy=0;
@@ -143,7 +144,7 @@ struct Receiver::Impl {
         s.bin_size=std::max<std::size_t>(2,rate/500);
         s.fit_size=std::max<std::size_t>(16,rate/25);
         s.bin_step=std::polar(1.,-tau*expected/rate);
-        s.guess_hz=expected;s.coarse_hz=expected;
+        s.guess_hz=expected;s.coarse_hz=expected;s.basis_hz=expected;
     }
     double seconds(std::uint64_t sample) const {return static_cast<double>(sample)/state.rate;}
     double local(double time) const {
@@ -279,7 +280,7 @@ struct Receiver::Impl {
     }
     std::complex<double> aligned(const Bin& b,double center) const {
         const auto t=(static_cast<double>(b.first)+.5*state.bin_size)/state.rate;
-        return b.z*std::polar(1.,-tau*(state.guess_hz-expected)*(t-center));
+        return b.z*std::polar(1.,-tau*(state.guess_hz-state.basis_hz)*(t-center));
     }
     void find_punctuation() {
         auto& s=state;if(s.ring_count<32||!s.coarse_valid)return;
@@ -293,12 +294,49 @@ struct Receiver::Impl {
            11*std::norm(left)<.998*left_power||11*std::norm(right)<.998*right_power||
            std::abs(std::abs(right)/std::abs(left)-1)>.03||std::abs(phase_wrap(std::arg(-right/left)))>.015)return;
         const auto gain=(left-right)*.5;
+        // A changing real-tone envelope also changes the carrier image in
+        // each finite bin. Project the candidate reversal through the same
+        // sampled carrier/Gram model as finish_bin; a scalar envelope average
+        // biases timing with carrier phase and can corrupt dense metadata.
+        struct ReversalBin {
+            double begin;
+            std::complex<double> carrier,alignment,observed;
+        };
+        std::array<ReversalBin,8> reversal_bins;
+        const auto difference=s.guess_hz-s.basis_hz;
+        const auto basis_step=std::polar(1.,tau*s.basis_hz/s.rate);
+        const auto carrier_step=std::polar(1.,tau*s.guess_hz/s.rate);
+        const auto sample_seconds=1./s.rate;
+        const auto envelope_step=sample_seconds/.008;
+        // The s.basis_hz-carrier oscillator restarts in every bin, so all
+        // completed bins have this same actual finite Gram matrix.
+        const auto determinant=s.bin_cc*s.bin_ss-s.bin_cs*s.bin_cs;
+        if(determinant<=1e-12)return;
+        for(std::size_t i=0;i<reversal_bins.size();++i) {
+            const auto& b=bin(i+10);
+            const auto begin=seconds(b.first);
+            const auto cycles=std::fmod(static_cast<long double>(s.basis_hz)*b.first/s.rate,1.L);
+            const auto phase=std::polar(1.,tau*static_cast<double>(cycles));
+            reversal_bins[i]={begin,
+                gain*phase*std::polar(1.,tau*difference*(begin-center)),
+                std::conj(phase)*std::polar(1.,-tau*difference*(begin+.5*static_cast<double>(s.bin_size)/s.rate-center)),
+                aligned(b,center)};
+        }
         const auto objective=[&](double crossing) {
             double error=0;
-            for(std::size_t age=10;age<=17;++age) {
-                const auto& b=bin(age);
-                const auto begin=seconds(b.first),end=seconds(b.first+s.bin_size);
-                error+=std::norm(aligned(b,center)-gain*reversal_average(begin,end,crossing));
+            for(const auto& b:reversal_bins) {
+                auto carrier=b.carrier,basis=std::complex<double>{1,0};
+                auto position=(b.begin-crossing+.004)/.008;
+                double cosine_rhs=0,sine_rhs=0;
+                for(std::size_t j=0;j<s.bin_size;++j) {
+                    const auto sample=carrier.real()*(1-2*smooth(position));
+                    cosine_rhs+=sample*basis.real();sine_rhs+=sample*basis.imag();
+                    carrier*=carrier_step;basis*=basis_step;position+=envelope_step;
+                }
+                const std::complex<double> projected{
+                    (s.bin_ss*cosine_rhs-s.bin_cs*sine_rhs)/determinant,
+                    -(s.bin_cc*sine_rhs-s.bin_cs*cosine_rhs)/determinant};
+                error+=std::norm(b.observed-projected*b.alignment);
             }
             return error/std::norm(gain);
         };
@@ -329,8 +367,8 @@ struct Receiver::Impl {
         const auto& s=state;
         const auto step_seconds=static_cast<double>(s.bin_size)/s.rate;
         const auto offset=-.5*(narrow_bins-1)*step_seconds;
-        const auto difference=frequency-expected;
-        const auto cycles=std::fmod(static_cast<long double>(expected)*bin(narrow_bins-1).first/s.rate,1.L);
+        const auto difference=frequency-s.basis_hz;
+        const auto cycles=std::fmod(static_cast<long double>(s.basis_hz)*bin(narrow_bins-1).first/s.rate,1.L);
         auto rotation=std::polar(1.,-tau*difference*offset);
         auto covariance_rotation=std::polar(1.,-tau*static_cast<double>(cycles)-tau*difference*offset);
         const auto rotation_step=std::polar(1.,-tau*difference*step_seconds);
@@ -407,7 +445,7 @@ struct Receiver::Impl {
             const auto f=.5*(low+high);std::complex<double> resultant{};
             for(std::size_t i=0;i<count;++i) {
                 const auto& p=point(i);const auto w=1./(4*p.phase_variance);
-                resultant+=std::polar(w,2*p.phase-2*tau*(f-expected)*(p.time-center_time));
+                resultant+=std::polar(w,2*p.phase-2*tau*(f-s.basis_hz)*(p.time-center_time));
             }
             const auto residual=std::max(0.,2*wsum-2*std::abs(resultant));
             const auto numerical=128*std::numeric_limits<double>::epsilon()*wsum;
@@ -425,8 +463,8 @@ struct Receiver::Impl {
         if(s.frequency_groups==std::numeric_limits<std::uint64_t>::max())return;
         ++s.frequency_groups;
         const auto frontier=bin(0).first+s.bin_size-1;
-        if(s.reference&&frontier-s.reference->sample<s.rate/2&&
-           s.reference->frequency_uncertainty_hz<=.1)return;
+        const bool strong_reference=s.reference&&frontier-s.reference->sample<s.rate/2&&
+           s.reference->frequency_uncertainty_hz<=.1;
         const auto eigenvalue=.5*(s.bin_cc+s.bin_ss-std::hypot(s.bin_cc-s.bin_ss,2*s.bin_cs));
         if(eigenvalue<s.bin_size*.2)return;
         double noise_energy=0;for(std::size_t i=0;i<narrow_bins;++i)noise_energy+=bin(i).noise_energy;
@@ -441,18 +479,53 @@ struct Receiver::Impl {
         const auto cells=static_cast<unsigned>(std::ceil(width/2.5));
         const auto spacing=cells?width/cells:0;
         const auto bank_size=2*cells+1;
-        const auto admission_log=std::log(200.)+std::log(static_cast<double>(bank_size))+spending;
+        const auto admission_log=std::log(400.)+std::log(static_cast<double>(bank_size))+spending;
         double frequency=expected,best_score=-1;
+        const auto group_first=bin(narrow_bins-1).first;
+        const auto independent=group_first>s.group_last_end;
         for(unsigned i=0;i<bank_size;++i) {
             const auto candidate=expected+(static_cast<double>(i)-cells)*spacing;
             const auto score=narrow_fit(candidate).score;
+            if(independent)s.group_evidence[i]+=degrees*.5*std::log1p(score/noise_energy);
             if(score>best_score) {best_score=score;frequency=candidate;}
         }
+        if(independent) {
+            s.group_last_end=frontier;
+            const auto target=4+static_cast<std::size_t>(std::min(28.,
+                std::ceil(2*std::log1p(static_cast<double>(s.completed_groups)))));
+            if(++s.group_windows>=target) {
+                if(s.completed_groups!=UINT64_MAX) {
+                    ++s.completed_groups;
+                    const auto alpha=std::log(400.)+std::log(static_cast<double>(bank_size))+
+                        std::log(static_cast<double>(s.completed_groups))+std::log(static_cast<double>(s.completed_groups)+1);
+                    unsigned best=0;
+                    for(unsigned i=1;i<bank_size;++i)if(s.group_evidence[i]>s.group_evidence[best])best=i;
+                    const auto evidence=s.group_evidence[best];double log_sum=0,term=0;
+                    if(evidence>0)for(std::size_t j=1;j<target;++j) {
+                        term+=std::log(evidence)-std::log(static_cast<double>(j));
+                        const auto high=std::max(log_sum,term),low=std::min(log_sum,term);
+                        log_sum=high+std::log1p(std::exp(low-high));
+                    }
+                    if(evidence>0 && -evidence+log_sum<=-alpha) {
+                        s.group_admitted_sample=frontier;
+                        s.group_frequency=expected+(static_cast<double>(best)-cells)*spacing;
+                    }
+                }
+                s.group_evidence={};s.group_windows=0;
+            }
+        }
+        // Existence groups follow raw time even when a strong reference makes
+        // another precision fit unnecessary. Data-dependent window selection
+        // would invalidate the independent-window Fisher calibration.
+        if(strong_reference)return;
         // Fixed-grid score is an exact two-dimensional whitened projection.
         // Its raw residual denominator is orthogonal under independent AWGN.
         // The spending union bound covers every grid cell and every look;
         // continuous local refinement below never grants fresh admission.
-        if(-degrees*.5*std::log1p(best_score/noise_energy)>-admission_log)return;
+        const bool grouped=s.group_admitted_sample && frontier>=s.group_admitted_sample &&
+            frontier-s.group_admitted_sample<=12ULL*s.rate &&
+            std::abs(frequency-s.group_frequency)<=std::max(2.5,spacing);
+        if(!grouped && -degrees*.5*std::log1p(best_score/noise_energy)>-admission_log)return;
         auto lower=std::max(expected-width,frequency-spacing),upper=std::min(expected+width,frequency+spacing);
         for(unsigned iteration=0;iteration<18&&upper>lower;++iteration) {
             const auto a=lower+(upper-lower)/3,b=upper-(upper-lower)/3;
@@ -498,6 +571,16 @@ struct Receiver::Impl {
         const auto observed_amplitude_squared=std::max(0.,amplitude*amplitude-
             amplitude_variance-amplitude*amplitude*phase_variance);
         if(observed_amplitude_squared*s.rate/(4*variance_upper)<10*std::pow(10.,.6))return;
+        // This completed, admitted window can choose a future LS basis, but
+        // cannot publish precision from that adaptively chosen basis itself.
+        // Keep the physical candidate grid and all confidence spending fixed.
+        // A noise-scaled hysteresis and one-second cooldown prevent weak fits
+        // from repeatedly discarding otherwise usable future observations.
+        const auto recenter_distance=std::max(2.,4*z*std::sqrt(frequency_variance));
+        if(std::abs(frequency-s.basis_hz)>recenter_distance &&
+           (!s.last_basis_sample || frontier-s.last_basis_sample>=s.rate)) {
+            s.pending_basis_hz=frequency;return;
+        }
         double phase_gain=0,frequency_gain=0;
         narrow_samples(frequency,[&](Pair,Block weight,double time) {
             const Pair derivative{-tau*time*fit.amplitude[1],tau*time*fit.amplitude[0]};
@@ -508,22 +591,59 @@ struct Receiver::Impl {
             };
             phase_gain+=sensitivity(phase_influence);frequency_gain+=sensitivity(frequency_influence);
         });
-        const auto amplitude_upper=amplitude+z*std::sqrt(amplitude_variance);
-        phase_gain*=amplitude_upper;frequency_gain*=amplitude_upper;
-        const auto coefficient_error_per_hz=tau*s.bin_size/(2*s.rate)*std::sqrt(s.bin_size/eigenvalue);
-        const auto feedback=frequency_gain*coefficient_error_per_hz;
-        if(feedback>=.5)return;
-        // Evaluate the actual finite-Gram normal-equation sensitivities. The
-        // frequency error also changes the bin-center approximation bound;
-        // solve that local perturbation inequality instead of assuming the
-        // uniformly weighted continuous phase-line factor three.
-        const auto frequency_bias=frequency_gain*coefficient_error_per_hz*
-            (std::abs(frequency-expected)+z*std::sqrt(frequency_variance))/(1-feedback);
-        const auto coefficient_error=coefficient_error_per_hz*(std::abs(frequency-expected)+
-            z*std::sqrt(frequency_variance)+frequency_bias);
-        const auto phase_bias=phase_gain*coefficient_error;
-        if(coefficient_error>.25||phase_bias>.5)return;
         const auto first=bin(narrow_bins-1).first;
+        const auto start=local(seconds(first));
+        const auto span=static_cast<double>(frontier-first)/s.rate;
+        const bool straight=s.timing_valid && std::isfinite(s.timing_uncertainty) &&
+            s.timing_uncertainty>=0 && start>=.008+s.timing_uncertainty &&
+            start+span<=.212-s.timing_uncertainty;
+        double frequency_bias=0,coefficient_error=0,phase_bias=0;
+        if(!straight) {
+            // Without a qualified dwell date this window can straddle a
+            // reversal or metadata. Preserve the original conservative model;
+            // centered-CW cancellation cannot justify a tighter phase history.
+            const auto upper=amplitude+z*std::sqrt(amplitude_variance);
+            phase_gain*=upper;frequency_gain*=upper;
+            const auto error_per_hz=tau*s.bin_size/(2*s.rate)*std::sqrt(s.bin_size/eigenvalue);
+            const auto feedback=frequency_gain*error_per_hz;
+            if(feedback>=.5)return;
+            frequency_bias=frequency_gain*error_per_hz*
+                (std::abs(frequency-s.basis_hz)+z*std::sqrt(frequency_variance))/(1-feedback);
+            coefficient_error=error_per_hz*(std::abs(frequency-s.basis_hz)+
+                z*std::sqrt(frequency_variance)+frequency_bias);
+            phase_bias=phase_gain*coefficient_error;
+        } else {
+        // The model bound below is relative to true amplitude. For e<=.25,
+        // factor two also covers the 1/(1-e) coefficient-bias feedback.
+        const auto amplitude_upper=2*(amplitude+z*std::sqrt(amplitude_variance));
+        phase_gain*=amplitude_upper;frequency_gain*=amplitude_upper;
+        // In a centered finite bin the first-order DC envelope term cancels.
+        // Only its real-carrier image moment remains. Taylor's remainder is
+        // bounded by dw^2 sum(t^2)/2, for arbitrary phase. Dividing both RHS
+        // bounds by the ACTUAL Gram eigenvalue bounds coefficient error.
+        const auto sine=std::abs(std::sin(tau*s.basis_hz/s.rate));
+        if(!(sine>0))return;
+        const auto n=static_cast<double>(s.bin_size),rate=static_cast<double>(s.rate);
+        const auto moment=(n/sine+1/(sine*sine))/(2*rate);
+        const auto second=n*(n*n-1)/(12*rate*rate);
+        // Published bin dates use first+N/2 rather than first+(N-1)/2.
+        // Keep the additional half-sample envelope phase error explicitly.
+        const auto a=(tau*moment/(2*eigenvalue)+std::numbers::pi/rate)*(1+1e-12);
+        const auto b=tau*tau*second/(2*eigenvalue)*(1+1e-12);
+        const auto delta=std::abs(frequency-s.basis_hz)+z*std::sqrt(frequency_variance);
+        const auto A=frequency_gain*b,B=1-frequency_gain*a-2*frequency_gain*b*delta;
+        const auto C=frequency_gain*(a*delta+b*delta*delta+1e-12);
+        const auto discriminant=B*B-4*A*C;
+        if(!std::isfinite(discriminant)||!std::isfinite(B)||B<=0||discriminant<=0)return;
+        // Small stable root of u=K e(delta+u). Reject an unstable feedback
+        // model instead of shrinking its interval or choosing another alias.
+        frequency_bias=2*C/(B+std::sqrt(discriminant));
+        const auto extent=delta+frequency_bias;
+        if(!std::isfinite(extent)||frequency_bias<0||frequency_gain*(a+2*b*extent)>=1-1e-12)return;
+        coefficient_error=a*extent+b*extent*extent+1e-12;
+        phase_bias=phase_gain*coefficient_error;
+        }
+        if(coefficient_error>.25||phase_bias>.5)return;
         if(s.frequency_count&&first<=s.last_frequency_end)return;
         const auto time=(static_cast<double>(first)+.5*narrow_bins*s.bin_size)/s.rate;
         if(s.frequency_count) {
@@ -553,6 +673,27 @@ struct Receiver::Impl {
            s.reference->phase_uncertainty_radians<=.25&&frontier-s.reference->sample<s.rate/2)return;
         if(!s.update||!s.update->metadata)s.update=reference;
     }
+    void recenter_basis() {
+        auto& s=state;if(!s.pending_basis_hz)return;
+        // Called after every consumer has processed the completed bin's last
+        // sample. New fits therefore use only future PCM, conditionally on
+        // this past basis choice. Capture indices and alpha ordinals never
+        // restart; discard partial evidence and every mixed-basis phase fit.
+        s.basis_hz=s.pending_basis_hz;s.pending_basis_hz=0;s.last_basis_sample=s.next;
+        s.bin_step=std::polar(1.,-tau*s.basis_hz/s.rate);s.bin_osc={1,0};
+        s.ring={};s.ring_count=s.ring_position=0;
+        s.frequency_points={};s.frequency_count=s.frequency_position=0;s.last_frequency_end=0;
+        s.group_evidence={};s.group_windows=0;
+        s.group_admitted_sample=0;s.group_frequency=0;
+        // group_last_end, frequency_groups and completed_groups retain their
+        // absolute raw-window dates and lifetime confidence-budget ordinals.
+        s.previous_bin={};s.increment_sum={};s.increments=0;
+        s.coarse_valid=true;s.coarse_hz=s.guess_hz=s.basis_hz;
+        s.fit_count=0;s.candidate.reset();s.reference.reset();
+        s.frequency_sample=0;s.frequency_value=s.frequency_uncertainty=0;
+        s.timing_valid=false;s.punctuation=-1;s.boundary_notch=-1;s.boundary_level=1;
+        s.amplitude=0;s.metadata_active=false;s.metadata_last_dwell=-1;
+    }
     void finish_bin() {
         auto& s=state;
         const auto determinant=s.bin_cc*s.bin_ss-s.bin_cs*s.bin_cs;
@@ -561,18 +702,18 @@ struct Receiver::Impl {
             -(s.bin_cc*(-s.bin_sum.imag())-s.bin_cs*s.bin_sum.real())/determinant};
         // bin_sum uses exp(-i wt), hence its negative imaginary component is
         // the sine RHS; the returned phasor uses the conventional +i phase.
-        const auto cycles=std::fmod(static_cast<long double>(expected)*s.bin_first/s.rate,1.L);
+        const auto cycles=std::fmod(static_cast<long double>(s.basis_hz)*s.bin_first/s.rate,1.L);
         z*=std::polar(1.,-tau*static_cast<double>(cycles));
         if(std::norm(z)>1e-14&&std::norm(s.previous_bin)>1e-14) {
             const auto increment=z*std::conj(s.previous_bin);
             const auto delta=std::arg(increment);
-            const auto expected_delta=tau*(s.guess_hz-expected)*s.bin_size/s.rate;
+            const auto expected_delta=tau*(s.guess_hz-s.basis_hz)*s.bin_size/s.rate;
             if((s.coarse_valid?std::abs(phase_wrap(delta-expected_delta))<.35:
                 std::abs(delta)<=tau*(width+1)*s.bin_size/s.rate)&&
                std::abs(std::abs(z)/std::abs(s.previous_bin)-1)<.1) {
                 s.increment_sum+=increment/std::abs(increment);++s.increments;
                 if(s.increments>=16) {
-                    const auto value=expected+std::arg(s.increment_sum)*s.rate/(tau*s.bin_size);
+                    const auto value=s.basis_hz+std::arg(s.increment_sum)*s.rate/(tau*s.bin_size);
                     if(std::abs(s.increment_sum)>s.increments*.995&&std::abs(value-expected)<=width+1e-6) {
                         s.coarse_hz=value;s.coarse_valid=true;if(!s.reference)s.guess_hz=value;
                     }
@@ -766,6 +907,7 @@ void Receiver::push(std::span<const float> samples,std::uint32_t rate,std::uint6
             s.timing_valid=false;s.candidate.reset();
         }
         impl_->bin_sample(sample);impl_->fit_sample(sample,index);impl_->metadata_sample(sample,index);
+        if(!s.bin_count)impl_->recenter_basis();
     }
 }
 std::optional<Reference> Receiver::take_update() {auto out=std::move(impl_->state.update);impl_->state.update.reset();return out;}

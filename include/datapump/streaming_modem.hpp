@@ -168,6 +168,8 @@ public:
     ConstellationBatch take_payload_constellation();
     std::size_t working_bytes() const;
     std::size_t reserved_workspace_bytes() const;
+    std::optional<HelperReplayBudget> helper_replay_budget(std::size_t future_samples,
+        const PatternSearch* reset_search=nullptr) const;
     // Additional allocation bound for one finite PCM push and its next drain.
     // SIZE_MAX disables optional shared preprocessing for unsupported geometry.
     std::size_t projection_cache_headroom(std::size_t input_samples) const;

@@ -3,6 +3,7 @@
 #include "datapump/fast/cli.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/helper_receiver.hpp"
+#include "datapump/helper_filter.hpp"
 #include "datapump/correlation_experiment.hpp"
 #include <array>
 #include "datapump/crypto.hpp"
@@ -507,7 +508,7 @@ void play_transmission(const Args& a, transfer::Options& options,const helper::O
     };
     audio::Options output;
     output.minimum_hardware_rate=helper::minimum_output_rate(helper_settings,options.modem.carrier_hz,
-        modem::waveform_bandwidth_hz(options.modem)+modem::waveform_gate_bandwidth_allowance_hz(options.modem),
+        helper::occupied_bandwidth(options.modem),
         options.modem.sample_rate);
     std::optional<helper::Generator> helper_generator;
     if(helper_settings.power_w>0)output.playback_output_transform=[&](float payload,long double seconds,std::uint32_t rate) {
@@ -589,8 +590,8 @@ void play_transmission(const Args& a, transfer::Options& options,const helper::O
         std::optional<helper::Plan> helper_plan;
         if(helper_settings.power_w>0) {
             helper_plan=helper::plan(helper_settings,options.modem.carrier_hz,
-                modem::waveform_bandwidth_hz(options.modem)+modem::waveform_gate_bandwidth_allowance_hz(options.modem),
-                format.hardware_rate,options.modem.sample_rate+250.,modem::outer_dsss_transmit_gain(options.modem));
+                helper::occupied_bandwidth(options.modem),
+                format.hardware_rate,0,modem::outer_dsss_transmit_gain(options.modem));
         }
         if(!a.has("time")) {
             const auto clock=[] {return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();};
@@ -742,11 +743,51 @@ auto receive_with_helper_diagnostics(const Args& args,const std::optional<Helper
         throw;
     }
 }
+transfer::Received receive_helper_payload(std::span<const float> samples,const transfer::Options& options,
+        const helper::Options& helper_options,const std::optional<HelperCapture>& capture,
+        const transfer::Progress& progress,std::size_t other_waveform_bytes=0) {
+    if(helper_options.power_w>0 && helper_options.frequency!=helper::Frequency::cochannel &&
+       capture && capture->present)try {
+        const auto frequency=capture->reference&&capture->reference->frequency_valid?
+            capture->reference->frequency_hz:(capture->observation?capture->observation->frequency_hz:0.);
+        if(frequency>225 && frequency+225<options.modem.sample_rate/2.) {
+            helper::PayloadFilter filter(options.modem.sample_rate,frequency);
+            const auto margin=2*filter.delay();
+            const auto budget=options.modem.memory_limit;
+            const auto raw_bytes=samples.size_bytes();
+            std::array<float,4096> block{};
+            const auto auxiliary_bytes=filter.allocated_bytes()+sizeof(block);
+            if(samples.size()>margin && raw_bytes<=budget && other_waveform_bytes<=budget-raw_bytes &&
+               auxiliary_bytes<=budget-raw_bytes-other_waveform_bytes &&
+               samples.size()-margin<=(budget-raw_bytes-other_waveform_bytes-auxiliary_bytes)/sizeof(float) &&
+               filter.delay()<=UINT64_MAX-options.input_sample_origin_samples) {
+                std::vector<float> selected;selected.reserve(samples.size()-margin);
+                if(selected.capacity()<=(budget-raw_bytes-other_waveform_bytes-auxiliary_bytes)/sizeof(float)) {
+                    for(std::size_t first=0;first<samples.size();first+=block.size()) {
+                        const auto count=filter.push(samples.subspan(first,std::min(block.size(),samples.size()-first)),block);
+                        selected.insert(selected.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(count));
+                    }
+                    // Only completely observed FIR windows are returned. Their
+                    // centers retain the original capture coordinate; EOF supplies
+                    // no filter padding and no absent-symbol evidence.
+                    auto filtered_options=options;
+                    filtered_options.input_sample_origin_samples+=filter.delay();
+                    auto received=transfer::receive(selected,filtered_options,progress);
+                    if(received.observed_bits)return received;
+                }
+            }
+        }
+    }catch(const std::exception&) {
+        // Optional conditioning yields to the complete original receiver. Its
+        // result/error remains authoritative when conditioning accepts no bits.
+    }
+    return transfer::receive(samples,options,progress);
+}
 HelperCapture preselect_helper_wav(modem::Wav& wav,const modem::Config& config,const helper::Options& options,
                                    const std::optional<Crypto>& key={}) {
     const auto plan=helper::plan(options,config.carrier_hz,
-        modem::waveform_bandwidth_hz(config)+modem::waveform_gate_bandwidth_allowance_hz(config),
-        wav.sample_rate,config.sample_rate+250.,modem::outer_dsss_transmit_gain(config));
+        helper::occupied_bandwidth(config),
+        wav.sample_rate,0,modem::outer_dsss_transmit_gain(config));
     HelperCapture helper_capture;
     helper::Tracker tracker(plan.frequency_hz);
     std::vector<Crypto> keys;if(key)keys.push_back(*key);
@@ -788,7 +829,7 @@ void output_wave(const Args& a,std::vector<float> samples,const modem::Config& c
         if(physical_rate>120000000)throw Error("helper WAV requires a separate supported physical sample rate");
         output_rate=static_cast<std::uint32_t>(physical_rate);
         const auto plan=helper::plan(helper_settings,c.carrier_hz,
-            modem::waveform_bandwidth_hz(c)+modem::waveform_gate_bandwidth_allowance_hz(c),output_rate,c.sample_rate+250.,
+            helper::occupied_bandwidth(c),output_rate,0,
             modem::outer_dsss_transmit_gain(c));
         const helper::Generator generator(helper_settings,plan,helper_epoch,true,helper_time_key);
         const auto helper_end=helper_origin+static_cast<long double>(samples.size())/c.sample_rate;
@@ -1428,7 +1469,8 @@ int main(int argc,char** argv) {
                 std::optional<HelperCapture> helper_capture;
                 if(helper_settings.power_w>0)helper_capture=preselect_helper_wav(wav,settings.modem,helper_settings,settings.key);
                 settings.modem.sample_rate=wav.sample_rate;modem::validate(settings.modem);
-                const auto result=receive_with_helper_diagnostics(a,helper_capture,[&]{return transfer::receive(wav.samples,settings,progress);});
+                const auto result=receive_with_helper_diagnostics(a,helper_capture,[&]{return receive_helper_payload(wav.samples,settings,helper_settings,helper_capture,progress,
+                    (wav.samples.capacity()-wav.samples.size())*sizeof(float));});
                 std::cout<<"{\"authenticated\":false,\"content_validated\":false,\"known_bits\":\""<<a.get("bits")<<"\",\"raw_bits\":\"";
                 for(auto bit:result.raw_bits)std::cout<<(bit?'1':'0');
                 std::cout<<"\",\"raw_bit_count\":"<<result.raw_bits.size()<<",\"missing_symbols\":"<<result.missing_symbols
@@ -1460,7 +1502,7 @@ int main(int argc,char** argv) {
                 };
                 try {
                     capture_options.minimum_hardware_rate=helper::minimum_output_rate(helper_settings,c.carrier_hz,
-                        modem::waveform_bandwidth_hz(c)+modem::waveform_gate_bandwidth_allowance_hz(c),c.sample_rate);
+                        helper::occupied_bandwidth(c),c.sample_rate);
                 }catch(const Error& error){disable_helper(error.what());}
                 if(helper_settings.power_w>0) {
                     helper_capture.emplace();
@@ -1488,8 +1530,8 @@ int main(int argc,char** argv) {
                     }
                     if(helper_settings.power_w>0&&!helper_disabled)try {
                         const auto plan=helper::plan(helper_settings,c.carrier_hz,
-                            modem::waveform_bandwidth_hz(c)+modem::waveform_gate_bandwidth_allowance_hz(c),
-                            format.hardware_rate,c.sample_rate+250.,modem::outer_dsss_transmit_gain(c));
+                            helper::occupied_bandwidth(c),
+                            format.hardware_rate,0,modem::outer_dsss_transmit_gain(c));
                         std::vector<Crypto> keys;if(settings.key)keys.push_back(*settings.key);
                         helper_tracker.emplace(plan.frequency_hz);
                         helper_receiver.emplace(plan.frequency_hz,20,std::move(keys));
@@ -1513,7 +1555,8 @@ int main(int argc,char** argv) {
                 c.sample_rate=wav.sample_rate;modem::validate(c);samples=std::move(wav.samples);
             }
             settings.modem=c;
-            auto result=receive_with_helper_diagnostics(a,helper_capture,[&]{return transfer::receive(samples,settings,progress);});
+            auto result=receive_with_helper_diagnostics(a,helper_capture,[&]{return receive_helper_payload(samples,settings,helper_settings,helper_capture,progress,
+                (samples.capacity()-samples.size())*sizeof(float));});
             report_received(a,result,nullptr,helper_capture?&*helper_capture:nullptr);return 0;
         }
         if(a.command=="tx" && !a.has("output") && !a.has("device")) throw Error("tx requires --output WAV or explicit --device");
@@ -1556,12 +1599,12 @@ int main(int argc,char** argv) {
         if(helper_settings.power_w>0) {
             auto source=transfer::message_transmitter(outgoing,settings);
             modem::SampledSimulationChannel impairments(transfer::seeded_config(settings,timestamp),channel,
-                helper_settings,modem::waveform_bandwidth_hz(c)+modem::waveform_gate_bandwidth_allowance_hz(c));
+                helper_settings,helper::occupied_bandwidth(c));
             impairments.set_helper_time_key(settings.key);
             const auto physical_rate=impairments.physical_sample_rate();
             const auto helper_plan=helper::plan(helper_settings,c.carrier_hz,
-                modem::waveform_bandwidth_hz(c)+modem::waveform_gate_bandwidth_allowance_hz(c),
-                physical_rate,c.sample_rate+250.,modem::outer_dsss_transmit_gain(c));
+                helper::occupied_bandwidth(c),
+                physical_rate,0,modem::outer_dsss_transmit_gain(c));
             helper::Tracker tracker(helper_plan.frequency_hz);
             std::vector<Crypto> keys;if(settings.key)keys.push_back(*settings.key);
             helper::Receiver helper_receiver(helper_plan.frequency_hz,20,std::move(keys));
@@ -1590,7 +1633,8 @@ int main(int argc,char** argv) {
             }
             auto receiver_settings=settings;
             receiver_settings.timestamp=channel.receiver_timestamp.value_or(timestamp);
-            result=receive_with_helper_diagnostics(a,helper_capture,[&]{return transfer::receive(noisy,receiver_settings,progress);});
+            result=receive_with_helper_diagnostics(a,helper_capture,[&]{return receive_helper_payload(noisy,receiver_settings,helper_settings,helper_capture,progress,
+                (physical.capacity()+noisy.capacity()-noisy.size())*sizeof(float));});
             if(a.has("output")) {
                 auto physical_config=c;physical_config.sample_rate=physical_rate;
                 output_wave(a,std::move(physical),physical_config,false);

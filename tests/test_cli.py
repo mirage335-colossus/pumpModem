@@ -96,6 +96,14 @@ class StreamCLI(unittest.TestCase):
                     decoded=self.run_pump('status-rx','--bits','001','--input',output,
                         '--helper-power','1.5kW','--helper-data-power','4W',*AUDIO)
                     self.assertTrue(json.loads(decoded.stdout)['known_bits_match'])
+                    truncated=directory/'high-truncated.wav'
+                    with wave.open(str(output),'rb') as source, wave.open(str(truncated),'wb') as target:
+                        target.setparams(source.getparams())
+                        target.writeframes(source.readframes(source.getnframes()-6*source.getframerate()))
+                    pending=json.loads(self.run_pump('status-rx','--bits','001','--input',truncated,
+                        '--helper-power','1.5kW','--helper-data-power','4W',*AUDIO).stdout)
+                    self.assertEqual(pending['raw_bits'],'001')
+                    self.assertFalse(pending['stream_complete'],'FIR/EOF invented physical absence')
             # Helper identification copies the local callsign unless overridden.
             copied=directory/'copied.wav'; explicit=directory/'explicit.wav'
             for output,extra in ((copied,()),(explicit,('--helper-callsign','W1ABC'))):
@@ -187,6 +195,36 @@ class StreamCLI(unittest.TestCase):
         self.assertFalse(value['stream_complete'])
         self.assertNotIn('raw_bits',value)
         self.assertIn('no sufficiently confident pattern',value['error'])
+
+    def test_helper_framed_encrypted_wav_and_physical_end(self):
+        text='helper framed text.'
+        self.assertEqual(len(text),19)
+        helper=('--helper-power','1.5kW','--helper-data-power','4W')
+        with tempfile.TemporaryDirectory() as directory:
+            directory=pathlib.Path(directory)
+            key=directory/'framed.key'; capture=directory/'framed.wav'; saved=directory/'received.txt'
+            self.run_pump('keygen','--output',key)
+            self.run_pump('tx','--text',text,'--keyfile',key,'--output',capture,*helper,*AUDIO)
+            value=json.loads(self.run_pump('rx','--input',capture,'--keyfile',key,
+                '--json','--save',saved,*helper,*AUDIO).stdout)
+            self.assertTrue(value['stream_complete'])
+            self.assertTrue(value['content_validated'])
+            self.assertTrue(value['authenticated'])
+            self.assertEqual(value['data_text'],text)
+            self.assertEqual(saved.read_bytes(),text.encode('ascii'))
+            self.assertEqual(value['raw_bit_count'],1216)
+            self.assertTrue(value['helper_carrier']['present'])
+            truncated=directory/'framed-truncated.wav'
+            with wave.open(str(capture),'rb') as source, wave.open(str(truncated),'wb') as target:
+                target.setparams(source.getparams())
+                target.writeframes(source.readframes(source.getnframes()-6*source.getframerate()))
+            pending=json.loads(self.run_pump('rx','--input',truncated,'--keyfile',key,
+                '--json',*helper,*AUDIO).stdout)
+            self.assertEqual(pending['raw_bit_count'],1216)
+            self.assertFalse(pending['stream_complete'])
+            self.assertFalse(pending['content_validated'])
+            self.assertFalse(pending['authenticated'])
+            self.assertEqual(pending['data_text'],'')
 
     def test_helper_only_live_simulation(self):
         result=self.run_pump('listen','--helper-only','--helper-power','1.5kW',

@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/helper_metadata.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include <array>
 #include <complex>
 #include <cstdint>
@@ -10,6 +11,15 @@
 #include <vector>
 
 namespace datapump::helper {
+// Match the waveform's own DC/Nyquist validation. Rate describes twice the
+// chip rate; a shaped pattern occupies its RRC support including rolloff.
+// Finite truncation/limiting tails still require the separate leakage guard.
+inline double occupied_bandwidth(const modem::Config& config) {
+    const auto waveform=modem::pattern_pulse_enabled(config)?
+        (1+modem::pattern_pulse_rolloff)*config.sample_rate/modem::pattern_chip_samples(config):
+        modem::waveform_bandwidth_hz(config);
+    return waveform+modem::waveform_gate_bandwidth_allowance_hz(config);
+}
 enum class Frequency { high, low, cochannel };
 struct Options {
     double power_w=0, data_power_w=4, ratio_limit_db=90;
@@ -96,7 +106,7 @@ struct Observation {
 // and colored interference can be present; metadata decoding is independent.
 class Tracker {
 public:
-    static constexpr std::size_t workspace_bound=6*1024;
+    static constexpr std::size_t workspace_bound=5*1024;
     explicit Tracker(double expected_frequency,double search_half_width_hz=20);
     void push(std::span<const float>,std::uint32_t rate);
     std::optional<Observation> take_update();

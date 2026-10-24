@@ -21,6 +21,10 @@ struct AssistanceRequest {
     // Additional uncertainty between an admitted clock lane and physical
     // sampling rate. This is not inferred from the helper's carrier offset.
     double residual_clock_uncertainty_ppm=0;
+    // Cover the continuous declared clock domain, including the space between
+    // its lattice centers. A domain narrower than one original quarter-chip
+    // cell may use one midpoint lane; its full radius still widens frequency.
+    bool cover_continuous_clock=false;
     // Generic data symbol zero is NOT aligned to the helper dwell. The caller
     // may supply this relation (in nominal TRANSMIT-clock seconds) only from
     // an explicit transmit/timing model. All retained audio-clock rates remain

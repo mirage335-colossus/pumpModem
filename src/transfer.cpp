@@ -755,6 +755,29 @@ std::size_t StreamReceiver::source_buffer_bytes()const {
     std::size_t bytes=0;for(const auto& [id,state]:impl_->states)bytes+=state->source.capacity();
     return bytes;
 }
+std::optional<std::size_t> StreamReceiver::helper_replay_storage_bound(std::size_t maximum_stream_bits)const {
+    constexpr auto marker_minimum=boundary_sync::marker_bits-boundary_sync::maximum_marker_loss_bits;
+    static_assert(marker_minimum<=short_message_bits);
+    if(!impl_->states.empty() || maximum_stream_bits>=marker_minimum ||
+       impl_->options.modem.symbol_burst.enabled())return std::nullopt;
+    // No marker can be acquired (even at physical END), and post-END RS
+    // alignment/recovery is excluded by short_message_bits. Quotas and source
+    // gates stay unchanged; only the short dictionary (<=16 bytes) is reachable.
+    boundary_sync::Collector collector;
+    const auto rounded=[](std::size_t n) {std::size_t c=1;while(c<n)c*=2;return c;};
+    const auto preview=rounded(maximum_stream_bits);
+    const auto packed=rounded((maximum_stream_bits+3)/4);
+    constexpr auto diagnostic=2048*sizeof(std::complex<double>);
+    const auto targets=impl_->options.receive_targets_db_hz.capacity()*sizeof(double);
+    const auto state=sizeof(Impl::State)+sizeof(std::pair<std::uint64_t,std::uint64_t>)+
+        sizeof(std::unique_ptr<Impl::State>)+4*sizeof(void*)+collector.working_bytes()+targets+
+        preview+packed+diagnostic+128+short_message_bytes;
+    // All retained candidates plus one return/publication copy. Include the
+    // real empty receiver shell and the complete configured quota separately
+    // at Live's shared-bank boundary, never once per candidate.
+    if(state>(SIZE_MAX-working_bytes())/(candidate_limit+1))return std::nullopt;
+    return working_bytes()+(candidate_limit+1)*state;
+}
 Received interpret_pattern(modem::PatternBurst burst,const Options& options,std::uint64_t timestamp,modem::Diagnostics diagnostics) {
     StreamReceiver receiver(options,timestamp);return recover_received(receiver.push(std::move(burst),std::move(diagnostics)));
 }
@@ -824,6 +847,8 @@ Received receive(std::span<const float> samples, const Options& input_options, P
     const auto options=effective_options(input_options);
     check_cancelled(stop);
     validate(options);
+    if(samples.size()>std::numeric_limits<std::uint64_t>::max()-options.input_sample_origin_samples)
+        throw Error("receive capture sample range overflows");
     std::optional<Received> best;
     std::string last_error;
     auto profiles=options.automatic_receive_profiles?tuning::receive_profiles(options.modem,options.receive_targets_db_hz,options.receive_pattern_mode,options.key.has_value()):std::vector<modem::Config>{options.modem};
@@ -847,6 +872,9 @@ Received receive(std::span<const float> samples, const Options& input_options, P
             *search.start_offset_seconds+=static_cast<double>(origin.phase)/profile.sample_rate;
         if(!options.capture_epoch)*search.start_offset_seconds+=(static_cast<double>(modem::training_sample_count(profile))+
             static_cast<double>(modem::pattern_pulse_padding_samples(profile)))/profile.sample_rate;
+        search.input_sample_origin=options.input_sample_origin_samples;
+        if(options.input_sample_origin_samples)
+            *search.start_offset_seconds-=static_cast<double>(options.input_sample_origin_samples)/profile.sample_rate;
         search.bit_limit=pattern_bit_limit(value.content_limit);
 
         search.search_stream_phases=!profile.symbol_burst.enabled() && options.key.has_value();

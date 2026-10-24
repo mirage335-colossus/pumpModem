@@ -1,6 +1,6 @@
 # Validation status
 
-Updated 23 October 2026. This page records current qualification, release status,
+Updated 24 October 2026. This page records current qualification, release status,
 coverage limits and useful historical anchors. It is not a session log. Replace
 superseded status here; keep one latest [resource snapshot](ci-resource-results.json)
 and use Git history for comparisons. Detailed studies remain in the
@@ -8,182 +8,537 @@ and use Git history for comparisons. Detailed studies remain in the
 
 ## Current Helper Carrier candidate
 
-The default-off continuation is based on
-`b47c7a0ebd6a29d21ffa8748d5bc7ffbbeb7e942`. The 44 modified application, test
-and build inputs have overlay SHA-256
-`d9f1212860bd02830b1d9bab2e27141882a29273804f30c34508e1f017d9b0dd`.
-`local-evidence/helper-live-fix/final-source-inputs.json` records sorted UTF-8
-path, NUL, lowercase SHA-256 and LF identities. Documentation and ignored
-evidence are excluded. No publication, promotion or certification is claimed.
+The accepted source candidate is based on
+`b2d3539919f0955cee94986269ccbd6402e37b1b`, with 42 application/test/build inputs
+and overlay SHA-256
+`107aa9d0ad36910fc087015b6357b006a412552092473a81560012f8086606ff`.
+`local-evidence/helper-v3/final/source-inputs.json` binds those inputs;
+documentation changes are excluded. Source review and the focused containment
+checks below are accepted. The normal application/GUI/worker build passed for
+this source, and the focused ASan/UBSan and shared GUI checks below passed. The
+294-registration normal run completed with 288 passes, five setup failures and
+one timeout. Exact web and native display retries passed all five setup-failed
+cases with unchanged source and binaries, giving 293/294 distinct cases passed.
+The current physical check observed clean transmission and same-row pending
+`001` to completion, but strict individual-prefix coverage remains incomplete.
+Contract preparation coverage is **failed/incomplete**:
+`scheduled_parallel_preparation` timed out at 1,500.12 s.
+No full matrix pass is claimed.
+New binary identities are recorded in
+`local-evidence/helper-v3/final/containment-application-build-result.json` and
+`normal-binary-inputs.json` in the same directory; earlier binaries are not
+provenance for this source. No publication or certification is claimed.
 
-Messages travel exclusively on ordinary Robust signals. Helper measurements
-can guide one optional ordinary receiver, retaining long text, attachments,
-framing, decompression, recovery, source quota, exact progress and six seconds
-of fully scored absence for completion. Optional speculation yields to ordinary
-allocation and acquisition. Once bits are accepted, that payload retains the
-ordinary processing and completion path. See the [reference](helper-carrier.md)
-and [plan](helper-carrier-plan.md).
+Earlier diagnostics retain their own source identities. The earlier 33-input
+overlay is
+`80ac7f2fba143fca05d623c6cb8cd2e5e94158a7561abb7d723390c1638d205e`, retained
+in `local-evidence/helper-v3/final/pre-bootstrap-source-inputs.json`. The later
+overlay is `22125d5bbf5344afa5cf11a243ba125513706df48ffde6648623544521b11027`;
+its source and linked runtime identities are preserved in
+`local-evidence/helper-v3/tx/receive-22125-build-binding.json`. The earlier normal
+binary identities remain in `final/pre-bootstrap-normal-binary-inputs.json`
+under the same evidence root. Documentation and ignored evidence are excluded
+from the source overlays. These historical bindings remain separate from the
+current 42-input manifest. A subsequent normal placement build and repaired
+test-only fixture are identified separately below.
 
-Actual-length callsigns occupy one to seven APSK symbols. Q16 Unix time uses at
-most 48 time bits and three symbols/24 ms. FF1/AES-256 encryption preserves bit
-length and adds no authentication tag; CRC7 uses only spare bits. Metadata is
-unauthenticated and grants no clock or payload authority. Keyed operation hides
-and ignores helper callsign. Helper-only transmission is a Developer action.
+Neither historical diagnostic snapshot is a qualified final source. The later
+HF diagnostic recovered the expected ordinary message, but receiver-health and
+separately observed bit-prefix checks remain unsatisfied; the EME run was
+cancelled incomplete. Full qualification of the current candidate remains
+pending. Those snapshots predate
+the fixed-epoch containment policy below; they do not establish final rolling-
+reception assistance. No publication, promotion or certification is claimed.
 
-### Reproduced failure and current local evidence
+Messages travel exclusively on ordinary Robust signals. Helper carries only
+its tone, punctuation and optional callsign/time. Actual-length callsigns use
+one to seven APSK symbols; at most 48 Q16 Unix-time bits fit three symbols/24 ms.
+FF1/AES-256 encryption preserves length without an authentication tag, and CRC7
+uses only existing spare bits. Metadata remains unauthenticated and grants no
+UTC or payload authority. Keyed operation hides and ignores helper callsign,
+even invalid inactive preference text; clear mode validates it. This
+normalization/parser change passed source review and the focused shared
+controller/parser checks below. Helper-only transmission remains a Developer action. See the
+[reference](helper-carrier.md) and [plan](helper-carrier-plan.md).
 
-The reported 36 Hz/interleaved configuration selected an 8 kHz hardware clock
-for a 6,380 Hz helper, failing before PCM output. Helper operation now requests
-at least 48 kHz, independently of the unchanged modem clock, and validates the
-actual provider format. ALSA, Windows and host adapters honor this floor. A
-capture provider unable to supply it can retain ordinary reception with helper
-observation disabled. High, Low and cochannel placement reach the physical
-waveform; cochannel deliberately overlaps payload and is discouraged.
+### Current behavior and containment policy
 
-The helper amplitude now accounts for the existing outer-DSSS amplitude gain.
-Actual PCM controls retain payload gain and AWGN while checking the requested
-power ratio. A physical 48 kHz cable return of the first reported configuration
-measured helper RMS 0.2534 FS near 6,380 Hz and payload RMS 0.0813 FS near
-1,500 Hz: 9.87 dB versus the configured 10 dB, peak 0.630 FS, zero clipped
-samples. This is clean physical return evidence, not a weak-link sensitivity
-measurement. The preceding native source cohort also completed the exact
-one-bit encrypted payload in duplex after physical absence. The final native
-repetition also passed in 50.07 seconds, using 48 kHz hardware, with the exact
-completed bit at 47.92 seconds and no error or unexpected bits. Its FFT work
-briefly accumulated 1.98 seconds of backlog before returning to zero; this is
-not a zero-backlog or latency-improvement claim. Separate four-second physical
-Low/cochannel transmissions returned 550/1,500 Hz tones at 0.519 FS RMS.
+Helper Power remains editable, with 10 kW and 15 kW presets added. High/Low
+placement uses actual shaped occupied data bandwidth plus gating allowance and
+the nearest power-qualified leakage guard. The former logical-sample-rate High
+floor is removed. The startup failure, “Helper Carrier requires a valid data
+passband at the output sample rate,” came from treating the default shaped
+3.6 kHz setting as an unshaped 3.6 kHz band. The corrected occupied bandwidth
+fits its existing data carrier without changing Rate. Narrow 100 Hz, SSB
+3.6 kHz and wide 12 kHz settings all retain selected modem geometry; there is
+no automatic Rate adjustment. Hardware FHSS output preparation also no longer
+adds a duplicate 200 Hz gate allowance; the reported EME configuration now
+plans its High helper at 2,250.3125 Hz. This is a placement correction, not a
+passing EME reception result. Closest digital placement still does not promise
+that a radio's narrow SSB filter can pass the complete data/guard/helper bands.
 
-Link Planner reports helper effective power, received power, C/N0, level in a
-10 Hz cell, audio frequency and whether the reference qualifies. It preserves
-ordinary payload SNR and probability calculations. The second reported example
-has predicted helper C/N0 15.76 dB-Hz, or 5.76 dB in 10 Hz, below the required
-6 dB presence gate. That configuration does not promise a usable reference.
+Mixed Live output can disable an unavailable helper and visibly report the
+reason while retaining ordinary unscaled payload PCM. A helper-specific device
+setup request can retry once without that request only before the first PCM
+callback. An actual output gap still fails TX without retry. Helper-only output
+fails when its helper cannot be generated. Hardware-rate negotiation remains
+independent of the logical modem clock, with a practical 48 kHz helper floor.
 
-Weak-tone acquisition uses a finite-Gram narrowband fit and a lifetime
-multiple-look existence budget of at most 0.01 per reset under the stated AWGN
-model. Long-baseline doubled-phase confidence retains all surviving frequency
-aliases or falls back to a wide interval. Frequency and phase measurement dates
-are separate. Live uses original earliest qualified evidence only to rank one
-advisory private epoch. Phase qualification can activate later with continuous
-correction at the committed frontier. Timing bounds remain fixed at admission.
+The decided primary-replacement policy is restricted to a fixed configured
+transmit timestamp with an unchanging epoch-admission bank, using the same
+fixed-bank condition as ordinary refresh. It also requires explicit
+**Complex only**, an actual native continuous/noncalendar/noncompact backend and a
+structurally identical bounded normal `Error`-reset recipe. Clock sync, FHSS,
+DSSS/Interleave, calendar, compact, configured drift and differential paths are
+excluded from primary replacement. Auto, energy,
+differential, compact/correlator, scheduled and rolling/unknown-epoch cases
+retain their ordinary bank; an additional helper lane is separately eligible. Eligible large fixed banks
+can use at most 257 frequency/clock alternatives per narrowed profile while
+retaining all admitted key/profile/private-epoch and original start alternatives. The original clock
+domain includes continuous residual uncertainty in helper-to-data transfer;
+only an equivalent quarter-chip-sized domain can share a clock hypothesis.
+Before qualification, bounded history attempts to retain the full original
+initial acquisition aperture. Switching declines if history starts after an
+original receiver origin. Precommit replay eligibility bounds the configured
+physical capture aperture and its resources; it does not use received length or
+a message-size quota. Full configured source quotas remain intact. Exact dormant
+ordinary state and subsequent raw PCM remain available for replay until the first
+bit accepted by an ordinary detector. Reference loss, failed acquisition or unavailable bounds before that
+boundary restore the original state and input. The first ordinary accepted bit
+commits that same full decoder and releases fallback state; the precommit bound
+no longer limits accepted payload lifetime. No helper-specific message-length or
+source quota applies. Accepted payloads retain ordinary limits and future
+acquisition can broaden on helper loss. The additional small optional lane
+remains separate. Native-backend containment and immutable cold-start/replay
+grants for ordinary `Error` recovery passed source review and focused checks;
+the focused sanitizer run passed, while full contract coverage remains
+incomplete and broader sanitizer qualification remains pending. Both retain full long-text
+and attachment framing, source quota, decompression, recovery, next-poll bit
+progress and six seconds of fully scored absence. Tone/metadata never commit
+payload or supply END.
 
-A 52-configuration observer benchmark retained in
-`local-evidence/helper-live-fix/observer/` used 48/96 kHz, ±20/100 Hz search,
-tone/callsign/encrypted metadata and clean/30/24 dB-Hz conditions. Tracker plus
-precision receiver cost 2.24–11.98 ms CPU per audio second. Precision-receiver
-retained requested heap was 5,808 bytes unkeyed or 5,968 keyed; peak 6,000 plus
-an 8-byte handle (allocator-usable 6,024). Stack, caller keys and OpenSSL direct
-allocations are outside that measurement. All clean metadata controls decoded.
-At 24 dB-Hz, 56 wide intervals missed truth under model contamination; none of
-the eight intervals ≤0.1 Hz or 22 intervals ≤0.1758 Hz did. This does not promise
-uniform weak-helper qualification or full-Live CPU headroom.
+Adjacent assisted reception can use a real linear bandstop FIR; its fully
+observed centered windows retain the actual input offset and never insert EOF
+zeros. Dormant original receivers and FIR-delayed consumers remain in processing
+frontier accounting. Raw fallback is unchanged. Filtered noise is correlated;
+the helper presence budget does not certify payload false-alarm behavior after
+this frontend. Link Planner shows prospective conditional counts and their
+required measured frequency uncertainty. Its ordinary payload SNR, probability
+and CPU curves remain unchanged; those counts are not a measured speedup.
 
-Local builds use `build/dev`, Release GCC 14, FLTK, system OpenSSL and ordered
-floating point. No resource-margin environment or relaxed acceptance limits
-are applied. Current normal application/worker build and focused phase and
-unambiguous-onset calendar retention checks passed. The complete assisted Live
-suite also passed in 68.50 seconds in the normal two-test contract run, including
-both full-payload scenarios and the constrained-memory ordinary fallback.
-The final normal contract run finished with 206/207 passes in 3,576.19 seconds.
-All seven helper cases passed. Strict Live passed in 76.88 seconds, full
-differential calibration passed all sections in 1,407.03 seconds, and the full
-45-method CLI suite passed in 46.94 seconds. Complete CTest and CLI details are
-retained in `local-evidence/helper-live-fix/final-contract-details.log` and
-`final-cli-details.log`.
+Weak-frequency existence admission combines independent fixed-grid raw-time
+evidence groups with the single-window/variance allowances under the stated
+AWGN model. Refined covariance/model intervals are local estimates, not exact
+global 99% confidence intervals. Centered-CW bias cancellation is restricted to
+a timing-qualified straight dwell region; unqualified windows that could cross
+punctuation or metadata retain the conservative model bound. No uniform weak
+qualification or GPSDO replacement is established. The metadata correction
+projects the reversal through the actual sampled real-carrier/finite-Gram bin
+model instead of a scalar envelope average, removing a carrier-phase-dependent
+timing bias in clean dense metadata fits.
 
-The sole failure was `scheduled_parallel_preparation`, which hit its unchanged
-1,500-second watchdog at 1,500.05 seconds. Reservation and default/fp32/fp64
-serial/parallel arithmetic comparisons completed without assertions;
-`shared.serial` was still active. This is failed/incomplete preparation
-coverage, not a passing full contract. The prior watchdog occurred later in
-`shared.parallel`; these runs do not establish preparation throughput parity.
-Shared GUI passed all 39 cases in 188.30 seconds, including Link Planner and
-helper control visibility/state. Complete details are in `final-gui-details.log`.
-All 13 web cases have passing coverage: 11 passed in 140.78 seconds, while
-`build_preview` and `web_preview` failed only at sandbox-blocked socket creation
-(`EPERM`) before running. The unchanged pair passed 2/2 in 6.74 seconds with the
-already authorized temporary loopback listener access. Original setup failures
-and full detail remain retained. This is native worker/host/Node coverage, not
-real-browser or prepared Wasm execution. The 36 regular cases outside the
-contract passed in 135.35 seconds. The regular/contract union therefore has
-236/237 regular passes and 206/207 contract passes, with the same preparation
-timeout in both inventories; all nine focused audio registrations passed.
-The 201 regular/contract overlaps were not repeated. All three native GUI cases
-passed in 225.08 seconds on a private 2,400×1,800 display, using the original
-assertions and deadlines: workflow 139.99 seconds, adapter conformance 84.97
-seconds and document conformance 0.10 seconds. The initial physical-desktop run
-passed workflow and document conformance but failed the adapter visibility
-check when the window manager changed client height from 1,008 to the required
-1,040 pixels, moving the bottom-anchored device control by 32 pixels. The focused
-unchanged fixture passed on the larger private display; its temporary diagnostic
-was removed byte-for-byte before the complete native rerun. No runtime layout
-change or weakened assertion was needed. Original and passing logs remain in
-`final-native-details.log` and `final-native-private-display-details.log`.
+### Completed focused normal checks preceding the later diagnostics
 
-### Retained failures and earlier evidence
+Checks used the compatible `build/dev` Release GCC 14/FLTK/system OpenSSL profile
+with ordered floating point and unchanged resource margins. The first nine-helper
+run passed six and failed three in 127.09 seconds. Its failures are retained:
+`helper_live` did not decode a strong callsign, `helper_receiver` failed its
+original assertion, and `helper_sim` failed its near-Nyquist passband assertion. The
+subsequent corrections and focused reruns are separate results:
 
-The earlier compact-codec/full-payload cohort passed seven helper suites,
-45 CLI cases, 39 shared GUI cases and nine focused audio/channel cases. Its web
-suite passed 11 initially; the two socket-blocked preview cases passed with
-permission for temporary loopback listeners. Those results precede the current
-physical-rate, power, confidence and Live control changes and do not qualify
-this overlay. The still earlier 207-case contract run had 206 passes and one
-1,500.11-second preparation watchdog, in 3,494.98 seconds. Differential
-calibration completed in 1,408.61 seconds. Full-contract qualification was not
-established.
+| Scope | Completed result |
+| --- | --- |
+| `helper_live_assistance` | Passed in 109.36 s in the nine-helper run, including ordinary full-payload and fallback cases. |
+| `helper_output_fallback` | Passed in 0.03 s; mock-provider checks include unchanged ordinary PCM and no retry after output begins. |
+| `helper_conditioned_native` | Passed in 4.62 s; deterministic native capture/processing-frontier fixture, not physical audio hardware. |
+| `helper_carrier`, `helper_metadata`, `helper_assistance` | Passed in 0.14/0.01/1.31 s respectively in the nine-helper run. |
+| Corrected metadata/Live reception | `helper_live` and `helper_receiver` passed in 15.55/1.89 s, 17.45 s total. |
+| Conservative receiver and simulation controls | `helper_receiver` and `helper_sim` passed 2/2 in 4.05 s. |
+| Focused Link Planner helper checks | Passed after correcting the floating-point preset fixture; selected 100 Hz, 3.6 kHz and 12 kHz geometry remains unchanged. |
+| CLI | Initial run passed 45/46 methods in 47.754 s. The 19-byte framed helper fixture incorrectly expected unrestricted `!` instead of the received-text replacement `_`; the corrected fixture passed separately in 3.692 s. Application source was unchanged, so the other 45 method results remain applicable; this was not a fresh complete 46-method pass. |
 
-Current development retained the original invalid planner fixture, incorrect
-negative-frequency control, misaligned two-stream suspension fixture, missing
-simulation noise tail, expensive automatic compact receiver selection, lost
-long-symbol acquisition on helper disappearance. These led to focused
-corrections; failures are kept separately from passing reruns. The simulation now captures actual channel
-noise far enough past EOF for the resident FFT acquisition window to run,
-including with helper disabled, without synthesizing completion or more TX.
+Detailed evidence is retained in
+`local-evidence/helper-v3/final/helper-focused.log`,
+`helper-focused-details.log`, `conservative-focused.log`,
+`local-evidence/helper-v3/metadata-review/focused-final.log`,
+`local-evidence/helper-v3/planner-tests-diagnostic.log`,
+`planner-tests-corrected.log`, `local-evidence/helper-cli-full-v3.log` and
+`local-evidence/helper-cli-framed-v3-corrected.log`. Original failures remain
+failures rather than being relabeled by the passing reruns. These focused
+results do not constitute a full normal regression pass or a new CPU benchmark.
 
-Adjacent-epoch selection at a late-second boundary remains a helper limitation.
-The first accepted CW window has no certified maximum detection delay, and
-unknown channel startup/arrival delay can itself cross a private-epoch boundary.
-Both weak and strong late-start failures are retained. The calendar-lifetime
-fixture explicitly uses a strong 1,500 W/0.004 W ratio, 40 dB less added noise
-and an early fractional transmit date (0.10–0.30 seconds); it checks one healthy
-advisory epoch across ordinary refresh, not the ambiguous late case. The
-separate weak 30.02 dB-Hz fixed-epoch comparison retains the realistic waveform
-and demonstrates acquisition outside the original frequency bank. Full unknown
-clock-prior assistance needs concurrent epoch hypotheses with separately
-accounted false-alarm, memory and CPU budgets; it is not established here.
+### Accepted containment and focused evidence
 
-Earlier instrumented cohorts do not count as current sanitizer coverage.
-Final instrumentation rebuilt all eight actual DSP implementations, including
-the correlator, and linked all five complete helper suites. Carrier, metadata,
-precision reception and physical simulation passed without ASan/UBSan findings
-in 0.67/0.07/9.59/8.49 seconds. These deterministic checks ran alongside the
-normal prerequisite build; no throughput claim is made. Assistance ran
-separately after compilation ended and passed in 1.17 seconds with its original
-five-second recovery budget. All 18 compile/link/run commands succeeded and
-all 247 frozen dependency hashes matched current source. The correlator compile
-took 274.91 seconds and 2.73 GiB child peak RSS, within its compiler-only
-600-second/5-GiB cap. Archive dependencies, OpenSSL and Live remain
-outside that focused scope; disabled LSAN is not leak coverage.
+The accepted containment inputs include `src/live.cpp` SHA-256
+`6db6403ff86b4edfe87a0aaf9aae5d70aeb330db0f97457d751e51d38f442153`,
+`src/pattern_receiver.cpp`
+`4503fe72fb0ef0be4617c50d4a660016026c1d1f5a5810ff3b4a162b54e2665d` and
+`src/streaming_modem.cpp`
+`3ad9451439200133dc869e4df370a4ad009c76005a45753104270ceabc1c87ef`.
+Focused fixtures retained their full configured 1 MiB source quotas. The
+precommit resource boundary did not become a message-size or received-length
+quota.
 
-### Qualification limits
+| Focused scope | Accepted result and limit |
+| --- | --- |
+| Finite resource query | Native and compact queries cover all 32 ordinary source candidates and the 111/112 aperture boundary. This is resource-query geometry, not a payload-length cap; compact primary replacement remains ineligible. |
+| Fixed-bank exact bits | Exact `001` and scored END across all five original epochs; 4,625 oscillator alternatives became 45. |
+| Full framed source | The 19-byte/1,216-bit fixture retained FEC, decompression, recovery, bit progress and scored END: 42.586 s process CPU for 790.769 s media. |
+| Native-provider paths | Conditioned success and exact raw fallback passed. These use actual 48 kHz PCM through a provider fixture, not another physical-radio qualification. |
+| Ordinary error recovery | Five forced ordinary-row `Error` resets retained immutable cold grant 769,730 and replay grant 1,164,226 bytes without an input-domain/provider/revision reset or drops. Later negligible-helper `001` and scored END passed over 17.28 s media. |
+| Rolling admission | Primary replacement declined; helper off/on constructor grants were equal and both recovered exact `001`. CPU totals were 231.643/221.541 s; no rolling speedup is claimed. |
+| Fixed strong-reference comparison | Matched ordinary control used 240.128 s process CPU versus 0.678877 s with assistance for 14.5552 s media, about 354× in this synthetic strong-reference fixture only. It does not qualify weak HF/EME reception, observer cost or general real-time CPU margin. |
 
-The full ordinary search remains admitted. One optional compatible receiver can
-use helper frequency, phase and punctuation timing, within actual surplus. No
-universal CPU-ceiling or full-bank sensitivity improvement is claimed. Guards,
-scheduled acquisition, Symbol_Burst and hopping combinations retain their
-ordinary fallback when helper assistance is incompatible. Unknown full-band
-discovery, arbitrary UTC/private-epoch ambiguity and every repeated-message
-onset are not solved by one tone. Dense metadata requires a clean strong helper.
-A tone cannot separate RF error, Doppler and sample-clock error.
+Evidence is retained in `local-evidence/helper-v3/conditioning-two-grant-*`
+logs, including unit2, 001, full, error3, rolling, control, native-success and
+native-fallback. Earlier native-only declines and a 90 s full-framed timeout
+remain retained. A compact fixture with two tracks exhausted its output queue;
+the corrected fixture uses the ordinary default of 16. A bright-helper
+post-error control also failed its 90 s bound. A repeated trace-path setup
+failure was followed by a passing fresh-directory run; this sequence does not
+establish a single cause for every earlier failure. The native fixture's unique
+temporary filename changed only after these passing runs; the new normal
+application build passed, but its default regression run still must complete. None of those failures is relabeled as
+a pass by the accepted focused checks.
 
-Physical helper sidebands, colored interference and DAC/RF dynamic range remain
-real limitations, especially at extreme power ratios. AWGN false-admission
-controls do not establish equivalent guarantees for arbitrary interference.
-Native cable tests do not qualify RF propagation or the 5.8 GHz experiment.
-Windows runtime, real browser, prepared Wasm/SDK, alternate frontends and
-release/package certification are separate unexecuted scopes here. Shared,
-worker and adapter stubs do not replace them.
+### Focused ASan/UBSan — selected paths passed
+
+The focused run passed all 41 commands: 11 fresh instrumented compiles,
+12 instrumentation checks, eight links and ten runtime commands. Twelve actual
+implementations were instrumented; metadata alone reused an object after exact
+source/include-closure and object-hash verification. All 219 frozen input
+hashes and the current 42-input overlay matched. Every command exited 0 and
+every direct child was reaped, with no timeout, retry, ASan or UBSan finding.
+Scoped process verification found no remaining owned process and released the
+CPU window.
+
+Coverage includes the actual helper DSP, channel, Pattern/Streaming/Correlator
+receivers, framed transfer and FIR input-origin/EOF handling, plus native-provider
+three-bit Live success, original replay and ordinary-Error replay. The framed
+batch check recovered the exact 19-byte/1,216-bit source and withheld completion
+when six seconds were removed from the observed quiet tail. The three native
+selectors used requested and observed CPUs 0–7 with unchanged 90 s internal and
+300 s outer limits; other commands used CPU 0. Compilers ran sequentially on one
+CPU under compiler-only 600 s/5 GiB limits. These are functional checks, not
+throughput measurements.
+
+Leak detection was disabled (`detect_leaks=0`). Full-payload Live, GUI and
+production CLI entry points, physical devices/RF, throughput, the platform
+matrix and full sanitizer/release qualification are outside this scope. Normal
+archive dependencies, OpenSSL, LZMA and system libraries were not instrumented.
+Exact commands, hashes, results and process limits are retained in
+`local-evidence/helper-recenter/sanitizer/result.json`, `report.md`,
+`identity.json`, `commands.jsonl` and `process-verification.json`.
+
+### Focused shared GUI/controller/parser checks — passed
+
+The focused GUI targets built successfully for the unchanged 42-input source.
+All three runtime checks passed: controller `--helper-controls` in 0.4146 s,
+the complete launch-command parser suite in 0.0081 s and planner `--helper-only`
+in 0.2644 s. Coverage includes invalid inactive encrypted callsigns with clear-
+mode recovery and Live validation, explicit strategy/fixed-versus-rolling gates,
+unchanged Rate and the reported HF/EME planner counts. It does not establish
+full shared GUI or native-adapter conformance. Source binding, commands and
+results are in `local-evidence/helper-v3/final/containment-focused-gui-result.json`
+and `containment-gui-*.log` in the same directory.
+
+### Later placement build and hardware-rate output fixture
+
+The normal application/GUI/worker build passed for 33-input overlay
+`39954499171f16b28325ef6c26eb30fd06688183b9686f6f0751eb5165bc5b2b`, recorded
+in `local-evidence/helper-v3/final/placement-source-inputs.json`, with build and
+binary evidence in `placement-application-build.log` and
+`placement-normal-binary-inputs.json`. This application build is not full
+regression qualification. Subsequent repairs changed only the new test fixture;
+the final `tests/test_helper_output_fallback.cpp` input SHA-256 was
+`67a2dcbe412707ebdb9f96dd79313d82d83dbc1c8af4b74ea88471621d084430`.
+
+The complete fallback suite, including the FHSS emitted-frequency check on actual
+48 kHz output PCM through the mock provider, passed in 0.683 s. This checks the
+output waveform against the common single-gate placement, alongside exact
+ordinary fallback PCM, output discontinuity handling and helper-only failure.
+It is mocked-provider PCM coverage, not an additional physical radio test.
+The passing output is retained in
+`local-evidence/helper-v3/final/placement-output-utc-test.log`.
+
+The original fixture first failed its gate-allowance assertion before playback.
+After that setup repair, a mock UTC-acceptance timeout reported one open, one
+format callback and zero source callbacks (`1/1/0`). A matched fixture with
+proper mock UTC acceptance passed. Those are test setup repairs, not production
+TX failures. The failed checks and matched control remain in
+`placement-output-test.log`, `placement-output-repaired-test.log`,
+`placement-utc-before.log` and `placement-utc-after.log` in the same evidence
+directory; they are not overwritten by the passing run.
+
+### Earlier exact HF simulation — no payload acquisition
+
+The actual-controller simulation of the reported encrypted crystal/IC-7100 HF
+configuration, with 1.5 kW helper, 4 W data and ordinary raw bits `001`, completed
+its bounded probe with exit 3 after 600.378 s wall time. The process was reaped;
+this is an unsuccessful acquisition result, not a passing transmission or
+physical-end test. Helper pending and received rows were observed, but no
+ordinary bits or payload END were observed. No meaningful assistance benefit
+for this exact case is demonstrated by the earlier `80ac7f2f` overlay.
+
+Resolved geometry was 6,120 Hz logical DSP, 14.2222 s per payload symbol,
+100 ppm sample-clock error, 30 Hz carrier offset and
+0.50249 degrees/sqrt(second) phase diffusion. Estimated helper C/N0 was about
+39.7 dB-Hz after the existing interleaved waveform backoff; this is a configured
+budget, not measured precision. The ordinary search reported +/-7.97985 Hz
+coverage against +/-90.45 Hz requested. At the deadline the probe reported
+45.646 s of media, zero committed processing samples, 59 receiver instances,
+1,470,007,381 bytes requested DSP buffering and 3,978,260 KiB process peak RSS.
+The final reported aggregate process CPU time was 4,774.59 s. These diagnostic
+resource totals do not qualify real-time margin or identify one cause for all
+missed reception.
+
+Investigation identified a deterministic precision-receiver bootstrap rejection
+at a 30 Hz offset before dwell timing qualifies: the conservative untimed model
+can prevent the frequency reference needed for assistance. The later diagnostic
+below does not retroactively pass this failed run. Exact command, resolved
+settings, progress, deadline and stderr are retained in
+`local-evidence/helper-v3/current-simulation/crystal-final-command.log`,
+`crystal-final.jsonl` and `crystal-final.stderr`.
+
+### Pre-containment HF recovery and incomplete EME diagnostic
+
+Before the fixed-epoch containment policy, the same HF simulation on overlay
+`22125d5b` recovered ordinary raw bits `001`, then their fixed-dictionary text
+`e`, in the same GUI row, ID 2. The
+three-bit pending row was observed at 70.340 s and its completed text at
+70.381 s. Ordinary physical END was observed, but the earlier prefixes `0` and
+`00` were not separately observed. The search-limited health state also remained;
+the probe explicitly reported `receiver_health_ok=false`,
+`all_pending_prefixes_on_same_row=false` and exit 1. This demonstrates ordinary
+payload recovery in that case, not complete clean progress/health qualification,
+a CPU speedup, general weak-link sensitivity or GPSDO replacement. This earlier
+primary-route result cannot establish assistance benefit for the current rolling
+route, which retains the ordinary bank. The reported HF and EME commands select
+Auto and are ineligible for current primary replacement; any benefit through the
+additional lane needs its own evidence. The command
+and observations are retained in `current-simulation/crystal-recenter-command.log`
+and `crystal-recenter.jsonl` under `local-evidence/helper-v3/`.
+
+The exact EME diagnostic on that same overlay was cancelled after its last
+observation at 178.998 s wall time and only 1.074 s media. No ordinary bit or
+payload END was observed. The ordinary search requested 9,432,739,510 bytes of
+DSP buffering before a sufficiently long helper observation could condition
+acquisition, and reported incomplete half-chip clock/frequency/rate coverage.
+This was a cancelled/incomplete diagnostic, not a completed receive or deadline
+pass. The cancellation record and original command/progress remain in
+`current-simulation/eme-recenter-cancelled.json`, `eme-recenter-command.log` and
+`eme-recenter.jsonl` under the same evidence directory.
+
+### Adjacent physical transmission and cable return
+
+The actual 40 W helper/4 W payload test used 48 kHz hardware with the nearest
+helper center at 2,062.5 Hz and data center at 1,500 Hz. The public Volume 100
+run completed TX and recording but returned 122,056 samples at or above the
+16-bit clipping threshold, with peak 1.0 FS. It is retained as a clipped return,
+not clean-signal qualification.
+
+A separate repetition using the public Volume control at 20 completed TX and
+recording with exit 0, zero clipped samples and peak 0.33835 FS. Returned helper
+RMS was 0.13502 FS versus payload RMS 0.04351 FS: a 9.8358 dB ratio for the
+configured 10 dB. This establishes adjacent-tone output and clean cable return
+at that Volume setting. It does not qualify receiver decoding, RF power
+calibration, weak-link assistance or GPSDO replacement. Both original and clean
+repetition results, waveforms and analyses are retained in
+`local-evidence/helper-v3/tx/gpsdo40-adjacent-final-*` and
+`gpsdo40-adjacent-volume20-*`.
+
+### Source-bound native receive completion with pending-poll gap
+
+A separate normal-Controller physical duplex run linked the frozen `22125d5b`
+libraries, using public Volume 20, 48 kHz hardware and the 2,062.5 Hz helper.
+TX completed 17.4002 s media at 19.0556 s elapsed. The receiver exposed the exact
+ordinary raw bit `1` as completed at 46.7336 s, row ID 2, revision 1, with no
+unexpected bits. Capture continued until about 110 s, so completion occurred
+during actual physical capture rather than at EOF. The observed run had no
+receiver-health fault, drops, overruns, backlog or errors.
+
+The strict wrapper nevertheless exited 3 after 110.110 s because it never
+observed pending `1` in its polls; it reported no pending-to-completed same-row
+coverage. This is completed physical receive evidence, not a passing full
+wrapper or next-poll progress qualification. It also makes no weak-RF or GPSDO
+replacement claim. The wrapper binary SHA-256 was
+`88c141a7278c96d7fe590ece75a316c7678f246994dfac7a9337cb5e91d926b8`.
+Command, output and failure result are retained in
+`local-evidence/helper-v3/tx/gpsdo40-rx-overlay22125-volume20-command.json`,
+`gpsdo40-rx-overlay22125-volume20.log` and
+`gpsdo40-rx-overlay22125-volume20-result.json`.
+`receive-22125-build-binding.json` records the exact source/library binding;
+`receive-22125-postrun-hashes.json` confirms all linked/runtime inputs remained
+unchanged. This evidence belongs to pre-containment `22125d5b`, not later
+bootstrap or containment changes, and does not qualify current rolling-route
+assistance.
+
+### Current-source physical duplex — completion observed, prefix coverage incomplete
+
+The current `107aa9d0` source and linked libraries were checked through the
+actual shared Controller and native audio path, at 48 kHz, public Volume 20,
+40 W helper/4 W data and the planned 2,062.5 Hz helper. All 42 source inputs
+and linked binary hashes were unchanged. The hashed GUI ELF was not launched
+through a toolkit in this physical check. The transmit result reported
+`passed=1`, with 45.8446 s of media; the 110 s WAV recorder exited 0 and cleanup
+completed. The overall strict runner nevertheless exited 3, as detailed below;
+this was not a transmit failure.
+
+Helper row ID 1/revision 2 was pending at 1.8561 s and received at 7.6607 s.
+Ordinary row ID 2/revision 2 first appeared with exact `001` pending at
+46.4406 s, then completed as `001`/`e` on that same row at 77.8076 s, with no
+missing or unexpected bits. Capture remained open to 110.012 s, so completion
+did not depend on EOF. No receiver-health failure was reported. The separate
+`0` and `00` pending prefixes were never observed in the polls, so the strict
+all-prefix predicate failed and full individual-prefix/next-poll coverage
+remains unqualified. The observed `001` pending-to-completed transition is
+verified; it is distinct from that remaining coverage gap.
+
+The returned PCM had zero clipped samples and a peak of 0.337677 full scale.
+Measured helper/data centroids were 2,062.4894/1,500.9495 Hz in disjoint bands,
+with a 9.9925 dB RMS power ratio against the configured 10 dB. This establishes
+clean adjacent cable output and the observed ordinary receive completion,
+not weak-RF, default-Auto or GPSDO-replacement benefit. Binding, strict result,
+spectrum and original output are retained under `local-evidence/helper-v3/tx/`
+as `current107-physical-volume20-binding.json`,
+`current107-physical-volume20-result.json`,
+`current107-physical-volume20-spectrum.json`,
+`current107-physical-volume20-tx.log` and the matching WAV.
+
+### Withdrawn bootstrap proposal
+
+The unaccepted recipe bootstrap was withdrawn from production after independent
+review identified a native unprocessed-queue (`Q - R`) overrun and unreserved
+simulation DSP use. Its patch is retained in ignored evidence for future
+experiments; this withdrawn path is not implemented behavior and does not fix
+or qualify the exact weak EME case. A separate private joint raw-bin frequency
+estimator remains unaccepted, with no production integration planned for this
+candidate. Payload-contamination handling and its stochastic phase prior need
+a supported argument and validation before any future integration. Completed
+private diagnostics do not establish production payload SNR, CPU speedup or
+full-case qualification.
+
+The safe existing assistance routes remain optional: full ordinary receiver
+grants, retained history and the conditional receiver must coexist inside the
+configured resources. If they cannot, helper work yields while ordinary
+framing, source quota, progress and fully scored physical END remain unchanged.
+The production resource contract remains unchanged: no additional RAM allowance,
+source-quota change or disk/I/O contract change. The review rejection and
+original diagnostic failures remain distinct from future qualification.
+
+### Normal regression results and remaining qualification
+
+The normal application/GUI/worker build passed with exit 0 using
+`./build.sh --web-worker --build-dir build/dev --jobs 2`, bound to the current
+42-input manifest by `final/containment-application-build-result.json`.
+The 294-registration normal run completed and was reaped with exit 1. Original
+outcomes are 288 passes, five failures and one timeout, all accounted for in
+`local-evidence/helper-v3/final/normal/reconciliation.json`:
+
+| Scope | Original normal-run outcome | Follow-up status |
+| --- | --- | --- |
+| Contract | 208 passed; one preparation timeout | Failed/incomplete preparation coverage |
+| Shared GUI extras | 33/33 passed | Complete for this selection |
+| Regular extras | 36/36 passed | Complete for this selection |
+| Web | 11 passed; two socket-permission setup failures | Exact pair passed on loopback-permission retry |
+| Native GUI | Three immediate display-startup failures | Exact display-only retry passed 3/3 |
+
+The reconciliation repairs reporting of CTest output with adjacent `***` status
+text; original logs and failed outcomes are unchanged. The contract's
+`scheduled_parallel_preparation` timed out at 1,500.12 s, at line 3157 of
+`local-evidence/helper-v3/final/normal/contract.log`. The unchanged watchdog and
+this failure preclude a full contract or matrix pass. The preceding input
+closure equivalent to committed `b2d3539` also timed out at 1,500.05 s; neither
+result establishes passing preparation throughput. The overall run log is
+`local-evidence/helper-v3/final/normal-qualification.log`.
+
+The web retry ran only `build_preview` and `web_preview`: both passed in 7.50 s
+with the same 42-input overlay verified before and after. The original
+`PermissionError: [Errno 1] Operation not permitted` failures remain recorded.
+Retry accounting is in
+`local-evidence/helper-v3/final/normal/web-loopback-retry-reconciled-reconciliation.json`.
+Original native startup failed because Xvfb could not bind its listeners and
+the tests could not open the display; adapter assertions did not run then.
+The exact display-only retry passed all three tests in 225.14 s, including
+`gui_workflow` in 139.74 s, with unchanged source, binaries, tests and deadlines.
+Its result is in
+`local-evidence/helper-v3/final/normal/native-display-retry-reconciliation.json`.
+Across the original run and these five strict setup retries, 293/294 distinct
+cases passed. The preparation timeout remains unqualified; the retries do not
+turn the original 288-pass/five-failure/one-timeout result into a passing full
+matrix. Normal CPU work is complete. The current-source physical check above
+observed clean output and same-row `001` pending-to-completed reception, with
+strict individual-prefix coverage incomplete and runner exit 3.
+`local-evidence/helper-v3/final/final-verification.json` confirms the 42-input
+overlay, all five accepted application/archive hashes, complete registration
+accounting and cleanup of the normal, retry and physical processes. Docs-only
+changes are excluded from the source guard.
+
+The focused sanitizer coverage does not replace the full sanitizer suite.
+The pre-containment HF recovery leaves progress and health coverage unresolved;
+EME needs a complete run. Current physical `0`/`00` next-poll coverage and full
+duplex qualification remain unqualified despite the observed `001` transition
+and physical completion.
+A proposed 64-point frequency history failed known-frequency truth coverage at
+24 dB-Hz in `local-evidence/helper-v3/eme-history/regression-history64.log`.
+That history proposal remains unaccepted; the recipe bootstrap above is
+withdrawn, and the private joint estimator is not qualified. None is a passing
+weak-EME fix. Current-source qualification is limited to the results recorded
+above; prior diagnostic snapshots and binaries do not qualify it. In-progress,
+failed or cancelled work is not a pass.
+No weak RF-link or 5.8 GHz propagation benefit is established by these fixtures.
+
+Unknown full-band helper discovery, arbitrary UTC/private-epoch ambiguity and
+every repeated-message onset are not solved by one tone. Dynamic phase/timing
+assistance requires independently qualified measurements and supported geometry.
+True scheduled, Symbol_Burst and deferred hopping retain ordinary fallback when
+assisted acquisition is unavailable. Physical helper sidebands, colored
+interference and DAC/RF dynamic range remain limitations at extreme power
+ratios. A tone cannot separate RF error, Doppler and sample-clock error. Windows
+runtime, real browser, prepared Wasm/SDK, alternate frontends and release/package
+certification remain separate scopes.
+
+### Historical Helper Carrier evidence — not current qualification
+
+The previous candidate was based on
+`b47c7a0ebd6a29d21ffa8748d5bc7ffbbeb7e942`, with 44-input overlay
+`d9f1212860bd02830b1d9bab2e27141882a29273804f30c34508e1f017d9b0dd`, recorded
+in `local-evidence/helper-live-fix/final-source-inputs.json`. That implementation
+was incorporated into the current `b2d3539` base; its results do not qualify the
+new placement, FIR, conditional bank, precision or metadata changes above.
+
+Its normal contract run passed 206/207 in 3,576.19 s. The unchanged
+`scheduled_parallel_preparation` watchdog expired at 1,500.05 s while
+`shared.serial` was active. The 44 recorded input hashes for that run match
+committed `b2d3539`; this is the exact preceding baseline timeout. A separate
+earlier `helper-carrier-v2/contract.log` run timed out at 1,500.11 s in
+`shared.parallel`, but its candidate inputs differ from `b2d3539` and are not an
+exact baseline comparison. Neither run established a full contract pass or
+preparation throughput parity. The earlier source also passed 39 shared GUI
+cases, all 13 web registrations after two sandbox socket-setup failures were rerun with
+authorized loopback access, 36 regular cases outside contract, nine focused audio
+registrations and three native GUI cases on a private 2,400×1,800 display.
+Its regular/contract union was 236/237, with the same preparation timeout.
+The original desktop adapter-height failure, socket setup failures and passing
+reruns remain in the retained `helper-live-fix/final-*` logs.
+
+The earlier physical 48 kHz cable return measured a helper near **6,380 Hz**,
+9.87 dB above the payload for a configured 10 dB ratio, with zero clipped
+samples, and an encrypted one-bit duplex repetition passed in 50.07 s.
+Separate Low/cochannel controls also returned their tones. These measurements
+used the superseded distant High placement. They are historical audio evidence
+only and are explicitly excluded from current adjacent-placement, current
+physical transmission and sensitivity claims.
+
+The old 52-configuration observer benchmark and focused five-suite ASan/UBSan
+checks likewise precede this candidate. They do not establish current heap,
+CPU margin, weak-frequency precision or sanitizer coverage. The prior sanitizer
+scope excluded Live and dependency instrumentation; disabled LSAN was not leak
+coverage. Earlier invalid planner, frequency, suspension, noise-tail,
+helper-loss and late-private-epoch failures remain retained. The old strong
+calendar fixture checked one advisory epoch; the new multi-epoch conditional
+route needs its own qualification. Historical helper-only success never
+established full mixed-link sensitivity or RF propagation performance.
 
 ## Prior source qualification
 

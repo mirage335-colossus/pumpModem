@@ -609,7 +609,14 @@ void link_budget(Node& root, const planner::Model& model) {
                 paragraph(n,"Helper audio center: "+frequency(helper.frequency_hz)+
                     ". The audio route and radio must pass its tone and metadata band.",11,Tone::muted,false,4);
             paragraph(n,helper.status,11,helper.geometry_available?Tone::muted:Tone::caution,false,4);
-            paragraph(n,"Helper-assisted probability and CPU benefit are not quantified by these curves. The payload target and ordinary search remain unchanged.",
+            if(helper.conditional_strip_available && helper.ordinary_pairs>=512)
+                paragraph(n,"Conditional acquisition: at most "+std::to_string(helper.conditional_pair_limit)+
+                    " frequency/clock alternatives in an additional optional search versus "+std::to_string(helper.ordinary_pairs)+
+                    " ordinarily, when measured helper uncertainty is at most +/-"+
+                    number(helper.required_frequency_uncertainty_hz)+" Hz. Retained clock rates: "+
+                    std::to_string(helper.retained_clock_rates)+"; all original epoch and timing alternatives remain.",
+                    11,Tone::muted,false,4);
+            paragraph(n,"Helper-assisted probability and CPU benefit are not quantified by these curves. The payload target is unchanged. Additional helper searches retain the ordinary bank. Where primary bank replacement is admitted, failed acquisition restores the broad bank before payload commitment.",
                 11,Tone::muted,false,0);
         }
     } else paragraph(n, "Link estimate unavailable", 13, Tone::text, true, 0);

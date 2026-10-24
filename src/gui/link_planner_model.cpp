@@ -8,6 +8,7 @@
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/pattern_search.hpp"
+#include "datapump/helper_assistance.hpp"
 #include "datapump/simulation_estimate.hpp"
 #include "datapump/sched_hop.hpp"
 #include <algorithm>
@@ -120,20 +121,57 @@ void helper_reference_plan(Model& model,const modem::Config& config) {
         // hardware output rate or radio filter can pass the resulting tone.
         const auto plan=helper::plan(settings.helper,config.carrier_hz,
             live::detail::helper_occupied_bandwidth(settings),120000000,
-            static_cast<double>(config.sample_rate)+250,waveform_gain);
+            0,waveform_gain);
         result.frequency_hz=plan.frequency_hz;result.geometry_available=true;
-        if((config.fake_hopping && config.fake_hopping->defer_symbols) ||
-           (config.scheduled_hopping && config.scheduled_hopping->enabled() && !config.scheduled_hopping->continuous()) ||
-           config.symbol_burst.enabled())
+        // Show the actual conditional search policy without inventing a
+        // received measurement or changing the ordinary probability curves.
+        modem::PatternSearch original;
+        if(config.oscillator_search) {
+            const auto lattice=modem::oscillator_pattern_search(config,
+                transfer::effective_clock_sync(settings.transfer)?modem::utc_transmit_rate_limit(config):0);
+            original.hypotheses=lattice.hypotheses;
+            original.admitted_clock_half_width_ppm=lattice.requested_clock_half_width_ppm;
+        }else original.hypotheses={{0,0}};
+        result.ordinary_pairs=original.hypotheses.size();
+        helper::Reference reference;reference.sample_rate=config.sample_rate;
+        reference.frequency_valid=true;reference.frequency_hz=plan.frequency_hz;
+        helper::AssistanceRequest request;request.expected_helper_hz=plan.frequency_hz;
+        request.maximum_hypotheses=result.conditional_pair_limit;request.cover_continuous_clock=true;
+        const auto conditional=helper::plan_assistance(config,original,reference,request);
+        const bool split=(config.fake_hopping && config.fake_hopping->defer_symbols) ||
+            (config.scheduled_hopping && config.scheduled_hopping->enabled() && !config.scheduled_hopping->continuous()) ||
+            config.symbol_burst.enabled();
+        const bool spare_workspace=live::receiver_workspace_capacity(settings)/8>=128*1024;
+        if(conditional.search && !split && spare_workspace &&
+           config.receiver_strategy!=modem::ReceiverStrategy::amplitude_only) {
+            std::vector<double> clocks;
+            for(const auto& h:conditional.search->hypotheses)clocks.push_back(h.clock_error_ppm);
+            std::sort(clocks.begin(),clocks.end());clocks.erase(std::unique(clocks.begin(),clocks.end()),clocks.end());
+            result.retained_clock_rates=clocks.size();
+            const auto side=(result.conditional_pair_limit/clocks.size()-1)/2;
+            const auto step=.25*config.sample_rate/static_cast<double>(modem::symbol_sample_count(config));
+            result.required_frequency_uncertainty_hz=side*step-conditional.frequency_uncertainty_hz;
+            result.conditional_strip_available=result.required_frequency_uncertainty_hz>=0;
+        }
+        if(split)
             result.status="Helper transmission and presence tracking are available; assisted payload acquisition is unavailable for this scheduled geometry.";
         else if(config.receiver_strategy==modem::ReceiverStrategy::amplitude_only)
             result.status="Presence tracking is available; amplitude-only reception does not admit helper-assisted payload acquisition.";
-        else if(!model.clock_search_supported || !model.receiver_workspace_supported)
-            result.status="Ordinary search coverage does not fit; optional helper work yields to the payload receiver.";
-        else if(live::receiver_workspace_capacity(settings)/8<128*1024)
+        else if(!spare_workspace)
             result.status="Optional helper acquisition has insufficient spare workspace; ordinary payload reception retains priority.";
+        else if(!model.clock_search_supported || !model.receiver_workspace_supported)
+            result.status="Ordinary search coverage is limited. A qualified helper can admit a narrower optional acquisition within spare workspace; ordinary coverage remains limited.";
         else
             result.status="A clean received helper can guide frequency acquisition and dwell timing in a coherent FFT or compact correlator receiver. Dynamic phase tracking requires a compatible FFT path; admission requires spare workspace.";
+        if(!settings.transfer.timestamp) {
+            result.status+=" Primary bank replacement is unavailable during rolling epoch admission; the ordinary bank is retained.";
+        }else if(config.receiver_strategy!=modem::ReceiverStrategy::complex_only) {
+            result.status+=" Primary bank replacement requires Complex only; the ordinary bank is retained.";
+        }else
+            result.status+=" Fixed timestamp and Complex only permit runtime eligibility checks for primary bank replacement; an actual native continuous receiver, precommit resources, timing and receiver lifecycle checks are still required.";
+        if(result.conditional_strip_available && (!settings.transfer.timestamp ||
+           config.receiver_strategy!=modem::ReceiverStrategy::complex_only))
+            result.status+=" An additional optional helper search still requires spare workspace and runtime eligibility.";
         if(settings.helper.frequency==helper::Frequency::low)
             result.status+=" Low placement leaves the adjacent helper in the ordinary capture band; interference isolation is unqualified.";
         else if(settings.helper.frequency==helper::Frequency::cochannel)

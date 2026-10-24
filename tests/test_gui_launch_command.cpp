@@ -285,8 +285,18 @@ void helper_settings() {
     }
     for(const auto* value:{"--helper-power -1","--helper-power nan","--helper-power 1e308kW",
         "--helper-ratio-limit 30","--helper-ratio-limit 91","--helper-frequency middle",
-        "--helper-callsign 12345678901234567890","--helper-callsign 'N0CÄLL'"})
+        "--tx-key none --helper-callsign 12345678901234567890","--helper-callsign 'N0CÄLL' --tx-key none"})
         rejects([&]{launch_command::parse(value);},"Invalid helper setting accepted");
+    for(const auto* callsign:{"12345678901234567890","N0CÄLL"}) {
+        for(const auto& command:std::vector<std::string>{
+            "--helper-callsign '"+std::string(callsign)+"' --tx-key named",
+            "--tx-key named --helper-callsign '"+std::string(callsign)+"'",
+            "--helper-callsign '"+std::string(callsign)+"'"}) {
+            const auto patch=launch_command::parse(command);
+            check(patch.helper_callsign==callsign&&launch_command::parse(launch_command::format(patch))==patch,
+                  "Inactive or context-dependent helper callsign was rejected or lost on export");
+        }
+    }
     check(!launch_command::parse("--rate 1200").helper_power_w,"Older partial commands must preserve helper settings");
 }
 

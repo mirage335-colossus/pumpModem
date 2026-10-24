@@ -295,6 +295,16 @@ struct PatternFftWork {
 // It excludes the immutable affine helper frequency used by the optional
 // frequency bank; constant Tx/propagation phase remains an unknown fitted gain.
 struct PatternPhaseKnot {std::uint64_t sample=0;double radians=0;};
+// Conservative mandatory storage through a finite retained-input replay.
+// This grants no source interpretation or physical completion authority.
+struct HelperReplayBudget {
+    std::size_t maximum_stream_bits=0,workspace_bytes=0;
+    // Nonzero only for the native, default-shaped ordinary reset recipe.
+    // This is a CONSTRUCTOR ARGUMENT, not an actual-storage measurement.
+    // Keep it immutable: constructing directly with workspace_bytes could
+    // choose a larger resident template layout than the original receiver.
+    std::size_t cold_constructor_bytes=0,reset_overlap_bytes=0,steady_workspace_bytes=0;
+};
 class PatternReceiver {
 public:
     PatternReceiver(Config, std::size_t workspace_bytes = 8 * 1024 * 1024,
@@ -395,6 +405,10 @@ public:
     static std::size_t symbol_burst_control_bytes();
     // Includes admitted detector state whose allocation is deferred until PCM.
     std::size_t reserved_workspace_bytes() const;
+    // No state changes. Unsupported calendars/backends return nullopt.
+    // Includes all already observed input, future PCM and current capacities.
+    std::optional<HelperReplayBudget> helper_replay_budget(std::size_t future_samples,
+        const PatternSearch* reset_search=nullptr) const;
     // Additional allocation bound for one finite PCM push and its next drain.
     // SIZE_MAX disables optional shared preprocessing for unsupported geometry.
     std::size_t projection_cache_headroom(std::size_t input_samples) const;

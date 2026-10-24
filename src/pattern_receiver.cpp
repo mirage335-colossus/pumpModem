@@ -3792,6 +3792,94 @@ std::size_t PatternReceiver::reserved_workspace_bytes()const {
     if(impl_->fallback)return impl_->wrapper_bytes()+impl_->fallback->reserved_workspace_bytes();
     return std::max(impl_->working_bytes(),impl_->retained_bit_reservation(impl_->fixed_reservation));
 }
+std::optional<HelperReplayBudget> PatternReceiver::helper_replay_budget(std::size_t future_samples,
+        const PatternSearch* reset_search)const {
+    const auto& s=*impl_;
+    if(s.fallback) {
+        if(reset_search)return std::nullopt;
+        auto result=s.fallback->helper_replay_budget(future_samples);
+        if(result) {
+            const auto wrapper=s.wrapper_bytes();
+            if(result->workspace_bytes>SIZE_MAX-wrapper)return std::nullopt;
+            result->workspace_bytes+=wrapper;
+        }
+        return result;
+    }
+    if(s.calendar_symbols() || !s.bin_samples || s.templates.empty())return std::nullopt;
+    if(future_samples>UINT64_MAX-s.sample)return std::nullopt;
+    auto minimum=UINT64_MAX;
+    for(std::size_t f=0;f<s.templates.size();++f)minimum=std::min(minimum,s.symbol_bins(f));
+    // Continuation may correct the preceding start by two bins at EACH bit.
+    // Count the entire observed aperture, including unprocessed initial PCM.
+    if(minimum<=2)return std::nullopt;
+    const auto bins=(s.sample+future_samples)/s.bin_samples;
+    const auto whole=bins/(minimum-2);
+    if(whole>SIZE_MAX-2)return std::nullopt;
+    const auto observed=static_cast<std::size_t>(whole)+2;
+    auto capacity=std::size_t{1};
+    // A later ordinary workspace loan may raise today's clipped bit limit.
+    // Bound the physical aperture itself, independent of that optional loan.
+    while(capacity<observed) {
+        if(capacity>SIZE_MAX/2)return std::nullopt;
+        capacity*=2;
+    }
+    capacity=std::max(capacity,s.latest.bits.capacity());
+    for(const auto& track:s.tracks)capacity=std::max(capacity,track.burst.bits.capacity());
+    for(const auto& burst:s.bursts)capacity=std::max(capacity,burst.bits.capacity());
+    // Tracks, queued events, latest, realloc/copy and publish's three-event
+    // temporary cover. Optional plans/caches retain their ordinary trim path.
+    if(s.search.track_limit>(SIZE_MAX-6)/2)return std::nullopt;
+    const auto slots=2*s.search.track_limit+6;
+    const auto retained=std::max(s.working_bytes(),s.fixed_reservation);
+    if(capacity>(SIZE_MAX-retained)/slots)return std::nullopt;
+    HelperReplayBudget result{observed,retained+slots*capacity};
+    result.steady_workspace_bytes=result.workspace_bytes;
+    const auto default_reset_shape=[&](const PatternSearch& search) {
+        return search.candidate_limit==2048 && search.track_limit==16 && search.initial_stream_symbols==4 &&
+            search.chunk_bits==1024 && search.search_stream_phases && !search.compact_clock_search &&
+            !search.couple_clock_to_carrier && !search.uncoupled_frequency_count &&
+            search.clock_errors_ppm.size()==1 && search.clock_errors_ppm.front()==0 && !search.qualified_start_window &&
+            !search.scheduled_capture && !search.hypotheses.empty();
+    };
+    const bool cold_native=s.config.receiver_strategy==ReceiverStrategy::complex_only &&
+        s.config.oscillator_search && s.config.scramble && !s.config.dsss && s.config.dsss_factor==1 &&
+        !s.config.fake_hopping && !s.config.scheduled_hopping && !s.config.symbol_burst.enabled() &&
+        s.drift_sections==1 && !s.differential_window && !s.search.compact_clock_search &&
+        s.code.symbol_samples()<60ULL*s.config.sample_rate && default_reset_shape(s.search);
+    if(reset_search && (!cold_native || !default_reset_shape(*reset_search) ||
+       reset_search->hypotheses!=s.search.hypotheses ||
+       reset_search->hypotheses.capacity()>s.search.hypotheses.capacity() ||
+       !reset_search->frequency_offsets_hz.empty() ||
+       reset_search->prefer_streamed_templates!=s.search.prefer_streamed_templates ||
+       reset_search->bit_limit!=s.configured_bit_limit))return std::nullopt;
+    if(cold_native) {
+        // For this SAME native geometry, F bounds the constructor's required
+        // storage after removing optional per-frequency rows. With G=F+K,
+        // full required+K either fits (so required<=F), or the constructor
+        // streams those rows and without_rows<=F. It cannot reach the late
+        // Correlator redirect. Do not replace G with the larger replay ceiling.
+        const auto minimum_bits=2*s.search.track_limit+2;
+        if(s.fixed_reservation>SIZE_MAX-minimum_bits)return std::nullopt;
+        result.cold_constructor_bytes=s.fixed_reservation+minimum_bits;
+        // Cover pristine C-entry history/new tail overlap and its one pending
+        // checkpoint. Live may bind any diagnostic limit no greater than C.
+        const auto history=s.search.candidate_limit*sizeof(PatternEvidence);
+        const auto binding=sizeof(detail::NativeDiagnosticHistoryTail<PatternEvidence>)+history;
+        auto reset=result.cold_constructor_bytes;
+        const auto add=[&](std::size_t bytes){if(bytes>SIZE_MAX-reset)return false;reset+=bytes;return true;};
+        if(!add(binding) || !add(history) || capacity>(SIZE_MAX-reset)/slots)return std::nullopt;
+        reset+=slots*capacity;result.workspace_bytes=std::max(result.workspace_bytes,reset);
+        // Ordinary reset temporarily holds proposed/declared searches and
+        // constructor copies while the old row still exists. These vector
+        // capacities also cover the Streaming wrapper's retained search copy.
+        const auto vectors=s.search.frequency_offsets_hz.capacity()*sizeof(double)+
+            s.search.clock_errors_ppm.capacity()*sizeof(double)+
+            s.search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis);
+        if(vectors>(SIZE_MAX-65536)/8)return std::nullopt;
+        result.reset_overlap_bytes=65536+8*vectors;
+    }
+    return result;
+}
 std::size_t PatternReceiver::projection_cache_headroom(std::size_t input_samples)const {
     return impl_->fallback?impl_->fallback->projection_cache_headroom(input_samples):std::numeric_limits<std::size_t>::max();
 }

@@ -409,6 +409,42 @@ void helper_developer_visibility() {
     check(!app.control(*found).visible&&!app.enabled(C::transmit_helper),"Leaving Developer mode kept helper-only dispatch available");
 }
 
+void helper_power_declaration() {
+    using F=ui::Field;
+    Application app({.simulation=true});
+    const auto& power=control(F::helper_power);
+    check(power.kind==ui::Kind::text&&power.persistent&&!power.read_only&&power.byte_limit==64,
+          "Helper Carrier Power must remain a shared editable dropdown");
+    for(const auto* preset:{"10 kW","15 kW"}) {
+        app.preset(power,preset);
+        check(app.field(F::helper_power).text==preset,
+              "High-power helper preset did not use the shared edit path");
+    }
+    app.edit(control(F::link_power),"2 mW");
+    app.select(F::helper_ratio_limit,"20");
+    app.preset(power,"1.5 kW");
+    check(app.field(F::helper_power).text=="1.5 kW"&&
+          app.field(F::helper_power).display_text.find("effective (ratio limit)")!=std::string::npos&&
+          app.control(power).label==std::string(power.label)+" · "+app.field(F::helper_power).display_text,
+          "Helper's effective ratio label replaced or disappeared from its editable power control");
+    for(const auto& page:ui::pages()) {
+        app.select_page(page.id);
+        check(app.control(power).visible&&app.control(power).enabled,
+              "Helper power editor was hidden or disabled on a shared page");
+        app.edit(power,"275.125 W");
+        check(app.field(F::helper_power).text=="275.125 W",
+              "Helper power editor rejected a custom watt value");
+        app.preset(power,"0");
+        check(app.field(F::helper_power).text=="0"&&!app.field(F::helper_ratio_limit).enabled&&
+              app.control(power).label==power.label,
+              "Helper power's disabled preset did not use its editable control");
+        for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
+            const auto geometry=app.control_layout(power,size.w,size.h);
+            check(geometry.has_suggestions&&geometry.widget.w>0&&geometry.suggestions.w>0,
+                  "Helper power lost its native preset dropdown geometry");
+        }
+    }
+}
 void transmission_scope_records() {
     using F=ui::Field;
     const auto& declaration=control(F::transmit_scope);
@@ -1679,6 +1715,6 @@ int main(int argc,char** argv) {
         });
     }
 #endif
-    try {physical_debug_workflow();verbose_diagnostics();probe_fixture::run();fhss_developer_editor();fast_default_console();developer_mode_presentation();helper_developer_visibility();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();expanded_spectrum();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();planner_clock_details();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();smoke_shutdown_does_not_resume_workflow();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {physical_debug_workflow();verbose_diagnostics();probe_fixture::run();fhss_developer_editor();fast_default_console();developer_mode_presentation();helper_developer_visibility();helper_power_declaration();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();expanded_spectrum();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();planner_clock_details();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();smoke_shutdown_does_not_resume_workflow();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

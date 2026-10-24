@@ -1,4 +1,6 @@
 #include "datapump/helper_assistance.hpp"
+#include "datapump/helper_carrier.hpp"
+#include "datapump/helper_filter.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/streaming_modem.hpp"
@@ -134,6 +136,65 @@ Reception receive(const modem::Config& c,const modem::PatternSearch& s,const std
         at+=count;drain();
     }
     receiver.finish();drain();result.work=receiver.fft_work();return result;
+}
+void adjacent_filter_coordinates_and_gain() {
+    constexpr std::uint32_t rate=8000;
+    constexpr double carrier=1500,helper_hz=2450;
+    const auto apply=[&](const std::vector<float>& input,std::size_t chunk) {
+        helper::PayloadFilter filter(rate,helper_hz);
+        std::vector<float> result,output(chunk);
+        for(std::size_t first=0;first<input.size();first+=chunk) {
+            const auto n=std::min(chunk,input.size()-first);
+            const auto count=filter.push(std::span(input).subspan(first,n),output);
+            result.insert(result.end(),output.begin(),output.begin()+count);
+        }
+        check(result.size()==input.size()-2*filter.delay() && filter.output_samples()==result.size(),
+              "helper filter inserted unobserved history or lost its sample-center map");
+        return result;
+    };
+    std::vector<float> input(3*rate);
+    for(std::size_t i=0;i<input.size();++i)
+        input[i]=static_cast<float>(.02*std::cos(tau*carrier*i/rate)+.7*std::cos(tau*helper_hz*i/rate));
+    const auto one=apply(input,1),many=apply(input,137);
+    check(one==many,"helper filtering depends on caller chunk boundaries");
+    helper::PayloadFilter geometry(rate,helper_hz);
+    const auto amplitude=[&](double frequency) {
+        std::complex<double> sum{};
+        for(std::size_t i=0;i<one.size();++i)
+            sum+=static_cast<double>(one[i])*std::polar(1.,-tau*frequency*(i+geometry.delay())/rate);
+        return 2*std::abs(sum)/one.size();
+    };
+    check(std::abs(amplitude(carrier)-.02)<.00002 && amplitude(helper_hz)<.00007,
+          "adjacent helper filter changed payload gain or failed to remove the bright neighboring tone");
+    helper::PayloadFilter warmup(rate,helper_hz);std::vector<float> short_input(2*warmup.delay(),1),output(short_input.size());
+    check(warmup.push(short_input,output)==0 && warmup.output_samples()==0,
+          "helper filter published zero padding before a complete physical window");
+}
+void filtered_noise_and_beacon_do_not_carry_bits() {
+    auto c=config();c.sample_rate=8000;c.carrier_hz=1500;c.bandwidth_hz=1000;c.spreading_factor=64;
+    helper::Options options;options.power_w=100;options.callsign="N0CALL";
+    const auto placement=helper::plan(options,c.carrier_hz,helper::occupied_bandwidth(c),48000);
+    for(unsigned seed=0;seed<8;++seed)for(const bool beacon:{false,true}) {
+        helper::PayloadFilter filter(c.sample_rate,placement.frequency_hz);
+        auto selected=search();selected.start_offset_seconds=0;selected.start_uncertainty_seconds=1;
+        selected.input_sample_origin=filter.delay();
+        modem::PatternReceiver receiver(c,4*1024*1024,selected);
+        helper::Generator generator(options,placement,c.stream_epoch,true);
+        std::mt19937_64 random(5181+seed);std::normal_distribution<double> noise(0,.03);
+        std::array<float,137> input{},output{};
+        for(std::size_t first=0;first<9*c.sample_rate;first+=input.size()) {
+            for(std::size_t i=0;i<input.size();++i) {
+                const auto tone=beacon?generator.mix(0,static_cast<long double>(first+i)/c.sample_rate,c.sample_rate):0.f;
+                input[i]=static_cast<float>(tone+noise(random));
+            }
+            const auto count=filter.push(input,output);receiver.push(std::span(output).first(count));
+            for(const auto& burst:receiver.take_bursts())
+                check(burst.bits.empty(),"filtered noise/helper-only signal manufactured Robust message bits");
+        }
+        receiver.finish();
+        for(const auto& burst:receiver.take_bursts())
+            check(burst.bits.empty(),"filtered noise/helper-only EOF manufactured Robust message bits");
+    }
 }
 void actual_timing_benefit() {
     auto c=config();c.stream_epoch=1800000000;auto original=search();original.start_uncertainty_seconds=1;
@@ -446,5 +507,5 @@ void suspended_helper_keeps_physical_tail() {
     }
 }
 }
-int main(){try{planner();actual_frequency_benefit();practical_long_symbol_search();actual_timing_benefit();actual_phase_benefit();unsupported_and_zero_identity();covariance_bound();noise_gate();ordinary_arbitration_priority();full_assisted_payload_source();suspended_helper_keeps_physical_tail();
+int main(){try{planner();adjacent_filter_coordinates_and_gain();filtered_noise_and_beacon_do_not_carry_bits();actual_frequency_benefit();practical_long_symbol_search();actual_timing_benefit();actual_phase_benefit();unsupported_and_zero_identity();covariance_bound();noise_gate();ordinary_arbitration_priority();full_assisted_payload_source();suspended_helper_keeps_physical_tail();
     std::cout<<"helper assistance passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

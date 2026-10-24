@@ -97,8 +97,9 @@ std::uint32_t minimum_output_rate(const Options& options,double carrier,double b
     if(options.power_w==0)return 0;
     if(logical_rate<64||logical_rate>120000000)
         throw Error("invalid Helper Carrier logical sample rate");
-    const auto placement=plan(options,carrier,bandwidth,120000000,
-                              static_cast<double>(logical_rate)+250);
+    // Hardware and modem clocks are independent. A larger logical clock is
+    // not a reason to move an otherwise adjacent helper out of the audio band.
+    const auto placement=plan(options,carrier,bandwidth,120000000);
     const auto required=std::ceil(2*(placement.frequency_hz+250));
     if(required>120000000)throw Error("Helper Carrier exceeds the physical audio sample-rate limit");
     return static_cast<std::uint32_t>(std::max({48000.,required,static_cast<double>(logical_rate)}));

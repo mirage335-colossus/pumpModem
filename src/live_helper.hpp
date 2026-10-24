@@ -7,7 +7,7 @@ namespace datapump::live::detail {
 // message or editing the callsign cannot move the carrier into the other band.
 inline double helper_occupied_bandwidth(const Settings& settings) {
     const auto occupied=[](const modem::Config& c) {
-        return modem::waveform_bandwidth_hz(c)+modem::waveform_gate_bandwidth_allowance_hz(c);
+        return helper::occupied_bandwidth(c);
     };
     auto bandwidth=occupied(settings.transfer.modem);
     if(settings.long_message_modem)bandwidth=std::max(bandwidth,occupied(*settings.long_message_modem));

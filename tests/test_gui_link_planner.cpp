@@ -6,6 +6,7 @@
 #include "../src/estimate_cancellation.hpp"
 #include "datapump/correlation_experiment.hpp"
 #include "datapump/execution.hpp"
+#include "datapump/helper_assistance.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_search.hpp"
 #include "datapump/simulation_estimate.hpp"
@@ -1853,8 +1854,7 @@ void receiver_overlay_and_cpu_status() {
 }
 void helper_reference_link_budget() {
     auto inputs=example();inputs.target_db_hz=23;
-    // The reported link uses a 36 Hz payload centered at 1500 Hz. The general
-    // planner example's 3600 Hz band crosses DC and cannot host this helper.
+    // The reported link uses a 36 Hz payload centered at 1500 Hz.
     inputs.options.modem=tuning::resolve(36,inputs.target_db_hz,
         tuning::PatternMode::auto_pattern,false,1500).config;
     inputs.tx_dbm=36.020599913279625;inputs.path_loss_db=180;
@@ -1964,6 +1964,269 @@ void helper_reference_link_budget() {
     const auto disabled=selected(inputs);
     check(!disabled.helper_reference.enabled&&!contains_text(planner_page::build(disabled,900,false,false),"Helper Carrier"),
           "Disabling helper must clear the previously displayed auxiliary budget");
+}
+void helper_conditional_acquisition_plan() {
+    const auto selected=[](const planner::Inputs& input,planner::Cache& cache) {
+        std::stop_source stop;std::optional<planner::Model> result;std::string error;
+        try {
+            const auto completed=planner::build(input,cache,stop.get_token(),[&](const auto& model) {
+                result=model;stop.request_stop();
+            },planner::TargetSteps{});
+            error=completed.error;
+        }catch(const estimate_detail::Cancelled&){}
+        check(result&&result->available,("Conditional helper plan unavailable: "+error).c_str());
+        return *result;
+    };
+    const auto unchanged=[](const planner::Model& assisted,const planner::Model& ordinary) {
+        near(assisted.actual_cn0_db_hz,ordinary.actual_cn0_db_hz,"Helper changed payload C/N0");
+        near(assisted.margin_db,ordinary.margin_db,"Helper changed payload target margin");
+        near(assisted.bit_seconds,ordinary.bit_seconds,"Helper changed payload symbol duration");
+        near(assisted.send_seconds,ordinary.send_seconds,"Helper changed payload airtime");
+        near(assisted.finish_seconds,ordinary.finish_seconds,"Helper changed physical completion estimate");
+        near(assisted.success_probability,ordinary.success_probability,"Helper fabricated payload probability gain");
+        near(assisted.one_bit_success_probability,ordinary.one_bit_success_probability,"Helper fabricated first-bit probability gain");
+        near(assisted.cpu_realtime_ratio,ordinary.cpu_realtime_ratio,"Helper changed the ordinary CPU estimate");
+        near(assisted.timing_hypotheses,ordinary.timing_hypotheses,"Helper removed ordinary timing alternatives");
+        check(std::tie(assisted.clock_search_supported,assisted.receiver_workspace_supported,
+                  assisted.confidence_available,assisted.one_bit_confidence_available,
+                  assisted.reference_probability_available,assisted.one_bit_reference_available,
+                  assisted.frequency_rate_hypotheses,assisted.epoch_hypotheses,assisted.timing_phase_groups)==
+              std::tie(ordinary.clock_search_supported,ordinary.receiver_workspace_supported,
+                  ordinary.confidence_available,ordinary.one_bit_confidence_available,
+                  ordinary.reference_probability_available,ordinary.one_bit_reference_available,
+                  ordinary.frequency_rate_hypotheses,ordinary.epoch_hypotheses,ordinary.timing_phase_groups),
+              "Conditional helper advice changed ordinary search coverage or model qualification");
+    };
+    const auto fixture=[](bool eme) {
+        planner::Inputs input;input.mode=tuning::PatternMode::auto_keystream;
+        // The microwave command has a separate -33.197 dB-Hz planner preview.
+        // Its explicit short/long -3.072 dB-Hz targets retain 128 s symbols.
+        input.target_db_hz=eme?-3.0720996964786846:8;
+        input.options.modem=tuning::resolve(eme?1:36,input.target_db_hz,input.mode,true,1500,
+            eme?1:10,modem::OuterDsssVersion::interleaved_v2).config;
+        input.options.key.emplace(Bytes(32,0x57));
+        input.options.automatic_receive_profiles=true;input.options.receive_pattern_mode=input.mode;
+        input.options.audio_timing_error_seconds=0;
+        // Fixed byte allowances keep these geometry checks independent of host RAM.
+        input.options.dsp_workspace_bytes=2ULL*1024*1024*1024;
+        input.dsp_workspace_percent=eme?75:50;
+        input.tx_dbm=36.020599913279625;input.path_loss_db=eme?205:180;input.noise_density_dbm_hz=-164;
+        modem::OscillatorSearchConfig oscillator;
+        oscillator.lf=tuning::oscillator_model(tuning::parse_oscillator_preset(eme?"gpsdo-ocxo":"crystal"));
+        oscillator.rf=tuning::oscillator_model(tuning::parse_oscillator_preset(eme?"gpsdo-ocxo":"ic-7100"));
+        oscillator.rf_shift_hz=eme?5.8e9:3e7;oscillator.margin=3;
+        oscillator.reference=modem::OscillatorReference::independent_audio;
+        input.options.modem.oscillator_search=oscillator;
+        if(eme) {
+            input.fake_hopping=fhss::resolve(fhss::Preference::fcc,input.options.modem);
+            check(input.fake_hopping.available,"Microwave helper fixture lost its Fake FCC profile");
+            input.observer_hopping=input.fake_hopping.observer();
+            modem::FhssPlan hops;hops.channels=input.fake_hopping.channels;hops.dwell_seconds=.4;
+            for(unsigned i=0;i<hops.channels;++i)hops.shifts[i]=input.fake_hopping.center(i)-1500;
+            input.options.modem.fake_hopping=transfer::transmit_hopping(hops,input.options);
+            // Match the planner's conservative oscillator domain at the highest hop.
+            input.options.modem.oscillator_search->rf_shift_hz=input.fake_hopping.last_hz-1500;
+        }
+        const auto effects=modem::oscillator_effects(input.options.modem);
+        input.channel.clock_error_ppm=effects.clock_error_ppm;
+        input.channel.frequency_offset_hz=effects.frequency_offset_hz;
+        input.channel.phase_noise_degrees_per_sqrt_second=effects.phase_noise_degrees_per_sqrt_second;
+        input.receiver_work_mode=simulation::ReceiverWorkMode::hardware_fallback;
+        input.receiver_settings=live::Settings{};
+        input.receiver_settings->transfer=input.options;
+        input.receiver_settings->long_message_modem=input.options.modem;
+        input.receiver_settings->dsp_workspace_bytes=input.options.dsp_workspace_bytes;
+        input.receiver_settings->full_duplex=true;
+        input.receiver_settings->helper.power_w=1500;
+        input.receiver_settings->helper.data_power_w=4;
+        return input;
+    };
+    for(const bool eme:{false,true}) {
+        auto input=fixture(eme);planner::Cache cache;
+        const auto assisted=selected(input,cache);
+        auto disabled=input;disabled.receiver_settings->helper.power_w=0;
+        const auto ordinary=selected(disabled,cache);unchanged(assisted,ordinary);
+        const auto& advice=assisted.helper_reference;
+        check(advice.geometry_available&&advice.budget_available&&advice.tone_level_sufficient&&
+              advice.conditional_strip_available&&advice.ordinary_pairs>=512&&advice.conditional_pair_limit==257&&
+              advice.retained_clock_rates>0&&advice.required_frequency_uncertainty_hz>0,
+              "Reported crystal/microwave configuration lost its conditional helper search advice");
+        check(!input.options.timestamp&&
+              advice.status.find("Primary bank replacement is unavailable during rolling epoch admission")!=std::string::npos&&
+              advice.status.find("ordinary bank is retained")!=std::string::npos&&
+              advice.status.find("additional optional helper search still requires spare workspace and runtime eligibility")!=std::string::npos,
+              "Rolling crystal/microwave reception must retain the ordinary bank despite prospective helper search counts");
+        const auto config=planned_config(input,input.target_db_hz);
+        const auto lattice=modem::oscillator_pattern_search(config,transfer::effective_clock_sync(input.options)?
+            modem::utc_transmit_rate_limit(config):0);
+        check(advice.ordinary_pairs==lattice.hypotheses.size(),
+              "Conditional comparison did not retain the ordinary oscillator-bank size");
+        if(eme) {
+            near(assisted.bit_seconds,128,"Microwave helper advice changed the active 128 s waveform");
+            near(advice.cn0_db_hz,10*std::log10(1500.)+30-205+164,
+                 "Microwave helper advice used the wrong received level");
+            check(advice.retained_clock_rates==1&&advice.required_frequency_uncertainty_hz>.24&&
+                  advice.required_frequency_uncertainty_hz<=.25,
+                  "Tiny GPSDO clock domain must remain covered within the 257-lane, 128 s frequency budget");
+        }else check(advice.retained_clock_rates>1,
+                   "A single helper tone must not remove the independent crystal audio-clock alternatives");
+        modem::PatternSearch original;original.hypotheses=lattice.hypotheses;
+        original.admitted_clock_half_width_ppm=lattice.requested_clock_half_width_ppm;
+        original.start_offset_seconds=7;original.start_uncertainty_seconds=.6;
+        original.search_stream_phases=true;
+        helper::Reference reference;reference.sample_rate=config.sample_rate;reference.frequency_valid=true;
+        reference.frequency_hz=advice.frequency_hz;
+        const auto step=.25/assisted.bit_seconds;
+        reference.frequency_uncertainty_hz=std::max(0.,advice.required_frequency_uncertainty_hz-.01*step);
+        helper::AssistanceRequest request;request.expected_helper_hz=advice.frequency_hz;
+        request.maximum_hypotheses=advice.conditional_pair_limit;request.cover_continuous_clock=true;
+        const auto below=helper::plan_assistance(config,original,reference,request);
+        check(below.search&&below.search->hypotheses.size()<=257&&
+              below.search->start_offset_seconds==original.start_offset_seconds&&
+              below.search->start_uncertainty_seconds==original.start_uncertainty_seconds&&
+              below.search->search_stream_phases&&!below.search->qualified_start_window&&below.timing_alternatives.empty()&&
+              below.search->admitted_clock_half_width_ppm==original.admitted_clock_half_width_ppm,
+              "Advertised frequency threshold lost original timing or continuous clock coverage");
+        std::set<double> retained;
+        for(const auto& h:below.search->hypotheses)retained.insert(h.clock_error_ppm);
+        check(retained.size()==advice.retained_clock_rates,
+              "Advertised retained clock count differs from actual conditional planning");
+        reference.frequency_uncertainty_hz=advice.required_frequency_uncertainty_hz+.01*step;
+        check(!helper::plan_assistance(config,original,reference,request).search,
+              "Advertised helper uncertainty threshold exceeded its actual lane budget");
+        for(const auto width:{220.f,900.f}) {
+            const auto page=planner_page::build(assisted,width,false,false);
+            check(contains_text(page,"Conditional acquisition: at most 257")&&
+                  contains_text(page,"in an additional optional search")&&
+                  contains_text(page,"when measured helper uncertainty is at most")&&
+                  contains_text(page,"all original epoch and timing alternatives remain")&&
+                  contains_text(page,"unavailable during rolling epoch admission")&&
+                  contains_text(page,"Additional helper searches retain the ordinary bank")&&
+                  contains_text(page,"Where primary bank replacement is admitted")&&
+                  contains_text(page,"not quantified by these curves")&&contains_text(page,"payload target is unchanged"),
+                  "Conditional helper advice must disclose its measurement prerequisite and unchanged payload model");
+        }
+        auto fixed=input;fixed.options.timestamp=1000;fixed.receiver_settings->transfer.timestamp=1000;
+        const auto dated=selected(fixed,cache);
+        check(dated.helper_reference.conditional_strip_available&&
+              dated.helper_reference.status.find("unavailable during rolling epoch admission")==std::string::npos&&
+              dated.helper_reference.status.find("Primary bank replacement requires Complex only; the ordinary bank is retained")!=std::string::npos&&
+              dated.helper_reference.status.find("additional optional helper search still requires spare workspace and runtime eligibility")!=std::string::npos&&
+              dated.helper_reference.ordinary_pairs==advice.ordinary_pairs&&
+              dated.helper_reference.retained_clock_rates==advice.retained_clock_rates,
+              "A fixed timestamp with Automatic strategy must retain the ordinary bank and additional-only helper advice");
+        near(dated.bit_seconds,assisted.bit_seconds,"Fixed-timestamp helper advice changed the payload waveform");
+        near(dated.helper_reference.required_frequency_uncertainty_hz,advice.required_frequency_uncertainty_hz,
+             "A fixed timestamp changed the prospective helper frequency threshold");
+        auto fixed_disabled=fixed;fixed_disabled.receiver_settings->helper.power_w=0;
+        unchanged(dated,selected(fixed_disabled,cache));
+        auto complex=fixed;complex.options.modem.receiver_strategy=modem::ReceiverStrategy::complex_only;
+        complex.receiver_settings->transfer.modem.receiver_strategy=modem::ReceiverStrategy::complex_only;
+        complex.receiver_settings->long_message_modem->receiver_strategy=modem::ReceiverStrategy::complex_only;
+        const auto explicit_complex=selected(complex,cache);
+        check(explicit_complex.helper_reference.conditional_strip_available&&
+              explicit_complex.helper_reference.status.find("unavailable during rolling epoch admission")==std::string::npos&&
+              explicit_complex.helper_reference.status.find("Primary bank replacement requires Complex only")==std::string::npos&&
+              explicit_complex.helper_reference.status.find("Fixed timestamp and Complex only permit runtime eligibility checks")!=std::string::npos&&
+              explicit_complex.helper_reference.status.find("actual native continuous receiver, precommit resources, timing and receiver lifecycle checks are still required")!=std::string::npos&&
+              explicit_complex.helper_reference.ordinary_pairs==advice.ordinary_pairs&&
+              explicit_complex.helper_reference.retained_clock_rates==advice.retained_clock_rates,
+              "Fixed epoch and explicit Complex only must still disclose actual backend and resource prerequisites");
+        near(explicit_complex.bit_seconds,assisted.bit_seconds,"Complex-only helper advice changed payload symbol duration");
+        near(explicit_complex.helper_reference.required_frequency_uncertainty_hz,advice.required_frequency_uncertainty_hz,
+             "Complex-only helper advice changed the prospective frequency threshold");
+        auto complex_disabled=complex;complex_disabled.receiver_settings->helper.power_w=0;
+        unchanged(explicit_complex,selected(complex_disabled,cache));
+        auto amplitude=input;amplitude.options.modem.receiver_strategy=modem::ReceiverStrategy::amplitude_only;
+        amplitude.receiver_settings->transfer.modem.receiver_strategy=modem::ReceiverStrategy::amplitude_only;
+        amplitude.receiver_settings->long_message_modem->receiver_strategy=modem::ReceiverStrategy::amplitude_only;
+        const auto unsupported=selected(amplitude,cache);
+        check(!unsupported.helper_reference.conditional_strip_available&&
+              !contains_text(planner_page::build(unsupported,900,false,false),"Conditional acquisition:")&&
+              contains_text(planner_page::build(unsupported,900,false,false),"amplitude-only reception does not admit"),
+              "Amplitude-only reception must not advertise helper-conditioned payload acquisition");
+        if(!eme) {
+            auto split=input;split.options.modem.symbol_burst={2,0};
+            split.receiver_settings->transfer=split.options;
+            split.receiver_settings->long_message_modem=split.options.modem;
+            const auto scheduled=selected(split,cache);
+            check(!scheduled.helper_reference.conditional_strip_available&&
+                  !contains_text(planner_page::build(scheduled,900,false,false),"Conditional acquisition:")&&
+                  scheduled.helper_reference.status.find("unavailable for this scheduled geometry")!=std::string::npos,
+                  "Split physical symbols must not advertise unsupported helper acquisition");
+            auto small=input;bool admitted=false;
+            for(std::size_t bytes=512*1024;bytes<=4*1024*1024;bytes+=64*1024) {
+                small.options.dsp_workspace_bytes=bytes;
+                small.receiver_settings->transfer.dsp_workspace_bytes=bytes;
+                small.receiver_settings->dsp_workspace_bytes=bytes;
+                try {
+                    if(live::receiver_workspace_capacity(*small.receiver_settings)/8<128*1024) {
+                        admitted=true;break;
+                    }
+                }catch(const Error&){} // Smaller budgets can fail the ordinary frontend reservation.
+            }
+            check(admitted,"No valid small-workspace helper exclusion fixture");
+            const auto limited=selected(small,cache);
+            check(!limited.helper_reference.conditional_strip_available&&
+                  !contains_text(planner_page::build(limited,900,false,false),"Conditional acquisition:")&&
+                  limited.helper_reference.status.find("insufficient spare workspace")!=std::string::npos,
+                  "Optional helper advice must yield to the ordinary receiver workspace reservation");
+        }
+        if(eme) {
+            const auto patch=launch_command::parse("--target-snr -33.19739098858173 --short-target-snr -3.0720996964786846 --long-target-snr -3.0720996964786846");
+            near(*patch.target_db_hz,-33.19739098858173,"Microwave preview target changed during parsing");
+            near(*patch.short_target_db_hz,input.target_db_hz,"Microwave active short target changed during parsing");
+            near(*patch.long_target_db_hz,input.target_db_hz,"Microwave active long target changed during parsing");
+        }
+    }
+    // Full graph results stay ordinary even when the auxiliary helper budget is
+    // recomputed through the same retained cache.
+    auto curves=fixture(false);curves.options.modem.oscillator_search.reset();
+    curves.channel.clock_error_ppm=curves.channel.frequency_offset_hz=curves.channel.phase_noise_degrees_per_sqrt_second=0;
+    curves.receiver_settings->transfer=curves.options;
+    curves.receiver_settings->long_message_modem=curves.options.modem;
+    planner::Cache curve_cache;const auto with_helper=planner::build(curves,curve_cache);
+    curves.receiver_settings->helper.power_w=0;const auto without_helper=planner::build(curves,curve_cache);
+    check(with_helper.available&&without_helper.available&&!with_helper.points.empty()&&
+          !with_helper.receive_points.empty()&&!with_helper.cpu_points.empty(),
+          "Helper curve comparison requires complete ordinary graphs");
+    unchanged(with_helper,without_helper);
+    check(with_helper.points.size()==without_helper.points.size()&&
+          with_helper.receive_points.size()==without_helper.receive_points.size()&&
+          with_helper.cpu_points.size()==without_helper.cpu_points.size(),
+          "Helper changed ordinary graph coverage");
+    for(std::size_t i=0;i<with_helper.points.size();++i) {
+        const auto& a=with_helper.points[i];const auto& b=without_helper.points[i];
+        check(std::tie(a.target_db_hz,a.bit_seconds,a.observer_ratio,a.observer_available)==
+              std::tie(b.target_db_hz,b.bit_seconds,b.observer_ratio,b.observer_available),
+              "Helper changed the ordinary airtime/observer graph");
+    }
+    for(std::size_t i=0;i<with_helper.receive_points.size();++i) {
+        const auto& a=with_helper.receive_points[i];const auto& b=without_helper.receive_points[i];
+        check(std::tie(a.target_db_hz,a.success_probability,a.confidence_available,a.reference_available,
+                  a.probability_reference_only,a.clock_supported,a.workspace_supported,a.probability_trials)==
+              std::tie(b.target_db_hz,b.success_probability,b.confidence_available,b.reference_available,
+                  b.probability_reference_only,b.clock_supported,b.workspace_supported,b.probability_trials),
+              "Helper changed the ordinary probability graph or its qualification");
+    }
+    for(std::size_t i=0;i<with_helper.cpu_points.size();++i) {
+        const auto& a=with_helper.cpu_points[i];const auto& b=without_helper.cpu_points[i];
+        check(std::tie(a.target_db_hz,a.realtime_ratio,a.available)==std::tie(b.target_db_hz,b.realtime_ratio,b.available),
+              "Helper fabricated a CPU improvement in the ordinary graph");
+    }
+    for(const double rate:{100,3600,12000}) {
+        launch_command::Patch patch;patch.rate_hz=rate;patch.carrier_hz=std::max(1500.,.75*rate);
+        Controller controller({false,false,patch});
+        const auto before=controller.settings().transfer.modem;
+        const auto rate_text=controller.field(ui::Field::bandwidth).text;
+        controller.select(ui::Field::helper_power,"1.5 kW");
+        const auto& after=controller.settings().transfer.modem;
+        check(std::abs(controller.settings().helper.power_w-1500)<1e-9&&controller.field(ui::Field::bandwidth).text==rate_text&&
+              std::tie(after.bandwidth_hz,after.sample_rate,after.carrier_hz,after.pattern_symbols,after.spreading_factor,after.integration_seconds)==
+              std::tie(before.bandwidth_hz,before.sample_rate,before.carrier_hz,before.pattern_symbols,before.spreading_factor,before.integration_seconds),
+              "Enabling helper must not silently change the configured 100 Hz, SSB or 12 kHz waveform");
+        controller.close();
+    }
 }
 void estimate_warning_thresholds() {
     planner::Model model;model.inputs=example();model.available=true;
@@ -2496,7 +2759,8 @@ int main(int argc,char** argv) {
             std::cout<<"Conditional RX reference and timing work document passed\n";return 0;
         }
         if(argc==2&&std::string_view(argv[1])=="--helper-only") {
-            helper_reference_link_budget();std::cout<<"Helper reference link budget passed\n";return 0;
+            helper_reference_link_budget();helper_conditional_acquisition_plan();
+            std::cout<<"Helper reference link budget and conditional acquisition advice passed\n";return 0;
         }
         selected_plan_progress_and_support_equivalence();
         sustained_listening_plan_document();
@@ -2514,7 +2778,7 @@ int main(int argc,char** argv) {
         shared_link_budget_without_simulation();shared_link_controls_visibility();
         link_budget_edit_buffers();link_budget_preset_and_dialog_sync();
         search_arithmetic_document_and_cache();
-        receiver_overlay_and_cpu_status();helper_reference_link_budget();estimate_warning_thresholds();rolling_epoch_selected_plan_document();conditional_reference_and_timing_work_document();document_semantics_layout_and_plots();
+        receiver_overlay_and_cpu_status();helper_reference_link_budget();helper_conditional_acquisition_plan();estimate_warning_thresholds();rolling_epoch_selected_plan_document();conditional_reference_and_timing_work_document();document_semantics_layout_and_plots();
         std::cout<<"Shared Link planner tests passed\n";
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

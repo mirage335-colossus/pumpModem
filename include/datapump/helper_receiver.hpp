@@ -43,7 +43,7 @@ struct Reference {
 // helper yields no useful reference and leaves the original search available.
 class Receiver {
 public:
-    static constexpr std::size_t workspace_bound=8*1024;
+    static constexpr std::size_t workspace_bound=9*1024;
     // Only the first receive key is selected for compact encrypted time. No
     // helper metadata is authenticated or used here to adjust a clock/grid.
     explicit Receiver(double expected_hz,double search_half_width_hz=20,

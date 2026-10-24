@@ -364,9 +364,9 @@ struct Controller::Impl {
             f(UiField::link_noise).options.push_back({value,value});
         sync_link_fields();
         f(UiField::helper_power).options={{"0","0 (disabled)"}};
-        for(const auto* value:{"1.5 kW","100 W","40 W","4 W","1 W","100 mW","2 mW","1 mW","30 µW","1 µW"})
+        for(const auto* value:{"15 kW","10 kW","1.5 kW","100 W","40 W","4 W","1 W","100 mW","2 mW","1 mW","30 µW","1 µW"})
             f(UiField::helper_power).options.push_back({value,value});
-        f(UiField::helper_power).selected="0";
+        f(UiField::helper_power).selected=f(UiField::helper_power).text="0";
         for(const auto* value:{"10","20","40","60","80","90"})
             f(UiField::helper_ratio_limit).options.push_back({value,std::string(value)+" dB"});
         f(UiField::helper_ratio_limit).selected="90";
@@ -935,13 +935,15 @@ struct Controller::Impl {
                     validate_link_value(field,field==UiField::link_power?next_planner.tx_dbm:
                         field==UiField::link_loss?next_planner.path_loss_db:next_planner.noise_density_dbm_hz);
             }
-            next.helper.power_w=load&&load->helper_power_w?*load->helper_power_w:helper_power_w(f(UiField::helper_power).selected);
+            next.helper.power_w=load&&load->helper_power_w?*load->helper_power_w:helper_power_w(f(UiField::helper_power).text);
             next.helper.ratio_limit_db=load&&load->helper_ratio_limit_db?*load->helper_ratio_limit_db:
                 number(f(UiField::helper_ratio_limit).selected,"Helper ratio limit");
             next.helper.frequency=helper_frequency(load&&load->helper_frequency?*load->helper_frequency:f(UiField::helper_frequency).selected);
             next.helper.callsign=load&&load->helper_callsign?*load->helper_callsign:f(UiField::helper_callsign).text;
             next.helper.data_power_w=std::pow(10.,(next_planner.tx_dbm-30)/10);
-            validate_helper_callsign(next.helper.callsign);
+            // The saved callsign is inactive with a transmit key. Preserve it
+            // for later clear operation without letting it reject encryption.
+            if(!next_encrypted)validate_helper_callsign(next.helper.callsign);
             next.transfer.timestamp=0;
             next.transfer.automatic_receive_profiles=true;
             next.transfer.receive_pattern_mode=mode;
@@ -1167,6 +1169,7 @@ struct Controller::Impl {
                     return std::abs(watts-next.helper.power_w)<=std::max(watts,next.helper.power_w)*1e-12;});
                 if(power_choice==helper_power.options.end()){helper_power.options.push_back({loaded_power,loaded_power});helper_power.selected=loaded_power;}
                 else helper_power.selected=power_choice->id;
+                helper_power.text=helper_power.selected;
                 f(UiField::helper_ratio_limit).selected=planner_number(next.helper.ratio_limit_db);
                 f(UiField::helper_frequency).selected=helper_frequency_id(next.helper.frequency);
                 f(UiField::helper_callsign).text=next.helper.callsign;
@@ -1371,8 +1374,14 @@ struct Controller::Impl {
         validate_helper_callsign(text);
         f(UiField::helper_callsign).text=text;
         settings.helper.callsign=text;
-        if(started)session.set_helper_callsign(std::move(text));
-        dirty();sync_launch_command();
+        // A saved, inactive callsign can become invalid when encryption is
+        // switched off. A valid visible edit must recover that configuration.
+        if(!settings_valid)configure();
+        else {
+            if(started)session.set_helper_callsign(std::move(text));
+            dirty();
+        }
+        sync_launch_command();
     }
     void message_label() {
         if(!attachment) f(UiField::message_label).text=composer.raw_bits()?
@@ -2512,7 +2521,11 @@ void Controller::edit(UiField field,std::string text) {
         }
         const bool untouched=!p.composer.raw_bits()&&p.draft_error.empty()&&p.f(UiField::message).text==p.seeded_message;
         p.f(field).text=std::move(text);
-        if(field==UiField::short_bits)p.short_bits_changed();
+        if(field==UiField::helper_power) {
+            p.configure();
+            p.f(field).selected=p.settings.helper.power_w>0?p.f(field).text:"0";
+        }
+        else if(field==UiField::short_bits)p.short_bits_changed();
         else if(field==UiField::binary) p.binary_changed();
         else if(field==UiField::receive_snr) {
             p.f(field).display_text.clear();
@@ -2576,11 +2589,12 @@ void Controller::select(UiField field,std::string id) {
             }
             id=preset.enabled?"yes":"no";
         }
-        if(state.selected==id&&!legacy_budget&&!(field==UiField::dsss_factor&&p.f(UiField::dsss_version).selected!="interleave"))return;
+        if(state.selected==id&&(field!=UiField::helper_power||state.text==id)&&!legacy_budget&&!(field==UiField::dsss_factor&&p.f(UiField::dsss_version).selected!="interleave"))return;
         const bool list=std::any_of(ui::console_screen().begin(),ui::console_screen().end(),[&](const auto& control){return control.field==field&&control.kind==ui::Kind::list;});
         const bool available=list?std::any_of(state.records.begin(),state.records.end(),[&](const auto& row){return row.id==id&&row.enabled;}):
             std::any_of(state.options.begin(),state.options.end(),[&](const auto& option){return option.id==id&&option.enabled;});
         if(!available)throw Error("Select an available item");
+        if(field==UiField::helper_power) {edit(field,std::move(id));return;}
         const auto previous_selection=state.selected;
         state.selected=std::move(id);
         if(field==UiField::volume) {

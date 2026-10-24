@@ -336,6 +336,12 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   add_executable(test_helper_live_assistance tests/test_helper_live_assistance.cpp)
   target_link_libraries(test_helper_live_assistance PRIVATE datapump)
   add_test(NAME helper_live_assistance COMMAND test_helper_live_assistance)
+  add_executable(test_helper_output_fallback tests/test_helper_output_fallback.cpp)
+  target_link_libraries(test_helper_output_fallback PRIVATE datapump)
+  add_test(NAME helper_output_fallback COMMAND test_helper_output_fallback)
+  add_executable(test_helper_conditioned_native tests/test_helper_conditioned_native.cpp)
+  target_link_libraries(test_helper_conditioned_native PRIVATE datapump)
+  add_test(NAME helper_conditioned_native COMMAND test_helper_conditioned_native)
   add_executable(test_helper_carrier tests/test_helper_carrier.cpp)
   target_link_libraries(test_helper_carrier PRIVATE datapump)
   add_test(NAME helper_carrier COMMAND test_helper_carrier)
@@ -695,7 +701,7 @@ endif()
 if(NOT DATAPUMP_BUILD_WASM)
   set(_datapump_mock_audio_tests
     test_symbol_burst_live test_gui_scheduled_cold_start test_gui_timing_advice test_legacy_session test_live_profiles
-    test_fast_session test_live_transmit_lock test_fast_telemetry
+    test_fast_session test_live_transmit_lock test_helper_output_fallback test_helper_conditioned_native test_fast_telemetry
     test_gui_legacy_live test_gui_fast_live)
   set(_datapump_direct_audio_tests test_alsa_audio test_windows_audio)
   get_property(_datapump_native_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
