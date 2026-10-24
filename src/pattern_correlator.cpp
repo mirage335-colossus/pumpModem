@@ -1053,7 +1053,7 @@ struct PatternCorrelator::Impl {
         return view.first==this?view.second:scheduled?scheduled->map.get():nullptr;
     }
     ScheduledSymbolCalendar* scheduled_calendar() const {return scheduled?scheduled->calendar.get():nullptr;}
-    bool amplitude_publication_dirty=true;
+    bool amplitude_publication_dirty=true,helper_acquisition_suspended=false;
     std::vector<PatternAmplitudeChannel> amplitude_channels;
     std::vector<float> amplitude_pcm;
     std::vector<detail::EnvelopeChannelFit> amplitude_fits;
@@ -8576,8 +8576,9 @@ struct PatternCorrelator::Impl {
         amplitude_publication_dirty=true;
         const auto retained_context=h.admitted || !h.burst.bits.empty();
         const auto admitted_before=h.admitted;
-        const bool permitted_start=!burst || !burst->acquisition_suspended ||
-            h.index<=burst->lanes[hypothesis].acquisition_cutoff || retained_context || burst_current_context(h);
+        const bool permitted_start=(!helper_acquisition_suspended || h.admitted) &&
+            (!burst || !burst->acquisition_suspended ||
+             h.index<=burst->lanes[hypothesis].acquisition_cutoff || retained_context || burst_current_context(h));
         std::size_t group_count=0;
         const auto groups=phase_groups(h,group_count);
         if(scheduled_map() && !options.amplitude_only && differential_window) {
@@ -8785,8 +8786,8 @@ struct PatternCorrelator::Impl {
             }
         } else {
             if(standalone && pending_count && (!h.admitted || next_chain<threshold())) {
-                const bool restart_allowed=!burst || !burst->acquisition_suspended ||
-                    h.index<=burst->lanes[hypothesis].acquisition_cutoff;
+                const bool restart_allowed=!helper_acquisition_suspended &&
+                    (!burst || !burst->acquisition_suspended || h.index<=burst->lanes[hypothesis].acquisition_cutoff);
                 publish(h);clear(h);
                 if(!restart_allowed)reliable=false;
             }
@@ -12794,6 +12795,13 @@ void PatternCorrelator::suspend_fresh_acquisition() {
     for(std::size_t i=0;i<s.hypotheses.size();++i)
         s.burst->lanes[i].acquisition_cutoff=std::max(s.burst->lanes[i].acquisition_cutoff,s.hypotheses[i].index);
     s.burst->acquisition_suspended=true;
+}
+bool PatternCorrelator::suspend_helper_acquisition() {
+    auto& s=*impl_;
+    if(s.finished || s.burst || s.scheduled || s.options.amplitude_only || !s.sample ||
+       (s.config.fake_hopping && s.config.fake_hopping->defer_symbols) ||
+       std::none_of(s.hypotheses.begin(),s.hypotheses.end(),[](const auto& h){return h.admitted;}))return false;
+    s.helper_acquisition_suspended=true;return true;
 }
 bool PatternCorrelator::symbol_burst_tracking_active()const {
     auto& s=*impl_;if(!s.burst)return false;

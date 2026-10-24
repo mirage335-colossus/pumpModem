@@ -1,4 +1,5 @@
 #include "../scheduled_acquisition_policy.hpp"
+#include "../live_helper.hpp"
 #include "link_planner_model.hpp"
 #include "../estimate_cancellation.hpp"
 #include "datapump/execution.hpp"
@@ -85,6 +86,61 @@ simulation::Estimate receiver_estimate(const transfer::Estimate& transmission,co
 }
 const live::Settings* receiver_settings(const Inputs& inputs) {
     return inputs.receiver_settings?&*inputs.receiver_settings:nullptr;
+}
+void helper_reference_plan(Model& model,const modem::Config& config) {
+    if(!model.inputs.receiver_settings || model.inputs.receiver_settings->helper.power_w==0)return;
+    auto& result=model.helper_reference;result.enabled=true;
+    auto settings=*model.inputs.receiver_settings;
+    // The planner's editable power is authoritative for this hypothetical
+    // link. A retained Live snapshot can still contain the previous value.
+    settings.helper.data_power_w=std::pow(10.,(model.inputs.tx_dbm-30)/10);
+    settings.transfer.modem=config;
+    try {
+        helper::validate(settings.helper);
+        result.effective_power_w=std::min(settings.helper.power_w,
+            settings.helper.data_power_w*std::pow(10.,settings.helper.ratio_limit_db/10));
+        result.received_dbm=30+10*std::log10(result.effective_power_w)-model.inputs.path_loss_db;
+        result.cn0_db_hz=result.received_dbm-model.inputs.noise_density_dbm_hz;
+        result.tone_snr_db=result.cn0_db_hz-10; // The tracker uses a 10 Hz cell.
+        if(!std::isfinite(result.received_dbm)||!std::isfinite(result.cn0_db_hz)||!std::isfinite(result.tone_snr_db))
+            throw Error("helper link budget exceeds the numerical range");
+        result.budget_available=true;
+        const auto waveform_gain=modem::outer_dsss_transmit_gain(config);
+        result.simulation_level_modeled=model.inputs.receiver_work_mode==simulation::ReceiverWorkMode::sampled_simulation&&
+            waveform_gain!=1;
+        if(result.simulation_level_modeled) {
+            result.simulation_level_db=20*std::log10(waveform_gain);
+            result.simulation_data_cn0_db_hz=model.actual_cn0_db_hz+result.simulation_level_db;
+            result.simulation_cn0_db_hz=result.cn0_db_hz+result.simulation_level_db;
+            result.simulation_tone_snr_db=result.tone_snr_db+result.simulation_level_db;
+        }
+        result.tone_level_sufficient=(result.simulation_level_modeled?
+            result.simulation_tone_snr_db:result.tone_snr_db)>=6;
+        // This is the same placement as Live, without claiming that an unknown
+        // hardware output rate or radio filter can pass the resulting tone.
+        const auto plan=helper::plan(settings.helper,config.carrier_hz,
+            live::detail::helper_occupied_bandwidth(settings),120000000,
+            static_cast<double>(config.sample_rate)+250,waveform_gain);
+        result.frequency_hz=plan.frequency_hz;result.geometry_available=true;
+        if((config.fake_hopping && config.fake_hopping->defer_symbols) ||
+           (config.scheduled_hopping && config.scheduled_hopping->enabled() && !config.scheduled_hopping->continuous()) ||
+           config.symbol_burst.enabled())
+            result.status="Helper transmission and presence tracking are available; assisted payload acquisition is unavailable for this scheduled geometry.";
+        else if(config.receiver_strategy==modem::ReceiverStrategy::amplitude_only)
+            result.status="Presence tracking is available; amplitude-only reception does not admit helper-assisted payload acquisition.";
+        else if(!model.clock_search_supported || !model.receiver_workspace_supported)
+            result.status="Ordinary search coverage does not fit; optional helper work yields to the payload receiver.";
+        else if(live::receiver_workspace_capacity(settings)/8<128*1024)
+            result.status="Optional helper acquisition has insufficient spare workspace; ordinary payload reception retains priority.";
+        else
+            result.status="A clean received helper can guide frequency acquisition and dwell timing in a coherent FFT or compact correlator receiver. Dynamic phase tracking requires a compatible FFT path; admission requires spare workspace.";
+        if(settings.helper.frequency==helper::Frequency::low)
+            result.status+=" Low placement leaves the adjacent helper in the ordinary capture band; interference isolation is unqualified.";
+        else if(settings.helper.frequency==helper::Frequency::cochannel)
+            result.status+=" Co-channel placement overlaps the payload and can interfere; this option is discouraged.";
+    } catch(const Error& error) {
+        result.status="Helper unavailable: "+std::string(error.what());
+    }
 }
 auto planning_policy_key() {
     const auto* batching=std::getenv("DATAPUMP_SCHED_LAZY_BATCH");
@@ -1004,6 +1060,7 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
             result.receiver_status+="CPU estimate unavailable for selected receiver";
         }
         if(result.receiver_status.empty())result.receiver_status="Clock and RAM fit · reception unverified";
+        helper_reference_plan(result,config);
 
         if(selected) {
             estimate_detail::check(stop);

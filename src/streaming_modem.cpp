@@ -234,6 +234,7 @@ void StreamingReceiver::suspend_fresh_acquisition(){impl_->pattern.suspend_fresh
 bool StreamingReceiver::symbol_burst_tracking_active()const{return impl_->pattern.symbol_burst_tracking_active();}
 bool StreamingReceiver::synchronized()const{return impl_->pattern.synchronized();}
 bool StreamingReceiver::initial_search_complete()const{return impl_->pattern.initial_search_complete();}
+std::uint64_t StreamingReceiver::initial_fft_input_samples()const noexcept{return impl_->pattern.initial_fft_input_samples();}
 bool StreamingReceiver::clock_windowed()const{return impl_->pattern.clock_windowed();}
 bool StreamingReceiver::local_clock_fallback()const{return impl_->pattern.local_clock_fallback();}
 bool StreamingReceiver::candidate_limited()const{return impl_->pattern.candidate_limited();}
@@ -277,6 +278,13 @@ Bytes StreamingReceiver::push_symbols(std::span<const SymbolObservation>,std::st
     cancelled(stop);throw Error("pattern acquisition requires measured PCM, not despread symbol observations");
 }
 Bytes StreamingReceiver::push(std::span<const float> samples,std::stop_token stop){impl_->pattern.push(samples,stop);return {};}
+bool StreamingReceiver::phase_assistance_supported()const noexcept{return impl_->pattern.phase_assistance_supported();}
+std::size_t StreamingReceiver::phase_assistance_bin_samples()const noexcept{return impl_->pattern.phase_assistance_bin_samples();}
+bool StreamingReceiver::suspend_helper_acquisition(){return impl_->pattern.suspend_helper_acquisition();}
+bool StreamingReceiver::push_phase_assisted(std::span<const float> samples,std::span<const PatternPhaseKnot> knots,
+        std::uint64_t maximum_gap_samples,std::stop_token stop) {
+    return impl_->pattern.push_phase_assisted(samples,knots,maximum_gap_samples,stop);
+}
 Bytes StreamingReceiver::push(std::span<const float> samples,std::span<const Complex> projected,std::stop_token stop){impl_->pattern.push(samples,projected,stop);return {};}
 Bytes StreamingReceiver::push(std::span<const float> samples,std::span<const Complex> projected,std::stop_token stop,
                               detail::CorrelationProjectionCache* cache){impl_->pattern.push(samples,projected,stop,cache);return {};}

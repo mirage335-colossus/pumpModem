@@ -99,6 +99,10 @@ public:
                 <<",\"tx_timed\":"<<s.transmit_clock_following<<",\"streams\":"<<signals.lines().size()
                 <<",\"complete_match\":"<<complete<<",\"unexpected_bits\":"<<unexpected
                 <<",\"unexpected_seen\":"<<unexpected_seen_
+                <<",\"helper_status\":\""<<json_escape(s.helper_status)<<"\",\"helper_snr_db\":"
+                <<(s.helper_snr_db?std::to_string(*s.helper_snr_db):"null")
+                <<",\"helper_frequency_offset_hz\":"
+                <<(s.helper_frequency_offset_hz?std::to_string(*s.helper_frequency_offset_hz):"null")
                 <<",\"timing\":\""<<json_escape(s.clock_timing_status)<<"\",\"error\":\""<<json_escape(s.error)<<"\"}\n"<<std::flush;
         }
         if(s.simulation)return finish(elapsed,"refused simulation",false);

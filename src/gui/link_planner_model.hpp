@@ -53,6 +53,28 @@ struct CpuPoint {
     double realtime_ratio=0;
     bool available=false;
 };
+struct HelperReferencePlan {
+    bool enabled=false;
+    bool budget_available=false;
+    // Nominal placement only. The audio device/radio passband is not known to
+    // the planner, and a received tone still needs measured qualification.
+    bool geometry_available=false;
+    bool tone_level_sufficient=false;
+    double effective_power_w=0;
+    double received_dbm=0;
+    double cn0_db_hz=0;
+    double tone_snr_db=0; // The presence tracker's 10 Hz resolution cell.
+    // Sampled simulation retains the source waveform's existing amplitude
+    // backoff against its nominal-power noise model. Hardware watts above
+    // instead describe the operator's calibrated transmit-power budget.
+    bool simulation_level_modeled=false;
+    double simulation_level_db=0;
+    double simulation_data_cn0_db_hz=0;
+    double simulation_cn0_db_hz=0;
+    double simulation_tone_snr_db=0;
+    double frequency_hz=0;
+    std::string status;
+};
 struct Model {
     Inputs inputs;
     std::vector<Point> points;
@@ -133,6 +155,9 @@ struct Model {
     double new_epoch_admissions=0,new_epoch_full_fft_batches=0,new_epoch_retained_fft_batches=0;
     double new_epoch_qualified_ready_batch_slots=0;
     std::string receiver_work_assumptions;
+    // Separate auxiliary link budget. It changes neither the ordinary payload
+    // target/margin nor the unassisted probability and CPU curves.
+    HelperReferencePlan helper_reference;
     double fallback_cpu_realtime_ratio=0,fallback_timing_hypotheses=0;
     double occupied_bandwidth_hz=0;
     // Additional full nominal engineering rolloff allowance for smooth gates;

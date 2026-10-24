@@ -2838,7 +2838,51 @@ void audio_options() {
     check(f::state.attempts==std::vector<std::string>{"hw:1,2","plug:SLAVE='dsnoop:1,2'","plug:SLAVE='dsnoop:1,2'"},
           "shared capture did not keep its own route after exclusive access was busy");
 }
+void minimum_hardware_rate() {
+    constexpr std::uint32_t logical=6000;
+    const auto setup=[] {f::reset();f::state.available={"default"};f::state.supported_rates={8000,16000};};
+    for(const auto minimum:{0u,64u,12000u}) {
+        const auto expected=minimum>8000?16000u:8000u;
+        a::Options options;options.minimum_hardware_rate=minimum;
+        setup();std::size_t generated=0;bool formatted=false;
+        a::playback(logical,"default",[&](std::span<float> samples) {
+            check(formatted,"rate-constrained playback generated PCM before format");
+            const auto count=std::min<std::size_t>(samples.size(),121-generated);
+            std::fill_n(samples.begin(),count,.25f);generated+=count;return count;
+        },{},[&](const auto& format) {
+            check(format.logical_rate==logical && format.hardware_rate==expected,"minimum playback rate changed logical format or selected a slow card rate");formatted=true;
+        },a::ChannelMode::left_mono,options);
+        check(generated==121 && f::state.played.size()==(121ULL*expected+logical-1)/logical && !f::state.live,
+            "minimum playback rate changed logical duration or leaked device");
+        check(std::all_of(f::state.configured.begin(),f::state.configured.end(),[&](const auto& candidate){return candidate.second>=minimum;}),
+            "playback attempted a rate below the minimum");
+        setup();formatted=false;
+        const auto pcm=a::record(.02,logical,"default",1024*1024,{},[&](const auto& format) {
+            check(format.logical_rate==logical && format.hardware_rate==expected,"minimum capture rate changed logical format or selected a slow card rate");formatted=true;
+        },options);
+        check(formatted && pcm.size()==120 && !f::state.live,"minimum capture rate changed duration or leaked device");
+        check(std::all_of(f::state.configured.begin(),f::state.configured.end(),[&](const auto& candidate){return candidate.second>=minimum;}),
+            "capture attempted a rate below the minimum");
+    }
+    for(bool capture:{false,true}) {
+        setup();f::state.supported_rates={8000};unsigned callbacks=0,formats=0;
+        a::Options options;options.minimum_hardware_rate=12000;
+        rejects([&] {
+            const auto format=[&](const auto&){++formats;};
+            if(capture)a::capture(logical,"default",[&](auto){++callbacks;return false;},{},format,options);
+            else a::playback(logical,"default",[&](auto){++callbacks;return std::size_t{0};},{},format,a::ChannelMode::left_mono,options);
+        });
+        check(!callbacks && !formats && f::state.played.empty() && !f::state.captured,"unsupported minimum reached source or capture PCM");
+    }
+    for(const auto invalid:{63u,120000001u}) {
+        setup();a::Options options;options.minimum_hardware_rate=invalid;
+        rejects([&]{a::playback(logical,"default",[](auto){return std::size_t{0};},{},{},a::ChannelMode::left_mono,options);});
+        check(!f::state.opens,"invalid minimum rate opened hardware");
+    }
+}
 int main(int argc,char** argv){try{
+    if(argc==2&&std::string(argv[1])=="--minimum-rate") {minimum_hardware_rate();return 0;}
+    minimum_hardware_rate();
     if(argc==2&&std::string(argv[1])=="--dsss-clipping-diagnostic") {native_queued_dsss_playback(false,true);return 0;}
     std::unique_ptr<datapump::audio::trace::Scope> verbose;
     if(argc==3&&std::string(argv[1])=="--trace-utc") {

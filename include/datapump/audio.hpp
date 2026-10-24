@@ -162,6 +162,11 @@ struct Options {
     // source seconds (including clock correction), and the hardware sample rate.
     // It cannot change source timing or extend playback beyond its source end.
     std::function<float(float,long double,std::uint32_t)> playback_output_transform={};
+    // Optional provider-clock floor for playback and capture. Zero preserves
+    // the existing candidate ordering; a nonzero floor excludes slower device
+    // formats without changing logical PCM, symbol timing, or callback rates.
+    // Providers with an already configured clock reject an insufficient rate.
+    std::uint32_t minimum_hardware_rate=0;
 };
 // Capabilities belong to the selected audio provider, not the UI or target OS.
 bool exclusive_supported();
@@ -175,6 +180,9 @@ void schedule_output(double epoch_seconds,std::stop_token stop={});
 namespace detail {
 template<bool CheckProvider>
 inline void validate_options_impl(const Options& options) {
+    if(options.minimum_hardware_rate!=0 &&
+       (options.minimum_hardware_rate<64 || options.minimum_hardware_rate>120000000))
+        throw Error("minimum hardware audio rate must be zero or 64..120000000 Hz");
     if(options.clock_timing)options.clock_timing->validate();
     if(options.allow_timing_fallback && !options.timing_status)
         throw Error("audio timing fallback requires a visible status observer");

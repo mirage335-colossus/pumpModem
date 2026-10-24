@@ -90,7 +90,15 @@ void helper_controls() {
     controller.select(F::helper_power,"1.5 kW");
     check(std::abs(controller.settings().helper.power_w-1500)<1e-9&&controller.field(F::helper_callsign).enabled,
           "Helper power did not enable the independent controls");
-    check(controller.enabled(ui::Command::transmit_helper),"Enabled helper cannot transmit independently");
+    check(!controller.enabled(ui::Command::transmit_helper),"Helper-only transmit bypasses Developer mode");
+    controller.activate(ui::Command::transmit_helper);
+    check(!controller.snapshot().transmitting&&!controller.enabled(ui::Command::cancel),
+          "Hidden developer helper action accepted a direct callback");
+    controller.set_developer_mode(true);
+    check(controller.enabled(ui::Command::transmit_helper),"Enabled developer helper cannot transmit independently");
+    controller.set_developer_mode(false);
+    check(!controller.enabled(ui::Command::transmit_helper),"Leaving Developer mode left helper-only dispatch enabled");
+    controller.set_developer_mode(true);
     controller.select(F::helper_ratio_limit,"20");controller.select(F::helper_frequency,"low");
     (void)controller.plot_update();
     controller.edit(F::helper_callsign,"N0HELP/P");
@@ -137,6 +145,29 @@ void helper_controls() {
     (void)controller.plot_update();controller.edit(F::callsign,"N0OFF");
     check(controller.settings().helper.callsign=="N0OFF"&&!controller.plot_update().clear_waterfall,
           "Disabled helper callsign copy reconfigured the receiver");
+    controller.select(F::helper_power,"100 W");
+    struct HelperKeyring {
+        std::filesystem::path path=std::filesystem::temp_directory_path()/
+            ("datapump-helper-gui-key-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        ~HelperKeyring(){std::error_code ignored;std::filesystem::remove(path,ignored);}
+    } fixture;
+    create_keyring(fixture.path,{"Helper privacy"});
+    controller.activate(ui::Command::open_keyfile);
+    const auto requests=controller.take_services();
+    check(requests.size()==1,"Helper privacy fixture did not request a keyfile");
+    controller.complete_service({requests.front().id,false,fixture.path.string(),{}});
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+    while(!controller.settings().transfer.key&&std::chrono::steady_clock::now()<deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(controller.settings().transfer.key&&!controller.field(F::helper_callsign).visible&&
+          !controller.field(F::helper_callsign).enabled,"Encryption did not hide and disable Helper Callsign");
+    controller.edit(F::helper_callsign,"STALE");
+    check(controller.field(F::helper_callsign).text=="N0OFF"&&controller.settings().helper.callsign=="N0OFF",
+          "Hidden encrypted Helper Callsign accepted an edit or lost its saved preference");
+    controller.select(F::key,"none");
+    check(controller.field(F::helper_callsign).visible&&controller.field(F::helper_callsign).enabled&&
+          controller.field(F::helper_callsign).text=="N0OFF","Disabling encryption did not restore Helper Callsign");
 }
 
 void search_arithmetic_controls() {
@@ -3528,6 +3559,7 @@ void bitmap_source_checks() {
 
 int main(int argc,char** argv) {
     try {
+        if(argc>1&&std::string_view(argv[1])=="--helper-controls") {helper_controls();std::cout<<"Helper controls passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--observer-only") {lpi_estimate_controls();std::cout<<"Observer controls passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--planner-examples") {planner_examples();std::cout<<"Planner examples passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--search-arithmetic") {search_arithmetic_controls();std::cout<<"Search arithmetic controls passed\n";return 0;}

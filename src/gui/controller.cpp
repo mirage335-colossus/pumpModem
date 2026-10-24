@@ -1610,7 +1610,7 @@ struct Controller::Impl {
         case Command::transmit: return transmit_ready()&&key_lock_seconds()<=0&&separation_seconds()<=0;
         case Command::force_transmit: return transmit_ready()&&(key_lock_seconds()>0||separation_seconds()>0);
         case Command::transmit_noise: return !busy && !key_loading && settings_valid && transmit_hop_ready();
-        case Command::transmit_helper: return settings.helper.power_w>0&&!busy&&!key_loading&&settings_valid&&transmit_hop_ready();
+        case Command::transmit_helper: return developer_mode&&settings.helper.power_w>0&&!busy&&!key_loading&&settings_valid&&transmit_hop_ready();
         case Command::cancel: return busy||snapshot.simulation_replay;
         case Command::open_keyfile: case Command::generate_keyfile: return !busy&&!key_loading;
         case Command::show_key_folder: return !busy&&!key_loading&&!key_path.empty();
@@ -1669,6 +1669,8 @@ struct Controller::Impl {
         f(UiField::helper_power).enabled=!busy;
         const bool helper_enabled=f(UiField::helper_power).selected!="0";
         for(const auto id:{UiField::helper_ratio_limit,UiField::helper_frequency,UiField::helper_callsign})f(id).enabled=!busy&&helper_enabled;
+        f(UiField::helper_callsign).visible=!encrypted();
+        f(UiField::helper_callsign).enabled=f(UiField::helper_callsign).enabled&&!encrypted();
         f(UiField::helper_power).display_text.clear();
         if(helper_enabled&&settings_valid) {
             const auto limit=settings.helper.data_power_w*std::pow(10.,settings.helper.ratio_limit_db/10);

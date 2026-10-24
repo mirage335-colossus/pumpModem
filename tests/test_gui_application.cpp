@@ -387,6 +387,28 @@ void developer_mode_presentation() {
     app.close();app.toggle(toggle,true);
     check(!app.field(F::developer_mode).checked,"A closing application accepted a developer-mode callback");
 }
+void helper_developer_visibility() {
+    using F=ui::Field;using C=ui::Command;
+    Launch launch;launch.settings=launch_command::parse("--pattern auto-pattern --helper-power 100 --helper-callsign N0HELP");
+    Application app(launch);
+    const auto& controls=ui::console_screen();
+    const auto found=std::find_if(controls.begin(),controls.end(),[](const auto& declaration){return declaration.command==C::transmit_helper;});
+    check(found!=controls.end()&&found->developer_only&&found->persistent&&found->scope==ui::ScreenScope::regular,
+          "Helper-only action lacks the shared developer-only regular declaration");
+    check(!app.control(*found).visible&&!app.enabled(C::transmit_helper)&&app.control(control(F::helper_callsign)).visible,
+          "Helper-only action is visible or dispatchable before Developer mode");
+    app.activate(C::transmit_helper);
+    check(!app.enabled(C::cancel),"Hidden helper-only action started transmission");
+    app.toggle(F::developer_mode,true);
+    check(app.control(*found).visible&&app.control(*found).enabled,"Developer mode did not show the enabled helper-only action");
+    for(const auto* modem:{"fast","legacy"}) {
+        app.select(F::fast_mode,modem);
+        check(!app.control(*found).visible,"Regular developer helper action leaked into another modem");
+    }
+    app.select(F::fast_mode,"robust");app.toggle(F::developer_mode,false);
+    check(!app.control(*found).visible&&!app.enabled(C::transmit_helper),"Leaving Developer mode kept helper-only dispatch available");
+}
+
 void transmission_scope_records() {
     using F=ui::Field;
     const auto& declaration=control(F::transmit_scope);
@@ -1657,6 +1679,6 @@ int main(int argc,char** argv) {
         });
     }
 #endif
-    try {physical_debug_workflow();verbose_diagnostics();probe_fixture::run();fhss_developer_editor();fast_default_console();developer_mode_presentation();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();expanded_spectrum();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();planner_clock_details();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();smoke_shutdown_does_not_resume_workflow();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {physical_debug_workflow();verbose_diagnostics();probe_fixture::run();fhss_developer_editor();fast_default_console();developer_mode_presentation();helper_developer_visibility();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();expanded_spectrum();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();planner_clock_details();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();smoke_shutdown_does_not_resume_workflow();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

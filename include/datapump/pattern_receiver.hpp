@@ -291,6 +291,10 @@ struct PatternFftWork {
     bool restricted_timing_active=false;
     PatternFftWindowStatus timing_window=PatternFftWindowStatus::not_requested;
 };
+// Receiver-local unwrapped residual phase, in original LOCAL input samples.
+// It excludes the immutable affine helper frequency used by the optional
+// frequency bank; constant Tx/propagation phase remains an unknown fitted gain.
+struct PatternPhaseKnot {std::uint64_t sample=0;double radians=0;};
 class PatternReceiver {
 public:
     PatternReceiver(Config, std::size_t workspace_bytes = 8 * 1024 * 1024,
@@ -299,6 +303,28 @@ public:
     PatternReceiver(PatternReceiver&&) noexcept;
     PatternReceiver& operator=(PatternReceiver&&) noexcept;
     void push(std::span<const float>, std::stop_token = {});
+    // Optional separate assisted receiver only. Original real PCM is first
+    // projected exactly as usual; each complete complex bin is then rotated
+    // at its center. Unit rotations preserve its noise covariance eigenvalues
+    // and the existing conservative scalar condition bound for predetermined
+    // rotations. Helper-derived/adaptive rotations need empirical calibration;
+    // this is not a certified false-alarm probability. Model observations must
+    // predate the FIRST sample of every affected bin, including partial bins.
+    // Sample/Gram,
+    // differential, singular and correlator paths are unsupported.
+    bool phase_assistance_supported() const noexcept;
+    std::size_t phase_assistance_bin_samples() const noexcept;
+    // Knots are immutable during this call and not retained. Every completed
+    // bin center (including a partial bin from a previous push) must be covered;
+    // no interpolation gap may exceed maximum_gap_samples. Residual phases
+    // must be finite with magnitude <=1e12 radians. False leaves all
+    // state untouched; caller must feed the original samples with push().
+    bool push_phase_assisted(std::span<const float>,std::span<const PatternPhaseKnot>,
+                             std::uint64_t maximum_gap_samples,std::stop_token = {});
+    // Optional FFT helper lane only: stop first-start acquisition beyond the
+    // already processed start frontier, while admitted tracks continue scoring
+    // every observed symbol/absence. False leaves unsupported state untouched.
+    bool suspend_helper_acquisition();
     // Scheduled nulls only; never fabricates received absence. A false return
     // leaves all state unchanged and requires the original input samples.
     bool try_skip_unobserved(std::uint64_t samples, std::stop_token = {});
@@ -350,6 +376,9 @@ public:
     // scoring. Independent of admission, message completion and wall time;
     // false without a finite start hint. EOF cannot supply missing samples.
     bool initial_search_complete() const;
+    // Conservative physical input span for the first ordinary native FFT
+    // batch (zero for a non-FFT backend). No samples or work are inserted.
+    std::uint64_t initial_fft_input_samples() const noexcept;
     // True when acquisition covers an explicit finite system-clock window.
     bool clock_windowed() const;
     // The application requested expansion but only the original local

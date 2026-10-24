@@ -1887,7 +1887,7 @@ struct PatternReceiver::Impl {
                 const auto symbol_support=temporal_symbol_support(
                     best,selected_frequency,track.burst.end_sample/bin_samples,stop);
                 const auto standalone=best.score>=threshold() && presence;
-                if(burst_plan && acquisition_suspended && !track.established && standalone &&
+                if(acquisition_suspended && !track.established && standalone &&
                    best.first_sample/bin_samples>acquisition_last_start) {
                     // The ordinary standalone rule would replace the weak
                     // prefix with a fresh stream here. Frozen acquisition may
@@ -2014,7 +2014,7 @@ struct PatternReceiver::Impl {
         }
     }
     void admit(const PatternEvidence& item,std::size_t f,double chain_score,std::stop_token stop) {
-        if(burst_plan && acquisition_suspended && item.first_sample/bin_samples>acquisition_last_start)return;
+        if(acquisition_suspended && item.first_sample/bin_samples>acquisition_last_start)return;
         if(item.score<search.retain_score || item.score-item.alternative_score<1)return;
         remember(item);
         if(search.search_stream_phases && item.score<threshold()) {
@@ -2797,7 +2797,7 @@ struct PatternReceiver::Impl {
         return true;
     }
     void continue_observed_tracks(std::stop_token stop) {
-        if(burst_plan && acquisition_suspended && next_start>acquisition_last_start){continue_tracks(stop);return;}
+        if(acquisition_suspended && next_start>acquisition_last_start){continue_tracks(stop);return;}
         if(long_symbol && !fft_workload->restricted_timing_active){continue_tracks(stop);return;}
         if(!fft_workload->restricted_timing_active || !search.early_qualified_fft || tracks.empty())return;
         if(component_hop) {
@@ -3035,7 +3035,7 @@ struct PatternReceiver::Impl {
         return true;
     }
     void process(std::stop_token stop,bool final=false) {
-        if(burst_plan && acquisition_suspended && next_start>acquisition_last_start) {
+        if(acquisition_suspended && next_start>acquisition_last_start) {
             continue_tracks(stop,final);return;
         }
         // The first long-symbol pass needs only a small range of fully
@@ -3077,7 +3077,7 @@ struct PatternReceiver::Impl {
                 std::min(hop,std::max<std::size_t>(1,config.sample_rate/bin_samples)):hop;
         };
         while(bins>=length+next_start && (final || bins-length+1-next_start>=next_count())) {
-            if(burst_plan && acquisition_suspended && next_start>acquisition_last_start)break;
+            if(acquisition_suspended && next_start>acquisition_last_start)break;
             cancelled(stop);
             const auto observed=static_cast<std::size_t>(std::min<std::uint64_t>(hop,bins-length+1-next_start));
             const bool early=!final && fft_workload->restricted_timing_active && search.early_qualified_fft &&
@@ -3553,6 +3553,65 @@ void PatternReceiver::push(std::span<const float> input,std::stop_token stop) {
     }
     s.continue_observed_tracks(stop);
 }
+bool PatternReceiver::phase_assistance_supported()const noexcept {
+    const auto& s=*impl_;
+    return !s.fallback && !s.sample_fit && !s.differential_window && !s.real_rank &&
+        !(s.search.outer_presence_guard && s.config.dsss_factor>1 && s.drift_sections==1);
+}
+std::size_t PatternReceiver::phase_assistance_bin_samples()const noexcept {
+    return phase_assistance_supported()?impl_->bin_samples:0;
+}
+bool PatternReceiver::suspend_helper_acquisition() {
+    auto& s=*impl_;
+    if(s.fallback)return s.fallback->suspend_helper_acquisition();
+    if(s.calendar_symbols() || s.finished || !s.next_start)return false;
+    if(!s.acquisition_suspended) {
+        s.acquisition_last_start=s.next_start?s.next_start-1:0;
+        s.acquisition_suspended=true;
+    }
+    return true;
+}
+bool PatternReceiver::push_phase_assisted(std::span<const float> input,
+        std::span<const PatternPhaseKnot> knots,std::uint64_t maximum_gap_samples,std::stop_token stop) {
+    auto& s=*impl_;cancelled(stop);if(s.finished)throw Error("pattern capture already finished");
+    if(!phase_assistance_supported() || !maximum_gap_samples || knots.size()<2 ||
+       s.sample<s.unobserved_until || input.size()>std::numeric_limits<std::uint64_t>::max()-s.sample)return false;
+    for(std::size_t i=0;i<knots.size();++i) {
+        if(!std::isfinite(knots[i].radians) || std::abs(knots[i].radians)>1e12 ||
+           (i && (knots[i].sample<=knots[i-1].sample ||
+           knots[i].sample-knots[i-1].sample>maximum_gap_samples)))return false;
+    }
+    const auto complete=(input.size()+s.partial)/s.bin_samples;
+    const auto first_center=static_cast<long double>(s.sample-s.partial)+(s.bin_samples-1)/2.L;
+    const auto last_center=first_center+(complete?complete-1:0)*static_cast<long double>(s.bin_samples);
+    if(complete && (first_center<knots.front().sample || last_center>knots.back().sample))return false;
+    // All model checks precede mutation. A rejected optional model cannot
+    // consume PCM or poison the ordinary raw-input fallback.
+    Impl::ScoringScope scoring{s};
+    if(!s.oscillator_valid) {
+        s.oscillator=std::polar(1.,static_cast<double>(std::remainder(-static_cast<long double>(tau)*s.config.carrier_hz*s.sample/s.config.sample_rate,
+                                                                   static_cast<long double>(tau))));
+        s.oscillator_valid=true;
+    }
+    std::size_t segment=0;
+    for(auto x:input) {
+        if((s.sample&4095U)==0)cancelled(stop);
+        if(!std::isfinite(x))throw Error("pattern input contains a nonfinite sample");
+        s.sum+=static_cast<double>(x)*s.oscillator;s.oscillator*=s.rotation;++s.sample;
+        if((s.sample&65535U)==0)s.oscillator/=std::abs(s.oscillator);
+        if(++s.partial==s.bin_samples) {
+            const auto center=static_cast<long double>(s.sample)-(s.bin_samples+1)/2.L;
+            while(segment+2<knots.size() && center>knots[segment+1].sample)++segment;
+            const auto& a=knots[segment];const auto& b=knots[segment+1];
+            const auto fraction=(center-a.sample)/static_cast<long double>(b.sample-a.sample);
+            const auto phase=static_cast<double>(a.radians+fraction*(static_cast<long double>(b.radians)-a.radians));
+            auto value=s.sum/static_cast<double>(s.partial);
+            if(phase!=0)value*=std::polar(1.,-std::remainder(phase,tau));
+            s.bin(value,stop);s.sum={};s.partial=0;
+        }
+    }
+    s.continue_observed_tracks(stop);return true;
+}
 void PatternReceiver::push(std::span<const float> input,std::span<const std::complex<double>> projected,std::stop_token stop) {
     push(input,projected,stop,nullptr);
 }
@@ -3670,6 +3729,16 @@ std::vector<PatternEvidence> PatternReceiver::candidates(std::size_t limit)const
 std::vector<Complex> PatternReceiver::take_chip_constellation(){if(impl_->fallback)return impl_->fallback->take_chip_constellation();auto result=impl_->chip_points();impl_->points.clear();impl_->point_cursor=0;return result;}
 bool PatternReceiver::acquiring()const{return impl_->fallback?impl_->fallback->acquiring():!impl_->tracks.empty();}
 bool PatternReceiver::synchronized()const{return impl_->fallback?impl_->fallback->synchronized():std::any_of(impl_->tracks.begin(),impl_->tracks.end(),[](const auto& track){return track.admitted;});}
+std::uint64_t PatternReceiver::initial_fft_input_samples()const noexcept {
+    const auto& s=*impl_;
+    if(s.fallback || !s.bin_samples)return 0;
+    // A full hop also bounds qualified/component scheduling, including its
+    // four-bin refinement cover. Do not assume the long-symbol one-second
+    // shortcut when a qualified arrival component can be wider.
+    if(s.hop>UINT64_MAX-s.length || s.length+s.hop>UINT64_MAX-4)return UINT64_MAX;
+    const auto bins=static_cast<std::uint64_t>(s.length)+s.hop+4;
+    return bins>UINT64_MAX/s.bin_samples?UINT64_MAX:bins*s.bin_samples;
+}
 bool PatternReceiver::initial_search_complete()const {
     const auto& s=*impl_;
     if(s.fallback)return s.fallback->initial_search_complete();

@@ -54,7 +54,7 @@ std::size_t sample_count(double seconds,std::uint32_t rate,std::size_t memory_li
         throw Error("audio duration/sample rate exceeds memory budget or valid range");
     return static_cast<std::size_t>(seconds*rate);
 }
-std::vector<std::uint32_t> rate_candidates(std::uint32_t logical_rate) {
+std::vector<std::uint32_t> rate_candidates(std::uint32_t logical_rate,std::uint32_t minimum_rate=0) {
     if(logical_rate<64 || logical_rate>120000000)throw Error("invalid logical sample rate");
     constexpr std::array<std::uint32_t,13> common{8000,11025,16000,22050,24000,32000,44100,48000,88200,96000,176400,192000,384000};
     // Sound-card interfaces stay within actual audio clock ranges. SDR-rate
@@ -64,6 +64,10 @@ std::vector<std::uint32_t> rate_candidates(std::uint32_t logical_rate) {
     // Preserve physical passband when a faster device clock is available.
     for(const auto rate:common)if(rate>logical_rate)result.push_back(rate);
     for(auto it=common.rbegin();it!=common.rend();++it)if(*it<logical_rate)result.push_back(*it);
+    if(minimum_rate) {
+        std::erase_if(result,[&](const auto rate){return rate<minimum_rate;});
+        if(result.empty())throw Error("no native audio sample rate meets the requested minimum of "+std::to_string(minimum_rate)+" Hz");
+    }
     return result;
 }
 void report_format(std::uint32_t logical,std::uint32_t hardware,std::size_t workspace,const StreamFormatCallback& callback,
@@ -532,7 +536,7 @@ struct Stream {
             ~CloseOnFailure(){if(!committed && pcm)api.close(pcm);}
         } cleanup{api,pcm};
         check_cancelled(stop);
-        const auto rates=rate_candidates(rate);
+        const auto rates=rate_candidates(rate,options?options->minimum_hardware_rate:0);
         const auto requested=device.empty()?std::string("default"):device;
         std::string attempted;
         int last_error=0;
@@ -859,8 +863,9 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
     if(timed && !options->frame_timestamp && shared_server_endpoint(stream.endpoint)) {
         try {
             const auto target=detail::local_pipewire_sink(stop);
-            if(rate>192000)throw Error("logical passband exceeds native shared-server timing support");
-            const auto native_rate=rate<=48000?48000u:rate<=96000?96000u:192000u;
+            const auto required_rate=std::max(rate,options->minimum_hardware_rate);
+            if(required_rate>192000)throw Error("required audio rate exceeds native shared-server timing support");
+            const auto native_rate=required_rate<=48000?48000u:required_rate<=96000?96000u:192000u;
             graph=std::make_unique<detail::PipeWirePlayback>(native_rate,target,stop,options->reported_xrun_budget_seconds,options->reported_xrun_window_seconds,rate);
             api.close(stream.pcm);stream.pcm=nullptr;
             stream.hardware_rate=native_rate;stream.channels=graph->channels();
@@ -1505,8 +1510,8 @@ struct WaveSession {
     std::array<std::array<std::int16_t,block_frames*2>,2> pcm{};
     std::array<WAVEHDR,2> headers{};
     std::array<bool,2> prepared{};
-    WaveSession(bool recording,std::uint32_t rate,const std::string& device) {
-        const auto rates=rate_candidates(rate);
+    WaveSession(bool recording,std::uint32_t rate,const std::string& device,std::uint32_t minimum_rate=0) {
+        const auto rates=rate_candidates(rate,minimum_rate);
         const auto id=device_id(device);
         event=CreateEventA(nullptr,FALSE,FALSE,nullptr);
         if(!event) throw Error("cannot create audio completion event");
@@ -1593,7 +1598,7 @@ static void playback_device(std::uint32_t rate,const std::string& device,const P
     check_cancelled(stop);
     if(options && options->follow_system_clock)throw TimingPreflightUnavailable(std::numeric_limits<double>::infinity(),"Windows audio provider has no UTC presentation timestamps");
     if(!next_samples)throw Error("playback callback is required");
-    WaveSession session(false,rate,device);
+    WaveSession session(false,rate,device,options?options->minimum_hardware_rate:0);
     PlaybackSource source(rate,session.hardware_rate,next_samples,stop,false,
         options?options->playback_output_gain:std::function<double(long double)>{},
         options?options->playback_output_transform:std::function<float(float,long double,std::uint32_t)>{});
@@ -1664,7 +1669,7 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
             "Windows audio provider has no physical capture timestamps; ordinary capture retained"});
     check_cancelled(stop);
     if(!on_chunk) throw Error("capture callback is required");
-    WaveSession session(true,rate,device);
+    WaveSession session(true,rate,device,options?options->minimum_hardware_rate:0);
     CaptureSink sink(rate,session.hardware_rate,on_chunk,stop);
     session.prepare();
     const auto chunk_samples=std::min<std::size_t>(WaveSession::block_frames,session.hardware_rate/20);

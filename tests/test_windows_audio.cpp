@@ -144,8 +144,44 @@ void passive_capture_is_explicitly_unavailable() {
     require(captured==ordinary && formatted && statuses==1 && !dates && !queries,
         "unsupported passive timing changed WinMM PCM or emitted fabricated evidence");clean();
 }
+void minimum_hardware_rate() {
+    constexpr std::uint32_t logical=6000;
+    for(const auto minimum:{0u,64u,12000u}) {
+        audio::Options options;options.minimum_hardware_rate=minimum;
+        const auto expected=minimum>8000?16000u:8000u;
+        fake::reset();fake::state.supported_rates={8000,16000};
+        const std::vector<float> input(121,.25f);bool formatted=false;
+        audio::play(input,logical,"7",{},[&](const auto& format) {
+            require(format.logical_rate==logical && format.hardware_rate==expected,"minimum playback rate changed logical format or selected a slow card rate");formatted=true;
+        },audio::ChannelMode::left_mono,options);
+        require(formatted && fake::state.played.size()==(input.size()*expected+logical-1)/logical,"minimum playback rate changed logical duration");
+        require(std::all_of(fake::state.attempted_rates.begin(),fake::state.attempted_rates.end(),[&](auto rate){return rate>=minimum;}),"Windows playback attempted a rate below its minimum");clean();
+        fake::reset();fake::state.supported_rates={8000,16000};formatted=false;
+        const auto pcm=audio::record(.02,logical,"7",1024*1024,{},[&](const auto& format) {
+            require(format.logical_rate==logical && format.hardware_rate==expected,"minimum capture rate changed logical format or selected a slow card rate");formatted=true;
+        },options);
+        require(formatted && pcm.size()==120,"minimum capture rate changed logical duration");
+        require(std::all_of(fake::state.attempted_rates.begin(),fake::state.attempted_rates.end(),[&](auto rate){return rate>=minimum;}),"Windows capture attempted a rate below its minimum");clean();
+    }
+    for(bool capture:{false,true}) {
+        fake::reset();fake::state.supported_rates={8000};unsigned callbacks=0,formats=0;
+        audio::Options options;options.minimum_hardware_rate=12000;
+        rejects([&] {
+            const auto format=[&](const auto&){++formats;};
+            if(capture)audio::capture(logical,"7",[&](auto){++callbacks;return false;},{},format,options);
+            else audio::playback(logical,"7",[&](auto){++callbacks;return std::size_t{0};},{},format,audio::ChannelMode::left_mono,options);
+        });
+        require(!callbacks && !formats && fake::state.played.empty() && !fake::state.captured,"unsupported Windows minimum reached PCM");
+    }
+    for(const auto invalid:{63u,120000001u}) {
+        fake::reset();audio::Options options;options.minimum_hardware_rate=invalid;
+        rejects([&]{audio::playback(logical,"7",[](auto){return std::size_t{0};},{},{},audio::ChannelMode::left_mono,options);});
+        require(!fake::state.open_calls,"invalid minimum rate opened Windows hardware");
+    }
+}
 int main() {
     try {
+        minimum_hardware_rate();
         passive_capture_is_explicitly_unavailable();
         channel_routing();audio_options();
         std::vector<float> samples(30000);

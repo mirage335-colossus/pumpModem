@@ -312,6 +312,41 @@ unchanged. During a refresh, completed numbers are explicitly marked **updating*
 The prepared draft is reused. Optional advice work is cancelled/deferred during
 hardware playback, including tuning noise, and resumes afterward.
 
+Link Planner shows a separate Helper Carrier reference budget when helper power
+is nonzero: effective ratio-limited power, received dBm, C/N0, expected SNR in
+the tracker's 10 Hz cell and the required audio center. The current editable
+Robust transmit power supplies its ratio reference. At -164 dBm/Hz noise and
+these effective helper powers, 40 W through 180 dB loss gives 20.02 dB tone SNR;
+1.5 kW through 210 dB gives
+5.76 dB, below the 6 dB presence level. An adequate predicted level still needs
+measured confidence/coherence and a supported route. The helper budget does not
+change payload SNR, receive-probability curves or CPU estimates, and does not
+claim a quantified assistance gain. Low/0 retain their interference cautions.
+
+These hardware budgets use measured/calibrated RF power; 4 W data and 40 W
+helper retain a 10 dB reference ratio. The helper follows existing interleaved
+V2 DSSS amplitude backoff without changing data PCM or simulation noise. Sampled
+simulation still uses its nominal signal-power convention, under which that
+waveform's actual data and calibrated helper C/N0 both include a 6.02 dB backoff;
+helper dwell duty and route response can further affect measured average power.
+
+A visible helper reference does not imply immediate payload acquisition. Runtime
+assistance preserves the selected backend and native FFT startup fill; bounded
+pre-roll can recover only PCM still retained. It ranks one advisory private epoch
+with ordinary fallback, using the earliest qualified evidence retained privately
+from observer slices of at most 40 ms and its original sample date. Public
+callbacks retain their last-update cadence. This is an onset hint, not UTC or a
+guaranteed first physical tone start. Weak unknown-epoch late starts can select
+the wrong second and fail assisted acquisition; the full ordinary bank remains
+unchanged. Fixed-epoch frequency assistance does not establish a general GPS
+Clock sync replacement. Phase assistance may become active after
+admission through a continuous committed-frontier reanchor that preserves the
+initial template carrier offset. Timing-search bounds stay fixed at admission;
+later phase qualification does not narrow them. Full ordinary payload handling
+remains unchanged. This does not certify complete epoch coverage. Observer-only
+CPU measurements do not qualify the whole Live receiver or change the displayed
+ordinary CPU curves.
+
 Link Planner publishes completed selected-target values before the full graph
 sweep. **Calculating graphs...** identifies that intermediate view; it is not a
 partial probability trial. A changed-input previous graph remains explicitly
@@ -349,10 +384,14 @@ replay. Automatic transmission capture stays hidden during noise; manual Hex/Bit
 show bounded generated private/DSSS/FHSS purpose bytes, without temporary root
 keys or encoded message content. See [transmitter cover](transmit-cover.md).
 
-The **Helper** action beside Helper Carrier Callsign in the persistent header
-transmits only the configured Helper Carrier,
-without Robust data or tuning noise. It requires nonzero Helper Carrier Power,
-High placement, Simulation No and an idle transmitter. **Stop helper** ends it;
+The Developer-mode-only **Helper** action in the persistent Helper Carrier header
+transmits only the configured helper tone and optional callsign/time metadata,
+without Robust data or tuning noise. It requires nonzero Helper Carrier Power
+and an idle transmitter, with Simulation Yes or No. High, Low and 0 Hz are
+functional choices where physical geometry fits. High uses an out-of-capture-band
+guard; Low retains an adjacent tone in ordinary input, and 0 intentionally
+overlaps data and is discouraged.
+**Stop helper** ends it;
 **Abort now** cancels immediately.
 The message draft and saved keys stay available. **Transmit noise** retains its
 separate action in the ordinary transmit row. The compact **Helper** button
@@ -396,9 +435,13 @@ Finite simulation reports generated **audio** percentage separately from elapsed
 wall time. Elapsed time continues updating on UI polls while receiver scoring
 holds the audio percentage unchanged. Once TX audio ends, the mode line says
 **Checking reception after transmission** while complete-symbol absence is
-processed. Completion or cancellation freezes the elapsed value; a new run or
-reconfiguration resets it. Replay time is separate. None of these presentation
-states declares a received message complete. **RX estimate** is
+processed. The finite simulation also supplies real channel noise until the
+initial windows of resident native FFT receivers can be scored, using a fixed
+target calculated when transmission ends. This can lengthen the reception tail
+with helper power zero or enabled; it neither extends transmission nor supplies
+synthetic absence or END. Completion or cancellation freezes the elapsed value;
+a new run or reconfiguration resets it. Replay time is separate. None of these
+presentation states declares a received message complete. **RX estimate** is
 conditional on completed receiver computation, not a measured success rate or
 the probability of finishing within a deadline.
 
@@ -964,7 +1007,15 @@ Carrier and Shift share the existing modem row. Detailed oscillator/search
 values appear under the Link planner's hideable Model limits and references,
 and LPI assumptions remain in inspection.
 A further persistent row holds Helper Carrier Power, Ratio Limit, Frequency
-and editable Callsign; power zero disables the other helper controls.
+and editable Callsign; power zero disables the other helper controls. Encryption
+hides the helper callsign field and ignores its stored value for transmission;
+the saved preference returns when encryption is disabled. Unencrypted output
+uses a nonempty callsign or otherwise clear time; encrypted output uses encrypted
+time, with no public callsign. The helper-only action is visible in Developer
+mode. Helper audio negotiates a physical-rate floor independently of the
+unchanged logical modem rate. If higher-rate capture cannot open, optional
+helper observation yields during pre-PCM setup and ordinary capture continues;
+transmission fails before PCM if the selected helper cannot fit.
 The wider minimum retains readable oscillator choices alongside all four timing
 fields, preserving the existing composition, reception and plot allocations.
 `control_layout.hpp` computes frame, label,
@@ -1110,8 +1161,10 @@ retained tail.
 
 During hardware reception, the oscilloscope and waterfall observe the audio
 provider's input before modem resampling. Their rate and Nyquist range describe
-that captured stream, including surrounding interference. Device negotiation
-and receiver PCM/rate remain unchanged. A 48 kHz input has 23.4375 Hz FFT bins;
+that captured stream, including surrounding interference. The environmental
+monitor itself does not request a device format or change receiver PCM or its
+logical rate. Helper Carrier separately requests a sufficient physical hardware
+sample rate for its selected band. A 48 kHz input has 23.4375 Hz FFT bins;
 this environmental display is not a narrowband detection statistic. Receiver
 I/Q and pattern evidence continue to use the modem stream. Logical receiver
 updates do not append duplicate environmental spectrum rows.

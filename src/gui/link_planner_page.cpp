@@ -587,6 +587,31 @@ void link_budget(Node& root, const planner::Model& model) {
         paragraph(n, "Budget: " + number(std::abs(model.margin_db)) + (model.margin_db < 0 ? " dB short" : " dB margin") +
             "  ·  Whole-bit phase loss: " + (model.phase_coherence_loss_db < .1 ? "<0.1" : number(model.phase_coherence_loss_db)) +
             " dB", 11, Tone::muted, false, 0);
+        const auto& helper=model.helper_reference;
+        if(helper.enabled) {
+            paragraph(n,"Helper Carrier",12,Tone::text,true,4);
+            if(helper.budget_available) {
+                paragraph(n,"Effective power: "+number(helper.effective_power_w)+" W  ·  Received: "+
+                    db(helper.received_dbm)+" dBm  ·  Reference: "+db(helper.cn0_db_hz)+" dB in 1 Hz",11,Tone::muted,false,4);
+                if(helper.simulation_level_modeled) {
+                    paragraph(n,"Hardware tone link budget: "+db(helper.tone_snr_db)+" dB in 10 Hz.",11,Tone::muted,false,4);
+                    paragraph(n,"Sampled simulation: payload signal "+db(helper.simulation_data_cn0_db_hz)+
+                        " dB in 1 Hz; helper reference "+db(helper.simulation_cn0_db_hz)+
+                        " dB in 1 Hz. Both retain the waveform's "+db(helper.simulation_level_db)+" dB level.",11,Tone::muted,false,4);
+                }
+                paragraph(n,std::string(helper.simulation_level_modeled?"Sampled simulation tone: ":"Expected tone: ")+
+                    db(helper.simulation_level_modeled?helper.simulation_tone_snr_db:helper.tone_snr_db)+" dB in 10 Hz · "+
+                    (helper.tone_level_sufficient?"above the 6 dB presence level; measured confidence and coherence still required.":
+                        "below the 6 dB presence level; assistance cannot be assumed."),11,
+                    helper.tone_level_sufficient?Tone::muted:Tone::caution,false,4);
+            }
+            if(helper.geometry_available)
+                paragraph(n,"Helper audio center: "+frequency(helper.frequency_hz)+
+                    ". The audio route and radio must pass its tone and metadata band.",11,Tone::muted,false,4);
+            paragraph(n,helper.status,11,helper.geometry_available?Tone::muted:Tone::caution,false,4);
+            paragraph(n,"Helper-assisted probability and CPU benefit are not quantified by these curves. The payload target and ordinary search remain unchanged.",
+                11,Tone::muted,false,0);
+        }
     } else paragraph(n, "Link estimate unavailable", 13, Tone::text, true, 0);
     const auto& geometry=model.receiver_geometry;
     if(!geometry.receiver_strategy_selected.empty())

@@ -22,6 +22,7 @@ template<class Predicate>void until(AudioEndpoint& endpoint,Predicate consume) {
 void playback(std::uint32_t output_rate,bool composed=false) {
     AudioEndpoint endpoint;endpoint.configure(1,output_rate);std::atomic<unsigned> calls=0;std::size_t source=0;
     audio::Options options;options.transmit_gain=1.5;
+    if(composed)options.minimum_hardware_rate=output_rate;
     std::uint64_t transformed=0;bool formatted=false;
     if(composed) {
         options.playback_output_gain=[](long double){return 0.;};
@@ -58,6 +59,25 @@ void gap_and_close() {
     require(frames==128,"capture gap manufactured silence or accepted a broken timeline");
     endpoint.configure(2,44100);fails([&]{endpoint.capture_samples(1,stream,0,pcm);});pcm[0]=std::numeric_limits<float>::quiet_NaN();fails([&]{endpoint.capture_samples(2,stream,0,pcm);});
     AudioEndpoint waiting;auto blocked=std::async(std::launch::async,[&]{fails([&]{waiting.capture(8000,[](auto){return true;},{},{});});});waiting.close();require(blocked.wait_for(2s)==std::future_status::ready,"close failed to wake unconfigured capture");blocked.get();
+}
+void minimum_hardware_rate() {
+    AudioEndpoint endpoint;endpoint.configure(1,8000);
+    audio::Options options;options.minimum_hardware_rate=12000;
+    unsigned callbacks=0,formats=0;
+    fails([&]{endpoint.playback(6000,[&](auto){++callbacks;return std::size_t{0};},{},[&](const auto&){++formats;},audio::ChannelMode::left_mono,options);});
+    require(!callbacks && !formats && endpoint.take_events().empty(),"insufficient browser output started a stream or requested PCM");
+    auto& shared=audio_endpoint();shared.configure(1,8000);
+    unsigned monitors=0;options.capture_monitor=[&](auto,auto){++monitors;};
+    fails([&]{audio::capture(6000,"default",[&](auto){++callbacks;return false;},{},[&](const auto&){++formats;},options);});
+    require(!callbacks && !formats && !monitors,"insufficient browser capture delivered PCM or published a format");
+    const auto events=shared.take_events();
+    require(events.size()==2 && events.front().kind==AudioEndpoint::Kind::capture_start && events.back().kind==AudioEndpoint::Kind::capture_stop,
+        "failed browser capture left an active subscription");
+    for(const auto invalid:{63u,120000001u}) {
+        options.minimum_hardware_rate=invalid;
+        fails([&]{endpoint.playback(6000,[](auto){return std::size_t{0};},{},{},audio::ChannelMode::left_mono,options);});
+        require(endpoint.take_events().empty(),"invalid browser hardware floor started a stream");
+    }
 }
 void capture_monitor_pair() {
     constexpr std::uint32_t hardware=8000,logical=1000;
@@ -180,4 +200,4 @@ void paced_capture_stops() {
     }
 }
 }
-int main(){try{playback(8000);playback(44100);playback(48000);playback(8000,true);playback(44100,true);playback(48000,true);gap_and_close();capture_monitor_pair();capture_restart();stopped_capture();cancellation();failed_output_keeps_capture();paced_capture_stops();std::cout<<"Host audio bounds, continuity, resampling, readiness, drain, cancellation and output recovery passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{playback(8000);playback(44100);playback(48000);playback(8000,true);playback(44100,true);playback(48000,true);minimum_hardware_rate();gap_and_close();capture_monitor_pair();capture_restart();stopped_capture();cancellation();failed_output_keeps_capture();paced_capture_stops();std::cout<<"Host audio bounds, continuity, resampling, readiness, drain, cancellation and output recovery passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

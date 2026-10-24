@@ -109,6 +109,11 @@ public:
     StreamingReceiver& operator=(StreamingReceiver&&) noexcept;
     // Feed physical PCM, optionally with its shared carrier projection.
     Bytes push(std::span<const float> samples, std::stop_token stop = {});
+    bool phase_assistance_supported() const noexcept;
+    std::size_t phase_assistance_bin_samples() const noexcept;
+    bool push_phase_assisted(std::span<const float>,std::span<const PatternPhaseKnot>,
+                             std::uint64_t maximum_gap_samples,std::stop_token = {});
+    bool suspend_helper_acquisition();
     Bytes push(std::span<const float> samples, std::span<const std::complex<double>> projected,
                std::stop_token stop = {});
     Bytes push(std::span<const float> samples, std::span<const std::complex<double>> projected,
@@ -131,6 +136,7 @@ public:
     // Complete sampled acquisition coverage of the original finite start
     // window, independent of admission and physical message completion.
     bool initial_search_complete() const;
+    std::uint64_t initial_fft_input_samples() const noexcept;
     // Pattern candidates are accumulating.
     bool acquiring() const;
     // Bounded previews and drainable immutable decision chunks. Only observed

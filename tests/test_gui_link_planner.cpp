@@ -1851,6 +1851,120 @@ void receiver_overlay_and_cpu_status() {
               "CPU pace must be a visible line in every supported pixel format");
     }
 }
+void helper_reference_link_budget() {
+    auto inputs=example();inputs.target_db_hz=23;
+    // The reported link uses a 36 Hz payload centered at 1500 Hz. The general
+    // planner example's 3600 Hz band crosses DC and cannot host this helper.
+    inputs.options.modem=tuning::resolve(36,inputs.target_db_hz,
+        tuning::PatternMode::auto_pattern,false,1500).config;
+    inputs.tx_dbm=36.020599913279625;inputs.path_loss_db=180;
+    inputs.noise_density_dbm_hz=-164;
+    inputs.receiver_settings=live::Settings{};
+    inputs.receiver_settings->transfer=inputs.options;
+    inputs.receiver_settings->simulation=true;
+    planner::Cache cache;
+    const auto selected=[&](const planner::Inputs& input) {
+        std::stop_source stop;std::optional<planner::Model> result;std::string model_error;
+        try {
+            const auto completed=planner::build(input,cache,stop.get_token(),[&](const auto& model) {
+                result=model;stop.request_stop();
+            },planner::TargetSteps{});
+            model_error=completed.error;
+        } catch(const estimate_detail::Cancelled&) {}
+        check(result&&result->available,("Helper planning must retain selected ordinary receiver values: "+model_error).c_str());
+        return *result;
+    };
+    const auto baseline=selected(inputs);
+    check(!baseline.helper_reference.enabled,"Disabled helper appeared in the link budget");
+    inputs.receiver_settings->helper.power_w=40;
+    // Deliberately stale: the editable planner power owns the hypothetical
+    // ratio ceiling, just as it owns the ordinary received-power budget.
+    inputs.receiver_settings->helper.data_power_w=1e-6;
+    const auto forty=selected(inputs);
+    const auto& helper=forty.helper_reference;
+    check(helper.enabled&&helper.budget_available&&helper.geometry_available&&helper.tone_level_sufficient,
+          "Strong configured helper needs a separate budget and nominal placement");
+    near(helper.effective_power_w,40,"Helper budget used stale Live data power");
+    near(helper.received_dbm,10*std::log10(40.)+30-180,"Helper received power is incorrect");
+    near(helper.cn0_db_hz,30.020599913279625,"Helper C/N0 is incorrect");
+    near(helper.tone_snr_db,20.020599913279625,"Helper tone SNR must use the observer's 10 Hz cell");
+    near(forty.actual_cn0_db_hz,baseline.actual_cn0_db_hz,"Helper changed ordinary payload C/N0");
+    near(forty.margin_db,baseline.margin_db,"Helper changed the ordinary payload target margin");
+    near(forty.cpu_realtime_ratio,baseline.cpu_realtime_ratio,"Unqualified helper gain changed the CPU estimate");
+    near(forty.success_probability,baseline.success_probability,"Unqualified helper gain changed receive probability");
+    for(const auto width:{220.f,900.f}) {
+        const auto page=planner_page::build(forty,width,false,false);
+        check(contains_text(page,"Helper Carrier")&&contains_text(page,"dB in 10 Hz")&&
+              contains_text(page,"Helper audio center:")&&contains_text(page,"not quantified by these curves"),
+              "Helper level, passband requirement and model limits must remain visible at all widths");
+    }
+    auto spread=forty.inputs;
+    spread.mode=tuning::PatternMode::auto_keystream;
+    spread.options.key=Crypto(Bytes(32,0x63));
+    spread.options.modem.dsss_factor=10;
+    spread.options.modem.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+    spread.receiver_settings->transfer=spread.options;
+    const auto spread_helper=selected(spread);
+    const auto& simulation=spread_helper.helper_reference;
+    check(simulation.geometry_available&&simulation.simulation_level_modeled,
+          "Interleave simulation needs an explicit modeled helper level");
+    near(simulation.cn0_db_hz,helper.cn0_db_hz,"Interleave backoff changed calibrated hardware helper watts");
+    near(simulation.simulation_level_db,20*std::log10(.5),"Interleave simulation lost existing waveform backoff");
+    near(simulation.simulation_tone_snr_db,14,"Interleave helper simulation used hardware tone SNR");
+    near(simulation.simulation_cn0_db_hz-simulation.simulation_data_cn0_db_hz,10,
+         "Interleave simulation changed the helper-to-payload power ratio");
+    spread.receiver_settings->helper.power_w=0;
+    const auto spread_ordinary=selected(spread);
+    near(spread_helper.actual_cn0_db_hz,spread_ordinary.actual_cn0_db_hz,"Helper boosted Interleave payload C/N0");
+    near(spread_helper.margin_db,spread_ordinary.margin_db,"Helper changed Interleave payload target margin");
+    near(spread_helper.cpu_realtime_ratio,spread_ordinary.cpu_realtime_ratio,"Helper changed Interleave ordinary CPU curves");
+    near(spread_helper.success_probability,spread_ordinary.success_probability,"Helper changed Interleave ordinary confidence");
+    spread.receiver_settings->helper.power_w=40;spread.path_loss_db=190;
+    const auto spread_weak=selected(spread);
+    check(!spread_weak.helper_reference.tone_level_sufficient&&
+          spread_weak.helper_reference.tone_snr_db>6&&
+          contains_text(planner_page::build(spread_weak,900,false,false),"Sampled simulation tone: +4 dB in 10 Hz"),
+          "Simulation presence advice must use the actual modeled tone rather than calibrated hardware watts");
+    spread.receiver_work_mode=simulation::ReceiverWorkMode::hardware_fallback;
+    spread.receiver_settings->simulation=false;
+    const auto spread_hardware=selected(spread);
+    check(!spread_hardware.helper_reference.simulation_level_modeled&&spread_hardware.helper_reference.tone_level_sufficient,
+          "Calibrated hardware budget incorrectly inherited simulation waveform backoff");
+    near(spread_hardware.helper_reference.tone_snr_db,spread_weak.helper_reference.tone_snr_db,
+         "Changing planner execution scope changed calibrated helper watts");
+    inputs.receiver_settings->helper.power_w=1500;inputs.path_loss_db=210;
+    const auto weak=selected(inputs);
+    near(weak.helper_reference.tone_snr_db,10*std::log10(1500.)+30-210+164-10,
+         "Microwave helper link budget is incorrect");
+    check(!weak.helper_reference.tone_level_sufficient&&
+          contains_text(planner_page::build(weak,900,false,false),"below the 6 dB presence level"),
+          "The 1500 W/210 dB example must not imply a qualified reference below the tone-level gate");
+    inputs.receiver_settings->helper.ratio_limit_db=10;
+    const auto limited=selected(inputs);
+    near(limited.helper_reference.effective_power_w,40,"Helper ratio ceiling did not use current planner transmit power");
+    check(limited.helper_reference.tone_snr_db<weak.helper_reference.tone_snr_db,
+          "A reused planner cache hid the changed helper ratio ceiling");
+    inputs.receiver_settings->helper.frequency=helper::Frequency::low;
+    const auto low=selected(inputs);
+    check(low.helper_reference.geometry_available && low.helper_reference.frequency_hz!=helper.frequency_hz,
+          "A reused planner cache hid the changed helper placement");
+    inputs.receiver_settings->helper.power_w=-1;
+    // Malformed power violates the shared Live settings contract before the
+    // selected receiver estimate. It is distinct from valid helper geometry
+    // that cannot be used alongside an otherwise valid payload profile.
+    std::stop_source invalid_stop;bool invalid_selected=false;planner::Model invalid;
+    try {
+        invalid=planner::build(inputs,cache,invalid_stop.get_token(),[&](const auto&) {
+            invalid_selected=true;invalid_stop.request_stop();
+        },planner::TargetSteps{});
+    } catch(const estimate_detail::Cancelled&) {}
+    check(!invalid_selected&&!invalid.available&&!invalid.error.empty(),
+          "Malformed negative helper power must reject the complete settings with an error");
+    inputs.receiver_settings->helper.power_w=0;
+    const auto disabled=selected(inputs);
+    check(!disabled.helper_reference.enabled&&!contains_text(planner_page::build(disabled,900,false,false),"Helper Carrier"),
+          "Disabling helper must clear the previously displayed auxiliary budget");
+}
 void estimate_warning_thresholds() {
     planner::Model model;model.inputs=example();model.available=true;
     model.clock_search_supported=model.receiver_workspace_supported=true;
@@ -2381,6 +2495,9 @@ int main(int argc,char** argv) {
             conditional_reference_and_timing_work_document();
             std::cout<<"Conditional RX reference and timing work document passed\n";return 0;
         }
+        if(argc==2&&std::string_view(argv[1])=="--helper-only") {
+            helper_reference_link_budget();std::cout<<"Helper reference link budget passed\n";return 0;
+        }
         selected_plan_progress_and_support_equivalence();
         sustained_listening_plan_document();
         earth_moon_earth_estimate();independent_reference_values();exact_geometry_and_physical_finish();timing_milestones();
@@ -2397,7 +2514,7 @@ int main(int argc,char** argv) {
         shared_link_budget_without_simulation();shared_link_controls_visibility();
         link_budget_edit_buffers();link_budget_preset_and_dialog_sync();
         search_arithmetic_document_and_cache();
-        receiver_overlay_and_cpu_status();estimate_warning_thresholds();rolling_epoch_selected_plan_document();conditional_reference_and_timing_work_document();document_semantics_layout_and_plots();
+        receiver_overlay_and_cpu_status();helper_reference_link_budget();estimate_warning_thresholds();rolling_epoch_selected_plan_document();conditional_reference_and_timing_work_document();document_semantics_layout_and_plots();
         std::cout<<"Shared Link planner tests passed\n";
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -1,4 +1,5 @@
 #pragma once
+#include "datapump/helper_metadata.hpp"
 #include <array>
 #include <complex>
 #include <cstdint>
@@ -14,6 +15,10 @@ struct Options {
     double power_w=0, data_power_w=4, ratio_limit_db=90;
     Frequency frequency=Frequency::high;
     std::string callsign;
+    // A configured station key ignores callsign and selects length-preserving
+    // timestamp encryption. Without a key, callsign takes priority over optional
+    // clear time. Turning timecode off leaves keyed operation as tone only.
+    bool timecode=true;
     bool operator==(const Options&) const = default;
 };
 struct Plan {
@@ -22,23 +27,37 @@ struct Plan {
 void validate(const Options&);
 // Throws when the helper cannot fit; callers may retain their unchanged Robust
 // path and report that helper configuration unavailable. Never retunes data.
-// A nonzero minimum_high_frequency_hz requires High and adds a caller-supplied
+// A nonzero minimum_high_frequency_hz adds a High-only caller-supplied
 // placement floor (e.g. a separately qualified capture-converter stopband).
+// Low retains its spectral guard; cochannel intentionally overlaps the data.
 // It is a geometry constraint, not a general anti-alias rejection certificate.
+// data_amplitude_scale is the existing source's digital amplitude backoff;
+// it calibrates helper power without changing the returned payload gain.
 Plan plan(const Options&,double data_carrier_hz,double occupied_bandwidth_hz,
-          std::uint32_t output_rate,double minimum_high_frequency_hz=0);
+          std::uint32_t output_rate,double minimum_high_frequency_hz=0,
+          double data_amplitude_scale=1);
+// Negotiate the physical audio clock independently of the unchanged modem
+// clock. Includes the helper metadata band and a practical 48 kHz audio floor.
+std::uint32_t minimum_output_rate(const Options&,double data_carrier_hz,
+                                  double occupied_bandwidth_hz,
+                                  std::uint32_t logical_rate);
 
-// Public v1 metadata: five length bits, nineteen padded seven-bit ASCII bytes,
-// CRC-16/CCITT-FALSE over the twenty bytes [length, padded callsign], then
-// fourteen zero bits. All fields and each 21-bit symbol are MSB first.
-std::array<std::uint32_t,8> metadata_symbols(std::string_view callsign);
+// Protect a punctuation already begun when an open-ended source is stopped.
+// Only the helper is extended, through its 20 ms clean post-flip guard and
+// final 4 ms ramp. Coordinates are the same physical seconds as Generator.
+long double protected_endpoint(std::uint64_t epoch,long double start_seconds,long double end_seconds);
+
 // 1024 radii [0.9,1], 2048 phases; high ten bits select radius, low eleven phase.
 std::complex<double> apsk_point(std::uint32_t symbol);
 
 class Generator {
 public:
-    // Disable optional punctuation when the endpoint can shorten during output.
-    Generator(Options,Plan,std::uint64_t epoch=0,bool punctuate=true);
+    // One output thread owns each generator. Timestamp packets are cached per
+    // dwell; arbitrary-time rendering is deterministic with serialized calls.
+    // A shortening streaming endpoint must use protected_endpoint and emit
+    // helper-only zero padding through that endpoint.
+    Generator(Options,Plan,std::uint64_t epoch=0,bool punctuate=true,
+              std::optional<Crypto> time_key={});
     // seconds is physical time since epoch, independent of payload source time.
     // Payload PCM is assumed bounded by [-1,1]. Disabled mixing is bit exact.
     float mix(float payload,long double seconds,std::uint32_t rate,
@@ -52,7 +71,10 @@ private:
     Plan plan_;
     std::uint64_t epoch_;
     bool punctuate_;
-    std::array<std::complex<double>,8> symbols_{};
+    std::optional<Crypto> time_key_;
+    mutable std::optional<std::uint64_t> cached_time_;
+    mutable std::array<std::complex<double>,9> symbols_{};
+    mutable std::size_t symbol_count_=0;
 };
 
 struct Observation {

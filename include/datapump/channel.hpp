@@ -2,6 +2,7 @@
 #include "datapump/streaming_modem.hpp"
 #include "datapump/helper_carrier.hpp"
 #include <memory>
+#include <functional>
 
 namespace datapump::modem {
 // Receiver-clock PCM from independent, free-running endpoints. The source is
@@ -13,10 +14,10 @@ public:
     static constexpr std::size_t workspace_bound=80*1024;
     // Guaranteed slack for bounded auxiliary observation during mode handoff.
     static constexpr std::size_t auxiliary_workspace_bound=16*1024;
-    // Optional helper shares the exact sampled channel before AWGN. Its linear
-    // data scale also scales noise, preserving the configured payload SNR.
-    // Unsupported helper placements throw; the Live caller can disable only
-    // the helper and retain the original channel at its unchanged sample rate.
+    // Helper-enabled transport uses a separate physical integer-multiple sample
+    // clock, then bounded anti-alias decimation back to this logical Config rate.
+    // Both signals share clock error, oscillator impairments and physical AWGN.
+    // Unsupported helper placements throw without changing logical geometry.
     SampledSimulationChannel(Config config, ChannelConfig channel, helper::Options helper = {},
                              double helper_occupied_bandwidth_hz = 0);
     ~SampledSimulationChannel();
@@ -28,6 +29,17 @@ public:
     void begin_burst(bool helper_only = false);
     // Takes effect at the next burst; current sampled output stays immutable.
     void set_helper_callsign(std::string callsign);
+    // Applies before the first read of the prepared burst, or to the next burst
+    // if output has already begun. No extra begin_burst call is required.
+    void set_helper_time_key(std::optional<Crypto> key);
+    using PhysicalObserver=std::function<void(std::span<const float>,std::uint32_t,std::uint64_t)>;
+    // Called before decimation, with a contiguous physical-clock PCM block and
+    // its first physical sample. Bounded centered-FIR lookahead may lead the
+    // committed logical frontier by at most128 logical samples. Assistance
+    // consumers must hold such updates until that frontier reaches them.
+    void set_physical_observer(PhysicalObserver observer);
+    std::uint32_t physical_sample_rate() const;
+    std::uint64_t physical_received_samples() const;
     std::size_t read(StreamingTransmitter& source, std::span<float> output,
                      std::stop_token stop = {});
     void read_noise(std::span<float> output, std::stop_token stop = {});

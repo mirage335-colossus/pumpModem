@@ -42,18 +42,20 @@ void helper_placement_covers_both_profiles() {
     check(width>=modem::waveform_bandwidth_hz(longer)+modem::waveform_gate_bandwidth_allowance_hz(longer),
         "common helper placement omitted long-message occupied band");
     helper::Options options;options.power_w=100;
-    const auto plan=helper::plan(options,settings.transfer.modem.carrier_hz,width,8000);
-    check(plan.frequency_hz-150>longer.carrier_hz+width/2,
-        "helper overlapped long-message data band");
     modem::ChannelConfig impairment;impairment.clock_error_ppm=0;impairment.phase_noise_degrees_per_sqrt_second=0;
     modem::SampledSimulationChannel channel(settings.transfer.modem,impairment,options,width);
+    const auto plan=helper::plan(options,settings.transfer.modem.carrier_hz,width,channel.physical_sample_rate(),
+        settings.transfer.modem.sample_rate+250.,modem::outer_dsss_transmit_gain(settings.transfer.modem));
+    check(plan.frequency_hz-150>longer.carrier_hz+width/2,
+        "helper overlapped long-message data band");
     modem::StreamingTransmitter source(modem::RawBits{{0,0,1}},longer);
     std::array<float,800> samples{};helper::Tracker tracker(plan.frequency_hz);
     bool observed=false;
+    channel.set_physical_observer([&](std::span<const float> pcm,std::uint32_t rate,std::uint64_t) {
+        tracker.push(pcm,rate);if(const auto update=tracker.take_update())observed=observed||update->present;
+    });
     for(unsigned i=0;i<20;++i) {
-        const auto count=channel.read(source,samples);if(!count)break;
-        tracker.push(std::span(samples).first(count),8000);
-        if(const auto update=tracker.take_update())observed=observed||update->present;
+        if(!channel.read(source,samples))break;
     }
     check(observed,"long-message waveform and common helper did not share the sampled channel");
 }
@@ -62,14 +64,14 @@ void sampled_composite() {
     impairment.snr_db=20;impairment.clock_error_ppm=0;impairment.frequency_offset_hz=2;
     impairment.phase_noise_degrees_per_sqrt_second=0;impairment.seed=581;
     helper::Options options;options.power_w=1500;options.data_power_w=4;
-    const auto plan=helper::plan(options,c.carrier_hz,
-        modem::waveform_bandwidth_hz(c)+modem::waveform_gate_bandwidth_allowance_hz(c),c.sample_rate);
     modem::SampledSimulationChannel baseline(c,impairment),disabled(c,impairment,{}),assisted(c,impairment,options);
+    const auto plan=helper::plan(options,c.carrier_hz,
+        modem::waveform_bandwidth_hz(c)+modem::waveform_gate_bandwidth_allowance_hz(c),assisted.physical_sample_rate(),c.sample_rate+250.,
+        modem::outer_dsss_transmit_gain(c));
     std::array<float,800> a{},b{},h{};
     baseline.read_noise(a);disabled.read_noise(b);assisted.read_noise(h);
     check(a==b,"disabled helper changed original simulation noise");
-    for(std::size_t i=0;i<a.size();++i)
-        check(std::abs(h[i]-a[i]*plan.data_gain)<1e-7,"helper changed payload SNR noise calibration");
+    check(assisted.physical_sample_rate()>2*c.sample_rate,"helper reused the unisolated logical sample clock");
     baseline.begin_burst();disabled.begin_burst();assisted.begin_burst();
     modem::StreamingTransmitter source_a(modem::RawBits{{0,0,1}},c),source_b(modem::RawBits{{0,0,1}},c);
     const auto n=baseline.read(source_a,a),m=disabled.read(source_b,b);
@@ -77,14 +79,16 @@ void sampled_composite() {
     modem::StreamingTransmitter noise(modem::Noise{},c);
     helper::Tracker tracker(plan.frequency_hz,20);
     bool present=false,confirmed=false;
-    for(unsigned block=0;block<75;++block) {
-        const auto count=assisted.read(noise,h);check(count==h.size(),"helper noise source ended unexpectedly");
-        tracker.push(h,c.sample_rate);
+    assisted.set_physical_observer([&](std::span<const float> pcm,std::uint32_t rate,std::uint64_t) {
+        tracker.push(pcm,rate);
         if(const auto observation=tracker.take_update()) {
             present=present||observation->present;confirmed=confirmed||observation->confirmed;
             if(observation->present)check(std::abs(observation->frequency_hz-(plan.frequency_hz+2))<4,
                 "composite helper frequency was not observed through actual sampled channel");
         }
+    });
+    for(unsigned block=0;block<75;++block) {
+        const auto count=assisted.read(noise,h);check(count==h.size(),"helper noise source ended unexpectedly");
     }
     check(present && confirmed,"sampled helper composite did not sustain six seconds of independent presence");
 }
@@ -120,16 +124,53 @@ void callsign_update_preserves_live_reception() {
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     } while(std::chrono::steady_clock::now()<deadline);
     check(before.transmitting_noise&&before.transmission_seconds>0,"live noise did not begin");
-    check(before.helper_status.find("distinct physical audio rate")!=std::string::npos,
-        "unsupported mixed helper simulation did not explain its unchanged Robust fallback");
-    bool rejected=false;try {session.transmit_helper();}catch(const Error&) {rejected=true;}
-    check(rejected,"unsupported helper-only simulation was queued");
+    check(before.helper_status.find("distinct physical audio rate")==std::string::npos,
+        "physical helper simulation retained its obsolete unavailability fallback");
     session.set_helper_callsign("N0CALL");
     const auto after=session.snapshot();
     check(after.transmitting_noise&&!after.transmission_cancelled && after.transmission_id==before.transmission_id &&
         after.receiver_input_revision==before.receiver_input_revision,
         "helper callsign edit interrupted active transmission or replaced the pending receiver");
     session.cancel_transmit();session.stop();
+}
+void helper_only_live_simulation() {
+    live::Settings settings;settings.simulation=true;settings.full_duplex=true;settings.transfer.modem=config();
+    settings.transfer.timestamp=1800000000;settings.transfer.search_seconds=0;settings.simulation_snr_db=100;
+    settings.simulation_clock_error_ppm=0;settings.simulation_phase_noise_degrees_per_sqrt_second=0;
+    settings.dsp_workspace_bytes=32*1024*1024;settings.content_limit=1024*1024;
+    settings.helper.power_w=1500;settings.helper.callsign="N0CALL";
+    live::Session session;session.start(settings);session.transmit_helper();
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+    bool helper_row=false,callsign=false;std::uint64_t helper_id=0;
+    do {
+        const auto snapshot=session.snapshot();check(snapshot.error.empty(),"helper-only Live simulation failed");
+        check(snapshot.received.empty(),"helper-only Live simulation manufactured received payload content");
+        for(const auto& event:snapshot.signals) {
+            check(event.helper_carrier||!event.received_bits,"helper-only Live simulation manufactured binary bits");
+            if(!event.helper_carrier)continue;
+            helper_row=true;if(!helper_id)helper_id=event.id;
+            check(event.id==helper_id,"ongoing Live helper replaced its stable signal row");
+            callsign=callsign||event.text.find("N0CALL")!=std::string::npos;
+        }
+        if(helper_row&&callsign&&snapshot.helper_frequency_offset_hz)break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    } while(std::chrono::steady_clock::now()<deadline);
+    check(helper_row,"helper-only physical simulation did not publish a received helper row");
+    check(callsign,"strong coherent Live helper did not decode its callsign metadata");
+    session.clear_received();
+    bool after_clear=false;
+    const auto clear_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+    do {
+        const auto snapshot=session.snapshot();check(snapshot.error.empty(),"helper simulation failed after receive clear");
+        for(const auto& event:snapshot.signals) {
+            check(event.helper_carrier||!event.received_bits,"helper-only clear manufactured binary bits");
+            after_clear=after_clear||(event.helper_carrier&&event.id!=helper_id);
+        }
+        if(after_clear)break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    } while(std::chrono::steady_clock::now()<clear_deadline);
+    session.cancel_transmit();session.stop();
+    check(after_clear,"continuous physical helper did not resume its receive row after clear");
 }
 std::vector<float> physical_convert(std::span<const float> input,std::uint32_t from,std::uint32_t to,
         std::function<float(float,long double,std::uint32_t)> transform={}) {
@@ -185,7 +226,8 @@ void payload_survives_physical_helper_preselection() {
             if(only) {modem::SampledSimulationChannel noise(c,impairment);noise.read_noise(input);}
             helper::Options options;options.power_w=power;options.data_power_w=4;options.callsign=test.callsign;
             const auto occupied=modem::waveform_bandwidth_hz(c)+modem::waveform_gate_bandwidth_allowance_hz(c);
-            const auto plan=helper::plan(options,c.carrier_hz,occupied,physical_rate,static_cast<double>(c.sample_rate)+250);
+            const auto plan=helper::plan(options,c.carrier_hz,occupied,physical_rate,static_cast<double>(c.sample_rate)+250,
+                modem::outer_dsss_transmit_gain(c));
             helper::Generator generator(options,plan,0);
             auto end=static_cast<long double>(eof)/c.sample_rate;
             if(test.end_phase>=0)end=.4L*std::floor(end/.4L)+test.end_phase;
@@ -282,7 +324,7 @@ void helper_yields_event_queue_to_payload_progress() {
 }
 }
 int main() {
-    try {helper_yields_event_queue_to_payload_progress();helper_preserves_receiver_workspace_capacity();helper_placement_covers_both_profiles();sampled_composite();helper_only_and_callsign_update();callsign_update_preserves_live_reception();payload_survives_physical_helper_preselection();helper_presentation();
+    try {helper_yields_event_queue_to_payload_progress();helper_preserves_receiver_workspace_capacity();helper_placement_covers_both_profiles();sampled_composite();helper_only_and_callsign_update();callsign_update_preserves_live_reception();helper_only_live_simulation();payload_survives_physical_helper_preselection();helper_presentation();
         std::cout<<"helper live integration passed\n";return 0;}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

@@ -8,116 +8,182 @@ and use Git history for comparisons. Detailed studies remain in the
 
 ## Current Helper Carrier candidate
 
-The Helper Carrier implementation is based on
-`a858f6f31d19431d3d15b077752f67a30cd1866f`. It is experimental and defaults off.
-The 37 changed application/test/build inputs have overlay SHA-256
-`287b34eada8e6c12b6762cdd38feffdf3256925a81b6ea320001b1bc3fbe7fc2`;
-the local `final-source-inputs.json` records each input and the digest encoding.
-Documentation and ignored evidence are excluded from that overlay digest.
-The prior green cohort below does not qualify these runtime changes. See the
-[implementation reference](helper-carrier.md) and [revised plan](helper-carrier-plan.md)
-for the deliberately restricted integrated path: High placement outside the
-existing capture converter's passband, hardware-rate composition, optional
-undecoded callsign metadata and receive frequency diagnostics. Equal-rate Live
-simulation retains the original Robust waveform and reports helper unavailable.
-Automatic search centering, phase/clock discipline, metadata decoding and
-CPU-ceiling improvements are not implemented or claimed.
+The default-off continuation is based on
+`b47c7a0ebd6a29d21ffa8748d5bc7ffbbeb7e942`. The 44 modified application, test
+and build inputs have overlay SHA-256
+`d9f1212860bd02830b1d9bab2e27141882a29273804f30c34508e1f017d9b0dd`.
+`local-evidence/helper-live-fix/final-source-inputs.json` records sorted UTF-8
+path, NUL, lowercase SHA-256 and LF identities. Documentation and ignored
+evidence are excluded. No publication, promotion or certification is claimed.
 
-Local qualification uses the existing `build/dev` Release profile, GCC 14,
-ordered `-ffp-contract=off -fno-fast-math`, FLTK and the native pipe worker. No
-CI resource-margin environment or relaxed acceptance threshold is applied.
-Ignored `local-evidence/helper-carrier/` retains original failures and focused
-diagnostics. Native device, DAC/RF, real browser, Windows runtime and prepared
-Wasm/SDK qualification are unavailable in this local run; shared tests and stub
-compilation do not replace them. No native display server is available.
-Rev, TUI/framebuffer runtime, full-application sanitizer and release/package
-qualification were not run.
+Messages travel exclusively on ordinary Robust signals. Helper measurements
+can guide one optional ordinary receiver, retaining long text, attachments,
+framing, decompression, recovery, source quota, exact progress and six seconds
+of fully scored absence for completion. Optional speculation yields to ordinary
+allocation and acquisition. Once bits are accepted, that payload retains the
+ordinary processing and completion path. See the [reference](helper-carrier.md)
+and [plan](helper-carrier-plan.md).
 
-Initial full contract execution finished 196/202 passed in 3083.92 seconds and
-is not a green final-source result. It exposed
-the original Noise action label/width being changed, a case-sensitive CLI error
-assertion, a GUI advisory comparison failure, the compact Live case exhausting
-its strict 40-second wall-clock budget while progressing, and the unchanged
-parallel-preparation fixture reaching its 1500-second process watchdog. The
-differential receiver calibration also reached that watchdog: its matrix
-completed (13 modeled cases, RMS error 0.024103, maximum error 0.0574951), but
-shaped, null and default-window coverage did not finish. This is incomplete
-calibration, not a pass. The
-layout and CLI assertion were corrected without weakening their contracts.
-The GUI advisory failure also reproduced in an isolated observer run, then
-passed diagnostic observer runs; its cause remains unproven. Concurrent
-preparation/build work is a plausible contributor to the Live deadline failure,
-not an established cause. Final-source focused results and remaining calibration
-limits must be assessed separately from that initial run.
+Actual-length callsigns occupy one to seven APSK symbols. Q16 Unix time uses at
+most 48 time bits and three symbols/24 ms. FF1/AES-256 encryption preserves bit
+length and adds no authentication tag; CRC7 uses only spare bits. Metadata is
+unauthenticated and grants no clock or payload authority. Keyed operation hides
+and ignores helper callsign. Helper-only transmission is a Developer action.
 
-The rebuilt final-source helper/audio selection passed 11/11 serially in
-96.05 seconds: helper DSP and Live integration, resampler, device-rate and
-provider timing, sampled channel, snapshot copy, ALSA playback/interleave,
-Windows audio stub and browser host audio. The helper Live fixture covers two
-logical rates (8 kHz and 2 kHz), thirty physical-rate composite cases including
-PCM16, unchanged exact pending prefixes and physical completion, and helper
-updates yielding the bounded event queue to payload progress. Receiver workspace
-capacity is identical with helper enabled and disabled in both native and
-simulation modes. Digital spectral fixtures measured worst periodic data-relative
-leakage -50.9712 dB and active-duration-normalized finite leakage -37.2048 dB;
-all three callsign fixtures placed over 99% of energy within 300 Hz. The 64
-four-second Gaussian controls produced no false admissions. These are specific
-digital fixtures, not hardware or general colored-interference qualification.
+### Reproduced failure and current local evidence
 
-The final-source shared GUI group passed 39/39 serially in 531.15 seconds,
-including Fast/Legacy isolation, controller, link planner, original Transmit
-noise behavior, launch settings, boundary checks and self-check. The complete
-controller case passed in 184.82 seconds. This clears those focused GUI
-acceptance checks without erasing the original advisory failure or establishing
-its cause. Native rendering/device coverage remains unavailable.
+The reported 36 Hz/interleaved configuration selected an 8 kHz hardware clock
+for a 6,380 Hz helper, failing before PCM output. Helper operation now requests
+at least 48 kHz, independently of the unchanged modem clock, and validates the
+actual provider format. ALSA, Windows and host adapters honor this floor. A
+capture provider unable to supply it can retain ordinary reception with helper
+observation disabled. High, Low and cochannel placement reach the physical
+waveform; cochannel deliberately overlaps payload and is discouraged.
 
-The complete CLI case passed on final source (41 internal tests, 63.24 seconds),
-including helper WAV composition and separated payload recovery. The original
-case-sensitive diagnostic assertion was corrected to compare lowercase error
-text; actual unsupported-placement rejection remains required.
+The helper amplitude now accounts for the existing outer-DSSS amplitude gain.
+Actual PCM controls retain payload gain and AWGN while checking the requested
+power ratio. A physical 48 kHz cable return of the first reported configuration
+measured helper RMS 0.2534 FS near 6,380 Hz and payload RMS 0.0813 FS near
+1,500 Hz: 9.87 dB versus the configured 10 dB, peak 0.630 FS, zero clipped
+samples. This is clean physical return evidence, not a weak-link sensitivity
+measurement. The preceding native source cohort also completed the exact
+one-bit encrypted payload in duplex after physical absence. The final native
+repetition also passed in 50.07 seconds, using 48 kHz hardware, with the exact
+completed bit at 47.92 seconds and no error or unexpected bits. Its FFT work
+briefly accumulated 1.98 seconds of backlog before returning to zero; this is
+not a zero-backlog or latency-improvement claim. Separate four-second physical
+Low/cochannel transmissions returned 550/1,500 Hz tones at 0.519 FS RMS.
 
-The browser-worker group passed 11/13 in the ordinary sandbox, including its
-137.83-second live audio case. Two preview-server tests failed during setup
-because loopback socket creation returned `EPERM`. Both unchanged tests passed
-with sandbox escalation permitting their temporary `127.0.0.1` servers (2/2 in
-9.20 seconds). Every selected case therefore has a passing result, with the
-original setup failures retained; this was not one green sandboxed invocation.
-It does not qualify a real browser/device or an actual Wasm SDK build.
+Link Planner reports helper effective power, received power, C/N0, level in a
+10 Hz cell, audio frequency and whether the reference qualifies. It preserves
+ordinary payload SNR and probability calculations. The second reported example
+has predicted helper C/N0 15.76 dB-Hz, or 5.76 dB in 10 Hz, below the required
+6 dB presence gate. That configuration does not promise a usable reference.
 
-A direct control compiled the exact pre-feature sampled channel alongside the
-final helper-disabled implementation. Across 54 fixed cases, all float PCM bits
-matched for 3,759,222 samples per implementation, including noise before/after
-bursts, two source lengths, three impairments, three seeds and chunk sizes
-1/137/4096. Source progress and channel diagnostics also matched. Reversed-order
-generation totals were 5.06978 seconds for the legacy implementation and
-5.06539 seconds for the current implementation; these are diagnostic timings,
-not a throughput qualification.
+Weak-tone acquisition uses a finite-Gram narrowband fit and a lifetime
+multiple-look existence budget of at most 0.01 per reset under the stated AWGN
+model. Long-baseline doubled-phase confidence retains all surviving frequency
+aliases or falls back to a wide interval. Frequency and phase measurement dates
+are separate. Live uses original earliest qualified evidence only to rank one
+advisory private epoch. Phase qualification can activate later with continuous
+correction at the committed frontier. Timing bounds remain fixed at admission.
 
-The final helper DSP suite passed focused GCC ASan/UBSan instrumentation.
-`ASAN_OPTIONS=detect_leaks=0` was required after the sandbox prevented leak
-sanitizer's process inspection; no leak-coverage claim is made. This focused
-check does not replace the full sanitizer/platform matrix. Final whitespace
-validation passed. Full current-candidate qualification remains incomplete due
-to the recorded Live failure and calibration watchdogs; no release, publication
-or exact-binary certification is claimed.
+A 52-configuration observer benchmark retained in
+`local-evidence/helper-live-fix/observer/` used 48/96 kHz, ±20/100 Hz search,
+tone/callsign/encrypted metadata and clean/30/24 dB-Hz conditions. Tracker plus
+precision receiver cost 2.24–11.98 ms CPU per audio second. Precision-receiver
+retained requested heap was 5,808 bytes unkeyed or 5,968 keyed; peak 6,000 plus
+an 8-byte handle (allocator-usable 6,024). Stack, caller keys and OpenSSL direct
+allocations are outside that measurement. All clean metadata controls decoded.
+At 24 dB-Hz, 56 wide intervals missed truth under model contamination; none of
+the eight intervals ≤0.1 Hz or 22 intervals ≤0.1758 Hz did. This does not promise
+uniform weak-helper qualification or full-Live CPU headroom.
 
-The strict compact Live case also failed alone on final source: 40.533 seconds,
-1,088/1,216 bits generated, no reported receiver health fault. Its wall-clock
-limit was not changed. For a matched comparison, the exact pre-feature revision
-was reconstructed with `git archive`
-and built using its original `build.sh`, the same compiler, Release and ordered
-arithmetic flags and the same read-only dependency prefix. Its unchanged test
-also failed alone: 40.444 seconds, 1,080/1,216 bits, healthy receiver. This
-reproduces the deadline failure before Helper Carrier; the single pair does not
-establish general throughput parity or qualify the failed case. Metadata,
-commands, source/test hashes and original outputs are retained locally.
+Local builds use `build/dev`, Release GCC 14, FLTK, system OpenSSL and ordered
+floating point. No resource-margin environment or relaxed acceptance limits
+are applied. Current normal application/worker build and focused phase and
+unambiguous-onset calendar retention checks passed. The complete assisted Live
+suite also passed in 68.50 seconds in the normal two-test contract run, including
+both full-payload scenarios and the constrained-memory ordinary fallback.
+The final normal contract run finished with 206/207 passes in 3,576.19 seconds.
+All seven helper cases passed. Strict Live passed in 76.88 seconds, full
+differential calibration passed all sections in 1,407.03 seconds, and the full
+45-method CLI suite passed in 46.94 seconds. Complete CTest and CLI details are
+retained in `local-evidence/helper-live-fix/final-contract-details.log` and
+`final-cli-details.log`.
 
-A direct unisolated sampled 1.5 kW / 4 W case recovered `0011` instead of `001`.
-This failure is retained and excludes that mixed equal-rate path from Live.
-The passing physical-rate fixtures used the original capture converter and
-verified exact `0`, `00`, `001` progress and unchanged six-second absence
-completion. A new receive FIR and ineffective hypothesis reordering were
-rejected rather than changing Robust's noise assumptions or search order.
+The sole failure was `scheduled_parallel_preparation`, which hit its unchanged
+1,500-second watchdog at 1,500.05 seconds. Reservation and default/fp32/fp64
+serial/parallel arithmetic comparisons completed without assertions;
+`shared.serial` was still active. This is failed/incomplete preparation
+coverage, not a passing full contract. The prior watchdog occurred later in
+`shared.parallel`; these runs do not establish preparation throughput parity.
+Shared GUI passed all 39 cases in 188.30 seconds, including Link Planner and
+helper control visibility/state. Complete details are in `final-gui-details.log`.
+All 13 web cases have passing coverage: 11 passed in 140.78 seconds, while
+`build_preview` and `web_preview` failed only at sandbox-blocked socket creation
+(`EPERM`) before running. The unchanged pair passed 2/2 in 6.74 seconds with the
+already authorized temporary loopback listener access. Original setup failures
+and full detail remain retained. This is native worker/host/Node coverage, not
+real-browser or prepared Wasm execution. The 36 regular cases outside the
+contract passed in 135.35 seconds. The regular/contract union therefore has
+236/237 regular passes and 206/207 contract passes, with the same preparation
+timeout in both inventories; all nine focused audio registrations passed.
+The 201 regular/contract overlaps were not repeated. All three native GUI cases
+passed in 225.08 seconds on a private 2,400×1,800 display, using the original
+assertions and deadlines: workflow 139.99 seconds, adapter conformance 84.97
+seconds and document conformance 0.10 seconds. The initial physical-desktop run
+passed workflow and document conformance but failed the adapter visibility
+check when the window manager changed client height from 1,008 to the required
+1,040 pixels, moving the bottom-anchored device control by 32 pixels. The focused
+unchanged fixture passed on the larger private display; its temporary diagnostic
+was removed byte-for-byte before the complete native rerun. No runtime layout
+change or weakened assertion was needed. Original and passing logs remain in
+`final-native-details.log` and `final-native-private-display-details.log`.
+
+### Retained failures and earlier evidence
+
+The earlier compact-codec/full-payload cohort passed seven helper suites,
+45 CLI cases, 39 shared GUI cases and nine focused audio/channel cases. Its web
+suite passed 11 initially; the two socket-blocked preview cases passed with
+permission for temporary loopback listeners. Those results precede the current
+physical-rate, power, confidence and Live control changes and do not qualify
+this overlay. The still earlier 207-case contract run had 206 passes and one
+1,500.11-second preparation watchdog, in 3,494.98 seconds. Differential
+calibration completed in 1,408.61 seconds. Full-contract qualification was not
+established.
+
+Current development retained the original invalid planner fixture, incorrect
+negative-frequency control, misaligned two-stream suspension fixture, missing
+simulation noise tail, expensive automatic compact receiver selection, lost
+long-symbol acquisition on helper disappearance. These led to focused
+corrections; failures are kept separately from passing reruns. The simulation now captures actual channel
+noise far enough past EOF for the resident FFT acquisition window to run,
+including with helper disabled, without synthesizing completion or more TX.
+
+Adjacent-epoch selection at a late-second boundary remains a helper limitation.
+The first accepted CW window has no certified maximum detection delay, and
+unknown channel startup/arrival delay can itself cross a private-epoch boundary.
+Both weak and strong late-start failures are retained. The calendar-lifetime
+fixture explicitly uses a strong 1,500 W/0.004 W ratio, 40 dB less added noise
+and an early fractional transmit date (0.10–0.30 seconds); it checks one healthy
+advisory epoch across ordinary refresh, not the ambiguous late case. The
+separate weak 30.02 dB-Hz fixed-epoch comparison retains the realistic waveform
+and demonstrates acquisition outside the original frequency bank. Full unknown
+clock-prior assistance needs concurrent epoch hypotheses with separately
+accounted false-alarm, memory and CPU budgets; it is not established here.
+
+Earlier instrumented cohorts do not count as current sanitizer coverage.
+Final instrumentation rebuilt all eight actual DSP implementations, including
+the correlator, and linked all five complete helper suites. Carrier, metadata,
+precision reception and physical simulation passed without ASan/UBSan findings
+in 0.67/0.07/9.59/8.49 seconds. These deterministic checks ran alongside the
+normal prerequisite build; no throughput claim is made. Assistance ran
+separately after compilation ended and passed in 1.17 seconds with its original
+five-second recovery budget. All 18 compile/link/run commands succeeded and
+all 247 frozen dependency hashes matched current source. The correlator compile
+took 274.91 seconds and 2.73 GiB child peak RSS, within its compiler-only
+600-second/5-GiB cap. Archive dependencies, OpenSSL and Live remain
+outside that focused scope; disabled LSAN is not leak coverage.
+
+### Qualification limits
+
+The full ordinary search remains admitted. One optional compatible receiver can
+use helper frequency, phase and punctuation timing, within actual surplus. No
+universal CPU-ceiling or full-bank sensitivity improvement is claimed. Guards,
+scheduled acquisition, Symbol_Burst and hopping combinations retain their
+ordinary fallback when helper assistance is incompatible. Unknown full-band
+discovery, arbitrary UTC/private-epoch ambiguity and every repeated-message
+onset are not solved by one tone. Dense metadata requires a clean strong helper.
+A tone cannot separate RF error, Doppler and sample-clock error.
+
+Physical helper sidebands, colored interference and DAC/RF dynamic range remain
+real limitations, especially at extreme power ratios. AWGN false-admission
+controls do not establish equivalent guarantees for arbitrary interference.
+Native cable tests do not qualify RF propagation or the 5.8 GHz experiment.
+Windows runtime, real browser, prepared Wasm/SDK, alternate frontends and
+release/package certification are separate unexecuted scopes here. Shared,
+worker and adapter stubs do not replace them.
 
 ## Prior source qualification
 

@@ -20,7 +20,7 @@ coverage and decoded-message reliability are related but distinct quantities.
 | [Modem inspection](../inspection.md) | Reference: flow views, plots and interpretation boundaries. |
 | [Clock synchronization](../clock-sync.md) | Local candidate: independent GPS arrival controls, timing evidence, narrow-search prerequisites and hardware limitations. |
 | [Spread controls](../spread-spectrum-controls.md) | Local candidate: separate outer DSSS factors, Fake FHSS illustration and unqualified acquisition/regulatory scope. |
-| [Helper Carrier](../helper-carrier.md) | Independent experimental tone, public APSK callsign format, receive frequency diagnostics and hardware qualification limits; [implementation plan](../helper-carrier-plan.md). |
+| [Helper Carrier](../helper-carrier.md) | Experimental independent tone, optional frequency/phase/dwell-timing assistance, callsign/clear or encrypted timestamp metadata, Live/duplex and physical simulation; original-search and hardware qualification limits in the [implementation plan](../helper-carrier-plan.md). |
 | [Packetless stream plan](../packetless-stream-plan.md) | Historical code audit and migration plan for the now-implemented fixed-interval transport. |
 
 ## Computation, iterative search and receiver alternatives

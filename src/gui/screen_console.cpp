@@ -33,7 +33,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     control.persistent=persistent_slot(slot);
     control.developer_only=slot==Slot::pattern||slot==Slot::fec||slot==Slot::dsp_workspace||
         slot==Slot::receive_snr||slot==Slot::profile_reference||slot==Slot::callsign||
-        slot==Slot::grid||slot==Slot::repeatable;
+        slot==Slot::grid||slot==Slot::repeatable||slot==Slot::transmit_helper;
     control.open_upward=slot>=Slot::device;
     if(slot==Slot::symbol_burst||slot==Slot::symbol_burst_random||slot==Slot::helper_power||slot==Slot::helper_ratio_limit||slot==Slot::helper_frequency||slot==Slot::helper_callsign)control.open_upward=false;
     control.font_size=control.multiline?16:13;
@@ -50,8 +50,8 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::developer_mode)control.help="Show advanced controls and inspection tabs. Hiding them keeps their current settings, including command-line overrides.";
     if(slot==Slot::helper_power)control.help="Separate helper tone power relative to Transmit power. 0 disables it. This scales audio; it does not control RF transmitter power. The ratio limit reduces helper power when necessary, preserving the Robust data setting. Unsupported placement stops enabled-helper transmission before payload output.";
     if(slot==Slot::helper_ratio_limit)control.help="Maximum helper/data power ratio in dB. Amplitude ratio is the square root of the power ratio. Constrain this to the measured dynamic range of the sound card and radio; exceeding the limit reduces helper power. Robust target SNR and transmit power retain their meanings.";
-    if(slot==Slot::helper_frequency)control.help="High automatically places the helper above the Robust capture band with a power-dependent guard. The radio and audio route must pass that frequency. Low and 0 Hz offset are retained but unavailable until interference isolation is qualified. 0 Hz overlaps the Robust carrier. Tone observation does not require metadata decoding.";
-    if(slot==Slot::helper_callsign)control.help="Up to 19 printable 7-bit ASCII characters, transmitted separately on the helper every 400 ms. Editing Developer Callsign copies a valid value here; editing this field does not change Developer Callsign or the Robust message. Operator selects settings appropriate to their authorization.";
+    if(slot==Slot::helper_frequency)control.help="High places the helper above the Robust capture band with a power-dependent guard. Low places it below the data band. The radio and audio route must pass the selected frequency. 0 Hz overlaps the Robust carrier and can interfere with data; it is discouraged. Tone observation does not require metadata decoding.";
+    if(slot==Slot::helper_callsign)control.help="Up to 19 printable 7-bit ASCII characters, transmitted separately on the unencrypted helper every 400 ms. Hidden and ignored while encryption is enabled; the saved value returns when encryption is disabled. Editing Developer Callsign copies a valid value here; editing this field does not change Developer Callsign or the Robust message. Operator selects settings appropriate to their authorization.";
     if(slot==Slot::grid)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. Sent only as message text.";
     if(slot==Slot::callsign)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. A valid value of at most 19 printable ASCII characters also copies to Helper Carrier Callsign. Helper-only edits never change this value or the message.";
     if(slot==Slot::repeatable)control.help="Prepends REPEATABLE-XXXXXXXX and a space before the CQ greeting. Each message edit generates 8 random consonants or digits. Automatically turns off for attachments or messages over 256 bytes, including the prefix.";
@@ -125,7 +125,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::transmit_noise||slot==Slot::short_transmit_noise)
         control.help="Continuously transmit noise with the usual encrypted modulation and fresh temporary keys for all active keystreams until Stop noise is pressed. Keeps your message and selected keys. Uses the selected rate, carrier and audio routing.";
     if(slot==Slot::transmit_helper)
-        control.help="Transmit helper only: continuously transmit the configured helper tone and callsign without Robust data or noise. Requires Simulation No, High placement and nonzero Helper Carrier Power. Stop helper ends it. Keeps your message and selected keys. Helper frequency and radio power settings remain the operator's responsibility.";
+        control.help="Developer mode: transmit helper only. Continuously transmit the configured helper tone and optional callsign or time metadata, without Robust data or noise. Requires nonzero Helper Carrier Power. Works with Simulation Yes or No. Stop helper ends it. Keeps your message and selected keys. Helper frequency and radio power settings remain the operator's responsibility.";
     if(slot==Slot::copy_raw_signal)control.help="Copy the selected completed reception's exact transport bits, including leading zeros and compression bits.";
     if(slot==Slot::paste_raw_signal)control.help="Load the selected reception's exact bits (up to 208) into the raw editor for retransmission.";
     if(slot==Slot::signals) {

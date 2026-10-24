@@ -250,6 +250,10 @@ public:
     std::optional<std::uint64_t> unobserved_end_from(std::uint64_t local_sample) const;
     std::optional<ScheduledCaptureEnvelope> scheduled_capture_envelope(std::uint64_t local_sample) const;
     void suspend_fresh_acquisition();
+    // Optional helper lane only: retain established ordinary coherent streams
+    // and physical absence scoring, but admit no unrelated new stream. False
+    // rejects unsupported/no-admission states before mutation.
+    bool suspend_helper_acquisition();
     bool symbol_burst_tracking_active() const;
     void finish(std::stop_token = {});
     // Publish accepted decisions at each drain; chunk capacity never

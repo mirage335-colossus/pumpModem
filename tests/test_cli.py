@@ -53,7 +53,7 @@ class StreamCLI(unittest.TestCase):
             self.assertIn(flag,helptext)
         baseline=self.run_pump('estimate','--text','e',*AUDIO).stdout
         self.assertEqual(self.run_pump('estimate','--text','e','--helper-power','0',*AUDIO).stdout,baseline)
-        for command in ('estimate','simulate','analyze-link','devices','qr','keygen'):
+        for command in ('estimate','analyze-link','devices','qr','keygen'):
             # Reject before source/device/file operations and analysis requirements.
             error=self.run_pump(command,'--helper-power','1.5kW',ok=False)
             self.assertIn(b'helper',error.stderr)
@@ -79,7 +79,7 @@ class StreamCLI(unittest.TestCase):
             with wave.open(str(original),'rb') as source:
                 original_frames=source.getnframes()
                 original_rate=source.getframerate()
-            for frequency in ('high',):
+            for frequency in ('high','low','0'):
                 output=directory/(frequency+'.wav')
                 self.run_pump('status-tx','--bits','001','--output',output,
                     '--helper-power','1.5kW','--helper-data-power','4W',
@@ -92,14 +92,10 @@ class StreamCLI(unittest.TestCase):
                     # Tail silence is actual PCM, and never includes the helper.
                     self.assertEqual(pcm[-6*48000*source.getsampwidth():],b'\0'*(6*48000*source.getsampwidth()))
                     self.assertTrue(any(pcm[:48000*source.getsampwidth()]))
-                decoded=self.run_pump('status-rx','--bits','001','--input',output,
-                    '--helper-power','1.5kW','--helper-data-power','4W',*AUDIO)
-                self.assertTrue(json.loads(decoded.stdout)['known_bits_match'])
-            self.run_pump('status-tx','--bits','001','--output',directory/'low.wav',
-                '--helper-power','100W','--helper-frequency','low',*AUDIO,ok=False)
-            rejected=self.run_pump('status-tx','--bits','001','--output',directory/'cochannel.wav',
-                '--helper-power','100W','--helper-frequency','0',*AUDIO,ok=False)
-            self.assertIn(b'helper',rejected.stderr.lower())
+                if frequency=='high':
+                    decoded=self.run_pump('status-rx','--bits','001','--input',output,
+                        '--helper-power','1.5kW','--helper-data-power','4W',*AUDIO)
+                    self.assertTrue(json.loads(decoded.stdout)['known_bits_match'])
             # Helper identification copies the local callsign unless overridden.
             copied=directory/'copied.wav'; explicit=directory/'explicit.wav'
             for output,extra in ((copied,()),(explicit,('--helper-callsign','W1ABC'))):
@@ -108,6 +104,102 @@ class StreamCLI(unittest.TestCase):
             self.assertEqual(copied.read_bytes(),explicit.read_bytes())
             self.run_pump('tx','--text','e','--callsign','A'*20,'--helper-power','100W',
                 '--output',directory/'invalid.wav',*AUDIO,ok=False)
+    def test_helper_wav_callsign_and_timecode_metadata(self):
+        # Dense APSK decoding is optional on weaker/mixed captures. This fixture
+        # keeps data far below the clean 16-bit helper, exercising the metadata
+        # key/coordinate path independently of Robust sensitivity.
+        geometry=list(AUDIO)
+        geometry[geometry.index('--spreading')+1]='256'
+        helper=('--helper-power','1.5kW','--helper-data-power','2uW')
+        with tempfile.TemporaryDirectory() as directory:
+            directory=pathlib.Path(directory)
+            key=directory/'helper.key'
+            self.run_pump('keygen','--output',key)
+            for label,mode,extra in (('clear_time','clear_time',()),
+                                    ('callsign','callsign',('--helper-callsign','N0CALL')),
+                                    ('encrypted_time','encrypted_time',('--keyfile',key)),
+                                    ('encrypted_id','encrypted_time',('--keyfile',key,'--helper-callsign','N0CALL')),
+                                    ('encrypted_ignored_id','encrypted_time',('--keyfile',key,'--helper-callsign','private\n'+'A'*20))):
+                capture=directory/(label+'.wav')
+                self.run_pump('status-tx','--bits','001001001001','--output',capture,
+                    *helper,*extra,*geometry)
+                with wave.open(str(capture),'rb') as recorded:
+                    capture_ticks=(recorded.getnframes()*65536+recorded.getframerate()-1)//recorded.getframerate()
+                value=json.loads(self.run_pump('status-rx','--bits','001001001001','--input',capture,
+                    *helper,*extra,*geometry).stdout)
+                observed=value['helper_carrier']
+                self.assertTrue(observed['present'])
+                metadata=observed['metadata']
+                self.assertIsNotNone(metadata,mode)
+                self.assertEqual(metadata['kind'],mode)
+                # Compact helper time is advisory: encryption carries no tag.
+                self.assertFalse(metadata['authenticated'])
+                if mode=='callsign':
+                    self.assertEqual(metadata['callsign'],'N0CALL')
+                    self.assertNotIn('time_ticks',metadata)
+                else:
+                    self.assertNotIn('callsign',metadata)
+                    self.assertGreater(metadata['time_ticks'],(1800000000-4)*65536)
+                    # The physical frame includes training and source cover;
+                    # use its measured extent rather than a guessed eight seconds.
+                    self.assertLess(metadata['time_ticks'],1800000000*65536+capture_ticks)
+            encrypted=(directory/'encrypted_time.wav').read_bytes()
+            for ignored in ('encrypted_id','encrypted_ignored_id'):
+                self.assertEqual((directory/(ignored+'.wav')).read_bytes(),encrypted,
+                    'ignored encrypted callsign changed the transmitted waveform')
+            without_key=json.loads(self.run_pump('status-rx','--bits','001001001001',
+                '--input',directory/'encrypted_time.wav',*helper,*geometry,ok=False).stdout)
+            self.assertTrue(without_key['helper_carrier']['present'])
+            self.assertIsNone(without_key['helper_carrier']['metadata'])
+            self.assertFalse(without_key['content_validated'])
+            self.assertFalse(without_key['stream_complete'])
+            self.assertIn('no sufficiently confident pattern',without_key['error'])
+            # A keyfile flag does not enable encryption for the unencrypted
+            # tone mode, so its public helper ID still requires validation.
+            invalid=self.run_pump('tx','--text','e','--pattern','auto-tone','--bw','1000',
+                '--keyfile',key,'--helper-power','100W','--helper-callsign','A'*20,
+                '--output',directory/'invalid-tone.wav',ok=False)
+            self.assertIn(b'callsign',invalid.stderr)
+
+    def test_helper_physical_simulation(self):
+        common=('--text','e','--json','--snr','30','--clock-error-ppm','0','--phase-noise','0',
+                '--helper-power','1.5kW','--helper-data-power','4W','--helper-callsign','N0CALL',*AUDIO)
+        with tempfile.TemporaryDirectory() as directory:
+            for extra in ((),('--output',pathlib.Path(directory)/'physical.wav')):
+                value=json.loads(self.run_pump('simulate',*common,*extra).stdout)
+                self.assertTrue(value['stream_complete'])
+                self.assertEqual(value['raw_bits'],'001')
+                self.assertEqual(value['missing_symbols'],0)
+                self.assertEqual(value['data_text'],'e')
+                self.assertTrue(value['helper_carrier']['present'])
+            with wave.open(str(pathlib.Path(directory)/'physical.wav'),'rb') as capture:
+                self.assertGreater(capture.getframerate(),16000)
+                self.assertEqual(capture.getframerate()%8000,0)
+
+    def test_helper_simulation_diagnostics_survive_payload_failure(self):
+        result=self.run_pump('simulate','--text','e','--json','--snr','-50',
+            '--clock-error-ppm','0','--phase-noise','0','--helper-power','1.5kW',
+            '--helper-data-power','2uW','--helper-callsign','N0CALL',*AUDIO,ok=False)
+        value=json.loads(result.stdout)
+        self.assertEqual(value['event'],'helper_carrier')
+        self.assertTrue(value['helper_carrier']['present'])
+        self.assertFalse(value['content_validated'])
+        self.assertFalse(value['stream_complete'])
+        self.assertNotIn('raw_bits',value)
+        self.assertIn('no sufficiently confident pattern',value['error'])
+
+    def test_helper_only_live_simulation(self):
+        result=self.run_pump('listen','--helper-only','--helper-power','1.5kW',
+            '--helper-callsign','N0CALL','--simulation','3dBm -60dB','--seconds','4',
+            '--json','--clock-error-ppm','0','--phase-noise','0',*AUDIO)
+        events=[json.loads(line) for line in result.stdout.splitlines()]
+        helper_events=[event for event in events if event.get('event')=='helper_carrier']
+        self.assertTrue(helper_events,'helper-only simulated capture has no helper row')
+        self.assertTrue(any(event['state']=='pending' for event in helper_events))
+        self.assertFalse(any(event.get('event')=='raw_bits' for event in events),
+                         'helper-only simulation manufactured Robust payload bits')
+        self.assertFalse(any(event.get('stream_complete') for event in events))
+
     def test_short_text_dictionary_threshold(self):
         for size in (1,15,16,17):
             for fec in ('off','20','60'):

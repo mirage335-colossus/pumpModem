@@ -10,7 +10,7 @@
 namespace datapump::helper {
 namespace {
 constexpr double tau=2*std::numbers::pi;
-constexpr long double dwell=.4L,ramp=.004L,metadata_begin=.324L,symbol_time=.008L;
+constexpr long double dwell=.4L,ramp=.004L,metadata_end=.388L,symbol_time=.008L;
 double smooth(long double x) {
     const auto t=static_cast<double>(std::clamp(x,0.L,1.L));
     return t*t*t*(10+t*(-15+6*t));
@@ -24,7 +24,7 @@ void validate_callsign(std::string_view callsign) {
 // transition is a quintic smootherstep, whose derivative is Beta(3,3). Its
 // transform has magnitude <=15*(3+z^2+3z)/z^5, z=pi*f*T, and <=1.
 // The envelope has two unit 4ms ramps, one magnitude-two 8ms reversal, and
-// <=nine magnitude-two metadata transitions. Integration by parts supplies the
+// <=ten magnitude-two metadata transitions. Integration by parts supplies the
 // additional 1/(2*pi*f*dwell). Coefficients therefore fall at least as f^-4;
 // sum their squared bound over the 2.5Hz dwell harmonics. Factor four includes
 // the real carrier's other image and possible constructive addition. This is
@@ -35,7 +35,7 @@ double leakage_bound(double distance,double bandwidth,bool metadata) {
         return std::min(1.,15*(3+z*z+3*z)/std::pow(z,5));
     };
     const auto coefficient=(2*derivative_transform(.004)+
-        (metadata?20:2)*derivative_transform(.008))/(tau*distance*.4);
+        (metadata?22:2)*derivative_transform(.008))/(tau*distance*.4);
     const auto harmonics=1+std::min(std::ceil(bandwidth/2.5),distance/(7*2.5));
     return 4*coefficient*coefficient*harmonics;
 }
@@ -52,18 +52,16 @@ void validate(const Options& options) {
     validate_callsign(options.callsign);
 }
 Plan plan(const Options& options,double carrier,double bandwidth,std::uint32_t rate,
-          double minimum_high_frequency_hz) {
+          double minimum_high_frequency_hz,double data_amplitude_scale) {
     validate(options);
     if(options.power_w==0)return {};
     if(!std::isfinite(minimum_high_frequency_hz)||minimum_high_frequency_hz<0)
         throw Error("invalid Helper Carrier minimum High frequency");
-    if(minimum_high_frequency_hz>0&&options.frequency!=Frequency::high)
-        throw Error("Helper Carrier alongside data requires High placement outside its capture passband");
+    if(!std::isfinite(data_amplitude_scale)||data_amplitude_scale<=0||data_amplitude_scale>1)
+        throw Error("invalid Helper Carrier data amplitude reference");
     if(!rate||!std::isfinite(carrier)||!std::isfinite(bandwidth)||bandwidth<=0||
        carrier-bandwidth/2<0||carrier+bandwidth/2>=rate/2.)
         throw Error("Helper Carrier requires a valid data passband at the output sample rate");
-    if(options.frequency==Frequency::cochannel)
-        throw Error("Helper Carrier 0 Hz offset is unavailable: co-channel interference is not qualified");
     const double direction=options.frequency==Frequency::high?1:-1;
     const auto effective=std::min(options.power_w,
         options.data_power_w*std::pow(10.,options.ratio_limit_db/10));
@@ -72,63 +70,72 @@ Plan plan(const Options& options,double carrier,double bandwidth,std::uint32_t r
     // separation until the conservative digital leakage bound is at least
     // 30dB below data power. The data waveform and passband are never changed.
     double distance=450;
-    if(minimum_high_frequency_hz>0)
+    if(minimum_high_frequency_hz>0&&options.frequency==Frequency::high)
         distance=std::max(distance,50*std::ceil((minimum_high_frequency_hz-carrier-bandwidth/2)/50));
     const auto maximum_distance=direction>0?rate/2.-250-carrier-bandwidth/2:
                                            carrier-bandwidth/2-250;
-    while(distance<=maximum_distance&&
+    while(options.frequency!=Frequency::cochannel&&distance<=maximum_distance&&
           leakage_bound(distance,bandwidth,true)*power_ratio>1e-3)
         distance+=50;
-    if(distance>maximum_distance)
+    if(options.frequency!=Frequency::cochannel&&distance>maximum_distance)
         throw Error("Helper Carrier cannot fit its power-dependent leakage guard at this output sample rate");
-    const double frequency=carrier+direction*(bandwidth/2+distance);
+    // Cochannel is an intentional overlapping diagnostic configuration. Keep
+    // the actual linear mixture; it provides no isolation from payload data.
+    const double frequency=options.frequency==Frequency::cochannel?carrier:
+        carrier+direction*(bandwidth/2+distance);
     const auto relative_peak=std::sqrt(2*modem::nominal_signal_power)*
         std::sqrt(power_ratio);
     // Ordinary PCM has the unchanged nominal mean power and peak bound one.
     // Leave 5% composite headroom, with no nonlinear limiter or data power boost.
     const auto data_gain=.95/(1+relative_peak);
-    return {frequency,relative_peak*data_gain,data_gain,effective};
+    // Match the unchanged payload's digital backoff. Keep its conservative
+    // gain identical; only the helper yields amplitude/headroom here.
+    return {frequency,relative_peak*data_gain*data_amplitude_scale,data_gain,effective};
 }
-std::array<std::uint32_t,8> metadata_symbols(std::string_view callsign) {
-    validate_callsign(callsign);
-    std::array<std::uint8_t,20> bytes{};
-    bytes[0]=static_cast<std::uint8_t>(callsign.size());
-    for(std::size_t i=0;i<callsign.size();++i)bytes[i+1]=static_cast<std::uint8_t>(callsign[i]);
-    std::uint16_t crc=0xffff;
-    for(const auto byte:bytes) {
-        crc^=static_cast<std::uint16_t>(byte)<<8;
-        for(unsigned i=0;i<8;++i)
-            crc=static_cast<std::uint16_t>((crc&0x8000)?(crc<<1)^0x1021:crc<<1);
-    }
-    std::array<std::uint32_t,8> symbols{};
-    std::size_t offset=0;
-    const auto append=[&](std::uint32_t value,unsigned bits) {
-        while(bits) {
-            --bits;
-            symbols[offset/21]|=((value>>bits)&1U)<<(20-offset%21);
-            ++offset;
-        }
-    };
-    append(bytes[0],5);
-    for(std::size_t i=1;i<bytes.size();++i)append(bytes[i],7);
-    append(crc,16);
-    return symbols;
+std::uint32_t minimum_output_rate(const Options& options,double carrier,double bandwidth,
+                                  std::uint32_t logical_rate) {
+    if(options.power_w==0)return 0;
+    if(logical_rate<64||logical_rate>120000000)
+        throw Error("invalid Helper Carrier logical sample rate");
+    const auto placement=plan(options,carrier,bandwidth,120000000,
+                              static_cast<double>(logical_rate)+250);
+    const auto required=std::ceil(2*(placement.frequency_hz+250));
+    if(required>120000000)throw Error("Helper Carrier exceeds the physical audio sample-rate limit");
+    return static_cast<std::uint32_t>(std::max({48000.,required,static_cast<double>(logical_rate)}));
+}
+long double protected_endpoint(std::uint64_t epoch,long double start,long double end) {
+    if(!std::isfinite(start)||!std::isfinite(end)||end<start)
+        throw Error("invalid Helper Carrier protected endpoint");
+    auto local=std::fmod(static_cast<long double>(epoch%2)+end,2.L);
+    if(local<0)local+=2;
+    local-=std::floor(local/dwell)*dwell;
+    const auto origin=end-local;
+    if(local>=.236L && local<.268L && start<=origin+.212L)return origin+.268L;
+    return end;
 }
 std::complex<double> apsk_point(std::uint32_t symbol) {
     if(symbol>=(1U<<21))throw Error("invalid APSK-2097152 symbol");
     const auto radius=.9+.1*static_cast<double>(symbol>>11)/1023;
     return std::polar(radius,tau*static_cast<double>(symbol&2047U)/2048);
 }
-Generator::Generator(Options options,Plan plan,std::uint64_t epoch,bool punctuate)
-    :options_(std::move(options)),plan_(plan),epoch_(epoch),punctuate_(punctuate) {
+Generator::Generator(Options options,Plan plan,std::uint64_t epoch,bool punctuate,std::optional<Crypto> time_key)
+    :options_(std::move(options)),plan_(plan),epoch_(epoch),punctuate_(punctuate),time_key_(std::move(time_key)) {
+    // Encryption never exposes a stored public callsign, including through
+    // validation or a failed-cipher fallback. Keep the caller's settings intact.
+    if(time_key_)options_.callsign.clear();
     validate(options_);
     if(!std::isfinite(plan_.frequency_hz)||!std::isfinite(plan_.helper_gain)||
        !std::isfinite(plan_.data_gain)||plan_.helper_gain<0||plan_.data_gain<0||
        plan_.helper_gain+plan_.data_gain>1.0000000001)
         throw Error("invalid Helper Carrier mixer plan");
     if(!options_.callsign.empty()) {
-        const auto words=metadata_symbols(options_.callsign);
-        for(std::size_t i=0;i<words.size();++i)symbols_[i]=apsk_point(words[i]);
+        const auto packet=callsign_packet(options_.callsign);
+        for(std::size_t i=0;i<packet.count;++i)symbols_[i]=apsk_point(packet.symbols[i]);
+        symbol_count_=packet.count;
+    } else if(options_.timecode && plan_.helper_gain>0) {
+        // Validate cipher availability before the first PCM. Real
+        // dwell timestamps are cached below, never encrypted once per sample.
+        (void)timecode_packet(0,time_key_?&*time_key_:nullptr);
     }
 }
 std::complex<double> Generator::mix_analytic(std::complex<double> payload,long double seconds,
@@ -159,16 +166,33 @@ std::complex<double> Generator::mix_analytic(std::complex<double> payload,long d
         (!end_seconds || *end_seconds>=dwell_start+.268L);
     const std::complex<double> punctuation{punctuation_fits?1-2*smooth((local-.236L)/.008L):1.,0};
     std::complex<double> modulation=punctuation;
-    if(!options_.callsign.empty()&&local>=metadata_begin) {
+    // A time frame has at most three symbols. Cache it before its earliest
+    // possible start, then use its actual compact length. No crypto per sample.
+    if(options_.callsign.empty()&&options_.timecode&&local>=metadata_end-3*symbol_time) {
+        const auto absolute_dwell=static_cast<long double>(epoch_)+seconds-local;
+        if(absolute_dwell>=0 && absolute_dwell<4294967296.L) {
+            const auto ticks=static_cast<std::uint64_t>(std::round(absolute_dwell*65536));
+            if(ticks>=(std::uint64_t{1}<<48)) {symbol_count_=0;cached_time_.reset();}
+            else if(cached_time_!=ticks) {
+                const auto packet=timecode_packet(ticks,time_key_?&*time_key_:nullptr);
+                symbol_count_=packet.count;
+                for(std::size_t i=0;i<symbol_count_;++i)symbols_[i]=apsk_point(packet.symbols[i]);
+                cached_time_=ticks;
+            }
+        } else {symbol_count_=0;cached_time_.reset();}
+    }
+    const auto metadata_begin=metadata_end-symbol_count_*symbol_time;
+    if(symbol_count_ && local>=metadata_begin) {
         const auto position=(local-metadata_begin)/symbol_time;
         const auto index=static_cast<std::size_t>(std::floor(position));
-        if(index<symbols_.size()) {
+        if(index<symbol_count_) {
             const auto previous=index?symbols_[index-1]:std::complex<double>{1,0};
             const auto blend=smooth(position-index);
             modulation=punctuation*(previous+(symbols_[index]-previous)*blend);
-        } else if(index==symbols_.size()) {
+        } else if(symbol_count_ && index==symbol_count_) {
             const auto blend=smooth(position-index);
-            modulation=punctuation*(symbols_.back()+(std::complex<double>{1,0}-symbols_.back())*blend);
+            const auto last=symbols_[symbol_count_-1];
+            modulation=punctuation*(last+(std::complex<double>{1,0}-last)*blend);
         }
     }
     const auto cycles=std::fmod(static_cast<long double>(plan_.frequency_hz)*seconds,1.L);

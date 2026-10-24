@@ -23,6 +23,10 @@ public:
         std::uint64_t absence_samples = 0;
         double score = 0; // Arbitration support, not a displayed native score.
         bool complete = false;
+        // Optional helper-derived reception never suppresses compatible
+        // ordinary progress, even when its earlier prefix has more support.
+        // Stored in the existing alignment padding before signal_id.
+        bool helper_assisted = false;
         std::uint64_t signal_id = 0, symbol_samples = 0, timing_tolerance = 0;
         // Valid only for amplitude candidates. These are actual retained FFT
         // passbands; their reported centers are not coherent carrier estimates.
@@ -177,6 +181,7 @@ private:
         return {entry.signal_id, selected, limited, entry.revision, aliases(entry)};
     }
     static bool stronger(const Candidate& a, const Candidate& b) {
+        if(a.helper_assisted!=b.helper_assisted)return !a.helper_assisted;
         if (a.score != b.score) return a.score > b.score;
         // Intrinsic geometry resolves equal evidence independently of target
         // order. Candidate identity only breaks otherwise indistinguishable fits.
