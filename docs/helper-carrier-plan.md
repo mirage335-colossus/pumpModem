@@ -1,11 +1,43 @@
 # Helper Carrier implementation and qualification plan
 
-Updated 25 October 2026 for the wide-capture and compact-receiver corrections
-under development. These corrections are not yet runtime-qualified.
-Qualification remains open. This page describes current behavior and remaining
-work; source-bound results, original failures and historical architectures are
-in [validation](validation.md). Waveform and operating details are in the
+Updated 26 October 2026 for the manually enabled tracker/NCO preview. Live
+integration repairs and the rebuilt GUI remain pending. The immediate target
+is a manual GUI trial within the requested one-hour window, with short focused
+checks; broad qualification is explicitly deferred. This is not feature or
+release completion. Source-bound results and original failures remain in
+[validation](validation.md); waveform details are in the
 [Helper Carrier reference](helper-carrier.md).
+
+## Current preview design and immediate checks
+
+Use an upstream real-time tone tracker and continuously retuned NCO feeding one
+ordinary Robust receiver bank. Assistance is manually enabled; enabled without
+qualified lock admits no new payload acquisition. The preview does not use
+the previous broad fallback/probe banks, old capture replay or receiver
+capsules. Full ordinary wire, framing, long-text/attachment recovery, accepted
+progress and fully scored physical END remain required.
+
+The tracker is fixed at 54,160 bytes: a 4,096-point FFT seed, 20 ms FLL and at
+most 128 recent numeric observations over three seconds, without iterative
+historical work. Standalone tracker cases for drift, punctuation, noise, loss
+and sparse updates passed, and continuous NCO retuning passed a 0.376-second
+smoke check. These are component checks pending final source/check bindings,
+not Live or GUI acceptance. Uncertainty near 0.209 Hz at C/N0 49.7 dB-Hz and
+1.06 Hz near 31 dB-Hz does not establish 128-second-symbol coherence. New
+metadata, punctuation-phase or timing assistance is not qualified; the NCO
+phase stays continuous during retuning.
+
+Build the GUI, exercise lock/no-lock and loss behavior, and verify the complete
+ordinary payload/progress/END path in the manual trial. Link Planner must show
+the ordinary baseline and explicitly unavailable assisted estimates, with the
+old conditional overlays removed. Do not infer a CPU/SNR gain from enabling
+the feature. Final source/binary pins and these focused results are pending.
+
+The earlier receiver requirements and rolling architecture below are superseded
+by this preview. Their preserved measurements describe their own builds and do
+not qualify the new route.
+
+## Previous design and source-bound evidence
 
 The preceding build's 441-input source/build overlay is
 `87513574c569de7d9362d498f747cea6658b51e0b681884555242884c2a0e17f`, bound by
@@ -38,7 +70,7 @@ bridge. Earlier normal 379 passes, sanitizer 366/377 passes with eleven
 failed/incomplete, v7 normal failures and prior payload/cable/work measurements
 do not qualify v8. See [validation](validation.md) for source-bound evidence and failures.
 
-## Governing requirements
+## Previous design requirements — superseded
 
 The current acceptance cases add two encrypted 15 kW HF configurations: Rate 36,
 shared crystal RF/audio reference at 30 MHz with Interleave 10, and Rate 360,
@@ -262,7 +294,7 @@ These behaviors remain subject to their source-bound qualification limits.
     curves retain their ordinary meanings. No CPU or sensitivity gain follows
     merely from enabling helper power or predicting a strong tone.
 
-## Implemented rolling common-link acquisition
+## Previous rolling common-link acquisition — superseded
 
 ### One ordinary executor and an immutable original search
 

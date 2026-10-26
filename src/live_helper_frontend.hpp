@@ -302,8 +302,8 @@ class HelperInputFrontend {
         helper::PayloadFilter filter;
         std::uint64_t first_raw=0,next_raw=0,origin=0,first=0,eligible=0;
         std::vector<float> pending;
-        Branch(HelperInputView v,std::uint64_t at):view(std::make_shared<const HelperInputView>(v)),
-            translator({v.physical_rate,v.correction_hz,v.input_band,at,v.conjugate},
+        Branch(HelperInputView v,std::uint64_t at,bool realtime=false):view(std::make_shared<const HelperInputView>(v)),
+            translator({v.physical_rate,v.correction_hz,v.input_band,at,v.conjugate,realtime},
                        helper::AnalyticFrequencyTranslator::workspace_required()),
             converter(v.physical_rate,v.logical_rate),filter(v.logical_rate,v.translated_helper_hz),
             first_raw(at),next_raw(at),origin(at/v.physical_rate*v.logical_rate+
@@ -344,6 +344,43 @@ public:
     }
     bool active()const noexcept{return branches_[0] || branches_[1];}
     void reset()noexcept {branches_={};}
+    // Manually enabled reference mode has one upstream converter and one
+    // ordinary receiver. Positive real-PCM capture is the supported image;
+    // bands crossing DC/Nyquist decline instead of adding a second receiver.
+    void admit_realtime(const modem::Config& config,double expected,const helper::Reference& reference,
+            std::uint32_t physical_rate,double passband,std::uint64_t next_raw) {
+        if(active())return;
+        if(!reference.frequency_valid || reference.sample_rate!=physical_rate ||
+           !std::isfinite(reference.frequency_hz) || !std::isfinite(reference.frequency_uncertainty_hz) ||
+           reference.frequency_uncertainty_hz<0 || reference.frequency_hz<=0)return;
+        const auto correction=expected-reference.frequency_hz;
+        const auto half=helper::occupied_bandwidth(config)/2;
+        const auto uncertainty=std::max(32.,4*reference.frequency_uncertainty_hz);
+        const auto data_input=config.carrier_hz-correction;
+        const auto low=std::min(data_input-half,reference.frequency_hz-175)-uncertainty;
+        const auto high=std::max(data_input+half,reference.frequency_hz+175)+uncertainty;
+        if(low<=10 || high>=passband || low+correction<=10 ||
+           high+correction>=physical_rate/2.-10)
+            throw Error("helper reference or payload lies outside the captured positive passband");
+        HelperInputView view;view.id=1;view.budget_serial=budget_serial_;
+        view.physical_rate=physical_rate;view.logical_rate=config.sample_rate;
+        view.helper_hz=expected;view.correction_hz=correction;view.translated_helper_hz=expected;
+        view.input_band={low,high};
+        view.payload_output_band={config.carrier_hz-half-uncertainty,config.carrier_hz+half+uncertainty};
+        const auto quantum=physical_rate/std::gcd(physical_rate,config.sample_rate);
+        const auto remainder=next_raw%quantum;
+        if(remainder && next_raw>UINT64_MAX-(quantum-remainder))return;
+        const auto first=remainder?next_raw+quantum-remainder:next_raw;
+        auto branch=std::make_unique<Branch>(view,first,true);
+        if(sizeof(*this)+branch->bytes()>grant_)throw Error("realtime helper converter exceeds its workspace grant");
+        branches_[0]=std::move(branch);
+    }
+    bool track_frequency(const helper::Reference& reference,double expected)noexcept {
+        if(!reference.frequency_valid || !std::isfinite(reference.frequency_hz))return false;
+        auto& branch=branches_[0];
+        return branch && reference.sample_rate==branch->view->physical_rate &&
+            branch->translator.track_frequency(expected-reference.frequency_hz);
+    }
     void admit(const modem::Config& config,double expected,const helper::Reference& reference,
                std::uint32_t physical_rate,double passband,std::uint64_t next_raw) {
         if(active())return;

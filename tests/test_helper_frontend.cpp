@@ -162,11 +162,34 @@ void capture_limits_and_exact_delay() {
     input[0]=std::numeric_limits<float>::quiet_NaN();
     rejects([&]{delay.push(std::span<const float>(input).first(1),output,3000);},"translator accepted nonfinite PCM");
 }
+void realtime_retuning_preserves_phase() {
+    using Translator=helper::AnalyticFrequencyTranslator;
+    constexpr std::uint32_t rate=48000;
+    constexpr std::uint64_t origin=90000001;
+    Translator t({rate,0,{4000,6000},origin,false,true},Translator::workspace_required());
+    std::vector<float> input(4096),output(4096);
+    for(std::size_t i=0;i<input.size();++i)input[i]=static_cast<float>(std::cos(tau*5000*(origin+i)/rate));
+    t.push(input,output,origin);
+    auto at=origin+input.size();
+    for(const auto correction:{-3000.,-3000.125,-2999.75,0.}) {
+        const auto phase=t.phase_at(at);
+        check(t.track_frequency(correction),"continuous helper frequency update was declined");
+        check(std::abs(std::remainder(t.phase_at(at)-phase,tau))<1e-10,
+              "helper update reset the established NCO phase");
+        check(std::abs(std::remainder(t.phase_at(at+1234)-phase-tau*correction*1234/rate,tau))<1e-10,
+              "helper update did not apply its measured frequency slope");
+        t.push(input,output,at);at+=input.size();
+    }
+    const auto phase=t.phase_at(at);
+    check(!t.track_frequency(-10000),"helper update moved payload through DC");
+    check(t.phase_at(at)==phase,"declined helper update changed phase");
+}
 }
 int main() {
     try {
         coarse_seed_is_wide_bounded_and_source_independent();coarse_noise_has_no_persistent_peak();
         translation_removes_offset_without_a_mixer_image();capture_limits_and_exact_delay();
+        realtime_retuning_preserves_phase();
         std::cout<<"helper coarse discovery and analytic frequency translation passed\n";return 0;
     }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

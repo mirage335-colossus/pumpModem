@@ -51,7 +51,7 @@ else()
   add_library(Threads::Threads INTERFACE IMPORTED)
 endif()
 include(cmake/VendoredLzma.cmake)
-add_library(datapump src/crypto.cpp src/helper_carrier.cpp src/helper_metadata.cpp src/helper_receiver.cpp src/helper_assistance.cpp src/helper_frontend.cpp src/stream_codec.cpp src/recovery.cpp src/attachment.cpp src/boundary_sync.cpp src/compression_short.cpp src/compression_lzma.cpp src/modem.cpp src/streaming_modem.cpp src/pattern_code.cpp src/pattern_receiver.cpp src/pattern_correlator.cpp src/search_parallel.cpp src/channel.cpp src/runtime.cpp src/resampler.cpp src/qr.cpp src/transfer.cpp src/tuning.cpp src/live.cpp src/live_receiver_layout.cpp src/signal_view.cpp third_party/qrcodegen/qrcodegen.cpp)
+add_library(datapump src/crypto.cpp src/helper_carrier.cpp src/helper_metadata.cpp src/helper_receiver.cpp src/helper_assistance.cpp src/helper_frontend.cpp src/helper_tone_tracker.cpp src/stream_codec.cpp src/recovery.cpp src/attachment.cpp src/boundary_sync.cpp src/compression_short.cpp src/compression_lzma.cpp src/modem.cpp src/streaming_modem.cpp src/pattern_code.cpp src/pattern_receiver.cpp src/pattern_correlator.cpp src/search_parallel.cpp src/channel.cpp src/runtime.cpp src/resampler.cpp src/qr.cpp src/transfer.cpp src/tuning.cpp src/live.cpp src/live_receiver_layout.cpp src/signal_view.cpp third_party/qrcodegen/qrcodegen.cpp)
 # Scalar, cached and batched receiver paths must preserve identical arithmetic.
 # AArch64 can fuse multiply/add by default where generic x86-64 cannot. Keep
 # separate rounding in both the library and its independent reference tests.
@@ -394,7 +394,7 @@ if(BUILD_TESTING AND NOT DATAPUMP_BUILD_WASM)
   target_link_libraries(test_helper_filter_response PRIVATE datapump)
   add_test(NAME helper_filter_response COMMAND test_helper_filter_response)
   set_tests_properties(helper_filter_response PROPERTIES TIMEOUT 60)
-  foreach(component frontend reference_dynamics link_state current_reference current_link_runtime frequency_publication frequency_snapshot utc_map mean_caller punctuation_clock cold_input_stage measurement_history native_work_bound fft_probe_prepay frequency_coverage phase_chord compact_acquisition physical_capture calendar_bandwidth)
+  foreach(component frontend tone_tracker simple_dispatch reference_dynamics link_state current_reference current_link_runtime frequency_publication frequency_snapshot utc_map mean_caller punctuation_clock cold_input_stage measurement_history native_work_bound fft_probe_prepay frequency_coverage phase_chord compact_acquisition physical_capture calendar_bandwidth)
     add_executable(test_helper_${component} tests/test_helper_${component}.cpp)
     target_link_libraries(test_helper_${component} PRIVATE datapump)
     add_test(NAME helper_${component} COMMAND test_helper_${component})

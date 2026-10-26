@@ -136,6 +136,30 @@ void helper_assistance_debug_fields() {
     check(phase_log.str().find("\"helper_compact_phase_projected_samples\":53")!=std::string::npos&&
           phase_log.str().find("\"helper_compact_phase_moment_updates\":29")!=std::string::npos,
           "Actual compact phase work was omitted from debug JSON");
+    // Manual real-time reference state supersedes stale bank/probe counters.
+    auto realtime=snapshot;
+    realtime.helper_frequency_assistance_active=realtime.helper_phase_assistance_active=
+        realtime.helper_timing_assistance_active=true;
+    realtime.helper_conditional_jobs=123;realtime.helper_audit_jobs=45;
+    const auto no_legacy_claims=[](const std::string& text) {
+        return text.find("native FFT")==std::string::npos&&text.find("pair maxima")==std::string::npos&&
+            text.find("phase assistance")==std::string::npos&&text.find("broad/probe")==std::string::npos;
+    };
+    realtime.helper_status="Helper reference waiting";
+    const auto waiting=helper_diagnostics(realtime);
+    check(waiting.find("Robust acquisition waits for helper lock")!=std::string::npos&&
+        waiting.find("frequency-corrected")==std::string::npos&&no_legacy_claims(waiting),
+        "Waiting helper reference inherited stale assistance/search claims");
+    realtime.helper_status="Helper reference locked: offset +12.5 Hz";
+    const auto locked=helper_diagnostics(realtime);
+    check(locked.find(realtime.helper_status)==0&&
+        locked.find("frequency-corrected input to ordinary Robust reception")!=std::string::npos&&no_legacy_claims(locked),
+        "Locked helper reference lost the real-time correction state or inherited obsolete bank claims");
+    realtime.helper_status="Helper reference lost; acquisition paused";
+    const auto lost=helper_diagnostics(realtime);
+    check(lost==realtime.helper_status&&lost.find("frequency-corrected")==std::string::npos&&no_legacy_claims(lost),
+        "Lost helper reference inherited an active lock or broad fallback claim");
+
 }
 
 void physical_debug_workflow() {

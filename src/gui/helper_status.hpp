@@ -7,6 +7,16 @@ namespace datapump::gui {
 // Presence and measured offset alone cannot claim work saved or phase applied.
 // The runtime owns the joined result and its decline reason in helper_status.
 inline std::string helper_diagnostics(const live::Snapshot& snapshot) {
+    // The manual reference path owns its lock state. Old acquisition-bank
+    // counters may still be present in a transitional snapshot; they cannot
+    // turn waiting/loss into a lock or imply broad fallback reception.
+    if(snapshot.helper_status.starts_with("Helper reference ")) {
+        if(snapshot.helper_status.starts_with("Helper reference waiting"))
+            return snapshot.helper_status+" | Robust acquisition waits for helper lock";
+        if(snapshot.helper_status.starts_with("Helper reference locked:"))
+            return snapshot.helper_status+" | frequency-corrected input to ordinary Robust reception";
+        return snapshot.helper_status;
+    }
     const bool work=snapshot.helper_frequency_assistance_active||snapshot.helper_phase_assistance_active||
         snapshot.helper_timing_assistance_active||
         snapshot.helper_original_search_pairs||snapshot.helper_selected_search_pairs||

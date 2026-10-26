@@ -188,6 +188,9 @@ struct AnalyticFrequencyTranslator::Impl {
     std::uint64_t next=0;
     double error=0;
     Complex oscillator{1,0},step{1,0};
+    std::uint64_t phase_origin_sample=0;
+    double phase_origin_radians=0;
+    bool tracking=false;
     explicit Impl(Config c):config(c),next(c.first_sample) {
         if(!c.sample_rate || !std::isfinite(c.correction_hz) ||
            !std::isfinite(c.input_band.lower_hz) || !std::isfinite(c.input_band.upper_hz) ||
@@ -198,7 +201,7 @@ struct AnalyticFrequencyTranslator::Impl {
                           CaptureBand{c.input_band.lower_hz+c.correction_hz,c.input_band.upper_hz+c.correction_hz};
         if(output.lower_hz<10 || output.upper_hz>c.sample_rate/2.-10)
             throw Error("helper translator output band crosses DC or Nyquist guard");
-        if(c.correction_hz!=0 || c.conjugate) {
+        if(c.correction_hz!=0 || c.conjugate || c.continuous_reference) {
             for(std::size_t i=0;i<taps.size();++i) {
                 const auto k=2*i+1;
                 const auto w=.42+.5*std::cos(std::numbers::pi*static_cast<double>(k)/group_delay)+
@@ -213,6 +216,14 @@ struct AnalyticFrequencyTranslator::Impl {
         oscillator=std::polar(1.,phase(next));
     }
     double phase(std::uint64_t sample)const noexcept {
+        if(tracking) {
+            const auto forward=sample>=phase_origin_sample;
+            const auto distance=forward?sample-phase_origin_sample:phase_origin_sample-sample;
+            const auto residue=modular_product(config.correction_hz,distance,config.sample_rate);
+            return static_cast<double>(std::remainder(phase_origin_radians+
+                (forward?1.L:-1.L)*2*std::numbers::pi_v<long double>*residue/config.sample_rate,
+                2*std::numbers::pi_v<long double>));
+        }
         const auto residue=modular_product(config.correction_hz,sample,config.sample_rate)-
             modular_product(config.correction_hz,group_delay,config.sample_rate);
         return static_cast<double>(std::remainder(2*std::numbers::pi_v<long double>*residue/config.sample_rate,
@@ -289,6 +300,19 @@ CaptureBand AnalyticFrequencyTranslator::output_band()const noexcept{return impl
 double AnalyticFrequencyTranslator::maximum_amplitude_error()const noexcept{return impl_->error;}
 double AnalyticFrequencyTranslator::image_leakage_bound()const noexcept{return impl_->error;}
 double AnalyticFrequencyTranslator::phase_at(std::uint64_t n)const noexcept{return impl_->phase(n);}
+bool AnalyticFrequencyTranslator::track_frequency(double hz)noexcept {
+    auto& s=*impl_;
+    if(!s.config.continuous_reference || !std::isfinite(hz))return false;
+    const auto low=s.config.conjugate?hz-s.config.input_band.upper_hz:s.config.input_band.lower_hz+hz;
+    const auto high=s.config.conjugate?hz-s.config.input_band.lower_hz:s.config.input_band.upper_hz+hz;
+    if(low<10 || high>s.config.sample_rate/2.-10)return false;
+    // oscillator already names precisely the next sample, including its old
+    // continuous phase. Never reconstruct it from a new absolute q*n product.
+    s.phase_origin_sample=s.next;s.phase_origin_radians=std::arg(s.oscillator);s.tracking=true;
+    s.config.correction_hz=hz;s.output={low,high};
+    s.step=std::polar(1.,std::remainder(tau*hz/s.config.sample_rate,tau));
+    return true;
+}
 void AnalyticFrequencyTranslator::push(std::span<const float> input,std::span<float> output,std::uint64_t first) {
     auto& s=*impl_;check_pcm(input,first,s.next);
     if(output.size()<input.size())throw Error("helper translator output span is too short");
@@ -299,7 +323,7 @@ void AnalyticFrequencyTranslator::push(std::span<const float> input,std::span<fl
     }
     for(std::size_t n=0;n<input.size();++n) {
         s.history[s.position]=input[n];const auto real=static_cast<double>(s.at_delay(group_delay));
-        if(s.config.correction_hz==0 && !s.config.conjugate)output[n]=static_cast<float>(real);
+        if(s.config.correction_hz==0 && !s.config.conjugate && !s.config.continuous_reference)output[n]=static_cast<float>(real);
         else {
             double imaginary=0;
             for(std::size_t i=0;i<s.taps.size();++i) {

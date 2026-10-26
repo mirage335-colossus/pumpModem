@@ -73,6 +73,8 @@ public:
         CaptureBand input_band{};
         std::uint64_t first_sample=0;
         bool conjugate=false;
+        // Prepare analytic conversion even when the initial correction is zero.
+        bool continuous_reference=false;
     };
     static constexpr std::size_t tap_count=1025;
     static constexpr std::size_t group_delay=(tap_count-1)/2;
@@ -98,6 +100,10 @@ public:
     // adds this phase AFTER optional analytic conjugation. A physical reference
     // at k therefore maps to output k+delay(), sign*phase+phase_at(k+delay()).
     double phase_at(std::uint64_t output_sample)const noexcept;
+    // Change only the NCO slope at the next unprocessed sample. Its phase and
+    // FIR history remain continuous. After a change phase_at describes the
+    // current affine segment, not a historical phase observation.
+    bool track_frequency(double correction_hz)noexcept;
     // Exactly input.size() outputs, including the known FIR startup transient.
     // No EOF flush, time warp, gain normalization, or reset on helper loss.
     // Input and output may alias exactly. Gaps and nonfinite PCM are rejected.

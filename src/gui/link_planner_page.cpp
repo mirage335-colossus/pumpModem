@@ -132,19 +132,6 @@ Chart chart_data(const planner::Model& model, bool observer) {
         }
         std::sort(chart.receive_points.begin(),chart.receive_points.end(),[](const auto& a,const auto& b){return a.first>b.first;});
     }
-    if(!observer)for(const auto& point:model.helper_receive_points) {
-        if(!std::isfinite(point.target_db_hz))continue;
-        chart.helper_receive_points.emplace_back(point.target_db_hz,point.confidence_available||point.reference_available?
-            point.success_probability:std::numeric_limits<double>::quiet_NaN());
-    }
-    std::sort(chart.helper_receive_points.begin(),chart.helper_receive_points.end(),[](auto a,auto b){return a.first>b.first;});
-    if(!observer)for(const auto& point:model.helper_backend_feasibility_points) {
-        if(!std::isfinite(point.target_db_hz))continue;
-        chart.helper_feasibility_points.emplace_back(point.target_db_hz,
-            point.ordinary_phy_available&&point.backend_fits_budget?point.ordinary_success_probability:
-            std::numeric_limits<double>::quiet_NaN());
-    }
-    std::sort(chart.helper_feasibility_points.begin(),chart.helper_feasibility_points.end(),[](auto a,auto b){return a.first>b.first;});
     for (const auto& point : model.points) {
         chart.strong = std::max(chart.strong, point.target_db_hz);
         chart.weak = std::min(chart.weak, point.target_db_hz);
@@ -200,22 +187,6 @@ Chart cpu_chart_data(const planner::Model& model) {
         chart.points.emplace_back(point.target_db_hz,value);
         if(std::isfinite(value)){minimum=std::min(minimum,value);maximum=std::max(maximum,value);}
     }
-    for(const auto& point:model.helper_cpu_points) {
-        if(!std::isfinite(point.target_db_hz))continue;
-        const auto value=point.sustained_available&&std::isfinite(point.qualified_sustained_realtime_ratio)&&
-            point.qualified_sustained_realtime_ratio>0?point.qualified_sustained_realtime_ratio:
-            std::numeric_limits<double>::quiet_NaN();
-        chart.helper_points.emplace_back(point.target_db_hz,value);
-        if(std::isfinite(value)){minimum=std::min(minimum,value);maximum=std::max(maximum,value);}
-    }
-    std::sort(chart.helper_points.begin(),chart.helper_points.end(),[](auto a,auto b){return a.first>b.first;});
-    for(const auto& point:model.helper_cpu_points) {
-        const auto value=point.backend_sustained_available&&point.backend_sustained_realtime_ratio>0?
-            point.backend_sustained_realtime_ratio:std::numeric_limits<double>::quiet_NaN();
-        chart.helper_backend_points.emplace_back(point.target_db_hz,value);
-        if(std::isfinite(value)){minimum=std::min(minimum,value);maximum=std::max(maximum,value);}
-    }
-    std::sort(chart.helper_backend_points.begin(),chart.helper_backend_points.end(),[](auto a,auto b){return a.first>b.first;});
     if(chart.selected_value>0){minimum=std::min(minimum,chart.selected_value);maximum=std::max(maximum,chart.selected_value);}
     std::sort(chart.points.begin(),chart.points.end(),[](const auto& a,const auto& b){return a.first>b.first;});
     const auto high=std::max(-std::floor(std::log10(minimum)),std::ceil(std::log10(maximum))),low=-high;
@@ -437,12 +408,6 @@ Node graph(const planner::Model& model, bool observer, float width) {
             " · right axis"+(rx_available?" · "+probability(model.one_bit_success_probability):""),
             11,rx_available&&model.one_bit_success_probability<.8?Tone::negative:Tone::comparison,false,4);
     }
-    if(!observer&&!model.helper_receive_points.empty())paragraph(n,
-        "┈ Conditional helper 1-bit RX reference after independent qualification · known-onset finite window · gaps retain missing coverage",
-        10,Tone::text,false,4);
-    if(!observer&&!model.helper_backend_feasibility_points.empty())paragraph(n,
-        "┅ Ordinary PHY at conditional backend capacity · after helper acquisition · unchanged 1-bit estimate, shown only where retained backend fits the selected CPU budget. Reference/frontend/probe costs and total feasibility remain uncalibrated; gaps do not predict zero reception.",
-        10,Tone::text,false,4);
     const auto chart = chart_data(model, observer);
     const float label_width = 44,right_label_width=observer?0.f:36.f;
     const float plot_width = inner - label_width-right_label_width, height = 160;
@@ -481,9 +446,6 @@ Node cpu_graph(const planner::Model& model,float width) {
     paragraph(n,"CPU estimate",13,Tone::text,true,2);
     paragraph(n,model.symbol_burst.modeled?"Processing seconds per second of scheduled reception":
         "Processing seconds per second of audio",10,Tone::muted,false,4);
-    if(!model.helper_cpu_points.empty())paragraph(n,
-        "━ Ordinary baseline · ┄ Conditional backend model · ┈ Qualified helper total",
-        10,Tone::text,false,4);
     const auto chart=cpu_chart_data(model);
     auto body=row(inner);auto labels=column(label_width);labels.height=height;
     float previous=0;
@@ -498,8 +460,8 @@ Node cpu_graph(const planner::Model& model,float width) {
     body.children.push_back(std::move(plot));n.children.push_back(std::move(body));
     n.children.push_back(target_axis(chart,inner,plot_width,label_width));
     paragraph(n,"Target dB in 1 Hz · 1 = real-time limit",10,Tone::muted,false,0);
-    if(!model.helper_cpu_points.empty())paragraph(n,
-        "Conditional backend CPU uses the ordinary primitive-cost model on selected native FFT/direct/template/clock work, original construction and full continuation. Frequency-only forecasts retain all original DATA-clock and UTC-steering alternatives. An actually executed joint RF/DATA-clock certificate may illustrate the selected current target using its exact retained subset; its actual source relation decides the retained DATA-clock domain and does not forecast future qualification. Generic helpers retain their physical-a/UTC union; an explicit common corrected Robust source measures b directly, with a and c individually unresolved and not added again. Neither case is a GPSDO-equivalent estimate. It excludes reference/frontend/probe costs; it is not total CPU or a measured speedup. The separate total curve needs matched component calibration.",
+    if(model.helper_reference.enabled)paragraph(n,
+        "Ordinary receiver baseline. A helper-stabilized RF/CPU estimate for the real-time reference path is not available yet; no helper speedup or payload SNR gain is assigned.",
         10,Tone::muted,false,0);
 
     return n;
@@ -533,7 +495,7 @@ void oscillator_details(Node& root,const planner::Model& model) {
     root.children.push_back(std::move(clocks));
 }
 
-Node helper_work_graph(const planner::Model& model,float width) {
+[[maybe_unused]] Node helper_work_graph(const planner::Model& model,float width) {
     auto n=card(width);n.padding=8;
     paragraph(n,"Conditional acquisition work",13,Tone::text,true,4);
     paragraph(n,"Logical native template-pair job descriptors per original batch · checked representative targets",10,Tone::muted,false,4);
@@ -733,126 +695,21 @@ void link_budget(Node& root, const planner::Model& model) {
             " dB", 11, Tone::muted, false, 0);
         const auto& helper=model.helper_reference;
         if(helper.enabled) {
-            paragraph(n,"Helper Carrier",12,Tone::text,true,4);
+            paragraph(n,"Helper reference on",12,Tone::text,true,4);
             if(helper.budget_available) {
-                paragraph(n,"Effective power: "+number(helper.effective_power_w)+" W  ·  Received: "+
-                    db(helper.received_dbm)+" dBm  ·  Reference: "+db(helper.cn0_db_hz)+" dB in 1 Hz",11,Tone::muted,false,4);
-                if(helper.simulation_level_modeled) {
-                    paragraph(n,"Hardware tone link budget: "+db(helper.tone_snr_db)+" dB in 10 Hz.",11,Tone::muted,false,4);
-                    paragraph(n,"Sampled simulation: payload signal "+db(helper.simulation_data_cn0_db_hz)+
-                        " dB in 1 Hz; helper reference "+db(helper.simulation_cn0_db_hz)+
-                        " dB in 1 Hz. Both retain the waveform's "+db(helper.simulation_level_db)+" dB level.",11,Tone::muted,false,4);
-                }
-                paragraph(n,std::string(helper.simulation_level_modeled?"Sampled simulation tone: ":"Expected tone: ")+
-                    db(helper.simulation_level_modeled?helper.simulation_tone_snr_db:helper.tone_snr_db)+" dB in 10 Hz · "+
-                    (helper.tone_level_sufficient?"above the 6 dB presence level; observed frequency confidence still required.":
-                        "below the 6 dB presence level; assistance cannot be assumed."),11,
-                    helper.tone_level_sufficient?Tone::muted:Tone::caution,false,4);
-            }
-            if(helper.geometry_available)
-                paragraph(n,"Helper audio center: "+frequency(helper.frequency_hz)+
-                    ". The audio route and radio must pass its tone and metadata band.",11,Tone::muted,false,4);
-            if(helper.geometry_available) {
-                paragraph(n,"Declared signed helper-tone search: "+frequency(helper.helper_search_lower_hz)+
-                    " to "+frequency(helper.helper_search_upper_hz)+"; payload support: "+
-                    frequency(helper.payload_search_lower_hz)+" to "+frequency(helper.payload_search_upper_hz)+
-                    ". Real mono capture can fold negative frequencies; surviving image branches must be retained. ADC rate alone does not establish the radio or audio passband.",
-                    11,helper.coarse_conversion_required?Tone::caution:Tone::muted,false,4);
-                paragraph(n,"Ordinary RF margin: +/-"+number(helper.ordinary_rf_half_width_hz)+
-                    " Hz represented of +/-"+number(helper.requested_rf_half_width_hz)+" Hz requested"+
-                    (helper.baseline_search_limited?"; baseline coverage remains limited.":"."),
-                    11,helper.baseline_search_limited?Tone::caution:Tone::muted,false,4);
-            }
-            paragraph(n,helper.status,11,helper.geometry_available?Tone::muted:Tone::caution,false,4);
-            paragraph(n,"Ordinary baseline: payload margin, probability and CPU curves use the configured receiver without measured helper assistance.",
-                11,Tone::muted,false,4);
-            if(helper.conditional_geometry_available)
-                paragraph(n,"Conditional original-grid acquisition: "+std::to_string(helper.conditional_pairs)+
-                    " selected frequency/clock pairs versus an ordinary baseline of "+std::to_string(helper.ordinary_pairs)+
-                    ", assuming a qualified helper frequency confidence interval of +/-"+
-                    number(helper.assumed_frequency_uncertainty_hz)+" Hz at offset "+
-                    number(helper.assumed_helper_offset_hz)+" Hz. Retained original clock rates: "+
-                    std::to_string(helper.retained_clock_rates)+
-                    ". Every key, profile and newly admitted epoch retains its unresolved arrival and keyed phase alternatives. Actual backend capability, every profile's FIR response and reserved workspace still require runtime qualification.",
+                paragraph(n,"Effective helper power: "+number(helper.effective_power_w)+" W  ·  Received: "+
+                    db(helper.received_dbm)+" dBm  ·  Expected tone: "+db(helper.cn0_db_hz)+" dB in 1 Hz.",
                     11,Tone::muted,false,4);
-            if(helper.conditional_geometry_available) {
-                paragraph(n,std::string(helper.carrier_projection_counts_available?"Conditional carrier projections: ":"Conditional RF catalogue offsets: ")+
-                    std::to_string(helper.conditional_carriers)+" unique frequencies versus "+std::to_string(helper.ordinary_carriers)+
-                    " ordinary frequencies. "+(helper.carrier_projection_counts_available?
-                        "Several clock pairs can share one projection; pair work and carrier work are separate dimensions, not CPU speedups.":
-                        "This is catalogue geometry; physical projection work is not quantified for this backend."),
-                    11,Tone::muted,false,4);
-                paragraph(n,"Optional future broad probes become eligible after "+planner::duration(helper.broad_probe_eligibility_seconds)+
-                    ". One global cold probe slot rotates current key/profile/epoch ranks, retaining that owner's original RF/LF domain. This is partial future coverage, not a complete cohort audit. Eligibility promises no completion time or CPU percentage. A complete physical symbol still spans "+
-                    planner::duration(helper.physical_symbol_seconds)+"; skipped or partial probe input never proves absence.",
-                    11,Tone::muted,false,4);
-                paragraph(n,"Probe work uses bounded credit earned from actual conditional execution. Stored credit is capped at one previous packet; one indivisible packet may exceed the credit, and that debt must be paid before another probe. Template, projection and lane units do not imply CPU percentages. Any payload dependency promotes its owner to ordinary work outside this optional budget. Helper loss or inconsistency immediately restores broad future acquisition for every current key, profile and epoch. Accepted payload continues through ordinary physical completion.",
+                if(helper.simulation_level_modeled)paragraph(n,"Sampled simulation helper level: "+
+                    db(helper.simulation_cn0_db_hz)+" dB in 1 Hz. Payload retains its ordinary link budget.",
                     11,Tone::muted,false,4);
             }
-            if(!helper.timing_status.empty())paragraph(n,helper.timing_status,11,Tone::muted,false,4);
-            if(model.inputs.helper_joint_diagnostic_allocator_bytes)paragraph(n,
-                "Separate GUI diagnostic RAM at plan creation: "+
-                std::to_string(model.inputs.helper_joint_diagnostic_allocator_bytes)+" allocator-requested bytes plus "+
-                std::to_string(model.inputs.helper_joint_diagnostic_account_bytes)+" account-object bytes; "+
-                std::to_string(model.inputs.helper_joint_diagnostic_occupied_slots)+" of2 fixed "+
-                std::to_string(model.inputs.helper_joint_diagnostic_slot_bytes)+"-byte numeric slots remain borrowed. Account control-block/allocator overhead is separate. This is additional bounded GUI memory, outside DSP/payload promises; no third slot or fallback vector heap is allowed.",
+            if(helper.geometry_available)paragraph(n,"Nominal helper audio center: "+frequency(helper.frequency_hz)+
+                ". The audio route and radio must pass the helper tone and Robust signal; ADC rate alone does not establish that passband.",
                 11,Tone::muted,false,4);
-            const auto assisted=std::find_if(model.helper_cpu_points.begin(),model.helper_cpu_points.end(),
-                [&](const auto& p){return p.target_db_hz==model.inputs.target_db_hz;});
-            if(assisted!=model.helper_cpu_points.end()) {
-                if(assisted->executed_joint_geometry) {
-                    const auto& joint=*assisted->executed_joint_geometry;
-                    paragraph(n,"Current-target executed joint RF/DATA-clock geometry: "+
-                        std::to_string(joint.joint_pairs)+" retained pairs from the "+
-                        std::to_string(joint.frequency_only_pairs)+" frequency-only pairs ("+
-                        std::to_string(joint.original_pairs)+" original), with "+
-                        std::to_string(joint.joint_clock_rates)+" retained DATA-clock lanes. "+
-                        simulation::helper_joint_clock_source_domain(joint.source_relation)+
-                        " Original arrival/epoch trials remain. The backend model conditionally reuses this observed geometry; it does not forecast future measurement qualification or whole-cohort coverage.",
-                        11,Tone::muted,false,4);
-                }
-                const auto& req=assisted->requirements;
-                if(req.frequency_requirements_available)paragraph(n,
-                    "Conditional strong-fit requirement at expected helper C/N0 "+db(req.expected_cn0_db_hz)+
-                    " dBHz: raw frequency radius "+frequency(req.frequency_radius_hz)+
-                    ", phase radius "+number(req.phase_radius_radians,5)+" rad over "+planner::duration(req.fit_seconds)+
-                    (req.chord_requirements_available?"; independently canonical punctuation could permit a "+
-                        frequency(req.chord_mean_radius_hz)+" mean-frequency radius over "+planner::duration(req.chord_aperture_seconds):"")+". "+req.conditions,
-                    11,Tone::muted,false,4);
-                const auto& masked=assisted->masked_requirements;
-                if(!masked.reason.empty()) {
-                    if(masked.geometry_supported)paragraph(n,"Separate masked-tone frequency profile: "+
-                        frequency(masked.physical_sample_rate)+" physical PCM, "+planner::duration(masked.aperture_seconds)+
-                        " finite aperture, "+std::to_string(masked.required_bytes)+" optional bytes required"+
-                        (masked.coarse_required?" plus "+std::to_string(masked.coarse_bytes)+" coarse bytes":"")+
-                        ". Cold staging is capped at "+planner::duration(masked.cold_deadline_seconds)+
-                        "; expiry restores ordinary broad input, and is not a predicted acquisition deadline.",11,Tone::muted,false,4);
-                    if(masked.coarse_required)paragraph(n,"Initial coarse discovery supplies an engineering seed envelope of +/-"+
-                        frequency(masked.profile_half_width_hz)+" for a later independent global frequency fit. This is not the acquired-reference CI, a presence certificate or a predicted precision/deadline; the global fit must qualify separately.",11,Tone::muted,false,4);
-                    paragraph(n,masked.reason,11,Tone::muted,false,4);
-                }
-                if(assisted->discovery_available)paragraph(n,"Startup discovery CPU "+planner::duration(assisted->discovery_cpu_seconds)+
-                    "; concurrent ordinary broad-acquisition CPU "+planner::duration(assisted->prequalification_broad_cpu_seconds)+
-                    ". These startup costs are separate from the qualified sustained curve.",11,Tone::muted,false,4);
-                const auto feasibility=std::find_if(model.helper_backend_feasibility_points.begin(),
-                    model.helper_backend_feasibility_points.end(),[&](const auto& p){return p.target_db_hz==model.inputs.target_db_hz;});
-                if(feasibility!=model.helper_backend_feasibility_points.end()&&feasibility->backend_feasibility_known) {
-                    paragraph(n,"After an independently acquired helper reference, modeled retained backend CPU is "+
-                        number(feasibility->backend_realtime_ratio,4)+" s / audio second on "+std::string(simulation::reference_cpu)+
-                        ", against the selected "+number(feasibility->cpu_budget,4)+" budget: "+
-                        (feasibility->backend_fits_budget?"backend fits":"backend exceeds budget")+". "+
-                        (feasibility->ordinary_phy_available?"The plotted ordinary PHY estimate stays "+
-                            probability(feasibility->ordinary_success_probability)+"; helper adds no SNR or probability gain. ":
-                            "Ordinary PHY probability remains unavailable at this target. ")+
-                        "This is a necessary backend-capacity check, not total CPU or whole-message reception qualification.",
-                        11,Tone::muted,false,4);
-                }
-                paragraph(n,assisted->reason,11,Tone::muted,false,4);
-            } else paragraph(n,"Conditional helper curves are awaiting their source requirements. The ordinary baseline remains shown.",11,Tone::muted,false,4);
-            if(!model.inputs.helper_executed_joint_clock)paragraph(n,
-                "Before-tone joint DATA-clock forecasting is unavailable: C/N0 has no validated marker-crossing timing-error and clock-slew-over-support calibration here. Frequency-only conditional work retains the full DATA-clock/UTC union; phase-chord precision is not an audio-clock certificate.",
+            paragraph(n,"The strongest tone in the expected helper range supplies the real-time frequency reference for direct conversion. Robust acquisition waits while the helper is unavailable. Disable Helper Carrier to use ordinary oscillator search.",
                 11,Tone::muted,false,4);
-            paragraph(n,"Enabled power does not prove synchronization. Conditional overlays preserve payload Rate, SNR, phase process and ordinary recovery. Missing covariance, backend or component-cost coverage leaves graph gaps. Runtime presence and applied assistance remain separate measurements.",
+            paragraph(n,"The plots show the ordinary receiver baseline. A stabilized RF search/CPU/reception estimate for this reference path is not available yet. Expected tone power does not report a measured lock, and helper power does not increase payload SNR or Rate.",
                 11,Tone::muted,false,0);
         }
     } else paragraph(n, "Link estimate unavailable", 13, Tone::text, true, 0);
@@ -1178,9 +1035,6 @@ ui::DocumentNode build(const planner::Model& model, float width, bool show_detai
         "Fixed pattern: target changes leave bit duration unchanged. Finish includes a full silence check.", 11, Tone::muted, false, 4);
     paragraph(root, std::string(model.observer_hypothetical ? "No encrypted private pattern. " : "Private pattern. ") +
         "LPI is not guaranteed. See model limits.", 11, Tone::muted, false, 8);
-    if(!model.helper_work_points.empty()) {
-        auto work=helper_work_graph(model,root.width);work.bottom=8;root.children.push_back(std::move(work));
-    }
     notable_points(root, model);
     planner_footer(root,model,show_details);
     if (show_details) details(root,model);

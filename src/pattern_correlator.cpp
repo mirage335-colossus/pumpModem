@@ -1126,6 +1126,9 @@ struct PatternCorrelator::Impl {
     };
     std::unique_ptr<CompactControl> compact_control;
     bool compact_controls_used=false,compact_workspace_yielded=false;
+    // Admission gating is independent of optional RF/clock mask storage. It
+    // survives that storage yielding and never suppresses payload dependencies.
+    bool helper_dispatch_permitted=true,helper_dispatch_used=false;
     const PatternPhaseCurve* compact_phase_curve=nullptr;
     double compact_phase_carrier_shift=0;
     struct AmplitudePhaseEntry {
@@ -7878,6 +7881,12 @@ struct PatternCorrelator::Impl {
             pulse_lattices.empty() && config.spreading_mode==SpreadingMode::pattern &&
             !(config.fake_hopping && config.fake_hopping->defer_symbols);
     }
+    bool helper_dispatch_supported()const noexcept {
+        // The constructor already rejects nonscheduled deferred FHSS: those
+        // actual calendars use PatternReceiver's native pause implementation.
+        return !finished && !hypotheses.empty() && !burst && !scheduled && !options.amplitude_only &&
+            pulse_lattices.empty() && config.spreading_mode==SpreadingMode::pattern;
+    }
     void drop_compact_control()noexcept {
         if(!compact_control)return;
         const auto bytes=compact_control->working_bytes();compact_control.reset();compact_workspace_yielded=true;
@@ -7924,7 +7933,26 @@ struct PatternCorrelator::Impl {
     }
     void prepare_compact_control() {
         if(!compact_control) {
-            if(compact_controls_used)for(auto& h:hypotheses)h.helper_block_suppressed=false;
+            if(!helper_dispatch_permitted) {
+                // No control allocation or second decoder: reuse per-lane
+                // suppression flags and the ordinary dependency closure.
+                for(auto& h:hypotheses)h.helper_block_suppressed=!(h.admitted ||
+                    !h.burst.bits.empty() || h.pending_gaps || h.committed!=0);
+                if(timing)for(const auto& entry:*timing) {
+                    hypotheses[entry.hypothesis].helper_block_suppressed=false;
+                    for(const auto& relation:entry.state.relations)
+                        if(relation.neighbor<hypotheses.size())hypotheses[relation.neighbor].helper_block_suppressed=false;
+                }
+                for(const auto& emission:emissions)if(emission.owner && !emission.ended)
+                    hypotheses[hypotheses.index(*emission.owner)].helper_block_suppressed=false;
+                for(std::size_t i=0;i<hypotheses.size();++i) {
+                    auto& h=hypotheses[i];
+                    if(h.helper_block_suppressed && (h.fits[0].count || h.fits[1].count)) {
+                        clear_compact_fits(h,i);h.helper_unobserved=true;
+                    }
+                }
+            } else if(compact_controls_used || helper_dispatch_used)
+                for(auto& h:hypotheses)h.helper_block_suppressed=false;
             return;
         }
         auto& control=*compact_control;
@@ -7934,7 +7962,7 @@ struct PatternCorrelator::Impl {
             const auto& h=hypotheses[i];
             const auto timed=!control.timing_prior || compact_timing_intersects(h,*control.timing_prior);
             if(timed)++control.timing_selected;
-            control.active[i]=(control.dispatch_permitted && (broad || (control.selected[h.rate_index] && timed))) || h.admitted ||
+            control.active[i]=(helper_dispatch_permitted && control.dispatch_permitted && (broad || (control.selected[h.rate_index] && timed))) || h.admitted ||
                 !h.burst.bits.empty() || h.pending_gaps || h.committed!=0;
         }
         // A subscribed guide remains an evidence dependency even between its
@@ -12053,7 +12081,11 @@ template<class Source,class Pulses,class Gain,class Prepare>
         clear_shared.enabled=!certified_null;
         if(!certified_null)for(std::size_t b=0;b<banks.size();++b) {
             cancelled(stop);auto& bank=banks[b];bank.shared_prefix={};bank.shared_moment={};
-            if(compact_control && !compact_control->banks[b]) {work.skipped_carrier_samples+=input.size();continue;}
+            if((compact_control && !compact_control->banks[b]) ||
+               (!compact_control && !helper_dispatch_permitted && std::none_of(hypotheses.begin(),hypotheses.end(),
+                    [&](const auto& h){return h.frequency==b && !h.helper_block_suppressed;}))) {
+                work.skipped_carrier_samples+=input.size();continue;
+            }
             if(scheduled && !scheduled->physical_views.empty())scheduled->physical_views[b]={};
             if(cache && !compact_phase_curve && scheduled && scheduled->moments_eligible && (!outer_presence || scheduled->outer_moment_scratch) &&
                !options.raw_reference && !options.scheduled_moment_reference) {
@@ -12264,7 +12296,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
         if(pulse_segmented || scheduled_affine || (scheduled && scheduled->moments_eligible))work.segments=std::accumulate(affine_counts.begin(),affine_counts.end(),std::uint64_t{0});
         if(!certified_null) {
             std::size_t bank=0;
-            if(compact_controls_used) {
+            if(compact_controls_used || helper_dispatch_used) {
                 const auto active=std::find_if(hypotheses.begin(),hypotheses.end(),[](const auto& h){return !h.helper_block_suppressed;});
                 bank=active==hypotheses.end()?banks.size():active->frequency;
             }
@@ -13045,13 +13077,14 @@ bool PatternCorrelator::suspend_helper_acquisition() {
 }
 PatternAcquisitionDispatchState PatternCorrelator::helper_acquisition_dispatch()const noexcept {
     const auto& s=*impl_;
-    return {s.compact_supported() && bool(s.compact_control),
-        !s.compact_control || s.compact_control->dispatch_permitted,false};
+    return {s.helper_dispatch_supported(),s.helper_dispatch_permitted,false};
 }
 bool PatternCorrelator::set_helper_acquisition_dispatch(bool permitted)noexcept {
     auto& s=*impl_;
-    if(!s.compact_supported() || !s.compact_control || s.finished)return false;
-    s.compact_control->dispatch_permitted=permitted;s.prepare_compact_control();return true;
+    if(!s.helper_dispatch_supported())return false;
+    s.helper_dispatch_permitted=permitted;s.helper_dispatch_used|=!permitted;
+    if(s.compact_control)s.compact_control->dispatch_permitted=permitted;
+    s.prepare_compact_control();return true;
 }
 PatternCompactAcquisitionState PatternCorrelator::compact_acquisition_state()const noexcept {
     const auto& s=*impl_;PatternCompactAcquisitionState result;

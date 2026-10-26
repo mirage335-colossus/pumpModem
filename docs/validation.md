@@ -8,6 +8,17 @@ and use Git history for comparisons. Detailed studies remain in the
 
 ## Current Helper Carrier candidate
 
+The current manual-preview direction is an upstream bounded tone tracker and
+continuous NCO feeding one ordinary receiver bank. It is manually enabled;
+without qualified lock it starts no new payload acquisition. The previous
+broad fallback/probe and historical replay/capsule architecture is superseded.
+Live integration and the GUI rebuild are pending. Short focused checks and a
+manual GUI trial are the immediate scope; broad qualification is explicitly
+deferred, not passed. Final preview source/binary/check bindings are pending;
+earlier results below do not qualify this changed route.
+
+### Pre-preview correction — superseded
+
 The wide-capture/compact-receiver correction is under development from
 `efa00b0c63f66b3911d6e392ff42c9740fce6aa7`. Last coherent integration v26 retains
 v25 exact continuation-row reuse and resolves five focused checks across those
@@ -668,6 +679,16 @@ the existing auxiliary-storage assertion evaluated `17520 <= 16384`. The
 focused build exited 1 after 92.9938 wall/128.9630 process CPU seconds, with
 owned processes reaped. No v27 runtime test or rebuilt GUI result follows;
 v26 remains the last coherent runtime, and the resource failure is retained.
+
+The [v28 receipt](../local-evidence/helper-v9/integration-v28/execution-result.json)
+records passing focused and stack compilation before the explicit user
+architecture pivot interrupted runtime work (parent interruption exit 130;
+the receipt's runtime exit remains partial). Its
+[runtime log](../local-evidence/helper-v9/integration-v28/focused-runtime.wrapper.log)
+contains five passed tests and a failed `helper_live` lifecycle check, then
+the start of `helper_joint_clock`. The 19-test selection did not complete;
+neither all 19 passes nor a new-core runtime pass is claimed. The original v27
+resource failure and v28 lifecycle failure remain retained.
 
 The separate private raw-phase component has passing
 [compile](../local-evidence/helper-v9/raw-phase-nco-qualification-r4-v26/execution/compile/execution-result.json)

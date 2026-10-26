@@ -9,6 +9,31 @@ frequency, jurisdiction, license, station control and other authorizations.
 The software retains general-purpose power options; it does not impose a blanket
 regulatory power limit or certify an installation's compliance.
 
+## Manual reception preview — integration pending
+
+The current preview replaces the earlier conditional-bank design with an
+upstream tone tracker and continuously retuned NCO feeding one ordinary Robust
+receiver bank. Reception assistance is manually enabled. While enabled without
+qualified lock, it admits no new payload acquisition. This route does not launch
+broad fallback/probe banks or replay historical receiver capsules. The ordinary
+payload format, full text/attachment decoding, accepted-bit progress and
+physical-END rules remain required.
+
+The bounded tracker uses 54,160 bytes, a 4,096-point FFT seed, a 20 ms FLL and
+128 recent numeric observations spanning at most three seconds. It does not
+iteratively reprocess old capture. Preliminary standalone checks cover tone
+drift, punctuation, noise, loss and sparse updates; reported uncertainty was
+about 0.209 Hz at C/N0 49.7 dB-Hz and 1.06 Hz near 31 dB-Hz. This does not
+promise coherence over a 128-second symbol. Continuous NCO retuning is distinct
+from qualified punctuation, metadata or phase-derived timing assistance; those
+are not newly qualified by this preview.
+
+Live integration and the rebuilt GUI are pending. The immediate target is a
+manual GUI trial with short focused checks; broad qualification is explicitly
+deferred, not passed. The previous receive architecture below is superseded
+and its historical evidence does not qualify this route. See
+[validation](validation.md) for the current build and check status.
+
 ## Controls and use
 
 The Helper Carrier row is below Clock sync and the oscillator controls. Power
@@ -164,24 +189,11 @@ measured confidence, coherence and suitable geometry/resources. These auxiliary
 values do not change the payload's C/N0, target SNR, success-probability curves
 or CPU estimates.
 
-The revised planner previews selection from the same original frequency and
-audio-clock catalogue as the runtime. It explicitly assumes a qualified frequency
-interval of +/-0.01 Hz at zero helper offset; these are hypothetical inputs, not
-received measurements or a precision prediction from C/N0. It reports selected
-original pairs and retained clock values from the 2D closed-slab coverage check,
-using explicit physical-clock provenance and keeping every original clock value.
-A nonzero measured RF origin can
-align a full tiny catalogue without removing any pair; that is alignment, not a
-search-work reduction. A zero-offset full mask supplies no reduction or alignment.
-
-Normal Automatic/Complex rolling reception is described through the common-link
-cohort below, with actual backend, all-profile FIR response and reserved-resource
-eligibility still checked at runtime. Fixed-epoch reception has a separate
-legacy path. Compact long-symbol, unsupported strategy, scheduled geometry and
-invalid passband cases decline optional acquisition. Preview counts do not change payload probability,
-SNR or CPU estimates and do not qualify a speedup. This planner/selector revision
-has passed the application build and selected focused checks; broader current
-runtime qualification remains pending.
+The manual preview keeps the ordinary planner baseline. An assisted estimate is
+explicitly unavailable: the previous conditional-pair overlays and their
+computation are removed from that preview. Helper power or a predicted strong
+tone supplies no CPU, payload-SNR or success-probability gain estimate. The
+pending GUI rebuild and focused checks must verify this presentation.
 
 ## Physical simulation
 
@@ -306,7 +318,10 @@ received Robust payload share a transmitter. The code and independent vectors
 specify the compact mapping; the format alone does not establish identification
 compliance for every emission, band or radio installation.
 
-## Receive observations and assistance
+## Previous receive observations and assistance — superseded
+
+The following describes the preceding observer/conditional-bank route for
+interpreting historical results. It is not the manual tracker/NCO preview above.
 
 Presence admission remains independent of metadata decoding and modem assistance.
 A bounded tracker uses 100 ms coherent fits. Evidence groups start with four fits
