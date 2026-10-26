@@ -3,6 +3,7 @@
 // receiver, grant memory, score PCM, retire a receiver or classify absence.
 #include "datapump/live.hpp"
 #include "live_receiver_layout.hpp"
+#include "receiver_oscillator_policy.hpp"
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/pattern_search.hpp"
 #include "datapump/receiver_strategy.hpp"
@@ -127,7 +128,7 @@ inline ReceiverSearchPreparation prepare_receiver_search(const modem::Config& co
     search.receiver_strategy_workspace_bytes=cohort_share>context.control_margin?cohort_share-context.control_margin:1;
     search.input_sample_origin=context.sample_origin;
     if(config.oscillator_search) {
-        auto oscillator_search=modem::oscillator_pattern_search(config,transfer::effective_clock_sync(value.transfer)?modem::utc_transmit_rate_limit(config):0);
+        auto oscillator_search=transfer::receiver_oscillator_search(config,value.transfer);
         declared_search=oscillator_search;
         search.admitted_frequency_half_width_hz=oscillator_search.frequency.requested_half_width_hz;
         search.admitted_clock_half_width_ppm=oscillator_search.requested_clock_half_width_ppm;
@@ -165,7 +166,7 @@ inline ReceiverSearchPreparation prepare_receiver_search(const modem::Config& co
     }
     if(modem::scheduled_bursts(config) && !modem::packed_scheduled_symbols(config) && config.receiver_strategy!=modem::ReceiverStrategy::amplitude_only) {
         auto refined=modem::scheduled_complex_search(config,search,
-            transfer::effective_clock_sync(value.transfer)?modem::utc_transmit_rate_limit(config):0);
+            transfer::receiver_utc_rate_correction(config,value.transfer));
         if(refined.complete_coverage)search=std::move(refined.search);
     }
     // Establish the finite amplitude relation before computing its FFT lead.

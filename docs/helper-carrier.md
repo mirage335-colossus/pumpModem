@@ -375,7 +375,8 @@ Practical latency is seed/profile dependent: the 24 dB-Hz simulator-backoff case
 may yield few or no sufficiently narrow references, despite passing the tone's
 level gate. Actual observations and limits belong in [validation](validation.md).
 
-The common-link source remains under qualification. Current 441-input overlay
+The wide-capture and compact-receiver corrections are under development and have
+not completed end-to-end qualification. The preceding build's 441-input overlay
 `87513574` passed its application build, recorded in
 `local-evidence/helper-v4/candidate-v8-application-build/execution-result.json`
 (hash begins `0fe66ddd`); the GUI hash begins `8f2af1f4`. Records are
@@ -410,6 +411,13 @@ All message bits still use the full ordinary Robust receiver: short/raw/long
 text and attachments, configured source quotas, framing, decompression,
 recovery, next-poll accepted-bit progress and fully scored six-second physical
 completion remain required. Helper loss or metadata never supplies payload END.
+
+Within the configured helper search range, assume the strongest stable constant
+tone is the helper. Its straight-tone measurements alone can qualify frequency
+narrowing. Punctuation decoding is only for independently qualified dwell timing
+and phase assistance; callsign/time decoding is optional information. Neither
+is required for frequency assistance. Optional drift tracking uses the declared
+relative oscillator model and must not add a moving-vehicle Doppler allowance.
 
 For supported Automatic or Complex native rolling reception, one ordinary
 executor per row processes helper-conditioned acquisition batches first across

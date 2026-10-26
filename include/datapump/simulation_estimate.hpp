@@ -1,17 +1,29 @@
 #pragma once
 #include "datapump/transfer.hpp"
+#include "datapump/pattern_search.hpp"
+#include <vector>
 #include <span>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <stop_token>
+#include <memory>
 
 namespace datapump::live { struct Settings; }
+namespace datapump::modem {
+class PatternAcquisitionClockPrior;
+struct PatternAcquisitionClockResult;
+struct PatternAcquisitionState;
+struct PatternAcquisitionWorkBound;
+}
 
 namespace datapump::simulation {
 inline constexpr std::string_view reference_cpu = "Ryzen 5 PRO 5650U (local acquisition calibration)";
 inline constexpr std::string_view reference_gpu = "RTX 4090 Laptop GPU";
 
+// Ordinary unknown-peer Live reception is modeled in both execution media.
+// transfer::simulate's deliberate known-source fixed-rate comparator is a
+// separate receiver experiment and may retain its narrower oscillator bank.
 // A sampled simulation has its randomized startup/settling epoch coverage.
 // Hardware keeps the configured peer's oscillator/correction coverage even
 // when local capture timing falls back to the full arrival window.
@@ -148,6 +160,10 @@ struct Estimate {
     // Divide by simulated_seconds for a rough real-time workload,
     // not a measured CPU utilization or a guarantee about per-bit latency.
     double receiver_cpu_seconds = 0;
+    double logical_acquisition_threshold = 0,logical_search_trials = 0;
+    std::uint64_t execution_projection_bin_samples=0;
+    double execution_minimum_rate=0,execution_maximum_rate=0;
+    bool execution_compact=false,execution_pulse_projected=false,execution_drift_supported=false,execution_differential_supported=false;
     SymbolBurstWorkDiagnostics symbol_burst;
     // Separate continuous hardware workload: one complete fresh UTC cohort
     // per admission cadence, through its acquisition/retirement lifetime.
@@ -156,6 +172,7 @@ struct Estimate {
     // times/probabilities, and are not measured utilization or peak deadlines.
     bool hardware_sustained_modeled = false;
     double hardware_sustained_realtime_ratio = 0;
+    double hardware_sustained_tracking_realtime_ratio = 0;
     double fallback_hardware_sustained_realtime_ratio = 0;
     double hardware_cohort_lifetime_seconds = 0;
     double hardware_sustained_receiver_instances = 0;
@@ -320,6 +337,256 @@ Estimate estimate_with_receiver_settings(const transfer::Estimate& transmission,
                   double differential_window_seconds = 100,std::size_t probability_trials = 4096,
                   ReceiverWorkMode work_mode = ReceiverWorkMode::sampled_simulation,
                   ReceiverTimingModel timing_model = {},std::stop_token stop = {});
+// Explicit conditional frequency work. These inputs never qualify a tone or
+// manufacture a forecast from enabled helper power. They describe a reference
+// already qualified by the actual receiver, or a separately validated forecast.
+enum class HelperScenarioOrigin { unavailable, measured_reference, requirements_forecast, validated_forecast };
+namespace detail {struct HelperJointClockProof;}
+// The joint owner consumes an opaque diagnostic copy supplied by the trusted
+// joined runtime producer after ACTUAL core execution. Its public result fields
+// are consistency-checked metadata, not an unforgeable execution receipt.
+enum class HelperExecutionOwner { original_masked_owner, conditional_catalogue_owner, executed_joint_masked_owner };
+struct HelperFrequencyCell {
+    modem::PatternFrequencyRateHypothesis hypothesis;
+    double frequency_half_width_hz=0,clock_lower_ppm=0,clock_upper_ppm=0;
+};
+struct HelperFrequencyStrip {
+    double clock_lower_ppm=0,clock_upper_ppm=0;
+    // Receiver-input residual frequency = intercept + slope * physical ppm.
+    double frequency_intercept_hz=0,frequency_slope_hz_per_ppm=0,frequency_half_width_hz=0;
+};
+// Provenance from the actual joined producer, not inferred from oscillator
+// presets, enabled power, marker presence or the numeric selected-pair count.
+enum class HelperJointClockSourceRelation {unknown,physical_audio_unsteered,common_corrected_robust_source};
+const char* helper_joint_clock_source_domain(HelperJointClockSourceRelation) noexcept;
+struct HelperFrequencyInputMap {
+    std::uint32_t physical_sample_rate=0,logical_sample_rate=0;
+    std::uint64_t input_view_id=0,input_origin_samples=0;
+    double physical_passband_lower_hz=0,physical_passband_upper_hz=0;
+    double frequency_correction_hz=0;
+    bool conjugate_image=false;
+    // A filter/NCO is not automatically covered by the ordinary real-noise
+    // model. A caller needs actual projection/covariance validation evidence.
+    std::string ordinary_noise_model_evidence;
+    // Authoritative planned fixed notch from this scenario's power/profile
+    // union. A finite reference must not replan it from stale GUI settings.
+    std::optional<double> payload_filter_hz;
+    // Used only by executed joint copies. Unknown cannot grant joined cost
+    // provenance; ordinary frequency-only scenarios keep this field unknown.
+    HelperJointClockSourceRelation joint_source_relation=HelperJointClockSourceRelation::unknown;
+};
+// Conditional source requirements, not a probability that a tone qualifies.
+// The six-column finite WLS geometry is evaluated on a unit straight tone;
+// white-noise scale comes from the entered physical C/N0. Runtime residual,
+// curvature, canonical punctuation and cycle-consistency gates still apply.
+struct HelperStrongRequirements {
+    bool frequency_requirements_available=false,chord_requirements_available=false;
+    std::uint32_t sample_rate=0;
+    std::size_t fit_samples=0;
+    double expected_cn0_db_hz=0,fit_seconds=0,expected_explained_fraction=0;
+    double frequency_radius_hz=0,phase_radius_radians=0,process_frequency_radius_hz=0;
+    double chord_mean_radius_hz=0,chord_aperture_seconds=0,minimum_observation_seconds=0;
+    std::string source_requirements_id,conditions,reason;
+};
+HelperStrongRequirements helper_strong_requirements(std::uint32_t physical_sample_rate,
+    double observed_helper_hz,double search_half_width_hz,double expected_cn0_db_hz,
+    double phase_noise_radians_per_sqrt_second,std::uint64_t acquisition_frontier_sample);
+struct HelperFrequencyGeometry {
+    std::uint64_t projection_bin_samples=0;
+    double minimum_rate=0,maximum_rate=0;
+    bool compact=false,pulse_projected=false,pulse_segmented=false;
+    bool drift_supported=false,differential_supported=false;
+};
+struct HelperFrequencyProfile {
+    std::size_t profile_index=0;
+    HelperExecutionOwner owner=HelperExecutionOwner::original_masked_owner;
+    // Include every actually active/protected pair, not only a desired RF mask.
+    std::vector<HelperFrequencyCell> cells;
+    HelperFrequencyStrip physical_domain;
+    HelperFrequencyInputMap input;
+    HelperFrequencyGeometry actual_geometry;
+    // Original masks preserve their full original logical trials. A newly
+    // born catalogue requires the core's separate original-statistics seam;
+    // diagnostic original-pair counts alone cannot set this evidence.
+    std::string original_trial_policy_evidence;
+    std::shared_ptr<const detail::HelperJointClockProof> joint_clock_proof;
+};
+enum class HelperForecastUtilityScope { unavailable, validated_strong_only, validated_global };
+struct HelperFrequencyForecastCoverage {
+    HelperForecastUtilityScope utility_scope=HelperForecastUtilityScope::unavailable;
+    std::string source_revision,estimator_requirements_id,validation_evidence;
+    std::uint32_t physical_sample_rate=0;
+    double minimum_cn0_db_hz=0,maximum_cn0_db_hz=0;
+    double maximum_clock_magnitude_ppm=0,maximum_phase_noise_degrees_per_sqrt_second=0;
+    double maximum_discovery_seconds=0;
+};
+// Actual masked-tone analysis geometry, separate from the short polynomial
+// fit. Support/aperture is not a predicted CI, qualification probability or
+// reserved memory. Coarse FFT width remains an engineering seed envelope.
+struct HelperMaskedFrequencyRequirements {
+    bool geometry_supported=false,coarse_required=false,continuous_phase_assumed=false;
+    std::uint32_t physical_sample_rate=0;
+    std::size_t required_bytes=0,coarse_bytes=0;
+    double profile_half_width_hz=0,aperture_seconds=0,startup_support_seconds=0,cold_deadline_seconds=0;
+    std::string reason;
+};
+HelperMaskedFrequencyRequirements helper_masked_frequency_requirements(std::uint32_t physical_sample_rate,
+    double expected_helper_hz,double constructor_half_width_hz,double phase_noise_radians_per_sqrt_second,
+    bool continuous_phase_assumed);
+struct HelperFrequencyForecastRequest {
+    std::uint32_t physical_sample_rate=0;
+    double physical_passband_lower_hz=0,physical_passband_upper_hz=0;
+    double helper_frequency_hz=0,expected_usable_helper_cn0_db_hz=0;
+    // A dated capture frontier determines the actual finite opportunity weight;
+    // zero forecasts a new capture generation, not an indefinitely valid fit.
+    std::uint64_t acquisition_frontier_sample=0;
+    bool assume_independently_qualified_punctuation=false;
+    bool assume_continuous_helper_phase=false;
+    // Explicit fixed nominal resampling retains frequency in Hz and the full
+    // original DATA-clock domain. Steered/unknown maps need separate evidence.
+    bool fixed_nominal_rate_conversion=false;
+    std::optional<HelperFrequencyForecastCoverage> validated_coverage;
+};
+struct HelperFrequencyCosts {
+    std::string validation_evidence,cpu_reference_id;
+    // Explicit measured/validated stage costs, not pair-count discounts.
+    std::optional<double> discovery_cpu_seconds,prequalification_broad_cpu_seconds;
+    std::optional<double> additional_frontend_cpu_per_second,optional_probe_cpu_per_second;
+    // Omission retains the ordinary backend's modeled tracking component.
+    std::optional<double> ordinary_tracking_cpu_per_second;
+};
+struct QualifiedHelperFrequencyScenario {
+    HelperScenarioOrigin origin=HelperScenarioOrigin::unavailable;
+    std::string reference_evidence;
+    std::vector<HelperFrequencyProfile> profiles;
+    HelperFrequencyCosts costs;
+    std::optional<HelperFrequencyForecastCoverage> forecast_coverage;
+    std::optional<double> expected_usable_helper_cn0_db_hz;
+    double qualification_aperture_seconds=0;
+};
+struct HelperJointClockMetadata {
+    std::uint64_t first_input_sample=0,last_input_sample=0,captured_input_end_sample=0;
+    std::uint64_t reference_evidence_sample=0,reference_captured_end_sample=0,executed_template_jobs=0;
+    std::size_t original_pairs=0,frequency_only_pairs=0,joint_pairs=0,original_clock_rates=0,joint_clock_rates=0;
+    std::size_t owned_bytes=0,projection_bin_samples=0,original_phase_groups=0;
+    HelperJointClockSourceRelation source_relation=HelperJointClockSourceRelation::unknown;
+};
+class HelperJointClockDiagnosticPool;
+struct HelperJointClockDiagnosticStatus {
+    std::size_t slots=2,occupied_slots=0,slot_bytes=0;
+    // Actual allocator requests, including pool/lease shared-control blocks.
+    // Account object/its control block and allocator overhead are separate.
+    std::size_t allocator_requested_bytes=0,account_object_bytes=0;
+};
+// A separately funded GUI diagnostic arena; never borrowed from DSP/codec or
+// ordinary receiver promises. Exactly TWO fixed sizeof-derived slots, each
+// bounded to4096 original pairs and64 DATA intervals. No fallback vector heap.
+std::size_t helper_joint_clock_diagnostic_gui_grant_bytes();
+std::shared_ptr<HelperJointClockDiagnosticPool> make_helper_joint_clock_diagnostic_pool(std::size_t gui_grant_bytes);
+HelperJointClockDiagnosticStatus helper_joint_clock_diagnostic_status(const std::shared_ptr<HelperJointClockDiagnosticPool>&);
+struct HelperJointClockCopy {
+    std::shared_ptr<const detail::HelperJointClockProof> proof;
+    HelperJointClockMetadata metadata;
+    std::string reason;
+    // Pooled decoder path uses static text only, avoiding untracked temporary
+    // string allocations. Component/background calls may use reason above.
+    const char* runtime_reason=nullptr;
+};
+// Trusted-producer API: the caller must supply its actual synchronous joined
+// core result, not a constructed PatternAcquisitionClockResult. The function
+// checks matching geometry/count/work metadata but does not authenticate that
+// execution occurred. Call while the prior's borrowed spans still exist, AFTER
+// joined execution and BEFORE resolve/mask replacement. The grant owns retained
+// metadata only; allocator overhead is separate. No PCM or payload is copied.
+HelperJointClockCopy copy_executed_helper_joint_clock(const modem::Config&,
+    const modem::PatternAcquisitionClockPrior&,const modem::PatternAcquisitionClockResult&,
+    const modem::PatternAcquisitionState& before,const modem::PatternAcquisitionWorkBound& before_work,
+    const HelperFrequencyInputMap&,std::size_t optional_grant_bytes);
+// Same trusted-producer premise and metadata validation, using one fixed slot.
+// The shared lease returns it only after the LAST Snapshot/Planner borrower.
+HelperJointClockCopy copy_executed_helper_joint_clock(const std::shared_ptr<HelperJointClockDiagnosticPool>&,
+    const modem::Config&,const modem::PatternAcquisitionClockPrior&,const modem::PatternAcquisitionClockResult&,
+    const modem::PatternAcquisitionState& before,const modem::PatternAcquisitionWorkBound& before_work,
+    const HelperFrequencyInputMap&);
+bool same_helper_joint_clock_geometry(const std::shared_ptr<const detail::HelperJointClockProof>&,
+    const modem::Config&,const modem::PatternAcquisitionClockPrior&,const HelperFrequencyInputMap&);
+struct HelperJointClockScenario {
+    std::optional<QualifiedHelperFrequencyScenario> scenario;
+    HelperJointClockMetadata metadata;
+    std::string reason;
+};
+// Cost-only current-geometry illustration from observed joint cells. No
+// enabled/CN0/punctuation forecast and no future-support or RX guarantee.
+HelperJointClockScenario helper_executed_joint_scenario(const transfer::Estimate&,
+    const transfer::Options&,const modem::ChannelConfig&,
+    const std::shared_ptr<const detail::HelperJointClockProof>&,
+    const HelperFrequencyCosts& costs={},ReceiverWorkMode=ReceiverWorkMode::hardware_fallback,
+    ReceiverTimingModel={},const live::Settings* receiver_settings=nullptr,std::stop_token={});
+struct HelperFrequencyForecast {
+    HelperStrongRequirements requirements;
+    HelperMaskedFrequencyRequirements masked_requirements;
+    std::optional<QualifiedHelperFrequencyScenario> scenario;
+    std::string reason;
+};
+// Builds a conditional original-grid frequency execution scenario from the
+// same conservative selector used by Live. It does not invent qualification,
+// change the oscillator model, supply missing noise-model validation, or price
+// component CPU from pair counts. Unsupported wide/shared births decline.
+HelperFrequencyForecast helper_frequency_forecast(const transfer::Estimate& transmission,
+    const transfer::Options&,const modem::ChannelConfig&,const HelperFrequencyForecastRequest&,
+    const HelperFrequencyCosts& costs={},ReceiverWorkMode work_mode=ReceiverWorkMode::hardware_fallback,
+    ReceiverTimingModel timing_model={},const live::Settings* receiver_settings=nullptr,
+    std::stop_token stop={});
+// Explicit acquired-reference counterfactual. The first-bit observation has
+// a known cropped onset; no arrival-search or whole-message probability is
+// implied. Qualification/startup costs are independent. Source channel errors
+// and payload SNR remain unchanged; unsupported phase/arithmetic declines.
+struct HelperFirstBitConditions {
+    modem::ChannelConfig channel;
+    bool independent_reference_before_observation=false;
+    std::size_t starts=1,trials=256;
+};
+struct HelperFirstBitReference {
+    bool available=false;
+    double correct=0,wrong=0,correct_low=0,correct_high=1;
+    std::size_t trials=0,original_jobs=0,selected_jobs=0,retained_clock_rates=0;
+    std::string reason;
+    std::optional<double> payload_filter_hz;
+};
+// Exact metadata from a bounded pristine ordinary native receiver. Counts
+// name logical job descriptors, not physical transforms, CPU time or benefit.
+struct HelperNativeWork {
+    bool available=false,streaming_probe=false;
+    std::size_t original_jobs=0,conditional_jobs=0,original_pairs=0,conditional_pairs=0;
+    std::size_t retained_clock_rates=0,original_starts=0,bin_samples=0;
+    std::size_t original_descriptor_bytes=0,probe_workspace_bytes=0;
+    std::uint64_t original_trial_charge=0;
+    double original_batch_end_threshold=0;
+    std::string reason;
+    HelperFirstBitReference first_bit;
+};
+HelperNativeWork helper_native_work(const transfer::Options&,const QualifiedHelperFrequencyScenario&,
+    ReceiverWorkMode,const live::Settings* receiver_settings=nullptr,std::stop_token={},
+    const HelperFirstBitConditions* first_bit=nullptr);
+struct HelperFrequencyEstimate {
+    Estimate baseline,assisted;
+    bool scenario_available=false,conditional_probability_available=false,conditional_one_bit_probability_available=false;
+    bool discovery_cost_available=false,qualified_cost_available=false,forecast_available=false;
+    // Kept separate from finite acquisition and payload work in assisted.
+    double discovery_cpu_seconds=0,prequalification_broad_cpu_seconds=0;
+    double additional_frontend_realtime_ratio=0,optional_probe_realtime_ratio=0;
+    double qualified_sustained_realtime_ratio=0,ordinary_tracking_realtime_ratio=0;
+    std::string reason;
+};
+HelperFrequencyEstimate estimate_helper_frequency(const transfer::Estimate& transmission,
+    const transfer::Options&,bool raw_bits,const modem::ChannelConfig& uncorrected_channel,
+    const QualifiedHelperFrequencyScenario&,std::span<const modem::Config> receive_profiles={},
+    std::size_t receive_key_count=1,bool compute_probability=true,
+    double differential_window_seconds=100,std::size_t probability_trials=4096,
+    ReceiverWorkMode work_mode=ReceiverWorkMode::sampled_simulation,
+    ReceiverTimingModel timing_model={},const live::Settings* receiver_settings=nullptr,
+    std::stop_token stop={});
+
 // Pure planner support query with the same configured bank, timing coverage,
 // backend and workspace decisions. Skips Burst service/debt/recommendation work
 // and probability trials. Only coverage, profile and workspace fields are a

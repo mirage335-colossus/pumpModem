@@ -52,6 +52,9 @@ struct ReceiverWireObservation {
     std::uint64_t physical_first,physical_end,feed_end_sample,missing_slots;
     std::span<const std::uint8_t> bits;
     bool complete,helper_acquired;
+    // Observation-only actual conditional birth, independent of the legacy
+    // helper overlap policy tag above. No source/completion authority.
+    bool helper_conditioned_acquisition=false;
 };
 struct SimulationHook {
     void* context;

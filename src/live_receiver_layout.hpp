@@ -18,6 +18,7 @@
 
 namespace datapump::modem::detail {struct SourceFamily;}
 namespace datapump::live::detail {
+struct HelperInputRecipe;
 // The runtime owns these SAME types; allocation accounting never duplicates a
 // guessed representation. Include the complete SourceFamily before creating or
 // destroying ReceiverState. Pure layout callers only inspect sizeof.
@@ -32,14 +33,24 @@ struct ReceiverState {
     // Input provenance is immutable until a full numeric reconstruction;
     // optional scheduling and joined Error recovery are separate capabilities.
     enum HelperFlag : std::uint8_t {helper_filtered_input=1,helper_eligible=2,
-        helper_deferred_error=4,helper_departure=8};
+        helper_deferred_error=4,helper_departure=8,helper_broad_audit=16,helper_payload_dependency=32,
+        helper_compact_phase=64,helper_qualified_mask=128};
     std::uint8_t helper_flags=0,helper_audit_group=0;
+    std::uint8_t helper_input_view=0;
+    bool helper_audit_scored=false;
     std::size_t amplitude_fft_samples=0,amplitude_channel_count=0;
     // Actual selected passbands for coarse-frequency presentation arbitration.
     std::optional<modem::PatternAmplitudeGeometry> amplitude_geometry;
     double last_confident_at = 0;
     std::uint64_t last_confident_end = 0;
     std::uint64_t sample_origin = 0, family = 0;
+    std::uint64_t helper_view_next_sample=0;
+    // Immutable translated views and raw broad-audit owners are disjoint.
+    // Reuse their bookkeeping word; neither increases ordinary row storage.
+    union {
+        std::uint64_t helper_view_jobs_accounted=0;
+        std::uint64_t helper_audit_generation;
+    };
     modem::detail::scheduled_source_samples::PointFamilyToken point_family;
     std::uint64_t point_consumer=UINT64_MAX;
     modem::detail::NativePointOwner native_points;
@@ -60,6 +71,7 @@ struct ReceiverState {
     std::unique_ptr<const modem::detail::SourceFamily> source_curve_family;
     std::unique_ptr<modem::StreamingReceiver> modem;
     std::unique_ptr<transfer::StreamReceiver> content;
+    std::shared_ptr<const HelperInputRecipe> helper_input_recipe;
 };
 // The helper controls must fit the padding that already followed the two
 // bools. Fail on any ABI that would move ordinary amplitude/payload state.

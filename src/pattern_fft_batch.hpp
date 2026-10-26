@@ -87,6 +87,24 @@ struct FftPreparedTemplate {
     std::array<double,2> energy{};
     std::array<FftComplex,2> square{};
 };
+// Explicit native-FP64 direct domain. Rows are the conjugate, untransformed
+// production template in forward bin order. Unlike spectral uploads this
+// table carries its row-generation identity; borrowed data may be reused only
+// for matching jobs/geometry and actual observations with <=32 starts.
+// Kept separate so ordinary per-job FftPreparedTemplate storage is unchanged.
+struct FftPreparedRawTemplate {
+    FftPreparedTemplate values;
+    FftPatternParameters pattern;
+    std::uint64_t bins=0,bin_samples=0,symbol=0,phase=0;
+    double carrier_hz=0,frequency_hz=0,clock_ratio=1;
+    std::uint32_t extended_clock_window=0;
+};
+// The caller owns both exact-length output rows and the mutable PatternCode
+// cache. This builder owns no row storage and uses the SAME production
+// template_value implementation as generated scoring (no approximate reuse).
+FftPreparedRawTemplate prepare_fft_raw_template(const FftSearchGeometry&,
+    const FftSearchJob&,PatternCode&,std::array<std::span<FftComplex>,2>,std::stop_token = {});
+
 // Batch-local packed operands. No shifted PCM matrix. Input statistics are valid
 // only while the original observation span is immutable; discard at every batch
 // boundary/cancellation. Private template rows are repacked for EVERY job.
@@ -152,6 +170,9 @@ struct FftSearchBatch {
     double refine_threshold = 0, refine_threshold_max = 0;
     FftQuantizedDirect* quantized_direct = nullptr;
     const FftPrivateTemplate* private_template = nullptr;
+    // Mutually exclusive with spectral prepared uploads. Existing job table
+    // indices select this explicit raw domain only when it is supplied.
+    std::span<const FftPreparedRawTemplate> prepared_raw;
 };
 // Paired D10/100/1000 CPU measurements favor <=32 starts; 64 is marginal
 // and 128 loses. Keep the conservative measured crossover. Direct scoring generates

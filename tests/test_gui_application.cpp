@@ -26,8 +26,14 @@ const ui::Control& control(ui::Field field) {
 void helper_assistance_debug_fields() {
     live::Snapshot snapshot;
     check(!snapshot.helper_frequency_assistance_active&&!snapshot.helper_phase_assistance_active&&
+          !snapshot.helper_timing_assistance_active&&
           snapshot.helper_original_search_pairs==0&&snapshot.helper_selected_search_pairs==0&&
-          snapshot.helper_conditional_jobs==0&&snapshot.helper_audit_jobs==0,
+          snapshot.helper_conditional_jobs==0&&snapshot.helper_audit_jobs==0&&
+          snapshot.helper_input_view_conditional_jobs==0&&snapshot.helper_input_view_count==0&&
+          snapshot.helper_compact_projected_samples==0&&snapshot.helper_compact_lane_samples==0&&
+          snapshot.helper_compact_skipped_projected_samples==0&&snapshot.helper_compact_skipped_lane_samples==0&&
+          snapshot.helper_compact_audit_projected_samples==0&&snapshot.helper_compact_audit_lane_samples==0&&
+          snapshot.helper_compact_phase_projected_samples==0&&snapshot.helper_compact_phase_moment_updates==0,
           "Helper assistance snapshot defaults claim unobserved work");
     check(helper_diagnostics(snapshot).empty(),"Absent helper left a diagnostic assistance claim");
     snapshot.running=true;snapshot.samples_received=1;snapshot.helper_snr_db=12;
@@ -35,7 +41,8 @@ void helper_assistance_debug_fields() {
     const auto presence_text=helper_diagnostics(snapshot);
     check(presence_text.find("acquisition not narrowed: insufficient workspace")!=std::string::npos&&
           presence_text.find("frequency assistance not applied")!=std::string::npos&&
-          presence_text.find("phase assistance not applied")!=std::string::npos,
+          presence_text.find("phase assistance not applied")!=std::string::npos&&
+          presence_text.find("punctuation timing assistance not applied")!=std::string::npos,
           "Measured helper presence claimed narrowed search or applied phase");
     snapshot.helper_status.clear();
     check(helper_diagnostics(snapshot).find("acquisition not narrowed: no committed frequency assistance")!=std::string::npos,
@@ -45,6 +52,7 @@ void helper_assistance_debug_fields() {
     presence.step(0,snapshot,Signals{},false,false);
     check(presence_log.str().find("\"helper_frequency_assistance_active\":0")!=std::string::npos&&
           presence_log.str().find("\"helper_phase_assistance_active\":0")!=std::string::npos&&
+          presence_log.str().find("\"helper_timing_assistance_active\":0")!=std::string::npos&&
           presence_log.str().find("\"helper_conditional_jobs\":0")!=std::string::npos&&
           presence_log.str().find("acquisition not narrowed: insufficient workspace")!=std::string::npos,
           "Helper presence diagnostic claimed assistance or lost its decline reason");
@@ -58,7 +66,8 @@ void helper_assistance_debug_fields() {
           applied_text.find("(reference aligned)")!=std::string::npos&&
           applied_text.find("phase assistance applied")!=std::string::npos&&
           applied_text.find("pair maxima across rows: selected 129, original 4096")!=std::string::npos&&
-          applied_text.find("jobs: conditional 37, audit 5")!=std::string::npos,
+          applied_text.find("native FFT jobs: conditional 37, broad/probe 5")!=std::string::npos&&
+          applied_text.find("broad/probe work does not establish complete cohort coverage")!=std::string::npos,
           "Joined helper work was omitted from shared GUI diagnostics");
     snapshot.helper_phase_assistance_active=false;
     check(helper_diagnostics(snapshot).find("phase assistance not applied")!=std::string::npos,
@@ -91,6 +100,42 @@ void helper_assistance_debug_fields() {
     snapshot.helper_status="Helper present; acquisition not narrowed: reference not qualified";
     check(helper_diagnostics(snapshot).find("reference aligned")==std::string::npos,
           "Measured helper presence was presented as committed alignment");
+    snapshot.helper_frequency_assistance_active=true;snapshot.helper_timing_assistance_active=true;
+    snapshot.helper_conditional_jobs=0;snapshot.helper_audit_jobs=0;
+    snapshot.helper_compact_projected_samples=100;snapshot.helper_compact_lane_samples=200;
+    snapshot.helper_compact_skipped_projected_samples=300;snapshot.helper_compact_skipped_lane_samples=400;
+    snapshot.helper_compact_audit_projected_samples=20;snapshot.helper_compact_audit_lane_samples=40;
+    snapshot.helper_status="Helper frequency narrowed; phase declined: phase confidence unavailable";
+    const auto compact_text=helper_diagnostics(snapshot);
+    check(compact_text.find("frequency assistance applied")!=std::string::npos&&
+          compact_text.find("phase assistance not applied")!=std::string::npos&&
+          compact_text.find("phase confidence unavailable")!=std::string::npos&&
+          compact_text.find("punctuation timing assistance applied")!=std::string::npos&&
+          compact_text.find("compact carrier-samples: projected 100, skipped 300, broad/probe 20")!=std::string::npos&&
+          compact_text.find("compact arrival-lane-samples: accumulated 200, skipped 400, broad/probe 40")!=std::string::npos&&
+          compact_text.find("FFT jobs")==std::string::npos,
+          "Compact work units or independently qualified assistance were lost or combined with FFT work");
+    std::ostringstream compact_log;DebugLive compact(120,compact_log);
+    compact.step(0,snapshot,Signals{},false,false);
+    for(const auto* field:{"\"helper_timing_assistance_active\":1","\"helper_compact_projected_samples\":100",
+        "\"helper_compact_lane_samples\":200","\"helper_compact_skipped_projected_samples\":300",
+        "\"helper_compact_skipped_lane_samples\":400","\"helper_compact_audit_projected_samples\":20",
+        "\"helper_compact_audit_lane_samples\":40"})
+        check(compact_log.str().find(field)!=std::string::npos,"Compact work or punctuation status missing from debug JSON");
+    snapshot.helper_input_view_count=2;snapshot.helper_input_view_conditional_jobs=71;
+    check(helper_diagnostics(snapshot).find("signed input views 2, conditional native FFT jobs 71")!=std::string::npos,
+          "Conditional signed input-view work was omitted from GUI diagnostics");
+    std::ostringstream views_log;DebugLive views(120,views_log);views.step(0,snapshot,Signals{},false,false);
+    check(views_log.str().find("\"helper_input_view_count\":2")!=std::string::npos&&
+          views_log.str().find("\"helper_input_view_conditional_jobs\":71")!=std::string::npos,
+          "Conditional signed input-view work was omitted from debug JSON");
+    snapshot.helper_compact_phase_projected_samples=53;snapshot.helper_compact_phase_moment_updates=29;
+    check(helper_diagnostics(snapshot).find("compact phase work: projected samples 53, moment updates 29")!=std::string::npos,
+          "Actual compact phase work was omitted or combined with incompatible work units");
+    std::ostringstream phase_log;DebugLive phase(120,phase_log);phase.step(0,snapshot,Signals{},false,false);
+    check(phase_log.str().find("\"helper_compact_phase_projected_samples\":53")!=std::string::npos&&
+          phase_log.str().find("\"helper_compact_phase_moment_updates\":29")!=std::string::npos,
+          "Actual compact phase work was omitted from debug JSON");
 }
 
 void physical_debug_workflow() {
@@ -1771,6 +1816,10 @@ void smoke_shutdown_does_not_resume_workflow() {
 }
 }
 int main(int argc,char** argv) {
+    if(argc==2&&std::string(argv[1])=="--helper-only") {
+        try {helper_assistance_debug_fields();std::cout<<"Helper assistance diagnostics passed\n";return 0;}
+        catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
+    }
     if(argc==2&&std::string(argv[1])=="--expanded-spectrum") {
         try {expanded_spectrum();std::cout<<"Expanded spectrum application passed\n";return 0;}
         catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

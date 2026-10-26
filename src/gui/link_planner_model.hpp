@@ -5,6 +5,7 @@
 #include "datapump/lpi_estimate.hpp"
 #include "datapump/simulation_estimate.hpp"
 #include <memory>
+#include <limits>
 #include <functional>
 #include <optional>
 #include <span>
@@ -12,6 +13,10 @@
 #include <vector>
 
 namespace datapump::gui::planner {
+struct QualifiedHelperCurveScenario {
+    double target_db_hz=0;
+    simulation::QualifiedHelperFrequencyScenario scenario;
+};
 struct Inputs {
     transfer::Options options;
     tuning::PatternMode mode=tuning::PatternMode::auto_pattern;
@@ -31,6 +36,30 @@ struct Inputs {
     // Current immutable frontend/cohort reservations plus candidate-profile
     // necessary fit; no full post-Use-target allocation or runtime guarantee.
     std::optional<live::Settings> receiver_settings; // Never a Session/capture owner.
+    // Explicit measured or validated-forecast scenarios for exact targets.
+    // Enabled helper power alone never creates these entries.
+    std::vector<QualifiedHelperCurveScenario> helper_frequency_scenarios;
+    // An immutable, funded copy of an actually executed current native joint
+    // RF/DATA-clock batch. Only the selected current target may illustrate its
+    // backend cost. It grants no forecast/future-support or RX probability.
+    std::shared_ptr<const simulation::detail::HelperJointClockProof> helper_executed_joint_clock;
+    std::string helper_joint_diagnostic_reason;
+    std::size_t helper_joint_diagnostic_allocator_bytes=0,helper_joint_diagnostic_account_bytes=0;
+    std::size_t helper_joint_diagnostic_slot_bytes=0,helper_joint_diagnostic_occupied_slots=0;
+    // Default planner forecasts are conditional source requirements. Validation
+    // coverage and actual component costs are supplied independently; absence
+    // leaves corresponding RX/sustained-CPU graph gaps with concrete reasons.
+    simulation::HelperFrequencyCosts helper_forecast_costs;
+    std::optional<simulation::HelperFrequencyForecastCoverage> helper_forecast_validation;
+    bool helper_forecast_assume_qualified_punctuation=false;
+    // Actual or explicitly planned PHYSICAL capture format, independent of
+    // the modem's logical Fs. Hardware/provider negotiation can be unknown.
+    std::optional<std::uint32_t> helper_forecast_capture_sample_rate;
+    std::optional<double> helper_forecast_capture_passband_hz;
+    bool helper_forecast_fixed_nominal_rate_conversion=false;
+    std::optional<std::uint32_t> helper_forecast_capture_logical_sample_rate;
+    bool helper_forecast_plan_sampled_capture=false;
+    std::string helper_forecast_capture_description;
 };
 struct Point {
     double target_db_hz=0;
@@ -52,6 +81,34 @@ struct CpuPoint {
     double target_db_hz=0;
     double realtime_ratio=0;
     bool available=false;
+};
+struct HelperCpuPoint {
+    double target_db_hz=0,discovery_cpu_seconds=0,prequalification_broad_cpu_seconds=0;
+    double qualified_finite_receiver_cpu_seconds=0,qualified_sustained_realtime_ratio=0;
+    double ordinary_tracking_realtime_ratio=0,additional_frontend_realtime_ratio=0,optional_probe_realtime_ratio=0;
+    bool scenario_available=false,discovery_available=false,sustained_available=false,forecast_available=false;
+    bool backend_sustained_available=false;
+    double backend_sustained_realtime_ratio=0;
+    simulation::HelperStrongRequirements requirements;
+    simulation::HelperMaskedFrequencyRequirements masked_requirements;
+    std::optional<simulation::HelperJointClockMetadata> executed_joint_geometry;
+    std::string reason;
+};
+// A scheduling/compute overlay carrying the UNCHANGED ordinary PHY point.
+// It is not a helper sensitivity/probability estimate. Backend fit is only
+// necessary until reference, frontend and bounded-probe costs are calibrated.
+struct HelperBackendFeasibilityPoint {
+    double target_db_hz=0,ordinary_success_probability=0;
+    double backend_realtime_ratio=0,cpu_budget=0;
+    bool ordinary_phy_available=false,backend_feasibility_known=false,backend_fits_budget=false;
+};
+HelperBackendFeasibilityPoint helper_backend_feasibility(const ReceivePoint&,const HelperCpuPoint&,double cpu_budget);
+struct HelperWorkPoint {
+    double target_db_hz=0;
+    simulation::HelperNativeWork native;
+    // Requirement forecast never means synchronization was observed.
+    bool measured_reference=false,native_probe_attempted=false;
+    double expected_helper_cn0_db_hz=std::numeric_limits<double>::quiet_NaN(),minimum_observation_seconds=0;
 };
 struct HelperReferencePlan {
     bool enabled=false;
@@ -77,6 +134,23 @@ struct HelperReferencePlan {
     // measurement. This does not certify runtime receiver/profile/resources.
     bool conditional_geometry_available=false;
     std::size_t ordinary_pairs=0,conditional_pairs=0,retained_clock_rates=0;
+    // Unique RF catalogue offsets. Only resolved coherent pattern compact
+    // geometry shares one physical projection per offset across LF lanes.
+    std::size_t ordinary_carriers=0,conditional_carriers=0;
+    bool carrier_projection_counts_available=false;
+    bool compact_geometry=false,baseline_search_limited=false;
+    double ordinary_rf_half_width_hz=0,requested_rf_half_width_hz=0;
+    // Signed pre-conversion support. Real mono capture may fold its negative
+    // image; all surviving signed branches must remain eligible at runtime.
+    double helper_search_lower_hz=0,helper_search_upper_hz=0;
+    double payload_search_lower_hz=0,payload_search_upper_hz=0;
+    bool coarse_conversion_required=false;
+    // Earliest optional-probe eligibility, not an audit-completion deadline.
+    // One cold global slot rotates current key/profile/epoch ranks. Its
+    // original RF/LF work is partial future coverage of the cohort.
+    double broad_probe_eligibility_seconds=0,physical_symbol_seconds=0;
+    double punctuation_period_seconds=.4,arrival_cell_seconds=0;
+    std::string timing_status;
     double assumed_frequency_uncertainty_hz=.01;
     double assumed_helper_offset_hz=0;
     double original_clock_cell_half_width_ppm=0;
@@ -92,6 +166,12 @@ struct Model {
     // Receiver CPU time per second of one-bit simulated audio. Uses the same
     // checked target sweep; unsupported Clock/RAM geometry leaves graph gaps.
     std::vector<CpuPoint> cpu_points;
+    // Separate conditional curves. Unsupported residual/backend/forecast
+    // coverage stays a gap; ordinary curves above are never overwritten.
+    std::vector<ReceivePoint> helper_receive_points;
+    std::vector<HelperCpuPoint> helper_cpu_points;
+    std::vector<HelperBackendFeasibilityPoint> helper_backend_feasibility_points;
+    std::vector<HelperWorkPoint> helper_work_points;
     bool available=false;
     // A valid background request; a previous completed view may remain visible.
     bool calculating=false;

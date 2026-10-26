@@ -105,10 +105,21 @@ public:
                 <<(s.helper_frequency_offset_hz?std::to_string(*s.helper_frequency_offset_hz):"null")
                 <<",\"helper_frequency_assistance_active\":"<<s.helper_frequency_assistance_active
                 <<",\"helper_phase_assistance_active\":"<<s.helper_phase_assistance_active
+                <<",\"helper_timing_assistance_active\":"<<s.helper_timing_assistance_active
                 <<",\"helper_original_search_pairs\":"<<s.helper_original_search_pairs
                 <<",\"helper_selected_search_pairs\":"<<s.helper_selected_search_pairs
                 <<",\"helper_conditional_jobs\":"<<s.helper_conditional_jobs
                 <<",\"helper_audit_jobs\":"<<s.helper_audit_jobs
+                <<",\"helper_input_view_conditional_jobs\":"<<s.helper_input_view_conditional_jobs
+                <<",\"helper_input_view_count\":"<<s.helper_input_view_count
+                <<",\"helper_compact_projected_samples\":"<<s.helper_compact_projected_samples
+                <<",\"helper_compact_lane_samples\":"<<s.helper_compact_lane_samples
+                <<",\"helper_compact_skipped_projected_samples\":"<<s.helper_compact_skipped_projected_samples
+                <<",\"helper_compact_skipped_lane_samples\":"<<s.helper_compact_skipped_lane_samples
+                <<",\"helper_compact_audit_projected_samples\":"<<s.helper_compact_audit_projected_samples
+                <<",\"helper_compact_audit_lane_samples\":"<<s.helper_compact_audit_lane_samples
+                <<",\"helper_compact_phase_projected_samples\":"<<s.helper_compact_phase_projected_samples
+                <<",\"helper_compact_phase_moment_updates\":"<<s.helper_compact_phase_moment_updates
                 <<",\"timing\":\""<<json_escape(s.clock_timing_status)<<"\",\"error\":\""<<json_escape(s.error)<<"\"}\n"<<std::flush;
         }
         if(s.simulation)return finish(elapsed,"refused simulation",false);

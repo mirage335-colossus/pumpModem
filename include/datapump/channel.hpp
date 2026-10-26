@@ -1,6 +1,7 @@
 #pragma once
 #include "datapump/streaming_modem.hpp"
 #include "datapump/helper_carrier.hpp"
+#include "datapump/capture_transport.hpp"
 #include <memory>
 #include <functional>
 
@@ -15,6 +16,17 @@ public:
         double lead_seconds,tail_seconds;
         constexpr HelperEnvelope(double lead=2,double tail=2):lead_seconds(lead),tail_seconds(tail) {}
     };
+    // Explicit opt-in for a caller which consumes the indexed physical PCM
+    // before the ordinary logical-rate decimator. The signed frequency domain
+    // must include every declared helper/data placement, including negative
+    // mono images. It is checked against the physical clock and the actual
+    // channel geometry; it does not certify an external radio/audio passband.
+    // The ordinary logical output still contains the original, possibly
+    // attenuated mixture. A caller must not treat it as corrected wide capture.
+    struct PreconversionCapture {
+        double minimum_hz=0,maximum_hz=0;
+        std::uint32_t minimum_sample_rate=0;
+    };
     static constexpr std::size_t workspace_bound=80*1024;
     // Guaranteed slack for bounded auxiliary observation during mode handoff.
     static constexpr std::size_t auxiliary_workspace_bound=16*1024;
@@ -22,12 +34,24 @@ public:
     // frontend. Both channel layouts prove this slack without shrinking any
     // ordinary receiver grant or increasing the existing workspace reserve.
     static constexpr std::size_t helper_cohort_workspace_bound=7*1024;
+    // The helper-enabled physical route replaces the legacy double-precision
+    // interpolation table, leaving this larger mode-specific reserve inside
+    // the same 80KiB channel budget. Never use it for a legacy fallback.
+    static constexpr std::size_t physical_helper_cohort_workspace_bound=10*1024;
     // Helper-enabled transport uses a separate physical integer-multiple sample
     // clock, then bounded anti-alias decimation back to this logical Config rate.
     // Both signals share clock error, oscillator impairments and physical AWGN.
     // Unsupported helper placements throw without changing logical geometry.
     SampledSimulationChannel(Config config, ChannelConfig channel, helper::Options helper = {},
-                             double helper_occupied_bandwidth_hz = 0, HelperEnvelope envelope = {});
+                             double helper_occupied_bandwidth_hz = 0, HelperEnvelope envelope = {},
+                             std::optional<PreconversionCapture> preconversion_capture = {});
+    // Pure geometry query using the constructor's exact physical-clock
+    // selection. It constructs no source, filter, receiver or DSP storage;
+    // rejected intermediate plans may create bounded exception strings.
+    // It certifies neither channel impairments nor an external radio passband.
+    // Disabled helper selects the ordinary clock.
+    static std::uint32_t planned_physical_sample_rate(const Config&,const helper::Options&,
+        double helper_occupied_bandwidth_hz=0,std::optional<PreconversionCapture> = {});
     ~SampledSimulationChannel();
     SampledSimulationChannel(SampledSimulationChannel&&) noexcept;
     SampledSimulationChannel& operator=(SampledSimulationChannel&&) noexcept;
@@ -35,6 +59,14 @@ public:
     // source, after any idle noise. Only the waveform queue and its independent
     // start schedule reset; receiver time and both oscillators keep running.
     void begin_burst(bool helper_only = false, HelperEnvelope envelope = {});
+    // Bind a prepared helper-enabled burst before a dated idle interval. The
+    // idle is added to the receiver-clock delay, so the Robust source starts at
+    // exactly the same coordinate as idle followed by begin_burst/read. Source
+    // PCM is not consumed here. Use read(source, ...) through that idle instead
+    // of read_noise: only the helper is present, on the same absolute dwell
+    // calendar as the later helper. The Robust source's FHSS plan is unchanged.
+    // Do not call begin_burst again afterward.
+    void prepare_helper_lead(StreamingTransmitter& source,std::uint64_t additional_logical_samples);
     // Enabled helpers surround the unchanged source waveform with at least
     // two seconds each of helper-only PCM. Requested minima round upward to
     // complete 0.4-second dwells, and endpoints align to that physical grid.
@@ -55,6 +87,16 @@ public:
     // consumers must hold such updates until that frontier reaches them.
     void set_physical_observer(PhysicalObserver observer);
     std::uint32_t physical_sample_rate() const;
+    // Actual raw-to-logical construction witness. Legacy interpolation has no
+    // such raw observation map; its result stays unknown even at equal rates.
+    audio::CaptureTransportRecipe capture_transport() const noexcept;
+    std::size_t helper_cohort_workspace_bytes() const;
+    // Whether the enabled helper's unmodified logical decimator preserves the
+    // actual payload passband. False is possible only with explicit
+    // preconversion capture; assistance must use separately observed physical
+    // PCM then. Disabled helpers add no decimator and return true; this is not
+    // a claim about an ordinary channel's separate Nyquist/oscillator limits.
+    bool logical_payload_preserved() const;
     std::uint64_t physical_received_samples() const;
     // Enabled helper output returns a positive short read at the committed
     // payload endpoint, allowing tail extension before subsequent post PCM.

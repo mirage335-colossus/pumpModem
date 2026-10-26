@@ -1,5 +1,7 @@
 #include "datapump/helper_carrier.hpp"
+#include "datapump/fhss_schedule.hpp"
 #include "datapump/modem.hpp"
+#include "datapump/pattern_receiver.hpp"
 #include "datapump/types.hpp"
 #include <algorithm>
 #include <cmath>
@@ -48,6 +50,17 @@ double leakage_bound(double distance,double bandwidth,bool metadata) {
     const auto harmonics=1+std::min(std::ceil(bandwidth/2.5),distance/(7*2.5));
     return 4*coefficient*coefficient*harmonics;
 }
+long double aligned_duration(long double seconds,long double rate) {
+    auto count=seconds*2.5L;
+    const auto nearest=std::round(count);
+    // Input durations are binary64. Do not add a whole dwell because promoting
+    // an intended integral count (e.g. 6.4s) exposes its input rounding residue.
+    const auto tolerance=std::min(4*std::numeric_limits<double>::epsilon()*std::max(1.L,std::abs(count)),
+        .5L/rate*2.5L);
+    if(std::abs(count-nearest)<=tolerance)
+        count=nearest;
+    return std::ceil(count)*dwell;
+}
 }
 void validate(const Options& options) {
     if(!std::isfinite(options.power_w)||options.power_w<0||
@@ -65,7 +78,92 @@ double calibrated_data_gain(const Options& options) {
     if(options.power_w==0)return 1;
     return gains_from_ratio(effective_power(options)/options.data_power_w).second;
 }
+ReferenceLevel reference_level(const Options& options,double nominal,double scale,double payload_fraction,double usable_fraction) {
+    validate(options);
+    if(options.power_w<=0||!std::isfinite(nominal)||
+       !std::isfinite(scale)||scale<=0||scale>1||
+       !std::isfinite(payload_fraction)||payload_fraction<=0||payload_fraction>1||
+       !std::isfinite(usable_fraction)||usable_fraction<=0||usable_fraction>1)
+        throw Error("invalid Helper Carrier reference-level inputs");
+    const auto ratio=std::min(static_cast<long double>(options.power_w)/options.data_power_w,
+        std::pow(10.L,static_cast<long double>(options.ratio_limit_db)/10));
+    const auto payload=static_cast<long double>(nominal)+20*std::log10(static_cast<long double>(scale));
+    const auto straight=payload+10*std::log10(ratio);
+    const auto usable=straight+10*std::log10(static_cast<long double>(usable_fraction));
+    const auto average=payload+10*std::log10(static_cast<long double>(payload_fraction));
+    ReferenceLevel result{static_cast<double>(ratio),static_cast<double>(straight),
+        static_cast<double>(usable),static_cast<double>(average)};
+    if(!std::isfinite(result.effective_power_ratio)||result.effective_power_ratio<=0||
+       !std::isfinite(result.straight_cn0_db_hz)||!std::isfinite(result.usable_cn0_db_hz)||
+       !std::isfinite(result.payload_average_cn0_db_hz))
+        throw Error("Helper Carrier reference level exceeds the numerical range");
+    return result;
+}
+EnvelopePlan plan_envelope(const modem::Config& config,const EnvelopeRequirements& requirements) {
+    modem::validate(config);
+    for(const auto duration:{requirements.frequency_acquisition_seconds,requirements.frontend_lookahead_seconds,
+                             requirements.receiver_buffer_deficit_seconds})
+        if(!std::isfinite(duration)||duration<0)throw Error("invalid Helper Carrier envelope duration");
+    if(!std::isfinite(requirements.maximum_source_capture_ratio)||requirements.maximum_source_capture_ratio<=0)
+        throw Error("invalid Helper Carrier envelope clock ratio");
+    const auto ratio=std::max(1.L,static_cast<long double>(requirements.maximum_source_capture_ratio));
+    const auto rate=static_cast<long double>(config.sample_rate);
+    const auto support=2.L*modem::pattern_pulse_padding_samples(config)/rate;
+    const auto ordinary_tail=static_cast<long double>(modem::pattern_absence_capture_samples(config))/rate+1+support;
+    const auto lookahead=static_cast<long double>(requirements.frontend_lookahead_seconds);
+    EnvelopePlan result;
+    result.lead_seconds=aligned_duration(ratio*(std::max(2.L,
+        static_cast<long double>(requirements.frequency_acquisition_seconds))+lookahead),rate);
+    result.tail_seconds=aligned_duration(ratio*(std::max({2.L,ordinary_tail,
+        static_cast<long double>(requirements.receiver_buffer_deficit_seconds)})+lookahead),rate);
+    result.preparation_seconds=result.lead_seconds+dwell+1/rate;
+    result.maximum_stop_extension_seconds=result.lead_seconds+result.tail_seconds+2*dwell+2/rate;
+    // The source wrapper still checks its full endpoint. Reject a plan whose
+    // independent extension alone cannot fit the existing 64-bit source clock.
+    if(!std::isfinite(result.maximum_stop_extension_seconds)||
+       std::ceil(result.maximum_stop_extension_seconds*rate)>=std::ldexp(1.L,64))
+        throw Error("Helper Carrier envelope exceeds the source sample counter");
+    return result;
+}
+PlacementBand placement_band(const modem::Config& config,double minimum_bandwidth) {
+    modem::validate(config);
+    if(!std::isfinite(minimum_bandwidth)||minimum_bandwidth<0)
+        throw Error("invalid Helper Carrier minimum occupied data bandwidth");
+    if(config.fake_hopping) {
+        // Helper geometry must not turn an unavailable mandatory gate into
+        // ungated payload. This is the same public shape used by the source.
+        (void)modem::FhssPowerShape(*config.fake_hopping,config.sample_rate,
+            modem::pattern_pulse_padding_samples(config),modem::symbol_sample_count(config));
+    }
+    const auto waveform=modem::pattern_pulse_enabled(config)?
+        (1+modem::pattern_pulse_rolloff)*config.sample_rate/modem::pattern_chip_samples(config):
+        modem::waveform_bandwidth_hz(config);
+    const auto full=std::max(minimum_bandwidth,waveform+modem::waveform_gate_bandwidth_allowance_hz(config));
+    PlacementBand band{config.carrier_hz,waveform,full-waveform};
+    (void)mono_passband(band);
+    return band;
+}
+MonoPassband mono_passband(const PlacementBand& band) {
+    if(!std::isfinite(band.carrier_hz)||band.carrier_hz<=0||
+       !std::isfinite(band.waveform_bandwidth_hz)||band.waveform_bandwidth_hz<=0||
+       !std::isfinite(band.gate_bandwidth_hz)||band.gate_bandwidth_hz<0||
+       band.carrier_hz-band.waveform_bandwidth_hz/2<0)
+        throw Error("Helper Carrier requires a valid data passband at the output sample rate");
+    const auto bandwidth=band.waveform_bandwidth_hz+band.gate_bandwidth_hz;
+    const auto lower=band.carrier_hz-bandwidth/2,upper=band.carrier_hz+bandwidth/2;
+    if(!std::isfinite(bandwidth)||!std::isfinite(lower)||!std::isfinite(upper)||upper<=0)
+        throw Error("invalid Helper Carrier gate-modulated data passband");
+    // For a positive nominal carrier the positive and negative real images
+    // overlap when the gate skirt crosses DC. Their positive union is one
+    // interval [0,max(abs(edges))], never a negative capture frequency.
+    return {std::max(0.,lower),std::max(std::abs(lower),std::abs(upper))};
+}
 Plan plan(const Options& options,double carrier,double bandwidth,std::uint32_t rate,
+          double minimum_high_frequency_hz,double data_amplitude_scale) {
+    return plan(options,PlacementBand{carrier,bandwidth,0},rate,
+        minimum_high_frequency_hz,data_amplitude_scale);
+}
+Plan plan(const Options& options,const PlacementBand& band,std::uint32_t rate,
           double minimum_high_frequency_hz,double data_amplitude_scale) {
     validate(options);
     if(options.power_w==0)return {};
@@ -73,9 +171,15 @@ Plan plan(const Options& options,double carrier,double bandwidth,std::uint32_t r
         throw Error("invalid Helper Carrier minimum High frequency");
     if(!std::isfinite(data_amplitude_scale)||data_amplitude_scale<=0||data_amplitude_scale>1)
         throw Error("invalid Helper Carrier data amplitude reference");
-    if(!rate||!std::isfinite(carrier)||!std::isfinite(bandwidth)||bandwidth<=0||
-       carrier-bandwidth/2<0||carrier+bandwidth/2>=rate/2.)
+    const auto passband=mono_passband(band);
+    const auto carrier=band.carrier_hz;
+    const auto bandwidth=band.waveform_bandwidth_hz+band.gate_bandwidth_hz;
+    if(!rate||passband.upper_hz>=rate/2.)
         throw Error("Helper Carrier requires a valid data passband at the output sample rate");
+    const bool folded=carrier-bandwidth/2<0;
+    if(folded&&options.frequency==Frequency::low)
+        throw Error("Helper Carrier Low has no isolated passband below gate-modulated data reaching DC");
+    const auto leakage_width=folded?passband.upper_hz-passband.lower_hz:bandwidth;
     const double direction=options.frequency==Frequency::high?1:-1;
     const auto effective=effective_power(options);
     const auto power_ratio=effective/options.data_power_w;
@@ -85,17 +189,18 @@ Plan plan(const Options& options,double carrier,double bandwidth,std::uint32_t r
     double distance=450;
     if(minimum_high_frequency_hz>0&&options.frequency==Frequency::high)
         distance=std::max(distance,50*std::ceil((minimum_high_frequency_hz-carrier-bandwidth/2)/50));
-    const auto maximum_distance=direction>0?rate/2.-250-carrier-bandwidth/2:
-                                           carrier-bandwidth/2-250;
+    const auto maximum_distance=folded?
+        (direction>0?rate/2.-250-passband.upper_hz:passband.lower_hz-250):
+        (direction>0?rate/2.-250-carrier-bandwidth/2:carrier-bandwidth/2-250);
     while(options.frequency!=Frequency::cochannel&&distance<=maximum_distance&&
-          leakage_bound(distance,bandwidth,true)*power_ratio>1e-3)
+          leakage_bound(distance,leakage_width,true)*power_ratio>1e-3)
         distance+=50;
     if(options.frequency!=Frequency::cochannel&&distance>maximum_distance)
         throw Error("Helper Carrier cannot fit its power-dependent leakage guard at this output sample rate");
     // Cochannel is an intentional overlapping diagnostic configuration. Keep
     // the actual linear mixture; it provides no isolation from payload data.
     const double frequency=options.frequency==Frequency::cochannel?carrier:
-        carrier+direction*(bandwidth/2+distance);
+        folded?passband.upper_hz+distance:carrier+direction*(bandwidth/2+distance);
     const auto [relative_peak,data_gain]=gains_from_ratio(power_ratio);
     // Ordinary PCM has the unchanged nominal mean power and peak bound one.
     // Leave 5% composite headroom, with no nonlinear limiter or data power boost.
@@ -105,12 +210,16 @@ Plan plan(const Options& options,double carrier,double bandwidth,std::uint32_t r
 }
 std::uint32_t minimum_output_rate(const Options& options,double carrier,double bandwidth,
                                   std::uint32_t logical_rate) {
+    return minimum_output_rate(options,PlacementBand{carrier,bandwidth,0},logical_rate);
+}
+std::uint32_t minimum_output_rate(const Options& options,const PlacementBand& band,
+                                  std::uint32_t logical_rate) {
     if(options.power_w==0)return 0;
     if(logical_rate<64||logical_rate>120000000)
         throw Error("invalid Helper Carrier logical sample rate");
     // Hardware and modem clocks are independent. A larger logical clock is
     // not a reason to move an otherwise adjacent helper out of the audio band.
-    const auto placement=plan(options,carrier,bandwidth,120000000);
+    const auto placement=plan(options,band,120000000);
     const auto required=std::ceil(2*(placement.frequency_hz+250));
     if(required>120000000)throw Error("Helper Carrier exceeds the physical audio sample-rate limit");
     return static_cast<std::uint32_t>(std::max({48000.,required,static_cast<double>(logical_rate)}));

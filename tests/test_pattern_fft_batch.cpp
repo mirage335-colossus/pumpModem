@@ -253,6 +253,78 @@ void prepared_template_and_cancellation() {
     catch(const Error&) {rejected=true;}
     check(rejected,"FFT batch accepted a zero private-template chip size");
 }
+void raw_prepared_direct_exactness_and_guards() {
+    std::size_t compared=0;
+    for(const bool shaped:{false,true})for(const std::size_t bin:{1U,4U})for(const std::size_t starts:{1U,7U,32U}) {
+        Config c;c.sample_rate=64;c.bandwidth_hz=8;c.carrier_hz=15.3;
+        c.integration_seconds=257./64;c.pulse_shaping=shaped;c.scramble=true;
+        for(std::size_t i=0;i<c.spreading_seed.size();++i)c.spreading_seed[i]=static_cast<std::uint8_t>(7+11*i);
+        PatternCode code(c);FftSearchBatch batch;auto& g=batch.geometry;
+        g.pattern={c.stream_epoch,code.chip_samples(),code.chips_per_symbol(),code.symbol_samples(),c.sample_rate,
+            static_cast<std::uint32_t>(c.spreading_mode),shaped?1U:0U,1,0,c.spreading_seed,c.dsss_seed};
+        g.bins_per_symbol=(code.symbol_samples()+bin-1)/bin+3;g.bin_samples=bin;g.carrier_hz=c.carrier_hz;
+        g.evidence_count=g.bins_per_symbol;g.extended_clock_window=1;g.noise_condition=1.375;
+        batch.starts=starts;batch.score_stride=starts+2;
+        const auto length=static_cast<std::size_t>(g.bins_per_symbol),field=length+starts-1;
+        const auto transform=std::bit_ceil(field);
+        std::vector<FftComplex> input(field),spectrum(transform);std::vector<double> energy(field+1);
+        for(std::size_t i=0;i<field;++i) {
+            input[i]={std::sin(.19*i+.27),std::cos(.13*i-.31)};energy[i+1]=energy[i]+std::norm(input[i]);
+        }
+        batch.spectrum=spectrum;batch.observations=input;batch.energy_prefix=energy;
+        std::array<FftSearchJob,3> jobs{};
+        for(std::size_t i=0;i<jobs.size();++i) {
+            jobs[i].symbol=i+1;jobs[i].phase=i+3;jobs[i].frequency_hz=.03125-.019*i;
+            jobs[i].clock_ratio=i==0?1:i==1?.9998:1.0002;
+        }
+        std::vector<FftSearchWorkspace> generated_workers;generated_workers.emplace_back(c,transform,true);
+        std::vector<FftSearchScore> expected(jobs.size()*batch.score_stride,untouched);
+        execute_fft_search_cpu(batch,jobs,expected,generated_workers);
+        std::vector<FftComplex> rows(2*jobs.size()*length);std::vector<FftPreparedRawTemplate> prepared;
+        for(std::size_t i=0;i<jobs.size();++i) {
+            prepared.push_back(prepare_fft_raw_template(g,jobs[i],code,
+                {std::span(rows).subspan(2*i*length,length),std::span(rows).subspan((2*i+1)*length,length)}));
+            jobs[i].prepared_template=i;
+        }
+        batch.prepared_raw=prepared;
+        std::vector<FftSearchWorkspace> uploaded_workers;uploaded_workers.emplace_back(c,transform,false);
+        std::vector<FftSearchScore> actual(expected.size(),untouched);
+        execute_fft_search_cpu(batch,jobs,actual,uploaded_workers);
+        check(std::equal(expected.begin(),expected.end(),actual.begin(),equal),
+            "raw prepared rows changed production direct FP64 bits or padding");
+        compared+=starts*jobs.size()*2;
+        const auto rejects=[&](const auto& mutation) {
+            std::fill(actual.begin(),actual.end(),untouched);mutation();bool rejected=false;
+            try {execute_fft_search_cpu(batch,jobs,actual,uploaded_workers);}catch(const Error&){rejected=true;}
+            check(rejected&&std::all_of(actual.begin(),actual.end(),[](auto x){return equal(x,untouched);}),
+                "invalid raw prepared domain wrote scores or was accepted");
+        };
+        jobs[1].frequency_hz+=.001;rejects([]{});jobs[1].frequency_hz-=.001;
+        // Restore from the exact builder identity, avoiding a floating add/sub
+        // round-trip in a test whose contract is exact field identity.
+        jobs[1].frequency_hz=prepared[1].frequency_hz;
+        const auto oldclock=jobs[1].clock_ratio;jobs[1].clock_ratio=1;rejects([]{});jobs[1].clock_ratio=oldclock;
+        const auto oldpattern=g.pattern;g.pattern.legacy_public^=1;rejects([]{});g.pattern=oldpattern;
+        g.search_arithmetic=static_cast<std::uint32_t>(SearchArithmetic::fp32);rejects([]{});
+        g.search_arithmetic=static_cast<std::uint32_t>(SearchArithmetic::fp64);
+        g.real_rank=1;rejects([]{});g.real_rank=0;
+        const auto observed=batch.observations;batch.observations={};rejects([]{});batch.observations=observed;
+        FftPreparedTemplate spectral;batch.prepared=std::span(&spectral,1);rejects([]{});batch.prepared={};
+        std::stop_source stopped;stopped.request_stop();std::fill(actual.begin(),actual.end(),untouched);bool cancelled=false;
+        try {execute_fft_search_cpu(batch,jobs,actual,uploaded_workers,stopped.get_token());}catch(const Error&){cancelled=true;}
+        check(cancelled&&std::all_of(actual.begin(),actual.end(),[](auto x){return equal(x,untouched);}),
+            "raw prepared cancellation wrote scores");
+        if(starts>1) {
+            const FftStartRange range{1,1};batch.start_ranges=std::span(&range,1);
+            for(auto& job:jobs)job.range_count=1;
+            std::fill(actual.begin(),actual.end(),untouched);execute_fft_search_cpu(batch,jobs,actual,uploaded_workers);
+            for(std::size_t i=0;i<actual.size();++i)
+                check(equal(actual[i],i%batch.score_stride==1?expected[i]:untouched),
+                    "raw prepared restricted starts changed exact scores or padding");
+        }
+    }
+    std::cout<<"raw_prepared_exact compared_bit_scores="<<compared<<'\n';
+}
 void restricted_coherent_direct_and_fft() {
     for(const bool shaped:{false,true})for(const auto bin:{std::size_t{1},std::size_t{4}}) {
         Config config;config.sample_rate=64;config.bandwidth_hz=8;config.carrier_hz=15.3;
@@ -1594,7 +1666,7 @@ void score_evidence_legacy_oracle() {
 }
 }
 int main() {
-    try {score_evidence_legacy_oracle();prepared_batch_scalar_oracle();paired_regression::run();flat_batch_tiling_and_order();borrowed_double_tables_equivalence_and_guards();prepared_template_and_cancellation();restricted_coherent_direct_and_fft();public_nominal_reference_exactness();
+    try {score_evidence_legacy_oracle();prepared_batch_scalar_oracle();paired_regression::run();flat_batch_tiling_and_order();borrowed_double_tables_equivalence_and_guards();prepared_template_and_cancellation();raw_prepared_direct_exactness_and_guards();restricted_coherent_direct_and_fft();public_nominal_reference_exactness();
         drift_rank_and_partition();drift_direct_fft_and_real_gram();differential_direct_fft_and_real_gram();frequency_axis_equivalence_and_bounds();}
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
     std::cout<<"pattern FFT batch tests passed\n";

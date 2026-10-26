@@ -146,6 +146,11 @@ struct CoreWork {
     std::size_t hypotheses=0,lattices=0,phase_groups=0,peak_workspace_bytes=0;
     unsigned drift_sections=1;
     std::uint64_t differential_window_samples=0,samples=0,cells=0,segments=0;
+    std::uint64_t projected_carrier_samples=0,accumulated_lane_samples=0;
+    std::uint64_t skipped_carrier_samples=0,skipped_lane_samples=0;
+    std::uint64_t broad_audit_projected_carrier_samples=0,broad_audit_accumulated_lane_samples=0,broad_audit_full_symbols=0;
+    std::uint64_t skipped_logical_trials=0;
+    std::uint64_t phase_projected_carrier_samples=0,phase_carrier_moment_updates=0;
     // Kernel preparation is included in frontend time and also shown separately.
     // Opt-in timers affect execution cost; use uninstrumented runs for speedup.
     double frontend_seconds=0,search_seconds=0,kernel_seconds=0;
@@ -1089,7 +1094,14 @@ struct PatternCorrelator::Impl {
         std::uint32_t frequency=0,rate_index=0,tone_bank_base=0;
         bool admitted=false,pending_gaps=false;
         std::uint8_t affine_groups=0; // Keep ordinary compact-workspace layout.
+        // Occupy the original tail padding; optional assistance must not grow
+        // every ordinary lane or alter its pre-existing field offsets.
+        bool helper_unobserved:1=false;
+        bool helper_block_suppressed:1=false;
+        bool helper_initial_unscored:1=false;
     };
+    static_assert(sizeof(Hypothesis)==((offsetof(Hypothesis,affine_groups)+sizeof(std::uint8_t)+
+        alignof(Hypothesis)-1)/alignof(Hypothesis))*alignof(Hypothesis));
     struct PhaseGroup {std::uint64_t lower=0,upper=0;};
     struct PhaseGroups {
         std::array<PhaseGroup,3> inline_groups{};
@@ -1099,6 +1111,23 @@ struct PatternCorrelator::Impl {
             return inline_groups.at(index);
         }
     };
+    // Optional assistance never owns payload or a second decoder. Per-lane
+    // unobserved eligibility lives in Hypothesis so reclaiming this control
+    // cannot turn a skipped partial symbol into a physical absence test.
+    struct CompactControl {
+        std::vector<std::uint8_t> selected,active,pairs,banks,audit_seen;
+        bool prior_active=true,audit_active=false,audit_complete=false,dispatch_permitted=true;
+        std::uint64_t audit_start=0;
+        std::size_t audit_scored=0,timing_selected=0;
+        std::optional<PatternPeriodicTimingPrior> timing_prior;
+        std::size_t working_bytes()const noexcept {
+            return sizeof(*this)+selected.capacity()+active.capacity()+pairs.capacity()+banks.capacity()+audit_seen.capacity();
+        }
+    };
+    std::unique_ptr<CompactControl> compact_control;
+    bool compact_controls_used=false,compact_workspace_yielded=false;
+    const PatternPhaseCurve* compact_phase_curve=nullptr;
+    double compact_phase_carrier_shift=0;
     struct AmplitudePhaseEntry {
         PhaseGroups groups;
         std::uint64_t index=std::numeric_limits<std::uint64_t>::max(),lower=0,upper=0;
@@ -1659,6 +1688,10 @@ struct PatternCorrelator::Impl {
     Impl(Config c,PatternSearch search_options,std::size_t bytes,PatternCorrelatorOptions work_options)
         :config(c),search(std::move(search_options)),code(c,c.stream_epoch),budget(bytes),options(work_options) {
         validate(c);
+        if(!pattern_clock_interval_valid(search))throw Error("invalid qualified clock interval or incomplete explicit clock cells");
+        if(search.qualified_clock_interval && (c.symbol_burst.enabled() || scheduled_bursts(c) || deferred_symbols(c) ||
+           options.amplitude_only))throw Error("qualified clock interval requires continuous coherent reception");
+        if(search.qualified_clock_interval)search.admitted_clock_cell_half_width_ppm=search.qualified_clock_interval->cell_half_width_ppm;
         if(c.symbol_burst.enabled()) {
             require(search.initial_stream_symbols && search.initial_stream_symbols<=64,
                 "invalid Symbol_Burst initial source-symbol search limit");
@@ -1750,7 +1783,10 @@ struct PatternCorrelator::Impl {
            search.clock_errors_ppm==std::vector<double>{0} && !search.couple_clock_to_carrier)
             search.hypotheses=oscillator_pattern_search(c).hypotheses;
         const bool paired=!search.hypotheses.empty();
-        long double highest_rate=1,lowest_rate=1;
+        long double highest_rate=search.qualified_clock_interval?
+            1+static_cast<long double>(search.qualified_clock_interval->upper_ppm)*1e-6L:1;
+        long double lowest_rate=search.qualified_clock_interval?
+            1+static_cast<long double>(search.qualified_clock_interval->lower_ppm)*1e-6L:1;
         if(paired) {
             require(search.hypotheses.size()<=maximum_pattern_frequency_rate_hypotheses,
                     "frequency/rate bank exceeds finite hypothesis limit");
@@ -7577,6 +7613,7 @@ struct PatternCorrelator::Impl {
             history.capacity()*sizeof(PatternEvidence)+bursts.capacity()*sizeof(PatternBurst)+
             (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double)+
             search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis);
+        if(compact_control)value+=compact_control->working_bytes();
         if(burst)value+=burst->working_bytes();
         if(timing)value+=sizeof(*timing)+timing->capacity()*sizeof(TimingEntry);
         value+=pulse_lattices.capacity()*sizeof(PulseLattice);
@@ -7835,8 +7872,144 @@ struct PatternCorrelator::Impl {
         decltype(affine_coefficients)().swap(affine_coefficients);
         work.affine_coefficient_cache_entries=0;
     }
+    bool compact_supported()const noexcept {
+        return !finished && search.compact_clock_search && !search.hypotheses.empty() &&
+            !hypotheses.empty() && !burst && !scheduled && !options.amplitude_only &&
+            pulse_lattices.empty() && config.spreading_mode==SpreadingMode::pattern &&
+            !(config.fake_hopping && config.fake_hopping->defer_symbols);
+    }
+    void drop_compact_control()noexcept {
+        if(!compact_control)return;
+        const auto bytes=compact_control->working_bytes();compact_control.reset();compact_workspace_yielded=true;
+        accounted_bytes-=bytes;
+    }
+    void clear_compact_fits(Hypothesis& h,std::size_t lane) {
+        h.fits={};h.affine_groups=0;
+        for(std::size_t group=0;group<alternate_groups;++group)alternate_fits[lane*alternate_groups+group]={};
+        for(std::size_t group=0;group<=alternate_groups;++group) {
+            if(outer_presence)(*outer_evidence)[lane*(alternate_groups+1)+group]={};
+            if(!chip_evidence.empty())chip_evidence[lane*(alternate_groups+1)+group]={};
+            if(drift_sections>1 && !drift_fits.empty())section_fits(lane,group)={};
+            if(differential_window)local_fits(lane,group)={};
+            if(!affine_coefficients.empty())affine_coefficients[lane*(alternate_groups+1)+group].invalidate();
+        }
+    }
+    bool compact_timing_intersects(const Hypothesis& h,const PatternPeriodicTimingPrior& prior)const noexcept {
+        const auto lower=origin_lower;
+        const auto upper=(static_cast<long double>(*search.start_offset_seconds)+search.start_uncertainty_seconds)*config.sample_rate;
+        const auto step=static_cast<long double>(code.chip_samples())/(2*h.rate);
+        const auto address=std::floor((h.origin-lower)/step);
+        const auto regular=lower+address*step;
+        const auto previous=h.origin<=lower?lower:regular<h.origin?regular:std::max(lower,h.origin-step);
+        const auto next=std::min(upper,h.origin+step);
+        const auto cell_lower=h.origin<=lower?lower:(previous+h.origin)/2;
+        const auto cell_upper=h.origin>=upper?upper:(h.origin+next)/2;
+        const auto period=prior.period_samples/h.rate;
+        const auto center=prior.observed_sample+(static_cast<long double>(h.phase_lower)-prior.source_phase_samples)/h.rate;
+        const auto clock_radius=static_cast<long double>(*search.admitted_clock_cell_half_width_ppm)*1e-6L;
+        const auto elapsed=std::max(std::abs(prior.observed_sample-cell_lower),std::abs(prior.observed_sample-cell_upper));
+        // Original private phase cells remain unresolved. A conservative union
+        // over their full source extent can make the periodic prior ineligible
+        // to narrow; it must never silently select a nearest cipher address.
+        const auto phase_upper=search.search_stream_phases?canonical_phase_cell_upper(config,h.phase_upper):h.phase_upper;
+        const auto phase_width=static_cast<long double>(phase_upper-h.phase_lower)/h.rate;
+        auto radius=prior.half_width_samples+elapsed*clock_radius/h.rate+phase_width;
+        const auto pad=128*std::numeric_limits<long double>::epsilon()*
+            std::max({1.L,std::abs(cell_lower),std::abs(cell_upper),std::abs(center),period,radius});
+        radius+=pad;
+        if(2*radius+cell_upper-cell_lower>=period)return true;
+        const auto first=std::ceil((cell_lower-center-radius)/period);
+        const auto last=std::floor((cell_upper-center+radius)/period);
+        return first<=last;
+    }
+    void prepare_compact_control() {
+        if(!compact_control) {
+            if(compact_controls_used)for(auto& h:hypotheses)h.helper_block_suppressed=false;
+            return;
+        }
+        auto& control=*compact_control;
+        std::fill(control.active.begin(),control.active.end(),0);
+        const bool broad=!control.prior_active || control.audit_active;control.timing_selected=0;
+        for(std::size_t i=0;i<hypotheses.size();++i) {
+            const auto& h=hypotheses[i];
+            const auto timed=!control.timing_prior || compact_timing_intersects(h,*control.timing_prior);
+            if(timed)++control.timing_selected;
+            control.active[i]=(control.dispatch_permitted && (broad || (control.selected[h.rate_index] && timed))) || h.admitted ||
+                !h.burst.bits.empty() || h.pending_gaps || h.committed!=0;
+        }
+        // A subscribed guide remains an evidence dependency even between its
+        // two tagged decisions. Include all relations, not only current owners.
+        if(timing)for(const auto& entry:*timing) {
+            control.active[entry.hypothesis]=1;
+            for(const auto& relation:entry.state.relations)
+                if(relation.neighbor<hypotheses.size())control.active[relation.neighbor]=1;
+        }
+        for(const auto& emission:emissions)if(emission.owner && !emission.ended)
+            control.active[hypotheses.index(*emission.owner)]=1;
+        std::fill(control.pairs.begin(),control.pairs.end(),0);
+        std::fill(control.banks.begin(),control.banks.end(),0);
+        for(std::size_t i=0;i<hypotheses.size();++i) {
+            auto& h=hypotheses[i];h.helper_block_suppressed=!control.active[i];
+            if(control.active[i]) {
+                control.pairs[h.rate_index]=1;control.banks[h.frequency]=1;
+            } else {
+                // Explicitly conditional RF exclusion. Unaccepted noise fits
+                // carry no payload authority; discard rather than score them.
+                if(h.fits[0].count || h.fits[1].count) {clear_compact_fits(h,i);h.helper_unobserved=true;}
+            }
+        }
+    }
+    bool compact_lane_active(std::size_t lane)const noexcept {
+        return !hypotheses[lane].helper_block_suppressed;
+    }
+    // Skipping never calls complete() or creates a fit/bit/absence. Original
+    // logical detector-choice penalties remain. On restoration, skip the crossed
+    // symbol before collecting its first wholly observed successor.
+    std::uint64_t compact_skip(Hypothesis& h,std::size_t lane,std::uint64_t cursor,
+                               std::uint64_t end,bool cold) {
+        if(!cold && !h.helper_unobserved)return cursor;
+        while(cursor<end) {
+            const auto start=std::max(0.L,std::ceil(symbol_start(h)));
+            if(!cold && static_cast<long double>(cursor)<=start) {h.helper_unobserved=false;break;}
+            const auto boundary=std::ceil(clock_boundary(h,code.symbol_samples()));
+            const auto next=static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::max(0.L,boundary)));
+            if(next>cursor) {
+                work.skipped_lane_samples+=next-cursor;h.helper_unobserved=true;
+                const auto first_full=std::ceil(std::max(0.L,-h.origin)*h.rate/code.symbol_samples());
+                if(static_cast<long double>(h.index)<=first_full)h.helper_initial_unscored=true;
+                cursor=next;
+            }
+            if(static_cast<long double>(cursor)<boundary)break;
+            clear_compact_fits(h,lane);
+            // Preserve the ordinary detector-choice penalty without creating
+            // a fit, decision, observed absence or completion event.
+            std::size_t groups=0;(void)phase_groups(h,groups);
+            require(groups<=UINT64_MAX-trials,"conditional compact trial counter overflow");
+            trials+=groups;work.skipped_logical_trials+=groups;
+            require(h.index<UINT64_MAX,"conditional compact stream symbol counter overflow");++h.index;
+            h.helper_unobserved=false;
+            if(!cold)break;
+        }
+        return cursor;
+    }
+    void compact_audit_decision(const Hypothesis& h,std::size_t lane,std::uint64_t end) {
+        if(!compact_control || !compact_control->audit_active || compact_control->audit_seen[lane])return;
+        const auto start=std::ceil(symbol_start(h));
+        if(start<static_cast<long double>(compact_control->audit_start) || h.helper_unobserved ||
+           static_cast<long double>(h.observed_start)!=start ||
+           static_cast<long double>(end)!=std::ceil(clock_boundary(h,code.symbol_samples())) ||
+           h.fits[0].count!=end-h.observed_start)return;
+        compact_control->audit_seen[lane]=1;++compact_control->audit_scored;++work.broad_audit_full_symbols;
+    }
+    void settle_compact_audit() {
+        if(!compact_control || !compact_control->audit_active || compact_control->audit_scored!=hypotheses.size())return;
+        if(timing && std::any_of(timing->begin(),timing->end(),[](const auto& entry){return entry.state.pending_terminal;}))return;
+        compact_control->audit_active=false;compact_control->audit_complete=true;
+    }
     void room_for(std::size_t extra) {
         rx_cpu::Scope cpu_scope(rx_cpu::Stage::allocation,true);
+        if(compact_control && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
+           extra>budget-sizeof(PatternCorrelator)-accounted_bytes))drop_compact_control();
         // The joined Live cohort may hold optional source/numeric caches in
         // idle receivers. Request that surplus BEFORE evicting this receiver's
         // original acceleration. The owner callback reclaims only joined cache
@@ -8030,6 +8203,11 @@ struct PatternCorrelator::Impl {
     }
     bool prefix_timing_continuation() const {return burst || (scheduled_map() && !options.amplitude_only);}
     std::size_t process_count(std::size_t count) const {
+        if(compact_phase_curve && sample<=UINT64_MAX-search.input_sample_origin) {
+            const auto absolute=sample+search.input_sample_origin;
+            if(const auto next=compact_phase_curve->next_segment_after(absolute);next && *next-absolute<count)
+                count=static_cast<std::size_t>(*next-absolute);
+        }
         if(prefix_timing_continuation() && timing_enabled) {
             bool common_fence=bit_limit<2;
             if(!common_fence)for(const auto& h:hypotheses)if(h.committed &&
@@ -8587,6 +8765,10 @@ struct PatternCorrelator::Impl {
     }
     void complete(Hypothesis& h,std::size_t hypothesis,std::uint64_t end,std::stop_token stop,certdiag::Probe* certificate_probe=nullptr) {
         rx_cpu::Scope cpu_scope(rx_cpu::Stage::guards);
+        if(h.helper_initial_unscored && !h.helper_unobserved &&
+           static_cast<long double>(h.observed_start)==std::max(0.L,std::ceil(symbol_start(h))) &&
+           h.fits[0].count==end-h.observed_start)h.helper_initial_unscored=false;
+        compact_audit_decision(h,hypothesis,end);
         amplitude_publication_dirty=true;
         const auto retained_context=h.admitted || !h.burst.bits.empty();
         const auto admitted_before=h.admitted;
@@ -9378,7 +9560,7 @@ struct PatternCorrelator::Impl {
         detail::CorrelationCarrierMoments uncached;
         const auto* carrier=bank.carrier(piece_count);
         if(!carrier) {
-            uncached=detail::correlation_carrier_moments(piece_count,2*tau*bank.frequency/config.sample_rate);
+            uncached=detail::correlation_carrier_moments(piece_count,2*tau*(bank.frequency+compact_phase_carrier_shift)/config.sample_rate);
             carrier=&uncached;
         }
         for(unsigned bit=0;bit<2;++bit) {
@@ -11844,6 +12026,22 @@ template<class Source,class Pulses,class Gain,class Prepare>
             }}
         } clear_shared{*this};
         WorkTimer frontend_timer(options.measure_work,work.frontend_seconds,work.frontend_cpu_seconds);
+        double compact_phase=0;
+        if(compact_phase_curve) {
+            require(sample<=UINT64_MAX-search.input_sample_origin,"compact phase input coordinate overflow");
+            const auto absolute=sample+search.input_sample_origin;
+            compact_phase=compact_phase_curve->value_at(absolute);
+            const auto shift=compact_phase_curve->slope_at(absolute)*config.sample_rate/tau;
+            if(shift!=compact_phase_carrier_shift) {
+                compact_phase_carrier_shift=shift;
+                for(auto& bank:banks)for(std::size_t i=0;i<bank.affine_carrier.size();++i) {
+                    const auto count=bank.affine_carrier.size()>bank.affine_lengths.size()?i+1:bank.affine_lengths[i];
+                    bank.affine_carrier[i]=detail::correlation_carrier_moments(count,2*tau*(bank.frequency+shift)/config.sample_rate);
+                    ++work.phase_carrier_moment_updates;
+                }
+            }
+        }
+        prepare_compact_control();
         const bool raw_pulse_observations=prepare_pulse_cell_modes(input.size(),stop);
         bool certified_null=scheduled_map()!=nullptr;
         if(certified_null)for(const auto& h:hypotheses) {
@@ -11855,8 +12053,9 @@ template<class Source,class Pulses,class Gain,class Prepare>
         clear_shared.enabled=!certified_null;
         if(!certified_null)for(std::size_t b=0;b<banks.size();++b) {
             cancelled(stop);auto& bank=banks[b];bank.shared_prefix={};bank.shared_moment={};
+            if(compact_control && !compact_control->banks[b]) {work.skipped_carrier_samples+=input.size();continue;}
             if(scheduled && !scheduled->physical_views.empty())scheduled->physical_views[b]={};
-            if(cache && scheduled && scheduled->moments_eligible && (!outer_presence || scheduled->outer_moment_scratch) &&
+            if(cache && !compact_phase_curve && scheduled && scheduled->moments_eligible && (!outer_presence || scheduled->outer_moment_scratch) &&
                !options.raw_reference && !options.scheduled_moment_reference) {
                 require(sample<=std::numeric_limits<std::uint64_t>::max()-search.input_sample_origin,
                     "shared physical capture coordinate overflow");
@@ -11864,14 +12063,18 @@ template<class Source,class Pulses,class Gain,class Prepare>
                 const auto shared=cache->physical(input,search.input_sample_origin+sample,sample,config.sample_rate,bank.frequency,stop);
                 if(shared){scheduled->physical_views[b]=shared;continue;}
             }
-            if(cache && (scheduled_map() || work.backend==PatternCorrelationBackend::pulse_moments || pulse_segmented)) {
+            if(cache && !compact_phase_curve && (scheduled_map() || work.backend==PatternCorrelationBackend::pulse_moments || pulse_segmented)) {
                 const auto shared=cache->get(input,sample,config.sample_rate,bank.frequency,block_samples,!scheduled_map() || scheduled_affine,stop);
                 if(shared){bank.shared_prefix=shared.prefix;bank.shared_moment=shared.first_moment;continue;}
             }
+            work.projected_carrier_samples+=input.size();
+            if(compact_phase_curve && sample+search.input_sample_origin>=compact_phase_curve->first_sample())
+                work.phase_projected_carrier_samples+=input.size();
+            if(compact_control && compact_control->audit_active)work.broad_audit_projected_carrier_samples+=input.size();
             bank.prefix[0]={};
             if(!bank.first_moment.empty())bank.first_moment[0]={};
-            auto oscillator=std::polar(1.,static_cast<double>(std::remainder(static_cast<long double>(sample)*tau*bank.frequency/config.sample_rate,static_cast<long double>(tau))));
-            const auto step=std::polar(1.,tau*bank.frequency/config.sample_rate);
+            auto oscillator=std::polar(1.,static_cast<double>(std::remainder(static_cast<long double>(sample)*tau*bank.frequency/config.sample_rate+compact_phase,static_cast<long double>(tau))));
+            const auto step=std::polar(1.,tau*(bank.frequency+compact_phase_carrier_shift)/config.sample_rate);
             for(std::size_t i=0;i<input.size();++i) {
                 const auto c=oscillator.real(),s=oscillator.imag(),x=static_cast<double>(input[i]);
                 auto p=bank.prefix[i];p.xc+=x*c;p.xs+=x*s;p.cc+=c*c;p.ss+=s*s;p.cs+=c*s;p.energy+=x*x;
@@ -11943,7 +12146,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
             struct RestoreTemporalView {decltype(temporal_view) target;decltype(previous_temporal) old;~RestoreTemporalView(){target=old;}} restore_temporal{temporal_view,previous_temporal};
             if(scheduled && !scheduled->worker_temporal_templates.empty())temporal_view={this,scheduled->worker_temporal_templates[worker].get()};
             cancelled(stop);auto& h=hypotheses[hypothesis];
-            if(burst_dormant(hypothesis))return;
+            if(burst_dormant(hypothesis) || !compact_lane_active(hypothesis) || h.helper_unobserved)return;
             const auto cursor=initial_cursor(h,end);
             const auto symbol_end=clock_boundary(h,code.symbol_samples());
             if(cursor<end && static_cast<long double>(cursor)<symbol_end) {
@@ -12028,13 +12231,19 @@ template<class Source,class Pulses,class Gain,class Prepare>
             auto& h=hypotheses[hypothesis];
             if(burst_dormant(hypothesis))continue;
             cancelled(stop);auto cursor=initial_cursor(h,end);
+            const bool restored=h.helper_unobserved;
+            cursor=compact_skip(h,hypothesis,cursor,end,!compact_lane_active(hypothesis));
+            if(!compact_lane_active(hypothesis))continue;
             // Only independent fit accumulation was moved ahead. Trial counts,
             // phase selection, peer ownership and every publication retain the
             // original serial hypothesis/complete-symbol order.
-            if(accumulation_ahead && cursor<end) {
+            if(accumulation_ahead && !restored && cursor<end) {
                 const auto symbol_end=clock_boundary(h,code.symbol_samples());
                 if(static_cast<long double>(cursor)<symbol_end) {
+                    const auto before=cursor;
                     cursor=static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(symbol_end)));
+                    work.accumulated_lane_samples+=cursor-before;
+                    if(compact_control && compact_control->audit_active)work.broad_audit_accumulated_lane_samples+=cursor-before;
                     if(static_cast<long double>(cursor)>=symbol_end)complete(h,hypothesis,cursor,stop);
                 }
             }
@@ -12044,14 +12253,25 @@ template<class Source,class Pulses,class Gain,class Prepare>
                 if(cursor>=end || burst_dormant(hypothesis))break;
                 const auto symbol_end=clock_boundary(h,code.symbol_samples());
                 if(static_cast<long double>(cursor)>=symbol_end) { complete(h,hypothesis,cursor,stop);continue; }
-                cursor=accumulate(h,hypothesis,cursor,end,code,stop);
+                const auto before=cursor;cursor=accumulate(h,hypothesis,cursor,end,code,stop);
+                work.accumulated_lane_samples+=cursor-before;
+                if(compact_control && compact_control->audit_active)work.broad_audit_accumulated_lane_samples+=cursor-before;
                 if(static_cast<long double>(cursor)>=symbol_end)complete(h,hypothesis,cursor,stop);
             }
         }
         settle_timing();
+        settle_compact_audit();
         if(pulse_segmented || scheduled_affine || (scheduled && scheduled->moments_eligible))work.segments=std::accumulate(affine_counts.begin(),affine_counts.end(),std::uint64_t{0});
-        if(!certified_null)record_point(banks.front().observations(physical_view(0))[input.size()]);
+        if(!certified_null) {
+            std::size_t bank=0;
+            if(compact_controls_used) {
+                const auto active=std::find_if(hypotheses.begin(),hypotheses.end(),[](const auto& h){return !h.helper_block_suppressed;});
+                bank=active==hypotheses.end()?banks.size():active->frequency;
+            }
+            if(bank<banks.size())record_point(banks[bank].observations(physical_view(bank))[input.size()]);
+        }
         sample=end;
+        if(compact_phase_curve)compact_phase_curve->mark_observed(search.input_sample_origin+sample);
         room_for(0);
     }
 };
@@ -12656,6 +12876,12 @@ void PatternCorrelator::push(std::span<const float> samples,std::stop_token stop
     detail::PatternPermutationScope permutation_scope(cache?cache->permutations():inherited.pools,
         cache?cache->permutation_namespace():inherited.key_namespace);
     require(samples.size()<=std::numeric_limits<std::uint64_t>::max()-s.sample,"pattern sample counter overflow");
+    // A borrowed phase curve uses absolute capture coordinates. Validate the
+    // whole caller span before consuming any PCM, so a later block cannot wrap
+    // its oscillator coordinate or the curve's immutable-observation fence.
+    if(s.compact_phase_curve)require(s.sample<=UINT64_MAX-s.search.input_sample_origin &&
+        samples.size()<=UINT64_MAX-s.search.input_sample_origin-s.sample,
+        "compact phase input coordinate overflow");
     {
         rx_cpu::Scope cpu_validation(rx_cpu::Stage::input_validation);
         WorkTimer validation_timer(s.options.measure_work,s.work.validation_seconds,s.work.validation_cpu_seconds);
@@ -12817,6 +13043,133 @@ bool PatternCorrelator::suspend_helper_acquisition() {
        std::none_of(s.hypotheses.begin(),s.hypotheses.end(),[](const auto& h){return h.admitted;}))return false;
     s.helper_acquisition_suspended=true;return true;
 }
+PatternAcquisitionDispatchState PatternCorrelator::helper_acquisition_dispatch()const noexcept {
+    const auto& s=*impl_;
+    return {s.compact_supported() && bool(s.compact_control),
+        !s.compact_control || s.compact_control->dispatch_permitted,false};
+}
+bool PatternCorrelator::set_helper_acquisition_dispatch(bool permitted)noexcept {
+    auto& s=*impl_;
+    if(!s.compact_supported() || !s.compact_control || s.finished)return false;
+    s.compact_control->dispatch_permitted=permitted;s.prepare_compact_control();return true;
+}
+PatternCompactAcquisitionState PatternCorrelator::compact_acquisition_state()const noexcept {
+    const auto& s=*impl_;PatternCompactAcquisitionState result;
+    result.supported=s.compact_supported();result.observed_samples=s.sample;result.workspace_yielded=s.compact_workspace_yielded;
+    result.original_pairs=s.search.hypotheses.size();result.original_arrival_lanes=s.hypotheses.size();
+    result.admitted_clock_half_width_ppm=s.search.admitted_clock_half_width_ppm;
+    result.admitted_clock_cell_half_width_ppm=s.search.admitted_clock_cell_half_width_ppm;
+    result.qualified_clock_interval=s.search.qualified_clock_interval;
+    result.projected_carrier_samples=s.work.projected_carrier_samples;
+    result.accumulated_lane_samples=s.work.accumulated_lane_samples;
+    result.skipped_carrier_samples=s.work.skipped_carrier_samples;result.skipped_lane_samples=s.work.skipped_lane_samples;
+    result.broad_audit_projected_carrier_samples=s.work.broad_audit_projected_carrier_samples;
+    result.broad_audit_accumulated_lane_samples=s.work.broad_audit_accumulated_lane_samples;
+    result.broad_audit_full_symbols=s.work.broad_audit_full_symbols;result.skipped_logical_trials=s.work.skipped_logical_trials;
+    result.phase_projected_carrier_samples=s.work.phase_projected_carrier_samples;
+    result.phase_carrier_moment_updates=s.work.phase_carrier_moment_updates;
+    result.phase_view_id=s.compact_phase_curve?s.compact_phase_curve->view_id():0;
+    if(!s.compact_control) {
+        result.selected_pairs=result.active_pairs=result.original_pairs;
+        result.active_arrival_lanes=s.hypotheses.size();result.projected_carriers=s.banks.size();return result;
+    }
+    const auto& control=*s.compact_control;
+    result.prior_active=control.prior_active;result.audit_active=control.audit_active;result.audit_complete=control.audit_complete;
+    result.audit_start_sample=control.audit_start;result.audit_scored_lanes=control.audit_scored;
+    result.workspace_bytes=control.working_bytes();
+    result.timing_prior_active=control.timing_prior.has_value();
+    result.timing_selected_arrival_lanes=control.timing_selected;
+    result.timing_narrowing_active=control.prior_active && !control.audit_active &&
+        control.timing_prior && control.timing_selected<s.hypotheses.size();
+    result.selected_pairs=std::count(control.selected.begin(),control.selected.end(),std::uint8_t{1});
+    result.active_pairs=std::count(control.pairs.begin(),control.pairs.end(),std::uint8_t{1});
+    for(std::size_t i=0;i<control.pairs.size();++i)if(control.pairs[i] && !control.selected[i])++result.protected_pairs;
+    result.active_arrival_lanes=std::count(control.active.begin(),control.active.end(),std::uint8_t{1});
+    result.projected_carriers=std::count(control.banks.begin(),control.banks.end(),std::uint8_t{1});return result;
+}
+std::span<const PatternFrequencyRateHypothesis> PatternCorrelator::compact_acquisition_hypotheses()const noexcept {
+    return impl_->compact_supported()?std::span<const PatternFrequencyRateHypothesis>{impl_->search.hypotheses}:
+        std::span<const PatternFrequencyRateHypothesis>{};
+}
+bool PatternCorrelator::set_compact_acquisition_prior(double origin,std::span<const std::uint8_t> mask) {
+    auto& s=*impl_;
+    if(!s.compact_supported() || s.compact_workspace_yielded || !std::isfinite(origin) || origin!=0 || mask.size()!=s.search.hypotheses.size() ||
+       std::any_of(mask.begin(),mask.end(),[](auto value){return value>1;}))return false;
+    const auto selected=std::count(mask.begin(),mask.end(),std::uint8_t{1});
+    if(!selected || static_cast<std::size_t>(selected)==mask.size())return false;
+    std::array<double,65> rates{};std::array<bool,65> retained{};std::size_t rate_count=0;
+    for(std::size_t i=0;i<mask.size();++i) {
+        const auto rate=s.search.hypotheses[i].clock_error_ppm;
+        const auto found=std::find(rates.begin(),rates.begin()+static_cast<std::ptrdiff_t>(rate_count),rate);
+        auto at=static_cast<std::size_t>(found-rates.begin());
+        if(at==rate_count) {if(rate_count==rates.size())return false;rates[rate_count++]=rate;}
+        retained[at]=retained[at] || mask[i]!=0;
+    }
+    if(std::any_of(retained.begin(),retained.begin()+static_cast<std::ptrdiff_t>(rate_count),[](auto value){return !value;}))return false;
+    if(!s.compact_control) {
+        const auto count=s.hypotheses.size(),pairs=mask.size(),banks=s.banks.size();
+        if(count>(SIZE_MAX-sizeof(Impl::CompactControl)-banks)/2 || pairs>(SIZE_MAX-sizeof(Impl::CompactControl)-banks-2*count)/2)return false;
+        const auto needed=sizeof(Impl::CompactControl)+2*count+2*pairs+banks;
+        if(sizeof(PatternCorrelator)+s.accounted_bytes>s.budget || needed>s.budget-sizeof(PatternCorrelator)-s.accounted_bytes)return false;
+        try {
+            auto control=std::make_unique<Impl::CompactControl>();
+            control->selected.assign(mask.begin(),mask.end());control->pairs.resize(pairs);
+            control->active.resize(count);control->audit_seen.resize(count);control->banks.resize(banks);
+            const auto actual=control->working_bytes();
+            if(actual>s.budget-sizeof(PatternCorrelator)-s.accounted_bytes)return false;
+            s.compact_control=std::move(control);s.accounted_bytes+=actual;s.compact_controls_used=true;
+        } catch(const std::bad_alloc&) {return false;}
+    } else std::copy(mask.begin(),mask.end(),s.compact_control->selected.begin());
+    s.compact_control->prior_active=true;s.prepare_compact_control();return true;
+}
+bool PatternCorrelator::start_compact_acquisition_audit()noexcept {
+    auto& s=*impl_;if(!s.compact_supported() || !s.compact_control)return false;
+    auto& control=*s.compact_control;
+    if(control.audit_active)return true;
+    control.audit_active=true;control.audit_complete=false;control.audit_start=s.sample;control.audit_scored=0;
+    std::fill(control.audit_seen.begin(),control.audit_seen.end(),0);s.prepare_compact_control();return true;
+}
+bool PatternCorrelator::clear_compact_acquisition_prior()noexcept {
+    auto& s=*impl_;if(!s.compact_supported() || !s.compact_control)return false;
+    s.compact_control->prior_active=false;return start_compact_acquisition_audit();
+}
+bool PatternCorrelator::set_compact_timing_prior(const PatternPeriodicTimingPrior& prior)noexcept {
+    auto& s=*impl_;
+    if(!s.compact_supported() || !s.compact_control || !s.search.admitted_clock_cell_half_width_ppm ||
+       !std::isfinite(*s.search.admitted_clock_cell_half_width_ppm) || *s.search.admitted_clock_cell_half_width_ppm<0 ||
+       !std::isfinite(prior.observed_sample) || !std::isfinite(prior.source_phase_samples) ||
+       !std::isfinite(prior.period_samples) || prior.period_samples<1 ||
+       !std::isfinite(prior.half_width_samples) || prior.half_width_samples<0 ||
+       prior.observed_sample<0 || prior.observed_sample>static_cast<long double>(s.sample))return false;
+    s.compact_control->timing_prior=prior;s.prepare_compact_control();return true;
+}
+bool PatternCorrelator::clear_compact_timing_prior()noexcept {
+    auto& s=*impl_;if(!s.compact_control)return false;
+    s.compact_control->timing_prior.reset();s.prepare_compact_control();return true;
+}
+bool PatternCorrelator::compact_phase_assistance_supported()const noexcept {
+    const auto& s=*impl_;return s.compact_supported();
+}
+bool PatternCorrelator::set_compact_phase_view(const PatternPhaseCurve* curve)noexcept {
+    auto& s=*impl_;
+    if(!s.compact_supported() || s.sample || !cold_acquisition_only())return false;
+    if(curve && (!curve->view_id() || curve->sample_rate()!=s.config.sample_rate))return false;
+    s.compact_phase_curve=curve;return true;
+}
+bool PatternCorrelator::compact_phase_view_active()const noexcept {
+    const auto& s=*impl_;
+    return s.compact_phase_curve && s.work.phase_projected_carrier_samples &&
+        s.sample<=UINT64_MAX-s.search.input_sample_origin &&
+        s.compact_phase_curve->qualified_until()>=s.sample+s.search.input_sample_origin;
+}
+bool PatternCorrelator::cold_acquisition_only()const noexcept {
+    const auto& s=*impl_;
+    if(s.finished || s.lazy_state() || s.scheduled || s.burst || s.options.amplitude_only ||
+       !s.bursts.empty() || !s.emissions.empty() || (s.timing && !s.timing->empty()))return false;
+    return std::all_of(s.hypotheses.begin(),s.hypotheses.end(),[](const auto& h) {
+        return !h.admitted && h.burst.bits.empty() && !h.burst.missing_slots && !h.committed && !h.gap_slots && !h.pending_gaps;
+    });
+}
 bool PatternCorrelator::symbol_burst_tracking_active()const {
     auto& s=*impl_;if(!s.burst)return false;
     for(std::size_t i=0;i<s.hypotheses.size();++i) {
@@ -12923,6 +13276,7 @@ bool PatternCorrelator::initial_search_complete()const {
         return true;
     }
     return std::all_of(s.hypotheses.begin(),s.hypotheses.end(),[&](const auto& h) {
+        if(h.helper_initial_unscored)return false;
         // A negative origin can leave the first scored symbol truncated at
         // capture start. Wait for the next full symbol in that hypothesis's
         // own rate. index advances only after complete() scores every phase;
@@ -12969,6 +13323,7 @@ std::size_t PatternCorrelator::projection_cache_headroom(std::size_t input_sampl
 std::optional<std::size_t> PatternCorrelator::temporal_plan_workers()const{return impl_->temporal_plan_workers();}
 std::size_t PatternCorrelator::reserved_workspace_bytes()const{return sizeof(PatternCorrelator)+impl_->accounted_bytes;}
 void PatternCorrelator::set_workspace_bytes(std::size_t bytes) {
+    if(bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)impl_->drop_compact_control();
     if(bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)impl_->drop_lazy_colored_sources();
     if(impl_->lazy_state() && impl_->lazy_state()->detached_replay && !impl_->lazy_state()->detached_replay->numeric_active &&
        bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes)impl_->lazy_drop_detached_replay();
@@ -13009,7 +13364,7 @@ void PatternCorrelator::set_workspace_bytes(std::size_t bytes) {
     }
     require(bytes>=working_bytes()+impl_->unallocated_history_bytes()+impl_->amplitude_scratch_reservation,"DSP workspace is smaller than streaming pattern state");impl_->budget=bytes;
 }
-void PatternCorrelator::trim_optional_workspace(){impl_->lazy_drop_native_cohort();impl_->drop_lazy_colored_sources();if(impl_->lazy_state() && impl_->lazy_state()->detached_replay && !impl_->lazy_state()->detached_replay->numeric_active)impl_->lazy_drop_detached_replay();impl_->drop_lazy_projections(Impl::LazyState::ProjectionDrop::explicit_trim);impl_->drop_lazy_plans();impl_->drop_scheduled_families();impl_->drop_scheduled_curves();impl_->drop_scheduled_moments();impl_->drop_workers();}
+void PatternCorrelator::trim_optional_workspace(){impl_->drop_compact_control();impl_->lazy_drop_native_cohort();impl_->drop_lazy_colored_sources();if(impl_->lazy_state() && impl_->lazy_state()->detached_replay && !impl_->lazy_state()->detached_replay->numeric_active)impl_->lazy_drop_detached_replay();impl_->drop_lazy_projections(Impl::LazyState::ProjectionDrop::explicit_trim);impl_->drop_lazy_plans();impl_->drop_scheduled_families();impl_->drop_scheduled_curves();impl_->drop_scheduled_moments();impl_->drop_workers();}
 Diagnostics PatternCorrelator::diagnostics()const {
     const auto burst=provisional();Diagnostics result;result.bit_rate=static_cast<double>(impl_->config.sample_rate)/static_cast<double>(impl_->code.symbol_samples());
     result.sample_offset=static_cast<std::size_t>(burst.first_sample);result.pattern_score=burst.score;return result;

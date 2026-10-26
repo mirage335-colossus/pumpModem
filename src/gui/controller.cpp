@@ -11,6 +11,7 @@
 #include "../audio_trace.hpp"
 #include "receiver_health.hpp"
 #include "helper_status.hpp"
+#include "helper_forecast_capture.hpp"
 #include "receiver_timing_advice.hpp"
 #include "audio_controls.hpp"
 #include "datapump/received_text.hpp"
@@ -605,7 +606,9 @@ struct Controller::Impl {
         invalid_link_inputs[link_input_index(field)]=false;
         sync_link_fields(editing);update_link_channel(settings);dirty();
         // A hypothetical power edit must not discard a live pending symbol.
-        if(started&&settings_valid&&(settings.simulation||settings.helper.power_w>0))session.configure(settings);
+        if(started&&settings_valid&&(settings.simulation||settings.helper.power_w>0)) {
+            snapshot.helper_planner_joint.reset();session.configure(settings);
+        }
     }
     void edit_link_budget(UiField field,const std::string& text,bool editing=false) {
         if(editing)f(field).text=text;
@@ -1219,7 +1222,7 @@ struct Controller::Impl {
             simulation_estimate_status(!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
             lpi_estimate_status(!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
             plot_policy.reset(); plot_update.clear_waterfall=true;
-            if(started) session.configure(settings);
+            if(started) {snapshot.helper_planner_joint.reset();session.configure(settings);}
             if(load)audio::trace::record("gui_settings_committed",[&](auto& fields) {
                 fields.add("preview_target_db_hz",planner_inputs.target_db_hz);
                 fields.add("short_target_db_hz",short_target);fields.add("long_target_db_hz",long_target);
@@ -1248,6 +1251,10 @@ struct Controller::Impl {
         }
     }
     const std::shared_ptr<const planner::Model>& link_plan() const {
+        // GUI-only diagnostic request. This separate fixed arena never changes
+        // ordinary DSP/source/receiver budgets and can simply be unavailable.
+        if(started&&settings.helper.power_w>0)
+            session.request_helper_planner_diagnostics(simulation::helper_joint_clock_diagnostic_gui_grant_bytes());
         if(planner_model)return planner_model;
         auto input=planner_inputs;
         input.options=settings.transfer;
@@ -1260,6 +1267,13 @@ struct Controller::Impl {
         input.channel.frequency_offset_hz=settings.simulation_frequency_offset_hz;
         input.channel.phase_noise_degrees_per_sqrt_second=settings.simulation_phase_noise_degrees_per_sqrt_second;
         fake_planning(input,f(UiField::fhss).selected);
+        planner_capture::apply(input,settings,snapshot);
+        input.helper_executed_joint_clock=snapshot.helper_planner_joint;
+        input.helper_joint_diagnostic_reason=snapshot.helper_planner_diagnostic_reason;
+        input.helper_joint_diagnostic_allocator_bytes=snapshot.helper_planner_diagnostic_allocator_bytes;
+        input.helper_joint_diagnostic_account_bytes=snapshot.helper_planner_diagnostic_account_bytes;
+        input.helper_joint_diagnostic_slot_bytes=snapshot.helper_planner_diagnostic_slot_bytes;
+        input.helper_joint_diagnostic_occupied_slots=snapshot.helper_planner_diagnostic_occupied_slots;
         input.wire_bits=planner_draft&&estimate?estimate->wire_bits:1;
         input.empty_draft=empty_draft();
         if(!planner_target_valid || !link_inputs_valid() || !settings_valid || (planner_draft&&(!estimate||estimated_revision!=revision))) {
@@ -2061,6 +2075,14 @@ struct Controller::Impl {
         }
     }
     void accept_snapshot(live::Snapshot next) {
+        if(settings.helper.power_w>0&&(planner_capture::key(next)!=planner_capture::key(snapshot)||
+           next.helper_planner_joint!=snapshot.helper_planner_joint||
+           next.helper_planner_diagnostic_reason!=snapshot.helper_planner_diagnostic_reason)) {
+            // Capture-format loss invalidates conditional work immediately. Keep
+            // the ordinary curve cache, and reject in-flight old-format results.
+            if(preparing&&active_kind==PrepKind::planner)worker.request_stop();
+            pending_planner.reset();planner_model.reset();planner_identity.reset();
+        }
         const bool calendar=shared_hop_calendar(settings.transfer.modem);
         const auto observation=!settings.simulation&&
             (calendar||(next.clock_window_modeled&&!next.clock_timing_fallback))?

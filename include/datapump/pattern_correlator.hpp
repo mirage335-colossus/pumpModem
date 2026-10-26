@@ -254,6 +254,19 @@ public:
     // and physical absence scoring, but admit no unrelated new stream. False
     // rejects unsupported/no-admission states before mutation.
     bool suspend_helper_acquisition();
+    PatternCompactAcquisitionState compact_acquisition_state() const noexcept;
+    std::span<const PatternFrequencyRateHypothesis> compact_acquisition_hypotheses() const noexcept;
+    bool set_compact_acquisition_prior(double frequency_origin_hz,std::span<const std::uint8_t> mask);
+    bool clear_compact_acquisition_prior() noexcept;
+    bool start_compact_acquisition_audit() noexcept;
+    bool cold_acquisition_only() const noexcept;
+    PatternAcquisitionDispatchState helper_acquisition_dispatch() const noexcept;
+    bool set_helper_acquisition_dispatch(bool permitted) noexcept;
+    bool set_compact_timing_prior(const PatternPeriodicTimingPrior&) noexcept;
+    bool clear_compact_timing_prior() noexcept;
+    bool compact_phase_assistance_supported() const noexcept;
+    bool set_compact_phase_view(const PatternPhaseCurve*) noexcept;
+    bool compact_phase_view_active() const noexcept;
     bool symbol_burst_tracking_active() const;
     void finish(std::stop_token = {});
     // Publish accepted decisions at each drain; chunk capacity never

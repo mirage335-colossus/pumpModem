@@ -142,7 +142,8 @@ void AudioEndpoint::capture(std::uint32_t logical,const audio::CaptureCallback& 
         if(!p.closed)p.retired();};
     try {
         audio::Resampler converter(rate,logical);std::vector<float> output(std::max<std::size_t>(1,std::min<std::size_t>(4096,logical/20)));
-        if(format)format({logical,rate,converter.passband_hz(),converter.workspace_bytes()+output.capacity()*sizeof(float)+max_queue_frames*sizeof(float)});
+        if(format)format({logical,rate,converter.passband_hz(),converter.workspace_bytes()+output.capacity()*sizeof(float)+max_queue_frames*sizeof(float),
+            audio::TimingQuality::unavailable,0,converter.capture_transport()});
         bool more=true;
         auto delivery=execution::Clock::now();
         while(more) {

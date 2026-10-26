@@ -131,8 +131,15 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
     const auto supplied_workspace=workspace;
     if(search.receiver_strategy_workspace_bytes)workspace=std::min(workspace,search.receiver_strategy_workspace_bytes);
     ReceiverStrategyPlan p;p.cpu_budget=c.receiver_cpu_budget;
+    if(!pattern_clock_interval_valid(search)) {
+        p.supported=false;p.workspace_limited=false;p.reason="invalid qualified clock interval or incomplete explicit clock cells";return p;
+    }
     p.selected_bank_count=std::max<std::size_t>(1,search.receiver_bank_count);p.selected_workspace_bytes=workspace;
     p.frequency_axis_processing_ratio=p.amplitude_processing_ratio=std::numeric_limits<double>::infinity();
+    if(search.qualified_clock_interval && (c.symbol_burst.enabled() || scheduled_bursts(c) || deferred_symbols(c) ||
+       c.receiver_strategy==ReceiverStrategy::amplitude_only)) {
+        p.supported=false;p.reason="qualified clock interval requires continuous coherent reception";return p;
+    }
     const auto symbol=symbol_sample_count(c),chip=pattern_chip_samples(c);
     const auto seconds=static_cast<double>(symbol)/c.sample_rate;
     std::string scheduled_complex_failure;
@@ -263,7 +270,8 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
         // Explicit pairs are authoritative. A Config-only bank would omit UTC
         // steering or invent Cartesian alternatives not present in this bank.
         p.full_frequency_coverage=search.complex_frequency_coverage.value_or(!search.admitted_frequency_half_width_hz);
-        p.full_clock_coverage=search.complex_clock_coverage.value_or(!search.admitted_clock_half_width_ppm);
+        p.full_clock_coverage=search.qualified_clock_interval?pattern_clock_interval_valid(search):
+            search.complex_clock_coverage.value_or(!search.admitted_clock_half_width_ppm);
     } else if(c.oscillator_search && search.frequency_offsets_hz.empty() &&
               search.clock_errors_ppm==std::vector<double>{0} && !search.couple_clock_to_carrier) {
         const auto bank=oscillator_pattern_search(c);
@@ -305,7 +313,7 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
     // Even supplied provenance cannot certify an endpoint that is absent.
     if(search.admitted_frequency_half_width_hz && actual_frequency<*search.admitted_frequency_half_width_hz)
         p.full_frequency_coverage=false;
-    if(search.admitted_clock_half_width_ppm && actual_clock<*search.admitted_clock_half_width_ppm)
+    if(!search.qualified_clock_interval && search.admitted_clock_half_width_ppm && actual_clock<*search.admitted_clock_half_width_ppm)
         p.full_clock_coverage=false;
     limited=!p.full_frequency_coverage||!p.full_clock_coverage;
     double maximum=0,minimum_rate=hypotheses.empty()?1:1+hypotheses.front().clock_error_ppm*1e-6;
@@ -733,6 +741,10 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
         p.backend=ReceiverBackend::amplitude_energy;p.supported=false;p.experimental=true;
         p.reason=amplitude.reason;p.selected_processing_ratio=std::numeric_limits<double>::infinity();
         p.full_frequency_coverage=p.full_clock_coverage=false;
+    }
+    if(search.qualified_clock_interval && p.backend==ReceiverBackend::amplitude_energy) {
+        p.supported=false;p.full_clock_coverage=false;
+        p.reason="qualified clock interval is unavailable to the selected phase-insensitive backend";
     }
     if(c.receiver_strategy==ReceiverStrategy::existing_only)
         p.reason="new decoders disabled; original complex reference";

@@ -5,20 +5,46 @@
 #include "../src/live_signal_queue.hpp"
 #include "../src/gui/state.hpp"
 #include "../src/gui/record_presentations.hpp"
+#include "../src/audio_trace.hpp"
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <iostream>
 #include <chrono>
 #include <thread>
 #include <map>
 #include <cstdint>
+#include <cstring>
+#include <fstream>
+#include <sstream>
 using namespace datapump;
 namespace {
 void check(bool value,const char* what) {if(!value)throw Error(what);}
 modem::Config config() {
     modem::Config c;c.sample_rate=8000;c.bandwidth_hz=1000;c.carrier_hz=1500;
     c.spreading_factor=16;c.stream_epoch=1800000000;return c;
+}
+void punctuation_requires_consumed_evidence() {
+    helper::Reference reference;reference.sample_rate=1000;reference.sample=1000;
+    reference.timing_valid=true;reference.dwell_start_seconds=.75;reference.dwell_uncertainty_seconds=.001;
+    // The anchor is at receiver sample 650, but the measured punctuation is
+    // proved only at 900. An already captured later reference is frequency-only
+    // until this particular receiver consumes that evidence too.
+    auto timing=live::detail::helper_timing_evidence(reference,3,100,800,1000);
+    check(!timing.prior,"a past dwell anchor admitted future punctuation evidence");
+    timing=live::detail::helper_timing_evidence(reference,3,100,900,1000);
+    // Neither phase nor metadata is qualified in this reference.
+    check(timing.prior && timing.evidence_sample==900 && timing.prior->observed_sample==650 &&
+          timing.prior->source_phase_samples==-1000 && timing.prior->period_samples==400,
+          "causal punctuation lost its original periodic/epoch coordinates");
+    reference.dwell_start_seconds=1.05;
+    check(!live::detail::helper_timing_evidence(reference,3,100,1000,1000).prior,
+          "punctuation anchor after its own evidence date was admitted");
+    reference.dwell_start_seconds=.75;
+    reference.sample=99;
+    check(!live::detail::helper_timing_evidence(reference,3,100,900,1000).prior,
+          "punctuation evidence before the receiver origin wrapped its date");
 }
 void helper_dates_survive_capture_clear() {
     helper::Reference reference;
@@ -52,6 +78,64 @@ void helper_dates_survive_capture_clear() {
     reference.sample=6400;
     check(!live::detail::rebase_helper_reference(reference,4000,8000,6000),
           "helper reference entered a different sample clock");
+}
+void helper_frequency_support_survives_capture_clear() {
+    for(const auto fit:{helper::FrequencyFit::local_polynomial,helper::FrequencyFit::conditioned_polynomial,
+                        helper::FrequencyFit::masked_tone_profile}) {
+        helper::Reference reference;
+        reference.sample_rate=8000;reference.sample=6400;reference.frequency_sample=5600;
+        reference.frequency_first_sample=4400;reference.frequency_fit=fit;reference.frequency_valid=true;
+        reference.frequency_hz=2300.25;reference.frequency_uncertainty_hz=.125;
+        reference.frequency_phase_diffusion_gain=.03125;reference.frequency_process_uncertainty_hz=.0625;
+        reference.dwell_start_seconds=.8;
+        auto rebased=live::detail::rebase_helper_reference(reference,4000,8000,8000);
+        check(rebased && rebased->sample==2400 && rebased->frequency_first_sample==400 &&
+              rebased->frequency_sample==1600 && rebased->frequency_sample+1==1601 &&
+              rebased->frequency_first_sample<=rebased->frequency_sample &&
+              rebased->frequency_sample<=rebased->sample,
+              "capture clear did not translate the full causal helper frequency support");
+        check(rebased->frequency_fit==fit && rebased->frequency_valid &&
+              rebased->frequency_hz==reference.frequency_hz &&
+              rebased->frequency_uncertainty_hz==reference.frequency_uncertainty_hz &&
+              rebased->frequency_phase_diffusion_gain==reference.frequency_phase_diffusion_gain &&
+              rebased->frequency_process_uncertainty_hz==reference.frequency_process_uncertainty_hz,
+              "capture clear changed the helper fit or counted its included process uncertainty again");
+        check(reference.sample==6400 && reference.frequency_first_sample==4400 &&
+              reference.frequency_sample==5600 && reference.frequency_fit==fit,
+              "rebasing mutated the observer's original helper frequency provenance");
+
+        auto boundary=reference;boundary.frequency_first_sample=4000;
+        rebased=live::detail::rebase_helper_reference(boundary,4000,8000,8000);
+        check(rebased && rebased->frequency_first_sample==0 && rebased->frequency_sample==1600,
+              "capture clear discarded frequency support beginning exactly at the new origin");
+        auto straddling=reference;straddling.frequency_first_sample=3999;
+        check(!live::detail::rebase_helper_reference(straddling,4000,8000,8000),
+              "capture clear retained an optional frequency fit using pre-clear samples");
+        auto reversed=reference;reversed.frequency_first_sample=5601;
+        check(!live::detail::rebase_helper_reference(reversed,4000,8000,8000),
+              "capture clear accepted helper frequency support starting after its endpoint");
+        auto future=reference;future.frequency_sample=6401;
+        check(!live::detail::rebase_helper_reference(future,4000,8000,8000),
+              "capture clear accepted frequency support beyond the published observation");
+
+        auto same_date=reference;same_date.frequency_sample=0;
+        rebased=live::detail::rebase_helper_reference(same_date,4000,8000,8000);
+        check(rebased && rebased->frequency_sample==0 && rebased->sample==2400 &&
+              rebased->frequency_first_sample==400 && rebased->sample+1==2401 &&
+              rebased->frequency_fit==fit &&
+              rebased->frequency_uncertainty_hz==reference.frequency_uncertainty_hz &&
+              rebased->frequency_phase_diffusion_gain==reference.frequency_phase_diffusion_gain &&
+              rebased->frequency_process_uncertainty_hz==reference.frequency_process_uncertainty_hz,
+              "capture clear changed the same-date helper frequency support or its uncertainty");
+        same_date.frequency_first_sample=3999;
+        check(!live::detail::rebase_helper_reference(same_date,4000,8000,8000),
+              "same-date frequency sentinel concealed a fit straddling capture clear");
+        // An independently dated endpoint at the new origin cannot become
+        // zero: that value would instead mean the later phase/sample date.
+        boundary.frequency_sample=4000;
+        check(!live::detail::rebase_helper_reference(boundary,4000,8000,8000),
+              "capture clear confused an origin endpoint with the same-date frequency sentinel");
+    }
 }
 void helper_preserves_receiver_workspace_capacity() {
     for(const bool simulation:{false,true}) {
@@ -205,6 +289,191 @@ void helper_only_live_simulation() {
     session.cancel_transmit();session.stop();
     check(after_clear,"continuous physical helper did not resume its receive row after clear");
 }
+struct LifecycleTraceState {
+    std::atomic<bool> broad_active{false};
+    std::atomic<unsigned> coverage_events{0};
+};
+std::atomic<LifecycleTraceState*> lifecycle_trace_state{nullptr};
+struct LifecycleTraceStateScope {
+    LifecycleTraceState state;
+    LifecycleTraceStateScope() {
+        LifecycleTraceState* empty=nullptr;
+        check(lifecycle_trace_state.compare_exchange_strong(empty,&state),"helper lifecycle trace monitor already active");
+    }
+    ~LifecycleTraceStateScope(){lifecycle_trace_state.store(nullptr);}
+};
+bool lifecycle_trace_event(const char* event)noexcept {
+    if(auto* state=lifecycle_trace_state.load()) {
+        if(std::strcmp(event,"receiver_helper_future_broad_begin")==0)state->broad_active=true;
+        if(std::strcmp(event,"receiver_helper_future_broad_slot_finished")==0)state->broad_active=false;
+        if(std::strcmp(event,"receiver_helper_future_broad_coverage")==0) {
+            state->broad_active=false;++state->coverage_events;
+        }
+    }
+    return std::strcmp(event,"receiver_helper_cohort_resolution")==0 ||
+        std::strcmp(event,"receiver_helper_native_timing")==0 ||
+        std::strncmp(event,"receiver_helper_future_broad_",29)==0;
+}
+void helper_audit_work_credit_is_bounded() {
+    live::detail::HelperAuditTokens native,compact;
+    native.earn(7);check(!native.ready(),"optional audit used work that had not executed");
+    native.earn(8);check(native.ready()&&!compact.ready(),"audit work units were pooled across receiver backends");
+    native.charge(80);check(!native.ready()&&native.debt==79,"one indivisible audit packet escaped its debt");
+    native.earn(640);check(!native.ready()&&!native.debt,"audit debt repayment minted another packet");
+    native.earn(648);check(native.ready(),"actual conditional work did not replenish an audit credit");
+    native.charge(1);native.earn(1000000);
+    check(native.credit==1&&native.ready(),"old work accumulated an unbounded audit burst");
+    native.charge(1);native.earn(1);
+    check(!native.ready(),"a reset work counter minted optional audit credit");
+}
+void rolling_helper_waits_without_payload_and_audits_future() {
+    live::Settings settings;settings.simulation=true;settings.full_duplex=true;
+    // T=.64s leaves more capture margin for the original four-epoch/full-arrival
+    // FFT coverage within the unchanged ten-second post-cancel deadline. The
+    // retained SF128 run (T=1.28s) stopped 2,480 capture frames before its last
+    // fresh-fallback scoring fence; that observation remains incomplete.
+    auto& c=settings.transfer.modem;c=config();c.bandwidth_hz=200;c.spreading_factor=64;
+    c.pulse_shaping=false;c.scramble=true;c.receiver_strategy=modem::ReceiverStrategy::automatic;
+    c.oscillator_search=modem::OscillatorSearchConfig{{.01,0},{1,0},1e6,3};
+    std::array<std::uint8_t,32> secret{};secret[0]=29;settings.transfer.key=Crypto(secret);
+    settings.transfer.timestamp=0;settings.transfer.search_seconds=0;
+    settings.simulation_snr_db=40;settings.simulation_clock_error_ppm=0;
+    settings.simulation_frequency_offset_hz=1;settings.simulation_phase_noise_degrees_per_sqrt_second=0;
+    settings.dsp_workspace_bytes=64*1024*1024;settings.content_limit=1024*1024;
+    settings.helper.power_w=1500;settings.helper.data_power_w=4;
+    const auto path=std::filesystem::temp_directory_path()/
+        ("datapump-helper-lifecycle-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl");
+    bool narrowed=false,waited=false,loss_advanced=false,loss_coverage_observed=false;
+    std::uint64_t loss_origin=0,last_samples=0;
+    double cancel_steady=0;
+    {
+        // The Session joins before the trace/monitor are removed. This observes
+        // executed coverage, without controlling any receiver decision.
+        LifecycleTraceStateScope monitor;
+        audio::trace::Scope trace(path,false,&lifecycle_trace_event);
+        live::Session session;session.start(settings);session.transmit_helper();
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(25);
+        do {
+            const auto snapshot=session.snapshot();
+            check(snapshot.error.empty(),"ordinary rolling helper-only wait failed");
+            check(snapshot.received.empty(),"helper-only rolling wait decoded payload content");
+            for(const auto& event:snapshot.signals)
+                check(event.helper_carrier||!event.received_bits,"helper-only rolling wait invented Robust payload");
+            narrowed=narrowed||snapshot.helper_frequency_assistance_active;
+            last_samples=snapshot.samples_received;
+            if(last_samples>=18ULL*c.sample_rate) {
+                waited=true;break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        } while(std::chrono::steady_clock::now()<deadline);
+        loss_origin=session.snapshot().samples_received;
+        const auto coverage_before_cancel=monitor.state.coverage_events.load();
+        cancel_steady=std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        session.cancel_transmit();
+        const auto loss_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+        do {
+            const auto snapshot=session.snapshot();check(snapshot.error.empty(),"helper loss failed ordinary rolling reception");
+            last_samples=snapshot.samples_received;
+            loss_advanced=last_samples>=loss_origin+3ULL*c.sample_rate;
+            loss_coverage_observed=monitor.state.coverage_events.load()>coverage_before_cancel;
+            if(loss_advanced&&loss_coverage_observed)break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        } while(std::chrono::steady_clock::now()<loss_deadline);
+        session.stop();
+    }
+    std::ifstream input(path);check(bool(input),"helper lifecycle evidence was not written");
+    std::string line;bool conditional_after_silence=false,broad_work=false,full_coverage=false,future_loss=false;
+    bool fallback_admission=false,post_loss_coverage=false,partial_slot=false,one_cold_owner=true,workspace_observed=false;
+    std::size_t periodic_admissions=0;
+    std::uint64_t active_probe=0;
+    std::map<std::uint64_t,std::uint64_t> periodic_begins;
+    const auto number=[](const std::string& record,const char* name) {
+        const auto key="\""+std::string(name)+"\":";const auto field=record.find(key);
+        return field==std::string::npos?std::uint64_t{}:std::stoull(record.substr(field+key.size()));
+    };
+    while(std::getline(input,line)) {
+        if(line.find("receiver_helper_native_timing")!=std::string::npos && number(line,"qualified_reference"))
+            check(number(line,"evidence_local_sample")<=number(line,"observed_samples"),
+                  "native punctuation used evidence beyond its consumed input fence");
+        if(line.find("receiver_helper_future_broad_slot_workspace")!=std::string::npos ||
+           (line.find("receiver_helper_future_broad_row_admitted")!=std::string::npos && number(line,"partial_slot"))) {
+            workspace_observed=true;
+            check(number(line,"cold_workspace_ceiling_bytes")>=number(line,"actual_working_bytes"),
+                  "cold optional audit exceeded its funded numerical ceiling");
+            if(line.find("receiver_helper_future_broad_slot_workspace")!=std::string::npos) {
+                const auto ceiling=number(line,"cold_workspace_ceiling_bytes");
+                check(ceiling>=sizeof(modem::StreamingReceiver) &&
+                      number(line,"workspace_argument")<=ceiling-sizeof(modem::StreamingReceiver),
+                      "cold optional audit loan exceeded its stored argument ceiling");
+            }
+        }
+        if(line.find("receiver_helper_cohort_resolution")!=std::string::npos &&
+           line.find("\"prior_pending\":1")!=std::string::npos) {
+            check(line.find("\"conditional\":1")!=std::string::npos,
+                "empty/wrong epochs replayed historical exhaustive search despite a qualified helper");
+            const auto field=line.find("\"sample\":");
+            if(field!=std::string::npos && std::stoull(line.substr(field+9))>8ULL*c.sample_rate)
+                conditional_after_silence=true;
+        }
+        if(line.find("receiver_helper_future_broad_slot_finished")!=std::string::npos) {
+            if(!number(line,"promoted_payload"))
+                check(number(line,"actual_working_bytes")<=number(line,"cold_workspace_ceiling_bytes"),
+                      "cold optional audit batch exceeded its funded numerical ceiling");
+            partial_slot=partial_slot||(number(line,"packet_completed")==1 &&
+                number(line,"full_cohort_coverage")==0 && number(line,"unscored_input_is_absence")==0 &&
+                (number(line,"template_jobs")>0 || number(line,"accumulated_lane_samples")>0));
+            broad_work=broad_work||number(line,"template_jobs")>0||number(line,"accumulated_lane_samples")>0;
+            one_cold_owner=one_cold_owner && number(line,"requested")<=1 && number(line,"committed")<=1;
+            if(number(line,"instance_id")==active_probe)active_probe=0;
+        }
+        if(line.find("receiver_helper_future_broad_row_scored")!=std::string::npos) {
+            const auto field=line.find("\"original_template_jobs\":");
+            broad_work=broad_work||(field!=std::string::npos && std::stoull(line.substr(field+25))>0);
+        }
+        full_coverage=full_coverage||(line.find("receiver_helper_future_broad_coverage")!=std::string::npos &&
+            line.find("\"full_cohort_coverage\":1")!=std::string::npos);
+        if(line.find("receiver_helper_future_broad_begin")!=std::string::npos &&
+           line.find("periodic partial future broad probe")!=std::string::npos)
+            periodic_begins.emplace(number(line,"episode"),number(line,"sample"));
+        if(line.find("receiver_helper_future_broad_row_admitted")!=std::string::npos && number(line,"partial_slot")) {
+            ++periodic_admissions;
+            one_cold_owner=one_cold_owner && !active_probe;
+            active_probe=number(line,"instance_id");
+            check(number(line,"maximum_cold_owners")==1 && number(line,"eligible_epochs")>1 &&
+                  number(line,"epoch_rank")<number(line,"eligible_epochs"),
+                  "periodic probe did not retain an explicit single current epoch rank");
+        }
+        if(line.find("receiver_helper_future_broad_fallback")!=std::string::npos &&
+           number(line,"sample")>loss_origin) {
+            future_loss=true;
+        }
+        fallback_admission=fallback_admission||(line.find("receiver_helper_future_broad_row_admitted")!=std::string::npos &&
+            line.find("\"fallback_active\":1")!=std::string::npos && number(line,"sample")>loss_origin);
+        if(line.find("receiver_helper_future_broad_coverage")!=std::string::npos &&
+           number(line,"full_cohort_coverage") && number(line,"origin")>loss_origin) {
+            const auto key=line.find("\"steady\":");
+            post_loss_coverage=number(line,"requested")>0 &&
+                number(line,"committed")==number(line,"requested") && number(line,"scored")==number(line,"requested") &&
+                number(line,"sample")>loss_origin && !periodic_begins.contains(number(line,"episode")) &&
+                key!=std::string::npos && std::stod(line.substr(key+9))>cancel_steady;
+        }
+    }
+    if(!(narrowed&&waited&&conditional_after_silence&&broad_work&&partial_slot&&one_cold_owner&&workspace_observed&&periodic_admissions&&
+         full_coverage&&loss_advanced&&loss_coverage_observed&&future_loss&&fallback_admission&&post_loss_coverage)) {
+        std::ostringstream diagnosis;
+        diagnosis<<"rolling helper lifecycle coverage incomplete: narrowed="<<narrowed<<", waited="<<waited
+            <<", conditional_after_silence="<<conditional_after_silence<<", broad_work="<<broad_work
+            <<", full_coverage="<<full_coverage<<", loss_advanced="<<loss_advanced<<", future_loss="<<future_loss
+            <<", partial_slot="<<partial_slot<<", one_cold_owner="<<one_cold_owner
+            <<", workspace_observed="<<workspace_observed
+            <<", periodic_admissions="<<periodic_admissions<<", loss_coverage_observed="<<loss_coverage_observed
+            <<", fallback_admission="<<fallback_admission<<", post_loss_coverage="<<post_loss_coverage
+            <<", loss_origin="<<loss_origin<<", last_samples="<<last_samples
+            <<"; evidence retained: "<<path.string();
+        throw Error(diagnosis.str());
+    }
+    std::filesystem::remove(path);
+}
 std::vector<float> physical_convert(std::span<const float> input,std::uint32_t from,std::uint32_t to,
         std::function<float(float,long double,std::uint32_t)> transform={}) {
     audio::Resampler converter(from,to);if(transform)converter.set_output_transform(std::move(transform));
@@ -357,7 +626,7 @@ void helper_yields_event_queue_to_payload_progress() {
 }
 }
 int main() {
-    try {helper_dates_survive_capture_clear();helper_yields_event_queue_to_payload_progress();helper_preserves_receiver_workspace_capacity();helper_placement_covers_both_profiles();sampled_composite();helper_only_and_callsign_update();callsign_update_preserves_live_reception();helper_only_live_simulation();payload_survives_physical_helper_preselection();helper_presentation();
+    try {punctuation_requires_consumed_evidence();helper_dates_survive_capture_clear();helper_frequency_support_survives_capture_clear();helper_yields_event_queue_to_payload_progress();helper_preserves_receiver_workspace_capacity();helper_placement_covers_both_profiles();sampled_composite();helper_only_and_callsign_update();callsign_update_preserves_live_reception();helper_only_live_simulation();helper_audit_work_credit_is_bounded();rolling_helper_waits_without_payload_and_audits_future();payload_survives_physical_helper_preselection();helper_presentation();
         std::cout<<"helper live integration passed\n";return 0;}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

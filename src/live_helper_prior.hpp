@@ -93,6 +93,38 @@ inline Interval inner_clock(double center,double radius,double physical) {
 }
 } // namespace helper_prior_detail
 
+struct HelperUtcFrequencyAllowance {
+    double radius_hz=0,physical_audio_fraction=0,correction_fraction=0;
+    bool valid=false;
+};
+// The original catalogue's LF coordinate b includes optional UTC transmit
+// steering c: 1+b=(1+a)(1+c), where a is the physical audio-clock error.
+// helperCFO=RF+H*a and dataCFO=RF+D*b. The existing (D-H)*b strip therefore
+// misses H*(1+a)*c. Enclose that term without removing any original DATA LF
+// lane or assuming a known applied correction. The declared candidate limit
+// is conservative even when ordinary catalogue admission disables steering.
+inline HelperUtcFrequencyAllowance helper_utc_frequency_allowance(const modem::Config& config,
+        bool utc_steering,double helper_hz) noexcept {
+    using namespace helper_prior_detail;
+    HelperUtcFrequencyAllowance result;
+    if(!std::isfinite(helper_hz))return result;
+    if(!utc_steering) {result.valid=true;return result;}
+    try {
+        result.correction_fraction=modem::utc_transmit_rate_limit(config);
+        if(result.correction_fraction==0) {result.valid=true;return result;}
+        if(!config.oscillator_search || !environment() || !std::isfinite(result.correction_fraction) ||
+           result.correction_fraction<0 || result.correction_fraction>.001)return result;
+        const auto& policy=*config.oscillator_search;
+        result.physical_audio_fraction=ppm(product(policy.lf.accuracy_ppm,policy.margin)).upper;
+        const auto one_plus_audio=sum(1,result.physical_audio_fraction).upper;
+        result.radius_hz=product(product(std::abs(helper_hz),one_plus_audio).upper,
+            result.correction_fraction).upper;
+        result.valid=std::isfinite(result.physical_audio_fraction) && result.physical_audio_fraction>=0 &&
+            std::isfinite(result.radius_hz) && result.radius_hz>=0;
+    }catch(...) {} // Optional assistance yields; ordinary payload policy is unchanged.
+    return result;
+}
+
 // A and beta are independently authoritative: A is the SAME original
 // builder's requested/admitted physical LF halfwidth (including UTC steering),
 // beta is its represented timing-cell halfwidth. Missing provenance must be
@@ -100,7 +132,7 @@ inline Interval inner_clock(double center,double radius,double physical) {
 inline HelperPriorMask helper_prior_mask(std::span<const modem::PatternFrequencyRateHypothesis> pairs,
         double offset_hz,double uncertainty_hz,double data_minus_helper_hz,
         double frequency_cell_radius_hz,double clock_cell_half_width_ppm,
-        double physical_clock_half_width_ppm) {
+        double physical_clock_half_width_ppm,bool allow_frequency_translation=true) {
     using namespace helper_prior_detail;
     HelperPriorMask result;
     result.clock_cell_half_width_ppm=clock_cell_half_width_ppm;
@@ -221,7 +253,7 @@ inline HelperPriorMask helper_prior_mask(std::span<const modem::PatternFrequency
     // A center inside the old RF extrema is insufficient: the entire CI can
     // cross an edge. Recenter the SAME catalogue only after the full strip
     // fails at zero. The phase caller continues to supply its frozen baseline.
-    if(!certifies(0) && (offset_hz==0 || !certifies(offset_hz))) {
+    if(!certifies(0) && (!allow_frequency_translation || offset_hz==0 || !certifies(offset_hz))) {
         result.reason="helper full uncertainty strip is not covered by the original frequency/clock cells; broad acquisition retained";
         return result;
     }

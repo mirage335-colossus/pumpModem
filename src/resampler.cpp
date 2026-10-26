@@ -6,7 +6,7 @@
 
 namespace datapump::audio {
 Resampler::Resampler(std::uint32_t input_rate,std::uint32_t output_rate,bool adjustable)
-    :input_rate_(input_rate),output_rate_(output_rate),adjustable_(adjustable) {
+    :input_rate_(input_rate),output_rate_(output_rate),adjustable_(adjustable),capture_nominal_unshifted_(!adjustable) {
     if(input_rate<64 || input_rate>120000000 || output_rate<64 || output_rate>120000000)
         throw Error("resampler rate must be 64..120000000 Hz");
     if(input_rate==output_rate && !adjustable_)return;
@@ -152,13 +152,21 @@ void Resampler::discard_history() {
 }
 void Resampler::set_output_gain(std::function<double(long double)> gain) {
     if(started_)throw Error("resampler output envelope must be set before processing");
+    if(gain)capture_nominal_unshifted_=false;
     if(last_stage_)last_stage_->set_output_gain(std::move(gain));
     else output_gain_=std::move(gain);
 }
 void Resampler::set_output_transform(std::function<float(float,long double,std::uint32_t)> transform) {
     if(started_)throw Error("resampler output transform must be set before processing");
+    if(transform)capture_nominal_unshifted_=false;
     if(last_stage_)last_stage_->set_output_transform(std::move(transform));
     else output_transform_=std::move(transform);
+}
+CaptureTransportRecipe Resampler::capture_transport()const noexcept {
+    if(!capture_nominal_unshifted_ || adjustable_ || output_gain_ || output_transform_ ||
+       (first_stage_&&first_stage_->capture_transport().kind!=CaptureTransportKind::fixed_nominal_audio) ||
+       (last_stage_&&last_stage_->capture_transport().kind!=CaptureTransportKind::fixed_nominal_audio))return {};
+    return {CaptureTransportKind::fixed_nominal_audio,input_rate_,output_rate_,0,0};
 }
 Resampler::Progress Resampler::process(std::span<const float> input,std::span<float> output,bool end) {
     if(ending_ && !input.empty())throw Error("cannot append to a finished resampler");

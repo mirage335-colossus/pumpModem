@@ -109,14 +109,42 @@ public:
     StreamingReceiver& operator=(StreamingReceiver&&) noexcept;
     // Feed physical PCM, optionally with its shared carrier projection.
     Bytes push(std::span<const float> samples, std::stop_token stop = {});
+    PatternCompactAcquisitionState compact_acquisition_state() const noexcept;
+    std::span<const PatternFrequencyRateHypothesis> compact_acquisition_hypotheses() const noexcept;
+    bool set_compact_acquisition_prior(double frequency_origin_hz,std::span<const std::uint8_t> mask);
+    bool clear_compact_acquisition_prior() noexcept;
+    bool start_compact_acquisition_audit() noexcept;
+    bool cold_acquisition_only() const noexcept;
+    PatternAcquisitionDispatchState helper_acquisition_dispatch() const noexcept;
+    bool set_helper_acquisition_dispatch(bool permitted) noexcept;
+    bool set_compact_timing_prior(const PatternPeriodicTimingPrior&) noexcept;
+    bool clear_compact_timing_prior() noexcept;
+    bool compact_phase_assistance_supported() const noexcept;
+    bool set_compact_phase_view(const PatternPhaseCurve*) noexcept;
+    bool compact_phase_view_active() const noexcept;
     PatternAcquisitionState acquisition_state() const noexcept;
+    std::optional<PatternAcquisitionWorkBound> acquisition_work_bound() const noexcept;
+    std::optional<PatternAcquisitionScoredSupport> acquisition_scored_support() const noexcept;
+    std::optional<PatternContinuationScoredSupport> continuation_scored_support(std::size_t incoming_samples=0) const noexcept;
     std::span<const PatternFrequencyRateHypothesis> acquisition_hypotheses() const noexcept;
     bool set_acquisition_prior(double,std::span<const std::uint8_t>);
     bool clear_acquisition_prior();
     bool set_helper_gap_protection(bool qualified) noexcept;
     std::size_t observe_acquisition(std::span<const float>,std::stop_token = {});
+    std::size_t observe_acquisition(std::span<const float>,const PatternContinuationFrequencyPrior&,
+        PatternContinuationFrequencyResult&,std::stop_token = {});
     bool process_prior_acquisition(std::stop_token = {});
+    bool process_assisted_acquisition(const PatternAcquisitionAssistance&,std::stop_token = {});
+    bool process_prior_acquisition(const PatternPeriodicTimingPrior&,std::uint64_t evidence_sample,
+                                   PatternAcquisitionTimingResult&,std::stop_token = {});
+    bool process_prior_acquisition(const PatternAcquisitionClockPrior&,PatternAcquisitionClockResult&,
+                                   std::stop_token = {});
+    bool process_prior_acquisition(const PatternAcquisitionClockPrior&,PatternAcquisitionClockResult&,
+                                   const PatternPeriodicTimingPrior&,std::uint64_t timing_evidence_sample,
+                                   PatternAcquisitionTimingResult&,std::stop_token = {});
     void resolve_acquisition(bool conditional_link,std::stop_token = {});
+    void resolve_acquisition(bool conditional_link,const PatternContinuationFrequencyPrior&,
+        PatternContinuationFrequencyResult&,std::stop_token = {});
     void process_acquisition(std::stop_token = {});
     bool set_acquisition_phase_view(const PatternPhaseCurve*) noexcept;
     bool acquisition_phase_view_active() const noexcept;
@@ -181,6 +209,12 @@ public:
     ConstellationBatch take_payload_constellation();
     std::size_t working_bytes() const;
     std::size_t reserved_workspace_bytes() const;
+    // Joined native cold decoder/configured-bit floor; no worker grant.
+    // The returned actual bound includes the outer StreamingReceiver shell.
+    std::optional<PatternColdWorkspaceFloor> cold_workspace_floor() const noexcept;
+    // Pure pristine split-observation bound; includes this outer shell. The
+    // returned execution argument must be funded in full before any scoring.
+    std::optional<PatternColdObservationStorage> cold_observation_storage() const noexcept;
     std::optional<HelperReplayBudget> helper_replay_budget(std::size_t future_samples,
         const PatternSearch* reset_search=nullptr) const;
     // Additional allocation bound for one finite PCM push and its next drain.

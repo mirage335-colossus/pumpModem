@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/types.hpp"
+#include "datapump/capture_transport.hpp"
 #include <memory>
 #include <functional>
 #include <span>
@@ -47,6 +48,10 @@ public:
     std::size_t workspace_bytes() const noexcept;
     // Approximately flat passband; the transition rolls off before Nyquist.
     double passband_hz() const noexcept;
+    // Immutable construction/history evidence, not rate_correction()==0.
+    // An initially adjustable or ever transformed/enveloped converter remains
+    // unknown, even after its current correction/callback returns to zero.
+    CaptureTransportRecipe capture_transport() const noexcept;
 private:
     static constexpr unsigned phases=256;
     std::uint32_t input_rate_, output_rate_;
@@ -56,7 +61,7 @@ private:
     std::function<double(long double)> output_gain_;
     std::function<float(float,long double,std::uint32_t)> output_transform_;
     bool ending_=false;
-    bool adjustable_=false, started_=false;
+    bool adjustable_=false, started_=false,capture_nominal_unshifted_=true;
     double fraction_=0, correction_=0, target_correction_=0, correction_step_=0;
     double correction_roundoff_=0;
     bool observe_timing_=false;

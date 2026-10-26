@@ -2054,9 +2054,20 @@ void helper_conditional_acquisition_plan() {
             config.carrier_hz-advice.frequency_hz,.125*config.sample_rate/
                 static_cast<double>(modem::symbol_sample_count(config)),domain.clock_step_ppm/2,
             domain.requested_clock_half_width_ppm);
-        check(advice.ordinary_pairs==domain.hypotheses.size()&&advice.conditional_pairs==prior.selected&&
-              advice.retained_clock_rates==prior.represented_rates&&prior.represented_rates==prior.rates,
-              "Planner conditional counts differ from the actual conservative original-grid selector");
+        if(advice.ordinary_pairs!=domain.hypotheses.size()||advice.conditional_pairs!=prior.selected||
+           advice.retained_clock_rates!=prior.represented_rates||prior.represented_rates!=prior.rates) {
+            std::ostringstream error;
+            error<<"Planner conditional counts differ from the actual conservative original-grid selector"
+                 <<"; target="<<input.target_db_hz<<" T="<<static_cast<double>(modem::symbol_sample_count(config))/config.sample_rate
+                 <<" deferred="<<modem::deferred_symbols(config)<<" fixed="<<bool(input.options.timestamp)
+                 <<" ordinary="<<advice.ordinary_pairs<<'/'<<domain.hypotheses.size()
+                 <<" selected="<<advice.conditional_pairs<<'/'<<prior.selected
+                 <<" LF="<<advice.retained_clock_rates<<'/'<<prior.represented_rates<<'/'<<prior.rates
+                 <<" helper="<<advice.frequency_hz<<" clock-beta="<<domain.clock_step_ppm/2
+                 <<" clock-A="<<domain.requested_clock_half_width_ppm<<" selector="<<prior.reason
+                 <<" helper-status="<<advice.status;
+            throw Error(error.str());
+        }
         near(advice.original_clock_cell_half_width_ppm,domain.clock_step_ppm/2,
              "Planner inferred a thin clock cell from adjacent center spacing");
         near(advice.assumed_frequency_uncertainty_hz,.01,"Conditional helper CI assumption changed");
@@ -2067,6 +2078,18 @@ void helper_conditional_acquisition_plan() {
             if(prior.cells[i])selected_rates.insert(domain.hypotheses[i].clock_error_ppm);
         }
         check(original_rates==selected_rates,"Conditional helper plan omitted an original clock lane");
+        std::set<double> original_carriers,selected_carriers;
+        for(std::size_t i=0;i<domain.hypotheses.size();++i) {
+            original_carriers.insert(domain.hypotheses[i].frequency_offset_hz);
+            if(prior.cells[i])selected_carriers.insert(domain.hypotheses[i].frequency_offset_hz);
+        }
+        check(advice.ordinary_carriers==original_carriers.size()&&
+              advice.conditional_carriers==selected_carriers.size(),
+              "Planner confused unique shared carrier projections with frequency/clock pairs");
+        near(advice.ordinary_rf_half_width_hz,domain.frequency.half_width_hz,
+             "Helper advice replaced the ordinary represented RF margin");
+        near(advice.requested_rf_half_width_hz,domain.frequency.requested_half_width_hz,
+             "Helper advice hid the ordinary requested RF margin");
         return prior;
     };
     for(const bool eme:{false,true}) {
@@ -2085,8 +2108,30 @@ void helper_conditional_acquisition_plan() {
               "Planner retained a legacy Auto/rolling exclusion or inferred qualification from SNR");
         if(eme) {
             near(assisted.bit_seconds,128,"Microwave helper advice changed the active 128 s waveform");
-            check(!advice.conditional_geometry_available&&advice.status.find("compact clock-search")!=std::string::npos,
-                  "Long keyed compact reception advertised unsupported common-link acquisition");
+            check(advice.compact_geometry&&advice.carrier_projection_counts_available&&advice.conditional_geometry_available&&
+                  advice.status.find("Compact carrier projections")!=std::string::npos&&
+                  advice.conditional_carriers<advice.ordinary_carriers&&
+                  advice.retained_clock_rates>=5,
+                  "Long keyed compact advice omitted conditional RF work or unresolved clock lanes");
+            check(advice.arrival_cell_seconds>=advice.punctuation_period_seconds&&
+                  advice.timing_status.find("no timing-count reduction is justified")!=std::string::npos,
+                  "EME punctuation aliases fabricated a reduction of one-second arrival cells");
+            near(advice.broad_probe_eligibility_seconds,1024,"Compact helper advice changed eight-symbol optional-probe eligibility");
+            near(advice.physical_symbol_seconds,128,"Compact helper advice changed the complete physical symbol duration");
+            for(const auto width:{220.f,900.f}) {
+                const auto page=planner_page::build(assisted,width,false,false);
+                check(contains_text(page,"Conditional carrier projections:")&&
+                      contains_text(page,"Optional future broad probes become eligible after")&&
+                      contains_text(page,"partial future coverage, not a complete cohort audit")&&
+                      contains_text(page,"Eligibility promises no completion time or CPU percentage")&&
+                      contains_text(page,"debt must be paid before another probe")&&
+                      contains_text(page,"Any payload dependency promotes its owner to ordinary work")&&
+                      contains_text(page,"immediately restores broad future acquisition for every current key, profile and epoch")&&
+                      !contains_text(page,"Broad audits are due every")&&
+                      contains_text(page,"no timing-count reduction is justified")&&
+                      contains_text(page,"phase, punctuation and metadata decoding are not required"),
+                      "Long compact helper advice hid audit costs, timing aliases or independent frequency qualification");
+            }
         } else {
             const auto config=planned_config(input,input.target_db_hz);
             if(advice.frequency_hz+225>=config.sample_rate/2.)
@@ -2149,6 +2194,70 @@ void helper_conditional_acquisition_plan() {
                   cochannel.helper_reference.status.find("no isolated common-link")!=std::string::npos,
                   "Cochannel helper advertised isolated acquisition assistance");
         }
+    }
+    {
+        auto short_fhss=fixture(false);
+        const auto oscillator=short_fhss.options.modem.oscillator_search;
+        short_fhss.target_db_hz=40;short_fhss.path_loss_db=60;
+        short_fhss.options.modem=tuning::resolve(360,40,short_fhss.mode,true,1500,10,
+            modem::OuterDsssVersion::interleaved_v2).config;
+        short_fhss.options.modem.oscillator_search=oscillator;
+        short_fhss.fake_hopping=fhss::resolve(fhss::Preference::fcc,short_fhss.options.modem);
+        check(short_fhss.fake_hopping.available,"Short helper planner fixture lost its Fake FCC profile");
+        short_fhss.observer_hopping=short_fhss.fake_hopping.observer();
+        modem::FhssPlan hops;hops.channels=short_fhss.fake_hopping.channels;hops.dwell_seconds=.4;
+        for(unsigned i=0;i<hops.channels;++i)hops.shifts[i]=short_fhss.fake_hopping.center(i)-1500;
+        short_fhss.options.modem.fake_hopping=transfer::transmit_hopping(hops,short_fhss.options);
+        short_fhss.options.modem.oscillator_search->rf_shift_hz=short_fhss.fake_hopping.last_hz-1500;
+        check(modem::deferred_symbols(short_fhss.options.modem),"Short helper planner fixture lost its ordinary FHSS calendar");
+        const auto effects=modem::oscillator_effects(short_fhss.options.modem);
+        short_fhss.channel.clock_error_ppm=effects.clock_error_ppm;
+        short_fhss.channel.frequency_offset_hz=effects.frequency_offset_hz;
+        short_fhss.channel.phase_noise_degrees_per_sqrt_second=effects.phase_noise_degrees_per_sqrt_second;
+        short_fhss.receiver_settings->transfer=short_fhss.options;
+        short_fhss.receiver_settings->long_message_modem=short_fhss.options.modem;
+        short_fhss.receiver_settings->helper.power_w=15000;
+        planner::Cache cache;const auto assisted=selected(short_fhss,cache);
+        auto ordinary=short_fhss;ordinary.receiver_settings->helper.power_w=0;
+        unchanged(assisted,selected(ordinary,cache));
+        const auto& advice=assisted.helper_reference;
+        (void)matches_original_mask(short_fhss,assisted);
+        check(advice.conditional_geometry_available&&!advice.carrier_projection_counts_available&&
+              advice.status.find("Deferred FHSS can retain the ordinary native calendar path")!=std::string::npos&&
+              advice.status.find("backend capability")!=std::string::npos,
+              "Deferred FHSS helper advice either excluded native conditional RF controls or claimed runtime qualification");
+        const auto page=planner_page::build(assisted,900,false,false);
+        check(contains_text(page,"Conditional RF catalogue offsets:")&&
+              contains_text(page,"physical projection work is not quantified for this backend"),
+              "Native calendar RF dimensions were presented as compact physical projection counts");
+    }
+    {
+        auto wide=fixture(false);
+        auto& oscillator=*wide.options.modem.oscillator_search;
+        oscillator.rf=tuning::oscillator_model(tuning::parse_oscillator_preset("crystal"));
+        oscillator.reference=modem::OscillatorReference::shared_radio;
+        const auto effects=modem::oscillator_effects(wide.options.modem);
+        wide.channel.clock_error_ppm=effects.clock_error_ppm;
+        wide.channel.frequency_offset_hz=effects.frequency_offset_hz;
+        wide.channel.phase_noise_degrees_per_sqrt_second=effects.phase_noise_degrees_per_sqrt_second;
+        wide.receiver_settings->transfer=wide.options;
+        wide.receiver_settings->long_message_modem=wide.options.modem;
+        wide.receiver_settings->helper.power_w=15000;
+        planner::Cache cache;const auto assisted=selected(wide,cache);
+        auto ordinary=wide;ordinary.receiver_settings->helper.power_w=0;
+        unchanged(assisted,selected(ordinary,cache));
+        const auto& advice=assisted.helper_reference;
+        check(advice.coarse_conversion_required&&advice.baseline_search_limited&&
+              advice.requested_rf_half_width_hz>9000&&advice.ordinary_rf_half_width_hz<40&&
+              advice.helper_search_lower_hz<0&&advice.helper_search_upper_hz>9000&&
+              !advice.conditional_geometry_available&&
+              advice.status.find("new shared-clock conditional catalogue")!=std::string::npos,
+              "Wide crystal helper advice relabelled a clipped LF mask as a new conditional clock catalogue");
+        const auto page=planner_page::build(assisted,900,false,false);
+        check(contains_text(page,"Declared signed helper-tone search:")&&
+              contains_text(page,"ADC rate alone does not establish the radio or audio passband")&&
+              contains_text(page,"baseline coverage remains limited"),
+              "Wide helper advice hid physical capture/image or ordinary search limits");
     }
     // A shifted tiny catalogue can align at full work, while the same catalogue
     // at zero offset cannot promise a reduction. Neither creates new cells.

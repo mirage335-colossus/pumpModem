@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+namespace datapump::simulation::detail {struct HelperJointClockProof;}
 namespace datapump::live {
 struct Settings {
     transfer::Options transfer;
@@ -246,14 +247,41 @@ struct Snapshot {
     std::optional<double> helper_snr_db;
     bool helper_frequency_assistance_active = false;
     bool helper_phase_assistance_active = false;
+    bool helper_timing_assistance_active = false;
     std::uint64_t helper_original_search_pairs = 0;
     std::uint64_t helper_selected_search_pairs = 0;
     // Actual joined work, kept separate from prospective planner pair limits.
     std::uint64_t helper_conditional_jobs = 0;
     std::uint64_t helper_audit_jobs = 0;
+    std::uint64_t helper_input_view_conditional_jobs = 0;
+    std::size_t helper_input_view_count = 0;
+    // Compact work uses carrier/sample and arrival-lane/sample units. These
+    // counters are deliberately separate from the native FFT job counters.
+    std::uint64_t helper_compact_projected_samples = 0;
+    std::uint64_t helper_compact_lane_samples = 0;
+    std::uint64_t helper_compact_skipped_projected_samples = 0;
+    std::uint64_t helper_compact_skipped_lane_samples = 0;
+    std::uint64_t helper_compact_audit_projected_samples = 0;
+    std::uint64_t helper_compact_audit_lane_samples = 0;
+    std::uint64_t helper_compact_phase_projected_samples = 0;
+    std::uint64_t helper_compact_phase_moment_updates = 0;
     // Largest admitted initial FFT input aperture, for conservative output
     // post-roll planning. It is never a payload completion authority.
     std::uint64_t receiver_initial_fft_input_samples = 0;
+    // Actual active capture, independently of playback's negotiated format.
+    // Nyquist is a hard digital limit, not an external ADC/radio flat-passband
+    // certificate. The converter passband describes logical output only.
+    std::uint32_t capture_raw_sample_rate=0;
+    double capture_raw_nyquist_hz=0,capture_converter_passband_hz=0;
+    audio::CaptureTransportRecipe capture_transport={};
+    // GUI diagnostics have a separate fixed two-slot grant. Leases survive the
+    // last external borrower and never reduce DSP/payload receiver capacity.
+    std::shared_ptr<const simulation::detail::HelperJointClockProof> helper_planner_joint;
+    std::size_t helper_planner_diagnostic_allocator_bytes=0,helper_planner_diagnostic_account_bytes=0;
+    std::size_t helper_planner_diagnostic_slot_bytes=0,helper_planner_diagnostic_occupied_slots=0;
+    std::uint64_t helper_planner_capture_generation=0,helper_planner_provider_identity=0;
+    std::uint64_t helper_planner_receive_revision=0,helper_planner_owner_instance=UINT64_MAX;
+    const char* helper_planner_diagnostic_reason=""; // Static bounded diagnostic text; no snapshot heap.
 };
 
 // Audio callbacks and modem work never run on the caller/UI thread. configure
@@ -288,6 +316,10 @@ public:
     void set_transmit_gain(double gain);
     // Future transmissions only; does not replace live receivers or active PCM.
     void set_helper_callsign(std::string callsign);
+    // Optional GUI request only: allocate one separate bounded diagnostic pool
+    // when helper is enabled. No audio, receiver, DSP loan or wire setting is
+    // changed. Failure simply leaves actual joint Planner evidence unavailable.
+    bool request_helper_planner_diagnostics(std::size_t gui_grant_bytes) const;
     // Release only idle hardware capture for another local engine. Refuses
     // pending RX/TX; repeated polls acknowledge actual device closure. Does
     // not cancel recovery, complete a reception, or change saved settings.

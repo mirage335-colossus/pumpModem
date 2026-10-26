@@ -105,12 +105,13 @@ struct Chart {
     std::vector<std::pair<double, double>> points;
     // Unavailable samples keep their position and break the RX line.
     std::vector<std::pair<double, double>> receive_points;
+    std::vector<std::pair<double,double>> helper_points,helper_receive_points,helper_backend_points,helper_feasibility_points;
     std::vector<Tick> y_ticks;
     double strong = 25, weak = -35, low_log = 0, high_log = 1;
     double selected_target = 0, selected_value = 0;
     double selected_probability = 0;
     bool receive_available = false;
-    bool cpu = false;
+    bool cpu = false,work=false;
 };
 double y_fraction(const Chart& chart, double value) {
     return (chart.high_log - std::log10(value)) / (chart.high_log - chart.low_log);
@@ -131,6 +132,19 @@ Chart chart_data(const planner::Model& model, bool observer) {
         }
         std::sort(chart.receive_points.begin(),chart.receive_points.end(),[](const auto& a,const auto& b){return a.first>b.first;});
     }
+    if(!observer)for(const auto& point:model.helper_receive_points) {
+        if(!std::isfinite(point.target_db_hz))continue;
+        chart.helper_receive_points.emplace_back(point.target_db_hz,point.confidence_available||point.reference_available?
+            point.success_probability:std::numeric_limits<double>::quiet_NaN());
+    }
+    std::sort(chart.helper_receive_points.begin(),chart.helper_receive_points.end(),[](auto a,auto b){return a.first>b.first;});
+    if(!observer)for(const auto& point:model.helper_backend_feasibility_points) {
+        if(!std::isfinite(point.target_db_hz))continue;
+        chart.helper_feasibility_points.emplace_back(point.target_db_hz,
+            point.ordinary_phy_available&&point.backend_fits_budget?point.ordinary_success_probability:
+            std::numeric_limits<double>::quiet_NaN());
+    }
+    std::sort(chart.helper_feasibility_points.begin(),chart.helper_feasibility_points.end(),[](auto a,auto b){return a.first>b.first;});
     for (const auto& point : model.points) {
         chart.strong = std::max(chart.strong, point.target_db_hz);
         chart.weak = std::min(chart.weak, point.target_db_hz);
@@ -186,6 +200,22 @@ Chart cpu_chart_data(const planner::Model& model) {
         chart.points.emplace_back(point.target_db_hz,value);
         if(std::isfinite(value)){minimum=std::min(minimum,value);maximum=std::max(maximum,value);}
     }
+    for(const auto& point:model.helper_cpu_points) {
+        if(!std::isfinite(point.target_db_hz))continue;
+        const auto value=point.sustained_available&&std::isfinite(point.qualified_sustained_realtime_ratio)&&
+            point.qualified_sustained_realtime_ratio>0?point.qualified_sustained_realtime_ratio:
+            std::numeric_limits<double>::quiet_NaN();
+        chart.helper_points.emplace_back(point.target_db_hz,value);
+        if(std::isfinite(value)){minimum=std::min(minimum,value);maximum=std::max(maximum,value);}
+    }
+    std::sort(chart.helper_points.begin(),chart.helper_points.end(),[](auto a,auto b){return a.first>b.first;});
+    for(const auto& point:model.helper_cpu_points) {
+        const auto value=point.backend_sustained_available&&point.backend_sustained_realtime_ratio>0?
+            point.backend_sustained_realtime_ratio:std::numeric_limits<double>::quiet_NaN();
+        chart.helper_backend_points.emplace_back(point.target_db_hz,value);
+        if(std::isfinite(value)){minimum=std::min(minimum,value);maximum=std::max(maximum,value);}
+    }
+    std::sort(chart.helper_backend_points.begin(),chart.helper_backend_points.end(),[](auto a,auto b){return a.first>b.first;});
     if(chart.selected_value>0){minimum=std::min(minimum,chart.selected_value);maximum=std::max(maximum,chart.selected_value);}
     std::sort(chart.points.begin(),chart.points.end(),[](const auto& a,const auto& b){return a.first>b.first;});
     const auto high=std::max(-std::floor(std::log10(minimum)),std::ceil(std::log10(maximum))),low=-high;
@@ -195,6 +225,27 @@ Chart cpu_chart_data(const planner::Model& model) {
         upper>=1e3?number(upper/1e3)+"k":number(upper);
     chart.y_ticks={{upper,upper_label},{1,"1"},
         {std::pow(10.,low),number(std::pow(10.,low))}};
+    return chart;
+}
+
+Chart helper_work_chart_data(const planner::Model& model) {
+    const auto time=chart_data(model,false);Chart chart;
+    chart.strong=time.strong;chart.weak=time.weak;chart.work=true;
+    chart.selected_target=model.inputs.target_db_hz;double maximum=10;
+    for(const auto& p:model.helper_work_points) {
+        const auto ordinary=p.native.available?static_cast<double>(p.native.original_jobs):std::numeric_limits<double>::quiet_NaN();
+        const auto conditional=p.native.available?static_cast<double>(p.native.conditional_jobs):std::numeric_limits<double>::quiet_NaN();
+        chart.points.emplace_back(p.target_db_hz,ordinary);chart.helper_points.emplace_back(p.target_db_hz,conditional);
+        if(std::isfinite(ordinary))maximum=std::max(maximum,ordinary);
+        if(p.target_db_hz==model.inputs.target_db_hz&&std::isfinite(ordinary))chart.selected_value=ordinary;
+    }
+    std::sort(chart.points.begin(),chart.points.end(),[](auto a,auto b){return a.first>b.first;});
+    std::sort(chart.helper_points.begin(),chart.helper_points.end(),[](auto a,auto b){return a.first>b.first;});
+    chart.low_log=-.1;chart.high_log=std::ceil(std::log10(maximum))+.1;
+    for(int power=0;power<=static_cast<int>(chart.high_log);++power) {
+        const auto v=std::pow(10.,power);chart.y_ticks.push_back({v,number(v,4)});
+    }
+    std::sort(chart.y_ticks.begin(),chart.y_ticks.end(),[](const auto& a,const auto& b){return a.value>b.value;});
     return chart;
 }
 
@@ -220,7 +271,9 @@ BitmapSource chart_bitmap(Chart chart) {
         const auto p_at = [&](double value) { return top + (1-std::clamp(value,0.,1.)) * (bottom-top); };
         using Spans=std::vector<std::pair<double,double>>;
         const auto empty_span=std::pair{std::numeric_limits<double>::infinity(),-std::numeric_limits<double>::infinity()};
-        Spans spans(damage.width,empty_span),receive_spans(damage.width,empty_span),receive_markers(damage.width,empty_span);
+        Spans spans(damage.width,empty_span),receive_spans(damage.width,empty_span),receive_markers(damage.width,empty_span),
+            helper_spans(damage.width,empty_span),backend_spans(damage.width,empty_span),
+            feasibility_spans(damage.width,empty_span);
         const auto stroke = [&](Spans& destination,double x1, double y1, double x2, double y2) {
             const int first = std::max(static_cast<int>(damage.x), static_cast<int>(std::floor(std::min(x1, x2) - 1)));
             const int last = std::min(static_cast<int>(damage.x + damage.width - 1), static_cast<int>(std::ceil(std::max(x1, x2) + 1)));
@@ -244,6 +297,28 @@ BitmapSource chart_bitmap(Chart chart) {
             const auto& a=chart.receive_points[i-1];const auto& b=chart.receive_points[i];
             if(!std::isfinite(a.second)||!std::isfinite(b.second))continue;
             stroke(receive_spans,x_at(a.first),p_at(a.second),x_at(b.first),p_at(b.second));
+        }
+        const auto& conditional=chart.cpu||chart.work?chart.helper_points:chart.helper_receive_points;
+        for(std::size_t i=0;i<conditional.size();++i) {
+            const auto& b=conditional[i];if(!std::isfinite(b.second)||((chart.cpu||chart.work)&&b.second<=0))continue;
+            const auto bx=x_at(b.first),by=chart.cpu||chart.work?y_at(b.second):p_at(b.second);
+            stroke(helper_spans,bx,by,bx,by);
+            if(!i)continue;const auto& a=conditional[i-1];
+            if(!std::isfinite(a.second)||((chart.cpu||chart.work)&&a.second<=0))continue;
+            stroke(helper_spans,x_at(a.first),chart.cpu||chart.work?y_at(a.second):p_at(a.second),bx,by);
+        }
+        for(std::size_t i=0;i<chart.helper_feasibility_points.size();++i) {
+            const auto& b=chart.helper_feasibility_points[i];if(!std::isfinite(b.second))continue;
+            stroke(feasibility_spans,x_at(b.first),p_at(b.second),x_at(b.first),p_at(b.second));
+            if(!i)continue;const auto& a=chart.helper_feasibility_points[i-1];
+            if(std::isfinite(a.second))stroke(feasibility_spans,x_at(a.first),p_at(a.second),x_at(b.first),p_at(b.second));
+        }
+        for(std::size_t i=0;i<chart.helper_backend_points.size();++i) {
+            const auto& b=chart.helper_backend_points[i];if(!std::isfinite(b.second)||b.second<=0)continue;
+            stroke(backend_spans,x_at(b.first),y_at(b.second),x_at(b.first),y_at(b.second));
+            if(!i)continue;const auto& a=chart.helper_backend_points[i-1];
+            if(std::isfinite(a.second)&&a.second>0)
+                stroke(backend_spans,x_at(a.first),y_at(a.second),x_at(b.first),y_at(b.second));
         }
         // Tiny supported islands still have useful estimates. Keep their
         // endpoints visible without drawing a connection through a RAM gap.
@@ -290,6 +365,15 @@ BitmapSource chart_bitmap(Chart chart) {
                 const auto& receive_span=receive_spans[x-damage.x];
                 if(within&&y>=receive_span.first&&y<=receive_span.second&&((x+y)/5)%2==0)
                     ink=theme::comparison_rgb(color);
+                const auto& backend_span=backend_spans[x-damage.x];
+                if(within&&y>=backend_span.first&&y<=backend_span.second&&x%7<4)
+                    ink=theme::comparison_rgb(color);
+                const auto& feasibility_span=feasibility_spans[x-damage.x];
+                if(within&&y>=feasibility_span.first&&y<=feasibility_span.second&&x%11<7)
+                    ink=color?theme::positive_tint:theme::grayscale(theme::text);
+                const auto& helper_span=helper_spans[x-damage.x];
+                if(within&&y>=helper_span.first&&y<=helper_span.second&&x%9<3)
+                    ink=theme::grayscale(theme::text);
                 const auto& marker=receive_markers[x-damage.x];
                 if(within&&y>=marker.first&&y<=marker.second)ink=chart.cpu?data_ink:theme::comparison_rgb(color);
                 const double dx = (x - selected_x) * request.sample_aspect_ratio, dy = y - selected_y;
@@ -353,6 +437,12 @@ Node graph(const planner::Model& model, bool observer, float width) {
             " · right axis"+(rx_available?" · "+probability(model.one_bit_success_probability):""),
             11,rx_available&&model.one_bit_success_probability<.8?Tone::negative:Tone::comparison,false,4);
     }
+    if(!observer&&!model.helper_receive_points.empty())paragraph(n,
+        "┈ Conditional helper 1-bit RX reference after independent qualification · known-onset finite window · gaps retain missing coverage",
+        10,Tone::text,false,4);
+    if(!observer&&!model.helper_backend_feasibility_points.empty())paragraph(n,
+        "┅ Ordinary PHY at conditional backend capacity · after helper acquisition · unchanged 1-bit estimate, shown only where retained backend fits the selected CPU budget. Reference/frontend/probe costs and total feasibility remain uncalibrated; gaps do not predict zero reception.",
+        10,Tone::text,false,4);
     const auto chart = chart_data(model, observer);
     const float label_width = 44,right_label_width=observer?0.f:36.f;
     const float plot_width = inner - label_width-right_label_width, height = 160;
@@ -391,6 +481,9 @@ Node cpu_graph(const planner::Model& model,float width) {
     paragraph(n,"CPU estimate",13,Tone::text,true,2);
     paragraph(n,model.symbol_burst.modeled?"Processing seconds per second of scheduled reception":
         "Processing seconds per second of audio",10,Tone::muted,false,4);
+    if(!model.helper_cpu_points.empty())paragraph(n,
+        "━ Ordinary baseline · ┄ Conditional backend model · ┈ Qualified helper total",
+        10,Tone::text,false,4);
     const auto chart=cpu_chart_data(model);
     auto body=row(inner);auto labels=column(label_width);labels.height=height;
     float previous=0;
@@ -405,6 +498,10 @@ Node cpu_graph(const planner::Model& model,float width) {
     body.children.push_back(std::move(plot));n.children.push_back(std::move(body));
     n.children.push_back(target_axis(chart,inner,plot_width,label_width));
     paragraph(n,"Target dB in 1 Hz · 1 = real-time limit",10,Tone::muted,false,0);
+    if(!model.helper_cpu_points.empty())paragraph(n,
+        "Conditional backend CPU uses the ordinary primitive-cost model on selected native FFT/direct/template/clock work, original construction and full continuation. Frequency-only forecasts retain all original DATA-clock and UTC-steering alternatives. An actually executed joint RF/DATA-clock certificate may illustrate the selected current target using its exact retained subset; its actual source relation decides the retained DATA-clock domain and does not forecast future qualification. Generic helpers retain their physical-a/UTC union; an explicit common corrected Robust source measures b directly, with a and c individually unresolved and not added again. Neither case is a GPSDO-equivalent estimate. It excludes reference/frontend/probe costs; it is not total CPU or a measured speedup. The separate total curve needs matched component calibration.",
+        10,Tone::muted,false,0);
+
     return n;
 }
 
@@ -434,6 +531,53 @@ void oscillator_details(Node& root,const planner::Model& model) {
         } catch(const std::exception& error) {paragraph(clocks,error.what(),11,Tone::accent);}
     }
     root.children.push_back(std::move(clocks));
+}
+
+Node helper_work_graph(const planner::Model& model,float width) {
+    auto n=card(width);n.padding=8;
+    paragraph(n,"Conditional acquisition work",13,Tone::text,true,4);
+    paragraph(n,"Logical native template-pair job descriptors per original batch · checked representative targets",10,Tone::muted,false,4);
+    paragraph(n,"━ Ordinary full bank · ┈ After an independently qualified helper frequency reference",10,Tone::text,false,4);
+    const auto chart=helper_work_chart_data(model);
+    const float inner=width-2*n.padding,label_width=52,height=110,plot_width=inner-label_width;
+    auto body=row(inner);auto labels=column(label_width);labels.height=height;float previous=0;
+    for(const auto& tick:chart.y_ticks) {
+        const auto position=8+static_cast<float>(y_fraction(chart,tick.value))*(height-17)-7;
+        if(position<previous||position+14>height)continue;
+        auto label=text(tick.label,label_width,10);label.height=14;label.top=position-previous;
+        previous=position+14;labels.children.push_back(std::move(label));
+    }
+    body.children.push_back(std::move(labels));auto plot=column(plot_width);
+    plot.kind=Kind::bitmap;plot.height=height;plot.plot_name="planner/helper-native-work";plot.plot=chart_bitmap(chart);
+    body.children.push_back(std::move(plot));n.children.push_back(std::move(body));
+    n.children.push_back(target_axis(chart,inner,plot_width,label_width));
+    const auto selected=std::find_if(model.helper_work_points.begin(),model.helper_work_points.end(),
+        [&](const auto& p){return p.target_db_hz==model.inputs.target_db_hz;});
+    if(selected!=model.helper_work_points.end()) {
+        const auto& w=selected->native;
+        if(w.available)paragraph(n,std::to_string(w.original_jobs)+" ordinary / "+std::to_string(w.conditional_jobs)+
+            " conditional job descriptors; "+std::to_string(w.retained_clock_rates)+" LF rates and "+
+            std::to_string(w.original_starts)+" original arrival starts retained. Original batch trial charge "+
+            std::to_string(w.original_trial_charge)+"; threshold "+number(w.original_batch_end_threshold,6)+".",11,Tone::text,false,4);
+        if(std::isfinite(selected->expected_helper_cn0_db_hz))paragraph(n,
+            std::string(selected->measured_reference?"Measured-reference scenario":"Conditional source-requirements forecast")+
+            " at scenario helper C/N0 "+db(selected->expected_helper_cn0_db_hz)+" dBHz; observation requirement "+
+            (selected->minimum_observation_seconds>0?planner::duration(selected->minimum_observation_seconds):
+                std::string("unavailable for this component/model"))+". Expected level alone does not qualify synchronization.",11,Tone::muted,false,4);
+        paragraph(n,w.reason,11,Tone::muted,false,4);
+        if(!w.first_bit.reason.empty()) {
+            if(w.first_bit.available)paragraph(n,"Conditional acquired-reference first bit: "+
+                probability(w.first_bit.correct)+" correct, "+probability(w.first_bit.wrong)+" wrong; "+
+                std::to_string(w.first_bit.trials)+" paired outcomes with 95% Monte Carlo interval "+
+                number(100*w.first_bit.correct_low,4)+"–"+number(100*w.first_bit.correct_high,4)+
+                "%. Known-onset isolated finite window; this does not predict arrival acquisition, full-message success or physical completion.",
+                11,Tone::text,false,4);
+            paragraph(n,w.first_bit.reason,11,Tone::muted,false,4);
+        }
+
+    }
+    paragraph(n,"Before qualification, startup retains ordinary broad acquisition plus discovery. After qualification, this chart shows selected native work geometry only. Physical transforms, cache reuse, helper tracking, bounded probes and fallback CPU need separate calibration; full ordinary continuation and payload functionality remain. No CPU percentage, backlog or RX-probability gain follows from these counts. Curves between checked targets are guides; gaps are unsupported.",10,Tone::muted,false,0);
+    return n;
 }
 
 void planner_controls(Node& root,const planner::Model& model,bool use_draft) {
@@ -601,13 +745,24 @@ void link_budget(Node& root, const planner::Model& model) {
                 }
                 paragraph(n,std::string(helper.simulation_level_modeled?"Sampled simulation tone: ":"Expected tone: ")+
                     db(helper.simulation_level_modeled?helper.simulation_tone_snr_db:helper.tone_snr_db)+" dB in 10 Hz · "+
-                    (helper.tone_level_sufficient?"above the 6 dB presence level; measured confidence and coherence still required.":
+                    (helper.tone_level_sufficient?"above the 6 dB presence level; observed frequency confidence still required.":
                         "below the 6 dB presence level; assistance cannot be assumed."),11,
                     helper.tone_level_sufficient?Tone::muted:Tone::caution,false,4);
             }
             if(helper.geometry_available)
                 paragraph(n,"Helper audio center: "+frequency(helper.frequency_hz)+
                     ". The audio route and radio must pass its tone and metadata band.",11,Tone::muted,false,4);
+            if(helper.geometry_available) {
+                paragraph(n,"Declared signed helper-tone search: "+frequency(helper.helper_search_lower_hz)+
+                    " to "+frequency(helper.helper_search_upper_hz)+"; payload support: "+
+                    frequency(helper.payload_search_lower_hz)+" to "+frequency(helper.payload_search_upper_hz)+
+                    ". Real mono capture can fold negative frequencies; surviving image branches must be retained. ADC rate alone does not establish the radio or audio passband.",
+                    11,helper.coarse_conversion_required?Tone::caution:Tone::muted,false,4);
+                paragraph(n,"Ordinary RF margin: +/-"+number(helper.ordinary_rf_half_width_hz)+
+                    " Hz represented of +/-"+number(helper.requested_rf_half_width_hz)+" Hz requested"+
+                    (helper.baseline_search_limited?"; baseline coverage remains limited.":"."),
+                    11,helper.baseline_search_limited?Tone::caution:Tone::muted,false,4);
+            }
             paragraph(n,helper.status,11,helper.geometry_available?Tone::muted:Tone::caution,false,4);
             paragraph(n,"Ordinary baseline: payload margin, probability and CPU curves use the configured receiver without measured helper assistance.",
                 11,Tone::muted,false,4);
@@ -618,9 +773,86 @@ void link_budget(Node& root, const planner::Model& model) {
                     number(helper.assumed_frequency_uncertainty_hz)+" Hz at offset "+
                     number(helper.assumed_helper_offset_hz)+" Hz. Retained original clock rates: "+
                     std::to_string(helper.retained_clock_rates)+
-                    ". Native backend, every profile's FIR response and reserved workspace still require runtime qualification.",
+                    ". Every key, profile and newly admitted epoch retains its unresolved arrival and keyed phase alternatives. Actual backend capability, every profile's FIR response and reserved workspace still require runtime qualification.",
                     11,Tone::muted,false,4);
-            paragraph(n,"Helper-assisted probability and CPU benefit are not quantified by these curves. Search-pair counts do not establish a CPU speedup. The payload target is unchanged. Runtime assistance, audit work and decline reasons are reported separately from measured helper presence.",
+            if(helper.conditional_geometry_available) {
+                paragraph(n,std::string(helper.carrier_projection_counts_available?"Conditional carrier projections: ":"Conditional RF catalogue offsets: ")+
+                    std::to_string(helper.conditional_carriers)+" unique frequencies versus "+std::to_string(helper.ordinary_carriers)+
+                    " ordinary frequencies. "+(helper.carrier_projection_counts_available?
+                        "Several clock pairs can share one projection; pair work and carrier work are separate dimensions, not CPU speedups.":
+                        "This is catalogue geometry; physical projection work is not quantified for this backend."),
+                    11,Tone::muted,false,4);
+                paragraph(n,"Optional future broad probes become eligible after "+planner::duration(helper.broad_probe_eligibility_seconds)+
+                    ". One global cold probe slot rotates current key/profile/epoch ranks, retaining that owner's original RF/LF domain. This is partial future coverage, not a complete cohort audit. Eligibility promises no completion time or CPU percentage. A complete physical symbol still spans "+
+                    planner::duration(helper.physical_symbol_seconds)+"; skipped or partial probe input never proves absence.",
+                    11,Tone::muted,false,4);
+                paragraph(n,"Probe work uses bounded credit earned from actual conditional execution. Stored credit is capped at one previous packet; one indivisible packet may exceed the credit, and that debt must be paid before another probe. Template, projection and lane units do not imply CPU percentages. Any payload dependency promotes its owner to ordinary work outside this optional budget. Helper loss or inconsistency immediately restores broad future acquisition for every current key, profile and epoch. Accepted payload continues through ordinary physical completion.",
+                    11,Tone::muted,false,4);
+            }
+            if(!helper.timing_status.empty())paragraph(n,helper.timing_status,11,Tone::muted,false,4);
+            if(model.inputs.helper_joint_diagnostic_allocator_bytes)paragraph(n,
+                "Separate GUI diagnostic RAM at plan creation: "+
+                std::to_string(model.inputs.helper_joint_diagnostic_allocator_bytes)+" allocator-requested bytes plus "+
+                std::to_string(model.inputs.helper_joint_diagnostic_account_bytes)+" account-object bytes; "+
+                std::to_string(model.inputs.helper_joint_diagnostic_occupied_slots)+" of2 fixed "+
+                std::to_string(model.inputs.helper_joint_diagnostic_slot_bytes)+"-byte numeric slots remain borrowed. Account control-block/allocator overhead is separate. This is additional bounded GUI memory, outside DSP/payload promises; no third slot or fallback vector heap is allowed.",
+                11,Tone::muted,false,4);
+            const auto assisted=std::find_if(model.helper_cpu_points.begin(),model.helper_cpu_points.end(),
+                [&](const auto& p){return p.target_db_hz==model.inputs.target_db_hz;});
+            if(assisted!=model.helper_cpu_points.end()) {
+                if(assisted->executed_joint_geometry) {
+                    const auto& joint=*assisted->executed_joint_geometry;
+                    paragraph(n,"Current-target executed joint RF/DATA-clock geometry: "+
+                        std::to_string(joint.joint_pairs)+" retained pairs from the "+
+                        std::to_string(joint.frequency_only_pairs)+" frequency-only pairs ("+
+                        std::to_string(joint.original_pairs)+" original), with "+
+                        std::to_string(joint.joint_clock_rates)+" retained DATA-clock lanes. "+
+                        simulation::helper_joint_clock_source_domain(joint.source_relation)+
+                        " Original arrival/epoch trials remain. The backend model conditionally reuses this observed geometry; it does not forecast future measurement qualification or whole-cohort coverage.",
+                        11,Tone::muted,false,4);
+                }
+                const auto& req=assisted->requirements;
+                if(req.frequency_requirements_available)paragraph(n,
+                    "Conditional strong-fit requirement at expected helper C/N0 "+db(req.expected_cn0_db_hz)+
+                    " dBHz: raw frequency radius "+frequency(req.frequency_radius_hz)+
+                    ", phase radius "+number(req.phase_radius_radians,5)+" rad over "+planner::duration(req.fit_seconds)+
+                    (req.chord_requirements_available?"; independently canonical punctuation could permit a "+
+                        frequency(req.chord_mean_radius_hz)+" mean-frequency radius over "+planner::duration(req.chord_aperture_seconds):"")+". "+req.conditions,
+                    11,Tone::muted,false,4);
+                const auto& masked=assisted->masked_requirements;
+                if(!masked.reason.empty()) {
+                    if(masked.geometry_supported)paragraph(n,"Separate masked-tone frequency profile: "+
+                        frequency(masked.physical_sample_rate)+" physical PCM, "+planner::duration(masked.aperture_seconds)+
+                        " finite aperture, "+std::to_string(masked.required_bytes)+" optional bytes required"+
+                        (masked.coarse_required?" plus "+std::to_string(masked.coarse_bytes)+" coarse bytes":"")+
+                        ". Cold staging is capped at "+planner::duration(masked.cold_deadline_seconds)+
+                        "; expiry restores ordinary broad input, and is not a predicted acquisition deadline.",11,Tone::muted,false,4);
+                    if(masked.coarse_required)paragraph(n,"Initial coarse discovery supplies an engineering seed envelope of +/-"+
+                        frequency(masked.profile_half_width_hz)+" for a later independent global frequency fit. This is not the acquired-reference CI, a presence certificate or a predicted precision/deadline; the global fit must qualify separately.",11,Tone::muted,false,4);
+                    paragraph(n,masked.reason,11,Tone::muted,false,4);
+                }
+                if(assisted->discovery_available)paragraph(n,"Startup discovery CPU "+planner::duration(assisted->discovery_cpu_seconds)+
+                    "; concurrent ordinary broad-acquisition CPU "+planner::duration(assisted->prequalification_broad_cpu_seconds)+
+                    ". These startup costs are separate from the qualified sustained curve.",11,Tone::muted,false,4);
+                const auto feasibility=std::find_if(model.helper_backend_feasibility_points.begin(),
+                    model.helper_backend_feasibility_points.end(),[&](const auto& p){return p.target_db_hz==model.inputs.target_db_hz;});
+                if(feasibility!=model.helper_backend_feasibility_points.end()&&feasibility->backend_feasibility_known) {
+                    paragraph(n,"After an independently acquired helper reference, modeled retained backend CPU is "+
+                        number(feasibility->backend_realtime_ratio,4)+" s / audio second on "+std::string(simulation::reference_cpu)+
+                        ", against the selected "+number(feasibility->cpu_budget,4)+" budget: "+
+                        (feasibility->backend_fits_budget?"backend fits":"backend exceeds budget")+". "+
+                        (feasibility->ordinary_phy_available?"The plotted ordinary PHY estimate stays "+
+                            probability(feasibility->ordinary_success_probability)+"; helper adds no SNR or probability gain. ":
+                            "Ordinary PHY probability remains unavailable at this target. ")+
+                        "This is a necessary backend-capacity check, not total CPU or whole-message reception qualification.",
+                        11,Tone::muted,false,4);
+                }
+                paragraph(n,assisted->reason,11,Tone::muted,false,4);
+            } else paragraph(n,"Conditional helper curves are awaiting their source requirements. The ordinary baseline remains shown.",11,Tone::muted,false,4);
+            if(!model.inputs.helper_executed_joint_clock)paragraph(n,
+                "Before-tone joint DATA-clock forecasting is unavailable: C/N0 has no validated marker-crossing timing-error and clock-slew-over-support calibration here. Frequency-only conditional work retains the full DATA-clock/UTC union; phase-chord precision is not an audio-clock certificate.",
+                11,Tone::muted,false,4);
+            paragraph(n,"Enabled power does not prove synchronization. Conditional overlays preserve payload Rate, SNR, phase process and ordinary recovery. Missing covariance, backend or component-cost coverage leaves graph gaps. Runtime presence and applied assistance remain separate measurements.",
                 11,Tone::muted,false,0);
         }
     } else paragraph(n, "Link estimate unavailable", 13, Tone::text, true, 0);
@@ -946,6 +1178,9 @@ ui::DocumentNode build(const planner::Model& model, float width, bool show_detai
         "Fixed pattern: target changes leave bit duration unchanged. Finish includes a full silence check.", 11, Tone::muted, false, 4);
     paragraph(root, std::string(model.observer_hypothetical ? "No encrypted private pattern. " : "Private pattern. ") +
         "LPI is not guaranteed. See model limits.", 11, Tone::muted, false, 8);
+    if(!model.helper_work_points.empty()) {
+        auto work=helper_work_graph(model,root.width);work.bottom=8;root.children.push_back(std::move(work));
+    }
     notable_points(root, model);
     planner_footer(root,model,show_details);
     if (show_details) details(root,model);

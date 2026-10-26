@@ -71,9 +71,11 @@ std::vector<std::uint32_t> rate_candidates(std::uint32_t logical_rate,std::uint3
     return result;
 }
 void report_format(std::uint32_t logical,std::uint32_t hardware,std::size_t workspace,const StreamFormatCallback& callback,
-                   bool timed=false,double uncertainty=0,bool adjusted=false,TimingQuality qualified=TimingQuality::unavailable) {
+                   bool timed=false,double uncertainty=0,bool adjusted=false,TimingQuality qualified=TimingQuality::unavailable,
+                   CaptureTransportRecipe capture_transport={}) {
     if(callback)callback({logical,hardware,(logical==hardware && !adjusted?.5:.42)*std::min(logical,hardware),workspace,
-        qualified!=TimingQuality::unavailable?qualified:timed?TimingQuality::estimated:TimingQuality::unavailable,uncertainty});
+        qualified!=TimingQuality::unavailable?qualified:timed?TimingQuality::estimated:TimingQuality::unavailable,uncertainty,
+        capture_transport});
 }
 void playback_pcm(std::span<const float> samples,std::span<std::int16_t> output,unsigned channels,ChannelMode mode,double gain) {
     for(std::size_t i=0;i<samples.size();++i) {
@@ -159,6 +161,7 @@ class CaptureSink {
     std::optional<Resampler> converter_;
     std::vector<float> output_;
     bool timed_=false,strict_timing_=false,timing_reported_=false,timing_published_=false;
+    bool capture_continuous_=true;
     const Options* options_=nullptr;
 public:
     CaptureSink(std::uint32_t logical,std::uint32_t hardware,const CaptureCallback& next,std::stop_token stop,const Options* options=nullptr)
@@ -168,6 +171,9 @@ public:
          timed_(options && (options->follow_system_clock || options->request_capture_timing)),
          strict_timing_(options && options->follow_system_clock),options_(options){}
     std::size_t workspace_bytes() const {return sizeof(*this)+converter_->workspace_bytes()+output_.capacity()*sizeof(float);}
+    CaptureTransportRecipe capture_transport()const noexcept {
+        return capture_continuous_?converter_->capture_transport():CaptureTransportRecipe{};
+    }
     bool timed() const {return timed_;}
     bool strict_timing() const {return strict_timing_;}
     void disable_timing() {timed_=strict_timing_=false;}
@@ -183,6 +189,7 @@ public:
         if(timing_published_) {
             if(!options_ || !options_->capture_discontinuity)
                 throw Error(std::string("capture timestamp continuity lost: ")+error.what());
+            capture_continuous_=false;
             options_->capture_discontinuity();check_cancelled(stop_);
         }
         disable_timing();
@@ -192,7 +199,7 @@ public:
     void discontinuity() {
         // emplace destroys the old filter before allocating its replacement;
         // no doubled filter workspace and no fabricated EOF/absence samples.
-        converter_.emplace(hardware_,logical_);
+        capture_continuous_=false;converter_.emplace(hardware_,logical_);
         timing_published_=false;
     }
     bool write(std::span<const float> input,const UtcTimeline* timeline=nullptr) {
@@ -1413,7 +1420,8 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
     const auto chunk_limit=std::min<std::size_t>(block.size(),stream.hardware_rate/20);
     std::vector<float> converted(chunk_limit);
     report_format(rate,stream.hardware_rate,sink.workspace_bytes()+block.capacity()*sizeof(std::int16_t)+converted.capacity()*sizeof(float)+
-        (timed?sizeof(AlsaTimeline):0),on_format,timed && !options->frame_timestamp,timed?timing->allowance():0);
+        (timed?sizeof(AlsaTimeline):0),on_format,timed && !options->frame_timestamp,timed?timing->allowance():0,
+        false,TimingQuality::unavailable,sink.capture_transport());
     unsigned failures=0;
     const auto lose_observation=[&](const Error& error) {
         sink.lose_observation(error);timed=false;timing.reset();
@@ -1674,7 +1682,8 @@ static void capture_device(std::uint32_t rate,const std::string& device,const Ca
     session.prepare();
     const auto chunk_samples=std::min<std::size_t>(WaveSession::block_frames,session.hardware_rate/20);
     std::vector<float> converted(chunk_samples);
-    report_format(rate,session.hardware_rate,sink.workspace_bytes()+sizeof(session)+converted.capacity()*sizeof(float),on_format);
+    report_format(rate,session.hardware_rate,sink.workspace_bytes()+sizeof(session)+converted.capacity()*sizeof(float),on_format,
+        false,0,false,TimingQuality::unavailable,sink.capture_transport());
     for(auto& header:session.headers) {
         header.dwBufferLength=static_cast<DWORD>(chunk_samples*sizeof(std::int16_t));
         mm_check(waveInAddBuffer(session.input,&header,sizeof(WAVEHDR)),"waveIn queue failed");

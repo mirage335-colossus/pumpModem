@@ -10,6 +10,7 @@
 #include <numbers>
 #include <random>
 #include <vector>
+#include <string_view>
 
 using namespace datapump;
 namespace {
@@ -22,12 +23,12 @@ Result run(bool punctuation,std::string callsign,double frequency,double phase,d
            std::size_t chunk,double noise=0,bool quantize=false,bool timecode=false,
            std::optional<Crypto> transmit_key={},std::vector<Crypto> keys={},double ppm=0,
            bool corrupt_metadata=false,std::uint64_t epoch=1700000000,
-           std::optional<long double> repeated_dwell={}) {
+           std::optional<long double> repeated_dwell={},helper::FrequencyPrecisionOptions precision={}) {
     constexpr std::uint32_t rate=48000;
     helper::Options options;options.power_w=100;options.callsign=std::move(callsign);options.timecode=timecode;
     helper::Plan plan{frequency,.7,.1,100};
     helper::Generator generator(options,plan,epoch,punctuation,std::move(transmit_key));
-    helper::Receiver receiver(2100,20,std::move(keys));
+    helper::Receiver receiver(2100,20,std::move(keys),std::nullopt,precision);
     Result out;std::vector<float> samples(chunk);
     std::mt19937 rng(519);std::normal_distribution<double> gaussian(0,noise);
     const auto count=static_cast<std::uint64_t>(3.2*rate);
@@ -201,6 +202,49 @@ void clock_skew() {
     }
     check(timed);
 }
+void metadata_with_declared_process() {
+    // A clean actual waveform can remain locally decodable under a much more
+    // conservative declared oscillator model. Keep real PCM16 quantization
+    // and deterministic additive noise in both matched controls. This does not
+    // promise metadata decoding through an actual crystal-diffusion realization.
+    constexpr double frequency=2100,phase=.2,delay=.034;
+    constexpr double crystal_sigma=.5*std::numbers::pi/180;
+    const auto observed=[&](double sigma) {
+        helper::FrequencyPrecisionOptions precision;
+        precision.phase_noise_radians_per_sqrt_second=sigma;
+        return run(true,"",frequency,phase,delay,137,1e-6,true,true,{}, {},0,false,
+            1700000000,{},precision);
+    };
+    const auto control=observed(0),modeled=observed(crystal_sigma);
+    for(const auto* result:{&control,&modeled}) {
+        std::size_t decoded=0;
+        for(const auto& r:result->updates) {
+            if(!r.phase_valid||!r.timing_valid)continue;
+            const auto time=static_cast<double>(r.sample)/r.sample_rate-delay;
+            const auto phase_error=std::abs(std::remainder(r.phase_radians-tau*frequency*time-phase,tau));
+            check(phase_error<=r.phase_uncertainty_radians);
+            check(std::abs(r.frequency_hz-frequency)<=r.frequency_uncertainty_hz);
+            if(result==&modeled) {
+                // The full public interval still contains the finite-aperture
+                // process allowance even when optional metadata is decoded.
+                check(r.phase_uncertainty_radians>=8*crystal_sigma*std::sqrt(.04));
+                check(r.frequency_process_uncertainty_hz>0);
+                check(r.frequency_uncertainty_hz>=r.frequency_process_uncertainty_hz);
+            } else check(r.frequency_process_uncertainty_hz==0);
+            if(!r.metadata)continue;
+            ++decoded;
+            check(r.metadata->kind==helper::MetadataKind::clear_time);
+            check(!r.metadata->authenticated);
+            const auto expected=1700000000.L+r.dwell_start_seconds-delay;
+            check(std::abs(static_cast<long double>(r.metadata->time_ticks)/65536-expected)<.0002);
+            if(result==&modeled) {
+                check(r.phase_uncertainty_radians>.0002);
+                check(r.frequency_uncertainty_hz>.002);
+            }
+        }
+        check(decoded>0);metadata_has_no_timing_authority(*result);
+    }
+}
 void frequency_drift() {
     for(const auto rate:{8000U,11025U,44100U,48000U})for(const auto drift:{0.,-.2,.2,-1.,1.}) {
         helper::Receiver receiver(2100,20);
@@ -244,6 +288,36 @@ void fallback_and_noise() {
         receiver.push(samples,48000,first);check(!receiver.take_update());
     }
 }
+// The following weak-tone fixtures explicitly fund the optional profile and
+// drive its joined work seam. Their coherent Generator supplies the declared
+// cross-dwell phase model; default strong Receiver fixtures remain unfunded.
+class FundedFrequencyReceiver {
+    helper::Receiver receiver_;
+    std::uint32_t rate_;
+public:
+    FundedFrequencyReceiver(double expected,double width,std::uint32_t rate,std::vector<Crypto> keys={},
+                            helper::FrequencyPrecisionOptions precision={})
+        :receiver_(expected,width,std::move(keys),std::nullopt,precision),rate_(rate) {
+        helper::FrequencyWorkOptions work;work.sample_rate=rate;work.coherent_phase_model=true;
+        const auto geometry=helper::Receiver::optional_frequency_geometry(expected,width,work,precision);
+        check(geometry.supported&&!geometry.eligible);
+        work.workspace_grant=geometry.required_bytes;
+        check(helper::Receiver::optional_frequency_geometry(expected,width,work,precision).eligible);
+        check(receiver_.set_optional_frequency_work(work));
+        const auto actual=receiver_.optional_frequency_work();
+        check(actual.actual_bytes==work.workspace_grant&&
+              actual.heap_bytes+actual.worker_scratch_bytes==actual.actual_bytes);
+    }
+    void push(std::span<const float> samples,std::uint32_t rate,std::uint64_t first) {
+        check(rate==rate_);receiver_.push(samples,rate,first);
+        if(receiver_.prepare_optional_frequency(7)) {
+            while(!receiver_.advance_optional_frequency(64).complete) {}
+            const auto actual=receiver_.optional_frequency_work();
+            receiver_.commit_optional_frequency({7,actual.generation,0,helper::FrequencyPresenceState::unavailable});
+        }
+    }
+    std::optional<helper::Reference> take_update() {return receiver_.take_update();}
+};
 struct LinkResult {
     std::size_t references=0,usable=0;
     double first_usable=0,max_error=0,max_uncertainty=0;
@@ -255,7 +329,7 @@ LinkResult realistic_link(double cn0_db_hz,double power,double amplitude,std::si
     helper::Options options;options.power_w=power;options.data_power_w=4;
     options.callsign="N0CALL";options.timecode=false;
     helper::Generator generator(options,{frequency,amplitude,.1,power},1700000000,true);
-    helper::Receiver receiver(expected,20);
+    FundedFrequencyReceiver receiver(expected,20,rate);
     const auto noise_sigma=std::sqrt(amplitude*amplitude*rate/(4*std::pow(10.,cn0_db_hz/10)));
     std::mt19937 rng(seed);std::normal_distribution<double> noise(0,noise_sigma);
     std::vector<float> samples(chunk);LinkResult result;
@@ -273,6 +347,9 @@ LinkResult realistic_link(double cn0_db_hz,double power,double amplitude,std::si
             check((reference->frequency_sample?reference->frequency_sample:reference->sample)<=reference->sample);
             check(reference->frequency_valid&&!reference->phase_valid&&!reference->timing_valid&&!reference->metadata);
             ++result.references;result.last=reference;
+            check(std::isfinite(reference->frequency_hz)&&std::isfinite(reference->frequency_uncertainty_hz)&&
+                  reference->frequency_uncertainty_hz>=0&&
+                  std::abs(reference->frequency_hz-frequency)<=reference->frequency_uncertainty_hz);
             if(reference->frequency_uncertainty_hz<=.1) {
                 if(!result.usable)result.first_usable=static_cast<double>(reference->sample)/rate;
                 ++result.usable;
@@ -317,7 +394,7 @@ void realistic_frequency() {
     // do not turn that floor into a confidence claim on the true C/N0.
     check(second.usable==0);
 }
-void weak_timecode_frequency() {
+void weak_timecode_frequency(std::optional<bool> only={}) {
     // Weak existence evidence must not turn unresolved dwell modulation into
     // false fine frequency precision. Narrow intervals, if any, must cover the
     // real carrier; this vector does not promise useful acquisition latency.
@@ -325,9 +402,10 @@ void weak_timecode_frequency() {
     constexpr double expected=6380,frequency=6380.37,amplitude=.01,cn0=20.7609125906;
     const Crypto key{std::array<std::uint8_t,32>{}};
     for(const bool signal:{false,true}) {
+        if(only&&signal!=*only)continue;
         helper::Options options;options.power_w=1500;options.timecode=true;
         helper::Generator generator(options,{frequency,amplitude,0,1500},1700000000,true,key);
-        helper::Receiver receiver(expected,20,{key});
+        FundedFrequencyReceiver receiver(expected,20,rate,{key});
         const auto sigma=std::sqrt(amplitude*amplitude*rate/(4*std::pow(10.,cn0/10)));
         std::mt19937 random(5181);std::normal_distribution<double> noise(0,sigma);
         std::array<float,137> samples{};std::size_t references=0;
@@ -342,6 +420,9 @@ void weak_timecode_frequency() {
                 ++references;
                 check(reference->sample<first+count && reference->frequency_sample<=reference->sample);
                 check(reference->frequency_valid && !reference->phase_valid && !reference->timing_valid && !reference->metadata);
+                check(std::isfinite(reference->frequency_hz)&&std::isfinite(reference->frequency_uncertainty_hz)&&
+                      reference->frequency_uncertainty_hz>=0);
+                if(signal)check(std::abs(reference->frequency_hz-frequency)<=reference->frequency_uncertainty_hz);
                 if(reference->frequency_uncertainty_hz<=.25) {
                     check(std::abs(reference->frequency_hz-frequency)<=reference->frequency_uncertainty_hz);
                 }
@@ -357,7 +438,9 @@ LinkResult shifted_helper_frequency(bool signal,std::size_t chunk) {
     const Crypto key{std::array<std::uint8_t,32>{}};
     helper::Options options;options.power_w=1500;options.timecode=true;
     helper::Generator generator(options,{expected,amplitude,0,1500},1800000000,true,key);
-    helper::Receiver receiver(expected,100,{key});
+    helper::FrequencyPrecisionOptions precision;
+    precision.phase_noise_radians_per_sqrt_second=.50249378105604448*std::numbers::pi/180;
+    FundedFrequencyReceiver receiver(expected,100,rate,{key},precision);
     const auto sigma=std::sqrt(amplitude*amplitude*rate/(4*std::pow(10.,cn0/10)));
     std::mt19937 noise_random(581),phase_random(7181);
     std::normal_distribution<double> noise(0,sigma),phase_step(0,
@@ -412,7 +495,27 @@ void chunks_and_gaps() {
     receiver.push(std::span<const float>(samples).first(1),48000,9000);check(!receiver.take_update());
 }
 }
-int main() {
-    clean_precision();metadata();metadata_carrier_images();timecodes_and_corruption();clock_skew();frequency_drift();fallback_and_noise();realistic_frequency();weak_timecode_frequency();shifted_frequency();chunks_and_gaps();
-    std::cout<<"helper precision receiver passed\n";
+int main(int argc,char** argv) {
+    try {
+        check(argc<=2);std::cout<<std::unitbuf;
+        const std::string_view which=argc==2?argv[1]:"all";
+        if(which=="all") {
+            clean_precision();metadata();metadata_carrier_images();timecodes_and_corruption();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();realistic_frequency();weak_timecode_frequency();shifted_frequency();chunks_and_gaps();
+        } else if(which=="strong") {
+            clean_precision();metadata();metadata_carrier_images();timecodes_and_corruption();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();chunks_and_gaps();
+        } else if(which=="realistic")realistic_frequency();
+        else if(which=="legacy30"||which=="legacy24") {
+            const bool reduced=which=="legacy24";
+            const auto result=realistic_link(reduced?24:30.02,40,reduced?.003:.01,137,581);
+            std::cout<<"MODELED,"<<which<<",refs="<<result.references<<",usable="<<result.usable
+                <<",first="<<result.first_usable<<",max_error="<<result.max_error<<",max_ci="<<result.max_uncertainty<<'\n';
+            check(result.usable>0&&result.first_usable<(reduced?10:8));
+        } else if(which=="weak_timecode")weak_timecode_frequency();
+        else if(which=="weak_noise")weak_timecode_frequency(false);
+        else if(which=="weak_signal")weak_timecode_frequency(true);
+        else if(which=="shifted")shifted_frequency();
+        else if(which=="metadata_process")metadata_with_declared_process();
+        else throw Error("unknown helper receiver test selector");
+        std::cout<<"helper precision receiver passed: "<<which<<'\n';return 0;
+    }catch(const std::exception& error) {std::cerr<<"FAIL,"<<error.what()<<'\n';return 1;}
 }

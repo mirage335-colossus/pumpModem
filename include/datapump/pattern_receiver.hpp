@@ -1,5 +1,10 @@
 #pragma once
 #include <array>
+#include <bit>
+#include <cfenv>
+#include <cfloat>
+#include <cmath>
+#include <limits>
 #include <optional>
 #include "datapump/modem.hpp"
 #include "datapump/pattern_search.hpp"
@@ -7,11 +12,13 @@
 #include <algorithm>
 #include <memory>
 
+namespace datapump::helper {class JointClockCellCertificate;class ContinuationFrequencyCertificate;}
 namespace datapump::modem {
 namespace detail::scheduled_capture {class SharedScheduledCapture;}
 namespace detail { class NativePeakLease; }
 namespace detail {class NativePointLease;}
 namespace detail {struct NativeDiagnosticHistoryAccess;}
+namespace detail {struct ConditionedReferenceDescriptor;}
 // Cross-profile presentation weight for one admitted symbol. Native scores
 // have different conservative bounds on different DSP paths; cap each symbol
 // separately so a strong prefix cannot lend its surplus to a weak later fit.
@@ -59,9 +66,13 @@ struct PatternBurst {
     // True only after six seconds of observed search absence. EOF and a
     // pending gap never mark completion. A terminal event may contain no bits.
     bool complete = false;
-    // Durable acquisition provenance. Losing the optional reference never
-    // changes this stream's ordinary payload or physical-completion rules.
+    // Legacy continuous-helper overlap/source-identity policy tag. Keep its
+    // arbitration semantics separate from observation-only birth provenance.
     bool helper_acquired = false;
+    // True only when this stream was born in an executed conditional helper
+    // acquisition pass. This durable observation never controls arbitration,
+    // payload progress, framing or physical completion.
+    bool helper_conditioned_acquisition = false;
     std::uint64_t stream_phase_samples = 0;
     // Stable local identity across drainable chunks. The ordinary first_*
     // fields above describe this chunk's original sample/symbol coordinates.
@@ -105,6 +116,10 @@ struct ScheduledCaptureEnvelope {
     SchedHopCoordinate lower,upper;
     long double minimum_rate=1,maximum_rate=1;
 };
+// Independently qualified birth-only clock domain. This does not rewrite the
+// ordinary baseline oscillator/coverage report. Explicit original pairs retain
+// their actual nonzero clock ratios and must cover this entire interval.
+struct PatternClockInterval {double lower_ppm=0,upper_ppm=0,cell_half_width_ppm=0;};
 struct PatternSearch {
     // Live supplies the entire simultaneous key/profile/epoch cohort for the
     // shared CPU-budget policy. These are scheduling inputs, never wire data.
@@ -134,6 +149,7 @@ struct PatternSearch {
     // include qualified UTC steering here; a phase-insensitive alternative must
     // cover it in full rather than inherit the clipped coherent endpoints.
     std::optional<double> admitted_frequency_half_width_hz,admitted_clock_half_width_ppm;
+    std::optional<PatternClockInterval> qualified_clock_interval;
     // Radius represented by each original paired timing lane. Thin independent
     // strips can have a larger cell than half the adjacent rate-center gap.
     // This provenance comes from the same builder as authoritative hypotheses.
@@ -266,6 +282,53 @@ struct PatternSearch {
     // False retains the preceding detector for identical-PCM comparisons.
     bool outer_presence_guard = true;
 };
+// Conservative closed-cell validation for an explicitly supplied conditional
+// domain. It creates no clock hypotheses, and missing provenance stays absent.
+inline bool pattern_clock_interval_valid(const PatternSearch& search) noexcept {
+    if(!search.qualified_clock_interval)return true;
+    const auto& interval=*search.qualified_clock_interval;
+    if(search.hypotheses.empty() || search.hypotheses.size()>maximum_pattern_frequency_rate_hypotheses ||
+       !std::isfinite(interval.lower_ppm) || !std::isfinite(interval.upper_ppm) ||
+       !std::isfinite(interval.cell_half_width_ppm) || interval.lower_ppm>interval.upper_ppm ||
+       interval.lower_ppm < -10000 || interval.upper_ppm>10000 || interval.cell_half_width_ppm<0 || interval.cell_half_width_ppm>10000)return false;
+#if defined(__FAST_MATH__) || (defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__>0) || FLT_EVAL_METHOD!=0
+    return false;
+#else
+    if(!std::numeric_limits<double>::is_iec559 || sizeof(double)!=sizeof(std::uint64_t) || std::fegetround()!=FE_TONEAREST)return false;
+    volatile double tiny=std::numeric_limits<double>::denorm_min(),one=1;
+    volatile double normal=std::numeric_limits<double>::min(),half=.5;
+    const double input=tiny*one,output=normal*half;
+    if(std::bit_cast<std::uint64_t>(input)!=1 || std::bit_cast<std::uint64_t>(output)!=0x0008000000000000ULL)return false;
+#endif
+    std::array<double,maximum_pattern_frequency_rate_hypotheses> rates{};
+    for(std::size_t i=0;i<search.hypotheses.size();++i) {
+        const auto rate=search.hypotheses[i].clock_error_ppm;
+        if(!std::isfinite(rate) || std::abs(rate)>10000)return false;
+        rates[i]=rate;
+    }
+    const auto count=search.hypotheses.size();std::sort(rates.begin(),rates.begin()+static_cast<std::ptrdiff_t>(count));
+    if(interval.cell_half_width_ppm==0)
+        return interval.lower_ppm==interval.upper_ppm && std::binary_search(rates.begin(),rates.begin()+static_cast<std::ptrdiff_t>(count),interval.lower_ppm);
+    // Error-free two-sum preserves exactly touching representable cells.
+    // Only actual inexact rounding contracts an inner endpoint; no tolerance
+    // is allowed to bridge a real or unproved coverage gap.
+    const auto sum=[](double a,double b) {
+        const auto value=a+b,bv=value-a,error=(a-(value-bv))+(b-bv);
+        const auto infinity=std::numeric_limits<double>::infinity();
+        return std::array<double,2>{error<0?std::nextafter(value,-infinity):value,
+            error>0?std::nextafter(value,infinity):value};
+    };
+    auto covered=interval.lower_ppm;
+    for(std::size_t i=0;i<count;++i) {
+        const auto lower=sum(rates[i],-interval.cell_half_width_ppm)[1];
+        const auto upper=sum(rates[i],interval.cell_half_width_ppm)[0];
+        if(!std::isfinite(lower) || !std::isfinite(upper))return false;
+        if(upper<covered)continue;
+        if(lower>covered)return false;
+        covered=upper;if(covered>=interval.upper_ppm)return true;
+    }
+    return false;
+}
 // Whole-symbol sampled absence needed by the fixed six-second policy.
 // Callers add their finite acquisition/lookahead margin when generating tails.
 std::uint64_t pattern_absence_samples(const Config&);
@@ -349,6 +412,8 @@ public:
     bool requalify(std::uint64_t evidence_sample,std::uint64_t qualified_until) noexcept;
     void close() noexcept {qualified_until_=0;}
     double value_at(long double absolute_sample) const noexcept;
+    double slope_at(long double absolute_sample) const noexcept;
+    std::optional<std::uint64_t> next_segment_after(std::uint64_t absolute_sample) const noexcept;
     std::uint64_t first_sample() const noexcept {return size_?segments_[0].first_sample:UINT64_MAX;}
     double baseline() const noexcept {return baseline_;}
     std::uint64_t latest_evidence() const noexcept {return latest_evidence_;}
@@ -369,6 +434,23 @@ private:
     std::uint32_t sample_rate_=0,maximum_bin_samples_=0;
 };
 static_assert(sizeof(PatternPhaseCurve)<=640);
+// Joined, native-only storage bound before the first acquisition decision.
+// This is a decoder/configured-bit floor, NOT an acquisition worker, cache or
+// throughput grant. Query after optional trim when the smallest bound is wanted.
+// Argument bytes use this receiver's constructor/setter convention; actual
+// bytes also include any outer wrapper object owned outside that argument.
+struct PatternColdWorkspaceFloor {
+    std::size_t workspace_argument_bytes=0,actual_workspace_bytes=0,configured_bit_limit=0;
+};
+// Pristine native observation storage through the first original scoring fence.
+// This certificate may fund observe_acquisition ONLY; it is not a setter grant
+// or permission to score. Configured/effective bit ceilings and the original
+// execution argument remain unchanged. Before any scoring the caller must fund
+// that full ordinary execution argument, or discard this optional cold owner.
+struct PatternColdObservationStorage {
+    std::size_t actual_workspace_bytes=0,execution_workspace_argument_bytes=0;
+    std::size_t configured_bit_limit=0,effective_bit_limit=0;
+};
 // Conservative mandatory storage through a finite retained-input replay.
 // This grants no source interpretation or physical completion authority.
 struct HelperReplayBudget {
@@ -381,7 +463,16 @@ struct HelperReplayBudget {
 };
 // Original native acquisition scheduling, in receiver-local input samples.
 // Observation is not an acquisition decision or physical absence. A caller
-// must finish ready original work before accepting further observations.
+// must finish ready work before further observation unless fresh dispatch is
+// paused; an already-scored pending receipt must always resolve first.
+// A caller-owned source-support lease controls NEW helper-conditioned work.
+// Pausing leaves pending scored receipts, accepted/provisional tracks and their
+// continuous phase/input coordinates intact. A native ring can eventually lose
+// an unscored cold aperture; retired then forbids replay on this owner, without
+// asserting that its original acquisition coverage was scored.
+struct PatternAcquisitionDispatchState {
+    bool supported=false,permitted=true,retired=false;
+};
 struct PatternAcquisitionState {
     bool supported=false,ready=false,prior_active=false,prior_pending=false,prior_accepted=false;
     std::uint64_t observed_samples=0,processing_frontier=0,audit_start_sample=0;
@@ -389,6 +480,158 @@ struct PatternAcquisitionState {
     double frequency_origin_hz=0;
     std::optional<double> admitted_clock_half_width_ppm;
     std::optional<double> admitted_clock_cell_half_width_ppm;
+    std::optional<PatternClockInterval> qualified_clock_interval;
+};
+// Cold-acquisition descriptor upper bound, not CPU time. Exact original
+// phase/index groups precede optional timing/overlap skips and score reuse.
+// A numerical retry can perform more transforms inside one FFT pair job.
+struct PatternAcquisitionWorkBound {
+    std::uint64_t original_pair_descriptors=0,maximum_fft_pair_jobs=0,original_phase_groups=0;
+    std::size_t initial_stream_symbols=0,transform_length=0;
+    bool ready=false;
+};
+// Full desired cold-acquisition support in receiver-local input samples.
+// The two-bin refinement cover is not clipped to consumed/captured PCM. The
+// caller must expand through its actual FIR/resampler mapping and decline if
+// any desired sample is unavailable. consumed_end_sample is exclusive.
+// Pure physical RF cell of the native coherent-pattern score operator.
+// Generated oscillator lattice spacing can be smaller and a UTC-steering
+// catalogue can contain several original grids. Neither changes this radius.
+// This query certifies no backend, capture, presence or future scored support;
+// its caller must independently prove native execution eligibility.
+double native_pattern_frequency_cell_radius(const Config&);
+struct PatternAcquisitionClockDomain {
+    // Immutable original catalogue and CURRENT legacy all-LF mask. The latter
+    // is a prerequisite, never silently intersected after certificate creation.
+    std::span<const PatternFrequencyRateHypothesis> original_pairs;
+    std::span<const std::uint8_t> legacy_frequency_mask;
+    std::uint64_t legacy_mask_id=0,input_sample_origin=0,input_phase_view_id=0,symbol_samples=0;
+    std::uint32_t sample_rate=0;
+    double frequency_origin_hz=0,frequency_cell_radius_hz=0;
+    double data_clock_half_width_ppm=0,clock_cell_half_width_ppm=0;
+};
+struct PatternAcquisitionScoredSupport {
+    std::uint64_t first_sample=0,last_sample=0,consumed_end_sample=0;
+    PatternAcquisitionClockDomain domain;
+};
+struct PatternAcquisitionClockInterval {double lower_ppm=0,upper_ppm=0;};
+// A trusted internal proof-producing builder issues this immutable, borrowed
+// certificate for ONE exact ordinary batch. It contains a complete original
+// RF x DATA-LF cell union, with every unresolved UTC transmit-steering factor.
+// Core validates its catalogue/domain binding, support, subset and DATA-clock
+// coverage. The builder, not core, proves the physical helper mapping.
+// The builder AND receiver must outlive the synchronous joined call. Rebuilding
+// the builder invalidates earlier views. No pointer is retained in Impl/Track.
+class PatternAcquisitionClockPrior {
+public:
+    const PatternAcquisitionScoredSupport& scored_support()const noexcept{return support_;}
+    std::span<const PatternAcquisitionClockInterval> intervals()const noexcept{return intervals_;}
+    std::span<const std::uint8_t> pair_mask()const noexcept{return mask_;}
+    std::uint64_t captured_input_end_sample()const noexcept{return input_end_;}
+    std::uint64_t reference_evidence_sample()const noexcept{return evidence_;}
+    std::uint64_t reference_captured_end_sample()const noexcept{return reference_end_;}
+private:
+    friend class datapump::helper::JointClockCellCertificate;
+    PatternAcquisitionClockPrior(PatternAcquisitionScoredSupport support,
+            std::span<const PatternAcquisitionClockInterval> intervals,std::span<const std::uint8_t> mask,
+            std::uint64_t input_end,std::uint64_t evidence,std::uint64_t reference_end)noexcept:
+        support_(support),intervals_(intervals),mask_(mask),input_end_(input_end),
+        evidence_(evidence),reference_end_(reference_end){}
+    PatternAcquisitionScoredSupport support_;
+    std::span<const PatternAcquisitionClockInterval> intervals_;
+    std::span<const std::uint8_t> mask_;
+    std::uint64_t input_end_=0,evidence_=0,reference_end_=0;
+};
+// All current native PCM backing, in ORIGINAL receiver input coordinates.
+// It conservatively encloses every same-call warm timing/phase/LF fit, including
+// newly admitted owners. The core never clips this to a reference's support.
+struct PatternContinuationScoredSupport {
+    PatternAcquisitionScoredSupport input;
+    std::uint64_t ring_bins=0,ready_established_tracks=0;
+};
+class PatternContinuationFrequencyPrior {
+public:
+    const PatternContinuationScoredSupport& support()const noexcept{return support_;}
+    std::span<const std::uint8_t> pair_mask()const noexcept{return mask_;}
+    std::uint64_t input_captured_end_sample()const noexcept{return input_end_;}
+    std::uint64_t raw_last_sample()const noexcept{return raw_last_;}
+    std::uint64_t reference_observed_end_sample()const noexcept{return reference_end_;}
+private:
+    friend class datapump::helper::ContinuationFrequencyCertificate;
+    PatternContinuationFrequencyPrior(PatternContinuationScoredSupport support,std::span<const std::uint8_t> mask,
+        std::uint64_t input_end,std::uint64_t raw_last,std::uint64_t reference_end)noexcept:
+        support_(support),mask_(mask),input_end_(input_end),raw_last_(raw_last),reference_end_(reference_end){}
+    PatternContinuationScoredSupport support_;
+    std::span<const std::uint8_t> mask_;
+    std::uint64_t input_end_=0,raw_last_=0,reference_end_=0;
+};
+enum class PatternContinuationFrequencyStatus {
+    not_requested,active,unsupported_geometry,invalid_reference,domain_changed,invalid_pair_subset
+};
+struct PatternContinuationFrequencyResult {
+    PatternContinuationFrequencyStatus status=PatternContinuationFrequencyStatus::not_requested;
+    // Numeric fits and logical trials are DIFFERENT units. No skipped fit is
+    // confidence/absence evidence. Anchor/timing fits always execute as usual.
+    std::uint64_t windows=0,narrowed_windows=0,anchor_timing_fits=0;
+    std::uint64_t original_competing_fits=0,executed_competing_fits=0,skipped_competing_fits=0;
+    std::uint64_t first_failure_broad_retries=0,periodic_broad_windows=0,logical_trials=0;
+};
+enum class PatternAcquisitionClockStatus {
+    not_requested,active,unsupported_geometry,invalid_reference,unsupported_clock_domain,
+    uncovered_scored_support,uncovered_clock_interval,domain_changed,invalid_pair_subset,no_clock_reduction
+};
+struct PatternAcquisitionClockResult {
+    PatternAcquisitionClockStatus status=PatternAcquisitionClockStatus::not_requested;
+    bool completed=false,narrowed=false;
+    std::size_t original_clock_rates=0,selected_clock_rates=0,original_pairs=0,selected_pairs=0;
+    std::uint64_t executed_template_jobs=0;
+};
+// Compact assistance controls the existing streaming correlator, independently
+// of the native FFT split-input seam. Conditional cold RF lanes are advanced
+// without observations; fallback starts at the current frontier, never replay.
+// Periodic physical punctuation, independently qualified without decoding
+// metadata. All aliases survive. Source phase belongs to the local candidate
+// epoch; observed_sample is a receiver-local INPUT coordinate, not a Tx date.
+struct PatternPeriodicTimingPrior {
+    long double observed_sample=0,source_phase_samples=0,period_samples=0,half_width_samples=0;
+};
+enum class PatternAcquisitionTimingStatus {
+    not_requested,active,unsupported_geometry,invalid_reference,unsupported_clock_domain,
+    bounded_scoring_declined,numeric_selection_declined,no_start_reduction
+};
+struct PatternAcquisitionTimingResult {
+    PatternAcquisitionTimingStatus status=PatternAcquisitionTimingStatus::not_requested;
+    bool completed=false,narrowed=false;
+    // Original group/start cells, before multiplying by retained RF/LF pairs.
+    // qualified cells are diagnostic only when bounded execution declines.
+    std::uint64_t original_group_start_cells=0,qualified_group_start_cells=0;
+    std::uint64_t direct_jobs=0,partitioned_jobs=0,partitioned_transform_points=0,skipped_template_jobs=0;
+};
+// Borrowed synchronous arguments only; no selector/model pointer enters a
+// receiver, pending batch or Track. Existing overloads keep null defaults.
+struct PatternAcquisitionAssistance {
+    const PatternAcquisitionClockPrior* clock=nullptr;
+    PatternAcquisitionClockResult* clock_result=nullptr;
+    const PatternPeriodicTimingPrior* timing=nullptr;
+    std::uint64_t timing_evidence_sample=0;
+    PatternAcquisitionTimingResult* timing_result=nullptr;
+    const PatternContinuationFrequencyPrior* continuation=nullptr;
+    PatternContinuationFrequencyResult* continuation_result=nullptr;
+};
+struct PatternCompactAcquisitionState {
+    bool supported=false,prior_active=false,audit_active=false,audit_complete=false;
+    bool timing_prior_active=false,timing_narrowing_active=false,workspace_yielded=false;
+    std::uint64_t observed_samples=0,audit_start_sample=0;
+    std::size_t original_pairs=0,selected_pairs=0,active_pairs=0,protected_pairs=0;
+    std::size_t original_arrival_lanes=0,active_arrival_lanes=0,projected_carriers=0;
+    std::size_t audit_scored_lanes=0,workspace_bytes=0,timing_selected_arrival_lanes=0;
+    std::uint64_t projected_carrier_samples=0,accumulated_lane_samples=0;
+    std::uint64_t skipped_carrier_samples=0,skipped_lane_samples=0;
+    std::uint64_t broad_audit_projected_carrier_samples=0,broad_audit_accumulated_lane_samples=0;
+    std::uint64_t broad_audit_full_symbols=0,skipped_logical_trials=0;
+    std::uint64_t phase_projected_carrier_samples=0,phase_carrier_moment_updates=0,phase_view_id=0;
+    std::optional<double> admitted_clock_half_width_ppm,admitted_clock_cell_half_width_ppm;
+    std::optional<PatternClockInterval> qualified_clock_interval;
 };
 class PatternReceiver {
 public:
@@ -398,10 +641,40 @@ public:
     PatternReceiver(PatternReceiver&&) noexcept;
     PatternReceiver& operator=(PatternReceiver&&) noexcept;
     void push(std::span<const float>, std::stop_token = {});
+    // Streaming compact control is separate from the native FFT seam below.
+    PatternCompactAcquisitionState compact_acquisition_state() const noexcept;
+    std::span<const PatternFrequencyRateHypothesis> compact_acquisition_hypotheses() const noexcept;
+    // Only origin zero is supported. The original-pair mask must retain every
+    // unresolved clock rate; all arrival/private phase alternatives survive.
+    // Optional control storage yields before payload/detector allocations.
+    // Reclaim permanently declines optional assistance for this owner, so a
+    // later reinstall cannot starve its required broad fallback/audit window.
+    bool set_compact_acquisition_prior(double frequency_origin_hz,std::span<const std::uint8_t> mask);
+    bool clear_compact_acquisition_prior() noexcept;
+    // The original bank stays broad until EVERY original arrival lane scores
+    // a fresh complete symbol. Reenabled crossing partial symbols are ineligible;
+    // the first broad decision can therefore require almost two symbol times.
+    bool start_compact_acquisition_audit() noexcept;
+    // Raw/unaccepted acquisition sufficient statistics may be cold. Any hard
+    // bit/provisional chain, timing/emission dependency or output forbids this.
+    bool cold_acquisition_only() const noexcept;
+    PatternAcquisitionDispatchState helper_acquisition_dispatch() const noexcept;
+    bool set_helper_acquisition_dispatch(bool permitted) noexcept;
+    bool set_compact_timing_prior(const PatternPeriodicTimingPrior&) noexcept;
+    bool clear_compact_timing_prior() noexcept;
+    // Attach once before the first observed sample. The borrowed curve must
+    // outlive this receiver; guarded future segments preserve history and an
+    // expired/closed reference keeps its last affine phase convention.
+    bool compact_phase_assistance_supported() const noexcept;
+    bool set_compact_phase_view(const PatternPhaseCurve*) noexcept;
+    bool compact_phase_view_active() const noexcept;
     // Opt-in split input/ordinary-search seam. Unsupported engines consume
     // zero. Input stops at the exact original native scheduling fence; no
     // hypothesis, trial, candidate, bit or END rule is omitted or changed.
     PatternAcquisitionState acquisition_state() const noexcept;
+    std::optional<PatternAcquisitionWorkBound> acquisition_work_bound() const noexcept;
+    std::optional<PatternAcquisitionScoredSupport> acquisition_scored_support() const noexcept;
+    std::optional<PatternContinuationScoredSupport> continuation_scored_support(std::size_t incoming_samples=0) const noexcept;
     std::span<const PatternFrequencyRateHypothesis> acquisition_hypotheses() const noexcept;
     // A conditional common-link prior, never a replacement source decoder.
     // The mask names the immutable original pairs and must retain every clock
@@ -419,12 +692,32 @@ public:
     // Allocation-free; unsupported compact engines remain untouched.
     bool set_helper_gap_protection(bool qualified) noexcept;
     std::size_t observe_acquisition(std::span<const float>,std::stop_token = {});
+    std::size_t observe_acquisition(std::span<const float>,const PatternContinuationFrequencyPrior&,
+        PatternContinuationFrequencyResult&,std::stop_token = {});
     // One conditional pass holds its original input/cursor until resolution.
     // True means an ordinary Robust bit was accepted, not helper metadata.
     bool process_prior_acquisition(std::stop_token = {});
+    bool process_assisted_acquisition(const PatternAcquisitionAssistance&,std::stop_token = {});
+    // Independently qualified periodic punctuation is borrowed for this joined
+    // acquisition batch only. observed_sample is the row-local physical grid
+    // anchor; evidence_sample separately dates the actual raw publication.
+    // Unsupported/crossover cases retain the ordinary selection and frequency
+    // prior. No timing pointer, epoch choice or changed basis reaches a track.
+    bool process_prior_acquisition(const PatternPeriodicTimingPrior&,std::uint64_t evidence_sample,
+                                   PatternAcquisitionTimingResult&,std::stop_token = {});
+    // Native deferred-FHSS cold acquisition only. The legacy all-LF prior
+    // setter remains unchanged; established tracking and END never use this
+    // selector. Unsupported certificates keep the frequency/timing path.
+    bool process_prior_acquisition(const PatternAcquisitionClockPrior&,PatternAcquisitionClockResult&,
+                                   std::stop_token = {});
+    bool process_prior_acquisition(const PatternAcquisitionClockPrior&,PatternAcquisitionClockResult&,
+                                   const PatternPeriodicTimingPrior&,std::uint64_t timing_evidence_sample,
+                                   PatternAcquisitionTimingResult&,std::stop_token = {});
     // A cohort may retire the original batch under the explicitly configured
     // common-link assumption. False instead audits that same batch at origin0.
     void resolve_acquisition(bool conditional_link,std::stop_token = {});
+    void resolve_acquisition(bool conditional_link,const PatternContinuationFrequencyPrior&,
+        PatternContinuationFrequencyResult&,std::stop_token = {});
     void process_acquisition(std::stop_token = {});
     // Borrowed bank-owned curve: it must outlive this receiver and all its
     // tracks. No per-row allocation or permanent phase history is added.
@@ -507,6 +800,11 @@ public:
     // Conservative physical input span for the first ordinary native FFT
     // batch (zero for a non-FFT backend). No samples or work are inserted.
     std::uint64_t initial_fft_input_samples() const noexcept;
+    // PRIVATE finite-reference export. Pure metadata snapshot of a pristine
+    // ordinary native owner; no samples, trials, tracks or policy are changed.
+    // Output allocation and complete physical observation support are capped.
+    bool export_conditioned_reference(detail::ConditionedReferenceDescriptor&,
+        std::size_t maximum_jobs,std::size_t maximum_source_samples) const;
     // True when acquisition covers an explicit finite system-clock window.
     bool clock_windowed() const;
     // The application requested expansion but only the original local
@@ -523,6 +821,15 @@ public:
     static std::size_t symbol_burst_control_bytes();
     // Includes admitted detector state whose allocation is deferred until PCM.
     std::size_t reserved_workspace_bytes() const;
+    // Pure/allocation-free. Declines after any acquisition decision, provisional
+    // or published owner, held acquisition/view, or unsupported backend. It neither
+    // changes the configured quota nor promises execution workers. A caller must
+    // fund a genuine ordinary execution loan before scoring a ready batch, and
+    // promote a new dependency before any further input under a cold policy.
+    std::optional<PatternColdWorkspaceFloor> cold_workspace_floor() const noexcept;
+    // Same pristine lifetime gate; no allocations, state or quota changes.
+    // Only the split observe_acquisition path is covered, up to its ready fence.
+    std::optional<PatternColdObservationStorage> cold_observation_storage() const noexcept;
     // No state changes. Unsupported calendars/backends return nullopt.
     // Includes all already observed input, future PCM and current capacities.
     std::optional<HelperReplayBudget> helper_replay_budget(std::size_t future_samples,
@@ -543,6 +850,9 @@ private:
     friend class detail::NativePeakLease;
     friend class detail::NativePointLease;
     friend struct detail::NativeDiagnosticHistoryAccess;
+    bool process_prior_acquisition_bounded(const PatternPeriodicTimingPrior*,std::uint64_t,
+        PatternAcquisitionTimingResult*,const PatternAcquisitionClockPrior*,PatternAcquisitionClockResult*,std::stop_token,
+        const PatternContinuationFrequencyPrior* = nullptr,PatternContinuationFrequencyResult* = nullptr);
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

@@ -143,6 +143,46 @@ void prepare_fft_nominal_reference(const FftSearchGeometry& geometry,PatternCode
             reference[bin][bit]=template_value(code,geometry,nominal,bin,bit,{},false);
     }
 }
+namespace {
+bool raw_template_geometry(const FftSearchGeometry& g) {
+    return effective_search_arithmetic(g)==SearchArithmetic::fp64 &&
+        !g.real_rank && !g.sample_fit && g.drift_sections==1 && !g.differential_window_samples &&
+        g.bins_per_symbol && g.bin_samples && g.pattern.chip_samples &&
+        g.pattern.chips_per_symbol && g.pattern.sample_rate && g.pattern.symbol_samples &&
+        std::fegetround()==FE_TONEAREST;
+}
+bool raw_template_matches(const FftPreparedRawTemplate& r,const FftSearchGeometry& g,
+                          const FftSearchJob& j) {
+    return r.pattern==g.pattern && r.bins==g.bins_per_symbol && r.bin_samples==g.bin_samples &&
+        r.carrier_hz==g.carrier_hz && r.extended_clock_window==g.extended_clock_window &&
+        r.symbol==j.symbol && r.phase==j.phase && r.frequency_hz==j.frequency_hz && r.clock_ratio==j.clock_ratio;
+}
+}
+FftPreparedRawTemplate prepare_fft_raw_template(const FftSearchGeometry& g,const FftSearchJob& j,
+        PatternCode& code,std::array<std::span<FftComplex>,2> rows,std::stop_token stop) {
+    if(!raw_template_geometry(g) || !std::isfinite(j.clock_ratio) || j.clock_ratio<=0 ||
+       !std::isfinite(j.frequency_hz) || rows[0].size()!=g.bins_per_symbol || rows[1].size()!=g.bins_per_symbol ||
+       !rows[0].data() || !rows[1].data() || fft_table_overlap(rows[0],rows[1]))
+        throw Error("invalid raw prepared pattern geometry or storage");
+    if(j.symbol>std::numeric_limits<std::uint64_t>::max()/g.pattern.chips_per_symbol)
+        throw Error("pattern stream coordinate overflow");
+    cancelled(stop);code.set_stream_phase_samples(j.phase);
+    code.prepare_symbol(j.symbol*g.pattern.chips_per_symbol,stop);
+    FftPreparedRawTemplate result;result.pattern=g.pattern;result.bins=g.bins_per_symbol;
+    result.bin_samples=g.bin_samples;result.symbol=j.symbol;result.phase=j.phase;
+    result.carrier_hz=g.carrier_hz;result.frequency_hz=j.frequency_hz;result.clock_ratio=j.clock_ratio;
+    result.extended_clock_window=g.extended_clock_window;
+    for(unsigned bit=0;bit<2;++bit) {
+        double norm=0;
+        for(std::size_t i=0;i<rows[bit].size();++i) {
+            if((i&4095U)==0)cancelled(stop);
+            const auto value=template_value(code,g,j,i,bit);
+            rows[bit][i]=std::conj(value);norm+=std::norm(value);
+        }
+        result.values.rows[bit]=rows[bit];result.values.energy[bit]=norm;
+    }
+    return result;
+}
 void pattern_fft(std::span<FftComplex> a, bool inverse, std::stop_token stop) {
     // Every transform uses these same power-of-two stages. Preserve the exact
     // polar calculation while sharing its immutable result between transforms
@@ -484,6 +524,28 @@ void execute_fft_search_cpu_exact(const FftSearchBatch& batch,std::span<const Ff
             previous=range.first+range.count;
         }
     }
+    if(!batch.prepared_raw.empty()) {
+        if(!batch.prepared.empty() || generates || supplied_tables || !raw_template_geometry(geometry) ||
+           !batch.nominal_reference.empty() || !exact_references.empty() || batch.private_template ||
+           batch.observations.size()<length+batch.starts-1)
+            throw Error("unsupported raw prepared pattern batch");
+        // All raw identity, domain and span checks precede any score writes.
+        for(const auto& job:jobs) {
+            if(job.prepared_template>=batch.prepared_raw.size())throw Error("invalid raw prepared pattern index");
+            const auto& raw=batch.prepared_raw[static_cast<std::size_t>(job.prepared_template)];
+            std::size_t selected=job.range_count==std::numeric_limits<std::size_t>::max()?batch.starts:0;
+            if(job.range_count!=std::numeric_limits<std::size_t>::max())
+                for(const auto r:batch.start_ranges.subspan(job.range_begin,job.range_count))selected+=r.count;
+            if(selected>32 || !raw_template_matches(raw,geometry,job))
+                throw Error("raw prepared pattern identity or direct geometry mismatch");
+            for(const auto row:raw.values.rows) {
+                if(row.size()!=length || !row.data() || fft_table_overlap(row,scores) || fft_table_overlap(row,jobs))
+                    throw Error("invalid or aliased raw prepared pattern row");
+                for(const auto& workspace:workspaces)if(fft_table_overlap(row,std::span(workspace.product)))
+                    throw Error("raw prepared pattern row aliases worker storage");
+            }
+        }
+    }
     if(supplied_tables) {
         // Validate every borrowed view and policy before any worker can prepare
         // a private template or publish an output. Normal non-trapping FP and
@@ -555,7 +617,9 @@ void execute_fft_search_cpu_exact(const FftSearchBatch& batch,std::span<const Ff
                 continue;
             }
             const FftPreparedTemplate* prepared=nullptr;
-            if(job.prepared_template!=std::numeric_limits<std::uint64_t>::max()) {
+            const bool raw_prepared=!batch.prepared_raw.empty();
+            if(raw_prepared)prepared=&batch.prepared_raw[static_cast<std::size_t>(job.prepared_template)].values;
+            else if(job.prepared_template!=std::numeric_limits<std::uint64_t>::max()) {
                 if(job.prepared_template>=batch.prepared.size())throw Error("invalid prepared pattern FFT template");
                 prepared=&batch.prepared[static_cast<std::size_t>(job.prepared_template)];
                 for(const auto row:prepared->rows)if(row.size()!=transform)
@@ -567,7 +631,7 @@ void execute_fft_search_cpu_exact(const FftSearchBatch& batch,std::span<const Ff
                     throw Error("pattern stream coordinate overflow");
                 workspace.code->prepare_symbol(job.symbol*geometry.pattern.chips_per_symbol,stop);
             }
-            const auto direct=pattern_fft_direct_eligible(geometry,!prepared,selected,
+            const auto direct=raw_prepared || pattern_fft_direct_eligible(geometry,!prepared,selected,
                 batch.observations.size()>=length+batch.starts-1);
             const auto visit=[&](const auto& action) {
                 if(full)for(std::size_t j=0;j<batch.starts;++j)action(j);
@@ -604,7 +668,8 @@ void execute_fft_search_cpu_exact(const FftSearchBatch& batch,std::span<const Ff
                     }
                 } else {
                     norm=prepared->energy[bit];square=prepared->square[bit];
-                    if(mode!=SearchArithmetic::fp32)
+                    if(raw_prepared) { /* Immutable direct row is borrowed below. */ }
+                    else if(mode!=SearchArithmetic::fp32)
                         for(std::size_t i=0;i<transform;++i)row[i]=batch.spectrum[i]*prepared->rows[bit][i];
                     else
                         for(std::size_t i=0;i<transform;++i)row[i]=pattern_fft_product(batch.spectrum[i],prepared->rows[bit][i],mode);
@@ -613,17 +678,18 @@ void execute_fft_search_cpu_exact(const FftSearchBatch& batch,std::span<const Ff
                     if(supplied_tables)search_fft::fft(std::span(row),true,tables,stop);
                     else pattern_fft(row,true,stop,mode);
                 }
+                const auto direct_row=raw_prepared?prepared->rows[bit]:std::span<const Complex>(row);
                 visit([&](std::size_t j) {
                     Complex dot{};
                     if(direct)for(std::size_t i=0;i<length;++i) {
                         if((i&4095U)==0)cancelled(stop);
                         if(mode==SearchArithmetic::fp32){
-                            const auto x=batch.observations[j+i],t=row[i];
+                            const auto x=batch.observations[j+i],t=direct_row[i];
                             const auto z=std::complex<float>{static_cast<float>(dot.real()),static_cast<float>(dot.imag())}+
                                 std::complex<float>{static_cast<float>(x.real()),static_cast<float>(x.imag())}*
                                 std::complex<float>{static_cast<float>(t.real()),static_cast<float>(t.imag())};
                             dot={z.real(),z.imag()};
-                        }else dot+=batch.observations[j+i]*row[i];
+                        }else dot+=batch.observations[j+i]*direct_row[i];
                     }
                     else dot=row[length-1+j];
                     const auto score=pattern_evidence(dot,

@@ -1,7 +1,18 @@
 #include "live_receiver_layout.hpp"
+#include "live_helper_prior.hpp"
+#include "helper_phase_chord.hpp"
+#include "conditioned_reference_export.hpp"
+#include "conditioned_reference_factory.hpp"
+#include "pattern_fft_clock_prior.hpp"
+#include "receiver_storage_allocator.hpp"
+#include <mutex>
 #include "live_receiver_admission.hpp"
+#include "receiver_oscillator_policy.hpp"
 #include "scheduled_acquisition_policy.hpp"
 #include "datapump/simulation_estimate.hpp"
+#include "datapump/helper_carrier.hpp"
+#include "datapump/helper_frontend.hpp"
+#include "datapump/helper_filter.hpp"
 #include "datapump/live.hpp"
 #include "shared_scheduled_capture.hpp"
 #include "datapump/boundary_sync.hpp"
@@ -25,6 +36,9 @@
 #include "datapump/sched_hop.hpp"
 #include "datapump/correlation_experiment.hpp"
 #include <algorithm>
+#include <set>
+#include <new>
+#include <tuple>
 #include <cstdlib>
 #include <array>
 #include <cmath>
@@ -35,7 +49,81 @@
 #include <sstream>
 
 namespace datapump::simulation {
+const char* helper_joint_clock_source_domain(HelperJointClockSourceRelation relation) noexcept {
+    switch(relation) {
+    case HelperJointClockSourceRelation::physical_audio_unsteered:
+        return "Independent unsteered helper: all certified physical audio-clock branches and their unresolved UTC DATA-clock union remain.";
+    case HelperJointClockSourceRelation::common_corrected_robust_source:
+        return "Explicit same corrected Robust source: the measured DATA clock b=(1+a)(1+c)-1 retains every certified branch; physical audio a and UTC correction c remain individually unresolved and are not added again.";
+    case HelperJointClockSourceRelation::unknown:
+        return "Helper/Robust source-clock relation is unknown; no executed joint cost provenance is granted.";
+    }
+    return "Helper/Robust source-clock relation is unknown; no executed joint cost provenance is granted.";
+}
+namespace detail {
+struct HelperJointClockProof {
+    static constexpr std::size_t pair_capacity=4096,interval_capacity=64;
+    // Numeric shape only. No selected key/seeds or shared provider ownership
+    // crosses from the decoder into retained GUI diagnostics.
+    modem::Config config;
+    std::optional<modem::FhssPlan> hopping;
+    HelperFrequencyInputMap input;
+    std::array<modem::PatternFrequencyRateHypothesis,pair_capacity> pair_storage{};
+    std::array<std::uint8_t,pair_capacity> frequency_storage{},joint_storage{};
+    std::array<modem::PatternAcquisitionClockInterval,interval_capacity> interval_storage{};
+    std::span<const modem::PatternFrequencyRateHypothesis> original_pairs;
+    std::span<const std::uint8_t> frequency_mask,joint_mask;
+    std::span<const modem::PatternAcquisitionClockInterval> data_intervals;
+    HelperJointClockMetadata metadata;
+    double data_clock_radius_ppm=0,clock_cell_radius_ppm=0,frequency_cell_radius_hz=0;
+    HelperJointClockProof()=default;
+    HelperJointClockProof(const HelperJointClockProof&)=delete;
+    HelperJointClockProof& operator=(const HelperJointClockProof&)=delete;
+};
+}
+class HelperJointClockDiagnosticPool {
+public:
+    struct Slot {detail::HelperJointClockProof proof;bool occupied=false;};
+    std::shared_ptr<live::detail::ReceiverAllocationAccount> account;
+    std::mutex mutex;
+    std::array<Slot,2> slots;
+    explicit HelperJointClockDiagnosticPool(std::shared_ptr<live::detail::ReceiverAllocationAccount> value):account(std::move(value)){}
+};
 namespace {
+struct HelperJointClockDiagnosticLease {
+    std::shared_ptr<HelperJointClockDiagnosticPool> pool;
+    std::size_t slot=0;
+    HelperJointClockDiagnosticLease(std::shared_ptr<HelperJointClockDiagnosticPool> value,std::size_t i):pool(std::move(value)),slot(i){}
+    ~HelperJointClockDiagnosticLease() {
+        std::lock_guard lock(pool->mutex);
+        auto& value=pool->slots[slot];
+        value.proof.original_pairs={};value.proof.frequency_mask={};value.proof.joint_mask={};value.proof.data_intervals={};
+        value.proof.config={};value.proof.hopping.reset();value.proof.input={};value.proof.metadata={};
+        value.occupied=false;
+    }
+};
+bool same_joint_profile_numeric(const modem::Config& a,const detail::HelperJointClockProof& proof,bool exact_epoch=true) {
+    const auto& b=proof.config;
+    if(!a.fake_hopping||!proof.hopping)return false;
+    const auto& x=*a.fake_hopping;const auto& y=*proof.hopping;
+    return x.channels==y.channels&&x.shifts==y.shifts&&x.dwell_seconds==y.dwell_seconds&&
+        x.power_ramps==y.power_ramps&&x.defer_symbols==y.defer_symbols&&x.matched_gaps==y.matched_gaps&&
+        x.mandatory_ramps==y.mandatory_ramps&&x.smooth_ramps==y.smooth_ramps&&x.remote_guard_covered==y.remote_guard_covered&&
+        x.ramp_seconds==y.ramp_seconds&&x.clock_error_seconds==y.clock_error_seconds&&
+        x.peer_clock_error_seconds==y.peer_clock_error_seconds&&x.audio_error_seconds==y.audio_error_seconds&&
+        x.region_seconds==y.region_seconds&&x.offset_seconds==y.offset_seconds&&
+        a.pattern_symbols==b.pattern_symbols&&a.sample_rate==b.sample_rate&&a.carrier_hz==b.carrier_hz&&
+        a.bandwidth_hz==b.bandwidth_hz&&a.dsss_factor==b.dsss_factor&&a.outer_dsss_version==b.outer_dsss_version&&
+        a.spreading_factor==b.spreading_factor&&a.integration_seconds==b.integration_seconds&&a.training_seconds==b.training_seconds&&
+        a.spreading_mode==b.spreading_mode&&a.scramble==b.scramble&&a.dsss==b.dsss&&a.pulse_shaping==b.pulse_shaping&&
+        (!exact_epoch||(a.stream_epoch%2==b.stream_epoch%2&&a.stream_phase_samples==b.stream_phase_samples))&&
+        a.receiver_cpu_budget==b.receiver_cpu_budget;
+}
+bool same_joint_pairs(std::span<const modem::PatternFrequencyRateHypothesis> a,
+                      std::span<const modem::PatternFrequencyRateHypothesis> b) {
+    return a.size()==b.size()&&std::equal(a.begin(),a.end(),b.begin());
+}
+
 bool shared_hop_calendar(const modem::Config& config) {
     return config.symbol_burst.enabled() || config.fake_hopping || (config.scheduled_hopping&&config.scheduled_hopping->enabled());
 }
@@ -231,11 +319,12 @@ struct SearchBank {
     double requested_clock_ppm=0,clock_ppm=0,clock_step_ppm=0;
     double minimum_rate=1,maximum_rate=1;
     bool legacy_coupled=false,limited=false;
+    const HelperFrequencyProfile* helper_profile=nullptr;
 };
-SearchBank search_bank(const modem::Config& config,bool utc) {
+SearchBank search_bank(const modem::Config& config,const transfer::Options& options) {
     SearchBank result;
     if(config.oscillator_search) {
-        const auto plan=modem::oscillator_pattern_search(config,utc?modem::utc_transmit_rate_limit(config):0);
+        const auto plan=transfer::receiver_oscillator_search(config,options);
         result.frequency=plan.frequency;result.hypotheses=plan.hypotheses;
         result.requested_clock_ppm=plan.requested_clock_half_width_ppm;
         result.clock_ppm=plan.clock_half_width_ppm;result.clock_step_ppm=plan.clock_step_ppm;
@@ -265,7 +354,7 @@ SearchBank search_bank(const modem::Config& config,bool utc) {
         probe.admitted_clock_half_width_ppm=result.requested_clock_ppm;
         probe.complex_frequency_coverage=!result.frequency.limited;
         probe.complex_clock_coverage=result.clock_ppm>=result.requested_clock_ppm;
-        const auto refined=modem::scheduled_complex_search(config,probe,utc?modem::utc_transmit_rate_limit(config):0);
+        const auto refined=modem::scheduled_complex_search(config,probe,transfer::receiver_utc_rate_correction(config,options));
         if(refined.complete_coverage) {
             result.hypotheses=refined.search.hypotheses;
             result.frequency.step_hz=refined.geometry.frequency_step_hz;
@@ -290,6 +379,142 @@ SearchBank search_bank(const modem::Config& config,bool utc) {
     }
     return result;
 }
+// The scenario supplies actual receiver cells, not a confidence-to-probability
+// conversion. Certify their complete conditional strip with the same inward /
+// outward interval operations as ordinary helper admission.
+SearchBank helper_execution_bank(const modem::Config& config,const SearchBank& original,
+                                const HelperFrequencyProfile& profile) {
+    using namespace live::detail::helper_prior_detail;
+    if(!environment())throw Error("helper scenario interval arithmetic unavailable");
+    if(!config.oscillator_search || profile.cells.empty() ||
+       profile.cells.size()>modem::maximum_pattern_frequency_rate_hypotheses ||
+       profile.input.logical_sample_rate!=config.sample_rate || !profile.input.physical_sample_rate ||
+       !std::isfinite(profile.input.frequency_correction_hz))
+        throw Error("helper scenario has no finite actual input/catalogue geometry");
+    const auto& domain=profile.physical_domain;
+    for(const auto value:{domain.clock_lower_ppm,domain.clock_upper_ppm,domain.frequency_intercept_hz,
+         domain.frequency_slope_hz_per_ppm,domain.frequency_half_width_hz})
+        if(!std::isfinite(value))throw Error("helper scenario physical strip is nonfinite");
+    if(domain.clock_lower_ppm>domain.clock_upper_ppm || domain.clock_lower_ppm<=-1e6 ||
+       domain.frequency_half_width_hz<0)throw Error("helper scenario physical strip is invalid");
+    const auto& actual=profile.actual_geometry;
+    if(!actual.projection_bin_samples || !std::isfinite(actual.minimum_rate) ||
+       !std::isfinite(actual.maximum_rate) || actual.minimum_rate<=0 ||
+       actual.minimum_rate>actual.maximum_rate)
+        throw Error("helper scenario lacks resolved backend/bin/rate geometry");
+    SearchBank result=original;result.helper_profile=&profile;
+    result.hypotheses.clear();result.limited=result.frequency.limited=false;
+    result.minimum_rate=actual.minimum_rate;result.maximum_rate=actual.maximum_rate;
+    result.requested_clock_ppm=result.clock_ppm=std::max(std::abs(domain.clock_lower_ppm),std::abs(domain.clock_upper_ppm));
+    std::vector<double> endpoints{domain.clock_lower_ppm,domain.clock_upper_ppm},frequencies;
+    const auto maximum_radius=modem::native_pattern_frequency_cell_radius(config);
+    for(const auto& cell:profile.cells) {
+        const auto& pair=cell.hypothesis;
+        for(const auto value:{pair.frequency_offset_hz,pair.clock_error_ppm,cell.frequency_half_width_hz,
+             cell.clock_lower_ppm,cell.clock_upper_ppm})
+            if(!std::isfinite(value))throw Error("helper scenario cell is nonfinite");
+        if(cell.frequency_half_width_hz<0 || cell.frequency_half_width_hz>maximum_radius ||
+           cell.clock_lower_ppm>pair.clock_error_ppm || cell.clock_upper_ppm<pair.clock_error_ppm ||
+           cell.clock_lower_ppm>cell.clock_upper_ppm ||
+           1+pair.clock_error_ppm*1e-6<actual.minimum_rate ||
+           1+pair.clock_error_ppm*1e-6>actual.maximum_rate ||
+           std::find(result.hypotheses.begin(),result.hypotheses.end(),pair)!=result.hypotheses.end())
+            throw Error("helper scenario cell exceeds its actual physical geometry");
+        if(profile.owner==HelperExecutionOwner::original_masked_owner &&
+           std::find(original.hypotheses.begin(),original.hypotheses.end(),pair)==original.hypotheses.end())
+            throw Error("helper masked scenario invents an original pair");
+        if(profile.owner==HelperExecutionOwner::original_masked_owner) {
+            const auto clock=inner_clock(pair.clock_error_ppm,original.clock_step_ppm/2,original.requested_clock_ppm);
+            if(cell.clock_lower_ppm<clock.lower||cell.clock_upper_ppm>clock.upper||
+               cell.frequency_half_width_hz!=maximum_radius)
+                throw Error("helper masked scenario changes an original native RF/clock cell");
+        }
+        result.hypotheses.push_back(pair);frequencies.push_back(pair.frequency_offset_hz);
+        if(cell.clock_lower_ppm>domain.clock_lower_ppm&&cell.clock_lower_ppm<domain.clock_upper_ppm)
+            endpoints.push_back(cell.clock_lower_ppm);
+        if(cell.clock_upper_ppm>domain.clock_lower_ppm&&cell.clock_upper_ppm<domain.clock_upper_ppm)
+            endpoints.push_back(cell.clock_upper_ppm);
+    }
+    if(profile.owner==HelperExecutionOwner::executed_joint_masked_owner) {
+        const auto& proof=profile.joint_clock_proof;
+        if(!proof||!same_joint_profile_numeric(config,*proof,false)||config.oscillator_search!=proof->config.oscillator_search||
+           config.receiver_strategy!=proof->config.receiver_strategy||config.search_arithmetic!=proof->config.search_arithmetic||
+           config.receiver_cpu_budget!=proof->config.receiver_cpu_budget||
+           config.frequency_search_multiplier!=proof->config.frequency_search_multiplier||
+           profile.input.physical_sample_rate!=proof->input.physical_sample_rate||
+           profile.input.logical_sample_rate!=proof->input.logical_sample_rate||
+           profile.input.input_view_id!=proof->input.input_view_id||
+           profile.input.input_origin_samples!=proof->input.input_origin_samples||
+           profile.input.joint_source_relation!=proof->input.joint_source_relation||
+           proof->metadata.source_relation!=proof->input.joint_source_relation||
+           profile.input.frequency_correction_hz!=0||profile.input.conjugate_image||
+           !same_joint_pairs(original.hypotheses,proof->original_pairs)||proof->joint_mask.size()!=original.hypotheses.size()||original.requested_clock_ppm!=proof->data_clock_radius_ppm||
+           original.clock_step_ppm/2!=proof->clock_cell_radius_ppm||
+           maximum_radius!=proof->frequency_cell_radius_hz||
+           profile.actual_geometry.projection_bin_samples!=proof->metadata.projection_bin_samples||
+           result.hypotheses.size()!=proof->metadata.joint_pairs)
+            throw Error("executed joint-clock scenario is not bound to this exact original native domain/basis");
+        std::size_t selected=0;
+        for(std::size_t i=0;i<original.hypotheses.size();++i)if(proof->joint_mask[i]) {
+            const auto found=std::find_if(profile.cells.begin(),profile.cells.end(),[&](const auto& c){return c.hypothesis==original.hypotheses[i];});
+            if(found==profile.cells.end()||found->frequency_half_width_hz!=maximum_radius)
+                throw Error("executed joint-clock scenario changed its certified original pair mask");
+            const auto clock=inner_clock(original.hypotheses[i].clock_error_ppm,proof->clock_cell_radius_ppm,proof->data_clock_radius_ppm);
+            if(found->clock_lower_ppm!=clock.lower||found->clock_upper_ppm!=clock.upper)
+                throw Error("executed joint-clock scenario changed an original DATA-clock cell");
+            ++selected;
+        }
+        if(selected!=result.hypotheses.size())throw Error("executed joint-clock scenario added an unproved pair");
+        // The trusted core builder proved this source relation's complete
+        // DATA-clock union; never rebuild a different independent affine strip
+        // or add UTC again to a measured common corrected-source clock.
+        result.requested_clock_ppm=result.clock_ppm=original.requested_clock_ppm;
+        std::sort(frequencies.begin(),frequencies.end());
+        result.frequency.count=std::unique(frequencies.begin(),frequencies.end())-frequencies.begin();
+        return result;
+    }
+    if(profile.owner==HelperExecutionOwner::original_masked_owner) {
+        if(domain.clock_lower_ppm!=-original.requested_clock_ppm || domain.clock_upper_ppm!=original.requested_clock_ppm)
+            throw Error("helper masked scenario removes an unresolved physical clock interval");
+        for(const auto& pair:original.hypotheses)
+            if(std::none_of(result.hypotheses.begin(),result.hypotheses.end(),[&](const auto& selected) {
+                return selected.clock_error_ppm==pair.clock_error_ppm;
+            }))throw Error("helper masked scenario removes an unresolved original LF lane");
+    }
+    std::sort(endpoints.begin(),endpoints.end());endpoints.erase(std::unique(endpoints.begin(),endpoints.end()),endpoints.end());
+    const auto covered=[&](double lower,double upper) {
+        const auto required=strip(domain.frequency_intercept_hz,domain.frequency_half_width_hz,
+            domain.frequency_slope_hz_per_ppm*1e6,lower,upper);
+        if(!finite(required))return false;
+        std::vector<Interval> intervals;
+        for(const auto& cell:profile.cells)
+            if(cell.clock_lower_ppm<=lower&&cell.clock_upper_ppm>=upper)
+                intervals.push_back(inner_cell(cell.hypothesis.frequency_offset_hz,0,cell.frequency_half_width_hz));
+        std::sort(intervals.begin(),intervals.end(),[](auto a,auto b){return a.lower<b.lower;});
+        auto frontier=required.lower;
+        for(const auto interval:intervals) {
+            if(!finite(interval)||interval.lower>interval.upper)return false;
+            if(interval.upper<frontier)continue;
+            if(interval.lower>frontier)return false;
+            frontier=std::max(frontier,interval.upper);
+            if(frontier>=required.upper)return true;
+        }
+        return false;
+    };
+    if(endpoints.size()==1) {
+        if(!covered(endpoints.front(),endpoints.front()))throw Error("helper scenario leaves a physical strip gap");
+    } else for(std::size_t i=1;i<endpoints.size();++i)
+        if(!covered(endpoints[i-1],endpoints[i]))throw Error("helper scenario leaves a physical strip gap");
+    std::sort(frequencies.begin(),frequencies.end());
+    result.frequency.count=static_cast<std::size_t>(std::unique(frequencies.begin(),frequencies.end())-frequencies.begin());
+    if(profile.owner==HelperExecutionOwner::conditional_catalogue_owner) {
+        result.frequency.half_width_hz=0;
+        for(const auto& pair:result.hypotheses)result.frequency.half_width_hz=std::max(result.frequency.half_width_hz,std::abs(pair.frequency_offset_hz));
+        result.frequency.requested_half_width_hz=result.frequency.half_width_hz;
+        result.frequency.step_hz=2*maximum_radius;
+    }
+    return result;
+}
 bool within_representation_bound(long double value,long double bound) {
     // Policy endpoints and public channel values are doubles. Round the
     // intermediate product back to that representation before comparing;
@@ -297,6 +522,10 @@ bool within_representation_bound(long double value,long double bound) {
     return static_cast<double>(std::abs(value))<=static_cast<double>(bound);
 }
 bool paired_clock_coverage(const SearchBank& bank,long double frequency,double clock) {
+    if(bank.helper_profile)return std::any_of(bank.helper_profile->cells.begin(),bank.helper_profile->cells.end(),[&](const auto& cell) {
+        return clock>=cell.clock_lower_ppm&&clock<=cell.clock_upper_ppm&&
+            std::abs(frequency-cell.hypothesis.frequency_offset_hz)<=cell.frequency_half_width_hz;
+    });
     if(!within_representation_bound(clock,bank.clock_ppm))return false;
     return std::any_of(bank.hypotheses.begin(),bank.hypotheses.end(),[&](const auto& hypothesis) {
         return within_representation_bound(frequency-hypothesis.frequency_offset_hz,bank.frequency.step_hz/2)&&
@@ -843,7 +1072,7 @@ ReceiverLayoutContext receiver_layout_context(const transfer::Options& options,
         if(mode==ReceiverWorkMode::hardware_calendar_model||mode==ReceiverWorkMode::hardware_timing_model) {
             double rate_radius=0;
             for(const auto& profile:profiles) {
-                const auto bank=search_bank(profile,arrival_policy(options,profile).has_value());
+                const auto bank=search_bank(profile,options);
                 rate_radius=std::max({rate_radius,1-bank.minimum_rate,bank.maximum_rate-1});
             }
             context.timing=audio::TimePrediction{context.now,
@@ -1135,7 +1364,8 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     const bool scaled=bank.minimum_rate!=1||bank.maximum_rate!=1;
     const auto frequencies=static_cast<long double>(bank.hypotheses.size());
     const auto maximum_clock_ratio=std::max(1-bank.minimum_rate,bank.maximum_rate-1);
-    auto bin=modem::pattern_projection_bin_samples(config,geometry.half_width_hz);
+    auto bin=bank.helper_profile?bank.helper_profile->actual_geometry.projection_bin_samples:
+        modem::pattern_projection_bin_samples(config,geometry.half_width_hz);
     const auto omega=2*std::numbers::pi*config.carrier_hz/config.sample_rate;
     const auto sine=std::sin(omega);
     auto image=std::abs(sine)>1e-12?std::abs(std::sin(static_cast<double>(bin)*omega)/sine):static_cast<double>(bin);
@@ -2718,7 +2948,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
                   const modem::ChannelConfig& channel,std::span<const modem::Config> profiles,std::size_t keys,
                   bool compute_probability,double local_window_seconds,std::size_t probability_trials,
                   ReceiverWorkMode work_mode,ReceiverTimingModel timing_model,const live::Settings* actual_settings,std::stop_token stop,
-                  bool support_only=false) {
+                  bool support_only=false,const QualifiedHelperFrequencyScenario* helper_scenario=nullptr) {
     estimate_detail::check(stop);
     auto options=source_options;
     options.search_seconds=live::detail::effective_epoch_search_seconds(options,false);
@@ -2726,7 +2956,11 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         options.modem.data_key=options.key;
         options.modem=modem::scheduled_estimate_config(options.modem);
     }
-    modem::validate(options.modem);modem::validate_channel(options.modem,channel);
+    modem::validate(options.modem);
+    auto validation_config=options.modem;
+    if(helper_scenario)for(const auto& profile:helper_scenario->profiles)
+        validation_config.sample_rate=std::max(validation_config.sample_rate,profile.input.physical_sample_rate);
+    modem::validate_channel(validation_config,channel);
     if(!std::isfinite(transmission.total_seconds) || transmission.total_seconds<0 || !keys ||
        !std::isfinite(local_window_seconds) || local_window_seconds<0)
         throw Error("invalid simulation estimate input");
@@ -2846,7 +3080,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
     bool any_pulse_projected=false,any_pulse_segmented=false,any_kernel_upper_bound=false;
     Work matching_work;
     const modem::Config* matching_profile=nullptr;
-    struct BankEntry {const modem::Config* profile;SearchBank bank;};
+    struct BankEntry {const modem::Config* profile;SearchBank bank;std::optional<SearchBank> original;};
     struct WorkEntry {std::size_t bank;std::uint64_t training_samples;std::size_t established_bits;Bytes burst_calendar_tag;Work work;};
     // This cache lasts only for one estimate. Keys/epochs do not change the
     // search geometry; each receive profile still contributes its full cost.
@@ -2856,8 +3090,18 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
     std::vector<WorkEntry> work_entries;
     banks.reserve(profiles.size()+1);work_entries.reserve(profiles.size());
     const auto bank_index=[&](const modem::Config& profile) {
+        const HelperFrequencyProfile* helper_profile=nullptr;
+        if(helper_scenario) {
+            const auto identity=std::find_if(profiles.begin(),profiles.end(),[&](const auto& p){return &p==&profile;});
+            if(identity==profiles.end())throw Error("helper scenario cannot invent a missing receive-profile identity");
+            const auto index=static_cast<std::size_t>(identity-profiles.begin());
+            const auto found=std::find_if(helper_scenario->profiles.begin(),helper_scenario->profiles.end(),
+                [&](const auto& value){return value.profile_index==index;});
+            if(found==helper_scenario->profiles.end())throw Error("helper scenario omits an ordinary receive profile");
+            helper_profile=&*found;
+        }
         const auto found=std::find_if(banks.begin(),banks.end(),[&](const auto& entry) {
-            return same_profile(profile,*entry.profile)&&
+            return entry.bank.helper_profile==helper_profile&&same_profile(profile,*entry.profile)&&
                 profile.pattern_symbols==entry.profile->pattern_symbols&&
                 profile.oscillator_search==entry.profile->oscillator_search&&
                 profile.receiver_strategy==entry.profile->receiver_strategy&&
@@ -2867,15 +3111,17 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         if(found!=banks.end())return static_cast<std::size_t>(found-banks.begin());
         auto keyed_profile=profile;
         if(options.key&&!profile.symbol_burst.enabled())keyed_profile.data_key=options.key;
-        banks.push_back({&profile,search_bank(keyed_profile,arrival_policy(options,keyed_profile).has_value()&&
-            work_mode!=ReceiverWorkMode::sampled_simulation)});
+        auto original=search_bank(keyed_profile,options);
+        if(helper_profile)banks.push_back({&profile,helper_execution_bank(keyed_profile,original,*helper_profile),std::move(original)});
+        else banks.push_back({&profile,std::move(original),std::nullopt});
         return banks.size()-1;
     };
     std::size_t matching_bank=0;
     bool matching_supported=false,all_work_supported=true,all_cost_available=true,all_workspace_supported=true,all_initial_coverage=true;
     bool all_sustained_modeled=true;
-    long double sustained_cpu=0,fallback_sustained_cpu=0;
-    const auto frequency=channel.frequency_offset_hz+static_cast<long double>(config.carrier_hz)*channel.clock_error_ppm*1e-6L;
+    long double sustained_cpu=0,fallback_sustained_cpu=0,sustained_tracking_cpu=0;
+    auto frequency=channel.frequency_offset_hz+static_cast<long double>(config.carrier_hz)*channel.clock_error_ppm*1e-6L;
+    const auto uncorrected_frequency=frequency;
     for(const auto& profile:profiles) {
         estimate_detail::check(stop);
         modem::validate(profile);
@@ -2891,6 +3137,8 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         result.profile_matches|=matches;
         const auto index=bank_index(profile);
         const auto& candidate_bank=banks[index].bank;
+        const auto candidate_frequency=uncorrected_frequency+(candidate_bank.helper_profile?
+            candidate_bank.helper_profile->input.frequency_correction_hz:0.);
         // receiver_work uses training only for rounded private epoch coverage.
         // All its remaining profile inputs are included in the bank identity;
         // media, options, key/profile counts and matching wire bits are fixed.
@@ -2902,9 +3150,80 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
             return entry.bank==index&&entry.training_samples==training_samples&&
                 entry.established_bits==established_bits&&entry.burst_calendar_tag==calendar_tag;
         });
-        const auto work=existing!=work_entries.end()?existing->work:
+        auto work=existing!=work_entries.end()?existing->work:
             receiver_work(profile,candidate_bank,media*profile.sample_rate,profile_options,profiles.size(),keys,
                           matches?transmission.wire_bits:0,local_window_seconds,work_mode,timing_model,layout?&*layout:nullptr,stop);
+        if(existing==work_entries.end()&&candidate_bank.helper_profile) {
+            const auto& actual=candidate_bank.helper_profile->actual_geometry;
+            auto corrected_channel=channel;
+            corrected_channel.frequency_offset_hz+=candidate_bank.helper_profile->input.frequency_correction_hz;
+            modem::validate_channel(profile,corrected_channel);
+            if(work.strategy.backend!=modem::ReceiverBackend::existing_complex ||
+               work.bin_samples!=actual.projection_bin_samples || work.compact!=actual.compact ||
+               work.pulse_projected!=actual.pulse_projected || work.pulse_segmented!=actual.pulse_segmented ||
+               work.drift_supported!=actual.drift_supported || work.differential_supported!=actual.differential_supported)
+                throw Error("helper scenario backend/representation differs from actual resolved geometry");
+            const auto logical=receiver_work(profile,*banks[index].original,media*profile.sample_rate,profile_options,
+                profiles.size(),keys,matches?transmission.wire_bits:0,local_window_seconds,work_mode,timing_model,
+                layout?&*layout:nullptr,stop);
+            if(work.bin_samples!=logical.bin_samples || work.compact!=logical.compact ||
+               work.pulse_projected!=logical.pulse_projected || work.pulse_segmented!=logical.pulse_segmented ||
+               work.drift_supported!=logical.drift_supported || work.differential_supported!=logical.differential_supported)
+                throw Error("helper frequency model retains the original fine grid and detector representation");
+            if(candidate_bank.helper_profile->owner==HelperExecutionOwner::original_masked_owner||
+               candidate_bank.helper_profile->owner==HelperExecutionOwner::executed_joint_masked_owner) {
+                // Masking does not construct a smaller owner or unlock a new
+                // allocation/representation. Charge original constructor work.
+                if(work.compact!=logical.compact||work.pulse_projected!=logical.pulse_projected||
+                   work.pulse_segmented!=logical.pulse_segmented||work.drift_supported!=logical.drift_supported||
+                   work.differential_supported!=logical.differential_supported||
+                   work.geometry.template_reuse!=logical.geometry.template_reuse)
+                    throw Error("helper masked work would change the retained owner's representation");
+                const auto serial_delta=logical.initial_epoch_setup_operations+logical.new_epoch_setup_operations-
+                    work.initial_epoch_setup_operations-work.new_epoch_setup_operations;
+                const auto scoring_delta=logical.initial_epoch_setup_scoring_operations+logical.new_epoch_setup_scoring_operations-
+                    work.initial_epoch_setup_scoring_operations-work.new_epoch_setup_scoring_operations;
+                work.serial+=serial_delta;work.parallel+=scoring_delta;
+                if(work.sustained_modeled&&logical.sustained_modeled&&work.cohort_lifetime>0&&work.epoch_hypotheses>0) {
+                    const auto constructors=work.sustained_instances/work.cohort_lifetime;
+                    work.sustained_serial+=constructors*(logical.initial_epoch_setup_operations/logical.epoch_hypotheses-
+                        work.initial_epoch_setup_operations/work.epoch_hypotheses)/keys;
+                    work.sustained_parallel+=constructors*(logical.initial_epoch_setup_scoring_operations/logical.epoch_hypotheses-
+                        work.initial_epoch_setup_scoring_operations/work.epoch_hypotheses)/keys;
+                }
+                work.workspace_supported&=logical.workspace_supported;
+            }
+            // Executed projection/fit work changes; logical detector penalties
+            // do not. The caller separately proves that the core preserves it.
+            work.search_trials=logical.search_trials;
+            work.acquisition_threshold=logical.acquisition_threshold;
+            work.following_search_ratio=logical.following_search_ratio;
+            work.tracking_serial=logical.tracking_serial;work.tracking_windows=logical.tracking_windows;
+            work.sustained_tracking=logical.sustained_tracking;
+            if(work.compact) {
+                // The existing model rolls compact continuation into lane work;
+                // it cannot price the retained full owner separately from a
+                // selected acquisition mask. Do not silently discount payload.
+                work.cost_available=false;work.work_supported=false;
+                work.geometry.fallback_reason+="; helper compact full-owner continuation cost is not separately modeled";
+            }
+            work.initial_epoch_setup_operations=logical.initial_epoch_setup_operations;
+            work.new_epoch_setup_operations=logical.new_epoch_setup_operations;
+            work.initial_epoch_setup_scoring_operations=logical.initial_epoch_setup_scoring_operations;
+            work.new_epoch_setup_scoring_operations=logical.new_epoch_setup_scoring_operations;
+            work.geometry.scope+="; explicit qualified helper frequency execution; original logical detector penalties retained";
+            if(candidate_bank.helper_profile->owner==HelperExecutionOwner::executed_joint_masked_owner) {
+                // ClockCacheScope discards exact/helper/cached template rows on
+                // each joined batch. Private native cost already regenerates
+                // selected templates for EVERY acquisition batch. Native FFT
+                // plans are Impl-owned (not ScoringStorage) and survive these
+                // drops; charge the ordinary persistent plan, never claim a
+                // helper cache hit or invent a per-job plan rebuild.
+                if(!profile.scramble&&!profile.dsss)
+                    throw Error("executed joint cost has no private per-dispatch template generation model");
+                work.geometry.scope+="; joint batches retain cold private template generation and ordinary push-scoped scoring storage; native plans survive cache drops";
+            }
+        }
         if(existing==work_entries.end())work_entries.push_back({index,training_samples,established_bits,calendar_tag,work});
         serial+=work.serial;parallel+=work.parallel;all_work_supported&=work.work_supported;
         all_workspace_supported&=work.workspace_supported;
@@ -2921,6 +3240,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         all_cost_available&=work.cost_available&&fallback_work.cost_available;
         sustained_cpu+=(work.sustained_serial+work.sustained_tracking)/serial_operations_per_second+
             work.sustained_parallel/cpu_scoring_operations_per_second;
+        sustained_tracking_cpu+=work.sustained_tracking/serial_operations_per_second;
         fallback_sustained_cpu+=(fallback_work.sustained_serial+fallback_work.sustained_tracking)/serial_operations_per_second+
             fallback_work.sustained_parallel/cpu_scoring_operations_per_second;
         result.hardware_cohort_lifetime_seconds=std::max(result.hardware_cohort_lifetime_seconds,
@@ -2933,12 +3253,12 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         any_pulse_segmented|=work.pulse_segmented;any_kernel_upper_bound|=work.kernel_upper_bound;
         tracking_serial+=work.tracking_serial;tracking_windows+=work.tracking_windows;
         if(matches) {
-            const bool frequency_covered=within_representation_bound(frequency,
+            const bool frequency_covered=within_representation_bound(candidate_frequency,
                 work.strategy.backend==modem::ReceiverBackend::amplitude_energy?
                     work.strategy.amplitude_frequency_half_width_hz:candidate_bank.frequency.half_width_hz);
             const bool clock_covered=work.strategy.backend==modem::ReceiverBackend::amplitude_energy?
                 within_representation_bound(channel.clock_error_ppm,work.strategy.amplitude_clock_half_width_ppm):
-                (!profile.oscillator_search||paired_clock_coverage(candidate_bank,frequency,channel.clock_error_ppm));
+                (!profile.oscillator_search||paired_clock_coverage(candidate_bank,candidate_frequency,channel.clock_error_ppm));
             const bool coverage_limited=candidate_bank.limited&&
                 !(work.strategy.full_frequency_coverage&&work.strategy.full_clock_coverage);
             const bool supported=frequency_covered&&clock_covered&&!coverage_limited&&
@@ -2946,16 +3266,25 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
             if(!matching_profile||(supported&&(!matching_supported||work.acquisition_threshold<matching_work.acquisition_threshold))) {
                 matching_work=work;matching_profile=&profile;matching_supported=supported;
                 matching_bank=index;
-                trials=work.search_trials;
+                trials=work.search_trials;frequency=candidate_frequency;
             }
         }
     }
+    result.execution_projection_bin_samples=matching_work.bin_samples;
+    const auto& execution_bank=banks[matching_profile?matching_bank:bank_index(config)].bank;
+    result.execution_minimum_rate=execution_bank.minimum_rate;result.execution_maximum_rate=execution_bank.maximum_rate;
+    result.execution_compact=matching_work.compact;result.execution_pulse_projected=matching_work.pulse_projected;
+    result.execution_drift_supported=matching_work.drift_supported;
+    result.execution_differential_supported=matching_work.differential_supported;
+    result.logical_acquisition_threshold=matching_work.acquisition_threshold;
+    result.logical_search_trials=finite_seconds(matching_work.search_trials);
     result.receiver_workspace_supported=matching_profile&&matching_work.workspace_supported&&layout->cohort_capacity>0&&
         (!config.symbol_burst.enabled()||all_workspace_supported);
     result.receiver_work_supported=matching_profile&&all_work_supported&&(!config.symbol_burst.enabled()||all_initial_coverage);
     result.hardware_sustained_modeled=matching_profile&&all_sustained_modeled;
     if(result.hardware_sustained_modeled) {
         result.hardware_sustained_realtime_ratio=finite_seconds(sustained_cpu);
+        result.hardware_sustained_tracking_realtime_ratio=finite_seconds(sustained_tracking_cpu);
         result.fallback_hardware_sustained_realtime_ratio=finite_seconds(fallback_sustained_cpu);
     }
     result.receiver_frontend_seconds=finite_seconds(receiver_frontend/serial_operations_per_second);
@@ -3393,7 +3722,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         return result;
     }
     const bool frequency_axis=matching_work.strategy.backend==modem::ReceiverBackend::frequency_axis;
-    const bool eme_reference_geometry=!matching_work.compact&&config.pattern_symbols&&
+    const bool eme_reference_geometry=!helper_scenario&&!matching_work.compact&&config.pattern_symbols&&
         config.spreading_mode==modem::SpreadingMode::pattern&&!config.scramble&&!config.dsss&&
         config.dsss_factor==1&&!config.fake_hopping&&!config.scheduled_hopping&&!config.data_key&&!options.key&&
         !arrival_policy(options,config)&&
@@ -3860,6 +4189,797 @@ Estimate estimate_with_receiver_settings(const transfer::Estimate& transmission,
         bool compute_probability,double window,std::size_t trials,ReceiverWorkMode mode,
         ReceiverTimingModel timing,std::stop_token stop) {
     return estimate_impl(transmission,options,raw_bits,channel,profiles,keys,compute_probability,window,trials,mode,timing,&settings,stop);
+}
+namespace {
+using HelperVector=std::array<double,6>;
+using HelperMatrix=std::array<HelperVector,6>;
+bool helper_requirement_solve(HelperMatrix a,HelperVector b,HelperVector& x) {
+    for(unsigned i=0;i<6;++i) {
+        unsigned pivot=i;
+        for(unsigned j=i+1;j<6;++j)if(std::abs(a[j][i])>std::abs(a[pivot][i]))pivot=j;
+        if(!std::isfinite(a[pivot][i])||std::abs(a[pivot][i])<1e-14)return false;
+        std::swap(a[i],a[pivot]);std::swap(b[i],b[pivot]);
+        for(unsigned j=i+1;j<6;++j) {
+            const auto f=a[j][i]/a[i][i];
+            for(unsigned k=i+1;k<6;++k)a[j][k]-=f*a[i][k];
+            b[j]-=f*b[i];
+        }
+    }
+    for(unsigned r=6;r>0;--r) {const auto i=r-1;double sum=b[i];
+        for(unsigned j=i+1;j<6;++j)sum-=a[i][j]*x[j];
+        x[i]=sum/a[i][i];if(!std::isfinite(x[i]))return false;
+    }
+    return true;
+}
+double helper_requirement_covariance(const HelperMatrix& inverse,const HelperVector& a,const HelperVector& b) {
+    double sum=0;for(unsigned i=0;i<6;++i)for(unsigned j=0;j<6;++j)sum+=a[i]*inverse[i][j]*b[j];
+    return sum;
+}
+}
+HelperStrongRequirements helper_strong_requirements(std::uint32_t rate,double hz,double width,
+        double cn0,double sigma,std::uint64_t frontier) {
+    HelperStrongRequirements r;r.sample_rate=rate;r.expected_cn0_db_hz=cn0;
+    r.source_requirements_id="helper-raw-polynomial-6col-8se+process-envelope+phase-chord-mean-v1";
+    r.conditions="Conditional ideal straight-tone WLS geometry with expected AWGN residual scale; actual 90% explained-energy, amplitude/curvature, precision, cycle and continuity gates must independently pass, and the published local/model/process interval must be no wider than the forecast requirement. Punctuation is an additional condition only for the chord. No probability of qualification or unconditional utility is inferred.";
+    const auto fail=[&](const char* text){r.reason=text;return r;};
+    if(rate<1000||frontier>std::numeric_limits<std::uint64_t>::max()-3ULL*rate||!std::isfinite(hz)||!std::isfinite(width)||width<0||hz-width<10||hz+width>=rate/2.-10||
+       !std::isfinite(cn0)||!std::isfinite(sigma)||sigma<0)
+        return fail("Strong requirements are outside the actual raw precision fit passband/model");
+    r.fit_samples=std::max<std::size_t>(16,rate/25);r.fit_seconds=static_cast<double>(r.fit_samples)/rate;
+    const auto C=std::pow(10.,cn0/10),noise=std::sqrt(rate/(4*C));
+    if(!std::isfinite(noise))return fail("Expected helper noise scale is nonfinite");
+    constexpr auto tau=2*std::numbers::pi;
+    HelperMatrix gram{},inverse{};
+    for(std::size_t i=0;i<r.fit_samples;++i) {
+        const auto u=static_cast<double>(i)/r.fit_samples-.5;
+        const auto c=std::cos(tau*hz*i/rate),s=std::sin(tau*hz*i/rate);
+        const HelperVector b{c,s,u*c,u*s,u*u*c,u*u*s};
+        for(unsigned j=0;j<6;++j)for(unsigned k=0;k<6;++k)gram[j][k]+=b[j]*b[k];
+    }
+    // Minimum finite tone energy over the unknown initial carrier phase.
+    // Ratio of expected energies is a necessary planning diagnostic, never a
+    // success probability or a guarantee that a random raw fit passes.
+    const auto tone_energy=(gram[0][0]+gram[1][1]-std::hypot(gram[0][0]-gram[1][1],2*gram[0][1]))/2;
+    r.expected_explained_fraction=tone_energy/(tone_energy+r.fit_samples*noise*noise);
+    if(!std::isfinite(r.expected_explained_fraction)||r.expected_explained_fraction<.90)
+        return fail("Expected raw energy is below the receiver's 90% strong-fit gate; weak masked-tone utility is not forecast by the strong component");
+    for(unsigned j=0;j<6;++j) {HelperVector unit{},column{};unit[j]=1;
+        if(!helper_requirement_solve(gram,unit,column))return fail("Finite raw-tone Gram geometry is singular");
+        for(unsigned i=0;i<6;++i)inverse[i][j]=column[i];
+    }
+    const auto u=static_cast<double>(r.fit_samples-1)/r.fit_samples-.5;
+    HelperVector pc{},ps{},fc{},fs{};
+    for(unsigned j=0;j<6;++j) {const auto power=j/2;
+        const auto q=power==0?1.:power==1?u:u*u,dq=power==0?0.:power==1?1.:2*u;
+        (j%2?pc:ps)[j]=-q;(j%2?fc:fs)[j]=-dq/(tau*r.fit_seconds);
+    }
+    const auto maximum_variance=[&](const HelperVector& a,const HelperVector& b) {
+        const auto aa=helper_requirement_covariance(inverse,a,a),bb=helper_requirement_covariance(inverse,b,b);
+        const auto ab=helper_requirement_covariance(inverse,a,b);
+        return (aa+bb+std::hypot(aa-bb,2*ab))/2;
+    };
+    const auto pv=maximum_variance(pc,ps),fv=maximum_variance(fc,fs);
+    if(!(pv>0)||!(fv>0)||!std::isfinite(pv)||!std::isfinite(fv))return fail("Raw finite-window covariance is unavailable");
+    r.phase_radius_radians=std::max(2e-6,8*noise*std::sqrt(pv));
+    r.frequency_radius_hz=std::max(1e-5,8*noise*std::sqrt(fv));
+    // Same full-aperture Wiener event/opportunity spending as Receiver. The
+    // unit-CW counterfactual remains explicit: this is a requirements forecast,
+    // not a bound on an unobserved data-dependent polynomial fit.
+    if(sigma>0) {
+        const auto ordinal=static_cast<double>((frontier+3ULL*rate)/r.fit_samples+1);
+        const auto logarithm=std::log(1600.)+std::log(ordinal)+std::log(ordinal+1);
+        const auto z=std::max(8.,std::sqrt(2*logarithm)),h=z*sigma*std::sqrt(r.fit_seconds);
+        const auto degrees=static_cast<double>(r.fit_samples)-6;
+        const auto vd=degrees-2*std::sqrt(degrees*logarithm);
+        const auto sine=std::min(std::sin(tau*(hz-width)/rate),std::sin(tau*(hz+width)/rate));
+        const auto carrier=(r.fit_samples-1/sine)/2.;
+        if(!(vd>0)||!(sine>0)||!(carrier>0))return fail("Strong process/noise event cannot be represented at this aperture");
+        const auto noise_upper=noise*std::sqrt(degrees/vd);
+        const auto count=static_cast<double>(r.fit_samples);
+        const auto noise_norm=noise_upper*std::sqrt(count+2*std::sqrt(count*logarithm)+2*logarithm);
+        const auto denominator=std::sqrt(carrier)-std::sqrt(count)*h;
+        if(!(denominator>0))return fail("Strong process amplitude ball spans zero; no frequency precision forecast");
+        const auto tone_energy_upper=(count+1/sine)/2;
+        const auto upper=(std::sqrt(tone_energy_upper)+noise_norm)/denominator;
+        std::array<HelperVector,4> eg{{{1,0,u,0,u*u,0},{0,-1,0,-u,0,-u*u},
+            {0,0,1,0,2*u,0},{0,0,0,-1,0,-2*u}}};
+        std::array<HelperVector,4> ei{};HelperVector fi_c{},fi_s{};
+        for(unsigned q=0;q<4;++q)if(!helper_requirement_solve(gram,eg[q],ei[q]))return fail("Strong process influence is unavailable");
+        if(!helper_requirement_solve(gram,fc,fi_c)||!helper_requirement_solve(gram,fs,fi_s))return fail("Strong frequency influence is unavailable");
+        double absolute_gain=0,Lc=0,Ld=0;
+        for(std::size_t i=0;i<r.fit_samples;++i) {
+            const auto v=static_cast<double>(i)/r.fit_samples-.5;
+            const auto c=std::cos(tau*hz*i/rate),s=std::sin(tau*hz*i/rate);
+            const HelperVector b{c,s,v*c,v*s,v*v*c,v*v*s};
+            std::array<double,4> e{};double kc=0,ks=0;
+            for(unsigned j=0;j<6;++j) {kc+=fi_c[j]*b[j];ks+=fi_s[j]*b[j];
+                for(unsigned q=0;q<4;++q)e[q]+=ei[q][j]*b[j];}
+            absolute_gain+=std::hypot(kc,ks)*upper;
+            Lc+=std::hypot(e[0],e[1])*upper;Ld+=std::hypot(e[2],e[3])*upper;
+        }
+        const auto dc=Lc*h,dd=Ld*h;
+        if(!std::isfinite(dc)||!std::isfinite(dd)||dc>=1)return fail("Strong endpoint process ball spans a phase cycle");
+        r.process_frequency_radius_hz=h*absolute_gain+dd*dc/((1-dc)*tau*r.fit_seconds);
+        r.frequency_radius_hz+=r.process_frequency_radius_hz;
+        r.phase_radius_radians+=h+std::asin(dc);
+    }
+    if(!std::isfinite(r.frequency_radius_hz)||!std::isfinite(r.phase_radius_radians))return fail("Strong precision forecast is nonfinite");
+    r.frequency_requirements_available=true;
+    // Feed dated conditional canonical endpoints through the ACTUAL component,
+    // rather than using CI width as a probability or choosing an arbitrary long
+    // averaging aperture. The forty-ms fits start at the actual tone windows.
+    helper::PhaseChord chord;
+    if(!chord.configure(rate,sigma,hz))return fail("PhaseChord arithmetic/configuration declined");
+    const auto dwell=static_cast<std::uint64_t>(2ULL*rate/5);
+    const auto start=frontier+(dwell-frontier%dwell)%dwell;
+    const auto first=static_cast<std::uint64_t>(std::ceil(.008*rate));
+    for(unsigned d=0;d<5;++d)for(unsigned k=0;k<5;++k) {
+        const auto sample=start+d*dwell+first+(k+1)*r.fit_samples-1;
+        helper::Reference ref;ref.sample=ref.frequency_sample=ref.phase_observation_sample=sample;ref.sample_rate=rate;
+        ref.frequency_hz=hz;ref.phase_radians=std::remainder(tau*hz*static_cast<double>(sample)/rate,tau);
+        ref.phase_uncertainty_radians=r.phase_radius_radians;ref.frequency_uncertainty_hz=r.frequency_radius_hz;
+        ref.frequency_valid=ref.phase_valid=ref.timing_valid=ref.phase_observation_known=true;
+        ref.dwell_start_seconds=static_cast<double>(start+d*dwell)/rate;ref.dwell_uncertainty_seconds=0;
+        chord.observe(ref,sample);
+        if(const auto prediction=chord.prediction())if(const auto mean=prediction->mean_frequency_interval()) {
+            r.chord_requirements_available=true;r.chord_mean_radius_hz=mean->radius_hz;
+            r.chord_aperture_seconds=static_cast<double>(mean->last_sample-mean->first_sample)/rate;
+        }
+    }
+    r.minimum_observation_seconds=static_cast<double>(start-frontier)/rate+2;
+    r.reason=r.chord_requirements_available?
+        "Strong conditional frequency requirements available; chord additionally assumes independently qualified punctuation and canonical endpoints":
+        "Strong frequency-only requirements available; phase/punctuation/cycle precision does not justify a chord";
+    return r;
+}
+
+HelperMaskedFrequencyRequirements helper_masked_frequency_requirements(std::uint32_t rate,
+        double expected,double width,double sigma,bool coherent) {
+    HelperMaskedFrequencyRequirements result;result.physical_sample_rate=rate;
+    result.continuous_phase_assumed=coherent;
+    try {
+        auto profile_width=width;
+        if(width>100) {
+            result.coarse_required=true;
+            const helper::CoarseToneSearch::Config coarse{rate,expected,width,4096,3};
+            result.coarse_bytes=helper::CoarseToneSearch::workspace_required(coarse);
+            profile_width=helper::CoarseToneSearch::seed_half_width_bound(coarse);
+        }
+        helper::FrequencyWorkOptions work;work.sample_rate=rate;work.coherent_phase_model=coherent;
+        // No optional RAM is reserved by this pure query. Report required bytes
+        // independently; an actual Bank surplus grant is a runtime prerequisite.
+        const auto geometry=helper::Receiver::optional_frequency_geometry(expected,profile_width,work,{0,1000,sigma});
+        result.geometry_supported=geometry.supported;result.required_bytes=geometry.required_bytes;
+        result.profile_half_width_hz=profile_width;result.aperture_seconds=geometry.aperture_seconds;
+        result.startup_support_seconds=geometry.startup_support_seconds;
+        result.cold_deadline_seconds=geometry.cold_staging_deadline_seconds;
+        result.reason=geometry.supported?
+            "Optional masked-tone frequency geometry is supported at this physical capture rate; the raw polynomial90% gate does not decide its eligibility. Complete global analysis, independent recent presence, declared cross-dwell phase continuity and a separately funded actual workspace remain required. No residual CI, qualification probability, startup completion time or CPU/RX gain is forecast.":
+            "Masked-tone frequency geometry is unavailable for this capture/phase/prior model. The current native profile supports24kHz,48kHz and48.96kHz physical PCM; a logical modem rate is not proof of the raw capture rate. A failed short polynomial fit alone does not rule out that separate native profile.";
+        if(result.coarse_required)result.reason+=" Coarse discovery only seeds future independent precision data; its FFT guard width is not confidence. Both admissible real-PCM signs remain unresolved.";
+        if(!coherent)result.reason+=" Continuous cross-dwell phase has not been assumed; an RF retune with unknown phase cannot use this model.";
+    }catch(const Error& error){result.reason=error.what();}
+    return result;
+}
+
+HelperFrequencyForecast helper_frequency_forecast(const transfer::Estimate& transmission,
+        const transfer::Options& options,const modem::ChannelConfig& channel,
+        const HelperFrequencyForecastRequest& request,const HelperFrequencyCosts& costs,
+        ReceiverWorkMode mode,ReceiverTimingModel timing,const live::Settings* settings,std::stop_token stop) {
+    HelperFrequencyForecast r;
+    const auto fail=[&](const std::string& reason){r.reason=reason;return r;};
+    const auto& config=options.modem;
+    auto constructor_width=20.;
+    if(config.oscillator_search) {
+        const auto original=transfer::receiver_oscillator_search(config,options);
+        constructor_width=std::max(constructor_width,original.frequency.requested_half_width_hz);
+    }
+    r.masked_requirements=helper_masked_frequency_requirements(request.physical_sample_rate,
+        request.helper_frequency_hz,constructor_width,channel.phase_noise_degrees_per_sqrt_second*std::numbers::pi/180,
+        request.assume_continuous_helper_phase);
+    if(config.receiver_strategy!=modem::ReceiverStrategy::automatic&&
+       config.receiver_strategy!=modem::ReceiverStrategy::complex_only)
+        return fail("Helper rolling acquisition requires Automatic or Complex receiver policy; the selected policy is ineligible");
+    if(settings&&(settings->helper.power_w<=0||settings->helper.frequency==helper::Frequency::cochannel))
+        return fail("Disabled or cochannel helper has no isolated rolling frequency-reference forecast");
+    if(!config.oscillator_search||!config.pattern_symbols||config.spreading_mode!=modem::SpreadingMode::pattern||
+       config.symbol_burst.enabled()||modem::scheduled_bursts(config)||options.timestamp)
+        return fail("Strong conditional forecast requires the ordinary rolling coherent-pattern owner; scheduled, Burst and fixed-epoch paths are outside this seam");
+    if(request.physical_sample_rate!=config.sample_rate&&
+       (!request.fixed_nominal_rate_conversion||
+        (config.oscillator_search->reference==modem::OscillatorReference::shared_radio&&config.oscillator_search->rf_shift_hz>0)))
+        return fail("Raw/shared input-view forecast needs a certified fixed nominal rate map or original-statistics/input-map adapter; capture rate alone does not certify that catalogue");
+    try {
+        // Same native fixed-filter constructor/passband/tap limit as Live.
+        // This proves geometry only, not complete control reservations,
+        // full all-profile response or correlated-noise sensitivity.
+        const helper::PayloadFilter filter(config.sample_rate,request.helper_frequency_hz);
+        if(!filter.enabled())return fail("Native helper payload filter is unavailable");
+    }catch(const Error& e) {return fail(std::string("Native helper filter is ineligible: ")+e.what());}
+    const auto observed=request.helper_frequency_hz*(1+channel.clock_error_ppm*1e-6)+channel.frequency_offset_hz;
+    const auto fit_width=std::min(20.,std::min(observed-10.,request.physical_sample_rate/2.-10.-observed));
+    r.requirements=helper_strong_requirements(request.physical_sample_rate,observed,fit_width,
+        request.expected_usable_helper_cn0_db_hz,channel.phase_noise_degrees_per_sqrt_second*std::numbers::pi/180,
+        request.acquisition_frontier_sample);
+    if(!r.requirements.frequency_requirements_available)return fail(r.requirements.reason);
+    auto keyed=config;if(options.key)keyed.data_key=options.key;
+    const auto original=search_bank(keyed,options);
+    if(original.limited||original.frequency.limited)
+        return fail("Original LF/RF catalogue is clipped; a new shared-clock conditional catalogue cannot inherit its incomplete statistical domain");
+    // Exact native operator authority, shared with core scored-support and
+    // pristine descriptor exports. Generated spacing is not this physical
+    // radius, particularly when UTC steering retains several original grids.
+    const auto frequency_cell_radius=modem::native_pattern_frequency_cell_radius(config);
+    auto radius=r.requirements.frequency_radius_hz;
+    if(request.assume_independently_qualified_punctuation&&r.requirements.chord_requirements_available)
+        radius=std::min(radius,r.requirements.chord_mean_radius_hz);
+    const auto mask=live::detail::helper_prior_mask(original.hypotheses,
+        observed-request.helper_frequency_hz,radius,config.carrier_hz-request.helper_frequency_hz,
+        frequency_cell_radius,original.clock_step_ppm/2,original.requested_clock_ppm,false);
+    if(!mask.admitted)return fail(std::string("Source requirements do not certify an original-grid RF reduction: ")+mask.reason);
+    if(mask.origin_hz!=0||mask.selected>=original.hypotheses.size())
+        return fail("Conditional strong reference does not reduce original-grid RF work; no benefit is assigned");
+    Estimate ordinary;
+    try {ordinary=estimate_impl(transmission,options,true,channel,{},1,false,100,64,mode,timing,settings,stop);}
+    catch(const Error& e){return fail(e.what());}
+    if(ordinary.receiver_geometry.receiver_strategy_selected!="existing complex")
+        return fail("Actual Auto backend is outside the retained complex frequency-mask cost model");
+    HelperFrequencyProfile profile;profile.profile_index=0;
+    profile.physical_domain={-original.requested_clock_ppm,original.requested_clock_ppm,
+        observed-request.helper_frequency_hz,(config.carrier_hz-request.helper_frequency_hz)*1e-6,radius};
+    profile.input.physical_sample_rate=request.physical_sample_rate;profile.input.logical_sample_rate=config.sample_rate;
+    profile.input.physical_passband_lower_hz=request.physical_passband_lower_hz;
+    profile.input.physical_passband_upper_hz=request.physical_passband_upper_hz;
+    profile.input.payload_filter_hz=request.helper_frequency_hz;
+    profile.original_trial_policy_evidence="actual original masked owner: full original trials and continuation retained";
+    // PayloadFilter's response bound explicitly does not validate correlated
+    // noise/FAP. This remains empty until that independent component is covered.
+    profile.input.ordinary_noise_model_evidence.clear();
+    profile.actual_geometry={ordinary.execution_projection_bin_samples,ordinary.execution_minimum_rate,
+        ordinary.execution_maximum_rate,ordinary.execution_compact,ordinary.execution_pulse_projected,
+        ordinary.pulse_segment_projection_modeled,ordinary.execution_drift_supported,ordinary.execution_differential_supported};
+    for(std::size_t i=0;i<original.hypotheses.size();++i)if(mask.cells[i]) {
+        const auto& pair=original.hypotheses[i];
+        const auto clock=live::detail::helper_prior_detail::inner_clock(pair.clock_error_ppm,
+            original.clock_step_ppm/2,original.requested_clock_ppm);
+        profile.cells.push_back({pair,frequency_cell_radius,clock.lower,clock.upper});
+    }
+    QualifiedHelperFrequencyScenario scenario;scenario.origin=HelperScenarioOrigin::requirements_forecast;
+    scenario.reference_evidence=r.requirements.source_requirements_id;
+    scenario.profiles.push_back(std::move(profile));scenario.costs=costs;
+    scenario.expected_usable_helper_cn0_db_hz=request.expected_usable_helper_cn0_db_hz;
+    scenario.qualification_aperture_seconds=r.requirements.minimum_observation_seconds;
+    if(request.validated_coverage) {scenario.origin=HelperScenarioOrigin::validated_forecast;
+        scenario.forecast_coverage=request.validated_coverage;}
+    r.scenario=std::move(scenario);
+    r.reason="Conditional strong source-requirements forecast, not observed synchronization or qualification probability. ";
+    r.reason+=request.assume_independently_qualified_punctuation&&r.requirements.chord_requirements_available?
+        "The separate canonical-punctuation assumption permits the actual PhaseChord mean-frequency requirement. ":
+        "Frequency-only WLS requirements do not depend on punctuation or metadata. ";
+    r.reason+="All original LF/arrival/epoch alternatives, fine projection bins, logical thresholds and payload continuation remain. Input-filter probability calibration is unavailable.";
+    return r;
+}
+
+namespace {
+const char* joint_copy_error(const modem::Config& config,const modem::PatternAcquisitionClockPrior& prior,
+        const modem::PatternAcquisitionClockResult& executed,const modem::PatternAcquisitionState& before,
+        const modem::PatternAcquisitionWorkBound& bound,const HelperFrequencyInputMap& input) {
+    const auto& support=prior.scored_support();const auto& domain=support.domain;
+    const auto pairs=domain.original_pairs;const auto legacy=domain.legacy_frequency_mask;const auto joint=prior.pair_mask();
+    if(input.joint_source_relation!=HelperJointClockSourceRelation::physical_audio_unsteered&&
+       input.joint_source_relation!=HelperJointClockSourceRelation::common_corrected_robust_source)
+        return "Executed joint-clock copy lacks the actual producer's source-clock relation";
+    // The joined runtime caller supplies its real execution result. These
+    // public fields reject inconsistent/default metadata; they do not prove
+    // execution independently of that trusted-producer premise.
+    if(!executed.completed||!executed.narrowed||!executed.executed_template_jobs||
+       executed.status!=modem::PatternAcquisitionClockStatus::active)
+        return "No completed, actually executed native joint-clock batch";
+    modem::PatternAcquisitionClockResult verified;
+    if(!modem::detail::pattern_fft_clock_prior(prior,support,verified)||
+       verified.original_pairs!=executed.original_pairs||verified.selected_pairs!=executed.selected_pairs||
+       verified.original_clock_rates!=executed.original_clock_rates||verified.selected_clock_rates!=executed.selected_clock_rates)
+        return "Executed joint-clock result no longer matches its trusted original-domain certificate";
+    if(!before.supported||!before.ready||!before.prior_active||before.prior_pending||
+       before.frequency_origin_hz!=0||!before.bin_samples||before.observed_samples!=support.consumed_end_sample||
+       before.original_pairs!=pairs.size()||before.selected_pairs!=verified.original_pairs||
+       before.admitted_clock_half_width_ppm!=std::optional<double>{domain.data_clock_half_width_ppm}||
+       before.admitted_clock_cell_half_width_ppm!=std::optional<double>{domain.clock_cell_half_width_ppm}||
+       !bound.ready||!bound.original_phase_groups||!bound.initial_stream_symbols||!bound.transform_length||
+       bound.original_phase_groups>UINT64_MAX/pairs.size()||
+       bound.original_pair_descriptors!=bound.original_phase_groups*pairs.size()||
+       bound.maximum_fft_pair_jobs!=bound.original_pair_descriptors||
+       executed.executed_template_jobs>bound.maximum_fft_pair_jobs)
+        return "Executed joint-clock copy lacks matching original pre-dispatch geometry/work support";
+    if(config.sample_rate!=14400||config.bandwidth_hz!=360||config.dsss_factor!=10||
+       config.outer_dsss_version!=modem::OuterDsssVersion::interleaved_v2||!config.oscillator_search||
+       !config.pattern_symbols||config.spreading_mode!=modem::SpreadingMode::pattern||(!config.scramble&&!config.dsss)||
+       !modem::deferred_symbols(config)||config.symbol_burst.enabled()||modem::scheduled_bursts(config)||
+       domain.symbol_samples!=modem::symbol_sample_count(config)||domain.sample_rate!=config.sample_rate||
+       domain.frequency_cell_radius_hz!=modem::native_pattern_frequency_cell_radius(config)||
+       input.logical_sample_rate!=config.sample_rate||!input.physical_sample_rate||
+       input.input_origin_samples!=domain.input_sample_origin||domain.input_phase_view_id||
+       input.input_view_id||input.frequency_correction_hz!=0||input.conjugate_image||
+       !std::isfinite(input.physical_passband_lower_hz)||input.physical_passband_lower_hz<0||
+       !std::isfinite(input.physical_passband_upper_hz)||input.physical_passband_upper_hz<=input.physical_passband_lower_hz||
+       input.physical_passband_upper_hz>=input.physical_sample_rate/2.)
+        return "Executed joint-clock cost copy requires the actual unshifted B native fixed input domain";
+    if(pairs.size()>detail::HelperJointClockProof::pair_capacity||
+       prior.intervals().size()>detail::HelperJointClockProof::interval_capacity||
+       !input.ordinary_noise_model_evidence.empty())
+        return "Joint GUI snapshot exceeds fixed4096-pair/64-interval or numeric-only diagnostic scope";
+    return nullptr;
+}
+void fill_joint_copy(detail::HelperJointClockProof& proof,const modem::Config& source,
+        const modem::PatternAcquisitionClockPrior& prior,const modem::PatternAcquisitionClockResult& executed,
+        const modem::PatternAcquisitionState& before,const modem::PatternAcquisitionWorkBound& bound,
+        const HelperFrequencyInputMap& input) {
+    // Copy only numeric public shape, never crypto, seeds or provider pointers.
+    auto& c=proof.config;c={};
+    c.pattern_symbols=source.pattern_symbols;c.search_arithmetic=source.search_arithmetic;c.receiver_strategy=source.receiver_strategy;
+    c.outer_dsss_version=source.outer_dsss_version;c.spreading_factor=source.spreading_factor;
+    c.stream_epoch=source.stream_epoch;c.stream_phase_samples=source.stream_phase_samples;
+    c.sample_rate=source.sample_rate;c.constellation_bits=source.constellation_bits;c.carrier_hz=source.carrier_hz;
+    c.oscillator_search=source.oscillator_search;c.frequency_search_multiplier=source.frequency_search_multiplier;
+    c.bandwidth_hz=source.bandwidth_hz;c.training_seconds=source.training_seconds;c.integration_seconds=source.integration_seconds;
+    c.spreading_mode=source.spreading_mode;c.pulse_shaping=source.pulse_shaping;c.scramble=source.scramble;c.dsss=source.dsss;
+    c.dsss_factor=source.dsss_factor;c.receiver_cpu_budget=source.receiver_cpu_budget;c.memory_limit=source.memory_limit;
+    if(source.fake_hopping) {
+        proof.hopping.emplace();auto& h=*proof.hopping;const auto& a=*source.fake_hopping;
+        h.shifts=a.shifts;h.channels=a.channels;h.dwell_seconds=a.dwell_seconds;h.power_ramps=a.power_ramps;
+        h.defer_symbols=a.defer_symbols;h.mandatory_ramps=a.mandatory_ramps;h.matched_gaps=a.matched_gaps;
+        h.smooth_ramps=a.smooth_ramps;h.remote_guard_covered=a.remote_guard_covered;h.ramp_seconds=a.ramp_seconds;
+        h.clock_error_seconds=a.clock_error_seconds;h.audio_error_seconds=a.audio_error_seconds;
+        h.peer_clock_error_seconds=a.peer_clock_error_seconds;h.region_seconds=a.region_seconds;h.offset_seconds=a.offset_seconds;
+    }
+    auto& view=proof.input;view={};view.physical_sample_rate=input.physical_sample_rate;view.logical_sample_rate=input.logical_sample_rate;
+    view.input_view_id=input.input_view_id;view.input_origin_samples=input.input_origin_samples;
+    view.physical_passband_lower_hz=input.physical_passband_lower_hz;view.physical_passband_upper_hz=input.physical_passband_upper_hz;
+    view.frequency_correction_hz=input.frequency_correction_hz;view.conjugate_image=input.conjugate_image;view.payload_filter_hz=input.payload_filter_hz;
+    view.joint_source_relation=input.joint_source_relation;
+    const auto& support=prior.scored_support();const auto& domain=support.domain;
+    const auto pairs=domain.original_pairs;const auto legacy=domain.legacy_frequency_mask;const auto joint=prior.pair_mask();
+    std::copy(pairs.begin(),pairs.end(),proof.pair_storage.begin());proof.original_pairs=std::span(proof.pair_storage).first(pairs.size());
+    std::copy(legacy.begin(),legacy.end(),proof.frequency_storage.begin());proof.frequency_mask=std::span(proof.frequency_storage).first(legacy.size());
+    std::copy(joint.begin(),joint.end(),proof.joint_storage.begin());proof.joint_mask=std::span(proof.joint_storage).first(joint.size());
+    std::copy(prior.intervals().begin(),prior.intervals().end(),proof.interval_storage.begin());
+    proof.data_intervals=std::span(proof.interval_storage).first(prior.intervals().size());
+    proof.data_clock_radius_ppm=domain.data_clock_half_width_ppm;proof.clock_cell_radius_ppm=domain.clock_cell_half_width_ppm;
+    proof.frequency_cell_radius_hz=domain.frequency_cell_radius_hz;
+    auto& m=proof.metadata;m.first_input_sample=support.first_sample;m.last_input_sample=support.last_sample;
+    m.captured_input_end_sample=prior.captured_input_end_sample();m.reference_evidence_sample=prior.reference_evidence_sample();
+    m.reference_captured_end_sample=prior.reference_captured_end_sample();m.executed_template_jobs=executed.executed_template_jobs;
+    m.original_pairs=pairs.size();m.frequency_only_pairs=executed.original_pairs;m.joint_pairs=executed.selected_pairs;
+    m.original_clock_rates=executed.original_clock_rates;m.joint_clock_rates=executed.selected_clock_rates;
+    m.owned_bytes=sizeof(proof);m.projection_bin_samples=before.bin_samples;m.original_phase_groups=bound.original_phase_groups;
+    m.source_relation=input.joint_source_relation;
+}
+}
+std::size_t helper_joint_clock_diagnostic_gui_grant_bytes(){return 256*1024;}
+std::shared_ptr<HelperJointClockDiagnosticPool> make_helper_joint_clock_diagnostic_pool(std::size_t grant) {
+    if(grant<sizeof(HelperJointClockDiagnosticPool)||grant>helper_joint_clock_diagnostic_gui_grant_bytes())return {};
+    try {
+        auto account=std::make_shared<live::detail::ReceiverAllocationAccount>(grant);
+        return std::allocate_shared<HelperJointClockDiagnosticPool>(
+            live::detail::ReceiverStorageAllocator<HelperJointClockDiagnosticPool>(account),account);
+    }catch(const std::bad_alloc&){return {};}
+}
+HelperJointClockDiagnosticStatus helper_joint_clock_diagnostic_status(const std::shared_ptr<HelperJointClockDiagnosticPool>& pool) {
+    HelperJointClockDiagnosticStatus out;out.slot_bytes=sizeof(HelperJointClockDiagnosticPool::Slot);
+    if(pool) {
+        std::lock_guard lock(pool->mutex);
+        for(const auto& slot:pool->slots)out.occupied_slots+=slot.occupied;
+        out.allocator_requested_bytes=pool->account->allocated_bytes();
+        out.account_object_bytes=sizeof(live::detail::ReceiverAllocationAccount);
+    }
+    return out;
+}
+HelperJointClockCopy copy_executed_helper_joint_clock(const modem::Config& config,
+        const modem::PatternAcquisitionClockPrior& prior,const modem::PatternAcquisitionClockResult& executed,
+        const modem::PatternAcquisitionState& before,const modem::PatternAcquisitionWorkBound& bound,
+        const HelperFrequencyInputMap& input,std::size_t grant) {
+    HelperJointClockCopy out;
+    if(const auto error=joint_copy_error(config,prior,executed,before,bound,input)){out.reason=error;return out;}
+    if(grant<sizeof(detail::HelperJointClockProof)||grant>2*1024*1024) {
+        out.reason="Executed joint-clock fixed metadata exceeds optional grant";return out;
+    }
+    try {
+        auto proof=std::make_shared<detail::HelperJointClockProof>();fill_joint_copy(*proof,config,prior,executed,before,bound,input);
+        out.metadata=proof->metadata;out.proof=std::move(proof);
+        out.reason="Owned fixed numeric snapshot of an actually executed trusted joint RF/DATA-clock batch; no crypto/providers, borrowed spans or payload. Component shared-control/allocator overhead is separate.";
+    }catch(const std::bad_alloc&){out.reason="Optional executed joint-clock copy allocation unavailable";}
+    return out;
+}
+HelperJointClockCopy copy_executed_helper_joint_clock(const std::shared_ptr<HelperJointClockDiagnosticPool>& pool,
+        const modem::Config& config,const modem::PatternAcquisitionClockPrior& prior,const modem::PatternAcquisitionClockResult& executed,
+        const modem::PatternAcquisitionState& before,const modem::PatternAcquisitionWorkBound& bound,const HelperFrequencyInputMap& input) {
+    HelperJointClockCopy out;
+    if(!pool){out.runtime_reason="GUI joint diagnostics have no separate funded fixed-slot arena";return out;}
+    if(const auto error=joint_copy_error(config,prior,executed,before,bound,input)){out.runtime_reason=error;return out;}
+    try {
+        std::lock_guard lock(pool->mutex);
+        const auto free=std::find_if(pool->slots.begin(),pool->slots.end(),[](const auto& slot){return !slot.occupied;});
+        if(free==pool->slots.end()){out.runtime_reason="Both fixed GUI diagnostic slots remain borrowed; optional publication yields";return out;}
+        const auto i=static_cast<std::size_t>(free-pool->slots.begin());
+        // Allocate ONLY a bounded lease/control block from the GUI account.
+        // The numeric object itself has fixed lifetime/storage in this slot.
+        auto lease=std::allocate_shared<HelperJointClockDiagnosticLease>(
+            live::detail::ReceiverStorageAllocator<HelperJointClockDiagnosticLease>(pool->account),pool,i);
+        fill_joint_copy(free->proof,config,prior,executed,before,bound,input);free->occupied=true;
+        out.metadata=free->proof.metadata;out.proof=std::shared_ptr<const detail::HelperJointClockProof>(std::move(lease),&free->proof);
+        out.runtime_reason="Actual executed joint-clock geometry in one fixed separately funded GUI diagnostic slot";
+    }catch(const std::bad_alloc&){out.runtime_reason="GUI diagnostic lease grant unavailable; ordinary DSP promises retained";}
+    return out;
+}
+bool same_helper_joint_clock_geometry(const std::shared_ptr<const detail::HelperJointClockProof>& proof,
+        const modem::Config& config,const modem::PatternAcquisitionClockPrior& prior,const HelperFrequencyInputMap& input) {
+    if(!proof)return false;
+    const auto& domain=prior.scored_support().domain;
+    return same_joint_profile_numeric(config,*proof)&&config.oscillator_search==proof->config.oscillator_search&&
+        config.receiver_strategy==proof->config.receiver_strategy&&config.search_arithmetic==proof->config.search_arithmetic&&
+        config.frequency_search_multiplier==proof->config.frequency_search_multiplier&&
+        same_joint_pairs(domain.original_pairs,proof->original_pairs)&&
+        std::equal(prior.pair_mask().begin(),prior.pair_mask().end(),proof->joint_mask.begin(),proof->joint_mask.end())&&
+        std::equal(domain.legacy_frequency_mask.begin(),domain.legacy_frequency_mask.end(),proof->frequency_mask.begin(),proof->frequency_mask.end())&&
+        domain.data_clock_half_width_ppm==proof->data_clock_radius_ppm&&domain.clock_cell_half_width_ppm==proof->clock_cell_radius_ppm&&
+        domain.frequency_cell_radius_hz==proof->frequency_cell_radius_hz&&
+        input.physical_sample_rate==proof->input.physical_sample_rate&&input.logical_sample_rate==proof->input.logical_sample_rate&&
+        input.input_view_id==proof->input.input_view_id&&input.input_origin_samples==proof->input.input_origin_samples&&
+        input.frequency_correction_hz==proof->input.frequency_correction_hz&&input.conjugate_image==proof->input.conjugate_image&&
+        input.payload_filter_hz==proof->input.payload_filter_hz&&
+        input.joint_source_relation==proof->input.joint_source_relation&&
+        input.physical_passband_lower_hz==proof->input.physical_passband_lower_hz&&
+        input.physical_passband_upper_hz==proof->input.physical_passband_upper_hz;
+}
+
+HelperJointClockScenario helper_executed_joint_scenario(const transfer::Estimate& transmission,
+        const transfer::Options& source,const modem::ChannelConfig& channel,
+        const std::shared_ptr<const detail::HelperJointClockProof>& proof,
+        const HelperFrequencyCosts& costs,ReceiverWorkMode mode,ReceiverTimingModel timing,
+        const live::Settings* settings,std::stop_token stop) {
+    HelperJointClockScenario out;const auto fail=[&](const std::string& reason){out.reason=reason;return out;};
+    estimate_detail::check(stop);
+    if(!proof)return fail("No executed joint-clock measurement for this current target");
+    out.metadata=proof->metadata;
+    if(!source.key||source.timestamp||source.modem.receiver_strategy!=proof->config.receiver_strategy||
+       source.modem.search_arithmetic!=proof->config.search_arithmetic||
+       source.modem.receiver_cpu_budget!=proof->config.receiver_cpu_budget||
+       source.modem.frequency_search_multiplier!=proof->config.frequency_search_multiplier||
+       source.modem.oscillator_search!=proof->config.oscillator_search||!same_joint_profile_numeric(source.modem,*proof,false))
+        return fail("Executed joint-clock copy belongs to different original rolling target/policy/oscillator geometry");
+    if(settings&&(settings->helper.power_w<=0||settings->helper.frequency==helper::Frequency::cochannel))
+        return fail("Current disabled/cochannel helper cannot use an older executed joint-clock copy");
+    try {
+        auto options=source;options.search_seconds=live::detail::effective_epoch_search_seconds(options,false);
+        const auto& config=options.modem;
+        // The measured cell subset concerns physical RF/DATA-clock geometry,
+        // not a decoded source date. The ordinary model still enumerates its
+        // complete rolling epoch/canonical-phase alternatives and retains the
+        // actual complete native projection geometry at this selected target.
+        const auto original=search_bank(config,options);
+        if(original.limited||original.frequency.limited||!same_joint_pairs(original.hypotheses,proof->original_pairs)||
+           original.requested_clock_ppm!=proof->data_clock_radius_ppm||original.clock_step_ppm/2!=proof->clock_cell_radius_ppm)
+            return fail("Current original full RF/DATA-clock catalogue differs from actual executed joint authority");
+        const auto ordinary=estimate_impl(transmission,options,true,channel,{},1,false,100,64,mode,timing,settings,stop);
+        if(ordinary.receiver_geometry.receiver_strategy_selected!="existing complex"||
+           ordinary.execution_compact||ordinary.execution_drift_supported||ordinary.execution_differential_supported||
+           ordinary.execution_projection_bin_samples!=proof->metadata.projection_bin_samples)
+            return fail("Current backend/bin/detector differs from the actual executed native joint-clock batch");
+        HelperFrequencyProfile profile;profile.profile_index=0;profile.owner=HelperExecutionOwner::executed_joint_masked_owner;
+        profile.input=proof->input;profile.joint_clock_proof=proof;
+        profile.physical_domain={-original.requested_clock_ppm,original.requested_clock_ppm,0,0,0};
+        profile.actual_geometry={ordinary.execution_projection_bin_samples,ordinary.execution_minimum_rate,
+            ordinary.execution_maximum_rate,ordinary.execution_compact,ordinary.execution_pulse_projected,
+            ordinary.pulse_segment_projection_modeled,ordinary.execution_drift_supported,ordinary.execution_differential_supported};
+        profile.original_trial_policy_evidence="Actual executed joint original-domain batch: original trials/thresholds and full payload continuation retained";
+        for(std::size_t i=0;i<original.hypotheses.size();++i)if(proof->joint_mask[i]) {
+            const auto& pair=original.hypotheses[i];
+            const auto clock=live::detail::helper_prior_detail::inner_clock(pair.clock_error_ppm,
+                original.clock_step_ppm/2,original.requested_clock_ppm);
+            profile.cells.push_back({pair,proof->frequency_cell_radius_hz,clock.lower,clock.upper});
+        }
+        (void)helper_execution_bank(config,original,profile);
+        QualifiedHelperFrequencyScenario scenario;scenario.origin=HelperScenarioOrigin::measured_reference;
+        scenario.reference_evidence="Actual executed native joint RF/DATA-clock support "+std::to_string(proof->metadata.first_input_sample)+
+            ".."+std::to_string(proof->metadata.last_input_sample)+"; current-geometry illustration only";
+        scenario.profiles.push_back(std::move(profile));scenario.costs=costs;
+        out.scenario=std::move(scenario);
+        out.reason="Current-target conditional backend-work illustration from actual executed joint RF/DATA-clock cells. ";
+        out.reason+=helper_joint_clock_source_domain(proof->metadata.source_relation);
+        out.reason+=" Original arrival/phase/epoch trials, projection bins, full constructors and continuation retained. This reuses the observed subset as a conditional execution geometry, not future reference qualification, probability or full-cohort coverage. Cold private templates are priced every acquisition dispatch; no helper-cache reuse gain is assigned. Total reference/front-end/probe costs remain separately required.";
+        return out;
+    }catch(const Error& error){return fail(error.what());}
+}
+
+HelperNativeWork helper_native_work(const transfer::Options& source,
+        const QualifiedHelperFrequencyScenario& scenario,ReceiverWorkMode mode,
+        const live::Settings* actual,std::stop_token stop,const HelperFirstBitConditions* first_bit) {
+    HelperNativeWork out;const auto fail=[&](const std::string& reason){out.reason=reason;return out;};
+    estimate_detail::check(stop);
+    if(scenario.origin==HelperScenarioOrigin::unavailable||scenario.reference_evidence.empty())
+        return fail("Native work curve has no explicit reference or conditional requirements provenance");
+    if(source.modem.receiver_strategy!=modem::ReceiverStrategy::automatic&&
+       source.modem.receiver_strategy!=modem::ReceiverStrategy::complex_only)
+        return fail("Selected receiver policy does not support helper rolling work narrowing");
+    if(actual&&(actual->helper.power_w<=0||actual->helper.frequency==helper::Frequency::cochannel))
+        return fail("Disabled or cochannel helper has no isolated rolling work reference");
+    if(scenario.profiles.size()!=1||scenario.profiles.front().profile_index!=0||!source.key||source.timestamp)
+        return fail("Native work curve models one representative rolling keyed profile/epoch, not full reception or every cohort");
+    const auto& p=scenario.profiles.front();
+    if(p.owner!=HelperExecutionOwner::original_masked_owner||p.input.frequency_correction_hz!=0||p.input.conjugate_image)
+        return fail("Native work curve requires the unchanged original-coordinate acquisition owner");
+    auto options=source;options.search_seconds=live::detail::effective_epoch_search_seconds(options,false);
+    if(options.modem.sample_rate!=14400||options.modem.bandwidth_hz!=360||options.modem.dsss_factor!=10||
+       options.modem.outer_dsss_version!=modem::OuterDsssVersion::interleaved_v2||
+       !modem::deferred_symbols(options.modem)||options.modem.symbol_burst.enabled()||modem::scheduled_bursts(options.modem))
+        return fail("Actual native work descriptor is currently bounded to the B Interleave10 deferred-FHSS waveform");
+    const auto epoch=options.modem.stream_epoch?options.modem.stream_epoch:1800000000ULL;
+    auto config=transfer::seeded_config(options,epoch);
+    auto settings=actual?*actual:live::Settings{};settings.transfer=options;
+    settings.simulation=mode==ReceiverWorkMode::sampled_simulation;
+    if(!actual){settings.dsp_workspace_bytes=options.dsp_workspace_bytes;settings.content_limit=options.content_limit;}
+    try {
+        live::detail::ReceiverAdmissionContext context;context.now=static_cast<double>(epoch);context.keyed=true;
+        context.capacity=live::receiver_workspace_capacity(settings);
+        context.control_margin=live::receiver_control_margin(config,true);
+        const auto prepared=live::detail::prepare_receiver_search(config,settings,epoch,context);
+        const auto original=search_bank(config,options);
+        (void)helper_execution_bank(config,original,p); // Same complete strip/original-cell certificate.
+        if(prepared.search.hypotheses!=original.hypotheses)
+            return fail("Actual ordinary admission and conditional scenario have different RF/LF catalogues");
+        constexpr std::size_t probe_cap=32*1024*1024;
+        const auto normal_grant=prepared.search.receiver_strategy_workspace_bytes;
+        if(!normal_grant)return fail("Ordinary native work descriptor has no numeric workspace grant");
+        const auto probe_grant=std::min(normal_grant,probe_cap);
+        // A small constructor is representative only if the SAME normal
+        // Auto/Complex policy resolves to this native coherent detector at
+        // both grants. A workspace-dependent detector/backend change declines;
+        // it is not treated as optional cache streaming or CPU savings.
+        const auto normal_strategy=modem::resolve_receiver_strategy(config,prepared.search,normal_grant);
+        const auto probe_strategy=modem::resolve_receiver_strategy(config,prepared.search,probe_grant);
+        if(!normal_strategy.supported||!probe_strategy.supported||
+           normal_strategy.backend!=modem::ReceiverBackend::existing_complex||
+           probe_strategy.backend!=normal_strategy.backend||normal_strategy.scheduled||probe_strategy.scheduled||
+           normal_strategy.full_frequency_coverage!=probe_strategy.full_frequency_coverage||
+           normal_strategy.full_clock_coverage!=probe_strategy.full_clock_coverage||prepared.search.compact_clock_search)
+            return fail("Normal-grant and bounded-probe policies do not certify the same ordinary native backend/coverage");
+        const auto drift_sections=modem::detail::drift_section_count(config,prepared.search.drift_tolerant);
+        const auto differential_window=drift_sections>1?modem::detail::differential_window_samples(
+            modem::symbol_sample_count(config),modem::pattern_chip_samples(config),config.sample_rate,
+            prepared.search.differential_window_seconds):0;
+        if(drift_sections!=1||differential_window||p.actual_geometry.compact||p.actual_geometry.pulse_projected||
+           p.actual_geometry.pulse_segmented||p.actual_geometry.drift_supported||p.actual_geometry.differential_supported||
+           p.actual_geometry.minimum_rate!=original.minimum_rate||p.actual_geometry.maximum_rate!=original.maximum_rate)
+            return fail("Native work curve requires unchanged full-clock coherent B rate/detector geometry");
+        // Keep the declared normal strategy grant and all original cells.
+        // The actual descriptor below must independently match that geometry.
+        // Optional cache/constructor costs remain unpriced.
+        modem::PatternReceiver ordinary(config,probe_grant,prepared.search);
+        modem::detail::ConditionedReferenceDescriptor descriptor;
+        if(!ordinary.export_conditioned_reference(descriptor,32768,32768))return fail(descriptor.reason);
+        estimate_detail::check(stop);
+        const auto pairs=ordinary.acquisition_hypotheses();
+        const auto state=ordinary.acquisition_state();
+        if(pairs.size()!=original.hypotheses.size()||!std::equal(pairs.begin(),pairs.end(),original.hypotheses.begin())||
+           descriptor.original_pairs!=pairs.size()||
+           descriptor.frequency_cell_radius_hz!=modem::native_pattern_frequency_cell_radius(config)||
+           std::any_of(p.cells.begin(),p.cells.end(),[&](const auto& cell){return
+               cell.frequency_half_width_hz!=descriptor.frequency_cell_radius_hz;})||
+           descriptor.geometry.bin_samples!=p.actual_geometry.projection_bin_samples||
+           descriptor.geometry.drift_sections!=drift_sections||
+           descriptor.geometry.differential_window_samples!=differential_window||
+           state.admitted_clock_half_width_ppm!=std::optional<double>{original.requested_clock_ppm}||
+           state.admitted_clock_cell_half_width_ppm!=std::optional<double>{original.clock_step_ppm/2})
+            return fail("Bounded ordinary constructor changed native bin, detector or original RF/LF geometry; work curve unavailable");
+        double actual_minimum_rate=1,actual_maximum_rate=1;
+        for(const auto& job:descriptor.jobs) {
+            if(job.frequency_index>=pairs.size()||
+               job.frequency_hz!=pairs[static_cast<std::size_t>(job.frequency_index)].frequency_offset_hz||
+               job.clock_ratio!=1+pairs[static_cast<std::size_t>(job.frequency_index)].clock_error_ppm*1e-6)
+                return fail("Native work descriptor changed an original RF/LF row");
+            actual_minimum_rate=std::min(actual_minimum_rate,job.clock_ratio);
+            actual_maximum_rate=std::max(actual_maximum_rate,job.clock_ratio);
+        }
+        if(actual_minimum_rate!=original.minimum_rate||actual_maximum_rate!=original.maximum_rate)
+            return fail("Bounded ordinary constructor changed original full-clock rate extrema");
+        std::vector<std::uint8_t> selected(pairs.size());std::set<double> rates;
+        for(const auto& cell:p.cells) {
+            const auto found=std::find(pairs.begin(),pairs.end(),cell.hypothesis);
+            if(found==pairs.end())return fail("Conditional execution cell is absent from actual native owner");
+            selected[static_cast<std::size_t>(found-pairs.begin())]=1;rates.insert(cell.hypothesis.clock_error_ppm);
+        }
+        std::map<std::tuple<std::uint64_t,std::uint64_t,double>,bool> groups;
+        for(const auto& job:descriptor.jobs) {
+            if(job.frequency_index>=selected.size())return fail("Native work descriptor has an invalid original pair identity");
+            const bool retained=selected[static_cast<std::size_t>(job.frequency_index)]!=0;
+            out.conditional_jobs+=retained;
+            groups[{job.symbol,job.phase,job.clock_ratio}]|=retained;
+        }
+        if(std::any_of(groups.begin(),groups.end(),[](const auto& group){return !group.second;}))
+            return fail("Conditional work curve lost an original symbol/phase/LF alternative");
+        out.original_jobs=descriptor.jobs.size();out.original_pairs=pairs.size();out.conditional_pairs=p.cells.size();
+        out.retained_clock_rates=rates.size();out.original_starts=descriptor.original_starts;
+        out.bin_samples=static_cast<std::size_t>(descriptor.geometry.bin_samples);
+        out.original_descriptor_bytes=descriptor.descriptor_bytes;out.probe_workspace_bytes=descriptor.pristine_workspace_bytes;
+        out.original_trial_charge=descriptor.original_trial_charge;
+        out.original_batch_end_threshold=descriptor.original_acquisition_threshold;
+        out.streaming_probe=probe_grant<normal_grant;out.available=out.conditional_jobs>0&&out.conditional_jobs<out.original_jobs;
+        out.reason="Actual representative native logical template-pair job descriptors per original batch; every original symbol, phase, LF and arrival start remains. Full original threshold/trial charge retained. This is work geometry, not physical transform counts, CPU, backlog or reception probability.";
+        if(out.streaming_probe)out.reason+=" Normal-grant and bounded32MiB policies/geometry match; optional cached rows may stream differently. Runtime cache/constructor cost is not inferred.";
+        if(first_bit) {
+            auto& reference=out.first_bit;
+            if(!first_bit->independent_reference_before_observation)
+                reference.reason="Finite first-bit outcome requires an explicitly independent acquired reference before the scored FIR halo";
+            else if(!std::isfinite(first_bit->channel.snr_db)||first_bit->channel.snr_db< -300||first_bit->channel.snr_db>300)
+                reference.reason="Finite first-bit sample-SNR is outside the ordinary -300..300 dB numerical range";
+            else if(mode!=ReceiverWorkMode::sampled_simulation)
+                reference.reason="Finite first-bit hardware average-power normalization is not yet matched to the ordinary model; sampled source-power reference only";
+            else if(p.input.physical_sample_rate!=config.sample_rate)
+                reference.reason="Finite first-bit reference models logical-input AWGN only; physical-to-logical conversion response/noise is outside this component";
+            else if(!p.input.payload_filter_hz||!std::isfinite(*p.input.payload_filter_hz))
+                reference.reason="Finite first-bit reference lacks the scenario's authoritative planned payload-filter frequency";
+            else {
+                detail::conditioned_factory::SourceConditions conditions;
+                conditions.channel=first_bit->channel;conditions.starts=first_bit->starts;conditions.trials=first_bit->trials;
+                conditions.independent_prior=true;
+                // The isolated source uses its own conventional sample frame.
+                // This is a counterfactual prior predating all observed data,
+                // not an inferred timing timestamp or qualification deadline.
+                conditions.prior_evidence_end_sample=1;
+                conditions.raw_noise_variance=modem::nominal_signal_power*
+                    std::pow(10.,-first_bit->channel.snr_db/10);
+                conditions.payload_filter_hz=p.input.payload_filter_hz;
+                reference.payload_filter_hz=p.input.payload_filter_hz;
+                auto finite=detail::conditioned_factory::make_first_bit_request(ordinary,selected,conditions,stop);
+                reference.reason=finite.reason;
+                if(finite.request) {
+                    const auto result=detail::conditioned_private::conditioned_first_bit_reference(*finite.request,stop);
+                    reference.available=result.reference_probability_available;
+                    reference.correct=result.correct;reference.wrong=result.wrong;
+                    reference.correct_low=result.correct_low;reference.correct_high=result.correct_high;
+                    reference.trials=result.trials;reference.original_jobs=result.original_jobs;
+                    reference.selected_jobs=result.selected_jobs;reference.retained_clock_rates=result.retained_clock_rates;
+                    reference.reason+=" "+result.limit;
+                }
+            }
+        }
+        return out;
+    }catch(const Error& e){return fail(e.what());}
+    catch(const std::bad_alloc&){return fail("Optional bounded native work descriptor allocation unavailable");}
+}
+HelperFrequencyEstimate estimate_helper_frequency(const transfer::Estimate& transmission,
+        const transfer::Options& options,bool raw_bits,const modem::ChannelConfig& channel,
+        const QualifiedHelperFrequencyScenario& scenario,std::span<const modem::Config> profiles,std::size_t keys,
+        bool probability,double window,std::size_t trials,ReceiverWorkMode mode,
+        ReceiverTimingModel timing,const live::Settings* settings,std::stop_token stop) {
+    HelperFrequencyEstimate result;
+    try {result.baseline=estimate_impl(transmission,options,raw_bits,channel,profiles,keys,probability,
+        window,trials,mode,timing,settings,stop);}
+    catch(const Error& error) {result.baseline.receiver_work_supported=false;
+        result.baseline.probability_model_limit=error.what();}
+    const auto reject=[&](const std::string& reason) {
+        result.reason=reason;result.assisted.receiver_work_supported=false;
+        result.assisted.probability_model_limit=reason;return result;
+    };
+    if(scenario.origin==HelperScenarioOrigin::unavailable||scenario.reference_evidence.empty()||
+       scenario.profiles.empty())return reject("No independently qualified frequency scenario or validated forecast");
+    if(options.modem.symbol_burst.enabled()||modem::scheduled_bursts(options.modem))
+        return reject("Frequency scenario does not yet model split scheduled/Burst execution");
+    const auto profile_count=profiles.empty()?std::size_t{1}:profiles.size();
+    if(scenario.profiles.size()!=profile_count)return reject("Frequency scenario must retain every ordinary receive profile");
+    for(std::size_t i=0;i<profile_count;++i)
+        if(std::count_if(scenario.profiles.begin(),scenario.profiles.end(),[&](const auto& p){return p.profile_index==i;})!=1)
+            return reject("Frequency scenario has missing or duplicate profile identity");
+    for(const auto& p:scenario.profiles) {
+        if(p.input.conjugate_image)return reject("Conjugate input-view probability/source mapping is not modeled by this first scope");
+        if(p.input.physical_passband_lower_hz<0||
+           !std::isfinite(p.input.physical_passband_lower_hz)||!std::isfinite(p.input.physical_passband_upper_hz)||
+           p.input.physical_passband_upper_hz<=p.input.physical_passband_lower_hz||
+           p.input.physical_passband_upper_hz>=p.input.physical_sample_rate/2.)
+            return reject("Frequency scenario lacks a valid physical capture/passband certificate");
+        const auto& c=profiles.empty()?options.modem:profiles[p.profile_index];
+        const auto half=helper::occupied_bandwidth(c)/2*(1+channel.clock_error_ppm*1e-6);
+        const auto center=c.carrier_hz*(1+channel.clock_error_ppm*1e-6)+channel.frequency_offset_hz;
+        const auto lower=center-half,upper=center+half;
+        const auto positive_lower=lower<=0&&upper>=0?0.:std::min(std::abs(lower),std::abs(upper));
+        if(positive_lower<p.input.physical_passband_lower_hz||
+           std::max(std::abs(lower),std::abs(upper))>p.input.physical_passband_upper_hz)
+            return reject("Frequency scenario source support lies outside its physical capture passband");
+    }
+    if(scenario.origin==HelperScenarioOrigin::validated_forecast) {
+        if(!scenario.forecast_coverage||!scenario.expected_usable_helper_cn0_db_hz||
+           !std::isfinite(*scenario.expected_usable_helper_cn0_db_hz))
+            return reject("Helper forecast unavailable: no validated C/N0-to-requirements input");
+        const auto& f=*scenario.forecast_coverage;
+        if(f.utility_scope==HelperForecastUtilityScope::unavailable||f.source_revision.empty()||
+           f.estimator_requirements_id.empty()||f.validation_evidence.empty()||
+           !std::isfinite(f.minimum_cn0_db_hz)||!std::isfinite(f.maximum_cn0_db_hz)||
+           *scenario.expected_usable_helper_cn0_db_hz<f.minimum_cn0_db_hz||
+           *scenario.expected_usable_helper_cn0_db_hz>f.maximum_cn0_db_hz||
+           !std::isfinite(f.maximum_clock_magnitude_ppm)||f.maximum_clock_magnitude_ppm<0||
+           std::abs(channel.clock_error_ppm)>f.maximum_clock_magnitude_ppm||
+           !std::isfinite(f.maximum_phase_noise_degrees_per_sqrt_second)||
+           channel.phase_noise_degrees_per_sqrt_second>f.maximum_phase_noise_degrees_per_sqrt_second||
+           !std::isfinite(scenario.qualification_aperture_seconds)||scenario.qualification_aperture_seconds<=0||
+           !std::isfinite(f.maximum_discovery_seconds)||
+           scenario.qualification_aperture_seconds>f.maximum_discovery_seconds||
+           std::any_of(scenario.profiles.begin(),scenario.profiles.end(),[&](const auto& p) {
+                return p.input.physical_sample_rate!=f.physical_sample_rate;
+           }))return reject("Helper forecast lies outside its validated utility/C/N0/clock/process/aperture coverage");
+        result.forecast_available=true;
+    }
+    const bool original_statistics=std::all_of(scenario.profiles.begin(),scenario.profiles.end(),[](const auto& p) {
+        return !p.original_trial_policy_evidence.empty();
+    });
+    const bool covariance=scenario.origin!=HelperScenarioOrigin::requirements_forecast&&
+        std::all_of(scenario.profiles.begin(),scenario.profiles.end(),[](const auto& p) {
+        return !p.input.ordinary_noise_model_evidence.empty();
+    });
+    // Selected RF offsets can be sparse and far from zero. The ordinary
+    // probability model still uses a symmetric zero-centered candidate range
+    // and an analytic threshold containing its own frequency-count term.
+    // Neither covariance evidence nor a restored work threshold makes that
+    // model applicable. Keep ordinary baseline probability; decline helper
+    // probability until the complete original statistical bank is a separate
+    // input to EVERY probability branch.
+    try {result.assisted=estimate_impl(transmission,options,raw_bits,channel,profiles,keys,
+        false,window,trials,mode,timing,settings,stop,false,&scenario);}
+    catch(const Error& error) {return reject(error.what());}
+    result.scenario_available=true;
+    // A future broad fallback uses the original source and ordinary bank; no
+    // selected-domain result may relabel itself as full fallback coverage.
+    result.assisted.fallback_receiver_cpu_seconds=result.baseline.fallback_receiver_cpu_seconds;
+    result.assisted.fallback_hardware_sustained_realtime_ratio=result.baseline.fallback_hardware_sustained_realtime_ratio;
+    result.assisted.fallback_timing_hypotheses=result.baseline.fallback_timing_hypotheses;
+    result.assisted.confidence_available=result.assisted.one_bit_confidence_available=false;
+    result.assisted.reference_probability_available=result.assisted.one_bit_reference_available=false;
+    result.assisted.probability_interval_available=false;
+    result.assisted.probability_model_limit="Helper probability unavailable: sparse RF execution is outside the original probability candidate-domain/threshold model";
+    if(!original_statistics)result.assisted.probability_model_limit+=
+        "; actual original logical trial policy has no preservation evidence";
+    if(!covariance)result.assisted.probability_model_limit+=
+        "; transformed input/covariance is outside the ordinary validated model";
+    result.conditional_probability_available=result.assisted.confidence_available||result.assisted.reference_probability_available;
+    result.conditional_one_bit_probability_available=result.assisted.one_bit_confidence_available||result.assisted.one_bit_reference_available;
+    const auto valid_cost=[](const std::optional<double>& value) {return value&&std::isfinite(*value)&&*value>=0;};
+    const auto& cost=scenario.costs;
+    result.discovery_cost_available=!cost.validation_evidence.empty()&&cost.cpu_reference_id==reference_cpu&&valid_cost(cost.discovery_cpu_seconds)&&
+        valid_cost(cost.prequalification_broad_cpu_seconds);
+    if(result.discovery_cost_available) {
+        result.discovery_cpu_seconds=*cost.discovery_cpu_seconds;
+        result.prequalification_broad_cpu_seconds=*cost.prequalification_broad_cpu_seconds;
+    }
+    result.qualified_cost_available=!cost.validation_evidence.empty()&&cost.cpu_reference_id==reference_cpu&&
+        valid_cost(cost.additional_frontend_cpu_per_second)&&valid_cost(cost.optional_probe_cpu_per_second)&&
+        result.assisted.receiver_work_supported&&result.assisted.receiver_workspace_supported&&
+        result.assisted.hardware_sustained_modeled;
+    if(cost.ordinary_tracking_cpu_per_second&&!valid_cost(cost.ordinary_tracking_cpu_per_second))
+        result.qualified_cost_available=false;
+    if(result.qualified_cost_available) {
+        result.additional_frontend_realtime_ratio=*cost.additional_frontend_cpu_per_second;
+        result.optional_probe_realtime_ratio=*cost.optional_probe_cpu_per_second;
+        result.ordinary_tracking_realtime_ratio=cost.ordinary_tracking_cpu_per_second.value_or(
+            result.assisted.hardware_sustained_tracking_realtime_ratio);
+        result.qualified_sustained_realtime_ratio=result.assisted.hardware_sustained_realtime_ratio-
+            result.assisted.hardware_sustained_tracking_realtime_ratio+result.ordinary_tracking_realtime_ratio+
+            result.additional_frontend_realtime_ratio+result.optional_probe_realtime_ratio;
+        result.qualified_cost_available=std::isfinite(result.qualified_sustained_realtime_ratio)&&
+            result.qualified_sustained_realtime_ratio>=0;
+    }
+    const bool joint=std::any_of(scenario.profiles.begin(),scenario.profiles.end(),[](const auto& p){
+        return p.owner==HelperExecutionOwner::executed_joint_masked_owner;
+    });
+    result.reason=joint?
+        "Executed joint RF/DATA-clock conditional geometry. Original fine projection grid, logical trials, arrival/epoch alternatives and full continuation retained. This current-geometry illustration does not extend measurement validity into future reception. Payload Rate, SNR, clock error and phase process are unchanged.":
+        "Frequency-only conditional scenario; original fine projection grid, logical trials, arrival/epoch alternatives and full continuation retained. Payload Rate, SNR, clock error and phase process are unchanged.";
+    if(joint)for(const auto& profile:scenario.profiles)
+        if(profile.owner==HelperExecutionOwner::executed_joint_masked_owner) {
+            result.reason+=" ";result.reason+=helper_joint_clock_source_domain(profile.input.joint_source_relation);
+        }
+    if(!result.conditional_one_bit_probability_available)result.reason+=" "+result.assisted.probability_model_limit;
+    if(!result.discovery_cost_available||!result.qualified_cost_available)
+        result.reason+=" Startup or qualified sustained CPU remains unavailable without validated component costs/backend coverage.";
+    return result;
 }
 Estimate estimate_receiver_support(const transfer::Estimate& transmission,const transfer::Options& options,
         const modem::ChannelConfig& channel,std::span<const modem::Config> profiles,std::size_t keys,

@@ -1,3 +1,4 @@
+#include "receiver_oscillator_policy.hpp"
 #include "datapump/attachment.hpp"
 #include "datapump/compression.hpp"
 #include "datapump/transfer.hpp"
@@ -53,6 +54,9 @@ void validate(const Options& options) {
     if(options.capture_epoch && (!std::isfinite(*options.capture_epoch) || *options.capture_epoch<0 ||
        static_cast<long double>(*options.capture_epoch)>=static_cast<long double>(std::numeric_limits<std::uint64_t>::max())))
         throw Error("invalid capture epoch");
+    if(!std::isfinite(options.capture_start_uncertainty_seconds) ||
+       options.capture_start_uncertainty_seconds<0 || options.capture_start_uncertainty_seconds>32768)
+        throw Error("invalid capture start uncertainty");
     if((options.modem.scramble || options.modem.dsss) && !options.key)
         throw Error("encrypted spreading requires a symmetric key");
     if(options.modem.scheduled_hopping && options.modem.scheduled_hopping->enabled() && !options.key)
@@ -507,6 +511,11 @@ struct StreamReceiver::Impl {
                 result.content.message.local_id[j*8+i]=static_cast<std::uint8_t>(identity[j]>>(8*i));
         }
     };
+    // No prototype heap survives a query. Only these fixed scalar results are
+    // retained, and sizeof(Impl) already charges them in working_bytes().
+    struct RetainedShape {std::size_t preview=0,packed=0,starts=0,error=0,collector=0;};
+    mutable bool retained_shape_queried=false;
+    mutable std::optional<RetainedShape> retained_shape;
     Options options;
     std::map<std::pair<std::uint64_t,std::uint64_t>,std::unique_ptr<State>> states;
     std::shared_ptr<ReceiveStorageQuota> quota;
@@ -755,6 +764,165 @@ std::size_t StreamReceiver::source_buffer_bytes()const {
     std::size_t bytes=0;for(const auto& [id,state]:impl_->states)bytes+=state->source.capacity();
     return bytes;
 }
+std::optional<std::size_t> StreamReceiver::retained_growth_bound(std::size_t diagnostic_bytes)const {
+    // The source quota is shared across all receiver rows. Its remaining
+    // encoded capacity must be reserved ONCE by Live, never per candidate here.
+    // Symbol_Burst's two address cursors need a separate retained bound.
+    if(impl_->options.modem.symbol_burst.enabled() || impl_->states.size()>candidate_limit)return std::nullopt;
+    try {
+        const auto maximum=std::numeric_limits<std::size_t>::max();
+        const auto add=[&](std::size_t& total,std::size_t value) {
+            if(value>maximum-total)return false;total+=value;return true;
+        };
+        const auto product=[&](std::size_t a,std::size_t b)->std::optional<std::size_t> {
+            if(a && b>maximum/a)return std::nullopt;return a*b;
+        };
+        if(diagnostic_bytes>maximum-sizeof(Received))return std::nullopt;
+        const auto& options=impl_->options;
+        if(!impl_->retained_shape_queried) {
+            impl_->retained_shape_queried=true;
+#if (defined(__GLIBCXX__) && _GLIBCXX_USE_CXX11_ABI) || defined(_LIBCPP_VERSION) || defined(_MSVC_STL_VERSION)
+            Impl::RetainedShape shape;
+            // Production appends one element at a time. Replay that exact
+            // sequence with its real types: neither vector growth nor a copy
+            // constructor is required to round capacity to a power of two.
+            Bytes bytes;
+            for(std::size_t i=0;i<4096;++i)bytes.push_back(0);
+            shape.preview=bytes.capacity();
+            const bool recovery=options.recovery_options.enabled && options.recovery_options.budget.count()>0 &&
+                options.fec!=FecMode::off;
+            const auto retained=recovery?options.recovery_options.retained_bits:0;
+            if(retained>1024*1024)return std::nullopt; // validated production limit
+            Bytes packed;
+            for(std::size_t i=0;i<(retained+3)/4;++i)packed.push_back(0);
+            shape.packed=packed.capacity();
+            // A nonfinal coded interval consumes 1024 observed slots. Ignore
+            // marker slots and allow one final partial interval.
+            auto start_count=retained/boundary_sync::interval_bits+
+                static_cast<std::size_t>(retained%boundary_sync::interval_bits!=0);
+            if(retained)++start_count;
+            std::vector<std::uint64_t> starts;
+            for(std::size_t i=0;i<start_count;++i)starts.push_back(0);
+            const auto start_bytes=product(starts.capacity(),sizeof(std::uint64_t));
+            if(!start_bytes)return std::nullopt;
+            shape.starts=*start_bytes;
+            // Caught errors originate in local Collector, codec, crypto and
+            // symbol/calendar validation. Their longest fixed diagnostic is
+            // the modem carrier validation below (126 characters). The sole
+            // composed calendar message adds the configured FHSS fallback
+            // reason; numeric coordinates are not rendered into these errors.
+            constexpr auto fixed_error_chars=sizeof("carrier and waveform must fit above DC and below internal Nyquist; raise the carrier for short unshaped patterns or tone modes")-1;
+            auto error_chars=fixed_error_chars;
+            if(options.modem.fake_hopping) {
+                constexpr auto prefix=sizeof("FHSS transmission blocked: ")-1;
+                const auto length=options.modem.fake_hopping->power_fallback_reason.size();
+                if(length>maximum-prefix)return std::nullopt;
+                error_chars=std::max(error_chars,prefix+length);
+            }
+            // fail() may assign repeatedly. These supported libraries choose
+            // default-string copy/C-string growth by capacity and source
+            // length, not text. Replay real assignment paths and close their
+            // capacity graph for EVERY length up to the audited maximum.
+            // Probe cutoffs decline assistance; they are not capacity bounds.
+            constexpr std::size_t error_probe_chars=512;
+            if(error_chars>error_probe_chars)return std::nullopt;
+            struct ErrorShape {std::size_t capacity=0,parent=0,length=0;bool copy=false;};
+            // GCC14's default 126-character range closes over 160 capacities
+            // (98 initial capacities plus 62 doubled ones). This is a bounded
+            // optional-probe budget, not a portable capacity bound: other or
+            // deeper graphs still return unknown when these slots are full.
+            std::array<ErrorShape,160> shapes{};
+            std::size_t shape_count=1;shapes[0].capacity=std::string{}.capacity();
+            std::array<char,error_probe_chars+1> text{};text.fill('x');
+            const auto assign=[&](std::string& destination,std::size_t length,bool copy) {
+                text[length]='\0';
+                if(copy) {const std::string source(text.data());destination=source;}
+                else destination=text.data();
+                text[length]='x';
+            };
+            const auto record=[&](std::size_t capacity,std::size_t parent,std::size_t length,bool copy) {
+                if(capacity>4096)return false;
+                shape.error=std::max(shape.error,capacity);
+                for(std::size_t i=0;i<shape_count;++i)if(shapes[i].capacity==capacity)return true;
+                if(shape_count==shapes.size())return false;
+                shapes[shape_count++]={capacity,parent,length,copy};return true;
+            };
+            shape.error=shapes[0].capacity;
+            for(std::size_t at=0;at<shape_count;++at)for(std::size_t length=0;length<=error_chars;++length) {
+                text[length]='\0';
+                const auto source_capacity=std::string(text.data()).capacity();
+                if(source_capacity>4096)return std::nullopt;
+                shape.error=std::max(shape.error,source_capacity);
+                text[length]='x';
+                for(const bool copy:{false,true}) {
+                    std::string destination;
+                    std::array<std::size_t,160> path{};std::size_t count=0;
+                    for(auto node=at;node;node=shapes[node].parent)path[count++]=node;
+                    while(count) {const auto& step=shapes[path[--count]];assign(destination,step.length,step.copy);}
+                    if(destination.capacity()!=shapes[at].capacity)return std::nullopt;
+                    assign(destination,length,copy);
+                    if(!record(destination.capacity(),at,length,copy))return std::nullopt;
+                }
+            }
+            boundary_sync::Collector collector;
+            shape.collector=collector.working_bytes();
+            impl_->retained_shape=shape;
+#else
+            return std::nullopt;
+#endif
+        }
+        if(!impl_->retained_shape)return std::nullopt;
+        const auto& shape=*impl_->retained_shape;
+        const auto preview=shape.preview,error_capacity=shape.error;
+        const auto targets=product(options.receive_targets_db_hz.capacity(),sizeof(double));
+        if(!targets)return std::nullopt;
+        const auto empty_string=std::string{}.capacity();
+        const auto strings=product(3,empty_string); // filename, callsign, grid
+        if(!strings)return std::nullopt;
+        std::size_t state=sizeof(Impl::State)+sizeof(std::pair<std::uint64_t,std::uint64_t>)+
+            sizeof(std::unique_ptr<Impl::State>)+4*sizeof(void*);
+        for(const auto bytes:{shape.collector,*targets,preview,diagnostic_bytes,
+                              error_capacity,*strings,shape.packed,shape.starts})
+            if(!add(state,bytes))return std::nullopt;
+        std::size_t pending_copy=sizeof(Received);
+        for(const auto bytes:{preview,diagnostic_bytes,error_capacity,*strings})
+            if(!add(pending_copy,bytes))return std::nullopt;
+        const auto births=product(candidate_limit-impl_->states.size(),state);
+        if(!births)return std::nullopt;
+        auto growth=*births;
+        for(const auto& [id,owned]:impl_->states) {
+            (void)id;const auto& current=*owned;const auto& result=current.result;
+            const auto& message=result.content.message;
+            // A terminal source is moved out and erased in the ordinary push.
+            // Do not silently treat its potentially full decoded output as a
+            // bounded pre-END preview if this serialized-query premise changes.
+            if(result.stream_complete || result.content_validated || result.short_text_decoded ||
+               result.recovery || !message.data.empty())return std::nullopt;
+            const auto constellation=product(result.diagnostics.constellation.capacity(),sizeof(std::complex<double>));
+            const auto waveform=product(result.diagnostics.waveform.capacity(),sizeof(float));
+            const auto current_starts=product(current.recovery_starts.capacity(),sizeof(std::uint64_t));
+            if(!constellation || !waveform || !current_starts)return std::nullopt;
+            auto current_diagnostics=*constellation;
+            if(!add(current_diagnostics,*waveform))return std::nullopt;
+            const auto reserve_growth=[&](std::size_t bound,std::size_t actual) {
+                return bound<=actual || add(growth,bound-actual);
+            };
+            if(!reserve_growth(preview,result.raw_bits.capacity()) ||
+               !reserve_growth(diagnostic_bytes,current_diagnostics) ||
+               !reserve_growth(error_capacity,result.error.capacity()) ||
+               !reserve_growth(shape.packed,current.recovery_bits.capacity()) ||
+               !reserve_growth(shape.starts,*current_starts))return std::nullopt;
+            std::size_t copy=sizeof(Received);
+            for(const auto bytes:{result.raw_bits.capacity(),current_diagnostics,result.error.capacity(),
+                                  message.filename.capacity(),message.callsign.capacity(),message.grid.capacity()})
+                if(!add(copy,bytes))return std::nullopt;
+            pending_copy=std::max(pending_copy,copy);
+        }
+        if(!add(growth,pending_copy))return std::nullopt;
+        return growth;
+    } catch(const std::bad_alloc&) {return std::nullopt;}
+      catch(const std::length_error&) {return std::nullopt;}
+}
 std::optional<std::size_t> StreamReceiver::helper_replay_storage_bound(std::size_t maximum_stream_bits)const {
     constexpr auto marker_minimum=boundary_sync::marker_bits-boundary_sync::maximum_marker_loss_bits;
     static_assert(marker_minimum<=short_message_bits);
@@ -859,7 +1027,7 @@ Received receive(std::span<const float> samples, const Options& input_options, P
         auto value=options;value.modem=profile;value.modem.stream_phase_samples=origin.phase;
         modem::PatternSearch search;search.allow_local_clock_fallback=true;
         if(profile.oscillator_search) {
-            const auto declared=modem::oscillator_pattern_search(profile,effective_clock_sync(options)?modem::utc_transmit_rate_limit(profile):0);
+            const auto declared=receiver_oscillator_search(profile,options);
             search.hypotheses=declared.hypotheses;
             search.admitted_frequency_half_width_hz=declared.frequency.requested_half_width_hz;
             search.admitted_clock_half_width_ppm=declared.requested_clock_half_width_ppm;
@@ -880,7 +1048,7 @@ Received receive(std::span<const float> samples, const Options& input_options, P
 
         search.search_stream_phases=!profile.symbol_burst.enabled() && options.key.has_value();
         search.receiver_bank_count=modem::receiver_strategy_bank_count(profile,options.search_seconds,1,profiles.size());
-        search.start_uncertainty_seconds=options.search_seconds+1.;
+        search.start_uncertainty_seconds=options.search_seconds+1.+options.capture_start_uncertainty_seconds;
         modem::PatternReceiver decoder(seeded_config(value,epoch),options.dsp_workspace_bytes,search);
         StreamReceiver content(value,epoch);
         for(std::size_t offset=0;offset<samples.size();) {

@@ -1,13 +1,13 @@
 # Helper Carrier implementation and qualification plan
 
-Updated 25 October 2026 for the implemented rolling common-link frequency
-reference, bounded ordinary broad search and unchanged Robust payload path.
+Updated 25 October 2026 for the wide-capture and compact-receiver corrections
+under development. These corrections are not yet runtime-qualified.
 Qualification remains open. This page describes current behavior and remaining
 work; source-bound results, original failures and historical architectures are
 in [validation](validation.md). Waveform and operating details are in the
 [Helper Carrier reference](helper-carrier.md).
 
-The current 441-input source/build overlay is
+The preceding build's 441-input source/build overlay is
 `87513574c569de7d9362d498f747cea6658b51e0b681884555242884c2a0e17f`, bound by
 `local-evidence/helper-v4/candidate-v8-source-bindings.json`,
 `candidate-v8-auxiliary-source-bindings-r1.json` and
@@ -15,20 +15,20 @@ The current 441-input source/build overlay is
 build passed, recorded in `candidate-v8-application-build/execution-result.json`
 (hash begins `0fe66ddd`); the GUI hash begins `8f2af1f4`.
 
-Current lifecycle focus passed three sampled/control functions and the
+That build's lifecycle focus passed three sampled/control functions and the
 deterministic rolling pair, recorded in
 `candidate-v8-lifecycle/focused-checks-r1/execution-result.json` (hash begins
-`b555072b`). Current full normal qualification passed 381/381 registered cases
+`b555072b`). That build's full normal qualification passed 381/381 registered cases
 exactly once: Core 325, Fast 36, Frontends 3, Web 13, Live 2, Preparation 1 and
 Calibration 1. All 24 Fast CLI cases passed, with no omissions or limits and
 passing provenance/cleanup audits; the final record hash begins `b810c8a5`.
-Current sanitizer focus passed 15 named cases, all 24 Fast CLI checks and three
+That build's sanitizer focus passed 15 named cases, all 24 Fast CLI checks and three
 gap-focused checks; 364 other headless cases remain unselected, and the original
-eleven full-suite failures remain historical. Current Native FLTK passed 3/3.
-Current physical cable text96 strictly passed full wire/source and physical END,
+eleven full-suite failures remain historical. Its Native FLTK checks passed 3/3.
+Its physical cable text96 strictly passed full wire/source and physical END,
 with large backlog rather than real-time performance. Attachment129 also passed
 its full 900/910-second window. HF8 cable completed exact data and physical END,
-but its strict full-pending-prefix audit failed and remains limited. Current
+but its strict full-pending-prefix audit failed and remains limited. Its
 controlled 1,024-bit work and exact-HF8 simulation results have the narrower
 scopes below. Broader performance, remaining cable and weak EME qualification remain pending.
 
@@ -39,6 +39,33 @@ failed/incomplete, v7 normal failures and prior payload/cable/work measurements
 do not qualify v8. See [validation](validation.md) for source-bound evidence and failures.
 
 ## Governing requirements
+
+The current acceptance cases add two encrypted 15 kW HF configurations: Rate 36,
+shared crystal RF/audio reference at 30 MHz with Interleave 10, and Rate 360,
+independent crystal audio/ic-7100 RF references with Fake-FCC and Interleave 10.
+The earlier 5.8 GHz GPSDO-OCXO, Rate 1, 128-second-symbol case remains a separate
+requirement. Bounded baseline runs retained in `local-evidence/helper-v9/`
+completed no payload in any of these cases. Rate 360 advanced only 2.05 seconds
+of captured audio in 55 seconds of processing; the EME case advanced 0.341
+seconds in 20 seconds. Neither executed conditional acquisition work. These
+observations establish failures, not a completed performance comparison.
+
+The correction must discover the strongest stable tone in the captured helper
+range before narrow conversion, retain both admissible signed-mono images, and
+use independently qualified frequency measurements without requiring phase,
+punctuation or metadata decoding. Shared-radio clock inference requires a new
+immutable conditional catalogue with its actual nonzero audio-clock values;
+an RF-only correction cannot repair a clipped clock catalogue. The ordinary
+compact and calendar backends must skip actual cold projection/fit work while
+preserving all accepted state and complete-symbol absence scoring. Optional
+workspace reclamation must yield to ordinary broad decoding and cannot erase a
+required audit obligation. Punctuation preserves all modulo-400-ms aliases;
+it cannot reduce one-second EME arrival cells. Configured oscillator diffusion
+may support phase continuation, but does not authorize vehicle-Doppler tracking.
+
+Physical capture remains a prerequisite. A sufficiently fast ADC does not
+restore a helper or payload removed by a narrow SSB radio filter. Qualification
+must report that limit separately from conditional digital-search coverage.
 
 Helper Carrier is an independent experimental reference transmission, optionally
 assisting Robust reception when GPSDO hardware is unavailable. It can accompany

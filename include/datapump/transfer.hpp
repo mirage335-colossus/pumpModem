@@ -50,6 +50,10 @@ struct Options {
     // zero within the original physical capture. This is an offset, not UTC
     // authority; canonical source epochs/phases and capture_epoch stay fixed.
     std::uint64_t input_sample_origin_samples = 0;
+    // Receive-only additional arrival uncertainty in the physical recording.
+    // For example a helper-only lead can precede the unchanged keyed source.
+    // This widens start coverage, never the source epoch/phase or END rule.
+    double capture_start_uncertainty_seconds = 0;
 };
 inline bool shared_hop_calendar(const modem::Config& config) {
     return config.symbol_burst.enabled() || bool(config.fake_hopping) || (config.scheduled_hopping && config.scheduled_hopping->enabled());
@@ -156,6 +160,21 @@ public:
     void discard(std::uint64_t first_sample, std::uint64_t first_symbol);
     std::size_t working_bytes() const;
     std::size_t source_buffer_bytes() const;
+    // Additional retained non-encoded receiver storage beyond working_bytes(),
+    // in that method's accounting units (including its fixed map-node allowance),
+    // not an allocator-overhead bound. Actual supported container capacities are
+    // probed lazily; the scalar cache itself is included in working_bytes().
+    // Covers bounded candidate State/collector/preview/recovery-vector growth
+    // and ONE pre-END pending Received copy. The caller must prove the maximum
+    // combined constellation/waveform CAPACITY bytes supplied by diagnostics.
+    // Live accounts the shared encoded-source promise exactly once separately.
+    // This is not an allocation/COW/transient peak bound. Decoded application
+    // output, codec scratch and post-END recovery jobs keep their own quotas;
+    // in particular, the at-END returned decoded source is not covered here.
+    // Serialize this query with push/discard, as with working_bytes().
+    // Unknown/unsupported geometry or arithmetic/allocation failure returns
+    // nullopt: release optional storage before the unchanged ordinary push.
+    std::optional<std::size_t> retained_growth_bound(std::size_t maximum_diagnostic_capacity_bytes) const;
     // Helper-only reservation for empty candidates over a finite native PCM
     // replay. nullopt when any framed source interpretation could be reached.
     // Native callers supply at most 2048 constellation points and no waveform.

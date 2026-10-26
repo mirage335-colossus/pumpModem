@@ -243,6 +243,31 @@ Diagnostics StreamingReceiver::diagnostics()const{return impl_->pattern.diagnost
 ConstellationBatch StreamingReceiver::take_payload_constellation(){return {impl_->pattern.take_chip_constellation(),0};}
 std::size_t StreamingReceiver::working_bytes()const{return sizeof(StreamingReceiver)+sizeof(Impl)+impl_->pattern.working_bytes();}
 std::size_t StreamingReceiver::reserved_workspace_bytes()const{return sizeof(StreamingReceiver)+sizeof(Impl)+impl_->pattern.reserved_workspace_bytes();}
+std::optional<PatternColdWorkspaceFloor> StreamingReceiver::cold_workspace_floor()const noexcept {
+    auto result=impl_->pattern.cold_workspace_floor();
+    if(!result)return std::nullopt;
+    constexpr auto maximum=std::numeric_limits<std::size_t>::max();
+    if(result->workspace_argument_bytes>maximum-sizeof(Impl))return std::nullopt;
+    auto argument=result->workspace_argument_bytes+sizeof(Impl);
+    // set_workspace_bytes also checks actual storage, which includes the outer
+    // shell. Preserve that exact public precondition even for a tiny quota.
+    argument=std::max(argument,working_bytes());
+    if(argument>maximum-sizeof(StreamingReceiver))return std::nullopt;
+    result->workspace_argument_bytes=argument;
+    result->actual_workspace_bytes=argument+sizeof(StreamingReceiver);
+    return result;
+}
+std::optional<PatternColdObservationStorage> StreamingReceiver::cold_observation_storage()const noexcept {
+    auto result=impl_->pattern.cold_observation_storage();
+    if(!result)return std::nullopt;
+    constexpr auto overhead=sizeof(Impl)+sizeof(StreamingReceiver);
+    constexpr auto maximum=std::numeric_limits<std::size_t>::max();
+    if(result->actual_workspace_bytes>maximum-overhead ||
+       result->execution_workspace_argument_bytes>maximum-sizeof(Impl))return std::nullopt;
+    result->actual_workspace_bytes+=overhead;
+    result->execution_workspace_argument_bytes+=sizeof(Impl);
+    return result;
+}
 std::optional<HelperReplayBudget> StreamingReceiver::helper_replay_budget(std::size_t future_samples,
         const PatternSearch* reset_search)const {
     auto result=impl_->pattern.helper_replay_budget(future_samples,reset_search);
@@ -299,6 +324,9 @@ Bytes StreamingReceiver::push_symbols(std::span<const SymbolObservation>,std::st
 }
 Bytes StreamingReceiver::push(std::span<const float> samples,std::stop_token stop){impl_->pattern.push(samples,stop);return {};}
 PatternAcquisitionState StreamingReceiver::acquisition_state()const noexcept{return impl_->pattern.acquisition_state();}
+std::optional<PatternAcquisitionWorkBound> StreamingReceiver::acquisition_work_bound()const noexcept{return impl_->pattern.acquisition_work_bound();}
+std::optional<PatternAcquisitionScoredSupport> StreamingReceiver::acquisition_scored_support()const noexcept{return impl_->pattern.acquisition_scored_support();}
+std::optional<PatternContinuationScoredSupport> StreamingReceiver::continuation_scored_support(std::size_t incoming)const noexcept{return impl_->pattern.continuation_scored_support(incoming);}
 std::span<const PatternFrequencyRateHypothesis> StreamingReceiver::acquisition_hypotheses()const noexcept {
     return impl_->pattern.acquisition_hypotheses();
 }
@@ -306,6 +334,23 @@ bool StreamingReceiver::set_acquisition_prior(double origin,std::span<const std:
     return impl_->pattern.set_acquisition_prior(origin,mask);
 }
 bool StreamingReceiver::clear_acquisition_prior(){return impl_->pattern.clear_acquisition_prior();}
+PatternCompactAcquisitionState StreamingReceiver::compact_acquisition_state()const noexcept{return impl_->pattern.compact_acquisition_state();}
+std::span<const PatternFrequencyRateHypothesis> StreamingReceiver::compact_acquisition_hypotheses()const noexcept{return impl_->pattern.compact_acquisition_hypotheses();}
+bool StreamingReceiver::set_compact_acquisition_prior(double origin,std::span<const std::uint8_t> mask){return impl_->pattern.set_compact_acquisition_prior(origin,mask);}
+bool StreamingReceiver::clear_compact_acquisition_prior()noexcept{return impl_->pattern.clear_compact_acquisition_prior();}
+bool StreamingReceiver::start_compact_acquisition_audit()noexcept{return impl_->pattern.start_compact_acquisition_audit();}
+bool StreamingReceiver::set_compact_timing_prior(const PatternPeriodicTimingPrior& prior)noexcept{return impl_->pattern.set_compact_timing_prior(prior);}
+bool StreamingReceiver::clear_compact_timing_prior()noexcept{return impl_->pattern.clear_compact_timing_prior();}
+bool StreamingReceiver::compact_phase_assistance_supported()const noexcept{return impl_->pattern.compact_phase_assistance_supported();}
+bool StreamingReceiver::set_compact_phase_view(const PatternPhaseCurve* curve)noexcept{return impl_->pattern.set_compact_phase_view(curve);}
+bool StreamingReceiver::compact_phase_view_active()const noexcept{return impl_->pattern.compact_phase_view_active();}
+bool StreamingReceiver::cold_acquisition_only()const noexcept{return impl_->pattern.cold_acquisition_only();}
+PatternAcquisitionDispatchState StreamingReceiver::helper_acquisition_dispatch()const noexcept {
+    return impl_->pattern.helper_acquisition_dispatch();
+}
+bool StreamingReceiver::set_helper_acquisition_dispatch(bool permitted)noexcept {
+    return impl_->pattern.set_helper_acquisition_dispatch(permitted);
+}
 bool StreamingReceiver::set_helper_gap_protection(bool qualified)noexcept {
     return impl_->pattern.set_helper_gap_protection(qualified);
 }
@@ -316,7 +361,24 @@ void StreamingReceiver::process_acquisition(std::stop_token stop){impl_->pattern
 bool StreamingReceiver::set_acquisition_phase_view(const PatternPhaseCurve* curve)noexcept{return impl_->pattern.set_acquisition_phase_view(curve);}
 bool StreamingReceiver::acquisition_phase_view_active()const noexcept{return impl_->pattern.acquisition_phase_view_active();}
 bool StreamingReceiver::process_prior_acquisition(std::stop_token stop){return impl_->pattern.process_prior_acquisition(stop);}
+std::size_t StreamingReceiver::observe_acquisition(std::span<const float> samples,
+        const PatternContinuationFrequencyPrior& prior,PatternContinuationFrequencyResult& result,std::stop_token stop){
+    return impl_->pattern.observe_acquisition(samples,prior,result,stop);
+}
+bool StreamingReceiver::process_assisted_acquisition(const PatternAcquisitionAssistance& assistance,std::stop_token stop){return impl_->pattern.process_assisted_acquisition(assistance,stop);}
+bool StreamingReceiver::process_prior_acquisition(const PatternPeriodicTimingPrior& prior,std::uint64_t evidence,
+        PatternAcquisitionTimingResult& result,std::stop_token stop) {
+    return impl_->pattern.process_prior_acquisition(prior,evidence,result,stop);
+}
+bool StreamingReceiver::process_prior_acquisition(const PatternAcquisitionClockPrior& prior,PatternAcquisitionClockResult& result,
+        std::stop_token stop) {return impl_->pattern.process_prior_acquisition(prior,result,stop);}
+bool StreamingReceiver::process_prior_acquisition(const PatternAcquisitionClockPrior& clock,PatternAcquisitionClockResult& clock_result,
+        const PatternPeriodicTimingPrior& timing,std::uint64_t evidence,PatternAcquisitionTimingResult& timing_result,std::stop_token stop) {
+    return impl_->pattern.process_prior_acquisition(clock,clock_result,timing,evidence,timing_result,stop);
+}
 void StreamingReceiver::resolve_acquisition(bool conditional_link,std::stop_token stop){impl_->pattern.resolve_acquisition(conditional_link,stop);}
+void StreamingReceiver::resolve_acquisition(bool conditional_link,const PatternContinuationFrequencyPrior& prior,
+        PatternContinuationFrequencyResult& result,std::stop_token stop){impl_->pattern.resolve_acquisition(conditional_link,prior,result,stop);}
 PatternFftWork StreamingReceiver::fft_work()const{return impl_->pattern.fft_work();}
 std::optional<PatternSourceIdentity> StreamingReceiver::source_identity(const PatternBurst& burst)const {
     return impl_->pattern.source_identity(burst);

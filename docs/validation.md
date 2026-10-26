@@ -1,6 +1,6 @@
 # Validation status
 
-Updated 25 October 2026. This page records current qualification, release status,
+Updated 26 October 2026. This page records current qualification, release status,
 coverage limits and useful historical anchors. It is not a session log. Replace
 superseded status here; keep one latest [resource snapshot](ci-resource-results.json)
 and use Git history for comparisons. Detailed studies remain in the
@@ -8,7 +8,904 @@ and use Git history for comparisons. Detailed studies remain in the
 
 ## Current Helper Carrier candidate
 
-The current v4 application candidate is v8, overlay SHA-256
+The wide-capture/compact-receiver correction is under development from
+`efa00b0c63f66b3911d6e392ff42c9740fce6aa7`. Last coherent integration v26 retains
+v25 exact continuation-row reuse and resolves five focused checks across those
+two runs after a test-only progress-oracle repair. This is not full normal
+qualification. The latest B12 diagnostics report exact full wire/source,
+retained pending identity and ordinary END, but their unchanged strict helper
+gate still fails the assisted-provenance tag. The v27 build failed its auxiliary
+storage bound; no newer GUI/runtime result is qualified. Prior A/EME startup
+passes cover frequency bootstrap only. A supported v21 private continuous
+256-bit fixture completed both legs; its posthoc report is recovered while the
+original outer parser failure remains retained. No full regression, current phase/compact/A/EME
+or cable acceptance, feature completion or release certification is claimed.
+The preceding v8 matrix and cable/native-GUI passes below are historical and
+do not qualify this changed candidate.
+
+The focused matched 15 kW baseline runs in `local-evidence/helper-v9/` are
+**incomplete**, not passes. Shared-crystal Rate 36 produced no bits in either
+20-second window (45.79 seconds of capture each). Independent crystal/ic-7100
+Rate 360 with Fake-FCC produced no bits in either 55-second window; helper ON
+advanced 2.05 seconds of capture. The separate GPSDO-OCXO 128-second EME case
+produced no bits in either 20-second window; helper ON advanced 0.341 seconds.
+None executed conditional acquisition work. `baseline-binding-r1.json` binds
+the preserved baseline ELF, archives, metadata-fixture repair and reaped runs.
+The original incorrect deferred-FHSS metadata expectation remains a retained
+fixture failure; its repaired metadata-only check passed without a DSP change.
+
+The coarse frontend's initial standalone compile and focused tests passed
+(3.87 seconds and 0.42 seconds; no warnings, processes reaped), bound in
+`frontend-focused-v1/execution-result.json`. This proves the component's
+discovery/translation controls, not normal rolling reception or payloads.
+Compact focused checks have demonstrated matched 12-bit physical completion,
+including final-symbol helper loss, with fewer executed sample projections and
+lane accumulations. The original trial-matching, calendar and pressure failures
+remain retained alongside their individually reviewed repairs below. These core
+checks do not establish normal rolling reception. The separate physical-capture
+build's missing `/usr/bin/time` setup error is also retained; no compiler ran in
+that initial attempt.
+Its corrected timing wrapper then compiled, linked and passed the physical
+capture test (0.064 seconds), including raw +3/+6 kHz support, default narrow
+rejections, early helper energy, unchanged source drain and payload coordinates.
+The phase-dynamics component also passed (0.032 seconds), with an actual
+Receiver/Generator check that metadata-forwarded phase cannot become a fresh
+observation; `dynamics-focused-v1/execution-result.json` binds that check.
+All component processes were reaped. These passes do not establish Live
+integration, a current GUI build or any of the three end-to-end acceptance cases.
+
+The first coherent application build passed (145.25 seconds, exit 0/reaped,
+unchanged input hashes), in `production-build-v1/`. Its focused component and
+history/physical-tail group passed 5/5, and the shared GUI helper check passed.
+Planner focus failed before selector comparison: the Rate 360 deferred-FHSS
+profile's real gate-skirt allowance crosses audio DC, which the symmetric
+helper placement incorrectly rejects. The independent selector retained all
+seven LF lanes. `planner-diagnostic-v1/` retains that distinction; a typed
+real-mono placement correction is not yet built or qualified.
+
+The separately bound compact core in `compact-coherent-v2/` passed clock-cell
+coverage, strict trial parity, periodic aliases, audit/reclaim and matched
+short-payload controls. Correcting the calendar fixture to use the existing
+physical absence-capture duration produced exact eight-bit/END and competing
+start passes (108 to 12 and 810 to 90 acquisition jobs). The original calendar
+test supplied insufficient eligible absence and remains a retained failure.
+Two memory fixtures first failed in the ordinary helper-OFF control, under
+loans below its required future workspace; these were invalid resource setups,
+not demonstrated helper regressions. The reviewed long-symbol repair uses the
+same ordinary 82,464-byte promise for both sides and passes complete two-bit
+128-second reception, final-symbol helper loss, progress/identity and END.
+The first revised pressure pair completed exactly under the same measured
+66,855-byte loan but failed to observe actual subsequent helper-control
+reclamation. A reviewed, test-only pressure-frontier repair then passed the
+original reclamation predicate: the optional control was present after actual
+cold-work omission and yielded at sample 2,712. Both controls retained exact
+12-bit data, per-poll progress, pending identity and physical END under that same
+loan. Executed carrier projections changed from 286,929 to 265,233, and lane
+samples from 2,810,583 to 2,548,423. The original failed run remains distinct;
+`compact-coherent-v2/reviewed-r3/result.json` binds the repaired pass.
+
+Actual raw and 128-second segmented phase controls pass exact data and END
+through reference closure. In the controlled nonzero-phase long case, the
+uncorrected receiver does not recover the exact two bits, while the corrected
+receiver does; first-symbol evidence changes from 1,396.24 to 158,571. This is
+an isolated phase-kernel comparison, not measured normal Auto acquisition or a
+CPU benefit. `compact-coherent-v2/reviewed-r2/result.json` binds these results.
+The current post-build Live repairs and normal phase caller are not covered by
+the first application build or these component checks.
+
+The second coherent GUI/application build passed in 127.48 seconds with unchanged
+build-input hashes (`production-build-v2/`). Its focused group passed 10/11;
+the new calendar-bandwidth test incorrectly requested isolated Low at 15 kW
+with too little guard space. The reviewed test-only correction moves that
+synthetic identity check's carrier from 1 to 4 kHz, preserving power, all three
+placements and the actual HF/EME geometry. A private compile/link against the
+unchanged second-build library passed the repaired test (0.008 seconds), bound
+in `calendar-repaired-r1/result.json`. The original failed fixture and 10/11
+result remain retained. Shared GUI helper, Planner helper and
+all three 15 kW acceptance metadata checks passed separately.
+
+Actual encrypted Auto/rolling diagnostics of this second build remain
+**incomplete**. Shared-crystal HF recovered the exact first five of eight bits
+in 45 seconds, with a qualified preconversion reference and both signed input
+views; 20,524 executed native jobs all belonged to conditional views, including
+the primary wire and later epochs. There was no reset or overrun, but the run
+did not cover the full 114-second payload or physical END. Independent
+crystal/ic-7100 HF initially selected 21 of 2,075 pairs and executed 2,688
+conditional jobs, then a newer nonoverlapping frequency interval triggered
+quarantine and broad acquisition. Its 60-second window advanced only 2.81
+seconds of audio and received no bits. The trace proves this rejection branch,
+but lacks the rejected measurement needed to quantify its cause. Local
+frequency covariance omits the configured oscillator phase diffusion; that
+model/provenance gap is being corrected, not replaced by an empirical gate
+increase. `stage2-hf-crystal-on/` and `stage2-hf-fhss-on/` bind sealed traces,
+commands, binary hashes and reaped processes. Neither is a full acceptance or
+before/after performance pass.
+
+The actual 15 kW weak-helper observer exposed a separate frequency-confidence
+defect. At 205 dB path loss, one of 264 published intervals missed the simulated
+carrier; at 210 dB, 111 of 363 missed it. The first reported interval below
+0.1 Hz at 210 dB was wrong by 0.8703 Hz despite a 0.0250 Hz half-width. Eighty-six
+invalid intervals lay wholly inside the declared oscillator domain, so a domain
+or adjacent-interval overlap gate alone is insufficient. Private provenance
+diagnostics reproduced both raw local-fit misses and long-fit amplification;
+the narrow uncertainty is not accepted as justified assistance. These are
+helper-only observation checks, not ordinary payload or Live passes. The four
+60-second signal/noise streams, unchanged inputs, reaped processes and failed
+coverage remain in `eme-precision/` and `weak-frequency-diagnostic-v1/`.
+
+The replacement strong-tone process allowance passed a separate private focused
+check under the original 9 KiB receiver bound (2,664-byte measured stack chain
+within its 2,880-byte scratch allowance). With matched oscillator phase noise,
+the original local-only calculation missed the mean carrier in 11/56 references
+and rejected the initial link interval once; the conservative pathwise model
+missed none of the same 56 references and caused no such rejection. Its largest
+frequency process half-width was 0.9466 Hz. All 47 independently dated fitted
+phase measurements also covered their actual endpoints (maximum error 0.00134
+radians, maximum total allowance 0.0791 radians). A 4 Hz/s chirp produced no
+qualified reference; a retained 0.2 Hz/s chirp observed for 12 seconds produced
+36 fixed-interval rejections. Earlier four-second chirp fixtures legitimately
+failed to leave the wider interval and remain retained test-setup failures.
+These are conditional CW/AWGN/oscillator-model checks, not universal interference
+confidence, full Live validation or a repair of the weak global-frequency path.
+
+The third coherent application build passed in 52.13 seconds with unchanged
+inputs (`production-build-v3/`). Its focused CTest group passed 6/6, including
+the causal frequency-support rebase, oscillator dynamics, calendar geometry and
+both payload-tail controls. Shared GUI helper, Planner helper and the three
+acceptance metadata checks also passed (`frequency-focused-v3/`). These are
+focused results; full current-source qualification remains pending.
+
+The same 60-second encrypted Rate 360 Auto/rolling diagnostic advanced 9.81
+seconds of audio with the reference continuously qualified, compared with 2.81
+seconds before the process-model correction. It still failed to complete:
+one pending bit, no physical END, 269,528 acquisition jobs and 382.59 process
+CPU seconds. Twelve empty epoch candidates exhausted their payload-renewed
+probation and replayed exhaustive windows, accounting for 199,200 of those
+jobs. Every affected trace reported `audit_due=0`; this is a candidate-lifetime
+defect rather than a scheduled broad audit. `stage3-hf-fhss-on/` retains the
+incomplete result and sealed traces. The correction must keep a continuously
+qualified tone as the conditional link reference and use separately owned,
+fully scored future broad audits; missing payload alone cannot invalidate it.
+
+The fifth focused application build and six focused CTests passed, including
+the repaired helper-loss-during-audit lifecycle control; GUI, Planner and three
+metadata checks also passed (`frequency-focused-v5/`). The fourth run's failed
+Simulation counter oracle and subsequent audit-generation overlap defect remain
+preserved in `frequency-focused-v4/`. These focused passes do not qualify the
+acceptance payloads or the final source.
+
+The next unchanged 60-second Rate 360 diagnostic still failed: one matching
+pending bit, no END, 8.39 seconds of audio and 478.12 process CPU seconds
+(`stage5-hf-fhss-on/`). That bit belonged to candidate epoch 1800000004 while
+TX used 1800000005; it was not true-epoch acquisition. Joined work comprised
+58,128 conditional and 315,400
+future-broad template-descriptor visits. Template visits include exact reuse;
+they are not a count of FFT executions. One periodic audit admitted 16 complete
+broad banks, so the future-audit policy still overwhelmed the conditional path.
+These separate helper-on runs resolved percentage workspace independently;
+their CPU differences are not controlled before/after measurements. The later
+focused builds exercise a revised partial future-probe policy and explicit
+backend telemetry without establishing an acceptance-case pass.
+
+The sixth coherent application build passed in 76.90 seconds and its focused
+targets built in 29.34 seconds (`frequency-focused-v6/`). Eight of nine receiver
+checks passed, including normal helper loss, phase continuity and both tail
+controls; GUI, Planner and acceptance geometry also passed. The lifecycle check
+remains incomplete: its fresh broad fallback opened, but capture stopped 2,480
+frames before the newest candidate's first complete scoring fence. Its retained
+SF128 waveform captured 9.55 seconds during the ten-second wall window; the
+required fence was about 9.86 input seconds after loss. This does not establish
+a receiver retirement defect or a categorical ten-input-second impossibility.
+A reviewed SF64 functional fixture retains every assertion and wall limit;
+its subsequent v7 rerun passed, while the original result remains unpassed.
+
+Three of four focused CLI helper checks passed. Clear-time metadata failed;
+the same WAV decoded all twelve Robust bits and completed physically. An
+identical-PCM receiver comparison produced 51 metadata updates without declared
+diffusion and none with the crystal model: its conservative process uncertainty
+exceeded metadata's local coherence gate. `cli-metadata-model-v2/` retains the
+WAV and both streams. The subsequent metadata-only local-fit gate correction
+passed the v7 CLI checks below; published synchronization bounds and acquisition
+remain separate from that metadata decoding gate.
+
+The seventh coherent application build passed (139.31 seconds), its focused
+targets built successfully, and all ten component/history/physical-tail CTests
+passed. Shared GUI helper, Planner helper, all four CLI helper checks and the
+three acceptance metadata geometries also passed. Processes were reaped without
+timeouts or changed inputs. `frequency-focused-v7/execution-result.json`,
+`inputs.json` and `production-binaries.json` bind these focused results: Live
+`605e6061`, its helper `76cf005a`, Live test `a0a4ba24`, core archive `d6a36171`
+and GUI `ae3d683c`. This resolves the focused lifecycle/metadata fixtures, not
+the acceptance payloads or full final-source qualification.
+
+The subsequent stage 7B encrypted Rate 360 Auto/rolling diagnostic failed its
+gate under a later-diagnosed TX fixture mismatch: zero primary bits and one
+secondary row, with TX epoch 1800000006. It
+advanced 198,579 samples at 14,400 Hz (13.7902 seconds of audio) during
+60.068934 wall seconds and 153.010143 process CPU seconds. Joined work was
+115,848 template-descriptor visits: 99,248 conditional and 16,600 audit.
+Separate arithmetic counts were 53,875 FFT jobs, 29,648 direct jobs, 32,325
+exact-reused template visits and 215,500 tabulated FP64 transforms; these units
+are not summed into one arithmetic cost. `stage7-diagnostics/execution/` retains
+the result and wrapper log, sealed complete trace, unchanged source/binary
+bindings and reaped processes. Its failure kept the 1,024-bit long pair gated
+and unrun. The 6,083,008,512-byte percentage-resolved workspace differs from
+earlier independent invocations, so this is neither a controlled causal
+regression comparison with stage 5 nor a performance gain. The omitted TX FHSS
+plan described below also prevents treating it as a matched GUI configuration
+or evidence of core payload truncation.
+
+The first private global weak-frequency replacement retained every compatible
+frequency/mask cell and had no interval misses in its six controlled streams.
+It did not meet the original 24 dB-Hz or wide shifted-tone utility checks:
+the minimum interval half-widths were 6.89 and 95.08 Hz, respectively. The
+205 dB EME observer first reached 0.1 Hz after 6.4 seconds; at 210 dB its best
+half-width was 0.666 Hz. Noise-only input published no reference. These are
+helper-only prototype results in `global-line-profile-v1/`, not accepted
+production assistance or payload evidence. The alias/frequency-confidence
+correction and its original utility checks remain open.
+
+The reviewed fourth private replacement adds a constant-amplitude residual
+within each clean dwell and retains the full frequency/mask union. Its prototype
+24 dB-Hz stream reached a half-width at most 0.1 Hz at 7.20 seconds. All
+15 intervals covered the carrier; evaluation used 7.81 process CPU seconds for
+12 seconds of audio. Precision was intermittent. The stronger and shifted controls
+passed, as did 16-second EME controls over the actual ±1.7400009 Hz prior:
+205/210 dB loss each published 25 intervals with no misses, first at 6.40 seconds,
+minimum half-widths 0.0293/0.0500 Hz, and 0.0545/0.0645 CPU seconds per audio
+second. Noise published no reference. Actual object storage is 139,480 bytes
+and measured evaluation stack 2,032 bytes. Original failed prototypes remain in
+`global-{line,ray}-profile-v*/`. These are conditional coherent-tone/AWGN/model
+component results, not production, long-history, payload or Live evidence.
+
+The subsequent optional-work API passed its lifecycle, resource and unchanged
+strong-rate controls, but failed the literal maintained 24 dB-Hz utility stream:
+15 intervals over 12 seconds of audio, none at most 0.1 Hz by the unchanged
+ten-second acquisition deadline. The earlier prototype differs from that stream
+by a constant 0.08646-radian phase; its pass does not qualify the original
+fixture. The stronger and shifted-tone utility checks passed separately.
+`optional-frequency-api-v2/original-utility/` preserves these results. A bounded
+diagnostic reproduced the failure and retained all compatible frequency islands;
+the best complete union had a 0.101318359375 Hz half-width. No island was selected
+or clipped to obtain a narrower result. That private API result remains a
+retained utility failure, separate from the later V5 literal-stream result below.
+The subsequent paired-projection candidate also failed the same literal
+fixture (18.40 seconds, fifteen covering intervals, none meeting the precision
+deadline). Its observational trace shows surviving aliases using time masks
+that cross punctuation and whose own best fitted frequency is wrong. All
+compatible islands remain retained. This is a diagnosed estimator limitation,
+not permission to select a preferred island or relax the original utility test.
+
+The separate mean-frequency/affine-support phase query component passed all
+five compile/link/positive/unsupported-arithmetic commands, with unchanged
+inputs and reaped processes, in
+`phase-mean-interval-private/execution-v1/result.json`. Header `3f27ba3b` and
+test `b928e355` were subsequently integrated. At that stage the runtime caller
+was unchanged; this component result is not a normal workload or work-reduction
+proof.
+
+The next coherent build, `frequency-focused-v8r1/`, passed in 52.00 seconds;
+all 13 focused CTests, shared GUI helper, Planner helper, four CLI helper checks
+and three metadata geometries passed with unchanged inputs and reaped processes.
+The initial v8 attempt remains a configuration failure: the new native timing
+CTest lacked its declared build prerequisites. The corrected receipt,
+`execution-result.json`, `inputs.json` and `production-binaries.json` bind
+Live `82df4aa6`, its helper `69854335`, phase header `3f27ba3b`, core archive
+`a3e4892d` and GUI `6d4035ad`. These are focused current-reference, independent
+frequency/phase, timing and ordinary completion checks, not normal acceptance
+or final-source qualification.
+
+The separate conservative UTC RF mapping and finite-aperture mean-caller guards
+passed both compiles and both regression commands, with unchanged inputs and
+empty process groups (`combined-utc-mean-private/execution-v1/result.json`).
+The UTC check included 1.58297 Hz extra RF uncertainty, all seven original LF
+rates and nine joint boundary points, without a shared-radio correction. The
+mean-caller check reduced a controlled 0.3 Hz raw radius to 0.00170045 Hz over
+samples 10,000–28,000, retained eight direct fallbacks and granted no future
+precision lease. Tested candidate sources were `a36de520`/`f4fab968`/`79dd55ab`,
+with guard wrappers `29fec28b` and `b01f3337`; these are component guard results,
+not measured normal acquisition or performance.
+
+The RF-truth diagnostic also passed compile, link and its fixed-epoch run in
+`true-epoch-b-v1/rf-truth-all-clocks-execution-v1/result.json`, with unchanged
+inputs and reaped processes. It recovered exact 12-bit data with ordinary
+physical END using DATA CFO truth 30.15 Hz and all seven original LF lanes.
+Wrapper `5c57fa64` and ELF `a5fa480b` bind this diagnostic against core
+`a3e4892d`. Supplying RF truth and a fixed epoch does not establish helper
+measurement accuracy, unknown-epoch Auto acquisition or a normal acceptance
+pass.
+
+The private V5 aperture estimator passed the literal maintained 24 dB-Hz stream
+in `optional-frequency-api-v5-aperture/execution/legacy24-result.json` (6.03
+wall seconds, reaped without timeout). All 11 published intervals were usable;
+the first was at 7.99998 audio seconds, maximum carrier error 0.00207031 Hz and
+maximum interval half-width 0.0507813 Hz. Matching before/after bindings retain
+receiver `b9fba408`, API `ed9a44f3` and fixture `d127cb8d`, linked to retained
+core `99cc4718`. This component pass does not qualify production weak Live,
+EME, other streams or the earlier failed API versions.
+
+The combined caller/publisher application build and isolated `datapump` target
+first failed the unchanged auxiliary assertion `16496 <= 16384`, 112 bytes over
+budget. Both reaped failures remain in
+`combined-utc-mean-private/coherent-compile-failure.log`. A four-entry compact
+numeric history then restored the existing 16 KiB bound. The coherent v9
+application and focused targets built in 52.51/31.11 seconds. Eleven of twelve
+focused CTests passed; `helper_receiver` still failed its line-335 usable/early
+reference assertion for the 30.02 dB-Hz case, whose weak-profile funding is not
+merged. GUI helper, Planner helper and nine metadata configurations passed.
+`frequency-focused-v9/{execution-result,inputs,production-binaries}.json` binds
+GUI `26ceb229` and archive `46953f31`. Ten later query/prepayment/diagnostic
+postimages are separately pinned as unbuilt in
+`normal-gpsdo-same-pcm-private/source-overlay.json`; the v9 runtime and old ABI
+headers used by private probes do not qualify them. Those changes and the
+promoted fixture/getter were subsequently rebuilt in v10. Its initial
+timing-wrapper attempt exited 127 because `/usr/bin/time` was unavailable,
+before a build ran.
+
+The coherent v10 application build passed in 142.255 wall/279.656907 process
+CPU seconds, with GUI `51b7e7d7` and core archive `28e6c757`. The first focused
+compile failed for a missing direct `fhss_schedule` include; its first header
+repair then exposed a missing `symbol_schedule` resolve-function declaration.
+Both failed attempts remain retained in `integration-v10/`. Adding only those
+two direct headers produced a passing focused compile in 2.1684 wall/4.26426 CPU
+seconds and all seven CTests passed in 42.7956 wall/17.45655 CPU seconds:
+retained growth, native work bound, FFT-probe prepayment, helper Live, phase
+continuity and both payload-tail controls. Source guards were unchanged during
+each run and processes were reaped. `schedule-header-repair/execution-result.json`
+binds that focused result; no assertions or deadlines changed. This is not full
+normal, cable or acceptance qualification.
+
+All three original `normal-b12-triplet-v9/` legs failed or remained incomplete.
+A causal fixture diagnostic found that TX omitted the selected FHSS plan while
+RX expected FHSS: Session's default empty plan clears TX hopping, whereas the
+GUI Controller passes its selected plan. Stage 7B used the same omission.
+The original failed results, traces and actual work counts remain retained as
+fixture-setup evidence, without a core-truncation or valid matched-configuration
+claim. Corrected fixture `1a0bcbaf`, which passes the selected GUI TX plan, has
+now been promoted and rebuilt in v10; the private results below retain their
+original v9 runtime bindings.
+
+The corrected private B12 triplet completed with an incomplete overall result,
+bound by `normal-fixture-matched-tx-private/execution-b12-triplet-v9/` receipt
+`bd347eb8`. OFF recovered 0/12 bits; ON had nine contiguous true-TX bits after
+12.6808 audio seconds, while the GPSDO control strictly passed 12/12, stable
+pending identity and ordinary physical END after 18.7633 audio seconds. ON's
+capture deadline preceded the final symbol end, so its incompleteness does not
+demonstrate truncation or false END. The selected primary commit context was
+epoch 1800000005 rather than actual TX 1800000006; true-TX nine-bit continuity
+is separate trace evidence, not a completed primary acquisition. ON used
+195.324629 process CPU seconds versus GPSDO's 6.886595 with unequal processed
+media, so no normalized gain is claimed. All launched processes were reaped;
+the old wrong-plan failures remain retained.
+
+The corrected private same-PCM helper-OFF GPSDO control passed rolling reception
+of the exact 12-bit TX wire `101011100000`, source, stable pending row and
+ordinary physical END. Its 18.7633 audio seconds used 6.5359 process CPU seconds
+and 3.7898 wall seconds, with 10,975 FFT jobs across 34 owners; this is not a
+helper gain comparison. `normal-gpsdo-same-pcm-private/execution-same-pcm-fhss-v1/`
+binds receipt `3f9238a0`, private ELF `f4f5eed1` and PCM `6e11efe4` against
+archive `46953f31`. A separate fixed-epoch EOF replay is diagnostic only.
+Earlier probe failures `491e6ae4`/`0a1061c7` remain preserved; the r1 complete capture
+proved that actual TX wire differed at bit 8, rather than proving lost capture
+or a truncated Robust decoder.
+
+The private retained-growth getter reproduced the 128-state closure failure.
+Its R2 160-state arrays passed focused accounting/source-gate checks in
+`retained-growth-private/r2/focused-r2-v1/` (receipt `7c4910a1`), bound to source
+`436a604c` and patch `b3d2206f`. R2 has now been promoted and rebuilt in v10,
+whose retained-growth CTest passed. Its existing focused evidence remains
+source-bound, not a maximum
+grown-payload or transient heap-peak witness, Live funding or END qualification.
+
+The joint-clock component retains three distinct earlier failures in
+`native-clock-v1/`: R2 (`3bbe9c23`) failed to compile because one unsupported-drift
+call lacked the new clock parameter; R3 (`08a12d0d`) corrected that call
+(`1bd588fe`) but its
+all-ones query mask was unsupported test setup. R4 used the production legacy
+helper mask and passed query geometry, then its payload setup (`c031f02b`) failed because a
+scalar helper-placement overload used the wrong gate/passband geometry. R5
+changed only that fixture to the exact production placement; no earlier failed
+result is replaced.
+
+R5 passed actual encrypted 12-bit reception for both `c = +/-0.0003` cases,
+using 14 actual punctuation markers, helper 5,275 Hz and measured CFO interval
+[0.52749, 0.52751] Hz. Both controls retained the same pending row, per-bit
+progress, full final wire and ordinary END at sample 230,407, including helper
+loss near the final symbol. FFT jobs changed from 8,025 to 6,885 (14.21% fewer);
+process CPU changed from 8.89568 to 7.86672 seconds and from 8.92711 to 7.88196
+seconds, about 11.6% less in this isolated comparison. This is a fixed-epoch
+component result, not a normal Auto acquisition gain.
+`native-clock-v1/execution-r5/result.json` (`4667b9c0`) binds packet `b630b81a`
+and payload ELF `d89834bf`; the actual output is
+`test-actual-encrypted-payload.log`. Inputs were unchanged and processes reaped.
+The core, headers and maintained payload/query regressions were then integrated.
+
+The coherent v11 application build passed in 140.3982 wall/276.492169 process
+CPU seconds; focused compilation passed in 14.77096/27.81078 seconds and all six
+CTests passed in 34.4972/34.485186 seconds. These cover retained growth, frontend,
+native work bound, FFT-probe prepayment and joint-clock payload/query components.
+`integration-v11/{execution-result,inputs,production-binaries}.json` binds GUI
+`1bf1af11`, core archive `08a4d2db`, receiver `1bd588fe` and unchanged run inputs;
+all processes were reaped. The pure engineering seed query was promoted and its
+frontend check passed. Later cold-eligibility API/test changes were promoted
+after v11 and built in v12 below; no full normal/cable result is claimed.
+
+The preceding actual 48,960 Hz coarse/optional-frequency pipeline component
+passed its signal and noise commands in
+`optional-frequency-api-v6-native48960/`. The controlled 12-second signal had
+49.7403 dB-Hz C/N0, +3 kHz CFO, 100 ppm audio error, encrypted metadata enabled,
+no Robust payload and no known RX timestamp. It published 26 truth-covering
+references, first at 1.5613 audio seconds, with interval half-widths about
+0.155–0.161 Hz; the coarse seed itself was not treated as confidence or signed
+RF authority. Noise produced no seed or reference. This is a strong-signal
+pipeline component pass, not normal A acquisition, a <=0.1 Hz utility pass,
+hardware reception or general false-alarm qualification.
+
+Its resource receipt reports 216,720 optional bytes (208,528 heap plus 8,192
+worker scratch), a 2,872-byte strong call chain within 2,880, and 9,078 base
+bytes with full scratch. The coarse grant was separately 181,496 bytes. These
+explicit component grants are not proof of donor availability in a normal Bank.
+The resource-foundation donor-interface check also passed, bound by
+`frontend-budget-private/execution-r2/`: its synthetic two-signed-view interface
+reported 1,315,160 bytes against a 2,518,520-byte ceiling. It explicitly provides
+no Bank, payload-completion or normal A funding claim.
+
+The coherent v12 application build passed in 56.062947 wall/76.565216 process
+CPU seconds; focused compilation passed in 22.582919/45.001243 seconds. The
+74.561245 wall/52.115457 CPU runtime group passed 16/17. `helper_live` failed
+after 24.38 seconds with missing broad-work, periodic/fallback-admission and
+post-loss-coverage observations. Its complete 522-record trace had no drops
+and is retained at `/tmp/datapump-helper-lifecycle-237024062547547.jsonl`.
+That original lifecycle failure remains retained; the narrower v13 result below
+does not convert it into a pass.
+`integration-v12/{execution-result,inputs,production-binaries}.json` binds GUI
+`dfc3e6d4`, core archive `2a00f0c2`, native optional API `1cf626e8`/`4a22ee2e`
+and Live `a4ae1b55`. Raw-A mean, resource foundation and cold-stage component
+changes are built; the new weak/staging/joint Live consumers remain private.
+All recorded inputs were unchanged during these runs and processes reaped.
+This focused result does not qualify full normal/cable reception or overall
+acceptance.
+
+The retained v13 Live lifecycle failure is bound in `integration-v13/`: focused
+compilation passed, but only the raw-clock-bridge test passed at runtime.
+`helper_live` still failed after 27.53 seconds, with `partial_slot=0` and
+`one_cold_owner=0`; broad work, full coverage, periodic admissions and post-loss
+coverage were observed. The reviewed boundary is a one-second reclaim before
+the 1.28-second scoring fence, rather than the earlier reset-loop hypothesis.
+Its complete 510-record trace is retained at
+`/tmp/datapump-helper-lifecycle-237941270195306.jsonl`. The failed coverage
+predicates remain required, without a deadline or assertion waiver.
+
+The actual Rate 360 Auto/rolling FHSS B12 comparison remains **incomplete**,
+with matched 2 GiB workspace and 15 kW helper when ON. The
+[v13 baseline receipt](../local-evidence/helper-v9/helper-fft-cache-private/normal-v13-baseline-v1/execution-result.json)
+(`a3bc7b3e`, archive `a8d1e0a3`, fixture `b58c0f8b`) reported helper ON 9/12
+pending, OFF 0/12 and GPSDO strict 12/12 with END. The
+[v19 AFTER receipt](../local-evidence/helper-v9/helper-fft-cache-private/normal-after-v1/execution-result.json)
+(`bc23b3aa`) reported ON 7/12 pending without END, OFF 0/12 and GPSDO strict
+12/12 with END. The AFTER source observer proves that TX had generated only
+10/12 bits and neither TX nor channel had finished. This is throughput-incomplete
+capture, not evidence of lost final bits or decoder truncation; baseline TX
+source position was unavailable and is not retroactively inferred.
+
+The [observational reporting recovery](../local-evidence/helper-v9/helper-fft-cache-private/normal-after-v1/observational-reporting-recovery.json)
+(`9f026d64`) preserves the failed receipt and reconstructs only an interleaved
+trailing trace-path field, without changing numeric fields or runtime. Across
+the same committed raw-coordinate prefix 0–173,017, measured process CPU bounds
+changed from 139.783–139.829 to 70.139–70.177 seconds, while wall time increased
+from 45.436 to 55.789 seconds. The prefix includes helper lead, and retained PCM
+was unavailable for bitwise waveform comparison. Neither this bounded CPU
+observation nor the unequal whole-leg media establishes payload throughput,
+hardware backlog or completed-message gain. Inputs and original failed results
+remain preserved and launched processes were reaped.
+
+The [corrected true-owner summary](../local-evidence/helper-v9/helper-fft-cache-private/normal-after-v1/observational-true-owner-summary-r1.json)
+(`c9c21dd6`) supersedes the marker interpretation in retained summary `a031ba93`:
+0/256 clock attempts qualified, but 222 stopped at `unavailable_scored_support`
+(reason 4) and 34 at `invalid_snapshot` (reason 2), before marker qualification.
+The default marker text did not establish absent punctuation: 169 references
+had known punctuation spanning 29 distinct raw marker samples. The accepted
+captured-lookahead support repair
+[clock-ingress R2](../local-evidence/helper-v9/clock-ingress-v1/clock-ingress-r2.patch)
+(`bb801f3d`; rejected duplicate-accessor R1 retained) is integrated in v20 Live
+`0159027b`. The subsequent
+[normal v20 ON receipt](../local-evidence/helper-v9/helper-fft-cache-private/normal-v20-on-v1/execution-result.json)
+(`201e6c29`) remained incomplete: RX 7/12 pending without END, TX only 10/12
+generated and unfinished, 75.173846 process CPU/60.084448 wall seconds.
+Its [observational summary](../local-evidence/helper-v9/helper-fft-cache-private/normal-v20-on-v1/observational-summary.json)
+(`e69fb903`) shows that the support repair reached the clock qualifier in
+206/256 setup attempts. Of those, 203 were unqualified (161 markers did not
+enclose the scored support; 42 awaited distinct markers); three supported fits
+declined the original joint-cell certificate. No qualified narrowing executed
+for a true-TX owner. This proves qualifier reach, not clock work gain, full
+reception or a completed-message improvement. The failed result is retained
+and all launched processes were reaped.
+
+The separately read FFT-cache component receipt
+`helper-fft-cache-private/focused-v13-v1/execution-result.json` (`8b9300ec`)
+passed arithmetic, exact R5 payload/row/progress/physical-END/loss and matched
+helper-OFF layout/quota controls. It retained worker slots and kept the actual
+cache within its cap. This is private component coverage, not normal rolling
+performance or a repair of the lifecycle hold.
+
+The subsequent v14 focused build failed in
+`conditioned_reference_factory.cpp`, where `deferred_symbols`,
+`scheduled_bursts` and `scheduled_symbol_offset` were undeclared.
+`integration-v14/execution-result.json` retains the failed compile (112.7252
+wall/223.09058 process CPU seconds), unchanged inputs and reaped execution.
+No v14 runtime, application/GUI rebuild or full coverage is claimed.
+
+The v15 focused build passed in 96.63379 wall/191.69458 process CPU seconds.
+Its runtime group passed 9/13 in 9.89583 wall/9.86925 CPU seconds, bound by
+`integration-v15/execution-result.json` and `focused-runtime.log`. The four
+original failure strings remain retained:
+
+| Test | Recorded failure |
+| --- | --- |
+| `conditioned_first_bit` | `Native source prefix does not cover the observed left FIR halo` |
+| `conditioned_reference_factory` | `factory fixture lost user's production B sampled/calendar geometry` |
+| `helper_estimate_scenario` | `helper masked scenario widens an original physical cell` |
+| `helper_native_work_curve` | `Actual native work descriptor is currently bounded to the B Interleave10 deferred-FHSS waveform` |
+
+The clock bridge, cold configured-workspace floor, Planner forecast, pure
+capture-transport construction, strong/literal-24 helper cases, presence
+prepass work and native signal/noise pipeline components passed. This does
+not qualify transport-gap execution, normal reception or the private weak-stage
+and clock consumers. All launched commands were reaped. There is no v15 GUI
+update, full coverage or feature-completion claim. Later outcomes below do not
+rewrite this failed run.
+
+The [v17](../local-evidence/helper-v9/integration-v17/execution-result.json)
+forecast-fixture `gap` name conflict and
+[v18](../local-evidence/helper-v9/integration-v18/execution-result.json)
+incompatible `HelperWorkspace` presence-field resets remain retained compile
+failures. The [v19 result](../local-evidence/helper-v9/integration-v19/execution-result.json)
+rebuilt the application but failed its lifecycle and work-curve runtime checks.
+None of those runs is promoted to a full pass by the later fixes.
+
+The [v20 receipt](../local-evidence/helper-v9/integration-v20/execution-result.json)
+records a passing focused build (168.1345 seconds), runtime 8/10 (29.7180
+seconds) and application rebuild (8.6878 seconds), with unchanged inputs and
+reaped commands. Its
+[binary bindings](../local-evidence/helper-v9/integration-v20/production-binaries.json)
+pin GUI `9ce083a5` and archive `e2398045`; the
+[input manifest](../local-evidence/helper-v9/integration-v20/inputs.json) pins
+Live source `0159027b`. Cold input stage/workspace, clock bridge, first-bit, factory, scenario,
+forecast and capture components passed. The retained v20 failures were:
+
+| Test | Failed coverage in v20 |
+| --- | --- |
+| `helper_live` | Only `partial_slot=0`; `one_cold_owner=1`, `workspace_observed=1`, two periodic admissions and all other fixture flags were observed. |
+| `helper_native_work_curve` | Native work geometry is available, but sampled first-bit Monte Carlo declines: `Production template evaluation exceeds bounded reference budget`. |
+
+The work-curve run now uses the actual ordinary sampled UTC catalogue: 2,075
+pairs and 600.09 ppm clock half-domain, rather than the unsteered 777/300 ppm
+geometry. This correction does not itself predict CPU, SNR, probability or
+completed reception. The accepted weak/startup and raw-clock integrations are
+built/source-reviewed; full normal startup, payload, phase, compact, A, EME
+and current cable qualification remain open. Full current-source regression,
+sanitizer and release qualification have not passed.
+
+The [v21 receipt](../local-evidence/helper-v9/integration-v21/execution-result.json)
+records passing focused compilation and application rebuild, then 9/10 runtime
+passes. `helper_live` now passed its unchanged lifecycle predicates; only
+`helper_native_work_curve` failed the finite production reference budget.
+[Binary bindings](../local-evidence/helper-v9/integration-v21/production-binaries.json)
+pin GUI `ad7d16da` and archive `b296c060`. These focused passes retain the
+earlier failed runs and do not establish full acceptance.
+
+The [v22 receipt](../local-evidence/helper-v9/integration-v22/execution-result.json)
+records passing focused/application builds and 10/14 runtime passes, with
+unchanged inputs and reaped commands. Its
+[binary bindings](../local-evidence/helper-v9/integration-v22/production-binaries.json)
+pin GUI `c46ff965` and archive `9f7aacfd`. Selector-cache focus passed in 2.24
+seconds: exact evidence, trial/descriptor coverage and next-event controls
+matched its uncached control, with actual tabulated FP64 transforms reduced.
+The logged FFT-pair-job counts were 1,698 versus 1,992; these are distinct from
+transform counts. Numeric FFT batch focus passed in 4.43 seconds and helper
+Live lifecycle in 42.49 seconds. The earlier work-curve budget check now passed
+in 1.65 seconds with finite-reference template reuse; that does not qualify all
+first-bit/Monte Carlo cases or normal reception. The four retained failures are:
+
+| Test | Recorded v22 failure and subsequent focused result |
+| --- | --- |
+| `conditioned_first_bit` | `Calculation cancelled`; the negative test caught the wrong exception class. Repaired focus passed in v23. |
+| `conditioned_first_bit_monte_carlo` | The same negative-test exception mismatch failed v22; repaired focus passed in v23. |
+| `helper_planner_forecast` | `UI omitted separate conditional curves or hid their actual limits`; repaired focus passed in v23. |
+| `helper_joint_cost` | `joint cost trusted original full-catalogue builder declined`; the later v23 failure and v24 test-only correction are recorded below. |
+
+These component passes are not full-candidate, normal-HF, performance or release
+qualification; the original v22 failed receipts remain retained.
+
+The [v23 receipt](../local-evidence/helper-v9/integration-v23/execution-result.json)
+records a passing focused build (99.6496 wall/198.2398 process CPU seconds),
+application rebuild and 12/14 runtime passes (82.0970 wall/59.1969 CPU seconds).
+The Monte Carlo focus passed in 30.49 seconds with finite-reference
+reuse. Two fixture failures remained: `live_helper_clock_bridge` used a derived
+clock factor of −300.075 ppm outside its declared ±300 ppm domain, and
+`helper_joint_cost` treated payload-link acceptance as the predicate for actual
+numeric execution. Their original failed logs remain retained.
+
+The [v24 receipt](../local-evidence/helper-v9/integration-v24/execution-result.json)
+records only corrections to those two test oracles. Focused compilation passed
+in 5.6287 wall/10.1606 CPU seconds; bridge and joint-cost checks passed in
+0.54 and 0.40 seconds (0.9659 wall/0.9627 CPU seconds combined), and the
+application build passed in 1.7176 wall seconds. Its
+[binary bindings](../local-evidence/helper-v9/integration-v24/production-binaries.json)
+retain v23 GUI `50d7f079`, core archive `00dfac18` and normal-acquisition fixture
+`19b5a9d8`. Together with the 12 unchanged v23 passes, all 14 focused checks
+are resolved; this does not constitute full normal or performance qualification.
+
+The [v25 receipt](../local-evidence/helper-v9/integration-v25/execution-result.json)
+records passing configuration and a 15.53-second focused build of exact
+continuation-row reuse. Its source bindings retain `pattern_receiver.cpp`
+`559b7331` and row helper `cd8f9686`. Helper Live, joint-clock and selector-cache
+checks passed in 41.37, 34.63 and 2.25 seconds. Both new continuation checks
+failed an unsupported assertion that each input push could publish exactly
+one new bit, despite exact fit/payload comparisons. These failures remain
+retained; several accepted bits may legitimately appear in one progress poll.
+
+The accepted test-only repair compares the entire per-push `Progress` vector
+between scalar and reused execution, retaining monotonic exact prefixes, full
+pending bits and ordinary physical-absence completion. The
+[v26 receipt](../local-evidence/helper-v9/integration-v26/execution-result.json)
+(`ba6ffa30`, [input bindings](../local-evidence/helper-v9/integration-v26/inputs.json)
+`3f915c5e`) records both repaired checks passing in 84.43 and 68.11 seconds,
+with unchanged runtime inputs and reaped commands. The production build passed
+in 2.23 seconds; [binary bindings](../local-evidence/helper-v9/integration-v26/production-binaries.json)
+pin GUI `79c2f036` and core archive `9b58a749`. Together with the three unchanged
+v25 passes, these five focused checks are resolved, not a full normal matrix.
+
+The component evidence includes 756 exact scalar row/score oracle comparisons
+and a 64-bit full-receiver comparison with all 8,400 fits equal, exact full
+pending payload, ordinary END and helper loss. That component reported process
+CPU 42.3738 to 25.5118 seconds. It is not a measured normal-controller runtime
+gain, current cable acceptance or feature completion.
+
+The [v27 receipt](../local-evidence/helper-v9/integration-v27/execution-result.json)
+(`ae2d4119`) records successful configuration followed by a compile failure:
+the existing auxiliary-storage assertion evaluated `17520 <= 16384`. The
+focused build exited 1 after 92.9938 wall/128.9630 process CPU seconds, with
+owned processes reaped. No v27 runtime test or rebuilt GUI result follows;
+v26 remains the last coherent runtime, and the resource failure is retained.
+
+The separate private raw-phase component has passing
+[compile](../local-evidence/helper-v9/raw-phase-nco-qualification-r4-v26/execution/compile/execution-result.json)
+and [link](../local-evidence/helper-v9/raw-phase-nco-qualification-r4-v26/execution/link/execution-result.json)
+receipts. Its
+[operator diagnostic](../local-evidence/helper-v9/raw-phase-nco-qualification-r4-v26/execution/functional-operator-diagnostic/execution-result.json)
+passed, while the
+[strong diagnostic](../local-evidence/helper-v9/raw-phase-nco-qualification-r4-v26/execution/functional-strong-diagnostic/execution-result.json)
+failed `raw correction was backdated to observed evidence`; source diagnosis
+found an invalid fixture-origin check. The causal test correction is
+source-accepted but unrun, so that failed diagnostic remains failed.
+
+Its [resource R1 report](../local-evidence/helper-v9/raw-phase-nco-qualification-r4-v26-resource-r1/artifacts/resource-result.json)
+is held, not passed: unresolved/ambiguous callees leave project-owned stack
+subtotals of 768 and 1,632 bytes incomplete, with external runtime stack
+unproved. Measured retained class sizes are 104 bytes for the mixer and
+1,192 bytes for control. No exceed was observed in this partial component
+accounting; it does not prove a whole-chain resource bound, caller multiplicity
+or current Live raw-phase qualification.
+
+The [v21 B ON diagnostic](../local-evidence/helper-v9/helper-fft-cache-private/normal-v21-on-v1/execution-result.json)
+(`74830527`) still reported 3/12 pending bits without END, with TX only 6/12
+generated and unfinished, at 72.287311 process CPU/60.105498 wall seconds.
+Its [observational summary](../local-evidence/helper-v9/helper-fft-cache-private/normal-v21-on-v1/observational-summary.json)
+records 49 executed clock-conditioned batches/11,048 template jobs overall;
+the true-TX owner accounted for two batches/456 jobs. Those batches selected
+five of seven original LF rates with unresolved UTC retained. This is actual
+conditional execution, not full-source completion or a matched performance gain.
+
+The [v22 B ON receipt](../local-evidence/helper-v9/helper-fft-cache-private/normal-v22-on-v1/execution-result.json)
+(`054d1915`) remains incomplete: nine contiguous correct wire bits were pending,
+without END, at 75.112198 process CPU/60.096969 wall seconds. There were no drops
+or receiver resets; inputs were unchanged and all launched commands were reaped.
+Its [observational summary](../local-evidence/helper-v9/helper-fft-cache-private/normal-v22-on-v1/observational-summary.json)
+(`d7b4a940`) records all 12 generated wire bits `100000001101` and plaintext
+bits `110101101110`, but only 100,915/148,300 TX source samples emitted and an
+unfinished channel. The actual geometry was Fs 14,400 Hz, SF 64, H = 5,120
+samples and T = 0.355556 seconds, rather than the earlier hypothetical
+1.422-second symbol.
+
+The shaped waveform ends at sample 235,848, beyond the captured 187,630. Only
+185,582 samples had joined the receiver bank, leaving a final 2,048-sample
+packet uncommitted. True-TX owner 13 remained alive without END; its next READY
+fence at 185,920 was 338 samples beyond the joined frontier. Even the
+six-second ordinary-absence lower bound is sample 256,240, beyond this capture.
+This is an unfinished waveform/processing observation, not completion,
+truncation or a throughput-gain result.
+
+The same summary joins 49 executed clock-conditioned batches/11,320 jobs;
+two true-TX-owner batches accounted for 464 jobs and selected five of seven
+original LF rates. Cache accounting records 64 allocation lifetimes, 44
+timing-priority endings and 20 still present at the final trace, with 18,470
+fills, 73,938 hits and 36,940 forward transforms. Those are lifetime/event
+counters, not simultaneous allocation, heap-peak, CPU or FFT-equivalent claims.
+
+The subsequent [v23 B ON receipt](../local-evidence/helper-v9/helper-fft-cache-private/normal-v23-on-v1/execution-result.json)
+(`34b6a817`) and
+[summary](../local-evidence/helper-v9/helper-fft-cache-private/normal-v23-on-v1/observational-summary.json)
+(`9f44543b`) report all 12 wire bits exact and pending, without physical END,
+at 64.039629 process CPU/60.167203 wall seconds. The last data endpoint was
+sample 187,120; capture ended at 205,224, only 1.2572 seconds later. The ordinary
+absence lower bound is sample 273,520. TX had emitted 118,068/148,300 source
+samples, with waveform/channel drain unfinished. This remains an incomplete
+single-leg result, not a passed 60-second gate, completion, truncation,
+matched gain or real-time qualification.
+
+The v23 summary joins 265 clock-conditioned batches/19,000 jobs overall;
+15 true-TX-owner batches accounted for 1,072 jobs and selected one of seven
+original LF rates. Its dated history has one allocation at sample zero and a
+release at simulation join. All 30 observed constructor envelopes retained
+clock history without grant reduction; the optional-cache trimming branch
+was not exercised. Distinct numeric counts were 27,688 template descriptors,
+14,035 FFT jobs and 40,350 tabulated FP64 transforms. These execution and
+resource observations do not establish completed reception or throughput.
+
+The explicit 120-second [v24 profiled B receipt](../local-evidence/helper-v9/helper-fft-cache-private/normal-v24-on-profile-v1/execution-result.json)
+(`8e53b244`) also failed full completion: all 12 wire bits were exact and
+pending without END. TX and channel finished all 148,300 source samples, but
+capture ended at 258,376, only 4.9483 seconds after the payload endpoint
+187,120. The minimum ordinary-absence endpoint 273,520 still requires another
+15,144 captured samples, followed by actual scoring. Its
+[profile summary](../local-evidence/helper-v9/helper-fft-cache-private/normal-v24-on-profile-v1/observational-profile-summary.json)
+(`ae874824`, trace `141b6a25`) records 124.778677 process CPU/120.228152 wall
+seconds. This diagnostic does not replace the original 60-second failure or
+establish payload completion.
+
+Only the outer native-thread Context CPU total, 122.883312 seconds, is exact
+for that profiling scope. Timer overruns left 75.077% of recorded expirations
+unassigned; delivered stage samples cannot allocate that missing CPU. The
+instrumented call counter recorded 308,520,820 template-build calls. Complete
+committed input covers 17.8006 raw audio seconds including helper lead, with
+about 6.98 process CPU seconds per raw second. Profiler overhead is
+uncalibrated; these are not payload-throughput, real-time or hardware-backlog
+measurements.
+
+Source diagnosis found that established warm continuation still traverses the
+2,075 original RF/LF pairs across seven LF rates and serially regenerates source
+rows; the acquisition RF mask does not narrow that continuation work. The
+subsequent v25/v26 exact-row reuse integration above preserves every original
+continuation fit. Its focused component result does not turn this older
+profiled run into a normal performance or completion pass.
+
+The unprofiled [v26 B receipt](../local-evidence/helper-v9/helper-fft-cache-private/normal-v26-on-v1/execution-result.json)
+(`cdab91ea`) and
+[summary](../local-evidence/helper-v9/helper-fft-cache-private/normal-v26-on-v1/observational-summary.json)
+(`bd141c90`, trace `1f886982`) report exact 12-bit wire `100000001101` and
+plaintext `110101101110`, with pending, identity, source and ordinary physical-END
+flags all one. True owner 13 scored END at feed sample 287,296, 6.9567 seconds
+after payload endpoint 187,120. TX/channel finished all 148,300 source samples;
+capture reached 383,998 with fixed 2 GiB workspace and no health faults. Process
+CPU/wall were 39.523558/32.649976 seconds; all launched commands were reaped.
+The unchanged strict gate nevertheless failed solely on `primary_assisted=0`:
+the legacy-calendar provenance tag deliberately excludes this route. This is
+retained as a failed assistance result, not a full qualification pass. A
+source-accepted observation-only provenance correction remains private; no
+functional arbitration change or passing rerun is claimed.
+
+The unprofiled trace joins 31 true-owner clock records/2,032 jobs, selecting
+one of seven LF rates. Its 142 grouped warm measures retain 294,508 original
+non-anchor fit visits while evaluating 1,272,604 source-row pairs. These are
+executed continuation counters, not FFT or CPU equivalents. Further fresh-RF
+warm-work investigation remains private and supplies no future gain claim.
+
+The separate [10 ms profile receipt](../local-evidence/helper-v9/helper-fft-cache-private/normal-v26-on-profile-10ms-v1/execution-result.json)
+(`9a10442f`) and
+[summary](../local-evidence/helper-v9/helper-fft-cache-private/normal-v26-on-profile-10ms-v1/observational-profile-summary.json)
+(`737e82f3`, trace `030e5be0`) retain the same full-wire/END observations and
+strict provenance failure, at 41.919658 process CPU/34.855868 wall seconds.
+Exact outer Context CPU was 39.497970294 seconds. The profiler classified
+3,914 delivered samples, with 165 outside-tag samples and 29 missing overruns
+(0.70594%) kept separate, without profiler faults. Control, template-build and
+search tags were 52.94%, 27.75% and 16.99% of classified delivered samples,
+respectively; these statistical fractions are not exact CPU allocations. The
+instrumented template-build call count was 45,577,491.
+
+For each run, the audited complete 235-packet prefix is samples 0–383,278,
+26.61653 raw audio seconds including helper lead. Unprofiled prefix CPU was
+38.8304–38.9412 seconds over 32.0708 wall seconds, or 1.4589–1.4630 CPU seconds
+per raw second; the profiled ratio was 1.5489–1.5532. The final unfinished read
+is explicitly excluded. Raw PCM was not retained for bytewise comparison;
+profiling overhead and the observed difference are not causally isolated.
+Neither run supplies matched OFF/GPSDO performance, payload-only or real-time
+throughput, hardware-backlog measurements, or current cable qualification.
+
+The [private continuous 256-bit raw fixture log](../local-evidence/helper-v4/practical-payload-current-prep/private/current-focus-prep/execution-v21-continuous-focus-v1/continuous_focus256.wrapper.log)
+(`7b1145c0`) reports exact 256/256 ordinary wire/source bits and physical END
+for OFF and ON, without drops or resets. This supported encrypted configuration
+uses Fs 6,000 Hz, bandwidth 1,500 Hz, SF 32, T = 0.0426667 seconds, 33 original
+pairs, +30 Hz CFO, 100 ppm audio error and matched 2 GiB workspace. OFF reported
+118.689465 process CPU/21.233669 wall seconds and 1,421,508 template jobs; ON
+reported 44.947931/19.240348 seconds and 360,488 jobs, including 191,924
+conditional and 528 observed audit jobs. There was no configured Rate/SNR change.
+TX epochs 1800000000/1800000005 legitimately differ with helper lead; each leg
+was checked against its own dated wire.
+
+The [outer receipt](../local-evidence/helper-v4/practical-payload-current-prep/private/current-focus-prep/execution-v21-continuous-focus-v1/execution-result.json)
+remains exit 1 solely because trace-finalization output interleaved a metadata
+CSV line; the actual fixture exited 0, process groups were reaped and postguards
+passed. The sealed
+[posthoc recovered summary](../local-evidence/helper-v4/practical-payload-current-prep/private/current-focus-prep/execution-v21-continuous-focus-v1/posthoc-recovered-summary.json)
+(`32614374`) confirms the same full bits/source/END by demultiplexing that one
+metadata line. It reruns no reception and changes no source, binary, phase,
+clock or test predicate; the original failed outer receipt remains unchanged.
+This v21-bound limited raw functional
+pass supplies no production-GUI equivalence, independent next-poll, helper-loss,
+long-payload matrix, narrow-HF acceptance, real-time or CPU-per-audio gain claim.
+
+The [A startup receipt](../local-evidence/helper-v9/cold-startup-runtime-private/execution-v20-a-v1/execution-result.json)
+(`0d5a7fa8`, [run result](../local-evidence/helper-v9/cold-startup-runtime-private/execution-v20-a-v1/run-result.json)
+`5ee0327f`) passed actual frequency bootstrap, retained dates and deliberate
+STOP/join. Coarse frequency half-width 25.906 Hz became a qualified half-width
+of about 0.12518 Hz. Its complete [trace](../local-evidence/helper-v9/cold-startup-runtime-private/execution-v20-a-v1/trace.jsonl)
+(`3dcee65e`) records retirement with 27 remaining blocks abandoned after that
+intentional STOP. This scope proves neither ordinary payload reception nor
+full A physical END.
+
+The [EME startup receipt](../local-evidence/helper-v9/cold-startup-runtime-private/execution-v20-eme-v1/execution-result.json)
+(`cf67e6be`) failed after 21.3472 wall/101.50714 process CPU seconds: the actual
+tone never released useful frequency-only startup. That gate failure remains retained;
+there is no completed 128-second payload result. Both startup probes retained
+unchanged bindings and reaped execution; the failed EME result is not replaced
+by the limited A pass.
+
+The subsequent [v21 EME startup receipt](../local-evidence/helper-v9/cold-startup-runtime-private/execution-v21-eme-v1/execution-result.json)
+(`3d4a2902`) passed in 8.88758 wall/8.912745 process CPU seconds, with unchanged
+bindings and reaped execution. It released 192,000 raw samples into 48,001
+logical samples, with zero payload processing and no phase/timing authority.
+Optional analysis used 50.844842 ms and reported zero CPU-credit debt. This
+qualifies frequency startup/release only, not a completed 128-second EME symbol
+or payload, and does not replace the v20 failure.
+
+The separate weak R4 ingest split passed lifecycle/recovery with fresh no-inline
+scratch accounting of 2,872 bytes within 2,880, and 216,720 bytes total owned
+workspace. `optional-frequency-api-v6-r4-ingest-split/execution-lifecycle-recovery/`
+binds lifecycle receipt `d6cad177` and ELF `0ffa4e70`, with unchanged inputs and
+reaped execution.
+The earlier 2,952-byte scratch failure and punctuation warning-as-error setup
+failure remain retained. Separate v6 component cases passed the literal 30/24
+dB-Hz streams, metadata process gate, strong controls, coverage and formatted
+punctuation. The shifted-tone case with the declared noise sigma failed its
+line-476 compound predicate `usable > 0 && first_usable < 3`. The combined
+weak-timecode command timed out after 20.0028 seconds. Both outcomes and reaped processes remain in
+`optional-frequency-api-v6-r4-ingest-split/execution-existing-cases/`, with
+punctuation recovery bound separately in `execution-punctuation-recovery/`.
+An instrumented shifted-tone diagnostic subsequently observed 12 intervals
+covering the simulated carrier, with half-widths about 0.216–0.228 Hz and none
+meeting the 0.1 Hz utility threshold. Its usable count was zero, so the utility
+failure remains. Noise-only input passed 31 looks with no published reference
+(18.458 wall seconds); this is not a general false-alarm qualification. The
+weak-signal diagnostic timed out after 20.0033 wall seconds: seven looks each
+used about 3.14–3.46 million work units without a reference, and no final result
+for the full 20 audio seconds was reached. These failed/incomplete diagnostics
+are retained in `optional-frequency-api-v6-diagnostics/execution-cases/` and
+do not establish ordinary payload or END reception.
+
+The older V5 frequency-only EME controls at
+[205 dB loss](../local-evidence/helper-v9/optional-frequency-api-v5-qualification/execution/205-result.json)
+(`ea4ffa58`) and
+[210 dB loss](../local-evidence/helper-v9/optional-frequency-api-v5-qualification/execution/210-result.json)
+(`aa7292a0`) both passed and reaped without timeout. At C/N0 30.7609 and
+25.7609 dB-Hz respectively, each published 131/131 carrier-covering conditional
+reference intervals with no fixture misses. Their half-widths were
+0.02246–0.02636 Hz and 0.03710–0.04589 Hz, using eight-second fits over 60 audio
+seconds. These unquantized helper-only controls used a coherent Generator
+envelope rather than RF retunes, with no ordinary payload and no phase/timing
+authority. These fits do not qualify a reference across one complete
+128-second ordinary EME symbol, current Live reception or payload completion;
+the later weak failures above remain retained.
+
+The optional-frequency API and funded component tests are built, and the later
+weak/startup consumers are integrated through v20; weak Live and EME remain
+unqualified. Component passes do not establish normal startup or payload work.
+Full current-source normal, cable, sanitizer and acceptance
+qualification remain pending; original failures and older bindings are retained.
+
+### Preceding v8 build and its limits
+
+The preceding v4 application candidate is v8, overlay SHA-256
 `87513574c569de7d9362d498f747cea6658b51e0b681884555242884c2a0e17f`.
 `local-evidence/helper-v4/candidate-v8-source-bindings.json` binds 441 inputs
 (manifest SHA-256 `5c564afbcfc7f77afd2b186e7fdc2e8c4a0710569259bc8b9fbc5db6d0aa6242`);

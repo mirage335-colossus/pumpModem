@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/types.hpp"
+#include "datapump/capture_transport.hpp"
 #include "datapump/utc_timing.hpp"
 #include "datapump/audio_provider_timing.hpp"
 #include <span>
@@ -21,6 +22,10 @@ struct StreamFormat {
     std::size_t workspace_bytes=0;
     TimingQuality timing_quality=TimingQuality::unavailable;
     double timing_uncertainty_seconds=0;
+    // Capture only, published from the actual converter before its first PCM.
+    // Playback and unsupported providers retain unknown. Any capture gap
+    // revokes this witness until a fresh capture/format constructs a new map.
+    CaptureTransportRecipe capture_transport={};
 };
 using StreamFormatCallback = std::function<void(const StreamFormat&)>;
 enum class ChannelMode { left_mono, right_mono, stereo };

@@ -482,40 +482,84 @@ long double helper_source_origin(const modem::Config& c,std::uint64_t timestamp,
                                 const modem::StreamingTransmitter* source=nullptr) {
     if(c.symbol_burst.enabled() || (c.scheduled_hopping&&c.scheduled_hopping->enabled()&&!c.scheduled_hopping->continuous())) {
         if(!source)throw Error("helper carrier requires the prepared physical transmit origin");
-        return static_cast<long double>(source->physical_output_origin())/c.sample_rate-timestamp;
+        const auto physical=source->physical_output_origin();
+        return (static_cast<long double>(physical/c.sample_rate)-timestamp)+
+            static_cast<long double>(physical%c.sample_rate)/c.sample_rate;
     }
     return (static_cast<long double>(c.stream_phase_samples)-modem::training_sample_count(c)-
         modem::pattern_pulse_padding_samples(c))/c.sample_rate;
+}
+std::uint64_t helper_sample_count(long double seconds,std::uint32_t rate) {
+    const auto count=std::ceil(seconds*rate);
+    if(!std::isfinite(count)||count<0||count>=std::ldexp(1.L,64))
+        throw Error("Helper Carrier envelope exceeds the sample range");
+    return static_cast<std::uint64_t>(count);
+}
+std::uint64_t add_helper_samples(std::uint64_t first,std::uint64_t second) {
+    if(first>UINT64_MAX-second)throw Error("Helper Carrier output sample count overflow");
+    return first+second;
+}
+std::uint64_t helper_resampled_count(std::uint64_t samples,std::uint32_t source_rate,std::uint32_t output_rate) {
+    const auto whole=samples/source_rate;
+    if(whole>UINT64_MAX/output_rate)throw Error("Helper Carrier output sample count overflow");
+    return add_helper_samples(whole*output_rate,
+        ((samples%source_rate)*output_rate+source_rate-1)/source_rate);
+}
+long double helper_dwell_boundary(std::uint64_t epoch,long double seconds,bool upward) {
+    auto dwells=(static_cast<long double>(epoch%2)+seconds)*2.5L;
+    const auto nearest=std::round(dwells);
+    if(std::abs(dwells-nearest)<=8*std::numeric_limits<long double>::epsilon()*std::max(1.L,std::abs(dwells)))
+        dwells=nearest;
+    return (upward?std::ceil(dwells):std::floor(dwells))*.4L-static_cast<long double>(epoch%2);
+}
+helper::EnvelopePlan helper_output_envelope(const modem::Config& config,const helper::Options& options,
+        double helper_frequency,helper::EnvelopeRequirements requirements={}) {
+    if(options.frequency!=helper::Frequency::cochannel && helper_frequency>225 &&
+       helper_frequency+225<config.sample_rate/2.)try {
+        const helper::PayloadFilter filter(config.sample_rate,helper_frequency);
+        requirements.frontend_lookahead_seconds=std::max(requirements.frontend_lookahead_seconds,
+            static_cast<double>(filter.delay())/config.sample_rate);
+    }catch(const Error&) {
+        // The optional CLI filter also yields to the full original receive
+        // path when its geometry/workspace is unsupported.
+    }
+    return helper::plan_envelope(config,requirements);
 }
 template<class Factory>
 void play_transmission(const Args& a, transfer::Options& options,const helper::Options& helper_settings, Factory make) {
     std::unique_ptr<modem::StreamingTransmitter> source;
     bool protected_stop=false;
-    std::uint64_t provided_samples=0;
+    std::uint64_t provided_samples=0,leading_samples=0;
+    helper::EnvelopePlan envelope;
+    const auto helper_lead=[&] {return static_cast<long double>(leading_samples)/options.modem.sample_rate;};
+    const auto prepare_envelope=[&] {
+        if(helper_settings.power_w==0)return;
+        const auto origin=helper_source_origin(options.modem,options.timestamp,source.get());
+        const auto start=helper_dwell_boundary(options.timestamp,origin-envelope.lead_seconds,false);
+        leading_samples=helper_sample_count(origin-start,options.modem.sample_rate);
+    };
     const auto helper_end=[&] {
         const auto origin=helper_source_origin(options.modem,options.timestamp,source.get());
-        return helper::protected_endpoint(options.timestamp,origin,
-            origin+static_cast<long double>(source->total_samples())/options.modem.sample_rate);
+        const auto end=helper_dwell_boundary(options.timestamp,
+            origin+static_cast<long double>(source->total_samples())/options.modem.sample_rate+envelope.tail_seconds,true);
+        return helper::protected_endpoint(options.timestamp,origin-helper_lead(),end);
     };
     const auto padded_source_end=[&] {
         if(!source)return std::uint64_t{0};
         if(helper_settings.power_w==0)return source->total_samples();
         const auto origin=helper_source_origin(options.modem,options.timestamp,source.get());
-        const auto count=std::ceil((helper_end()-origin)*options.modem.sample_rate);
-        if(count<0||count>std::numeric_limits<std::uint64_t>::max())
-            throw Error("helper guard padding exceeds the source sample range");
-        return std::max(source->total_samples(),static_cast<std::uint64_t>(count));
+        return std::max(add_helper_samples(leading_samples,source->total_samples()),
+            helper_sample_count(helper_end()-origin+helper_lead(),options.modem.sample_rate));
     };
     audio::Options output;
-    output.minimum_hardware_rate=helper::minimum_output_rate(helper_settings,options.modem.carrier_hz,
-        helper::occupied_bandwidth(options.modem),
-        options.modem.sample_rate);
+    if(helper_settings.power_w>0)output.minimum_hardware_rate=helper::minimum_output_rate(
+        helper_settings,helper::placement_band(options.modem),options.modem.sample_rate);
     std::optional<helper::Generator> helper_generator;
     if(helper_settings.power_w>0)output.playback_output_transform=[&](float payload,long double seconds,std::uint32_t rate) {
         if(!helper_generator||!source)throw Error("helper carrier output was not prepared");
         const auto origin=helper_source_origin(options.modem,options.timestamp,source.get());
-        return helper_generator->mix(payload,origin+seconds,rate,
-            helper_end(),origin);
+        const auto start=origin-helper_lead();
+        return helper_generator->mix(payload,start+seconds,rate,helper_end(),start);
     };
     const auto clock_policy=transfer::effective_clock_sync(options);
     output.maximum_utc_error_seconds=clock_sync::audio_lag_radius(options.audio_timing_error_seconds);
@@ -523,6 +567,24 @@ void play_transmission(const Args& a, transfer::Options& options,const helper::O
     auto timing_config=options.modem;
     if(options.key)timing_config.scramble=true;
     detail::configure_transmit_timing_protection(output,timing_config,[&]{return source.get();});
+    if(helper_settings.power_w>0) {
+        const auto placement=helper::plan(helper_settings,helper::placement_band(timing_config),120000000,0,
+            modem::outer_dsss_transmit_gain(timing_config));
+        helper::EnvelopeRequirements requirements;
+        if(timing_config.oscillator_search) {
+            const auto search=modem::oscillator_pattern_search(timing_config,
+                clock_policy?modem::utc_transmit_rate_limit(timing_config):0);
+            requirements.maximum_source_capture_ratio=1+search.requested_clock_half_width_ppm*1e-6;
+        }
+        envelope=helper_output_envelope(timing_config,helper_settings,placement.frequency_hz,requirements);
+        output.timing_stop_duration_seconds+=static_cast<double>(envelope.maximum_stop_extension_seconds);
+        output.timing_independent_cover_seconds+=static_cast<double>(envelope.tail_seconds);
+        output.timing_protected_payload_end=[&](std::uint64_t frontier)->std::optional<std::uint64_t> {
+            if(!source)return {};
+            const auto physical=frontier>leading_samples?frontier-leading_samples:0;
+            return add_helper_samples(leading_samples,source->predicted_physical_valid_payload_end(physical));
+        };
+    }
     output.timing_source_end=[&]() -> std::optional<std::uint64_t> {
         return source?std::optional<std::uint64_t>(padded_source_end()):std::nullopt;
     };
@@ -530,10 +592,13 @@ void play_transmission(const Args& a, transfer::Options& options,const helper::O
         const modem::FhssPowerShape shape(*timing_config.fake_hopping,timing_config.sample_rate,
             modem::pattern_pulse_padding_samples(timing_config),modem::symbol_sample_count(timing_config));
         output.playback_output_gain=[&,shape](long double seconds) {
+            seconds-=helper_lead();
             const auto& c=options.modem;
-            const auto origin=c.symbol_burst.enabled() && source?
-                static_cast<long double>(source->physical_output_origin())-static_cast<long double>(options.timestamp)*c.sample_rate:
-                static_cast<long double>(c.stream_phase_samples)-modem::training_sample_count(c)-modem::pattern_pulse_padding_samples(c);
+            const auto origin=helper_settings.power_w>0?
+                helper_source_origin(c,options.timestamp,source.get())*c.sample_rate:
+                (c.symbol_burst.enabled() && source?
+                    static_cast<long double>(source->physical_output_origin())-static_cast<long double>(options.timestamp)*c.sample_rate:
+                    static_cast<long double>(c.stream_phase_samples)-modem::training_sample_count(c)-modem::pattern_pulse_padding_samples(c));
             return shape.gain(options.timestamp,origin+seconds*c.sample_rate,c.sample_rate);
         };
     }
@@ -571,34 +636,51 @@ void play_transmission(const Args& a, transfer::Options& options,const helper::O
     output.timing_protected_stop=[&](const std::string& reason) {
         protected_stop=true;std::cerr<<reason<<"\n";if(source)source->request_finish();
     };
-    if(a.has("time"))source=make(options);
+    const auto clock=[] {return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();};
+    const auto schedule_helper_output=[&] {
+        const auto origin=helper_source_origin(options.modem,options.timestamp,source.get());
+        const auto playback=static_cast<long double>(options.timestamp)+origin-helper_lead();
+        if(static_cast<long double>(clock())+audio::minimum_lead_seconds()>=playback)
+            throw Error("Helper Carrier lead cannot precede the explicit Robust timestamp; disable the helper or choose a future --time");
+        audio::schedule_output(static_cast<double>(playback));
+    };
+    if(a.has("time")) {
+        source=make(options);prepare_envelope();
+        if(helper_settings.power_w>0) {
+            const auto origin=helper_source_origin(options.modem,options.timestamp,source.get());
+            if(static_cast<long double>(clock())>=static_cast<long double>(options.timestamp)+origin-helper_lead())
+                throw Error("Helper Carrier lead cannot precede the explicit Robust timestamp; disable the helper or choose a future --time");
+        }
+    }
     audio::playback(options.modem.sample_rate,a.get("device"),[&](std::span<float> chunk) {
         if(helper_settings.power_w==0)return source->read(chunk);
-        auto count=source->read(chunk);
-        if(count>std::numeric_limits<std::uint64_t>::max()-provided_samples)throw Error("source sample count overflow");
-        provided_samples+=count;
+        std::size_t count=static_cast<std::size_t>(std::min<std::uint64_t>(chunk.size(),
+            leading_samples>provided_samples?leading_samples-provided_samples:0));
+        std::fill_n(chunk.begin(),count,0.f);
+        if(count<chunk.size())count+=source->read(chunk.subspan(count));
+        provided_samples=add_helper_samples(provided_samples,count);
         if(helper_settings.power_w>0 && source->finished()) {
             const auto end=padded_source_end();
             const auto padding=static_cast<std::size_t>(std::min<std::uint64_t>(
                 chunk.size()-count,end>provided_samples?end-provided_samples:0));
             std::fill_n(chunk.begin()+static_cast<std::ptrdiff_t>(count),padding,0.f);
-            count+=padding;provided_samples+=padding;
+            count+=padding;provided_samples=add_helper_samples(provided_samples,padding);
         }
         return count;
     },{},[&](const auto& format) {
         audio_passband_guard(options.modem)(format);
         std::optional<helper::Plan> helper_plan;
         if(helper_settings.power_w>0) {
-            helper_plan=helper::plan(helper_settings,options.modem.carrier_hz,
-                helper::occupied_bandwidth(options.modem),
+            helper_plan=helper::plan(helper_settings,helper::placement_band(options.modem),
                 format.hardware_rate,0,modem::outer_dsss_transmit_gain(options.modem));
         }
         if(!a.has("time")) {
-            const auto clock=[] {return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();};
-            auto scheduled=detail::schedule_transfer_transmission(options,make,clock,{},0,audio::minimum_lead_seconds());
+            auto scheduled=detail::schedule_transfer_transmission(options,make,clock,{},0,
+                audio::minimum_lead_seconds()+static_cast<double>(envelope.preparation_seconds));
             source=std::move(scheduled.transmitter);
-            audio::schedule_output(scheduled.playback_epoch);
-        }
+            prepare_envelope();
+            audio::schedule_output(scheduled.playback_epoch-static_cast<double>(helper_lead()));
+        } else if(helper_settings.power_w>0)schedule_helper_output();
         if(helper_plan)helper_generator.emplace(helper_settings,*helper_plan,options.timestamp,true,options.key);
     },a.has("no-mono")?audio::ChannelMode::stereo:a.has("right-mono")?audio::ChannelMode::right_mono:audio::ChannelMode::left_mono,output);
     if(protected_stop)throw Error("transmission truncated by UTC timing protection; cover and device drain completed");
@@ -746,6 +828,16 @@ auto receive_with_helper_diagnostics(const Args& args,const std::optional<Helper
 transfer::Received receive_helper_payload(std::span<const float> samples,const transfer::Options& options,
         const helper::Options& helper_options,const std::optional<HelperCapture>& capture,
         const transfer::Progress& progress,std::size_t other_waveform_bytes=0) {
+    auto receive_options=options;
+    if(helper_options.power_w>0) {
+        // A helper capture can contain a lead before the original keyed
+        // source. Cover that arrival range without changing key epochs or
+        // assuming the lead's exact start, a timecode, or a payload length.
+        const auto envelope=helper::plan_envelope(options.modem);
+        receive_options.capture_start_uncertainty_seconds=std::max(
+            receive_options.capture_start_uncertainty_seconds,
+            static_cast<double>(envelope.preparation_seconds));
+    }
     if(helper_options.power_w>0 && helper_options.frequency!=helper::Frequency::cochannel &&
        capture && capture->present)try {
         const auto frequency=capture->reference&&capture->reference->frequency_valid?
@@ -770,7 +862,7 @@ transfer::Received receive_helper_payload(std::span<const float> samples,const t
                     // Only completely observed FIR windows are returned. Their
                     // centers retain the original capture coordinate; EOF supplies
                     // no filter padding and no absent-symbol evidence.
-                    auto filtered_options=options;
+                    auto filtered_options=receive_options;
                     filtered_options.input_sample_origin_samples+=filter.delay();
                     auto received=transfer::receive(selected,filtered_options,progress);
                     if(received.observed_bits)return received;
@@ -781,17 +873,22 @@ transfer::Received receive_helper_payload(std::span<const float> samples,const t
         // Optional conditioning yields to the complete original receiver. Its
         // result/error remains authoritative when conditioning accepts no bits.
     }
-    return transfer::receive(samples,options,progress);
+    return transfer::receive(samples,receive_options,progress);
+}
+helper::FrequencyPrecisionOptions helper_precision_options(const modem::Config& config) {
+    helper::FrequencyPrecisionOptions result;
+    if(config.oscillator_search)result.phase_noise_radians_per_sqrt_second=
+        modem::oscillator_effects(config).phase_noise_degrees_per_sqrt_second*std::numbers::pi/180;
+    return result;
 }
 HelperCapture preselect_helper_wav(modem::Wav& wav,const modem::Config& config,const helper::Options& options,
                                    const std::optional<Crypto>& key={}) {
-    const auto plan=helper::plan(options,config.carrier_hz,
-        helper::occupied_bandwidth(config),
+    const auto plan=helper::plan(options,helper::placement_band(config),
         wav.sample_rate,0,modem::outer_dsss_transmit_gain(config));
     HelperCapture helper_capture;
     helper::Tracker tracker(plan.frequency_hz);
     std::vector<Crypto> keys;if(key)keys.push_back(*key);
-    helper::Receiver receiver(plan.frequency_hz,20,std::move(keys));
+    helper::Receiver receiver(plan.frequency_hz,20,std::move(keys),std::nullopt,helper_precision_options(config));
     for(std::size_t first=0;first<wav.samples.size();first+=4096)
         observe_helper_capture(helper_capture,tracker,receiver,
             std::span(wav.samples).subspan(first,std::min<std::size_t>(4096,wav.samples.size()-first)),
@@ -828,18 +925,30 @@ void output_wave(const Args& a,std::vector<float> samples,const modem::Config& c
         const auto physical_rate=std::max<std::uint64_t>(48000,4ULL*c.sample_rate);
         if(physical_rate>120000000)throw Error("helper WAV requires a separate supported physical sample rate");
         output_rate=static_cast<std::uint32_t>(physical_rate);
-        const auto plan=helper::plan(helper_settings,c.carrier_hz,
-            helper::occupied_bandwidth(c),output_rate,0,
+        const auto plan=helper::plan(helper_settings,helper::placement_band(c),output_rate,0,
             modem::outer_dsss_transmit_gain(c));
-        const helper::Generator generator(helper_settings,plan,helper_epoch,true,helper_time_key);
-        const auto helper_end=helper_origin+static_cast<long double>(samples.size())/c.sample_rate;
-        const auto count=(static_cast<std::uint64_t>(samples.size())*output_rate+c.sample_rate-1)/c.sample_rate;
+        const auto envelope=helper_output_envelope(c,helper_settings,plan.frequency_hz);
+        const auto start_boundary=helper_dwell_boundary(helper_epoch,helper_origin-envelope.lead_seconds,false);
+        const auto leading=helper_sample_count(helper_origin-start_boundary,output_rate);
+        // Compose the public helper at the physical rate. Only the original
+        // Robust samples enter the resampler, retaining their source origin.
+        const auto helper_start=helper_origin-static_cast<long double>(leading)/output_rate;
+        const auto helper_end=helper::protected_endpoint(helper_epoch,helper_start,
+            helper_dwell_boundary(helper_epoch,helper_origin+
+                static_cast<long double>(samples.size())/c.sample_rate+envelope.tail_seconds,true));
+        const auto count=helper_sample_count(helper_end-helper_start,output_rate);
+        const auto payload_count=helper_resampled_count(samples.size(),c.sample_rate,output_rate);
+        if(count<add_helper_samples(leading,payload_count))throw Error("Helper Carrier envelope ends before the Robust waveform");
         if(count>c.memory_limit/sizeof(float))throw Error("helper WAV exceeds the configured waveform memory limit");
+        const helper::Generator generator(helper_settings,plan,helper_epoch,true,helper_time_key);
         audio::Resampler converter(c.sample_rate,output_rate);
         converter.set_output_transform([&](float payload,long double seconds,std::uint32_t rate) {
-            return generator.mix(payload,helper_origin+seconds,rate,helper_end,helper_origin);
+            return generator.mix(payload,helper_origin+seconds,rate,helper_end,helper_start);
         });
         std::vector<float> mixed; mixed.reserve(static_cast<std::size_t>(count));
+        for(std::uint64_t i=0;i<leading;++i)
+            mixed.push_back(generator.mix(0,helper_start+static_cast<long double>(i)/output_rate,
+                output_rate,helper_end,helper_start));
         std::array<float,4096> block{};
         std::size_t offset=0;
         while(!converter.finished()) {
@@ -850,6 +959,16 @@ void output_wave(const Args& a,std::vector<float> samples,const modem::Config& c
             offset+=progress.consumed;
             mixed.insert(mixed.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(progress.produced));
         }
+        if(mixed.size()!=add_helper_samples(leading,payload_count))throw Error("Helper Carrier Robust resampler duration changed");
+        const auto post=count-mixed.size();
+        while(mixed.size()<count)
+            mixed.push_back(generator.mix(0,helper_start+static_cast<long double>(mixed.size())/output_rate,
+                output_rate,helper_end,helper_start));
+        // This diagnostic describes emitted PCM only. Reception never reads it
+        // or uses transmitted lengths to select framing or declare completion.
+        std::cerr<<"{\"event\":\"helper_envelope\",\"sample_rate\":"<<output_rate
+            <<",\"helper_lead_frames\":"<<leading<<",\"robust_frames\":"<<payload_count
+            <<",\"helper_post_frames\":"<<post<<"}\n";
         samples=std::move(mixed);
     }
     // A generated capture includes actual quiet samples for the receiver's
@@ -1501,8 +1620,8 @@ int main(int argc,char** argv) {
                     std::cerr<<"Helper carrier observation disabled: "<<reason<<'\n';
                 };
                 try {
-                    capture_options.minimum_hardware_rate=helper::minimum_output_rate(helper_settings,c.carrier_hz,
-                        helper::occupied_bandwidth(c),c.sample_rate);
+                    if(helper_settings.power_w>0)capture_options.minimum_hardware_rate=helper::minimum_output_rate(
+                        helper_settings,helper::placement_band(c),c.sample_rate);
                 }catch(const Error& error){disable_helper(error.what());}
                 if(helper_settings.power_w>0) {
                     helper_capture.emplace();
@@ -1529,12 +1648,11 @@ int main(int argc,char** argv) {
                         settings.timestamp=static_cast<std::uint64_t>(*settings.capture_epoch);
                     }
                     if(helper_settings.power_w>0&&!helper_disabled)try {
-                        const auto plan=helper::plan(helper_settings,c.carrier_hz,
-                            helper::occupied_bandwidth(c),
+                        const auto plan=helper::plan(helper_settings,helper::placement_band(c),
                             format.hardware_rate,0,modem::outer_dsss_transmit_gain(c));
                         std::vector<Crypto> keys;if(settings.key)keys.push_back(*settings.key);
                         helper_tracker.emplace(plan.frequency_hz);
-                        helper_receiver.emplace(plan.frequency_hz,20,std::move(keys));
+                        helper_receiver.emplace(plan.frequency_hz,20,std::move(keys),std::nullopt,helper_precision_options(c));
                         helper_capture.emplace();helper_raw_samples=0;helper_raw_rate=format.hardware_rate;
                     } catch(const std::exception& error) {disable_helper(error.what());}
                 };
@@ -1602,12 +1720,11 @@ int main(int argc,char** argv) {
                 helper_settings,helper::occupied_bandwidth(c));
             impairments.set_helper_time_key(settings.key);
             const auto physical_rate=impairments.physical_sample_rate();
-            const auto helper_plan=helper::plan(helper_settings,c.carrier_hz,
-                helper::occupied_bandwidth(c),
+            const auto helper_plan=helper::plan(helper_settings,helper::placement_band(c),
                 physical_rate,0,modem::outer_dsss_transmit_gain(c));
             helper::Tracker tracker(helper_plan.frequency_hz);
             std::vector<Crypto> keys;if(settings.key)keys.push_back(*settings.key);
-            helper::Receiver helper_receiver(helper_plan.frequency_hz,20,std::move(keys));
+            helper::Receiver helper_receiver(helper_plan.frequency_hz,20,std::move(keys),std::nullopt,helper_precision_options(c));
             helper_capture.emplace();
             std::vector<float> physical,noisy;
             const auto sample_budget=c.memory_limit/sizeof(float);

@@ -21,6 +21,11 @@ class StreamCLI(unittest.TestCase):
         p=subprocess.run([PUMP,*map(str,args)],input=data,capture_output=True,timeout=timeout)
         self.assertEqual(p.returncode,0 if ok else 2,p.stderr.decode(errors='replace'))
         return p
+    def helper_envelope(self,result):
+        events=[json.loads(line) for line in result.stderr.decode().splitlines() if line.startswith('{')]
+        envelopes=[event for event in events if event.get('event')=='helper_envelope']
+        self.assertEqual(len(envelopes),1)
+        return envelopes[0]
     def run_pump_with_exact_save(self,*args,source,data=None,receive_options=AUDIO):
         # Preserve byte-for-byte transport assertions independently of the
         # intentionally lossy received-text presentation. simulate can write
@@ -81,17 +86,27 @@ class StreamCLI(unittest.TestCase):
                 original_rate=source.getframerate()
             for frequency in ('high','low','0'):
                 output=directory/(frequency+'.wav')
-                self.run_pump('status-tx','--bits','001','--output',output,
+                transmitted=self.run_pump('status-tx','--bits','001','--output',output,
                     '--helper-power','1.5kW','--helper-data-power','4W',
                     '--helper-ratio-limit','90dB','--helper-frequency',frequency,
                     '--helper-callsign','W1ABC',*AUDIO)
+                envelope=self.helper_envelope(transmitted)
+                self.assertEqual(envelope['sample_rate'],48000)
+                lead=envelope['helper_lead_frames']; robust=envelope['robust_frames']
+                post=envelope['helper_post_frames']
+                self.assertGreaterEqual(lead,2*48000)
+                self.assertGreaterEqual(post,2*48000)
                 with wave.open(str(output),'rb') as source:
                     self.assertEqual(source.getframerate(),48000)
-                    self.assertEqual(source.getnframes(),original_frames*48000//original_rate)
+                    # The complete original waveform/separation keeps its
+                    # duration; only helper-only lead and post PCM are added.
+                    self.assertEqual(source.getnframes(),original_frames*48000//original_rate+lead+post)
                     pcm=source.readframes(source.getnframes())
+                    frame_width=source.getsampwidth()*source.getnchannels()
+                    self.assertTrue(any(pcm[:lead*frame_width]))
+                    self.assertTrue(any(pcm[(lead+robust)*frame_width:(lead+robust+post)*frame_width]))
                     # Tail silence is actual PCM, and never includes the helper.
-                    self.assertEqual(pcm[-6*48000*source.getsampwidth():],b'\0'*(6*48000*source.getsampwidth()))
-                    self.assertTrue(any(pcm[:48000*source.getsampwidth()]))
+                    self.assertEqual(pcm[-6*48000*frame_width:],b'\0'*(6*48000*frame_width))
                 if frequency=='high':
                     decoded=self.run_pump('status-rx','--bits','001','--input',output,
                         '--helper-power','1.5kW','--helper-data-power','4W',*AUDIO)
@@ -99,7 +114,10 @@ class StreamCLI(unittest.TestCase):
                     truncated=directory/'high-truncated.wav'
                     with wave.open(str(output),'rb') as source, wave.open(str(truncated),'wb') as target:
                         target.setparams(source.getparams())
-                        target.writeframes(source.readframes(source.getnframes()-6*source.getframerate()))
+                        # Preserve every original source frame, including its
+                        # suppression drain, but omit new helper-only post and
+                        # the actual quiet separation. EOF supplies no absence.
+                        target.writeframes(source.readframes(lead+robust))
                     pending=json.loads(self.run_pump('status-rx','--bits','001','--input',truncated,
                         '--helper-power','1.5kW','--helper-data-power','4W',*AUDIO).stdout)
                     self.assertEqual(pending['raw_bits'],'001')
@@ -204,7 +222,10 @@ class StreamCLI(unittest.TestCase):
             directory=pathlib.Path(directory)
             key=directory/'framed.key'; capture=directory/'framed.wav'; saved=directory/'received.txt'
             self.run_pump('keygen','--output',key)
-            self.run_pump('tx','--text',text,'--keyfile',key,'--output',capture,*helper,*AUDIO)
+            transmitted=self.run_pump('tx','--text',text,'--keyfile',key,'--output',capture,*helper,*AUDIO)
+            envelope=self.helper_envelope(transmitted)
+            self.assertGreaterEqual(envelope['helper_lead_frames'],2*envelope['sample_rate'])
+            self.assertGreaterEqual(envelope['helper_post_frames'],2*envelope['sample_rate'])
             value=json.loads(self.run_pump('rx','--input',capture,'--keyfile',key,
                 '--json','--save',saved,*helper,*AUDIO).stdout)
             self.assertTrue(value['stream_complete'])
@@ -217,7 +238,7 @@ class StreamCLI(unittest.TestCase):
             truncated=directory/'framed-truncated.wav'
             with wave.open(str(capture),'rb') as source, wave.open(str(truncated),'wb') as target:
                 target.setparams(source.getparams())
-                target.writeframes(source.readframes(source.getnframes()-6*source.getframerate()))
+                target.writeframes(source.readframes(envelope['helper_lead_frames']+envelope['robust_frames']))
             pending=json.loads(self.run_pump('rx','--input',truncated,'--keyfile',key,
                 '--json',*helper,*AUDIO).stdout)
             self.assertEqual(pending['raw_bit_count'],1216)
