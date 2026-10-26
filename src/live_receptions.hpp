@@ -1,12 +1,15 @@
 #pragma once
+#include "datapump/pattern_receiver.hpp"
 #include "datapump/symbol_burst.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <optional>
+#include <variant>
 
 namespace datapump::live::detail {
 // Different symbol durations can admit the same PCM. Share presentation state
@@ -16,6 +19,13 @@ namespace datapump::live::detail {
 class ReceptionHistory {
 public:
     static constexpr std::size_t capacity = 64;
+    struct BurstIdentity {
+        modem::SymbolBurstCoordinate first,next;
+        bool first_valid=false,next_valid=false;
+    };
+    using SourceIdentity=std::variant<std::monostate,BurstIdentity,modem::PatternSourceIdentity>;
+    static_assert(sizeof(SourceIdentity)==2*sizeof(std::optional<modem::SymbolBurstCoordinate>));
+    static_assert(alignof(SourceIdentity)==alignof(std::optional<modem::SymbolBurstCoordinate>));
     struct Candidate {
         std::uint64_t id = 0, family = 0;
         std::uint64_t first = 0, end = 0;
@@ -23,17 +33,28 @@ public:
         std::uint64_t absence_samples = 0;
         double score = 0; // Arbitration support, not a displayed native score.
         bool complete = false;
-        // Optional helper-derived reception never suppresses compatible
-        // ordinary progress, even when its earlier prefix has more support.
-        // Stored in the existing alignment padding before signal_id.
+        // Durable helper birth or past legacy-assistance provenance. Only a checked
+        // disjoint keyed source envelope may use it to preserve separate rows;
+        // it never lowers ordinary Robust symbol or payload support.
         bool helper_assisted = false;
         std::uint64_t signal_id = 0, symbol_samples = 0, timing_tolerance = 0;
         // Valid only for amplitude candidates. These are actual retained FFT
         // passbands; their reported centers are not coherent carrier estimates.
         double amplitude_low_hz = 0, amplitude_high_hz = 0;
-        // Exact source-calendar identity for optional Burst continuation.
-        // Physical overlap, evidence and completion still use scored PCM.
-        std::optional<modem::SymbolBurstCoordinate> burst_first, burst_next;
+        // Explicitly distinguish Burst scheduling from an ordinary keyed
+        // source-address envelope. Neither identity implies physical END.
+        SourceIdentity source_identity;
+        const BurstIdentity* burst_identity()const{return std::get_if<BurstIdentity>(&source_identity);}
+        BurstIdentity* burst_identity(){return std::get_if<BurstIdentity>(&source_identity);}
+        const modem::SymbolBurstCoordinate* burst_first()const {
+            const auto* source=burst_identity();return source && source->first_valid?&source->first:nullptr;
+        }
+        const modem::SymbolBurstCoordinate* burst_next()const {
+            const auto* source=burst_identity();return source && source->next_valid?&source->next:nullptr;
+        }
+        const modem::PatternSourceIdentity* ordinary_identity()const {
+            return std::get_if<modem::PatternSourceIdentity>(&source_identity);
+        }
     };
     struct Decision {
         std::uint64_t signal_id = 0;
@@ -60,11 +81,17 @@ public:
             // pass or by replaying its earlier chunks. A different, stronger
             // hypothesis may revise that interpretation under the same row ID.
             if (entry.complete) return decision(entry, false);
+            observed.helper_assisted|=entry.owner.helper_assisted;
             observed.first = std::min(observed.first, entry.owner.first);
+            if(observed.first!=candidate.first && observed.ordinary_identity())
+                observed.source_identity=std::monostate{}; // Its source anchor belongs to candidate.first.
             observed.end = std::max(observed.end, entry.owner.end);
             observed.absence_samples = std::max(observed.absence_samples, entry.owner.absence_samples);
-            if(entry.owner.burst_next && (!observed.burst_next || *observed.burst_next<*entry.owner.burst_next))
-                observed.burst_next=entry.owner.burst_next;
+            if(const auto* old_next=entry.owner.burst_next();old_next &&
+               (!observed.burst_next() || *observed.burst_next()<*old_next)) {
+                if(!observed.burst_identity())observed.source_identity=BurstIdentity{};
+                auto& id=*observed.burst_identity();id.next=*old_next;id.next_valid=true;
+            }
             if (observed.score < entry.owner.score) {
                 observed.frequency = entry.owner.frequency;
                 observed.frequency_tolerance = entry.owner.frequency_tolerance;
@@ -77,7 +104,16 @@ public:
         std::array<bool, capacity> matched{};
         std::size_t selected = size_, count = 0;
         for (std::size_t i = 0; i < size_; ++i) {
-            if (i != identity && !matches(entries_[i], observed)) continue;
+            if (i != identity) {
+                if(!matches(entries_[i], observed))continue;
+                // Once separately published, an existing helper-involved
+                // source cannot retract another row merely because a longer
+                // clock cone makes their old separation proof inconclusive.
+                // An actual identical source anchor can still merge aliases.
+                if(identity<size_ && entries_[identity].owner.ordinary_identity() && entries_[i].owner.ordinary_identity() &&
+                   (observed.helper_assisted || entries_[identity].owner.helper_assisted || entries_[i].owner.helper_assisted) &&
+                   !same_source_alignment(entries_[i].owner,observed))continue;
+            }
             matched[i] = true; ++count;
             if (stronger(entries_[i].owner, observed) &&
                 (selected == size_ || stronger(entries_[i].owner, entries_[selected].owner))) selected = i;
@@ -89,6 +125,10 @@ public:
             return decision(entries_[selected], false);
         }
         if (count) {
+            // A stronger alias may become this GUI row's owner, but cannot
+            // erase helper involvement already attached to its published row.
+            for(std::size_t i=0;i<size_;++i)if(matched[i])
+                observed.helper_assisted|=entries_[i].owner.helper_assisted;
             std::size_t oldest = size_;
             for (std::size_t i = 0; i < size_; ++i)
                 if (matched[i] && (oldest == size_ || entries_[i].signal_id < entries_[oldest].signal_id)) oldest = i;
@@ -181,7 +221,6 @@ private:
         return {entry.signal_id, selected, limited, entry.revision, aliases(entry)};
     }
     static bool stronger(const Candidate& a, const Candidate& b) {
-        if(a.helper_assisted!=b.helper_assisted)return !a.helper_assisted;
         if (a.score != b.score) return a.score > b.score;
         // Intrinsic geometry resolves equal evidence independently of target
         // order. Candidate identity only breaks otherwise indistinguishable fits.
@@ -189,6 +228,27 @@ private:
         if (a.first != b.first) return a.first < b.first;
         if (a.frequency != b.frequency) return a.frequency < b.frequency;
         return a.id < b.id;
+    }
+    static bool same_source_alignment(const Candidate& a,const Candidate& b) {
+        const auto* x=a.ordinary_identity();const auto* y=b.ordinary_identity();
+        if(!x || !y || a.first!=b.first || !a.symbol_samples || a.symbol_samples!=b.symbol_samples ||
+           !x->sample_rate || x->sample_rate!=y->sample_rate || x->phase_lower>x->phase_upper ||
+           x->phase_upper>=x->sample_rate || !std::isfinite(x->clock_half_width_ppm) ||
+           x->clock_half_width_ppm<0 || x->clock_half_width_ppm>=1e6)return false;
+        if(!(x->epoch==y->epoch && x->first_symbol==y->first_symbol &&
+            x->phase_lower==y->phase_lower && x->phase_upper==y->phase_upper &&
+            x->clock_half_width_ppm==y->clock_half_width_ppm) || a.end<=a.first || b.end<=b.first)return false;
+        // Identical invalid addresses are still unknown. Bound the complete
+        // relative source cone without multiplying a distant UTC epoch by Fs.
+        const auto span=static_cast<long double>(std::max(a.end,b.end)-a.first);
+        const auto base=static_cast<long double>(x->first_symbol)*a.symbol_samples;
+        const auto upper=base+x->phase_upper+span*(1+x->clock_half_width_ppm*1e-6L)+3.L*a.symbol_samples;
+        const auto magnitude=std::max({1.L,base,span,upper});
+        if(!std::isfinite(upper) || magnitude>=1e15L)return false;
+        const auto outward=upper+256*std::numeric_limits<double>::epsilon()*magnitude;
+        const auto seconds=std::ceil(outward/x->sample_rate);
+        return std::isfinite(seconds) && seconds<=static_cast<long double>(
+            std::numeric_limits<std::uint64_t>::max()-x->epoch);
     }
     static bool matches(const Entry& entry, const Candidate& candidate) {
         const auto& owner = entry.owner;
@@ -201,8 +261,11 @@ private:
                candidate.amplitude_low_hz>=owner.amplitude_high_hz)return false;
         } else if(std::abs(owner.frequency-candidate.frequency)>
                   std::max(owner.frequency_tolerance,candidate.frequency_tolerance))return false;
+        if((owner.helper_assisted || candidate.helper_assisted) && owner.ordinary_identity() && candidate.ordinary_identity() &&
+           modem::pattern_source_identities_disjoint(*owner.ordinary_identity(),owner.first,owner.end,owner.symbol_samples,
+                *candidate.ordinary_identity(),candidate.first,candidate.end,candidate.symbol_samples))return false;
         if(!owner_amplitude && !candidate_amplitude && owner.symbol_samples && owner.symbol_samples==candidate.symbol_samples &&
-           !owner.burst_first && !candidate.burst_first) {
+           !owner.burst_first() && !candidate.burst_first()) {
             // Overlap alone does not identify one ordinary symbol stream.
             // Competing epochs may score unrelated clocks over the same PCM;
             // their extra support must not replace an incompatible stream.
@@ -222,9 +285,9 @@ private:
         // alias merely because a long receiver has yet to score its silence.
         const auto gap = later.first - earlier.end;
         if (gap >= earlier.absence_samples) return false;
-        if(earlier.burst_first || later.burst_first)
-            return earlier.burst_first && earlier.burst_next && later.burst_first && later.burst_next &&
-                earlier.symbol_samples==later.symbol_samples && *earlier.burst_next==*later.burst_first &&
+        if(earlier.burst_first() || later.burst_first())
+            return earlier.burst_first() && earlier.burst_next() && later.burst_first() && later.burst_next() &&
+                earlier.symbol_samples==later.symbol_samples && *earlier.burst_next()==*later.burst_first() &&
                 // A disjoint suffix has no copy of the leading accepted bits.
                 // Reuse an earlier stronger row without transferring ownership;
                 // a stronger suffix remains independent until actual overlap

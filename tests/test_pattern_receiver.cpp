@@ -1753,6 +1753,90 @@ void retired_stream_identity_is_not_physical_end() {
               receiver.take_bursts().empty(),"drained retired stream regained output ownership");
     }
 }
+void helper_gap_protection_retains_physical_end() {
+    auto c=config(64);c.pulse_shaping=false;
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    const auto start=4*symbol+symbol/3;
+    const auto absence=modem::pattern_absence_samples(c);
+    const Bytes earlier_bits{1,0},later_bits{0,0,1};
+    auto samples=waveform(c,later_bits,start,absence+6*symbol,.73);
+    const auto earlier=waveform(c,earlier_bits,0,0,.37);
+    std::copy(earlier.begin(),earlier.end(),samples.begin());
+    // Use the same independent-start geometry as the strict ordinary
+    // retirement control above, followed by real complete-symbol silence.
+    // Exercise both qualified births and a reference first seen after a bit.
+    for(unsigned mode=0;mode<3;++mode)for(const auto chunk:{std::size_t{37},std::size_t{997}}) {
+        modem::PatternReceiver receiver(c);
+        const auto before=receiver.working_bytes(),reserved=receiver.reserved_workspace_bytes();
+        check(receiver.set_helper_gap_protection(mode==1),"native helper gap context was unsupported");
+        check(receiver.working_bytes()==before && receiver.reserved_workspace_bytes()==reserved,
+              "helper gap context allocated storage or changed an ordinary reservation");
+        struct Observed {modem::PatternBurst burst;std::size_t terminal=0;};
+        std::vector<Observed> streams;bool lost=false;
+        std::size_t position=0;
+        while(position<samples.size()) {
+            // Poll the old prefix before any PCM of the independent start.
+            const auto causal=mode && !lost?start-position:samples.size()-position;
+            check(causal,"helper gap loss fixture did not expose its old prefix before the later start");
+            const auto count=std::min({chunk,samples.size()-position,causal});
+            receiver.push(std::span(samples).subspan(position,count));position+=count;
+            for(auto& burst:receiver.take_bursts()) {
+                check(!burst.helper_acquired,"gap protection fabricated conditional acquisition provenance");
+                if(burst.complete)check(position>=burst.end_sample+absence,
+                    "helper gap protection fabricated unscored physical absence");
+                auto prior=std::find_if(streams.begin(),streams.end(),[&](const auto& item) {
+                    return item.burst.stream_first_sample==burst.stream_first_sample &&
+                        item.burst.stream_first_symbol==burst.stream_first_symbol;
+                });
+                if(prior==streams.end()) {
+                    streams.push_back({std::move(burst),0});prior=streams.end()-1;
+                } else {
+                    check(prior->burst.first_stream_symbol+prior->burst.bits.size()==burst.first_stream_symbol,
+                          "helper gap protection changed the next progress ordinal");
+                    prior->burst.bits.insert(prior->burst.bits.end(),burst.bits.begin(),burst.bits.end());
+                    prior->burst.complete=burst.complete;prior->burst.end_sample=burst.end_sample;
+                }
+                prior->terminal+=prior->burst.complete;
+            }
+            const auto old=std::find_if(streams.begin(),streams.end(),[](const auto& item) {
+                return item.burst.stream_first_sample==0 && item.burst.stream_first_symbol==0;
+            });
+            if(mode && !lost && old!=streams.end() && !old->burst.bits.empty()) {
+                check(position<=start && receiver.retains_stream(0,0),
+                      "helper gap loss fixture missed the earlier pending owner");
+                const auto bytes=receiver.working_bytes(),promise=receiver.reserved_workspace_bytes();
+                if(mode==2)check(receiver.set_helper_gap_protection(true),"existing native track could not latch helper context");
+                check(receiver.set_helper_gap_protection(false),"helper gap context could not disarm future births");
+                check(receiver.working_bytes()==bytes && receiver.reserved_workspace_bytes()==promise,
+                      "helper qualification loss changed ordinary resources");
+                lost=true;
+            }
+        }
+        check(streams.size()==2 && streams.front().burst.bits==earlier_bits && streams.back().burst.bits==later_bits,
+              "helper gap protection lost an accepted prefix or the independent later start");
+        check(streams.back().burst.complete && streams.back().terminal==1,
+              "independent later start lost its fully scored physical END");
+        check(mode?lost && streams.front().burst.complete && streams.front().terminal==1:
+                   !streams.front().burst.complete && !streams.front().terminal,
+              "helper gap loss abandoned its latched owner or changed ordinary retirement");
+        check(!receiver.retains_stream(0,0),"physically resolved earlier owner retained a detector producer");
+        receiver.finish();
+        check(receiver.take_bursts().empty(),"EOF added bits or physical END after sampled gap completion");
+    }
+    modem::StreamingReceiver native(c);
+    const auto before=native.working_bytes(),promise=native.reserved_workspace_bytes();
+    check(native.set_helper_gap_protection(true) && native.set_helper_gap_protection(false) &&
+          native.working_bytes()==before && native.reserved_workspace_bytes()==promise,
+          "streaming gap-context forwarding changed native resources");
+    modem::PatternSearch compact;compact.compact_clock_search=true;
+    compact.start_offset_seconds=0;compact.start_uncertainty_seconds=1;
+    modem::PatternReceiver fallback(c,8*1024*1024,compact);
+    const auto fallback_bytes=fallback.working_bytes(),fallback_promise=fallback.reserved_workspace_bytes();
+    check(fallback.clock_windowed() && !fallback.set_helper_gap_protection(true) &&
+          !fallback.set_helper_gap_protection(false) && fallback.working_bytes()==fallback_bytes &&
+          fallback.reserved_workspace_bytes()==fallback_promise,
+          "unsupported compact helper gap context changed ordinary state");
+}
 void wrong_key_and_background() {
     const auto c=config(256,true);const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
     const auto samples=waveform(c,{0,0,1},131,3*symbol,1.29,.5);constexpr std::array<std::size_t,2> chunks{613,79};
@@ -3216,6 +3300,7 @@ int main(int argc,char** argv) {
     run("unconfirmed tail and later start",unconfirmed_tail_cannot_veto_later_start);
     run("timed gap and independent start",timed_gap_cannot_veto_independent_start);
     run("retired stream identity",retired_stream_identity_is_not_physical_end);
+    run("helper gap protection physical end",helper_gap_protection_retains_physical_end);
     run("noise-hidden chip observations",noise_hidden_chips);run("wrong keys and finite noise captures",wrong_key_and_background);
     run("multiple bursts",multiple_bursts);run("memory limits and cancellation",bounds_and_cancellation);
     run("fractional symbol timing",fractional_symbol_timing);run("keyed capture missing first symbol",keyed_capture_missing_first_symbol);

@@ -1,3 +1,4 @@
+#include <type_traits>
 #include "datapump/helper_receiver.hpp"
 #include "datapump/helper_carrier.hpp"
 #include "datapump/types.hpp"
@@ -15,6 +16,28 @@ constexpr double tau=2*std::numbers::pi;
 constexpr std::size_t vertices=9;
 constexpr std::size_t narrow_bins=72;
 using Pair=std::array<double,2>;
+// Raw fit state never carries decoded metadata. Keep every measured field, but
+// do not reserve two dormant strings/Metadata optionals in the persistent state.
+struct ToneReference {
+    std::uint64_t sample=0;
+    std::uint32_t sample_rate=0;
+    double frequency_hz=0,phase_radians=0;
+    double frequency_uncertainty_hz=0,phase_uncertainty_radians=0;
+    double dwell_start_seconds=0,dwell_uncertainty_seconds=0;
+    bool frequency_valid=false,phase_valid=false,timing_valid=false;
+    std::uint64_t frequency_sample=0;
+    Reference publication() const {
+        Reference r;
+        r.sample=sample;r.sample_rate=sample_rate;
+        r.frequency_hz=frequency_hz;r.phase_radians=phase_radians;
+        r.frequency_uncertainty_hz=frequency_uncertainty_hz;
+        r.phase_uncertainty_radians=phase_uncertainty_radians;
+        r.dwell_start_seconds=dwell_start_seconds;
+        r.dwell_uncertainty_seconds=dwell_uncertainty_seconds;
+        r.frequency_valid=frequency_valid;r.phase_valid=phase_valid;r.timing_valid=timing_valid;
+        r.frequency_sample=frequency_sample;return r;
+    }
+};
 struct Block { double xx=0,xy=0,yy=0; };
 struct Tri { std::array<Block,vertices> diagonal{};std::array<Block,vertices-1> upper{}; };
 struct Cross { std::array<Block,vertices> diagonal{};std::array<Block,vertices-1> upper{},lower{}; };
@@ -86,6 +109,10 @@ struct Receiver::Impl {
     };
     struct NarrowFit {Pair amplitude{};Block gram{};double score=0,energy=0;};
     struct State {
+        // Fixed builtin/complex<double> values, fixed arrays and disengaged
+        // optionals only: no allocation or user-provided throwing constructor.
+        // libstdc++ complex value initialization lacks a noexcept annotation.
+        State() noexcept = default;
         std::uint32_t rate=0;std::uint64_t next=0;
         std::size_t bin_size=0,bin_count=0,ring_count=0,ring_position=0;
         std::uint64_t bin_first=0;
@@ -109,6 +136,7 @@ struct Receiver::Impl {
         std::uint64_t frequency_sample=0;
         double frequency_value=0,frequency_uncertainty=0;
         bool coarse_valid=false;
+        std::uint32_t nuisance_range=0;
         std::complex<double> previous_bin{};
         std::complex<double> increment_sum{};std::size_t increments=0;
         double guess_hz=0;
@@ -118,7 +146,12 @@ struct Receiver::Impl {
         std::array<std::array<double,6>,6> fit_gram{};
         std::array<double,6> fit_rhs{};
         double fit_energy=0,fit_hz=0;
-        std::optional<Reference> candidate,reference,update;
+        // Fixed public-band sufficient statistics, not a raw physical PCM buffer.
+        std::array<std::complex<double>,27> nuisance_rhs{};
+        std::uint32_t nuisance_first() const {return nuisance_range>>5;}
+        std::uint32_t nuisance_count() const {return nuisance_range&31;}
+        std::optional<ToneReference> candidate,reference;
+        std::optional<Reference> update;
         double amplitude=0;
         double punctuation=-1,punctuation_uncertainty=0,anchor=0,timing_uncertainty=0;
         double boundary_notch=-1,boundary_level=1;
@@ -134,10 +167,17 @@ struct Receiver::Impl {
     } state;
     double expected,width;
     std::vector<Crypto> keys;
-    explicit Impl(double e,double w,std::vector<Crypto> k):expected(e),width(w),keys(std::move(k)) {}
+    OccupiedBand conditioning;
+    explicit Impl(double e,double w,std::vector<Crypto> k,std::optional<OccupiedBand> band)
+        :expected(e),width(w),keys(std::move(k)),conditioning(band.value_or(OccupiedBand{})) {}
 
+    void reset_state() noexcept {
+        static_assert(std::is_nothrow_default_constructible_v<State>);
+        static_assert(std::is_nothrow_destructible_v<State>);
+        std::destroy_at(&state);std::construct_at(&state);
+    }
     void configure(std::uint32_t rate,std::uint64_t first) {
-        state={};auto& s=state;
+        reset_state();auto& s=state;
         if(rate<1000||expected-width<10||expected+width>=rate/2.-10)
             throw Error("Helper Carrier precision band is outside capture passband");
         s.rate=rate;s.next=first;s.bin_first=first;
@@ -154,7 +194,7 @@ struct Receiver::Impl {
         if(!state.timing_valid)return true;
         const auto t=local(time);return (t>=.008&&t<.212)||(t>=.268&&t<.308);
     }
-    Reference fuse_frequency(Reference reference) const {
+    void fuse_frequency(Reference& reference) const {
         const auto& s=state;
         if(s.frequency_sample&&s.frequency_sample<=reference.sample&&
            reference.sample-s.frequency_sample<=s.rate&&s.frequency_uncertainty>0&&
@@ -165,37 +205,140 @@ struct Receiver::Impl {
             reference.frequency_uncertainty_hz=s.frequency_uncertainty;
             reference.frequency_sample=s.frequency_sample;
         }
-        return reference;
     }
-    void finish_fit() {
-        auto& s=state;
-        std::array<double,6> x{};
-        if(!solve6(s.fit_gram,s.fit_rhs,x))return;
-        double explained=0;for(unsigned i=0;i<6;++i)explained+=x[i]*s.fit_rhs[i];
-        const auto residual=std::max(0.,s.fit_energy-explained);
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+    __attribute__((noinline))
+#endif
+    static std::array<std::complex<long double>,3> moments(long double frequency,
+                                                          std::size_t count,std::uint32_t rate) {
+        const auto omega=2*std::numbers::pi_v<long double>*frequency/rate;
+        const auto q=std::polar(1.L,omega),qn=std::polar(1.L,omega*count);
+        const auto d=1.L-q;const auto N=static_cast<long double>(count);
+        const auto s0=(1.L-qn)/d;
+        const auto s1=(q-N*qn+(N-1)*qn*q)/(d*d);
+        const auto s2=(q+q*q-N*N*qn+(2*N*N-2*N-1)*qn*q-(N-1)*(N-1)*qn*q*q)/(d*d*d);
+        return {s0,s1/N-.5L*s0,s2/(N*N)-s1/N+.25L*s0};
+    }
+    void start_nuisance() {
+        auto& s=state;s.nuisance_rhs={};s.nuisance_range=0;
+        if(!std::isfinite(conditioning.lower_hz)||!std::isfinite(conditioning.upper_hz)||
+           conditioning.lower_hz<=0||conditioning.upper_hz<=conditioning.lower_hz||conditioning.upper_hz>=s.rate/2.||
+           (conditioning.lower_hz<=expected+width&&conditioning.upper_hz>=expected-width))return;
+        const auto step=static_cast<double>(s.rate)/s.fit_size;
+        const auto first=std::floor(conditioning.lower_hz/step),last=std::ceil(conditioning.upper_hz/step);
+        if(first<1||last>=s.fit_size/2.||last<first||last-first+1>s.nuisance_rhs.size()||
+           (first*step<=expected+width&&last*step>=expected-width)||
+           s.fit_size<=6+2*(last-first+1))return;
+        if(first>static_cast<double>(UINT32_MAX>>5))return;
+        s.nuisance_range=(static_cast<std::uint32_t>(first)<<5)|static_cast<std::uint32_t>(last-first+1);
+    }
+    void nuisance_sample(float sample) {
+        auto& s=state;if(!s.nuisance_count())return;
+        const auto angle=tau*static_cast<double>(s.fit_count)/s.fit_size;
+        const auto harmonic=std::polar(1.,angle);
+        auto oscillator=std::polar(1.,angle*s.nuisance_first());
+        for(std::size_t k=0;k<s.nuisance_count();++k) {
+            s.nuisance_rhs[k]+=static_cast<double>(sample)*oscillator;oscillator*=harmonic;
+        }
+    }
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+    __attribute__((noinline))
+#endif
+    bool nuisance_cross(std::size_t k,std::array<double,6>& cosine,std::array<double,6>& sine) const {
+        const auto& s=state;
+        const auto frequency=static_cast<long double>(s.nuisance_first()+k)*s.rate/s.fit_size;
+        // Public-band overlap is rejected above; this also protects the
+        // finite geometric-moment denominators if a fit approaches it.
+        if(std::abs(s.fit_hz-static_cast<double>(frequency))<static_cast<double>(s.rate)/s.fit_size)return false;
+        const auto minus=moments(s.fit_hz-frequency,s.fit_size,s.rate);
+        const auto plus=moments(s.fit_hz+frequency,s.fit_size,s.rate);
+        for(unsigned power=0;power<3;++power) {
+            cosine[2*power]=static_cast<double>(.5L*(minus[power].real()+plus[power].real()));
+            cosine[2*power+1]=static_cast<double>(.5L*(minus[power].imag()+plus[power].imag()));
+            sine[2*power]=static_cast<double>(.5L*(plus[power].imag()-minus[power].imag()));
+            sine[2*power+1]=static_cast<double>(.5L*(minus[power].real()-plus[power].real()));
+        }
+        return true;
+    }
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+    __attribute__((noinline))
+#endif
+    bool condition_fit(double raw_residual,std::array<double,6>& coefficients,
+                       double& residual,double& degrees,double& trace) {
+        auto& s=state;if(!s.nuisance_count())return false;
+        trace=0;
+        const auto scale=2./s.fit_size;double nuisance_energy=0;
+        for(std::size_t k=0;k<s.nuisance_count();++k) {
+            std::array<double,6> cosine{},sine{};
+            if(!nuisance_cross(k,cosine,sine))return false;
+            for(unsigned column=0;column<2;++column) {
+                const auto& cross=column?sine:cosine;
+                const auto measurement=column?s.nuisance_rhs[k].imag():s.nuisance_rhs[k].real();
+                std::array<double,6> inverse_cross{};
+                if(!solve6(s.fit_gram,cross,inverse_cross))return false;
+                for(unsigned i=0;i<6;++i) {
+                    trace+=scale*cross[i]*inverse_cross[i];s.fit_rhs[i]-=scale*cross[i]*measurement;
+                }
+                nuisance_energy+=scale*measurement*measurement;
+            }
+        }
+        if(!std::isfinite(trace)||trace<0||trace>.25)return false;
+        // Raw candidate/reference/guess and publication are already committed.
+        // These completed-frame arrays are scratch until the next fit starts.
+        for(std::size_t k=0;k<s.nuisance_count();++k) {
+            std::array<double,6> cosine{},sine{};
+            if(!nuisance_cross(k,cosine,sine))return false;
+            for(unsigned column=0;column<2;++column) {
+                const auto& cross=column?sine:cosine;
+                for(unsigned i=0;i<6;++i)for(unsigned j=0;j<6;++j)s.fit_gram[i][j]-=scale*cross[i]*cross[j];
+            }
+        }
+        if(!solve6(s.fit_gram,s.fit_rhs,coefficients))return false;
+        auto explained=nuisance_energy;
+        for(unsigned i=0;i<6;++i)explained+=coefficients[i]*s.fit_rhs[i];
+        residual=s.fit_energy-explained;
+        degrees=static_cast<double>(s.fit_size)-6-2*s.nuisance_count();
+        const auto roundoff=256*std::numeric_limits<double>::epsilon()*s.fit_size*
+            (6+2*s.nuisance_count())*s.fit_energy;
+        // Never clamp away negative/unexplained energy. Very pure numerical
+        // cases and an inconsistent nested projection retain the raw estimate.
+        if(!std::isfinite(residual)||residual<=roundoff||
+           residual>raw_residual+roundoff||degrees<=0)return false;
+        return true;
+    }
+    template<typename Result>
+    bool estimate_frame(const std::array<double,6>& x,
+            const std::array<std::array<double,6>,6>& gram,double residual,double degrees,
+            Result& r,double& output_amplitude) const {
+        const auto& s=state;
         const auto amplitude=std::hypot(x[0],x[1]);
-        if(!(amplitude>1e-9)||s.fit_energy<=0||explained<s.fit_energy*.90)return;
+        if(!(amplitude>1e-9)||degrees<=0)return false;
         const auto duration=static_cast<double>(s.fit_size)/s.rate;
         const std::complex<double> c0{x[0],-x[1]},c1{x[2],-x[3]},c2{x[4],-x[5]};
         const auto correction=std::imag(c1*std::conj(c0))/std::norm(c0);
         // The quadratic envelope must agree with a slowly rotating phasor,
         // rather than admitting an arbitrary smooth burst as a reference.
         const auto curvature_error=std::abs(c2+.5*c0*correction*correction)/amplitude;
-        if(std::abs(correction)>.12||curvature_error>.01)return;
-        Reference r;
+        if(std::abs(correction)>.12||curvature_error>.01)return false;
         r.sample=s.fit_first+s.fit_size-1;r.sample_rate=s.rate;
         const auto u=static_cast<double>(s.fit_size-1)/s.fit_size-.5;
         const auto c=c0+u*c1+u*u*c2,derivative=c1+2*u*c2;
         const auto frontier_amplitude=std::abs(c);
-        if(frontier_amplitude<amplitude*.98||frontier_amplitude>amplitude*1.02)return;
+        if(frontier_amplitude<amplitude*.98||frontier_amplitude>amplitude*1.02)return false;
         const auto frequency=s.fit_hz+std::imag(derivative*std::conj(c))/
             (std::norm(c)*tau*duration);
-        if(!std::isfinite(frequency)||std::abs(frequency-expected)>width+1e-6)return;
+        if(!std::isfinite(frequency)||std::abs(frequency-expected)>width+1e-6)return false;
         r.frequency_hz=frequency;
         auto phase=std::arg(c)+tau*s.fit_hz*static_cast<double>(s.fit_size-1)/s.rate;
         if(s.timing_valid&&local(seconds(r.sample))>=.244)phase-=std::numbers::pi;
         r.phase_radians=phase_wrap(phase);
-        const auto noise=std::sqrt(residual/std::max<double>(1,s.fit_size-6));
+        const auto noise=std::sqrt(residual/degrees);
         // Endpoint evaluation has greater variance than a center phasor. Use
         // the actual finite-window six-column Gram covariance, including the
         // quadratic envelope and noninteger carrier cycles.
@@ -211,14 +354,14 @@ struct Receiver::Impl {
             frequency_gradient[j]=(std::imag(dd*std::conj(c)+derivative*std::conj(dc))/norm-
                 numerator*2*std::real(dc*std::conj(c))/(norm*norm))/(tau*duration);
         }
-        if(!solve6(s.fit_gram,phase_gradient,covariance))return;
+        if(!solve6(gram,phase_gradient,covariance))return false;
         double phase_variance=0;
         for(unsigned j=0;j<6;++j)phase_variance+=phase_gradient[j]*covariance[j];
-        if(!solve6(s.fit_gram,frequency_gradient,covariance))return;
+        if(!solve6(gram,frequency_gradient,covariance))return false;
         double frequency_variance=0;
         for(unsigned j=0;j<6;++j)frequency_variance+=frequency_gradient[j]*covariance[j];
         if(!std::isfinite(phase_variance)||!std::isfinite(frequency_variance)||
-           phase_variance<=0||frequency_variance<=0)return;
+           phase_variance<=0||frequency_variance<=0)return false;
         const auto phase_noise=std::max(2e-6,8*noise*std::sqrt(phase_variance));
         const auto frequency_noise=8*noise*std::sqrt(frequency_variance);
         const auto radial=std::real(c1*std::conj(c0))/std::norm(c0);
@@ -237,6 +380,27 @@ struct Receiver::Impl {
         r.frequency_valid=r.phase_valid=true;
         r.timing_valid=s.timing_valid;r.dwell_uncertainty_seconds=s.timing_uncertainty;
         r.dwell_start_seconds=seconds(r.sample)-local(seconds(r.sample));
+        output_amplitude=frontier_amplitude;return true;
+    }
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+    __attribute__((noinline))
+#endif
+    std::optional<double> finish_fit() {
+        auto& s=state;
+        std::array<double,6> x{};
+        if(!solve6(s.fit_gram,s.fit_rhs,x))return {};
+        double explained=0;for(unsigned i=0;i<6;++i)explained+=x[i]*s.fit_rhs[i];
+        const auto residual=std::max(0.,s.fit_energy-explained);
+        const auto amplitude=std::hypot(x[0],x[1]);
+        // The original raw-tone admission is untouched. Nuisance explained
+        // energy never helps an absent helper pass this gate.
+        if(!(amplitude>1e-9)||s.fit_energy<=0||explained<s.fit_energy*.90)return {};
+        ToneReference r;double frontier_amplitude=0;
+        if(!estimate_frame(x,s.fit_gram,residual,std::max<double>(1,s.fit_size-6),r,frontier_amplitude))return {};
+        const auto frequency=r.frequency_hz;
+        bool accepted=false;
         if(s.candidate) {
             const auto dt=static_cast<double>(r.sample-s.candidate->sample)/s.rate;
             auto error=phase_wrap(r.phase_radians-s.candidate->phase_radians-tau*s.candidate->frequency_hz*dt);
@@ -248,12 +412,36 @@ struct Receiver::Impl {
                 s.candidate->phase_uncertainty_radians+tau*dt*s.candidate->frequency_uncertainty_hz));
             if(std::abs(error)<allowance&&std::abs(r.frequency_hz-s.candidate->frequency_hz)<
                std::max(.05,6*(r.frequency_uncertainty_hz+s.candidate->frequency_uncertainty_hz))) {
-                s.reference=r;
-                if(!s.update||!s.update->metadata)s.update=fuse_frequency(r);
+                s.reference=r;accepted=true;
+                if(!s.update||!s.update->metadata) {s.update=r.publication();fuse_frequency(*s.update);}
                 s.amplitude=frontier_amplitude;s.guess_hz=frequency;
             }
         }
         s.candidate=r;
+        if(!accepted||!s.update||s.update->metadata||s.update->sample!=r.sample)return {};
+        return residual;
+    }
+#if defined(_MSC_VER)
+    __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+    __attribute__((noinline))
+#endif
+    void refine_accepted(double residual) {
+        auto& s=state;
+        if(!s.reference||!s.update||s.update->metadata||s.update->sample!=s.reference->sample)return;
+        const auto& r=*s.reference;
+        std::array<double,6> x{};
+        bool used=false;double joint_residual=-1,joint_degrees=0,trace=-1;
+        Reference refined;double refined_amplitude=0;
+        if(condition_fit(residual,x,joint_residual,joint_degrees,trace)&&
+           estimate_frame(x,s.fit_gram,joint_residual,joint_degrees,refined,refined_amplitude)) {
+            if(refined.frequency_uncertainty_hz<=r.frequency_uncertainty_hz&&
+               refined.phase_uncertainty_radians<=r.phase_uncertainty_radians&&
+               std::abs(refined.frequency_hz-r.frequency_hz)<=r.frequency_uncertainty_hz+refined.frequency_uncertainty_hz&&
+               std::abs(phase_wrap(refined.phase_radians-r.phase_radians))<=r.phase_uncertainty_radians+refined.phase_uncertainty_radians)
+                used=true;
+        }
+        if(used&&s.update&&!s.update->metadata&&s.update->sample==r.sample) {s.update=std::move(refined);fuse_frequency(*s.update);}
     }
     void fit_sample(float sample,std::uint64_t index) {
         auto& s=state;
@@ -261,6 +449,7 @@ struct Receiver::Impl {
         if(!s.fit_count) {
             s.fit_first=index;s.fit_gram={};s.fit_rhs={};s.fit_energy=0;
             s.fit_hz=s.guess_hz;s.fit_osc={1,0};s.fit_step=std::polar(1.,tau*s.fit_hz/s.rate);
+            start_nuisance();
         }
         const auto u=static_cast<double>(s.fit_count)/s.fit_size-.5;
         const auto c=s.fit_osc.real(),v=s.fit_osc.imag();
@@ -269,10 +458,12 @@ struct Receiver::Impl {
             s.fit_rhs[i]+=sample*basis[i];
             for(unsigned j=i;j<6;++j)s.fit_gram[i][j]+=basis[i]*basis[j];
         }
+        nuisance_sample(sample);
         s.fit_energy+=static_cast<double>(sample)*sample;s.fit_osc*=s.fit_step;
         if(++s.fit_count==s.fit_size) {
             for(unsigned i=0;i<6;++i)for(unsigned j=0;j<i;++j)s.fit_gram[i][j]=s.fit_gram[j][i];
-            finish_fit();s.fit_count=0;
+            if(const auto accepted=finish_fit())refine_accepted(*accepted);
+            s.fit_count=0;
         }
     }
     const Bin& bin(std::size_t age) const {
@@ -830,7 +1021,7 @@ struct Receiver::Impl {
             // Compact metadata is unauthenticated, and its optional CRC never
             // grants timing authority. The interpolation shift is only a local
             // nuisance fit; preserve the independent punctuation-derived grid.
-            auto update=*s.reference;
+            auto update=s.reference->publication();
             const auto frontier=s.next-1;
             const auto age=static_cast<double>(frontier-update.sample)/s.rate;
             update.frequency_sample=update.frequency_sample?update.frequency_sample:update.sample;
@@ -839,7 +1030,7 @@ struct Receiver::Impl {
             update.sample=frontier;update.metadata=std::move(metadata);
             update.timing_valid=s.timing_valid;
             update.dwell_start_seconds=s.metadata_dwell;
-            update.dwell_uncertainty_seconds=s.timing_uncertainty;s.update=fuse_frequency(std::move(update));
+            update.dwell_uncertainty_seconds=s.timing_uncertainty;s.update=std::move(update);fuse_frequency(*s.update);
         }
     }
     void metadata_sample(float sample,std::uint64_t index) {
@@ -882,20 +1073,33 @@ struct Receiver::Impl {
         s.metadata_energy+=static_cast<double>(sample)*sample;++s.metadata_samples;s.metadata_osc*=s.metadata_step;
     }
 };
-Receiver::Receiver(double expected,double width,std::vector<Crypto> keys) {
+Receiver::Receiver(double expected,double width,std::vector<Crypto> keys,
+                   std::optional<OccupiedBand> ordinary_band) {
     if(!std::isfinite(expected)||expected<=0||!std::isfinite(width)||width<0||width>100||keys.size()>8)
         throw Error("invalid Helper Carrier precision band or receive-key count");
     // Do not inherit an unbounded caller vector capacity into the workspace.
     std::vector<Crypto> compact;
     if(!keys.empty())compact.push_back(keys.front());
-    if(sizeof(*this)+sizeof(Impl)+compact.capacity()*sizeof(Crypto)+2048>workspace_bound)
+    // Account for both the retained metadata and a replacement decoded before
+    // it is moved into that slot. Match the codec's bounded append sequence,
+    // rather than assuming a particular standard library string capacity.
+    std::size_t metadata_heap=0;
+    {
+        std::string callsign;
+        for(unsigned i=0;i<19;++i)callsign+='X';
+        metadata_heap=2*(callsign.capacity()+1);
+    }
+    // Measured production project-frame peak is 2080 bytes for the qualified
+    // toolchain; this includes a small additional project scratch allowance.
+    constexpr std::size_t scratch_bound=2112;
+    if(sizeof(*this)+sizeof(Impl)+compact.capacity()*sizeof(Crypto)+scratch_bound+metadata_heap>workspace_bound)
         throw Error("Helper Carrier precision receiver exceeds its bounded workspace");
-    impl_=std::make_unique<Impl>(expected,width,std::move(compact));
+    impl_=std::make_unique<Impl>(expected,width,std::move(compact),ordinary_band);
 }
 Receiver::~Receiver()=default;
 Receiver::Receiver(Receiver&&) noexcept=default;
 Receiver& Receiver::operator=(Receiver&&) noexcept=default;
-void Receiver::reset() {impl_->state={};}
+void Receiver::reset() {impl_->reset_state();}
 void Receiver::push(std::span<const float> samples,std::uint32_t rate,std::uint64_t first) {
     auto& s=impl_->state;
     if(!rate)throw Error("invalid Helper Carrier precision sample rate");

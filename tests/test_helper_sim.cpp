@@ -69,14 +69,146 @@ void helper_only_graceful_finish() {
     modem::SampledSimulationChannel channel(c,model(),h);channel.begin_burst(true);
     modem::StreamingTransmitter source(modem::Noise{},c);
     std::vector<float> before(c.sample_rate*5);check(channel.read(source,before)==before.size(),"helper-only source ended before stop");
-    check(source.samples_emitted()>4*c.sample_rate,"helper-only output did not advance its source clock");
+    check(source.samples_emitted()>2*c.sample_rate&&source.samples_emitted()<4*c.sample_rate&&
+          source.samples_emitted()>=channel.transmitted_samples()&&
+          source.samples_emitted()-channel.transmitted_samples()<=2048,
+          "helper-only lead advanced or delayed its source clock incorrectly");
     source.request_finish();
     const auto end=source.total_samples();
     check(end>channel.transmitted_samples(),"helper-only stop endpoint moved behind already-transmitted PCM");
-    capture(channel,source,137);
+    bool payload_done=false;std::array<float,137> pcm{};
+    while(channel.read(source,pcm)) {
+        if(channel.payload_finished()) {
+            payload_done=true;
+            check(channel.transmitted_samples()==end,"helper-only post advanced beyond its exact source endpoint");
+        }
+    }
     check(channel.transmitted_samples()==end&&source.finished(),"helper-only graceful stop omitted its protected source endpoint");
-    check(channel.received_samples()==static_cast<std::uint64_t>(std::ceil(channel.startup_offset_samples()+end)),
-          "centered helper-only route changed the logical finite EOF extent");
+    check(payload_done&&channel.payload_end_sample()&&
+        channel.received_samples()>=*channel.payload_end_sample()+2*c.sample_rate,
+        "helper-only graceful stop omitted its separate post-source envelope");
+}
+void source_coordinates_and_envelope() {
+    auto c=config(2000);c.stream_phase_samples=137;c.scramble=true;c.dsss=true;
+    c.data_key.emplace(Bytes(32,0x53));c.spreading_seed[0]=43;c.dsss_seed[0]=97;
+    auto impairment=model();impairment.clock_error_ppm=137;impairment.frequency_offset_hz=2.3;
+    const auto h=helper_options(40);
+    for(const auto envelope:{modem::SampledSimulationChannel::HelperEnvelope{},
+                             modem::SampledSimulationChannel::HelperEnvelope{4.01,3.21}}) {
+        modem::SampledSimulationChannel channel(c,impairment,h,0,envelope);
+        modem::StreamingTransmitter source(modem::RawBits{{0,0,1}},c),reference(modem::RawBits{{0,0,1}},c);
+        check(!channel.payload_begin_sample()&&!channel.payload_end_sample()&&!channel.payload_finished(),
+              "unbound helper exposed a fabricated payload endpoint");
+        Observer physical;channel.set_physical_observer(std::ref(physical));
+        const auto expected_total=source.total_samples(),expected_origin=source.physical_output_origin();
+        const auto rate=1+static_cast<long double>(impairment.clock_error_ppm)*1e-6L;
+        std::array<float,137> pcm{};std::array<std::complex<double>,2048> actual{},expected{};
+        std::uint64_t checked=0;bool lead=false,post=false,extended=false;
+        std::uint64_t end=0;
+        while(channel.read(source,pcm)) {
+            check(channel.payload_begin_sample()&&channel.payload_end_sample(),"bound helper lost its source coordinates");
+            check(source.total_samples()==expected_total&&source.physical_output_origin()==expected_origin,
+                  "helper envelope changed source duration or keyed epoch");
+            end=*channel.payload_end_sample();
+            const auto progress=channel.transmitted_samples();
+            const auto position=(static_cast<long double>(channel.received_samples())-channel.startup_offset_samples())*rate;
+            const auto wanted=position<=0?0:position>=expected_total?expected_total:static_cast<std::uint64_t>(position);
+            check(progress==wanted,"helper envelope inflated payload progress with lead, tail or interpolation lookahead");
+            if(channel.received_samples()+128<*channel.payload_begin_sample()) {
+                lead=true;check(!source.samples_emitted()&&!progress,"negative helper coordinate accessed its source");
+            }
+            const auto delta=static_cast<std::size_t>(source.samples_emitted()-checked);
+            check(delta<=actual.size(),"source comparison lost its bounded analytic history");
+            if(delta) {
+                source.preview_last_analytic(std::span(actual).first(delta));
+                check(reference.read_analytic(std::span(expected).first(delta))==delta,
+                      "helper envelope changed the ordinary source sample count");
+                check(std::equal(actual.begin(),actual.begin()+static_cast<std::ptrdiff_t>(delta),expected.begin()),
+                      "helper envelope changed ordinary source PCM, wire coordinates or keyed timing");
+                checked+=delta;
+            }
+            check(channel.payload_finished()==(channel.received_samples()>=end),
+                  "helper source completion followed prefetch rather than the receiver frontier");
+            if(channel.payload_finished()) {
+                post=true;
+                check(source.finished()&&progress==expected_total,"helper post did not preserve the complete source endpoint");
+                if(!extended) {channel.extend_helper_tail(4.01);channel.extend_helper_tail(2);extended=true;}
+            }
+        }
+        check(lead&&post&&checked==expected_total&&reference.finished(),
+              "helper envelope failed to preserve the entire ordinary waveform between lead and post");
+        check(source.emitted_payload_epoch()==reference.emitted_payload_epoch()&&
+            source.source_valid_payload_end()==reference.source_valid_payload_end(),
+            "helper envelope changed the payload bit endpoint or epoch");
+        check(channel.received_samples()>=end+static_cast<std::uint64_t>(std::floor(4.4L*c.sample_rate/rate)),
+              "helper tail extension shrank or failed to round complete dwells");
+        // The physical observer includes real helper transmission throughout
+        // both outside-source regions, not fabricated receiver absence.
+        const auto physical_factor=physical.rate/c.sample_rate;
+        const auto energy=[&](std::uint64_t begin,std::uint64_t finish) {
+            double sum=0;const auto lo=begin*physical_factor,hi=finish*physical_factor;
+            check(hi<=physical.samples.size(),"helper envelope energy window escaped captured PCM");
+            for(auto i=lo;i<hi;++i)sum+=static_cast<double>(physical.samples[i])*physical.samples[i];
+            return sum/static_cast<double>(hi-lo);
+        };
+        check(energy(c.sample_rate/2,3*c.sample_rate/2)>.1&&
+              energy(end+c.sample_rate/2,end+3*c.sample_rate/2)>.1,
+              "helper lead or post did not contain a real physical carrier");
+        bool rejected=false;try {channel.extend_helper_tail(8);}catch(const Error&) {rejected=true;}
+        check(rejected,"completed helper envelope was retroactively extended");
+    }
+}
+void disabled_envelope_and_validation() {
+    const auto c=config(2000);const auto impairment=model();
+    modem::SampledSimulationChannel original(c,impairment),disabled(c,impairment,{},0,{23,37});
+    original.begin_burst();disabled.begin_burst(false,{91,53});
+    disabled.extend_helper_tail(std::numeric_limits<double>::quiet_NaN());
+    modem::StreamingTransmitter a(modem::RawBits{{0,0,1}},c),b(modem::RawBits{{0,0,1}},c);
+    check(capture(original,a,137)==capture(disabled,b,137),"disabled helper envelope changed ordinary PCM or its finite extent");
+    check(original.received_samples()==disabled.received_samples()&&
+        original.transmitted_samples()==disabled.transmitted_samples()&&
+        original.payload_begin_sample()==disabled.payload_begin_sample()&&
+        original.payload_end_sample()==disabled.payload_end_sample()&&original.payload_finished()&&disabled.payload_finished(),
+        "disabled helper envelope changed ordinary timing or source progress");
+    for(const auto duration:{-1.,std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity(),
+                             std::numeric_limits<double>::max()}) {
+        bool rejected=false;try {modem::SampledSimulationChannel invalid(c,impairment,helper_options(),0,{duration,2});}
+        catch(const Error&) {rejected=true;}
+        check(rejected,"helper envelope accepted an invalid or overflowing lead");
+        modem::SampledSimulationChannel channel(c,impairment,helper_options());
+        rejected=false;try {channel.extend_helper_tail(duration);}catch(const Error&) {rejected=true;}
+        check(rejected,"helper envelope accepted an invalid or overflowing tail extension");
+    }
+}
+void payload_boundary_precedes_envelope_eof() {
+    const auto c=config(2000);
+    modem::SampledSimulationChannel channel(c,model(),helper_options(40));
+    modem::StreamingTransmitter source(modem::RawBits{{0,0,1}},c);
+    std::vector<float> pcm(static_cast<std::size_t>(source.total_samples()+10*c.sample_rate));
+    const auto count=channel.read(source,pcm);
+    check(channel.payload_end_sample()&&channel.payload_finished()&&count==*channel.payload_end_sample()&&count<pcm.size(),
+          "large helper read concealed the committed source endpoint until envelope EOF");
+    channel.extend_helper_tail(6.01);
+    check(channel.read(source,pcm)>6*c.sample_rate,"payload boundary short read prevented real extended helper output");
+    check(!channel.read(source,pcm),"completed helper envelope repeated its tail");
+}
+void late_extension_preserves_rendered_pcm() {
+    const auto c=config(2000);const auto h=helper_options(40);const auto impairment=model();
+    modem::SampledSimulationChannel reference(c,impairment,h),late(c,impairment,h);
+    modem::StreamingTransmitter a(modem::RawBits{{0,0,1}},c),b(modem::RawBits{{0,0,1}},c);
+    const auto expected=capture(reference,a,137);
+    const auto target=expected.size()-20;
+    std::vector<float> actual(target);std::size_t position=0;
+    while(position<target) {
+        const auto count=late.read(b,std::span(actual).subspan(position));
+        check(count>0,"late-extension fixture reached EOF before its physical final ramp");position+=count;
+    }
+    check(late.payload_finished()&&late.received_samples()<reference.received_samples(),
+          "late-extension fixture did not retain a logical post-source interval");
+    bool rejected=false;try {late.extend_helper_tail(8);}catch(const Error&) {rejected=true;}
+    check(rejected,"helper tail extension rewrote a final ramp already emitted in physical lookahead");
+    const auto rest=capture(late,b,137);actual.insert(actual.end(),rest.begin(),rest.end());
+    check(actual==expected,"rejected helper extension changed immutable physical PCM or its endpoint");
 }
 void unsupported_geometry_preserves_plain_channel() {
     auto c=config();c.carrier_hz=3400;
@@ -301,7 +433,7 @@ void outer_dsss_helper_power_calibration() {
 }
 }
 int main() {
-    try {logical_contract_and_chunking();helper_only_graceful_finish();unsupported_geometry_preserves_plain_channel();adjacent_helpers_are_physical_mixtures();calibrated_data_band_noise();physical_phase_noise_sidebands();physical_frequency_and_helper_only_rejection();payload_progress_and_completion();outer_dsss_helper_power_calibration();
+    try {logical_contract_and_chunking();helper_only_graceful_finish();source_coordinates_and_envelope();disabled_envelope_and_validation();payload_boundary_precedes_envelope_eof();late_extension_preserves_rendered_pcm();unsupported_geometry_preserves_plain_channel();adjacent_helpers_are_physical_mixtures();calibrated_data_band_noise();physical_phase_noise_sidebands();physical_frequency_and_helper_only_rejection();payload_progress_and_completion();outer_dsss_helper_power_calibration();
         std::cout<<"physical helper simulation passed\n";return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <span>
 
 namespace datapump::live::detail {
 inline double simulation_media_epoch(double origin,std::uint64_t samples,std::uint32_t rate) {
@@ -35,20 +36,46 @@ struct SimulationInputTransaction {
 // Session/channel that can observe it before removing or destroying the hook.
 // No callbacks run under the Session mutex. The ordinary path has no hook.
 enum class SimulationPhase {bank_created,transmit_epoch,before_read,read_progress,
-    before_feed,receiver_processed,before_commit,after_commit,input_invalidated};
+    before_feed,receiver_processed,before_commit,after_commit,input_invalidated,
+    helper_prior,helper_audit,helper_row_recovered,bank_refresh_moved};
 struct SimulationObservation {
     SimulationPhase phase;
     std::uint64_t source=0,bank=0,revision=0;
     double epoch=0;
 };
+// Optional bounded test observation of the ordinary detector's actual wire.
+// The span is borrowed only for this joined callback, before Data XOR or
+// framing. It supplies no source length or completion authority to reception.
+struct ReceiverWireObservation {
+    std::uint64_t input_revision,epoch,family,instance_id,candidate_id,sample_origin;
+    std::uint64_t stream_first_sample,stream_first_symbol,first_stream_symbol,stream_phase_samples;
+    std::uint64_t physical_first,physical_end,feed_end_sample,missing_slots;
+    std::span<const std::uint8_t> bits;
+    bool complete,helper_acquired;
+};
 struct SimulationHook {
     void* context;
     void (*callback)(void*,const SimulationObservation&);
+    // Controls only the initial station date. Unlike Session's injected wall
+    // clock this leaves ordinary sample-driven rolling admission enabled.
+    std::optional<double> initial_media_epoch=std::nullopt;
+    // Test collectors must bound their own storage and report overflow later;
+    // observation cannot throw, retain the span or interrupt ordinary payload.
+    void (*wire_callback)(void*,const ReceiverWireObservation&) noexcept=nullptr;
 };
 inline std::atomic<SimulationHook*> simulation_hook{nullptr};
+inline double simulation_initial_epoch(double fallback) {
+    if(auto* hook=simulation_hook.load(std::memory_order_acquire);hook && hook->initial_media_epoch)
+        return simulation_media_epoch(*hook->initial_media_epoch,0,1);
+    return fallback;
+}
 inline void simulation_checkpoint(SimulationPhase phase,std::uint64_t source=0,
     std::uint64_t bank=0,std::uint64_t revision=0,double epoch=0) {
     if(auto* hook=simulation_hook.load(std::memory_order_acquire))
         hook->callback(hook->context,{phase,source,bank,revision,epoch});
+}
+inline void simulation_wire_checkpoint(const ReceiverWireObservation& observation) noexcept {
+    if(auto* hook=simulation_hook.load(std::memory_order_acquire);hook && hook->wire_callback)
+        hook->wire_callback(hook->context,observation);
 }
 }

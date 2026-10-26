@@ -9,6 +9,79 @@ namespace datapump::modem {
 struct PatternCorrelatorTimingTestAccess {
     using State=PatternCorrelator::Impl;
     static void check(bool ok,const char* why) {if(!ok)throw Error(why);}
+    static void ordinary_cohort_storage_preserves_bit_capacity() {
+        if constexpr(sizeof(std::size_t)<8)return;
+        Config c;c.sample_rate=6000;c.carrier_hz=1500;c.bandwidth_hz=1;
+        c.spreading_factor=64;c.scramble=true;c.stream_epoch=1800000000;
+        c.data_key.emplace(std::array<std::uint8_t,32>{});
+        const OscillatorModel oscillator{.0001,.005};
+        c.oscillator_search=OscillatorSearchConfig{oscillator,oscillator,5.8e9,3};
+        FhssPlan hopping;hopping.channels=200;hopping.dwell_seconds=.4;
+        for(unsigned i=0;i<hopping.channels;++i)hopping.shifts[i]=5.8e9+i*3000.;
+        hopping.clock_error_seconds=hopping.peer_clock_error_seconds=.01;hopping.audio_error_seconds=0;
+        c.fake_hopping=resolve_fhss_power(hopping,c);
+        auto declared=oscillator_pattern_search(c,utc_transmit_rate_limit(c));
+        PatternSearch search;search.hypotheses=declared.hypotheses;
+        search.start_offset_seconds=15.875;search.start_uncertainty_seconds=7;
+        search.search_stream_phases=true;search.compact_clock_search=true;
+        search.prefer_streamed_templates=true;search.receiver_bank_count=159;
+        search.bit_limit=static_cast<std::size_t>(20401250304ULL);
+        constexpr auto grant=static_cast<std::size_t>(4533374976ULL);
+        constexpr std::size_t share=42730143;
+        struct Snapshot {
+            std::size_t resident,reserved,bits,chunk,hypotheses,lattices;
+            unsigned backend,drift;
+            std::uint64_t differential,fingerprint;
+            bool outer,timing;
+        };
+        const auto inspect=[&](const Config& config,PatternSearch options,std::size_t bytes) {
+            PatternCorrelator receiver(config,options,bytes);const auto& state=*receiver.impl_;
+            std::uint64_t fingerprint=1469598103934665603ULL;
+            const auto add=[&](auto value){fingerprint^=static_cast<std::uint64_t>(value);fingerprint*=1099511628211ULL;};
+            for(const auto& h:state.hypotheses) {
+                add(std::hash<long double>{}(h.origin));add(std::hash<long double>{}(h.rate));
+                add(h.frequency);add(h.rate_index);add(h.phase_lower);add(h.phase_upper);add(h.index);
+            }
+            const auto work=receiver.work();
+            return Snapshot{receiver.working_bytes(),receiver.reserved_workspace_bytes(),state.bit_limit,
+                std::min(state.search.chunk_bits,state.bit_limit),state.hypotheses.size(),work.lattices,
+                static_cast<unsigned>(work.backend),state.drift_sections,state.differential_window,
+                fingerprint,state.outer_presence,state.timing_enabled};
+        };
+        const auto original=inspect(c,search,grant);
+        auto shared=search;shared.receiver_strategy_workspace_bytes=share;
+        const auto bounded=inspect(c,shared,grant);
+        check(search.hypotheses.size()==3565 && original.hypotheses==55257 && bounded.hypotheses==55257 &&
+              original.fingerprint==bounded.fingerprint,"ordinary cohort share changed complete EME frequency/rate/phase geometry");
+        check(original.backend==static_cast<unsigned>(PatternCorrelationBackend::pulse_moments) && original.lattices &&
+              bounded.backend==static_cast<unsigned>(PatternCorrelationBackend::pulse_segments) && !bounded.lattices &&
+              bounded.reserved<=share,"ordinary cohort retained oversized pulse storage despite its planned share");
+        check(original.bits>=36908 && bounded.bits>=original.bits && original.chunk==1024 && bounded.chunk==original.chunk,
+              "ordinary cohort storage choice reduced retained bit capacity or publication chunks");
+        check(original.drift==bounded.drift && original.differential==bounded.differential &&
+              original.outer==bounded.outer && original.timing==bounded.timing,
+              "ordinary cohort share changed a mandatory detector or physical timing policy");
+        shared.receiver_strategy_workspace_bytes=grant;
+        const auto generous=inspect(c,shared,grant);
+        check(original.resident==generous.resident && original.reserved==generous.reserved && original.bits==generous.bits &&
+              original.backend==generous.backend && original.fingerprint==generous.fingerprint,
+              "generous cohort share changed the original pulse path");
+        // The new optional-storage policy is confined to ordinary long private
+        // compact contexts. A tiny share must not alter unrelated callers.
+        for(unsigned kind=0;kind<4;++kind) {
+            auto control=c;auto options=search;options.hypotheses.resize(5);options.start_uncertainty_seconds=.01;
+            if(kind==0)control.bandwidth_hz=4; //32-second waveform
+            if(kind==1){control.scramble=control.dsss=false;control.data_key.reset();}
+            if(kind==2)options.compact_clock_search=false;
+            if(kind==3){control.bandwidth_hz=100;control.spreading_factor=4096;} //long, but no segmented fallback
+            const auto before=inspect(control,options,16*1024*1024);
+            options.receiver_strategy_workspace_bytes=1;
+            const auto after=inspect(control,options,16*1024*1024);
+            check(before.resident==after.resident && before.reserved==after.reserved && before.bits==after.bits &&
+                  before.backend==after.backend && before.fingerprint==after.fingerprint,
+                  "ordinary cohort storage policy escaped its supported long-private compact geometry");
+        }
+    }
     static PatternCorrelator make(std::size_t limit,std::size_t chunk,bool all_phases=false) {
         Config c;c.sample_rate=64;c.carrier_hz=16;c.bandwidth_hz=3.2;c.integration_seconds=6;
         c.spreading_factor=64;c.scramble=true;c.dsss=true;c.dsss_factor=10;
@@ -266,7 +339,7 @@ struct PatternCorrelatorTimingTestAccess {
         check(got.bits==Bytes({0}) && got.terminals==1,"compatible guide did not finish after its full absence");
         rx.finish();got.drain(rx);check(got.terminals==1,"compatible guide duplicated physical completion at EOF");
     }
-    static void run() {same_phase_timing_neighbors();incompatible_guide_cannot_delay_absence();compatible_guide_retains_its_absence_boundary();earlier_guide_suffix();terminal_waits_for_all_promotions();impossible_handoff_reclaims_suffix();mismatching_prefix_never_lends_suffix();unusable_best_guide_does_not_hide_valid_neighbor();minimum_budget_and_explicit_exhaustion();}
+    static void run() {ordinary_cohort_storage_preserves_bit_capacity();same_phase_timing_neighbors();incompatible_guide_cannot_delay_absence();compatible_guide_retains_its_absence_boundary();earlier_guide_suffix();terminal_waits_for_all_promotions();impossible_handoff_reclaims_suffix();mismatching_prefix_never_lends_suffix();unusable_best_guide_does_not_hide_valid_neighbor();minimum_budget_and_explicit_exhaustion();}
 };
 }
 int main() {

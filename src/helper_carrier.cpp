@@ -20,6 +20,15 @@ void validate_callsign(std::string_view callsign) {
     for(const char c:callsign)
         if(static_cast<unsigned char>(c)>127)throw Error("Helper Carrier callsign must be seven-bit ASCII");
 }
+double effective_power(const Options& options) {
+    return std::min(options.power_w,
+        options.data_power_w*std::pow(10.,options.ratio_limit_db/10));
+}
+std::pair<double,double> gains_from_ratio(double power_ratio) {
+    const auto relative_peak=std::sqrt(2*modem::nominal_signal_power)*
+        std::sqrt(power_ratio);
+    return {relative_peak,.95/(1+relative_peak)};
+}
 // Bound the periodic complex envelope's energy in either data sideband. Each
 // transition is a quintic smootherstep, whose derivative is Beta(3,3). Its
 // transform has magnitude <=15*(3+z^2+3z)/z^5, z=pi*f*T, and <=1.
@@ -51,6 +60,11 @@ void validate(const Options& options) {
     }
     validate_callsign(options.callsign);
 }
+double calibrated_data_gain(const Options& options) {
+    validate(options);
+    if(options.power_w==0)return 1;
+    return gains_from_ratio(effective_power(options)/options.data_power_w).second;
+}
 Plan plan(const Options& options,double carrier,double bandwidth,std::uint32_t rate,
           double minimum_high_frequency_hz,double data_amplitude_scale) {
     validate(options);
@@ -63,8 +77,7 @@ Plan plan(const Options& options,double carrier,double bandwidth,std::uint32_t r
        carrier-bandwidth/2<0||carrier+bandwidth/2>=rate/2.)
         throw Error("Helper Carrier requires a valid data passband at the output sample rate");
     const double direction=options.frequency==Frequency::high?1:-1;
-    const auto effective=std::min(options.power_w,
-        options.data_power_w*std::pow(10.,options.ratio_limit_db/10));
+    const auto effective=effective_power(options);
     const auto power_ratio=effective/options.data_power_w;
     // Begin with a 300Hz nominal metadata band and a 300Hz guard. Increase
     // separation until the conservative digital leakage bound is at least
@@ -83,11 +96,9 @@ Plan plan(const Options& options,double carrier,double bandwidth,std::uint32_t r
     // the actual linear mixture; it provides no isolation from payload data.
     const double frequency=options.frequency==Frequency::cochannel?carrier:
         carrier+direction*(bandwidth/2+distance);
-    const auto relative_peak=std::sqrt(2*modem::nominal_signal_power)*
-        std::sqrt(power_ratio);
+    const auto [relative_peak,data_gain]=gains_from_ratio(power_ratio);
     // Ordinary PCM has the unchanged nominal mean power and peak bound one.
     // Leave 5% composite headroom, with no nonlinear limiter or data power boost.
-    const auto data_gain=.95/(1+relative_peak);
     // Match the unchanged payload's digital backoff. Keep its conservative
     // gain identical; only the helper yields amplitude/headroom here.
     return {frequency,relative_peak*data_gain*data_amplitude_scale,data_gain,effective};

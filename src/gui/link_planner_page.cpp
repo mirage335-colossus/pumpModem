@@ -609,14 +609,18 @@ void link_budget(Node& root, const planner::Model& model) {
                 paragraph(n,"Helper audio center: "+frequency(helper.frequency_hz)+
                     ". The audio route and radio must pass its tone and metadata band.",11,Tone::muted,false,4);
             paragraph(n,helper.status,11,helper.geometry_available?Tone::muted:Tone::caution,false,4);
-            if(helper.conditional_strip_available && helper.ordinary_pairs>=512)
-                paragraph(n,"Conditional acquisition: at most "+std::to_string(helper.conditional_pair_limit)+
-                    " frequency/clock alternatives in an additional optional search versus "+std::to_string(helper.ordinary_pairs)+
-                    " ordinarily, when measured helper uncertainty is at most +/-"+
-                    number(helper.required_frequency_uncertainty_hz)+" Hz. Retained clock rates: "+
-                    std::to_string(helper.retained_clock_rates)+"; all original epoch and timing alternatives remain.",
+            paragraph(n,"Ordinary baseline: payload margin, probability and CPU curves use the configured receiver without measured helper assistance.",
+                11,Tone::muted,false,4);
+            if(helper.conditional_geometry_available)
+                paragraph(n,"Conditional original-grid acquisition: "+std::to_string(helper.conditional_pairs)+
+                    " selected frequency/clock pairs versus an ordinary baseline of "+std::to_string(helper.ordinary_pairs)+
+                    ", assuming a qualified helper frequency confidence interval of +/-"+
+                    number(helper.assumed_frequency_uncertainty_hz)+" Hz at offset "+
+                    number(helper.assumed_helper_offset_hz)+" Hz. Retained original clock rates: "+
+                    std::to_string(helper.retained_clock_rates)+
+                    ". Native backend, every profile's FIR response and reserved workspace still require runtime qualification.",
                     11,Tone::muted,false,4);
-            paragraph(n,"Helper-assisted probability and CPU benefit are not quantified by these curves. The payload target is unchanged. Additional helper searches retain the ordinary bank. Where primary bank replacement is admitted, failed acquisition restores the broad bank before payload commitment.",
+            paragraph(n,"Helper-assisted probability and CPU benefit are not quantified by these curves. Search-pair counts do not establish a CPU speedup. The payload target is unchanged. Runtime assistance, audit work and decline reasons are reported separately from measured helper presence.",
                 11,Tone::muted,false,0);
         }
     } else paragraph(n, "Link estimate unavailable", 13, Tone::text, true, 0);

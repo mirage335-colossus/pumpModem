@@ -11,6 +11,144 @@ namespace datapump::modem {
 struct PatternReceiverStartupGuideTestAccess {
     using State=PatternReceiver::Impl;
     static void check(bool ok,const char* why){if(!ok)throw Error(why);}
+    // Exact original measure() is the oracle, not a copied score formula.
+    static void continuation_clock_group_reuse() {
+        for(const auto& [groups,hf]:{std::pair{1U,false},std::pair{3U,false},std::pair{9U,false},
+                                   std::pair{18U,false},std::pair{9U,true}}) {
+            Config c;c.sample_rate=6000;c.carrier_hz=1300;c.bandwidth_hz=200;c.spreading_factor=32;
+            c.pulse_shaping=true;c.scramble=groups!=1;c.dsss_factor=c.scramble?10:1;
+            if(hf) {
+                c.sample_rate=6120;c.carrier_hz=1500;c.bandwidth_hz=36;c.spreading_factor=256;
+                c.dsss=true;c.outer_dsss_version=OuterDsssVersion::interleaved_v2;
+            }
+            c.stream_epoch=1800000041;c.stream_phase_samples=23;
+            c.receiver_strategy=ReceiverStrategy::complex_only;
+            for(std::size_t i=0;i<c.spreading_seed.size();++i)c.spreading_seed[i]=std::uint8_t(13*i+29);
+            for(std::size_t i=0;i<c.dsss_seed.size();++i)c.dsss_seed[i]=std::uint8_t(7*i+113);
+            if(hf)c.data_key=Crypto(c.spreading_seed);
+            PatternSearch search;search.worker_threads=1;search.initial_stream_symbols=1;search.chunk_bits=1;
+            search.track_limit=4;search.candidate_limit=16;search.drift_tolerant=false;
+            search.differential_window_seconds=0;search.search_stream_phases=false;search.early_qualified_fft=false;
+            for(int f=-4;f<=4;++f)for(unsigned r=0;r<groups;++r)
+                search.hypotheses.push_back({.5*f,groups==1?0.:-300.+600.*r/(groups-1)});
+            PatternPhaseCurve curve; // Borrowed view outlives the receiver.
+            PatternReceiver receiver(c,(hf?64:32)*1024*1024,search);auto& state=*receiver.impl_;
+            check(!state.fallback && state.drift_sections==1 && !state.sample_fit &&
+                  !state.differential_window && !state.calendar_symbols() && state.product.size()/2>=state.length,
+                  "clock-group fixture lost its original native coherent scratch geometry");
+            if(hf)check(c.dsss && c.data_key && state.code.symbol_samples()==87040 && state.bin_samples==17 &&
+                        state.length==5122 && state.transform==16384 && state.hop==11263,
+                        "clock-group HF fixture lost actual DSSS/Interleave source and projection geometry");
+            const auto current=std::size_t{4*groups+groups/2};
+            const auto eligible=[](std::size_t){return true;};
+            std::vector<std::array<double,2>> cached(state.templates.size(),{-101,-202});
+            if(groups==18) {
+                const auto before=cached;const auto tag=state.tracking_reference_valid;
+                check(!state.measure_clock_groups(0,1,0,current,eligible,cached,{}) && cached==before &&
+                      state.tracking_reference_valid==tag,"unsupported clock-group cache changed scores or template ownership");
+                continue;
+            }
+            const auto index=std::uint64_t{7},start=std::uint64_t{13};
+            state.stream_phase(c.stream_phase_samples);
+            if(groups==1) {
+                state.scoring.resize(1);auto& row=state.scoring.front().nominal_reference;row.resize(state.length);
+                detail::prepare_fft_nominal_reference(state.scoring_geometry(),state.code,row,{});
+            }
+            if(groups==9) {
+                state.frequency_origin_hz=state.acquisition_origin_hz=2.17;
+                check(curve.configure(51,c.sample_rate,2.17,0,state.bin_samples),"clock-group phase configure failed");
+                const PatternPhaseSegment segment{2*state.bin_samples,0,hf?.000017:.00017};
+                check(curve.append(std::span(&segment,1),0,10000000),"clock-group phase append failed");
+                state.execution_phase_view=&curve;
+            }
+            state.bins=std::min<std::uint64_t>(state.ring.size(),start+state.length+20);
+            state.sample=state.bins*state.bin_samples;
+            for(std::size_t i=0;i<state.ring.size();++i)state.ring[i]={.01*std::sin(.37*i),.01*std::cos(.23*i)};
+            state.code.prepare_symbol(index*state.code.chips_per_symbol());
+            for(std::size_t i=0;i<state.length;++i) {
+                const auto pair=state.template_values(state.code,i,index,current);
+                state.ring[(start+i)%state.ring.size()]+=.7*pair[1]*std::conj(state.phase_weight(start+i));
+            }
+            state.prepare_phase_window(start,state.length,{});
+            const auto observed_before=start+3;
+            std::vector<std::array<double,2>> original(state.templates.size());
+            for(std::size_t f=0;f<original.size();++f) {
+                const auto fit=state.measure(start,index,f,observed_before,{},{});
+                original[f][fit.bit]=fit.score;original[f][1-fit.bit]=fit.alternative_score;
+            }
+            const auto trials=state.trials,shifted=state.shifted_trials;
+            check(state.measure_clock_groups(start,index,observed_before,current,eligible,cached,{}),
+                  "repeated original clock rows did not qualify for exact cache reuse");
+            check(state.trials==trials && state.shifted_trials==shifted,"clock-row arithmetic spent admission trials");
+            for(std::size_t f=0;f<original.size();++f)if(f!=current)
+                check(cached[f]==original[f],"clock-row reuse changed an original zero/one cell score");
+            check(cached[current]==std::array<double,2>{-101,-202},"clock-row reuse overwrote primary timing fit");
+            if(groups>1) {
+                bool padded=false;
+                for(std::size_t f=0;f<original.size();++f)padded|=state.variable_clock &&
+                    (static_cast<long double>(state.length-1)*state.bin_samples+(state.bin_samples-1)/2.L)*
+                        state.clock_ratio(f)>=state.code.symbol_samples();
+                check(padded,"clock-row fixture lost original fast-rate zero padding");
+            } else {
+                check(state.tracking_reference.empty(),"cancellation control no longer reuses product tracking storage");
+                const auto expected=state.measure(start,index,current,observed_before,{},{});
+                check(state.tracking_reference_valid,"cancellation control has no old product cache tag");
+                std::stop_source stop;std::size_t calls=0;bool caught=false;
+                const auto cancel_after_base=[&](std::size_t) {
+                    if(++calls>state.templates.size()-1)stop.request_stop();return true;
+                };
+                try{(void)state.measure_clock_groups(start,index,observed_before,current,cancel_after_base,cached,stop.get_token());}
+                catch(const Error& error){caught=std::string(error.what())=="pattern search cancelled";}
+                check(caught && calls>state.templates.size()-1 && !state.tracking_reference_valid,
+                      "cancelled source-row scratch retained a modulated-template cache tag");
+                const auto actual=state.measure(start,index,current,observed_before,{},{});
+                check(actual.score==expected.score && actual.alternative_score==expected.alternative_score && actual.bit==expected.bit,
+                      "ordinary measure after cancellation reused an unmodulated source row");
+            }
+        }
+        std::cout<<"exact repeated-clock cell scores, padding, phase, refusal and scratch reuse passed\n";
+    }
+    static void helper_owner_unknown_replacement() {
+        for(unsigned scenario=0;scenario<3;++scenario) {
+            Config c;c.sample_rate=2000;c.carrier_hz=500;c.bandwidth_hz=200;c.spreading_factor=128;
+            c.pulse_shaping=false;c.scramble=true;c.stream_epoch=1800000041;
+            PatternSearch search;search.hypotheses={{0,0},{1,0}};search.initial_stream_symbols=1;
+            search.chunk_bits=1024;search.worker_threads=1;search.drift_tolerant=false;
+            search.differential_window_seconds=0;search.search_stream_phases=false;
+            PatternReceiver receiver(c,8*1024*1024,search);auto& state=*receiver.impl_;
+            check(!state.fallback,"owner replacement control lost ordinary native geometry");
+            const std::array<std::uint8_t,2> mask{1,0};
+            if(scenario==0)check(receiver.set_acquisition_prior(0,mask),"helper-born owner setup failed");
+            state.prior_dispatch=scenario==0;
+            const auto first=4*state.bin_samples;
+            PatternEvidence accepted{first,first+state.length*state.bin_samples,0,c.carrier_hz,
+                state.threshold()+1,0,0,c.stream_phase_samples};
+            state.admit(accepted,0,accepted.score,0,nullptr,{});
+            check(state.tracks.size()==1 && state.tracks.front().established && state.completed.empty() && state.bursts.empty(),
+                  "owner replacement control did not retain an unpublished accepted prefix");
+            const auto serial=state.tracks.front().serial;
+            if(scenario==0)check(receiver.clear_acquisition_prior(),"helper loss setup could not clear fresh acquisition");
+            if(scenario==1)check(receiver.set_acquisition_prior(0,mask),"new prior setup failed");
+            state.prior_dispatch=scenario==1;
+            auto rival=accepted;rival.first_sample+=state.bin_samples;rival.end_sample+=state.bin_samples;
+            rival.score=2*accepted.score+100;rival.bit=1;
+            check(!state.independent_overlap(state.tracks.front().burst,rival,state.prior_dispatch),
+                  "unknown replacement control accidentally proved distinct source domains");
+            state.admit(rival,0,rival.score,0,nullptr,{});
+            check(state.tracks.size()==1 && state.bursts.empty() && state.completed.empty() &&
+                  !state.tracks.front().burst.complete,"replacement manufactured output or physical END");
+            const auto& owner=state.tracks.front();
+            if(scenario<2) {
+                check(owner.serial==serial && owner.burst.bits==Bytes{0} && owner.confirmed==1 &&
+                      owner.burst.stream_first_sample==first && owner.established,
+                      "unknown helper-involved fresh peak withdrew an accepted owner");
+            } else check(owner.serial!=serial && owner.burst.bits==Bytes{1} &&
+                         owner.burst.stream_first_sample==rival.first_sample,
+                         "ordinary stronger-start replacement policy changed");
+            std::cout<<"unknown replacement scenario="<<scenario<<" original_serial="<<serial
+                     <<" retained_serial="<<owner.serial<<" helper="<<owner.burst.helper_acquired<<'\n';
+        }
+    }
     static void burst(std::ostream& o,const PatternBurst& b) {
         o<<b.first_sample<<' '<<b.end_sample<<' '<<b.first_stream_symbol<<' '<<b.frequency_hz<<' '<<b.score<<' '
          <<b.complete<<' '<<b.stream_phase_samples<<' '<<b.stream_first_sample<<' '<<b.stream_first_symbol<<' '
@@ -62,7 +200,7 @@ struct PatternReceiverStartupGuideTestAccess {
             s.peaks.capacity()>=2,"startup guide test lost its exact original cohorts/storage");
         s.trials=s.acquisition_trials(initial);
         PatternEvidence first{s.bin_samples,(1+s.length)*s.bin_samples,0,c.carrier_hz,s.threshold()+.25,1,0,c.stream_phase_samples};
-        s.admit(first,0,first.score,std::stop_token{});
+        s.admit(first,0,first.score,0,nullptr,std::stop_token{});
         s.next_start=initial;s.sample=(initial+s.hop-1+s.length)*s.bin_samples;s.bins=s.sample/s.bin_samples;
         check(s.startup_guide_owner(s.hop,false),"actual first-bit publication did not qualify the startup witness");
         return receiver;
@@ -220,5 +358,5 @@ struct PatternReceiverStartupGuideTestAccess {
     }
 };
 }
-int main(){try{datapump::modem::PatternReceiverStartupGuideTestAccess::storage_boundary();datapump::modem::PatternReceiverStartupGuideTestAccess::run();return 0;}
+int main(){try{datapump::modem::PatternReceiverStartupGuideTestAccess::continuation_clock_group_reuse();datapump::modem::PatternReceiverStartupGuideTestAccess::storage_boundary();datapump::modem::PatternReceiverStartupGuideTestAccess::run();datapump::modem::PatternReceiverStartupGuideTestAccess::helper_owner_unknown_replacement();return 0;}
 catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

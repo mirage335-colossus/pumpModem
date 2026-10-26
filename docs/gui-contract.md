@@ -321,17 +321,23 @@ these effective helper powers, 40 W through 180 dB loss gives 20.02 dB tone SNR;
 5.76 dB, below the 6 dB presence level. An adequate predicted level still needs
 measured confidence/coherence and a supported route. The helper budget does not
 change payload SNR, receive-probability curves or CPU estimates, and does not
-claim a quantified assistance gain. For a large oscillator search it also shows
-prospective conditional frequency/clock counts, retained clock rates and the
-measured frequency-uncertainty threshold needed to fit at most 257 alternatives
-per narrowed profile. This is a geometry condition, not a received measurement,
-C/N0-to-latency prediction or measured CPU speedup. All original epoch/start
-alternatives remain; runtime eligibility, snapshot/history and workspace limits
-still apply. Primary replacement requires explicit **Complex only** and a fixed
-timestamp, with actual backend and recovery eligibility checked at runtime.
-Auto and rolling epochs retain the ordinary bank and consider only an
-independently eligible additional helper search. Adjacent High/Low retain real interference in capture; 0 Hz
-overlap is discouraged.
+claim a quantified assistance gain. Its revised preview uses the runtime's
+original-cell selector under explicit hypothetical qualification: +/-0.01 Hz
+frequency uncertainty and zero helper offset. Selected/original frequency and
+audio-clock pairs and retained clock values describe geometry, not a measured reference,
+C/N0-to-latency prediction or CPU gain. The 2D closed-slab coverage check uses
+explicit physical-clock provenance and preserves every original clock value.
+A nonzero measured RF
+origin may align a full tiny catalogue without reducing work; zero-offset full
+selection gives no alignment or reduction. Normal Automatic/Complex rolling
+acquisition uses the common-link cohort policy below, with actual backend,
+all-profile FIR and reserved-resource checks still required at runtime.
+Fixed-epoch reception keeps its separate legacy path. Long-symbol compact,
+unsupported strategy, scheduled and invalid passband cases decline optional
+acquisition. Adjacent High/Low retain real interference in capture; 0 Hz overlap
+is discouraged. This planner/selector source revision passed the coherent
+application build and selected focused checks; broader current runtime
+qualification remains pending.
 
 These hardware budgets use measured/calibrated RF power; 4 W data and 40 W
 helper retain a 10 dB reference ratio. The helper follows existing interleaved
@@ -341,49 +347,262 @@ waveform's actual data and calibrated helper C/N0 both include a 6.02 dB backoff
 helper dwell duty and route response can further affect measured average power.
 
 A visible helper reference does not imply immediate payload acquisition.
-Primary replacement is restricted to a fixed configured transmit timestamp and
-unchanging epoch-admission bank, using the same fixed-bank condition as ordinary
-refresh. It also requires explicit **Complex only**, an actual native continuous
-backend without Clock sync, FHSS, DSSS/Interleave, calendar, compact, configured
-drift or differential processing, with the same structurally bounded ordinary
-receiver-error recovery recipe. Immutable cold-start and replay grants preserve
-that normal error recovery. Auto, energy, differential, compact/
-correlator, scheduled and rolling/unknown-epoch cases retain their ordinary bank;
-an additional helper lane remains subject to its separate eligibility. Within an eligible large fixed bank, measured frequency narrows
-acquisition while preserving every admitted key/profile/epoch and original
-start alternative. Original clock-domain coverage includes continuous
-residual uncertainty; only an equivalent quarter-chip-sized domain can share a
-clock hypothesis. Before qualification, large-search history attempts to retain
-the full original initial FFT/acquisition aperture within min(64 MiB, bank
-capacity/8) and actual surplus. Switching declines if history starts after any
-original receiver origin. Precommit replay eligibility bounds the configured
-physical capture aperture and its resources, retaining full configured source
-quotas. Received lengths and total message size do not choose eligibility. The
-bank retains exact dormant ordinary receiver state and raw PCM until the first
-bit accepted by an ordinary detector. Reference loss, failed initial search or
-unavailable bounds restore that state and replay real input. The dormant bank remains a required processing consumer while it
-awaits replay. Tone presence, punctuation and metadata cannot commit acquisition.
-The first ordinary accepted bit commits that same full receiver and releases
-the backup; the precommit aperture bound no longer constrains payload lifetime.
-Helper loss retains accepted contexts and can broaden future acquisition. Long
-text, attachments, framing, decompression, recovery, next-poll progress and fully
-scored physical completion retain ordinary configured limits. No helper-specific
-message-size or source quota is added.
+Current 441-input source/build overlay `87513574` passed its application build,
+recorded in `local-evidence/helper-v4/candidate-v8-application-build/execution-result.json`
+(hash begins `0fe66ddd`); the GUI hash begins `8f2af1f4`. Source, auxiliary-r1 and
+six-binary records are the `candidate-v8-*-bindings*.json` manifests in that
+directory. Current lifecycle focus passed three sampled/control functions and a
+deterministic rolling pair; its result is
+`candidate-v8-lifecycle/focused-checks-r1/execution-result.json` (hash begins
+`b555072b`). Current full normal passed 381/381 registered cases exactly once
+and all 24 Fast CLI cases, without omissions/limits and with valid provenance/
+cleanup audits. Current sanitizer focus passed 15 named cases, all 24 Fast CLI
+and three gap-focused checks; 364 other headless cases remain unselected.
+Current Native FLTK passed 3/3. Current physical cable text96 strictly passed
+full wire/source, same pending row and ordinary END, with large backlog rather
+than real-time operation. Attachment129 also passed its full 900/910-second window;
+HF8 cable completed exact data and physical END, but its strict full-pending-prefix
+audit failed and remains limited. Current controlled work and exact-HF8
+simulation results retain their narrower scope below; remaining cable and weak
+EME qualification remains pending.
 
-The separate additional optional lane preserves its selected backend and native
-FFT startup fill. This smaller lane's pre-roll is bounded to 16 seconds/1 MiB
-and can recover only PCM still retained. This
-lane ranks one advisory private epoch, using the earliest qualified evidence
-retained privately from observer slices of at most 40 ms and its original date;
-public callbacks keep their normal cadence. Weak late starts can rank the wrong
-second, while its ordinary bank remains available. The primary conditional
-route does not discard epochs using that ranking. Neither route establishes UTC
-or a general GPS Clock sync replacement. Qualified phase assistance can activate
-after admission through a continuous committed-frontier reanchor that preserves
-initial template carrier offset; timing-search bounds stay fixed. Adjacent
-helper suppression uses a real optional FIR with fully observed centered input
-windows, dated delay and no EOF zero padding. Observer-only CPU measurements do
-not qualify the full Live receiver or alter the ordinary CPU curves.
+The following older observations are historical only: no equivalence or full
+coverage bridge to v8 exists. Their complete source-bound evidence and
+original failures are retained in [validation](validation.md).
+
+Historical `f47fa339` native text96 cable strictly passed all 3,648 wire bits,
+authenticated 96-byte text and 11,510 correct retained prefix observations on
+row 2/revision 1 through END after 6.050667 seconds of scored absence. Health
+checks were clear, the light trace was complete without drops and PCM was clean.
+Historical attachment129 also strictly passed all 4,864 wire bits, including those
+beyond the preview, authenticated file kind/name/data and 19,575 correct prefixes
+on stable row 2/revision 1 through END after 6.039333 seconds of scored absence.
+The full configured Auto RF/audio-clock domains were retained; frequency and
+timing-qualified phase were observed, with later bounded fallback. Health,
+complete no-drop trace, clean 910-second
+PCM, unchanged inputs/binaries and child cleanup passed. These cable proofs
+are functional coverage without numeric-work, real-time or CPU-gain claims.
+Historical `f47fa339` normal encrypted Auto/rolling HF simulation strictly passed
+all eight encrypted wire bits and source `11010110`, primary row 2/revision 8,
+strict prefixes and ordinary physical END without a known TX timestamp. It
+reported 8,181 original/51 selected pairs while retaining all nine original
+audio-clock lanes; phase was not applied. The complete trace had no drops and
+input health was clear, while ordinary `search_limited=1` remained unchanged.
+This is a functional helper-on pass without a matched CPU-gain or real-time claim.
+Historical HF8 cable showed an exact
+stable eight-bit final GUI entry, but capped/dropped trace records lack complete
+eighth-bit/END proof and `search_limited=1` remains; it is not a strict native pass.
+
+Retained `a469ce48` text96/attachment129 cable strict passes keep their original
+bindings and eventual-functional scope, including the text run's 340.952-second
+maximum backlog. They do not qualify current native or weak-RF behavior.
+The retained `a469ce48` HF simulation trace passed read-only post-hoc checks
+for all eight wire/source bits and historical END, retaining the original
+fixture failure; this is not a new reception or health run. The `a469ce48` exact-HF cable
+remains incomplete after 900 seconds with seven of eight bits (`0010110`)
+pending on the same row, no END and `search_limited=1` as its sole health flag.
+Historical e2 normal qualification passed 379 cases; its headless sanitizer run
+passed 366/377 with eleven failed/incomplete and empty official omission lists.
+Those results, including the Fast UBSan finding, Preparation/Calibration
+timeouts and v7 normal failures, remain unchanged in [validation](validation.md). The Fast empty-write
+fix is now integrated alongside Low fallback and the 2D selector. Current normal
+passed 381/381 and current sanitizer focus passed 15 named, all 24 Fast CLI and
+three gap checks, with 364 other headless cases unselected; the historical
+failed/incomplete full sanitizer run remains unchanged. Current Native FLTK
+passed 3/3. Current physical text96 passed exact 3,648 wire bits/authenticated
+96-byte source on the same pending row through END without health errors;
+its first source at 462.300 seconds and 325.855-second peak backlog are not
+real-time or cable CPU-gain evidence. Attachment129 passed the full window,
+all 4,864 dated wire bits/authenticated file, 19,302 correct prefixes on the same
+row and END after 6.067333 seconds of scored absence, with clear health/trace/
+recording checks. Its 607.766333-second backlog gives the same performance limit.
+Current HF8 physical cable confirmed exact `00101101`, identity, canonical
+phase/seed and scored END on completed row 2. Native acceptance chunks were
+2/3/2/1 bits, with END already scored at the final bit; shared commits were
+2/5/7 pending bits followed by 8-bit completion on that same row. No earlier
+accepted eight-bit pending state existed. The unchanged strict audit failed
+its full-eight-pending/all-prefix coverage requirement (`1c1e61ff`, reader
+`f1257e59`); this fixture coverage gap does not demonstrate a runtime progress
+gap or require a fabricated pending state after valid physical END. Baseline
+`search_limited=1` also remained. The complete 521-record trace had no drops,
+and other health checks and the 900/910-second Controller/recording window
+were clear, without clipping or XRUNs. The reference was active with up to
+220 selected pairs from 8,181, while phase assistance declined. Maximum backlog
+was 774.169935 seconds, without real-time or CPU-gain proof or full requested
++/-90.45 Hz HF coverage. Current full sanitizer, weak EME and remaining
+qualification remain pending. Earlier outcomes cannot qualify
+the changed source.
+
+For the intended quiet licensed/underutilized spectrum without an unrelated or
+deliberate adjacent transmitter, a qualified measured helper may condition normal
+Automatic/Complex native rolling acquisition. All current/new key, profile and
+private-epoch cohorts are considered by one ordinary executor per row; an extra
+payload decoder and fixed timestamp are not prerequisites. Tone association is
+an assumption, not authentication. Ordinary interference tolerance remains a
+validation requirement; bounded audits/fallback alone do not establish it.
+Original source quotas, short/raw/long text and attachment framing,
+decompression, recovery, next-poll progress and fully scored physical completion
+remain ordinary behavior. Helper loss and metadata cannot commit bits or END.
+
+The 2D mask uses explicit original/UTC-expanded physical audio-clock domain `A`
+and authoritative `beta = clock_step_ppm/2`; adjacent-centre spacing or a heuristic
+beta cannot replace missing provenance. Selected original RF cells and nearest
+audio-clock ties must cover the whole mapped confidence strip across closed
+clock slabs using RF interval unions. All original clock values remain. Missing
+provenance, uncovered support or unsupported floating-point arithmetic declines
+the optional mask. Selection tries zero origin, then measured baseline origin.
+A full-catalogue nonzero alignment remains distinct from actual narrowing; the
+original phase convention and unconditional `search_limited` latch are unchanged.
+
+Selector setup has about 19.5 KiB of temporary arrays plus the existing 8 KiB
+mask. Individual static-frame measurements of 19,920 bytes and an 8,464-byte
+caller do not bound the whole call chain or place all storage inside 7/16 KiB.
+Historical setup timing supplies no universal CPU or payload work-gain claim.
+
+Keep the ordinary `search_limited` report when helper alignment retries the
+catalogue at measured delta, retaining every original audio-clock value. The supplied
+HF catalogue keeps all nine values and is not absolutely confined to its raw
++/-7.979848 Hz range, but at 6,120 Hz bin 17 checks the absolute offsets of all
+shifted original pairs, including unselected pairs, against
+`Fs/(4*17) = 90 Hz`. This gives a conservative origin condition of about
++/-82.02015 Hz, subject to other coverage/passband gates, rather than the full
+requested +/-90.45 Hz. Declined assistance keeps broad ordinary acquisition
+and reports a reason. Exact-HF geometry controls reached +/-30.15 Hz. Current
+exact Rate 36/interleave 10 HF simulation passed full bits/END with injected
+PCM +30 Hz/100 ppm/0.502494 degrees per square-root second phase diffusion,
+reporting 8,181 original/49 selected pairs with the baseline limited flag intact.
+It took about 468 seconds wall for 166 seconds audio, without an HF-off gain or
+real-time claim. +80 Hz PCM and full requested RF remain unqualified. Current
+Rate 1500 normal Auto 1,024-bit reception passed full wire/source in both legs,
+with 7.3091 times fewer acquisition jobs, 3.6578 times less CPU and 1.4361 times
+less wall time while FFTs increased. This is a strong controlled-HF result,
+not universal gain or weak EME/real-time qualification.
+
+The executor retains saved conditional batches and original broad-scoring views.
+A track freezes its frequency origin; reference updates do not reinterpret its
+accepted bits. Broad audits become due at `max(6 seconds, 8*T)` from the
+first-ready original batch, using valid original row dates, and are serviced at
+the next ready FFT batch. This does not guarantee completed coverage within that
+period. Audit service and actual coverage must remain observable; helper renewal
+does not postpone the due date. Initial probation/link leases keep the shorter
+`max(6 seconds, 2*T)` interval. Those limits and immediate reference-loss fallback
+bound conditional use; accepted payloads keep ordinary
+error recovery and lifetime. Audit completion and interference tolerance still
+need end-to-end qualification.
+
+A fresh causal measured helper reference arms allocation-free sticky gap
+protection for native ordinary rows, including new and legacy/cohort-declined
+rows. Accepted owners retain their pending row through gaps until ordinary
+full-symbol absence supplies END. Reference loss stops protection for new births,
+while protected accepted owners keep that ordinary completion rule. New-start
+thresholds and the 16-track cap, helper-off retirement and unsupported compact
+policy remain unchanged. New optional auxiliary construction yields to active
+ordinary payload work; existing accepted assisted payloads stay retained.
+
+The integrated capacity fix removes the former sticky 240-row helper limit;
+normal admission and resource checks still apply. Unmodulated base templates
+may be reused while every original continuation fit and nonprimary cell remains.
+This does not merge or suppress independent suffix decoders or qualify a runtime
+performance gain.
+
+Independently qualified distinct private streams preserve their published
+prefixes and separate GUI rows under later uncertainty; an unknown fresh
+helper-involved candidate cannot erase an established owner. Suffix decoders
+remain independent: common helper frequency alone cannot merge receptions,
+suppress starts or combine their framing/decompression state. Source-address
+metadata is funded only by diagnostic history in helper-involved receivers,
+for example 128 entries becoming 118. Actual Bank allocation, ordinary payload-bit capacity, source quotas,
+recovery and candidate peaks are preserved. END still requires ordinary fully
+scored six-second absence for each owner. Private same-PCM eight-versus-seven-bit
+and thin-catalogue passes do not qualify general false-alarm behavior.
+
+Replay staging preserves compatible ID/revision progress as one verified packed
+binary prefix and at most 60 exact frame checkpoints. Each original prefix and
+its observation metadata remain reconstructible; incompatible entries use the
+generic path. Terminal, recovery and alias handling, including reserved space
+for future terminal events, remain inside the same 351,760-byte pool and 124
+owner slots. This does not
+change wire framing, source quotas, next-poll semantics or scored physical END.
+The `a469ce48` normal-path text and native text/attachment proofs passed within
+their recorded scopes. Private nine/25-row class checks and the original nine-row
+failure retain their own scopes; broad checks remain pending.
+
+The diagnostic wire callback defaults to null and borrows ordinary detector bits
+before Data XOR/framing. A bounded test-only collector can verify complete wire
+without the JSON trace cap; it is outside DSP accounting and supplies no expected
+bit count or decoding authority to the receiver. It changes no product flow or
+Helper Carrier payload.
+
+Actual native-backend, full-profile FIR passband/amplitude and reserved-resource
+gates remain mandatory. Keyed symbols of at least 60 seconds retain compact
+reception and decline the optional cohort, as do unsupported strategy/backend
+and scheduled/Burst geometry. Fixed-epoch helper paths retain their own eligibility.
+Helper work yields before mandatory receiver grants, source quotas or accepted
+payloads. No helper-specific message-length quota is added; the selector's
+separate temporary setup cost is reported above.
+The real optional FIR uses fully observed centered input with dated delay and
+no EOF padding; correlated filtered-noise false-alarm behavior is not certified
+by helper presence bounds.
+
+Qualified phase and punctuation timing can separately correct future compatible
+complex bins. Their history is bounded to 24 segments. Loss or capacity exhaustion
+closes fresh phase qualification with a UI decline reason; established tracks
+retain unknown constant phase, frozen frequency origin and their last affine
+slope. No later correction rewrites earlier bins. Phase/timing never authorize
+UTC or retime source/key addresses.
+The actual row verdict in runtime `helper_status` alone classifies narrowing.
+An active-frequency flag adds only “reference aligned”. Selected/original counts
+are independent maxima across rows, labelled “pair maxima across rows: selected
+X, original Y”; their ratio must not infer narrowing, full-catalogue reduction
+or CPU gain. Presence/decline reason, phase-applied state and conditional/audit
+jobs remain separate. Public counters may lag partial closing traces until a
+cohort barrier publishes them.
+The historical `f47fa339` 1,024-bit pair's acquisition counters were independently reconciled,
+including incomplete snapshots without cancellation excess. Acquisition counts
+exclude retained full-RF scalar continuation fits and cache preparation; they
+measure neither total work nor frequency coverage. Whole-process CPU has a
+broader scope. See [validation](validation.md) for the trace-bound work audit.
+Observer-only measurements and selected pair counts do not qualify full Live CPU
+margins or alter ordinary SNR/probability/CPU curves. Optional EME pulse/cache
+storage may use the existing cohort share only when proven smaller, retaining
+the original grant, bit quota, detectors and geometry. The local constructor
+workspace pass does not qualify aggregate EME runtime or weak precision. The
+keyed `T >= 60 s` compact-cohort decline remains. At weak levels, the minimum
+two-second helper lead may not establish precision before data. Current 32-second
+weak EME observer checks at 205/210 dB path loss had minimum frequency interval
+half-widths about 2.277/3.183 Hz and no phase or timing assistance. These empirical
+observer limits do not qualify ordinary weak EME payload reception or establish
+physical precision floors; selection also needs the simultaneous measured centre
+and full 2D coverage check. An earlier EME
+observer measurement had minimum interval half-width about 2.2992432 Hz, but its simultaneous
+centre was not logged; that width alone does not establish zero pair reduction.
+Historical one-dimensional padding thresholds do not qualify the current 2D
+mask, which requires full closed-slab coverage. These observations establish
+neither current work gain nor physical precision floors. The current keyed
+`T = 128 s` EME case has no supported common-link compact backend. The native HF
+historical interval of about +/-0.528 Hz is likewise a conservative estimator/model bound;
+its mapped radius retained all nine original clock lanes in that case. Its frequency-only
+phase forecast exceeds the optional phase gate, so a phase decline is consistent
+with frequency alignment. Exact-HF cable/EME qualification remains open.
+A separate 32-second helper-only `d072` observer diagnostic produced minimum
+half-width 2.3018353 Hz; its model allowance met or exceeded the maximum chord cost in
+159 of 160 evaluations, keeping every estimator frequency cell. This is an
+algorithm/model limit, not a physical floor, original RF-pair count, new algorithm
+change or ordinary EME qualification; see the [plan](helper-carrier-plan.md).
+Private PCM diagnostics identify Robust data-band energy inflating the raw helper
+residual covariance; finite-operator controls confirmed the aliasing term without
+threshold changes. The source now accepts optional public-band nuisance fitting
+over all public receive profiles and full requested RF/audio-clock coverage,
+using at most 27 DFT nuisance frequencies. Raw tone admission retains authority;
+only an already accepted publication can be refined, and unsuitable fits retain
+the raw estimate. The 9 KiB receiver/project-scratch bound is unchanged, with
+external runtime allocations separate. Current build and selected focused checks
+passed, without qualified current full-receiver, refined-precision or false-alarm
+claims. Private compact stable/loss checks
+do not override its repeated-audit failure or the current backend gate.
+Integrated capacity/cache changes still need
+broader qualification beyond focused and manual proofs; see the
+[plan](helper-carrier-plan.md).
 
 Link Planner publishes completed selected-target values before the full graph
 sweep. **Calculating graphs...** identifies that intermediate view; it is not a
@@ -1066,12 +1285,17 @@ The radio/audio route must still pass the complete data/helper bands and guard;
 closest placement does not guarantee a fit inside a narrow SSB filter. Helper
 audio negotiates a physical-rate floor independently of the logical modem rate.
 If higher-rate capture cannot open, optional helper observation yields during
-pre-PCM setup and ordinary capture continues. Mixed Live transmission likewise
-reports an unavailable helper and retains original ordinary payload PCM when
-helper geometry/setup cannot fit. A provider setup retry without the helper
-rate request is permitted only before any PCM callback; actual output gaps
-still fail transmission. Helper-only transmission fails when its helper cannot
-be generated.
+pre-PCM setup and ordinary capture continues. Existing mixed Live fallback
+reports helper-specific provider-rate failure or a past helper epoch before PCM
+delivery. It preserves calibrated `data_gain`, logical PCM, wire and key epoch;
+full-scale restoration would violate operator RF calibration. A provider setup
+retry without the helper rate request is permitted only before any PCM callback.
+Validated calibrated gain is now independent of placement geometry, including
+valid FHSS engineering gate allowances crossing DC. Placement or minimum-output-
+rate `Error` disables helper output before PCM, retaining calibrated ordinary
+PCM, wire and key epoch.
+Malformed powers/settings still reject, helper-only transmission fails if its
+helper cannot emit, and actual output gaps still fail transmission without retry.
 
 The wider minimum retains readable oscillator choices alongside all four timing
 fields, preserving the existing composition, reception and plot allocations.

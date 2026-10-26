@@ -7,6 +7,7 @@
 #include "datapump/tuning.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/channel.hpp"
+#include "datapump/helper_filter.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -15,9 +16,12 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 
 using namespace datapump;
 namespace {
@@ -32,12 +36,18 @@ bool trace_filter(const char* name)noexcept {
         event=="receiver_signal_commit" || event=="receiver_helper_payload_retained" ||
         event=="receiver_helper_assistance_suspended" || event=="receiver_permutation_counts" ||
         event=="receiver_bank_admitted" || event=="receiver_helper_phase_qualified" ||
-        event=="receiver_helper_phase_applied" || event.starts_with("receiver_helper_conditioning_") || event=="trace_begin";
+        event=="receiver_helper_phase_applied" || event=="receiver_acquisition_work" ||
+        event.starts_with("receiver_helper_cohort_") || event.starts_with("receiver_helper_conditioning_") || event=="trace_begin";
 }
 std::uint64_t number(const std::string& line,const char* key) {
     const auto needle='"'+std::string(key)+"\":";
     const auto at=line.find(needle);if(at==std::string::npos)throw Error("missing trace coordinate "+std::string(key));
     return std::stoull(line.substr(at+needle.size()));
+}
+double real_number(const std::string& line,const char* key) {
+    const auto needle='"'+std::string(key)+"\":";
+    const auto at=line.find(needle);if(at==std::string::npos)throw Error("missing trace coordinate "+std::string(key));
+    return std::stod(line.substr(at+needle.size()));
 }
 struct SimulationDates {
     std::atomic<double> origin{0},transmit{0};
@@ -47,8 +57,9 @@ struct SimulationDates {
         if(event.phase==live::detail::SimulationPhase::bank_created)self.origin=event.epoch;
         if(event.phase==live::detail::SimulationPhase::transmit_epoch)self.transmit=event.epoch;
     }};
-    explicit SimulationDates(bool enabled):active(enabled) {
+    explicit SimulationDates(bool enabled,std::optional<double> initial_epoch=std::nullopt):active(enabled) {
         if(active) {
+            hook.initial_media_epoch=initial_epoch;
             live::detail::SimulationHook* empty=nullptr;
             check(live::detail::simulation_hook.compare_exchange_strong(empty,&hook),"simulation date hook already installed");
         }
@@ -261,23 +272,40 @@ void realistic_frequency_benefit(bool calendar=false) {
         // nominal unit waveform used by ChannelConfig's noise parameter.
         value.simulation_snr_db=20.020599913279625-10*std::log10(c.sample_rate/2.)-
             20*std::log10(modem::outer_dsss_transmit_gain(c));
-        // The single advisory epoch does not cover unknown weak-tone
-        // detection delay. Keep the realistic weak fixed-epoch comparison,
-        // and qualify calendar retention with an early strong reference.
-        // The weak late-boundary failure remains retained separately.
+        // Keep the realistic weak fixed-epoch comparison separately. The
+        // calendar case qualifies the ordinary rolling cohort with an early
+        // strong reference and retains its independent broad acquisition audit.
         if(calendar)value.simulation_snr_db+=40;
         value.simulation_phase_noise_degrees_per_sqrt_second=.5;
         value.helper.power_w=enabled?(calendar?1500:40):0;value.helper.callsign.clear();
-        if(calendar)value.helper.data_power_w=.004;
+        if(calendar)value.helper.data_power_w=4;
+        if(calendar&&enabled) {
+            // This rolling-cohort fixture uses the reported 4W/1500W link.
+            // A .004W payload requires a wider leakage guard, placing the
+            // helper above this unchanged modem sample clock's Nyquist edge.
+            // Reject that setup before testing the native helper front end.
+            const auto plan=helper::plan(value.helper,c.carrier_hz,helper::occupied_bandwidth(c),
+                120000000,0,modem::outer_dsss_transmit_gain(c));
+            const helper::PayloadFilter native_filter(c.sample_rate,plan.frequency_hz);
+            check(native_filter.enabled(),"calendar helper fixture has no native isolated helper passband");
+        }
         // Deliberately outside the declared GPSDO bank: this is an experiment
         // with an extra LO error, using the same long-symbol waveform/link.
         value.simulation_frequency_offset_hz=2.17;
+        // Twelve calendar symbols keep captured media past the eight-symbol
+        // audit due date AND the next ready FFT batch. The weak fixed-epoch
+        // control remains one bit; receiver completion never uses this length.
+        const Bytes sent_bits=calendar?Bytes{1,0,1,1,0,0,1,0,1,1,0,1}:Bytes{1};
+        const std::string expected=calendar?"101100101101":"1";
+        const auto symbol_samples=modem::symbol_sample_count(c);
+        const auto required_absence=calendar?
+            ((6ULL*c.sample_rate+symbol_samples-1)/symbol_samples)*symbol_samples:6ULL*c.sample_rate;
         const auto path=std::filesystem::temp_directory_path()/
             ("datapump-helper-realistic-"+std::to_string(audio::trace::identity())+"-"+
              std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl");
         std::atomic<std::int64_t> replay_ms{0};bool finished=false,exact=false;
         std::uint64_t observed_samples=0,expected_epoch=UINT64_MAX;
-        double actual_transmit_phase=0;
+        double actual_transmit_phase=0,requested_transmit_date=0;
         {
             audio::trace::Scope trace(path,false,&trace_filter);
             SimulationDates dates(calendar);
@@ -290,17 +318,16 @@ void realistic_frequency_benefit(bool calendar=false) {
                     const auto snapshot=session.snapshot();
                     const auto epoch=dates.origin.load()+static_cast<double>(snapshot.samples_received)/c.sample_rate;
                     const auto phase=std::fmod(epoch,1.);
-                    // Calendar lifetime is tested with an unambiguous onset.
-                    // Unknown channel startup/detection delay can cross a
-                    // second for late TX; a single advisory epoch cannot
-                    // resolve that separate retained weak-boundary failure.
+                    // Start after ordinary rolling admission is established.
+                    // Helper lead then reserves a fresh future integer payload
+                    // epoch; helper-off retains its original fractional start.
                     ready=dates.origin.load()>0 && snapshot.samples_received>=2ULL*c.sample_rate && phase>=.10 && phase<=.16;
-                    if(ready)break;
+                    if(ready){requested_transmit_date=epoch;break;}
                     std::this_thread::sleep_for(std::chrono::milliseconds(5));
                 }
                 check(ready,"continuous simulation did not reach the dated delayed-TX boundary");
             }
-            session.transmit_bits(Bytes{1});
+            session.transmit_bits(sent_bits);
             const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(60);
             while(std::chrono::steady_clock::now()<deadline) {
                 const auto snapshot=session.snapshot();
@@ -309,8 +336,8 @@ void realistic_frequency_benefit(bool calendar=false) {
                 if(snapshot.transmission_finished&&snapshot.simulation_replay) {
                     observed_samples=snapshot.samples_received;
                     replay_ms=4000;finished=true;
-                    for(const auto& signal:session.snapshot().signals)if(!signal.helper_carrier && signal.complete && signal.received_bits==1)
-                        exact=exact||(signal.binary?signal.text:signal.raw_bits)=="1";
+                    for(const auto& signal:session.snapshot().signals)if(!signal.helper_carrier && signal.complete && signal.received_bits==sent_bits.size())
+                        exact=exact||(signal.binary?signal.text:signal.raw_bits)==expected;
                     break;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -320,17 +347,30 @@ void realistic_frequency_benefit(bool calendar=false) {
                 check(dates.transmit.load()>0,"calendar simulation did not report its actual transmit date");
                 expected_epoch=static_cast<std::uint64_t>(dates.transmit.load());
                 actual_transmit_phase=std::fmod(dates.transmit.load(),1.);
-                check(actual_transmit_phase>=.10 && actual_transmit_phase<.30,
-                      "actual transmit date missed the unambiguous-onset fixture");
+                if(enabled)check(dates.transmit.load()>requested_transmit_date && actual_transmit_phase==0,
+                    "helper lead did not retain a fresh future integer payload epoch");
+                else check(actual_transmit_phase>=.10 && actual_transmit_phase<.30,
+                    "helper-disabled transmit date missed the original fractional-onset fixture");
             }
         }
-        std::ifstream input(path);std::string line;bool admitted=false,completed=false,observed_end=false,isolated_counter=false;
-        std::uint64_t first=UINT64_MAX,initial_epoch=UINT64_MAX,helper_epoch=UINT64_MAX,helper_sample=0,first_refresh=0;
+        std::ifstream input(path);std::string line;bool admitted=false,completed=false,observed_end=false,isolated_counter=false,pending=false;
+        bool cohort_frontend=false,cohort_aligned=false,cohort_audited=false,later_epoch_admitted=false,primary_replaced=false;
+        std::uint64_t first=UINT64_MAX,initial_epoch=UINT64_MAX,helper_epoch=UINT64_MAX,later_epoch_sample=UINT64_MAX;
+        std::uint64_t conditional_jobs=0,audit_jobs=0;
+        std::uint64_t payload_id=0,payload_revision=0,payload_first=0,last_count=0;
+        bool payload_completed=false;
+        std::set<std::uint64_t> initial_epochs;
+        using RowIdentity=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>;
+        std::set<RowIdentity> admitted_alignments,conditional_alignments,periodic_audits;
         std::size_t helper_admissions=0;
         while(std::getline(input,line)) {
             if(line.find("\"event\":\"receiver_bank_admitted\"")!=std::string::npos) {
-                if(initial_epoch==UINT64_MAX)initial_epoch=number(line,"epoch");
-                if(helper_sample && !first_refresh && number(line,"sample")>helper_sample)first_refresh=number(line,"sample");
+                const auto epoch=number(line,"epoch"),sample=number(line,"sample");
+                if(initial_epoch==UINT64_MAX)initial_epoch=epoch;
+                if(!sample)initial_epochs.insert(epoch);
+                if(calendar && cohort_frontend && sample>0 && !initial_epochs.contains(epoch)) {
+                    later_epoch_admitted=true;later_epoch_sample=std::min(later_epoch_sample,sample);
+                }
             }
             if(line.find("\"event\":\"receiver_permutation_counts\"")!=std::string::npos) {
                 if(!calendar)check(number(line,"eligible")==1 && !number(line,"projection_context_created") && !number(line,"pool_present"),
@@ -338,36 +378,106 @@ void realistic_frequency_benefit(bool calendar=false) {
                 isolated_counter=isolated_counter||number(line,"resident")>1;
             }
             if(line.find("\"event\":\"receiver_helper_assistance_admitted\"")!=std::string::npos) {
-                admitted=true;++helper_admissions;helper_epoch=number(line,"epoch");helper_sample=number(line,"sample");
+                admitted=true;++helper_admissions;helper_epoch=number(line,"epoch");
                 check(number(line,"clock_windowed")==0 && number(line,"allowance")+number(line,"history_bytes")==allowance &&
                       number(line,"numeric_limit")<allowance,"realistic helper bypassed its normalized FFT receiver grant");
             }
-            if(line.find("\"event\":\"receiver_signal_commit\"")==std::string::npos ||
-               line.find("\"helper_assisted\":1")==std::string::npos || !number(line,"received_bits"))continue;
+            if(calendar) {
+                cohort_frontend=cohort_frontend||line.find("\"event\":\"receiver_helper_cohort_frontend\"")!=std::string::npos;
+                primary_replaced=primary_replaced||line.find("\"event\":\"receiver_helper_conditioning_admitted\"")!=std::string::npos;
+                // This thin GPSDO catalogue has one pair per clock value.
+                // A translated full mask assists RF alignment while retaining
+                // all three clock values; it makes no search-work reduction.
+                if(line.find("\"event\":\"receiver_helper_cohort_prior_decision\"")!=std::string::npos &&
+                   number(line,"epoch")==expected_epoch && number(line,"admitted")) {
+                    check(number(line,"prior_active") && number(line,"original_pairs")==3 &&
+                          number(line,"selected_pairs")==3 && number(line,"clock_rates")==3 &&
+                          number(line,"represented_rates")==3 && std::isfinite(real_number(line,"origin_hz")) &&
+                          real_number(line,"origin_hz")!=0,
+                          "rolling helper RF alignment changed the original three clock cells");
+                    admitted_alignments.emplace(number(line,"revision"),number(line,"instance_id"),number(line,"sample_origin"));
+                }
+                if(line.find("\"event\":\"receiver_helper_cohort_resolution\"")!=std::string::npos) {
+                    const RowIdentity identity{number(line,"revision"),number(line,"instance_id"),number(line,"sample_origin")};
+                    if(number(line,"audit_due") && !number(line,"conditional")) {
+                        periodic_audits.insert(identity);cohort_audited=true;
+                    }
+                    if(number(line,"epoch")==expected_epoch && number(line,"conditional")) {
+                        check(admitted_alignments.contains(identity) && number(line,"original_pairs")==3 &&
+                              number(line,"selected_pairs")==3 && std::isfinite(real_number(line,"origin_hz")) &&
+                              real_number(line,"origin_hz")!=0,
+                              "rolling helper did not conditionally resolve its measured RF alignment");
+                        conditional_alignments.insert(identity);cohort_aligned=true;
+                    }
+                }
+                if(line.find("\"event\":\"receiver_acquisition_work\"")!=std::string::npos) {
+                    const RowIdentity identity{number(line,"revision"),number(line,"instance_id"),number(line,"sample_origin")};
+                    if(periodic_audits.contains(identity))audit_jobs=std::max(audit_jobs,number(line,"audit_jobs"));
+                    if(number(line,"epoch")==expected_epoch && conditional_alignments.contains(identity)) {
+                        conditional_jobs=std::max(conditional_jobs,number(line,"conditional_jobs"));
+                        if(conditional_jobs)helper_epoch=number(line,"epoch");
+                    }
+                }
+            }
+            if(line.find("\"event\":\"receiver_signal_commit\"")==std::string::npos || !number(line,"received_bits"))continue;
+            if(calendar) {
+                if(number(line,"epoch")!=expected_epoch || number(line,"first_stream_symbol")!=0)continue;
+                const auto count=number(line,"received_bits");
+                check(count<=expected.size() && !number(line,"missing") &&
+                      line.find("\"raw_bits_prefix\":\""+expected.substr(0,count)+"\"")!=std::string::npos,
+                      "rolling helper changed an exact dated payload prefix");
+                if(!payload_id) {
+                    payload_id=number(line,"signal_id");payload_revision=number(line,"revision");
+                    payload_first=number(line,"physical_first");
+                }
+                const auto is_complete=number(line,"complete")!=0;
+                // A stronger ordinary owner may revise its interpretation in
+                // the same GUI row. Never reset that row's lifetime prefix or
+                // completed status when its revision advances.
+                check(number(line,"signal_id")==payload_id && number(line,"revision")>=payload_revision &&
+                      number(line,"physical_first")==payload_first && count>=last_count &&
+                      (!payload_completed||is_complete),
+                      "rolling helper replaced its pending row or lost bit progress");
+                payload_revision=number(line,"revision");last_count=count;
+                payload_completed|=is_complete;
+            } else if(line.find("\"helper_assisted\":1")==std::string::npos)continue;
             first=std::min(first,number(line,"feed_end_sample"));
             if(line.find("\"complete\":1")!=std::string::npos) {
-                completed=number(line,"received_bits")==1;
-                observed_end=number(line,"feed_end_sample")>=number(line,"physical_end")+6*c.sample_rate;
-            }
+                completed=number(line,"received_bits")==sent_bits.size();
+                observed_end=number(line,"feed_end_sample")>=number(line,"physical_end")+required_absence;
+            }else pending=true;
         }
-        if(!finished || (enabled?(!exact||!admitted||!completed||!observed_end):exact))
+        const bool used_assistance=calendar?(cohort_frontend&&cohort_aligned&&conditional_jobs):admitted;
+        if(!finished || (enabled?(!exact||!used_assistance||!completed||!observed_end):exact))
             std::cerr<<"realistic helper trace retained at "<<path<<'\n';
         check(finished,"bounded realistic helper simulation did not finish");
         check(observed_samples>45ULL*c.sample_rate,"frequency control ended before ordinary FFT acquisition could run");
         if(enabled) {
-            check(exact&&admitted&&completed&&observed_end,"realistic weak helper failed exact payload acquisition/physical END");
+            check(exact&&used_assistance&&completed&&observed_end,"realistic weak helper failed exact payload acquisition/physical END");
             check(first<60ULL*c.sample_rate,"helper failed bounded first-symbol acquisition");
-            if(calendar)check(initial_epoch!=UINT64_MAX && helper_epoch==expected_epoch && helper_epoch!=initial_epoch && helper_admissions==1 &&
-                first_refresh>helper_sample && first_refresh<first,
-                "automatic helper did not survive calendar refresh on a later transmit epoch");
+            if(calendar) {
+                check(pending,"rolling helper omitted pending progress before payload completion");
+                check(!admitted && !primary_replaced && !helper_admissions,
+                      "rolling helper replaced the ordinary acquisition executor");
+                check(initial_epoch!=UINT64_MAX && helper_epoch==expected_epoch &&
+                      later_epoch_admitted && later_epoch_sample<first,
+                      "rolling helper did not retain new ordinary epoch admission before the actual dated payload");
+                check(cohort_audited && audit_jobs>0,
+                      "rolling helper omitted measured periodic broad acquisition work");
+            }
             if(!calendar && modem::detail::pattern_permutation_sharing_supported)
                 check(isolated_counter,"actual helper receiver was not excluded from ordinary cohort counters");
-        }else check(!exact&&!admitted,"realistic helper-disabled frequency control unexpectedly decoded the out-of-bank payload");
+        }else check(!exact&&!admitted&&!cohort_frontend&&!conditional_jobs,
+                    "realistic helper-disabled frequency control unexpectedly decoded or admitted helper acquisition");
         std::cout<<"realistic helper="<<enabled<<" calendar="<<calendar<<" exact="<<exact
                  <<" observed_seconds="<<static_cast<double>(observed_samples)/c.sample_rate
                  <<" first_seconds="<<(first==UINT64_MAX?-1.:static_cast<double>(first)/c.sample_rate)
                  <<" helper_epoch="<<helper_epoch<<" expected_epoch="<<expected_epoch
-                 <<" actual_transmit_phase="<<actual_transmit_phase<<'\n';
+                 <<" later_epoch_sample="<<later_epoch_sample
+                 <<" actual_transmit_phase="<<actual_transmit_phase
+                 <<" rf_aligned="<<cohort_aligned<<" alignment_work_reduction=0"
+                 <<" pending_observed="<<pending
+                 <<" conditional_jobs="<<conditional_jobs<<" audit_jobs="<<audit_jobs<<'\n';
         std::filesystem::remove(path);std::filesystem::remove(path.string()+".seal");
     }
 }
@@ -410,7 +520,10 @@ double conditioned_frequency_bank(bool enabled,bool full_message=false,bool beac
     const auto cpu_start=std::clock();conditioning_replayed=false;
     {
         audio::trace::Scope trace(path,false,&trace_filter);
-        SimulationDates dates(rolling);
+        // Reproduce the private-code/arrival alignment that previously left
+        // an exact pending prefix without END. Only the station clock is
+        // controlled: receive timestamp stays zero and epochs roll normally.
+        SimulationDates dates(rolling,rolling?std::optional<double>{1792949964.37109375}:std::nullopt);
         live::Session session({},[&]{return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_ms.load());});
         session.start(value);
         if(beacon_only)session.transmit_helper();
@@ -434,7 +547,8 @@ double conditioned_frequency_bank(bool enabled,bool full_message=false,bool beac
                 } else for(const auto& signal:visible.signals) {
                     if(signal.helper_carrier || !signal.received_bits)continue;
                     const auto raw=signal.binary?signal.text:signal.raw_bits;
-                    check(raw=="0" || raw=="00" || raw=="001","conditioned acquisition changed an accepted bit prefix");
+                    // Other detected rows need not carry this test's payload.
+                    // The dated primary's entire lifecycle is checked below.
                     exact=exact||(signal.complete && raw=="001" && signal.received_bits==3);
                 }
                 break;
@@ -450,8 +564,37 @@ double conditioned_frequency_bank(bool enabled,bool full_message=false,bool beac
     const auto cpu=static_cast<double>(std::clock()-cpu_start)/CLOCKS_PER_SEC;
     std::ifstream input(path);std::string line;bool admitted=false,committed=false,fallback=false,replayed=false,completed=false,observed_end=false,pending=false;
     std::size_t admissions=0;std::uint64_t id=0,revision=0,last=0,replay_end=0;
-    bool rolling_declined=false;
+    std::uint64_t payload_capture=0,revision_first=0;
+    const auto exact_pending_prefix=[&](const std::string& record,std::uint64_t count) {
+        const auto key=std::string("\"raw_bits_prefix\":\"");const auto at=record.find(key);
+        if(at==std::string::npos)return false;
+        const auto begin=at+key.size(),end=record.find('"',begin);
+        return end!=std::string::npos && count<=wire.size() &&
+            record.substr(begin,end-begin)==expected.substr(0,std::min<std::uint64_t>(count,128));
+    };
+    if(!beacon_only) {
+        // The actual dated source identifies this test's subject. It does not
+        // require every later selected alias to retain that key epoch/ordinal.
+        // Rewind to check even the row's earlier accepted prefixes afterward.
+        while(std::getline(input,line)) {
+            if(line.find("\"event\":\"receiver_signal_commit\"")==std::string::npos ||
+               !number(line,"received_bits") || number(line,"epoch")!=expected_epoch ||
+               number(line,"first_stream_symbol")!=0 || number(line,"complete") || number(line,"missing") ||
+               !exact_pending_prefix(line,number(line,"received_bits")))continue;
+            const auto signal=number(line,"signal_id"),capture=number(line,"input_revision");
+            if(!id) {id=signal;payload_capture=capture;}
+            check(signal==id && capture==payload_capture,
+                "conditioned dated payload anchors changed their pending row");
+        }
+        check(id,"conditioned ordinary reception omitted its exact dated pending anchor");
+        input.clear();input.seekg(0);
+        check(bool(input),"conditioned trace could not rewind its selected row lifecycle");
+    }
+    bool rolling_declined=false,primary_pending=false;
     while(std::getline(input,line)) {
+        if(rolling && enabled && primary_pending && !completed)
+            check(line.find("\"event\":\"receiver_helper_assistance_admitted\"")==std::string::npos,
+                "legacy helper acquisition re-admitted while the dated primary payload was active");
         if(line.find("\"event\":\"receiver_helper_conditioning_declined\"")!=std::string::npos &&
            line.find("rolling_ordinary_admission")!=std::string::npos)rolling_declined=true;
         if(constructor_grants && line.find("\"event\":\"receiver_bank_admitted\"")!=std::string::npos)
@@ -475,20 +618,39 @@ double conditioned_frequency_bank(bool enabled,bool full_message=false,bool beac
             replayed=true;check(number(line,"sample")==replay_end && number(line,"resident")==5,
                 "conditional fallback did not restore all original epochs at the exact physical frontier");
         }
-        if(line.find("\"event\":\"receiver_signal_commit\"")!=std::string::npos && number(line,"received_bits") &&
-           number(line,"epoch")==expected_epoch && number(line,"first_stream_symbol")==0) {
-            const auto count=number(line,"received_bits");
-            if(!id){id=number(line,"signal_id");revision=number(line,"revision");}
-            check(number(line,"signal_id")==id && number(line,"revision")==revision && count>=last,
-                "conditioned ordinary reception changed its pending identity or lost bit progress");last=count;
-            if(line.find("\"complete\":1")!=std::string::npos) {
-                completed=count==wire.size();observed_end=number(line,"feed_end_sample")>=number(line,"physical_end")+6*c.sample_rate;
+        if(line.find("\"event\":\"receiver_signal_commit\"")!=std::string::npos) {
+            const auto count=number(line,"received_bits");const bool ended=number(line,"complete")!=0;
+            if(beacon_only) {
+                check(!count && !ended,"helper-only conditioning accepted payload bits or invented physical END");
+                continue;
+            }
+            if(number(line,"input_revision")!=payload_capture || number(line,"signal_id")!=id)continue;
+            const auto next_revision=number(line,"revision");
+            // Ordinary stronger aliases may refine the physical start when
+            // they revise this row. Each selected revision retains its own
+            // source coordinates; the row's bit prefix never resets.
+            const auto first_sample=number(line,"physical_first");
+            check(next_revision>=revision && (next_revision>revision || first_sample==revision_first) &&
+                  count>=last && count<=wire.size() && !number(line,"missing") && !(completed&&!ended),
+                "conditioned ordinary reception changed its pending identity, start or exact progress");
+            revision=next_revision;revision_first=first_sample;last=count;
+            if(ended) {
+                const auto symbol=number(line,"symbol_samples");
+                const std::uint64_t target=6ULL*c.sample_rate;
+                check(symbol,"conditioned physical END omitted its complete symbol duration");
+                const auto absent_symbols=target/symbol+(target%symbol!=0);
+                check(absent_symbols<=UINT64_MAX/symbol,"conditioned physical END duration overflowed");
+                const auto end=number(line,"physical_end"),feed=number(line,"feed_end_sample");
+                check(count==wire.size() && feed>=end && feed-end>=absent_symbols*symbol,
+                    "conditioned ordinary reception ended without the full payload or full-symbol absence");
+                completed=true;observed_end=true;
             } else {
-                pending=true;const auto key=std::string("\"raw_bits_prefix\":\"");const auto at=line.find(key);
-                check(at!=std::string::npos,"conditioned progress omitted its accepted prefix");
-                const auto begin=at+key.size(),end=line.find('"',begin);
-                check(line.substr(begin,end-begin)==expected.substr(0,std::min<std::uint64_t>(count,128)),
+                // Complete framed events may contain decoded display text;
+                // only pending events expose this diagnostic bit prefix.
+                check(exact_pending_prefix(line,count),
                     "conditioned ordinary reception changed an exact accepted bit prefix");
+                pending=true;
+                if(count)primary_pending=true;
             }
         }
     }

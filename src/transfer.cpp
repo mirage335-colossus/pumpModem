@@ -863,6 +863,7 @@ Received receive(std::span<const float> samples, const Options& input_options, P
             search.hypotheses=declared.hypotheses;
             search.admitted_frequency_half_width_hz=declared.frequency.requested_half_width_hz;
             search.admitted_clock_half_width_ppm=declared.requested_clock_half_width_ppm;
+            search.admitted_clock_cell_half_width_ppm=declared.clock_step_ppm/2;
             search.complex_frequency_coverage=!declared.frequency.limited;
             search.complex_clock_coverage=declared.clock_half_width_ppm>=declared.requested_clock_half_width_ppm;
         }
@@ -929,6 +930,7 @@ Received simulate(const Message& message, const Options& input_options, const mo
             search.hypotheses=declared.hypotheses;
             search.admitted_frequency_half_width_hz=declared.frequency.requested_half_width_hz;
             search.admitted_clock_half_width_ppm=declared.requested_clock_half_width_ppm;
+            search.admitted_clock_cell_half_width_ppm=declared.clock_step_ppm/2;
             search.complex_frequency_coverage=!declared.frequency.limited;
             search.complex_clock_coverage=declared.clock_half_width_ppm>=declared.requested_clock_half_width_ppm;
         }

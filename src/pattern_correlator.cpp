@@ -2066,18 +2066,32 @@ struct PatternCorrelator::Impl {
             total*sizeof(PulseAddress)+detail::correlation_pulse_scratch_bytes+
             (burst?pulse_count*sizeof(BurstPulse)+total*sizeof(std::size_t):0)+
             (code.chip_samples()>4096?bank_count*(block_samples+1)*sizeof(Complex):0);
-        const bool pulse_enabled=pulse_geometry && fixed+pulse_extra+denominator<=bytes;
+        const auto affine_capacity=std::tuple_size_v<decltype(Bank::affine_lengths)>;
+        const auto segment_extra=bank_count*((block_samples+1)*sizeof(Complex)+
+            affine_capacity*sizeof(detail::CorrelationCarrierMoments))+total*sizeof(std::uint64_t);
+        const bool segment_geometry=!scheduled_map() && !options.amplitude_only && !options.raw_reference && shaped && paired &&
+            code.symbol_samples()>=16ULL*c.sample_rate && code.chip_samples()>=1024;
+        // A long private Live cohort receives a large shared byte loan, but
+        // its planner already apportions optional storage across all epochs.
+        // Use that existing share only to choose reconstructible pulse/cache
+        // storage. Mandatory detectors, the complete lane set and retained-bit
+        // capacity below still use the original loan, exactly as before.
+        const bool shared_compact_storage=search.compact_clock_search && c.data_key &&
+            c.spreading_mode==SpreadingMode::pattern && (c.scramble || c.dsss) &&
+            !burst && !scheduled_map() && !deferred_symbols(c) &&
+            code.symbol_samples()>=60ULL*c.sample_rate;
+        // Never replace an affordable pulse path with a larger representation
+        // (which would lower bit_limit), or with the unsegmented raw fallback.
+        const bool shared_pulse_budget=shared_compact_storage && segment_geometry &&
+            std::isfinite(segment_extra) && std::isfinite(pulse_extra) && segment_extra<=pulse_extra &&
+            fixed+segment_extra+denominator<=bytes;
+        const auto pulse_storage_budget=shared_pulse_budget?selection_budget:bytes;
+        const bool pulse_enabled=pulse_geometry && fixed+pulse_extra+denominator<=pulse_storage_budget;
         if(pulse_enabled) {fixed+=pulse_extra;pulse_lattices.reserve(pulse_count);pulse_addresses.reserve(count);}
         // Affine spans also retain a whole symbol when its shared-cell kernels
         // cannot fit. They keep the same complete search and pulse geometry
         // without retaining a kernel or observations per lane.
-        const auto affine_capacity=std::tuple_size_v<decltype(Bank::affine_lengths)>;
-        const auto segment_extra=bank_count*((block_samples+1)*sizeof(Complex)+
-            affine_capacity*sizeof(detail::CorrelationCarrierMoments))+total*sizeof(std::uint64_t);
-        pulse_segmented=!scheduled_map() && !options.amplitude_only && !options.raw_reference && shaped && paired &&
-            code.symbol_samples()>=16ULL*c.sample_rate &&
-            code.chip_samples()>=1024 &&
-            !pulse_enabled &&
+        pulse_segmented=segment_geometry && !pulse_enabled &&
             fixed+segment_extra+denominator<=bytes;
         if(pulse_segmented){fixed+=segment_extra;affine_counts.resize(count);}
         // The source warp is affine INSIDE an active flat interval. Contract
@@ -2112,7 +2126,7 @@ struct PatternCorrelator::Impl {
         if(pulse_segmented && !outer_presence && !options.affine_coefficient_reference && code.chip_samples()>=8192 &&
                 code.chip_samples()/(256*highest_rate)>block_samples &&
                 coefficient_count<=std::numeric_limits<std::size_t>::max() &&
-                fixed+coefficient_extra+denominator<=bytes)
+                fixed+coefficient_extra+denominator<=pulse_storage_budget)
             affine_coefficients.resize(static_cast<std::size_t>(coefficient_count));
         hypotheses.reserve(count);if(scheduled_map()){scheduled->anchors.reserve(count);scheduled->observed_begin.resize(count);scheduled->last_accepted.resize(count);if(scheduled_calendar())scheduled->source_starts.resize(count);
             if(!options.amplitude_only){scheduled->symbol_ends.resize(count);scheduled->end_indices.resize(count);scheduled->first_full_indices.resize(count);}}

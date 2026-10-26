@@ -1,5 +1,6 @@
 #include "application.hpp"
 #include "debug_live.hpp"
+#include "helper_status.hpp"
 #include "../src/audio_trace.hpp"
 #include "audio_diagnostic.hpp"
 #include <random>
@@ -22,6 +23,76 @@ const ui::Control& control(ui::Field field) {
     for(const auto& value:ui::console_screen())if(value.field==field)return value;
     throw Error("Missing shared control");
 }
+void helper_assistance_debug_fields() {
+    live::Snapshot snapshot;
+    check(!snapshot.helper_frequency_assistance_active&&!snapshot.helper_phase_assistance_active&&
+          snapshot.helper_original_search_pairs==0&&snapshot.helper_selected_search_pairs==0&&
+          snapshot.helper_conditional_jobs==0&&snapshot.helper_audit_jobs==0,
+          "Helper assistance snapshot defaults claim unobserved work");
+    check(helper_diagnostics(snapshot).empty(),"Absent helper left a diagnostic assistance claim");
+    snapshot.running=true;snapshot.samples_received=1;snapshot.helper_snr_db=12;
+    snapshot.helper_status="Helper present; acquisition not narrowed: insufficient workspace";
+    const auto presence_text=helper_diagnostics(snapshot);
+    check(presence_text.find("acquisition not narrowed: insufficient workspace")!=std::string::npos&&
+          presence_text.find("frequency assistance not applied")!=std::string::npos&&
+          presence_text.find("phase assistance not applied")!=std::string::npos,
+          "Measured helper presence claimed narrowed search or applied phase");
+    snapshot.helper_status.clear();
+    check(helper_diagnostics(snapshot).find("acquisition not narrowed: no committed frequency assistance")!=std::string::npos,
+          "Presence without a joined result omitted its assistance limit");
+    snapshot.helper_status="Helper present; acquisition not narrowed: insufficient workspace";
+    std::ostringstream presence_log;DebugLive presence(120,presence_log);
+    presence.step(0,snapshot,Signals{},false,false);
+    check(presence_log.str().find("\"helper_frequency_assistance_active\":0")!=std::string::npos&&
+          presence_log.str().find("\"helper_phase_assistance_active\":0")!=std::string::npos&&
+          presence_log.str().find("\"helper_conditional_jobs\":0")!=std::string::npos&&
+          presence_log.str().find("acquisition not narrowed: insufficient workspace")!=std::string::npos,
+          "Helper presence diagnostic claimed assistance or lost its decline reason");
+    snapshot.helper_frequency_assistance_active=true;snapshot.helper_phase_assistance_active=true;
+    snapshot.helper_original_search_pairs=4096;snapshot.helper_selected_search_pairs=129;
+    snapshot.helper_conditional_jobs=37;snapshot.helper_audit_jobs=5;
+    snapshot.helper_status="Helper acquisition narrowed";
+    const auto applied_text=helper_diagnostics(snapshot);
+    check(applied_text.find("frequency assistance applied")!=std::string::npos&&
+          applied_text.find("Helper acquisition narrowed")!=std::string::npos&&
+          applied_text.find("(reference aligned)")!=std::string::npos&&
+          applied_text.find("phase assistance applied")!=std::string::npos&&
+          applied_text.find("pair maxima across rows: selected 129, original 4096")!=std::string::npos&&
+          applied_text.find("jobs: conditional 37, audit 5")!=std::string::npos,
+          "Joined helper work was omitted from shared GUI diagnostics");
+    snapshot.helper_phase_assistance_active=false;
+    check(helper_diagnostics(snapshot).find("phase assistance not applied")!=std::string::npos,
+          "Past phase assistance remained visible after the current result cleared it");
+    snapshot.helper_phase_assistance_active=true;
+    std::ostringstream applied_log;DebugLive applied(120,applied_log);
+    applied.step(0,snapshot,Signals{},false,false);
+    for(const auto* field:{"\"helper_frequency_assistance_active\":1","\"helper_phase_assistance_active\":1",
+        "\"helper_original_search_pairs\":4096","\"helper_selected_search_pairs\":129",
+        "\"helper_conditional_jobs\":37","\"helper_audit_jobs\":5"})
+        check(applied_log.str().find(field)!=std::string::npos,"Joined helper work was omitted from debug JSON");
+    snapshot.helper_status="qualified helper aligns ordinary acquisition frequencies without reducing search work";
+    snapshot.helper_original_search_pairs=3;snapshot.helper_selected_search_pairs=3;
+    snapshot.helper_phase_assistance_active=false;
+    const auto aligned_text=helper_diagnostics(snapshot);
+    check(aligned_text.find("frequency assistance applied")!=std::string::npos&&
+          aligned_text.find("without reducing search work")!=std::string::npos&&
+          aligned_text.find("(reference aligned)")!=std::string::npos&&
+          aligned_text.find("pair maxima across rows: selected 3, original 3")!=std::string::npos&&
+          aligned_text.find("phase assistance not applied")!=std::string::npos&&
+          aligned_text.find("acquisition narrowed")==std::string::npos,
+          "Full-catalog alignment claimed narrower acquisition or phase assistance");
+    snapshot.helper_original_search_pairs=233;
+    const auto mixed_text=helper_diagnostics(snapshot);
+    check(mixed_text.find("without reducing search work")!=std::string::npos&&
+          mixed_text.find("pair maxima across rows: selected 3, original 233")!=std::string::npos&&
+          mixed_text.find("acquisition narrowed")==std::string::npos,
+          "Independent mixed-profile maxima invented a narrowed acquisition catalogue");
+    snapshot.helper_frequency_assistance_active=false;
+    snapshot.helper_status="Helper present; acquisition not narrowed: reference not qualified";
+    check(helper_diagnostics(snapshot).find("reference aligned")==std::string::npos,
+          "Measured helper presence was presented as committed alignment");
+}
+
 void physical_debug_workflow() {
     using A=DebugLive::Action;
     std::ostringstream log;DebugLive debug(120,log);live::Snapshot snap;Signals signals;
@@ -1715,6 +1786,6 @@ int main(int argc,char** argv) {
         });
     }
 #endif
-    try {physical_debug_workflow();verbose_diagnostics();probe_fixture::run();fhss_developer_editor();fast_default_console();developer_mode_presentation();helper_developer_visibility();helper_power_declaration();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();expanded_spectrum();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();planner_clock_details();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();smoke_shutdown_does_not_resume_workflow();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {helper_assistance_debug_fields();physical_debug_workflow();verbose_diagnostics();probe_fixture::run();fhss_developer_editor();fast_default_console();developer_mode_presentation();helper_developer_visibility();helper_power_declaration();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();expanded_spectrum();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();planner_clock_details();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();smoke_shutdown_does_not_resume_workflow();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -73,9 +73,13 @@ struct HelperReferencePlan {
     double simulation_cn0_db_hz=0;
     double simulation_tone_snr_db=0;
     double frequency_hz=0;
-    bool conditional_strip_available=false;
-    std::size_t ordinary_pairs=0,conditional_pair_limit=257,retained_clock_rates=0;
-    double required_frequency_uncertainty_hz=0;
+    // Original-grid geometry under an explicit hypothetical qualified helper
+    // measurement. This does not certify runtime receiver/profile/resources.
+    bool conditional_geometry_available=false;
+    std::size_t ordinary_pairs=0,conditional_pairs=0,retained_clock_rates=0;
+    double assumed_frequency_uncertainty_hz=.01;
+    double assumed_helper_offset_hz=0;
+    double original_clock_cell_half_width_ppm=0;
     std::string status;
 };
 struct Model {

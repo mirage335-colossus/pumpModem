@@ -10,6 +10,7 @@
 #include "../estimate_cancellation.hpp"
 #include "../audio_trace.hpp"
 #include "receiver_health.hpp"
+#include "helper_status.hpp"
 #include "receiver_timing_advice.hpp"
 #include "audio_controls.hpp"
 #include "datapump/received_text.hpp"
@@ -2146,7 +2147,7 @@ struct Controller::Impl {
                 diagnostics<<" | UTC capture timestamps bounded; full search: peer TX timing is not qualified";
         }
         if(!next.simulation&&next.audio_passband_hz>0&&settings.transfer.modem.carrier_hz+modem::waveform_bandwidth_hz(settings.transfer.modem)/2>next.audio_passband_hz) diagnostics<<" | Nominal envelope exceeds audio passband; reduce Rate or Carrier - Shift, or choose a wider device";
-        if(!next.helper_status.empty())diagnostics<<" | "<<next.helper_status;
+        if(const auto helper=helper_diagnostics(next);!helper.empty())diagnostics<<" | "<<helper;
         if(!target_supported) diagnostics<<" | "<<tuning_explanation;
         fake_display(next);
         f(UiField::diagnostics).text=diagnostics.str(); snapshot=std::move(next);

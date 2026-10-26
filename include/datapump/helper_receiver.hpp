@@ -34,6 +34,11 @@ struct Reference {
     std::uint64_t frequency_sample=0;
 };
 
+// Fixed public occupied-band geometry in the physical PCM clock. Conditioning
+// is optional and refines only already accepted raw tone publications. A band
+// that is invalid, too wide, or overlaps the helper search retains the raw fit.
+struct OccupiedBand {double lower_hz=0,upper_hz=0;};
+
 // Independent assistance, never payload completion or presence admission.
 // Strong coherent fits retain phase/metadata measurement. A separate raw-noise-
 // calibrated narrowband fit can publish frequency-only references after several
@@ -43,11 +48,14 @@ struct Reference {
 // helper yields no useful reference and leaves the original search available.
 class Receiver {
 public:
+    // Receiver-owned storage plus project scratch; the pre-existing external
+    // C/C++/libm/libgcc/OpenSSL runtime stack/provider allocations are separate.
     static constexpr std::size_t workspace_bound=9*1024;
     // Only the first receive key is selected for compact encrypted time. No
     // helper metadata is authenticated or used here to adjust a clock/grid.
     explicit Receiver(double expected_hz,double search_half_width_hz=20,
-                      std::vector<Crypto> keys={});
+                      std::vector<Crypto> keys={},
+                      std::optional<OccupiedBand> ordinary_band={});
     ~Receiver();
     Receiver(Receiver&&) noexcept;
     Receiver& operator=(Receiver&&) noexcept;

@@ -43,6 +43,92 @@ std::vector<double> local_frequency_offsets(const Config& config) {
     return result;
 }
 }
+bool pattern_source_identities_disjoint(const PatternSourceIdentity& a,std::uint64_t first_a,
+        std::uint64_t end_a,std::uint64_t symbol_a,const PatternSourceIdentity& b,std::uint64_t first_b,
+        std::uint64_t end_b,std::uint64_t symbol_b)noexcept {
+    if(!symbol_a || symbol_a!=symbol_b || !a.sample_rate || a.sample_rate!=b.sample_rate ||
+       first_a>=end_a || first_b>=end_b)return false;
+    const auto first=std::max(first_a,first_b),end=std::min(end_a,end_b);
+    if(first>=end)return false;
+    const auto valid=[](const PatternSourceIdentity& id) {
+        return id.phase_lower<=id.phase_upper && id.phase_upper<id.sample_rate &&
+            std::isfinite(id.clock_half_width_ppm) && id.clock_half_width_ppm>=0 && id.clock_half_width_ppm<1e6;
+    };
+    if(!valid(a) || !valid(b))return false;
+    const auto epoch_delta=b.epoch>=a.epoch?static_cast<long double>(b.epoch-a.epoch):
+        -static_cast<long double>(a.epoch-b.epoch);
+    const auto shift=epoch_delta*a.sample_rate;
+    const auto bounds=[&](const PatternSourceIdentity& id,std::uint64_t anchor,std::uint64_t at,
+                          long double epoch_shift,std::array<long double,2>& out) {
+        const auto base=static_cast<long double>(id.first_symbol)*symbol_a;
+        const auto distance=static_cast<long double>(at-anchor);
+        const auto radius=static_cast<long double>(id.clock_half_width_ppm)*1e-6L;
+        const auto lower=base+id.phase_lower+distance*(1-radius);
+        const auto upper=base+id.phase_upper+distance*(1+radius);
+        // Two whole symbols cover the original symbol-cell ambiguity and
+        // the sub-symbol refinement at a drainable chunk's physical anchor.
+        const auto guard=2.L*symbol_a;
+        const auto magnitude=std::max({1.L,std::abs(base),std::abs(shift),std::abs(upper),distance});
+        if(!std::isfinite(lower) || !std::isfinite(upper) || lower<0 || magnitude>=1e15L)return false;
+        const auto seconds=std::ceil((upper+guard)/id.sample_rate);
+        if(!std::isfinite(seconds) || seconds<0 || seconds>=1e15L ||
+           static_cast<std::uint64_t>(seconds)>UINT64_MAX-id.epoch)return false;
+        const auto error=256*std::numeric_limits<double>::epsilon()*magnitude;
+        out={epoch_shift+std::max(0.L,lower-guard)-error,epoch_shift+upper+guard+error};
+        return std::isfinite(out[0]) && std::isfinite(out[1]);
+    };
+    int order=0;
+    for(const auto at:{first,end}) {
+        std::array<long double,2> x{},y{};
+        if(!bounds(a,first_a,at,0,x) || !bounds(b,first_b,at,shift,y))return false;
+        const int current=x[1]+symbol_a<y[0]?-1:y[1]+symbol_a<x[0]?1:0;
+        if(!current || (order && current!=order))return false;
+        order=current;
+    }
+    // Every endpoint product of the two affine rate cones has the same
+    // strict order throughout the overlap. A source ordinal cell is at most
+    // one symbol wide, including across second/epoch boundaries.
+    return true;
+}
+bool PatternPhaseCurve::configure(std::uint64_t id,std::uint32_t rate,double baseline,
+        std::uint64_t guard,std::size_t maximum_bin)noexcept {
+    if(view_id_ || !id || !rate || !std::isfinite(baseline) || !maximum_bin || maximum_bin>UINT32_MAX)return false;
+    view_id_=id;sample_rate_=rate;baseline_=baseline;input_guard_=guard;
+    maximum_bin_samples_=static_cast<std::uint32_t>(maximum_bin);return true;
+}
+double PatternPhaseCurve::value_at(long double sample)const noexcept {
+    if(!size_ || sample<segments_[0].first_sample)return 0;
+    std::size_t selected=0;
+    while(selected+1<size_ && sample>=segments_[selected+1].first_sample)++selected;
+    const auto& segment=segments_[selected];
+    return static_cast<double>(static_cast<long double>(segment.radians)+
+        (sample-segment.first_sample)*segment.radians_per_sample);
+}
+bool PatternPhaseCurve::requalify(std::uint64_t evidence,std::uint64_t until)noexcept {
+    if(!view_id_ || !size_ || evidence<latest_evidence_ || until<=evidence)return false;
+    latest_evidence_=evidence;qualified_until_=until;return true;
+}
+bool PatternPhaseCurve::append(std::span<const PatternPhaseSegment> additions,std::uint64_t evidence,
+        std::uint64_t until)noexcept {
+    if(!view_id_ || additions.empty() || additions.size()>2 || additions.size()>available_segments() ||
+       evidence<latest_evidence_ || until<=evidence || input_guard_>UINT64_MAX-maximum_bin_samples_ ||
+       std::max(evidence,observed_until_)>UINT64_MAX-input_guard_-maximum_bin_samples_)return false;
+    const auto first_allowed=std::max(evidence,observed_until_)+input_guard_+maximum_bin_samples_;
+    const PatternPhaseSegment* previous=size_?&segments_[size_-1]:nullptr;
+    for(const auto& segment:additions) {
+        if(segment.first_sample<=first_allowed || segment.first_sample>until ||
+           !std::isfinite(segment.radians) || std::abs(segment.radians)>1e12 ||
+           !std::isfinite(segment.radians_per_sample) || std::abs(segment.radians_per_sample)>1e6 ||
+           (previous && segment.first_sample<=previous->first_sample))return false;
+        const auto expected=previous?static_cast<long double>(previous->radians)+
+            (static_cast<long double>(segment.first_sample)-previous->first_sample)*previous->radians_per_sample:0.L;
+        const auto tolerance=128*std::numeric_limits<double>::epsilon()*std::max(1.L,std::abs(expected));
+        if(!std::isfinite(expected) || std::abs(segment.radians-expected)>tolerance)return false;
+        previous=&segment;
+    }
+    for(const auto& segment:additions)segments_[size_++]=segment;
+    latest_evidence_=evidence;qualified_until_=until;return true;
+}
 struct PatternReceiver::Impl {
     Config config;
     PatternSearch search;
@@ -65,6 +151,25 @@ struct PatternReceiver::Impl {
     mutable std::unique_ptr<SymbolBurstCursor> burst_cursor;
     SymbolBurstCoordinate burst_origin;
     bool acquisition_suspended=false;
+    bool defer_acquisition=false;
+    std::uint64_t deferred_acquisition_frontier=UINT64_MAX;
+    std::vector<std::uint8_t> acquisition_mask;
+    double frequency_origin_hz=0,acquisition_origin_hz=0;
+    const PatternPhaseCurve* phase_curve=nullptr;
+    const PatternPhaseCurve* execution_phase_view=nullptr;
+    const PatternPhaseCurve* cached_phase_view=nullptr;
+    std::uint64_t phase_cache_first=0;
+    std::size_t phase_cache_count=0;
+    bool prior_dispatch=false;
+    std::size_t prior_pending_count=0;
+    std::uint64_t shifted_trials=0,accepted_serial=0,track_serial=0;
+    std::uint64_t prior_track_floor=0,prior_acceptance_floor=0;
+    struct LinkEvidence {std::uint64_t serial=0;double frequency_offset_hz=0,clock_error_ppm=0;
+        const PatternPhaseCurve* phase_view=nullptr;};
+    LinkEvidence link_evidence;
+    std::uint64_t prior_link_floor=0;
+    bool prior_candidate_before=false;
+    bool prior_schedule_saved=false,prior_early_qualified=false,prior_component_qualified=false;
     std::uint64_t acquisition_last_start=0,acquisition_capture_end=0,unobserved_until=0;
     std::vector<std::uint64_t> packed_phases;
     // A broad symbol-zero prediction is not a qualified UTC phase map. Keep
@@ -95,7 +200,15 @@ struct PatternReceiver::Impl {
     std::size_t scheduled_observed_starts=0;
     using TimingComponents = std::array<detail::FftStartRange,256>;
     std::unique_ptr<TimingComponents> timing_components;
-    std::size_t timing_component_count=0,timing_component_index=0;
+    static_assert(std::tuple_size_v<TimingComponents><=std::numeric_limits<std::uint16_t>::max());
+    std::uint16_t timing_component_count=0,timing_component_index=0;
+    struct HelperOverlapStorage {
+        struct PublishedSource {PatternSourceIdentity identity;std::uint64_t first=0;};
+        std::vector<std::optional<PublishedSource>> completed;
+        std::size_t history_limit=0;
+        std::size_t working_bytes()const {return sizeof(*this)+completed.capacity()*sizeof(completed.front());}
+    };
+    std::unique_ptr<HelperOverlapStorage> helper_overlap;
     std::uint64_t logical_hop_begin=0,logical_hop_end=0;
     bool component_hop=false,acquisition_prepaid=false;
     bool early_eof_pending=false,early_eof_replayable=false,final_component_replay=false;
@@ -154,7 +267,7 @@ struct PatternReceiver::Impl {
     double noise_condition=1;
     bool real_rank=false,sample_fit=false,shaped=false;
     std::size_t partial=0;
-    bool finished=false,oscillator_valid=true,candidate_limit_reached=false;
+    bool finished=false,oscillator_valid=true,candidate_limit_reached=false,helper_gap_protection=false;
     std::uint64_t trials=0,history_insertions=0;
     std::vector<PatternEvidence> history,peaks;
     std::unique_ptr<detail::NativeDiagnosticHistoryTail<PatternEvidence>> diagnostic_tail;
@@ -165,6 +278,9 @@ struct PatternReceiver::Impl {
     std::size_t point_cursor=0;
     struct Track {
         PatternBurst burst;
+        double frequency_origin_hz=0;
+        const PatternPhaseCurve* phase_view=nullptr;
+        std::uint64_t serial=0;
         std::uint64_t next=0,index=1,unconfirmed_symbols=0;
         std::uint64_t phase_lower=0,phase_upper=0;
         double total_score=0,penalty=0;
@@ -178,7 +294,7 @@ struct PatternReceiver::Impl {
         std::uint64_t anchor_start=0,anchor_index=0;
         long double absent_samples=0;
         std::size_t frequency=0;
-        bool admitted=false,established=false,pending_gap=false;
+        bool admitted=false,established=false,pending_gap=false,helper_gap_protected=false;
     };
     std::vector<Track> tracks;
     PatternBurst latest;
@@ -218,6 +334,9 @@ struct PatternReceiver::Impl {
            (search.amplitude_start_uncertainty_seconds&&(!std::isfinite(*search.amplitude_start_uncertainty_seconds)||
                *search.amplitude_start_uncertainty_seconds<0)))
             throw Error("invalid pattern system-clock window");
+        if(search.admitted_clock_cell_half_width_ppm &&
+           (!std::isfinite(*search.admitted_clock_cell_half_width_ppm) || *search.admitted_clock_cell_half_width_ppm<0))
+            throw Error("invalid original pattern clock-cell radius");
         // Public Burst has the same single initial opportunity as the ordinary
         // public receiver, including an early amplitude fallback.
         if(c.symbol_burst.enabled() && !c.scramble && !c.dsss)search.initial_stream_symbols=1;
@@ -252,8 +371,11 @@ struct PatternReceiver::Impl {
             frequency_axis_selected=true;search.compact_clock_search=false;
         }
         if(c.oscillator_search && search.hypotheses.empty() && search.frequency_offsets_hz.empty() &&
-           search.clock_errors_ppm==std::vector<double>{0} && !search.couple_clock_to_carrier)
-            search.hypotheses=oscillator_pattern_search(c).hypotheses;
+           search.clock_errors_ppm==std::vector<double>{0} && !search.couple_clock_to_carrier) {
+            auto declared=oscillator_pattern_search(c);
+            search.hypotheses=std::move(declared.hypotheses);
+            search.admitted_clock_cell_half_width_ppm=declared.clock_step_ppm/2;
+        }
         const bool permit_local_fallback=search.allow_local_clock_fallback && search.expand_clock_search &&
             search.hypotheses.empty() && search.frequency_offsets_hz.empty() && !search.couple_clock_to_carrier &&
             search.clock_errors_ppm==std::vector<double>{0};
@@ -837,6 +959,7 @@ struct PatternReceiver::Impl {
         auto& energies=cached?template_bank(index).energy:template_energy;
         auto& squares=cached?template_bank(index).square:template_square;
         for(std::size_t f=0;f<templates.size();++f) {
+                    if(!acquisition_lane(f))continue;
             for(unsigned bit=0;bit<2;++bit) {
                 auto& row=rows[f][bit];row.resize(transform);
                 std::fill(row.begin(),row.end(),Complex{});
@@ -933,7 +1056,9 @@ struct PatternReceiver::Impl {
         const auto workers=detail::search_concurrency(search.worker_threads);
         if(workers<2){drop_exact_initial_rows();return;}
         if(allow_exact)reserve_exact_initial_rows(budget);
-        const auto jobs=search.initial_stream_symbols*templates.size()*(phase_upper?3:1);
+        const auto selected_pairs=acquisition_mask.empty()?templates.size():
+            static_cast<std::size_t>(std::count_if(acquisition_mask.begin(),acquisition_mask.end(),[](auto value){return value!=0;}));
+        const auto jobs=search.initial_stream_symbols*selected_pairs*(phase_upper?3:1);
         const bool needs_code=drift_sections>1 || (cached_templates.empty() && !reuse_single_template());
         const auto worker_bytes=sizeof(detail::FftSearchWorkspace)+
             (needs_code?code.working_bytes():0)+transform*sizeof(Complex)+
@@ -941,7 +1066,7 @@ struct PatternReceiver::Impl {
             (differential_window?hop*sizeof(detail::DifferentialAccumulator):0);
         const auto job_bytes=sizeof(detail::FftSearchJob)+sizeof(detail::FftPreparedTemplate)+
             hop*sizeof(detail::FftSearchScore);
-        long double retained=static_cast<long double>(fixed_reservation)+cache_reservation+latest.bits.capacity();
+        long double retained=static_cast<long double>(fixed_reservation)+cache_reservation+acquisition_mask.capacity()+latest.bits.capacity();
         for(const auto& track:tracks)retained+=track.burst.bits.capacity();
         for(const auto& burst:bursts)retained+=burst.bits.capacity();
         if(retained>=budget || budget-static_cast<std::size_t>(retained)<=sizeof(ScoringStorage)) {
@@ -955,7 +1080,7 @@ struct PatternReceiver::Impl {
            !(config.fake_hopping&&config.fake_hopping->matched_gaps) &&
            config.spreading_mode==SpreadingMode::pattern && uncached_workers>=2) {
             std::size_t nominal_jobs=0;
-            for(std::size_t f=0;f<templates.size();++f)if(clock_ratio(f)==1)++nominal_jobs;
+            for(std::size_t f=0;f<templates.size();++f)if(acquisition_lane(f) && clock_ratio(f)==1)++nominal_jobs;
             const auto bytes=static_cast<long double>(length)*sizeof(std::array<Complex,2>);
             // Reserve the optional waveform before filling spare memory with
             // FFT job outputs. Keep every affordable physical worker and at
@@ -993,6 +1118,12 @@ struct PatternReceiver::Impl {
         if(!cache_fits(budget,0)) {
             drop_scoring();if(drop_exact_initial_rows())prepare_scoring(stop,false);return;
         }
+        auto& prepared_peak=acquisition_mask.empty()?fft_workload->original_prepared_jobs_peak:
+            fft_workload->conditional_prepared_jobs_peak;
+        auto& scoring_peak=acquisition_mask.empty()?fft_workload->original_scoring_peak_bytes:
+            fft_workload->conditional_scoring_peak_bytes;
+        prepared_peak=std::max(prepared_peak,scoring_jobs.capacity());
+        scoring_peak=std::max(scoring_peak,scoring_reservation);
         if(cache_nominal)detail::prepare_fft_nominal_reference(scoring_geometry(),code,storage.nominal_reference,stop);
         if(exact_initial_rows && !exact_initial_rows->valid && needs_code && !scoring_workspaces.empty() &&
            scoring_workspaces.front().code && std::fegetround()==FE_TONEAREST) {
@@ -1037,7 +1168,7 @@ struct PatternReceiver::Impl {
         // transform scratch may leave no room even for two small private
         // pattern caches; release it only when that space is needed.
         if(!cache_fits(budget,minimum) && !scoring.empty())drop_scoring();
-        long double retained=static_cast<long double>(fixed_reservation)+cache_reservation+
+        long double retained=static_cast<long double>(fixed_reservation)+cache_reservation+acquisition_mask.capacity()+
             scoring_reservation+latest.bits.capacity()+(scoring.empty()?sizeof(ScoringStorage):0);
         for(const auto& track:tracks)retained+=track.burst.bits.capacity();
         for(const auto& burst:bursts)retained+=burst.bits.capacity();
@@ -1070,6 +1201,7 @@ struct PatternReceiver::Impl {
         reference.resize(transform);energy_prefix.resize(transform+1);
     }
     void release_idle_scratch() {
+        invalidate_phase_cache();
         // These are the last initial-symbol transforms, not detector state.
         // Unwindowed multi-symbol acquisition rebuilds its initial rows on
         // the next batch; do not retain one row set per idle peer after its
@@ -1098,7 +1230,8 @@ struct PatternReceiver::Impl {
         // Retain the original fixed reservation, including scratch/copy
         // headroom, when deciding whether optional caches can coexist with
         // payload growth. The original uncached bit-capacity proof still holds.
-        long double required=static_cast<long double>(fixed_reservation)+cache_reservation+scoring_reservation+extra+latest.bits.capacity();
+        long double required=static_cast<long double>(fixed_reservation)+cache_reservation+scoring_reservation+
+            acquisition_mask.capacity()+extra+latest.bits.capacity();
         for(const auto& track:tracks)required+=track.burst.bits.capacity();
         for(const auto& burst:bursts)required+=burst.bits.capacity();
         return required+native_plan_bytes()<=bytes;
@@ -1107,12 +1240,63 @@ struct PatternReceiver::Impl {
         // Acquisition only collects pre-reserved peaks. Payload admission occurs
         // after all native scratch is destroyed, so plans can be evicted here.
         if(native_active_bytes)throw Error("native FFT scratch crossed admission boundary");
+        if(!acquisition_mask.empty() && !cache_fits(budget,extra)) {
+            const auto execution_origin=frequency_origin_hz;
+            clear_prior(!prior_pending_count && !prior_dispatch);
+            // A completed ordinary fit still owns its RF basis while its bit
+            // is appended. Only subsequent fresh acquisition is withdrawn.
+            frequency_origin_hz=execution_origin;
+        }
         if(!cache_fits(budget,extra)){native_float_plan.reset();native_double_plan.reset();}
         if(!scoring.empty() && !cache_fits(budget,extra))drop_scoring();
         if((!cached_templates.empty() || exact_initial_rows) && !cache_fits(budget,extra))drop_template_cache();
     }
     Complex template_value(std::size_t bin,std::uint64_t index,unsigned bit,std::size_t f) {
         return template_value(code,bin,index,bit,f);
+    }
+    double frequency_offset(std::size_t f)const {return search.frequency_offsets_hz[f]+frequency_origin_hz;}
+    bool acquisition_lane(std::size_t f)const {return acquisition_mask.empty() || acquisition_mask[f]!=0;}
+    bool link_matches(double origin,std::span<const std::uint8_t> mask)const {
+        if(link_evidence.serial<=prior_link_floor || mask.size()!=search.hypotheses.size() ||
+           link_evidence.phase_view!=fresh_phase_view())return false;
+        const auto target=link_evidence.frequency_offset_hz-origin;
+        double nearest=std::numeric_limits<double>::infinity(),center=0;
+        double minimum=std::numeric_limits<double>::infinity(),maximum=-std::numeric_limits<double>::infinity();
+        const auto tolerance=64*std::numeric_limits<double>::epsilon()*
+            std::max({1.,std::abs(target),std::abs(origin),std::abs(link_evidence.frequency_offset_hz)});
+        for(const auto& h:search.hypotheses)if(h.clock_error_ppm==link_evidence.clock_error_ppm) {
+            minimum=std::min(minimum,h.frequency_offset_hz);maximum=std::max(maximum,h.frequency_offset_hz);
+            const auto distance=std::abs(h.frequency_offset_hz-target);
+            if(distance<nearest){nearest=distance;center=h.frequency_offset_hz;}
+        }
+        if(!std::isfinite(nearest) || target<minimum-tolerance || target>maximum+tolerance)return false;
+        double spacing=std::numeric_limits<double>::infinity();
+        for(std::size_t f=0;f<search.hypotheses.size();++f) {
+            const auto& h=search.hypotheses[f];if(h.clock_error_ppm!=link_evidence.clock_error_ppm)continue;
+            if(std::abs(std::abs(h.frequency_offset_hz-target)-nearest)<=tolerance && !mask[f])return false;
+            const auto gap=std::abs(h.frequency_offset_hz-center);
+            if(gap>tolerance)spacing=std::min(spacing,gap);
+        }
+        // No endpoint extrapolation and no singleton confidence certificate.
+        // This is only a conservative association with the existing cells.
+        return nearest<=tolerance || (std::isfinite(spacing) && nearest<=spacing/2+tolerance);
+    }
+    void record_link(std::size_t f,double origin) {
+        if(search.hypotheses.empty())return;
+        link_evidence={accepted_serial,search.frequency_offsets_hz[f]+origin,search.hypotheses[f].clock_error_ppm,execution_phase_view};
+    }
+    void restore_prior_schedule() {
+        if(!prior_schedule_saved)return;
+        search.early_qualified_fft=prior_early_qualified;
+        search.component_qualified_search=prior_component_qualified;
+        prior_schedule_saved=false;
+    }
+    void clear_prior(bool restore_schedule=true) {
+        decltype(acquisition_mask)().swap(acquisition_mask);
+        prior_link_floor=accepted_serial;
+        frequency_origin_hz=acquisition_origin_hz=0;drop_scoring();drop_template_cache();
+        templates_valid=tracking_reference_valid=false;
+        if(restore_schedule)restore_prior_schedule();
     }
     Complex template_value(PatternCode& pattern,std::size_t bin,std::uint64_t index,unsigned bit,std::size_t f) const {
         const auto sample_position=static_cast<long double>(bin)*bin_samples+static_cast<long double>(bin_samples-1)/2;
@@ -1134,7 +1318,7 @@ struct PatternReceiver::Impl {
         const auto value=cached?scoring.front().nominal_reference[bin][bit]:shaped?
             pattern.shaped_value(index*code.chips_per_symbol(),bit,static_cast<double>(source_position)):
             pattern.value(chip,bit,fraction);
-        return value*std::polar(1.,tau*search.frequency_offsets_hz[f]*static_cast<double>(sample_position)/config.sample_rate);
+        return value*std::polar(1.,tau*frequency_offset(f)*static_cast<double>(sample_position)/config.sample_rate);
     }
     std::array<Complex,2> template_values(PatternCode& pattern,std::size_t bin,std::uint64_t index,std::size_t f) const {
         const auto sample_position=static_cast<long double>(bin)*bin_samples+static_cast<long double>(bin_samples-1)/2;
@@ -1152,13 +1336,51 @@ struct PatternReceiver::Impl {
         if(cached)values={scoring.front().nominal_reference[bin][0],scoring.front().nominal_reference[bin][1]};
         else if(shaped)values=pattern.shaped_values(index*code.chips_per_symbol(),static_cast<double>(source_position));
         else values=pattern.values(chip,fraction);
-        const auto carrier=std::polar(1.,tau*search.frequency_offsets_hz[f]*static_cast<double>(sample_position)/config.sample_rate);
+        const auto carrier=std::polar(1.,tau*frequency_offset(f)*static_cast<double>(sample_position)/config.sample_rate);
         values[0]=values[0]*carrier;values[1]=values[1]*carrier;
         return values;
     }
-    Complex at(std::uint64_t i)const {
+    bool phase_geometry_supported()const noexcept {
+        return !fallback && !calendar_symbols() && bin_samples && !sample_fit && !differential_window && !real_rank;
+    }
+    const PatternPhaseCurve* fresh_phase_view()const noexcept {
+        if(!phase_geometry_supported() || !phase_curve || !phase_curve->view_id() ||
+           phase_curve->sample_rate()!=config.sample_rate || bin_samples>phase_curve->maximum_bin_samples())return nullptr;
+        const auto first=static_cast<long double>(search.input_sample_origin)+static_cast<long double>(next_start)*bin_samples;
+        const auto end=static_cast<long double>(search.input_sample_origin)+sample;
+        return first>=phase_curve->first_sample() && end<=phase_curve->qualified_until()?phase_curve:nullptr;
+    }
+    void invalidate_phase_cache()noexcept {cached_phase_view=nullptr;phase_cache_count=0;}
+    Complex raw_at(std::uint64_t i)const {
         if(i>=bins || bins-i>ring.size())throw Error("pattern observation expired before refinement");
         return ring[static_cast<std::size_t>(i%ring.size())];
+    }
+    Complex phase_weight(std::uint64_t i)const {
+        if(!execution_phase_view)return {1,0};
+        if(cached_phase_view==execution_phase_view && i>=phase_cache_first && i-phase_cache_first<phase_cache_count)
+            return reference[static_cast<std::size_t>(i-phase_cache_first)];
+        const auto center=static_cast<long double>(search.input_sample_origin)+static_cast<long double>(i)*bin_samples+(bin_samples-1)/2.L;
+        return std::polar(1.,-std::remainder(execution_phase_view->value_at(center),tau));
+    }
+    Complex at(std::uint64_t i)const {
+        if(!execution_phase_view)return raw_at(i);
+        if(cached_phase_view==execution_phase_view && i>=phase_cache_first && i-phase_cache_first<phase_cache_count)
+            return spectrum[static_cast<std::size_t>(i-phase_cache_first)];
+        return raw_at(i)*phase_weight(i);
+    }
+    void prepare_phase_window(std::uint64_t first,std::size_t count,std::stop_token stop) {
+        if(!execution_phase_view)return;
+        if(cached_phase_view==execution_phase_view && first>=phase_cache_first &&
+           first-phase_cache_first<=phase_cache_count && count<=phase_cache_count-static_cast<std::size_t>(first-phase_cache_first))return;
+        ensure_execution_scratch();invalidate_phase_cache();
+        if(count>spectrum.size() || count>reference.size())throw Error("phase-view window exceeds original FFT scratch");
+        for(std::size_t i=0;i<count;++i) {
+            if((i&4095U)==0)cancelled(stop);
+            const auto weight=phase_weight(first+i);
+            spectrum[i]=raw_at(first+i)*weight;reference[i]=weight;
+            if(weight!=Complex{1,0})++fft_workload->phase_corrected_bins;
+        }
+        phase_cache_first=first;phase_cache_count=count;cached_phase_view=execution_phase_view;
     }
     Complex carrier_square(std::uint64_t bin)const {
         const auto phase=std::remainder(2*static_cast<long double>(tau)*config.carrier_hz*
@@ -1189,14 +1411,18 @@ struct PatternReceiver::Impl {
             static_cast<long double>(code.symbol_samples())/bin_samples/
             clock_ratio(frequency))));
     }
-    double threshold()const {
+    double threshold_at(long double original_trials)const {
         // Alpha-spending-style threshold under the reference noise model.
         // Actual PCM quadrature covariance and adaptive paths need calibration;
         // this tuning parameter is not a certified lifetime false-alarm bound.
-        const auto t=static_cast<double>(trials)+1;
-        return -std::log(search.false_alarm_probability)+2*std::log(t)+
+        // Optional off-catalogue RF references have a separate, smaller
+        // allowance. They never raise the original-origin Robust threshold.
+        const bool shifted=frequency_origin_hz!=0 || execution_phase_view;
+        const auto t=static_cast<double>(shifted?std::max(original_trials,static_cast<long double>(shifted_trials)):original_trials)+1;
+        return -std::log(search.false_alarm_probability)+(shifted?std::log(64.):0.)+2*std::log(t)+
             std::log(2.*static_cast<double>(templates.size()*search.initial_stream_symbols));
     }
+    double threshold()const {return threshold_at(trials);}
     double continuation_penalty(std::uint64_t radius=2)const {
         // Continuation can select either bit at each timing and carrier.
         // Other carriers reuse a timing chosen from PCM, so charge the full
@@ -1265,11 +1491,122 @@ struct PatternReceiver::Impl {
         if(item.score<search.retain_score)return;
         item.admission_threshold=threshold();
         if(diagnostic_tail)diagnostic_tail->append(history,item);
-        else {
-            if(history.size()==search.candidate_limit)history.erase(history.begin());
+        else if(history.capacity()) {
+            const auto limit=helper_overlap?helper_overlap->history_limit:search.candidate_limit;
+            if(history.size()==limit)history.erase(history.begin());
             history.push_back(item);
         }
         ++history_insertions;
+    }
+    bool ensure_helper_overlap() {
+        if(helper_overlap)return true;
+        // The helper may surrender diagnostics, never candidate peaks or a
+        // checkpoint needed by the original restricted/component scheduler.
+        if(fallback || calendar_symbols() || fft_workload->restricted_timing_active ||
+           component_hop || early_eof_pending || (diagnostic_tail && diagnostic_tail->checkpoint_bytes()))return false;
+        const auto released=history.capacity()*sizeof(PatternEvidence);
+        const auto minimum=sizeof(HelperOverlapStorage)+search.track_limit*sizeof(std::optional<HelperOverlapStorage::PublishedSource>);
+        if(minimum>released)return false;
+        constexpr std::size_t retained_limit=128;
+        std::array<PatternEvidence,retained_limit> saved;
+        const auto saved_count=std::min(history.size(),retained_limit);
+        std::copy_n(history.end()-static_cast<std::ptrdiff_t>(saved_count),saved_count,saved.begin());
+        const auto old_limit=diagnostic_tail?diagnostic_tail->limit():search.candidate_limit;
+        const auto planned_limit=std::min(old_limit,(released-minimum)/sizeof(PatternEvidence));
+        if(diagnostic_tail && !diagnostic_tail->rebind_materialized_limit(planned_limit))return false;
+        // Free first: the bank's actual working allocation cannot grow even
+        // transiently by retaining the old diagnostic array beside metadata.
+        std::vector<PatternEvidence>().swap(history);
+        try {
+            auto storage=std::make_unique<HelperOverlapStorage>();
+            storage->completed.resize(search.track_limit);
+            const auto bytes=storage->working_bytes();
+            if(bytes>released) {
+                if(diagnostic_tail)diagnostic_tail->rebind_materialized_limit(0);
+                return false;
+            }
+            const auto limit=std::min(old_limit,(released-bytes)/sizeof(PatternEvidence));
+            history.reserve(limit);
+            if(history.capacity()*sizeof(PatternEvidence)>released-bytes) {
+                std::vector<PatternEvidence>().swap(history);
+                if(diagnostic_tail)diagnostic_tail->rebind_materialized_limit(0);
+                return false;
+            }
+            storage->history_limit=limit;
+            const auto count=std::min(saved_count,limit);
+            history.insert(history.end(),saved.begin()+static_cast<std::ptrdiff_t>(saved_count-count),
+                           saved.begin()+static_cast<std::ptrdiff_t>(saved_count));
+            if(diagnostic_tail && !diagnostic_tail->rebind_materialized_limit(limit)) {
+                std::vector<PatternEvidence>().swap(history);
+                if(diagnostic_tail)diagnostic_tail->rebind_materialized_limit(0);
+                return false;
+            }
+            helper_overlap=std::move(storage);return true;
+        } catch(const std::bad_alloc&) {
+            // An optional diagnostic allocation may yield completely. With
+            // zero capacity remember() cannot regrow it behind the bank grant.
+            std::vector<PatternEvidence>().swap(history);
+            if(diagnostic_tail)diagnostic_tail->rebind_materialized_limit(0);
+            return false;
+        }
+    }
+    std::optional<PatternSourceIdentity> source_identity(std::uint64_t index,std::uint64_t phase)const try {
+        if(!helper_overlap || fallback || calendar_symbols() || !(config.scramble || config.dsss) ||
+           !config.sample_rate || phase>=config.sample_rate || search.hypotheses.empty())return std::nullopt;
+        auto lower=phase,upper=phase;
+        if(search.search_stream_phases) {
+            // Continuation only narrows its birth phase group. Recover that
+            // ORIGINAL partition at the immutable birth index from the current
+            // representative; never pair a newly exact phase with old PCM.
+            std::size_t count=0;
+            const auto groups=phase_groups(index,0,phase_upper,count);
+            bool found=false;
+            for(std::size_t g=0;g<count;++g)if(phase>=groups[g].lower && phase<=groups[g].upper) {
+                lower=groups[g].lower;upper=canonical_phase_cell_upper(config,groups[g].upper);found=true;break;
+            }
+            if(!found)return std::nullopt;
+        }
+        long double minimum=1,maximum=1;
+        if(search.admitted_clock_half_width_ppm) {
+            const auto radius=static_cast<long double>(*search.admitted_clock_half_width_ppm)*1e-6L;
+            if(!std::isfinite(radius) || radius<0 || radius>=1)return std::nullopt;
+            minimum=1-radius;maximum=1+radius;
+        }
+        auto minimum_step=UINT64_MAX,maximum_step=std::uint64_t{0};
+        for(std::size_t f=0;f<templates.size();++f) {
+            const auto rate=static_cast<long double>(clock_ratio(f));
+            minimum=std::min(minimum,rate);maximum=std::max(maximum,rate);
+            const auto step=symbol_bins(f);
+            if(step>UINT64_MAX/bin_samples)return std::nullopt;
+            minimum_step=std::min(minimum_step,step*bin_samples);
+            maximum_step=std::max(maximum_step,step*bin_samples);
+        }
+        if(bin_samples>UINT64_MAX/2 || minimum_step<=2*bin_samples || maximum_step>UINT64_MAX-2*bin_samples)return std::nullopt;
+        const auto symbol=static_cast<long double>(code.symbol_samples());
+        minimum=std::min(minimum,symbol/(maximum_step+2*bin_samples));
+        maximum=std::max(maximum,symbol/(minimum_step-2*bin_samples));
+        if(2.L*bin_samples*maximum>symbol)return std::nullopt;
+        const auto radius=std::max(1-minimum,maximum-1)*1e6L;
+        if(!std::isfinite(radius) || radius>=1e6L || upper>=config.sample_rate)return std::nullopt;
+        return PatternSourceIdentity{config.stream_epoch,index,
+            std::nextafter(static_cast<double>(radius),std::numeric_limits<double>::infinity()),
+            static_cast<std::uint32_t>(lower),static_cast<std::uint32_t>(upper),config.sample_rate};
+    } catch(const Error&) {return std::nullopt;}
+    bool independent_overlap(const PatternBurst& old,const PatternEvidence& item,bool helper_candidate)const {
+        if(!(old.helper_acquired || helper_candidate) || item.score<threshold())return false;
+        const auto a=source_identity(old.stream_first_symbol,old.stream_phase_samples);
+        const auto b=source_identity(item.stream_symbol,item.stream_phase_samples);
+        return a && b && pattern_source_identities_disjoint(*a,old.stream_first_sample,old.end_sample,
+            code.symbol_samples(),*b,item.first_sample,item.end_sample,code.symbol_samples());
+    }
+    bool independent_overlap(std::size_t span_index,const PatternEvidence& item)const {
+        if(!helper_overlap || span_index>=completed.size() || item.score<threshold())return false;
+        const auto& identity=helper_overlap->completed[span_index];
+        if(!identity)return false; // Unknown ordinary published spans retain their original veto.
+        const auto candidate=source_identity(item.stream_symbol,item.stream_phase_samples);
+        const auto& span=completed[span_index];
+        return candidate && pattern_source_identities_disjoint(identity->identity,identity->first,span.end,code.symbol_samples(),
+            *candidate,item.first_sample,item.end_sample,code.symbol_samples());
     }
     std::array<std::size_t,5> drift_edges(std::size_t frequency) const {
         std::array<std::size_t,5> edges{};edges.back()=length;
@@ -1435,6 +1772,7 @@ struct PatternReceiver::Impl {
     PatternEvidence measure(std::uint64_t start,std::uint64_t index,std::size_t f,std::uint64_t observed_before,
                             std::span<const Complex> carrier_phases,std::stop_token stop,
                             const PatternEvidence* trace_expected=nullptr) {
+        if(execution_phase_view)++fft_workload->phase_view_tracking_fits;
         std::array<Complex,2> dot{},square{};std::array<double,2> norm{};double energy=0;
         SectionFits sections;const auto edges=drift_edges(f);unsigned section=0;
         prepare_tracking_reference(index,f,stop);
@@ -1465,7 +1803,7 @@ struct PatternReceiver::Impl {
         // end. Keep that end in evidence so continuation excludes all reused
         // bins, including the noise-only tail of a faster rate alternative.
         PatternEvidence result{start*bin_samples,(start+length)*bin_samples,index,
-            config.carrier_hz+search.frequency_offsets_hz[f],std::max(zero,one),std::min(zero,one),one>zero?1U:0U,active_stream_phase};
+            config.carrier_hz+frequency_offset(f),std::max(zero,one),std::min(zero,one),one>zero?1U:0U,active_stream_phase};
         result.frequency_hypothesis=static_cast<std::uint32_t>(f);
         if(trace_expected)audio::trace::record("symbol_burst_fft_fit",[&](auto& fields) {
             fields.add("stage","selected continuation before track update; trace recomputes cached fit");
@@ -1534,14 +1872,106 @@ struct PatternReceiver::Impl {
         for(unsigned bit=0;bit<2;++bit)result[bit]=differential.combine(result[bit],bit);
         return result;
     }
+    // Serial coherent continuation repeats the same shaped source row at
+    // every RF cell sharing an exact clock ratio. Keep all original fits and
+    // their arithmetic, using only the idle acquisition product as scratch.
+    template<class Eligible>
+    bool measure_clock_groups(std::uint64_t start,std::uint64_t index,std::uint64_t observed_before,
+                              std::size_t current,Eligible eligible,
+                              std::span<std::array<double,2>> scores,std::stop_token stop) {
+        if(drift_sections!=1 || differential_window || sample_fit || calendar_symbols() ||
+           product.size()/2<length || scores.size()!=templates.size())return false;
+        std::array<std::size_t,16> representatives{};
+        std::size_t groups=0,jobs=0;
+        for(std::size_t f=0;f<templates.size();++f)if(f!=current && eligible(f)) {
+            ++jobs;std::size_t group=0;
+            while(group<groups && clock_ratio(representatives[group])!=clock_ratio(f))++group;
+            if(group==groups) {
+                if(groups==representatives.size())return false;
+                representatives[groups++]=f;
+            }
+        }
+        if(jobs<4 || jobs<2*groups)return false;
+        if(index>std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol())
+            throw Error("pattern stream coordinate overflow");
+        // With no dedicated tracking row, product is also the ordinary
+        // template cache. Its old tag cannot survive this scratch use, even
+        // on cancellation or an exception.
+        struct ScratchScope {
+            Impl& state;
+            explicit ScratchScope(Impl& value):state(value) {
+                if(state.tracking_reference.empty())state.tracking_reference_valid=false;
+            }
+            ~ScratchScope(){if(state.tracking_reference.empty())state.tracking_reference_valid=false;}
+        } scratch_scope{*this};
+        const auto skip=static_cast<std::size_t>(observed_before>start?
+            std::min<std::uint64_t>(length,observed_before-start):0);
+        for(std::size_t group=0;group<groups;++group) {
+            cancelled(stop);const auto representative=representatives[group];
+            const auto ratio=clock_ratio(representative);
+            code.prepare_symbol(index*code.chips_per_symbol(),stop);
+            std::size_t valid=length;
+            for(std::size_t i=0;i<length;++i) {
+                if((i&4095U)==0)cancelled(stop);
+                const auto sample_position=static_cast<long double>(i)*bin_samples+static_cast<long double>(bin_samples-1)/2;
+                const auto source_position=sample_position*ratio;
+                if(variable_clock && source_position>=code.symbol_samples()){valid=i;break;}
+                const auto chip_position=source_position/code.chip_samples();
+                const auto local=static_cast<std::uint64_t>(chip_position);
+                if(index>(std::numeric_limits<std::uint64_t>::max()-local)/code.chips_per_symbol())
+                    throw Error("pattern stream coordinate overflow");
+                const auto chip=index*code.chips_per_symbol()+local;
+                const auto fraction=static_cast<double>(chip_position-local);
+                const bool cached=ratio==1 && !scoring.empty() && !scoring.front().nominal_reference.empty();
+                std::array<Complex,2> values;
+                if(cached)values={scoring.front().nominal_reference[i][0],scoring.front().nominal_reference[i][1]};
+                else if(shaped)values=code.shaped_values(index*code.chips_per_symbol(),static_cast<double>(source_position));
+                else values=code.values(chip,fraction);
+                product[2*i]=values[0];product[2*i+1]=values[1];
+            }
+            for(std::size_t f=0;f<templates.size();++f) {
+                if(f==current || !eligible(f) || clock_ratio(f)!=ratio)continue;
+                cancelled(stop);
+                std::array<Complex,2> dot{};std::array<double,2> norm{};double energy=0;
+                for(std::size_t i=skip;i<length;++i) {
+                    if((i&4095U)==0)cancelled(stop);
+                    const auto value=at(start+i);energy+=std::norm(value);
+                    std::array<Complex,2> patterns{};
+                    if(i<valid) {
+                        const auto sample_position=static_cast<long double>(i)*bin_samples+static_cast<long double>(bin_samples-1)/2;
+                        const auto carrier=std::polar(1.,tau*frequency_offset(f)*static_cast<double>(sample_position)/config.sample_rate);
+                        patterns={product[2*i]*carrier,product[2*i+1]*carrier};
+                    }
+                    for(unsigned bit=0;bit<2;++bit) {
+                        dot[bit]+=value*std::conj(patterns[bit]);norm[bit]+=std::norm(patterns[bit]);
+                    }
+                }
+                const auto count=evidence_count(length-skip);
+                scores[f]={pattern_evidence(dot[0],energy,norm[0],count,noise_condition,real_rank,false,Complex{}),
+                           pattern_evidence(dot[1],energy,norm[1],count,noise_condition,real_rank,false,Complex{})};
+                if(execution_phase_view)++fft_workload->phase_view_tracking_fits;
+            }
+        }
+        return true;
+    }
+    bool fine_private_chip_guard()const noexcept {
+        return search.outer_presence_guard && bin_samples==1 && real_rank && !sample_fit && !shaped &&
+            (config.scramble || config.dsss) && config.dsss_factor<=1 && drift_sections==1 &&
+            !differential_window && !config.fake_hopping && !calendar_symbols();
+    }
     bool outer_presence_check(PatternEvidence& evidence,std::uint64_t observed_before,std::stop_token stop,
-            double* chain_score=nullptr) {
+            double* chain_score=nullptr,bool established_continuation=false) {
         if(chain_score)*chain_score=evidence.score;
-        if(!search.outer_presence_guard || config.dsss_factor<=1 || drift_sections>1 || differential_window ||
-            evidence.score<search.retain_score)return true;
+        // Fresh acquisition and every original standalone decision retain
+        // their complete original score, including declared-cell mismatch.
+        const bool chip_guard=established_continuation && evidence.score<threshold() && fine_private_chip_guard();
+        const bool outer_guard=search.outer_presence_guard && config.dsss_factor>1 &&
+            drift_sections==1 && !differential_window;
+        if((!chip_guard && !outer_guard) || evidence.score<search.retain_score)return true;
         const auto start=evidence.first_sample/bin_samples,index=evidence.stream_symbol;
         const auto f=evidence.frequency_hypothesis;
         const auto skip=static_cast<std::size_t>(observed_before>start?std::min<std::uint64_t>(length,observed_before-start):0);
+        prepare_phase_window(start,length,stop);
         stream_phase(evidence.stream_phase_samples);
         detail::CorrelationOuterEvidence outer;
         std::array<detail::CorrelationFit,2> full{};
@@ -1561,15 +1991,16 @@ struct PatternReceiver::Impl {
             const auto sample_position=static_cast<long double>(i)*bin_samples+(bin_samples-1)/2.L;
             const auto source=sample_position*clock_ratio(f);
             const auto observation=at(start+i);
-            const auto rotation=std::polar(1.,tau*search.frequency_offsets_hz[f]*static_cast<double>(sample_position)/config.sample_rate);
-            if(source<code.symbol_samples()) {
+            const auto rotation=std::polar(1.,tau*frequency_offset(f)*static_cast<double>(sample_position)/config.sample_rate);
+            if(outer_guard && source<code.symbol_samples()) {
                 const auto measured=observation*std::conj(rotation);
                 if(shaped)pattern_pulse_each(static_cast<double>(source),code.symbol_samples(),code.chip_samples(),
                     [&](std::uint64_t local,double pulse){outer.add(local,pulse*measured,coefficients);});
                 else outer.add(static_cast<std::uint64_t>(source/code.chip_samples()),measured,coefficients);
             }
             const auto local=static_cast<std::uint64_t>(std::max(0.L,source/code.chip_samples()));
-            const auto gamma=image*std::conj(carrier_square(start+i));
+            auto gamma=image*std::conj(carrier_square(start+i));
+            if(execution_phase_view) {const auto weight=phase_weight(start+i);gamma*=weight*weight;}
             const auto determinant=1-std::norm(gamma);
             double a=0,b=0,c=0;std::uint64_t rank=2;
             if(!sample_fit) {
@@ -1598,6 +2029,18 @@ struct PatternReceiver::Impl {
                 total.ss+=fit.ss;total.cs+=fit.cs;total.energy+=fit.energy;total.count+=fit.count;
                 chips[bit].add_fit(fit,local);
             }
+        }
+        if(chip_guard) {
+            // A fine real-sample grid is not fresh independent evidence when
+            // the input is a held-chip private cover. Keep the original AWGN
+            // score unless the existing nested-subspace test independently
+            // qualifies strong colored excess. Its finite-noise allowance
+            // removes a correctly represented payload at arbitrary strength.
+            const auto& full_fit=full[evidence.bit];const auto& chip_fit=chips[evidence.bit];
+            const bool colored=chip_fit.colored_excess(full_fit,threshold(),1.);
+            if(colored)evidence.score=std::min(evidence.score,chip_fit.score(full_fit));
+            if(chain_score)*chain_score=evidence.score;
+            return true;
         }
         outer.finish(coefficients);
         // Match the compact receiver's weak-chain null. The shared hop gaps
@@ -1641,6 +2084,7 @@ struct PatternReceiver::Impl {
             event.frequency_hz=track.burst.frequency_hz;event.stream_phase_samples=track.burst.stream_phase_samples;
             event.bits.assign(track.burst.bits.begin(),track.burst.bits.begin()+static_cast<std::ptrdiff_t>(count));
             event.complete=complete && count==track.confirmed;
+            event.helper_acquired=track.burst.helper_acquired;
             event.end_sample=count==track.confirmed?track.confirmed_end:
                 !calendar_symbols()?event.first_sample+count*(search.hypotheses.empty()?code.symbol_samples():symbol_bins(track.frequency)*bin_samples):
                 event.first_sample+static_cast<std::uint64_t>(std::llround((static_cast<long double>(source_start(event.first_stream_symbol+count-1,track.phase_lower))-
@@ -1659,8 +2103,18 @@ struct PatternReceiver::Impl {
             });
             room_for_bits(3*event.bits.capacity());latest=event;
             if(count) {
-                if(completed.size()==search.track_limit)completed.erase(completed.begin());
+                if(completed.size()==search.track_limit) {
+                    completed.erase(completed.begin());
+                    if(helper_overlap)std::move(helper_overlap->completed.begin()+1,helper_overlap->completed.end(),
+                                                 helper_overlap->completed.begin());
+                }
                 completed.push_back({event.first_sample,event.end_sample,event.frequency_hz});
+                if(helper_overlap) {
+                    auto& source=helper_overlap->completed[completed.size()-1];source.reset();
+                    if(event.helper_acquired)if(const auto identity=source_identity(
+                            track.burst.stream_first_symbol,track.burst.stream_phase_samples))
+                        source=HelperOverlapStorage::PublishedSource{*identity,track.burst.stream_first_sample};
+                }
             }
             bursts.push_back(std::move(event));
             track.burst.bits.erase(track.burst.bits.begin(),track.burst.bits.begin()+static_cast<std::ptrdiff_t>(count));
@@ -1685,6 +2139,7 @@ struct PatternReceiver::Impl {
         event.frequency_hz=track.burst.frequency_hz;event.score=track.confirmed_score;
         event.support_samples=track.confirmed_support;
         event.stream_phase_samples=track.burst.stream_phase_samples;event.missing_slots=track.gap_slots;
+        event.helper_acquired=track.burst.helper_acquired;
         bursts.push_back(std::move(event));track.gap_slots=0;
         track.burst.first_sample=resumed_sample;track.burst.first_stream_symbol=resumed_symbol;
     }
@@ -1704,20 +2159,18 @@ struct PatternReceiver::Impl {
         if(skip==length)return false;
         const auto job_bytes=templates.size()*sizeof(detail::FftSearchJob);
         const auto output_bytes=templates.size()*sizeof(detail::FftSearchScore);
-        const auto used=std::max(working_bytes(),fixed_reservation+cache_reservation+scoring_reservation);
+        const auto used=std::max(working_bytes(),fixed_reservation+cache_reservation+scoring_reservation+acquisition_mask.capacity());
         if(used>=budget || job_bytes>=budget-used)return false;
         std::vector<detail::FftSearchJob> jobs(templates.size());
         for(std::size_t f=0;f<jobs.size();++f) {
-            jobs[f]={index,active_stream_phase,f,search.frequency_offsets_hz[f]};jobs[f].clock_ratio=clock_ratio(f);
+            jobs[f]={index,active_stream_phase,f,frequency_offset(f)};jobs[f].clock_ratio=clock_ratio(f);
         }
         detail::FftSearchBatch batch;batch.geometry=scoring_geometry();
         batch.geometry.search_arithmetic=static_cast<std::uint32_t>(SearchArithmetic::fp64);
         batch.geometry.evidence_count=evidence_count(length-skip);
         batch.observation_skip=skip;batch.starts=batch.score_stride=1;batch.first_bin=start;
         batch.retain_floor=search.retain_score;batch.refine_threshold=threshold();
-        batch.refine_threshold_max=-std::log(search.false_alarm_probability)+
-            2*std::log(static_cast<long double>(trials)+templates.size()+1)+
-            std::log(2.*static_cast<double>(templates.size()*search.initial_stream_symbols));
+        batch.refine_threshold_max=threshold_at(static_cast<long double>(trials)+templates.size());
         const auto requirements=detail::frequency_axis::choose_geometry(batch.geometry,jobs,1,1,
             budget-used-job_bytes,detail::search_concurrency(search.worker_threads),false,skip);
         if(!requirements.supported() || !cache_fits(budget,job_bytes+output_bytes+requirements.scratch_bytes)) {
@@ -1750,6 +2203,19 @@ struct PatternReceiver::Impl {
                          std::uint64_t latest_start=std::numeric_limits<std::uint64_t>::max()) {
         for(auto it=tracks.begin();it!=tracks.end();) {
             cancelled(stop);auto& track=*it;bool ended=false;
+            // Acquisition and each established/provisional track retain their
+            // own RF reference. A broad origin-zero audit cannot reinterpret
+            // an already accepted track or its clock lanes.
+            struct OriginScope {
+                Impl& state;double previous;const PatternPhaseCurve* previous_view;
+                OriginScope(Impl& value,double origin,const PatternPhaseCurve* view):
+                        state(value),previous(value.frequency_origin_hz),previous_view(value.execution_phase_view) {
+                    if(previous!=origin)state.tracking_reference_valid=false;
+                    state.frequency_origin_hz=origin;state.execution_phase_view=view;
+                }
+                ~OriginScope(){if(state.frequency_origin_hz!=state.acquisition_origin_hz)state.tracking_reference_valid=false;
+                    state.frequency_origin_hz=state.acquisition_origin_hz;state.execution_phase_view=previous_view;}
+            } origin_scope{*this,track.frequency_origin_hz,track.phase_view};
             while(track.next<=latest_start) {
                 const auto radius=track_radius(track);
                 const auto lookahead=final && !packed_calendar && !burst_plan?0:radius;
@@ -1764,6 +2230,7 @@ struct PatternReceiver::Impl {
                 auto selected_frequency=track.frequency;
                 const auto low=track.next>radius?track.next-radius:0;
                 const auto high=std::min(track.next+radius,bins-length);
+                prepare_phase_window(low,static_cast<std::size_t>(length+high-low),stop);
                 // Acquisition is finished while tracks run. Its work buffer
                 // fits all five overlapping timing windows, whose exact
                 // carrier Gram phases also repeat across frequency fits.
@@ -1790,7 +2257,7 @@ struct PatternReceiver::Impl {
                     for(auto f=first_frequency;f<end_frequency;++f)for(auto start=low;start<=high;++start) {
                         if(bins-start>ring.size())continue;
                         auto fit=measure(start,track.index,f,track.burst.end_sample/bin_samples,
-                            carrier_phases(start),stop);++trials;
+                            carrier_phases(start),stop);if(frequency_origin_hz!=0 || execution_phase_view)++shifted_trials;else ++trials;
                         if(packed_calendar || burst_plan) {
                             frequency_scores[f][fit.bit]=std::max(frequency_scores[f][fit.bit],fit.score);
                             frequency_scores[f][1-fit.bit]=std::max(frequency_scores[f][1-fit.bit],fit.alternative_score);
@@ -1808,7 +2275,7 @@ struct PatternReceiver::Impl {
                 const auto chosen_carriers=carrier_phases(chosen);
                 const auto eligible=[&](std::size_t f) {
                     if(packed_calendar || burst_plan)return false; // Full bank already scored above.
-                    return competing_frequencies() || track.established || std::abs(search.frequency_offsets_hz[f]-search.frequency_offsets_hz[track.frequency])<=
+                    return competing_frequencies() || track.established || std::abs(frequency_offset(f)-frequency_offset(track.frequency))<=
                         static_cast<double>(config.sample_rate)/static_cast<double>(code.symbol_samples());
                 };
                 std::size_t jobs=0;
@@ -1816,6 +2283,8 @@ struct PatternReceiver::Impl {
                 const bool axis=jobs>=1023 && jobs*5>=templates.size()*4 &&
                     tracking_frequency_axis(chosen,track.index,track.burst.end_sample/bin_samples,frequency_scores,stop);
                 auto* workers=axis?nullptr:prepare_tracking(jobs);
+                const bool grouped=!axis && !workers && measure_clock_groups(chosen,track.index,
+                    track.burst.end_sample/bin_samples,track.frequency,eligible,frequency_scores,stop);
                 double axis_max=best.score;
                 if(axis)for(std::size_t f=0;f<templates.size();++f)if(eligible(f))
                     axis_max=std::max({axis_max,frequency_scores[f][0],frequency_scores[f][1]});
@@ -1833,15 +2302,16 @@ struct PatternReceiver::Impl {
                                     track.burst.end_sample/bin_samples,chosen_carriers,stop);
                             }
                         });
+                    if(execution_phase_view)fft_workload->phase_view_tracking_fits+=jobs;
                 }
                 for(std::size_t f=0;f<templates.size();++f) {
                     if(!eligible(f))continue;
                     auto fit=timing_fit;
                     if(f!=track.frequency) {
-                        if(axis || workers) {
+                        if(axis || workers || grouped) {
                             const auto zero=frequency_scores[f][0],one=frequency_scores[f][1];
                             fit={chosen*bin_samples,(chosen+length)*bin_samples,track.index,
-                                config.carrier_hz+search.frequency_offsets_hz[f],std::max(zero,one),std::min(zero,one),
+                                config.carrier_hz+frequency_offset(f),std::max(zero,one),std::min(zero,one),
                                 one>zero?1U:0U,active_stream_phase};
                             fit.frequency_hypothesis=static_cast<std::uint32_t>(f);
                             // Original arithmetic decides the strongest carrier
@@ -1852,7 +2322,7 @@ struct PatternReceiver::Impl {
                             }
                         } else fit=measure(chosen,track.index,f,track.burst.end_sample/bin_samples,chosen_carriers,stop);
                     }
-                    if(f!=track.frequency)++trials;
+                    if(f!=track.frequency){if(frequency_origin_hz!=0 || execution_phase_view)++shifted_trials;else ++trials;}
                     frequency_scores[f][fit.bit]=fit.score;
                     frequency_scores[f][1-fit.bit]=fit.alternative_score;
                     if(fit.score>best.score){best=fit;selected_frequency=f;}
@@ -1861,32 +2331,43 @@ struct PatternReceiver::Impl {
                 // carrier during continuation. Apply overlap arbitration here
                 // as well as at acquisition, before it can publish a duplicate
                 // suffix of the same physical stream.
-                if(!track.established) {
+                const auto duplicate_continuation=[&](bool distinct_qualified) {
+                    if(track.established)return false;
                     const auto same_frequency=[&](double frequency) {
                         return competing_frequencies() || std::abs(best.frequency_hz-frequency)<=
                             static_cast<double>(config.sample_rate)/static_cast<double>(code.symbol_samples());
                     };
-                    const auto duplicate=std::any_of(tracks.begin(),tracks.end(),[&](const Track& other) {
+                    if(std::any_of(tracks.begin(),tracks.end(),[&](const Track& other) {
                         return &other!=&track && other.established && !other.pending_gap && !other.unconfirmed_symbols &&
                             same_frequency(other.burst.frequency_hz) &&
                             track.burst.stream_first_sample>=other.burst.stream_first_sample &&
                             best.first_sample<=other.next*bin_samples+2*bin_samples &&
-                            best.end_sample>other.burst.stream_first_sample;
-                    }) || std::any_of(completed.begin(),completed.end(),[&](const Completed& span) {
-                        return same_frequency(span.frequency) && track.burst.stream_first_sample>=span.first &&
-                            best.first_sample<span.end && best.end_sample>span.first;
-                    });
-                    if(duplicate){ended=true;break;}
-                }
+                            best.end_sample>other.burst.stream_first_sample &&
+                            !(distinct_qualified && independent_overlap(other.burst,best,track.burst.helper_acquired));
+                    }))return true;
+                    for(std::size_t i=0;i<completed.size();++i) {
+                        const auto& span=completed[i];
+                        if(same_frequency(span.frequency) && track.burst.stream_first_sample>=span.first &&
+                           best.first_sample<span.end && best.end_sample>span.first &&
+                           !(distinct_qualified && independent_overlap(i,best)))return true;
+                    }
+                    return false;
+                };
+                // Preserve the ordinary early veto exactly. Helper-involved
+                // exceptions first require the unchanged independent guard.
+                const bool pending_duplicate=duplicate_continuation(false);
+                if(pending_duplicate && !helper_overlap){ended=true;break;}
                 if(burst_plan && best.score>=threshold() && audio::trace::event_enabled("symbol_burst_fft_fit"))
                     (void)measure(chosen,track.index,selected_frequency,track.burst.end_sample/bin_samples,
                         chosen_carriers,stop,&best);
                 double chain_score=best.score;
-                const auto presence=outer_presence_check(best,track.burst.end_sample/bin_samples,stop,&chain_score);
+                const auto presence=outer_presence_check(best,track.burst.end_sample/bin_samples,stop,&chain_score,
+                    track.established);
                 remember(best);
                 const auto symbol_support=temporal_symbol_support(
                     best,selected_frequency,track.burst.end_sample/bin_samples,stop);
                 const auto standalone=best.score>=threshold() && presence;
+                if(pending_duplicate && duplicate_continuation(standalone)){ended=true;break;}
                 if(acquisition_suspended && !track.established && standalone &&
                    best.first_sample/bin_samples>acquisition_last_start) {
                     // The ordinary standalone rule would replace the weak
@@ -1986,17 +2467,20 @@ struct PatternReceiver::Impl {
                         track.frequency_scores[f]+=frequency_scores[f][best.bit];
                     const auto winner=static_cast<std::size_t>(std::max_element(track.frequency_scores.begin(),
                         track.frequency_scores.begin()+static_cast<std::ptrdiff_t>(templates.size()))-track.frequency_scores.begin());
-                    track.burst.frequency_hz=config.carrier_hz+search.frequency_offsets_hz[winner];
+                    track.burst.frequency_hz=config.carrier_hz+search.frequency_offsets_hz[winner]+track.frequency_origin_hz;
                     track.frequency=selected_frequency;
                     track.admitted=track.established=true;track.unconfirmed_symbols=0;
                     track.pending_gap=false;
                     track.confirmed=track.burst.bits.size();track.confirmed_end=best.end_sample;
+                    accepted_serial+=track.confirmed-prior_confirmed;
+                    if(track.confirmed>prior_confirmed)record_link(selected_frequency,track.frequency_origin_hz);
                     track.confirmed_score=track.total_score;track.pending_score=0;track.penalty=0;
                     track.confirmed_support=track.total_support;
                     audio::trace::record("pattern_confirmation",[&](auto& f) {
                         f.add("phase","continuation");f.add("epoch",config.stream_epoch);f.add("input_samples",sample);
                         f.add("stream_first_sample",track.burst.stream_first_sample);f.add("stream_first_symbol",track.burst.stream_first_symbol);
                         f.add("sample_rate",config.sample_rate);f.add("input_sample_origin",search.input_sample_origin);
+                        f.add("phase_view_id",track.phase_view?track.phase_view->view_id():0);
                         f.add("stream_phase_samples",track.burst.stream_phase_samples);f.add("frequency_hz",track.burst.frequency_hz);
                         f.add("chunk_first_symbol",track.burst.first_stream_symbol);f.add("prior_confirmed",prior_confirmed);
                         f.add("confirmed",track.confirmed);f.add("newly_confirmed",track.confirmed-prior_confirmed);
@@ -2013,7 +2497,8 @@ struct PatternReceiver::Impl {
             if(ended)it=tracks.erase(it);else ++it;
         }
     }
-    void admit(const PatternEvidence& item,std::size_t f,double chain_score,std::stop_token stop) {
+    void admit(const PatternEvidence& item,std::size_t f,double chain_score,double origin,
+            const PatternPhaseCurve* view,std::stop_token stop) {
         if(acquisition_suspended && item.first_sample/bin_samples>acquisition_last_start)return;
         if(item.score<search.retain_score || item.score-item.alternative_score<1)return;
         remember(item);
@@ -2028,12 +2513,23 @@ struct PatternReceiver::Impl {
             return competing_frequencies() ||
                 std::abs(item.frequency_hz-frequency)<=static_cast<double>(config.sample_rate)/static_cast<double>(code.symbol_samples());
         };
-        for(const auto& span:completed)
-            if(same_frequency(span.frequency)&&item.first_sample<span.end&&item.end_sample>span.first)return;
+        for(std::size_t i=0;i<completed.size();++i) {
+            const auto& span=completed[i];
+            if(same_frequency(span.frequency)&&item.first_sample<span.end&&item.end_sample>span.first &&
+               !independent_overlap(i,item))return;
+        }
         for(auto it=tracks.begin();it!=tracks.end();) {
             const auto& track=*it;
             const auto margin=2*bin_samples;
             if(same_frequency(track.burst.frequency_hz)&&item.first_sample+margin>=track.burst.stream_first_sample && item.first_sample<=track.next*bin_samples+margin) {
+                // A helper-born false alias cannot permanently veto a distinct
+                // independently qualified private stream. Keep both owners;
+                // neither published prefix is retracted or used as framing.
+                if(independent_overlap(track.burst,item,prior_dispatch)){++it;continue;}
+                // Unknown alignment cannot withdraw a helper-involved owner
+                // that already accepted bits. A fresh unpublished peak keeps
+                // the overlap veto; ordinary replacement policy is unchanged.
+                if(track.established && (track.burst.helper_acquired || prior_dispatch))return;
                 // A weak fresh noise candidate must not displace timing that
                 // already decoded a symbol and is crossing a bounded gap.
                 if(track.established && !track.admitted && item.score<threshold())return;
@@ -2072,6 +2568,11 @@ struct PatternReceiver::Impl {
                 }
                 if(track.admitted && !follows_gap && (track.pending_gap || track.confirmed<track.burst.bits.size()) &&
                    item.first_sample>=track.confirmed_end && item.score>=threshold()) {
+                    // A qualified helper may expose a later independent
+                    // start while an accepted owner is still scoring absence.
+                    // Keep that owner's original clock through physical END;
+                    // the fresh start still competes under the same track cap.
+                    if(track.established && track.helper_gap_protected){++it;continue;}
                     // Confidence belongs only to the confirmed span. Weak
                     // pending extensions cannot veto an independently strong
                     // later start; finish the old span and consider this one.
@@ -2091,10 +2592,13 @@ struct PatternReceiver::Impl {
             tracks.erase(worst);
         }
         Track track;track.frequency_scores.resize(templates.size());
+        track.helper_gap_protected=helper_gap_protection;
+        track.frequency_origin_hz=origin;track.phase_view=view;track.serial=++track_serial;
         append_bit(track.burst.bits,static_cast<std::uint8_t>(item.bit));
         track.burst.first_sample=item.first_sample;track.burst.end_sample=item.end_sample;track.burst.frequency_hz=item.frequency_hz;
         track.burst.first_stream_symbol=item.stream_symbol;track.index=item.stream_symbol+1;
         track.burst.stream_first_sample=item.first_sample;track.burst.stream_first_symbol=item.stream_symbol;
+        track.burst.helper_acquired=prior_dispatch;
         track.phase_lower=track.phase_upper=config.stream_phase_samples;
         if(search.search_stream_phases) {
             std::size_t group_count=0;
@@ -2111,6 +2615,8 @@ struct PatternReceiver::Impl {
         track.total_support=temporal_symbol_support(item,f,0,stop);
         track.frequency_scores[f]=item.score;
         track.admitted=track.established=item.score>=threshold();
+        if(track.admitted)++accepted_serial;
+        if(track.admitted)record_link(f,origin);
         if(track.admitted){track.confirmed=1;track.confirmed_end=item.end_sample;track.confirmed_score=item.score;track.penalty=0;
             track.confirmed_support=track.total_support;}
         else track.pending_score=chain_score;
@@ -2118,6 +2624,7 @@ struct PatternReceiver::Impl {
             f.add("phase","acquisition");f.add("epoch",config.stream_epoch);f.add("input_samples",sample);
             f.add("stream_first_sample",track.burst.stream_first_sample);f.add("stream_first_symbol",track.burst.stream_first_symbol);
             f.add("sample_rate",config.sample_rate);f.add("input_sample_origin",search.input_sample_origin);
+            f.add("phase_view_id",track.phase_view?track.phase_view->view_id():0);
                         f.add("stream_phase_samples",track.burst.stream_phase_samples);f.add("frequency_hz",track.burst.frequency_hz);
                         f.add("chunk_first_symbol",track.burst.first_stream_symbol);f.add("prior_confirmed",0);f.add("confirmed",1);f.add("newly_confirmed",1);
             f.add("end_sample",track.confirmed_end);f.add("standalone",true);f.add("joint_chain",false);
@@ -2138,7 +2645,7 @@ struct PatternReceiver::Impl {
                 const auto score=bit?b:a;
                 if(score>peaks[bit].score) {
                     peaks[bit]={(next_start+j)*bin_samples,(next_start+j+length)*bin_samples,index,
-                        config.carrier_hz+search.frequency_offsets_hz[f],score,bit?a:b,bit,phase};
+                        config.carrier_hz+frequency_offset(f),score,bit?a:b,bit,phase};
                     peaks[bit].frequency_hypothesis=static_cast<std::uint32_t>(f);
                 }
             }
@@ -2146,7 +2653,7 @@ struct PatternReceiver::Impl {
         }
         if(std::max(a,b)<search.retain_score)return;
         PatternEvidence item{(next_start+j)*bin_samples,(next_start+j+length)*bin_samples,index,
-            config.carrier_hz+search.frequency_offsets_hz[f],std::max(a,b),std::min(a,b),b>a?1U:0U,phase};
+            config.carrier_hz+frequency_offset(f),std::max(a,b),std::min(a,b),b>a?1U:0U,phase};
         item.frequency_hypothesis=static_cast<std::uint32_t>(f);
         const auto existing=std::find_if(peaks.begin(),peaks.end(),[&](const auto& p){
             const auto distance=p.first_sample>item.first_sample?p.first_sample-item.first_sample:item.first_sample-p.first_sample;
@@ -2318,6 +2825,7 @@ struct PatternReceiver::Impl {
                 struct CacheReservation {std::size_t& bytes;std::size_t before;
                     ~CacheReservation(){bytes=before;}} private_cache_scope{native_active_bytes,before_cache};
                 for(std::size_t f=0;f<templates.size();++f) {
+                    if(!acquisition_lane(f))continue;
                     if(private_cache)++fft_workload->private_template_lane_jobs;
                     ++fft_workload->template_jobs;
                     fft_workload->retained_start_trials+=selected.selected_count;
@@ -2338,7 +2846,7 @@ struct PatternReceiver::Impl {
                                 const auto position=static_cast<long double>(i)*bin_samples+(bin_samples-1)/2.L;
                                 if(!variable_clock || position*clock_ratio(f)<code.symbol_samples())
                                     original=private_cache->value(i,clock_ratio(f))[b]*std::polar(1.,
-                                        tau*search.frequency_offsets_hz[f]*static_cast<double>(position)/config.sample_rate);
+                                        tau*frequency_offset(f)*static_cast<double>(position)/config.sample_rate);
                             }else original=template_value(i,index,b,f);
                             if constexpr(std::is_same_v<Scalar,float>)safe=safe && std::isfinite(original.real()) &&
                                 std::isfinite(original.imag()) && std::abs(original.real())<=limit && std::abs(original.imag())<=limit;
@@ -2414,7 +2922,7 @@ struct PatternReceiver::Impl {
         const auto inspect=[&](std::uint64_t index,PhaseGroup group) {
             const auto selected=select_starts(index,group,count);
             batch.start_ranges=std::span(selected.ranges).first(selected.range_count);
-            detail::FftSearchJob job{index,group.lower,0,search.frequency_offsets_hz[0]};
+            detail::FftSearchJob job{index,group.lower,0,frequency_offset(0)};
             job.clock_ratio=clock_ratio(0);job.range_count=selected.range_count;
             if(selected.full)return false;
             if(!selected.selected_count || (search.restricted_direct_search && selected.selected_count<=direct_limit))return true;
@@ -2454,7 +2962,7 @@ struct PatternReceiver::Impl {
                     continue;
                 }
                 batch.start_ranges=std::span(selected.ranges).first(selected.range_count);
-                detail::FftSearchJob job{index,phases[g].lower,0,search.frequency_offsets_hz[0]};
+                detail::FftSearchJob job{index,phases[g].lower,0,frequency_offset(0)};
                 job.clock_ratio=clock_ratio(0);job.range_count=selected.range_count;
                 const bool direct=search.restricted_direct_search&&selected.selected_count<=direct_limit;
                 if(direct && arithmetic_available && search_arithmetic_is_int8(config.search_arithmetic) && !quantized) {
@@ -2490,8 +2998,9 @@ struct PatternReceiver::Impl {
                 struct PrivateReferenceScope {detail::FftSearchBatch& batch;
                     ~PrivateReferenceScope(){batch.private_template=nullptr;}} private_reference_scope{batch};
                 for(std::size_t f=0;f<templates.size();++f) {
+                    if(!acquisition_lane(f))continue;
                     if(private_cache)++fft_workload->private_template_lane_jobs;
-                    job.frequency_index=f;job.frequency_hz=search.frequency_offsets_hz[f];job.clock_ratio=clock_ratio(f);
+                    job.frequency_index=f;job.frequency_hz=frequency_offset(f);job.clock_ratio=clock_ratio(f);
                     const auto previous_int8_dots=work_count.int8_dots;
                     const auto success=direct?detail::partitioned_paired::score_direct(batch,job,code,reference,
                         arithmetic_available?std::span(spectrum):std::span<Complex>{},
@@ -2633,8 +3142,9 @@ struct PatternReceiver::Impl {
                 stream_phase(groups[g].lower);
                 if(!cached_templates.empty() || reuse_templates)prepare_templates(index,stop);
                 for(std::size_t f=0;f<templates.size();++f) {
+                    if(!acquisition_lane(f))continue;
                     auto& job=scoring_jobs[queued];
-                    job={index,groups[g].lower,f,search.frequency_offsets_hz[f]};
+                    job={index,groups[g].lower,f,frequency_offset(f)};
                     job.clock_ratio=clock_ratio(f);
                     // Drift jobs retain their original full-hop scorer. Its
                     // backend does not accept restricted ranges; the ordered
@@ -2666,7 +3176,8 @@ struct PatternReceiver::Impl {
             for(std::size_t g=0;g<group_count;++g) {
                 stream_phase(groups[g].lower);
                 for(std::size_t f=0;f<templates.size();++f) {
-                    detail::FftSearchJob job{index,groups[g].lower,f,search.frequency_offsets_hz[f]};
+                    if(!acquisition_lane(f))continue;
+                    detail::FftSearchJob job{index,groups[g].lower,f,frequency_offset(f)};
                     job.clock_ratio=clock_ratio(f);
                     ++fft_workload->template_jobs;
                     ++fft_workload->fft_jobs;fft_workload->retained_start_trials+=count;
@@ -2679,7 +3190,7 @@ struct PatternReceiver::Impl {
         }
     }
     bool score_frequency_axis(std::size_t count,std::stop_token stop,bool startup_guide=false) {
-        if(!frequency_axis_selected || drift_sections!=4 || differential_window || sample_fit)return false;
+        if(!acquisition_mask.empty() || !frequency_axis_selected || drift_sections!=4 || differential_window || sample_fit)return false;
         detail::FftSearchBatch original;original.geometry=scoring_geometry();
         // The supported CZT implementation currently uses native FP64 at all
         // policy settings. Do not silently route Default/FP32 back to broad FFT.
@@ -2687,14 +3198,12 @@ struct PatternReceiver::Impl {
         original.observations=work;original.energy_prefix=energy_prefix;
         original.first_bin=next_start;original.starts=count;original.score_stride=count;
         original.retain_floor=search.retain_score;original.refine_threshold=threshold();
-        const auto final_trials=static_cast<long double>(trials)+acquisition_trials(count)+1;
-        original.refine_threshold_max=-std::log(search.false_alarm_probability)+2*std::log(final_trials)+
-            std::log(2.*static_cast<double>(templates.size()*search.initial_stream_symbols));
+        original.refine_threshold_max=threshold_at(static_cast<long double>(trials)+acquisition_trials(count));
         const auto job_bytes=templates.size()*sizeof(detail::FftSearchJob);
         if(!cache_fits(budget,job_bytes))return false;
         std::vector<detail::FftSearchJob> jobs(templates.size());
         for(std::size_t f=0;f<jobs.size();++f) {
-            jobs[f]={0,0,f,search.frequency_offsets_hz[f]};jobs[f].clock_ratio=clock_ratio(f);
+            jobs[f]={0,0,f,frequency_offset(f)};jobs[f].clock_ratio=clock_ratio(f);
         }
         bool spectrum_ready=false;
         for(std::size_t index=0;index<search.initial_stream_symbols;++index) {
@@ -2717,7 +3226,7 @@ struct PatternReceiver::Impl {
                     std::span<const detail::FftStartRange>(selected.ranges).first(selected.range_count);
                 std::array<detail::frequency_axis::Requirements,64> requirements{};
                 const auto descriptor_bytes=sizeof(requirements)+sizeof(full_range);
-                const auto used=std::max(working_bytes(),fixed_reservation+cache_reservation+scoring_reservation);
+                const auto used=std::max(working_bytes(),fixed_reservation+cache_reservation+scoring_reservation+acquisition_mask.capacity());
                 const auto output_bytes=selected.selected_count*jobs.size()*sizeof(detail::FftSearchScore);
                 bool eligible=used<budget && descriptor_bytes<budget-used &&
                     job_bytes<budget-used-descriptor_bytes && output_bytes<budget-used-descriptor_bytes-job_bytes;
@@ -2868,7 +3377,8 @@ struct PatternReceiver::Impl {
             try {timing_components=std::make_unique<TimingComponents>();}
             catch(const std::bad_alloc&) {return false;}
         }
-        timing_component_count=components.count;
+        if(components.count>std::tuple_size_v<TimingComponents>)throw Error("pattern timing component capacity overflow");
+        timing_component_count=static_cast<std::uint16_t>(components.count);
         std::copy_n(components.ranges.begin(),components.count,timing_components->begin());
         logical_hop_begin=next_start;logical_hop_end=next_start+hop;
         component_hop=true;acquisition_prepaid=false;
@@ -2921,6 +3431,12 @@ struct PatternReceiver::Impl {
         // Never consume later observations ahead of an unscored competitor.
         continue_observed_tracks(stop);
     }
+    bool hold_prior_batch(std::size_t count) {
+        if(!prior_dispatch)return false;
+        prior_pending_count=count;
+        ++fft_workload->deferred_original_batches;
+        return true;
+    }
     void finish_observed(std::stop_token stop) {
         struct FinalScope {
             bool& flag;bool previous;
@@ -2959,7 +3475,7 @@ struct PatternReceiver::Impl {
     bool startup_guide_owner(std::size_t count,bool final,bool charged=false) const {
         // Only the original startup cohort and its immediately following full
         // hop have a complete, immutable proof without additional track state.
-        if(final || !long_symbol || !shaped || sample_fit || drift_sections!=4 || differential_window ||
+        if(final || !acquisition_mask.empty() || !long_symbol || !shaped || sample_fit || drift_sections!=4 || differential_window ||
            config.scramble || config.dsss || config.dsss_factor!=1 || legacy_public_pattern(config) ||
            config.fake_hopping || calendar_symbols() || burst_plan || packed_calendar ||
            search.search_stream_phases || search.initial_stream_symbols!=1 ||
@@ -3008,7 +3524,7 @@ struct PatternReceiver::Impl {
            guide.end_sample>sample || guide.end_sample<t.confirmed_end)return false;
         const auto f=static_cast<std::size_t>(guide.frequency_hypothesis);
         if(f>=templates.size() || f>=search.hypotheses.size() || f>=t.frequency_scores.size() ||
-           guide.frequency_hz!=config.carrier_hz+search.frequency_offsets_hz[f])return false;
+           guide.frequency_hz!=config.carrier_hz+frequency_offset(f))return false;
         const auto start=guide.first_sample/bin_samples;
         const auto advance=advance_bins(guide.stream_symbol,t.phase_lower,f);
         if(start>std::numeric_limits<std::uint64_t>::max()-advance)return false;
@@ -3035,6 +3551,7 @@ struct PatternReceiver::Impl {
         return true;
     }
     void process(std::stop_token stop,bool final=false) {
+        if(prior_pending_count)return;
         if(acquisition_suspended && next_start>acquisition_last_start) {
             continue_tracks(stop,final);return;
         }
@@ -3088,6 +3605,18 @@ struct PatternReceiver::Impl {
             const auto count=component_hop?std::min(observed,static_cast<std::size_t>(logical_hop_begin+
                 (*timing_components)[timing_component_index].first+(*timing_components)[timing_component_index].count-next_start)):
                 early?hop:observed;
+            const auto batch_origin=frequency_origin_hz;
+            const auto* batch_phase_view=execution_phase_view;
+            if(prior_dispatch && !acquisition_prepaid) {
+                // A subset spends the full original catalogue once. An
+                // adaptive translated catalogue additionally spends its own
+                // full attempt, monotonically across reference changes.
+                const auto full=acquisition_trials(count);
+                if(full>UINT64_MAX-trials || ((frequency_origin_hz!=0 || execution_phase_view) && full>UINT64_MAX-shifted_trials))
+                    throw Error("conditional acquisition trial count overflow");
+                trials+=full;if(frequency_origin_hz!=0 || execution_phase_view)shifted_trials+=full;
+                acquisition_prepaid=true;
+            }
             if(!final && (early || component_hop))checkpoint_early_hop();
             if(component_hop)prepay_component_trials();
             if(!fft_batch_may_intersect(count)) {
@@ -3100,6 +3629,7 @@ struct PatternReceiver::Impl {
                     fft_workload->skipped_template_jobs+=skipped/count;
                 }
                 ++fft_workload->skipped_batches;
+                if(hold_prior_batch(count))return;
                 advance_acquisition(count,stop);continue;
             }
             // Drained decisions already veto overlapping acquisition in
@@ -3113,11 +3643,15 @@ struct PatternReceiver::Impl {
                 return track.next+length+2<=bins;
             });
             const auto covered=long_symbol && stable_spans && std::any_of(completed.begin(),completed.end(),[&](const Completed& span) {
+                const auto index=static_cast<std::size_t>(&span-completed.data());
+                // A helper-born published alias cannot prove that every
+                // original source alignment in this whole batch is duplicate.
+                if(helper_overlap && helper_overlap->completed[index])return false;
                 if((next_start+count-1)*bin_samples>=span.end ||
                    (next_start+length)*bin_samples<=span.first)return false;
                 return competing_frequencies() ||
                     std::all_of(search.frequency_offsets_hz.begin(),search.frequency_offsets_hz.end(),[&](double offset) {
-                        return std::abs(config.carrier_hz+offset-span.frequency)<=
+                        return std::abs(config.carrier_hz+offset+frequency_origin_hz-span.frequency)<=
                             static_cast<double>(config.sample_rate)/static_cast<double>(code.symbol_samples());
                     });
             });
@@ -3128,13 +3662,18 @@ struct PatternReceiver::Impl {
                     (void)phase_groups(index,search.search_stream_phases?0:config.stream_phase_samples,phase_upper,groups);
                     if(!acquisition_prepaid)trials+=static_cast<std::uint64_t>(count)*templates.size()*groups;
                 }
+                if(hold_prior_batch(count))return;
                 advance_acquisition(count,stop);continue;
             }
             ensure_execution_scratch();
+            prepare_phase_window(next_start,observed+length-1,stop);
             std::fill(work.begin(),work.end(),Complex{});energy_prefix[0]=0;
             for(std::size_t i=0;i<observed+length-1;++i) {
                 work[i]=at(next_start+i);energy_prefix[i+1]=energy_prefix[i]+std::norm(work[i]);
             }
+            // Input is now materialized in work. FFT/template paths may reuse
+            // spectrum/reference; no cached phase span may survive that reuse.
+            invalidate_phase_cache();
             if(acquisition_arithmetic()==SearchArithmetic::fp32 &&
                !detail::search_fft::float_input_safe(std::span<const Complex>(work),transform)) {
                 // Keep the requested mode but normalize every subsequently
@@ -3191,6 +3730,7 @@ struct PatternReceiver::Impl {
             const auto& energies=cached_templates.empty()?template_energy:template_bank(stream_index).energy;
             const auto& squares=cached_templates.empty()?template_square:template_bank(stream_index).square;
             for(std::size_t f=0;f<templates.size();++f) {
+                if(!acquisition_lane(f))continue;
                 ++fft_workload->template_jobs;
                 fft_workload->retained_start_trials+=selected.selected_count;
                 const auto direct=fft_workload->restricted_timing_active && search.restricted_direct_search && streamed_templates &&
@@ -3247,17 +3787,22 @@ struct PatternReceiver::Impl {
                 const auto start=peak.first_sample/bin_samples;
                 continue_tracks(stop,false,start>std::numeric_limits<std::uint64_t>::max()-2?
                     std::numeric_limits<std::uint64_t>::max():start+2);
+                frequency_origin_hz=batch_origin;
+                execution_phase_view=batch_phase_view;
                 auto checked=peak;
                 double chain_score=checked.score;
-                if(outer_presence_check(checked,0,stop,&chain_score))admit(checked,checked.frequency_hypothesis,chain_score,stop);
+                if(outer_presence_check(checked,0,stop,&chain_score))admit(checked,checked.frequency_hypothesis,chain_score,batch_origin,batch_phase_view,stop);
                 else remember(checked);
             }
+            if(hold_prior_batch(count))return;
             advance_acquisition(count,stop);
         }
         if(final)continue_tracks(stop,true);
     }
     void bin(Complex value,std::stop_token stop) {
         ring[static_cast<std::size_t>(bins%ring.size())]=value;++bins;
+        if(phase_curve)phase_curve->mark_observed(sample<=UINT64_MAX-search.input_sample_origin?
+            search.input_sample_origin+sample:UINT64_MAX);
         if(early_eof_pending && bins>=length && bins-length+1>=early_eof_end) {
             early_eof_pending=false;
             if(diagnostic_tail)diagnostic_tail->release_checkpoint();
@@ -3266,7 +3811,7 @@ struct PatternReceiver::Impl {
         if(points.size()==2048){points[point_cursor]=point;point_cursor=(point_cursor+1)%points.size();}
         else points.push_back(point);
         previous_chip=value;
-        process(stop);
+        if(!defer_acquisition)process(stop);
     }
     std::vector<Complex> chip_points()const {
         std::vector<Complex> result;result.reserve(points.size());
@@ -3337,7 +3882,7 @@ struct PatternReceiver::Impl {
     }
     std::size_t working_bytes()const {
         if(fallback)return wrapper_bytes()+fallback->working_bytes();
-        std::size_t total=sizeof(Impl)+sizeof(PatternReceiver)+code.working_bytes()+sizeof(PatternFftWork)+(timing_components?sizeof(TimingComponents):0);
+        std::size_t total=acquisition_mask.capacity()+sizeof(Impl)+sizeof(PatternReceiver)+code.working_bytes()+sizeof(PatternFftWork)+(timing_components?sizeof(TimingComponents):0);
         for(const auto* v:{&ring,&work,&spectrum,&product,&reference,&points})total+=v->capacity()*sizeof(Complex);
         total+=energy_prefix.capacity()*sizeof(double)+(history.capacity()+peaks.capacity())*sizeof(PatternEvidence)+
             drift_scratch.capacity()*sizeof(detail::FftDriftAccumulator)+drift_scores.capacity()*sizeof(detail::FftSearchScore)+
@@ -3362,10 +3907,10 @@ struct PatternReceiver::Impl {
         }
         for(const auto& track:tracks)total+=track.burst.bits.capacity()+track.frequency_scores.capacity()*sizeof(double);
         for(const auto& burst:bursts)total+=burst.bits.capacity();
-        return total+(diagnostic_tail?diagnostic_tail->working_bytes():0)+latest.bits.capacity()+scoring_reservation+(work.empty()?0:arithmetic_reservation)+native_active_bytes+native_plan_bytes();
+        return total+(helper_overlap?helper_overlap->working_bytes():0)+(diagnostic_tail?diagnostic_tail->working_bytes():0)+latest.bits.capacity()+scoring_reservation+(work.empty()?0:arithmetic_reservation)+native_active_bytes+native_plan_bytes();
     }
     std::size_t wrapper_bytes()const {
-        return sizeof(Impl)+sizeof(PatternReceiver)+code.working_bytes()+(fft_workload?sizeof(PatternFftWork):0)+(timing_components?sizeof(TimingComponents):0)+
+        return acquisition_mask.capacity()+sizeof(Impl)+sizeof(PatternReceiver)+code.working_bytes()+(fft_workload?sizeof(PatternFftWork):0)+(timing_components?sizeof(TimingComponents):0)+
             search.frequency_offsets_hz.capacity()*sizeof(double)+search.clock_errors_ppm.capacity()*sizeof(double)+
             search.hypotheses.capacity()*sizeof(PatternFrequencyRateHypothesis)+
             packed_phases.capacity()*sizeof(std::uint64_t)+(packed_calendar?packed_calendar->working_bytes():0)+
@@ -3391,6 +3936,7 @@ struct PatternReceiver::Impl {
             if(wrapper>=bytes)throw Error("pattern workspace cannot retain correlator control state");
             fallback->set_workspace_bytes(bytes-wrapper);budget=bytes;return;
         }
+        if(!acquisition_mask.empty() && !cache_fits(bytes,0))clear_prior(!prior_pending_count && !prior_dispatch);
         if(!cache_fits(bytes,0)){native_float_plan.reset();native_double_plan.reset();}
         if(!scoring.empty() && !cache_fits(bytes,0))drop_scoring();
         if((!cached_templates.empty() || exact_initial_rows) && !cache_fits(bytes,0))drop_template_cache();
@@ -3478,7 +4024,7 @@ PatternReceiver::~PatternReceiver()=default;
 std::optional<detail::NativeDiagnosticHistoryRequirements>
 detail::NativeDiagnosticHistoryAccess::requirements(const PatternReceiver& receiver,std::size_t limit) {
     const auto& s=*receiver.impl_;
-    if(s.fallback || s.diagnostic_tail || !limit || limit>s.search.candidate_limit || s.finished ||
+    if(s.fallback || s.diagnostic_tail || s.helper_overlap || !limit || limit>s.search.candidate_limit || s.finished ||
        s.sample || s.bins || s.partial || s.trials || s.history_insertions || !s.history.empty() ||
        !s.tracks.empty() || !s.bursts.empty() || !s.completed.empty() || s.early_eof_pending)return std::nullopt;
     const auto tail_bytes=limit*sizeof(PatternEvidence);
@@ -3530,6 +4076,13 @@ PatternReceiver& PatternReceiver::operator=(PatternReceiver&&) noexcept=default;
 void PatternReceiver::push(std::span<const float> input,std::stop_token stop) {
     auto& s=*impl_;cancelled(stop);if(s.finished)throw Error("pattern capture already finished");
     if(s.fallback){s.fallback->push(input,stop);return;}
+    if(!s.defer_acquisition && s.prior_pending_count)resolve_acquisition(false,stop);
+    if(!s.defer_acquisition && !s.acquisition_mask.empty())s.clear_prior();
+    if(!s.defer_acquisition && s.deferred_acquisition_frontier!=UINT64_MAX) {
+        // Mixing the split seam with ordinary push must first finish the
+        // original ready batch at its saved input fence.
+        s.process(stop);s.deferred_acquisition_frontier=UINT64_MAX;
+    }
     if(s.sample<s.unobserved_until) {
         const auto count=std::min<std::uint64_t>(input.size(),s.unobserved_until-s.sample);
         for(const auto value:input.first(count))if(!std::isfinite(value))throw Error("pattern input contains a nonfinite sample");
@@ -3551,7 +4104,197 @@ void PatternReceiver::push(std::span<const float> input,std::stop_token stop) {
             s.bin(s.sum/static_cast<double>(s.partial),stop);s.sum={};s.partial=0;
         }
     }
+    if(!s.defer_acquisition || !acquisition_state().ready)s.continue_observed_tracks(stop);
+}
+PatternAcquisitionState PatternReceiver::acquisition_state()const noexcept {
+    const auto& s=*impl_;PatternAcquisitionState result;
+    result.observed_samples=s.sample;result.processing_frontier=s.sample;
+    result.original_pairs=s.templates.size();result.bin_samples=s.bin_samples;
+    result.admitted_clock_half_width_ppm=s.search.admitted_clock_half_width_ppm;
+    result.admitted_clock_cell_half_width_ppm=s.search.admitted_clock_cell_half_width_ppm;
+    result.frequency_origin_hz=s.acquisition_origin_hz;result.prior_active=!s.acquisition_mask.empty();
+    result.prior_pending=s.prior_pending_count!=0;
+    result.prior_accepted=result.prior_pending && s.link_matches(s.acquisition_origin_hz,s.acquisition_mask);
+    result.selected_pairs=s.acquisition_mask.empty()?s.templates.size():
+        static_cast<std::size_t>(std::count_if(s.acquisition_mask.begin(),s.acquisition_mask.end(),[](auto value){return value!=0;}));
+    // Restricted/calendar scheduling has additional component/checkpoint
+    // fences. Leave those original engines and their input path unchanged.
+    if(s.fallback || s.finished || s.calendar_symbols() || s.acquisition_suspended ||
+       !s.bin_samples || !s.length || !s.hop || s.ring.empty() || s.sample<s.unobserved_until ||
+       s.component_hop || s.early_eof_pending ||
+       (s.fft_workload->restricted_timing_active && s.search.early_qualified_fft))return result;
+    const auto count=s.long_symbol && !s.next_start?
+        std::min(s.hop,std::max<std::size_t>(1,s.config.sample_rate/s.bin_samples)):s.hop;
+    if(s.next_start>UINT64_MAX-s.length || s.next_start+s.length>UINT64_MAX-(count-1))return result;
+    const auto fence_bins=s.next_start+s.length+count-1;
+    if(fence_bins>UINT64_MAX/s.bin_samples)return result;
+    const auto fence_samples=fence_bins*s.bin_samples;
+    result.supported=true;result.original_pairs=s.templates.size();result.ready=s.bins>=fence_bins;
+    result.selected_pairs=s.acquisition_mask.empty()?s.templates.size():
+        static_cast<std::size_t>(std::count_if(s.acquisition_mask.begin(),s.acquisition_mask.end(),[](auto value){return value!=0;}));
+    result.prior_active=!s.acquisition_mask.empty();result.prior_pending=s.prior_pending_count!=0;
+    result.prior_accepted=result.prior_pending && s.link_matches(s.acquisition_origin_hz,s.acquisition_mask);
+    result.bin_samples=s.bin_samples;result.frequency_origin_hz=s.acquisition_origin_hz;
+    result.admitted_clock_half_width_ppm=s.search.admitted_clock_half_width_ppm;
+    result.admitted_clock_cell_half_width_ppm=s.search.admitted_clock_cell_half_width_ppm;
+    result.audit_start_sample=s.next_start*s.bin_samples;
+    if(s.deferred_acquisition_frontier!=UINT64_MAX)result.processing_frontier=s.deferred_acquisition_frontier;
+    if(result.ready || fence_samples<=s.sample)return result;
+    const auto room=fence_samples-s.sample;
+    result.input_room_samples=static_cast<std::size_t>(std::min<std::uint64_t>(room,SIZE_MAX));
+    return result;
+}
+std::span<const PatternFrequencyRateHypothesis> PatternReceiver::acquisition_hypotheses()const noexcept {
+    return impl_->fallback?std::span<const PatternFrequencyRateHypothesis>{}:std::span<const PatternFrequencyRateHypothesis>(impl_->search.hypotheses);
+}
+bool PatternReceiver::set_acquisition_phase_view(const PatternPhaseCurve* curve)noexcept {
+    auto& s=*impl_;
+    if(s.prior_pending_count || s.prior_dispatch)return false;
+    if(curve==s.phase_curve)return true;
+    if(std::any_of(s.tracks.begin(),s.tracks.end(),[](const auto& track){return track.phase_view!=nullptr;}))return false;
+    if(curve && (!s.phase_geometry_supported() || !curve->view_id() || curve->sample_rate()!=s.config.sample_rate ||
+                 s.bin_samples>curve->maximum_bin_samples()))return false;
+    s.phase_curve=curve;s.invalidate_phase_cache();
+    if(curve)curve->mark_observed(s.sample<=UINT64_MAX-s.search.input_sample_origin?
+        s.search.input_sample_origin+s.sample:UINT64_MAX);
+    return true;
+}
+bool PatternReceiver::acquisition_phase_view_active()const noexcept {return impl_->fresh_phase_view()!=nullptr;}
+bool PatternReceiver::set_acquisition_prior(double origin,std::span<const std::uint8_t> mask) {
+    auto& s=*impl_;
+    if(!std::isfinite(origin) || s.fallback || s.finished || s.calendar_symbols() || s.acquisition_suspended ||
+       s.component_hop || s.early_eof_pending || s.prior_pending_count ||
+       s.search.hypotheses.size()!=s.templates.size() || mask.size()!=s.templates.size() || mask.empty())return false;
+    std::size_t selected=0;double maximum=0;
+    for(std::size_t f=0;f<mask.size();++f) {
+        if(mask[f]>1)return false;
+        selected+=mask[f]!=0;maximum=std::max(maximum,std::abs(s.search.frequency_offsets_hz[f]+origin));
+        // The original explicit pairs remain authoritative for LF timing.
+        if(!mask[f] && std::none_of(s.search.hypotheses.begin(),s.search.hypotheses.end(),[&](const auto& h) {
+            const auto i=static_cast<std::size_t>(&h-s.search.hypotheses.data());
+            return mask[i] && h.clock_error_ppm==s.search.hypotheses[f].clock_error_ppm;
+        }))return false;
+    }
+    // A complete catalogue can still need a measured RF translation. Keeping
+    // its original LF pairs is alignment, with no acquisition-work saving.
+    // A full unshifted mask adds no frequency assistance and stays declined.
+    if(!selected || (selected==mask.size() && origin==0) || maximum>pattern_frequency_offset_limit(s.config) ||
+       detail::pattern_observation_bin_samples(s.config,maximum)<s.bin_samples)return false;
+    // This optional scalar mask is paid from the original receiver grant.
+    // It cannot replace a mandatory payload/bit reservation or an older mask.
+    // A joined caller can refresh an identical prior twice at one ready
+    // fence. Retain its exact template/cache basis only when the normal
+    // refresh would leave all acquisition and consume-once link state alone.
+    // Changed origins, masks, schedules or incompatible new evidence still
+    // take the original invalidating path below.
+    if(!s.prior_dispatch && !s.acquisition_prepaid && !s.execution_phase_view && s.scoring.empty() && s.helper_overlap &&
+       s.prior_schedule_saved && !s.search.early_qualified_fft && !s.search.component_qualified_search &&
+       s.frequency_origin_hz==origin && s.acquisition_origin_hz==origin &&
+       std::signbit(s.frequency_origin_hz)==std::signbit(origin) &&
+       std::signbit(s.acquisition_origin_hz)==std::signbit(origin) &&
+       s.acquisition_mask.size()==mask.size() && std::equal(mask.begin(),mask.end(),s.acquisition_mask.begin()) &&
+       s.cache_fits(s.budget,0) && (s.prior_link_floor==s.accepted_serial || s.link_matches(origin,mask)))return true;
+    if(!s.cache_fits(s.budget,mask.size()))return false;
+    std::vector<std::uint8_t> copy;
+    try {copy.assign(mask.begin(),mask.end());}catch(const std::bad_alloc&){return false;}
+    if(!s.cache_fits(s.budget,copy.capacity()))return false;
+    if(!s.ensure_helper_overlap())return false;
+    const bool preserve_link=!s.acquisition_mask.empty() && s.link_matches(origin,mask);
+    s.drop_scoring();s.drop_template_cache();s.templates_valid=s.tracking_reference_valid=false;
+    s.acquisition_mask=std::move(copy);s.frequency_origin_hz=s.acquisition_origin_hz=origin;
+    if(!preserve_link)s.prior_link_floor=s.accepted_serial;
+    // Full original batches avoid the independently checkpointed timing
+    // components. Their immutable start-window selection remains unchanged.
+    if(!s.prior_schedule_saved) {
+        s.prior_schedule_saved=true;s.prior_early_qualified=s.search.early_qualified_fft;
+        s.prior_component_qualified=s.search.component_qualified_search;
+    }
+    s.search.early_qualified_fft=false;s.search.component_qualified_search=false;
+    return true;
+}
+bool PatternReceiver::clear_acquisition_prior() {
+    auto& s=*impl_;if(s.fallback || s.prior_pending_count)return false;
+    s.clear_prior();return true;
+}
+std::size_t PatternReceiver::observe_acquisition(std::span<const float> input,std::stop_token stop) {
+    cancelled(stop);auto& s=*impl_;const auto state=acquisition_state();
+    if(!state.supported || state.ready)return 0;
+    const auto count=std::min(input.size(),state.input_room_samples);
+    const auto before=s.sample;
+    if(count && s.deferred_acquisition_frontier==UINT64_MAX)s.deferred_acquisition_frontier=before;
+    struct DeferredScope {
+        bool& flag;bool previous;
+        explicit DeferredScope(bool& value):flag(value),previous(value){flag=true;}
+        ~DeferredScope(){flag=previous;}
+    } deferred(s.defer_acquisition);
+    push(input.first(count),stop);
+    return count;
+}
+bool PatternReceiver::process_prior_acquisition(std::stop_token stop) {
+    cancelled(stop);auto& s=*impl_;const auto state=acquisition_state();
+    if(state.prior_pending)return state.prior_accepted;
+    if(!state.supported || !state.ready || !state.prior_active)return false;
+    s.prior_track_floor=s.track_serial;s.prior_acceptance_floor=s.accepted_serial;
+    s.prior_candidate_before=s.candidate_limit_reached;
+    const auto jobs=s.fft_workload->template_jobs;
+    const auto* view=s.fresh_phase_view();
+    struct CountScope {Impl& state;std::uint64_t before;bool phase;~CountScope(){
+        const auto count=state.fft_workload->template_jobs-before;state.fft_workload->conditional_template_jobs+=count;
+        if(phase)state.fft_workload->phase_view_template_jobs+=count;}} count_scope{s,jobs,view!=nullptr};
+    struct ExecutionOriginScope {Impl& state;const PatternPhaseCurve* previous;
+        ~ExecutionOriginScope(){state.frequency_origin_hz=state.acquisition_origin_hz;state.execution_phase_view=previous;}} origin_scope{s,s.execution_phase_view};
+    s.execution_phase_view=view;
+    struct PriorScope {bool& flag;explicit PriorScope(bool& value):flag(value){flag=true;}~PriorScope(){flag=false;}} prior(s.prior_dispatch);
+    Impl::ScoringScope scoring{s};s.process(stop);
+    return s.link_matches(s.acquisition_origin_hz,s.acquisition_mask);
+}
+void PatternReceiver::resolve_acquisition(bool conditional_link,std::stop_token stop) {
+    cancelled(stop);auto& s=*impl_;
+    if(!s.prior_pending_count) {
+        if(!conditional_link)process_acquisition(stop);return;
+    }
+    const auto count=s.prior_pending_count;s.prior_pending_count=0;
+    s.prior_link_floor=s.accepted_serial;
+    Impl::ScoringScope scoring{s};
+    if(conditional_link) {
+        s.acquisition_prepaid=false;s.advance_acquisition(count,stop);
+    } else {
+        // Existing accepted and provisional tracks keep their own immutable
+        // origins. Only new unaccepted candidates from this conditional pass
+        // can be withdrawn before the exact original-window audit.
+        std::erase_if(s.tracks,[&](const auto& track){return track.serial>s.prior_track_floor && !track.established;});
+        if(s.accepted_serial==s.prior_acceptance_floor)s.candidate_limit_reached=s.prior_candidate_before;
+        s.clear_prior(false);const auto jobs=s.fft_workload->template_jobs;
+        struct RawScope {Impl& state;const PatternPhaseCurve* previous;~RawScope(){state.execution_phase_view=previous;}} raw_scope{s,s.execution_phase_view};
+        s.execution_phase_view=nullptr;
+        struct AuditCountScope {Impl& state;std::uint64_t before;~AuditCountScope(){state.fft_workload->original_audit_template_jobs+=state.fft_workload->template_jobs-before;}} audit_scope{s,jobs};
+        s.process(stop);s.acquisition_prepaid=false;
+        s.restore_prior_schedule();
+    }
+    s.deferred_acquisition_frontier=UINT64_MAX;s.continue_observed_tracks(stop);
+}
+void PatternReceiver::process_acquisition(std::stop_token stop) {
+    cancelled(stop);auto& s=*impl_;
+    if(s.prior_pending_count){resolve_acquisition(false,stop);return;}
+    const bool conditional_prepay=s.prior_schedule_saved;
+    if(!s.acquisition_mask.empty())s.clear_prior(false);
+    if(s.fallback || s.finished || s.calendar_symbols() || !s.bin_samples)
+        throw Error("split acquisition requires an ordinary native input geometry");
+    const auto jobs=s.fft_workload->template_jobs;Impl::ScoringScope scoring{s};
+    struct RawScope {Impl& state;const PatternPhaseCurve* previous;~RawScope(){state.execution_phase_view=previous;}} raw_scope{s,s.execution_phase_view};
+    s.execution_phase_view=nullptr;
+    struct AuditCountScope {Impl& state;std::uint64_t before;~AuditCountScope(){state.fft_workload->original_audit_template_jobs+=state.fft_workload->template_jobs-before;}} audit_scope{s,jobs};
+    s.process(stop);s.deferred_acquisition_frontier=UINT64_MAX;
+    if(conditional_prepay)s.acquisition_prepaid=false;
+    s.restore_prior_schedule();
     s.continue_observed_tracks(stop);
+}
+bool PatternReceiver::set_helper_gap_protection(bool qualified)noexcept {
+    auto& s=*impl_;
+    if(s.fallback)return false;
+    s.helper_gap_protection=qualified;
+    if(qualified)for(auto& track:s.tracks)track.helper_gap_protected=true;
+    return true;
 }
 bool PatternReceiver::phase_assistance_supported()const noexcept {
     const auto& s=*impl_;
@@ -3574,7 +4317,8 @@ bool PatternReceiver::suspend_helper_acquisition() {
 bool PatternReceiver::push_phase_assisted(std::span<const float> input,
         std::span<const PatternPhaseKnot> knots,std::uint64_t maximum_gap_samples,std::stop_token stop) {
     auto& s=*impl_;cancelled(stop);if(s.finished)throw Error("pattern capture already finished");
-    if(!phase_assistance_supported() || !maximum_gap_samples || knots.size()<2 ||
+    if(!phase_assistance_supported() || s.phase_curve || !maximum_gap_samples || knots.size()<2 ||
+       s.deferred_acquisition_frontier!=UINT64_MAX || !s.acquisition_mask.empty() ||
        s.sample<s.unobserved_until || input.size()>std::numeric_limits<std::uint64_t>::max()-s.sample)return false;
     for(std::size_t i=0;i<knots.size();++i) {
         if(!std::isfinite(knots[i].radians) || std::abs(knots[i].radians)>1e12 ||
@@ -3620,7 +4364,13 @@ void PatternReceiver::push(std::span<const float> input,std::span<const std::com
     auto& s=*impl_;cancelled(stop);if(s.finished)throw Error("pattern capture already finished");
     if(input.size()!=projected.size())throw Error("shared pattern projection length mismatch");
     if(s.fallback){s.fallback->push(input,stop,cache);return;}
-    if(s.sample_fit || s.differential_window || (s.search.outer_presence_guard && s.config.dsss_factor>1 && s.drift_sections==1)) {
+    if(s.prior_pending_count)resolve_acquisition(false,stop);
+    if(!s.acquisition_mask.empty())s.clear_prior();
+    if(s.deferred_acquisition_frontier!=UINT64_MAX) {
+        s.process(stop);s.deferred_acquisition_frontier=UINT64_MAX;
+    }
+    if(s.sample_fit || s.differential_window || s.fine_private_chip_guard() ||
+       (s.search.outer_presence_guard && s.config.dsss_factor>1 && s.drift_sections==1)) {
         // Exact Gram whitening needs a known carrier phase convention. Shared
         // projections may have an arbitrary fixed rotation, so reconstruct
         // the observations from their raw samples.
@@ -3685,6 +4435,8 @@ std::optional<ScheduledCaptureEnvelope> PatternReceiver::scheduled_capture_envel
 }
 void PatternReceiver::finish(std::stop_token stop) {
     auto& s=*impl_;if(s.finished)return;cancelled(stop);
+    if(s.prior_pending_count)resolve_acquisition(false,stop);
+    if(!s.acquisition_mask.empty())s.clear_prior();
     Impl::ScoringScope scoring{s};
     if(s.fallback)s.fallback->finish(stop);else s.finish_observed(stop);
     s.finished=true;
@@ -3699,6 +4451,9 @@ std::vector<PatternBurst> PatternReceiver::take_bursts(){
     s.bursts.clear();return result;
 }
 PatternBurst PatternReceiver::provisional()const{return impl_->fallback?impl_->fallback->provisional():impl_->provisional();}
+std::optional<PatternSourceIdentity> PatternReceiver::source_identity(const PatternBurst& burst)const {
+    return impl_->source_identity(burst.stream_first_symbol,burst.stream_phase_samples);
+}
 bool PatternReceiver::retains_stream(std::uint64_t first_sample,std::uint64_t first_symbol)const {
     const auto& s=*impl_;
     if(s.fallback)return s.fallback->retains_stream(first_sample,first_symbol);
@@ -3715,7 +4470,11 @@ std::uint64_t PatternReceiver::diagnostic_history_generation()const noexcept{ret
 std::uint64_t PatternReceiver::diagnostic_history_resolved_through()const noexcept{return impl_->fallback?impl_->fallback->diagnostic_history_resolved_through():0;}
 std::uint64_t PatternReceiver::oldest_unresolved_diagnostic_event()const noexcept{return impl_->fallback?impl_->fallback->oldest_unresolved_diagnostic_event():0;}
 bool PatternReceiver::deferred_pattern_history()const noexcept{return impl_->fallback && impl_->fallback->deferred_pattern_history();}
-std::optional<std::uint64_t> PatternReceiver::delayed_processing_frontier()const noexcept{return impl_->fallback?impl_->fallback->delayed_processing_frontier():std::nullopt;}
+std::optional<std::uint64_t> PatternReceiver::delayed_processing_frontier()const noexcept {
+    if(impl_->fallback)return impl_->fallback->delayed_processing_frontier();
+    return impl_->deferred_acquisition_frontier==UINT64_MAX?std::nullopt:
+        std::optional<std::uint64_t>(impl_->deferred_acquisition_frontier);
+}
 std::vector<PatternEvidence> PatternReceiver::candidates()const{return impl_->fallback?impl_->fallback->candidates():impl_->history;}
 std::vector<PatternEvidence> PatternReceiver::candidates(std::size_t limit,std::stop_token stop)const {
     if(stop.stop_requested())throw Error("pattern diagnostic query cancelled");
@@ -3780,7 +4539,8 @@ bool PatternReceiver::local_clock_fallback()const{return impl_->local_search_fal
 bool PatternReceiver::candidate_limited()const{return impl_->candidate_limit_reached;}
 bool PatternReceiver::drift_tolerant()const{return impl_->fallback?impl_->fallback->drift_tolerant():impl_->drift_sections>1;}
 PatternFftWork PatternReceiver::fft_work()const {
-    auto result=impl_->fft_workload?*impl_->fft_workload:PatternFftWork{};result.threshold_trials=impl_->trials;
+    auto result=impl_->fft_workload?*impl_->fft_workload:PatternFftWork{};
+    result.threshold_trials=impl_->trials;result.shifted_reference_trials=impl_->shifted_trials;
     if(search_arithmetic_is_int8(impl_->config.search_arithmetic))
         result.arithmetic_fallback_jobs=result.template_jobs-result.int8_jobs;
     return result;
@@ -3889,9 +4649,12 @@ std::optional<std::size_t> PatternReceiver::temporal_plan_workers()const {
 void PatternReceiver::set_workspace_bytes(std::size_t bytes){impl_->set_workspace_bytes(bytes);}
 void PatternReceiver::trim_optional_workspace(){
     if(impl_->fallback)impl_->fallback->trim_optional_workspace();
-    else if(impl_->exact_initial_rows || impl_->cached_templates.capacity() ||
+    else {
+    if(!impl_->acquisition_mask.empty())impl_->clear_prior(!impl_->prior_pending_count && !impl_->prior_dispatch);
+    if(impl_->exact_initial_rows || impl_->cached_templates.capacity() ||
             (!impl_->required_tracking_reference && impl_->tracking_reference.capacity()))
         impl_->drop_template_cache(); // Joined optional storage only; exact bounded recomputation remains.
+    }
 }
 Diagnostics PatternReceiver::diagnostics()const {
     if(impl_->fallback)return impl_->fallback->diagnostics();

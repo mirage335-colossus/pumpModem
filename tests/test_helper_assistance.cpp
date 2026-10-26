@@ -400,17 +400,32 @@ void ordinary_arbitration_priority() {
         auto ordinary=helper;ordinary.id=2;ordinary.end=1100;ordinary.score=1000;ordinary.helper_assisted=false;
         const auto first=history.observe(helper_first?helper:ordinary,[&]{return ++next;});
         const auto second=history.observe(helper_first?ordinary:helper,[&]{return ++next;});
-        check(first.selected && second.selected==helper_first && second.signal_id==first.signal_id,
-              "optional helper support suppressed ordinary progress or changed its pending row");
-        const auto ordinary_revision=helper_first?second.revision:first.revision;
-        helper.score=300000;helper.end=6100;
+        check(first.selected && second.selected==!helper_first && second.signal_id==first.signal_id && next==1,
+              "helper provenance overrode stronger Robust support or changed its pending row");
+        check(helper_first?second.revision==first.revision:second.revision>first.revision,
+              "support arbitration changed revision without changing its owner");
+        const auto helper_revision=helper_first?first.revision:second.revision;
+        auto weaker=ordinary;weaker.end=2100;weaker.score=2000;weaker.complete=true;
+        const auto rejected=history.observe(weaker,[&]{return ++next;});
+        check(!rejected.selected && rejected.signal_id==first.signal_id && rejected.revision==helper_revision,
+              "weaker ordinary END retracted a stronger pending payload");
+        helper.score=6000;helper.end=6100;
         const auto later=history.observe(helper,[&]{return ++next;});
-        check(!later.selected && later.signal_id==first.signal_id && later.revision==ordinary_revision,
-              "later stronger helper took over an ordinary pending stream");
-        ordinary.end=2100;ordinary.score=2000;
+        check(later.selected && later.signal_id==first.signal_id && later.revision==helper_revision,
+              "stronger helper-owner progress was delayed or changed its revision");
+        ordinary.end=7100;ordinary.score=7000;
+        const auto replacement=history.observe(ordinary,[&]{return ++next;});
+        check(replacement.selected && replacement.signal_id==first.signal_id && replacement.revision>helper_revision,
+              "stronger ordinary support could not replace the helper owner under the same row");
+        ordinary.end=8100;ordinary.score=8000;
         const auto progress=history.observe(ordinary,[&]{return ++next;});
-        check(progress.selected && progress.signal_id==first.signal_id && progress.revision==ordinary_revision,
-              "ordinary next-poll progress was delayed by retained helper ownership");
+        check(progress.selected && progress.signal_id==first.signal_id && progress.revision==replacement.revision,
+              "ordinary-owner next-poll progress was delayed or changed its revision");
+        weaker=helper;weaker.end=9100;weaker.score=1000;weaker.complete=true;
+        const auto losing_helper=history.observe(weaker,[&]{return ++next;});
+        check(!losing_helper.selected && losing_helper.signal_id==first.signal_id &&
+              losing_helper.revision==progress.revision && next==1,
+              "weaker helper END retracted ordinary progress or changed the pending identity");
     }
 }
 void full_assisted_payload_source() {

@@ -20,6 +20,39 @@ modem::Config config() {
     modem::Config c;c.sample_rate=8000;c.bandwidth_hz=1000;c.carrier_hz=1500;
     c.spreading_factor=16;c.stream_epoch=1800000000;return c;
 }
+void helper_dates_survive_capture_clear() {
+    helper::Reference reference;
+    reference.sample_rate=8000;reference.sample=6400;reference.frequency_sample=5600;
+    reference.dwell_start_seconds=.8;reference.frequency_valid=true;
+    auto rebased=live::detail::rebase_helper_reference(reference,4000,8000,8000);
+    check(rebased && rebased->sample==2400 && rebased->frequency_sample==1600 &&
+          std::abs(rebased->dwell_start_seconds-.3)<1e-12,
+          "capture clear left helper frequency and phase dates on different clocks");
+    check(reference.sample==6400 && reference.frequency_sample==5600,
+          "rebasing changed the capture observer's reference");
+    reference.frequency_sample=0;
+    rebased=live::detail::rebase_helper_reference(reference,4000,8000,8000);
+    check(rebased && rebased->sample==2400 && rebased->frequency_sample==0,
+          "capture clear changed the same-as-phase frequency sentinel");
+    for(const auto stale:{3999ULL,4000ULL,6401ULL}) {
+        reference.frequency_sample=stale;
+        check(!live::detail::rebase_helper_reference(reference,4000,8000,8000),
+              "capture clear accepted a stale or future independently dated frequency");
+    }
+    reference.frequency_sample=4001;
+    rebased=live::detail::rebase_helper_reference(reference,4000,8000,8000);
+    check(rebased && rebased->frequency_sample==1,
+          "capture clear dropped the first valid independently dated frequency");
+    reference.sample=8001;
+    check(!live::detail::rebase_helper_reference(reference,4000,8000,8000),
+          "helper phase date escaped the observed capture frontier");
+    reference.sample=3999;reference.frequency_sample=0;
+    check(!live::detail::rebase_helper_reference(reference,4000,8000,8000),
+          "a pre-clear helper reference entered a replacement bank");
+    reference.sample=6400;
+    check(!live::detail::rebase_helper_reference(reference,4000,8000,6000),
+          "helper reference entered a different sample clock");
+}
 void helper_preserves_receiver_workspace_capacity() {
     for(const bool simulation:{false,true}) {
         live::Settings settings;settings.simulation=simulation;settings.transfer.modem=config();
@@ -324,7 +357,7 @@ void helper_yields_event_queue_to_payload_progress() {
 }
 }
 int main() {
-    try {helper_yields_event_queue_to_payload_progress();helper_preserves_receiver_workspace_capacity();helper_placement_covers_both_profiles();sampled_composite();helper_only_and_callsign_update();callsign_update_preserves_live_reception();helper_only_live_simulation();payload_survives_physical_helper_preselection();helper_presentation();
+    try {helper_dates_survive_capture_clear();helper_yields_event_queue_to_payload_progress();helper_preserves_receiver_workspace_capacity();helper_placement_covers_both_profiles();sampled_composite();helper_only_and_callsign_update();callsign_update_preserves_live_reception();helper_only_live_simulation();payload_survives_physical_helper_preselection();helper_presentation();
         std::cout<<"helper live integration passed\n";return 0;}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

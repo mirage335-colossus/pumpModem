@@ -17,9 +17,17 @@ public:
         if(!limit || limit>capacity)throw std::invalid_argument("invalid diagnostic history tail");
     }
     void append(std::vector<Entry>& history,const Entry& item) {
-        if(history.size()==limit_)history.erase(history.begin());
-        history.push_back(item);
+        if(limit_) {
+            if(history.size()==limit_)history.erase(history.begin());
+            history.push_back(item);
+        }
         logical_size_=std::min(capacity_,logical_size_+1);
+    }
+    // Helper-only diagnostic compaction. No acquisition peak or logical FIFO
+    // entry is removed; an active rollback obligation cannot be rebound.
+    bool rebind_materialized_limit(std::size_t limit)noexcept {
+        if(limit>limit_ || journal_.capacity() || checkpoint_size_)return false;
+        limit_=limit;return true;
     }
     void checkpoint(const std::vector<Entry>& history) {
         // Allocate before publishing a new checkpoint. No persistent per-owner

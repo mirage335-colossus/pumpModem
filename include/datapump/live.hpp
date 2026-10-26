@@ -239,9 +239,21 @@ struct Snapshot {
     // A separate bounded post-reception search pool; it never consumes the
     // waveform/receiver workspace reserved by dsp_buffered_bytes.
     std::size_t recovery_working_bytes = 0;
+    // Presence measurements are distinct from assistance committed by the
+    // current receiver revision. Enabled helper output alone sets neither flag.
     std::string helper_status;
     std::optional<double> helper_frequency_offset_hz;
     std::optional<double> helper_snr_db;
+    bool helper_frequency_assistance_active = false;
+    bool helper_phase_assistance_active = false;
+    std::uint64_t helper_original_search_pairs = 0;
+    std::uint64_t helper_selected_search_pairs = 0;
+    // Actual joined work, kept separate from prospective planner pair limits.
+    std::uint64_t helper_conditional_jobs = 0;
+    std::uint64_t helper_audit_jobs = 0;
+    // Largest admitted initial FFT input aperture, for conservative output
+    // post-roll planning. It is never a payload completion authority.
+    std::uint64_t receiver_initial_fft_input_samples = 0;
 };
 
 // Audio callbacks and modem work never run on the caller/UI thread. configure

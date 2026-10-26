@@ -32,6 +32,7 @@ struct CorruptCycle : Error { using Error::Error; };
 struct CloseFile { void operator()(std::FILE* f)const {if(f)std::fclose(f);} };
 using File = std::unique_ptr<std::FILE, CloseFile>;
 void write_file(std::FILE* f,std::span<const std::uint8_t> data) {
+    if(data.empty())return;
     if(std::fwrite(data.data(),1,data.size(),f)!=data.size()) throw Error("Fast destination write failed");
 }
 void append(Bytes& a,std::span<const std::uint8_t> b) { a.insert(a.end(),b.begin(),b.end()); }

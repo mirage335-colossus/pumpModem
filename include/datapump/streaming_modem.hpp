@@ -109,6 +109,19 @@ public:
     StreamingReceiver& operator=(StreamingReceiver&&) noexcept;
     // Feed physical PCM, optionally with its shared carrier projection.
     Bytes push(std::span<const float> samples, std::stop_token stop = {});
+    PatternAcquisitionState acquisition_state() const noexcept;
+    std::span<const PatternFrequencyRateHypothesis> acquisition_hypotheses() const noexcept;
+    bool set_acquisition_prior(double,std::span<const std::uint8_t>);
+    bool clear_acquisition_prior();
+    bool set_helper_gap_protection(bool qualified) noexcept;
+    std::size_t observe_acquisition(std::span<const float>,std::stop_token = {});
+    bool process_prior_acquisition(std::stop_token = {});
+    void resolve_acquisition(bool conditional_link,std::stop_token = {});
+    void process_acquisition(std::stop_token = {});
+    bool set_acquisition_phase_view(const PatternPhaseCurve*) noexcept;
+    bool acquisition_phase_view_active() const noexcept;
+    PatternFftWork fft_work() const;
+    std::optional<PatternSourceIdentity> source_identity(const PatternBurst&)const;
     bool phase_assistance_supported() const noexcept;
     std::size_t phase_assistance_bin_samples() const noexcept;
     bool push_phase_assisted(std::span<const float>,std::span<const PatternPhaseKnot>,

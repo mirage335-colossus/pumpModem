@@ -50,10 +50,17 @@ void replay_staging_retention() {
         return s.stage(std::move(e),frame,std::move(r),4096,8,16*1024*1024);
     };
     const auto count=[](const Staging& s) {
-        return std::count_if(s.entries().begin(),s.entries().end(),[](const auto& e){return bool(e);});
+        std::size_t observations=0;
+        for(const auto& e:s.entries())if(e)observations+=e->observations();
+        return observations;
     };
-    const auto find=[](const Staging& s,std::uint64_t id,bool terminal_only=false) -> const Staging::Entry* {
-        for(const auto& e:s.entries())if(e && e->event.id==id && (!terminal_only || e->terminal()))return e.get();
+    std::vector<std::unique_ptr<Staging::Entry>> inspected;
+    const auto find=[&](const Staging& s,std::uint64_t id,bool terminal_only=false) -> const Staging::Entry* {
+        for(const auto& e:s.entries())if(e && e->event.id==id && (!terminal_only || e->terminal())) {
+            if(!e->timeline)return e.get();
+            inspected.push_back(std::make_unique<Staging::Entry>(e->snapshot(0)));
+            return inspected.back().get();
+        }
         return nullptr;
     };
     const auto rejects=[&](auto action,const char* message) {
@@ -254,12 +261,232 @@ void replay_staging_retention() {
           published[1].event.superseded_ids==std::vector<std::uint64_t>{402} && count(alias_jump)==0,
           "deadline jump exposed historical aliases/prefixes or lost a canonical terminal/result pair");
 
+    // Two ordinary reception IDs can each progress through the same frames.
+    // The former global pending<=frames guard refused the 61st observation,
+    // even though the existing pointer/byte pool still had ample capacity.
+    Staging paired(1024*1024,live::detail::replay_frames);
+    for(std::size_t frame=0;frame<31;++frame) {
+        stage(paired,event(501,std::string(frame+1,'0')),frame);
+        stage(paired,event(502,std::string(frame+1,'1')),frame);
+    }
+    check(count(paired)==62,"independent reception histories exhausted one pending allowance per frame");
+    stage(paired,event(501,"first",true),59,result(501,"A"));
+    stage(paired,event(502,"second",true),59,result(502,"B"));
+    published.clear();paired.drain(31,false,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==62 && !published.front().terminal() && !published.back().terminal() &&
+          paired.owns_pending(published.front().event) && paired.owns_pending(published.back().event),
+          "independent pending histories were pruned or lost replay ownership");
+    paired.drain(60,true,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==64 && published[62].event.id==501 && published[63].event.id==502 &&
+          published[62].received && published[62].received->content.message.data==Bytes({'A'}) &&
+          published[63].received && published[63].received->content.message.data==Bytes({'B'}),
+          "independent full pending histories lost their reserved terminal/result slots");
+
+    Staging combined(1024*1024,live::detail::replay_frames);
+    for(std::size_t frame=0;frame<live::detail::replay_frames;++frame) {
+        auto first=event(601,"0"),second=event(602,"1");
+        first.binary=second.binary=false; // Generic observations retain separate ownership slots.
+        stage(combined,std::move(first),frame);stage(combined,std::move(second),frame);
+    }
+    stage(combined,event(603,"other",true),59);stage(combined,event(604,"other",true),59);
+    const auto before_combined=combined.metadata_bytes();
+    rejects([&]{stage(combined,event(605,"0"),59);},"combined staging slots did not reserve pending terminals");
+    check(count(combined)==122 && combined.metadata_bytes()==before_combined && !find(combined,605),
+          "combined-slot refusal changed an admitted pending history");
+    stage(combined,event(601,"done",true),59);stage(combined,event(602,"done",true),59);
+    check(count(combined)==live::detail::replay_frames+live::detail::maximum_events &&
+          find(combined,601,true) && find(combined,602,true),
+          "admitted pending receptions could not consume their reserved terminal slots");
+    rejects([&]{stage(combined,event(606,"other",true),59);},"full shared staging slots were not bounded");
+
+    // Terminal-only history does not consume the pending-ID limit. A newer
+    // independent revision of an old alias still needs its own terminal slot.
+    Staging terminal_reservations(1024*1024,2);
+    auto old_alias=event(700,"old",true,2);old_alias.superseded_ids={701};
+    stage(terminal_reservations,std::move(old_alias),1);
+    for(std::uint64_t id=702;id<702+live::detail::maximum_events-2;++id)
+        stage(terminal_reservations,event(id,"old",true),1);
+    stage(terminal_reservations,event(701,"new",false,3),0);
+    const auto before_terminal_reservation=terminal_reservations.metadata_bytes();
+    rejects([&]{stage(terminal_reservations,event(800,"0"),0);},"future terminals escaped the terminal count bound");
+    check(count(terminal_reservations)==live::detail::maximum_events &&
+          terminal_reservations.metadata_bytes()==before_terminal_reservation && !find(terminal_reservations,800),
+          "terminal reservation refusal changed an independent later alias revision");
+    stage(terminal_reservations,event(701,"done",true,3),1);
+
+    Staging pending_ids(1024*1024,2);
+    for(std::uint64_t id=1;id<=62;++id)stage(pending_ids,event(id,"0"),0);
+    auto covered=event(1,"done",true,2);
+    for(std::uint64_t id=2;id<=65;++id)covered.superseded_ids.push_back(id);
+    stage(pending_ids,std::move(covered),1);
+    stage(pending_ids,event(63,"0"),0);stage(pending_ids,event(64,"0"),0);
+    stage(pending_ids,event(1000,"independent",true),1);
+    const auto before_pending_ids=pending_ids.metadata_bytes();
+    rejects([&]{stage(pending_ids,event(65,"0"),0);},"distinct pending presentation IDs were not bounded");
+    check(count(pending_ids)==live::detail::maximum_events+2 &&
+          pending_ids.metadata_bytes()==before_pending_ids && !find(pending_ids,65),
+          "pending-ID refusal changed earlier alias history");
+    published.clear();pending_ids.drain(1,false,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==live::detail::maximum_events &&
+          std::all_of(published.begin(),published.end(),[&](const auto& e){return pending_ids.owns_pending(e.event);}),
+          "replay lost pending ownership beyond its original frame count");
+
+    const auto long_timeline=[&](std::size_t rows,std::size_t first_bits,std::size_t final_bits) {
+        const auto budget=live::detail::replay_result_workspace+
+            live::detail::replay_frames*live::detail::replay_pending_workspace;
+        Staging timelines(budget,live::detail::replay_frames);
+        std::vector<std::string> prefixes(rows);
+        for(std::size_t row=0;row<rows;++row) {
+            std::uint64_t state=row+1729;
+            for(std::size_t i=0;i<4096;++i) {
+                state=state*6364136223846793005ULL+1442695040888963407ULL;
+                prefixes[row].push_back((state>>63)?'1':'0');
+            }
+        }
+        const auto first_sequence=sequence+1;
+        for(std::size_t frame=0;frame<60;++frame)for(std::size_t row=0;row<rows;++row) {
+            const auto bits=first_bits+(final_bits-first_bits)*frame/59;
+            auto e=event(10000+row,prefixes[row].substr(0,std::min<std::size_t>(4096,bits)));
+            e.received_bits=bits;e.frequency_hz=1500+row+frame/1000.;
+            e.pattern_score=bits+.5;e.missing_symbols=(frame+row)%3;e.virtual_seconds=frame/4.;
+            stage(timelines,std::move(e),frame);
+            check(timelines.metadata_bytes()<=budget,"compact timelines exceeded the unchanged staging byte quota");
+        }
+        check(count(timelines)==rows*60,"compact timeline lost a dated pending observation");
+        for(std::size_t row=0;row<rows;++row) {
+            auto done=event(10000+row,prefixes[row],true);done.received_bits=final_bits;
+            stage(timelines,std::move(done),59,row==0?std::optional<transfer::Received>{result(10000,"source")}:std::nullopt);
+        }
+        std::size_t observed=0;
+        for(std::size_t frame=0;frame<60;++frame) {
+            timelines.drain(frame+1,false,[&](Staging::Entry e) {
+                const auto row=observed%rows,at=observed/rows;
+                const auto bits=first_bits+(final_bits-first_bits)*at/59;
+                check(!e.terminal() && e.frame==at && e.event.id==10000+row && e.event.sequence==first_sequence+observed &&
+                      e.event.received_bits==bits && e.event.text==prefixes[row].substr(0,std::min<std::size_t>(4096,bits)) &&
+                      e.event.frequency_hz==1500+row+at/1000. && e.event.pattern_score==bits+.5 &&
+                      e.event.missing_symbols==(at+row)%3 && e.event.virtual_seconds==at/4.,
+                      "compact replay changed a historical prefix, count, sequence or diagnostic field");
+                ++observed;
+            });
+            check(observed==(frame+1)*rows,"compact replay delayed a due frame or exposed a future observation");
+        }
+        std::size_t terminals=0;
+        timelines.drain(60,true,[&](Staging::Entry e) {
+            check(e.terminal() && e.event.id==10000+terminals && e.event.received_bits==final_bits &&
+                  e.event.text==prefixes[terminals],"compact replay changed terminal identity or raw diagnostics");
+            if(!terminals)check(e.received && e.received->content.message.data==Bytes({'s','o','u','r','c','e'}),
+                                "compact replay lost the completed source transaction");
+            ++terminals;
+        });
+        check(terminals==rows && count(timelines)==0,"compact replay lost or duplicated physical terminals");
+    };
+    long_timeline(9,2914,7296);
+    long_timeline(25,0,4864);
+
+    Staging chronology_order(256*1024,6);
+    stage(chronology_order,event(2001,"0"),4);
+    stage(chronology_order,event(2001,"01"),1);
+    stage(chronology_order,event(2002,"1"),1);
+    published.clear();chronology_order.drain(2,false,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==2 && published[0].event.id==2001 && published[0].event.text=="01" &&
+          published[1].event.id==2002,"out-of-order frames changed the sequence of currently due observations");
+    chronology_order.drain(5,false,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==3 && published.back().event.id==2001 && published.back().event.text=="0",
+          "compact replay exposed future prefix bytes in an earlier stored observation");
+
+    Staging incompatible(256*1024,4);
+    stage(incompatible,event(2101,"001"),0);stage(incompatible,event(2101,"1110"),1);
+    stage(incompatible,event(2102,"note"),0);stage(incompatible,event(2102,"note later"),1);
+    published.clear();incompatible.drain(1,false,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==2 && published[0].event.text=="001" && published[1].event.text=="note",
+          "incompatible or nonbinary pending text overwrote its earlier backing");
+    incompatible.drain(2,false,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==4 && published[2].event.text=="1110" && published[3].event.text=="note later",
+          "generic pending observations lost their exact fallback values");
+
+    Staging prototype(256*1024,4);
+    auto metadata_event=event(2201,"0");
+    metadata_event.reception_id="retained";metadata_event.snr_db=7.25;
+    metadata_event.received_bytes=11;metadata_event.expected_bytes=12;
+    metadata_event.preamble_received_percent=50.;metadata_event.pre_fec_accuracy=StreamBitAccuracy{1,2,3};
+    metadata_event.expected_bits=99;metadata_event.fec_stats.data={1,2,3,4,5,6};
+    metadata_event.fec_stats.integrity={7,8,9,10,11,12};metadata_event.fec_stats.parity={13,14,15,16,17,18};
+    metadata_event.raw_bits="unchanged metadata";metadata_event.superseded_ids={2202};
+    metadata_event.recovery_progress={transfer::RecoveryState::none,23,24,std::chrono::milliseconds(25)};
+    metadata_event.helper_carrier=true;
+    auto later_metadata=metadata_event;later_metadata.text="01";later_metadata.received_bits=2;later_metadata.sequence=++sequence;
+    stage(prototype,std::move(metadata_event),0);stage(prototype,std::move(later_metadata),1);
+    published.clear();prototype.drain(2,false,[&](Staging::Entry e){published.push_back(std::move(e));});
+    check(published.size()==2 && published[0].event.text=="0" && published[1].event.text=="01",
+          "prototype metadata prevented exact pending progress");
+    for(const auto& e:published) {
+        const auto& v=e.event;
+        check(v.reception_id=="retained" && v.snr_db==7.25 && v.received_bytes==11 && v.expected_bytes==12 &&
+              v.preamble_received_percent==50. && v.pre_fec_accuracy && v.pre_fec_accuracy->received_data_bits==1 &&
+              v.pre_fec_accuracy->corrected_data_bits==2 && v.pre_fec_accuracy->missing_data_bits==3 && v.expected_bits==99 &&
+              v.fec_stats.data.received_bits==1 && v.fec_stats.data.repaired_bytes==6 &&
+              v.fec_stats.integrity.received_bits==7 && v.fec_stats.integrity.repaired_bytes==12 &&
+              v.fec_stats.parity.received_bits==13 && v.fec_stats.parity.repaired_bytes==18 &&
+              v.raw_bits=="unchanged metadata" && v.superseded_ids==std::vector<std::uint64_t>{2202} &&
+              v.recovery_progress.state==transfer::RecoveryState::none && v.recovery_progress.attempts==23 &&
+              v.recovery_progress.total==24 && v.recovery_progress.elapsed==std::chrono::milliseconds(25) && v.helper_carrier,
+              "compact timeline changed a prototype field outside its explicit checkpoint");
+    }
+
+    Staging floating_metadata(256*1024,4);
+    constexpr std::array<std::uint64_t,4> floating_bits{
+        0,0x8000000000000000ULL,0x7ff8000000000001ULL,0x7ff8000000000002ULL};
+    for(std::size_t frame=0;frame<floating_bits.size();++frame) {
+        auto e=event(2211,std::string(frame+1,'0'));
+        e.snr_db=std::bit_cast<double>(floating_bits[frame]);
+        stage(floating_metadata,std::move(e),frame);
+    }
+    for(std::size_t frame=0;frame<2;++frame) {
+        auto e=event(2212,std::string(frame+1,'1'));
+        e.preamble_received_percent=std::bit_cast<double>(floating_bits[frame]);
+        stage(floating_metadata,std::move(e),frame);
+    }
+    std::size_t scalars=0,preambles=0;
+    floating_metadata.drain(4,false,[&](Staging::Entry e) {
+        if(e.event.id==2211)check(std::bit_cast<std::uint64_t>(e.event.snr_db)==floating_bits[scalars++],
+            "compact prototype equality changed signed-zero or NaN diagnostic metadata");
+        else check(e.event.preamble_received_percent &&
+            std::bit_cast<std::uint64_t>(*e.event.preamble_received_percent)==floating_bits[preambles++],
+            "compact prototype equality changed optional signed-zero metadata");
+    });
+    check(scalars==4 && preambles==2,"floating metadata fallback lost a dated observation");
+
+    // Explicit canonical aliases preserve the baseline drain/Clear behavior,
+    // including an earlier pending alias with an independently newer revision.
+    for(const bool clearing:{false,true}) {
+        Staging alias_completion(256*1024,4);
+        stage(alias_completion,event(2221,"0",false,3),0);
+        auto done=event(2222,"done",true,2);done.superseded_ids={2221};
+        auto received=result(2222,"done");
+        if(clearing) {
+            done.recovery_progress=job->progress();received.recovery=job;
+            received.recovery_progress=job->progress();
+        }
+        stage(alias_completion,std::move(done),3,std::move(received));
+        if(clearing) {
+            alias_completion.clear_recoveries();
+            check(count(alias_completion)==0,"compact history changed baseline recovery alias withdrawal");
+        } else {
+            published.clear();alias_completion.drain(4,true,[&](Staging::Entry e){published.push_back(std::move(e));});
+            check(published.size()==1 && published.front().event.id==2222 && published.front().received,
+                  "compact history changed baseline physical-terminal alias suppression");
+        }
+    }
+    Staging pending_recovery_alias(256*1024,4);
+    stage(pending_recovery_alias,event(2231,"0",false,3),0);
+    auto pending_recovering=event(2232,"1",false,2);pending_recovering.superseded_ids={2231};
+    pending_recovering.recovery_progress.state=transfer::RecoveryState::ready;
+    stage(pending_recovery_alias,std::move(pending_recovering),3);
+    pending_recovery_alias.clear_recoveries();
+    check(count(pending_recovery_alias)==0,"compact history changed baseline pending recovery alias withdrawal");
+
     Staging counts(1024*1024,2);
-    stage(counts,event(1,"0"),1);stage(counts,event(2,"1"),1);
-    const auto before_count=counts.metadata_bytes();
-    rejects([&]{stage(counts,event(3,"0"),1);},"global pending-event count was not bounded");
-    check(count(counts)==2 && counts.metadata_bytes()==before_count,"pending-count refusal mutated prior staging");
-    counts.clear();
     for(std::uint64_t id=1;id<=live::detail::maximum_events;++id)stage(counts,event(id,"0",true),1);
     rejects([&]{stage(counts,event(1000,"1",true),1);},"independent terminal count was not bounded");
     check(count(counts)==live::detail::maximum_events && find(counts,1) && !find(counts,1000),
@@ -928,7 +1155,7 @@ void continuous_noise_lifecycle() {
 
 struct SimulationScript {
     using Phase=live::detail::SimulationPhase;
-    static constexpr std::size_t phase_count=static_cast<std::size_t>(Phase::input_invalidated)+1;
+    static constexpr std::size_t phase_count=static_cast<std::size_t>(Phase::bank_refresh_moved)+1;
     Phase target=Phase::before_read;
     std::atomic<bool> armed{false},entered{false},released{false},transmit_seen{false};
     bool fail_checkpoint=false;
@@ -1650,8 +1877,8 @@ int main(int argc,char** argv) {
     try {
         cpu_work_budget_boundaries();
         replay_staging_retention();
-        if(argc>1 && std::string_view(argv[1])=="--replay-staging") {
-            check(argc==2,"usage: test_live --replay-staging");
+        if(argc>1 && (std::string_view(argv[1])=="--replay-staging" || std::string_view(argv[1])=="--replay-staging-only")) {
+            check(argc==2,"usage: test_live --replay-staging-only");
             std::cout<<"replay staging retention passed\n";return 0;
         }
         if(argc>1 && std::string_view(argv[1])=="--hosted-clock-progress") {

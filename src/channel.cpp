@@ -47,7 +47,8 @@ struct SampledLegacy {
         startup_random(impairment.seed^0x8ebc6af09c88c6e3ULL),
         phase_random(impairment.seed^0xa0761d6478bd642fULL),noise_random(impairment.seed),helper_options(std::move(helper_value)) {
         static_assert(sizeof(SampledLegacy)+sizeof(SampledSimulationChannel)+
-            SampledSimulationChannel::auxiliary_workspace_bound<=SampledSimulationChannel::workspace_bound);
+            SampledSimulationChannel::auxiliary_workspace_bound+
+            SampledSimulationChannel::helper_cohort_workspace_bound<=SampledSimulationChannel::workspace_bound);
         validate(config);validate_channel(config,channel);
         rate=1+static_cast<long double>(channel.clock_error_ppm)*1e-6L;
         diffusion=channel.phase_noise_degrees_per_sqrt_second*std::numbers::pi/180/std::sqrt(config.sample_rate);
@@ -146,8 +147,8 @@ struct SampledPhysical {
     SampledSimulationChannel::PhysicalObserver observer;
     std::uint32_t physical_rate=0,factor=1;
     std::size_t stage_count=0;
-    long double rate=1,startup=0,helper_origin=0;
-    std::uint64_t received=0,physical_received=0,origin=0,total=0,buffer_start=0;
+    long double rate=1,startup=0,helper_origin=0,lead_seconds=2,tail_seconds=2,helper_start=0,helper_end=0;
+    std::uint64_t received=0,physical_received=0,origin=0,total=0,buffer_start=0,helper_epoch=0;
     std::size_t buffer_count=0,observer_count=0;
     StreamingTransmitter* source=nullptr;
     bool complete=false,helper_only=false,primed=false;
@@ -169,7 +170,8 @@ struct SampledPhysical {
         }
         return sum;
     }
-    SampledPhysical(Config value,ChannelConfig impairment,helper::Options helper_value,double bandwidth)
+    SampledPhysical(Config value,ChannelConfig impairment,helper::Options helper_value,double bandwidth,
+                    SampledSimulationChannel::HelperEnvelope envelope)
         :config(value),channel(impairment),options(std::move(helper_value)),
          startup_random(impairment.seed^0x8ebc6af09c88c6e3ULL),
          phase_random(impairment.seed^0xa0761d6478bd642fULL),noise_random(impairment.seed) {
@@ -244,7 +246,7 @@ struct SampledPhysical {
             }
             for(std::size_t tap=0;tap<taps;++tap)coefficients[phase][tap]=static_cast<float>(row[tap]/coefficient_sum);
         }
-        begin();
+        begin(envelope);
     }
     double response(double frequency)const {
         double gain=1;
@@ -265,13 +267,65 @@ struct SampledPhysical {
     }
     long double group_delay()const {return static_cast<long double>(fir_taps/2)*(factor-1)/factor;}
     double uniform() {return (static_cast<double>(startup_random()>>11)+.5)/9007199254740992.;}
-    void begin() {
+    static long double rounded_duration(double seconds) {
+        if(!std::isfinite(seconds)||seconds<0)throw Error("invalid Helper Carrier envelope duration");
+        // One input-double ulp cannot turn an intended integral dwell count
+        // (e.g. 3.2s) into an extra dwell after promotion to long double.
+        const auto count=static_cast<long double>(std::max(2.,seconds))*2.5L;
+        const auto nearest=std::round(count);
+        const auto snapped=std::abs(count-nearest)<=4*std::numeric_limits<double>::epsilon()*count?nearest:count;
+        const auto result=std::ceil(snapped)*.4L;
+        if(!std::isfinite(result))throw Error("Helper Carrier envelope duration overflow");
+        return result;
+    }
+    static long double dwell_boundary(long double seconds,bool upward) {
+        const auto count=seconds*2.5L,nearest=std::round(count);
+        const auto snapped=std::abs(count-nearest)<=8*std::numeric_limits<long double>::epsilon()*std::max(1.L,std::abs(count))?nearest:count;
+        return (upward?std::ceil(snapped):std::floor(snapped))*.4L;
+    }
+    void validate_duration()const {
+        const auto end=startup+(helper_end-helper_origin)*config.sample_rate/rate;
+        const auto limit=std::numeric_limits<std::uint64_t>::max()/factor;
+        if(origin>=limit||!std::isfinite(end)||end<0||
+           std::ceil(end)+group_delay()+1>=static_cast<long double>(limit-origin))
+            throw Error("sampled simulation duration exceeds the physical receiver counter");
+    }
+    void update_helper_end() {
+        const auto phase=static_cast<long double>(helper_epoch%2);
+        helper_end=dwell_boundary(phase+helper_origin+static_cast<long double>(total)/config.sample_rate+tail_seconds,true)-phase;
+        helper_end=helper::protected_endpoint(helper_epoch,helper_start,helper_end);
+        validate_duration();
+    }
+    void extend_tail(double seconds) {
+        const auto duration=rounded_duration(seconds);
+        const auto end=startup+(helper_end-helper_origin)*config.sample_rate/rate;
+        if(complete||(source&&static_cast<long double>(received-origin)>=end))
+            throw Error("cannot extend a completed Helper Carrier envelope");
+        if(duration<=tail_seconds)return;
+        const auto rendered=helper_origin+
+            (static_cast<long double>(physical_received)/factor-origin-startup)*rate/config.sample_rate;
+        if(source&&rendered>=helper_end-.004L)
+            throw Error("cannot extend a Helper Carrier envelope after its physical final ramp");
+        const auto available=static_cast<long double>(std::numeric_limits<std::uint64_t>::max()/factor)-received;
+        if((lead_seconds+duration)*config.sample_rate/rate+group_delay()+1>=available)
+            throw Error("Helper Carrier envelope duration overflow");
+        const auto previous=tail_seconds;
+        tail_seconds=std::max(tail_seconds,duration);
+        try {if(source)update_helper_end();}
+        catch(...) {tail_seconds=previous;if(source)update_helper_end();throw;}
+    }
+    void begin(SampledSimulationChannel::HelperEnvelope envelope) {
+        const auto lead=rounded_duration(envelope.lead_seconds),tail=rounded_duration(envelope.tail_seconds);
+        const auto available=static_cast<long double>(std::numeric_limits<std::uint64_t>::max()/factor)-received;
+        if(channel.delay_samples+(lead+tail+.8L)*config.sample_rate/rate+group_delay()+1>=available)
+            throw Error("Helper Carrier envelope duration overflow");
         origin=received;source=nullptr;total=0;buffer_start=0;buffer_count=0;complete=false;generator.reset();
+        lead_seconds=lead;tail_seconds=tail;helper_start=helper_end=0;helper_epoch=0;
         startup=channel.delay_samples+std::floor((.05L+.25L*uniform())*config.sample_rate)+.05L+.9L*uniform();
         // A previously observed lookahead cannot be rewritten when a fresh
         // burst is enqueued. Keep its onset beyond that physical frontier.
         startup=std::max(startup,group_delay()+1);
-        burst_rotation=phase_rotation(tau*config.carrier_hz*rate*(static_cast<long double>(origin)+startup)/config.sample_rate);
+        startup+=lead_seconds*config.sample_rate/rate;
     }
     void flush_observer() {
         if(observer&&observer_count)observer(std::span(observer_buffer).first(observer_count),physical_rate,physical_received-observer_count);
@@ -313,11 +367,13 @@ struct SampledPhysical {
             const auto time=static_cast<long double>(physical_received)/factor;
             const auto position=(time-origin-startup)*rate;
             Complex value{};
-            if(transmitter&&position>=0&&position<total) {
-                const auto payload=interpolate(*transmitter,position,stop);
-                value=helper_only?Complex{}:payload*burst_rotation;
+            if(transmitter) {
+                if(position>=0&&position<total) {
+                    const auto payload=interpolate(*transmitter,position,stop);
+                    value=helper_only?Complex{}:payload*burst_rotation;
+                }
                 value=generator->mix_analytic(value,helper_origin+position/config.sample_rate,physical_rate,
-                    helper_origin+static_cast<long double>(total)/config.sample_rate,helper_origin);
+                    helper_end,helper_start);
                 value*=oscillator;
             }
             const auto pcm=static_cast<float>(value.real()+noise());
@@ -346,25 +402,32 @@ struct SampledPhysical {
             source=&transmitter;total=transmitter.total_samples();
             const auto physical_origin=transmitter.physical_output_origin();
             helper_origin=static_cast<long double>(physical_origin%config.sample_rate)/config.sample_rate;
-            generator.emplace(options,plan,physical_origin/config.sample_rate,true,time_key);
-            const auto duration=std::ceil(startup+static_cast<long double>(total)/rate);
-            if(duration>=static_cast<long double>(std::numeric_limits<std::uint64_t>::max()/factor-origin))
-                throw Error("sampled simulation duration exceeds the physical receiver counter");
+            helper_epoch=physical_origin/config.sample_rate;
+            const auto phase=static_cast<long double>(helper_epoch%2);
+            helper_start=dwell_boundary(phase+helper_origin-lead_seconds,false)-phase;
+            startup+=(helper_origin-helper_start-lead_seconds)*config.sample_rate/rate;
+            burst_rotation=phase_rotation(tau*config.carrier_hz*rate*(static_cast<long double>(origin)+startup)/config.sample_rate);
+            generator.emplace(options,plan,helper_epoch,true,time_key);
         } else if(source!=&transmitter||transmitter.samples_emitted()!=buffer_start+buffer_count)
             throw Error("sampled simulation source changed without begin_burst");
         const auto endpoint=transmitter.total_samples();
         if(endpoint>total||endpoint<transmitter.samples_emitted())
             throw Error("sampled simulation source endpoint changed incompatibly");
         total=endpoint;
-        if(!total){complete=true;return 0;}
+        update_helper_end();
         prime(&transmitter,stop);
-        const auto end=startup+static_cast<long double>(total)/rate;
+        const auto end=startup+(helper_end-helper_origin)*config.sample_rate/rate;
+        const auto payload_end=startup+static_cast<long double>(total)/rate;
+        const bool reach_payload_end=static_cast<long double>(received-origin)<payload_end;
         std::size_t written=0;
         while(written<output.size()) {
             if((written&4095U)==0&&stop.stop_requested())throw Error("modem operation cancelled");
             if(static_cast<long double>(received-origin)>=end){complete=true;break;}
             output[written++]=next(&transmitter,stop);++received;
             if(written==1)live::detail::simulation_checkpoint(live::detail::SimulationPhase::read_progress,received);
+            // Give callers a committed boundary to extend the helper post,
+            // even when their output span could hold the entire envelope.
+            if(reach_payload_end&&static_cast<long double>(received-origin)>=payload_end)break;
         }
         flush_observer();return written;
     }
@@ -385,24 +448,29 @@ struct SampledSimulationChannel::Impl {
     std::unique_ptr<SampledPhysical> physical;
     PhysicalObserver observer;
     std::optional<Crypto> time_key;
-    Impl(Config config,ChannelConfig channel,helper::Options options,double bandwidth) {
+    Impl(Config config,ChannelConfig channel,helper::Options options,double bandwidth,HelperEnvelope envelope) {
         static_assert(sizeof(Impl)+sizeof(SampledLegacy)+sizeof(SampledSimulationChannel)+
-            SampledSimulationChannel::auxiliary_workspace_bound<=SampledSimulationChannel::workspace_bound);
+            SampledSimulationChannel::auxiliary_workspace_bound+
+            SampledSimulationChannel::helper_cohort_workspace_bound<=SampledSimulationChannel::workspace_bound);
         static_assert(sizeof(Impl)+sizeof(SampledPhysical)+sizeof(SampledSimulationChannel)+
-            SampledSimulationChannel::auxiliary_workspace_bound<=SampledSimulationChannel::workspace_bound);
-        if(options.power_w>0)physical=std::make_unique<SampledPhysical>(config,channel,std::move(options),bandwidth);
+            SampledSimulationChannel::auxiliary_workspace_bound+
+            SampledSimulationChannel::helper_cohort_workspace_bound<=SampledSimulationChannel::workspace_bound);
+        if(options.power_w>0)physical=std::make_unique<SampledPhysical>(config,channel,std::move(options),bandwidth,envelope);
         else legacy=std::make_unique<SampledLegacy>(config,channel,std::move(options),bandwidth);
     }
 };
 
-SampledSimulationChannel::SampledSimulationChannel(Config config,ChannelConfig channel,helper::Options helper,double helper_bandwidth):impl_(std::make_unique<Impl>(config,channel,std::move(helper),helper_bandwidth)){}
+SampledSimulationChannel::SampledSimulationChannel(Config config,ChannelConfig channel,helper::Options helper,double helper_bandwidth,HelperEnvelope envelope):impl_(std::make_unique<Impl>(config,channel,std::move(helper),helper_bandwidth,envelope)){}
 SampledSimulationChannel::~SampledSimulationChannel()=default;
 SampledSimulationChannel::SampledSimulationChannel(SampledSimulationChannel&&)noexcept=default;
 SampledSimulationChannel& SampledSimulationChannel::operator=(SampledSimulationChannel&&)noexcept=default;
-void SampledSimulationChannel::begin_burst(bool helper_only){
+void SampledSimulationChannel::begin_burst(bool helper_only,HelperEnvelope envelope){
     if(helper_only&&!impl_->physical)throw Error("Helper-only sampled output requires an enabled helper");
-    if(impl_->physical) {impl_->physical->helper_only=helper_only;impl_->physical->begin();return;}
+    if(impl_->physical) {impl_->physical->begin(envelope);impl_->physical->helper_only=helper_only;return;}
     impl_->legacy->helper_only=helper_only;impl_->legacy->begin();
+}
+void SampledSimulationChannel::extend_helper_tail(double seconds) {
+    if(impl_->physical)impl_->physical->extend_tail(seconds);
 }
 void SampledSimulationChannel::set_helper_callsign(std::string callsign) {
     auto& current=impl_->physical?impl_->physical->options:impl_->legacy->helper_options;
@@ -417,6 +485,29 @@ void SampledSimulationChannel::set_physical_observer(PhysicalObserver observer) 
 std::uint32_t SampledSimulationChannel::physical_sample_rate()const {return impl_->physical?impl_->physical->physical_rate:impl_->legacy->config.sample_rate;}
 std::uint64_t SampledSimulationChannel::physical_received_samples()const {return impl_->physical?impl_->physical->physical_received:impl_->legacy->received;}
 std::uint64_t SampledSimulationChannel::received_samples()const{return impl_->physical?impl_->physical->received:impl_->legacy->received;}
+std::optional<std::uint64_t> SampledSimulationChannel::payload_begin_sample()const {
+    if(impl_->physical) {
+        const auto& s=*impl_->physical;
+        if(s.source)return s.origin+static_cast<std::uint64_t>(std::ceil(s.startup));
+    } else {
+        const auto& s=*impl_->legacy;
+        if(s.source)return s.origin+static_cast<std::uint64_t>(std::ceil(s.startup));
+    }
+    return {};
+}
+std::optional<std::uint64_t> SampledSimulationChannel::payload_end_sample()const {
+    if(impl_->physical) {
+        const auto& s=*impl_->physical;
+        if(s.source)return s.origin+static_cast<std::uint64_t>(std::ceil(s.startup+static_cast<long double>(s.total)/s.rate));
+    } else {
+        const auto& s=*impl_->legacy;
+        if(s.source)return s.origin+static_cast<std::uint64_t>(std::ceil(s.startup+static_cast<long double>(s.total)/s.rate));
+    }
+    return {};
+}
+bool SampledSimulationChannel::payload_finished()const {
+    const auto end=payload_end_sample();return end&&received_samples()>=*end;
+}
 std::uint64_t SampledSimulationChannel::transmitted_samples()const {
     if(impl_->physical) {
         const auto& s=*impl_->physical;

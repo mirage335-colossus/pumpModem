@@ -35,6 +35,10 @@ struct Plan {
     double frequency_hz=0, helper_gain=0, data_gain=1, effective_power_w=0;
 };
 void validate(const Options&);
+// Validates the options and preserves the calibrated payload gain independently
+// of helper placement, occupied-band geometry or output sample rate. Disabled
+// helper power returns unity. This computes no tone or metadata waveform.
+double calibrated_data_gain(const Options&);
 // Throws when the helper cannot fit; callers may retain their unchanged Robust
 // path and report that helper configuration unavailable. Never retunes data.
 // A nonzero minimum_high_frequency_hz adds a High-only caller-supplied

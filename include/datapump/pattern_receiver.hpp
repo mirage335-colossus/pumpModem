@@ -1,4 +1,5 @@
 #pragma once
+#include <array>
 #include <optional>
 #include "datapump/modem.hpp"
 #include "datapump/pattern_search.hpp"
@@ -23,6 +24,8 @@ inline double pattern_symbol_support(double known_samples,double log_evidence,st
 // neither a lifetime false-alarm guarantee nor authentication is implied.
 struct PatternEvidence {
     std::uint64_t first_sample = 0, end_sample = 0, stream_symbol = 0;
+    // A phase-view fit reports its frozen affine helper-reference coordinate,
+    // not an instantaneous raw-carrier estimate. Trace labels the view ID.
     double frequency_hz = 0, score = 0, alternative_score = 0;
     unsigned bit = 0;
     std::uint64_t stream_phase_samples = 0;
@@ -51,10 +54,14 @@ struct PatternBurst {
     Bytes bits;
     std::uint64_t first_sample = 0, end_sample = 0;
     std::uint64_t first_stream_symbol = 0;
+    // Same reference-coordinate convention as PatternEvidence::frequency_hz.
     double frequency_hz = 0, score = 0;
     // True only after six seconds of observed search absence. EOF and a
     // pending gap never mark completion. A terminal event may contain no bits.
     bool complete = false;
+    // Durable acquisition provenance. Losing the optional reference never
+    // changes this stream's ordinary payload or physical-completion rules.
+    bool helper_acquired = false;
     std::uint64_t stream_phase_samples = 0;
     // Stable local identity across drainable chunks. The ordinary first_*
     // fields above describe this chunk's original sample/symbol coordinates.
@@ -66,6 +73,18 @@ struct PatternBurst {
     // Missing positions add zero; draining chunks never resets this total.
     double support_samples = 0;
 };
+// Conservative ordinary private-stream alignment, without payload contents.
+// The clock cone includes native continuation's bounded timing refinements.
+struct PatternSourceIdentity {
+    std::uint64_t epoch=0,first_symbol=0;
+    double clock_half_width_ppm=0;
+    std::uint32_t phase_lower=0,phase_upper=0,sample_rate=0;
+};
+// True only when the entire physical overlap has disjoint source addresses.
+// Unsupported/ambiguous geometry retains the existing overlap arbitration.
+bool pattern_source_identities_disjoint(const PatternSourceIdentity&,std::uint64_t first_a,
+    std::uint64_t end_a,std::uint64_t symbol_a,const PatternSourceIdentity&,std::uint64_t first_b,
+    std::uint64_t end_b,std::uint64_t symbol_b)noexcept;
 // Completed failed-symbol observations covering this much received-media
 // time end the stream. One failed symbol suffices when it lasts >=6s.
 inline constexpr std::uint64_t pattern_absence_seconds = 6;
@@ -115,6 +134,10 @@ struct PatternSearch {
     // include qualified UTC steering here; a phase-insensitive alternative must
     // cover it in full rather than inherit the clipped coherent endpoints.
     std::optional<double> admitted_frequency_half_width_hz,admitted_clock_half_width_ppm;
+    // Radius represented by each original paired timing lane. Thin independent
+    // strips can have a larger cell than half the adjacent rate-center gap.
+    // This provenance comes from the same builder as authoritative hypotheses.
+    std::optional<double> admitted_clock_cell_half_width_ppm;
     // Coverage provenance from the same policy that produced authoritative
     // pairs (including UTC steering). Endpoints alone cannot certify holes or
     // joint clock/frequency coverage; absent certificates stay conservative.
@@ -254,6 +277,13 @@ struct PatternFftWork {
     // executed stream-index/phase/frequency alternative (a cancelled job may
     // have started). These are execution counters, not timing measurements.
     std::uint64_t input_transforms=0,template_jobs=0;
+    std::uint64_t conditional_template_jobs=0,original_audit_template_jobs=0,deferred_original_batches=0;
+    std::uint64_t shifted_reference_trials=0;
+    // Measured optional parallel preparation, separated from executed jobs.
+    // Conditional preparation must not initialize the full original matrix.
+    std::size_t conditional_prepared_jobs_peak=0,original_prepared_jobs_peak=0;
+    std::size_t conditional_scoring_peak_bytes=0,original_scoring_peak_bytes=0;
+    std::uint64_t phase_view_template_jobs=0,phase_view_tracking_fits=0,phase_corrected_bins=0;
     std::uint64_t exact_reused_template_jobs=0;
     std::uint64_t skipped_batches=0,skipped_start_trials=0,threshold_trials=0;
     // Acquisition start cells only; threshold_trials additionally includes
@@ -295,6 +325,50 @@ struct PatternFftWork {
 // It excludes the immutable affine helper frequency used by the optional
 // frequency bank; constant Tx/propagation phase remains an unknown fitted gain.
 struct PatternPhaseKnot {std::uint64_t sample=0;double radians=0;};
+struct PatternPhaseSegment {
+    std::uint64_t first_sample=0;
+    double radians=0,radians_per_sample=0;
+};
+// One optional bank-owned, bounded residual-phase view. Coordinates are
+// absolute original input samples. B is the frozen helper CFO, excluding its
+// nominal audio frequency. The caller independently qualifies canonical tone
+// phase AND punctuation timing; metadata never qualifies this model.
+// All updates occur between joined receiver calls. Existing segments are never
+// rewritten or reclaimed. A full curve retains its last affine continuation.
+class PatternPhaseCurve {
+public:
+    static constexpr std::size_t segment_capacity=24;
+    bool configure(std::uint64_t view_id,std::uint32_t sample_rate,double baseline_residual_hz,
+                   std::uint64_t input_guard_samples,std::size_t maximum_bin_samples) noexcept;
+    // At most two continuous future segments, committed atomically. The guard
+    // includes any FIR lookback; max-bin separation also protects partial bins.
+    bool append(std::span<const PatternPhaseSegment>,std::uint64_t evidence_sample,
+                std::uint64_t qualified_until) noexcept;
+    // Only independent evidence agreeing with the unchanged prediction may
+    // refresh this expiry. This operation does not change any observation.
+    bool requalify(std::uint64_t evidence_sample,std::uint64_t qualified_until) noexcept;
+    void close() noexcept {qualified_until_=0;}
+    double value_at(long double absolute_sample) const noexcept;
+    std::uint64_t first_sample() const noexcept {return size_?segments_[0].first_sample:UINT64_MAX;}
+    double baseline() const noexcept {return baseline_;}
+    std::uint64_t latest_evidence() const noexcept {return latest_evidence_;}
+    std::uint64_t qualified_until() const noexcept {return qualified_until_;}
+    std::size_t available_segments() const noexcept {return segment_capacity-size_;}
+    std::uint64_t view_id() const noexcept {return view_id_;}
+    std::uint32_t sample_rate() const noexcept {return sample_rate_;}
+    std::size_t maximum_bin_samples() const noexcept {return maximum_bin_samples_;}
+    // Decode-worker input fence, including raw input before phase activation.
+    // The max-bin append guard protects an unfinished partial bin as well.
+    void mark_observed(std::uint64_t end) const noexcept {observed_until_=std::max(observed_until_,end);}
+private:
+    std::array<PatternPhaseSegment,segment_capacity> segments_{};
+    std::size_t size_=0;
+    std::uint64_t view_id_=0,latest_evidence_=0,qualified_until_=0,input_guard_=0;
+    mutable std::uint64_t observed_until_=0;
+    double baseline_=0;
+    std::uint32_t sample_rate_=0,maximum_bin_samples_=0;
+};
+static_assert(sizeof(PatternPhaseCurve)<=640);
 // Conservative mandatory storage through a finite retained-input replay.
 // This grants no source interpretation or physical completion authority.
 struct HelperReplayBudget {
@@ -305,6 +379,17 @@ struct HelperReplayBudget {
     // choose a larger resident template layout than the original receiver.
     std::size_t cold_constructor_bytes=0,reset_overlap_bytes=0,steady_workspace_bytes=0;
 };
+// Original native acquisition scheduling, in receiver-local input samples.
+// Observation is not an acquisition decision or physical absence. A caller
+// must finish ready original work before accepting further observations.
+struct PatternAcquisitionState {
+    bool supported=false,ready=false,prior_active=false,prior_pending=false,prior_accepted=false;
+    std::uint64_t observed_samples=0,processing_frontier=0,audit_start_sample=0;
+    std::size_t input_room_samples=0,original_pairs=0,selected_pairs=0,bin_samples=0;
+    double frequency_origin_hz=0;
+    std::optional<double> admitted_clock_half_width_ppm;
+    std::optional<double> admitted_clock_cell_half_width_ppm;
+};
 class PatternReceiver {
 public:
     PatternReceiver(Config, std::size_t workspace_bytes = 8 * 1024 * 1024,
@@ -313,6 +398,38 @@ public:
     PatternReceiver(PatternReceiver&&) noexcept;
     PatternReceiver& operator=(PatternReceiver&&) noexcept;
     void push(std::span<const float>, std::stop_token = {});
+    // Opt-in split input/ordinary-search seam. Unsupported engines consume
+    // zero. Input stops at the exact original native scheduling fence; no
+    // hypothesis, trial, candidate, bit or END rule is omitted or changed.
+    PatternAcquisitionState acquisition_state() const noexcept;
+    std::span<const PatternFrequencyRateHypothesis> acquisition_hypotheses() const noexcept;
+    // A conditional common-link prior, never a replacement source decoder.
+    // The mask names the immutable original pairs and must retain every clock
+    // rate. Only native continuous execution is supported. Shifted references
+    // spend additional lifetime trials; each track freezes its own origin.
+    // Selecting every pair is allowed only for a nonzero RF translation;
+    // this aligns a small original catalogue without promising less work.
+    // Refresh is atomic; only compatible, unconsumed ordinary RF/clock
+    // evidence survives. Clear/loss consumes that evidence.
+    bool set_acquisition_prior(double frequency_origin_hz,std::span<const std::uint8_t> mask);
+    bool clear_acquisition_prior();
+    // A fresh causal helper reference may protect current/future native tracks
+    // from abandonment by an independent start during a pending gap. Loss
+    // disarms future births, never accepted owners' ordinary absence scoring.
+    // Allocation-free; unsupported compact engines remain untouched.
+    bool set_helper_gap_protection(bool qualified) noexcept;
+    std::size_t observe_acquisition(std::span<const float>,std::stop_token = {});
+    // One conditional pass holds its original input/cursor until resolution.
+    // True means an ordinary Robust bit was accepted, not helper metadata.
+    bool process_prior_acquisition(std::stop_token = {});
+    // A cohort may retire the original batch under the explicitly configured
+    // common-link assumption. False instead audits that same batch at origin0.
+    void resolve_acquisition(bool conditional_link,std::stop_token = {});
+    void process_acquisition(std::stop_token = {});
+    // Borrowed bank-owned curve: it must outlive this receiver and all its
+    // tracks. No per-row allocation or permanent phase history is added.
+    bool set_acquisition_phase_view(const PatternPhaseCurve*) noexcept;
+    bool acquisition_phase_view_active() const noexcept;
     // Optional separate assisted receiver only. Original real PCM is first
     // projected exactly as usual; each complete complex bin is then rotated
     // at its center. Unit rotations preserve its noise covariance eigenvalues
@@ -363,6 +480,7 @@ public:
     // False permits releasing its local state, never declaring physical END.
     bool retains_stream(std::uint64_t first_sample, std::uint64_t first_symbol) const;
     PatternBurst provisional() const;
+    std::optional<PatternSourceIdentity> source_identity(const PatternBurst&)const;
     // Numerical acquisition may defer diagnostic history; admission/progress never wait for it.
     // Receiver-worker only: score retained observations with cancellable bounded batching.
     // Publication polls never perform the deferred search or manufacture input.

@@ -298,6 +298,29 @@ Bytes StreamingReceiver::push_symbols(std::span<const SymbolObservation>,std::st
     cancelled(stop);throw Error("pattern acquisition requires measured PCM, not despread symbol observations");
 }
 Bytes StreamingReceiver::push(std::span<const float> samples,std::stop_token stop){impl_->pattern.push(samples,stop);return {};}
+PatternAcquisitionState StreamingReceiver::acquisition_state()const noexcept{return impl_->pattern.acquisition_state();}
+std::span<const PatternFrequencyRateHypothesis> StreamingReceiver::acquisition_hypotheses()const noexcept {
+    return impl_->pattern.acquisition_hypotheses();
+}
+bool StreamingReceiver::set_acquisition_prior(double origin,std::span<const std::uint8_t> mask) {
+    return impl_->pattern.set_acquisition_prior(origin,mask);
+}
+bool StreamingReceiver::clear_acquisition_prior(){return impl_->pattern.clear_acquisition_prior();}
+bool StreamingReceiver::set_helper_gap_protection(bool qualified)noexcept {
+    return impl_->pattern.set_helper_gap_protection(qualified);
+}
+std::size_t StreamingReceiver::observe_acquisition(std::span<const float> samples,std::stop_token stop){
+    return impl_->pattern.observe_acquisition(samples,stop);
+}
+void StreamingReceiver::process_acquisition(std::stop_token stop){impl_->pattern.process_acquisition(stop);}
+bool StreamingReceiver::set_acquisition_phase_view(const PatternPhaseCurve* curve)noexcept{return impl_->pattern.set_acquisition_phase_view(curve);}
+bool StreamingReceiver::acquisition_phase_view_active()const noexcept{return impl_->pattern.acquisition_phase_view_active();}
+bool StreamingReceiver::process_prior_acquisition(std::stop_token stop){return impl_->pattern.process_prior_acquisition(stop);}
+void StreamingReceiver::resolve_acquisition(bool conditional_link,std::stop_token stop){impl_->pattern.resolve_acquisition(conditional_link,stop);}
+PatternFftWork StreamingReceiver::fft_work()const{return impl_->pattern.fft_work();}
+std::optional<PatternSourceIdentity> StreamingReceiver::source_identity(const PatternBurst& burst)const {
+    return impl_->pattern.source_identity(burst);
+}
 bool StreamingReceiver::phase_assistance_supported()const noexcept{return impl_->pattern.phase_assistance_supported();}
 std::size_t StreamingReceiver::phase_assistance_bin_samples()const noexcept{return impl_->pattern.phase_assistance_bin_samples();}
 bool StreamingReceiver::suspend_helper_acquisition(){return impl_->pattern.suspend_helper_acquisition();}

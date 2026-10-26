@@ -28,6 +28,12 @@ struct ReceiverState {
     double admitted_at = 0;
     bool prefer_streamed_templates = false;
     bool clock_window_modeled = false;
+    // These bytes occupy existing alignment padding before amplitude state.
+    // Input provenance is immutable until a full numeric reconstruction;
+    // optional scheduling and joined Error recovery are separate capabilities.
+    enum HelperFlag : std::uint8_t {helper_filtered_input=1,helper_eligible=2,
+        helper_deferred_error=4,helper_departure=8};
+    std::uint8_t helper_flags=0,helper_audit_group=0;
     std::size_t amplitude_fft_samples=0,amplitude_channel_count=0;
     // Actual selected passbands for coarse-frequency presentation arbitration.
     std::optional<modem::PatternAmplitudeGeometry> amplitude_geometry;
@@ -55,6 +61,24 @@ struct ReceiverState {
     std::unique_ptr<modem::StreamingReceiver> modem;
     std::unique_ptr<transfer::StreamReceiver> content;
 };
+// The helper controls must fit the padding that already followed the two
+// bools. Fail on any ABI that would move ordinary amplitude/payload state.
+// Supported compilers evaluate this non-standard-layout offset as an extension.
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winvalid-offsetof"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
+#endif
+static_assert(offsetof(ReceiverState,amplitude_fft_samples)==
+    (offsetof(ReceiverState,clock_window_modeled)+sizeof(bool)+alignof(std::size_t)-1)/
+        alignof(std::size_t)*alignof(std::size_t));
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 struct ReplayFrame {
     std::vector<float> waveform, spectrum;
     std::optional<double> simulation_spectrum_gain_db;

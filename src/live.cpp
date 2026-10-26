@@ -14,6 +14,7 @@
 #include "native_diagnostic_history.hpp"
 #include "live_receiver_admission.hpp"
 #include "live_helper.hpp"
+#include "live_helper_prior.hpp"
 #include "datapump/helper_assistance.hpp"
 #include "datapump/helper_filter.hpp"
 #include "live_signal_queue.hpp"
@@ -195,6 +196,8 @@ struct Session::Impl {
         std::function<void(Prepared&)> prepare_hardware;
         std::function<void(Prepared&,double)> prepare_simulation;
         std::uint64_t simulation_leading_samples=0;
+        std::uint64_t hardware_helper_leading_samples=0,hardware_helper_trailing_samples=0;
+        bool hardware_helper_enabled=false;
         double timing_stop_seconds=0,timing_rate_fraction=0;
         audio::ChannelMode output_channels=audio::ChannelMode::left_mono;
         double output_gain=1;
@@ -210,6 +213,8 @@ struct Session::Impl {
         std::uint64_t transmitted_samples = 0;
         std::uint64_t tail_remaining = 0;
         bool tail_started = false;
+        bool simulation_envelope_finished = false;
+        bool simulation_helper_enabled = false;
         bool simulation_channel_pending=true;
         std::vector<ReplayFrame> replay;
         std::shared_ptr<detail::ReplayStaging> receives;
@@ -297,14 +302,14 @@ struct Session::Impl {
             Receiver* receiver=nullptr;
             helper::Reference reference;
             helper::PayloadFilter filter;
-            std::uint64_t filter_input_origin=0;
+            std::uint64_t filter_input_origin=0,publication_floor=0;
             std::uint64_t anchor_sample=0;
             std::size_t numeric_limit=0,ordinary_numeric_loan=0,preroll_count=0;
             double anchor_phase=0,anchor_frequency=0,unwrapped_phase=0;
-            double last_applied_phase=0;
+            detail::HelperPhaseContinuation phase_continuation;
             std::array<modem::PatternPhaseKnot,2> phase_knots{};
             bool phase_ready=false,phase_qualified=false,failed=false,tail_only=false,payload_retained=false;
-            bool bounded_initial_search=false,phase_applied=false;
+            bool bounded_initial_search=false,phase_applied=false,acquisition_frozen=false;
             std::size_t bytes()const noexcept{return sizeof(HelperAssistance)+filter.allocated_bytes();}
         };
         struct HelperConditioning {
@@ -329,8 +334,39 @@ struct Session::Impl {
                     replay_budgets.capacity()*sizeof(ReplayBudget)+(fallback?fallback->bytes():0)+(original?original_bytes:0);
             }
         };
+        struct HelperCohort {
+            // One stable front end and one native executor per ordinary row.
+            // The FIR basis is fixed before local sample zero and never changes
+            // when the optional reference becomes unavailable.
+            helper::PayloadFilter filter;
+            struct AuditGroup {
+                std::uint64_t family=0,symbol_samples=0,due=0;
+                bool audit_now=false;
+            };
+            std::array<AuditGroup,32> groups{};
+            std::size_t group_count=0;
+            std::uint64_t filter_origin=0,lease_until=0,probation_until=0,quarantine_until=0;
+            std::uint64_t conditional_jobs=0,audit_jobs=0;
+            struct PhaseControl {
+                modem::PatternPhaseCurve curve;
+                std::uint64_t jobs=0,corrected_bins=0;
+                double anchor=0;
+            };
+            static_assert(sizeof(PhaseControl)<=664);
+            std::unique_ptr<PhaseControl> phase;
+            std::uint64_t original_pairs=0,selected_pairs=0;
+            double expected_hz=0,last_frequency_hz=0,last_radius_hz=0;
+            std::optional<helper::Reference> reference;
+            const char* reason="waiting for a measured helper frequency reference";
+            const char* phase_reason="helper phase and punctuation timing are not independently qualified";
+            bool qualified=false,active=false,last_frequency_valid=false,lease_compatible=true;
+            std::size_t bytes()const noexcept{return sizeof(HelperCohort)+filter.allocated_bytes()+
+                (phase?sizeof(PhaseControl):0);}
+        };
+        std::unique_ptr<HelperCohort> helper_cohort;
+        const char* helper_cohort_decline_reason="helper rolling acquisition has not been admitted";
         std::unique_ptr<HelperConditioning> helper_conditioning;
-        bool helper_conditioning_attempted=false;
+        bool helper_conditioning_attempted=false,helper_gap_protection_qualified=false;
         std::uint64_t helper_conditioning_probe=0,helper_last_frequency_sample=0;
         std::size_t helper_fallback_replay_bytes=0;
         const HelperConditioning* helper_fallback_budget=nullptr; // Borrowed only by scoped original replay.
@@ -386,7 +422,7 @@ struct Session::Impl {
         std::uint64_t samples = 0, next_candidate = 1,revision=0;
         std::uint64_t admissions = 0, retirements = 0, builds = 0;
         std::size_t peak_receivers = 0;
-        std::size_t working_bytes = sizeof(detail::ReceptionHistory)+sizeof(source_curves)+sizeof(exact_source_samples)+sizeof(exact_source_generation)+sizeof(next_exact_source_trace)+sizeof(exact_source_points)+sizeof(point_source_generation)+sizeof(next_point_consumer)+sizeof(next_point_source_trace)+sizeof(permutations)+sizeof(temporal_plans)+sizeof(deferred_input)+sizeof(input_queued_at)+sizeof(shared_capture)+sizeof(future_capture)+sizeof(receiver_allocations)+sizeof(detail::ReceiverAllocationAccount)+sizeof(receiver_storage)+sizeof(native_peaks)+sizeof(modem::detail::NativePeakWorkspace)+sizeof(native_points)+sizeof(helper_conditioning)+sizeof(helper_conditioning_attempted)+sizeof(helper_conditioning_probe)+sizeof(helper_last_frequency_sample)+sizeof(helper_fallback_replay_bytes)+sizeof(helper_fallback_budget)+65536;
+        std::size_t working_bytes = sizeof(detail::ReceptionHistory)+sizeof(source_curves)+sizeof(exact_source_samples)+sizeof(exact_source_generation)+sizeof(next_exact_source_trace)+sizeof(exact_source_points)+sizeof(point_source_generation)+sizeof(next_point_consumer)+sizeof(next_point_source_trace)+sizeof(permutations)+sizeof(temporal_plans)+sizeof(deferred_input)+sizeof(input_queued_at)+sizeof(shared_capture)+sizeof(future_capture)+sizeof(receiver_allocations)+sizeof(detail::ReceiverAllocationAccount)+sizeof(receiver_storage)+sizeof(native_peaks)+sizeof(modem::detail::NativePeakWorkspace)+sizeof(native_points)+sizeof(helper_conditioning)+sizeof(helper_conditioning_attempted)+sizeof(helper_conditioning_probe)+sizeof(helper_last_frequency_sample)+sizeof(helper_fallback_replay_bytes)+sizeof(helper_fallback_budget)+sizeof(helper_cohort)+sizeof(helper_cohort_decline_reason)+65536;
         double created_at = 0;
         std::optional<long double> public_amplitude_epoch_origin;
         std::uint64_t refreshed_sample=0;
@@ -400,6 +436,7 @@ struct Session::Impl {
         // UTC for a captured block, independent of when its search runs. Sample
         // coordinates remain continuous; fresh stamps only guide new admission.
         std::optional<double> observed_epoch;
+        bool simulation_capture_dated=false;
         std::optional<audio::TimePrediction> timing;
         std::uint64_t observed_sample = 0;
         bool limited = false;
@@ -728,6 +765,7 @@ struct Session::Impl {
         // acquisition while retaining ordinary tracking/absence scoring, without
         // new helper updates or a different historical phase convention.
         if(!state.receiver->modem->suspend_helper_acquisition())return false;
+        state.acquisition_frozen=true;
         state.tail_only=true;return true;
     }
     static void drop_helper_assistance(Bank& bank,const char* reason,bool physically_complete=false) {
@@ -1550,10 +1588,9 @@ struct Session::Impl {
             else block.samples.assign(samples.begin(),samples.end());
             if(reference && helper_frontier>=capture_samples) {
                 const auto origin=helper_frontier-capture_samples;
-                if(reference->sample>=origin && reference->sample<=helper_frontier) {
-                    reference->sample-=origin;
-                    reference->dwell_start_seconds-=static_cast<double>(origin)/settings.transfer.modem.sample_rate;
-                    block.helper=std::make_unique<helper::Reference>(std::move(*reference));
+                if(auto mapped=detail::rebase_helper_reference(std::move(*reference),origin,helper_frontier,
+                                                              settings.transfer.modem.sample_rate)) {
+                    block.helper=std::make_unique<helper::Reference>(std::move(*mapped));
                     helper_input_bytes+=helper_reference_bytes(block.helper.get());
                 }
             }
@@ -1618,7 +1655,7 @@ struct Session::Impl {
     }
     bool modeled_start_window(modem::PatternSearch& search,const modem::Config& config,
             std::uint64_t epoch,const Bank& bank,const Settings& value,std::uint64_t origin,bool amplitude=false) {
-        detail::ReceiverAdmissionContext context;context.timing=bank.timing;context.observed_sample=bank.observed_sample;
+        detail::ReceiverAdmissionContext context;context.simulation_capture_dated=bank.simulation_capture_dated;context.timing=bank.timing;context.observed_sample=bank.observed_sample;
         return detail::modeled_receiver_start_window(search,config,epoch,context,value,origin,amplitude);
     }
     static bool crossbank_temporal_plans_requested() {
@@ -1832,6 +1869,16 @@ struct Session::Impl {
                 std::any_of(receiver.bursts.begin(),receiver.bursts.end(),[](const auto& burst){return !burst.bits.empty();});
         });
     }
+    static bool helper_tracking_reference_qualified(const Bank& bank,const Settings& value,
+            const std::optional<helper::Reference>& reference) noexcept {
+        if(value.helper.power_w<=0 || !reference)return false;
+        const auto& ref=*reference;
+        const auto dated=ref.frequency_sample?ref.frequency_sample:ref.sample;
+        return ref.frequency_valid && ref.sample_rate==value.transfer.modem.sample_rate &&
+            ref.sample<=bank.samples && dated<=ref.sample && bank.samples-dated<=ref.sample_rate &&
+            std::isfinite(ref.frequency_hz) && std::isfinite(ref.frequency_uncertainty_hz) &&
+            ref.frequency_uncertainty_hz>=0;
+    }
     static bool fixed_epoch_admission(const Bank& bank,const Settings& value) {
         return value.transfer.timestamp && !bank.burst_admission_frozen && !bank.burst_resume_pending &&
             std::none_of(bank.receivers().begin(),bank.receivers().end(),[](const auto& receiver) {
@@ -1877,7 +1924,7 @@ struct Session::Impl {
     bool begin_helper_conditioning(Bank& bank,const Settings& value,const helper::Reference& reference) {
         const auto rate=value.transfer.modem.sample_rate;
         const auto dated=reference.frequency_sample?reference.frequency_sample:reference.sample;
-        if(!rate || value.helper.power_w<=0 || bank.helper_conditioning || bank.helper_conditioning_attempted ||
+        if(!rate || value.helper.power_w<=0 || bank.helper_cohort || bank.helper_conditioning || bank.helper_conditioning_attempted ||
            bank.samples<bank.helper_conditioning_probe || bank.helper_fallback_replay_bytes || !reference.frequency_valid || reference.sample_rate!=rate ||
            reference.sample>bank.samples || dated>reference.sample || bank.samples-dated>rate ||
            !std::isfinite(reference.frequency_hz) || !std::isfinite(reference.frequency_uncertainty_hz) ||
@@ -1986,6 +2033,7 @@ struct Session::Impl {
             Bank replacement;
             replacement.samples=bank.samples;replacement.created_at=bank.created_at;
             replacement.revision=bank.revision;replacement.observed_epoch=bank.observed_epoch;
+            replacement.simulation_capture_dated=bank.simulation_capture_dated;
             replacement.observed_sample=bank.observed_sample;replacement.timing=bank.timing;
             replacement.public_amplitude_epoch_origin=bank.public_amplitude_epoch_origin;
             replacement.helper_input_origin_samples=bank.helper_input_origin_samples;
@@ -2003,6 +2051,7 @@ struct Session::Impl {
                 if(helper_assisted_receiver(bank,old))continue;
                 auto config=transfer::seeded_config(old.options,old.epoch);
                 detail::ReceiverAdmissionContext admission;
+                admission.simulation_capture_dated=bank.simulation_capture_dated;
                 admission.sample_origin=origin;admission.observed_sample=bank.observed_sample;admission.timing=bank.timing;
                 admission.public_amplitude_epoch_origin=bank.public_amplitude_epoch_origin;
                 admission.now=observation_epoch(bank,value,origin);admission.keyed=old.options.key.has_value();
@@ -2010,7 +2059,7 @@ struct Session::Impl {
                 admission.propagation=!value.simulation&&value.transfer.clock_sync?value.transfer.clock_sync->offset_seconds:0;
                 auto prepared=detail::prepare_receiver_search(config,value,old.epoch,admission);
                 const bool calendar=!value.simulation && transfer::shared_hop_calendar(config) && admission.timing;
-                if(value.transfer.timestamp && !calendar && prepared.search.start_offset_seconds)
+                if(value.transfer.timestamp && !calendar && !bank.simulation_capture_dated && prepared.search.start_offset_seconds)
                     *prepared.search.start_offset_seconds-=(static_cast<long double>(bank.helper_input_origin_samples)+origin)/rate;
                 const auto old_count=prepared.search.hypotheses.size();
                 auto plan=conditioned_search(bank,value,config,prepared.search,origin,reference);
@@ -2063,7 +2112,7 @@ struct Session::Impl {
     }
     void prepare_helper_assistance(Bank& bank,const Settings& value,const helper::Reference& reference,
                                    std::size_t input_samples,std::uint64_t version) {
-        if(bank.helper_conditioning || bank.helper_conditioning_attempted || bank.helper_fallback_replay_bytes)return;
+        if(bank.helper_cohort || bank.helper_conditioning || bank.helper_conditioning_attempted || bank.helper_fallback_replay_bytes)return;
         const auto capacity=bank_capacity(value);
         const auto frequency_sample=reference.frequency_sample?reference.frequency_sample:reference.sample;
         if(value.helper.power_w<=0 ||
@@ -2111,7 +2160,8 @@ struct Session::Impl {
                     state.anchor_sample=reference.sample;
                     const auto age=static_cast<double>(scored_frontier-reference.sample)/reference.sample_rate;
                     state.anchor_phase=reference.phase_radians+2*std::numbers::pi*
-                        (reference.frequency_hz-state.anchor_frequency)*age-state.last_applied_phase;
+                        (reference.frequency_hz-state.anchor_frequency)*age-
+                        state.phase_continuation.at(scored_frontier-state.receiver->sample_origin,reference.sample_rate);
                     state.unwrapped_phase=reference.phase_radians;
                     state.reference=measurement_only(reference);
                     state.phase_qualified=state.phase_ready=true;
@@ -2141,6 +2191,7 @@ struct Session::Impl {
             return;
         }
         if(bank.receivers().empty())return;
+        if(ordinary_payload_active(bank))return;
         // Helper work is isolated from original cohort planning below. Its
         // bounded numeric grant uses actual surplus after every original
         // detector/growth promise, rather than a fixed tiny FFT-only allowance.
@@ -2181,6 +2232,7 @@ struct Session::Impl {
                 }
                 const auto origin=input_origin+filter.delay();
                 detail::ReceiverAdmissionContext admission;
+                admission.simulation_capture_dated=bank.simulation_capture_dated;
                 admission.sample_origin=origin;admission.observed_sample=bank.observed_sample;
                 admission.public_amplitude_epoch_origin=bank.public_amplitude_epoch_origin;
                 admission.timing=bank.timing;admission.now=observation_epoch(bank,value,origin);
@@ -2188,7 +2240,7 @@ struct Session::Impl {
                 admission.keyed=original.options.key.has_value();admission.capacity=capacity;
                 auto prepared=detail::prepare_receiver_search(config,value,original.epoch,admission);
                 const bool dated_calendar=!value.simulation && transfer::shared_hop_calendar(config) && admission.timing;
-                if(value.transfer.timestamp && !dated_calendar && prepared.search.start_offset_seconds)
+                if(value.transfer.timestamp && !dated_calendar && !bank.simulation_capture_dated && prepared.search.start_offset_seconds)
                     *prepared.search.start_offset_seconds-=(static_cast<long double>(bank.helper_input_origin_samples)+origin)/config.sample_rate;
                 const auto expected=helper::plan(value.helper,value.transfer.modem.carrier_hz,
                     detail::helper_occupied_bandwidth(value),120000000,0,
@@ -2235,6 +2287,7 @@ struct Session::Impl {
                 state->bounded_initial_search=plan.search->start_offset_seconds &&
                     std::isfinite(*plan.search->start_offset_seconds) && std::isfinite(plan.search->start_uncertainty_seconds) &&
                     plan.search->start_uncertainty_seconds>=0;
+                state->publication_floor=bank.samples;
                 state->preroll_count=replay?bank.helper_history->count:0;
                 state->receiver=&receiver;state->reference=measurement_only(reference);state->anchor_sample=reference.sample;
                 state->anchor_phase=reference.phase_radians;state->unwrapped_phase=reference.phase_radians;
@@ -2263,8 +2316,111 @@ struct Session::Impl {
             }catch(const Error&){}catch(const std::bad_alloc&){} // Optional assistance never resets ordinary reception.
         }
     }
+    static bool helper_cohort_policy(const Settings& value,const modem::Config& config) {
+        return value.helper.power_w>0 && value.helper.frequency!=helper::Frequency::cochannel &&
+            !value.transfer.timestamp && !config.symbol_burst.enabled() && !modem::scheduled_bursts(config) &&
+            (config.receiver_strategy==modem::ReceiverStrategy::automatic ||
+             config.receiver_strategy==modem::ReceiverStrategy::complex_only);
+    }
+    static bool helper_cohort_receiver(const Bank& bank,const Receiver& receiver)noexcept {
+        return bank.helper_cohort && (receiver.helper_flags&Receiver::helper_filtered_input);
+    }
+    static bool helper_cohort_eligible(const Bank& bank,const Receiver& receiver)noexcept {
+        constexpr auto required=Receiver::helper_filtered_input|Receiver::helper_eligible;
+        return bank.helper_cohort && (receiver.helper_flags&required)==required &&
+            !(receiver.helper_flags&Receiver::helper_departure);
+    }
+    static void clear_helper_row_transients(Receiver& receiver)noexcept {
+        if(receiver.helper_flags&Receiver::helper_departure)
+            receiver.helper_flags&=static_cast<std::uint8_t>(~Receiver::helper_eligible);
+        receiver.helper_flags&=static_cast<std::uint8_t>(~(Receiver::helper_deferred_error|Receiver::helper_departure));
+    }
+    void initialize_helper_cohort(Bank& bank,const Settings& value) {
+        if(bank.helper_cohort || bank.samples || bank.admissions)return;
+        if(value.helper.power_w<=0) {bank.helper_cohort_decline_reason="Helper carrier disabled";return;}
+        if(value.helper.frequency==helper::Frequency::cochannel) {
+            bank.helper_cohort_decline_reason="cochannel helper cannot qualify an isolated rolling frequency reference";return;
+        }
+        if(value.transfer.timestamp) {
+            bank.helper_cohort_decline_reason="fixed-epoch reception retains its separate helper acquisition path";return;
+        }
+        if(value.transfer.modem.symbol_burst.enabled() || modem::scheduled_bursts(value.transfer.modem)) {
+            bank.helper_cohort_decline_reason="scheduled physical apertures retain their ordinary acquisition policy";return;
+        }
+        if(!helper_cohort_policy(value,value.transfer.modem)) {
+            bank.helper_cohort_decline_reason="the selected ordinary receiver policy does not support helper rolling narrowing";return;
+        }
+        if(value.transfer.key && modem::symbol_sample_count(value.transfer.modem)>=
+                60ULL*value.transfer.modem.sample_rate) {
+            bank.helper_cohort_decline_reason="ordinary compact clock-search backend retained; helper rolling narrowing is unsupported";return;
+        }
+        try {
+            const auto& config=value.transfer.modem;
+            const auto expected=helper::plan(value.helper,config.carrier_hz,
+                detail::helper_occupied_bandwidth(value),120000000,0,
+                modem::outer_dsss_transmit_gain(config)).frequency_hz;
+            const auto taps=static_cast<std::size_t>(std::ceil(config.sample_rate*.04))|1U;
+            constexpr auto allowance=modem::SampledSimulationChannel::helper_cohort_workspace_bound;
+            if(taps<3 || taps>4097 || sizeof(Bank::HelperCohort)>allowance ||
+               taps>(allowance-sizeof(Bank::HelperCohort))/(sizeof(double)+sizeof(float))) {
+                bank.helper_cohort_decline_reason="helper front end exceeds its reserved 7 KiB control allowance";return;
+            }
+            auto cohort=std::make_unique<Bank::HelperCohort>();
+            cohort->filter=helper::PayloadFilter(config.sample_rate,expected);
+            // The 40ms Blackman stop filter has a finite transition. Require
+            // the full declared RF/audio-clock/profile support to clear it;
+            // unsafe configurations retain their ordinary unfiltered path.
+            const auto safe=[&](const modem::Config& profile) {
+                double rf=0,clock=0;
+                if(profile.oscillator_search) {
+                    const auto domain=modem::oscillator_pattern_search(profile,
+                        transfer::effective_clock_sync(value.transfer)?modem::utc_transmit_rate_limit(profile):0);
+                    rf=domain.frequency.requested_half_width_hz;
+                    clock=domain.requested_clock_half_width_ppm;
+                }
+                const auto half=helper::occupied_bandwidth(profile)/2;
+                const auto uncertainty=rf+(std::abs(profile.carrier_hz)+half)*clock*1e-6;
+                // +/-100Hz is the declared helper tracking range. The filter
+                // remains centered on the nominal carrier, including on loss.
+                const auto wanted_low=profile.carrier_hz-half-uncertainty;
+                const auto wanted_high=profile.carrier_hz+half+uncertainty;
+                constexpr double stop_and_transition=325;
+                return wanted_low>0 && wanted_high<profile.sample_rate/2. &&
+                    (wanted_high<expected-stop_and_transition || wanted_low>expected+stop_and_transition) &&
+                    cohort->filter.maximum_amplitude_error(wanted_low,wanted_high)<=.001;
+            };
+            auto profiles=value.transfer.automatic_receive_profiles?
+                tuning::receive_profiles(config,value.transfer.receive_targets_db_hz,
+                    value.transfer.receive_pattern_mode,value.transfer.key.has_value()):std::vector<modem::Config>{config};
+            if(value.long_message_modem)profiles.push_back(*value.long_message_modem);
+            if(!std::all_of(profiles.begin(),profiles.end(),safe)) {
+                bank.helper_cohort_decline_reason="full declared payload support fails the fixed helper-filter separation or amplitude bound";return;
+            }
+            cohort->expected_hz=expected;cohort->filter_origin=cohort->filter.delay();
+            // This bounded control and its immutable FIR occupy the channel's
+            // already reserved auxiliary allowance. They cannot reduce an
+            // ordinary constructor grant, bit store or source quota.
+            if(cohort->bytes()>modem::SampledSimulationChannel::helper_cohort_workspace_bound) {
+                bank.helper_cohort_decline_reason="helper front end exceeds its reserved 7 KiB control allowance";return;
+            }
+            bank.helper_cohort=std::move(cohort);
+            audio::trace::record("receiver_helper_cohort_frontend",[&](auto& f) {
+                f.add("sample",bank.samples);f.add("filter_delay",bank.helper_cohort->filter.delay());
+                f.add("expected_hz",expected);f.add("declared_support_guard_hz",325);
+                f.add("reserved_bytes",modem::SampledSimulationChannel::helper_cohort_workspace_bound);
+                f.add("actual_bytes",bank.helper_cohort->bytes());f.add("cohort_control_bytes",sizeof(Bank::HelperCohort));
+                f.add("wanted_amplitude_error_limit",.001);
+            });
+        }catch(const Error&) {bank.helper_cohort_decline_reason="helper front end has no valid passband or bounded filter geometry";}
+        catch(const std::bad_alloc&) {bank.helper_cohort_decline_reason="optional helper front-end allocation unavailable; ordinary reception retained";}
+    }
     Bank make_bank(const Settings& value) { return make_bank(value, Bank{}); }
     Bank make_bank(const Settings& value, Bank bank) {
+        // The caller's former owner is now moved-from. The private checkpoint
+        // exercises capture invalidation at this joined admission boundary.
+        if(bank.samples && simulation_media_clock(value))detail::simulation_checkpoint(
+            detail::SimulationPhase::bank_refresh_moved,bank.samples,bank.samples,bank.revision);
+        initialize_helper_cohort(bank,value);
         initialize_receiver_storage(bank,bank_capacity(value));
         rx_cpu::Context cpu_context(rx_cpu::Stage::rolling);
         // Calendar refresh alone neither invalidates public N/C/coordinate
@@ -2368,7 +2524,7 @@ struct Session::Impl {
                         family_profiles.push_back(transfer::seeded_config(options,center));
                     }
                 }
-                detail::ReceiverAdmissionContext context;
+                detail::ReceiverAdmissionContext context;context.simulation_capture_dated=bank.simulation_capture_dated;
                 context.sample_origin=bank.samples;context.observed_sample=bank.observed_sample;
                 context.public_amplitude_epoch_origin=bank.public_amplitude_epoch_origin;
                 context.timing=bank.timing;context.now=now;context.propagation=propagation;
@@ -2486,6 +2642,7 @@ struct Session::Impl {
                         nominal.hypotheses=declared.hypotheses;
                         nominal.admitted_frequency_half_width_hz=declared.frequency.requested_half_width_hz;
                         nominal.admitted_clock_half_width_ppm=declared.requested_clock_half_width_ppm;
+                        nominal.admitted_clock_cell_half_width_ppm=declared.clock_step_ppm/2;
                         nominal.complex_frequency_coverage=!declared.frequency.limited;
                         nominal.complex_clock_coverage=declared.clock_half_width_ppm>=declared.requested_clock_half_width_ppm;
                     }
@@ -2569,7 +2726,7 @@ struct Session::Impl {
                     // Replenish the horizon even when today's epoch was
                     // already prepared by an earlier refresh.
                     if(epoch_index==0&&existing->amplitude_fft_samples&&!key) {
-                        detail::ReceiverAdmissionContext context;
+                        detail::ReceiverAdmissionContext context;context.simulation_capture_dated=bank.simulation_capture_dated;
                         context.sample_origin=bank.samples;context.observed_sample=bank.observed_sample;
                         context.timing=bank.timing;context.now=now;context.propagation=propagation;
                         context.public_amplitude_epoch_origin=bank.public_amplitude_epoch_origin;
@@ -2639,8 +2796,12 @@ struct Session::Impl {
                     unavailable("receiver container leaves insufficient constructor headroom");continue;
                 }
                 auto& receiver=staged.receiver();
+                bool cohort_candidate=bank.helper_cohort && helper_cohort_policy(value,profile) && !compact;
                 const auto helper_delay=bank.helper_conditioning?bank.helper_conditioning->filter.delay():0;
-                receiver.sample_origin=bank.samples-std::min<std::uint64_t>(bank.samples,helper_delay);receiver.family=family;
+                receiver.sample_origin=cohort_candidate?
+                    bank.helper_cohort->filter_origin+bank.helper_cohort->filter.output_samples():
+                    bank.samples-std::min<std::uint64_t>(bank.samples,helper_delay);
+                receiver.family=family;
                 if(bank.next_point_consumer==UINT64_MAX)throw Error("point pool consumer identity exhausted");
                 receiver.point_consumer=bank.next_point_consumer++;
                 receiver.prefer_streamed_templates=keys.size()>1 || profiles.size()>1 || epochs.size()>1;
@@ -2654,6 +2815,7 @@ struct Session::Impl {
                 std::size_t constructor_grant=0;
                 try {
                     detail::ReceiverAdmissionContext admission;
+                admission.simulation_capture_dated=bank.simulation_capture_dated;
                     admission.sample_origin=receiver.sample_origin;admission.observed_sample=bank.observed_sample;
                     admission.public_amplitude_epoch_origin=bank.public_amplitude_epoch_origin;
                     admission.timing=bank.timing;admission.now=observation_epoch(bank,value,receiver.sample_origin);admission.propagation=propagation;
@@ -2678,6 +2840,16 @@ struct Session::Impl {
                     // cohort can need an energy detector even when the initial
                     // cohort was eligible for frequency-conditioned acquisition.
                     auto selection=select();
+                    if(cohort_candidate && selection.backend!=modem::ReceiverBackend::existing_complex) {
+                        // Auto may require an energy/differential/calendar path.
+                        // That original policy receives original unfiltered PCM.
+                        cohort_candidate=false;receiver.sample_origin=bank.samples;
+                        admission.sample_origin=receiver.sample_origin;
+                        admission.now=observation_epoch(bank,value,receiver.sample_origin);
+                        prepared=detail::prepare_receiver_search(config,value,epoch,admission);
+                        search=std::move(prepared.search);declared_search=std::move(prepared.declared_search);
+                        selection=select();
+                    }
                     if(bank.helper_conditioning && !bank.helper_conditioning->broad_future) {
                         if(config.receiver_strategy==modem::ReceiverStrategy::existing_only ||
                            config.receiver_strategy==modem::ReceiverStrategy::amplitude_only ||
@@ -2819,6 +2991,18 @@ struct Session::Impl {
                         // factory. Required state and the single retry are unchanged.
                         receiver.modem=construct();
                     }
+                    if(cohort_candidate && receiver.modem->clock_windowed()) {
+                        // Selection policy can fall back inside construction.
+                        // Rebuild the untouched original raw-input dates before
+                        // this row observes even its first physical sample.
+                        receiver.modem.reset();cohort_candidate=false;receiver.sample_origin=bank.samples;
+                        admission.sample_origin=receiver.sample_origin;
+                        admission.now=observation_epoch(bank,value,receiver.sample_origin);
+                        prepared=detail::prepare_receiver_search(config,value,epoch,admission);
+                        search=std::move(prepared.search);declared_search=std::move(prepared.declared_search);
+                        selection=select();receiver.clock_window_modeled=prepared.clock_window_modeled;
+                        receiver.modem=construct();
+                    }
                 } catch(const Error& error) {
                     unavailable(error.what());continue;
                 }
@@ -2830,6 +3014,33 @@ struct Session::Impl {
                 if (bank.working_bytes > bank_capacity(value))
                     throw Error("key and epoch receiver bank exceeds the configured DSP workspace");
                 staged.commit();
+                if(cohort_candidate) {
+                    auto& cohort=*bank.helper_cohort;
+                    const auto symbol=modem::symbol_sample_count(config);
+                    std::size_t group=0;
+                    // Keep one shared overflow group. Its shortest symbol
+                    // period and earliest armed deadline cover every overflow
+                    // profile without disabling any ordinary row or helper.
+                    constexpr auto overflow=std::tuple_size_v<decltype(cohort.groups)>-1;
+                    for(;group<std::min(cohort.group_count,overflow);++group)
+                        if(cohort.groups[group].family==receiver.family && cohort.groups[group].symbol_samples==symbol)break;
+                    if(group==std::min(cohort.group_count,overflow)) {
+                        if(cohort.group_count<overflow)cohort.groups[cohort.group_count++]={receiver.family,symbol,0,false};
+                        else {
+                            group=overflow;auto& shared=cohort.groups[group];
+                            if(cohort.group_count==overflow) {
+                                shared={receiver.family,symbol,0,false};++cohort.group_count;
+                            } else {
+                                shared.symbol_samples=std::min(shared.symbol_samples,symbol);
+                                const auto due=detail::helper_audit_deadline(bank.samples,config.sample_rate,
+                                    shared.symbol_samples);
+                                if(shared.due)shared.due=std::min(shared.due,due);
+                            }
+                        }
+                    }
+                    receiver.helper_flags=Receiver::helper_filtered_input|Receiver::helper_eligible;
+                    receiver.helper_audit_group=static_cast<std::uint8_t>(group);
+                }
                 ++bank.admissions;
                 audio::trace::record("receiver_bank_admitted",[&](auto& f) {
                     f.add("revision",bank.revision);f.add("epoch",epoch);f.add("family",family);
@@ -2848,6 +3059,11 @@ struct Session::Impl {
                 f.add("admissions",bank.admissions);f.add("retirements",bank.retirements);
                 f.add("reason","no_new_receiver");
             });
+        if(bank.helper_cohort && !bank.samples && std::none_of(bank.receivers().begin(),bank.receivers().end(),
+            [&](const auto& receiver){return helper_cohort_receiver(bank,receiver);})) {
+            bank.helper_cohort.reset();
+            bank.helper_cohort_decline_reason="Auto retained an ordinary energy or compact backend; helper rolling narrowing is unsupported";
+        }
         bank.created_at = now;
         bank.refreshed_sample=bank.samples;
         if(bank.receivers().empty() && !(scheduled_quiet_only && !bank.coverage_limited) && bank.receiver_limit.empty())
@@ -2901,7 +3117,7 @@ struct Session::Impl {
             const bool sample_clock=bank.public_amplitude_windows && receiver.amplitude_geometry &&
                 receiver.amplitude_geometry->clock_hypotheses==1 && !receiver.options.key &&
                 chip && !(chip%2) && config.sample_rate%(chip/2)==0;
-            const auto age=static_cast<long double>(bank.samples-receiver.sample_origin)/config.sample_rate;
+            const auto age=static_cast<long double>(bank.samples-std::min(bank.samples,receiver.sample_origin))/config.sample_rate;
             const auto radius=std::max(allowance,33.);
             const bool expired=sample_clock?(receiver.last_confident_end?
                 age>static_cast<long double>(receiver.last_confident_end)/config.sample_rate+6+radius:
@@ -2942,7 +3158,7 @@ struct Session::Impl {
             bank.receiver_storage_bytes()+bank.receiver_allocations->allocated_bytes()+sizeof(bank.native_peaks)+
             sizeof(modem::detail::NativePeakWorkspace)+sizeof(bank.native_points)+native_pool_workspace(bank)+
             sizeof(bank.helper_conditioning)+sizeof(bank.helper_conditioning_attempted)+sizeof(bank.helper_conditioning_probe)+
-            sizeof(bank.helper_last_frequency_sample)+sizeof(bank.helper_fallback_replay_bytes)+sizeof(bank.helper_fallback_budget)+65536;
+            sizeof(bank.helper_last_frequency_sample)+sizeof(bank.helper_fallback_replay_bytes)+sizeof(bank.helper_fallback_budget)+sizeof(bank.helper_cohort)+sizeof(bank.helper_cohort_decline_reason)+65536;
         for(const auto& receiver:bank.receivers())bank.working_bytes+=receiver_workspace(receiver);
         if(bank.helper_assistance)bank.working_bytes+=bank.helper_assistance->bytes();
         if(bank.helper_history)bank.working_bytes+=bank.helper_history->bytes();
@@ -2950,6 +3166,7 @@ struct Session::Impl {
         bank.working_bytes+=bank.helper_fallback_replay_bytes;
         if(new_epoch && !bank.burst_admission_frozen) {
             bank.burst_resume_pending=false;
+            trace_receiver_acquisition_work(bank,false,"refresh_before_move");
             bank=make_bank(value,std::move(bank));
         }
     }
@@ -3002,8 +3219,9 @@ struct Session::Impl {
         std::uint32_t rate=0;
         double expected=0;
         HelperWorkspace(double frequency,double width,std::vector<Crypto> keys,
-                        std::uint32_t sample_rate,std::uint64_t version):
-            tracker(frequency,width),receiver(frequency,width,std::move(keys)),
+                        std::uint32_t sample_rate,std::uint64_t version,
+                        std::optional<helper::OccupiedBand> ordinary_band):
+            tracker(frequency,width),receiver(frequency,width,std::move(keys),ordinary_band),
             generation(version),rate(sample_rate),expected(frequency) {}
     };
     // One owner for both modes, including handoff. Auxiliary storage was already
@@ -3039,7 +3257,7 @@ struct Session::Impl {
             if(value.transfer.key)add(*value.transfer.key);
             for(const auto& key:value.receive_keys)add(key);
             helper_workspace=std::make_unique<HelperWorkspace>(plan.frequency_hz,width,
-                std::move(keys),physical_rate,version);
+                std::move(keys),physical_rate,version,detail::helper_occupied_receive_band(value));
             helper_workspace->tracker.push({},physical_rate);
             return true;
         } catch(const std::exception& error) {
@@ -3130,7 +3348,7 @@ struct Session::Impl {
         }
         if(!observation->present) {
             current.helper_frequency_offset_hz.reset();current.helper_snr_db.reset();
-            current.helper_status="Helper carrier absent; ordinary Robust reception retained";
+            if(current.helper_status.empty())current.helper_status="Helper carrier absent; ordinary Robust reception retained";
             if(observation->absent_seconds+1e-9>=6)work.first_reference_end=UINT64_MAX;
             if(reception.id && observation->absent_seconds+1e-9>=6) {
                 if(!reception.complete) {
@@ -3148,7 +3366,7 @@ struct Session::Impl {
         reception.frequency=observation->frequency_hz;reception.snr=observation->snr_db;
         const auto offset=observation->frequency_hz-expected;
         current.helper_frequency_offset_hz=offset;current.helper_snr_db=observation->snr_db;
-        current.helper_status="Helper carrier tracked; ordinary Robust payload decoding retained";
+        if(current.helper_status.empty())current.helper_status="Helper carrier present; acquisition assistance not active";
         SignalUpdate event;event.helper_carrier=true;event.id=reception.id;event.frequency_hz=observation->frequency_hz;
         event.snr_db=observation->snr_db;event.complete=reception.complete;event.revision=receive_revision;
         std::ostringstream text;text.imbue(std::locale::classic());
@@ -3413,7 +3631,7 @@ struct Session::Impl {
         candidate.timing_tolerance=modem::pattern_chip_samples(receiver.options.modem);
         candidate.score=burst.support_samples;
         candidate.complete=burst.complete;
-        candidate.helper_assisted=helper_assisted;
+        candidate.helper_assisted=burst.helper_acquired || helper_assisted;
         if(receiver.options.modem.symbol_burst.enabled()) {
             auto config=receiver.options.modem;config.data_key=receiver.options.key;
             const modem::SymbolBurstPlan plan(config);
@@ -3428,15 +3646,103 @@ struct Session::Impl {
                 modem::SymbolBurstCursor cursor(plan,*display.burst_next);
                 display.burst_next=cursor.at(next);
             }
-            candidate.burst_first=display.burst_first;
-            candidate.burst_next=display.burst_next->payload_begin;
-        }
+            candidate.source_identity=detail::ReceptionHistory::BurstIdentity{
+                *display.burst_first,display.burst_next->payload_begin,true,true};
+        } else if(const auto source=receiver.modem->source_identity(burst))candidate.source_identity=*source;
         return candidate;
+    }
+    static void trace_receiver_pattern_wire(const Bank& bank,const Receiver& receiver,
+            const modem::PatternBurst& burst,std::uint64_t candidate_id,std::uint64_t frontier) {
+        const auto trace=audio::trace::active.load();
+        if(!trace)return;
+        detail::simulation_wire_checkpoint({bank.revision,receiver.epoch,receiver.family,
+            receiver.point_consumer,candidate_id,receiver.sample_origin,
+            burst.stream_first_sample,burst.stream_first_symbol,burst.first_stream_symbol,burst.stream_phase_samples,
+            receiver.sample_origin+burst.stream_first_sample,receiver.sample_origin+burst.end_sample,
+            frontier,burst.missing_slots,burst.bits,burst.complete,burst.helper_acquired});
+        if(trace->event_filter && !trace->event_filter("receiver_pattern_wire"))return;
+        // Diagnostic copies of the actual ordinary detector output, before
+        // StreamReceiver applies the Data mask or interprets framing. Piece
+        // boundaries never change its original vector or completion decision.
+        std::size_t offset=0;
+        do {
+            const auto count=std::min<std::size_t>(1024,burst.bits.size()-offset);
+            std::string bits;bits.reserve(count);
+            for(const auto bit:std::span(burst.bits).subspan(offset,count))bits.push_back(static_cast<char>('0'+bit));
+            const bool last=offset+count==burst.bits.size();
+            audio::trace::record("receiver_pattern_wire",[&](auto& f) {
+                f.add("input_revision",bank.revision);f.add("epoch",receiver.epoch);f.add("family",receiver.family);
+                f.add("instance_id",receiver.point_consumer);f.add("candidate_id",candidate_id);
+                f.add("sample_origin",receiver.sample_origin);f.add("stream_first_sample",burst.stream_first_sample);
+                f.add("stream_first_symbol",burst.stream_first_symbol);
+                f.add("first_stream_symbol",burst.first_stream_symbol+offset);f.add("piece_offset",offset);
+                f.add("stream_phase_samples",burst.stream_phase_samples);
+                f.add("physical_first",receiver.sample_origin+burst.stream_first_sample);
+                f.add("physical_end",receiver.sample_origin+burst.end_sample);f.add("feed_end_sample",frontier);
+                f.add("bits",bits);f.add("missing_slots",offset?0:burst.missing_slots);
+                f.add("complete",last && burst.complete);f.add("helper_acquired",burst.helper_acquired);
+                f.add("scope","ordinary detector wire bits before Data XOR and framing; trace only");
+            });
+            offset+=count;
+        }while(offset<burst.bits.size());
+    }
+    // Call only at a joined receiver boundary: end of feed, or after its
+    // cancellation/error unwind and before this Bank is destroyed/reset.
+    static void trace_receiver_acquisition_work(const Bank& bank,bool incomplete,const char* reason,
+                                                const Receiver* only=nullptr,bool numeric_retired=false) {
+        if(!audio::trace::active.load())return;
+        if(!bank.receiver_storage) {
+            audio::trace::record("receiver_acquisition_work_unavailable",[&](auto& f) {
+                f.add("revision",bank.revision);f.add("sample",bank.samples);f.add("reason",reason);
+                f.add("incomplete",true);f.add("numeric_owner",false);
+                f.add("scope","receiver storage unavailable after an incomplete bank transition");
+            });
+            return;
+        }
+        for(const auto& receiver:bank.receivers()) {
+            if(only && only!=&receiver)continue;
+            const auto work=receiver.modem?receiver.modem->fft_work():modem::PatternFftWork{};
+            audio::trace::record("receiver_acquisition_work",[&](auto& f) {
+                f.add("revision",bank.revision);f.add("sample",bank.samples);f.add("epoch",receiver.epoch);
+                f.add("family",receiver.family);f.add("sample_origin",receiver.sample_origin);f.add("instance_id",receiver.point_consumer);
+                f.add("template_jobs",work.template_jobs);f.add("input_transforms",work.input_transforms);
+                f.add("conditional_jobs",work.conditional_template_jobs);f.add("audit_jobs",work.original_audit_template_jobs);
+                f.add("phase_jobs",work.phase_view_template_jobs);f.add("phase_tracking_fits",work.phase_view_tracking_fits);
+                f.add("phase_corrected_bins",work.phase_corrected_bins);
+                f.add("incomplete",incomplete || !receiver.modem);f.add("reason",reason);
+                f.add("numeric_owner",bool(receiver.modem));f.add("numeric_retired",numeric_retired);
+                f.add("scope","cumulative numeric work keyed by revision, row instance_id and sample_origin");
+            });
+        }
+    }
+    static void record_helper_cohort_phase_work(Bank& bank,const Receiver& receiver,
+                                               const modem::PatternFftWork& before,std::uint64_t frontier) {
+        if(!helper_cohort_receiver(bank,receiver))return;
+        auto& cohort=*bank.helper_cohort;
+        if(!cohort.phase)return;
+        auto& phase=*cohort.phase;
+        const auto after=receiver.modem->fft_work();
+        const auto jobs=after.phase_view_template_jobs-before.phase_view_template_jobs;
+        phase.jobs+=jobs;
+        phase.corrected_bins+=after.phase_corrected_bins-before.phase_corrected_bins;
+        const auto observed=receiver.modem->acquisition_state().observed_samples;
+        const auto consumer=observed<=UINT64_MAX-receiver.sample_origin?receiver.sample_origin+observed:UINT64_MAX;
+        if(jobs && consumer<=phase.curve.qualified_until())audio::trace::record("receiver_helper_cohort_phase_applied",[&](auto& f) {
+            f.add("sample",frontier);f.add("reference_sample",phase.curve.latest_evidence());
+            f.add("phase_consumer_frontier",consumer);
+            f.add("epoch",receiver.epoch);f.add("sample_origin",receiver.sample_origin);
+            f.add("phase_jobs",phase.jobs);f.add("phase_tracking_fits",after.phase_view_tracking_fits);
+            f.add("phase_corrected_bins",phase.corrected_bins);f.add("timing_qualified",true);
+            f.add("baseline_residual_hz",phase.curve.baseline());
+        });
     }
     static std::uint64_t committed_bank_frontier(const Bank& bank,std::optional<std::uint64_t> prospective={}) {
         const auto ingress=prospective.value_or(bank.samples);
         auto committed=ingress;
         for(const auto& receiver:bank.receivers()) {
+            if(helper_cohort_receiver(bank,receiver) && receiver.sample_origin>ingress) {
+                committed=0;continue; // The first symmetric FIR window is not observed yet.
+            }
             const detail::DeferredConsumerFrontier consumer{receiver.sample_origin,
                 receiver.modem->delayed_processing_frontier()};
             committed=std::min(committed,detail::committed_frontier(ingress,
@@ -3455,6 +3761,19 @@ struct Session::Impl {
             // real consumer, not merely optional retained memory. Holding its
             // frontier also makes automatic replay publication monotone.
             if(state.original)committed=std::min(committed,committed_bank_frontier(*state.original));
+        }
+        if(bank.helper_cohort && std::any_of(bank.receivers().begin(),bank.receivers().end(),
+            [&](const auto& receiver){return helper_cohort_receiver(bank,receiver);})) {
+            const auto& cohort=*bank.helper_cohort;
+            const auto centers=cohort.filter.output_samples()?cohort.filter_origin+cohort.filter.output_samples():0;
+            committed=std::min(committed,std::min(ingress,centers));
+        }
+        if(bank.helper_assistance) {
+            const auto& state=*bank.helper_assistance;
+            // FIR output dates refer to its centers, not the newest ingress.
+            // A newly admitted pre-roll consumer cannot retract publication.
+            const auto centers=state.receiver->sample_origin+state.filter.output_samples();
+            committed=std::min(committed,std::max(state.publication_floor,centers));
         }
         return committed;
     }
@@ -3951,6 +4270,23 @@ struct Session::Impl {
         // Observe every profile before publishing any completion. Otherwise a
         // weaker profile processed first could close the shared pending row.
         helper_planning.restore();
+        // Delayed cohort work rejoins this same ordinary per-row recovery
+        // boundary before publication. A numeric failure never resets the
+        // entire capture/transmitter merely because a helper was enabled.
+        // Sparse exceptions preserve the original Error, within the stack
+        // space formerly occupied by three fixed per-row control arrays.
+        struct CohortFailure {Receiver* receiver=nullptr;std::exception_ptr error;};
+        std::array<CohortFailure,240> cohort_failures{};
+        std::size_t cohort_failure_count=0;
+        struct JoinedHelperFlags {
+            Bank& bank;bool pending=false;
+            ~JoinedHelperFlags() {
+                if(!pending || !bank.receiver_storage)return;
+                for(auto& receiver:bank.receivers())clear_helper_row_transients(receiver);
+            }
+        } joined_helper_flags{bank,static_cast<bool>(bank.helper_cohort)};
+        static_assert(sizeof(cohort_failures)+sizeof(cohort_failure_count)+sizeof(JoinedHelperFlags)<=
+            sizeof(std::array<std::exception_ptr,240>)+sizeof(std::array<bool,240>)+sizeof(std::array<const char*,240>));
         for(unsigned phase=0;phase<2;++phase) {
             for (auto& receiver : bank.receivers()) {
                 execution::checkpoint();
@@ -3963,12 +4299,30 @@ struct Session::Impl {
                     accounted = actual;
                 };
                 try {
+                    if(phase==1 && (receiver.helper_flags&Receiver::helper_deferred_error)) {
+                        // Consume once before the same ordinary recovery.
+                        // Only failed rows search this bounded sparse table.
+                        receiver.helper_flags&=static_cast<std::uint8_t>(~Receiver::helper_deferred_error);
+                        for(std::size_t i=0;i<cohort_failure_count;++i)if(cohort_failures[i].receiver==&receiver) {
+                            auto error=std::move(cohort_failures[i].error);cohort_failures[i].receiver=nullptr;
+                            std::rethrow_exception(error);
+                        }
+                        // More than 240 simultaneous Errors still retain their
+                        // exact diagnostic trace, without a growing allocation.
+                        throw Error("ordinary helper cohort operation failed; original diagnostic recorded");
+                    }
                     // Empty publication batches only retire presentation metadata.
                     // Keep numeric storage pooled until a modem operation needs it.
                     if((phase==0 || !receiver.bursts.empty()) && !helper_assisted_receiver(bank,receiver))
                         native_storage.emplace(bank,receiver,capacity,accounted);
                     if(phase==0) {
-                        auto* local_projection=helper_assisted_receiver(bank,receiver)?nullptr:projection.cache.get();
+                        // Keep a helper-qualified accepted owner's ordinary
+                        // END scorer when a later start competes, including
+                        // after reference loss. This sets no acquisition prior
+                        // or phase correction.
+                        receiver.modem->set_helper_gap_protection(bank.helper_gap_protection_qualified);
+                        auto* local_projection=(helper_assisted_receiver(bank,receiver) ||
+                            helper_cohort_receiver(bank,receiver))?nullptr:projection.cache.get();
                         // Resolve/grow provenance before borrowing numeric caches
                         // or computing the modem loan. New heap bytes then reduce
                         // that loan exactly, including after pressure replay.
@@ -4066,7 +4420,7 @@ struct Session::Impl {
                             const auto ns=eligible && receiver.family<UINT64_MAX?receiver.family+1:0;
                             modem::detail::PatternPermutationScope permutation_scope(eligible?bank.permutations.get():nullptr,ns);
                             if(context)context->bind_permutations(eligible?bank.permutations.get():nullptr,ns);
-                            feed(*receiver.modem,context);
+                            feed(receiver,context);
                             record_history_generation(receiver);
                             receiver.modem->process_pending(stop);
                             record_history_generation(receiver);
@@ -4086,7 +4440,8 @@ struct Session::Impl {
                             // Promote before joined reclamation/publication:
                             // an accepted prefix is now mandatory payload work.
                             bank.helper_assistance->payload_retained=true;
-                            if(bank.helper_assistance->tail_only)receiver.modem->suspend_helper_acquisition();
+                            if(bank.helper_assistance->tail_only && receiver.modem->suspend_helper_acquisition())
+                                bank.helper_assistance->acquisition_frozen=true;
                             audio::trace::record("receiver_helper_payload_retained",[&](auto& f){
                                 f.add("sample",bank.samples);f.add("epoch",receiver.epoch);
                             });
@@ -4146,6 +4501,8 @@ struct Session::Impl {
                             auto& display=presentation->second;
                             const auto candidate=reception_candidate(receiver,burst,display,
                                 bank.helper_conditioning || helper_assisted_receiver(bank,receiver));
+                            trace_receiver_pattern_wire(bank,receiver,burst,display.candidate_id,
+                                bank.samples+coordinate_count.value_or(sample_count));
                             auto result=transfer::detail::push_live_pending(
                                 *receiver.content,std::move(burst),receiver.modem->diagnostics());
                             update_workspace();
@@ -4196,7 +4553,7 @@ struct Session::Impl {
                                     f.add("candidate_id",candidate.id);f.add("candidate_score",candidate.score);
                                     f.add("sample_origin",receiver.sample_origin);f.add("symbol_samples",candidate.symbol_samples);
                                     f.add("keyed",receiver.options.key.has_value());
-                                    f.add("helper_assisted",bank.helper_conditioning || helper_assisted_receiver(bank,receiver));
+                                    f.add("helper_assisted",candidate.helper_assisted);
                                     f.add("burst_enabled",receiver.options.modem.symbol_burst.enabled());
                                     f.add("physical_first",candidate.first);f.add("physical_end",candidate.end);f.add("first_stream_symbol",physical_id.second);
                                     f.add("stream_phase_samples",stream_phase_samples);
@@ -4277,6 +4634,8 @@ struct Session::Impl {
                             }
                         }
                         bank.limited=true;
+                        auto next_input=helper_cohort_receiver(bank,receiver)?
+                            bank.helper_cohort->filter_origin+bank.helper_cohort->filter.output_samples():bank.samples+sample_count;
                         modem::PatternSearch search;
                         std::optional<modem::OscillatorPatternSearch> declared_search;
                         // Reconstruct the same admitted families/profiles: plaintext is
@@ -4300,13 +4659,14 @@ struct Session::Impl {
                         const auto cohort_share=(capacity-std::min(capacity,owner_charge))/std::max<std::size_t>(1,search.receiver_bank_count);
                         const auto control_margin=receiver_control_margin(receiver.options.modem,receiver.options.key.has_value());
                         search.receiver_strategy_workspace_bytes=cohort_share>control_margin?cohort_share-control_margin:1;
-                        search.input_sample_origin=bank.samples+sample_count;search.scheduled_capture=bank.shared_capture;
+                        search.input_sample_origin=next_input;search.scheduled_capture=bank.shared_capture;
                         if(receiver.options.modem.oscillator_search) {
                             auto oscillator_search=modem::oscillator_pattern_search(receiver.options.modem,transfer::effective_clock_sync(receiver.options)?
                                 modem::utc_transmit_rate_limit(receiver.options.modem):0);
                             declared_search=oscillator_search;
                             search.admitted_frequency_half_width_hz=oscillator_search.frequency.requested_half_width_hz;
                             search.admitted_clock_half_width_ppm=oscillator_search.requested_clock_half_width_ppm;
+                            search.admitted_clock_cell_half_width_ppm=oscillator_search.clock_step_ppm/2;
                             search.complex_frequency_coverage=!oscillator_search.frequency.limited;
                             search.complex_clock_coverage=oscillator_search.clock_half_width_ppm>=oscillator_search.requested_clock_half_width_ppm;
                             search.hypotheses=std::move(oscillator_search.hypotheses);
@@ -4320,7 +4680,7 @@ struct Session::Impl {
                             modem::symbol_sample_count(receiver.options.modem)>=60ULL*receiver.options.modem.sample_rate;
                         search.search_stream_phases=receiver.options.key.has_value() &&
                             !receiver.options.modem.symbol_burst.enabled();
-                        search.start_offset_seconds=static_cast<double>(receiver.epoch)-observation_epoch(bank,value,bank.samples+sample_count);
+                        search.start_offset_seconds=static_cast<double>(receiver.epoch)-observation_epoch(bank,value,next_input);
                         const bool dated_calendar=!value.simulation && transfer::shared_hop_calendar(receiver.options.modem) && bank.timing;
                         if(!value.simulation && (!value.transfer.timestamp || dated_calendar) && value.transfer.clock_sync)
                             *search.start_offset_seconds+=value.transfer.clock_sync->offset_seconds;
@@ -4328,18 +4688,18 @@ struct Session::Impl {
                             *search.start_offset_seconds+=(static_cast<double>(modem::training_sample_count(receiver.options.modem))+
                                 static_cast<double>(modem::pattern_pulse_padding_samples(receiver.options.modem)))/receiver.options.modem.sample_rate;
                         search.start_uncertainty_seconds=value.transfer.search_seconds+1.;
-                        receiver.clock_window_modeled=modeled_start_window(search,receiver.options.modem,receiver.epoch,bank,value,bank.samples+sample_count);
+                        receiver.clock_window_modeled=modeled_start_window(search,receiver.options.modem,receiver.epoch,bank,value,next_input);
                         if(value.transfer.clock_sync&&!search.qualified_start_window) {
                             auto amplitude_search=search;
                             if(modeled_start_window(amplitude_search,receiver.options.modem,receiver.epoch,
-                                    bank,value,bank.samples+sample_count,true))
+                                    bank,value,next_input,true))
                                 search.amplitude_start_window=amplitude_search.qualified_start_window;
                         }
                         if(!value.transfer.timestamp&&!modem::scheduled_bursts(receiver.options.modem)) {
                             detail::prepare_public_amplitude_windows(receiver.options.modem,value,receiver.options.key.has_value(),search,key_count,profile_count);
                             if(search.amplitude_epoch_stride_seconds>1 && bank.public_amplitude_epoch_origin) {
                                 search.amplitude_start_offset_seconds=static_cast<double>(static_cast<long double>(receiver.epoch)-
-                                    *bank.public_amplitude_epoch_origin-static_cast<long double>(bank.samples+sample_count)/receiver.options.modem.sample_rate);
+                                    *bank.public_amplitude_epoch_origin-static_cast<long double>(next_input)/receiver.options.modem.sample_rate);
                                 search.amplitude_lookahead_epochs=detail::amplitude_epoch_lookahead(receiver.options.modem,search,
                                     1.L/receiver.options.modem.sample_rate,0);
                             }
@@ -4360,7 +4720,7 @@ struct Session::Impl {
                         const auto cold=helper_replay_cold_grant(bank,receiver);
                         auto replay_ceiling=std::size_t{0};
                         const auto replay_end=bank.helper_fallback_budget?bank.helper_fallback_budget->fallback->end:0;
-                        const auto next_sample=bank.samples+sample_count;
+                        const auto next_sample=next_input;
                         if(cold) {
                             const auto proof=receiver.modem->helper_replay_budget(0,&search);
                             if(!proof || !proof->cold_constructor_bytes || next_sample>replay_end)
@@ -4374,19 +4734,60 @@ struct Session::Impl {
                                 throw Error("ordinary reset cannot retain helper replay workspace promises");
                             remaining=cold;
                         }
-                        const auto selection=modem::resolve_receiver_strategy(receiver.options.modem,search,remaining);
+                        auto selection=modem::resolve_receiver_strategy(receiver.options.modem,search,remaining);
                         amplitude_metadata(receiver,receiver.options.modem,search,selection);
                         if(declared_search && !(selection.supported && selection.full_frequency_coverage && selection.full_clock_coverage))
                             note_oscillator_coverage(bank,*declared_search);
                         const auto old_pool_bytes=native_pool_workspace(bank);
                         receiver.native_points.reset();
                         bank.working_bytes=bank.working_bytes-old_pool_bytes+native_pool_workspace(bank);
+                        trace_receiver_acquisition_work(bank,true,"ordinary_row_reset",&receiver,true);
                         receiver.modem.reset();
                         receiver.modem=std::make_unique<modem::StreamingReceiver>(transfer::seeded_config(receiver.options,receiver.epoch),
                             cold?cold:selection.backend==modem::ReceiverBackend::existing_complex &&
                                 !(selection.scheduled && !modem::packed_scheduled_symbols(receiver.options.modem))?remaining:
                                 std::min(remaining,selection.selected_workspace_bytes),search);
                         if(cold)receiver.modem->set_workspace_bytes(replay_ceiling-sizeof(modem::StreamingReceiver));
+                        if(helper_cohort_receiver(bank,receiver) &&
+                           (selection.backend!=modem::ReceiverBackend::existing_complex || receiver.modem->clock_windowed())) {
+                            // This replacement has observed no samples. Return
+                            // unsupported backends to their original raw dates
+                            // before removing the row from the helper cohort.
+                            next_input=bank.samples+sample_count;
+                            detail::ReceiverAdmissionContext admission;
+                admission.simulation_capture_dated=bank.simulation_capture_dated;
+                            admission.sample_origin=next_input;admission.observed_sample=bank.observed_sample;
+                            admission.public_amplitude_epoch_origin=bank.public_amplitude_epoch_origin;
+                            admission.timing=bank.timing;admission.now=observation_epoch(bank,value,next_input);
+                            admission.propagation=!value.simulation && value.transfer.clock_sync?
+                                value.transfer.clock_sync->offset_seconds:0;
+                            admission.key_count=key_count;admission.profile_count=profile_count;admission.capacity=capacity;
+                            admission.capture_owner_bytes=owner_charge;admission.control_margin=control_margin;
+                            admission.keyed=receiver.options.key.has_value();
+                            admission.prefer_streamed_templates=receiver.prefer_streamed_templates;
+                            admission.compact_clock_search=search.compact_clock_search;
+                            auto prepared=detail::prepare_receiver_search(
+                                transfer::seeded_config(receiver.options,receiver.epoch),value,receiver.epoch,admission);
+                            search=std::move(prepared.search);declared_search=std::move(prepared.declared_search);
+                            receiver.clock_window_modeled=prepared.clock_window_modeled;
+                            receiver.modem.reset();
+                            selection=modem::resolve_receiver_strategy(receiver.options.modem,search,remaining);
+                            amplitude_metadata(receiver,receiver.options.modem,search,selection);
+                            receiver.modem=std::make_unique<modem::StreamingReceiver>(
+                                transfer::seeded_config(receiver.options,receiver.epoch),
+                                selection.backend==modem::ReceiverBackend::existing_complex &&
+                                    !(selection.scheduled && !modem::packed_scheduled_symbols(receiver.options.modem))?remaining:
+                                    std::min(remaining,selection.selected_workspace_bytes),search);
+                            // A complete zero-input numeric reconstruction
+                            // above restored raw dates before changing basis.
+                            receiver.helper_flags&=static_cast<std::uint8_t>(~Receiver::helper_filtered_input);
+                            receiver.helper_flags|=Receiver::helper_departure;
+                            audio::trace::record("receiver_helper_cohort_backend_fallback",[&](auto& f) {
+                                f.add("sample",next_input);f.add("epoch",receiver.epoch);f.add("raw_input",true);
+                                f.add("backend",modem::receiver_backend_name(selection.backend));
+                                f.add("clock_windowed",receiver.modem->clock_windowed());
+                            });
+                        }
                         bank.coverage_limited |= receiver.modem->local_clock_fallback();
                         update_workspace();bind_native_storage(bank,receiver,capacity);accounted=receiver_workspace(receiver);
                         if(cold) {
@@ -4402,14 +4803,17 @@ struct Session::Impl {
                             });
                         }
                         receiver.content=std::make_unique<transfer::StreamReceiver>(receiver.options,receiver.epoch,bank.source_quota);
-                        receiver.admitted_at=observation_epoch(bank,value,bank.samples+sample_count);
-                        receiver.sample_origin=bank.samples+sample_count;
+                        receiver.admitted_at=observation_epoch(bank,value,next_input);
+                        receiver.sample_origin=next_input;
                         receiver.last_confident_at=0;receiver.last_confident_end=0;
                         receiver.pattern_score_history = {};
                         receiver.history_ordinals={};receiver.history_poll={};
                         receiver.presentations.clear();
                         bank.reception_history_dirty=true;
                         receiver.bursts.clear();
+                        if(simulation_media_clock(value))detail::simulation_checkpoint(
+                            detail::SimulationPhase::helper_row_recovered,bank.samples+sample_count,
+                            receiver.sample_origin,bank.revision,static_cast<double>(receiver.epoch));
                     }
                     update_workspace();
                 }catch(const std::bad_alloc&) {
@@ -4420,6 +4824,207 @@ struct Session::Impl {
             }
             if(phase==0) {
                 projection.release();
+                if(bank.helper_cohort) {
+                    auto& cohort=*bank.helper_cohort;
+                    bool accepted=false,had_prior=false;
+                    const auto defer_error=[&](Receiver& receiver,const Error& error,const char* stage) {
+                        receiver.helper_flags|=Receiver::helper_deferred_error;
+                        const bool retained=cohort_failure_count<cohort_failures.size();
+                        if(retained)cohort_failures[cohort_failure_count++]={&receiver,std::current_exception()};
+                        audio::trace::record("receiver_helper_cohort_error",[&](auto& f) {
+                            f.add("sample",bank.samples+sample_count);f.add("revision",bank.revision);
+                            f.add("epoch",receiver.epoch);f.add("family",receiver.family);
+                            f.add("instance_id",receiver.point_consumer);f.add("sample_origin",receiver.sample_origin);
+                            f.add("stage",stage);f.add("reason",error.what());f.add("exception_retained",retained);
+                        });
+                    };
+                    std::size_t conditional_rows=0,aligned_rows=0,declined_rows=0,audited_rows=0;
+                    const auto operate=[&](Receiver& receiver,auto operation) {
+                        auto accounted=receiver_workspace(receiver);
+                        NativeStorageScope storage(bank,receiver,capacity,accounted);
+                        const auto other=bank.working_bytes-accounted;
+                        const auto overhead=accounted-receiver.modem->working_bytes();
+                        const auto before_work=receiver.modem->fft_work();
+                        const auto settle=[&] {
+                            const auto after_work=receiver.modem->fft_work();
+                            record_helper_cohort_phase_work(bank,receiver,before_work,bank.samples+sample_count);
+                            cohort.conditional_jobs+=after_work.conditional_template_jobs-before_work.conditional_template_jobs;
+                            cohort.audit_jobs+=after_work.original_audit_template_jobs-before_work.original_audit_template_jobs;
+                            record_history_generation(receiver);
+                            bank.working_bytes=bank.working_bytes-accounted+receiver_workspace(receiver);
+                            accounted=receiver_workspace(receiver);
+                        };
+                        try {
+                            if(other>capacity || overhead>capacity-other)
+                                throw Error("ordinary helper cohort exceeds its receiver workspace");
+                            const auto allowance=capacity-other-overhead;
+                            if(allowance<=sizeof(modem::StreamingReceiver))throw Error("ordinary helper cohort has no numeric loan");
+                            receiver.modem->set_workspace_bytes(allowance-sizeof(modem::StreamingReceiver));
+                            operation();
+                        }catch(...) {settle();throw;}
+                        settle();
+                    };
+                    // Close the observation batch before replacing a prior.
+                    // The newest preceding measurement may refine a mask that
+                    // was first installed many seconds before this FFT filled.
+                    if(cohort.qualified)for(auto& receiver:bank.receivers()) {
+                        if(!helper_cohort_eligible(bank,receiver))continue;
+                        const auto state=receiver.modem->acquisition_state();
+                        if(!state.supported || !state.ready || state.prior_pending)continue;
+                        try {operate(receiver,[&] {
+                            bool applied=false;
+                            detail::HelperPriorFacts facts;
+                            try {applied=set_helper_cohort_prior(bank,receiver,&facts);}
+                            catch(const Error&) {facts.reason=cohort.reason="helper prior workspace unavailable; broad acquisition retained";}
+                            catch(const std::bad_alloc&) {facts.reason=cohort.reason="helper prior workspace unavailable; broad acquisition retained";}
+                            if(!applied)receiver.modem->clear_acquisition_prior();
+                            const auto selected=receiver.modem->acquisition_state();
+                            audio::trace::record("receiver_helper_cohort_prior_decision",[&](auto& f) {
+                                f.add("sample",bank.samples+sample_count);f.add("revision",bank.revision);
+                                f.add("epoch",receiver.epoch);f.add("family",receiver.family);
+                                f.add("instance_id",receiver.point_consumer);f.add("sample_origin",receiver.sample_origin);
+                                f.add("origin_hz",facts.origin_hz);f.add("original_pairs",state.original_pairs);
+                                f.add("selected_pairs",facts.selected);f.add("measured_pairs",facts.measured_selected);
+                                f.add("clock_rates",facts.rates);f.add("represented_rates",facts.represented_rates);
+                                f.add("radius_hz",facts.radius_hz);f.add("clock_cell_half_width_ppm",facts.clock_cell_half_width_ppm);
+                                f.add("reference_offset_hz",cohort.reference?cohort.reference->frequency_hz-cohort.expected_hz:0.);
+                                f.add("reference_uncertainty_hz",cohort.reference?cohort.reference->frequency_uncertainty_hz:0.);
+                                f.add("supported",selected.supported);f.add("ready",selected.ready);
+                                f.add("prior_active",selected.prior_active);f.add("prior_pending",selected.prior_pending);
+                                f.add("admitted",applied);f.add("reason",facts.reason);
+                            });
+                        });}catch(const Error& error) {
+                            if(stop.stop_requested())return;
+                            defer_error(receiver,error,"prior_admission");
+                        }
+                    }
+                    // First all ready keys/profiles/epochs compete under the
+                    // same measured link prior. A wrong old epoch cannot run
+                    // its expensive broad miss before the correct epoch.
+                    for(auto& receiver:bank.receivers()) {
+                        if(!helper_cohort_eligible(bank,receiver) || (receiver.helper_flags&Receiver::helper_deferred_error))continue;
+                        const auto state=receiver.modem->acquisition_state();
+                        if(!state.supported || !state.ready || !state.prior_active)continue;
+                        had_prior=true;
+                        try {operate(receiver,[&] {
+                            try {
+                                if(simulation_media_clock(value))detail::simulation_checkpoint(
+                                    detail::SimulationPhase::helper_prior,bank.samples+sample_count,
+                                    receiver.sample_origin,bank.revision,static_cast<double>(receiver.epoch));
+                                accepted=receiver.modem->process_prior_acquisition(stop)||accepted;
+                            }
+                            catch(const Error& error) {
+                                if(stop.stop_requested())throw;
+                                // The core retains this same original cursor
+                                // and accepted tracks on a failed prior pass.
+                                // Audit before invoking ordinary row recovery.
+                                if(simulation_media_clock(value))detail::simulation_checkpoint(
+                                    detail::SimulationPhase::helper_audit,bank.samples+sample_count,
+                                    receiver.sample_origin,bank.revision,static_cast<double>(receiver.epoch));
+                                receiver.modem->resolve_acquisition(false,stop);
+                                auto drained=receiver.modem->take_pattern_bursts();
+                                receiver.bursts.insert(receiver.bursts.end(),std::make_move_iterator(drained.begin()),
+                                    std::make_move_iterator(drained.end()));
+                                cohort.qualified=cohort.active=false;cohort.lease_until=cohort.probation_until=0;
+                                cohort.reason="optional helper acquisition declined; original same-window audit retained";
+                                audio::trace::record("receiver_helper_cohort_fallback",[&](auto& f) {
+                                    f.add("sample",bank.samples);f.add("epoch",receiver.epoch);f.add("reason",error.what());
+                                });
+                            }
+                        });}catch(const Error& error) {
+                            if(stop.stop_requested())return;
+                            defer_error(receiver,error,"conditional_acquisition");
+                        }
+                    }
+                    const auto frontier=bank.samples+sample_count;
+                    const auto interval=std::max<std::uint64_t>(6ULL*value.transfer.modem.sample_rate,
+                        2*modem::symbol_sample_count(value.transfer.modem));
+                    if(accepted && cohort.lease_compatible)cohort.lease_until=frontier+interval;
+                    const bool link=cohort.qualified &&
+                        (frontier<=cohort.probation_until || frontier<=cohort.lease_until);
+                    // Audit dates belong to a key/profile family, not to
+                    // disposable rolling rows. The first actual ready batch
+                    // arms a finite deadline AFTER its unavoidable FFT fill.
+                    for(auto& group:cohort.groups)group.audit_now=false;
+                    for(const auto& receiver:bank.receivers()) {
+                        if(!helper_cohort_eligible(bank,receiver) || (receiver.helper_flags&Receiver::helper_deferred_error))continue;
+                        const auto state=receiver.modem->acquisition_state();
+                        if(!state.supported || !state.ready)continue;
+                        auto& group=cohort.groups[receiver.helper_audit_group];
+                        if(!group.due)group.due=detail::helper_audit_deadline(frontier,
+                            value.transfer.modem.sample_rate,group.symbol_samples);
+                        group.audit_now|=frontier>=group.due;
+                    }
+                    bool audited=false;
+                    for(auto& receiver:bank.receivers()) {
+                        if(!helper_cohort_eligible(bank,receiver) || (receiver.helper_flags&Receiver::helper_deferred_error))continue;
+                        const auto state=receiver.modem->acquisition_state();
+                        if(!state.supported || !state.ready)continue;
+                        auto& group=cohort.groups[receiver.helper_audit_group];
+                        const bool conditional=state.prior_pending && link && !group.audit_now;
+                        const auto* resolution_reason=conditional?
+                            (state.selected_pairs<state.original_pairs?"conditional acquisition narrowing":"conditional RF alignment without work reduction"):
+                            group.audit_now?"periodic original broad audit":!cohort.qualified?"helper reference unavailable":
+                            !link?"conditional link probation and lease expired":
+                            "ordinary row has no eligible helper mask; see its prior decision";
+                        try {operate(receiver,[&]{
+                            receiver.modem->resolve_acquisition(conditional,stop);
+                            auto drained=receiver.modem->take_pattern_bursts();
+                            receiver.bursts.insert(receiver.bursts.end(),std::make_move_iterator(drained.begin()),
+                                std::make_move_iterator(drained.end()));
+                        });}catch(const Error& error) {
+                            if(stop.stop_requested())return;
+                            defer_error(receiver,error,"original_resolution");continue;
+                        }
+                        audio::trace::record("receiver_helper_cohort_resolution",[&](auto& f) {
+                            f.add("sample",frontier);f.add("revision",bank.revision);f.add("epoch",receiver.epoch);
+                            f.add("family",receiver.family);f.add("instance_id",receiver.point_consumer);
+                            f.add("sample_origin",receiver.sample_origin);f.add("original_pairs",state.original_pairs);
+                            f.add("selected_pairs",state.selected_pairs);f.add("origin_hz",state.frequency_origin_hz);
+                            f.add("prior_pending",state.prior_pending);f.add("link",link);
+                            f.add("audit_due",group.audit_now);f.add("conditional",conditional);f.add("reason",resolution_reason);
+                        });
+                        if(!conditional) {audited=true;++audited_rows;if(!state.prior_pending)++declined_rows;}
+                        else {cohort.active=true;++conditional_rows;if(state.selected_pairs==state.original_pairs)++aligned_rows;}
+                    }
+                    for(std::size_t i=0;i<cohort.group_count;++i)if(cohort.groups[i].audit_now) {
+                        auto& group=cohort.groups[i];
+                        group.due=detail::helper_audit_deadline(frontier,value.transfer.modem.sample_rate,
+                            group.symbol_samples);
+                    }
+                    if(audited && cohort.qualified && frontier>cohort.probation_until &&
+                       frontier>cohort.lease_until)cohort.probation_until=frontier+interval;
+                    cohort.original_pairs=cohort.selected_pairs=0;
+                    bool narrowing=false,alignment=false;
+                    for(const auto& receiver:bank.receivers()) {
+                        if(!helper_cohort_eligible(bank,receiver) || (receiver.helper_flags&Receiver::helper_deferred_error))continue;
+                        const auto state=receiver.modem->acquisition_state();
+                        cohort.original_pairs=std::max<std::uint64_t>(cohort.original_pairs,state.original_pairs);
+                        if(state.prior_active) {
+                            cohort.selected_pairs=std::max<std::uint64_t>(cohort.selected_pairs,state.selected_pairs);
+                            narrowing|=state.selected_pairs<state.original_pairs;
+                            alignment|=state.selected_pairs==state.original_pairs && state.frequency_origin_hz!=0;
+                        }
+                    }
+                    cohort.active=cohort.qualified && cohort.selected_pairs && cohort.conditional_jobs &&
+                        (frontier<=cohort.probation_until || frontier<=cohort.lease_until);
+                    if(cohort.active && narrowing)cohort.reason=declined_rows?
+                        "qualified helper narrows eligible ordinary rows; other rows retain broad acquisition":
+                        "qualified helper narrows ordinary rolling acquisition; periodic broad audits retained";
+                    else if(cohort.active && alignment)cohort.reason=declined_rows?
+                        "qualified helper aligns eligible ordinary rows without reducing their work; other rows retain broad acquisition":
+                        "qualified helper aligns ordinary acquisition frequencies without reducing search work";
+                    else if(audited && had_prior && cohort.qualified)
+                        cohort.reason="ordinary broad audit; measured helper prior remains available";
+                    audio::trace::record("receiver_helper_cohort_dispatch",[&](auto& f) {
+                        f.add("sample",frontier);f.add("qualified",cohort.qualified);f.add("conditional",cohort.active);
+                        f.add("accepted",accepted);f.add("audited",audited);f.add("original_pairs",cohort.original_pairs);
+                        f.add("selected_pairs",cohort.selected_pairs);f.add("lease_until",cohort.lease_until);
+                        f.add("conditional_rows",conditional_rows);f.add("alignment_rows",aligned_rows);
+                        f.add("audited_rows",audited_rows);f.add("declined_rows",declined_rows);
+                        f.add("reason",cohort.reason);
+                    });
+                }
                 if(bank.helper_assistance && (bank.helper_assistance->failed ||
                    std::any_of(bank.receivers().begin(),bank.receivers().end(),[&](const auto& r){
                        return !helper_assisted_receiver(bank,r) && std::any_of(r.bursts.begin(),r.bursts.end(),[](const auto& b){
@@ -4464,6 +5069,10 @@ struct Session::Impl {
                     }
                     bank.working_bytes=bank.working_bytes-before+receiver_workspace(receiver);
                 }
+            }
+            if(phase==1 && bank.helper_cohort) {
+                for(auto& receiver:bank.receivers())clear_helper_row_transients(receiver);
+                joined_helper_flags.pending=false;
             }
         }
         // Every accepted bit/completion from every profile was published above.
@@ -4569,10 +5178,17 @@ struct Session::Impl {
             });
         }
         if(bank.helper_assistance && bank.helper_assistance->failed)drop_helper_assistance(bank,"optional_error");
-        if(bank.helper_assistance && (bank.helper_assistance->tail_only || bank.helper_assistance->payload_retained) &&
-           bank.helper_assistance->receiver->modem->initial_search_complete() &&
-           bank.helper_assistance->receiver->presentations.empty() &&
-           !bank.helper_assistance->receiver->modem->synchronized())drop_helper_assistance(bank,"observed_payload_tail_complete",true);
+        if(bank.helper_assistance) {
+            const auto& state=*bank.helper_assistance;
+            const auto& receiver=*state.receiver;
+            const auto frontier=receiver.modem->delayed_processing_frontier();
+            if((state.tail_only || state.payload_retained) &&
+               (receiver.modem->initial_search_complete() || state.acquisition_frozen) &&
+               !state.preroll_count && receiver.bursts.empty() && receiver.presentations.empty() &&
+               !receiver.modem->acquiring() && !receiver.modem->synchronized() &&
+               (!frontier || *frontier>=state.filter.output_samples()))
+                drop_helper_assistance(bank,"observed_payload_tail_complete",true);
+        }
         if(simulation_media_clock(value)) {
             detail::simulation_checkpoint(detail::SimulationPhase::before_commit,0,bank.samples,bank.revision);
             // A stopped receiver may return without consuming its whole span.
@@ -4609,6 +5225,7 @@ struct Session::Impl {
         bank.coverage_limited |= std::any_of(bank.receivers().begin(),bank.receivers().end(),[](const auto& receiver) {
             return receiver.modem->local_clock_fallback() || receiver.modem->candidate_limited();
         });
+        trace_receiver_acquisition_work(bank,false,"feed_complete");
         update_symbol_burst_tracking(bank,value,version);
         // Publish a prospective Burst proof before publishing the matching
         // committed frontier. A fast capture provider can otherwise outrun
@@ -4621,6 +5238,29 @@ struct Session::Impl {
             current.receiver_instances=bank.receivers().size();current.peak_receiver_instances=bank.peak_receivers;
             current.receiver_admissions=bank.admissions;current.receiver_retirements=bank.retirements;
             current.receiver_bank_builds=bank.builds;
+            current.helper_frequency_assistance_active=bank.helper_cohort && bank.helper_cohort->active;
+            const auto* cohort_phase=bank.helper_cohort?bank.helper_cohort->phase.get():nullptr;
+            const bool cohort_phase_qualified=cohort_phase && cohort_phase->curve.qualified_until() &&
+                bank.samples<=cohort_phase->curve.qualified_until();
+            current.helper_phase_assistance_active=(cohort_phase_qualified && cohort_phase->jobs) ||
+                (bank.helper_assistance && bank.helper_assistance->phase_applied &&
+                 bank.helper_assistance->phase_qualified && !bank.helper_assistance->tail_only);
+            current.helper_original_search_pairs=bank.helper_cohort?bank.helper_cohort->original_pairs:0;
+            current.helper_selected_search_pairs=bank.helper_cohort?bank.helper_cohort->selected_pairs:0;
+            current.helper_conditional_jobs=bank.helper_cohort?bank.helper_cohort->conditional_jobs:0;
+            current.helper_audit_jobs=bank.helper_cohort?bank.helper_cohort->audit_jobs:0;
+            if(bank.helper_cohort) {
+                current.helper_status=bank.helper_cohort->reason;current.helper_status+="; ";
+                current.helper_status+=current.helper_phase_assistance_active?
+                    "phase and punctuation assistance active":cohort_phase_qualified?
+                    "phase and punctuation qualified; waiting for eligible ordinary work":bank.helper_cohort->phase_reason;
+            }
+            else if(value.helper.power_w>0 && !current.helper_phase_assistance_active)
+                current.helper_status=bank.helper_cohort_decline_reason;
+            current.receiver_initial_fft_input_samples=0;
+            for(const auto& receiver:bank.receivers())
+                current.receiver_initial_fft_input_samples=std::max(current.receiver_initial_fft_input_samples,
+                    receiver.modem->initial_fft_input_samples());
             current.receiver_error=bank.receiver_limit.empty()?std::string{}:
                 (bank.receivers().empty()?"RX unavailable: ":"RX search incomplete: ")+bank.receiver_limit;
             current.clock_window_modeled=std::any_of(bank.receivers().begin(),bank.receivers().end(),
@@ -4894,7 +5534,8 @@ struct Session::Impl {
     void feed_unobserved(Bank& bank,std::uint64_t count,const Settings& value,std::uint64_t version,std::stop_token stop) {
         // A capture certificate has already proved no retained lane can consume
         // this interval. Advance physical coordinates only, never absent fits.
-        feed_bank(bank,value,version,stop,{},[&](auto& receiver,auto*) {
+        feed_bank(bank,value,version,stop,{},[&](auto& row,auto*) {
+            auto& receiver=*row.modem;
             if(!receiver.try_skip_unobserved(count,stop))
                 throw Error("scheduled capture certificate no longer covers the receiver bank");
         },nullptr,true,false,count);
@@ -4976,6 +5617,7 @@ struct Session::Impl {
         }
         const auto dated=state.reference.frequency_sample?state.reference.frequency_sample:state.reference.sample;
         const auto lost=dated>bank.samples || bank.samples-dated>rate || inconsistent;
+        bank.helper_gap_protection_qualified=value.helper.power_w>0 && fresh && !inconsistent;
         if(lost && !state.committed) {
             restore_helper_conditioning(bank,value,version,stop,wave,inconsistent?"reference_inconsistent":"reference_lost");
             if(!stop.stop_requested())feed_samples(bank,samples,value,version,stop,wave);
@@ -4989,7 +5631,8 @@ struct Session::Impl {
             return;
         }
         if(!state.preroll.empty()) {
-            feed_bank(bank,value,version,stop,{},[&](auto& receiver,auto*) {
+            feed_bank(bank,value,version,stop,{},[&](auto& row,auto*) {
+                auto& receiver=*row.modem;
                 for(std::size_t offset=0;offset<state.preroll.size() && !stop.stop_requested();) {
                     const auto count=std::min<std::size_t>(4096,state.preroll.size()-offset);
                     receiver.push(std::span(state.preroll).subspan(offset,count),stop);offset+=count;
@@ -5005,8 +5648,8 @@ struct Session::Impl {
         const auto payload=std::span(filtered).first(count);
         // Bank coordinates follow the physical capture. Each ordinary modem
         // receives only fully observed FIR centers, at its dated local origin.
-        feed_bank(bank,value,version,stop,samples,[&](auto& receiver,auto*) {
-            receiver.push(payload,stop);
+        feed_bank(bank,value,version,stop,samples,[&](auto& row,auto*) {
+            row.modem->push(payload,stop);
         },wave,true);
         const auto rotation=-2*std::numbers::pi*value.transfer.modem.carrier_hz/rate;
         bank.mixer*=std::polar(1.,std::remainder(rotation*samples.size(),2*std::numbers::pi));
@@ -5023,6 +5666,197 @@ struct Session::Impl {
                     bank.coverage_limited?"conditional_coverage_unavailable":"attempt_window");
         }
     }
+    static void close_helper_cohort_phase(Bank::HelperCohort& cohort,const char* reason)noexcept {
+        // Closing fresh qualification never changes the curve already pinned
+        // by an accepted ordinary track. Its final affine convention survives.
+        if(cohort.phase)cohort.phase->curve.close();cohort.phase_reason=reason;
+    }
+    void update_helper_cohort_phase(Bank& bank,const Settings& value) {
+        auto& cohort=*bank.helper_cohort;
+        const auto decline=[&](const char* reason){close_helper_cohort_phase(cohort,reason);};
+        if(!cohort.qualified || !cohort.reference) {
+            decline("helper phase reference unavailable; established phase convention retained");return;
+        }
+        const auto& reference=*cohort.reference;
+        const auto rate=value.transfer.modem.sample_rate;
+        constexpr double tau=2*std::numbers::pi;
+        if(!reference.phase_valid || !reference.timing_valid ||
+           !std::isfinite(reference.phase_radians) || !std::isfinite(reference.phase_uncertainty_radians) ||
+           reference.phase_uncertainty_radians<0 || reference.phase_uncertainty_radians>=.25 ||
+           !std::isfinite(reference.dwell_start_seconds) || !std::isfinite(reference.dwell_uncertainty_seconds) ||
+           reference.dwell_uncertainty_seconds<0 || reference.dwell_uncertainty_seconds>.005) {
+            decline("helper phase or punctuation timing is not independently qualified");return;
+        }
+        if(!cohort.phase) {
+            constexpr auto allowance=modem::SampledSimulationChannel::helper_cohort_workspace_bound;
+            const auto actual=cohort.bytes();
+            if(actual>allowance || sizeof(Bank::HelperCohort::PhaseControl)>allowance-actual) {
+                decline("reserved helper storage supports frequency assistance but not the optional phase model");return;
+            }
+            try {cohort.phase=std::make_unique<Bank::HelperCohort::PhaseControl>();}
+            catch(const std::bad_alloc&) {
+                decline("optional helper phase storage unavailable; frequency assistance retained");return;
+            }
+            audio::trace::record("receiver_helper_cohort_phase_storage",[&](auto& f) {
+                f.add("sample",bank.samples);f.add("actual_bytes",cohort.bytes());
+                f.add("cohort_control_bytes",sizeof(Bank::HelperCohort));
+                f.add("phase_control_bytes",sizeof(Bank::HelperCohort::PhaseControl));
+                f.add("reserved_bytes",allowance);
+            });
+        }
+        auto& phase=*cohort.phase;
+        std::size_t maximum_bin=modem::pattern_chip_samples(value.transfer.modem);
+        for(const auto& receiver:bank.receivers())if(helper_cohort_receiver(bank,receiver))
+            maximum_bin=std::max(maximum_bin,receiver.modem->acquisition_state().bin_samples);
+        const auto guard=cohort.filter.delay();
+        if(maximum_bin>UINT64_MAX-guard-1 || bank.samples>UINT64_MAX-guard-maximum_bin-1 ||
+           reference.sample>UINT64_MAX-rate) {
+            decline("helper phase model exceeds its dated sample range");return;
+        }
+        const auto first=bank.samples+guard+maximum_bin+1;
+        const auto expiry=reference.sample+rate;
+        auto& curve=phase.curve;
+        if(curve.available_segments()==24) {
+            if(!curve.view_id() && !curve.configure(1,rate,reference.frequency_hz-cohort.expected_hz,guard,maximum_bin)) {
+                decline("ordinary receiver cannot represent the bounded helper phase model");return;
+            }
+            const auto forecast=reference.phase_uncertainty_radians+
+                tau*reference.frequency_uncertainty_hz*static_cast<double>(first-reference.sample)/rate;
+            const modem::PatternPhaseSegment initial{first,0,
+                tau*(reference.frequency_hz-cohort.expected_hz-curve.baseline())/rate};
+            if(first>=expiry || forecast>.25 || !curve.append(std::span(&initial,1),reference.sample,expiry)) {
+                decline("helper phase precision does not cover the first future PCM bin");return;
+            }
+            // The unknown Tx/propagation phase is a fitted constant. Freeze
+            // this anchor and residual CFO B independently of grid origin O.
+            phase.anchor=std::remainder(reference.phase_radians+tau*reference.frequency_hz*
+                static_cast<double>(first-reference.sample)/rate,tau);
+            cohort.phase_reason="helper phase and punctuation timing qualified";return;
+        }
+        if(curve.sample_rate()!=rate || maximum_bin>curve.maximum_bin_samples()) {
+            decline("new ordinary profile exceeds the frozen helper phase-bin guard");return;
+        }
+        if(reference.sample<=curve.latest_evidence())return;
+        const auto helper_baseline=cohort.expected_hz+curve.baseline();
+        const auto predicted=[&](long double at) {
+            return static_cast<long double>(phase.anchor)+tau*helper_baseline*
+                (at-curve.first_sample())/rate+curve.value_at(at);
+        };
+        const auto phase_error=std::remainder(reference.phase_radians-
+            static_cast<double>(std::remainder(predicted(reference.sample),static_cast<long double>(tau))),tau);
+        if(std::abs(phase_error)>.25) {
+            decline("helper canonical phase changed beyond the coherent handoff limit; established affine convention retained");return;
+        }
+        const auto future_error=phase_error+tau*(reference.frequency_hz-helper_baseline)*
+            static_cast<double>(expiry-reference.sample)/rate-
+            (curve.value_at(expiry)-curve.value_at(reference.sample));
+        const auto forecast=reference.phase_uncertainty_radians+tau*reference.frequency_uncertainty_hz;
+        if(std::abs(phase_error)<=.02 && std::abs(future_error)+forecast<=.125 &&
+           curve.requalify(reference.sample,expiry)) {
+            cohort.phase_reason="helper phase and punctuation timing qualified";return;
+        }
+        // Correct a measured phase residual with a finite continuous bridge,
+        // then return to the measured stable slope. Append both atomically so
+        // reaching the fixed capacity can never leave a transient slew forever.
+        const auto bridge=std::max<std::uint64_t>(rate/5,2*maximum_bin);
+        if(first>UINT64_MAX-bridge || first+bridge>=expiry || curve.available_segments()<2) {
+            decline(curve.available_segments()<2?
+                "helper phase curve is full; established affine convention retained":
+                "helper phase precision cannot cover a continuous future handoff");return;
+        }
+        const auto end=first+bridge;
+        const auto beginning=curve.value_at(first);
+        const auto target=std::remainder(reference.phase_radians+tau*reference.frequency_hz*
+            static_cast<double>(first-reference.sample)/rate-
+            static_cast<double>(std::remainder(predicted(first),static_cast<long double>(tau))),tau);
+        if(std::abs(target)>.25) {
+            decline("helper future phase residual exceeds the coherent handoff limit; established affine convention retained");return;
+        }
+        const auto slope=tau*(reference.frequency_hz-helper_baseline)/rate;
+        const auto ending=beginning+target+slope*bridge;
+        const auto end_uncertainty=reference.phase_uncertainty_radians+tau*reference.frequency_uncertainty_hz*
+            static_cast<double>(end-reference.sample)/rate;
+        const std::array<modem::PatternPhaseSegment,2> segments{{
+            {first,beginning,(ending-beginning)/bridge},{end,ending,slope}}};
+        if(end_uncertainty>.25 || !curve.append(segments,reference.sample,expiry)) {
+            decline("helper phase handoff cannot preserve the immutable future-bin convention");return;
+        }
+        cohort.phase_reason="helper phase and punctuation timing qualified";
+    }
+    void update_helper_cohort_reference(Bank& bank,const Settings& value,
+                                       const std::optional<helper::Reference>& reference) {
+        if(!bank.helper_cohort)return;
+        auto& cohort=*bank.helper_cohort;cohort.qualified=false;
+        const auto rate=value.transfer.modem.sample_rate;
+        const auto dated=reference?(reference->frequency_sample?reference->frequency_sample:reference->sample):0;
+        if(!reference || !reference->frequency_valid || reference->sample_rate!=rate ||
+           reference->sample>bank.samples || dated>reference->sample || bank.samples-dated>rate ||
+           !std::isfinite(reference->frequency_hz) || !std::isfinite(reference->frequency_uncertainty_hz) ||
+           reference->frequency_uncertainty_hz<0) {
+            cohort.reason="helper frequency reference unavailable or stale; broad acquisition retained";
+            cohort.active=false;cohort.reference.reset();cohort.lease_until=cohort.probation_until=0;return;
+        }
+        if(std::abs(reference->frequency_hz-cohort.expected_hz)>100) {
+            cohort.reason="helper frequency lies outside the supported tracker range; broad acquisition retained";
+            cohort.active=false;cohort.reference.reset();cohort.lease_until=cohort.probation_until=0;return;
+        }
+        if(bank.samples<cohort.quarantine_until) {
+            cohort.active=false;cohort.reason="helper reference changed inconsistently; broad reacquisition retained";return;
+        }
+        if(cohort.last_frequency_valid &&
+           std::abs(reference->frequency_hz-cohort.last_frequency_hz)>
+                reference->frequency_uncertainty_hz+cohort.last_radius_hz+
+                .25*rate/static_cast<double>(modem::symbol_sample_count(value.transfer.modem))) {
+            cohort.active=false;cohort.reference.reset();cohort.lease_until=cohort.probation_until=0;
+            cohort.quarantine_until=bank.samples+rate;cohort.lease_compatible=false;
+            cohort.last_frequency_hz=reference->frequency_hz;cohort.last_radius_hz=reference->frequency_uncertainty_hz;
+            cohort.reason="helper reference changed inconsistently; broad reacquisition retained";return;
+        }
+        cohort.last_frequency_valid=true;cohort.last_frequency_hz=reference->frequency_hz;
+        cohort.last_radius_hz=reference->frequency_uncertainty_hz;
+        cohort.reference=measurement_only(*reference);cohort.qualified=true;
+        if(!cohort.probation_until) {
+            const auto interval=std::max<std::uint64_t>(6ULL*rate,2*modem::symbol_sample_count(value.transfer.modem));
+            std::uint64_t aperture=0;
+            for(const auto& receiver:bank.receivers())if(helper_cohort_eligible(bank,receiver))
+                aperture=std::max(aperture,receiver.modem->initial_fft_input_samples());
+            cohort.probation_until=bank.samples+aperture+interval;
+        }
+        cohort.reason="measured helper available; waiting for an ordinary acquisition batch";
+    }
+    bool set_helper_cohort_prior(Bank& bank,Receiver& receiver,detail::HelperPriorFacts* facts=nullptr) {
+        auto& cohort=*bank.helper_cohort;
+        if(!cohort.qualified || !cohort.reference)return false;
+        receiver.modem->set_acquisition_phase_view(cohort.phase && cohort.phase->curve.view_id()?&cohort.phase->curve:nullptr);
+        const auto state=receiver.modem->acquisition_state();
+        const auto pairs=receiver.modem->acquisition_hypotheses();
+        const auto& config=receiver.options.modem;
+        const auto offset=receiver.modem->acquisition_phase_view_active()?cohort.phase->curve.baseline():
+            cohort.reference->frequency_hz-cohort.expected_hz;
+        // Both values come from the SAME original oscillator builder. An
+        // uncertainty inflation derived from LF endpoints is not proof that
+        // each timing cell actually supports that radius. Known zero is valid.
+        if(!state.admitted_clock_cell_half_width_ppm || !state.admitted_clock_half_width_ppm) {
+            cohort.reason="ordinary physical clock domain or timing-cell coverage is unknown; broad acquisition retained";
+            if(facts)facts->reason=cohort.reason;
+            return false;
+        }
+        auto decision=detail::helper_prior_mask(pairs,offset,cohort.reference->frequency_uncertainty_hz,
+            config.carrier_hz-cohort.expected_hz,.125*config.sample_rate/
+                static_cast<double>(modem::symbol_sample_count(config)),
+            *state.admitted_clock_cell_half_width_ppm,*state.admitted_clock_half_width_ppm);
+        if(facts)*facts=decision;
+        cohort.reason=decision.reason;
+        if(!decision.admitted)return false;
+        if(!receiver.modem->set_acquisition_prior(decision.origin_hz,std::span(decision.cells).first(pairs.size()))) {
+            cohort.reason="ordinary receiver cannot represent the measured helper prior; broad acquisition retained";
+            if(facts){facts->admitted=false;facts->reason=cohort.reason;}
+            return false;
+        }
+        cohort.original_pairs=std::max<std::uint64_t>(cohort.original_pairs,pairs.size());
+        cohort.selected_pairs=std::max<std::uint64_t>(cohort.selected_pairs,decision.selected);
+        return true;
+    }
     void feed_samples(Bank& bank,std::span<const float> samples,const Settings& value,std::uint64_t version,
                       std::stop_token stop,Prepared* wave=nullptr,std::stop_token receive_stop={},
                       std::optional<helper::Reference> assistance={}) {
@@ -5036,7 +5870,53 @@ struct Session::Impl {
         std::array<std::complex<double>,plot_size> projected{};
         const auto rotation=std::polar(1.,-2*std::numbers::pi*value.transfer.modem.carrier_hz/value.transfer.modem.sample_rate);
         for(std::size_t offset=0;offset<samples.size();) {
-            const auto count=std::min(projected.size(),samples.size()-offset);
+            refresh_bank(bank,value);
+            bank.helper_gap_protection_qualified=helper_tracking_reference_qualified(bank,value,assistance);
+            update_helper_cohort_reference(bank,value,assistance);
+            if(bank.helper_cohort) {
+                try {update_helper_cohort_phase(bank,value);}
+                catch(const Error&) {close_helper_cohort_phase(*bank.helper_cohort,
+                    "optional helper phase model unavailable; ordinary acquisition retained");}
+            }
+            auto count=std::min(projected.size(),samples.size()-offset);
+            if(bank.helper_cohort) {
+                auto& cohort=*bank.helper_cohort;
+                bool batch_ready=false;
+                for(auto& row:bank.receivers()) {
+                    if(!helper_cohort_eligible(bank,row))continue;
+                    const auto installed=row.modem->acquisition_state();
+                    const auto clear_prior=[&] {
+                        const auto before=receiver_workspace(row);row.modem->clear_acquisition_prior();
+                        bank.working_bytes=bank.working_bytes-before+receiver_workspace(row);
+                    };
+                    if(cohort.qualified && !installed.prior_pending && (!installed.prior_active || installed.ready)) {
+                        // Keep the mask through observation. Its atomic closed-
+                        // batch refresh preserves compatible ordinary bit support.
+                        const auto before=receiver_workspace(row);
+                        const auto other=bank.working_bytes-before,overhead=before-row.modem->working_bytes();
+                        const auto capacity=bank_capacity(value);
+                        if(other<=capacity && overhead<capacity-other &&
+                           sizeof(modem::StreamingReceiver)<capacity-other-overhead)
+                            row.modem->set_workspace_bytes(capacity-other-overhead-sizeof(modem::StreamingReceiver));
+                        bool applied=false;
+                        try {applied=set_helper_cohort_prior(bank,row);}
+                        catch(const Error&) {cohort.reason="helper prior exceeds optional numeric workspace; broad acquisition retained";}
+                        catch(const std::bad_alloc&) {cohort.reason="helper prior workspace unavailable; broad acquisition retained";}
+                        if(!applied)row.modem->clear_acquisition_prior();
+                        bank.working_bytes=bank.working_bytes-before+receiver_workspace(row);
+                        if(bank.working_bytes>capacity)throw Error("ordinary helper prior exceeds receiver workspace");
+                    } else if(!cohort.qualified)clear_prior();
+                    const auto state=row.modem->acquisition_state();
+                    batch_ready|=state.supported && state.ready;
+                    if(state.supported && !state.ready)count=std::min(count,state.input_room_samples);
+                }
+                if(batch_ready) {
+                    feed_bank(bank,value,version,stop,{},[](auto&,auto*){},wave,false);
+                    if(stop.stop_requested())return;
+                    continue;
+                }
+                if(!count)throw Error("ordinary helper observation fence did not advance");
+            }
             const auto conditioned_feed=[&] {
                 const auto first=bank.samples;
                 try {feed_conditioned_samples(bank,samples.subspan(offset,count),value,version,stop,wave,assistance);}
@@ -5074,8 +5954,10 @@ struct Session::Impl {
             }
             bank.mixer/=std::abs(bank.mixer);
             const auto raw=samples.subspan(offset,count);const auto mixed=std::span(projected).first(count);
-            refresh_bank(bank,value);
-            prepare_helper_history(bank,value,count);
+            std::array<float,plot_size> cohort_filtered{};
+            const auto cohort_count=bank.helper_cohort?bank.helper_cohort->filter.push(raw,cohort_filtered):0;
+            const auto cohort_pcm=std::span(cohort_filtered).first(cohort_count);
+            if(!bank.helper_cohort)prepare_helper_history(bank,value,count);
             if(assistance && assistance->sample<=bank.samples)
                 prepare_helper_assistance(bank,value,*assistance,count,version);
             else if(bank.helper_assistance) {
@@ -5087,7 +5969,24 @@ struct Session::Impl {
             if(bank.helper_assistance && !helper_surplus_available(bank,bank_capacity(value),count))
                 drop_helper_assistance(bank,"ordinary_growth_priority");
             const auto feed_origin=bank.samples;
-            feed_bank(bank,value,version,stop,raw,[&](auto& receiver,auto* cache){if(receiver.try_skip_unobserved(raw.size(),stop))return;
+            feed_bank(bank,value,version,stop,raw,[&](auto& row,auto* cache){
+                auto& receiver=*row.modem;
+                if(helper_cohort_receiver(bank,row)) {
+                    const auto before=receiver.fft_work();
+                    const auto observed=[&] {
+                        const auto state=receiver.acquisition_state();
+                        if(helper_cohort_eligible(bank,row) && state.supported) {
+                            const auto consumed=receiver.observe_acquisition(cohort_pcm,stop);
+                            if(!stop.stop_requested() && consumed!=cohort_pcm.size())
+                                throw Error("ordinary helper cohort crossed an unprocessed acquisition fence");
+                        } else receiver.push(cohort_pcm,stop);
+                    };
+                    try {observed();}
+                    catch(...) {record_helper_cohort_phase_work(bank,row,before,feed_origin+raw.size());throw;}
+                    record_helper_cohort_phase_work(bank,row,before,feed_origin+raw.size());
+                    return;
+                }
+                if(receiver.try_skip_unobserved(raw.size(),stop))return;
                 if(bank.helper_assistance && bank.helper_assistance->receiver->modem.get()==&receiver) {
                     auto& state=*bank.helper_assistance;
                     if(state.preroll_count) {
@@ -5105,7 +6004,7 @@ struct Session::Impl {
                             auto drained=receiver.take_pattern_bursts();
                             if(!state.payload_retained && std::any_of(drained.begin(),drained.end(),[](const auto& b){return !b.bits.empty();})) {
                                 state.payload_retained=true;
-                                if(state.tail_only)receiver.suspend_helper_acquisition();
+                                if(state.tail_only && receiver.suspend_helper_acquisition())state.acquisition_frozen=true;
                                 audio::trace::record("receiver_helper_payload_retained",[&](auto& f){
                                     f.add("sample",bank.samples);f.add("epoch",state.receiver->epoch);f.add("preroll",true);
                                 });
@@ -5131,8 +6030,8 @@ struct Session::Impl {
                     if(bin && state.tail_only) {
                         const auto local=scored_frontier-state.receiver->sample_origin;
                         const auto begin=local>bin?local-bin:0,end=local+payload.size()+bin;
-                        state.phase_knots={modem::PatternPhaseKnot{begin,state.last_applied_phase},
-                            modem::PatternPhaseKnot{end,state.last_applied_phase}};
+                        state.phase_knots={modem::PatternPhaseKnot{begin,state.phase_continuation.at(begin,value.transfer.modem.sample_rate)},
+                            modem::PatternPhaseKnot{end,state.phase_continuation.at(end,value.transfer.modem.sample_rate)}};
                         if(receiver.push_phase_assisted(payload,state.phase_knots,end-begin,stop))return;
                     }
                     const auto forecast_seconds=static_cast<double>(static_cast<long double>(scored_frontier)+payload.size()+bin-state.reference.sample)/
@@ -5143,8 +6042,8 @@ struct Session::Impl {
                         if(retain_helper_absence_tail(bank)) {
                             const auto local=scored_frontier-state.receiver->sample_origin;
                             const auto begin=local>bin?local-bin:0,end=local+payload.size()+bin;
-                            state.phase_knots={modem::PatternPhaseKnot{begin,state.last_applied_phase},
-                                modem::PatternPhaseKnot{end,state.last_applied_phase}};
+                            state.phase_knots={modem::PatternPhaseKnot{begin,state.phase_continuation.at(begin,value.transfer.modem.sample_rate)},
+                                modem::PatternPhaseKnot{end,state.phase_continuation.at(end,value.transfer.modem.sample_rate)}};
                             if(receiver.push_phase_assisted(payload,state.phase_knots,end-begin,stop))return;
                         }
                         state.failed=true;return;
@@ -5165,7 +6064,8 @@ struct Session::Impl {
                         };
                         state.phase_knots={modem::PatternPhaseKnot{begin,phase(begin)},modem::PatternPhaseKnot{end,phase(end)}};
                         if(receiver.push_phase_assisted(payload,state.phase_knots,end-begin,stop)) {
-                            state.last_applied_phase=phase(local+payload.size());
+                            state.phase_continuation={local+payload.size(),phase(local+payload.size()),
+                                state.reference.frequency_hz-state.anchor_frequency};
                             if(!state.phase_applied) {
                                 state.phase_applied=true;
                                 audio::trace::record("receiver_helper_phase_applied",[&](auto& f){
@@ -5259,12 +6159,12 @@ struct Session::Impl {
         std::uint64_t local_generation = 0;
         std::optional<Bank> simulation_bank;
         const auto reset_simulation_bank=[&](const char* reason) {
-            if(simulation_bank){trace_exact_source_pool(*simulation_bank,reason,true);trace_point_pool(*simulation_bank,reason,true);}
+            if(simulation_bank){trace_receiver_acquisition_work(*simulation_bank,true,reason);trace_exact_source_pool(*simulation_bank,reason,true);trace_point_pool(*simulation_bank,reason,true);}
             simulation_bank.reset();
         };
         struct FinalSimulationSourceSnapshot {
             std::optional<Bank>& bank;
-            ~FinalSimulationSourceSnapshot(){try{if(bank){trace_exact_source_pool(*bank,"simulation_join",true);trace_point_pool(*bank,"simulation_join",true);}}catch(...) {}}
+            ~FinalSimulationSourceSnapshot(){try{if(bank){trace_receiver_acquisition_work(*bank,true,"simulation_join");trace_exact_source_pool(*bank,"simulation_join",true);trace_point_pool(*bank,"simulation_join",true);}}catch(...) {}}
         } final_simulation_source_snapshot{simulation_bank};
         std::unique_ptr<modem::SampledSimulationChannel> simulation_channel;
         std::uint64_t simulation_bank_source_origin=0;
@@ -5362,8 +6262,21 @@ struct Session::Impl {
                     const auto helper_options=simulation_channel?helper::Options{}:
                         sampled_helper(value,value.transfer.modem.sample_rate,version);
                     const auto make_simulation_channel=[&] {
-                        auto channel=std::make_unique<modem::SampledSimulationChannel>(
-                            value.transfer.modem,channel_config(value),helper_options,detail::helper_occupied_bandwidth(value));
+                        std::unique_ptr<modem::SampledSimulationChannel> channel;
+                        try {
+                            channel=std::make_unique<modem::SampledSimulationChannel>(
+                                value.transfer.modem,channel_config(value),helper_options,detail::helper_occupied_bandwidth(value));
+                        }catch(const Error& error) {
+                            if(helper_options.power_w<=0 || (wave && wave->helper_only))throw;
+                            helper_unavailable(version,std::string(error.what())+"; ordinary sampled Robust channel retained");
+                            channel=std::make_unique<modem::SampledSimulationChannel>(
+                                value.transfer.modem,channel_config(value));
+                        }catch(const std::bad_alloc&) {
+                            if(helper_options.power_w<=0 || (wave && wave->helper_only))throw;
+                            helper_unavailable(version,"Helper channel allocation unavailable; ordinary sampled Robust channel retained");
+                            channel=std::make_unique<modem::SampledSimulationChannel>(
+                                value.transfer.modem,channel_config(value));
+                        }
                         channel->set_helper_time_key(value.transfer.key);
                         if(helper_options.power_w>0&&configure_helper(value,version,channel->physical_sample_rate()))
                             channel->set_physical_observer([this,version](std::span<const float> raw,std::uint32_t rate,std::uint64_t first) {
@@ -5373,8 +6286,27 @@ struct Session::Impl {
                     };
                     if(media_clock && !simulation_channel) {
                         auto channel=make_simulation_channel();
-                        const auto origin=current_epoch();
+                        const auto origin=detail::simulation_initial_epoch(current_epoch());
                         simulation_channel=std::move(channel);simulation_origin=origin;
+                    }
+                    if(!media_clock && !simulation_channel && value.helper.power_w>0 &&
+                       value.transfer.timestamp && !transfer::shared_hop_calendar(value.transfer.modem)) {
+                        simulation_channel=make_simulation_channel();
+                        if(simulation_channel->physical_sample_rate()!=value.transfer.modem.sample_rate) {
+                            // A fixed diagnostic's timestamp dates source zero.
+                            // Its real helper pre-roll is captured earlier; date
+                            // that capture rather than moving the Robust epoch.
+                            const auto& config=wave?wave->modem:value.transfer.modem;
+                            const auto anchor=modem::symbol_schedule_detail::add(
+                                modem::symbol_schedule_detail::multiply(value.transfer.timestamp,config.sample_rate),
+                                config.stream_phase_samples);
+                            const auto prefix=modem::symbol_schedule_detail::add(
+                                modem::training_sample_count(config),modem::pattern_pulse_padding_samples(config));
+                            if(anchor<prefix)throw Error("diagnostic capture precedes the representable sample clock");
+                            const auto lead=detail::helper_leading_seconds(anchor-prefix,config.sample_rate)/
+                                (1+channel_config(value).clock_error_ppm*1e-6);
+                            simulation_origin=static_cast<double>(static_cast<long double>(value.transfer.timestamp)-lead);
+                        }
                     }
                     // The receiving computer runs continuously. TX control can
                     // start a waveform, but cannot reset, seed or align RX.
@@ -5384,6 +6316,10 @@ struct Session::Impl {
                             initial.observed_epoch=detail::simulation_media_epoch(*simulation_origin,
                                 simulation_channel->received_samples(),value.transfer.modem.sample_rate);
                             initial.revision=input_revision;
+                        } else if(simulation_origin) {
+                            initial.observed_epoch=detail::simulation_media_epoch(*simulation_origin,
+                                simulation_channel->received_samples(),value.transfer.modem.sample_rate);
+                            initial.simulation_capture_dated=true;
                         } else if(value.transfer.modem.symbol_burst.enabled()) {
                             initial.observed_epoch=current_epoch();
                             std::lock_guard lock(mutex);initial.revision=receive_revision;
@@ -5397,6 +6333,10 @@ struct Session::Impl {
                             *simulation_bank->observed_epoch);
                     }
                     if(wave && wave->prepare_simulation) {
+                        if(!simulation_channel && value.helper.power_w>0)
+                            simulation_channel=make_simulation_channel();
+                        wave->simulation_helper_enabled=simulation_channel &&
+                            simulation_channel->physical_sample_rate()!=value.transfer.modem.sample_rate;
                         if(media_clock) {
                             std::lock_guard lock(mutex);
                             if(generation!=wave->generation || tx_serial!=wave->serial ||
@@ -5421,17 +6361,9 @@ struct Session::Impl {
                     const auto simulation_reference=[&]() -> std::optional<helper::Reference> {
                         if(value.helper.power_w<=0)return std::nullopt;
                         auto reference=helper_reference(simulation_bank_source_origin+simulation_bank->samples,value.transfer.modem.sample_rate,version);
-                        if(!reference||reference->sample<simulation_bank_source_origin)return std::nullopt;
-                        if(reference->frequency_sample) {
-                            // Zero retains its legacy same-as-phase meaning;
-                            // an older independently dated component must wait
-                            // for a fresh observation in the replacement bank.
-                            if(reference->frequency_sample<=simulation_bank_source_origin)return std::nullopt;
-                            reference->frequency_sample-=simulation_bank_source_origin;
-                        }
-                        reference->sample-=simulation_bank_source_origin;
-                        reference->dwell_start_seconds-=static_cast<double>(simulation_bank_source_origin)/value.transfer.modem.sample_rate;
-                        return reference;
+                        if(!reference)return std::nullopt;
+                        return detail::rebase_helper_reference(std::move(*reference),simulation_bank_source_origin,
+                            simulation_bank_source_origin+simulation_bank->samples,value.transfer.modem.sample_rate);
                     };
                     // Freeze already observed assistance before producing the
                     // next block: physical FIR lookahead must neither leak into
@@ -5486,7 +6418,7 @@ struct Session::Impl {
                     if(wave && wave->tail_started) {
                         bool finish_after_source=false;
                         {std::lock_guard lock(mutex);finish_after_source=finish_requested;}
-                        if(finish_after_source) {
+                        if(finish_after_source && value.helper.power_w<=0) {
                             wave->graceful=true;complete_tx(*wave);wave.reset();continue;
                         }
                     }
@@ -5507,8 +6439,10 @@ struct Session::Impl {
                             prepare_source_read(*wave);
                             count = simulation_channel->read(*wave->transmitter, std::span(samples).first(capacity), wave->stop);
                             wave->transmitted_samples = simulation_channel->transmitted_samples();
-                            if (!count) {
-                                if(wave->graceful) {
+                            if (!count || (simulation_channel->physical_sample_rate()!=transmit_modem.sample_rate &&
+                                           simulation_channel->payload_finished())) {
+                                wave->simulation_envelope_finished=!count;
+                                if(!count && wave->graceful) {
                                     // Stop only the source/replay work. The same
                                     // receiver continues on ordinary idle PCM;
                                     // no scored absence or completion is invented.
@@ -5516,6 +6450,10 @@ struct Session::Impl {
                                 }
                                 wave->tail_started = true;
                                 wave->tail_remaining = modem::pattern_absence_capture_samples(transmit_modem)+transmit_modem.sample_rate+2*modem::pattern_pulse_padding_samples(transmit_modem);
+                                if(simulation_channel->physical_sample_rate()!=transmit_modem.sample_rate) {
+                                    if(wave->tail_remaining>UINT64_MAX-128)throw Error("Helper Carrier capture tail exceeds the sample clock");
+                                    wave->tail_remaining+=128; // Centered physical FIR support.
+                                }
                                 // A finite simulation must supply real noise
                                 // until admitted native FFTs can score captured
                                 // audio. Ending before their first batch would
@@ -5529,12 +6467,26 @@ struct Session::Impl {
                                             wave->tail_remaining=std::max(wave->tail_remaining,required-simulation_bank->samples);
                                     }
                                 }
+                                // Helper post-roll shares the real capture
+                                // absence interval; it is not an extra source
+                                // EOF followed by a second absence interval.
+                                simulation_channel->extend_helper_tail(
+                                    static_cast<double>(wave->tail_remaining)/transmit_modem.sample_rate);
                             }
                         }
-                        if (wave->tail_started && wave->tail_remaining) {
-                            count = static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(), wave->tail_remaining));
-                            simulation_channel->read_noise(std::span(samples).first(count));
-                            wave->tail_remaining -= count;
+                        if (!count && wave->tail_started &&
+                            (wave->tail_remaining || !wave->simulation_envelope_finished)) {
+                            count = wave->tail_remaining?static_cast<std::size_t>(
+                                std::min<std::uint64_t>(samples.size(),wave->tail_remaining)):samples.size();
+                            const auto helper_count=simulation_channel->read(*wave->transmitter,
+                                std::span(samples).first(count),wave->stop);
+                            if(helper_count)count=helper_count;
+                            else {
+                                wave->simulation_envelope_finished=true;
+                                if(wave->tail_remaining)simulation_channel->read_noise(std::span(samples).first(count));
+                                else count=0;
+                            }
+                            wave->tail_remaining-=std::min<std::uint64_t>(wave->tail_remaining,count);
                         }
                         const auto input_samples = std::span(samples).first(count);
                         account(count, version); progress(*wave, value);
@@ -5549,7 +6501,7 @@ struct Session::Impl {
                             wave->replay.size()+1 < wave->replay_count &&
                             wave->transmitted_samples >= replay_target(*wave))
                             collect_replay(*wave, transmit_modem, plot_window, value.simulation_spectrum_gain_db);
-                        if (wave->tail_started && !wave->tail_remaining) {
+                        if (wave->tail_started && !wave->tail_remaining && wave->simulation_envelope_finished) {
                             // Short pattern bursts can be scored only after
                             // trailing samples complete a receiver window.
                             // Reserve their final replay frame for that evidence.
@@ -5585,12 +6537,25 @@ struct Session::Impl {
                     audio::ChannelMode channels;
                     audio::Options output_options;
                     std::optional<helper::Generator> helper_generator;
+                    std::optional<helper::Plan> helper_output_plan;
                     std::uint64_t helper_output_frames=0;
                     bool helper_transmit=value.helper.power_w>0,output_started=false;
+                    wave->hardware_helper_enabled=helper_transmit;
                     const auto disable_helper=[&](const std::string& reason) {
                         if(wave->helper_only)throw Error(reason);
+                        if(!helper_output_plan)throw Error("Helper Carrier calibration unavailable: "+reason);
                         helper_transmit=false;helper_generator.reset();
-                        helper_unavailable(version,reason+"; transmitting ordinary Robust signal");
+                        wave->hardware_helper_enabled=false;
+                        if(!wave->transmitter)
+                            wave->hardware_helper_leading_samples=wave->hardware_helper_trailing_samples=0;
+                        helper_unavailable(version,reason+"; transmitting ordinary Robust signal at calibrated data amplitude");
+                    };
+                    const auto add_helper_frames=[](std::uint64_t first,std::uint64_t second) {
+                        if(first>UINT64_MAX-second)throw Error("Helper Carrier output coordinate exhausted");
+                        return first+second;
+                    };
+                    const auto helper_lead_seconds=[&]() -> long double {
+                        return static_cast<long double>(wave->hardware_helper_leading_samples)/wave->modem.sample_rate;
                     };
                     const auto helper_origin=[&]() -> long double {
                         const auto& c=wave->modem;
@@ -5602,35 +6567,67 @@ struct Session::Impl {
                     const auto helper_source_end=[&]() -> std::optional<std::uint64_t> {
                         if(!wave->transmitter || (wave->noise&&!wave->graceful))return {};
                         const auto total=wave->transmitter->total_samples();
-                        if(!helper_transmit)return total;
+                        const auto wrapped=add_helper_frames(wave->hardware_helper_leading_samples,total);
+                        if(!helper_transmit && !wave->hardware_helper_leading_samples && !wave->hardware_helper_trailing_samples)return total;
                         const auto origin=helper_origin();
-                        const auto end=helper::protected_endpoint(wave->modem.stream_epoch,origin,
-                            origin+static_cast<long double>(total)/wave->modem.sample_rate);
-                        const auto frames=std::ceil((end-origin)*wave->modem.sample_rate);
-                        if(frames>std::numeric_limits<std::uint64_t>::max())throw Error("Helper Carrier stop coordinate exhausted");
-                        return std::max(total,static_cast<std::uint64_t>(frames));
+                        const auto requested=origin+static_cast<long double>(total)/wave->modem.sample_rate+
+                            static_cast<long double>(wave->hardware_helper_trailing_samples)/wave->modem.sample_rate;
+                        const auto aligned=std::ceil(((wave->modem.stream_epoch%2)+requested)/.4L)*.4L-(wave->modem.stream_epoch%2);
+                        const auto end=helper::protected_endpoint(wave->modem.stream_epoch,origin-helper_lead_seconds(),
+                            aligned);
+                        const auto frames=std::ceil((end-origin+helper_lead_seconds())*wave->modem.sample_rate);
+                        if(!std::isfinite(frames)||frames<0||frames>=std::ldexp(1.L,64))throw Error("Helper Carrier stop coordinate exhausted");
+                        return std::max(wrapped,static_cast<std::uint64_t>(frames));
                     };
                     channels=wave->output_channels;
                     output_options={wave->output_gain,value.exclusive};
-                    try {
-                        output_options.minimum_hardware_rate=helper::minimum_output_rate(value.helper,
-                            transmit_modem.carrier_hz,wave->helper_bandwidth,transmit_modem.sample_rate);
-                    }catch(const Error& error){disable_helper(error.what());}
+                    if(helper_transmit) {
+                        // Preserve the data amplitude even if optional helper
+                        // output later becomes unavailable. Returning full-scale
+                        // PCM would invalidate the operator's RF calibration.
+                        // Calibration does not require the optional tone to
+                        // fit, including when a gate allowance crosses DC.
+                        // Invalid options still reject before the placement catch.
+                        helper_output_plan=helper::Plan{};
+                        helper_output_plan->data_gain=helper::calibrated_data_gain(value.helper);
+                        try {
+                            helper_output_plan=helper::plan(value.helper,transmit_modem.carrier_hz,
+                                wave->helper_bandwidth,120000000,0,modem::outer_dsss_transmit_gain(transmit_modem));
+                            output_options.minimum_hardware_rate=helper::minimum_output_rate(value.helper,
+                                transmit_modem.carrier_hz,wave->helper_bandwidth,transmit_modem.sample_rate);
+                        } catch(const Error& error) {
+                            disable_helper(error.what());
+                        }
+                    }
                     if(value.helper.power_w>0) {
                         output_options.playback_output_transform=[&](float payload,long double seconds,std::uint32_t rate) {
-                            if(!helper_transmit)return payload;
+                            if(!helper_transmit)return static_cast<float>(payload*helper_output_plan->data_gain);
                             if(!helper_generator || !wave->transmitter)
                                 throw Error("Enabled Helper Carrier has no calibrated output generator");
                             const auto& c=wave->modem;
                             const auto origin=helper_origin();
+                            const auto start=origin-helper_lead_seconds();
                             const auto end=helper_source_end();
-                            return helper_generator->mix(wave->helper_only?0.f:payload,origin+seconds,rate,
-                                end?std::optional<long double>(origin+static_cast<long double>(*end)/c.sample_rate):std::nullopt,origin);
+                            return helper_generator->mix(wave->helper_only?0.f:payload,start+seconds,rate,
+                                end?std::optional<long double>(start+static_cast<long double>(*end)/c.sample_rate):std::nullopt,start);
                         };
                     }
                     output_options.maximum_utc_error_seconds=clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds);
                     output_options.presentation_lag_seconds=clock_sync::audio_lag_radius(value.transfer.audio_timing_error_seconds);
                     output_options.timing_stop_duration_seconds=wave->timing_stop_seconds;
+                    if(helper_transmit && wave->timing_stop_seconds>0) {
+                        // Preparation precedes the final keyed origin. Reserve
+                        // the maximum dwell alignment plus the independent tail.
+                        const auto tail=std::max({2.L,static_cast<long double>(wave->hardware_helper_trailing_samples)/transmit_modem.sample_rate,
+                            (static_cast<long double>(modem::pattern_absence_capture_samples(transmit_modem))+
+                            transmit_modem.sample_rate+2.L*modem::pattern_pulse_padding_samples(transmit_modem))/transmit_modem.sample_rate});
+                        const auto extra=static_cast<double>(2.8L+tail+2.L/transmit_modem.sample_rate);
+                        output_options.timing_stop_duration_seconds+=extra;
+                        // The lead precedes valid payload, so it cannot be
+                        // subtracted from an absolute payload-end forecast.
+                        // Only the guaranteed independent post-roll is cover.
+                        output_options.timing_independent_cover_seconds=static_cast<double>(tail);
+                    }
                     if(wave->timing_stop_seconds>0 && modem::private_cover_enabled(transmit_modem)) {
                         // Reserve the same PHYSICAL clock for both terms. A
                         // source-time cover duration cannot be subtracted from
@@ -5641,15 +6638,17 @@ struct Session::Impl {
                         const auto cover_source=modem::suppression_sample_count(transmit_modem);
                         const auto valid_wall=static_cast<double>(modem::scheduled_physical_span_samples(
                             transmit_modem,stop_source-cover_source))/transmit_modem.sample_rate;
-                        output_options.timing_independent_cover_seconds=modem::scheduled_bursts(transmit_modem)?
+                        output_options.timing_independent_cover_seconds+=modem::scheduled_bursts(transmit_modem)?
                             std::max(0.,wave->timing_stop_seconds-valid_wall):
                             static_cast<double>(cover_source)/transmit_modem.sample_rate;
                     }
-                    if(transmit_modem.symbol_burst.enabled() ||
+                    if(value.helper.power_w>0 || transmit_modem.symbol_burst.enabled() ||
                        (transmit_modem.scheduled_hopping && transmit_modem.scheduled_hopping->enabled() && !transmit_modem.scheduled_hopping->continuous())) {
                         output_options.timing_protected_payload_end=[&](std::uint64_t frontier)->std::optional<std::uint64_t> {
                             if(!wave->transmitter)return std::nullopt;
-                            return wave->transmitter->predicted_physical_valid_payload_end(frontier);
+                            const auto lead=wave->hardware_helper_leading_samples;
+                            const auto source_frontier=frontier>lead?frontier-lead:0;
+                            return add_helper_frames(lead,wave->transmitter->predicted_physical_valid_payload_end(source_frontier));
                         };
                     }
                     output_options.timing_source_end=[&]() -> std::optional<std::uint64_t> {
@@ -5661,6 +6660,7 @@ struct Session::Impl {
                         const modem::FhssPowerShape shape(*transmit_modem.fake_hopping,transmit_modem.sample_rate,
                             modem::pattern_pulse_padding_samples(transmit_modem),modem::symbol_sample_count(transmit_modem));
                         output_options.playback_output_gain=[&,shape](long double seconds) {
+                            seconds-=helper_lead_seconds();
                             const auto& c=wave->modem;
                             const auto origin=c.symbol_burst.enabled() ||
                                 (c.scheduled_hopping && c.scheduled_hopping->enabled() && !c.scheduled_hopping->continuous())?
@@ -5729,16 +6729,37 @@ struct Session::Impl {
                     };
                     if(!value.full_duplex)discontinuity();
                     const auto play=[&] {audio::playback(transmit_modem.sample_rate, value.device, [&](std::span<float> output) {
-                        output_started=true;
-                        prepare_source_read(*wave);
+                        if(!output_started) {
+                            output_started=true;
+                            audio::trace::record("transmitter_seed_committed",[&](auto& f) {
+                                f.add("transmission_id",wave->serial);f.add("generation",wave->generation);
+                                f.add("epoch",wave->modem.stream_epoch);
+                                f.add("stream_phase_samples",wave->modem.stream_phase_samples);
+                                f.add("sample_rate",wave->modem.sample_rate);
+                                f.add("symbol_samples",modem::symbol_sample_count(wave->modem));
+                                f.add("helper_enabled",helper_transmit);
+                                f.add("helper_leading_samples",wave->hardware_helper_leading_samples);
+                            });
+                        }
                         const auto before=wave->transmitter->samples_emitted();
-                        auto count = wave->transmitter->read(output, wave->stop);
-                        helper_output_frames+=count;
-                        if(helper_transmit && wave->transmitter->finished()) {
+                        std::size_t count=0;
+                        if(helper_output_frames<wave->hardware_helper_leading_samples) {
+                            count=static_cast<std::size_t>(std::min<std::uint64_t>(output.size(),
+                                wave->hardware_helper_leading_samples-helper_output_frames));
+                            std::fill_n(output.begin(),count,0.f);
+                            helper_output_frames=add_helper_frames(helper_output_frames,count);
+                        }
+                        if(count<output.size() && !wave->transmitter->finished()) {
+                            prepare_source_read(*wave);
+                            const auto payload=wave->transmitter->read(output.subspan(count),wave->stop);
+                            count+=payload;helper_output_frames=add_helper_frames(helper_output_frames,payload);
+                        }
+                        if(wave->transmitter->finished() && (helper_transmit ||
+                           wave->hardware_helper_leading_samples || wave->hardware_helper_trailing_samples)) {
                             if(const auto end=helper_source_end();end && helper_output_frames<*end) {
                                 const auto padding=static_cast<std::size_t>(std::min<std::uint64_t>(output.size()-count,*end-helper_output_frames));
                                 std::fill_n(output.begin()+static_cast<std::ptrdiff_t>(count),padding,0.f);
-                                count+=padding;helper_output_frames+=padding;
+                                count+=padding;helper_output_frames=add_helper_frames(helper_output_frames,padding);
                             }
                         }
                         retain_emitted_epoch(*wave);
@@ -5756,17 +6777,39 @@ struct Session::Impl {
                         return count;
                     }, wave->stop, [&](const auto& format) {
                         audio_format(format, version,false);
+                        if(helper_transmit) {
+                            try {
+                                helper_output_plan=helper::plan(value.helper,wave->modem.carrier_hz,wave->helper_bandwidth,
+                                    format.hardware_rate,0,modem::outer_dsss_transmit_gain(wave->modem));
+                            }catch(const Error& error){disable_helper(error.what());}
+                        }
                         if(wave->prepare_hardware) {
                             wave->prepare_hardware(*wave);
                             wave->prepare_hardware={};
+                        } else if(wave->hardware_helper_leading_samples) {
+                            // A provider pre-source retry retains the private
+                            // payload origin. Declining a lead that no longer
+                            // fits must not move that already planned origin.
+                            const auto physical=wave->transmitter->physical_output_origin();
+                            const auto payload_epoch=static_cast<double>(physical/wave->modem.sample_rate)+
+                                static_cast<double>(physical%wave->modem.sample_rate)/wave->modem.sample_rate;
+                            auto playback_epoch=payload_epoch-static_cast<double>(helper_lead_seconds());
+                            if(!helper_transmit || current_epoch()+audio::minimum_lead_seconds()>=playback_epoch) {
+                                if(helper_transmit)disable_helper("Helper Carrier lead no longer fits after reopening the audio provider");
+                                wave->hardware_helper_leading_samples=wave->hardware_helper_trailing_samples=0;
+                                playback_epoch=payload_epoch;
+                            }
+                            audio::schedule_output(playback_epoch,wave->stop);
                         }
+                        if(helper_transmit&&!wave->hardware_helper_enabled)
+                            disable_helper("Helper Carrier lead does not fit before the explicit Robust timestamp");
                         if(helper_transmit) {
                             try {
                                 const auto& c=wave->modem;
-                                const auto plan=helper::plan(value.helper,c.carrier_hz,
+                                helper_output_plan=helper::plan(value.helper,c.carrier_hz,
                                     wave->helper_bandwidth,format.hardware_rate,0,
                                     modem::outer_dsss_transmit_gain(c));
-                                helper_generator.emplace(value.helper,plan,c.stream_epoch,true,value.transfer.key);
+                                helper_generator.emplace(value.helper,*helper_output_plan,c.stream_epoch,true,value.transfer.key);
                             } catch(const Error& error) {
                                 disable_helper(error.what());
                             }
@@ -6099,6 +7142,13 @@ struct Session::Impl {
                 prepared->timing_stop_seconds=static_cast<double>(modem::scheduled_physical_span_samples(value.transfer.modem,
                     modem::transmit_stop_sample_count(value.transfer.modem)))/value.transfer.modem.sample_rate;
                 prepared->output_gain=value.transmit_gain;prepared->helper_bandwidth=helper_bandwidth;
+                if(value.helper.power_w>0 && !value.simulation) {
+                    std::lock_guard lock(mutex);
+                    const auto aperture=current.receiver_initial_fft_input_samples;
+                    const auto guard=static_cast<std::uint64_t>(value.transfer.modem.sample_rate)+128;
+                    if(aperture>UINT64_MAX-guard)throw Error("Helper Carrier receiver aperture exceeds the source clock");
+                    prepared->hardware_helper_trailing_samples=aperture+guard;
+                }
                 prepared->output_channels=audio::output_channels(value.mono,value.channel_mode);
                 prepared->generation = version; prepared->serial = serial;prepared->receive_clear_generation=clear_generation; prepared->stop = token;
                 prepared->binary = std::holds_alternative<Bytes>(transmission);
@@ -6146,6 +7196,24 @@ struct Session::Impl {
                             return wave.binary?transfer::binary_transmitter(std::get<Bytes>(transmission),options):
                                 transfer::message_transmitter(std::get<Message>(transmission),options);
                         };
+                        const auto prepare_helper_envelope=[&] {
+                            if(!wave.hardware_helper_enabled)return;
+                            const auto rate=wave.modem.sample_rate;
+                            const auto physical=wave.transmitter->physical_output_origin();
+                            const auto origin=static_cast<long double>(physical/rate)-wave.modem.stream_epoch+
+                                static_cast<long double>(physical%rate)/rate;
+                            const auto parity=wave.modem.stream_epoch%2;
+                            const auto start=std::floor((parity+origin-2.L)/.4L)*.4L-parity;
+                            const auto lead=std::ceil((origin-start)*rate);
+                            const auto tail=std::max(2.L*rate,static_cast<long double>(modem::pattern_absence_capture_samples(wave.modem))+
+                                rate+2.L*modem::pattern_pulse_padding_samples(wave.modem));
+                            if(!std::isfinite(lead)||lead<0||lead>=std::ldexp(1.L,64)||
+                               !std::isfinite(tail)||tail<0||tail>=std::ldexp(1.L,64))
+                                throw Error("Helper Carrier envelope exceeds the source clock");
+                            wave.hardware_helper_leading_samples=static_cast<std::uint64_t>(lead);
+                            wave.hardware_helper_trailing_samples=std::max(wave.hardware_helper_trailing_samples,
+                                static_cast<std::uint64_t>(std::ceil(tail)));
+                        };
                         if(!options.timestamp) {
                             options.modem.stream_phase_samples=0;
                             wave.modem.stream_phase_samples=0;
@@ -6159,14 +7227,37 @@ struct Session::Impl {
                                     minimum=previous->second+1;
                                 }
                             }
+                            // Choose the keyed source once, with room to play
+                            // the helper before it. The payload origin is never
+                            // advanced or re-keyed by the output wrapper.
+                            const auto helper_reservation=wave.hardware_helper_enabled?
+                                2.4+1./options.modem.sample_rate:0.;
                             auto scheduled=datapump::detail::schedule_transmission(options.modem,make,
-                                [this]{return current_epoch();},wave.stop,minimum,audio::minimum_lead_seconds());
+                                [this]{return current_epoch();},wave.stop,minimum,audio::minimum_lead_seconds()+helper_reservation);
                             wave.transmitter=std::move(scheduled.transmitter);
+                            prepare_helper_envelope();
                             if(!key.empty())wave.protected_epoch=scheduled.epoch;
-                            audio::schedule_output(scheduled.playback_epoch,wave.stop);
+                            audio::schedule_output(scheduled.playback_epoch-
+                                static_cast<double>(wave.hardware_helper_leading_samples)/wave.modem.sample_rate,wave.stop);
                         } else {
                             wave.transmitter=make(options.timestamp,options.modem.stream_phase_samples);
                             if(!key.empty())wave.protected_epoch=options.timestamp;
+                            prepare_helper_envelope();
+                            if(wave.hardware_helper_enabled) {
+                                const auto physical=wave.transmitter->physical_output_origin();
+                                const auto playback=static_cast<double>(physical/wave.modem.sample_rate)+
+                                    static_cast<double>(physical%wave.modem.sample_rate)/wave.modem.sample_rate-
+                                    static_cast<double>(wave.hardware_helper_leading_samples)/wave.modem.sample_rate;
+                                if(current_epoch()+audio::minimum_lead_seconds()<playback)
+                                    audio::schedule_output(playback,wave.stop);
+                                else {
+                                    // An explicit private epoch is immutable.
+                                    // Optional assistance yields when its lead
+                                    // cannot fit; the ordinary source continues.
+                                    wave.hardware_helper_enabled=false;
+                                    wave.hardware_helper_leading_samples=wave.hardware_helper_trailing_samples=0;
+                                }
+                            }
                         }
                         wave.protected_key=key;
                         // Reservation itself happens after each successful read
@@ -6185,9 +7276,13 @@ struct Session::Impl {
                             return wave.binary?transfer::binary_transmitter(std::get<Bytes>(transmission),options):
                                 transfer::message_transmitter(std::get<Message>(transmission),options);
                         };
+                        const auto link_rate=1+channel_config(value).clock_error_ppm*1e-6;
+                        const auto reserve=wave.simulation_helper_enabled?(2.4+1./options.modem.sample_rate)/link_rate:0.;
                         auto scheduled=datapump::detail::schedule_transmission(options.modem,make,[now]{return now;},wave.stop,
-                            options.timestamp);
-                        const auto leading=std::ceil((static_cast<long double>(scheduled.playback_epoch)-now)*options.modem.sample_rate);
+                            options.timestamp,reserve);
+                        const auto helper_lead=wave.simulation_helper_enabled?
+                            detail::helper_leading_seconds(scheduled.transmitter->physical_output_origin(),options.modem.sample_rate)/link_rate:0.L;
+                        const auto leading=std::ceil((static_cast<long double>(scheduled.playback_epoch)-now-helper_lead)*options.modem.sample_rate);
                         if(!std::isfinite(leading) || leading<0 || leading>=std::ldexp(1.L,64))
                             throw Error("simulation calendar wait exceeds the sample range");
                         wave.simulation_leading_samples=static_cast<std::uint64_t>(leading);
@@ -6197,6 +7292,36 @@ struct Session::Impl {
                     prepared->prepare_simulation=[transmission=std::move(transmission),value](Prepared& wave,double now) mutable {
                         if(wave.stop.stop_requested())throw Error("transmission cancelled");
                         auto options=value.transfer;
+                        if(wave.simulation_helper_enabled) {
+                            if(wave.noise)options.modem=modem::StreamingTransmitter::prepare_noise_config(options.modem);
+                            else options.modem=transfer::seeded_config(options,options.timestamp);
+                            const auto make=[&](std::uint64_t epoch,std::uint32_t phase) {
+                                options.timestamp=epoch;options.modem.stream_epoch=epoch;options.modem.stream_phase_samples=phase;
+                                wave.modem=options.modem;
+                                if(wave.noise)return std::make_unique<modem::StreamingTransmitter>(modem::Noise{},options.modem,
+                                    modem::StreamingTransmitter::PreparedTemporaryKeys{},value.dsp_workspace_bytes/4);
+                                return wave.binary?transfer::binary_transmitter(std::get<Bytes>(transmission),options):
+                                    transfer::message_transmitter(std::get<Message>(transmission),options);
+                            };
+                            const auto link_rate=1+channel_config(value).clock_error_ppm*1e-6;
+                            auto scheduled=datapump::detail::schedule_transmission(options.modem,make,[now]{return now;},wave.stop,
+                                0,(2.4+1./options.modem.sample_rate)/link_rate);
+                            const auto lead=detail::helper_leading_seconds(scheduled.transmitter->physical_output_origin(),options.modem.sample_rate)/link_rate;
+                            // Ordinary free-running simulation dates source
+                            // zero at its epoch; receiver admission includes
+                            // the settling prefix. Preserve that convention
+                            // while reserving the helper before source zero.
+                            const auto prefix=(static_cast<long double>(modem::training_sample_count(options.modem))+
+                                modem::pattern_pulse_padding_samples(options.modem))/options.modem.sample_rate;
+                            const auto waiting=std::ceil((static_cast<long double>(scheduled.playback_epoch)+prefix-now-lead)*options.modem.sample_rate);
+                            if(!std::isfinite(waiting)||waiting<0||waiting>=std::ldexp(1.L,64))
+                                throw Error("Helper Carrier simulation lead exceeds the source clock");
+                            wave.simulation_leading_samples=static_cast<std::uint64_t>(waiting);
+                            detail::simulation_checkpoint(detail::SimulationPhase::transmit_epoch,0,0,0,
+                                static_cast<double>(scheduled.epoch));
+                            wave.transmitter=std::move(scheduled.transmitter);
+                            return;
+                        }
                         options.timestamp=static_cast<std::uint64_t>(detail::simulation_media_epoch(now,0,options.modem.sample_rate));
                         detail::simulation_checkpoint(detail::SimulationPhase::transmit_epoch,0,0,0,now);
                         std::unique_ptr<modem::StreamingTransmitter> transmitter;
@@ -6259,12 +7384,12 @@ struct Session::Impl {
         detail::configure_decoder_scheduling();
         std::optional<Bank> bank; std::uint64_t local_generation = 0, local_revision = 0;
         const auto reset_bank=[&](const char* reason) {
-            if(bank){trace_exact_source_pool(*bank,reason,true);trace_point_pool(*bank,reason,true);}
+            if(bank){trace_receiver_acquisition_work(*bank,true,reason);trace_exact_source_pool(*bank,reason,true);trace_point_pool(*bank,reason,true);}
             bank.reset();
         };
         struct FinalSourceSnapshot {
             std::optional<Bank>& bank;
-            ~FinalSourceSnapshot(){try{if(bank){trace_exact_source_pool(*bank,"decoder_join",true);trace_point_pool(*bank,"decoder_join",true);}}catch(...) {}}
+            ~FinalSourceSnapshot(){try{if(bank){trace_receiver_acquisition_work(*bank,true,"decoder_join");trace_exact_source_pool(*bank,"decoder_join",true);trace_point_pool(*bank,"decoder_join",true);}}catch(...) {}}
         } final_source_snapshot{bank};
         while (!stop.stop_requested()) {
             Settings value; AudioBlock block{}; std::uint64_t version; std::stop_token token;bool pending_only=false;

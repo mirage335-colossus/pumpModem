@@ -22,6 +22,9 @@ struct ReceiverAdmissionContext {
     double now=0,propagation=0;
     std::size_t key_count=1,profile_count=1,capacity=0,capture_owner_bytes=0,control_margin=0;
     bool keyed=true,prefer_streamed_templates=false,compact_clock_search=false;
+    // A fixed diagnostic epoch may have real captured helper-only PCM before
+    // source zero. In that case now dates capture, rather than source zero.
+    bool simulation_capture_dated=false;
     std::optional<std::size_t> amplitude_family_bank_count;
 };
 struct ReceiverSearchPreparation {
@@ -128,6 +131,7 @@ inline ReceiverSearchPreparation prepare_receiver_search(const modem::Config& co
         declared_search=oscillator_search;
         search.admitted_frequency_half_width_hz=oscillator_search.frequency.requested_half_width_hz;
         search.admitted_clock_half_width_ppm=oscillator_search.requested_clock_half_width_ppm;
+        search.admitted_clock_cell_half_width_ppm=oscillator_search.clock_step_ppm/2;
         search.complex_frequency_coverage=!oscillator_search.frequency.limited;
         search.complex_clock_coverage=oscillator_search.clock_half_width_ppm>=oscillator_search.requested_clock_half_width_ppm;
         search.hypotheses=std::move(oscillator_search.hypotheses);
@@ -146,7 +150,8 @@ inline ReceiverSearchPreparation prepare_receiver_search(const modem::Config& co
     // bank away from the actual physical calendar intersection.
     const bool dated_calendar=!value.simulation && transfer::shared_hop_calendar(config) && context.timing;
     search.start_offset_seconds=static_cast<double>(epoch)-
-        (value.transfer.timestamp && !dated_calendar?static_cast<double>(value.transfer.timestamp):context.now);
+        (value.transfer.timestamp && !dated_calendar && !context.simulation_capture_dated?
+            static_cast<double>(value.transfer.timestamp):context.now);
     if(!value.simulation && (!value.transfer.timestamp || dated_calendar)) *search.start_offset_seconds+=context.propagation;
     if(value.simulation || (value.transfer.timestamp && !dated_calendar))
         *search.start_offset_seconds+=(static_cast<double>(modem::training_sample_count(config))+

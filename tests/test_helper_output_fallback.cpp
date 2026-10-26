@@ -1,5 +1,6 @@
 #include "datapump/live.hpp"
 #include "datapump/resampler.hpp"
+#include "../src/transmit_timing.hpp"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -9,6 +10,7 @@
 #include <iostream>
 #include <numbers>
 #include <optional>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -17,6 +19,12 @@ using namespace std::chrono_literals;
 namespace {
 constexpr std::uint64_t epoch=1800000000;
 void check(bool value,const char* message) {if(!value)throw Error(message);}
+struct ReadObservation {
+    std::uint64_t supplied=0,source_samples=0;
+    std::size_t generated_bits=0;
+    double key_lock_seconds=0;
+    std::optional<std::uint64_t> source_end,payload_end;
+};
 struct Provider {
     std::atomic<unsigned> opened=0,closed=0,formats=0,source_calls=0;
     std::atomic<bool> capture_started=false;
@@ -24,7 +32,9 @@ struct Provider {
     std::optional<long double> accepted_utc;
     std::uint32_t output_rate=0;
     std::vector<std::uint32_t> requested_rates;
-    std::vector<float> pcm;
+    std::vector<float> pcm,logical_pcm;
+    std::vector<ReadObservation> reads;
+    std::function<live::Snapshot()> snapshot;
 };
 Provider* provider=nullptr;
 live::Settings settings() {
@@ -45,17 +55,19 @@ struct Result {
     std::optional<long double> accepted_utc;
     std::uint32_t output_rate=0;
     std::vector<std::uint32_t> requested_rates;
-    std::vector<float> pcm;
+    std::vector<float> pcm,logical_pcm;
+    std::vector<ReadObservation> reads;
 };
 Result run(live::Settings value,bool reject_rate=false,bool gap=false,bool helper_only=false,
            std::shared_ptr<const modem::FhssPlan> hopping={}) {
     Provider script;script.reject_helper_rate=reject_rate;script.fail_after_pcm=gap;
-    script.accept_buffered_utc=bool(hopping);
+    script.accept_buffered_utc=true;
     provider=&script;
     struct Release {~Release(){provider=nullptr;}}release;
     Result result;
     {
         live::Session session([]{return static_cast<double>(epoch);});session.start(value);
+        script.snapshot=[&]{return session.snapshot();};
         const auto deadline=std::chrono::steady_clock::now()+5s;
         while(!script.capture_started && std::chrono::steady_clock::now()<deadline)
             std::this_thread::sleep_for(1ms);
@@ -78,7 +90,13 @@ Result run(live::Settings value,bool reject_rate=false,bool gap=false,bool helpe
     result.output_rate=script.output_rate;
     result.timing_reported=script.timing_reported;result.accepted_utc=script.accepted_utc;
     result.requested_rates=std::move(script.requested_rates);result.pcm=std::move(script.pcm);
+    result.logical_pcm=std::move(script.logical_pcm);result.reads=std::move(script.reads);
     return result;
+}
+std::shared_ptr<modem::FhssPlan> fhss_hops() {
+    auto hops=std::make_shared<modem::FhssPlan>();hops->channels=200;hops->dwell_seconds=.4;
+    for(unsigned i=0;i<hops->channels;++i)hops->shifts[i]=30000000.+2000*i;
+    return hops;
 }
 void rate_failure_retries_ordinary() {
     auto value=settings();auto baseline=value;baseline.helper.power_w=0;
@@ -89,20 +107,108 @@ void rate_failure_retries_ordinary() {
     check(fallback.opened==2 && fallback.closed==2 && fallback.formats==1 &&
           fallback.requested_rates.size()==2 && fallback.requested_rates[0]>=48000 &&
           fallback.requested_rates[1]==0,"helper rate failure did not make exactly one pre-PCM ordinary retry");
-    check(fallback.pcm==ordinary.pcm,"disabled helper retained audio scaling or changed the ordinary payload");
+    const auto plan=helper::plan(value.helper,value.transfer.modem.carrier_hz,
+        helper::occupied_bandwidth(value.transfer.modem),48000,0,modem::outer_dsss_transmit_gain(value.transfer.modem));
+    check(fallback.pcm.size()==ordinary.pcm.size(),"helper decline changed the ordinary output duration");
+    for(std::size_t i=0;i<fallback.pcm.size();++i)
+        check(fallback.pcm[i]==static_cast<float>(ordinary.pcm[i]*plan.data_gain),
+              "helper decline changed the calibrated data amplitude or ordinary PCM");
+    check(fallback.logical_pcm==ordinary.logical_pcm &&
+          fallback.snapshot.transmit_trace.wire_bits==ordinary.snapshot.transmit_trace.wire_bits &&
+          fallback.snapshot.transmit_key_lock_seconds==ordinary.snapshot.transmit_key_lock_seconds,
+          "helper rate decline changed payload bytes, source PCM or keyed epoch exposure");
     check(fallback.snapshot.helper_status.find("transmitting ordinary Robust signal")!=std::string::npos,
           "ordinary output fallback omitted its helper-unavailable notice");
 }
-void low_geometry_yields_to_payload() {
+void unavailable_geometry_retains_ordinary() {
     auto value=settings();value.transfer.modem.carrier_hz=200;value.helper.frequency=helper::Frequency::low;
     auto baseline=value;baseline.helper.power_w=0;
     const auto ordinary=run(baseline),fallback=run(value);
-    check(!fallback.snapshot.transmission_failed && fallback.snapshot.error.empty() &&
-          fallback.snapshot.transmission_fraction==1,"invalid Low helper geometry aborted Robust TX");
-    check(fallback.opened==1 && fallback.formats==1 && fallback.requested_rates==std::vector<std::uint32_t>{0},
-          "invalid Low geometry opened helper output or restarted ordinary output");
-    check(!ordinary.pcm.empty() && fallback.pcm==ordinary.pcm,
-          "invalid Low helper geometry changed ordinary transmit PCM");
+    check(!ordinary.snapshot.transmission_failed&&!ordinary.pcm.empty(),"helper-off geometry control failed");
+    if(fallback.snapshot.transmission_failed||!fallback.snapshot.error.empty()||
+       fallback.snapshot.transmission_fraction!=1)
+        std::cerr<<"Low placement result: error='"<<fallback.snapshot.error
+                 <<"' transmission_failed="<<fallback.snapshot.transmission_failed
+                 <<" fraction="<<fallback.snapshot.transmission_fraction<<" opened="<<fallback.opened
+                 <<" source_calls="<<fallback.source_calls<<'\n';
+    check(!fallback.snapshot.transmission_failed&&fallback.snapshot.error.empty()&&
+          fallback.snapshot.transmission_fraction==1,"unavailable helper placement aborted ordinary payload");
+    check(fallback.opened==1&&fallback.closed==1&&fallback.formats==1&&fallback.source_calls>0&&
+          fallback.requested_rates==std::vector<std::uint32_t>{0},
+          "unavailable placement requested an optional device rate or repeated output");
+    auto calibration=value.helper;calibration.frequency=helper::Frequency::cochannel;
+    const auto gain=helper::plan(calibration,value.transfer.modem.carrier_hz,
+        helper::occupied_bandwidth(value.transfer.modem),48000,0,
+        modem::outer_dsss_transmit_gain(value.transfer.modem)).data_gain;
+    check(fallback.pcm.size()==ordinary.pcm.size(),"unavailable placement changed ordinary output duration");
+    for(std::size_t i=0;i<fallback.pcm.size();++i)
+        check(fallback.pcm[i]==static_cast<float>(ordinary.pcm[i]*gain),
+              "unavailable placement changed calibrated ordinary amplitude or PCM");
+    check(fallback.logical_pcm==ordinary.logical_pcm&&
+          fallback.snapshot.transmit_trace.wire_bits==ordinary.snapshot.transmit_trace.wire_bits&&
+          fallback.snapshot.transmit_key_lock_seconds==ordinary.snapshot.transmit_key_lock_seconds,
+          "unavailable placement changed ordinary source PCM, payload or key exposure");
+    check(fallback.snapshot.helper_status.find("cannot fit its power-dependent leakage guard")!=std::string::npos&&
+          fallback.snapshot.helper_status.find("transmitting ordinary Robust signal")!=std::string::npos,
+          "unavailable placement omitted its visible helper-disabled reason");
+}
+void gated_geometry_retains_ordinary() {
+    auto value=settings();value.transfer.timestamp=0;value.transfer.audio_timing_error_seconds=0;
+    value.transfer.modem.carrier_hz=100;value.transfer.modem.pulse_shaping=true;
+    value.transfer.modem.spreading_factor=64;
+    const auto hops=fhss_hops();
+    auto gated=value.transfer.modem;
+    gated.fake_hopping=transfer::transmit_hopping(*hops,value.transfer);
+    const auto ungated_band=helper::occupied_bandwidth(value.transfer.modem);
+    const auto occupied=helper::occupied_bandwidth(gated);
+    check(ungated_band==125&&occupied==325&&gated.carrier_hz-ungated_band/2>0&&
+          gated.carrier_hz-occupied/2<0,
+          "gated fallback fixture lost its ordinary-valid RRC and negative planning edge");
+    auto baseline=value;baseline.helper.power_w=0;
+    const auto ordinary=run(baseline,false,false,false,hops),fallback=run(value,false,false,false,hops);
+    check(!ordinary.snapshot.transmission_failed&&ordinary.snapshot.error.empty()&&!ordinary.pcm.empty(),
+          "ordinary gated near-DC control failed");
+    if(fallback.snapshot.transmission_failed||!fallback.snapshot.error.empty()||
+       fallback.snapshot.transmission_fraction!=1)
+        std::cerr<<"Gated placement result: error='"<<fallback.snapshot.error
+                 <<"' transmission_failed="<<fallback.snapshot.transmission_failed
+                 <<" fraction="<<fallback.snapshot.transmission_fraction<<" opened="<<fallback.opened
+                 <<" source_calls="<<fallback.source_calls<<'\n';
+    check(!fallback.snapshot.transmission_failed&&fallback.snapshot.error.empty()&&
+          fallback.snapshot.transmission_fraction==1,"gated helper placement aborted ordinary payload");
+    check(fallback.opened==1&&fallback.closed==1&&fallback.formats==1&&fallback.source_calls>0&&
+          fallback.requested_rates==std::vector<std::uint32_t>{0},
+          "unavailable gated placement requested a helper rate or repeated output");
+    // Use the old public planner with the valid underlying RRC band so this
+    // exact regression also links against the unchanged pre-fix library.
+    const auto gain=helper::plan(value.helper,value.transfer.modem.carrier_hz,ungated_band,48000,0,
+        modem::outer_dsss_transmit_gain(value.transfer.modem)).data_gain;
+    check(fallback.pcm.size()==ordinary.pcm.size(),"gated fallback changed ordinary output duration");
+    for(std::size_t i=0;i<fallback.pcm.size();++i)
+        check(fallback.pcm[i]==static_cast<float>(ordinary.pcm[i]*gain),
+              "gated fallback changed calibrated hardware PCM");
+    check(fallback.logical_pcm==ordinary.logical_pcm&&
+          fallback.snapshot.transmit_trace.wire_bits==ordinary.snapshot.transmit_trace.wire_bits&&
+          fallback.snapshot.transmit_key_lock_seconds==ordinary.snapshot.transmit_key_lock_seconds,
+          "gated fallback changed ordinary source, payload or keyed exposure");
+    check(fallback.snapshot.helper_status.find("requires a valid data passband at the output sample rate")!=std::string::npos&&
+          fallback.snapshot.helper_status.find("transmitting ordinary Robust signal")!=std::string::npos,
+          "gated fallback omitted the original passband decline reason");
+}
+void malformed_helper_settings_are_rejected() {
+    for(const bool invalid_power:{true,false}) {
+        auto value=settings();
+        if(invalid_power)value.helper.power_w=-1;
+        else {value.transfer.key.reset();value.helper.callsign="ABCDEFGHIJKLMNOPQRST";}
+        bool rejected=false;
+        try {live::validate_settings(value);}
+        catch(const Error& error) {
+            const auto message=std::string_view(error.what());
+            rejected=invalid_power?message=="invalid Helper Carrier power or ratio limit":
+                message=="Helper Carrier callsign must contain at most 19 seven-bit ASCII characters";
+        }
+        check(rejected,"placement fallback accepted malformed helper settings");
+    }
 }
 void emitted_gap_is_never_retried() {
     const auto result=run(settings(),false,true);
@@ -119,11 +225,100 @@ void helper_only_cannot_succeed_without_helper() {
           result.snapshot.transmission_fraction==0,"invalid helper-only request pretended to send a beacon");
     check(result.opened==0 && result.pcm.empty(),"invalid helper-only request emitted ordinary payload or silence");
 }
+void explicit_past_declines_at_calibrated_amplitude() {
+    auto value=settings();auto baseline=value;baseline.helper.power_w=0;
+    const auto ordinary=run(baseline),declined=run(value);
+    const auto gain=helper::plan(value.helper,value.transfer.modem.carrier_hz,
+        helper::occupied_bandwidth(value.transfer.modem),48000).data_gain;
+    check(!declined.snapshot.transmission_failed && declined.snapshot.transmission_fraction==1 &&
+          declined.opened==1 && declined.logical_pcm==ordinary.logical_pcm,
+          "past explicit helper epoch changed or aborted the ordinary source");
+    check(declined.pcm.size()==ordinary.pcm.size(),"past explicit helper epoch inserted a lead or tail");
+    for(std::size_t i=0;i<ordinary.pcm.size();++i)
+        check(declined.pcm[i]==static_cast<float>(ordinary.pcm[i]*gain),
+              "past explicit helper epoch lost the calibrated ordinary amplitude");
+    check(declined.snapshot.transmit_trace.wire_bits==ordinary.snapshot.transmit_trace.wire_bits &&
+          declined.snapshot.transmit_key_lock_seconds==ordinary.snapshot.transmit_key_lock_seconds &&
+          declined.snapshot.helper_status.find("lead does not fit")!=std::string::npos,
+          "past explicit helper epoch changed key exposure or omitted its decline reason");
+}
+void hardware_helper_envelope(bool fresh) {
+    auto value=settings();value.transfer.timestamp=fresh?0:epoch+10;
+    auto options=value.transfer;
+    std::unique_ptr<modem::StreamingTransmitter> reference;
+    if(fresh) {
+        audio::detail::UtcPlaybackScope buffered(true);
+        const auto margin=audio::minimum_lead_seconds()+2.4+1./options.modem.sample_rate;
+        auto scheduled=detail::schedule_transmission(options.modem,[&](std::uint64_t selected,std::uint32_t phase) {
+            options.timestamp=selected;options.modem.stream_epoch=selected;options.modem.stream_phase_samples=phase;
+            return transfer::binary_transmitter(Bytes{0,0,1},options);
+        },[]{return static_cast<double>(epoch);},{},0,margin);
+        reference=std::move(scheduled.transmitter);
+    } else reference=transfer::binary_transmitter(Bytes{0,0,1},options);
+    const auto total=reference->total_samples();
+    const auto rate=options.modem.sample_rate;
+    const auto physical=reference->physical_output_origin();
+    const auto result=run(value);
+    check(!result.snapshot.transmission_failed && result.snapshot.transmission_fraction==1 &&
+          result.accepted_utc && result.opened==1 && !result.reads.empty(),
+          "hardware helper envelope did not complete one scheduled waveform");
+    const auto first=std::find_if(result.reads.begin(),result.reads.end(),[](const auto& read){return read.source_samples>0;});
+    check(first!=result.reads.end() && first->supplied>=first->source_samples,"hardware helper envelope never read its source");
+    const auto lead=first->supplied-first->source_samples;
+    check(lead>=2ULL*rate && result.logical_pcm.size()>=lead+total+2ULL*rate,
+          "hardware helper envelope omitted its two-second lead or tail");
+    const auto payload_epoch=static_cast<long double>(physical/rate)+static_cast<long double>(physical%rate)/rate;
+    check(std::abs(*result.accepted_utc+static_cast<long double>(lead)/rate-payload_epoch)<1e-6L,
+          "hardware helper lead shifted the already planned keyed payload epoch");
+    if(fresh)check(*result.accepted_utc>epoch+2,"fresh scheduling did not reserve the helper before payload preparation");
+    check(std::all_of(result.logical_pcm.begin(),result.logical_pcm.begin()+lead,[](float sample){return sample==0;}),
+          "hardware helper lead read or emitted ordinary source PCM");
+    std::uint64_t consumed=0;std::optional<std::uint64_t> endpoint;
+    std::array<float,512> expected{};
+    bool observed_lead=false,observed_post=false;
+    for(const auto& read:result.reads) {
+        const auto wanted=std::min(total,read.supplied>lead?read.supplied-lead:0);
+        check(read.source_samples==wanted,"hardware envelope lead or tail inflated ordinary payload progress");
+        if(!read.source_samples) {
+            observed_lead=true;
+            check(!read.generated_bits && read.key_lock_seconds==0,"helper-only lead exposed private source bits or key epochs");
+        }
+        if(read.supplied>lead+total)observed_post=true;
+        while(consumed<wanted) {
+            const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(expected.size(),wanted-consumed));
+            check(reference->read(std::span(expected).first(count))==count,"independent ordinary source ended early");
+            check(std::equal(expected.begin(),expected.begin()+count,result.logical_pcm.begin()+lead+consumed),
+                  "hardware helper envelope changed ordinary source waveform or keyed epoch");
+            consumed+=count;
+        }
+        check(read.payload_end && *read.payload_end==lead+reference->predicted_physical_valid_payload_end(
+              read.supplied>lead?read.supplied-lead:0),"hardware helper lead was not mapped in protected payload frontiers");
+        check(read.source_end && *read.source_end==result.logical_pcm.size(),"hardware helper endpoint disagreed with physical EOF");
+        if(endpoint)check(*read.source_end<=*endpoint,"hardware helper endpoint grew after source preparation");
+        endpoint=read.source_end;
+    }
+    check(observed_lead&&observed_post&&consumed==total&&reference->finished(),
+          "hardware helper envelope failed to retain its entire ordinary source and independent cover");
+    check(std::all_of(result.logical_pcm.begin()+lead+total,result.logical_pcm.end(),[](float sample){return sample==0;}),
+          "hardware helper post-roll advanced or repeated the ordinary source");
+    const auto tail=result.logical_pcm.size()-lead-total;
+    const auto absence=modem::pattern_absence_capture_samples(options.modem)+rate+
+        2*modem::pattern_pulse_padding_samples(options.modem);
+    check(tail>=absence && tail>=result.snapshot.receiver_initial_fft_input_samples+rate+128,
+          "hardware helper post-roll did not cover physical absence and the immutable receiver aperture");
+    check(result.snapshot.transmission_seconds==static_cast<double>(total)/rate &&
+          result.snapshot.transmit_trace.wire_bits==reference->transmit_trace().wire_bits &&
+          result.snapshot.transmit_trace.pattern_output==reference->transmit_trace().pattern_output,
+          "hardware helper changed final ordinary progress or exact keyed payload bits");
+    double energy=0;
+    const auto samples=std::min<std::size_t>(result.pcm.size(),result.output_rate);
+    for(std::size_t i=0;i<samples;++i)energy+=result.pcm[i]*result.pcm[i];
+    check(samples&&energy/samples>.001,"helper-only lead did not contain actual physical carrier PCM");
+}
 void fhss_output_uses_one_gate_allowance() {
     auto value=settings();value.transfer.timestamp=0;value.transfer.audio_timing_error_seconds=0;
     value.transfer.modem.pulse_shaping=true;value.transfer.modem.spreading_factor=64;
-    auto hops=std::make_shared<modem::FhssPlan>();hops->channels=200;hops->dwell_seconds=.4;
-    for(unsigned i=0;i<hops->channels;++i)hops->shifts[i]=30000000.+2000*i;
+    const auto hops=fhss_hops();
     auto expected_config=value.transfer.modem;
     expected_config.fake_hopping=transfer::transmit_hopping(*hops,value.transfer);
     // Production FHSS needs finite pulse support. At 8 kHz and a 200 Hz
@@ -184,14 +379,14 @@ void playback(std::uint32_t logical,const std::string&,const PlaybackCallback& s
     struct Close {Provider& script;~Close(){++script.closed;}}close{script};
     if(script.reject_helper_rate&&options.minimum_hardware_rate)
         throw Error("fixture helper hardware rate unavailable");
-    const auto hardware=options.minimum_hardware_rate?48000u:logical;
+    const auto hardware=48000u;
     script.output_rate=hardware;
     Resampler converter(logical,hardware);
     converter.set_output_gain(options.playback_output_gain);
     converter.set_output_transform(options.playback_output_transform);
     // Like the existing timed-provider fixture, accept the synthetic UTC
     // presentation target without waiting against the host's unrelated clock.
-    // Only the new FHSS request uses this buffered-provider behavior.
+    // This accepts presentation targets without using a physical device.
     detail::UtcPlaybackScope schedule(script.accept_buffered_utc);
     if(script.accept_buffered_utc) {
         check(bool(options.timing_status),"FHSS mock omitted its timing status callback");
@@ -205,6 +400,16 @@ void playback(std::uint32_t logical,const std::string&,const PlaybackCallback& s
         if(offset==count&&!ending) {
             count=source(input);++script.source_calls;offset=0;ending=count==0;
             check(count<=input.size(),"fixture source exceeded its supplied output extent");
+            script.logical_pcm.insert(script.logical_pcm.end(),input.begin(),input.begin()+count);
+            const auto state=script.snapshot();
+            ReadObservation observed;
+            observed.supplied=script.logical_pcm.size();
+            observed.source_samples=static_cast<std::uint64_t>(std::llround(state.transmission_seconds*logical));
+            observed.generated_bits=state.transmit_trace.generated_bits;
+            observed.key_lock_seconds=state.transmit_key_lock_seconds;
+            if(options.timing_source_end)observed.source_end=options.timing_source_end();
+            if(options.timing_protected_payload_end)observed.payload_end=options.timing_protected_payload_end(observed.supplied);
+            script.reads.push_back(observed);
         }
         const auto progress=converter.process(std::span<const float>(input).subspan(offset,count-offset),output,ending);
         offset+=progress.consumed;
@@ -228,12 +433,26 @@ std::vector<float> record(double,std::uint32_t,const std::string&,std::size_t,st
     throw Error("unexpected record in helper fallback fixture");
 }
 }
-int main() {
+int main(int argc,char** argv) {
     try {
-        rate_failure_retries_ordinary();low_geometry_yields_to_payload();emitted_gap_is_never_retried();
+        if(argc!=1) {
+            if(argc!=2)throw Error("expected only --placement-low or --placement-gated");
+            const auto selector=std::string_view(argv[1]);
+            if(selector=="--placement-low") {
+                unavailable_geometry_retains_ordinary();
+                std::cout<<"Low placement fallback subset passed\n";
+            } else if(selector=="--placement-gated") {
+                gated_geometry_retains_ordinary();
+                std::cout<<"Gated placement fallback subset passed\n";
+            } else throw Error("expected only --placement-low or --placement-gated");
+            return 0;
+        }
+        malformed_helper_settings_are_rejected();rate_failure_retries_ordinary();unavailable_geometry_retains_ordinary();gated_geometry_retains_ordinary();emitted_gap_is_never_retried();
         helper_only_cannot_succeed_without_helper();
+        explicit_past_declines_at_calibrated_amplitude();
+        hardware_helper_envelope(false);hardware_helper_envelope(true);
         fhss_output_uses_one_gate_allowance();
-        std::cout<<"Helper output fallback, exact ordinary PCM, discontinuity, helper-only failure and FHSS placement passed\n";
+        std::cout<<"Helper calibrated decline, exact keyed PCM, hardware envelope, protected frontiers, discontinuity and FHSS placement passed\n";
         return 0;
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

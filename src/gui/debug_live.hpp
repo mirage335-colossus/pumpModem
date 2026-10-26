@@ -103,6 +103,12 @@ public:
                 <<(s.helper_snr_db?std::to_string(*s.helper_snr_db):"null")
                 <<",\"helper_frequency_offset_hz\":"
                 <<(s.helper_frequency_offset_hz?std::to_string(*s.helper_frequency_offset_hz):"null")
+                <<",\"helper_frequency_assistance_active\":"<<s.helper_frequency_assistance_active
+                <<",\"helper_phase_assistance_active\":"<<s.helper_phase_assistance_active
+                <<",\"helper_original_search_pairs\":"<<s.helper_original_search_pairs
+                <<",\"helper_selected_search_pairs\":"<<s.helper_selected_search_pairs
+                <<",\"helper_conditional_jobs\":"<<s.helper_conditional_jobs
+                <<",\"helper_audit_jobs\":"<<s.helper_audit_jobs
                 <<",\"timing\":\""<<json_escape(s.clock_timing_status)<<"\",\"error\":\""<<json_escape(s.error)<<"\"}\n"<<std::flush;
         }
         if(s.simulation)return finish(elapsed,"refused simulation",false);

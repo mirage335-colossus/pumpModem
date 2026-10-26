@@ -530,23 +530,23 @@ void burst_calendar_continuation() {
     using datapump::modem::SymbolBurstCoordinate;
     const auto earlier=[] {
         auto c=candidate(1,1000,2000,100);c.symbol_samples=1000;c.absence_samples=9000;
-        c.burst_first=SymbolBurstCoordinate{100,3};c.burst_next=SymbolBurstCoordinate{190,3};return c;
+        c.source_identity=History::BurstIdentity{{100,3},{190,3},true,true};return c;
     };
     const auto later=[] {
         auto c=candidate(2,10407,11407,80);c.symbol_samples=1000;c.absence_samples=9000;
-        c.burst_first=SymbolBurstCoordinate{190,3};c.burst_next=SymbolBurstCoordinate{280,3};return c;
+        c.source_identity=History::BurstIdentity{{190,3},{280,3},true,true};return c;
     };
     for(unsigned variant=0;variant<10;++variant) {
         History history;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
         auto first=earlier(),next=later();
         switch(variant) {
-        case 1:next.burst_first->epoch+=30;break;
-        case 2:++next.burst_first->phase;break;
+        case 1:next.burst_identity()->first.epoch+=30;break;
+        case 2:++next.burst_identity()->first.phase;break;
         case 3:next.symbol_samples*=2;break;
         case 4:++next.family;break;
         case 5:next.frequency+=100;break;
         case 6:first.complete=true;break;
-        case 7:next.burst_first.reset();next.burst_next.reset();break;
+        case 7:next.source_identity=std::monostate{};break;
         case 9:next.score=120;break;
         default:break;
         }
@@ -559,13 +559,126 @@ void burst_calendar_continuation() {
     History history;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
     const auto original=history.observe(earlier(),allocate);
     auto advanced=earlier();advanced.end=11000;advanced.score=300;
-    advanced.burst_next=SymbolBurstCoordinate{280,3};history.observe(advanced,allocate);
+    advanced.burst_identity()->next=SymbolBurstCoordinate{280,3};history.observe(advanced,allocate);
     history.observe(earlier(),allocate); // A provisional replay must not rewind nextC.
     auto continuation=later();continuation.id=3;continuation.first=19407;continuation.end=20407;
-    continuation.score=200;continuation.burst_first=SymbolBurstCoordinate{280,3};
-    continuation.burst_next=SymbolBurstCoordinate{370,3};
+    continuation.score=200;continuation.burst_identity()->first=SymbolBurstCoordinate{280,3};
+    continuation.burst_identity()->next=SymbolBurstCoordinate{370,3};
     check(history.observe(continuation,allocate).signal_id==original.signal_id && ids==1,
           "A stale Burst observation rewound its owner's next calendar address");
+    auto partial=earlier();partial.source_identity=History::BurstIdentity{{100,3},{190,3},false,true};
+    check(!partial.burst_first() && partial.burst_next() && partial.burst_next()->epoch==190,
+          "typed Burst identity lost independent first/next validity");
+    partial.burst_identity()->first_valid=true;partial.burst_identity()->next_valid=false;
+    check(partial.burst_first() && !partial.burst_next(),"typed Burst identity invented an absent next calendar address");
+}
+void helper_source_domains_remain_independent() {
+    using datapump::modem::PatternSourceIdentity;
+    if constexpr(sizeof(void*)==8 && sizeof(std::optional<datapump::modem::SymbolBurstCoordinate>)==24) {
+        check(sizeof(History::Candidate)==160 && sizeof(History)==45072,
+              "source identity changed the ordinary candidate/history workspace layout");
+    }
+    const auto first=[] {
+        auto c=candidate(1,1000,40000,80);c.symbol_samples=1000;c.timing_tolerance=10;
+        c.helper_assisted=true;c.source_identity=PatternSourceIdentity{.epoch=100,.first_symbol=0,.sample_rate=1000};return c;
+    };
+    const auto later=[] {
+        auto c=candidate(2,11000,12000,100);c.symbol_samples=1000;c.timing_tolerance=10;
+        c.source_identity=PatternSourceIdentity{.epoch=100,.first_symbol=0,.sample_rate=1000};return c;
+    };
+    History history;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
+    auto old=first(),next=later();
+    const auto a=history.observe(old,allocate),b=history.observe(next,allocate);
+    check(a.selected && b.selected && a.signal_id!=b.signal_id && history.size()==2 && ids==2 &&
+          b.superseded_ids.empty(),"helper-born independent keyed address withdrew or merged an established row");
+    old.end=45000;old.score=120;old.helper_assisted=false; // A refresh cannot erase past helper involvement.
+    check(history.observe(old,allocate).signal_id==a.signal_id,"helper source progress changed its original pending identity");
+    next.complete=true;next.end=13000;next.score=200;
+    const auto ended=history.observe(next,allocate);
+    check(ended.selected && ended.signal_id==b.signal_id && ended.superseded_ids.empty() && history.size()==2,
+          "independent helper source completion withdrew another row's prefix");
+    for(unsigned variant=0;variant<8;++variant) {
+        History ambiguous;ids=0;old=first();next=later();
+        switch(variant) {
+        case 0:old.helper_assisted=false;break;
+        case 1:old.source_identity=std::monostate{};break;
+        case 2:std::get<PatternSourceIdentity>(old.source_identity).clock_half_width_ppm=
+                   std::numeric_limits<double>::quiet_NaN();break;
+        case 3:std::get<PatternSourceIdentity>(next.source_identity).sample_rate=500;break;
+        case 4:next.symbol_samples=2000;break;
+        case 5:std::get<PatternSourceIdentity>(next.source_identity).first_symbol=10;break;
+        case 6:std::get<PatternSourceIdentity>(old.source_identity).epoch=std::numeric_limits<std::uint64_t>::max();break;
+        case 7:std::get<PatternSourceIdentity>(old.source_identity).clock_half_width_ppm=1e6;break;
+        }
+        const auto original=ambiguous.observe(old,allocate),observed=ambiguous.observe(next,allocate);
+        check(observed.signal_id==original.signal_id && ids==1,
+              "unknown, unassisted or compatible source identity changed ordinary overlap arbitration");
+    }
+    History rebased;ids=0;old=first();const auto original=rebased.observe(old,allocate);
+    old.first=11000;old.end=45000;rebased.observe(old,allocate);
+    next=later();next.first=21000;next.end=22000;
+    check(rebased.observe(next,allocate).signal_id==original.signal_id && ids==1,
+          "rebasing a physical start retained an identity anchored at a different sample");
+    History replaced;ids=0;old=first();const auto helper_row=replaced.observe(old,allocate);
+    auto alias=old;alias.id=3;alias.helper_assisted=false;alias.score=100;
+    check(replaced.observe(alias,allocate).signal_id==helper_row.signal_id && ids==1,
+          "a stronger same-source alias abandoned its original GUI row");
+    next=later();next.score=200;
+    const auto independent=replaced.observe(next,allocate);
+    check(independent.selected && independent.signal_id!=helper_row.signal_id && ids==2 &&
+          independent.superseded_ids.empty(),"alias owner replacement erased durable helper provenance");
+}
+void established_helper_rows_survive_widening_clock_cones() {
+    using datapump::modem::PatternSourceIdentity;
+    const PatternSourceIdentity source{.epoch=100,.first_symbol=0,.clock_half_width_ppm=1000,.sample_rate=1000};
+    auto a=candidate(1,1000,20000,80),b=candidate(2,11000,12000,100);
+    a.symbol_samples=b.symbol_samples=1000;a.timing_tolerance=b.timing_tolerance=10;
+    a.helper_assisted=true;a.source_identity=b.source_identity=source;
+    check(datapump::modem::pattern_source_identities_disjoint(source,a.first,a.end,1000,source,b.first,b.end,1000),
+          "long helper row fixture did not begin with independently proved source domains");
+    History history;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
+    const auto first=history.observe(a,allocate),second=history.observe(b,allocate);
+    check(first.signal_id!=second.signal_id && ids==2,"independent helper sources failed to publish separate rows");
+    a.end=1000000000;a.score=120;
+    check(history.observe(a,allocate).signal_id==first.signal_id,"long helper progress lost its original row");
+    b.end=a.end;b.score=200;
+    check(!datapump::modem::pattern_source_identities_disjoint(source,a.first,a.end,1000,source,b.first,b.end,1000),
+          "long helper row fixture did not reach an inconclusive clock-cone overlap");
+    const auto progressed=history.observe(b,allocate);
+    check(progressed.selected && progressed.signal_id==second.signal_id && progressed.superseded_ids.empty() &&
+          history.size()==2 && ids==2,"widening helper clock cones merged established rows or withdrew an old prefix");
+    a.complete=true;a.score=300;const auto ended_a=history.observe(a,allocate);
+    b.complete=true;b.score=400;const auto ended_b=history.observe(b,allocate);
+    check(ended_a.signal_id==first.signal_id && ended_b.signal_id==second.signal_id &&
+          ended_a.superseded_ids.empty() && ended_b.superseded_ids.empty() && history.size()==2,
+          "independent established helper rows lost their identities at completion");
+
+    // Affirmatively identical source anchors retain ordinary alias merging,
+    // even when separate initial RF measurements first produced two rows.
+    History aliases;ids=0;a=candidate(3,1000,20000,80);b=candidate(4,1000,12000,100);
+    a.symbol_samples=b.symbol_samples=1000;a.source_identity=b.source_identity=source;a.helper_assisted=true;
+    a.frequency=1480;b.frequency=1520;
+    const auto original=aliases.observe(a,allocate),other=aliases.observe(b,allocate);
+    check(original.signal_id!=other.signal_id,"same-source control did not begin with distinct RF observations");
+    b.frequency=a.frequency;b.score=200;
+    const auto merged=aliases.observe(b,allocate);
+    check(merged.selected && merged.signal_id==original.signal_id && aliases.size()==1,
+          "affirmatively identical helper source anchors stopped merging ordinary aliases");
+    for(unsigned invalid=0;invalid<3;++invalid) {
+        History unknown;ids=0;a=candidate(5,1000,20000,80);b=candidate(6,1000,12000,100);
+        auto identity=source;
+        if(invalid==0){identity.epoch=std::numeric_limits<std::uint64_t>::max();identity.first_symbol=1;}
+        if(invalid==1)identity.first_symbol=std::numeric_limits<std::uint64_t>::max();
+        if(invalid==2)a.end=b.end=std::numeric_limits<std::uint64_t>::max();
+        a.symbol_samples=b.symbol_samples=1000;a.source_identity=b.source_identity=identity;a.helper_assisted=true;
+        a.frequency=1480;b.frequency=1520;
+        const auto old=unknown.observe(a,allocate),separate=unknown.observe(b,allocate);
+        b.frequency=a.frequency;b.score=200;
+        const auto still_separate=unknown.observe(b,allocate);
+        check(old.signal_id!=separate.signal_id && still_separate.signal_id==separate.signal_id &&
+              still_separate.superseded_ids.empty() && unknown.size()==2,
+              "identical but overflowing source addresses merged previously established rows");
+    }
 }
 }
 int main() {
@@ -589,6 +702,8 @@ int main() {
         bounded_history_preserves_active_rows();
         retired_history_preserves_active_aliases();
         burst_calendar_continuation();
+        helper_source_domains_remain_independent();
+        established_helper_rows_survive_widening_clock_cones();
         std::cout << "live reception arbitration tests passed\n";
         return 0;
     } catch (const std::exception& error) {
