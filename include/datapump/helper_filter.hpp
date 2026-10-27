@@ -22,7 +22,7 @@ class PayloadFilter {
     std::size_t next_=0,seen_=0;
     std::uint64_t output_=0;
     std::uint32_t rate_=0;
-    double center_=0;
+    double center_=0,half_width_=225;
     // Every bound operation rounds away from the exact nonnegative result.
     // This certificate is deliberately unavailable under altered FP modes.
     static double upper(double value) noexcept {
@@ -74,16 +74,16 @@ class PayloadFilter {
         return {enclose(cosine),enclose(sine)};
     }
     bool valid_center(double center)const noexcept {
-        return rate_ && std::isfinite(center) && center>225 && center+225<rate_/2.;
+        return rate_ && std::isfinite(center) && std::isfinite(half_width_) && half_width_>0 &&
+            center>half_width_ && center+half_width_<rate_/2.;
     }
     double coefficient(std::size_t i,double center)const noexcept {
-        constexpr double half_width=225;
         const auto middle=taps_.size()/2;
         const auto k=static_cast<double>(i)-middle;
         const auto window=.42-.5*std::cos(2*std::numbers::pi*i/(taps_.size()-1))+
             .08*std::cos(4*std::numbers::pi*i/(taps_.size()-1));
-        const auto low=k==0?2*half_width/rate_:
-            std::sin(2*std::numbers::pi*half_width*k/rate_)/(std::numbers::pi*k);
+        const auto low=k==0?2*half_width_/rate_:
+            std::sin(2*std::numbers::pi*half_width_*k/rate_)/(std::numbers::pi*k);
         return (i==middle?1.:0.)-2*low*std::cos(2*std::numbers::pi*center*k/rate_)*window;
     }
     double response_error(double frequency)const noexcept {
@@ -144,7 +144,9 @@ class PayloadFilter {
     }
 public:
     PayloadFilter()=default;
-    PayloadFilter(std::uint32_t rate,double center):rate_(rate) {
+    // Width changes the one stored kernel, never its tap count or delay.
+    // Legacy single-tone users retain their original +/-225-Hz notch.
+    PayloadFilter(std::uint32_t rate,double center,double half_width=225):rate_(rate),half_width_(half_width) {
         if(!valid_center(center))
             throw Error("adjacent helper filter is outside the receiver passband");
         const auto count=static_cast<std::size_t>(std::ceil(rate*.04))|1U;
@@ -183,6 +185,7 @@ public:
         return true;
     }
     double center_hz()const noexcept{return center_;}
+    double half_width_hz()const noexcept{return half_width_;}
     std::span<const double> coefficients()const noexcept{return taps_;}
     bool enabled()const noexcept{return !taps_.empty();}
     std::size_t delay()const noexcept{return taps_.size()/2;}

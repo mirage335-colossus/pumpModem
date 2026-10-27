@@ -1,7 +1,9 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #include <memory>
+#include <optional>
 #include <span>
 
 namespace datapump::helper {
@@ -12,12 +14,26 @@ struct ToneTrackerConfig {
     // Operational following gate, not a drift rate inferred from ppm accuracy.
     // Unknown temperature evolution is not a prediction or a future lease.
     double maximum_tracking_slew_hz_per_second=.5;
+    // Pure pilot: independent short phase apertures, frequency-only pooling.
+    // Auxiliary decoding and phase continuity across retunes are not required.
+    bool segmented_pilot=false;
+};
+struct ToneFrequencyQuery {
+    bool valid=false;
+    double frequency_hz=0,uncertainty_hz=0;
 };
 struct ToneTrackerSnapshot {
     std::uint64_t sample=0,captured_end_sample=0,first_sample=0;
     std::uint32_t sample_rate=0;
     double frequency_hz=0,uncertainty_hz=0,carrier_to_noise_db_hz=0;
     double frequency_rate_hz_per_second=0;
+    // Covariance of the locally linear frequency model evaluated at sample.
+    // Units are Hz^2, Hz^2/s and Hz^2/s^2, respectively. Includes measured
+    // residual inflation; it carries no phase authority or future lease.
+    double frequency_variance_hz2=0,frequency_rate_covariance_hz2_per_second=0;
+    double frequency_rate_variance_hz2_per_second2=0;
+    double frequency_model_expected_hz=0,frequency_model_residual_scale=1;
+    bool frequency_covariance_valid=false;
     bool present=false,qualified=false;
     // Joint phase/frequency fits to disjoint200ms contexts refine the FLL
     // using at most36s of bounded numeric anchors. Full support is
@@ -26,6 +42,39 @@ struct ToneTrackerSnapshot {
     // Abrupt frequency or drift changes can temporarily exceed its engineering
     // uncertainty before withdrawal; it grants no future thermal/Doppler bound.
     bool frequency_precision_refined=false;
+    // Explicit actual-retune mode only: one independently acquired straight
+    // aperture, with no pooled RF/audio model. Its constant engineering
+    // interval includes the configured operational slew allowance throughout
+    // that observed aperture; it grants neither drift measurement nor clock
+    // authority. frequency_at() remains confined to first_sample..sample.
+    bool frequency_local_aperture=false;
+    // Pilot-mode provenance: support may span many independent phase apertures.
+    double coherent_aperture_seconds=0,frequency_support_seconds=0,observation_age_seconds=0;
+    // Latest disjoint frequency context. A fallback's selected gap is a model,
+    // not a known retune date; these fields never grant phase authority.
+    bool frequency_used_fallback=false;
+    unsigned frequency_gap_index=0;
+    double frequency_aperture_cube_seconds3=0;
+    std::uint64_t frequency_context_first_sample=0,frequency_context_end_sample=0;
+    // Absolute cosine carrier phase modulo one cycle at phase_sample (raw ADC
+    // coordinate), conditional on the current20ms projection. Never pooled.
+    double phase_cycles=0,phase_uncertainty_cycles=0,phase_sample_fraction=0;
+    std::uint64_t phase_sample=0;
+    // Projection values above are diagnostics; they never qualify pilot phase correction.
+    bool phase_qualified=false,projection_phase_valid=false;
+    // Accepted independent context only. Support is[first,end); the fractional
+    // reference date is observed, and frequency is this local fit rather than
+    // the separately pooled oscillator estimate. Never grants phase outside
+    // this actual support or continuity through an unknown hop.
+    double phase_fit_cycles=0,phase_fit_uncertainty_cycles=0;
+    double phase_fit_frequency_hz=0,phase_fit_frequency_uncertainty_hz=0;
+    // Whole observed support, including joint phase/slope covariance and the
+    // local process/residual allowances. Absent on legacy snapshots; never
+    // supplies authority independently of phase_fit_qualified and its dates.
+    std::optional<double> phase_fit_support_uncertainty_cycles;
+    double phase_fit_sample_fraction=0;
+    std::uint64_t phase_fit_sample=0,phase_fit_first_sample=0,phase_fit_end_sample=0;
+    bool phase_fit_qualified=false;
     // Independent source-clock evidence from actual periodic reversals.
     // Positive ppm means the generator's400ms intervals arrive in fewer ADC
     // samples. A quasistationary local aperture-mean engineering estimate with
@@ -35,6 +84,25 @@ struct ToneTrackerSnapshot {
     double clock_error_ppm=0,clock_uncertainty_ppm=0;
     std::uint64_t clock_sample=0,clock_first_sample=0,clock_last_sample=0;
     bool clock_qualified=false;
+    // Interpolate only inside the retained model's observed support bounds.
+    // Output Hz belongs to the CURRENT explicitly mapped reference geometry:
+    // common residual=(Hz-frequency_model_expected_hz)/frequency_model_residual_scale.
+    // Historical RF geometry requires the caller's own dated remapping. Gaps
+    // inside these bounds remain conditional on the fitted linear model; this
+    // is frequency interpolation, never a claim of observed past phase.
+    ToneFrequencyQuery frequency_at(std::uint64_t query_sample,double fraction=0)const noexcept {
+        ToneFrequencyQuery out;
+        if(!qualified || !frequency_covariance_valid || !sample_rate ||
+           !std::isfinite(fraction) || fraction<0 || fraction>=1 ||
+           query_sample<first_sample || query_sample>sample ||
+           (query_sample==sample && fraction>0))return out;
+        const auto dt=static_cast<double>((static_cast<long double>(query_sample)-sample+fraction)/sample_rate);
+        const auto variance=std::fma(dt,std::fma(dt,frequency_rate_variance_hz2_per_second2,
+            2*frequency_rate_covariance_hz2_per_second),frequency_variance_hz2);
+        out.frequency_hz=std::fma(frequency_rate_hz_per_second,dt,frequency_hz);
+        if(!(variance>=0) || !std::isfinite(variance) || !std::isfinite(out.frequency_hz))return out;
+        out.uncertainty_hz=3*std::sqrt(variance);out.valid=true;return out;
+    }
 };
 // workspace_required/bytes include this object and its fixed owned implementation.
 // Synchronous strongest-tone acquisition followed by short phase-difference
@@ -57,6 +125,14 @@ public:
     std::size_t workspace_bytes()const noexcept;
     void reset(std::uint64_t first_sample=0)noexcept;
     void push(std::span<const float>,std::uint64_t first_sample);
+    // Call at an actual retune boundary, before its first new sample. The phase
+    // is always invalidated. Frequency records survive only with an explicitly
+    // justified model: (observed_hz-expected_hz)/residual_scale is the common
+    // quantity. A single tone cannot establish RF versus audio-clock scaling.
+    void begin_pilot_segment(std::uint64_t first_sample,double expected_hz,
+                             double search_half_width_hz,bool preserve_frequency=false,
+                             double residual_scale=1,std::uint64_t settled_first_sample=0,
+                             bool qualify_local_aperture=false);
     ToneTrackerSnapshot snapshot()const noexcept;
 private:
     struct Impl;

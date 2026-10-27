@@ -4,6 +4,7 @@
 #include "datapump/capture_transport.hpp"
 #include <memory>
 #include <functional>
+#include <array>
 
 namespace datapump::modem {
 // Receiver-clock PCM from independent, free-running endpoints. The source is
@@ -83,11 +84,34 @@ public:
     // if output has already begun. No extra begin_burst call is required.
     void set_helper_time_key(std::optional<Crypto> key);
     using PhysicalObserver=std::function<void(std::span<const float>,std::uint32_t,std::uint64_t)>;
+    // Actual receiver tuning metadata, in the same continuous ADC coordinate
+    // as PhysicalObserver. No oscillator-error or carrier-phase truth is
+    // present. Each retune starts an independent phase segment; settling PCM
+    // remains payload input but is not usable reference evidence.
+    struct PhysicalRfSegment {
+        std::uint64_t first_sample=0,settled_first_sample=0,end_sample=0,phase_segment=0;
+        double rf_shift_hz=0;
+        int sideband_sign=1;
+    };
+    using PhysicalRfObserver=std::function<void(const PhysicalRfSegment&,std::uint32_t)>;
+    // Explicit sampled-channel laboratory impairment. The RF frequencies are
+    // actual retunes, rather than a keyed calendar over fixed physical RF.
+    // The configured channel CFO is defined at rf_shift_hz[0] and scales with
+    // RF; a seeded independent unknown phase is introduced at every retune.
+    // This is not a hardware tuning adapter. Configure before the first read.
+    struct RfRetuneSimulation {
+        std::array<double,4> rf_shift_hz{};
+        double dwell_seconds=.4,settling_seconds=.012;
+        std::uint64_t phase_seed=1;
+        int sideband_sign=1;
+    };
     // Called before decimation, with a contiguous physical-clock PCM block and
     // its first physical sample. Bounded centered-FIR lookahead may lead the
     // committed logical frontier by at most128 logical samples. Assistance
     // consumers must hold such updates until that frontier reaches them.
     void set_physical_observer(PhysicalObserver observer);
+    void set_physical_rf_observer(PhysicalRfObserver observer);
+    void set_rf_retune_simulation(const RfRetuneSimulation&);
     std::uint32_t physical_sample_rate() const;
     // Actual raw-to-logical construction witness. Legacy interpolation has no
     // such raw observation map; its result stays unknown even at equal rates.

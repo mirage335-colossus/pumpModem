@@ -119,6 +119,10 @@ void helper_reference_plan(Model& model,const modem::Config& config) {
         result.received_dbm=30+10*std::log10(result.effective_power_w)-model.inputs.path_loss_db;
         result.cn0_db_hz=result.received_dbm-model.inputs.noise_density_dbm_hz;
         result.tone_snr_db=result.cn0_db_hz-10; // Legacy presentation cell, not a lock gate.
+        result.pilot_power_w=result.effective_power_w*helper::pilot_power_fraction;
+        result.pilot_cn0_db_hz=result.cn0_db_hz+10*std::log10(helper::pilot_power_fraction);
+        result.pilot_tone_snr_db=result.pilot_cn0_db_hz-10;
+        result.auxiliary_cn0_db_hz=result.cn0_db_hz+10*std::log10(helper::auxiliary_power_fraction);
         if(!std::isfinite(result.received_dbm)||!std::isfinite(result.cn0_db_hz)||!std::isfinite(result.tone_snr_db))
             throw Error("helper link budget exceeds the numerical range");
         result.budget_available=true;
@@ -130,14 +134,17 @@ void helper_reference_plan(Model& model,const modem::Config& config) {
             result.simulation_data_cn0_db_hz=model.actual_cn0_db_hz+result.simulation_level_db;
             result.simulation_cn0_db_hz=result.cn0_db_hz+result.simulation_level_db;
             result.simulation_tone_snr_db=result.tone_snr_db+result.simulation_level_db;
+            result.simulation_pilot_cn0_db_hz=result.pilot_cn0_db_hz+result.simulation_level_db;
+            result.simulation_pilot_tone_snr_db=result.pilot_tone_snr_db+result.simulation_level_db;
         }
         result.tone_level_sufficient=(result.simulation_level_modeled?
-            result.simulation_tone_snr_db:result.tone_snr_db)>=6;
+            result.simulation_pilot_tone_snr_db:result.pilot_tone_snr_db)>=6;
         // This is the same placement as Live, without claiming that an unknown
         // hardware output rate or radio filter can pass the resulting tone.
         const auto placement=helper::placement_band(config,live::detail::helper_occupied_bandwidth(settings));
         const auto plan=helper::plan(settings.helper,placement,120000000,0,waveform_gain);
-        result.frequency_hz=plan.frequency_hz;result.geometry_available=true;
+        result.frequency_hz=plan.frequency_hz;result.auxiliary_frequency_hz=plan.auxiliary_frequency_hz;
+        result.geometry_available=true;
         result.status="Manual real-time helper reference: Robust acquisition waits for helper lock. Disable Helper Carrier for ordinary oscillator search. Conditional receiver cost preserves the full residual LF domain; helper tracking/conversion cost and lock probability are not calibrated.";
     } catch(const Error& error) {
         result.status="Helper unavailable: "+std::string(error.what());
@@ -644,14 +651,15 @@ struct CurveEntry {
 // Reuse that bounded numeric forecast under Cache's existing mutex; never
 // cache runtime qualification or a receiver-cost result here.
 struct HelperPrecisionCache {
-    using Key=std::tuple<std::uint32_t,double,double,std::size_t,bool,double,double,double,double,double>;
+    using Key=std::tuple<std::uint32_t,double,double,std::size_t,bool,double,double,double,double,double,bool,double,double>;
     struct Entry {Key key;helper::TonePrecisionPrediction prediction;};
     std::array<std::optional<Entry>,16> entries;
     std::size_t next=0;
     helper::TonePrecisionPrediction predict(const helper::TonePrecisionRequest& r) {
         const Key key{r.sample_rate,r.straight_cn0_db_hz,r.phase_noise_radians_per_sqrt_second,
             r.metadata_symbols,r.punctuate,r.baseline_lead_seconds,r.target_half_width_hz,
-            r.max_extra_seconds,r.maximum_tracking_slew_hz_per_second,r.maximum_source_capture_ratio};
+            r.max_extra_seconds,r.maximum_tracking_slew_hz_per_second,r.maximum_source_capture_ratio,
+            r.pilot_segmented,r.pilot_coherent_aperture_seconds,r.pilot_estimator_efficiency};
         for(const auto& entry:entries)if(entry && entry->key==key)return entry->prediction;
         auto prediction=helper::predict_tone_precision(r);
         entries[next]=Entry{key,prediction};next=(next+1)%entries.size();
@@ -736,25 +744,29 @@ RealtimeHelperCpuPoint realtime_helper_point(const Inputs& inputs,const modem::C
             physical=*inputs.helper_forecast_capture_sample_rate;
         else throw Error("Raw capture format/fixed nominal conversion is unknown; no helper cost forecast");
         out.physical_sample_rate=physical;
-        out.minimum_seed_seconds=8192./physical; // Two actual fresh 4096-point seed windows.
+        out.minimum_seed_seconds=static_cast<double>(helper::forecast_detail::pilot_discovery_samples(physical))/physical;
         if(plan.frequency_hz<200 || plan.frequency_hz>physical/2.-200)
             throw Error("Nominal helper is outside the real-time tracker's DC/Nyquist noise-projection margin");
         const auto power=std::min(settings.helper.power_w,settings.helper.data_power_w*std::pow(10.,settings.helper.ratio_limit_db/10));
         auto cno=30+10*std::log10(power)-inputs.path_loss_db-inputs.noise_density_dbm_hz;
         if(inputs.receiver_work_mode==simulation::ReceiverWorkMode::sampled_simulation)cno+=20*std::log10(gain);
+        cno+=10*std::log10(helper::pilot_power_fraction);
         // Use the shared production request: actual metadata/punctuation and
         // oscillator process, not the retired uninterrupted 384-date ideal.
         const auto receive_bound=live::detail::helper_receive_envelope_bound(settings);
         auto requirements=live::detail::helper_envelope_baseline_requirements(settings,config,receive_bound);
         requirements.frequency_precision_extension_seconds=0;
         const auto baseline=helper::plan_envelope(config,requirements);
-        const auto request=live::detail::helper_tone_precision_request(settings,config,physical,cno,
+        auto request=live::detail::helper_tone_precision_request(settings,config,physical,cno,
             static_cast<double>(baseline.lead_seconds),requirements.maximum_source_capture_ratio);
+        request.pilot_segmented=true;
         auto& reference=out.precision_reference;
         reference.cn0_db_hz=request.straight_cn0_db_hz;
         reference.phase_noise_radians_per_sqrt_second=request.phase_noise_radians_per_sqrt_second;
         reference.maximum_tracking_slew_hz_per_second=request.maximum_tracking_slew_hz_per_second;
         reference.maximum_source_capture_ratio=request.maximum_source_capture_ratio;
+        reference.coherent_aperture_seconds=request.pilot_coherent_aperture_seconds/request.maximum_source_capture_ratio;
+        reference.estimator_efficiency=request.pilot_estimator_efficiency;
         reference.ideal_one_second_half_width_hz=helper_ideal_tone_half_width(reference.cn0_db_hz,1);
         out.precision=precision_cache.predict(request);
         // Match transmit airtime even when the bounded lead is selected without
@@ -769,6 +781,8 @@ RealtimeHelperCpuPoint realtime_helper_point(const Inputs& inputs,const modem::C
         reference.ideal_lead_observation_seconds=out.planned_lead_seconds/request.maximum_source_capture_ratio;
         reference.ideal_lead_half_width_hz=helper_ideal_tone_half_width(reference.cn0_db_hz,
             reference.ideal_lead_observation_seconds);
+        if(out.precision.supported)
+            reference.segmented_lead_half_width_hz=out.precision.segmented_noise_reference_half_width_hz;
         if(!out.precision.supported)throw Error("Automatic helper precision lead prediction declined: "+out.precision.reason);
         out.observation_seconds=out.precision.usable_tone_seconds;
         const auto price_reference=[&](double uncertainty,const std::string& precision_reason) {
@@ -859,7 +873,7 @@ RealtimeHelperCpuPoint realtime_helper_point(const Inputs& inputs,const modem::C
                 if(out.precision.sustained_frequency_half_width_hz==out.uncertainty_hz)
                     out.sustained=static_cast<const RealtimeHelperReceiverWork&>(out);
                 else out.sustained=price_reference(out.precision.sustained_frequency_half_width_hz,
-                    "separate sustained conditional clean-model precision; reference must remain available");
+                    "separate sustained conditional planning-model precision; reference must remain available");
             } catch(const std::bad_alloc&) {
                 // A second optional price yields without erasing a valid
                 // initial forecast or increasing any receiver allowance.
@@ -1000,6 +1014,20 @@ std::optional<double> helper_ideal_tone_half_width(double cn0_db_hz,double obser
     if(!std::isfinite(width) || width<=0 || width>std::numeric_limits<double>::max())return {};
     const auto result=static_cast<double>(width);
     return result>0?std::optional<double>{result}:std::nullopt;
+}
+std::optional<double> helper_segmented_tone_half_width(double cn0_db_hz,
+        std::span<const double> apertures) noexcept {
+    if(!std::isfinite(cn0_db_hz) || apertures.empty())return {};
+    long double information_time=0;
+    for(const auto aperture:apertures) {
+        if(!std::isfinite(aperture) || !(aperture>0))return {};
+        const auto t=static_cast<long double>(aperture);
+        information_time+=t*t*t;
+    }
+    if(!std::isfinite(information_time) || !(information_time>0))return {};
+    const auto effective=std::cbrt(information_time);
+    if(effective>std::numeric_limits<double>::max())return {};
+    return helper_ideal_tone_half_width(cn0_db_hz,static_cast<double>(effective));
 }
 HelperReceiverCostLedger helper_receiver_cost(const simulation::Estimate& estimate) {
     HelperReceiverCostLedger out;

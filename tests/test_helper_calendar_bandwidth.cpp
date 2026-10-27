@@ -32,7 +32,7 @@ helper::Options options() {
     helper::Options h;h.power_w=15000;h.data_power_w=4;return h;
 }
 bool same_plan(const helper::Plan& a,const helper::Plan& b) {
-    return a.frequency_hz==b.frequency_hz&&a.helper_gain==b.helper_gain&&
+    return a.frequency_hz==b.frequency_hz&&a.auxiliary_frequency_hz==b.auxiliary_frequency_hz&&a.helper_gain==b.helper_gain&&
         a.data_gain==b.data_gain&&a.effective_power_w==b.effective_power_w;
 }
 void deferred_support_still_needs_gate_skirt() {
@@ -62,7 +62,8 @@ void deferred_support_still_needs_gate_skirt() {
     const auto mono=helper::mono_passband(band);
     check(mono.lower_hz==0&&mono.upper_hz==4425,"real mono gate spectrum was not folded into its full positive union");
     auto h=options();const auto high=helper::plan(h,band,48000);
-    check(high.frequency_hz>=mono.upper_hz+450&&high.frequency_hz+250<24000&&
+    check(high.auxiliary_frequency_hz>=mono.upper_hz+450&&
+          high.frequency_hz-high.auxiliary_frequency_hz==helper::auxiliary_pilot_spacing_hz&&high.frequency_hz+250<24000&&
           high.data_gain==helper::calibrated_data_gain(h),"folded High helper changed payload power or lost its leakage guard");
     check(helper::minimum_output_rate(h,band,c.sample_rate)==48000,
           "folded helper did not keep independent hardware-rate negotiation");
@@ -74,8 +75,7 @@ void deferred_support_still_needs_gate_skirt() {
     h.frequency=helper::Frequency::low;
     rejects([&] {helper::plan(h,band,48000);},"Low helper claimed isolation below a band that reaches DC");
     h.frequency=helper::Frequency::cochannel;
-    check(helper::plan(h,band,48000).frequency_hz==c.carrier_hz,
-          "folded cochannel helper moved away from the actual data carrier");
+    rejects([&] {helper::plan(h,band,48000);},"retired cochannel helper placement was accepted");
     std::cout<<"HF core=2250 gate=3600 positive=[0,4425] helper="<<high.frequency_hz
              <<" Hz scoring_flat=1 finite_shoulder_gain="<<shoulder_gain<<'\n';
 }
@@ -89,13 +89,14 @@ void long_gate_and_nonfolding_identity() {
     const auto h=options();
     check(same_plan(helper::plan(h,band,48000),helper::plan(h,1500,200.625,48000)),
           "nonfolding gate-aware placement changed the established symmetric helper plan");
-    // Leave enough room below the data for the unchanged 15kW Low leakage
-    // guard; identity does not imply every placement fits a narrow passband.
+    // Gate-aware and scalar geometry agree for the same valid High group.
     const helper::PlacementBand plain{4000,200,0};
-    for(const auto placement:{helper::Frequency::high,helper::Frequency::low,helper::Frequency::cochannel}) {
-        auto choice=h;choice.frequency=placement;
-        check(same_plan(helper::plan(choice,plain,48000),helper::plan(choice,4000,200,48000)),
-              "ordinary symmetric helper placement changed");
+    check(same_plan(helper::plan(h,plain,48000),helper::plan(h,4000,200,48000)),
+          "ordinary symmetric helper placement changed");
+    for(const auto placement:{helper::Frequency::low,helper::Frequency::cochannel}) {
+        auto retired=h;retired.frequency=placement;
+        rejects([&] {helper::plan(retired,plain,48000);},"gate-aware planner accepted retired helper placement");
+        rejects([&] {helper::plan(retired,4000,200,48000);},"scalar planner accepted retired helper placement");
     }
     check(modem::waveform_gate_bandwidth_allowance_hz(c)==200&&c.bandwidth_hz==1&&
           c.sample_rate==6000&&modem::symbol_sample_count(c)==768000,
@@ -129,6 +130,12 @@ void reference_level_accounting() {
     check(hardware.effective_power_ratio==3750&&std::abs(hardware.straight_cn0_db_hz-expected)<1e-12&&
           hardware.usable_cn0_db_hz==hardware.straight_cn0_db_hz&&
           hardware.payload_average_cn0_db_hz==nominal,"helper reference level did not match the RF link budget");
+    check(hardware.pilot_effective_power_ratio==hardware.effective_power_ratio*helper::pilot_power_fraction&&
+          std::abs(hardware.pilot_straight_cn0_db_hz-hardware.straight_cn0_db_hz-
+              10*std::log10(helper::pilot_power_fraction))<1e-12&&
+          std::abs(hardware.pilot_straight_cn0_db_hz-hardware.auxiliary_straight_cn0_db_hz-
+              10*std::log10(9.))<1e-12,
+          "pilot/auxiliary reference levels did not preserve the90/10 straight-tone power split");
     const auto sampled=helper::reference_level(h,nominal,.5,.25,.5);
     const auto backoff=20*std::log10(.5);
     check(std::abs(sampled.straight_cn0_db_hz-hardware.straight_cn0_db_hz-backoff)<1e-12&&
@@ -156,14 +163,15 @@ void reference_level_accounting() {
     auto disabled=h;disabled.power_w=0;
     rejects([&] {helper::reference_level(disabled,nominal);},"disabled helper produced a finite tone-level prediction");
 }
-void paired_punctuation_calendar() {
+void auxiliary_punctuation_calendar() {
     for(const auto epoch:{0ULL,1ULL,1800000000ULL}) {
         const auto origin=epoch%2?-.2L:0.L;
-        const auto first=origin+.236L,last=origin+.308L;
-        for(const auto stop:{first,origin+.244L,origin+.264L,origin+.268L,origin+.272L,last-.000001L})
+        const auto first=origin+.236L,last=origin+.268L;
+        for(const auto stop:{first,origin+.244L,origin+.264L,last-.000001L})
             check(std::abs(helper::protected_endpoint(epoch,origin,stop)-last)<1e-15L,
-                  "protected helper stop split its punctuation pair or restored-carrier guard");
+                  "protected helper stop split its auxiliary reversal or inverted straight-tone flank");
         check(helper::protected_endpoint(epoch,origin,last)==last&&
+              helper::protected_endpoint(epoch,origin,origin+.272L)==origin+.272L&&
               helper::protected_endpoint(epoch,origin+.212001L,first)==first,
               "punctuation protection changed an unpunctuated partial dwell");
     }
@@ -250,7 +258,7 @@ void bounded_envelope_planning() {
 }
 int main() {
     try {deferred_support_still_needs_gate_skirt();long_gate_and_nonfolding_identity();malformed_geometry_fails_closed();
-        reference_level_accounting();paired_punctuation_calendar();bounded_envelope_planning();
+        reference_level_accounting();auxiliary_punctuation_calendar();bounded_envelope_planning();
         std::cout<<"Helper calendar bandwidth checks passed\n";return 0;}
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

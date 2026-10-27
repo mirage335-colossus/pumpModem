@@ -141,7 +141,7 @@ void adjacent_filter_coordinates_and_gain() {
     constexpr std::uint32_t rate=8000;
     constexpr double carrier=1500,helper_hz=2450;
     const auto apply=[&](const std::vector<float>& input,std::size_t chunk) {
-        helper::PayloadFilter filter(rate,helper_hz);
+        helper::PayloadFilter filter(rate,helper_hz-200,425);
         std::vector<float> result,output(chunk);
         for(std::size_t first=0;first<input.size();first+=chunk) {
             const auto n=std::min(chunk,input.size()-first);
@@ -152,21 +152,27 @@ void adjacent_filter_coordinates_and_gain() {
               "helper filter inserted unobserved history or lost its sample-center map");
         return result;
     };
+    helper::Options options;options.power_w=100;options.callsign="N0CALL";options.timecode=false;
+    helper::Plan placement;placement.frequency_hz=helper_hz;placement.auxiliary_frequency_hz=helper_hz-400;
+    placement.helper_gain=.7;placement.data_gain=0;placement.effective_power_w=options.power_w;
+    helper::Generator generator(options,placement,1800000000,true);
     std::vector<float> input(3*rate);
     for(std::size_t i=0;i<input.size();++i)
-        input[i]=static_cast<float>(.02*std::cos(tau*carrier*i/rate)+.7*std::cos(tau*helper_hz*i/rate));
+        input[i]=static_cast<float>(.02*std::cos(tau*carrier*i/rate)+
+            generator.mix(0,static_cast<long double>(i)/rate,rate));
     const auto one=apply(input,1),many=apply(input,137);
     check(one==many,"helper filtering depends on caller chunk boundaries");
-    helper::PayloadFilter geometry(rate,helper_hz);
+    helper::PayloadFilter geometry(rate,helper_hz-200,425);
     const auto amplitude=[&](double frequency) {
         std::complex<double> sum{};
         for(std::size_t i=0;i<one.size();++i)
             sum+=static_cast<double>(one[i])*std::polar(1.,-tau*frequency*(i+geometry.delay())/rate);
         return 2*std::abs(sum)/one.size();
     };
-    check(std::abs(amplitude(carrier)-.02)<.00002 && amplitude(helper_hz)<.00007,
-          "adjacent helper filter changed payload gain or failed to remove the bright neighboring tone");
-    helper::PayloadFilter warmup(rate,helper_hz);std::vector<float> short_input(2*warmup.delay(),1),output(short_input.size());
+    check(std::abs(amplitude(carrier)-.02)<.00002 && amplitude(helper_hz)<.00007&&
+          amplitude(placement.auxiliary_frequency_hz)<.00007,
+          "adjacent helper filter changed payload gain or failed to remove both neighboring tones");
+    helper::PayloadFilter warmup(rate,helper_hz-200,425);std::vector<float> short_input(2*warmup.delay(),1),output(short_input.size());
     check(warmup.push(short_input,output)==0 && warmup.output_samples()==0,
           "helper filter published zero padding before a complete physical window");
 }
@@ -175,7 +181,7 @@ void filtered_noise_and_beacon_do_not_carry_bits() {
     helper::Options options;options.power_w=100;options.callsign="N0CALL";
     const auto placement=helper::plan(options,c.carrier_hz,helper::occupied_bandwidth(c),48000);
     for(unsigned seed=0;seed<8;++seed)for(const bool beacon:{false,true}) {
-        helper::PayloadFilter filter(c.sample_rate,placement.frequency_hz);
+        helper::PayloadFilter filter(c.sample_rate,placement.frequency_hz-200,425);
         auto selected=search();selected.start_offset_seconds=0;selected.start_uncertainty_seconds=1;
         selected.input_sample_origin=filter.delay();
         modem::PatternReceiver receiver(c,4*1024*1024,selected);

@@ -6,7 +6,540 @@ superseded status here; keep one latest [resource snapshot](ci-resource-results.
 and use Git history for comparisons. Detailed studies remain in the
 [evidence index](indexes/evidence.md).
 
-## Current Helper Carrier candidate
+## Current two-tone Helper Carrier candidate
+
+The 27 October checkout starts from `8355e64` with a changing implementation
+overlay; it is not the earlier R16 source or binary. The application now has
+90% pure pilot/10% auxiliary power, High-only adjacent placement, one shaped
+auxiliary reversal centered at 240 ms, and auxiliary-only optional metadata.
+Ordinary Robust power targets, Rate, wire/framing and keyed timing remain the
+contract. Native composite headroom changes the audio calibration: at unchanged
+volume the data gain is about 1.353 dB lower at 40 W/4 W and 1.989 dB lower at
+15 kW/4 W than the old single-tone format. Physical RF output needs recalibration;
+sampled simulation scales signal and noise together without changing payload SNR
+or path loss. Total Helper and pilot C/N0 are separately accounted.
+
+The initial rebuilt GUI is `build/dev/datapump-gui`. The actual commands were:
+
+```sh
+./build.sh --build-jobs 6 >local-evidence/helper-two-tone/gui-build-initial.log 2>&1
+CCACHE_DIR="$PWD/build/ccache" ./build.sh --build-jobs 6 >local-evidence/helper-two-tone/gui-build.log 2>&1
+ctest --test-dir build/dev --output-on-failure -j 1 -R '^(helper_carrier|helper_filter_response|helper_frontend|helper_planner_forecast|gui_launch_command)$' >local-evidence/helper-two-tone/focused-initial.log 2>&1
+```
+
+The [first application build](../local-evidence/helper-two-tone/gui-build-initial.log)
+failed during compilation with `ccache: error: Read-only file system`. The
+[workspace-cache build](../local-evidence/helper-two-tone/gui-build.log) passed.
+The [initial five checks](../local-evidence/helper-two-tone/focused-initial.log)
+passed 5/5 in 5.17 seconds: carrier, filter response, frontend, Planner forecast
+and GUI launch command. A later [focused-target build](../local-evidence/helper-two-tone/focused-build.log)
+failed because `test_gui_link_planner.cpp` lacked the include declaring
+`transfer::receiver_utc_rate_correction`; that test setup was repaired. The
+[second target build](../local-evidence/helper-two-tone/focused-build-r2.log)
+completed linking the selected targets. That build alone is not a runtime test
+pass. Separate [tracker](../local-evidence/helper-two-tone/tracker-initial.log)
+and [helper-control](../local-evidence/helper-two-tone/gui-helper-controls.log)
+checks passed. Later source changes require their own focused results and final
+GUI/source hashes; the initial checkpoint does not bind those evolving inputs.
+
+### R7/R8 current focused checks and bounded diagnostics
+
+The [source-band guard checks](../local-evidence/helper-two-tone/r6-source-band-tests.log)
+pass 2/2, and the [strengthened actual-RF Session run](../local-evidence/helper-two-tone/actual-rf-session-source-band-r6.log)
+passes: +2.19 Hz correction is admitted, +142.7 Hz declined with the old NCO
+preserved. It retains exact `001`, one row/physical END and 69 phase updates;
+3,626 owner-job deltas occur in phase-covered feeds. That measures covered feeds,
+not whole-symbol phase coverage. [R7 focused checks](../local-evidence/helper-two-tone/focused-r7.log)
+(actual-RF Session, pilot stage and tracker) pass 3/3 in 8.03 seconds.
+The [main R7 build](../local-evidence/helper-two-tone/integrated-r7-build.log)
+passes for GUI/CLI, bound by [R7 binaries](../local-evidence/helper-two-tone/r7-binaries.sha256):
+GUI `a4f69b06bc7dcc38d94d3d47ad24915d693021129aba542627de501788c860d8`,
+archive `0c8ad8b0cabfa2ddbbaf86655ed6d18644352212d16ed269d293194f923c874c`.
+The later optional metadata-budget CLI change still needs rebuilding.
+
+The reviewed covariance-based optional phase bounds change phase eligibility,
+not frequency arithmetic. Matched 128-second **component** aperture scores include
+all samples, with fixed physical RF and independent phase changes where stated:
+
+| Pilot C/N0 | Phase calendar | Phase-corrected loss (dB) | Frequency-only loss (dB) | Energy with phase support |
+| --- | --- | --- | --- | --- |
+| 30 | continuous | 0.0695 | 15.9255 | 41.62% |
+| 30 | random dwell phase | 3.6321 | 35.1535 | 50.62% |
+| 40 | continuous | 0.00627 | 1.6477 | 89.27% |
+| 40 | random dwell phase | 0.27925 | 24.7023 | 89.16% |
+
+[30 continuous](../local-evidence/helper-two-tone/pilot-128-r8-30-continuous.log),
+[30 random](../local-evidence/helper-two-tone/pilot-128-r8-30-random.log),
+[40 continuous](../local-evidence/helper-two-tone/pilot-128-r8-40-continuous.log) and
+[40 random](../local-evidence/helper-two-tone/pilot-128-r8-40-random.log) all peak
+at zero corrected RF. There are zero new-bound prediction escapes over
+18,633,600 dense prediction checks. At 30 dB-Hz, the old gate admits zero fits;
+the new gate admits 301/596 continuous and 360/635 random-phase fits. Thus a
+phase software gate, rather than a proven physical 30 dB-Hz limit, explains that
+particular rejection. The controls exclude the payload notch and ordinary
+128-second-symbol completion; remaining 3.63 dB random-phase loss is material.
+The [initial missing-time setup failure](../local-evidence/helper-two-tone/pilot-128-r7-setup-missing-time.log)
+and [first off-by-one diagnostic](../local-evidence/helper-two-tone/pilot-128-r7-30-continuous-r1-offbyone.log)
+remain separately retained, not relabeled successful runs.
+
+The [cached HF40 rerun](../local-evidence/helper-two-tone/hf40-r6.log) finishes
+incomplete: one pending bit under a non-TX epoch and no END. It captures 453,561
+samples/74.1113 audio seconds for 180.524 CPU/180.288 wall seconds. There are
+84,547 FFT jobs versus 41,180 in R5; 2,557 cache builds/81,990 hits (96.98%) use
+164,008 bytes per owner, with 41 FFT-executing owners using the serial-slot-1
+path, not 41 observed concurrent workers. True TX epoch 40 owner 47 still
+executes zero FFTs. Qualification is 98.269%, measured C/N0 median 23.416 dB-Hz,
+U median 0.248592 Hz, with 220 certified blocks spanning 72.7544 seconds.
+The [fixture binary pin](../local-evidence/helper-two-tone/hf40-r6-binary.sha256)
+retains this run's source scope. Common hot-feed CPU is 62.24 versus 127.39
+seconds descriptively; different fresh keyed waveforms and work prevent an exact
+causal speedup ratio or passing HF acceptance claim.
+
+The exact-lattice workspace idea saves only 38,880 bytes, leaving deficits
+469,191/1,232,001 bytes for 83/89 pairs. It was rejected without a production
+edit; the original constructor failures remain below. The first new
+[full-composite N0CALL metadata component](../local-evidence/helper-two-tone/metadata-two-tone-r7.log)
+decodes 7/7 references/frames. Earlier zero-frame failures remain below; nominal
+offset/random-hop metadata tests, independent-LF actual-RF Session coverage and
+Live optional metadata routing are still in progress, with no results claimed.
+
+### R6 focused integration and bounded actual-RF Session
+
+The independently reviewed serial clock-row cache passes its
+[direct scratch-linked production check](../local-evidence/helper-two-tone/hf-native-batch/production-test-r2.log):
+47,462,282 exact score bit-pattern comparisons, seven cohorts/nine clocks/301
+pairs, 63 builds, 2,044 hits and 164,008 charged bytes. Actual acquisition is
+nonzero (2,107 jobs/23,731,451 trials), with five ordered candidates and two
+ordered bursts matched. Original serial-slot-1/cache and parallel-slot-2/no-cache
+paths remain. This is focused functional equivalence, not measured throughput.
+The [original CTest fixture failure](../local-evidence/helper-two-tone/hf-native-batch/production-test.log)
+(`changed key/source owner borrowed another private row`) remains failed. The
+[dependency rebuild](../local-evidence/helper-two-tone/hf-native-batch/production-build-r2.log)
+was separately interrupted (exit 130); the scratch-linked pass does not turn that
+interruption into a build/CTest pass. The later
+[integrated R6 build](../local-evidence/helper-two-tone/integrated-r6-build.log)
+and [three focused CTests](../local-evidence/helper-two-tone/focused-r6.log)
+pass: clock rows 29.84 seconds, pilot stage 1.07 seconds and tracker 5.91 seconds
+(36.82 seconds total). These remain focused checks, with full groups pending.
+
+The [whole-aperture stage check](../local-evidence/helper-two-tone/pilot-stage-whole-r6.log)
+scores all 145,472 helper-present samples, including startup: phase-corrected
+loss is 1.227/1.410/1.266 dB for 40 dB-Hz fixed, 60 dB-Hz fixed and 60 dB-Hz
+actual-RF laboratory controls, versus frequency-only 17.63/18.40/6.82 dB. Corrected
+RF peaks are at zero; 80.4% of energy has phase support, with no covered-phase
+escapes. Earlier supported-sample RMS concealed this real 1.2–1.4 dB whole-aperture
+loss. This uses an isolated linear Robust contribution through the Hilbert
+translator; the payload notch, complete symbols and 128-second reception remain
+untested. It does not replace the earlier frequency-interval failures.
+
+The bounded [actual-RF Session check](../local-evidence/helper-two-tone/actual-rf-session-r6.log)
+passes with [complete trace](../local-evidence/helper-two-tone/actual-rf-session-r6.jsonl)
+and no dropped records. Exact command:
+
+```sh
+taskset -c 2-11 build/dev/test_helper_actual_rf_session local-evidence/helper-two-tone/actual-rf-session-r6.jsonl > local-evidence/helper-two-tone/actual-rf-session-r6.log 2>&1
+```
+
+It exercises 73 physical-RF model segments at 7/7.7/8.4/9.1 MHz, 400 ms dwells,
+independent phases (seed 49273) and 12 ms retune settling. All 887 qualified
+reference measurements contain truth, with maximum error 0.00043077 Hz and
+69 phase updates. The ordinary-work counter reaches 210 actual jobs, not an
+observed concurrency count; both frequency and phase assistance flags are true. Three pending commits retain one identity and
+exact `001`, followed by one fully scored physical END. It processes 232,327
+logical samples, peaks at 38,526,009 bytes, and bounds raw staging to 12,800
+samples at 32 kHz (400 ms). Process CPU is 1.603 seconds/1.101 wall seconds with
+permitted support cores 2–11; worker concurrency and throughput are not qualified.
+
+This is an RF-only, exact-audio-clock laboratory control with DATA simulation
+SNR 40 dB, a very strong pilot and zero drift. Encrypted Auto/rolling reception
+uses no GPS clock, known TX timestamp or decoded timecode. It is not supplied
+HF acceptance, independent-clock, 128-second-symbol or hardware-adapter coverage.
+This original narrow proof remains bound to its tested source; the subsequent
+source-band and covered-feed checks are recorded above.
+
+The [R6 binary record](../local-evidence/helper-two-tone/r6-build-binaries.sha256)
+pins GUI `ecac66bb25f3e681474a170ae56149b34340f22df0597ed96aa5e4a688cdea80`
+and archive `96977be799b054e0a33611cc98aa823fcd3afa26961d0a6319c3d694cb5ad8d8`.
+These rebuilt manual-test binaries do not certify pending source changes or a
+release.
+
+### R5 current focused integration
+
+The [22-target R5 build](../local-evidence/helper-two-tone/integrated-r5-build.log)
+passes, followed by [four focused checks](../local-evidence/helper-two-tone/focused-r5.log)
+(geometry, pilot phase, pilot stage and Planner) in 7.06 seconds. Whole-source
+inputs (949 pins) and produced binaries are bound by
+[R5 inputs](../local-evidence/helper-two-tone/r5-inputs.json) and
+[binary hashes](../local-evidence/helper-two-tone/r5-binaries.sha256); these are
+source/binary bindings, not release certification. Component provenance remains
+in [gap-final hashes](../local-evidence/helper-two-tone/gap-final-hashes.txt).
+Current tracker workspace is 403,016 bytes.
+
+The fixed-context numeric frequency fallback is implemented. It retains the
+ten current complex observations, permits a single independent phase gap in
+that bounded context, and gives no phase authority to a gap fit. The
+[current component baseline](../local-evidence/helper-two-tone/segmented-gap-final.txt)
+has 1,551 published estimates with no observed interval escapes. The
+[12-seed blind 30 dB-Hz ensemble](../local-evidence/helper-two-tone/segmented-gap-ensemble-final.txt)
+retains one escaped straight-fit estimate among 2,225: seed 2, support date
+9.370646 seconds, error −0.222884 Hz versus U 0.215283 Hz. It is a failed coverage
+control despite a successful final estimate. The
+[actual-waveform matrix](../local-evidence/helper-two-tone/segmented-gap-actual-final.txt)
+has twelve cases, 2,071 frequency estimates and 1,339 sampled phase fits with no
+observed escapes. At sampled pilot C/N0 24 dB-Hz, composite static/random-hop
+availability is 97.45%/96.39%, with final U about 0.222/0.250 Hz. This improves
+software availability without claiming those radii make every ordinary profile
+affordable. [Twelve noise-only seeds](../local-evidence/helper-two-tone/segmented-gap-noise-final.txt)
+never qualify. Tracker CPU/audio is about 0.00084–0.00226 across these component
+controls, excluding the ordinary receiver, staging/frontends, generation and GUI.
+
+The [R5 phase-stage output](../local-evidence/helper-two-tone/focused-r5-output.log)
+uses causal broad discovery without a truth-frequency seed. Constant 40/60 dB-Hz
+payload relative RMS is 0.0370012/0.00652916 versus frequency-only
+1.54784/1.4387; the 60 dB-Hz case retains ten frequency-interval escapes.
+A laboratory actual-RF control uses independent phases at 7/7.7/8.4/9.1 MHz:
+328 dated consumed-geometry checks have zero observed escapes, payload relative
+RMS 0.0059667 versus frequency-only 0.999442. Its USB, zero audio-clock error
+and known retune dates are explicit laboratory inputs. There is no production
+rig-retune adapter or unresolved-clock qualification. Storage remains capped at
+19,200 raw samples/76,800 bytes at 48 kHz, separately from the tracker.
+
+The prior GUI SegFault is narrowed to partial-bank retirement with null
+`receiver_storage`; the minimal guard is implemented and independently reviewed.
+The [original crashing key-control subsection](../local-evidence/helper-two-tone/tone-key-controls-r5.log)
+passes. The [full controller/Planner/self-check repair run](../local-evidence/helper-two-tone/gui-repair-r5.log)
+passes 3/3: controller 142.38 seconds, Planner 74.32 seconds and self-check
+9.95 seconds (142.40 seconds total elapsed). This validates the narrow null guard
+and selected GUI paths; final full groups remain pending. The original 38/39
+failed GUI group remains below.
+
+The [HF40 R5 rerun](../local-evidence/helper-two-tone/hf40-r5.log) finishes
+failed/incomplete (exit 2), again zero of eight bits. It uses the same exact
+flags as the prior command below, changing only the evidence directory and log
+from `hf40` to `hf40-r5`. It captures 52.977 audio seconds for 180.455 process
+CPU seconds. Reference qualification is now 97.58%, and true TX epoch
+`1800000040` is admitted at 34.110 seconds, but that owner executes zero FFTs.
+The ordinary roughly 301-cell work cost starves its processed frontier. Thus the
+fallback improves reference availability but does not complete HF40 reception;
+this is a receiver-work limitation, not a demonstrated physical precision limit.
+The earlier low-availability HF40 failure remains separately retained below.
+
+All three helper-OFF GPSDO-configured simulation controls pass exact eight bits,
+one visible row, prefixes, pending identity and ordinary scored END:
+[HF40](../local-evidence/helper-two-tone/hf40-gpsdo-control.log),
+[HF crystal](../local-evidence/helper-two-tone/hf-crystal-gpsdo-control.log) and
+[Rate-360 Fake FHSS](../local-evidence/helper-two-tone/hf-fhss-gpsdo-control.log).
+They are modeled GPSDO controls, not physical GPSDO-hardware tests. They do not
+make a failed Helper run pass or establish a matched end-to-end speedup.
+
+The exact EME wrapper command was:
+
+```sh
+taskset -c 0,1 build/dev/test_helper_normal_acquisition --eme --helper on --helper-power-w 15000 --workspace-bytes 2147483648 --runtime-metrics --work-trace --clock-sync default --audio-error 70ms --bit-count 8 --wall-seconds 600 --ephemeral-key --evidence-dir local-evidence/helper-two-tone/eme15k-r5 > local-evidence/helper-two-tone/eme15k-r5.log 2>&1
+```
+
+The supplied [15 kW EME R5 run](../local-evidence/helper-two-tone/eme15k-r5.log)
+now executes the 5.8 GHz GPSDO-OCXO encrypted Auto/rolling 128-second-symbol
+configuration, Default/70 ms, fixed 2 GiB workspace. It **fails** (exit 1):
+1,827.731 captured audio seconds, 80.983 process CPU seconds/78.483 wall seconds,
+zero admitted owners and zero bits. There are 53,012 provisional compact CPU
+admission rejections, with candidate pairs 83–389 (median 87). Minimum predicted
+serial CPU/audio is 1.221164, above the configured 0.6 objective. That is a
+software model/admission gate, not measured receiver throughput or a physical
+link limit. No receiver owner executed to establish PHY failure or full-symbol
+performance.
+
+EME raw measured pilot C/N0 median is 30.0399 dB-Hz, U median 0.084627 Hz and
+qualification 99.9369%; all 5,397 corrected blocks have valid certificates. These
+measurements establish sustained assistance availability, not useful ordinary
+reception while every candidate is rejected. Configured RF-budget C/N0, sampled
+channel noise and measured pilot C/N0 retain their distinct meanings. Native
+cache work has the focused source/equivalence acceptance and R6 build/selected
+CTest passes above; full groups and any measured throughput benefit remain pending. Final full regression groups, complete payload/cable checks
+and intended-hardware throughput qualification remain pending.
+
+The [EME GPSDO-configured control](../local-evidence/helper-two-tone/eme-gpsdo-control.log)
+finishes **incomplete** (exit 2), with zero bits and 31 owners. Exact command:
+
+```sh
+taskset -c 0,1 build/dev/test_helper_normal_acquisition --eme --gpsdo-only --workspace-bytes 2147483648 --runtime-metrics --work-trace --clock-sync default --audio-error 70ms --bit-count 8 --wall-seconds 600 --ephemeral-key --evidence-dir local-evidence/helper-two-tone/eme-gpsdo-control > local-evidence/helper-two-tone/eme-gpsdo-control.log 2>&1
+```
+
+It captures 16,384 samples at 6,000 Hz (2.73067 audio seconds), using
+574.549985 process CPU seconds/600.967447 wall seconds and peaking at
+1,453,811,343 bytes. Only seven feed calls covering input 0…14336 complete;
+the next is interrupted. Captured input is not a processed frontier. No full
+128-second symbol or physical END completes, and this partial control establishes
+no matched CPU gain or physical sensitivity limit.
+
+The separate [actual-constructor discriminator](../local-evidence/helper-two-tone/eme-cost-r5/RESULT.md)
+uses a copied R6-cache archive
+`23128c7b31f9b31da6c48965a5c6fa815961b3aeab9980a880b4692e2d1fafae`,
+distinct from the R5 runtime above. Its fixed 2 GiB configuration grants a
+10,092,055-byte strategy share:
+
+| Actual pairs | Complete hypotheses | Required bytes | Shortfall |
+| --- | --- | --- | --- |
+| 83 | 1,286 | 10,600,126 | 508,071 |
+| 89 | 1,379 | 11,362,936 | 1,270,881 |
+
+Both actual constructors return typed `PatternCompactAdmissionPending` before
+any PCM. [83-pair](../local-evidence/helper-two-tone/eme-cost-r5/execution-83.json)
+and [89-pair](../local-evidence/helper-two-tone/eme-cost-r5/execution-89.json)
+receipts retain diagnostic exit 3, commands, hashes and reaped processes. The
+Live provisional CPU gate therefore masks an additional actual workspace gate;
+no lane, timing/clock alternative or grant was changed. No receiver execution,
+throughput, payload/END or bank-count gain is measured by this discriminator.
+The later cached HF40 result remains incomplete as recorded above.
+
+### Preceding R3 focused integration and supplied cases
+
+The [R3 GUI rebuild](../local-evidence/helper-two-tone/gui-build-r3.log) and
+[GUI self-check](../local-evidence/helper-two-tone/gui-self-check-r3.log) pass;
+the self-check is one case, 8.89 seconds. The original
+[R3 focused group](../local-evidence/helper-two-tone/focused-r3.log) is **11/14**,
+with failed `helper_pilot_stage`, `helper_tone_tracker` and `helper_sim` cases.
+These remain individually failed. Narrow repairs then pass:
+[simulation](../local-evidence/helper-two-tone/helper-sim-r3-repair.log) measures
+suppression in the actual DATA band with unchanged thresholds;
+[tracker migration](../local-evidence/helper-two-tone/tone-tracker-migration-output.log)
+uses the current two-tone pilot route; and the
+[phase-stage fixture](../local-evidence/helper-two-tone/pilot-stage-r3-corrected.log)
+accepts first qualification at exactly one second, correcting its strict-boundary
+off-by-one assertion. These fixture repairs do not constitute a broad regression
+pass. The completed [GUI group](../local-evidence/helper-two-tone/gui-group-r4.log)
+is **38/39**, with `gui_controller` SegFault at 74.13 seconds and total elapsed
+155.99 seconds. It is a failed group, not full GUI qualification.
+
+The migrated actual two-tone tracker control spans 113.671 seconds, with 100%
+frequency availability, median/p90 U 0.00463568/0.00680744 Hz, maximum frequency
+error 0.000470372 Hz and zero observed interval escapes. Comparing actual pilot
+with auxiliary/Robust enabled versus disabled gives maximum bias 0.0000540165 Hz.
+The actual selector retains 45 of 369 pairs and all nine unresolved clock
+alternatives. This is a bounded mask/precision check, not an end-to-end CPU gain.
+That preceding 48 kHz tracker workspace is 382,392 bytes.
+
+The causal phase stage uses broad discovery without a truth-frequency seed.
+At 40/60 dB-Hz, first qualification is exactly 1.0 second and payload relative RMS
+is 0.0374703/0.00640305, versus frequency-only 1.51582/1.43624. It uses a bounded
+19,200-sample/76,800-byte raw stage at 48 kHz, and measured component CPU/audio
+is 0.04444/0.04390. No wrong-tone selection occurs, but the 60 dB-Hz control has
+**ten frequency-interval escapes**, versus zero at 40 dB-Hz. RF mapping is
+explicitly untested in this constant-scale laboratory control. Its phase
+improvement does not calibrate pooled-frequency intervals or prove ordinary
+payload reception.
+
+The [preceding plain-CW 30 dB-Hz trace](../local-evidence/helper-two-tone/promoted-plain30-trace.txt)
+(seed 1, production gate 1) has **19 escaped published estimates among 185**,
+repeated across 380 polls. Maximum observed `abs(error)/U` is about 1.2005;
+final error +0.051889 Hz lies inside final U 0.085746 Hz. Final containment does
+not repair earlier escapes. The [preceding component matrix](../local-evidence/helper-two-tone/segmented-promoted.txt)
+therefore fails coverage (exit 2). The
+[preceding actual-waveform matrix](../local-evidence/helper-two-tone/segmented-promoted-actual.txt)
+has four final-availability failures at 24 dB-Hz; its 30/40 dB-Hz cases finish
+qualified with no observed frequency escapes. Earlier failed component outputs
+below retain their own implementation versions. All published intervals remain
+conditional engineering estimates, not calibrated confidence guarantees.
+
+The optional full-composite auxiliary decoder still fails: both
+[initial](../local-evidence/helper-two-tone/aux-metadata-two-tone-first.log) and
+[strong](../local-evidence/helper-two-tone/aux-metadata-strong-first.log) attempts
+find 48 references and zero metadata frames. The
+[matched discriminator](../local-evidence/helper-two-tone/aux-metadata-discriminator.log)
+decodes six frames on isolated raw auxiliary, zero after its notch and zero on
+the notched full composite. This isolates a route limitation; metadata is not
+required to qualify pilot frequency assistance. The accepted capture-band guard
+accounts for both tones without changing already-generated supplied-case samples;
+its focused `helper_sim` check passes.
+
+The actual supplied-run commands are retained exactly, with two allowed CPUs
+and fixed 2 GiB workspace:
+
+```sh
+taskset -c 0,1 build/dev/test_helper_normal_acquisition --hf --helper on --helper-power-w 40 --workspace-bytes 2147483648 --runtime-metrics --work-trace --clock-sync default --audio-error 70ms --bit-count 8 --wall-seconds 180 --ephemeral-key --evidence-dir local-evidence/helper-two-tone/hf40 > local-evidence/helper-two-tone/hf40.log 2>&1
+taskset -c 0,1 build/dev/test_helper_normal_acquisition --hf-crystal --helper on --helper-power-w 15000 --workspace-bytes 2147483648 --runtime-metrics --work-trace --clock-sync default --audio-error 0ms --bit-count 8 --wall-seconds 180 --ephemeral-key --evidence-dir local-evidence/helper-two-tone/hf-crystal15k > local-evidence/helper-two-tone/hf-crystal15k.log 2>&1
+taskset -c 0,1 build/dev/test_helper_normal_acquisition --hf-fhss --helper on --helper-power-w 1500 --workspace-bytes 2147483648 --runtime-metrics --work-trace --clock-sync default --audio-error 70ms --bit-count 8 --wall-seconds 180 --ephemeral-key --evidence-dir local-evidence/helper-two-tone/hf-fhss1500 > local-evidence/helper-two-tone/hf-fhss1500.log 2>&1
+```
+
+The preceding [HF40 timing-wrapper setup attempt](../local-evidence/helper-two-tone/hf40-time-setup-failure.log)
+failed before the test: `taskset: failed to execute /usr/bin/time: No such file or directory`.
+The actual [HF40 run](../local-evidence/helper-two-tone/hf40.log) is failed/incomplete
+(exit 2): zero of eight bits, 113.418 captured media seconds, 180.106 wall seconds,
+180.694 process CPU seconds and 42,317 native FFT jobs, with zero input health
+faults/drops. Raw reference qualification covers about 2.79% of observations;
+corrected certificates cover 0.512 of 108.548 scored seconds. True TX epoch
+`1800000040` is never admitted. This identifies a software availability/admission
+failure, not a physical precision limit or successful weak-link qualification.
+
+The [strong HF15k run](../local-evidence/helper-two-tone/hf-crystal15k.log) and
+[Rate-360 Fake-FHSS run](../local-evidence/helper-two-tone/hf-fhss1500.log) return
+`decoded_exact` (exit 0) for their primary fixture checks, preserving all eight
+wire/source bits, primary prefixes, pending identity and ordinary scored END.
+HF15k exposes six rows/five secondary rows. Four secondary rows fail the expected
+source-start-prefix comparison. Independent
+[source-identity review](../local-evidence/helper-two-tone/row-identity-review/discriminator.log)
+uses [actual helper discriminators](../local-evidence/helper-two-tone/row-identity-review/discriminator.cpp),
+with no production edit. Signal 4's false/truncated wire `01` is not a canonical
+`10001100` suffix: its first two interior Data addresses agree, then diverge and
+end early. Its separate row birth is due to an actual gap of `T − 55` samples,
+outside the 34-sample association tolerance. This remains a strict qualification
+failure; no merge or threshold weakening is proposed.
+
+Signal 6 is different: candidate 11→13/source-coordinate changes preserve the
+published prefix `11`, while old Data epochs 75,89,104 become 75,89,103. The new
+three-symbol sequence matches the canonical suffix; the old one does not.
+Independent review finds this a permitted compatible-prefix correction adding
+the correct third bit, not an identity defect by itself. The review does not
+make signal 4, all GUI rows or strict cable qualification pass.
+Rate-360 has one visible primary row, epoch `1800000005` versus actual TX
+`1800000006`; true-epoch owner 13 also contains the full exact wire. The precise
+alias/source-presentation interpretation remains unqualified.
+
+Executed work is now audited for these helper-ON cases:
+
+| Supplied case | Captured audio (s) | Process CPU (s) | CPU/audio | Native FFT jobs | Input transforms | Peak DSP bytes |
+| --- | --- | --- | --- | --- | --- | --- |
+| HF15k | 194.106209 | 44.332381 | 0.228392 | 4,627 | 304 | 656,919,635 |
+| Rate-360 Fake FHSS | 24.666736 | 36.119178 | 1.464287 | 29,106 | 539 | 551,392,408 |
+
+HF15k records 206 owners, 161 executing native FFT jobs. Its primary owner narrows 127→8→…→2 before its first
+FFT and executes 56 FFT jobs under the 127→2 mask. Other measured work includes
+3,290 FFT jobs with 43→2 masks, 525 with 43→3 and 448 with 127→2. This is actual
+existing-owner narrowing, not a gain inferred from interval ratios. There is no
+matched helper-OFF CPU control. First qualification is at 0.968 seconds with
+99.51% availability; U median/minimum/maximum is 0.01000/0.00911/0.06513 Hz.
+There are 966 actual phase updates and 582/583 corrected blocks.
+
+Rate-360 records 40 owners, 39 executing native FFT jobs. Its actual masks remain 9→9: factory
+2,075-pair geometry is constructor metadata, not executed broad search removed
+by Helper. The folded-mono route supplies frequency-origin centering without
+phase correction. Qualification availability is 95.63%, median U 0.00747 Hz and
+measured pilot C/N0 56.501 dB-Hz. Worker concurrency is untraced in both cases;
+zero reported simulation backlog is not measured native-device backlog. Input
+health counters are zero. These costs compare different profiles and clock
+policies and establish no matched GPSDO/helper speedup.
+
+HF15k applies actual +3 kHz/+100 ppm impairment but launches with
+0 ms audio-error allowance; HF40 and FHSS use Default/70 ms. Rate-360 uses actual
++30 Hz/+100 ppm and fixed physical RF. They do not establish hardware-hop phase
+following, matched GPSDO speedup or equal-clock-policy comparisons. The
+[current EME metadata](../local-evidence/helper-two-tone/eme-metadata-current.log)
+resolves 15 kW, 5.8 GHz GPSDO-OCXO, encrypted Auto/rolling 128-second symbols and
+Default/70 ms, but executes no waveform, receiver bank or throughput check.
+
+These supplied-run results precede R5 and retain their tested-source bindings;
+the newer R5 component/focused results above do not retroactively qualify them.
+The original scratch context experiments and every failed result remain retained.
+The source-identity review is complete with no production change: signal 4 stays
+failed, while signal 6's compatible-prefix correction is permitted.
+
+### Earlier two-tone component baseline — superseded
+
+The following outputs precede the current gate/context integration above. Original
+failures remain retained and do not qualify newer source, even when a later case
+passes.
+
+The segmented path first discovers the strongest tone across the actual
+oscillator/capture prior, without auxiliary identification or a ±100 Hz cap.
+At 48 kHz it uses an 8,192-sample seed FFT, ten 20 ms Hann projections per
+200 ms context, and at most 192 dated frequency-only records over 36 seconds.
+The [synthetic final component matrix](../local-evidence/helper-two-tone/segmented-final.txt)
+reports 382,168 bytes and about 0.00082 tracker CPU seconds/audio second for
+qualified cases; this excludes generation, frontend, Robust and GUI work and is
+not an end-to-end throughput measurement. Constant/supported drift, wide
++3,000.37 Hz offset, synthetic mixtures, random per-hop phase and final loss are
+covered narrowly. The 40 dB-Hz loss case withdraws by 28.4 seconds after loss at
+28 seconds. At 20 dB-Hz it does not qualify; this is an implementation gate,
+not proof of a physical SNR threshold.
+
+The [12-seed synthetic 30 dB-Hz ensemble](../local-evidence/helper-two-tone/segmented-ensemble-final.txt)
+**fails interval coverage** (exit 2): seed 2 has one escaped dated estimate,
+repeated over 20 qualified polls. There are no wrong-tone selections in these
+controls. The [matched seed-2 dated-boundary control](../local-evidence/helper-two-tone/segmented-seed2-final.txt)
+removes the observed escape but reduces poll availability from 94.92% to 48.53%;
+it does not erase the original blind-hop failure. These short seeded results do
+not establish calibrated confidence.
+
+The [actual Generator plus actual Robust 12-case matrix](../local-evidence/helper-two-tone/segmented-actual-final.txt)
+uses pilot C/N0 30/40/60 dB-Hz, auxiliary/Robust enabled versus disabled, a
+137 ms source alignment, +3,000.37 Hz offset and independently randomized hop
+phases. Its sampled **pilot** C/N0 is the noise input; total straight Helper C/N0
+is 0.4576 dB greater. It is not configured RF-budget or measured cable C/N0.
+Two static 30 dB-Hz cases finish unqualified, so the matrix is failed (exit 1),
+with zero escaped frequency polls and wrong-tone selections. Ordinary reception
+is explicitly unexecuted. Representative matched results after 38 seconds are:
+
+| Pilot C/N0 | Hop phases | Auxiliary/Robust | Last frequency error (Hz) | Last interval radius U (Hz) | Poll availability |
+| --- | --- | --- | --- | --- | --- |
+| 30 | independent | disabled | +0.03598 | 0.19155 | 94.34% |
+| 30 | independent | enabled | +0.02515 | 0.19308 | 94.34% |
+| 40 | static | disabled | −0.00700 | 0.02570 | 97.45% |
+| 40 | static | enabled | −0.00695 | 0.02574 | 97.45% |
+| 40 | independent | disabled | +0.01864 | 0.04328 | 95.87% |
+| 40 | independent | enabled | +0.01092 | 0.04374 | 95.87% |
+| 60 | static | disabled | −0.000774 | 0.004949 | 97.45% |
+| 60 | static | enabled | −0.000719 | 0.005230 | 97.45% |
+
+The 60 dB-Hz mixture's measured pilot C/N0 is about 52.64 dB-Hz; sampled noise
+input is not achieved measurement quality. The mixtures expose actual
+self-interference rather than assuming an external-noise-only floor. These
+component timings were contended and provide no ordinary receiver CPU gain.
+Last qualified estimates can be older than the final captured frontier; the
+30 dB-Hz static final observation age is 0.529 seconds, consistent with its
+final qualification loss. Support spans near 36 seconds while the individual
+coherent aperture remains 0.2 seconds.
+
+The [local context-phase matrix](../local-evidence/helper-two-tone/segmented-context-phase-actual.txt)
+reports no phase-fit escapes over its tested local supports, with maximum
+observed phase error about 0.056 cycles for the mixed 40 dB-Hz independent-hop
+case. It retains the same two final frequency-availability failures. This is
+local component evidence only. Raw projection phase is diagnostic; pooled
+oscillator frequency has no phase authority. Source now contains a separately
+funded raw FIFO capped at 400 ms and local phase/slope APIs. Their integrated
+payload preservation and ordinary correction benefit remain under validation.
+Dated signed-RF scale/sideband/fade controls use laboratory-known zero clock
+error. The application has no actual rig-retune adapter; fixed-physical-RF Fake
+FHSS does not establish hardware-hop phase following.
+
+A non-integrated [320 ms alternative](../local-evidence/helper-two-tone/segmented-32-final.txt)
+improves static 30 dB-Hz final U from 0.0870 to 0.0539 Hz, but blind random-hop U
+worsens from 0.1730 to 0.3089 Hz and availability from 95.34% to 79.97%. A
+[known-boundary 320 ms control](../local-evidence/helper-two-tone/segmented-32-dated-final.txt)
+reaches U 0.0599 Hz at 30 dB-Hz with only 20.08% poll availability. This is a
+window-alignment tradeoff, not a physical limit or an integrated improvement.
+Earlier endpoint/setup outputs remain individually retained in the same evidence
+directory; their filenames do not qualify newer sources.
+
+### Current model references and remaining acceptance
+
+Planner's noise-only reference uses pilot power after the split. The
+[uninterrupted-tone reference](helper-carrier.md#link-planner-and-lead-time)
+is `3 sqrt(3 / (2 pi² (C/N0) T³))`, supported by the linked JPL/NASA reference.
+Independent unknown phases instead accumulate information as
+`sum_i((C/N0)_i T_i³)`. At 30 dB-Hz, 25 ideal 400 ms dwells give about ±0.029 Hz;
+uninterrupted ten seconds gives ±0.00117 Hz. Practical prediction includes
+separate context/phase-noise/model costs and does not replace measured coverage.
+Baseline lead is separate from the maximum 36-second precision extension;
+transmission begins at that cap without automatic qualification. The ±0.1 Hz
+milestone does not establish 128-second-symbol feasibility. Conditional
+receiver/workspace pricing uses the existing receiver-cost model with unresolved
+clock/timing work, not interval-width ratios, and excludes whole-process costs.
+
+Full current-source preservation-contract, GUI/native/sanitizer and complete
+supplied HF/5.8 GHz EME acceptance remain pending. Actual receiver work, existing
+and newly admitted candidate narrowing, workers, process CPU/audio, startup,
+sustained backlog, drops/resets, complete payloads, next-poll progress, row
+identity and fully scored physical END need integrated evidence. The completed modeled
+GPSDO controls above retain their scope; causal CPU comparisons and final exact
+launch/source bindings remain required, with fixed workspace bytes.
+No complete long-symbol EME, strict cable, physical GPSDO-substitution or
+release-certification pass is claimed. Historical prefix/suffix failures below
+remain failed even when their final canonical row was correct.
+
+## Superseded R16 single-tone Helper Carrier candidate
+
+All results in this section and its subsections retain their own source/binary
+bindings. They do not qualify the changed two-tone waveform or current overlay.
 
 R16 remains an experimental manual tracker/NCO route feeding one ordinary
 receiver bank. New acquisition requires fresh helper qualification and a

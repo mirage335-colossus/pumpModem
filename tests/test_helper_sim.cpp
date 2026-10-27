@@ -1,5 +1,6 @@
 #include "datapump/channel.hpp"
 #include "datapump/helper_filter.hpp"
+#include "../src/search_fft.hpp"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -243,22 +244,76 @@ void unsupported_geometry_preserves_plain_channel() {
 }
 void adjacent_helpers_are_physical_mixtures() {
     const auto c=config();auto impairment=model();impairment.snr_db=100;
-    for(const auto placement:{helper::Frequency::high,helper::Frequency::low,helper::Frequency::cochannel}) {
-        auto h=helper_options(40);h.frequency=placement;h.callsign.clear();h.timecode=false;
+    {
+        auto h=helper_options(40);h.callsign.clear();h.timecode=false;
         modem::SampledSimulationChannel channel(c,impairment,h);channel.begin_burst(true);
         Observer raw;channel.set_physical_observer(std::ref(raw));
         modem::StreamingTransmitter source(modem::Noise{32},c);
         const auto logical=capture(channel,source,137);
         const auto plan=helper::plan(h,c.carrier_hz,helper::occupied_bandwidth(c),channel.physical_sample_rate(),0,modem::outer_dsss_transmit_gain(c));
-        if(placement==helper::Frequency::high)
-            check(plan.frequency_hz==2262.5&&plan.frequency_hz+150<c.sample_rate/2.,
-                  "High helper was not adjacent inside the logical capture passband");
-        std::complex<double> sum{};
-        for(std::size_t i=0;i<raw.samples.size();++i)
-            sum+=static_cast<double>(raw.samples[i])*std::polar(1.,-2*std::numbers::pi*plan.frequency_hz*i/raw.rate);
-        check(std::norm(sum)>raw.samples.size(),"adjacent helper missing from physical PCM");
+        check(plan.auxiliary_frequency_hz>=c.carrier_hz+helper::occupied_bandwidth(c)/2+450&&
+              plan.frequency_hz-plan.auxiliary_frequency_hz==helper::auxiliary_pilot_spacing_hz&&
+              plan.frequency_hz+225<c.sample_rate/2.,
+              "High helper group was not adjacent inside the logical capture passband");
+        for(const auto frequency:{plan.frequency_hz,plan.auxiliary_frequency_hz}) {
+            std::complex<double> sum{};
+            for(std::size_t i=0;i<raw.samples.size();++i)
+                sum+=static_cast<double>(raw.samples[i])*std::polar(1.,-2*std::numbers::pi*frequency*i/raw.rate);
+            check(std::norm(sum)>raw.samples.size(),"adjacent helper tone missing from physical PCM");
+        }
         double energy=0;for(const auto sample:logical)energy+=static_cast<double>(sample)*sample;
         check(energy/logical.size()>.01,"simulator hid an in-band helper from logical PCM");
+    }
+    for(const auto placement:{helper::Frequency::low,helper::Frequency::cochannel}) {
+        auto h=helper_options(40);h.frequency=placement;bool rejected=false;
+        try {modem::SampledSimulationChannel channel(c,impairment,h);}
+        catch(const Error&) {rejected=true;}
+        check(rejected,"simulation accepted a retired Helper placement");
+    }
+}
+void two_tone_capture_and_alias_geometry() {
+    using Channel=modem::SampledSimulationChannel;
+    const auto h=helper_options(40);
+    {
+        const auto c=config();auto impairment=model();
+        impairment.clock_error_ppm=100;impairment.frequency_offset_hz=3000;
+        const auto p=helper::plan(h,helper::placement_band(c),64000,0,modem::outer_dsss_transmit_gain(c));
+        const auto clock=1+impairment.clock_error_ppm*1e-6;
+        const auto data_low=(c.carrier_hz-helper::occupied_bandwidth(c)/2)*clock+impairment.frequency_offset_hz;
+        const auto group_low=(p.auxiliary_frequency_hz-150)*clock+impairment.frequency_offset_hz;
+        const auto group_high=(p.frequency_hz+150)*clock+impairment.frequency_offset_hz;
+        check(data_low<group_low&&group_low<group_high,
+              "two-tone capture fixture lost its ordered DATA/auxiliary/pilot hull");
+        const Channel::PreconversionCapture domain{data_low,group_high,48000};
+        Channel accepted(c,impairment,h,0,{},domain);
+        check(accepted.physical_sample_rate()==64000,
+              "exact two-tone capture hull changed the bounded physical clock");
+        auto too_narrow=domain;too_narrow.maximum_hz-=.01;bool rejected=false;
+        try {Channel invalid(c,impairment,h,0,{},too_narrow);}
+        catch(const Error& error) {
+            rejected=std::string_view(error.what())=="Helper Carrier actual signal lies outside its preconversion capture domain";
+        }
+        check(rejected,"capture accepted a clock-scaled pilot modulation edge outside its domain");
+    }
+    {
+        auto c=config(2000);c.carrier_hz=800;
+        const auto p=helper::plan(h,helper::placement_band(c),8000,0,modem::outer_dsss_transmit_gain(c));
+        const auto low=c.carrier_hz-helper::occupied_bandwidth(c)/2;
+        const auto high=c.carrier_hz+helper::occupied_bandwidth(c)/2;
+        const auto auxiliary_sideband=p.auxiliary_frequency_hz-100;
+        const auto auxiliary_alias=std::abs(std::remainder(auxiliary_sideband,static_cast<double>(c.sample_rate)));
+        const auto pilot_alias_low=c.sample_rate-(p.frequency_hz+150);
+        const auto pilot_alias_high=c.sample_rate-(p.frequency_hz-150);
+        check(auxiliary_sideband>c.sample_rate/2.&&auxiliary_alias>low&&auxiliary_alias<high&&
+              pilot_alias_low>0&&pilot_alias_high<low,
+              "auxiliary alias discriminator no longer overlaps DATA while the entire pilot band misses it");
+        // The actual halfband cascade sufficiently rejects this auxiliary
+        // image, so complete group validation must retain this valid geometry.
+        Channel accepted(c,model(),h);
+        check(accepted.physical_sample_rate()==8000,
+              "whole-group alias validation rejected an isolated auxiliary image");
+        std::cout<<"two_tone_alias data_low_hz="<<low<<" data_high_hz="<<high
+                 <<" auxiliary_alias_hz="<<auxiliary_alias<<" pilot_alias_high_hz="<<pilot_alias_high<<'\n';
     }
 }
 void calibrated_data_band_noise() {
@@ -305,15 +360,49 @@ void physical_phase_noise_sidebands() {
         modem::SampledSimulationChannel channel(c,impairment,h);channel.begin_burst(true);
         const auto plan=helper::plan(h,c.carrier_hz,helper::occupied_bandwidth(c),channel.physical_sample_rate(),0,modem::outer_dsss_transmit_gain(c));
         modem::StreamingTransmitter source(modem::Noise{64},c);std::array<float,800> pcm{};
+        // The channel deliberately retains a physical mixture outside DATA.
+        // Measure actual DATA-band energy with fixed512ms Hann apertures;
+        // include both edge bins and retain the total logical power below.
+        constexpr std::size_t fft_size=4096;
+        modem::detail::search_fft::DoublePlan fft_plan(fft_size);
+        std::array<std::complex<double>,fft_size> fft{};
+        std::array<double,fft_size> window{};
+        double window_square=0,band_power=0;
+        for(std::size_t i=0;i<window.size();++i) {
+            window[i]=.5-.5*std::cos(2*std::numbers::pi*i/(window.size()-1));
+            window_square+=window[i]*window[i];
+        }
+        const auto df=static_cast<double>(c.sample_rate)/fft_size;
+        const auto occupied=helper::occupied_bandwidth(c);
+        const auto first_bin=static_cast<std::size_t>(std::floor((c.carrier_hz-occupied/2)/df));
+        const auto last_bin=static_cast<std::size_t>(std::ceil((c.carrier_hz+occupied/2)/df));
+        std::size_t used=0,windows=0;
         double energy=0;std::size_t samples=0;
         for(unsigned block=0;block<100;++block) {
             const auto count=channel.read(source,pcm);
-            for(std::size_t i=0;i<count;++i)energy+=static_cast<double>(pcm[i])*pcm[i];
+            for(std::size_t i=0;i<count;++i) {
+                energy+=static_cast<double>(pcm[i])*pcm[i];
+                fft[used]=static_cast<double>(pcm[i])*window[used];
+                if(++used==fft.size()) {
+                    modem::detail::search_fft::fft(fft,false,fft_plan);
+                    double power=0;
+                    for(auto bin=first_bin;bin<=last_bin;++bin)power+=std::norm(fft[bin]);
+                    band_power+=2*power/(fft_size*window_square);++windows;used=0;
+                }
+            }
             samples+=count;
         }
-        relative_power[trial]=energy/samples/(modem::nominal_signal_power*plan.data_gain*plan.data_gain);
+        check(windows>=16,"phase-noise power measurement lost its fixed observation aperture");
+        const auto data_reference=modem::nominal_signal_power*plan.data_gain*plan.data_gain;
+        const auto logical_power=energy/samples/data_reference;
+        relative_power[trial]=band_power/windows/data_reference;
+        std::cout<<"phase_noise_sidebands phase_sigma="<<impairment.phase_noise_degrees_per_sqrt_second
+                 <<" pilot_hz="<<plan.frequency_hz<<" auxiliary_hz="<<plan.auxiliary_frequency_hz
+                 <<" logical_power_over_data="<<logical_power
+                 <<" data_band_power_over_data="<<relative_power[trial]
+                 <<" band_first_hz="<<first_bin*df<<" band_last_hz="<<last_bin*df<<" windows="<<windows<<'\n';
     }
-    check(relative_power[0]<.001,"unmodulated helper exceeded its isolated logical leakage fixture");
+    check(relative_power[0]<.001,"stationary two-tone helper exceeded its isolated DATA-band leakage fixture");
     // A Wiener oscillator has real broadband wings. At a90dB helper ratio,
     // even modest phase diffusion can dominate the weak data band's AWGN.
     // Keeping these wings proves simulation does not secretly cancel them or
@@ -357,7 +446,8 @@ void payload_progress_and_completion() {
         const auto placement=helper::plan(h,c.carrier_hz,helper::occupied_bandwidth(c),channel.physical_sample_rate(),0,
             modem::outer_dsss_transmit_gain(c));
         helper::PayloadFilter filter;
-        if(placement.frequency_hz+225<c.sample_rate/2.)filter=helper::PayloadFilter(c.sample_rate,placement.frequency_hz);
+        if(placement.frequency_hz+225<c.sample_rate/2.)
+            filter=helper::PayloadFilter(c.sample_rate,placement.frequency_hz-200,425);
         modem::PatternReceiver receiver(c,16*1024*1024,search);
         std::map<std::pair<std::uint64_t,std::uint64_t>,Bytes> streams;
         std::vector<std::string> prefixes;std::size_t completions=0;std::uint64_t last_bit=0,completed=0;
@@ -444,7 +534,7 @@ void outer_dsss_helper_power_calibration() {
 }
 }
 int main() {
-    try {logical_contract_and_chunking();helper_only_graceful_finish();source_coordinates_and_envelope();disabled_envelope_and_validation();payload_boundary_precedes_envelope_eof();late_extension_preserves_rendered_pcm();unsupported_geometry_preserves_plain_channel();adjacent_helpers_are_physical_mixtures();calibrated_data_band_noise();physical_phase_noise_sidebands();physical_frequency_and_helper_only_rejection();payload_progress_and_completion();outer_dsss_helper_power_calibration();
+    try {logical_contract_and_chunking();helper_only_graceful_finish();source_coordinates_and_envelope();disabled_envelope_and_validation();payload_boundary_precedes_envelope_eof();late_extension_preserves_rendered_pcm();unsupported_geometry_preserves_plain_channel();adjacent_helpers_are_physical_mixtures();two_tone_capture_and_alias_geometry();calibrated_data_band_noise();physical_phase_noise_sidebands();physical_frequency_and_helper_only_rejection();payload_progress_and_completion();outer_dsss_helper_power_calibration();
         std::cout<<"physical helper simulation passed\n";return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -84,6 +84,21 @@ void helper_controls() {
           controller.field(F::helper_power).text=="0"&&
           controller.field(F::helper_ratio_limit).selected=="90"&&controller.field(F::helper_frequency).selected=="high",
           "Helper defaults changed");
+    check(controller.field(F::helper_frequency).options.size()==1&&
+          controller.field(F::helper_frequency).options.front().id=="high",
+          "Retired Helper frequency options remain in the selector");
+    for(const auto* frequency:{"low","0"}) {
+        launch_command::Patch legacy;
+        legacy.helper_power_w=100;legacy.helper_ratio_limit_db=20;
+        legacy.helper_frequency=frequency;legacy.helper_callsign="N0OLD";
+        Controller restored({false,true,legacy});
+        const auto exported=launch_command::parse(restored.field(F::planner_command).text);
+        check(restored.settings().helper.frequency==helper::Frequency::high&&
+              restored.field(F::helper_frequency).selected=="high"&&exported.helper_frequency=="high"&&
+              restored.settings().helper.power_w==100&&restored.settings().helper.ratio_limit_db==20&&
+              restored.settings().helper.callsign=="N0OLD",
+              "Legacy stored Helper placement did not normalize without changing other Helper settings");
+    }
     for(const auto field:{F::helper_ratio_limit,F::helper_frequency,F::helper_callsign})
         check(!controller.field(field).enabled,"Disabled helper leaves a companion editable");
     check(!controller.enabled(ui::Command::transmit_helper),"Disabled helper permits helper-only transmission");
@@ -136,11 +151,17 @@ void helper_controls() {
     controller.set_developer_mode(false);
     check(!controller.enabled(ui::Command::transmit_helper),"Leaving Developer mode left helper-only dispatch enabled");
     controller.set_developer_mode(true);
-    controller.select(F::helper_ratio_limit,"20");controller.select(F::helper_frequency,"low");
+    controller.select(F::helper_ratio_limit,"20");
+    for(const auto* retired:{"low","0"}) {
+        controller.select(F::helper_frequency,retired);
+        check(controller.settings().helper.frequency==helper::Frequency::high&&
+              controller.field(F::helper_frequency).selected=="high",
+              "Retired Helper placement accepted a direct selector callback");
+    }
     (void)controller.plot_update();
     controller.edit(F::helper_callsign,"N0HELP/P");
     check(!controller.plot_update().clear_waterfall,"Helper callsign-only edit restarted receive plots");
-    check(controller.settings().helper.ratio_limit_db==20&&controller.settings().helper.frequency==helper::Frequency::low&&
+    check(controller.settings().helper.ratio_limit_db==20&&controller.settings().helper.frequency==helper::Frequency::high&&
           controller.settings().helper.callsign=="N0HELP/P"&&controller.field(F::callsign).text.empty(),
           "Helper edits changed developer callsign or failed to reach settings");
     controller.edit(F::callsign,"N0DEV");
@@ -163,13 +184,13 @@ void helper_controls() {
           "Helper controls changed Robust modem geometry");
     const auto exported=launch_command::parse(controller.field(F::planner_command).text);
     check(exported.helper_power_w&&std::abs(*exported.helper_power_w-1500)<1e-9&&
-          exported.helper_callsign=="N0HELP"&&exported.helper_ratio_limit_db==20&&exported.helper_frequency=="low",
+          exported.helper_callsign=="N0HELP"&&exported.helper_ratio_limit_db==20&&exported.helper_frequency=="high",
           "Helper values omitted from settings export");
     Controller target;
     target.edit(F::planner_command,controller.field(F::planner_command).text);
     target.activate(ui::Command::planner_load_command);
     check(target.settings().helper==controller.settings().helper&&target.field(F::helper_callsign).text=="N0HELP"&&
-          target.field(F::helper_frequency).selected=="low","Helper settings failed transactional GUI import");
+          target.field(F::helper_frequency).selected=="high","Helper settings failed transactional GUI import");
     const auto before=target.settings().helper;
     target.edit(F::planner_command,"--helper-power 100 --helper-callsign '12345678901234567890'");
     target.activate(ui::Command::planner_load_command);
@@ -3649,6 +3670,7 @@ void bitmap_source_checks() {
 int main(int argc,char** argv) {
     try {
         if(argc>1&&std::string_view(argv[1])=="--helper-controls") {helper_controls();std::cout<<"Helper controls passed\n";return 0;}
+        if(argc>1&&std::string_view(argv[1])=="--tone-key-controls") {tone_key_controls();std::cout<<"Tone key controls passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--observer-only") {lpi_estimate_controls();std::cout<<"Observer controls passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--planner-examples") {planner_examples();std::cout<<"Planner examples passed\n";return 0;}
         if(argc>1&&std::string_view(argv[1])=="--search-arithmetic") {search_arithmetic_controls();std::cout<<"Search arithmetic controls passed\n";return 0;}

@@ -150,13 +150,13 @@ void validate_helper_callsign(std::string_view value) {
         throw Error("Helper carrier callsign must contain at most 19 printable ASCII characters");
 }
 helper::Frequency helper_frequency(std::string_view value) {
-    if(value=="high")return helper::Frequency::high;
-    if(value=="low")return helper::Frequency::low;
-    if(value=="0")return helper::Frequency::cochannel;
-    throw Error("Helper frequency must be high, low, or 0");
+    // Restore legacy stored patches with the only supported placement. Textual
+    // launch options are validated separately and reject the retired choices.
+    if(value=="high"||value=="low"||value=="0")return helper::Frequency::high;
+    throw Error("Helper frequency must be high");
 }
-std::string helper_frequency_id(helper::Frequency value) {
-    return value==helper::Frequency::high?"high":value==helper::Frequency::low?"low":"0";
+std::string helper_frequency_id(helper::Frequency) {
+    return "high";
 }
 double level(std::string value,std::string_view suffix,const char* name) {
     value=compact_units(std::move(value));
@@ -379,7 +379,7 @@ struct Controller::Impl {
         for(const auto* value:{"10","20","40","60","80","90"})
             f(UiField::helper_ratio_limit).options.push_back({value,std::string(value)+" dB"});
         f(UiField::helper_ratio_limit).selected="90";
-        f(UiField::helper_frequency).options={{"high","High"},{"low","Low"},{"0","0 Hz (discouraged)",true,ui::TextTone::discouraged}};
+        f(UiField::helper_frequency).options={{"high","High"}};
         f(UiField::helper_frequency).selected="high";
         for(const auto field:{UiField::clock_accuracy,UiField::clock_region,UiField::clock_offset,UiField::audio_error}) {
             f(field).text="Default";f(field).options={{"Default","Default"}};

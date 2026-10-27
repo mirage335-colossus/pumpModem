@@ -191,6 +191,12 @@ struct AnalyticFrequencyTranslator::Impl {
     std::uint64_t phase_origin_sample=0;
     double phase_origin_radians=0;
     bool tracking=false;
+    struct PendingPilot {
+        std::uint64_t sample=0;
+        double phase_radians=0,correction_hz=0;
+        CaptureBand output{};
+        bool valid=false;
+    } pending_pilot;
     explicit Impl(Config c):config(c),next(c.first_sample) {
         if(!c.sample_rate || !std::isfinite(c.correction_hz) ||
            !std::isfinite(c.input_band.lower_hz) || !std::isfinite(c.input_band.upper_hz) ||
@@ -228,6 +234,12 @@ struct AnalyticFrequencyTranslator::Impl {
             modular_product(config.correction_hz,group_delay,config.sample_rate);
         return static_cast<double>(std::remainder(2*std::numbers::pi_v<long double>*residue/config.sample_rate,
                                                   2*std::numbers::pi_v<long double>));
+    }
+    void apply_pilot(const PendingPilot& update)noexcept {
+        phase_origin_sample=next;phase_origin_radians=update.phase_radians;tracking=true;
+        config.correction_hz=update.correction_hz;output=update.output;
+        oscillator=std::polar(1.,update.phase_radians);
+        step=std::polar(1.,std::remainder(tau*config.correction_hz/config.sample_rate,tau));
     }
     double node_error(double hz)const {
         constexpr double pi_low=0x1.921fb54442d18p+1,pi_high=0x1.921fb54442d19p+1;
@@ -300,6 +312,7 @@ CaptureBand AnalyticFrequencyTranslator::output_band()const noexcept{return impl
 double AnalyticFrequencyTranslator::maximum_amplitude_error()const noexcept{return impl_->error;}
 double AnalyticFrequencyTranslator::image_leakage_bound()const noexcept{return impl_->error;}
 double AnalyticFrequencyTranslator::phase_at(std::uint64_t n)const noexcept{return impl_->phase(n);}
+std::uint64_t AnalyticFrequencyTranslator::next_sample()const noexcept{return impl_->next;}
 bool AnalyticFrequencyTranslator::track_frequency(double hz)noexcept {
     auto& s=*impl_;
     if(!s.config.continuous_reference || !std::isfinite(hz))return false;
@@ -311,6 +324,41 @@ bool AnalyticFrequencyTranslator::track_frequency(double hz)noexcept {
     s.phase_origin_sample=s.next;s.phase_origin_radians=std::arg(s.oscillator);s.tracking=true;
     s.config.correction_hz=hz;s.output={low,high};
     s.step=std::polar(1.,std::remainder(tau*hz/s.config.sample_rate,tau));
+    s.pending_pilot.valid=false;
+    return true;
+}
+bool AnalyticFrequencyTranslator::track_pilot(const PilotObservation& observation)noexcept {
+    auto& s=*impl_;
+    if(!s.config.continuous_reference || s.pending_pilot.valid ||
+       !std::isfinite(observation.expected_hz) || !std::isfinite(observation.observed_hz) ||
+       !std::isfinite(observation.phase_cycles) || !std::isfinite(observation.phase_sample_fraction) ||
+       (observation.tracking_frequency_hz && !std::isfinite(*observation.tracking_frequency_hz)) ||
+       observation.phase_sample_fraction<0 || observation.phase_sample_fraction>=1 ||
+       observation.first_sample>=observation.end_sample ||
+       observation.end_sample>observation.captured_end_sample ||
+       observation.phase_sample<observation.first_sample || observation.phase_sample>=observation.end_sample ||
+       observation.first_sample>std::numeric_limits<std::uint64_t>::max()-2*group_delay)return false;
+    const auto at=std::max(s.next,observation.first_sample+2*group_delay);
+    const auto input_at=at-group_delay;
+    if(at>=observation.end_sample)return false;
+    const auto sign=s.config.conjugate?-1.L:1.L;
+    const auto hz=observation.expected_hz-static_cast<double>(sign)*
+        observation.tracking_frequency_hz.value_or(observation.observed_hz);
+    if(!std::isfinite(hz))return false;
+    const auto low=s.config.conjugate?hz-s.config.input_band.upper_hz:s.config.input_band.lower_hz+hz;
+    const auto high=s.config.conjugate?hz-s.config.input_band.lower_hz:s.config.input_band.upper_hz+hz;
+    if(low<10 || high>s.config.sample_rate/2.-10)return false;
+    const auto rate=static_cast<long double>(s.config.sample_rate);
+    const auto expected=modular_product(observation.expected_hz,input_at,rate)/rate;
+    const auto forward=input_at>=observation.phase_sample;
+    const auto distance=forward?input_at-observation.phase_sample:observation.phase_sample-input_at;
+    const auto advance=(forward?1.L:-1.L)*modular_product(observation.observed_hz,distance,rate)-
+        std::fmod(static_cast<long double>(observation.observed_hz)*observation.phase_sample_fraction,rate);
+    const auto observed=std::remainder(static_cast<long double>(observation.phase_cycles),1.L)+advance/rate;
+    Impl::PendingPilot update{at,static_cast<double>(2*std::numbers::pi_v<long double>*
+        std::remainder(expected-sign*observed,1.L)),hz,{low,high},true};
+    if(at==s.next)s.apply_pilot(update);
+    else s.pending_pilot=update;
     return true;
 }
 void AnalyticFrequencyTranslator::push(std::span<const float> input,std::span<float> output,std::uint64_t first) {
@@ -322,6 +370,9 @@ void AnalyticFrequencyTranslator::push(std::span<const float> input,std::span<fl
         if((a<b && b-a<n)||(b<a && a-b<n))throw Error("helper translator PCM spans partially overlap");
     }
     for(std::size_t n=0;n<input.size();++n) {
+        if(s.pending_pilot.valid && s.pending_pilot.sample==s.next) {
+            s.apply_pilot(s.pending_pilot);s.pending_pilot.valid=false;
+        }
         s.history[s.position]=input[n];const auto real=static_cast<double>(s.at_delay(group_delay));
         if(s.config.correction_hz==0 && !s.config.conjugate && !s.config.continuous_reference)output[n]=static_cast<float>(real);
         else {

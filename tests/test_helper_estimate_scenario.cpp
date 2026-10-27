@@ -34,7 +34,7 @@ void strong_requirements() {
     check(!simulation::helper_strong_requirements(48960,5462.75,20,49.7403126773,
         .5*std::acos(-1.)/180,0).frequency_requirements_available,
         "native component eligibility was relabelled as a short polynomial fit");
-    const auto logical=simulation::helper_masked_frequency_requirements(6120,2462.5,20,0,true);
+    const auto logical=simulation::helper_masked_frequency_requirements(6120,2200,20,0,true);
     check(!logical.geometry_supported&&logical.reason.find("physical")!=std::string::npos,
         "logical sample rate was passed off as native physical capture");
     const auto process=simulation::helper_strong_requirements(6000,2200,20,100,.005,0);
@@ -124,7 +124,7 @@ void original_domain() {
     live::Settings cochannel;cochannel.transfer=o;cochannel.helper.power_w=15000;
     cochannel.helper.frequency=helper::Frequency::cochannel;
     check(!simulation::helper_frequency_forecast(tx,o,ch,request,{},simulation::ReceiverWorkMode::hardware_fallback,{},&cochannel).scenario,
-        "Cochannel policy manufactured an isolated helper forecast");
+        "Retired cochannel policy manufactured an isolated helper forecast");
     auto filter_request=request;filter_request.helper_frequency_hz=2990;
     const auto filter_limit=simulation::helper_frequency_forecast(tx,o,ch,filter_request);
     check(!filter_limit.scenario&&filter_limit.reason.find("filter is ineligible")!=std::string::npos,

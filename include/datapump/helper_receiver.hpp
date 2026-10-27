@@ -28,6 +28,10 @@ namespace datapump::helper {
 // change caused by a uniformly bounded Wiener phase path. It does not turn
 // the local AWGN linearization into a global likelihood/confidence interval.
 enum class FrequencyFit { unknown, local_polynomial, conditioned_polynomial, masked_tone_profile };
+// The former single-tone component fixtures retain their paired reversal.
+// Production optional metadata uses the separate auxiliary, whose240ms
+// reversal stays inverted until the zero-amplitude dwell boundary.
+enum class PunctuationFormat { paired_legacy, auxiliary_single };
 
 // One ACTUAL independently qualified phase-flip fit, not an extrapolated dwell
 // grid. Coordinates use Reference.sample_rate. The immutable last_sample is
@@ -162,7 +166,8 @@ public:
     explicit Receiver(double expected_hz,double search_half_width_hz=20,
                       std::vector<Crypto> keys={},
                       std::optional<OccupiedBand> ordinary_band={},
-                      FrequencyPrecisionOptions precision={});
+                      FrequencyPrecisionOptions precision={},
+                      PunctuationFormat punctuation=PunctuationFormat::paired_legacy);
     ~Receiver();
     Receiver(Receiver&&) noexcept;
     Receiver& operator=(Receiver&&) noexcept;
@@ -206,6 +211,32 @@ public:
     // Commit changes only frequency provenance;
     // phase, metadata, payload progress and completion have no authority here.
     bool commit_optional_frequency(const FrequencyPresenceCertificate&);
+private:
+    friend class AuxiliaryMetadataReceiver;
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+// Optional strong/local metadata only. Discovery uses a filtered diagnostic
+// copy; each complete dwell then fits independent pilot/auxiliary phasors on
+// its straight flank and removes only that fitted pilot from bounded raw PCM.
+// No phase continuity across dwells, decoded time, or payload authority follows.
+class AuxiliaryMetadataReceiver {
+public:
+    static std::size_t workspace_required(std::uint32_t rate);
+    AuxiliaryMetadataReceiver(std::uint32_t rate,double auxiliary_hz,double pilot_hz,
+        std::vector<Crypto> keys,FrequencyPrecisionOptions,std::size_t workspace_grant,
+        std::uint64_t first_sample=0);
+    ~AuxiliaryMetadataReceiver();
+    AuxiliaryMetadataReceiver(AuxiliaryMetadataReceiver&&) noexcept;
+    AuxiliaryMetadataReceiver& operator=(AuxiliaryMetadataReceiver&&) noexcept;
+    void push(std::span<const float>,std::uint64_t first_sample);
+    // At most one latest complete400ms dwell, no work queue. Owners may omit
+    // this call to yield optional decoding; expired raw support is discarded.
+    bool advance();
+    // Metadata is dated at the consumed raw frontier. All frequency, phase and
+    // timing authority flags are false; frequency_hz is diagnostic auxiliary Hz.
+    std::optional<Reference> take_update();
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

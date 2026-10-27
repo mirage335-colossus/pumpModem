@@ -1,5 +1,6 @@
 #include "datapump/helper_receiver.hpp"
 #include "datapump/helper_carrier.hpp"
+#include "datapump/helper_filter.hpp"
 #include "datapump/types.hpp"
 #include <algorithm>
 #include <source_location>
@@ -19,6 +20,31 @@ void check(bool condition,const std::source_location where=std::source_location:
     if(!condition)throw std::runtime_error(std::string(where.file_name())+":"+std::to_string(where.line())+" failed");
 }
 struct Result {std::vector<helper::Reference> updates;};
+// Isolated auxiliary component, extracted from the actual two-tone Generator.
+// The normalization preserves the historical component's amplitude/noise
+// fixtures; this is explicitly not composite-pilot isolation coverage.
+class AuxiliaryFixture {
+    helper::Generator composite_,pilot_;
+    bool paired_;
+public:
+    AuxiliaryFixture(helper::Options options,double frequency,double amplitude,double data_gain,
+                     std::uint64_t epoch,bool punctuate=true,std::optional<Crypto> key={},bool paired=false)
+        :composite_(options,{frequency+helper::auxiliary_pilot_spacing_hz,amplitude,data_gain,options.power_w,frequency},
+                    epoch,punctuate,key),
+         pilot_(options,{frequency+helper::auxiliary_pilot_spacing_hz,amplitude,data_gain,options.power_w},
+                epoch,false,key),paired_(paired) {}
+    std::complex<double> analytic(long double time,std::uint32_t rate) const {
+        auto value=(composite_.mix_analytic({},time,rate)-pilot_.mix_analytic({},time,rate))/
+            helper::auxiliary_amplitude_fraction;
+        if(paired_) {
+            const auto local=std::fmod(time,.4L);
+            const auto u=static_cast<double>(std::clamp((local-.276L)/.008L,0.L,1.L));
+            value*=1-2*u*u*u*(10+u*(-15+6*u));
+        }
+        return value;
+    }
+    float mix(long double time,std::uint32_t rate) const {return static_cast<float>(analytic(time,rate).real());}
+};
 Result run(bool punctuation,std::string callsign,double frequency,double phase,double delay,
            std::size_t chunk,double noise=0,bool quantize=false,bool timecode=false,
            std::optional<Crypto> transmit_key={},std::vector<Crypto> keys={},double ppm=0,
@@ -26,9 +52,9 @@ Result run(bool punctuation,std::string callsign,double frequency,double phase,d
            std::optional<long double> repeated_dwell={},helper::FrequencyPrecisionOptions precision={}) {
     constexpr std::uint32_t rate=48000;
     helper::Options options;options.power_w=100;options.callsign=std::move(callsign);options.timecode=timecode;
-    helper::Plan plan{frequency,.7,.1,100};
-    helper::Generator generator(options,plan,epoch,punctuation,std::move(transmit_key));
-    helper::Receiver receiver(2100,20,std::move(keys),std::nullopt,precision);
+    AuxiliaryFixture generator(options,frequency,.7,.1,epoch,punctuation,std::move(transmit_key));
+    helper::Receiver receiver(2100,20,std::move(keys),std::nullopt,precision,
+        helper::PunctuationFormat::auxiliary_single);
     Result out;std::vector<float> samples(chunk);
     std::mt19937 rng(519);std::normal_distribution<double> gaussian(0,noise);
     const auto count=static_cast<std::uint64_t>(3.2*rate);
@@ -37,7 +63,7 @@ Result run(bool punctuation,std::string callsign,double frequency,double phase,d
         for(std::size_t j=0;j<n;++j) {
             const auto time=static_cast<long double>(first+j)/rate*(1+ppm*1e-6)-delay;
             const auto generator_time=repeated_dwell?*repeated_dwell+std::fmod(std::max(0.L,time),.4L):time;
-            auto x=time<0?0.:std::real(generator.mix_analytic({},generator_time,rate)*std::polar(1.,phase));
+            auto x=time<0?0.:std::real(generator.analytic(generator_time,rate)*std::polar(1.,phase));
             x+=gaussian(rng);
             if(corrupt_metadata&&std::fmod(std::max(0.L,time),.4L)>.316L)
                 x+=.005*std::cos(tau*2173*static_cast<double>(time));
@@ -56,6 +82,11 @@ Result run(bool punctuation,std::string callsign,double frequency,double phase,d
 void metadata_has_no_timing_authority(const Result& result) {
     for(std::size_t i=0;i<result.updates.size();++i)if(result.updates[i].metadata) {
         const auto& publication=result.updates[i];
+        if(!publication.timing_valid) {
+            check(!publication.frequency_valid&&!publication.phase_valid&&
+                !publication.phase_observation_known&&!publication.punctuation.known);
+            continue; // Metadata-only per-dwell processing exposes no authority.
+        }
         bool compared=false;
         for(std::size_t previous=i;previous>0;--previous) {
             const auto& tone=result.updates[previous-1];
@@ -100,7 +131,7 @@ void paired_marker_identity_and_missing_return() {
         const bool lose_return=shape==1,return_only=shape==2;
         constexpr long double source_origin=.260L;
         helper::Options options;options.power_w=100;options.callsign="N0CALL";
-        helper::Generator source(options,{frequency,.7,.1,100},1800000000,false);
+        AuxiliaryFixture source(options,frequency,.7,.1,1800000000,false);
         helper::Receiver receiver(frequency,20);
         std::vector<float> samples(chunk);
         std::size_t frequencies=0,known=0,metadata=0,timed=0,late_frequencies=0;
@@ -116,7 +147,7 @@ void paired_marker_identity_and_missing_return() {
                 // or a post-return raw fit into canonical positive evidence.
                 const auto second_edge=lose_return&&time>=2.L?0.:2*smooth((local-.276L)/.008L);
                 const auto envelope=first_edge+second_edge;
-                const auto value=source.mix_analytic({},time,rate)*envelope*std::polar(1.,phase);
+                const auto value=source.analytic(time,rate)*envelope*std::polar(1.,phase);
                 samples[i]=static_cast<float>(std::round(value.real()*32767)/32767);
             }
             receiver.push(std::span(samples).first(count),rate,first);
@@ -174,8 +205,9 @@ void metadata_carrier_images() {
     for(const auto test:{Case{32000,2450,0},Case{32000,2262.5,.81},
                          Case{48000,2262.5,2.2},Case{48000,2462.5,.81}}) {
         helper::Options options;options.power_w=1500;options.callsign="N0CALL";
-        helper::Generator generator(options,{test.frequency,.7,.1,1500},1800000000,true);
-        helper::Receiver receiver(test.frequency,20);
+        AuxiliaryFixture generator(options,test.frequency,.7,.1,1800000000,true);
+        helper::Receiver receiver(test.frequency,20,{},std::nullopt,{},
+            helper::PunctuationFormat::auxiliary_single);
         constexpr double delay=.03719;
         std::array<float,512> samples{};Result result;
         const auto total=static_cast<std::uint64_t>(3.2*test.rate);
@@ -183,7 +215,7 @@ void metadata_carrier_images() {
             const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(),total-first));
             for(std::size_t i=0;i<count;++i) {
                 const auto time=static_cast<long double>(first+i)/test.rate-delay;
-                const auto value=time<0?0.:std::real(generator.mix_analytic({},time,test.rate)*
+                const auto value=time<0?0.:std::real(generator.analytic(time,test.rate)*
                     std::polar(1.,test.phase));
                 samples[i]=static_cast<float>(std::round(value*32767)/32767);
             }
@@ -201,6 +233,55 @@ void metadata_carrier_images() {
             check(reference.metadata->callsign=="N0CALL");decoded=true;
         }
         check(decoded);metadata_has_no_timing_authority(result);
+    }
+}
+void two_tone_auxiliary_metadata() {
+    constexpr std::uint32_t rate=48000;
+    constexpr double expected_auxiliary=2100,expected_pilot=expected_auxiliary+helper::auxiliary_pilot_spacing_hz;
+    constexpr double auxiliary=expected_auxiliary+.37,pilot=auxiliary+helper::auxiliary_pilot_spacing_hz,delay=.03719;
+    helper::Options options;options.power_w=100;options.callsign="N0CALL";options.timecode=false;
+    const auto required=helper::AuxiliaryMetadataReceiver::workspace_required(rate);
+    check(required<512*1024);
+    check(helper::AuxiliaryMetadataReceiver::workspace_required(96000)<512*1024);
+    bool declined=false;
+    try {helper::AuxiliaryMetadataReceiver unfunded(rate,expected_auxiliary,expected_pilot,{}, {},required-1);}
+    catch(const Error&) {declined=true;}
+    check(declined);
+    std::array<double,16> phases{};std::mt19937 random(8127);
+    std::uniform_real_distribution<double> phase(-std::numbers::pi,std::numbers::pi);
+    for(auto& value:phases)value=phase(random);
+    for(const bool phase_jumps:{false,true}) {
+    helper::Generator generator(options,{pilot,.7,.1,100,auxiliary},1800000000,true);
+    helper::AuxiliaryMetadataReceiver receiver(rate,expected_auxiliary,expected_pilot,{}, {},required);
+    std::array<float,137> input{};Result result;
+    const auto total=static_cast<std::uint64_t>(3.2*rate);
+    for(std::uint64_t first=0;first<total;first+=input.size()) {
+        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(input.size(),total-first));
+        for(std::size_t i=0;i<count;++i) {
+            const auto time=static_cast<long double>(first+i)/rate-delay;
+            const auto dwell=static_cast<std::size_t>(std::floor(std::max(0.L,time)/.4L));
+            input[i]=time<0?0:static_cast<float>(std::real(generator.mix_analytic({},time,rate)*
+                std::polar(1.,phase_jumps?phases[dwell%phases.size()]:0.)));
+        }
+        receiver.push(std::span(input).first(count),first);receiver.advance();
+        if(auto update=receiver.take_update()) {
+            check(update->sample<first+count);
+            check(update->phase_observation_sample<=update->sample);
+            check(update->punctuation.last_sample<=update->sample);
+            check(!update->frequency_valid&&!update->phase_valid&&!update->timing_valid);
+            result.updates.push_back(std::move(*update));
+        }
+    }
+    std::size_t decoded=0;
+    for(const auto& update:result.updates)if(update.metadata) {
+        check(update.metadata->kind==helper::MetadataKind::callsign);
+        check(update.metadata->callsign=="N0CALL"&&!update.metadata->authenticated);
+        check(std::abs(update.frequency_hz-auxiliary)<.002);
+        ++decoded;
+    }
+    std::cout<<"two-tone auxiliary phase_jumps="<<phase_jumps<<" references="<<result.updates.size()
+        <<" metadata="<<decoded<<" workspace_grant="<<required<<'\n';
+    check(decoded>0);metadata_has_no_timing_authority(result);
     }
 }
 void timecodes_and_corruption() {
@@ -396,7 +477,7 @@ LinkResult realistic_link(double cn0_db_hz,double power,double amplitude,std::si
     constexpr double expected=6380,frequency=6380.37,delay=.03719;
     helper::Options options;options.power_w=power;options.data_power_w=4;
     options.callsign="N0CALL";options.timecode=false;
-    helper::Generator generator(options,{frequency,amplitude,.1,power},1700000000,true);
+    AuxiliaryFixture generator(options,frequency,amplitude,.1,1700000000,true,{},true);
     FundedFrequencyReceiver receiver(expected,20,rate);
     const auto noise_sigma=std::sqrt(amplitude*amplitude*rate/(4*std::pow(10.,cn0_db_hz/10)));
     std::mt19937 rng(seed);std::normal_distribution<double> noise(0,noise_sigma);
@@ -405,7 +486,7 @@ LinkResult realistic_link(double cn0_db_hz,double power,double amplitude,std::si
         const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(chunk,rate*12-first));
         for(std::size_t i=0;i<count;++i) {
             const auto time=static_cast<long double>(first+i)/rate-delay;
-            const auto helper=time<0?0.:generator.mix(0,time,rate);
+            const auto helper=time<0?0.:generator.mix(time,rate);
             const auto payload=amplitude*std::sqrt(4/power)*std::cos(tau*1500*static_cast<double>(time));
             samples[i]=static_cast<float>(helper+payload+noise(rng));
         }
@@ -472,7 +553,7 @@ void weak_timecode_frequency(std::optional<bool> only={}) {
     for(const bool signal:{false,true}) {
         if(only&&signal!=*only)continue;
         helper::Options options;options.power_w=1500;options.timecode=true;
-        helper::Generator generator(options,{frequency,amplitude,0,1500},1700000000,true,key);
+        AuxiliaryFixture generator(options,frequency,amplitude,0,1700000000,true,key,true);
         FundedFrequencyReceiver receiver(expected,20,rate,{key});
         const auto sigma=std::sqrt(amplitude*amplitude*rate/(4*std::pow(10.,cn0/10)));
         std::mt19937 random(5181);std::normal_distribution<double> noise(0,sigma);
@@ -481,7 +562,7 @@ void weak_timecode_frequency(std::optional<bool> only={}) {
             const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(),20*rate-first));
             for(std::size_t i=0;i<count;++i) {
                 const auto time=static_cast<long double>(first+i)/rate-.03719L;
-                samples[i]=static_cast<float>((signal&&time>=0?generator.mix(0,time,rate):0.)+noise(random));
+                samples[i]=static_cast<float>((signal&&time>=0?generator.mix(time,rate):0.)+noise(random));
             }
             receiver.push(std::span<const float>(samples).first(count),rate,first);
             if(const auto reference=receiver.take_update()) {
@@ -505,7 +586,7 @@ LinkResult shifted_helper_frequency(bool signal,std::size_t chunk) {
     constexpr double frequency=expected*(1+ppm*1e-6)+offset;
     const Crypto key{std::array<std::uint8_t,32>{}};
     helper::Options options;options.power_w=1500;options.timecode=true;
-    helper::Generator generator(options,{expected,amplitude,0,1500},1800000000,true,key);
+    AuxiliaryFixture generator(options,expected,amplitude,0,1800000000,true,key,true);
     helper::FrequencyPrecisionOptions precision;
     precision.phase_noise_radians_per_sqrt_second=.50249378105604448*std::numbers::pi/180;
     FundedFrequencyReceiver receiver(expected,100,rate,{key},precision);
@@ -519,7 +600,7 @@ LinkResult shifted_helper_frequency(bool signal,std::size_t chunk) {
         for(std::size_t i=0;i<count;++i) {
             const auto time=static_cast<long double>(first+i)/rate;
             const auto source_time=time*(1+ppm*1e-6)-.03719L;phase+=phase_step(phase_random);
-            const auto value=!signal||source_time<0?0.:std::real(generator.mix_analytic({},source_time,rate)*
+            const auto value=!signal||source_time<0?0.:std::real(generator.analytic(source_time,rate)*
                 std::polar(1.,phase+tau*offset*static_cast<double>(time)));
             samples[i]=static_cast<float>(value+noise(noise_random));
         }
@@ -568,10 +649,11 @@ int main(int argc,char** argv) {
         check(argc<=2);std::cout<<std::unitbuf;
         const std::string_view which=argc==2?argv[1]:"all";
         if(which=="all") {
-            clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();timecodes_and_corruption();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();realistic_frequency();weak_timecode_frequency();shifted_frequency();chunks_and_gaps();
+            clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();two_tone_auxiliary_metadata();timecodes_and_corruption();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();realistic_frequency();weak_timecode_frequency();shifted_frequency();chunks_and_gaps();
         } else if(which=="strong") {
-            clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();timecodes_and_corruption();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();chunks_and_gaps();
+            clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();two_tone_auxiliary_metadata();timecodes_and_corruption();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();chunks_and_gaps();
         } else if(which=="pair")paired_marker_identity_and_missing_return();
+        else if(which=="two_tone")two_tone_auxiliary_metadata();
         else if(which=="realistic")realistic_frequency();
         else if(which=="legacy30"||which=="legacy24") {
             const bool reduced=which=="legacy24";

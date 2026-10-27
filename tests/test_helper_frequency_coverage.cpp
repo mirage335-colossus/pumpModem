@@ -1,6 +1,7 @@
 #include "datapump/helper_carrier.hpp"
 #include "datapump/helper_receiver.hpp"
 #include "datapump/modem.hpp"
+#include "helper_auxiliary_fixture.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -26,10 +27,10 @@ Summary strong_reference(double physical_sigma,double modeled_sigma,double chirp
     constexpr double expected=2450.3125,offset=.58,delay=.03719;
     helper::Options options;options.power_w=15000;options.timecode=true;
     const Crypto key{std::array<std::uint8_t,32>{}};
-    helper::Generator generator(options,{expected,.7,0,15000},1800000000,true,key);
+    test::AuxiliaryFixture generator(options,expected,.7,0,1800000000,true,key);
     helper::FrequencyPrecisionOptions precision;
     precision.phase_noise_radians_per_sqrt_second=modeled_sigma;
-    helper::Receiver receiver(expected,20,{key},{},precision);
+    helper::Receiver receiver(expected,20,{key},{},precision,helper::PunctuationFormat::auxiliary_single);
     std::mt19937_64 random(1),phase_random(1^0xa0761d6478bd642fULL);
     std::normal_distribution<double> noise(0,.0001),phase_step(0,physical_sigma/std::sqrt(rate));
     std::array<float,137> samples{};double phase=.81;Summary result;
@@ -44,7 +45,7 @@ Summary strong_reference(double physical_sigma,double modeled_sigma,double chirp
             const auto source_time=static_cast<long double>(time)-delay;
             actual_phase[first+i]=phase+tau*(expected*static_cast<double>(source_time)+
                 offset*time+chirp*time*time/2);
-            const auto signal=source_time<0?0.:std::real(generator.mix_analytic({},source_time,rate)*
+            const auto signal=source_time<0?0.:std::real(generator.analytic(source_time,rate)*
                 std::polar(1.,phase+tau*(offset*time+chirp*time*time/2)));
             samples[i]=static_cast<float>(signal+noise(random));
         }
@@ -124,16 +125,16 @@ void off_basis_punctuation() {
     const Crypto key{seed};
     helper::Options options;options.power_w=15000;options.data_power_w=4;options.ratio_limit_db=90;
     auto placement=helper::plan(options,1500,1800,rate,0,.5);
-    placement.frequency_hz=expected;
     const auto sigma=std::hypot(.5,.05)*std::numbers::pi/180;
     const auto awgn=std::sqrt(modem::nominal_signal_power*std::pow(10.,-101.44727494896694/10))*
         placement.data_gain*2;
     for(const double offset:{-30.,0.,30.})for(const double ppm:{0.,100.}) {
         const auto clock=1+ppm*1e-6;
-        helper::Generator generator(options,placement,1800000005,true,key);
+        test::AuxiliaryFixture generator(options,expected,placement.helper_gain,placement.data_gain,
+                                        1800000005,true,key);
         helper::FrequencyPrecisionOptions precision;
         precision.phase_noise_radians_per_sqrt_second=sigma;
-        helper::Receiver receiver(expected,100,{key},{},precision);
+        helper::Receiver receiver(expected,100,{key},{},precision,helper::PunctuationFormat::auxiliary_single);
         std::mt19937_64 phase_random(1^0xa0761d6478bd642fULL),noise_random(1);
         std::normal_distribution<double> phase_normal(0,1),noise_normal(0,1);
         double phase=.3141592653589793,max_dwell_error=0;
@@ -143,7 +144,7 @@ void off_basis_punctuation() {
             const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(),8ULL*rate-first));
             for(std::size_t i=0;i<count;++i) {
                 const auto seconds=static_cast<long double>(first+i)/rate;
-                const auto analytic=generator.mix_analytic({},seconds*clock,rate);
+                const auto analytic=generator.analytic(seconds*clock,rate);
                 samples[i]=static_cast<float>((analytic*std::polar(1.,phase+tau*offset*
                     static_cast<double>(seconds))).real()+awgn*noise_normal(noise_random));
                 phase+=sigma/std::sqrt(static_cast<double>(rate))*phase_normal(phase_random);

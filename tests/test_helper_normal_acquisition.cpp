@@ -64,7 +64,7 @@ struct Options {
     std::vector<bool> helpers{false,true};
     Payload payload=Payload::bits;
     bool metadata_only=false,ephemeral_key=false,keyfile_explicit=false,bit_count_explicit=false,wall_explicit=false;
-    bool work_trace=false,runtime_metrics=false,gpsdo_reference=false;
+    bool work_trace=false,runtime_metrics=false,gpsdo_reference=false,gpsdo_only=false;
     std::optional<std::size_t> workspace_bytes;
     std::optional<std::string> clock_sync_text,audio_error_text;
     std::optional<unsigned> source_bytes;
@@ -91,6 +91,10 @@ Options parse(int argc,char** argv) {
         else if(argument=="--work-trace")result.work_trace=true;
         else if(argument=="--runtime-metrics")result.runtime_metrics=true;
         else if(argument=="--gpsdo-reference")result.gpsdo_reference=result.runtime_metrics=true;
+        else if(argument=="--gpsdo-only") {
+            result.gpsdo_only=result.gpsdo_reference=result.runtime_metrics=true;
+            result.helpers={false};
+        }
         else if(argument=="--workspace-bytes") {
             const auto text=value();std::size_t consumed=0;const auto bytes=std::stoull(text,&consumed);
             require(!text.empty()&&text.front()>='0'&&text.front()<='9'&&consumed==text.size()&&bytes>0&&
@@ -171,9 +175,10 @@ Options parse(int argc,char** argv) {
                 std::filesystem::file_size(*result.inspect_path)<=audio::trace::State::maximum_file_bytes,
                 "posthoc inspection requires an existing bounded trace file");
     }
-    require(!result.gpsdo_reference||(result.workspace_bytes&&result.helpers==std::vector<bool>{false,true}&&
+    require(!result.gpsdo_reference||(result.workspace_bytes&&
+            result.helpers==(result.gpsdo_only?std::vector<bool>{false}:std::vector<bool>{false,true})&&
             !result.observe_samples&&!result.inspect_path),
-            "GPSDO reference requires an explicit byte workspace and the full declared helper-OFF/ON pair");
+            "GPSDO reference requires an explicit byte workspace and its declared helper-OFF/ON pair or standalone control");
     if(result.evidence.empty())result.evidence=std::filesystem::temp_directory_path()/"datapump-helper-normal-acquisition";
     return result;
 }
@@ -291,7 +296,7 @@ void auto_geometry(Profile profile,const live::Settings& value,bool helper_enabl
     auto options=value.helper;options.power_w=configured_helper_power_w;
     const auto width=std::max(helper::occupied_bandwidth(c),helper::occupied_bandwidth(*value.long_message_modem));
     const auto tone=helper::plan(options,helper::placement_band(c,width),120000000,0,modem::outer_dsss_transmit_gain(c)).frequency_hz;
-    helper::PayloadFilter filter(c.sample_rate,tone);
+    helper::PayloadFilter filter(c.sample_rate,tone-helper::auxiliary_pilot_spacing_hz/2,425);
     modem::ChannelConfig impairments;
     impairments.snr_db=value.simulation_snr_db;impairments.clock_error_ppm=value.simulation_clock_error_ppm;
     impairments.frequency_offset_hz=value.simulation_frequency_offset_hz;
@@ -341,7 +346,7 @@ void auto_geometry(Profile profile,const live::Settings& value,bool helper_enabl
             <<low<<','<<high<<','<<tone<<','<<error<<','<<std::quoted(selection.reason)<<'\n';
         require(selection.supported&&selection.backend==modem::ReceiverBackend::existing_complex&&
                 selection.full_frequency_coverage&&selection.full_clock_coverage&&!oscillator.limited&&
-                low>0&&high<seeded.sample_rate/2.&&(high<tone-325||low>tone+325)&&error<=.001,
+                low>0&&high<seeded.sample_rate/2.&&(high<tone-725||low>tone+325)&&error<=.001,
                 "Auto metadata lacks its original backend, clock domain or full-support helper FIR certificate");
         std::cout<<std::setprecision(17)<<"auto_geometry,"<<name(profile)<<','<<helper_enabled<<','<<i<<','<<profiles.size()<<','
             <<tags.size()<<','<<modem::receiver_backend_name(selection.backend)<<','<<prepared.search.hypotheses.size()<<','
@@ -2008,7 +2013,10 @@ int main(int argc,char** argv) {try {
     }
     if(options.gpsdo_reference) {
         std::cout<<"# reference_configuration columns: profile,control,matched_workspace_bytes,LF_accuracy_ppm,RF_accuracy_ppm,modeled_CFO_Hz,modeled_audio_clock_ppm,modeled_phase_diffusion_degrees_per_sqrt_second\n";
-        std::cout<<"# reference_triplet columns: profile,payload,declared_OFF_exit,declared_ON_exit,GPSDO_reference_OFF_exit,identical_actual_workspace,workspace_bytes; every exit retains the complete ordinary source/wire/progress/physical-END checks;0=passed,1=failed,2=incomplete\n";
+        if(options.gpsdo_only)
+            std::cout<<"# reference_control_only columns: profile,payload,GPSDO_reference_OFF_exit,workspace_bytes; declared OFF/ON runs are unexecuted, not inferred or reported as passed;0=passed,1=failed,2=incomplete\n";
+        else
+            std::cout<<"# reference_triplet columns: profile,payload,declared_OFF_exit,declared_ON_exit,GPSDO_reference_OFF_exit,identical_actual_workspace,workspace_bytes; every exit retains the complete ordinary source/wire/progress/physical-END checks;0=passed,1=failed,2=incomplete\n";
     }
     std::cout<<"# acceptance_configuration columns: profile,helper,configured_ON_helper_W,actual_helper_W,Controller_formatted_launch_command; new HF profiles retain Auto/rolling, named-key encryption and the declared shared/independent oscillator topology\n";
     std::cout<<"# acceptance_eligibility columns: profile,helper,ordinary_compact_requested,ordinary_numeric_grant_bytes,supported,backend,full_frequency_coverage,full_clock_coverage,reason; ordinary unassisted metadata only, never measured helper qualification or a constructed receiver\n";
@@ -2038,7 +2046,9 @@ int main(int argc,char** argv) {try {
                 <<controller_workspace<<','<<*matched_workspace<<','<<bank_bytes<<','
                 <<(options.workspace_bytes?"explicit identical byte budget":"% resolved once per matched pair")<<'\n';
             metadata(profile,helper,resolved);
-            if(options.metadata_only)continue;
+            // A standalone control clones the identical declared OFF geometry
+            // below, without repeating already preserved OFF/ON experiments.
+            if(options.metadata_only||options.gpsdo_only)continue;
             auto result=run(profile,helper,resolved,options);
             if(result.exit==1)status=1;else if(result.exit==2&&status==0)status=2;
             if(!helper)ordinary=result;
@@ -2096,10 +2106,14 @@ int main(int argc,char** argv) {try {
             if(!options.metadata_only) {
                 auto result=run(profile,false,resolved,options);
                 if(result.exit==1)status=1;else if(result.exit==2&&status==0)status=2;
-                std::cout<<"reference_triplet,"<<name(profile)<<','<<name(options.payload)<<','
-                    <<(ordinary?ordinary->exit:2)<<','<<(assisted?assisted->exit:2)<<','<<result.exit<<','
-                    <<(ordinary&&assisted&&ordinary->workspace_bytes==result.workspace_bytes&&
-                        assisted->workspace_bytes==result.workspace_bytes)<<','<<result.workspace_bytes<<'\n';
+                if(options.gpsdo_only)
+                    std::cout<<"reference_control_only,"<<name(profile)<<','<<name(options.payload)<<','
+                        <<result.exit<<','<<result.workspace_bytes<<'\n';
+                else
+                    std::cout<<"reference_triplet,"<<name(profile)<<','<<name(options.payload)<<','
+                        <<(ordinary?ordinary->exit:2)<<','<<(assisted?assisted->exit:2)<<','<<result.exit<<','
+                        <<(ordinary&&assisted&&ordinary->workspace_bytes==result.workspace_bytes&&
+                            assisted->workspace_bytes==result.workspace_bytes)<<','<<result.workspace_bytes<<'\n';
             }
         }
     }

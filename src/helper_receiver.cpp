@@ -2,6 +2,7 @@
 #include "datapump/helper_receiver.hpp"
 #include "helper_punctuation_numeric.hpp"
 #include "datapump/helper_carrier.hpp"
+#include "datapump/helper_filter.hpp"
 #include "datapump/types.hpp"
 #include <algorithm>
 #include <array>
@@ -1067,7 +1068,7 @@ struct Receiver::Impl {
         double amplitude=0;
         double punctuation=-1,punctuation_uncertainty=0,anchor=0,timing_uncertainty=0;
         double boundary_notch=-1,boundary_level=1;
-        bool timing_valid=false;
+        bool timing_valid=false,metadata_timing_hint=false;
         std::uint64_t punctuation_count=0;
         double metadata_dwell=0,metadata_last_dwell=-1;
         bool metadata_active=false;
@@ -1081,13 +1082,15 @@ struct Receiver::Impl {
     std::vector<Crypto> keys;
     OccupiedBand conditioning;
     FrequencyPrecisionOptions precision;
+    PunctuationFormat punctuation_format;
     std::uint64_t punctuation_generation=0;
     std::unique_ptr<FrequencyProfile> optional_frequency;
     std::uint64_t optional_generation=1,optional_ordinal=0;
     FrequencyWorkDecline optional_decline=FrequencyWorkDecline::grant_unavailable;
     explicit Impl(double e,double w,std::vector<Crypto> k,std::optional<OccupiedBand> band,
-                  FrequencyPrecisionOptions p)
-        :expected(e),width(w),keys(std::move(k)),conditioning(band.value_or(OccupiedBand{})),precision(p) {}
+                  FrequencyPrecisionOptions p,PunctuationFormat format)
+        :expected(e),width(w),keys(std::move(k)),conditioning(band.value_or(OccupiedBand{})),precision(p),
+         punctuation_format(format) {}
 
     void bump_optional_generation() noexcept {
         if(optional_generation!=UINT64_MAX)++optional_generation;
@@ -1119,11 +1122,11 @@ struct Receiver::Impl {
     bool tone_time(double time) const {
         if(!state.timing_valid)return true;
         const auto t=local(time);
-        // The second 8ms reversal restores the running carrier at284ms.
-        // Keep one complete40ms raw fit before the earliest compact metadata
-        // at332ms, with the measured grid error excluded at both boundaries.
+        // Both formats leave a straight flank before compact metadata. The
+        // separate auxiliary remains inverted after its single240ms edge.
         const auto guard=std::max(1./state.rate,state.timing_uncertainty);
-        return (t>=.008&&t<.212)||(t>=.284+guard&&t<.332-guard);
+        const auto straight_begin=punctuation_format==PunctuationFormat::auxiliary_single?.244:.284;
+        return (t>=.008&&t<.212)||(t>=straight_begin+guard&&t<.332-guard);
     }
     void fuse_frequency(Reference& reference) const {
         if(!optional_frequency||!optional_frequency->qualified())return;
@@ -1376,10 +1379,11 @@ struct Receiver::Impl {
         if(!std::isfinite(frequency)||std::abs(frequency-expected)>width+1e-6)return false;
         r.frequency_hz=frequency;
         auto phase=std::arg(c)+tau*s.fit_hz*static_cast<double>(s.fit_size-1)/s.rate;
-        // The paired punctuation is negative only between the two completed
-        // transitions; metadata and the next dwell share the running phase.
+        // Remove only the selected waveform's known punctuation sign. This
+        // auxiliary phase never becomes the pure pilot's phase observation.
         const auto dwell_phase=local(seconds(r.sample));
-        if(s.timing_valid&&dwell_phase>=.244&&dwell_phase<.276)phase-=std::numbers::pi;
+        const auto inverted_end=punctuation_format==PunctuationFormat::auxiliary_single?.4:.276;
+        if(s.timing_valid&&dwell_phase>=.244&&dwell_phase<inverted_end)phase-=std::numbers::pi;
         r.phase_radians=phase_wrap(phase);
         const auto noise=std::sqrt(residual/degrees);
         // Endpoint evaluation has greater variance than a center phasor. Use
@@ -1544,7 +1548,7 @@ struct Receiver::Impl {
         return b.z*std::polar(1.,-tau*(state.guess_hz-state.basis_hz)*(t-center));
     }
     void find_punctuation() {
-        auto& s=state;if(s.ring_count<32||!s.coarse_valid)return;
+        auto& s=state;if(s.metadata_timing_hint||s.ring_count<32||!s.coarse_valid)return;
         const auto center=(static_cast<double>(bin(13).first)+.5*s.bin_size)/s.rate;
         if(s.punctuation>=0&&center-s.punctuation<.1)return;
         std::complex<double> left{},right{};double left_power=0,right_power=0;
@@ -1869,8 +1873,10 @@ struct Receiver::Impl {
                r.metadata_frequency_uncertainty_hz>.002)return;
             s.metadata_active=true;s.metadata_dwell=dwell;s.bb={};s.dd={};s.bd={};s.rhs={};s.rhs_derivative={};
             s.metadata_energy=0;s.metadata_samples=0;s.metadata_gain=s.amplitude;
-            // Paired punctuation has returned to the canonical running phase.
-            s.metadata_osc=std::polar(1.,r.phase_radians+tau*r.frequency_hz*age);
+            // Metadata returns to the applicable underlying auxiliary state,
+            // which remains inverted for the single-reversal waveform.
+            const auto sign=punctuation_format==PunctuationFormat::auxiliary_single?std::numbers::pi:0.;
+            s.metadata_osc=std::polar(1.,r.phase_radians+tau*r.frequency_hz*age+sign);
             s.metadata_step=std::polar(1.,tau*r.frequency_hz/s.rate);
         }
         const auto position=(t-.332)/.008;
@@ -1897,7 +1903,8 @@ struct Receiver::Impl {
     }
 };
 Receiver::Receiver(double expected,double width,std::vector<Crypto> keys,
-                   std::optional<OccupiedBand> ordinary_band,FrequencyPrecisionOptions precision) {
+                   std::optional<OccupiedBand> ordinary_band,FrequencyPrecisionOptions precision,
+                   PunctuationFormat punctuation) {
     if(!std::isfinite(expected)||expected<=0||!std::isfinite(width)||width<0||width>100||keys.size()>8)
         throw Error("invalid Helper Carrier precision band or receive-key count");
     if(!std::isfinite(precision.maximum_audio_clock_ppm)||precision.maximum_audio_clock_ppm<0||
@@ -1920,7 +1927,7 @@ Receiver::Receiver(double expected,double width,std::vector<Crypto> keys,
     constexpr std::size_t scratch_bound=2880;
     if(sizeof(*this)+sizeof(Impl)+compact.capacity()*sizeof(Crypto)+scratch_bound+metadata_heap>workspace_bound)
         throw Error("Helper Carrier precision receiver exceeds its bounded workspace");
-    impl_=std::make_unique<Impl>(expected,width,std::move(compact),ordinary_band,precision);
+    impl_=std::make_unique<Impl>(expected,width,std::move(compact),ordinary_band,precision,punctuation);
 }
 Receiver::~Receiver()=default;
 Receiver::Receiver(Receiver&&) noexcept=default;
@@ -2033,6 +2040,173 @@ bool Receiver::commit_optional_frequency(const FrequencyPresenceCertificate& pre
     if(update&&update->sample>=selected.sample)impl_->fuse_frequency(*update);
     else if(!update)update=selected;
     return true;
+}
+
+struct AuxiliaryMetadataReceiver::Impl {
+    std::uint32_t rate;
+    double expected_auxiliary,spacing;
+    Receiver discovery,decoder;
+    PayloadFilter notch;
+    std::vector<float> raw;
+    std::array<float,4096> filtered{},corrected{};
+    std::uint64_t first_raw,next_raw,filtered_next,last_dwell_end=0;
+    std::optional<Reference> grid,update;
+    Impl(std::uint32_t r,double auxiliary,double pilot,std::vector<Crypto> keys,
+         FrequencyPrecisionOptions precision,std::uint64_t first)
+        :rate(r),expected_auxiliary(auxiliary),spacing(pilot-auxiliary),
+         discovery(auxiliary,20,{},std::nullopt,precision,PunctuationFormat::auxiliary_single),
+         decoder(auxiliary,20,std::move(keys),std::nullopt,precision,PunctuationFormat::auxiliary_single),
+         notch(r,pilot,100),raw(static_cast<std::size_t>(std::ceil(.84*r))+1),
+         first_raw(first),next_raw(first),filtered_next(first+notch.delay()) {}
+    float sample(std::uint64_t at) const {return raw[at%raw.size()];}
+    template<std::size_t N> static bool solve(std::array<std::array<double,N>,N> a,
+            std::array<double,N> b,std::array<double,N>& x) {
+        for(std::size_t i=0;i<N;++i) {
+            auto pivot=i;for(auto j=i+1;j<N;++j)if(std::abs(a[j][i])>std::abs(a[pivot][i]))pivot=j;
+            if(!(std::abs(a[pivot][i])>1e-12))return false;
+            std::swap(a[i],a[pivot]);std::swap(b[i],b[pivot]);
+            for(auto j=i+1;j<N;++j) {
+                const auto q=a[j][i]/a[i][i];
+                for(auto k=i+1;k<N;++k)a[j][k]-=q*a[i][k];
+                b[j]-=q*b[i];
+            }
+        }
+        for(auto i=N;i-->0;) {
+            auto value=b[i];for(auto j=i+1;j<N;++j)value-=a[i][j]*x[j];
+            x[i]=value/a[i][i];if(!std::isfinite(x[i]))return false;
+        }
+        return true;
+    }
+    // Only this dwell's measured straight flank is revisited. Three fixed
+    // local slope corrections refine two already discovered frequencies;
+    // there is no historical PCM frequency search or cross-hop phase model.
+    bool fit(std::uint64_t first,std::uint64_t end,double& auxiliary,double& pilot,
+             std::complex<double>& pilot_amplitude) const {
+        const auto duration=static_cast<double>(end-first)/rate;
+        for(unsigned iteration=0;iteration<3;++iteration) {
+            std::array<std::array<double,8>,8> gram{};std::array<double,8> rhs{},x{};
+            std::complex<double> a{1,0},p{1,0};
+            const auto da=std::polar(1.,tau*auxiliary/rate),dp=std::polar(1.,tau*pilot/rate);
+            for(auto at=first;at<end;++at) {
+                const auto u=static_cast<double>(at-first)/(end-first)-.5;
+                const std::array<double,8> b{a.real(),a.imag(),u*a.real(),u*a.imag(),
+                    p.real(),p.imag(),u*p.real(),u*p.imag()};
+                for(unsigned i=0;i<8;++i) {
+                    rhs[i]+=sample(at)*b[i];
+                    for(unsigned j=0;j<8;++j)gram[i][j]+=b[i]*b[j];
+                }
+                a*=da;p*=dp;
+            }
+            if(!solve(gram,rhs,x))return false;
+            const std::complex<double> ca{x[0],-x[1]},sa{x[2],-x[3]},cp{x[4],-x[5]},sp{x[6],-x[7]};
+            if(std::norm(ca)<1e-12||std::norm(cp)<1e-12)return false;
+            const auto fa=std::imag(sa*std::conj(ca))/(std::norm(ca)*tau*duration);
+            const auto fp=std::imag(sp*std::conj(cp))/(std::norm(cp)*tau*duration);
+            if(!std::isfinite(fa)||!std::isfinite(fp)||std::abs(fa)>2||std::abs(fp)>2)return false;
+            auxiliary+=fa;pilot+=fp;
+        }
+        std::array<std::array<double,4>,4> gram{};std::array<double,4> rhs{},x{};
+        std::complex<double> a{1,0},p{1,0};
+        const auto da=std::polar(1.,tau*auxiliary/rate),dp=std::polar(1.,tau*pilot/rate);
+        double energy=0;
+        for(auto at=first;at<end;++at) {
+            const std::array<double,4> b{a.real(),a.imag(),p.real(),p.imag()};
+            const auto value=sample(at);energy+=value*value;
+            for(unsigned i=0;i<4;++i) {
+                rhs[i]+=value*b[i];for(unsigned j=0;j<4;++j)gram[i][j]+=b[i]*b[j];
+            }
+            a*=da;p*=dp;
+        }
+        if(!solve(gram,rhs,x)||!(energy>0))return false;
+        double explained=0;for(unsigned i=0;i<4;++i)explained+=x[i]*rhs[i];
+        if(explained<.9*energy||std::abs(auxiliary-expected_auxiliary)>20)return false;
+        pilot_amplitude={x[2],-x[3]};return true;
+    }
+    bool advance() {
+        if(!grid||!grid->timing_valid||!grid->frequency_valid||!next_raw||
+           next_raw-1<grid->sample||next_raw-1-grid->sample>rate)return false;
+        const auto frontier=static_cast<double>(next_raw)/rate;
+        auto dwell=grid->dwell_start_seconds+.4*std::floor((frontier-grid->dwell_start_seconds)/.4);
+        if(dwell+.4>frontier)dwell-=.4;
+        if(dwell<0)return false;
+        const auto first=static_cast<std::uint64_t>(std::ceil(dwell*rate));
+        const auto end=static_cast<std::uint64_t>(std::ceil((dwell+.4)*rate));
+        const auto retained=std::max(first_raw,next_raw>raw.size()?next_raw-raw.size():0);
+        if(end>next_raw||end<=last_dwell_end||first<retained)return false;
+        last_dwell_end=end;
+        const auto fit_first=static_cast<std::uint64_t>(std::ceil((dwell+.04)*rate));
+        const auto fit_end=static_cast<std::uint64_t>(std::ceil((dwell+.20)*rate));
+        double auxiliary=grid->frequency_hz,pilot=auxiliary+spacing;
+        std::complex<double> amplitude;
+        if(fit_end<=fit_first||!fit(fit_first,fit_end,auxiliary,pilot,amplitude))return true;
+        decoder.reset();decoder.push({},rate,first);
+        auto& state=decoder.impl_->state;
+        // Private metadata decoding may use the independently observed grid.
+        // None of these conditioned tone/phase fits is exposed as assistance.
+        state.metadata_timing_hint=true;state.timing_valid=true;state.anchor=dwell;
+        state.timing_uncertainty=grid->dwell_uncertainty_seconds;state.punctuation=dwell;
+        state.coarse_valid=true;state.coarse_hz=state.guess_hz=auxiliary;
+        for(auto at=first;at<end;) {
+            const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(corrected.size(),end-at));
+            auto oscillator=std::polar(1.,tau*pilot*static_cast<double>(
+                (static_cast<long double>(at)-fit_first)/rate));
+            const auto step=std::polar(1.,tau*pilot/rate);
+            for(std::size_t i=0;i<count;++i) {
+                const auto t=static_cast<double>(at+i)/rate-dwell;
+                const auto envelope=smooth(std::min(t,.4-t)/.004);
+                corrected[i]=static_cast<float>(sample(at+i)-envelope*std::real(amplitude*oscillator));
+                oscillator*=step;
+            }
+            decoder.push(std::span<const float>(corrected).first(count),rate,at);at+=count;
+            if(auto decoded=decoder.take_update();decoded&&decoded->metadata) {
+                decoded->sample=next_raw-1;decoded->frequency_hz=auxiliary;
+                decoded->frequency_valid=decoded->phase_valid=decoded->timing_valid=false;
+                decoded->phase_observation_known=false;decoded->phase_observation_sample=0;
+                decoded->punctuation={};update=std::move(decoded);
+            }
+        }
+        return true;
+    }
+};
+std::size_t AuxiliaryMetadataReceiver::workspace_required(std::uint32_t rate) {
+    if(rate<1000||rate>96000)throw Error("optional Helper metadata requires1..96kHz PCM");
+    const auto taps=static_cast<std::size_t>(std::ceil(.04*rate))|1U;
+    return sizeof(Impl)+(static_cast<std::size_t>(std::ceil(.84*rate))+1)*sizeof(float)+
+        taps*(sizeof(double)+sizeof(float))+2*Receiver::workspace_bound+2048;
+}
+AuxiliaryMetadataReceiver::AuxiliaryMetadataReceiver(std::uint32_t rate,double auxiliary,double pilot,
+        std::vector<Crypto> keys,FrequencyPrecisionOptions precision,std::size_t grant,std::uint64_t first) {
+    const auto required=workspace_required(rate);
+    if(grant<required)throw Error("optional Helper metadata workspace was not prepaid");
+    if(!std::isfinite(auxiliary)||!std::isfinite(pilot)||pilot<=auxiliary||
+       first>UINT64_MAX-static_cast<std::size_t>(std::ceil(.04*rate)))
+        throw Error("invalid optional Helper metadata geometry");
+    impl_=std::make_unique<Impl>(rate,auxiliary,pilot,std::move(keys),precision,first);
+    if(sizeof(*this)+sizeof(Impl)+impl_->raw.capacity()*sizeof(float)+impl_->notch.allocated_bytes()+
+       2*Receiver::workspace_bound>grant)throw Error("optional Helper metadata exceeds its workspace grant");
+}
+AuxiliaryMetadataReceiver::~AuxiliaryMetadataReceiver()=default;
+AuxiliaryMetadataReceiver::AuxiliaryMetadataReceiver(AuxiliaryMetadataReceiver&&) noexcept=default;
+AuxiliaryMetadataReceiver& AuxiliaryMetadataReceiver::operator=(AuxiliaryMetadataReceiver&&) noexcept=default;
+void AuxiliaryMetadataReceiver::push(std::span<const float> samples,std::uint64_t first) {
+    auto& s=*impl_;
+    if(first!=s.next_raw||samples.size()>UINT64_MAX-first)
+        throw Error("optional Helper metadata capture is discontinuous");
+    for(std::size_t offset=0;offset<samples.size();offset+=s.filtered.size()) {
+        const auto input=samples.subspan(offset,std::min(s.filtered.size(),samples.size()-offset));
+        for(const auto value:input) {
+            if(!std::isfinite(value))throw Error("optional Helper metadata contains a nonfinite sample");
+            s.raw[s.next_raw%s.raw.size()]=value;++s.next_raw;
+        }
+        const auto count=s.notch.push(input,s.filtered);
+        if(count)s.discovery.push(std::span<const float>(s.filtered).first(count),s.rate,s.filtered_next);
+        s.filtered_next+=count;
+        if(auto grid=s.discovery.take_update();grid&&grid->timing_valid&&grid->frequency_valid)s.grid=std::move(grid);
+    }
+}
+bool AuxiliaryMetadataReceiver::advance() {return impl_->advance();}
+std::optional<Reference> AuxiliaryMetadataReceiver::take_update() {
+    auto out=std::move(impl_->update);impl_->update.reset();return out;
 }
 
 }

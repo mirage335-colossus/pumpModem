@@ -17,6 +17,7 @@
 #include "../src/receiver_oscillator_policy.hpp"
 #include "datapump/resampler.hpp"
 #include "datapump/fhss_schedule.hpp"
+#include "helper_auxiliary_fixture.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -1223,14 +1224,17 @@ void gps_clock_backend_shapes() {
 
 // Exercise the actual software composition point with nonzero adjustable
 // Resampler correction: no analytic/synthetic clock snapshot is substituted.
+// This isolates a paired auxiliary for the legacy clock tracker's compatibility
+// path; it does not qualify production pure-pilot or single-reversal clock aid.
 void gps_clock_actual_source() {
     constexpr unsigned rate=48000;constexpr std::uint64_t epoch=1793050572;
     for(const double b_ppm:{-550.,550.}) {
         helper::Options options;options.power_w=40;options.data_power_w=4;
-        helper::Generator generator(options,helper::Plan{2062.5,.6,0,40},epoch,true,Crypto(std::array<std::uint8_t,32>{}));
+        test::AuxiliaryFixture generator(options,2062.5,.6,0,epoch,true,
+                                        Crypto(std::array<std::uint8_t,32>{}),true);
         audio::Resampler converter(rate,rate,true);converter.initialize_timing(0,b_ppm*1e-6);
-        converter.set_output_transform([&](float payload,long double seconds,std::uint32_t fs) {
-            return generator.mix(payload,seconds+.137L,fs);
+        converter.set_output_transform([&](float,long double seconds,std::uint32_t fs) {
+            return generator.mix(seconds+.137L,fs);
         });
         const helper::ToneTrackerConfig config{rate,2062.5,20,0,.5};
         helper::ToneTracker tracker(config,helper::ToneTracker::workspace_required(config));
@@ -1245,7 +1249,7 @@ void gps_clock_actual_source() {
               result.clock_last_sample<produced && result.clock_error_ppm-result.clock_uncertainty_ppm<=b_ppm &&
               result.clock_error_ppm+result.clock_uncertainty_ppm>=b_ppm,
               "actual corrected-source helper clock did not enclose DATA b");
-        std::cout<<"actual Resampler helper b="<<b_ppm<<" measured="<<result.clock_error_ppm
+        std::cout<<"isolated paired auxiliary actual Resampler helper b="<<b_ppm<<" measured="<<result.clock_error_ppm
                  <<" uncertainty="<<result.clock_uncertainty_ppm<<" support="<<result.clock_first_sample<<".."<<result.clock_last_sample<<'\n';
     }
 }

@@ -35,6 +35,7 @@
 #include <limits>
 #include <map>
 #include <numbers>
+#include <numeric>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -119,7 +120,7 @@ Modem:
                         Numeric watts or W/kW/mW/uW, e.g. 1.5kW; tx/rx/status/listen/simulate
   --helper-data-power WATTS  Robust power for helper amplitude calibration; default4W
   --helper-ratio-limit DB  10, 20, 40, 60, 80, 90 (default); caps helper power
-  --helper-frequency high|low|0  Automatic placement; default high; 0 overlaps data
+  --helper-frequency high  Helper auxiliary and pilot above Robust; only high supported
   --helper-callsign TEXT  Up to19 printable ASCII characters; defaults to --callsign
                         Ignored when encryption is selected; optional encrypted time instead
                         Empty: optional compact time; helper time is unauthenticated
@@ -321,9 +322,7 @@ helper::Options helper_options(const Args& a,bool keyed) {
         throw Error("--helper-ratio-limit must be 10, 20, 40, 60, 80, or 90 dB");
     const auto frequency=a.get("helper-frequency","high");
     if(frequency=="high")result.frequency=helper::Frequency::high;
-    else if(frequency=="low")result.frequency=helper::Frequency::low;
-    else if(frequency=="0")result.frequency=helper::Frequency::cochannel;
-    else throw Error("--helper-frequency must be high, low, or 0");
+    else throw Error("--helper-frequency supports only high; low and 0 Hz are no longer supported");
     result.callsign=keyed?"":a.get("helper-callsign",result.power_w>0?a.get("callsign"):"");
     if(result.callsign.size()>19||std::any_of(result.callsign.begin(),result.callsign.end(),
         [](unsigned char ch){return ch<32||ch>126;}))
@@ -776,8 +775,49 @@ struct HelperCapture {
     bool present=false;
     std::optional<helper::Observation> observation;
     std::optional<helper::Reference> reference;
+    std::uint64_t payload_origin_samples=0;
+    bool payload_group_filtered=false;
 };
-void observe_helper_capture(HelperCapture& capture,helper::Tracker& tracker,helper::Receiver& receiver,
+// Optional diagnostic metadata never supplies pilot or payload authority.
+class HelperMetadataReceiver {
+    helper::Plan plan_;
+    std::vector<Crypto> keys_;
+    helper::FrequencyPrecisionOptions precision_;
+    std::size_t grant_;
+    std::optional<helper::AuxiliaryMetadataReceiver> receiver_;
+    std::uint32_t rate_=0;
+    std::uint64_t input_next_=0;
+    bool unavailable_=false;
+public:
+    HelperMetadataReceiver(const helper::Plan& plan,std::vector<Crypto> keys,
+                           helper::FrequencyPrecisionOptions precision,std::size_t grant=512*1024)
+        :plan_(plan),keys_(std::move(keys)),precision_(precision),grant_(grant) {}
+    void push(std::span<const float> samples,std::uint32_t rate,std::uint64_t first) {
+        if(samples.size()>UINT64_MAX-first)throw Error("Helper metadata capture coordinate overflow");
+        if(rate_!=rate||input_next_!=first) {receiver_.reset();unavailable_=false;rate_=rate;}
+        if(!receiver_&&!unavailable_) {
+            try {
+                const auto required=helper::AuxiliaryMetadataReceiver::workspace_required(rate);
+                if(required>grant_)unavailable_=true;
+                else receiver_.emplace(rate,plan_.auxiliary_frequency_hz,plan_.frequency_hz,
+                    keys_,precision_,required,first);
+            }catch(const std::exception&) {unavailable_=true;}
+        }
+        if(receiver_)for(std::size_t offset=0;offset<samples.size();offset+=4096) {
+            receiver_->push(samples.subspan(offset,std::min<std::size_t>(4096,samples.size()-offset)),first+offset);
+            receiver_->advance();
+        }
+        input_next_=first+samples.size();
+    }
+    void limit_workspace(std::size_t available) {
+        grant_=std::min(grant_,available);
+        if(receiver_&&helper::AuxiliaryMetadataReceiver::workspace_required(rate_)>grant_) {
+            receiver_.reset();unavailable_=true;
+        }
+    }
+    std::optional<helper::Reference> take_update() {return receiver_?receiver_->take_update():std::nullopt;}
+};
+void observe_helper_capture(HelperCapture& capture,helper::Tracker& tracker,HelperMetadataReceiver& receiver,
                             std::span<const float> samples,std::uint32_t rate,std::uint64_t first) {
     tracker.push(samples,rate);
     if(auto update=tracker.take_update();update&&update->present) {
@@ -790,8 +830,7 @@ void observe_helper_capture(HelperCapture& capture,helper::Tracker& tracker,help
 void report_helper_capture_json(const HelperCapture& helper_capture) {
     std::cout<<",\"helper_carrier\":{\"present\":"<<(helper_capture.present?"true":"false")
         <<",\"frequency_hz\":";
-    if(helper_capture.reference&&helper_capture.reference->frequency_valid)std::cout<<helper_capture.reference->frequency_hz;
-    else if(helper_capture.observation)std::cout<<helper_capture.observation->frequency_hz;
+    if(helper_capture.observation)std::cout<<helper_capture.observation->frequency_hz;
     else std::cout<<"null";
     std::cout<<",\"metadata\":";
     if(helper_capture.reference&&helper_capture.reference->metadata) {
@@ -829,6 +868,11 @@ transfer::Received receive_helper_payload(std::span<const float> samples,const t
         const helper::Options& helper_options,const std::optional<HelperCapture>& capture,
         const transfer::Progress& progress,std::size_t other_waveform_bytes=0) {
     auto receive_options=options;
+    if(capture&&capture->payload_group_filtered) {
+        if(capture->payload_origin_samples>UINT64_MAX-receive_options.input_sample_origin_samples)
+            throw Error("Helper payload origin exceeds the receive sample counter");
+        receive_options.input_sample_origin_samples+=capture->payload_origin_samples;
+    }
     if(helper_options.power_w>0) {
         // A helper capture can contain a lead before the original keyed
         // source. Cover that arrival range without changing key epochs or
@@ -839,11 +883,11 @@ transfer::Received receive_helper_payload(std::span<const float> samples,const t
             static_cast<double>(envelope.preparation_seconds));
     }
     if(helper_options.power_w>0 && helper_options.frequency!=helper::Frequency::cochannel &&
-       capture && capture->present)try {
-        const auto frequency=capture->reference&&capture->reference->frequency_valid?
-            capture->reference->frequency_hz:(capture->observation?capture->observation->frequency_hz:0.);
-        if(frequency>225 && frequency+225<options.modem.sample_rate/2.) {
-            helper::PayloadFilter filter(options.modem.sample_rate,frequency);
+       capture && capture->present && !capture->payload_group_filtered)try {
+        const auto frequency=capture->observation?capture->observation->frequency_hz:0.;
+        const auto center=frequency-helper::auxiliary_pilot_spacing_hz/2;
+        if(center>425 && center+425<options.modem.sample_rate/2.) {
+            helper::PayloadFilter filter(options.modem.sample_rate,center,425);
             const auto margin=2*filter.delay();
             const auto budget=options.modem.memory_limit;
             const auto raw_bytes=samples.size_bytes();
@@ -888,11 +932,36 @@ HelperCapture preselect_helper_wav(modem::Wav& wav,const modem::Config& config,c
     HelperCapture helper_capture;
     helper::Tracker tracker(plan.frequency_hz);
     std::vector<Crypto> keys;if(key)keys.push_back(*key);
-    helper::Receiver receiver(plan.frequency_hz,20,std::move(keys),std::nullopt,helper_precision_options(config));
+    const auto raw_bytes=wav.samples.capacity()*sizeof(float);
+    const auto metadata_grant=raw_bytes<config.memory_limit?
+        std::min<std::size_t>(512*1024,config.memory_limit-raw_bytes):0;
+    HelperMetadataReceiver receiver(plan,std::move(keys),helper_precision_options(config),metadata_grant);
     for(std::size_t first=0;first<wav.samples.size();first+=4096)
         observe_helper_capture(helper_capture,tracker,receiver,
             std::span(wav.samples).subspan(first,std::min<std::size_t>(4096,wav.samples.size()-first)),
             wav.sample_rate,first);
+    if(helper_capture.present&&helper_capture.observation) {
+        // Reject the complete group in its physical PCM clock, before rate
+        // conversion can alias or discard either tone into Robust's band.
+        helper::PayloadFilter filter(wav.sample_rate,
+            helper_capture.observation->frequency_hz-helper::auxiliary_pilot_spacing_hz/2,425);
+        const auto quantum=wav.sample_rate/std::gcd(wav.sample_rate,config.sample_rate);
+        const auto skip=(quantum-filter.delay()%quantum)%quantum;
+        const auto physical_origin=skip+filter.delay();
+        if(physical_origin%quantum)throw Error("Helper physical filter center is off the logical sample grid");
+        helper_capture.payload_origin_samples=physical_origin/wav.sample_rate*config.sample_rate+
+            (physical_origin%wav.sample_rate)*config.sample_rate/wav.sample_rate;
+        std::array<float,4096> block{};
+        std::size_t written=0;
+        for(std::size_t first=skip;first<wav.samples.size();first+=block.size()) {
+            const auto count=filter.push(std::span<const float>(wav.samples).subspan(first,
+                std::min(block.size(),wav.samples.size()-first)),block);
+            std::copy_n(block.begin(),count,wav.samples.begin()+static_cast<std::ptrdiff_t>(written));
+            written+=count;
+        }
+        // No padding or filter flush: retain only fully observed FIR windows.
+        wav.samples.resize(written);helper_capture.payload_group_filtered=true;
+    }
     audio::Resampler converter(wav.sample_rate,config.sample_rate);
     std::vector<float> selected;
     const auto count=(static_cast<std::uint64_t>(wav.samples.size())*config.sample_rate+wav.sample_rate-1)/wav.sample_rate;
@@ -1608,9 +1677,10 @@ int main(int argc,char** argv) {
             if(a.has("device")) {
                 if(a.has("input"))throw Error("choose --input WAV or --device");
                 audio::Options capture_options;
+                auto capture_record_rate=c.sample_rate;
                 bool helper_disabled=false,capture_format_accepted=false;
                 std::optional<helper::Tracker> helper_tracker;
-                std::optional<helper::Receiver> helper_receiver;
+                std::optional<HelperMetadataReceiver> helper_receiver;
                 std::uint64_t helper_raw_samples=0;
                 std::uint32_t helper_raw_rate=0;
                 const auto disable_helper=[&](const char* reason) {
@@ -1622,6 +1692,7 @@ int main(int argc,char** argv) {
                 try {
                     if(helper_settings.power_w>0)capture_options.minimum_hardware_rate=helper::minimum_output_rate(
                         helper_settings,helper::placement_band(c),c.sample_rate);
+                    capture_record_rate=std::max(c.sample_rate,capture_options.minimum_hardware_rate);
                 }catch(const Error& error){disable_helper(error.what());}
                 if(helper_settings.power_w>0) {
                     helper_capture.emplace();
@@ -1652,20 +1723,29 @@ int main(int argc,char** argv) {
                             format.hardware_rate,0,modem::outer_dsss_transmit_gain(c));
                         std::vector<Crypto> keys;if(settings.key)keys.push_back(*settings.key);
                         helper_tracker.emplace(plan.frequency_hz);
-                        helper_receiver.emplace(plan.frequency_hz,20,std::move(keys),std::nullopt,helper_precision_options(c));
+                        // Decode optional metadata after recording, when the
+                        // actual remaining waveform budget can fund its ring.
+                        helper_receiver.emplace(plan,std::move(keys),helper_precision_options(c),0);
                         helper_capture.emplace();helper_raw_samples=0;helper_raw_rate=format.hardware_rate;
                     } catch(const std::exception& error) {disable_helper(error.what());}
                 };
                 if(helper_settings.power_w>0) {
                     try {
-                        samples=audio::record(a.number("seconds",15),c.sample_rate,a.get("device"),budget(a),{},on_format,capture_options);
+                        // Retain the complete group in a bounded physical-rate
+                        // recording; preselect filters it before DATA conversion.
+                        samples=audio::record(a.number("seconds",15),capture_record_rate,a.get("device"),budget(a),{},on_format,capture_options);
                     }catch(const Error& error) {
                         if(capture_format_accepted||!capture_options.minimum_hardware_rate)throw;
-                        disable_helper(error.what());capture_options.minimum_hardware_rate=0;
+                        disable_helper(error.what());capture_options.minimum_hardware_rate=0;capture_record_rate=c.sample_rate;
                         samples=audio::record(a.number("seconds",15),c.sample_rate,a.get("device"),budget(a),{},on_format,capture_options);
                     }
                 }
                 else samples=audio::record(a.number("seconds",15),c.sample_rate,a.get("device"),budget(a),{},on_format);
+                if(helper_settings.power_w>0&&(!helper_disabled||capture_record_rate!=c.sample_rate)) {
+                    modem::Wav wav{capture_record_rate,std::move(samples)};
+                    helper_capture=preselect_helper_wav(wav,c,helper_settings,settings.key);
+                    samples=std::move(wav.samples);
+                }
             }
             else {
                 auto wav=input_wav(a);
@@ -1724,15 +1804,48 @@ int main(int argc,char** argv) {
                 physical_rate,0,modem::outer_dsss_transmit_gain(c));
             helper::Tracker tracker(helper_plan.frequency_hz);
             std::vector<Crypto> keys;if(settings.key)keys.push_back(*settings.key);
-            helper::Receiver helper_receiver(helper_plan.frequency_hz,20,std::move(keys),std::nullopt,helper_precision_options(c));
+            HelperMetadataReceiver helper_receiver(helper_plan,std::move(keys),helper_precision_options(c),
+                std::min<std::size_t>(512*1024,c.memory_limit));
             helper_capture.emplace();
             std::vector<float> physical,noisy;
             const auto sample_budget=c.memory_limit/sizeof(float);
+            // A small initial reserve lets nearby metadata finish during the
+            // Helper lead. Fund its workspace from actual retained capacities.
+            // Before either vector grows later, relinquish optional decoding;
+            // the existing waveform sample quotas remain unchanged.
+            try {
+                const auto metadata_bytes=helper::AuxiliaryMetadataReceiver::workspace_required(physical_rate);
+                const auto physical_reserve=a.has("output")?2ULL*physical_rate:0;
+                const auto logical_reserve=2ULL*c.sample_rate;
+                if(metadata_bytes<=c.memory_limit&&
+                   physical_reserve<=(c.memory_limit-metadata_bytes)/sizeof(float)&&
+                   logical_reserve<=(c.memory_limit-metadata_bytes)/sizeof(float)-physical_reserve) {
+                    physical.reserve(static_cast<std::size_t>(physical_reserve));
+                    noisy.reserve(static_cast<std::size_t>(logical_reserve));
+                }else helper_receiver.limit_workspace(0);
+            }catch(const std::exception&) {
+                std::vector<float>{}.swap(physical);std::vector<float>{}.swap(noisy);
+                helper_receiver.limit_workspace(0);
+            }
+            const auto limit_metadata_capacity=[&](const std::vector<float>& destination,std::size_t incoming) {
+                if(incoming>destination.capacity()-destination.size()) {
+                    helper_receiver.limit_workspace(0);return;
+                }
+                auto remaining=c.memory_limit;
+                if(physical.capacity()>remaining/sizeof(float))remaining=0;
+                else remaining-=physical.capacity()*sizeof(float);
+                if(noisy.capacity()>remaining/sizeof(float))remaining=0;
+                else remaining-=noisy.capacity()*sizeof(float);
+                helper_receiver.limit_workspace(remaining);
+            };
             impairments.set_physical_observer([&](std::span<const float> samples,std::uint32_t rate,std::uint64_t first) {
-                observe_helper_capture(*helper_capture,tracker,helper_receiver,samples,rate,first);
                 if(a.has("output")) {
                     if(physical.size()>sample_budget-noisy.size() || samples.size()>sample_budget-noisy.size()-physical.size())
                         throw Error("simulated helper WAV exceeds memory limit");
+                }
+                limit_metadata_capacity(physical,a.has("output")?samples.size():0);
+                observe_helper_capture(*helper_capture,tracker,helper_receiver,samples,rate,first);
+                if(a.has("output")) {
                     physical.insert(physical.end(),samples.begin(),samples.end());
                 }
             });
@@ -1740,6 +1853,7 @@ int main(int argc,char** argv) {
             const auto append=[&](std::size_t count) {
                 if(noisy.size()>sample_budget-physical.size() || count>sample_budget-physical.size()-noisy.size())
                     throw Error("simulated helper waveform exceeds memory limit");
+                limit_metadata_capacity(noisy,count);
                 noisy.insert(noisy.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(count));
             };
             while(const auto count=impairments.read(*source,block))append(count);
@@ -1750,6 +1864,7 @@ int main(int argc,char** argv) {
             }
             auto receiver_settings=settings;
             receiver_settings.timestamp=channel.receiver_timestamp.value_or(timestamp);
+            helper_receiver.limit_workspace(0); // Optional metadata yields before ordinary payload work.
             result=receive_with_helper_diagnostics(a,helper_capture,[&]{return receive_helper_payload(noisy,receiver_settings,helper_settings,helper_capture,progress,
                 (physical.capacity()+noisy.capacity()-noisy.size())*sizeof(float));});
             if(a.has("output")) {

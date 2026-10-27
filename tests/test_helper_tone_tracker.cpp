@@ -45,6 +45,123 @@ helper::ToneTrackerSnapshot run(helper::ToneTracker& tracker,Source& source,std:
     }
     return tracker.snapshot();
 }
+void segmented_pilot_dates_phase_and_retunes() {
+    constexpr unsigned rate=48000;constexpr double tau=2*std::numbers::pi;
+    helper::ToneTrackerConfig c{rate,2062.5,9000,0,.5,true};
+    helper::ToneTracker tracker(c,helper::ToneTracker::workspace_required(c));
+    std::array<float,480> block{};double phase=.37,scale=1;unsigned qualified=0,phases=0,phase_fits=0;
+    constexpr double common_error=300.37;
+    for(std::uint64_t n=0;n<8ULL*rate;n+=block.size()) {
+        if(n && n%(rate*2/5)==0) {
+            const auto hop=n/(rate*2/5);
+            // Explicit RF model, with laboratory-known zero audio-clock error.
+            // Alternating sidebands and7/7.7/8.4/9.1MHz actual RF hops.
+            constexpr double rf_hz[]{7e6,7.7e6,8.4e6,9.1e6};
+            scale=(hop%2?-1.:1.)*rf_hz[hop%4]/7e6;
+            phase=std::remainder(.173*hop*hop,tau);
+            tracker.begin_pilot_segment(n,2062.5,9000,true,scale);
+            check(!tracker.snapshot().phase_qualified && !tracker.snapshot().phase_fit_qualified &&
+                !tracker.snapshot().phase_fit_support_uncertainty_cycles,"retune retained phase authority");
+        }
+        const auto f=2062.5+common_error*scale;
+        for(std::size_t i=0;i<block.size();++i)block[i]=n>=static_cast<std::uint64_t>(2.8*rate) && n<static_cast<std::uint64_t>(3.2*rate)?0:static_cast<float>(.6*std::cos(phase+tau*f*static_cast<double>(n+i)/rate));
+        tracker.push(block,n);const auto s=tracker.snapshot();
+        check(s.captured_end_sample==n+block.size(),"pilot advanced or lost captured frontier");
+        check(!s.phase_qualified,"diagnostic projection qualified pilot phase correction");
+        if(s.qualified) {
+            ++qualified;check(s.first_sample<=s.sample && s.sample<s.captured_end_sample,"pilot support dates invalid");
+            check(std::abs(s.frequency_hz-f)<=s.uncertainty_hz+1e-7,"mapped independent-phase RF interval escape");
+            check(s.coherent_aperture_seconds<=.20001 && s.frequency_support_seconds<=36,"pilot invented coherent aperture");
+        }
+        if(s.projection_phase_valid) {
+            ++phases;const auto t=(static_cast<double>(s.phase_sample)+s.phase_sample_fraction)/rate;
+            check(std::abs(std::remainder(s.phase_cycles-phase/tau-f*t,1.))<1e-5,"pilot absolute phase sign or fractional date changed");
+        }
+        if(s.phase_fit_qualified) {
+            ++phase_fits;const auto t=(static_cast<double>(s.phase_fit_sample)+s.phase_fit_sample_fraction)/rate;
+            check(s.phase_fit_support_uncertainty_cycles.has_value() &&
+                std::isfinite(*s.phase_fit_support_uncertainty_cycles) && *s.phase_fit_support_uncertainty_cycles>=0,
+                "qualified pilot phase fit omitted its joint whole-support bound");
+            check(s.phase_fit_first_sample<=s.phase_fit_sample && s.phase_fit_sample<s.phase_fit_end_sample &&
+                s.phase_fit_end_sample<=s.captured_end_sample,"pilot phase fit support escaped capture");
+            check(s.phase_fit_end_sample-s.phase_fit_first_sample<=rate/5,"pilot phase fit invented coherence");
+            check(std::abs(std::remainder(s.phase_fit_cycles-phase/tau-f*t,1.))<1e-5,"context absolute phase sign or date changed");
+            check(std::abs(s.phase_fit_frequency_hz-f)<=s.phase_fit_frequency_uncertainty_hz+1e-6,"context local frequency escaped interval");
+        }
+    }
+        // Context fits may support only their actual dated input. Their local
+        // frequency and absolute phase have no cross-retune authority.
+    check(qualified>100 && phases>100 && phase_fits>100,"independent-phase pilot did not acquire usefully");
+    block.fill(0);for(std::uint64_t n=8ULL*rate;n<10ULL*rate;n+=block.size())tracker.push(block,n);
+    check(!tracker.snapshot().present && !tracker.snapshot().qualified && !tracker.snapshot().phase_fit_qualified &&
+        !tracker.snapshot().phase_fit_support_uncertainty_cycles,"pilot loss retained authority");
+}
+void segmented_frequency_query_dates_and_covariance() {
+    constexpr unsigned rate=48000;
+    constexpr auto origin=(std::uint64_t{1}<<60)+1234;
+    constexpr double f0=5062.87,drift=.5,tau=2*std::numbers::pi;
+    helper::ToneTrackerConfig c{rate,2062.5,9000,0,.5,true};
+    helper::ToneTracker tracker(c,helper::ToneTracker::workspace_required(c),origin);
+    std::array<float,480> block{};unsigned queries=0;
+    for(unsigned n=0;n<3*rate;n+=block.size()) {
+        for(unsigned i=0;i<block.size();++i) {
+            const auto t=(n+i)/static_cast<double>(rate);
+            block[i]=static_cast<float>(.6*std::cos(.37+tau*(f0*t+.5*drift*t*t)));
+        }
+        tracker.push(block,origin+n);const auto s=tracker.snapshot();if(!s.qualified)continue;
+        const auto at=s.sample-rate*2/5;const auto query=s.frequency_at(at,.5);
+        check(query.valid,"observed dated frequency query declined");
+        const auto truth=f0+drift*(static_cast<double>(at-origin)+.5)/rate;
+        check(std::abs(query.frequency_hz-truth)<=query.uncertainty_hz+1e-5,"dated trend frequency escaped covariance");
+        const auto endpoint=s.frequency_at(s.sample);
+        check(endpoint.valid && std::abs(endpoint.uncertainty_hz-s.uncertainty_hz)<1e-12,"frequency endpoint covariance mismatch");
+        check(!s.frequency_at(s.sample+1).valid && !s.frequency_at(s.sample,.5).valid &&
+            !s.frequency_at(s.first_sample-1).valid,"frequency query extrapolated beyond observed support");
+        ++queries;
+    }
+    check(queries>100,"dated frequency query did not acquire enough support");
+}
+void segmented_frequency_fallback_is_disjoint_and_frequency_only() {
+    constexpr unsigned rate=48000;constexpr double tau=2*std::numbers::pi,f=5062.87;
+    helper::ToneTrackerConfig c{rate,2062.5,9000,.01,.5,true};
+    helper::ToneTracker tracker(c,helper::ToneTracker::workspace_required(c));
+    std::mt19937 rng{49271};std::normal_distribution<double> normal;
+    std::uniform_real_distribution<double> phase_jump(-std::numbers::pi,std::numbers::pi);
+    const auto noise=.3*std::sqrt(rate/std::pow(10.,2.4));
+    std::array<float,480> block{};std::uint64_t last_context=0,last_end=0;
+    unsigned contexts=0,fallbacks=0,qualified=0,escapes=0;int hop=-1;double phase=0;
+    for(unsigned n=0;n<10*rate;n+=block.size()) {
+        for(unsigned j=0;j<block.size();++j) {
+            const auto t=(n+j)/static_cast<double>(rate);const auto h=static_cast<int>(std::floor((t-.137)/.4));
+            if(h!=hop){hop=h;phase=phase_jump(rng);}
+            block[j]=static_cast<float>((t<8?.6*std::cos(tau*f*t+phase):0)+noise*normal(rng));
+        }
+        tracker.push(block,n);const auto s=tracker.snapshot();
+        check(!s.clock_qualified,"frequency-only gap model manufactured clock authority");
+        if(s.frequency_used_fallback)check(!s.phase_fit_qualified && !s.phase_fit_support_uncertainty_cycles,
+            "gap model published phase authority");
+        if(s.frequency_context_end_sample!=last_context) {
+            last_context=s.frequency_context_end_sample;
+            if(last_context) {
+                ++contexts;fallbacks+=s.frequency_used_fallback;
+                check(s.frequency_context_end_sample-s.frequency_context_first_sample==rate/5 &&
+                    s.frequency_context_first_sample>=last_end,"frequency contexts overlap or change aperture");
+                check(s.frequency_gap_index<10 && s.coherent_aperture_seconds<=.20001 &&
+                    s.frequency_aperture_cube_seconds3<=.0080001,"gap fit invented uninterrupted coherence");
+                last_end=s.frequency_context_end_sample;
+            }
+        }
+        if(s.qualified && n<8*rate) {
+            ++qualified;check(std::abs(s.frequency_hz-f)<10,"frequency fallback selected a wrong tone");
+            escapes+=std::abs(s.frequency_hz-f)>s.uncertainty_hz;
+        }
+    }
+    std::cout<<"frequency-only fallback contexts="<<contexts<<" fallbacks="<<fallbacks
+        <<" qualified_polls="<<qualified<<" escaped_polls="<<escapes<<'\n';
+    check(contexts>=20 && fallbacks>=15 && qualified>=200,"24dBHz frequency fallback did not provide useful observations");
+    check(!tracker.snapshot().qualified && !tracker.snapshot().present && !tracker.snapshot().phase_fit_qualified,
+        "frequency fallback survived final reference loss");
+}
 void strong_wide_tone_and_drift() {
     const helper::ToneTrackerConfig c{48960,2062.5,9000,.01,.5};
     helper::ToneTracker tracker(c,helper::ToneTracker::workspace_required(c));Source source;
@@ -321,7 +438,7 @@ void shared_endpoint_precision_of_stable_tone() {
 double smooth(double x) {
     x=std::clamp(x,0.,1.);return x*x*x*(10+x*(-15+6*x));
 }
-void rolling_fifo_and_realistic_helper_modulation() {
+void legacy_paired_modulation_rolling_fifo() {
     constexpr std::uint32_t rate=48000;
     const helper::ToneTrackerConfig c{rate,2062.5,20,.01,.5};
     helper::ToneTracker tracker(c,helper::ToneTracker::workspace_required(c));Source source;
@@ -334,7 +451,7 @@ void rolling_fifo_and_realistic_helper_modulation() {
             const auto t=static_cast<double>(first+i)/rate;
             const auto hz=2062.5+.08*std::max(0.,t-3.);
             phase+=2*std::numbers::pi*hz/rate;
-            // Match Generator's400ms grid,4ms ramps,paired8ms C2 reversals and
+            // Historical single-tone fixture:400ms grid,4ms ramps,paired8ms C2 reversals and
             // three8ms APSK blends ending388ms plus8ms return. The137ms
             // offset deliberately makes transitions cut through loop windows.
             const auto local=std::fmod(t+.137,.4);
@@ -376,6 +493,9 @@ struct ClockPayloadStats {
     std::vector<double> uncertainties;
     double maximum_error=0;
 };
+// Explicit legacy paired-punctuation waveform. This preserves the independent
+// clock-kernel, cadence, interference and provenance regressions; it does not
+// describe the current two-tone Generator or qualify its pure pilot clock.
 helper::ToneTrackerSnapshot clock_wave(double ppm,double seconds,double noise_sigma,unsigned shape=0,
         std::uint32_t rate=48000,double rf_offset=0,bool loss=false,std::uint64_t origin=0,
         std::span<const float> payload={},ClockPayloadStats* payload_stats=nullptr) {
@@ -429,7 +549,7 @@ helper::ToneTrackerSnapshot clock_wave(double ppm,double seconds,double noise_si
     }
     return tracker.snapshot();
 }
-void ordinary_payload_does_not_obscure_punctuation_clock() {
+void legacy_paired_clock_survives_ordinary_payload() {
     constexpr std::uint32_t rate=48000;
     modem::Config data;data.sample_rate=rate;data.carrier_hz=1500;data.bandwidth_hz=45;
     data.dsss_factor=10;data.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
@@ -465,7 +585,7 @@ void ordinary_payload_does_not_obscure_punctuation_clock() {
     check(stats.polls>100 && fraction>.9,"ordinary payload repeatedly removed independent punctuation clock");
     check(p90<20,"ordinary payload contaminated narrowband punctuation clock precision");
 }
-void actual_encrypted_helper_boundary_does_not_poison_clock() {
+void actual_two_tone_pilot_keeps_clock_unresolved() {
     constexpr unsigned rate=48000;
     constexpr std::uint64_t epoch=1793050572;
     modem::Config data;data.sample_rate=rate;data.carrier_hz=1500;data.bandwidth_hz=45;
@@ -484,22 +604,31 @@ void actual_encrypted_helper_boundary_does_not_poison_clock() {
     check(energy>0,"actual helper interference had no physical power");
     const auto gain=std::sqrt(.018*payload.size()/energy);
     helper::Options options;options.power_w=40;options.data_power_w=4;
-    // The real encrypted3-symbol timecode and return/ramp implementation,
-    // using a public fixed test key. No live/private key is stored in this test.
-    helper::Generator generator(options,helper::Plan{2062.5,.6,0,40},epoch,true,key);
-    const helper::ToneTrackerConfig config{rate,2062.5,9000,.01,.5};
+    auto placement=helper::plan(options,helper::placement_band(data),rate);
+    // Actual current-format geometry, with total Helper straight-tone power.18
+    // and ordinary payload power.018 in this component mixture. Pilot power is
+    // .9*.18; auxiliary power is .1*.18. The public fixed key enables the actual
+    // encrypted auxiliary timecode. No metadata is consumed by either tracker.
+    placement.helper_gain=.6;placement.data_gain=0;
+    helper::Generator generator(options,placement,epoch,true,key);
+    auto pilot_placement=placement;pilot_placement.auxiliary_frequency_hz=0;
+    helper::Generator pilot_only(options,pilot_placement,epoch,true,key);
+    const auto pilot_hz=placement.frequency_hz;
+    const auto clock_coefficient=pilot_hz-data.carrier_hz;
+    const helper::ToneTrackerConfig config{rate,pilot_hz,9000,.01,.5,true};
     helper::ToneTracker tracker(config,helper::ToneTracker::workspace_required(config));
-    Source source;std::vector<float> block(733);std::uint64_t first=0;
-    const auto end=payload.size()+8ULL*rate;std::size_t polls=0,qualified=0;
-    double maximum_uncertainty=0;
+    helper::ToneTracker pilot_tracker(config,helper::ToneTracker::workspace_required(config));
+    Source source;std::vector<float> block(733),pilot_block(733);std::uint64_t first=0;
+    const auto end=payload.size()+8ULL*rate;std::size_t polls=0,qualified=0,pilot_qualified=0;
+    double auxiliary_energy=0,maximum_frequency_difference=0;
     modem::PatternSearch search;search.admitted_clock_half_width_ppm=300;
     search.admitted_clock_cell_half_width_ppm=37.5;
     const auto rf_step=.25*rate/modem::symbol_sample_count(data);
     for(int lf=-4;lf<=4;++lf)for(int rf=-20;rf<=20;++rf)
-        search.hypotheses.push_back({rf*rf_step-562.5*(lf*75.)*1e-6,lf*75.});
+        search.hypotheses.push_back({rf*rf_step-clock_coefficient*(lf*75.)*1e-6,lf*75.});
     modem::detail::PatternHelperFrequencySelector selector;
-    check(selector.initialize(search,{0,1,562.5,37.5}),"measured frequency work geometry unavailable");
-    auto passthrough_selector=selector;
+    check(selector.initialize(search,{0,1,clock_coefficient,37.5}),"measured frequency work geometry unavailable");
+    auto passthrough_selector=selector;const auto selector_bytes=selector.working_bytes();
     std::vector<double> frequency_uncertainties,selected_pairs,passthrough_pairs;
     double maximum_frequency_error=0;std::size_t frequency_interval_escapes=0;
     while(first<end) {
@@ -507,57 +636,69 @@ void actual_encrypted_helper_boundary_does_not_poison_clock() {
         for(std::size_t i=0;i<count;++i) {
             const auto sample=first+i;
             const auto seconds=static_cast<long double>(sample)/rate+.137L;
-            double value=generator.mix(0,seconds,rate);
-            if(sample>=2ULL*rate && sample<2ULL*rate+payload.size())value+=gain*payload[sample-2ULL*rate];
-            value+=.0083*source.noise(source.rng);block[i]=static_cast<float>(std::round(value*32767)/32767);
+            const auto composite=generator.mix(0,seconds,rate),pilot=pilot_only.mix(0,seconds,rate);
+            auxiliary_energy+=static_cast<double>(composite-pilot)*(composite-pilot);
+            double common=.0083*source.noise(source.rng);
+            if(sample>=2ULL*rate && sample<2ULL*rate+payload.size())common+=gain*payload[sample-2ULL*rate];
+            block[i]=static_cast<float>(std::round((composite+common)*32767)/32767);
+            pilot_block[i]=static_cast<float>(std::round((pilot+common)*32767)/32767);
         }
-        tracker.push(std::span(block).first(count),first);first+=count;
+        tracker.push(std::span(block).first(count),first);
+        pilot_tracker.push(std::span(pilot_block).first(count),first);first+=count;
         if(first>6ULL*rate && first<2ULL*rate+payload.size()) {
-            ++polls;const auto result=tracker.snapshot();
-            if(result.clock_qualified) {++qualified;maximum_uncertainty=std::max(maximum_uncertainty,result.clock_uncertainty_ppm);}
-            if(result.qualified && result.clock_qualified) {
-                frequency_uncertainties.push_back(result.uncertainty_hz);
-                maximum_frequency_error=std::max(maximum_frequency_error,std::abs(result.frequency_hz-2062.5));
-                frequency_interval_escapes+=std::abs(result.frequency_hz-2062.5)>result.uncertainty_hz;
-                const auto measured_offset=result.frequency_hz-2062.5;
+            ++polls;const auto result=tracker.snapshot(),control=pilot_tracker.snapshot();
+            check(!result.clock_qualified && !control.clock_qualified && result.clock_sample==0 &&
+                control.clock_sample==0,"pure pilot or auxiliary metadata manufactured a source clock");
+            pilot_qualified+=control.qualified;
+            if(result.qualified) {
+                ++qualified;frequency_uncertainties.push_back(result.uncertainty_hz);
+                maximum_frequency_error=std::max(maximum_frequency_error,std::abs(result.frequency_hz-pilot_hz));
+                frequency_interval_escapes+=std::abs(result.frequency_hz-pilot_hz)>result.uncertainty_hz;
+                if(control.qualified) {
+                    maximum_frequency_difference=std::max(maximum_frequency_difference,std::abs(result.frequency_hz-control.frequency_hz));
+                    check(std::abs(result.frequency_hz-control.frequency_hz)<=result.uncertainty_hz+control.uncertainty_hz,
+                        "auxiliary modulation changed the accepted pure-pilot interval");
+                }
+                const auto measured_offset=result.frequency_hz-pilot_hz;
                 const auto applied_measured_translation=measured_offset;
-                // Conditional geometry AFTER translating this measured tone,
-                // as Live's normal corrected view does. No decoder/NCO timing
-                // work is measured by this selector-only counterfactual.
+                // Frequency-only counterfactual in the ordinary corrected
+                // view. No qualified source-clock interval is supplied.
                 const auto corrected_center=measured_offset-applied_measured_translation;
-                const modem::PatternHelperClockInterval clock{result.clock_error_ppm-result.clock_uncertainty_ppm,
-                    result.clock_error_ppm+result.clock_uncertainty_ppm};
-                selector.update({corrected_center,result.uncertainty_hz,562.5,37.5,clock});
-                passthrough_selector.update({measured_offset,result.uncertainty_hz,562.5,37.5,clock});
+                selector.update({corrected_center,result.uncertainty_hz,clock_coefficient,37.5});
+                passthrough_selector.update({measured_offset,result.uncertainty_hz,clock_coefficient,37.5});
+                check(!selector.window.clock_interval && selector.working_bytes()==selector_bytes,
+                    "frequency assistance invented clock authority or allocated new geometry");
+                for(int lf=-4;lf<=4;++lf) {
+                    bool retained=false;
+                    for(std::size_t i=0;i<search.hypotheses.size();++i)
+                        retained|=search.hypotheses[i].clock_error_ppm==lf*75. && selector.keep(i);
+                    check(retained,"pure pilot discarded an unresolved original clock alternative");
+                }
+                check(selector.selected>=9 && selector.selected<search.hypotheses.size(),
+                    "pure-pilot frequency did not narrow RF work across the original clock domain");
                 selected_pairs.push_back(static_cast<double>(selector.selected));
                 passthrough_pairs.push_back(static_cast<double>(passthrough_selector.selected));
             }
         }
     }
     const auto fraction=polls?static_cast<double>(qualified)/polls:0;
-    std::cout<<"actual encrypted helper payload_seconds="<<static_cast<double>(payload.size())/rate
-        <<" qualified_fraction="<<fraction<<" maximum_uncertainty="<<maximum_uncertainty<<'\n';
-    check(polls>100 && fraction>.99,"actual encrypted helper boundary poisoned the clock aperture");
+    const auto control_fraction=polls?static_cast<double>(pilot_qualified)/polls:0;
+    std::cout<<"actual two-tone helper payload_seconds="<<static_cast<double>(payload.size())/rate
+        <<" pilot_hz="<<pilot_hz<<" auxiliary_hz="<<placement.auxiliary_frequency_hz
+        <<" frequency_qualified_fraction="<<fraction<<" pilot_only_fraction="<<control_fraction
+        <<" auxiliary_energy="<<auxiliary_energy<<" maximum_auxiliary_frequency_difference="<<maximum_frequency_difference<<'\n';
+    check(polls>100 && fraction>.99 && control_fraction>.99 && auxiliary_energy>0,
+        "actual two-tone pilot failed independent frequency qualification");
     std::sort(frequency_uncertainties.begin(),frequency_uncertainties.end());
-    std::sort(selected_pairs.begin(),selected_pairs.end());
-    std::sort(passthrough_pairs.begin(),passthrough_pairs.end());
+    std::sort(selected_pairs.begin(),selected_pairs.end());std::sort(passthrough_pairs.begin(),passthrough_pairs.end());
     check(!frequency_uncertainties.empty(),"actual helper produced no measured frequency work evidence");
-    std::cout<<"actual measured frequency median_U="<<frequency_uncertainties[frequency_uncertainties.size()/2]
+    std::cout<<"actual pilot frequency median_U="<<frequency_uncertainties[frequency_uncertainties.size()/2]
         <<" p90_U="<<frequency_uncertainties[frequency_uncertainties.size()*9/10]
         <<" max_error="<<maximum_frequency_error<<" interval_escapes="<<frequency_interval_escapes<<" rf_step="<<rf_step
-        <<" corrected_counterfactual_selected_median="<<selected_pairs[selected_pairs.size()/2]
-        <<" corrected_counterfactual_selected_p90="<<selected_pairs[selected_pairs.size()*9/10];
-    double selected_sum=0;std::size_t three_or_less=0;
-    for(const auto value:selected_pairs) {selected_sum+=value;three_or_less+=value<=3;}
-    std::cout<<" corrected_counterfactual_selected_mean="<<selected_sum/selected_pairs.size()
-        <<" corrected_counterfactual_selected_le3_fraction="<<static_cast<double>(three_or_less)/selected_pairs.size()<<'\n';
-    double passthrough_sum=0;std::size_t passthrough_three=0;
-    for(const auto value:passthrough_pairs) {passthrough_sum+=value;passthrough_three+=value<=3;}
-    std::cout<<"raw_passthrough_geometry selected_median="<<passthrough_pairs[passthrough_pairs.size()/2]
-        <<" selected_p90="<<passthrough_pairs[passthrough_pairs.size()*9/10]
-        <<" selected_mean="<<passthrough_sum/passthrough_pairs.size()
-        <<" selected_le3_fraction="<<static_cast<double>(passthrough_three)/passthrough_pairs.size()<<'\n';
-    check(!frequency_interval_escapes,"actual helper frequency measurement escaped its engineering interval");
+        <<" unresolved_clock_cells=9 corrected_counterfactual_selected_median="<<selected_pairs[selected_pairs.size()/2]
+        <<" corrected_counterfactual_selected_p90="<<selected_pairs[selected_pairs.size()*9/10]
+        <<" raw_passthrough_selected_median="<<passthrough_pairs[passthrough_pairs.size()/2]<<'\n';
+    check(!frequency_interval_escapes,"actual pure pilot frequency escaped its engineering interval");
 }
 void off_cadence_feature_does_not_poison_established_clock() {
     constexpr unsigned rate=48000;
@@ -774,7 +915,7 @@ void phase_anchor_precision_prediction() {
 }
 int main() {
     try {
-        phase_segment_covariance_and_precision_prediction();phase_anchor_precision_prediction();phase_kernel_covariance_joint_fit_and_provenance();strong_wide_tone_and_drift();representative_hf_noise_and_eme_level();narrow_range_and_noise();actual_helper_cold_capture_before_payload();sparse_segments_keep_recent_aperture();stable_full_capacity_keeps_moving();rolling_fifo_and_realistic_helper_modulation();shared_endpoint_precision_of_stable_tone();ordinary_payload_does_not_obscure_punctuation_clock();actual_encrypted_helper_boundary_does_not_poison_clock();off_cadence_feature_does_not_poison_established_clock();independent_punctuation_clock();out_of_range_or_large_evolving_shift_declines();
+        segmented_pilot_dates_phase_and_retunes();segmented_frequency_query_dates_and_covariance();segmented_frequency_fallback_is_disjoint_and_frequency_only();phase_segment_covariance_and_precision_prediction();phase_anchor_precision_prediction();phase_kernel_covariance_joint_fit_and_provenance();strong_wide_tone_and_drift();representative_hf_noise_and_eme_level();narrow_range_and_noise();actual_helper_cold_capture_before_payload();sparse_segments_keep_recent_aperture();stable_full_capacity_keeps_moving();legacy_paired_modulation_rolling_fifo();shared_endpoint_precision_of_stable_tone();legacy_paired_clock_survives_ordinary_payload();actual_two_tone_pilot_keeps_clock_unresolved();off_cadence_feature_does_not_poison_established_clock();independent_punctuation_clock();out_of_range_or_large_evolving_shift_declines();
         std::cout<<"helper realtime tone tracker checks passed\n";return 0;
     }catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

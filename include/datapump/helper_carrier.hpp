@@ -31,7 +31,16 @@ struct MonoPassband {double lower_hz=0,upper_hz=0;};
 // local profiles without reducing this configuration's own gate allowance.
 PlacementBand placement_band(const modem::Config&,double minimum_occupied_bandwidth_hz=0);
 MonoPassband mono_passband(const PlacementBand&);
+// Legacy enum values remain readable by settings migration; validate accepts
+// only High for the adjacent two-tone waveform.
 enum class Frequency { high, low, cochannel };
+// Steady straight-tone power fractions, before ramps or auxiliary metadata.
+// helper_gain is the equivalent amplitude of their combined power, not their
+// worst-case voltage sum. Keep these separate for received-level accounting.
+inline constexpr double pilot_power_fraction=.9,auxiliary_power_fraction=.1;
+inline constexpr double pilot_amplitude_fraction=.9486832980505137996;
+inline constexpr double auxiliary_amplitude_fraction=.3162277660168379332;
+inline constexpr double auxiliary_pilot_spacing_hz=400;
 struct Options {
     double power_w=0, data_power_w=4, ratio_limit_db=90;
     Frequency frequency=Frequency::high;
@@ -44,9 +53,16 @@ struct Options {
 };
 struct Plan {
     double frequency_hz=0, helper_gain=0, data_gain=1, effective_power_w=0;
+    // frequency_hz is the pure pilot. Zero auxiliary frequency is an explicit
+    // pilot-only laboratory plan; production plan() always supplies both tones.
+    double auxiliary_frequency_hz=0;
 };
 struct ReferenceLevel {
+    // Existing fields describe total Helper power. Precision predictions must
+    // use the explicit pilot fields below, after the90/10 split.
     double effective_power_ratio=0,straight_cn0_db_hz=0,usable_cn0_db_hz=0,payload_average_cn0_db_hz=0;
+    double pilot_effective_power_ratio=0,pilot_straight_cn0_db_hz=0,pilot_usable_cn0_db_hz=0;
+    double auxiliary_straight_cn0_db_hz=0;
 };
 // Nominal payload C/N0 is the ungated RF power reference. Use amplitude scale 1
 // for calibrated hardware and the existing waveform backoff for sampled
@@ -86,7 +102,6 @@ double calibrated_data_gain(const Options&);
 // path and report that helper configuration unavailable. Never retunes data.
 // A nonzero minimum_high_frequency_hz adds a High-only caller-supplied
 // placement floor (e.g. a separately qualified capture-converter stopband).
-// Low retains its spectral guard; cochannel intentionally overlaps the data.
 // It is a geometry constraint, not a general anti-alias rejection certificate.
 // data_amplitude_scale is the existing source's digital amplitude backoff;
 // it calibrates helper power without changing the returned payload gain.
@@ -106,10 +121,9 @@ std::uint32_t minimum_output_rate(const Options&,double data_carrier_hz,
 std::uint32_t minimum_output_rate(const Options&,const PlacementBand&,
                                   std::uint32_t logical_rate);
 
-// Protect a paired punctuation already begun when an open-ended source stops.
-// Reversals cross zero at 240/280ms, with a 32ms inverted plateau between
-// their 8ms transitions. Extend only the helper through the second reversal,
-// its 20ms restored-carrier guard and final 4ms ramp (308ms in that dwell).
+// Protect auxiliary punctuation already begun when an open-ended source stops.
+// One 8ms reversal crosses zero at 240ms. Extend only the helper through its
+// 20ms inverted straight-tone flank and final 4ms ramp (268ms in that dwell).
 // Coordinates are the same physical seconds as Generator.
 long double protected_endpoint(std::uint64_t epoch,long double start_seconds,long double end_seconds);
 

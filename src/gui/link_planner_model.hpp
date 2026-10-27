@@ -107,12 +107,18 @@ HelperReceiverCostLedger helper_receiver_cost(const simulation::Estimate&);
 // tone in white noise. It is neither an operational confidence interval nor a
 // substitute for the waveform/model-aware forecast or measured qualification.
 std::optional<double> helper_ideal_tone_half_width(double cn0_db_hz,double observation_seconds) noexcept;
+// Independent unknown phase per aperture: information is proportional to the
+// sum of C/N0*T_i^3, rather than the cube of elapsed time or total tone time.
+std::optional<double> helper_segmented_tone_half_width(double cn0_db_hz,
+    std::span<const double> coherent_apertures_seconds) noexcept;
 struct HelperPrecisionReference {
     double cn0_db_hz=0,phase_noise_radians_per_sqrt_second=0;
     // An acceptance guard, not a physical oscillator-drift prior.
     double maximum_tracking_slew_hz_per_second=0,maximum_source_capture_ratio=1;
     std::optional<double> ideal_one_second_half_width_hz,ideal_lead_half_width_hz;
+    std::optional<double> segmented_lead_half_width_hz;
     double ideal_lead_observation_seconds=0;
+    double coherent_aperture_seconds=0,estimator_efficiency=1;
 };
 // One ordinary receiver work query at an explicitly conditional residual U.
 // This is receiver-model pricing, not measured total helper/application CPU.
@@ -175,6 +181,7 @@ struct HelperReferencePlan {
     double received_dbm=0;
     double cn0_db_hz=0;
     double tone_snr_db=0; // The presence tracker's 10 Hz resolution cell.
+    double pilot_power_w=0,pilot_cn0_db_hz=0,pilot_tone_snr_db=0,auxiliary_cn0_db_hz=0;
     // Sampled simulation retains the source waveform's existing amplitude
     // backoff against its nominal-power noise model. Hardware watts above
     // instead describe the operator's calibrated transmit-power budget.
@@ -183,7 +190,9 @@ struct HelperReferencePlan {
     double simulation_data_cn0_db_hz=0;
     double simulation_cn0_db_hz=0;
     double simulation_tone_snr_db=0;
+    double simulation_pilot_cn0_db_hz=0,simulation_pilot_tone_snr_db=0;
     double frequency_hz=0;
+    double auxiliary_frequency_hz=0;
     RealtimeHelperCpuPoint conditional;
     // Original-grid geometry under an explicit hypothetical qualified helper
     // measurement. This does not certify runtime receiver/profile/resources.

@@ -180,6 +180,11 @@ struct SampledPhysical {
     std::optional<Crypto> time_key;
     std::optional<helper::Generator> generator;
     SampledSimulationChannel::PhysicalObserver observer;
+    SampledSimulationChannel::PhysicalRfObserver rf_observer;
+    std::optional<SampledSimulationChannel::RfRetuneSimulation> retunes;
+    SampledSimulationChannel::PhysicalRfSegment rf_segment;
+    std::uint64_t retune_samples=0,settling_samples=0;
+    Complex retune_rotation{1,0},retune_step{1,0};
     std::optional<SampledSimulationChannel::PreconversionCapture> capture_domain;
     std::uint32_t physical_rate=0,factor=1;
     std::size_t stage_count=0;
@@ -248,9 +253,16 @@ struct SampledPhysical {
         const auto clock_rate=1+channel.clock_error_ppm*1e-6;
         const auto low=(config.carrier_hz-occupied/2)*clock_rate+channel.frequency_offset_hz;
         const auto high=(config.carrier_hz+occupied/2)*clock_rate+channel.frequency_offset_hz;
+        // Both actual modulation bands belong to this physical mixture. The
+        // auxiliary is 400 Hz below the pilot; checking only the pilot misses
+        // auxiliary images which can fold into DATA at the logical clock.
+        // The frontend's additional 75 Hz notch transitions are filter support,
+        // not additional transmitted modulation bandwidth.
+        const std::array helper_frequencies{plan.auxiliary_frequency_hz,plan.frequency_hz};
+        constexpr double helper_half_width=150;
         if(capture_domain) {
-            const auto helper_low=(plan.frequency_hz-150)*clock_rate+channel.frequency_offset_hz;
-            const auto helper_high=(plan.frequency_hz+150)*clock_rate+channel.frequency_offset_hz;
+            const auto helper_low=(helper_frequencies.front()-helper_half_width)*clock_rate+channel.frequency_offset_hz;
+            const auto helper_high=(helper_frequencies.back()+helper_half_width)*clock_rate+channel.frequency_offset_hz;
             const auto physical_low=std::min(low,helper_low),physical_high=std::max(high,helper_high);
             if(!std::isfinite(physical_low)||!std::isfinite(physical_high)||
                physical_low<capture_domain->minimum_hz||physical_high>capture_domain->maximum_hz)
@@ -263,14 +275,17 @@ struct SampledPhysical {
         if(!logical_payload_preserved&&!capture_domain)
             throw Error("Helper Carrier simulation cannot preserve this near-Nyquist data passband");
         const auto power_ratio=plan.effective_power_w/options.data_power_w;
-        for(unsigned i=0;options.frequency==helper::Frequency::high&&i<=120;++i) {
-            const auto frequency=(plan.frequency_hz-150+300.*i/120)*clock_rate+channel.frequency_offset_hz;
-            const auto alias=std::abs(std::remainder(frequency,static_cast<double>(config.sample_rate)));
-            if(std::abs(frequency)<=config.sample_rate/2. || alias<low || alias>high)continue;
-            const auto gain=std::abs(response(frequency));
-            if(gain*gain*power_ratio>1e-6&&!capture_domain)
-                throw Error("Helper Carrier simulation cannot isolate this helper from the original data passband");
-        }
+        for(const auto center:helper_frequencies)
+            for(unsigned i=0;options.frequency==helper::Frequency::high&&i<=120;++i) {
+                const auto frequency=(center-helper_half_width+2*helper_half_width*i/120)*clock_rate+channel.frequency_offset_hz;
+                const auto alias=std::abs(std::remainder(frequency,static_cast<double>(config.sample_rate)));
+                if(std::abs(frequency)<=config.sample_rate/2. || alias<low || alias>high)continue;
+                const auto gain=std::abs(response(frequency));
+                // Retain the original conservative total-Helper ratio bound
+                // for each band; this does not change either tone's power.
+                if(gain*gain*power_ratio>1e-6&&!capture_domain)
+                    throw Error("Helper Carrier simulation cannot isolate this helper from the original data passband");
+            }
         rate=1+static_cast<long double>(channel.clock_error_ppm)*1e-6L;
         diffusion=channel.phase_noise_degrees_per_sqrt_second*std::numbers::pi/180/std::sqrt(physical_rate);
         // Preserve the original flat in-data-band AWGN density. The FIR's
@@ -418,6 +433,22 @@ struct SampledPhysical {
         if(observer&&observer_count)observer(std::span(observer_buffer).first(observer_count),physical_rate,physical_received-observer_count);
         observer_count=0;
     }
+    void begin_rf_segment() {
+        if(!retunes || physical_received%retune_samples)return;
+        // Deliver the preceding ADC interval before changing its metadata.
+        flush_observer();
+        const auto hop=physical_received/retune_samples;
+        const auto rf=retunes->rf_shift_hz[hop%retunes->rf_shift_hz.size()];
+        if(retune_samples>UINT64_MAX-physical_received)throw Error("RF retune sample counter overflow");
+        rf_segment={physical_received,physical_received+settling_samples,
+            physical_received+retune_samples,hop+1,rf,retunes->sideband_sign};
+        const auto fraction=(static_cast<double>(mix(retunes->phase_seed^hop)>>11)+.5)/9007199254740992.;
+        retune_rotation=phase_rotation(tau*(fraction-.5));
+        // The ordinary oscillator already contributes the base configured CFO.
+        // Apply only its RF-dependent increment to the complete analytic mix.
+        retune_step=phase_rotation(tau*channel.frequency_offset_hz*(rf/retunes->rf_shift_hz[0]-1)/physical_rate);
+        if(rf_observer)rf_observer(rf_segment,physical_rate);
+    }
     void advance() {
         if(physical_received==std::numeric_limits<std::uint64_t>::max())throw Error("sampled simulation physical receiver counter overflow");
         ++physical_received;oscillator*=step;
@@ -451,6 +482,7 @@ struct SampledPhysical {
     float next(StreamingTransmitter* transmitter,std::stop_token stop) {
         float output=0;
         for(;;) {
+            begin_rf_segment();
             const auto time=static_cast<long double>(physical_received)/factor;
             const auto position=(time-origin-startup)*rate;
             Complex value{};
@@ -462,10 +494,20 @@ struct SampledPhysical {
                 value=generator->mix_analytic(value,helper_origin+position/config.sample_rate,physical_rate,
                     helper_end,helper_start);
                 value*=oscillator;
+                if(retunes) {
+                    value*=retune_rotation;
+                    // Model an unavailable receiver during retuning. Source
+                    // and ADC dates continue; no sample is removed or redated.
+                    if(physical_received<rf_segment.settled_first_sample)value={};
+                }
             }
             const auto pcm=static_cast<float>(value.real()+noise());
             if(observer)observer_buffer[observer_count++]=pcm;
             advance();
+            if(retunes) {
+                retune_rotation*=retune_step;
+                if((physical_received&4095U)==0)retune_rotation/=std::max(std::abs(retune_rotation),1e-30);
+            }
             if(observer_count==observer_buffer.size())flush_observer();
             if(decimate(pcm,output))return output;
         }
@@ -578,6 +620,28 @@ void SampledSimulationChannel::set_helper_time_key(std::optional<Crypto> key) {
 }
 void SampledSimulationChannel::set_physical_observer(PhysicalObserver observer) {
     if(impl_->physical)impl_->physical->observer=std::move(observer);else impl_->observer=std::move(observer);
+}
+void SampledSimulationChannel::set_physical_rf_observer(PhysicalRfObserver observer) {
+    if(!impl_->physical)throw Error("actual RF observation requires physical Helper capture");
+    if(impl_->physical->physical_received)throw Error("actual RF observer must precede capture");
+    impl_->physical->rf_observer=std::move(observer);
+}
+void SampledSimulationChannel::set_rf_retune_simulation(const RfRetuneSimulation& value) {
+    if(!impl_->physical || impl_->physical->physical_received)
+        throw Error("RF retune simulation requires fresh physical Helper capture");
+    if(!std::isfinite(value.dwell_seconds)||!std::isfinite(value.settling_seconds)||
+       value.dwell_seconds<=0||value.dwell_seconds>10||value.settling_seconds<0||
+       value.settling_seconds>=value.dwell_seconds || (value.sideband_sign!=1&&value.sideband_sign!=-1))
+        throw Error("invalid sampled RF retune timing or sideband");
+    for(const auto rf:value.rf_shift_hz)if(!std::isfinite(rf)||rf<=0)
+        throw Error("invalid sampled RF retune frequency");
+    auto& physical=*impl_->physical;
+    const auto dwell=value.dwell_seconds*physical.physical_rate;
+    const auto settle=value.settling_seconds*physical.physical_rate;
+    if(dwell<1||std::abs(dwell-std::round(dwell))>1e-7)
+        throw Error("sampled RF dwell is not an integral physical aperture");
+    physical.retunes=value;physical.retune_samples=static_cast<std::uint64_t>(std::llround(dwell));
+    physical.settling_samples=static_cast<std::uint64_t>(std::ceil(settle));
 }
 std::uint32_t SampledSimulationChannel::physical_sample_rate()const {return impl_->physical?impl_->physical->physical_rate:impl_->legacy->config.sample_rate;}
 audio::CaptureTransportRecipe SampledSimulationChannel::capture_transport()const noexcept {

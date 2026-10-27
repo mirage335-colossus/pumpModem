@@ -4584,7 +4584,7 @@ HelperFrequencyForecast helper_frequency_forecast(const transfer::Estimate& tran
     if(config.receiver_strategy!=modem::ReceiverStrategy::automatic&&
        config.receiver_strategy!=modem::ReceiverStrategy::complex_only)
         return fail("Helper rolling acquisition requires Automatic or Complex receiver policy; the selected policy is ineligible");
-    if(settings&&(settings->helper.power_w<=0||settings->helper.frequency==helper::Frequency::cochannel))
+    if(settings&&(settings->helper.power_w<=0||settings->helper.frequency!=helper::Frequency::high))
         return fail("Disabled or cochannel helper has no isolated rolling frequency-reference forecast");
     if(!config.oscillator_search||!config.pattern_symbols||config.spreading_mode!=modem::SpreadingMode::pattern||
        config.symbol_burst.enabled()||modem::scheduled_bursts(config)||options.timestamp)
@@ -4597,7 +4597,8 @@ HelperFrequencyForecast helper_frequency_forecast(const transfer::Estimate& tran
         // Same native fixed-filter constructor/passband/tap limit as Live.
         // This proves geometry only, not complete control reservations,
         // full all-profile response or correlated-noise sensitivity.
-        const helper::PayloadFilter filter(config.sample_rate,request.helper_frequency_hz);
+        const helper::PayloadFilter filter(config.sample_rate,
+            request.helper_frequency_hz-helper::auxiliary_pilot_spacing_hz/2,425);
         if(!filter.enabled())return fail("Native helper payload filter is unavailable");
     }catch(const Error& e) {return fail(std::string("Native helper filter is ineligible: ")+e.what());}
     const auto observed=request.helper_frequency_hz*(1+channel.clock_error_ppm*1e-6)+channel.frequency_offset_hz;
@@ -4851,7 +4852,7 @@ HelperJointClockScenario helper_executed_joint_scenario(const transfer::Estimate
        source.modem.frequency_search_multiplier!=proof->config.frequency_search_multiplier||
        source.modem.oscillator_search!=proof->config.oscillator_search||!same_joint_profile_numeric(source.modem,*proof,false))
         return fail("Executed joint-clock copy belongs to different original rolling target/policy/oscillator geometry");
-    if(settings&&(settings->helper.power_w<=0||settings->helper.frequency==helper::Frequency::cochannel))
+    if(settings&&(settings->helper.power_w<=0||settings->helper.frequency!=helper::Frequency::high))
         return fail("Current disabled/cochannel helper cannot use an older executed joint-clock copy");
     try {
         auto options=source;options.search_seconds=live::detail::effective_epoch_search_seconds(options,false);
@@ -4905,7 +4906,7 @@ HelperNativeWork helper_native_work(const transfer::Options& source,
     if(source.modem.receiver_strategy!=modem::ReceiverStrategy::automatic&&
        source.modem.receiver_strategy!=modem::ReceiverStrategy::complex_only)
         return fail("Selected receiver policy does not support helper rolling work narrowing");
-    if(actual&&(actual->helper.power_w<=0||actual->helper.frequency==helper::Frequency::cochannel))
+    if(actual&&(actual->helper.power_w<=0||actual->helper.frequency!=helper::Frequency::high))
         return fail("Disabled or cochannel helper has no isolated rolling work reference");
     if(scenario.profiles.size()!=1||scenario.profiles.front().profile_index!=0||!source.key||source.timestamp)
         return fail("Native work curve models one representative rolling keyed profile/epoch, not full reception or every cohort");

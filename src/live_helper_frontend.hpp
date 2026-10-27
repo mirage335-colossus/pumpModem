@@ -25,6 +25,13 @@
 
 namespace datapump::live::detail {
 
+// One contiguous real FIR rejects both the pure pilot and the auxiliary
+// 400 Hz below it. The +/-150-Hz modulation support has 75-Hz transition
+// margins inside the fixed notch. Legacy conditional views keep their kernel.
+inline constexpr double realtime_helper_notch_offset_hz=200;
+inline constexpr double realtime_helper_notch_half_width_hz=425;
+inline constexpr double realtime_helper_group_low_hz=-550,realtime_helper_group_high_hz=150;
+
 // A real capture cannot distinguish the two signs of its analytic image.
 // Each admissible branch has its own immutable NCO/input provenance. These
 // facts describe a conditional common link, never full ordinary RF coverage.
@@ -79,6 +86,13 @@ struct HelperViewBlock {
     std::uint64_t raw_captured_end=0;
     std::optional<HelperFrequencyInterval> frequency_interval;
     bool frequency_model_rejected=false;
+    // The upstream NCO has applied an independently fitted pilot phase to
+    // some PCM in this block. This is executed correction, not a timing prior.
+    bool common_phase_corrected=false;
+    // Correction-domain RF uncertainty for the actual produced PCM. Raw
+    // Reference remains independently dated and unchanged for clock mapping.
+    std::optional<double> corrected_rf_uncertainty_hz;
+    helper::CaptureBand applied_correction_hz{};
     std::size_t bytes()const noexcept{return samples.capacity()*sizeof(float)+sizeof(*this)+
         (frequency_publication?sizeof(HelperFrequencyPublication):0);}
 };
@@ -346,7 +360,7 @@ inline RawHelperNotchBands raw_helper_notch_bands(const RawHelperNotchDomain& do
             std::max(std::abs(band.lower),std::abs(band.upper))};
     };
     result.data=absolute(signed_data);
-    const auto metadata=plus(measured,times({-150,150},domain.one_plus_clock));
+    const auto metadata=plus(measured,times({realtime_helper_group_low_hz,realtime_helper_group_high_hz},domain.one_plus_clock));
     result.helper={metadata.lower,metadata.upper};
     result.valid=finite(signed_data) && finite(metadata) &&
         std::isfinite(result.data.upper_hz) && result.data.lower_hz>=0 &&
@@ -369,6 +383,36 @@ class HelperInputFrontend {
         return sizeof(audio::Resampler)+2*(258*taps+2)*sizeof(float);
     }
     struct Branch {
+        struct Certificate {
+            std::uint64_t first=0,end=0;
+            double radius=0,q_low=0,q_high=0;
+            bool valid=false,phase=false;
+        };
+        struct Certificates {
+            std::array<Certificate,512> records{};
+            std::size_t head=0,count=0;
+            void append(Certificate value)noexcept {
+                if(value.first>=value.end)return;
+                if(count==records.size()){head=(head+1)%records.size();--count;}
+                records[(head+count)%records.size()]=value;++count;
+            }
+            Certificate summarize(std::uint64_t first,std::uint64_t end,bool all_phase)const noexcept {
+                Certificate out{first,end,0,0,0,true,all_phase};
+                auto cursor=first;bool have_q=false;
+                for(std::size_t i=0;i<count && cursor<end;++i) {
+                    const auto& r=records[(head+i)%records.size()];
+                    if(r.end<=cursor)continue;
+                    if(r.first>cursor){out.valid=out.phase=false;return out;}
+                    out.valid=out.valid && r.valid;out.radius=std::max(out.radius,r.radius);
+                    out.phase=all_phase?(out.phase && r.phase):(out.phase || r.phase);
+                    out.q_low=have_q?std::min(out.q_low,r.q_low):r.q_low;
+                    out.q_high=have_q?std::max(out.q_high,r.q_high):r.q_high;have_q=true;
+                    cursor=std::min(end,r.end);
+                }
+                if(cursor!=end)out.valid=out.phase=false;
+                return out;
+            }
+        } raw_certificates,output_certificates;
         std::shared_ptr<const HelperInputView> view;
         helper::AnalyticFrequencyTranslator translator;
         audio::Resampler converter;
@@ -379,8 +423,13 @@ class HelperInputFrontend {
         helper_prior_detail::Interval raw_certified_frequency{};
         const char* tracking_decline=nullptr;
         double last_notch_transition_l1=0;
+        bool physical_notch_=false,two_tone_=false;
+        std::uint64_t phase_support_first_=0,phase_support_end_=0;
+        double current_correction_hz_=0;
+        helper::CaptureBand helper_relative_band_{};
+        double certified_helper_uncertainty_=-1;
         bool filter_before_converter()const noexcept {
-            return view->translated_helper_hz<=225 || view->translated_helper_hz+225>=view->logical_rate/2.;
+            return physical_notch_;
         }
         static std::uint64_t logical_origin(const HelperInputView& v,std::uint64_t at,std::size_t delay) {
             if(at>UINT64_MAX-delay)throw Error("helper filter sample origin exceeds the capture counter");
@@ -390,14 +439,18 @@ class HelperInputFrontend {
                 throw Error("helper filter sample origin exceeds the logical counter");
             return whole*v.logical_rate+tail;
         }
-        Branch(HelperInputView v,std::uint64_t at,bool realtime=false,bool physical_notch=false):view(std::make_shared<const HelperInputView>(v)),
+        Branch(HelperInputView v,std::uint64_t at,bool realtime=false,bool physical_notch=false,
+               bool two_tone=false,helper::CaptureBand helper_relative_band={},double helper_uncertainty=0):view(std::make_shared<const HelperInputView>(v)),
             translator({v.physical_rate,v.correction_hz,v.input_band,at,v.conjugate,realtime},
                        helper::AnalyticFrequencyTranslator::workspace_required()),
             converter(v.physical_rate,v.logical_rate),
-            filter(physical_notch?v.physical_rate:v.logical_rate,v.translated_helper_hz),
+            filter(physical_notch?v.physical_rate:v.logical_rate,
+                v.translated_helper_hz-(two_tone?realtime_helper_notch_offset_hz:0),
+                two_tone?realtime_helper_notch_half_width_hz:225),
             first_raw(at),next_raw(at),origin(physical_notch?logical_origin(v,at,filter.delay()):
                 at/v.physical_rate*v.logical_rate+(at%v.physical_rate)*v.logical_rate/v.physical_rate),
-            first(origin+(physical_notch?0:filter.delay())) {
+            first(origin+(physical_notch?0:filter.delay())),physical_notch_(physical_notch),two_tone_(two_tone),
+            current_correction_hz_(v.correction_hz),helper_relative_band_(helper_relative_band) {
             if(physical_notch) {
                 // Filter output zero is the raw center at at+M, not at or
                 // at+2M. Admission puts that center on the exact logical grid.
@@ -424,6 +477,25 @@ class HelperInputFrontend {
             pending.reserve(2ULL*v.logical_rate);
             if(filter.maximum_amplitude_error(v.payload_output_band.lower_hz,v.payload_output_band.upper_hz)>.001)
                 throw Error("conditional helper filter does not preserve the payload passband");
+            if(two_tone && !v.reference_passthrough && !certify_helper_group(helper_uncertainty))
+                throw Error("two-tone helper filter cannot certify the complete auxiliary and pilot stopband");
+        }
+        bool certify_helper_group(double uncertainty)noexcept {
+            if(!two_tone_ || !std::isfinite(uncertainty) || uncertainty<0)return !two_tone_;
+            if(uncertainty<=certified_helper_uncertainty_)return true;
+            const auto certify=[&](double width) {
+                const auto low=helper_prior_detail::sum(view->translated_helper_hz,
+                    helper_prior_detail::sum(helper_relative_band_.lower_hz,-width).lower).lower;
+                const auto high=helper_prior_detail::sum(view->translated_helper_hz,
+                    helper_prior_detail::sum(helper_relative_band_.upper_hz,width).upper).upper;
+                if(filter.maximum_response(low,high)>.001)return false;
+                certified_helper_uncertainty_=width;return true;
+            };
+            // Qualify the actual stored FIR over an outward whole-Hz domain
+            // once, so small observation jitter does not repeat this expensive
+            // bound every poll. Near a limit, the exact interval may still fit.
+            const auto envelope=std::max(1.,std::ceil(uncertainty));
+            return certify(envelope) || (envelope!=uncertainty && certify(uncertainty));
         }
         bool track_raw_notch(const helper::Reference& reference)noexcept {
             using namespace helper_prior_detail;
@@ -460,7 +532,7 @@ class HelperInputFrontend {
             if(!HelperInputFrontend::logical_notch_supported(filter_rate,reference.frequency_hz))
                 return decline("raw helper moved outside the immutable physical/logical notch placement");
             const auto previous=filter.center_hz();double transition=0;
-            if(!filter.retune(reference.frequency_hz,&transition))
+            if(!filter.retune(reference.frequency_hz-realtime_helper_notch_offset_hz,&transition))
                 return decline("raw helper notch retuning is unsupported in the current FP environment");
             const auto preserved=filter.maximum_amplitude_error(bands.data.lower_hz,bands.data.upper_hz)<=.001;
             const auto stopped=filter.maximum_response(bands.helper.lower_hz,bands.helper.upper_hz)<=.001;
@@ -474,6 +546,41 @@ class HelperInputFrontend {
             raw_certified_frequency=proposal;last_notch_transition_l1=transition;
             tracking_decline=nullptr;return true;
         }
+        bool qualify_source_band(const helper::Reference& reference)noexcept {
+            // Configured live oscillator models retain their original LF/UTC
+            // differential geometry. An absent model is the existing explicit
+            // laboratory path, not an inferred independent clock relation.
+            if(!raw_domain.valid)return true;
+            using namespace helper_prior_detail;
+            if(!std::isfinite(reference.frequency_uncertainty_hz) || reference.frequency_uncertainty_hz<0)
+                return false;
+            const auto bands=raw_helper_notch_bands(raw_domain,
+                {sum(reference.frequency_hz,-reference.frequency_uncertainty_hz).lower,
+                 sum(reference.frequency_hz,reference.frequency_uncertainty_hz).upper});
+            const auto input=translator.input_band();
+            if(!bands.valid || bands.data.lower_hz<input.lower_hz || bands.data.upper_hz>input.upper_hz ||
+               bands.helper.lower_hz<input.lower_hz || bands.helper.upper_hz>input.upper_hz) {
+                tracking_decline="current DATA or complete helper group lies outside its immutable analytic capture certificate";
+                return false;
+            }
+            return true;
+        }
+        std::uint64_t raw_at_logical(std::uint64_t logical)const noexcept {
+            const auto whole=logical/view->logical_rate,tail=(logical%view->logical_rate)*view->physical_rate/view->logical_rate;
+            return whole>(UINT64_MAX-tail)/view->physical_rate?UINT64_MAX:whole*view->physical_rate+tail;
+        }
+        Certificate produced_certificate(std::uint64_t first,std::uint64_t end)const noexcept {
+            const auto filter_rate=filter_before_converter()?view->physical_rate:view->logical_rate;
+            const auto pad=static_cast<std::uint64_t>(std::ceil((
+                static_cast<double>(filter.delay())/filter_rate+converter.source_lookahead_seconds())*view->physical_rate))+2;
+            const auto raw=raw_at_logical(first);
+            const auto lower=raw>pad?raw-pad:0;
+            // Production APIs expose only fully observed centered windows.
+            // next_raw is the actual upper support frontier at production;
+            // including its extra samples conservatively encloses q changes.
+            auto result=raw_certificates.summarize(lower,next_raw,true);
+            result.first=first;result.end=end;return result;
+        }
         std::size_t bytes()const noexcept{return sizeof(*this)+sizeof(HelperInputView)+4*sizeof(void*)+translator.workspace_bytes()+
             converter.workspace_bytes()+filter.allocated_bytes()+pending.capacity()*sizeof(float);}
     };
@@ -486,7 +593,7 @@ public:
     // can depend on one. This is a lifetime ceiling, including the full fixed
     // pending capacity; actual bytes remain a separate telemetry quantity.
     static bool logical_notch_supported(std::uint32_t rate,double helper_hz)noexcept {
-        return rate && std::isfinite(helper_hz) && helper_hz>225 && helper_hz+225<rate/2.;
+        return rate && std::isfinite(helper_hz) && helper_hz>625 && helper_hz+225<rate/2.;
     }
     static std::size_t physical_notch_taps(std::uint32_t rate) {
         const auto count=static_cast<std::size_t>(std::ceil(rate*.04))|1U;
@@ -542,8 +649,8 @@ public:
             modem::HelperReferenceClockRelation::common_corrected_source);
         if(folded || preserve)correction=0; // Preserve the existing raw input basis.
         const auto data_input=config.carrier_hz-correction;
-        const auto low=folded?10.001:std::min(data_input-half,reference.frequency_hz-175)-uncertainty;
-        const auto high=std::max(data_input+half,reference.frequency_hz+175)+uncertainty;
+        const auto low=folded?10.001:std::min(data_input-half,reference.frequency_hz-625)-uncertainty;
+        const auto high=std::max(data_input+half,reference.frequency_hz+225)+uncertainty;
         if(low<=10 || high>=passband || low+correction<=10 ||
            high+correction>=physical_rate/2.-10)
             throw Error("helper reference or payload lies outside the captured positive passband");
@@ -555,8 +662,15 @@ public:
         view.input_band={low,high};
         view.payload_output_band={folded?0.:config.carrier_hz-half-uncertainty,config.carrier_hz+half+uncertainty};
         RawHelperNotchDomain raw_domain;
-        if(view.reference_passthrough) {
+        helper::CaptureBand helper_relative_band{realtime_helper_group_low_hz,realtime_helper_group_high_hz};
+        if(config.oscillator_search) {
             raw_domain=raw_helper_notch_domain(config,expected,passband,utc_rate_limit);
+            if(!raw_domain.valid)throw Error("two-tone helper has no valid original clock domain");
+            const auto band=shared_helper_detail::times(
+                {realtime_helper_group_low_hz,realtime_helper_group_high_hz},raw_domain.one_plus_clock);
+            helper_relative_band={band.lower,band.upper};
+        }
+        if(view.reference_passthrough) {
             const auto bands=raw_helper_notch_bands(raw_domain,
                 {helper_prior_detail::sum(reference.frequency_hz,-reference.frequency_uncertainty_hz).lower,
                  helper_prior_detail::sum(reference.frequency_hz,reference.frequency_uncertainty_hz).upper});
@@ -578,9 +692,10 @@ public:
         if(remainder && next_raw>UINT64_MAX-(quantum-remainder))return;
         const auto first=remainder?next_raw+quantum-remainder:next_raw;
         if(first>UINT64_MAX-delay)return;
-        auto branch=std::make_unique<Branch>(view,first,!folded && !preserve,physical_notch);
+        auto branch=std::make_unique<Branch>(view,first,!folded && !preserve,physical_notch,true,
+            helper_relative_band,reference.frequency_uncertainty_hz);
+        branch->raw_domain=raw_domain;
         if(view.reference_passthrough) {
-            branch->raw_domain=raw_domain;
             if(!branch->track_raw_notch(reference))throw Error(branch->tracking_decline);
         }
         if(sizeof(*this)+branch->bytes()>grant_)throw Error("realtime helper converter exceeds its workspace grant");
@@ -594,9 +709,30 @@ public:
         // corrected views retain their old continuous-NCO policy unchanged.
         if(branch && branch->view->reference_passthrough)
             return branch->track_raw_notch(reference);
-        return branch && reference.sample_rate==branch->view->physical_rate &&
+        const auto accepted=branch && reference.sample_rate==branch->view->physical_rate &&
+            branch->qualify_source_band(reference) &&
+            branch->certify_helper_group(reference.frequency_uncertainty_hz) &&
             branch->translator.track_frequency(expected-reference.frequency_hz);
+        if(accepted) {
+            branch->current_correction_hz_=expected-reference.frequency_hz;
+            branch->tracking_decline=nullptr;
+        }
+        return accepted;
     }
+    bool track_pilot(const helper::AnalyticFrequencyTranslator::PilotObservation& observation)noexcept {
+        auto& branch=branches_[0];
+        // A folded/prior-preserving mono branch has no analytic phase image.
+        // Its immutable raw frequency origin remains independently useful.
+        if(!branch || branch->view->reference_passthrough || branch->view->conjugate ||
+           observation.first_sample>UINT64_MAX-2*helper::AnalyticFrequencyTranslator::group_delay ||
+           branch->translator.next_sample()<observation.first_sample+2*helper::AnalyticFrequencyTranslator::group_delay ||
+           !branch->translator.track_pilot(observation))return false;
+        branch->phase_support_first_=branch->translator.next_sample();
+        branch->phase_support_end_=observation.end_sample;
+        branch->current_correction_hz_=observation.expected_hz-observation.tracking_frequency_hz.value_or(observation.observed_hz);
+        return true;
+    }
+    double current_correction_hz()const noexcept{return branches_[0]?branches_[0]->current_correction_hz_:0;}
     void admit(const modem::Config& config,double expected,const helper::Reference& reference,
                std::uint32_t physical_rate,double passband,std::uint64_t next_raw) {
         if(active())return;
@@ -620,13 +756,18 @@ public:
         if(total>grant_)throw Error("conditional helper input views exceed their workspace grant");
         branches_=std::move(staged);
     }
-    void push(std::span<const float> input,std::uint64_t first_raw) {
+    void push(std::span<const float> input,std::uint64_t first_raw,std::optional<double> corrected_residual_hz={}) {
         std::array<float,2048> translated{},converted{},filtered{};
         for(auto& owned:branches_)if(owned) {
             auto& branch=*owned;
             if(first_raw+input.size()<=branch.next_raw)continue;
             const auto skip=branch.next_raw>first_raw?branch.next_raw-first_raw:0;
             if(first_raw+skip!=branch.next_raw)throw Error("conditional helper input view has a physical capture gap");
+            const auto cert_first=first_raw+skip,cert_end=first_raw+input.size();
+            branch.raw_certificates.append({cert_first,cert_end,corrected_residual_hz.value_or(0),
+                branch.current_correction_hz_,branch.current_correction_hz_,
+                corrected_residual_hz && std::isfinite(*corrected_residual_hz) && *corrected_residual_hz>=0,
+                branch.phase_support_first_<=cert_first && cert_end<=branch.phase_support_end_});
             for(std::size_t at=static_cast<std::size_t>(skip);at<input.size();) {
                 const auto count=std::min(translated.size(),input.size()-at);
                 branch.translator.push(input.subspan(at,count),std::span(translated).first(count),first_raw+at);
@@ -648,6 +789,8 @@ public:
                     if(produced) {
                         if(branch.pending.size()+produced>2ULL*branch.view->logical_rate)
                             throw Error("conditional helper input-view queue exceeded its bounded capture lead");
+                        const auto output_first=branch.first+branch.pending.size();
+                        branch.output_certificates.append(branch.produced_certificate(output_first,output_first+produced));
                         branch.pending.insert(branch.pending.end(),output,output+produced);
                         if(branch.first<branch.eligible) {
                             const auto warmup=static_cast<std::size_t>(std::min<std::uint64_t>(
@@ -687,6 +830,11 @@ public:
                 // provenance cannot turn allocation failure into an input gap.
             }
             block.raw_captured_end=raw_captured_end;block.frequency_interval=frequency_interval;
+            const auto correction=branch.output_certificates.summarize(block.first_sample,
+                block.first_sample+block.samples.size(),false);
+            if(correction.valid)block.corrected_rf_uncertainty_hz=correction.radius;
+            block.applied_correction_hz={correction.q_low,correction.q_high};
+            block.common_phase_corrected=correction.phase;
             result.push_back(std::move(block));
         }
         for(const auto& block:result) {

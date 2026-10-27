@@ -1,6 +1,7 @@
 #pragma once
 
 #include "datapump/types.hpp"
+#include "datapump/channel.hpp"
 #include <atomic>
 #include <cmath>
 #include <cstddef>
@@ -65,6 +66,9 @@ struct SimulationHook {
     // Test collectors must bound their own storage and report overflow later;
     // observation cannot throw, retain the span or interrupt ordinary payload.
     void (*wire_callback)(void*,const ReceiverWireObservation&) noexcept=nullptr;
+    // Optional laboratory channel construction only. Receiver observation sees
+    // solely its ordinary PCM and separately dated actual-RF metadata.
+    void (*configure_channel)(void*,modem::SampledSimulationChannel&)=nullptr;
 };
 inline std::atomic<SimulationHook*> simulation_hook{nullptr};
 inline double simulation_initial_epoch(double fallback) {

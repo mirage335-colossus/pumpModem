@@ -72,11 +72,11 @@ void history_preserves_complete_tail() {
     std::cout<<"stage=ordinary_full_stronger selected="<<revised.selected<<" signal_id="<<revised.signal_id
              <<" revision="<<revised.revision<<" visible_count="<<visible.size()<<'\n';
 }
-// The raw helper is valid at 8 kHz but its 300-Hz metadata band aliases
-// across the wanted band at 2 kHz. A post-decimation notch cannot represent it.
+// The raw two-tone helper is valid at8kHz but its group aliases across
+// the wanted band at2kHz. A post-decimation notch cannot represent it.
 void frontend_physical_notch() {
     constexpr std::uint32_t raw_rate=8000,logical_rate=2000;
-    constexpr double helper_hz=1250;
+    constexpr double helper_hz=1650,auxiliary_hz=helper_hz-400;
     modem::Config c;c.sample_rate=logical_rate;c.carrier_hz=500;c.bandwidth_hz=200;
     c.spreading_factor=16;c.pulse_shaping=false;
     helper::Reference ref;ref.sample_rate=raw_rate;ref.frequency_valid=true;
@@ -90,11 +90,14 @@ void frontend_physical_notch() {
     catch(const Error&){declined=true;}
     check(declined&&!short_grant.active()&&short_grant.bytes()==sizeof(Frontend),
           "unfunded physical notch allocated or admitted an input basis");
-    helper::PayloadFilter filter(raw_rate,helper_hz);
-    const auto suppression=filter.maximum_response(helper_hz-150,helper_hz+150);
+    helper::PayloadFilter filter(raw_rate,helper_hz-200,425);
+    const auto suppression=filter.maximum_response(auxiliary_hz-150,helper_hz+150);
     const auto passband=filter.maximum_amplitude_error(368,632);
     check(suppression<=.001&&passband<=.001,
-          "actual physical FIR did not certify the full helper metadata and wanted payload bands");
+          "actual physical FIR did not certify the full two-tone helper and wanted payload bands");
+    helper::Options helper_options;helper_options.power_w=100;helper_options.callsign="N0CALL";
+    helper::Plan placement;placement.frequency_hz=helper_hz;placement.auxiliary_frequency_hz=auxiliary_hz;
+    placement.helper_gain=.5;placement.data_gain=0;placement.effective_power_w=helper_options.power_w;
     constexpr std::uint64_t raw_first=37;
     const auto quantum=raw_rate/std::gcd(raw_rate,logical_rate);
     const auto remainder=(raw_first+filter.delay())%quantum;
@@ -109,13 +112,13 @@ void frontend_physical_notch() {
     const auto apply=[&](std::size_t chunk) {
         Frontend frontend(grant,19);frontend.admit_realtime(c,helper_hz,ref,raw_rate,3990,raw_first);
         check(frontend.active()&&frontend.bytes()<=grant,"funded physical notch did not admit one immutable view");
+        helper::Generator generator(helper_options,placement,1800000000,true);
         std::vector<float> result;std::uint64_t next=0;
         std::vector<float> input(3*raw_rate);
         for(std::size_t i=0;i<input.size();++i) {
             const auto t=static_cast<double>(raw_first+i)/raw_rate;
             input[i]=static_cast<float>(.02*std::cos(2*std::numbers::pi*500*t)+
-                .3*std::cos(2*std::numbers::pi*1100*t)+.3*std::cos(2*std::numbers::pi*1250*t)+
-                .3*std::cos(2*std::numbers::pi*1400*t));
+                generator.mix(0,static_cast<long double>(raw_first+i)/raw_rate,raw_rate));
         }
         for(std::size_t at=0;at<input.size();) {
             const auto count=std::min(chunk,input.size()-at),end=raw_first+at+count;
@@ -143,14 +146,16 @@ void frontend_physical_notch() {
         frontend.push({},end);
         check(frontend.take(UINT64_MAX,ref,end).empty(),"empty/EOF input flushed unobserved filter samples");
         check(result.size()>2*logical_rate,"physical notch component did not retain a complete measured interval");
-        std::complex<double> wanted{},aliased{};
+        std::complex<double> wanted{},aliased_auxiliary{},aliased_pilot{};
         for(std::size_t i=0;i<result.size();++i) {
             const auto t=static_cast<double>(expected_first+i)/logical_rate;
             wanted+=static_cast<double>(result[i])*std::polar(1.,-2*std::numbers::pi*500*t);
-            aliased+=static_cast<double>(result[i])*std::polar(1.,-2*std::numbers::pi*750*t);
+            aliased_auxiliary+=static_cast<double>(result[i])*std::polar(1.,-2*std::numbers::pi*750*t);
+            aliased_pilot+=static_cast<double>(result[i])*std::polar(1.,-2*std::numbers::pi*350*t);
         }
-        check(std::abs(2*std::abs(wanted)/result.size()-.02)<.0001&&2*std::abs(aliased)/result.size()<.0003,
-              "physical notch/downsampling changed payload gain or retained a bright aliased helper");
+        check(std::abs(2*std::abs(wanted)/result.size()-.02)<.0001&&
+              2*std::abs(aliased_auxiliary)/result.size()<.0003&&2*std::abs(aliased_pilot)/result.size()<.0003,
+              "physical notch/downsampling changed payload gain or retained a bright aliased helper tone");
         return result;
     };
     check(apply(1)==apply(173),"physical-notch output or dates depend on caller chunk boundaries");
@@ -159,24 +164,26 @@ void frontend_physical_notch() {
           "helper envelope omitted actual physical notch/converter support");
     check(Frontend::reservation_bound(raw_rate,logical_rate,750)==old_grant,
           "valid logical notch changed its original frontend reservation");
-    // Literal former logical-notch pipeline: keep its sample values and dates
-    // exact, including the existing analytic translator's delay convention.
+    // Literal two-tone logical-notch pipeline: keep its sample values and
+    // dates exact, including the analytic translator's delay convention.
     {
         auto valid=c;valid.sample_rate=6000;valid.carrier_hz=1500;
         auto valid_ref=ref;valid_ref.frequency_hz=2450;
         const auto valid_grant=Frontend::reservation_bound(raw_rate,valid.sample_rate);
         Frontend frontend(valid_grant);frontend.admit_realtime(valid,2450,valid_ref,raw_rate,3990,40);
-        helper::AnalyticFrequencyTranslator translator({raw_rate,0,{1368,2657},40,false,true},
+        helper::AnalyticFrequencyTranslator translator({raw_rate,0,{1368,2707},40,false,true},
             helper::AnalyticFrequencyTranslator::workspace_required());
         audio::Resampler converter(raw_rate,valid.sample_rate);
-        helper::PayloadFilter logical_filter(valid.sample_rate,2450);
+        helper::PayloadFilter logical_filter(valid.sample_rate,2450-200,425);
+        auto logical_placement=placement;logical_placement.frequency_hz=2450;logical_placement.auxiliary_frequency_hz=2050;
+        helper::Generator generator(helper_options,logical_placement,1800000000,true);
         std::array<float,173> input{},translated{};std::array<float,2048> converted{},filtered{};
         std::vector<float> actual,previous;std::uint64_t actual_first=0;
         for(std::size_t at=0;at<2*raw_rate;) {
             const auto count=std::min(input.size(),2*raw_rate-at),end=40+at+count;
             for(std::size_t i=0;i<count;++i)input[i]=static_cast<float>(
                 .02*std::cos(2*std::numbers::pi*1500*(40+at+i)/raw_rate)+
-                .5*std::cos(2*std::numbers::pi*2450*(40+at+i)/raw_rate));
+                generator.mix(0,static_cast<long double>(40+at+i)/raw_rate,raw_rate));
             frontend.push(std::span(input).first(count),40+at);
             translator.push(std::span(input).first(count),std::span(translated).first(count),40+at);
             std::size_t consumed=0;
@@ -201,7 +208,7 @@ void frontend_physical_notch() {
             logical_filter.delay()+1;
         previous.erase(previous.begin(),previous.begin()+static_cast<std::ptrdiff_t>(eligible-old_first));
         check(actual_first==eligible&&actual==previous,
-              "valid logical-rate notch changed its former PCM or sample dates");
+              "valid logical-rate two-tone notch changed its PCM or sample dates");
     }
     bool too_large=false;try {Frontend::reservation_bound(200000,logical_rate,helper_hz);}
     catch(const Error&){too_large=true;}
@@ -476,7 +483,7 @@ PhysicalResult physical(bool helper_on) {
         const auto placement=helper::plan(helper,c.carrier_hz,helper::occupied_bandwidth(c),channel.physical_sample_rate(),0,
             modem::outer_dsss_transmit_gain(c));
         check(placement.frequency_hz+225<c.sample_rate/2.,"physical payload-tail fixture did not exercise adjacent-helper FIR");
-        filter=helper::PayloadFilter(c.sample_rate,placement.frequency_hz);
+        filter=helper::PayloadFilter(c.sample_rate,placement.frequency_hz-200,425);
     }
     audio::Resampler playback(c.sample_rate,48000),capture(48000,c.sample_rate);
     std::map<std::pair<std::uint64_t,std::uint64_t>,PhysicalResult> streams;

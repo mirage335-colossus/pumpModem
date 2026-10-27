@@ -163,8 +163,15 @@ void helper_placement_covers_both_profiles() {
     modem::SampledSimulationChannel channel(settings.transfer.modem,impairment,options,width);
     const auto plan=helper::plan(options,settings.transfer.modem.carrier_hz,width,channel.physical_sample_rate(),
         0,modem::outer_dsss_transmit_gain(settings.transfer.modem));
-    check(plan.frequency_hz-150>longer.carrier_hz+width/2,
-        "helper overlapped long-message data band");
+    const auto data_upper=longer.carrier_hz+width/2;
+    check(plan.auxiliary_frequency_hz>0 && plan.auxiliary_frequency_hz<plan.frequency_hz &&
+          plan.auxiliary_frequency_hz-150>=data_upper+300,
+        "closest auxiliary modulation band lost its long-message DATA guard");
+    check(plan.frequency_hz-plan.auxiliary_frequency_hz==helper::auxiliary_pilot_spacing_hz &&
+          plan.frequency_hz-(plan.auxiliary_frequency_hz+150)>=250,
+        "pure pilot lost its separate auxiliary modulation guard");
+    check(plan.frequency_hz+250<=channel.physical_sample_rate()/2.,
+        "highest pure pilot lost its physical capture-edge margin");
     modem::StreamingTransmitter source(modem::RawBits{{0,0,1}},longer);
     std::array<float,800> samples{};helper::Tracker tracker(plan.frequency_hz);
     bool observed=false;

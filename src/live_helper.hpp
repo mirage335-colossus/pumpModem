@@ -601,12 +601,17 @@ inline helper::EnvelopeRequirements helper_envelope_baseline_requirements(const 
             if(raw_rate) {
                 const auto expected=helper::plan(settings.helper,helper_placement_band(settings),raw_rate,0,
                     modem::outer_dsss_transmit_gain(config)).frequency_hz;
-                if(expected<=225 || expected+225>=config.sample_rate/2.)
+                if(expected<=helper::auxiliary_pilot_spacing_hz+225 || expected+225>=config.sample_rate/2.)
                     result.frontend_lookahead_seconds=std::max(result.frontend_lookahead_seconds,
                         helper_physical_notch_support(raw_rate,config.sample_rate));
             }
         }catch(const Error&) {} // Optional forecast cannot remove the physical baseline.
         catch(const std::bad_alloc&) {}
+        // Actual bounded PCM staging waits for the local pilot phase aperture.
+        // Charge this transport delay to the genuine lead/drain baseline,
+        // separately from the at-most36s precision extension.
+        result.frontend_lookahead_seconds=static_cast<double>(
+            helper_outward_duration_sum(result.frontend_lookahead_seconds,.4L));
     }
     return result;
 }
@@ -737,8 +742,8 @@ inline std::uint32_t helper_predicted_capture_sample_rate(const Settings& settin
     return modem::SampledSimulationChannel::planned_physical_sample_rate(config,settings.helper,
         helper_occupied_bandwidth(settings),shared_helper_capture(config,h));
 }
-// Shared TX/Planner inputs. Metadata changes expected clean-tone support,
-// never receiver qualification. Callsigns use their actual symbol count; three
+// Shared TX/Planner inputs. Metadata is confined to the auxiliary and cannot
+// qualify or interrupt the pure pilot. Callsigns use their actual symbol count; three
 // time symbols conservatively cover current/future Unix timestamps (early test
 // epochs may use fewer). The current software always punctuates helper.
 inline helper::TonePrecisionRequest helper_tone_precision_request(const Settings& settings,
@@ -746,6 +751,7 @@ inline helper::TonePrecisionRequest helper_tone_precision_request(const Settings
         double baseline_lead_seconds,double maximum_source_capture_ratio=1) {
     helper::TonePrecisionRequest request;
     request.sample_rate=physical_rate;request.straight_cn0_db_hz=straight_cn0_db_hz;
+    request.pilot_segmented=true;
     request.phase_noise_radians_per_sqrt_second=settings.simulation?
         settings.simulation_phase_noise_degrees_per_sqrt_second*std::numbers::pi/180:
         helper_precision_options(config).phase_noise_radians_per_sqrt_second;
@@ -763,7 +769,7 @@ inline helper::TonePrecisionPrediction helper_lead_precision_prediction(const Se
         const auto physical_rate=helper_predicted_capture_sample_rate(settings,config);
         const auto level=helper_configured_reference_level(settings,config);
         result=helper::predict_tone_precision(helper_tone_precision_request(settings,config,
-            physical_rate,level.straight_cn0_db_hz,baseline_lead_seconds,maximum_source_capture_ratio));
+            physical_rate,level.pilot_straight_cn0_db_hz,baseline_lead_seconds,maximum_source_capture_ratio));
     }catch(const Error& error) {
         try {result.reason=error.what();}catch(const std::bad_alloc&) {}
     }catch(const std::bad_alloc&) {} // Precision prediction yields before waveform functionality.

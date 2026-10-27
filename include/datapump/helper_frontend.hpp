@@ -64,7 +64,8 @@ private:
 // A fixed-rate, fixed-delay real-PCM frequency translator. It constructs an
 // analytic signal with an antisymmetric Hilbert FIR before mixing; a cosine
 // mixer alone would produce a second payload image. The caller supplies q and
-// the complete input-band union; measurements never mutate q after creation.
+// the complete input-band union. Optional continuous-reference updates change
+// only the NCO, retaining every sample and the fixed FIR delay.
 class AnalyticFrequencyTranslator {
 public:
     struct Config {
@@ -75,6 +76,18 @@ public:
         bool conjugate=false;
         // Prepare analytic conversion even when the initial correction is zero.
         bool continuous_reference=false;
+    };
+    struct PilotObservation {
+        double expected_hz=0,observed_hz=0,phase_cycles=0;
+        std::uint64_t phase_sample=0;
+        double phase_sample_fraction=0;
+        // Half-open support of one coherent, settled phase/frequency model.
+        // The caller owns its qualification, including retune boundaries.
+        std::uint64_t first_sample=0,end_sample=0,captured_end_sample=0;
+        // Optional dated oscillator-model frequency for the continued NCO
+        // slope. Absolute phase transport still uses observed_hz from this
+        // single coherent local fit. Empty preserves the local-fit slope.
+        std::optional<double> tracking_frequency_hz={};
     };
     static constexpr std::size_t tap_count=1025;
     static constexpr std::size_t group_delay=(tap_count-1)/2;
@@ -100,10 +113,22 @@ public:
     // adds this phase AFTER optional analytic conjugation. A physical reference
     // at k therefore maps to output k+delay(), sign*phase+phase_at(k+delay()).
     double phase_at(std::uint64_t output_sample)const noexcept;
+    std::uint64_t next_sample()const noexcept;
     // Change only the NCO slope at the next unprocessed sample. Its phase and
     // FIR history remain continuous. After a change phase_at describes the
     // current affine segment, not a historical phase observation.
+    // An explicit frequency-only update also cancels a pending pilot update.
     bool track_frequency(double correction_hz)noexcept;
+    // Transfer an absolute raw-cosine pilot phase to the common NCO. The
+    // correction starts at max(next_sample(), first_sample+2*delay()), only
+    // when its complete Hilbert input window lies in the supplied support. A
+    // future start is held in fixed numeric state and applied inside push;
+    // phase_at continues to describe the current segment until then. A second
+    // pilot update is declined while one is pending. The caller must supply
+    // the actual captured frontier, and must establish that this single-hop
+    // model supports the target coordinate; the API grants no phase authority
+    // across a retune or a future coherence guarantee.
+    bool track_pilot(const PilotObservation&)noexcept;
     // Exactly input.size() outputs, including the known FIR startup transient.
     // No EOF flush, time warp, gain normalization, or reset on helper loss.
     // Input and output may alias exactly. Gaps and nonfinite PCM are rejected.

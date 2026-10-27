@@ -14,6 +14,7 @@
 #include "datapump/symbol_schedule.hpp"
 #include "search_parallel.hpp"
 #include "pattern_fft_batch.hpp"
+#include "pattern_fft_clock_rows.hpp"
 #include "conditioned_reference_export.hpp"
 #include "pattern_fft_window.hpp"
 #include "pattern_fft_periodic_window.hpp"
@@ -1522,8 +1523,44 @@ struct PatternReceiver::Impl {
         if(!scoring.empty() && !cache_fits(budget,extra))drop_scoring();
         if((!cached_templates.empty() || exact_initial_rows) && !cache_fits(budget,extra))drop_template_cache();
     }
-    Complex template_value(std::size_t bin,std::uint64_t index,unsigned bit,std::size_t f) {
-        return template_value(code,bin,index,bit,f);
+    std::unique_ptr<detail::PatternFftClockRows> prepare_serial_clock_rows(std::size_t worker_slots) {
+        // The ORIGINAL parallel preparation decision has already completed.
+        // Never exchange an affordable worker, native/partition scratch or a
+        // prepared spectral row for this optional exact source-only cache.
+        if(worker_slots!=1 || !scoring.empty() || !streamed_templates || !shaped ||
+           (!config.scramble && !config.dsss) || calendar_symbols() || sample_fit ||
+           drift_sections!=1 || differential_window || acquisition_arithmetic()!=SearchArithmetic::fp64 ||
+           std::fegetround()!=FE_TONEAREST)return {};
+        const auto needed=detail::PatternFftClockRows::required_bytes(length);
+        if(!needed || needed>SIZE_MAX-arithmetic_reservation ||
+           !cache_fits(budget,arithmetic_reservation+needed))return {};
+        auto rows=detail::PatternFftClockRows::create(length,needed);
+        if(!rows || rows->working_bytes()>SIZE_MAX-arithmetic_reservation ||
+           !cache_fits(budget,arithmetic_reservation+rows->working_bytes()))return {};
+        arithmetic_reservation+=rows->working_bytes();
+        fft_workload->exact_clock_row_peak_bytes=std::max(fft_workload->exact_clock_row_peak_bytes,rows->working_bytes());
+        return rows;
+    }
+    std::span<const detail::PatternFftClockRows::Pair> serial_clock_rows(
+            detail::PatternFftClockRows* rows,std::uint64_t index,std::size_t f,std::stop_token stop) {
+        if(!rows)return {};
+        const auto source=code.resolved_symbol_address(index*code.chips_per_symbol());
+        const detail::PatternFftClockRows::Identity identity{&code,index,active_stream_phase,
+            source.epoch,source.ordinal,search.input_sample_origin,bin_samples,
+            std::bit_cast<std::uint64_t>(clock_ratio(f)),source.sample_in_second};
+        const bool hit=rows->matches(identity);
+        const auto values=rows->get(identity,[&](std::size_t i,unsigned bit) {
+            return template_value(code,i,index,bit,f,{},false);
+        },stop);
+        if(!values.empty()) {
+            if(hit)++fft_workload->exact_clock_row_hits;
+            else ++fft_workload->exact_clock_row_builds;
+        }
+        return values;
+    }
+    Complex template_value(std::size_t bin,std::uint64_t index,unsigned bit,std::size_t f,
+            std::span<const detail::PatternFftClockRows::Pair> exact_rows={}) {
+        return template_value(code,bin,index,bit,f,exact_rows);
     }
     double frequency_offset(std::size_t f)const {return search.frequency_offsets_hz[f]+frequency_origin_hz;}
     bool acquisition_lane(std::size_t f,const detail::PatternFftClockPrior* clock=nullptr)const {
@@ -1580,7 +1617,8 @@ struct PatternReceiver::Impl {
         templates_valid=tracking_reference_valid=false;
         if(restore_schedule)restore_prior_schedule();
     }
-    Complex template_value(PatternCode& pattern,std::size_t bin,std::uint64_t index,unsigned bit,std::size_t f) const {
+    Complex template_value(PatternCode& pattern,std::size_t bin,std::uint64_t index,unsigned bit,std::size_t f,
+            std::span<const detail::PatternFftClockRows::Pair> exact_rows={},bool rotate=true) const {
         const auto sample_position=static_cast<long double>(bin)*bin_samples+static_cast<long double>(bin_samples-1)/2;
         const auto source_position=sample_position*clock_ratio(f);
         if(variable_clock && source_position>=code.symbol_samples())return {};
@@ -1597,10 +1635,10 @@ struct PatternReceiver::Impl {
         // Reuse an already-budgeted acquisition cache during continuation
         // when present; this path never allocates a cache just for tracking.
         const bool cached=clock_ratio(f)==1 && !scoring.empty() && !scoring.front().nominal_reference.empty();
-        const auto value=cached?scoring.front().nominal_reference[bin][bit]:shaped?
+        const auto value=!exact_rows.empty()?exact_rows[bin][bit]:cached?scoring.front().nominal_reference[bin][bit]:shaped?
             pattern.shaped_value(index*code.chips_per_symbol(),bit,static_cast<double>(source_position)):
             pattern.value(chip,bit,fraction);
-        return value*std::polar(1.,tau*frequency_offset(f)*static_cast<double>(sample_position)/config.sample_rate);
+        return rotate?value*std::polar(1.,tau*frequency_offset(f)*static_cast<double>(sample_position)/config.sample_rate):value;
     }
     std::array<Complex,2> template_values(PatternCode& pattern,std::size_t bin,std::uint64_t index,std::size_t f) const {
         const auto sample_position=static_cast<long double>(bin)*bin_samples+static_cast<long double>(bin_samples-1)/2;
@@ -3224,6 +3262,7 @@ struct PatternReceiver::Impl {
         struct ActiveScope {std::size_t& value;~ActiveScope(){value=0;}} active{native_active_bytes};
         if(native_active_bytes>buffer_bytes || !cache_fits(budget,native_active_bytes))
             throw Error("native FFT storage exceeds reservation");
+        fft_workload->coherent_fft_worker_slots_peak=std::max<std::size_t>(fft_workload->coherent_fft_worker_slots_peak,1);
         // Adjacent deferred phase groups can name the exact same UTC symbol.
         // Reuse scores only within this immutable broad-input batch; keep all
         // original collections, trial charges, phase identities and ordering.
@@ -3481,6 +3520,7 @@ struct PatternReceiver::Impl {
         auto& storage=scoring.front();
         auto& scoring_jobs=storage.jobs;auto& scoring_templates=storage.templates;
         auto& scoring_outputs=storage.outputs;auto& scoring_workspaces=storage.workspaces;
+        fft_workload->coherent_fft_worker_slots_peak=std::max(fft_workload->coherent_fft_worker_slots_peak,scoring_workspaces.size());
         std::size_t queued=0;
         const bool reuse_templates=reuse_single_template();
         // Cache eviction originally materialized these ordinary transform
@@ -4229,6 +4269,11 @@ struct PatternReceiver::Impl {
             // Serial acquisition reuses the fallback tracking-cache buffer.
             // A later measure must rebuild it before any timing refinement.
             if(tracking_reference.empty())tracking_reference_valid=false;
+            fft_workload->coherent_fft_worker_slots_peak=std::max<std::size_t>(fft_workload->coherent_fft_worker_slots_peak,1);
+            const auto previous_arithmetic=arithmetic_reservation;
+            struct ClockRowsReservation {std::size_t& current;std::size_t before;
+                ~ClockRowsReservation(){current=before;}} clock_rows_reservation{arithmetic_reservation,previous_arithmetic};
+            auto exact_clock_rows=prepare_serial_clock_rows(1);
             for(std::size_t stream_index=0;stream_index<search.initial_stream_symbols;++stream_index) {
             std::size_t group_count=0;
             const auto groups=phase_groups(stream_index,search.search_stream_phases?0:config.stream_phase_samples,phase_upper,group_count);
@@ -4249,6 +4294,7 @@ struct PatternReceiver::Impl {
             const auto& squares=cached_templates.empty()?template_square:template_bank(stream_index).square;
             for(std::size_t f=0;f<templates.size();++f) {
                 if(!acquisition_lane(f,clock))continue;
+                const auto raw_clock_rows=serial_clock_rows(exact_clock_rows.get(),stream_index,f,stop);
                 ++fft_workload->template_jobs;
                 fft_workload->retained_start_trials+=selected.selected_count;
                 const auto direct=fft_workload->restricted_timing_active && search.restricted_direct_search && streamed_templates &&
@@ -4259,7 +4305,7 @@ struct PatternReceiver::Impl {
                     if(streamed_templates) {
                         std::fill(product.begin(),product.end(),Complex{});norm=0;square={};
                         for(std::size_t i=0;i<length;++i) {
-                            const auto value=arithmetic_value(template_value(i,stream_index,b,f));
+                            const auto value=arithmetic_value(template_value(i,stream_index,b,f,raw_clock_rows));
                             if((i&4095U)==0)cancelled(stop);
                             product[direct?i:length-1-i]=std::conj(value);norm+=std::norm(value);
                             if(sample_fit)square+=value*value*carrier_square(i);
@@ -4747,6 +4793,10 @@ PatternHelperFrequencyWindowState PatternReceiver::helper_frequency_window()cons
         !s.search.hypotheses.empty() && s.search.hypotheses.size()<=8194 && !s.phase_curve && !s.execution_phase_view && !s.cached_phase_view;
     out.active=s.helper_frequency()!=nullptr;out.original_pairs=s.templates.size();
     out.selected_pairs=s.helper_frequency()?s.helper_frequency()->selected:out.original_pairs;
+    if(out.supported && s.helper_frequency()) {
+        out.clock_counts_available=true;out.original_clock_rates=s.helper_frequency()->original_clock_rates;
+        out.selected_clock_rates=s.helper_frequency()->selected_clock_rates;
+    }
     out.unresolved_clock_cell_half_width_ppm=s.search.admitted_clock_cell_half_width_ppm.value_or(0);
     if(s.helper_frequency()) {
         out.clock_interval=s.helper_frequency()->window.clock_interval;out.clock_qualified=out.clock_interval.has_value();

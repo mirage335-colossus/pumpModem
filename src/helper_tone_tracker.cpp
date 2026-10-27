@@ -1,5 +1,6 @@
 #include "datapump/helper_tone_tracker.hpp"
 #include "datapump/helper_phase_precision.hpp"
+#include "datapump/helper_segmented_precision.hpp"
 #include "datapump/types.hpp"
 #include <algorithm>
 #include <array>
@@ -44,6 +45,7 @@ void fft(std::array<FComplex,fft_size>& a)noexcept {
 }
 }
 struct ToneTracker::Impl {
+    std::unique_ptr<segmented_detail::Pilot> pilot;
     struct ClockBin {
         Complex value{},nco_first{1,0},step_first{1,0},nco_second{1,0},step_second{1,0};
         std::uint64_t center=0,first=0,last=0;
@@ -95,6 +97,7 @@ struct ToneTracker::Impl {
     double clock_window_sum=0,clock_covariance_row_sum=0;
     bool clock_enabled=false;
     explicit Impl(ToneTrackerConfig c,std::uint64_t first):config(c) {
+        if(c.segmented_pilot){pilot=std::make_unique<segmented_detail::Pilot>(c,first);return;}
         low=std::max(20.,c.expected_hz-c.search_half_width_hz);
         high=std::min(c.sample_rate/2.-20.,c.expected_hz+c.search_half_width_hz);
         block_size=std::clamp<std::size_t>(static_cast<std::size_t>(std::lround(c.sample_rate*.02)),16,maximum_block);
@@ -127,6 +130,7 @@ struct ToneTracker::Impl {
         side_step=std::polar(1.,-tau*200/c.sample_rate);reset(first);
     }
     void reset(std::uint64_t first)noexcept {
+        if(pilot){pilot->reset(first);return;}
         next=last_good=tracking_first=first;seed_used=block_used=history_used=0;seed_support=0;
         center_hz=previous_center_hz=previous_seed_hz=0;noise_psd=signal_power=previous_phase_variance=0;
         oscillator=side={1,0};step={1,0};sum=lower=upper=previous={};locked=previous_valid=false;
@@ -639,6 +643,7 @@ struct ToneTracker::Impl {
         }
     }
     void push(std::span<const float> input,std::uint64_t first) {
+        if(pilot){pilot->push(input,first);return;}
         if(first!=next || input.size()>UINT64_MAX-first)throw Error("realtime helper tracker requires contiguous raw samples");
         for(const auto value:input)if(!std::isfinite(value))throw Error("realtime helper tracker received nonfinite PCM");
         for(const auto value:input) {
@@ -677,7 +682,7 @@ struct ToneTracker::Impl {
         if(!locked) {result.present=result.qualified=false;result.clock_qualified=false;}
     }
 };
-std::size_t ToneTracker::workspace_required(const ToneTrackerConfig& c) {validate(c);return sizeof(ToneTracker)+sizeof(Impl);}
+std::size_t ToneTracker::workspace_required(const ToneTrackerConfig& c) {validate(c);return sizeof(ToneTracker)+sizeof(Impl)+(c.segmented_pilot?sizeof(segmented_detail::Pilot):0);}
 ToneTracker::ToneTracker(ToneTrackerConfig c,std::size_t grant,std::uint64_t first) {
     if(workspace_required(c)>grant)throw Error("realtime helper tracker exceeds its workspace grant");
     impl_=std::make_unique<Impl>(c,first);
@@ -685,8 +690,13 @@ ToneTracker::ToneTracker(ToneTrackerConfig c,std::size_t grant,std::uint64_t fir
 ToneTracker::~ToneTracker()=default;
 ToneTracker::ToneTracker(ToneTracker&&)noexcept=default;
 ToneTracker& ToneTracker::operator=(ToneTracker&&)noexcept=default;
-std::size_t ToneTracker::workspace_bytes()const noexcept{return sizeof(ToneTracker)+sizeof(Impl);}
+std::size_t ToneTracker::workspace_bytes()const noexcept{return sizeof(ToneTracker)+sizeof(Impl)+(impl_->pilot?sizeof(segmented_detail::Pilot):0);}
 void ToneTracker::reset(std::uint64_t first)noexcept {impl_->reset(first);}
 void ToneTracker::push(std::span<const float> input,std::uint64_t first) {impl_->push(input,first);}
-ToneTrackerSnapshot ToneTracker::snapshot()const noexcept{return impl_->result;}
+ToneTrackerSnapshot ToneTracker::snapshot()const noexcept{return impl_->pilot?impl_->pilot->result:impl_->result;}
+void ToneTracker::begin_pilot_segment(std::uint64_t first,double expected,double width,bool preserve,double scale,std::uint64_t settled_first,
+                                    bool qualify_local_aperture) {
+    if(!impl_->pilot)throw Error("dated pilot segment requires segmented pilot mode");
+    impl_->pilot->begin(first,expected,width,preserve,scale,settled_first,qualify_local_aperture);
+}
 }

@@ -38,6 +38,65 @@ int main(){try{
             "ideal helper precision accepted an invalid observation duration");
     check(!gui::planner::helper_ideal_tone_half_width(std::numeric_limits<double>::quiet_NaN(),1),
         "ideal helper precision accepted a nonfinite C/N0");
+    std::array<double,25> dwells;dwells.fill(.4);
+    const auto segmented=gui::planner::helper_segmented_tone_half_width(30,dwells);
+    const auto uninterrupted=gui::planner::helper_ideal_tone_half_width(30,10);
+    check(segmented&&uninterrupted&&std::abs(*segmented-.029238630046262856)<1e-12&&
+        *segmented>24.9*(*uninterrupted),
+        "unknown hop phases incorrectly accumulated uninterrupted elapsed-time information");
+    const std::array unequal{.1,.2,.3};
+    const auto unequal_reference=gui::planner::helper_segmented_tone_half_width(40,unequal);
+    check(unequal_reference&&std::abs(*unequal_reference-
+        *gui::planner::helper_ideal_tone_half_width(40,std::cbrt(.001+.008+.027)))<1e-14,
+        "segmented reference did not sum the individual coherent aperture cubes");
+    const std::array invalid_aperture{.4,0.};
+    check(!gui::planner::helper_segmented_tone_half_width(30,{})&&
+        !gui::planner::helper_segmented_tone_half_width(30,invalid_aperture),
+        "segmented reference accepted empty or zero-length physical support");
+    helper::TonePrecisionRequest pilot;pilot.sample_rate=48000;pilot.straight_cn0_db_hz=30;
+    pilot.pilot_segmented=true;
+    const auto pilot30=helper::predict_tone_precision(pilot);
+    check(pilot30.supported&&pilot30.extension_capped&&!pilot30.target_reached&&
+        pilot30.extra_lead_seconds==36&&pilot30.total_lead_seconds==38&&
+        pilot30.coherent_aperture_seconds==.2&&pilot30.expected_segments>0&&
+        pilot30.fallback_information_fraction==.25&&pilot30.fallback_frequency_grid_hz==.1&&
+        pilot30.segmented_noise_reference_half_width_hz>0&&
+        pilot30.frequency_half_width_hz>2*pilot30.segmented_noise_reference_half_width_hz&&
+        pilot30.reason.find("no phase fit crosses a retune")!=std::string::npos,
+        "segmented pilot forecast lost finite local-aperture efficiency or its achievable capped residual");
+    pilot.straight_cn0_db_hz=40;
+    const auto pilot40=helper::predict_tone_precision(pilot);
+    check(pilot40.supported&&pilot40.target_reached&&pilot40.extra_lead_seconds<36&&
+        pilot40.frequency_half_width_hz<=.1&&pilot40.sustained_supported&&
+        pilot40.sustained_frequency_half_width_hz<pilot40.frequency_half_width_hz,
+        "strong segmented pilot failed to produce useful bounded precision lead");
+    check(pilot30.frequency_half_width_hz>.2&&pilot40.sustained_frequency_half_width_hz>.07&&
+        pilot40.reason.find("strong straight fits can be better")!=std::string::npos&&
+        pilot40.reason.find("not calibrated confidence or a physical floor")!=std::string::npos,
+        "fallback-aware forecast omitted its conservative balanced-gap/grid planning guard or confidence limits");
+    pilot.metadata_symbols=16;pilot.punctuate=true;
+    check(helper::predict_tone_precision(pilot).frequency_half_width_hz==pilot40.frequency_half_width_hz,
+        "auxiliary metadata or punctuation interrupted the independent pure pilot forecast");
+    auto boundary=pilot;boundary.straight_cn0_db_hz=20;
+    const auto pilot20=helper::predict_tone_precision(boundary);
+    check(!pilot20.supported&&pilot20.extension_capped&&pilot20.extra_lead_seconds==36&&
+        pilot20.reason.find("software/bootstrap")!=std::string::npos&&
+        pilot20.reason.find("FFT discovery gate")!=std::string::npos,
+        "current discovery gate was hidden or reported as a physical weak-pilot precision limit");
+    boundary.straight_cn0_db_hz=22;
+    check(helper::predict_tone_precision(boundary).supported,
+        "forecast retained the superseded3×projection gate after discovery was satisfied");
+    check(helper::forecast_detail::pilot_discovery_samples(24000)==4096&&
+        helper::forecast_detail::pilot_discovery_samples(48000)==8192&&
+        helper::forecast_detail::pilot_discovery_samples(192000)==32768,
+        "pilot forecast discovery no longer matches the actual bounded FFT sizing");
+    pilot.phase_noise_radians_per_sqrt_second=.1;
+    check(helper::predict_tone_precision(pilot).sustained_frequency_half_width_hz>
+        pilot40.sustained_frequency_half_width_hz,
+        "segmented practical prediction omitted configured oscillator phase noise");
+    pilot.pilot_coherent_aperture_seconds=.4;
+    check(!helper::predict_tone_precision(pilot).supported,
+        "segmented practical predictor accepted coherence across dwell ramps/retunes");
     // A backend can expose finite partial prices while explicitly declining
     // complete component support (for example V2 compact template rebuilds).
     simulation::Estimate partial;
@@ -122,6 +181,12 @@ int main(){try{
     const auto enabled=gui::planner::build(in);
     check(enabled.available&&enabled.helper_reference.enabled&&enabled.helper_reference.budget_available,
         "manual helper mode lost its ordinary plan or physical helper link budget");
+    check(std::abs(enabled.helper_reference.pilot_power_w-.9*enabled.helper_reference.effective_power_w)<1e-9&&
+        std::abs(enabled.helper_reference.pilot_cn0_db_hz-enabled.helper_reference.cn0_db_hz-
+            10*std::log10(.9))<1e-12&&
+        std::abs(enabled.helper_reference.pilot_cn0_db_hz-enabled.helper_reference.auxiliary_cn0_db_hz-
+            10*std::log10(9.))<1e-12,
+        "Planner lost the unambiguous 90/10 straight-interval helper power split");
     check(enabled.helper_cpu_points.empty()&&enabled.helper_receive_points.empty()&&
         enabled.helper_backend_feasibility_points.empty()&&enabled.helper_work_points.empty()&&
         !enabled.helper_reference.conditional_geometry_available,
@@ -133,6 +198,8 @@ int main(){try{
     const auto& forecast=enabled.helper_reference.conditional;
     const auto& ideal=forecast.precision_reference;
     check(ideal.ideal_one_second_half_width_hz&&ideal.ideal_lead_half_width_hz&&
+        ideal.segmented_lead_half_width_hz&&ideal.coherent_aperture_seconds>0&&
+        *ideal.segmented_lead_half_width_hz>*ideal.ideal_lead_half_width_hz&&
         ideal.ideal_lead_observation_seconds==forecast.planned_lead_seconds/ideal.maximum_source_capture_ratio&&
         ideal.ideal_lead_half_width_hz==gui::planner::helper_ideal_tone_half_width(ideal.cn0_db_hz,
             ideal.ideal_lead_observation_seconds),
@@ -205,12 +272,16 @@ int main(){try{
         "not total CPU, measured speed, or a lock/probability forecast",
         "No clock narrowing is inferred from tone power",
         "helper power does not increase payload SNR or Rate",
-        "DSP fixed workspace", "Automatic helper precision lead:","Conditional clean-model precision:",
-        "Expected helper C/N0:","dB-Hz", "Ideal noise-only 3σ scale:",
+        "DSP fixed workspace", "Automatic helper precision lead:","Conditional planning-model precision:",
+        "Expected helper C/N0:","Pure pilot:","90% power share","9× auxiliary power",
+        "dB-Hz", "Ideal noise-only 3σ scale:","Independent-hop noise-only 3σ scale:",
+        "Information sums C/N0 × aperture³","one complete symbol's coherent half-bin scale",
+        "Conditional fallback planning allowance:","all-context fallback allowance is conservative",
+        "Runtime measured uncertainty remains authoritative","not calibrated confidence or a physical precision floor",
         "not an operational confidence interval", "Practical precision inputs:",
-        "Sustained conditional clean-model precision:","if the reference remains available until",
-        "This adds no helper-only transmit lead", "Short dashes use initial clean-model precision",
-        "long dashes use sustained clean-model precision", "Initial conditional ordinary receiver cost:",
+        "Sustained conditional planning-model precision:","if the reference remains available until",
+        "This adds no helper-only transmit lead", "Short dashes use initial planning-model precision",
+        "long dashes use sustained planning-model precision", "Initial conditional ordinary receiver cost:",
         "Static oscillator accuracy in ppm sets initial discovery uncertainty, not a drift rate",
         "tracking-slew guard is an acceptance limit, not a physical drift prediction",
         "Prediction is not measured lock or a lock-probability forecast",
@@ -224,7 +295,7 @@ int main(){try{
     const auto no_sustained_page=gui::planner_page::build(no_sustained,900,true,false);
     check(contains(no_sustained_page,"optional work forecast yielded")&&
         contains(no_sustained_page,"Initial conditional ordinary receiver cost:")&&
-        !contains(no_sustained_page,"Sustained conditional clean-model precision:"),
+        !contains(no_sustained_page,"Sustained conditional planning-model precision:"),
         "missing sustained work erased or replaced the initial receiver price");
     auto percentage=enabled;percentage.inputs.dsp_workspace_percent=50;
     const auto percentage_page=gui::planner_page::build(percentage,900,true,false);
@@ -244,7 +315,7 @@ int main(){try{
     capped_point.planned_lead_seconds=capped_point.precision.total_lead_seconds;
     const auto capped_page=gui::planner_page::build(capped,900,true,false);
     check(capped_point.available&&contains(capped_page,"36 s extra-lead cap reached; ±0.1 Hz target not reached")&&
-        contains(capped_page,"Initial conditional clean-model half-width at payload start: 0.2 Hz"),
+        contains(capped_page,"Initial conditional planning-model half-width at payload start: 0.2 Hz"),
         "cap outcome hid the supported achievable residual precision/work");
     auto declined=enabled;auto& declined_point=declined.helper_reference.conditional;
     declined_point.precision.supported=false;declined_point.precision.reason="bounded forecast input unavailable";
@@ -340,7 +411,7 @@ int main(){try{
     const auto baseline_requirements=live::detail::helper_envelope_requirements(current,current.transfer.modem,
         live::detail::helper_receive_envelope_bound(current));
     const auto expected_cn0=simulation_model.helper_reference.simulation_level_modeled?
-        simulation_model.helper_reference.simulation_cn0_db_hz:simulation_model.helper_reference.cn0_db_hz;
+        simulation_model.helper_reference.simulation_pilot_cn0_db_hz:simulation_model.helper_reference.pilot_cn0_db_hz;
     const auto expected_request=live::detail::helper_tone_precision_request(current,current.transfer.modem,
         simulated_point.physical_sample_rate,expected_cn0,simulated_point.precision.baseline_lead_seconds,
         baseline_requirements.maximum_source_capture_ratio);

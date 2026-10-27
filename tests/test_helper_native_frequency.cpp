@@ -22,9 +22,9 @@ namespace {
 constexpr std::uint32_t rate=48960;
 constexpr double amplitude=.01,cn0=49.7403126773,cfo=3000,clock_ppm=100,delay=.03719,seconds=12;
 constexpr double phase_sigma=.5*std::numbers::pi/180,tau=2*std::numbers::pi;
-// The original HF Auto trace's nominal observer center and declared RF band,
-// before coarse peak detection. Neither is the injected or measured mean CFO.
-constexpr double coarse_expected=2462.78875,coarse_width=9000.4500000000007;
+// The declared HF RF search band is independent of the injected/measured CFO.
+// The configured pilot plan supplies its center before coarse peak detection.
+constexpr double coarse_width=9000.4500000000007;
 constexpr std::uint64_t capture_revision=77;
 void check(bool condition,const char* message) {if(!condition)throw Error(message);}
 double cpu() {return static_cast<double>(std::clock())/CLOCKS_PER_SEC;}
@@ -70,7 +70,10 @@ int main(int argc,char** argv) {
         // fine chip to34 logical samples, hence 1.25*6120/34=225Hz RRC support.
         // The helper-only component does not carry or decode Robust payload.
         const auto public_plan=helper::plan(options,1500,225,rate);
-        check(public_plan.frequency_hz==2462.5,"HF helper placement changed");
+        check(public_plan.auxiliary_frequency_hz>=1500+225./2+450&&
+              public_plan.frequency_hz-public_plan.auxiliary_frequency_hz==helper::auxiliary_pilot_spacing_hz,
+              "HF helper plan lost its adjacent pure pilot and auxiliary spacing");
+        const auto coarse_expected=public_plan.frequency_hz;
         auto received_plan=public_plan;received_plan.helper_gain=amplitude;received_plan.data_gain=0;
         const Crypto key{std::array<std::uint8_t,32>{}};
         helper::Generator generator(options,received_plan,1800000000,true,key);
@@ -90,7 +93,9 @@ int main(int argc,char** argv) {
         const auto noise_sigma=std::sqrt(amplitude*amplitude*rate/(4*std::pow(10.,cn0/10)));
         std::normal_distribution<double> noise(0,noise_sigma),phase_step(0,phase_sigma/std::sqrt(rate));
         double phase=.81;std::array<float,137> samples{};Stats stats;
-        std::cout<<"PARAMETERS,case="<<which<<",rate="<<rate<<",cn0="<<cn0<<",nominal_helper="<<public_plan.frequency_hz
+        std::cout<<"PARAMETERS,case="<<which<<",rate="<<rate<<",pilot_cn0="<<cn0+10*std::log10(helper::pilot_power_fraction)
+            <<",total_helper_cn0="<<cn0<<",nominal_helper="<<public_plan.frequency_hz
+            <<",nominal_auxiliary="<<public_plan.auxiliary_frequency_hz
             <<",coarse_expected="<<coarse_expected<<",coarse_width="<<coarse_width<<",capture_low="<<band.lower_hz
             <<",capture_high="<<band.upper_hz<<",fft=4096,persistence=3,truth="<<truth<<",cfo="<<cfo
             <<",clock_ppm="<<clock_ppm<<",phase_sigma="<<phase_sigma<<",maximum_audio_clock_ppm=1000,delay="<<delay

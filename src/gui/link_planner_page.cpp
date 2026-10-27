@@ -490,7 +490,7 @@ Node cpu_graph(const planner::Model& model,float width) {
     paragraph(n,"Receiver work on the reference CPU. Excludes helper frontend, audio I/O, transmit and GUI work; not measured total process CPU.",
         10,Tone::muted,false,4);
     if(model.helper_reference.enabled) {
-        paragraph(n,"Solid: ordinary receiver baseline. Dashed: conditional helper-corrected ordinary receiver cost. Short dashes use initial clean-model precision; long dashes use sustained clean-model precision if the reference remains available until its stated observation time. Full unresolved DATA-clock/UTC search and ordinary storage remain.",
+        paragraph(n,"Solid: ordinary receiver baseline. Dashed: conditional helper-corrected ordinary receiver cost. Short dashes use initial planning-model precision; long dashes use sustained planning-model precision if the reference remains available until its stated observation time. Full unresolved DATA-clock/UTC search and ordinary storage remain.",
             10,Tone::muted,false,4);
         paragraph(n,"Dashed cost excludes uncalibrated helper discovery, tracking and conversion overhead. It is not total CPU, measured speed, or a lock/probability forecast. Payload SNR, Rate and the ordinary PHY reception curve stay unchanged.",
             10,Tone::muted,false,0);
@@ -739,16 +739,22 @@ void link_budget(Node& root, const planner::Model& model) {
         if(helper.enabled) {
             paragraph(n,"Helper reference on",12,Tone::text,true,4);
             if(helper.budget_available) {
-                paragraph(n,"Expected helper C/N0: "+db(helper.cn0_db_hz)+" dB-Hz in straight-tone intervals ("+
-                    db(helper.tone_snr_db)+" dB in 10 Hz). Effective power: "+number(helper.effective_power_w)+
+                paragraph(n,"Expected helper C/N0: RF-budget total "+db(helper.cn0_db_hz)+" dB-Hz in straight-tone intervals. Effective power: "+number(helper.effective_power_w)+
                     " W; received: "+db(helper.received_dbm)+" dBm.",11,Tone::muted,false,4);
+                paragraph(n,"Pure pilot: RF-budget "+db(helper.pilot_cn0_db_hz)+" dB-Hz ("+
+                    db(helper.pilot_tone_snr_db)+" dB in 10 Hz), "+number(helper.pilot_power_w)+
+                    " W from the 90% power share. Auxiliary: "+db(helper.auxiliary_cn0_db_hz)+
+                    " dB-Hz from 10%. Pilot power is 9× auxiliary power; optional auxiliary metadata does not qualify frequency assistance. Ramps and interference are separate losses.",
+                    11,Tone::muted,false,4);
                 if(helper.simulation_level_modeled)paragraph(n,"Sampled simulation helper C/N0: "+
-                    db(helper.simulation_cn0_db_hz)+" dB-Hz, including "+db(helper.simulation_level_db)+
-                    " dB waveform amplitude allowance. Payload retains its ordinary link budget.",
+                    db(helper.simulation_cn0_db_hz)+" dB-Hz total; pilot "+db(helper.simulation_pilot_cn0_db_hz)+
+                    " dB-Hz, including "+db(helper.simulation_level_db)+
+                    " dB existing digital waveform backoff. This backoff affects both DATA and Helper against the sampled nominal noise; it does not reduce the calibrated hardware RF budget.",
                     11,Tone::muted,false,4);
             }
-            if(helper.geometry_available)paragraph(n,"Nominal helper audio center: "+frequency(helper.frequency_hz)+
-                ". The audio route and radio must pass the helper tone and Robust signal; ADC rate alone does not establish that passband.",
+            if(helper.geometry_available)paragraph(n,"Nominal helper audio center: pure pilot "+frequency(helper.frequency_hz)+
+                ", auxiliary "+frequency(helper.auxiliary_frequency_hz)+
+                ". The audio route and radio must pass Robust, guard, auxiliary modulation, guard and pilot with radio-filter margin; ADC rate alone does not establish that passband.",
                 11,Tone::muted,false,4);
             paragraph(n,"The strongest tone in the expected helper range supplies the real-time frequency reference for direct conversion. Robust acquisition waits while the helper is unavailable. Disable Helper Carrier to use ordinary oscillator search.",
                 11,Tone::muted,false,4);
@@ -756,6 +762,12 @@ void link_budget(Node& root, const planner::Model& model) {
             const auto& precision=conditional.precision;
             const auto& reference=conditional.precision_reference;
             if(reference.ideal_one_second_half_width_hz) {
+                paragraph(n,std::string("Precision preview source: ")+
+                    (model.inputs.receiver_work_mode==simulation::ReceiverWorkMode::sampled_simulation?
+                        "sampled-simulation pilot ":"calibrated RF-budget pilot ")+
+                    db(reference.cn0_db_hz)+
+                    " dB-Hz. Predicted C/N0 does not qualify the reference; measured runtime uncertainty remains authoritative.",
+                    11,Tone::muted,false,4);
                 auto ideal="Ideal noise-only 3σ scale: ±"+number(*reference.ideal_one_second_half_width_hz,4)+
                     " Hz after 1 s";
                 if(reference.ideal_lead_half_width_hz)ideal+="; ±"+
@@ -764,20 +776,44 @@ void link_budget(Node& root, const planner::Model& model) {
                 paragraph(n,ideal+". Identified uninterrupted constant tone in white noise; this theoretical reference is not an operational confidence interval or promised precision.",
                     11,Tone::muted,false,4);
             }
+            if(reference.segmented_lead_half_width_hz)paragraph(n,
+                "Independent-hop noise-only 3σ scale: ±"+frequency(*reference.segmented_lead_half_width_hz)+
+                " from "+std::to_string(precision.expected_segments)+" separate "+
+                number(reference.coherent_aperture_seconds,4)+
+                " s coherent apertures. Information sums C/N0 × aperture³; unrelated retune phases cannot supply uninterrupted coherence. This is a theoretical reference, not measured coverage.",
+                11,Tone::muted,false,4);
+            if(precision.fallback_information_fraction<1)paragraph(n,
+                "Conditional fallback planning allowance: a balanced unknown phase gap in every local context retains "+
+                number(100*precision.fallback_information_fraction,4)+
+                "% of its straight-context frequency information, with "+
+                frequency(precision.fallback_frequency_grid_hz)+
+                " frequency-grid padding per context. This all-context fallback allowance is conservative; strong straight fits can be better. It is not calibrated confidence or a physical precision floor. Runtime measured uncertainty remains authoritative; model competition, excess and observation availability require measurement.",
+                11,Tone::muted,false,4);
+            if(conditional.planned_lead_seconds>0)paragraph(n,
+                "Required baseline helper lead: "+number(precision.baseline_lead_seconds,4)+
+                " s; precision extension: "+number(precision.extra_lead_seconds,4)+
+                " s of at most 36 additional seconds; planned total: "+number(conditional.planned_lead_seconds,4)+
+                " s. Payload starts at the cap with achievable precision; elapsed lead does not grant runtime qualification.",
+                11,Tone::muted,false,4);
             if(precision.supported) {
                 paragraph(n,"Automatic helper precision lead: +"+number(precision.extra_lead_seconds,4)+
                     " s extra; "+number(conditional.planned_lead_seconds,4)+" s total helper-only lead. "+
                     (precision.target_reached?"Predicted ±0.1 Hz target reached.":
                         precision.extension_capped?"36 s extra-lead cap reached; ±0.1 Hz target not reached.":
                         "Predicted ±0.1 Hz target not reached.")+
-                    " Initial conditional clean-model half-width at payload start: "+frequency(conditional.uncertainty_hz)+"; measured uncertainty can be wider.",
+                    " Initial conditional planning-model half-width at payload start: "+frequency(conditional.uncertainty_hz)+"; measured uncertainty can be wider.",
                     11,precision.target_reached?Tone::muted:Tone::caution,false,4);
-                paragraph(n,"Conditional clean-model precision: "+number(precision.usable_tone_seconds,4)+
+                paragraph(n,"Conditional planning-model precision: "+number(precision.usable_tone_seconds,4)+
                     " s usable straight tone across "+std::to_string(precision.expected_segments)+
                     " dated observations at "+std::to_string(conditional.physical_sample_rate)+
-                    " raw samples/s, accounting for configured APSK metadata, punctuation and oscillator process. "+
-                    precision.reason+" Prediction is not measured lock or a lock-probability forecast; clean-model precision is not an operational confidence interval. "
+                    " raw samples/s. Pilot slopes use independent per-dwell phases; auxiliary punctuation/metadata do not interrupt the pure pilot. Configured phase noise, short-aperture estimator efficiency and the stated fallback planning allowance are included. "+
+                    precision.reason+" Prediction is not measured lock or a lock-probability forecast; planning-model precision is not an operational confidence interval. "
                     "Unexpected noise, glitches or model mismatch can widen actual uncertainty.",11,Tone::muted,false,4);
+                if(model.bit_seconds>0)paragraph(n,
+                    "Residual RF half-width: ±"+frequency(conditional.uncertainty_hz)+
+                    "; one complete symbol's coherent half-bin scale is "+frequency(.5/model.bit_seconds)+
+                    ". The ±0.1 Hz lead milestone does not guarantee inexpensive acquisition for long symbols. Unresolved clock and timing alternatives remain in the ordinary receiver cost query.",
+                    11,Tone::muted,false,4);
                 paragraph(n,"Helper tail planning minimum: "+planner::duration(conditional.planned_tail_seconds)+
                     ". Robust waveform time remains "+planner::duration(model.send_seconds)+
                     "; helper lead/tail add startup and drain time without changing payload Rate or framing.",
@@ -805,7 +841,7 @@ void link_budget(Node& root, const planner::Model& model) {
             if(conditional.sustained) {
                 const auto& sustained=*conditional.sustained;
                 const auto at=conditional.sustained_at_seconds/reference.maximum_source_capture_ratio;
-                paragraph(n,"Sustained conditional clean-model precision: ±"+frequency(sustained.uncertainty_hz)+
+                paragraph(n,"Sustained conditional planning-model precision: ±"+frequency(sustained.uncertainty_hz)+
                     " if the reference remains available until "+planner::duration(at)+" after helper start; "+
                     std::to_string(sustained.frequency_rate_hypotheses)+" RF/clock pairs at "+
                     std::to_string(sustained.retained_clock_rates)+" clock rates. This adds no helper-only transmit lead.",
@@ -820,7 +856,7 @@ void link_budget(Node& root, const planner::Model& model) {
                 11,Tone::muted,false,4);
             paragraph(n,"Additional helper discovery/tracking/conversion CPU and post-lock lead-in acquisition are not yet priced. They are unknown additive costs, not zero. No parallel broad helper fallback bank is included.",
                 11,Tone::muted,false,4);
-            paragraph(n,"Expected tone power does not report a measured lock. The ordinary baseline and PHY reception curve remain visible; helper power does not increase payload SNR or Rate. Radio/ADC passband, actual tone tracking and steady observations are conditions of the dashed receiver-cost curve.",
+            paragraph(n,"Expected tone power does not report a measured lock. The ordinary baseline and PHY reception curve remain visible; helper power does not increase payload SNR or Rate. Radio/ADC passband, actual tone tracking and steady observations are conditions of the dashed receiver-cost curve. The independent-phase forecast does not qualify actual hardware retuning or self-interference rejection.",
                 11,Tone::muted,false,0);
         }
     } else paragraph(n, "Link estimate unavailable", 13, Tone::text, true, 0);
@@ -856,7 +892,9 @@ void helper_receiver_details(Node& n,const planner::Model& model) {
     const auto& cost=conditional.receiver_cost;
     const auto& reference=conditional.precision_reference;
     if(reference.ideal_one_second_half_width_hz)paragraph(n,"Practical precision inputs: "+
-        db(reference.cn0_db_hz)+" dB-Hz straight tone; configured Brownian phase-noise standard deviation "+
+        db(reference.cn0_db_hz)+" dB-Hz pure pilot; "+number(reference.coherent_aperture_seconds,4)+
+        " s local coherent aperture; "+number(reference.estimator_efficiency,4)+
+        "× noise standard-deviation efficiency allowance; configured Brownian phase-noise standard deviation "+
         number(reference.phase_noise_radians_per_sqrt_second,5)+
         " rad/√s. Sampled clean-tone observations and smooth evolution are conditional assumptions; numeric history duration is not coherent observation time. Static oscillator accuracy in ppm sets initial discovery uncertainty, not a drift rate. The "+
         number(reference.maximum_tracking_slew_hz_per_second,4)+

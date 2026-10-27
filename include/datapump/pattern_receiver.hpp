@@ -371,6 +371,11 @@ struct PatternFftWork {
     std::size_t conditional_scoring_peak_bytes=0,original_scoring_peak_bytes=0;
     std::uint64_t phase_view_template_jobs=0,phase_view_tracking_fits=0,phase_corrected_bins=0;
     std::uint64_t exact_reused_template_jobs=0;
+    // Exact, batch-local unrotated private rows. Hits still execute every
+    // original RF job/FFT. Slots are joined CPU scratch owners, not a claim
+    // about simultaneous threads or a receiver-wide concurrency count.
+    std::uint64_t exact_clock_row_builds=0,exact_clock_row_hits=0;
+    std::size_t exact_clock_row_peak_bytes=0,coherent_fft_worker_slots_peak=0;
     std::uint64_t skipped_batches=0,skipped_start_trials=0,threshold_trials=0;
     // Acquisition start cells only; threshold_trials additionally includes
     // unchanged tracked timing/frequency refinements. A successful dispatch
@@ -548,6 +553,12 @@ struct PatternHelperFrequencyWindowState {
     bool supported=false,active=false,clock_qualified=false;
     std::optional<PatternHelperClockInterval> clock_interval{};
     std::size_t original_pairs=0,selected_pairs=0;
+    // Exact distinct original clock values represented by the current window,
+    // not a clock-qualification claim or the protected continuation closure.
+    // Inactive or unsupported snapshots leave these unavailable, not measured
+    // zero. The existing selector caches them while updating its mask.
+    bool clock_counts_available=false;
+    std::size_t original_clock_rates=0,selected_clock_rates=0;
     double unresolved_clock_cell_half_width_ppm=0;
     // Actual native continuation fits and omitted numerical fits. Compact
     // execution exposes its existing projected/accumulated/skipped samples.
@@ -558,11 +569,14 @@ namespace detail {
 // update one byte per ORIGINAL pair. Numeric hot paths use constant-time flags.
 class PatternHelperFrequencySelector {
 public:
-    struct Cell {double lower=0,upper=0,clock_ppm=0;bool selected=true;};
+    struct Cell {double lower=0,upper=0,clock_ppm=0;bool selected=true;std::uint16_t clock_group=0;};
+    struct CellWithoutClockGroup {double lower=0,upper=0,clock_ppm=0;bool selected=true;};
+    static_assert(sizeof(Cell)==sizeof(CellWithoutClockGroup)); // Group ID occupies existing padding.
     PatternHelperFrequencyWindow window;
     double domain_lower_ppm=0,domain_upper_ppm=0;
     std::vector<Cell> cells;
     std::size_t selected=0;
+    std::size_t original_clock_rates=0,selected_clock_rates=0;
     std::uint64_t continuation_fits=0,skipped_continuation_fits=0;
     // Construction preflight includes temporary original-index storage. Only
     // cells survive initialize; working_bytes reports that retained allocation.
@@ -617,11 +631,12 @@ public:
             if(x.frequency_offset_hz!=y.frequency_offset_hz)return x.frequency_offset_hz<y.frequency_offset_hz;
             return a<b;
         });
-        cells.resize(search.hypotheses.size());
+        cells.resize(search.hypotheses.size());original_clock_rates=0;
         for(std::size_t first=0;first<cells.size();) {
             auto end=first+1;
             while(end<cells.size()&&search.hypotheses[order[end]].clock_error_ppm==
                   search.hypotheses[order[first]].clock_error_ppm)++end;
+            const auto clock_group=static_cast<std::uint16_t>(original_clock_rates++);
             for(auto group=first;group<end;) {
                 const auto frequency=search.hypotheses[order[group]].frequency_offset_hz;
                 auto next=group+1;
@@ -639,12 +654,13 @@ public:
                 for(auto at=group;at<next;++at) {
                     const auto i=order[at];auto& cell=cells[i];
                     cell.lower=lower;cell.upper=upper;cell.clock_ppm=search.hypotheses[i].clock_error_ppm;
+                    cell.clock_group=clock_group;
                 }
                 group=next;
             }
             first=end;
         }
-        update(requested);return true;
+        selected=0;update(requested);return true;
     }
     bool keep(std::size_t i,double origin=0)const noexcept {
         if(i>=cells.size())return false;
@@ -660,8 +676,18 @@ public:
            window.clock_coefficient_hz==requested.clock_coefficient_hz &&
            window.clock_cell_half_width_ppm==requested.clock_cell_half_width_ppm &&
            window.clock_interval==requested.clock_interval && selected)return false;
-        window=requested;selected=0;bool widens=false;
-        for(auto& cell:cells) {const bool keep=intersects(cell,0);widens|=keep&&!cell.selected;cell.selected=keep;selected+=keep;}
+        window=requested;selected=selected_clock_rates=0;bool widens=false;
+        // Original clock groups are assigned by the already sorted initialize
+        // traversal. This bounded 1 KiB scratch adds no retained per-pair bytes
+        // and counts the current mask during its existing linear update.
+        std::array<std::uint64_t,(8194+63)/64> clocks{};
+        for(auto& cell:cells) {
+            const bool keep=intersects(cell,0);widens|=keep&&!cell.selected;cell.selected=keep;selected+=keep;
+            if(keep) {
+                auto& word=clocks[cell.clock_group/64];const auto bit=std::uint64_t{1}<<(cell.clock_group%64);
+                selected_clock_rates+=!(word&bit);word|=bit;
+            }
+        }
         return widens;
     }
 private:

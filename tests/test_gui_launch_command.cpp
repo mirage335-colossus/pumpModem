@@ -278,10 +278,21 @@ void helper_settings() {
               patch.helper_frequency=="high"&&patch.helper_callsign=="N0CALL/P","Helper options lost units or values");
         check(launch_command::parse(launch_command::format(patch))==patch,"Helper settings do not round trip");
     }
-    for(const auto* frequency:{"high","low","0"}) {
-        const auto patch=launch_command::parse(std::string("--helper-frequency ")+frequency+" --helper-callsign=''");
+    {
+        const auto patch=launch_command::parse("--helper-frequency high --helper-callsign=''");
         check(patch.helper_callsign==""&&launch_command::parse(launch_command::format(patch))==patch,
               "Helper empty callsign or frequency selection was discarded");
+    }
+    for(const auto* frequency:{"low","0"}) {
+        try {
+            (void)launch_command::parse(std::string("--helper-frequency ")+frequency);
+            check(false,"Retired Helper placement accepted by launch parser");
+        } catch(const std::invalid_argument& error) {
+            check(std::string_view(error.what()).find("only high")!=std::string_view::npos,
+                  "Retired Helper placement error omitted the supported choice");
+        }
+        launch_command::Patch retired;retired.helper_frequency=frequency;
+        rejects([&]{launch_command::format(retired);},"Retired Helper placement accepted by command export");
     }
     for(const auto* value:{"--helper-power -1","--helper-power nan","--helper-power 1e308kW",
         "--helper-ratio-limit 30","--helper-ratio-limit 91","--helper-frequency middle",

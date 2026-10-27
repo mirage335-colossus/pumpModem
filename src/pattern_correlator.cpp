@@ -13311,6 +13311,10 @@ PatternHelperFrequencyWindowState PatternCorrelator::helper_frequency_window()co
     out.supported=s.helper_dispatch_supported() && !s.compact_phase_curve && !s.search.hypotheses.empty() && s.search.hypotheses.size()<=8194;
     out.active=s.helper_frequency()!=nullptr;out.original_pairs=s.search.hypotheses.size();
     out.selected_pairs=s.helper_frequency()?s.helper_frequency()->selected:out.original_pairs;
+    if(out.supported && s.helper_frequency()) {
+        out.clock_counts_available=true;out.original_clock_rates=s.helper_frequency()->original_clock_rates;
+        out.selected_clock_rates=s.helper_frequency()->selected_clock_rates;
+    }
     out.unresolved_clock_cell_half_width_ppm=s.search.admitted_clock_cell_half_width_ppm.value_or(0);
     if(s.helper_frequency()){out.clock_interval=s.helper_frequency()->window.clock_interval;out.clock_qualified=out.clock_interval.has_value();}
     return out;

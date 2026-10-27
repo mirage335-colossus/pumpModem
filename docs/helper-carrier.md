@@ -1,6 +1,6 @@
 # Helper Carrier
 
-Helper Carrier is an experimental independent reference tone for propagation
+Helper Carrier is an experimental independent two-tone reference for propagation
 diagnostics and optional assistance to Robust reception, including operation
 without GPSDO hardware. It can accompany an ordinary transmission or transmit
 alone. Its product name does not classify an operation as an automatically
@@ -9,180 +9,135 @@ frequency, jurisdiction, license, station control and other authorizations.
 The software retains general-purpose power options; it does not impose a blanket
 regulatory power limit or certify an installation's compliance.
 
+## Current two-tone preview
+
+Updated 27 October 2026. The application now generates a **90/10 power split**:
+90% pure frequency/phase pilot and 10% auxiliary carrying punctuation and
+optional metadata. These fractions describe combined Helper power during normal
+straight-tone intervals, before ramps, metadata and channel response. The pilot
+is nine times stronger in power, three times in amplitude and 9.54 dB above the
+auxiliary. The pilot has no intentional phase reversals or metadata modulation.
+
+The rebuilt manual-checkpoint GUI is
+`build/dev/datapump-gui`. The initial application build and five focused checks
+passed. The R7 GUI/CLI rebuild and three focused Session/stage/tracker checks
+pass; broader qualification remains incomplete. The rebuilt
+GUI and archive hashes are recorded in [validation](validation.md). Prior single-tone
+HF, cable and EME results do not qualify this changed waveform. In particular,
+the old strict cable suffix/prefix failures and incomplete EME runs remain open.
+
 ## Manual reception
 
-Helper reception is manually enabled with positive Helper Carrier power. Within
-its configured oscillator prior, the tracker selects the strongest qualifying
-stable tone. This assumes the intended helper is the dominant tone in otherwise
-quiet spectrum; tone presence does not authenticate its transmitter. Frequency
-search still runs over the measured residual uncertainty.
+Helper reception is manually enabled with positive Helper Carrier power. The
+tracker discovers the strongest qualifying tone within the configured
+oscillator-derived pilot range, bounded by actual capture geometry. There is no
+artificial ±100 Hz cap. Quiet-spectrum operation assumes this strongest straight
+tone is the intended pilot; auxiliary detection and metadata decoding do not
+qualify frequency assistance or authenticate the transmitter.
 
-The live path feeds one ordinary Robust receiver bank. A positive-band signal
-uses a continuously retuned upstream NCO. For a real mono waveform that folds
-around DC, the frontend preserves PCM and its fixed helper notch instead of
-applying an invalid analytic shift. That case uses the measured helper to center
-the ordinary receiver's frequency origin; full upstream frequency correction is
-unavailable. The displayed centering must not be read as phase correction.
-There is no parallel broad bank, periodic broad-probe route or iterative search
-through old PCM.
+The live path feeds one ordinary Robust receiver bank. Positive-passband input
+uses upstream correction before payload filtering/downsampling. Folded real mono
+retains its frequency-origin-only limitation; a real waveform folded around DC
+cannot receive the same analytic correction. Measured dated residual RF windows
+refresh existing candidates and new admissions. Unresolved audio-clock and
+UTC/timing alternatives remain required. The helper-specific work-admission
+estimate is conditional; it is not a measured total-process CPU ceiling.
 
-While assistance is enabled without a fresh qualified reference, new payload
-acquisition pauses. Reference loss disarms new acquisition; already accepted
-ordinary receivers retain their payload, recovery and physical-absence scoring.
-Neither helper loss, helper metadata nor EOF completes a message. Helper-off
-reception retains its ordinary policy. All message bits use the unchanged Robust
-wire format and full receiver: short text, raw bits, long framed text,
-attachments, decompression, recovery, next-poll accepted-bit progress and the
-same pending row through physical END. Reception ends only after fully scored
-absent-symbol durations cover six seconds. Optional helper work cannot impose a
-smaller source quota or a raw-bits-only decoding mode.
+The segmented pilot path uses a bounded FFT discovery window (8,192 samples at
+48 kHz), then ten 20 ms Hann projections per independent 200 ms context.
+Frequency-only numeric records, at most 192 spanning 36 seconds, fit a locally
+linear oscillator trend. A bounded numeric fallback fits the current context
+with a possible phase gap; it supplies frequency while phase authority remains
+local. Unknown retune phase is not pooled across contexts.
+The current measured tracker workspace is 403,016 bytes at 48 kHz;
+this excludes the frontend and ordinary receivers. Dated segment interfaces can
+map compatible residual measurements using a signed RF scale, with independently
+unknown phase. Their component controls use known clock relationships; they do
+not resolve arbitrary RF/audio-clock ambiguity.
 
-For a new long-symbol compact candidate, the typed ordinary constructor is
-invoked with the actual full residual catalogue and bytes remaining after wrapper
-costs. Its specific shared-pulse workspace-limit outcome leaves the candidate
-waiting without failing transmission; retry requires an observed UTC second to
-advance. This is an actual constructor outcome, not a separate public preflight. This is not an arbitrary frequency-precision
-threshold or permission to reduce ordinary framing, source quota or Rate.
+Current source also contains local context-phase observations and a separately
+funded, at most 400 ms raw staging FIFO. The integration must preserve sample
+dates and every committed payload sample, including reference loss. Pooled
+frequency history cannot manufacture earlier phase support or advance a processed
+frontier. The R5 causal 40/60 dB-Hz controls reduce payload relative RMS to
+0.03700/0.006529, while 60 dB-Hz retains ten frequency-interval escapes. A dated
+four-RF laboratory control has RMS 0.005967 versus frequency-only 0.999442 and
+zero escapes across 328 consumed-geometry checks. That control assumes USB,
+zero audio-clock error and known retune dates. Scoring all helper-present input,
+rather than only phase-supported samples, exposes 1.2–1.4 dB remaining coherent
+loss; only 80.4% of energy has phase support. That loss check does not include
+the payload notch or 128-second symbols. A bounded strong RF-only Session test
+passes 73 independent-phase retunes, exact `001`, one pending identity and
+physical END; it uses an exact audio clock, DATA SNR 40 dB and zero drift.
+The source-band guard accepts +2.19 Hz and declines +142.7 Hz while retaining
+the old NCO. Covered-feed job checks pass; independent-clock/supplied-HF and
+ordinary 128-second completion remain unqualified. The application has no actual rig-retune adapter. Fake FHSS keeps physical RF fixed and does not prove
+reception through hardware phase jumps.
 
-Supported manually enabled Automatic/keyed long-symbol shared-pulse candidates
-also have work-based admission. A new candidate waits when its supported finite
-provisional serial-work estimate exceeds the selected receiver CPU objective;
-there is no fixed Hz gate. Existing/started owners, helper-OFF or forced-strategy
-operation, unsupported shapes and unknown estimates keep their existing policy.
-The shared-pulse caller's serial work is not discounted by extra search workers.
-The estimate interface requires explicit helper-policy opt-in; helper power or
-a supplied catalogue alone does not select it. This engineering admission model
-is not a measured CPU ceiling or a demonstrated EME throughput cure.
+Without a fresh qualified reference, new assisted acquisition may wait. Reference
+loss disarms new acquisition; established ordinary reception retains draining,
+recovery, per-bit progress, pending-row identity and physical-absence scoring.
+There is no parallel broad receiver bank or iterative historical PCM search.
+The ordinary Robust wire format, short dictionary endpoints, explicit binary
+bits, fixed framing, long text, attachments and post-END source decoding remain
+required. Neither Helper loss, metadata, EOF nor expected length completes a
+message: fully scored consecutive absent-symbol durations must cover six seconds.
+Optional Helper work yields before payload functionality.
 
-When qualification is lost, an already observed first ordinary symbol may
-continue to its next ordinary decision, including its pending cell. Rejected
-cold work retires at that decision. This bounded continuation does not admit a
-new broad search or change accepted-owner lifetime, timing, emission, bit
-progress or physical-absence closure. It is not a second receiver or a historical
-PCM search.
+Matched 128-second component apertures with the new optional phase bound have
+all-sample corrected loss 0.0695/3.6321 dB at 30 dB-Hz continuous/random phase,
+and 0.00627/0.27925 dB at 40 dB-Hz. The old 30 dB-Hz gate admitted no phase fits;
+its rejection was a software limit. These fixed-RF diagnostics exclude the
+payload notch and ordinary 128-second completion, and do not replace acquisition
+or uncertainty-coverage requirements.
 
-Across inactive helper authority, the ordinary receiver now retains its already
-paid numeric lookups while immediately revoking their frequency authority. This
-preserves the paid cache (5,152 bytes in the measured control), not a reference lease, extra receiver or permission
-to invent EOF/END. Shared/segmented partial-first-symbol loss controls preserve
-exact `01`, pending identity, all retained bit polls and ordinary physical END.
-The short matched cache discriminator improves cost at unchanged work counters;
-it does not update the latest full EME throughput result.
+R5 component controls retain useful precision without calibrated confidence
+claims. At 24 dB-Hz sampled pilot C/N0, composite availability is 97.45% static
+and 96.39% random-hop, with final U near 0.222/0.250 Hz. The baseline has no
+observed escapes across 1,551 estimates, but a 12-seed blind 30 dB-Hz ensemble
+retains one escaped straight-fit estimate among 2,225. Twelve actual-waveform
+cases have no observed escapes across 2,071 frequency estimates and 1,339 sampled
+phase fits. Earlier coverage failures remain preserved in validation. Component
+precision, mask counts and phase RMS are not whole-receiver CPU savings.
 
-The tracker combines an independent short FLL with a bounded phase/frequency
-fit. Each joint fit uses ten actual 20 ms complex projections; at most 240
-numeric anchors span 36 seconds. Saved mixer coordinates, finite-window noise
-and shared-endpoint/process covariance remain part of the calculation. This is
-numeric observation history, not a search through stored PCM. The FLL and phase
-fit qualify independently; neither metadata nor a known transmit date supplies
-measurement authority. Tracker storage is fixed and charged to its actual
-workspace query. The joint interval retains a 0.005 Hz engineering allowance;
-that is not a numerical rounding term. The consumer applies the actual measured
-interval rather than restoring the original broad RF width.
+HF40 remains incomplete. R5 improves reference availability but yields no bits;
+the cached rerun yields only one pending bit under a non-TX epoch, without END.
+True-epoch work is still starved. Cache hits and descriptive hot-feed CPU do not
+establish a causal speedup across different fresh keyed waveforms or make that
+failure pass. This is a software receiver-work limit, not a physical precision
+limit. The strong HF15k and Rate-360 fixed-RF
+Fake-FHSS cases pass their existing eight-bit primary checks. HF15k signal 4's false/truncated
+wire `01` remains a strict qualification failure. Independent review finds
+signal 6's retained `11` is a permitted compatible-prefix correction adding the
+correct third bit. The Rate-360 primary epoch differs
+from TX despite an admitted true-epoch owner. Correct primary data does not
+qualify all GUI rows or cable acceptance.
 
-The precision model is conditional on locally linear frequency evolution plus
-the configured Brownian phase process. Three abrupt-change controls still fail:
-step, slope and clock changes produced 6, 19 and 5 escaped qualified polls.
-They are not hidden by successful steady/drift controls. Current evidence does
-not establish all initial oscillator-prior coverage, arbitrary thermal/Doppler
-evolution, calibrated confidence or a future coherence lease.
-
-The measured RF window is continuously refreshed in the same ordinary receiver.
-It uses actual dated uncertainty, with only a numerical floor and the original
-clock/UTC geometry required by the configured source relation. A tone does not
-universally resolve audio-clock error. Under a validated shared-radio relation,
-frequency can condition the common source-clock interval; independently
-qualified 400 ms punctuation cadence can also constrain that interval. Consumers
-intersect the original configured LF domain and retain the required cells. Clock
-loss restores the original LF search; it does not rewrite PCM, epochs or already
-accepted bits. Queued input may use only a fresh clock measurement with matching
-source/rate provenance. This is not a second receiver or a PCM time warp.
-
-Punctuation supplies clock-rate evidence, not an epoch or timecode. Waveform
-phase assistance is currently inactive/declined: NCO phase continuity is not a
-measurement of the transmitter's absolute phase. Callsign/timecode transmission
-and standalone decoding exist, but metadata decoding in this Live manual route
-is not qualified and is not required for frequency assistance. Fake FHSS uses a
-fixed physical radio frequency; actual hardware retuning/hopped-helper following
-is unsupported in this preview.
-
-R16 remains an experimental preview. The current built GUI is
-`571664fa0faa8bb849165698b57ff6327717c37cd9ba180b2eb295289350f1c5`,
-with core prefix `3148dd7b`. Application/focused builds and four focused checks
-passed. Repeated helper-enable requests now avoid rebuilding dispatch control
-when both permissions are already true; frequency-window changes and numeric
-pushes still prepare their own closure. A matched eight-bit component retained
-exact per-push prefixes, identity, pending status and physical END. This avoids
-duplicate closure work but supplies no measured throughput gain. Earlier R13
-focus/R15 full `simulation_estimate` passes remain separately bound, not fresh
-full-contract, native or sanitizer coverage. A helper-specific grid union preserves the complete
-declared clock domain; its component reduced 69 pairs to 35 without narrowing
-that domain. Bounded trace coalescing avoids the preceding attachment trace-cap
-failure. These mechanisms do not qualify an EME link or establish a CPU gain.
-The rejected arbitration proposal was not integrated; strict cable failures
-remain. Available full-case measurements below are bound to R11, not fresh R16
-runtime passes.
-
-This closeout keeps the existing application path. A future two-tone design
-must keep a separate pilot continuously unmodulated; it is not implemented in
-the application.
-
-| Area | Handoff state |
-| --- | --- |
-| Application | One ordinary bank/NCO, measured RF/LF narrowing, ordered lookup cache and work admission; ordinary payload contracts unchanged. |
-| [Isolated pilot reference](../tools/pilot-reference/README.md) | Standalone CW-only estimator and short reproduction test; 11 component cases passed. No app/CMake, transmitter, metadata, audio-device or ordinary receiver integration. |
-| Old metadata-depth and exact-seed-cache experiments | Stopped or isolated; current waveform/metadata behavior unchanged. |
-
-The pilot component's engineering intervals assume a constant or locally linear
-carrier trend within 0.03 Hz/s and the configured Wiener phase model. They are
-not calibrated confidence intervals or future precision leases. Its dated
-measurements, memory/work accounting and remaining gaps are documented with the
-[check results](validation.md). The component does not fix the strict cable or
-EME failures below, demonstrate receiver CPU savings or complete the feature.
-
-Current manual GUI:
-`/home/user/___quick/p/_cur/dataPump/pumpModem/build/dev/datapump-gui`.
-The controls below describe the operator settings; measured controlled cases
-retain their separately bound profiles, often fixed 2 GiB rather than automatic
-50% workspace.
-
-R11 controlled HF reception passed exact eight-bit source/wire, retained
-prefixes, the same pending identity, complete TX/channel drain and ordinary END
-with no input health fault. Actual +3,000 Hz CFO and +100 ppm audio-clock error
-were applied to helper and DATA before decimation. Whole-process CPU/audio was
-0.26449; complete body ordinary-feed intervals measured 0.17676. Measured raw
-helper C/N0 median was 48.9042 dB-Hz, separate from the 55.7609 RF-budget
-prediction and 49.7403 sampled reference. Different dates, waveforms and media
-endpoints prevent a strict speedup claim against earlier trials. An R11
-matched OFF/ON attachment check also passed all 2,432 wire bits, authenticated
-17-byte source, prefixes, pending identity and physical END. That small framed
-case does not qualify full-size attachments or 1,024-byte text.
-
-Both actual R11 cable controls failed their strict checks. Default and
-GPSDO-configured runs eventually completed the correct eight bits on ID 3, but
-an earlier seven-bit suffix on ID 2 and aliases remained unexpected receptions.
-Final correctness does not erase those failures. Input health counters were
-zero. Whole-GUI CPU/audio was 0.42886/0.38494, with mean measured helper C/N0
-53.908/55.413 dB-Hz against the configured 30.0206 prediction. The cable did not
-inject the RF path loss/noise. Both helper-ON controls had different measured
-C/N0; their costs are descriptive, not a causal hardware-GPSDO speedup. They do
-not qualify the weak RF budget, GPSDO substitution or functional acceptance.
-
-The latest normal EME result is now R11 and remains incomplete: 300.612 wall
-seconds/301.331672 CPU seconds for 95.44 captured audio seconds, no bits/END and
-unfinished TX/channel drain. Complete body ordinary-feed intervals cost 3.94552
-CPU/audio, excluding lead. RF masks updated 79→73→63 pairs; a stale mask is not
-shown. The longest qualification island was only 2.36 seconds. This result
-advanced less audio than R8 and establishes no grid/cache work benefit or full
-128-second reception. The 1.907 dB PHY deficit remains untested; the new R13 gate has no full EME
-result. The precision model still fails the
-abrupt step/slope/clock controls (6/19/5 escaped polls). Rejected private precision
-variants are estimator evidence, not fundamental physical limits. Larger framed
-text, attachments, full contract/native/sanitizer and complete EME qualification
-remain incomplete. Phase assistance is inactive, actual hardware hops are
-unsupported and Planner CPU predictions remain uncalibrated. See
-[validation](validation.md) for individual bindings and retained failures; no
-release certification or full feature completion is claimed.
+Audited HF15k cost is 0.228392 process CPU/audio with 4,627 FFT jobs; its primary
+owner actually narrows 127→2 before its first FFT. Rate-360 costs 1.464287
+CPU/audio with 29,106 FFT jobs and actual masks unchanged at 9→9; its folded-mono
+route has no phase correction. There is no matched OFF CPU control, and worker
+concurrency is untraced. These simulation results do not measure native backlog
+or establish a speedup. The previous GUI group is 38/39 with a controller
+SegFault. A partial-bank retirement guard is implemented and the original
+crashing-subsection check and full selected controller/Planner/self-check repair
+run pass. Final full groups remain pending.
+A new full-composite N0CALL metadata component decodes 7/7 frames; earlier
+failures remain retained. Offset/random-hop and Live metadata routing are still
+in progress, and frequency assistance remains independent of metadata.
+All three modeled GPSDO HF controls pass exact eight bits on one visible row
+with ordinary END. The EME R5 run instead has zero owners/bits despite 99.9369%
+pilot qualification and all 5,397 correction blocks certified: provisional compact
+CPU estimates reject every candidate. Its U median is 0.084627 Hz at measured
+pilot C/N0 30.0399 dB-Hz. This software gate is not measured receiver throughput
+or a physical link limit. The EME GPSDO control is also incomplete, capturing
+only 2.73067 seconds with no full symbol or END. A separate pre-PCM constructor
+check exposes workspace shortfalls at both 83 and 89 pairs; it measures no
+throughput. A narrower exact-lattice reservation saves only 38,880 bytes and
+still cannot fit either constructor; it was rejected without production edits. The reviewed native serial-row cache passes focused
+exact-score/acquisition comparisons and R6 build/selected CTests; full groups
+and throughput benefit remain pending. Full regression, cable and intended-hardware qualification remain pending. See
+[validation](validation.md) for commands, preserved failures and measured limits.
 
 ## Controls and use
 
@@ -192,9 +147,8 @@ Power remains editable as a finite, nonnegative number of watts. Presets include
 15 kW, 10 kW, 1.5 kW, 100 W, 40 W and the existing Robust power presets. Invalid
 edits retain the last valid setting and prevent transmission until corrected.
 Ratio limits are 10, 20, 40, 60, 80 and 90 dB, with 90 dB the default. High is the
-default placement. High, Low and 0 Hz are functional for output, raw helper
-observation and physical simulation, subject to their physical band geometry.
-0 Hz is an overlapping diagnostic choice and is discouraged.
+only placement. Low and 0 Hz have been removed. Saved GUI settings/imports
+normalize retired values to High; new textual CLI values other than High reject.
 
 The independent callsign accepts at most 19 printable seven-bit ASCII
 characters. Editing Developer Callsign copies a valid value to the helper.
@@ -240,33 +194,37 @@ Robust's target SNR remains referenced to its low-power data component.
 The helper also follows any existing digital amplitude backoff of the selected
 Robust waveform. Interleaved V2 DSSS already applies a data amplitude factor
 `g = 0.5` (6.02 dB in power). Applying that factor to the helper component alone
-preserves the requested helper/data ratio; this calibration correction does not
-change Robust PCM, the composite data gain or the existing noise calibration.
+preserves the requested helper/data ratio without changing the intrinsic Robust
+source waveform. Composite headroom and physical RF calibration are accounted
+separately below.
 A ratio measured over a whole helper dwell can be slightly lower than its steady
 tone calibration because ramps and metadata reduce average power, with further
 differences from the physical route's frequency response.
 
-High and Low use the closest placement that satisfies the digital waveform's
-conservative periodic leakage bound at the effective power ratio. Placement uses
-the actual shaped occupied data bandwidth, plus any data gating allowance, rather
-than treating the nominal Rate as an unshaped rectangular band. The initial
-helper-center distance from the data edge is 450 Hz; it increases in 50 Hz steps
-as needed for the leakage bound. There is no additional High floor tied to the
-logical sample rate. Hardware FHSS counts its data gate allowance once; it does
-not add a duplicate 200 Hz allowance during output preparation. Larger power ratios and the paired-reversal leakage allowance can still
-require substantial separation. Low needs enough space below the data band for
-that guard and the helper band.
-**0 Hz** means the same audio center as the Robust carrier, not DC. Its intentional
-overlap can strongly interfere with data and is discouraged.
+The order is **Robust data → guard → auxiliary modulation → guard → pure
+pilot**. The auxiliary center starts 450 Hz above the upper shaped data edge,
+increasing in 50 Hz steps only as required by the power-dependent digital leakage
+bound. The pilot is 400 Hz above the auxiliary. The auxiliary's nominal ±150 Hz
+band leaves a 300 Hz data guard and a 250 Hz pilot guard at minimum placement.
+The bound uses the actual shaped/gated data bandwidth and both tones' power,
+ramps and auxiliary transitions. Tone-center separation alone is not the
+isolation argument. No logical-sample-rate floor moves the group arbitrarily far
+away.
 
-The selected Robust Rate, carrier, logical sample rate and target SNR stay
-unchanged. There is no automatic Rate reduction to fit the helper: 100 Hz,
-3.6 kHz SSB and 12 kHz selections all retain their geometry. The startup
-3.6 kHz passband failure was a nominal-versus-shaped-bandwidth calculation
-error; correcting that geometry requires no Rate reduction. The radio and audio
-route must pass the complete data, guard and helper bands; closest digital placement does not guarantee a fit in a voice
-SSB filter. Software cannot widen that hardware passband or move the data band
-to make Low fit.
+The radio/audio path must pass the complete group with margin below steep filter
+attenuation. Digital Nyquist margin does not establish an SSB radio passband.
+The selected Robust Rate, carrier, logical sample rate, framing and target SNR
+stay unchanged; a configuration that cannot pass the adjacent group is unavailable
+for Helper assistance.
+
+The two tones' possible voltage sum requires more peak headroom than the old
+single tone. At unchanged audio volume, the native calibrated data gain is lower
+by approximately 1.353 dB for 40 W Helper/4 W Robust and 1.989 dB for 15 kW/4 W.
+Recalibrate the physical RF chain to retain the configured powers. This is an
+audio-headroom change, not a requested payload-power reduction. Sampled simulation
+applies the same data gain to signal and noise, preserving payload SNR and the
+configured RF budget. Ramps/metadata and channel/filter gains are separate
+received-power effects.
 
 Native and browser playback generate the helper after output resampling.
 Helper-enabled audio requests a separate physical clock, with a practical
@@ -300,7 +258,7 @@ same logical modem geometry and helper profile with `--helper-power`: `rx` and
 `status-rx` observe metadata before conversion and payload scoring. Adjacent
 helpers inside the logical capture band remain real interference there. Capture
 anti-alias filtering rejects a helper outside that band when the geometry allows;
-it does not silently remove an in-band High or Low helper.
+it does not silently remove an in-band helper.
 CLI payload reception can try the same real adjacent-helper bandstop filter
 described below. Its first output keeps the original FIR-center sample coordinate;
 it changes neither the source epoch nor the capture date. The full ordinary
@@ -337,13 +295,14 @@ For effective helper power `P` watts, path loss `L` dB and noise density `N0`
 dBm/Hz, received helper power is `30 + 10*log10(P) - L` dBm and expected C/N0
 is that result minus `N0`. Its 10 Hz presentation reference is C/N0 minus 10 dB.
 A 4 W data/40 W helper setting has a 10 dB calibrated reference ratio. At
-180 dB path loss and -164 dBm/Hz noise, that helper budget is 30.02 dB-Hz;
-it is not the level necessarily present in a physical loopback cable.
+180 dB path loss and -164 dBm/Hz noise, the total Helper budget is 30.02 dB-Hz
+and pure pilot is 29.56 dB-Hz before relevant waveform/channel gains. Neither is
+the level necessarily present in a physical loopback cable.
 
 Predicted C/N0 does not grant lock, narrow the receiver by itself or change
 payload SNR, Rate or PHY probability. Runtime uses the actual measured interval.
-A bright reference can still leave broad uncertainty through metadata gaps,
-oscillator evolution, measured excess or interference. The following detector's
+A bright reference can still leave broad uncertainty through ramps, rejected
+observations, oscillator evolution, measured excess or interference. The following detector's
 short-window level gate is different from SNR in a 10 Hz presentation bandwidth.
 No calibrated acquisition probability or globally optimal estimator is claimed.
 
@@ -353,21 +312,46 @@ aperture and source/capture clock allowance. The tail retains at least two
 seconds and any greater filter, initial-FFT, pulse-support and physical-absence
 obligations. The shared lead predictor seeks a frequency half-width of **0.1 Hz**
 by adding complete 400 ms dwells, up to **36 extra seconds** beyond the baseline.
-The forecast uses forty closed 10 ms phase-interval bins per 400 ms dwell with
-the current joint kernel. Its pure forecast check passed: at C/N0 30 dB-Hz it
-predicts an initial 0.0979 Hz half-width at 8.8 seconds and 0.01882 Hz at the
-38-second cap. A separate noisy control measured roughly 0.180/0.117/0.031/
-0.019 Hz at 10/20/30/38 seconds. Predictions remain conditional on accepted
-observations and the stated model; they do not qualify lock probability,
-initial full-prior coverage or arbitrary channel evolution. The R6 Planner check passed in 4.119 seconds under the unchanged deadline;
-its preceding 90-second timeout remains recorded. These checks do not price
-all helper-assisted runtime work. At the cap, payload starts
-without claiming that the target was reached; actual fresh receiver qualification
-is still required. Tail duration never uses expected message length as completion
-authority.
+The forecast separates pilot C/N0 after the split, independent coherent
+apertures, configured phase noise and estimator/model assumptions. At the cap,
+payload starts with achievable precision; elapsed airtime grants no runtime
+qualification. The ±0.1 Hz target is a lead-planning milestone, not a sufficient
+bin width for every configuration, including 128-second symbols. Tail duration
+never uses expected message length as completion authority.
 
-The ordinary baseline remains visible. Conditional initial and sustained receiver
-prices must be distinguished from total helper-assisted runtime cost. The current
+For pilot C/N0 in linear Hz, the ideal uninterrupted noise-only three-times-CRLB
+standard-deviation scale is
+
+`S3(T) = 3 sqrt(3 / (2 pi² (C/N0) T³))`.
+
+It is a theoretical comparison, not an operational confidence guarantee; see
+[JPL Publication 88-21, A Comparison of Frequency Estimation Techniques for
+High-Dynamic Trajectories](https://ntrs.nasa.gov/api/citations/19890011016/downloads/19890011016.pdf).
+
+| Pilot C/N0 (dB-Hz) | Ideal ±scale at 1 s (Hz) | At 10 s (Hz) |
+| --- | --- | --- |
+| 40 | 0.0117 | 0.000370 |
+| 30 | 0.0370 | 0.00117 |
+| 20 | 0.117 | 0.00370 |
+| 10 | 0.370 | 0.0117 |
+| 6 | 0.586 | 0.0185 |
+| 3 | 0.828 | 0.0262 |
+| 0 | 1.17 | 0.0370 |
+| −3 | 1.65 | 0.0522 |
+
+For a common constant frequency with an independent unknown phase per aperture,
+replace `(C/N0) T³` by `sum_i((C/N0)_i T_i³)`. Thus 25 ideal 400 ms apertures
+at 30 dB-Hz give about ±0.029 Hz, rather than the uninterrupted-ten-second
+±0.00117 Hz. Ramps, rejected contexts, drift, clock ambiguity, local model fits
+and estimator inefficiency need additional treatment. Practical measured
+intervals and their observed escapes remain separately reported in validation.
+
+The ordinary baseline remains visible. Planner shows total Helper and pilot
+C/N0, ideal uninterrupted and segmented references, practical model prediction,
+baseline lead, capped precision extension, residual RF uncertainty and unresolved
+clock/timing work. Conditional initial and sustained receiver prices use the
+existing receiver-cost model, not frequency-interval ratios, and remain distinct
+from discovery, tracking and total helper-assisted runtime cost. The current
 forecast/pricing update is not a calibrated overall CPU forecast: tracking,
 conversion, audio, transmit and GUI work are separate. The configured 0.6 receiver
 budget is an Automatic backend-selection objective in modeled receiver seconds
@@ -392,8 +376,7 @@ make assistance succeed. Physical cable tests do not inject the configured RF
 path loss/noise and therefore cannot qualify the corresponding weak RF budget.
 
 An adjacent helper inside the logical capture band remains real interference;
-out-of-band isolation depends on the actual filtering geometry. Cochannel
-placement retains its intentional overlap. Bright-reference phase-noise
+out-of-band isolation depends on the actual filtering geometry. Bright-reference phase-noise
 sidebands, DAC distortion and RF-chain dynamic range can still limit data
 reception. Disabling the helper preserves ordinary transmit/channel arithmetic.
 Simulation tails contain actual modeled noise long enough for the original
@@ -403,31 +386,30 @@ from digital isolation or a single controlled payload result.
 
 ## Dwell waveform and metadata
 
-Every dwell is exactly 400 ms on the physical calendar, including when FHSS is
-off. Entry and exit ramps occupy 4 ms at each boundary. Paired smooth C2
-reversals cross zero at 240 and 280 ms, over 236–244 and 276–284 ms. The first
-creates a 32 ms inverted plateau; the second restores the original running
-carrier by 284 ms. They do not reset carrier phase or change Robust DATA.
-Partial dwells omit the pair when its complete support cannot fit.
+Every dwell is exactly 400 ms on the physical calendar, including when FHSS
+is off. Entry and exit ramps occupy 4 ms at each boundary and affect both tones.
+Only the auxiliary has one shaped reversal, over 236–244 ms and crossing zero at
+240 ms. It stays inverted through the rest of the dwell, including metadata,
+and resets while amplitude is zero at the boundary. There is no unintended
+full-amplitude boundary reversal. The pilot remains unmodulated apart from
+necessary start/end and dwell/hop ramps.
 
-Graceful streaming stop protects a pair already begun: helper continuation with
-zero payload padding can extend to 308 ms, retaining restored pure carrier
-through 304 ms before the final 4 ms ramp. This adds no Robust bits or progress
-and does not supply physical END. Immediate abort can truncate output.
+Partial dwells omit punctuation unless its required support fits. Graceful
+streaming stop protects a reversal already begun: helper-only continuation can
+extend to 268 ms, retaining a 20 ms inverted straight flank and final 4 ms ramp.
+This adds no Robust bits or progress and does not supply physical END. Immediate
+abort can truncate output. Earlier paired-reversal spectrum measurements apply
+to the superseded single-tone format, not this waveform.
 
-In an exact digital full-dwell punctuation-only spectrum, restoring the carrier
-changed the central-line fraction from 4.085% to 64.306% (11.93 dB of spectral
-redistribution). This is not added helper power or payload/link gain. Across the
-measured full-dwell metadata cases, less than 0.053% of energy lay outside
-±150 Hz. These are digital waveform controls, not RF/DAC bandwidth or reception
-qualification. Placement's leakage bound accounts for both reversals and can
-require a larger nearest guard than the earlier waveform. Metadata framing and
-Robust power, Rate and wire formats remain unchanged.
+Metadata decoding is optional and does not qualify the pure-pilot frequency
+reference. Its intended readability is primarily nearby or directly in the
+antenna beam; distant assistance need not support metadata decoding.
 
 Metadata uses APSK-2097152 at 125 baud, with only the symbols needed for the
-selected identifier or time value. A frame contains one to seven symbols and
-ends at 388 ms; its start is `388 - 8 * symbol_count` milliseconds. The return to
-straight tone completes at 396 ms, before the exit ramp. A maximum-length
+selected identifier or time value, on the auxiliary only. A frame contains one
+to seven symbols and ends at 388 ms; its start is `388 - 8 * symbol_count` milliseconds. The return to
+the auxiliary's applicable underlying straight-tone state completes at 396 ms,
+before the exit ramp. A maximum-length
 callsign therefore occupies seven symbols, 56 ms; timestamps need at most three
 symbols, 24 ms. Transitions use quintic interpolation in the complex plane. The
 high ten bits of each 21-bit symbol select one of 1024 radii
@@ -511,16 +493,17 @@ simulated tails contain the configured physical channel noise.
 
 ## Evidence and remaining qualification
 
-[Validation](validation.md) binds each result to source, binaries, settings and
-original failures. Current R16 component precision and digital-spectrum controls
-do not reuse preceding cable, full-matrix or sanitizer results as current
-qualification. Abrupt-change failures remain explicit. No whole-process CPU,
-false-alarm, interference-tolerance or initial full-prior guarantee is inferred
-from a narrow measured interval.
+[Validation](validation.md) retains current focused observations and separately
+bound historical failures. The current 20 dB-Hz component declines qualification;
+a short-window gate, poor bootstrap or inefficient aperture is not proof of a
+physical precision limit. The actual-waveform matrix and seeded uncertainty
+escapes must be resolved before operational interval claims. Capture passband,
+real-mono ambiguity, unresolved RF/audio-clock relationships and actual rig
+retuning are separate limitations.
 
-C/N0 20 and 24 dB-Hz are below the current short-FLL software qualification gate;
-this is an implementation/estimator limit, not a physical proof that weak EME
-assistance is impossible. Capture passband and real-mono image ambiguity impose
-separate geometry limits. Full 128-second EME, larger framed text, attachments and
-broader helper-loss/normal/native/sanitizer acceptance remain pending. This is a
-manual experimental preview, not release certification.
+Complete supplied HF and 5.8 GHz EME acceptance, causal CPU comparisons, strict
+cable identity/prefix behavior, complete long text/attachments, payload progress,
+fully scored END, measured receiver savings and current contract/native/sanitizer
+coverage remain outstanding. Component acquisition and precision do not complete
+those requirements. This is a manual experimental preview, not release
+certification.

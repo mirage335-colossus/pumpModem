@@ -68,13 +68,16 @@ class StreamCLI(unittest.TestCase):
                            ('--helper-frequency','middle'),('--helper-callsign','A'*20),
                            ('--helper-callsign','bad\ncall')):
             self.run_pump('tx','--text','e',flag,value,*AUDIO,ok=False)
+        for frequency in ('low','0'):
+            error=self.run_pump('tx','--text','e','--helper-frequency',frequency,*AUDIO,ok=False)
+            self.assertIn(b'only high',error.stderr)
         with tempfile.TemporaryDirectory() as directory:
             original=pathlib.Path(directory)/'original.wav'
             disabled=pathlib.Path(directory)/'disabled.wav'
             self.run_pump('tx','--text','e','--output',original,*AUDIO)
             self.run_pump('tx','--text','e','--output',disabled,'--helper-power','0',
                 '--helper-data-power','2uW','--helper-ratio-limit','10dB',
-                '--helper-frequency','low','--helper-callsign','W1ABC',*AUDIO)
+                '--helper-frequency','high','--helper-callsign','W1ABC',*AUDIO)
             self.assertEqual(original.read_bytes(),disabled.read_bytes())
     def test_helper_wav_composition_and_separation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -84,7 +87,7 @@ class StreamCLI(unittest.TestCase):
             with wave.open(str(original),'rb') as source:
                 original_frames=source.getnframes()
                 original_rate=source.getframerate()
-            for frequency in ('high','low','0'):
+            for frequency in ('high',):
                 output=directory/(frequency+'.wav')
                 transmitted=self.run_pump('status-tx','--bits','001','--output',output,
                     '--helper-power','1.5kW','--helper-data-power','4W',

@@ -17,6 +17,10 @@ struct TonePrecisionRequest {
     bool punctuate=true;
     double baseline_lead_seconds=2,target_half_width_hz=.1,max_extra_seconds=36;
     double maximum_tracking_slew_hz_per_second=.5,maximum_source_capture_ratio=1;
+    // Pure pilot: phase is an independent nuisance after every radio retune.
+    // The legacy modulated-tone forecast remains available for its controls.
+    bool pilot_segmented=false;
+    double pilot_coherent_aperture_seconds=.2,pilot_estimator_efficiency=1.25;
 };
 struct TonePrecisionPrediction {
     // supported grants a numeric precision estimate, not measured lock. A valid
@@ -35,6 +39,10 @@ struct TonePrecisionPrediction {
     // Zero U is unavailable unless sustained_supported; at_seconds merely
     // identifies the bounded forecast aperture and adds no transmit delay.
     double sustained_at_seconds=0,sustained_frequency_half_width_hz=0;
+    double coherent_aperture_seconds=0,segmented_noise_reference_half_width_hz=0;
+    // Explicit conditional planning allowances; defaults preserve the legacy
+    // straight-tone forecast. Neither is an observed loss or a physical floor.
+    double fallback_information_fraction=1,fallback_frequency_grid_hz=0;
     std::size_t expected_segments=0;
     std::string reason;
 };
@@ -195,6 +203,98 @@ struct Runtime {
 };
 }
 namespace forecast_detail {
+inline constexpr double pilot_balanced_gap_information_fraction=.25,pilot_fallback_frequency_grid_hz=.1;
+inline std::size_t pilot_discovery_samples(std::uint32_t sample_rate) noexcept {
+    std::size_t n=1024;
+    while(n<sample_rate*.16 && n<32768)n*=2;
+    return n;
+}
+// Conditional, deliberately short-aperture pilot model. Frequency summaries
+// share a local linear trend, but never phase. The endpoint regression penalty
+// prices prediction at the newest dated summary instead of a past mean. Its
+// efficiency covers ten20ms Hann projections. The fallback guard allows a
+// balanced unknown phase gap in every context: (T/2)^3+(T/2)^3=T^3/4.
+// The current fallback's frequency-grid pad is also priced per context.
+// These deliberately conservative assumptions are neither calibrated
+// confidence nor a physical floor or a promise of acquisition timing.
+inline TonePrecisionPrediction pilot_prediction(const TonePrecisionRequest& r) {
+    TonePrecisionPrediction result;result.baseline_lead_seconds=r.baseline_lead_seconds;
+    const auto steps=static_cast<unsigned>(std::floor(r.max_extra_seconds/.4));
+    const auto maximum_extra=.4*steps;
+    const auto cn0=std::pow(10.,r.straight_cn0_db_hz/10);
+    const auto aperture=r.pilot_coherent_aperture_seconds/r.maximum_source_capture_ratio;
+    const auto dwell=.4/r.maximum_source_capture_ratio;
+    const auto discovery_samples=pilot_discovery_samples(r.sample_rate);
+    const auto seed=static_cast<double>(discovery_samples)/r.sample_rate;
+    const auto block=std::max<std::size_t>(16,std::lround(r.sample_rate*.02));
+    double window_sum=0,window_square_sum=0;
+    for(std::size_t i=0;i<block;++i) {
+        const auto w=.5-.5*std::cos(precision_detail::tau*i/(block-1));
+        window_sum+=w;window_square_sum+=w*w;
+    }
+    const auto projection_bandwidth=r.sample_rate*window_square_sum/(window_sum*window_sum);
+    // Exact symmetric-Hann ENBW for the actual bounded discovery FFT.
+    const auto discovery_bandwidth=1.5*r.sample_rate/(discovery_samples-1);
+    const auto bootstrap_cn0=std::max(projection_bandwidth,16*discovery_bandwidth);
+    result.coherent_aperture_seconds=aperture;
+    result.fallback_information_fraction=pilot_balanced_gap_information_fraction;
+    result.fallback_frequency_grid_hz=pilot_fallback_frequency_grid_hz;
+    struct Candidate {bool valid=false;double uncertainty=0,ideal=0;std::size_t count=0;};
+    const auto candidate=[&](double source_seconds) {
+        Candidate c;
+        const auto physical=source_seconds/r.maximum_source_capture_ratio;
+        // One complete dwell is lost to unknown initial alignment and settling.
+        const auto count=std::floor(std::min(36.,std::max(0.,physical-seed-dwell))/dwell);
+        if(count<4 || !std::isfinite(cn0) || !(cn0>0))return c;
+        c.count=static_cast<std::size_t>(count);
+        // Current projection gate1 and discovery gate16 from the production
+        // tracker. Failure is a software/bootstrap boundary, not a noise bound.
+        if(cn0<=bootstrap_cn0)return c;
+        const auto thermal=3/(2*std::numbers::pi*std::numbers::pi*cn0*aperture*aperture*aperture);
+        const auto process=2*r.phase_noise_radians_per_sqrt_second*r.phase_noise_radians_per_sqrt_second/
+            (precision_detail::tau*precision_detail::tau*aperture);
+        // Price the support endpoint, including half a local context of
+        // transport beyond the newest context-center frequency date.
+        const auto mean_age=.5*((count-1)*dwell+aperture);
+        const auto time_square=dwell*dwell*count*(count*count-1)/12;
+        const auto endpoint=1/count+mean_age*mean_age/time_square;
+        c.ideal=3*std::sqrt(thermal/count);
+        const auto guarded_thermal=r.pilot_estimator_efficiency*r.pilot_estimator_efficiency*thermal/
+            pilot_balanced_gap_information_fraction;
+        const auto grid_variance=pilot_fallback_frequency_grid_hz*pilot_fallback_frequency_grid_hz/9;
+        c.uncertainty=3*std::sqrt(endpoint*(guarded_thermal+grid_variance+process));
+        c.valid=std::isfinite(c.uncertainty)&&std::isfinite(c.ideal);return c;
+    };
+    const auto sustained=candidate(r.baseline_lead_seconds+maximum_extra);
+    result.sustained_at_seconds=r.baseline_lead_seconds+maximum_extra;
+    result.sustained_supported=sustained.valid;
+    if(sustained.valid)result.sustained_frequency_half_width_hz=sustained.uncertainty;
+    Candidate selected;
+    for(unsigned step=0;step<=steps;++step) {
+        const auto c=candidate(r.baseline_lead_seconds+.4*step);
+        if(!c.valid)continue;
+        selected=c;result.extra_lead_seconds=.4*step;
+        if(c.uncertainty<=r.target_half_width_hz){result.target_reached=true;break;}
+    }
+    if(!selected.valid)result.extra_lead_seconds=maximum_extra;
+    result.total_lead_seconds=r.baseline_lead_seconds+result.extra_lead_seconds;
+    result.extension_capped=!result.target_reached;result.supported=selected.valid;
+    if(selected.valid) {
+        result.frequency_half_width_hz=selected.uncertainty;
+        result.segmented_noise_reference_half_width_hz=selected.ideal;
+        result.expected_segments=selected.count;result.usable_tone_seconds=selected.count*aperture;
+        result.reason="conditional independent-phase pilot dwell model; local linear frequency trend, short-aperture efficiency and configured Wiener phase noise; no phase fit crosses a retune; conservative balanced-gap/model-selection planning allowance on every context, including 0.1 Hz frequency-grid padding; strong straight fits can be better; measured model competition and excess can widen uncertainty; not calibrated confidence or a physical floor";
+    }else {
+        result.reason=cn0<=16*discovery_bandwidth?
+            "software/bootstrap unsupported: current pilot FFT discovery gate":
+            cn0<=projection_bandwidth?"software/bootstrap unsupported: current20ms pilot projection gate":
+            "software/bootstrap unsupported: insufficient fresh independent dwell measurements";
+        result.reason+="; "+std::to_string(maximum_extra)+
+            " s extra-lead cap selected; precision not predicted; target remains unmet";
+    }
+    result.reason+="; actual discovery, self-interference, retune settling, nonlinear drift and freshness require measured qualification";
+    return result;
+}
 // Cover the entire unknown400ms source calendar, not just the20ms loop
 // residue. Each bin certifies clean support for every phase in its interval.
 constexpr unsigned source_phase_bins=40;
@@ -325,12 +425,15 @@ inline TonePrecisionPrediction predict_tone_precision(const TonePrecisionRequest
        !std::isfinite(r.max_extra_seconds) || r.max_extra_seconds<0 || r.max_extra_seconds>36 ||
        !std::isfinite(r.maximum_source_capture_ratio) || r.maximum_source_capture_ratio<=0 ||
        !std::isfinite(r.maximum_tracking_slew_hz_per_second) || r.maximum_tracking_slew_hz_per_second<0 ||
+       !std::isfinite(r.pilot_coherent_aperture_seconds) || r.pilot_coherent_aperture_seconds<=0 || r.pilot_coherent_aperture_seconds>.392 ||
+       !std::isfinite(r.pilot_estimator_efficiency) || r.pilot_estimator_efficiency<1 ||
        r.metadata_symbols>16) {result.reason="invalid precision request";return result;}
     const auto maximum_total=static_cast<long double>(r.baseline_lead_seconds)+r.max_extra_seconds;
     const auto maximum_physical=maximum_total/r.maximum_source_capture_ratio;
     if(maximum_total>300 || !std::isfinite(maximum_physical) || maximum_physical>300) {
         result.reason="precision forecast exceeds bounded300s source/capture domain";return result;
     }
+    if(r.pilot_segmented)return forecast_detail::pilot_prediction(r);
     auto max_steps=static_cast<unsigned>(std::floor(r.max_extra_seconds/.4));
     while(max_steps && .4*max_steps>r.max_extra_seconds)--max_steps;
     const auto maximum_extra=.4*max_steps;

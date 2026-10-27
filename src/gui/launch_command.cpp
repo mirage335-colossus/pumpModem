@@ -184,7 +184,7 @@ Patch parse_arguments(std::span<const std::string> arguments) {
         else if(flag=="--helper-power")result.helper_power_w=helper_power(value);
         else if(flag=="--helper-ratio-limit")result.helper_ratio_limit_db=helper_ratio(value);
         else if(flag=="--helper-frequency") {
-            if(value!="high"&&value!="low"&&value!="0")invalid("--helper-frequency must be high, low, or 0.");
+            if(value!="high")invalid("--helper-frequency supports only high; low and 0 Hz are no longer supported.");
             result.helper_frequency=value;
         }
         else if(flag=="--helper-callsign")result.helper_callsign=value;

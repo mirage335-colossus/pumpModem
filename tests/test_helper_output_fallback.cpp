@@ -121,25 +121,28 @@ void rate_failure_retries_ordinary() {
           "ordinary output fallback omitted its helper-unavailable notice");
 }
 void unavailable_geometry_retains_ordinary() {
-    auto value=settings();value.transfer.modem.carrier_hz=200;value.helper.frequency=helper::Frequency::low;
+    auto value=settings();value.transfer.timestamp=epoch+10;
+    value.transfer.modem.sample_rate=48000;value.transfer.modem.carrier_hz=23800;
+    // The ordinary data band fits the provider's48kHz clock. A valid High
+    // group requests more room, which this provider cannot actually supply.
+    const auto requested=helper::minimum_output_rate(value.helper,value.transfer.modem.carrier_hz,
+        helper::occupied_bandwidth(value.transfer.modem),value.transfer.modem.sample_rate);
+    check(requested>48000,"unavailable High fixture unexpectedly fits its hardware clock");
     auto baseline=value;baseline.helper.power_w=0;
     const auto ordinary=run(baseline),fallback=run(value);
     check(!ordinary.snapshot.transmission_failed&&!ordinary.pcm.empty(),"helper-off geometry control failed");
     if(fallback.snapshot.transmission_failed||!fallback.snapshot.error.empty()||
        fallback.snapshot.transmission_fraction!=1)
-        std::cerr<<"Low placement result: error='"<<fallback.snapshot.error
+        std::cerr<<"High placement result: error='"<<fallback.snapshot.error
                  <<"' transmission_failed="<<fallback.snapshot.transmission_failed
                  <<" fraction="<<fallback.snapshot.transmission_fraction<<" opened="<<fallback.opened
                  <<" source_calls="<<fallback.source_calls<<'\n';
     check(!fallback.snapshot.transmission_failed&&fallback.snapshot.error.empty()&&
           fallback.snapshot.transmission_fraction==1,"unavailable helper placement aborted ordinary payload");
     check(fallback.opened==1&&fallback.closed==1&&fallback.formats==1&&fallback.source_calls>0&&
-          fallback.requested_rates==std::vector<std::uint32_t>{0},
-          "unavailable placement requested an optional device rate or repeated output");
-    auto calibration=value.helper;calibration.frequency=helper::Frequency::cochannel;
-    const auto gain=helper::plan(calibration,value.transfer.modem.carrier_hz,
-        helper::occupied_bandwidth(value.transfer.modem),48000,0,
-        modem::outer_dsss_transmit_gain(value.transfer.modem)).data_gain;
+          fallback.requested_rates==std::vector<std::uint32_t>{requested},
+          "unavailable High placement repeated output or lost its single physical-rate request");
+    const auto gain=helper::calibrated_data_gain(value.helper);
     check(fallback.pcm.size()==ordinary.pcm.size(),"unavailable placement changed ordinary output duration");
     for(std::size_t i=0;i<fallback.pcm.size();++i)
         check(fallback.pcm[i]==static_cast<float>(ordinary.pcm[i]*gain),
@@ -154,20 +157,22 @@ void unavailable_geometry_retains_ordinary() {
 }
 void gated_geometry_retains_ordinary() {
     auto value=settings();value.transfer.timestamp=0;value.transfer.audio_timing_error_seconds=0;
-    value.transfer.modem.carrier_hz=100;value.transfer.modem.pulse_shaping=true;
+    value.transfer.modem.sample_rate=48000;value.transfer.modem.carrier_hz=23900;
+    value.transfer.modem.pulse_shaping=true;
     value.transfer.modem.spreading_factor=64;
     const auto hops=fhss_hops();
     auto gated=value.transfer.modem;
     gated.fake_hopping=transfer::transmit_hopping(*hops,value.transfer);
     const auto ungated_band=helper::occupied_bandwidth(value.transfer.modem);
     const auto occupied=helper::occupied_bandwidth(gated);
-    check(ungated_band==125&&occupied==325&&gated.carrier_hz-ungated_band/2>0&&
-          gated.carrier_hz-occupied/2<0,
-          "gated fallback fixture lost its ordinary-valid RRC and negative planning edge");
+    check(ungated_band==125&&occupied==325&&gated.carrier_hz+ungated_band/2<24000&&
+          gated.carrier_hz+occupied/2>24000,
+          "gated fallback fixture lost its ordinary-valid RRC and uncapturable gate skirt");
+    const auto requested=helper::minimum_output_rate(value.helper,helper::placement_band(gated),gated.sample_rate);
     auto baseline=value;baseline.helper.power_w=0;
     const auto ordinary=run(baseline,false,false,false,hops),fallback=run(value,false,false,false,hops);
     check(!ordinary.snapshot.transmission_failed&&ordinary.snapshot.error.empty()&&!ordinary.pcm.empty(),
-          "ordinary gated near-DC control failed");
+          "ordinary gated near-Nyquist control failed");
     if(fallback.snapshot.transmission_failed||!fallback.snapshot.error.empty()||
        fallback.snapshot.transmission_fraction!=1)
         std::cerr<<"Gated placement result: error='"<<fallback.snapshot.error
@@ -177,12 +182,9 @@ void gated_geometry_retains_ordinary() {
     check(!fallback.snapshot.transmission_failed&&fallback.snapshot.error.empty()&&
           fallback.snapshot.transmission_fraction==1,"gated helper placement aborted ordinary payload");
     check(fallback.opened==1&&fallback.closed==1&&fallback.formats==1&&fallback.source_calls>0&&
-          fallback.requested_rates==std::vector<std::uint32_t>{0},
-          "unavailable gated placement requested a helper rate or repeated output");
-    // Use the old public planner with the valid underlying RRC band so this
-    // exact regression also links against the unchanged pre-fix library.
-    const auto gain=helper::plan(value.helper,value.transfer.modem.carrier_hz,ungated_band,48000,0,
-        modem::outer_dsss_transmit_gain(value.transfer.modem)).data_gain;
+          fallback.requested_rates==std::vector<std::uint32_t>{requested},
+          "unavailable gated placement repeated output or lost its physical-rate request");
+    const auto gain=helper::calibrated_data_gain(value.helper);
     check(fallback.pcm.size()==ordinary.pcm.size(),"gated fallback changed ordinary output duration");
     for(std::size_t i=0;i<fallback.pcm.size();++i)
         check(fallback.pcm[i]==static_cast<float>(ordinary.pcm[i]*gain),
@@ -209,6 +211,12 @@ void malformed_helper_settings_are_rejected() {
         }
         check(rejected,"placement fallback accepted malformed helper settings");
     }
+    for(const auto placement:{helper::Frequency::low,helper::Frequency::cochannel}) {
+        auto value=settings();value.helper.frequency=placement;bool rejected=false;
+        try {live::validate_settings(value);}
+        catch(const Error& error) {rejected=std::string_view(error.what())=="Helper Carrier requires High frequency placement";}
+        check(rejected,"live settings accepted a retired Helper placement");
+    }
 }
 void emitted_gap_is_never_retried() {
     const auto result=run(settings(),false,true);
@@ -219,11 +227,13 @@ void emitted_gap_is_never_retried() {
     check(result.snapshot.transmit_key_lock_seconds>0,"actual output gap released the exposed private key epoch");
 }
 void helper_only_cannot_succeed_without_helper() {
-    auto value=settings();value.transfer.modem.carrier_hz=200;value.helper.frequency=helper::Frequency::low;
+    auto value=settings();value.transfer.timestamp=epoch+10;
+    value.transfer.modem.sample_rate=48000;value.transfer.modem.carrier_hz=23800;
     const auto result=run(value,false,false,true);
     check(result.snapshot.transmission_failed && !result.snapshot.error.empty() &&
           result.snapshot.transmission_fraction==0,"invalid helper-only request pretended to send a beacon");
-    check(result.opened==0 && result.pcm.empty(),"invalid helper-only request emitted ordinary payload or silence");
+    check(result.opened==1 && result.closed==1 && result.source_calls==0 && result.pcm.empty(),
+          "unavailable helper-only request emitted ordinary payload, silence or a replay");
 }
 void explicit_past_declines_at_calibrated_amplitude() {
     auto value=settings();auto baseline=value;baseline.helper.power_w=0;
@@ -337,7 +347,7 @@ void fhss_output_uses_one_gate_allowance() {
     check(result.timing_reported && result.accepted_utc && *result.accepted_utc>epoch,
           "FHSS mock did not accept its fresh buffered UTC target");
     // Estimate the emitted carrier from real output samples. Independent 40 ms
-    // coherent fits tolerate the helper's phase punctuation and metadata; this
+    // coherent fits measure the pure pilot separately from auxiliary metadata; this
     // is not a second call through the output-transform/configuration logic.
     const auto window=result.output_rate/25;
     const auto count=std::min<std::size_t>(result.pcm.size(),result.output_rate);
@@ -436,15 +446,15 @@ std::vector<float> record(double,std::uint32_t,const std::string&,std::size_t,st
 int main(int argc,char** argv) {
     try {
         if(argc!=1) {
-            if(argc!=2)throw Error("expected only --placement-low or --placement-gated");
+            if(argc!=2)throw Error("expected only --placement-high or --placement-gated");
             const auto selector=std::string_view(argv[1]);
-            if(selector=="--placement-low") {
+            if(selector=="--placement-high") {
                 unavailable_geometry_retains_ordinary();
-                std::cout<<"Low placement fallback subset passed\n";
+                std::cout<<"High placement fallback subset passed\n";
             } else if(selector=="--placement-gated") {
                 gated_geometry_retains_ordinary();
                 std::cout<<"Gated placement fallback subset passed\n";
-            } else throw Error("expected only --placement-low or --placement-gated");
+            } else throw Error("expected only --placement-high or --placement-gated");
             return 0;
         }
         malformed_helper_settings_are_rejected();rate_failure_retries_ordinary();unavailable_geometry_retains_ordinary();gated_geometry_retains_ordinary();emitted_gap_is_never_retried();

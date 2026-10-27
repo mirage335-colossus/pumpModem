@@ -13,9 +13,9 @@ namespace datapump::helper {
 namespace {
 constexpr double tau=2*std::numbers::pi;
 constexpr long double dwell=.4L,ramp=.004L,metadata_end=.388L,symbol_time=.008L;
-constexpr long double punctuation_begin=.236L,punctuation_return=.276L,punctuation_transition=.008L;
+constexpr long double punctuation_begin=.236L,punctuation_transition=.008L;
 // Literal rational-calendar endpoints avoid accumulated rounding at an exact source sample.
-constexpr long double punctuation_latest_start=.212L,punctuation_protected_end=.308L;
+constexpr long double punctuation_latest_start=.212L,punctuation_protected_end=.268L;
 // The calendar is reduced to [0,2) before dwell subtraction. Allow32
 // long-double epsilons per unit for fmod, division and subtract rounding;
 // even a binary64 long double changes a guard by less than1.5e-14 seconds.
@@ -38,24 +38,25 @@ double effective_power(const Options& options) {
 std::pair<double,double> gains_from_ratio(double power_ratio) {
     const auto relative_peak=std::sqrt(2*modem::nominal_signal_power)*
         std::sqrt(power_ratio);
-    return {relative_peak,.95/(1+relative_peak)};
+    const auto composite_peak=relative_peak*(pilot_amplitude_fraction+auxiliary_amplitude_fraction);
+    return {relative_peak,.95/(1+composite_peak)};
 }
 // Bound the periodic complex envelope's energy in either data sideband. Each
 // transition is a quintic smootherstep, whose derivative is Beta(3,3). Its
 // transform has magnitude <=15*(3+z^2+3z)/z^5, z=pi*f*T, and <=1.
-// The envelope has two unit 4ms ramps, two magnitude-two 8ms reversals, and
+// The envelope has two unit 4ms ramps, one magnitude-two 8ms reversal, and
 // <=ten magnitude-two metadata transitions. Integration by parts supplies the
 // additional 1/(2*pi*f*dwell). Coefficients therefore fall at least as f^-4;
 // sum their squared bound over the 2.5Hz dwell harmonics. Factor four includes
 // the real carrier's other image and possible constructive addition. This is
 // a digital periodic-waveform bound, not an RF/DAC distortion certificate.
-double leakage_bound(double distance,double bandwidth,bool metadata) {
+double leakage_bound(double distance,double bandwidth,double transition_magnitude) {
     const auto derivative_transform=[&](double duration) {
         const auto z=std::numbers::pi*distance*duration;
         return std::min(1.,15*(3+z*z+3*z)/std::pow(z,5));
     };
     const auto coefficient=(2*derivative_transform(.004)+
-        (metadata?24:4)*derivative_transform(.008))/(tau*distance*.4);
+        transition_magnitude*derivative_transform(.008))/(tau*distance*.4);
     const auto harmonics=1+std::min(std::ceil(bandwidth/2.5),distance/(7*2.5));
     return 4*coefficient*coefficient*harmonics;
 }
@@ -77,8 +78,8 @@ void validate(const Options& options) {
        !std::isfinite(options.ratio_limit_db)||options.ratio_limit_db<0||options.ratio_limit_db>90)
         throw Error("invalid Helper Carrier power or ratio limit");
     switch(options.frequency) {
-        case Frequency::high:case Frequency::low:case Frequency::cochannel:break;
-        default:throw Error("invalid Helper Carrier frequency placement");
+        case Frequency::high:break;
+        default:throw Error("Helper Carrier requires High frequency placement");
     }
     validate_callsign(options.callsign);
 }
@@ -102,6 +103,10 @@ ReferenceLevel reference_level(const Options& options,double nominal,double scal
     const auto average=payload+10*std::log10(static_cast<long double>(payload_fraction));
     ReferenceLevel result{static_cast<double>(ratio),static_cast<double>(straight),
         static_cast<double>(usable),static_cast<double>(average)};
+    result.pilot_effective_power_ratio=static_cast<double>(ratio*pilot_power_fraction);
+    result.pilot_straight_cn0_db_hz=static_cast<double>(straight+10*std::log10(pilot_power_fraction));
+    result.pilot_usable_cn0_db_hz=static_cast<double>(usable+10*std::log10(pilot_power_fraction));
+    result.auxiliary_straight_cn0_db_hz=static_cast<double>(straight+10*std::log10(auxiliary_power_fraction));
     if(!std::isfinite(result.effective_power_ratio)||result.effective_power_ratio<=0||
        !std::isfinite(result.straight_cn0_db_hz)||!std::isfinite(result.usable_cn0_db_hz)||
        !std::isfinite(result.payload_average_cn0_db_hz))
@@ -195,36 +200,38 @@ Plan plan(const Options& options,const PlacementBand& band,std::uint32_t rate,
     if(!rate||passband.upper_hz>=rate/2.)
         throw Error("Helper Carrier requires a valid data passband at the output sample rate");
     const bool folded=carrier-bandwidth/2<0;
-    if(folded&&options.frequency==Frequency::low)
-        throw Error("Helper Carrier Low has no isolated passband below gate-modulated data reaching DC");
     const auto leakage_width=folded?passband.upper_hz-passband.lower_hz:bandwidth;
-    const double direction=options.frequency==Frequency::high?1:-1;
     const auto effective=effective_power(options);
     const auto power_ratio=effective/options.data_power_w;
-    // Begin with a 300Hz nominal metadata band and a 300Hz guard. Increase
-    // separation until the conservative digital leakage bound is at least
-    // 30dB below data power. The data waveform and passband are never changed.
+    // Data -> 300Hz guard -> auxiliary's nominal 300Hz band -> 250Hz
+    // guard -> pure pilot. Increase only the data/auxiliary separation until
+    // the combined conservative leakage bound is 30dB below data power.
+    // Their voltage sum is bounded conservatively before squaring. The pilot
+    // contains only dwell/start/end ramps; auxiliary modulation is weighted by
+    // its actual 10% power. The data waveform and passband never change.
     double distance=450;
-    if(minimum_high_frequency_hz>0&&options.frequency==Frequency::high)
-        distance=std::max(distance,50*std::ceil((minimum_high_frequency_hz-carrier-bandwidth/2)/50));
-    const auto maximum_distance=folded?
-        (direction>0?rate/2.-250-passband.upper_hz:passband.lower_hz-250):
-        (direction>0?rate/2.-250-carrier-bandwidth/2:carrier-bandwidth/2-250);
-    while(options.frequency!=Frequency::cochannel&&distance<=maximum_distance&&
-          leakage_bound(distance,leakage_width,true)*power_ratio>1e-3)
+    if(minimum_high_frequency_hz>0)
+        distance=std::max(distance,50*std::ceil((minimum_high_frequency_hz-passband.upper_hz-
+            auxiliary_pilot_spacing_hz)/50));
+    const auto maximum_distance=rate/2.-250-passband.upper_hz-auxiliary_pilot_spacing_hz;
+    const auto leakage=[&] {
+        const auto auxiliary=std::sqrt(auxiliary_power_fraction*leakage_bound(distance,leakage_width,22));
+        const auto pilot=std::sqrt(pilot_power_fraction*leakage_bound(
+            distance+auxiliary_pilot_spacing_hz,leakage_width,0));
+        return (auxiliary+pilot)*(auxiliary+pilot)*power_ratio;
+    };
+    while(distance<=maximum_distance&&leakage()>1e-3)
         distance+=50;
-    if(options.frequency!=Frequency::cochannel&&distance>maximum_distance)
+    if(distance>maximum_distance)
         throw Error("Helper Carrier cannot fit its power-dependent leakage guard at this output sample rate");
-    // Cochannel is an intentional overlapping diagnostic configuration. Keep
-    // the actual linear mixture; it provides no isolation from payload data.
-    const double frequency=options.frequency==Frequency::cochannel?carrier:
-        folded?passband.upper_hz+distance:carrier+direction*(bandwidth/2+distance);
+    const auto auxiliary_frequency=passband.upper_hz+distance;
+    const auto frequency=auxiliary_frequency+auxiliary_pilot_spacing_hz;
     const auto [relative_peak,data_gain]=gains_from_ratio(power_ratio);
     // Ordinary PCM has the unchanged nominal mean power and peak bound one.
     // Leave 5% composite headroom, with no nonlinear limiter or data power boost.
     // Match the unchanged payload's digital backoff. Keep its conservative
     // gain identical; only the helper yields amplitude/headroom here.
-    return {frequency,relative_peak*data_gain*data_amplitude_scale,data_gain,effective};
+    return {frequency,relative_peak*data_gain*data_amplitude_scale,data_gain,effective,auxiliary_frequency};
 }
 std::uint32_t minimum_output_rate(const Options& options,double carrier,double bandwidth,
                                   std::uint32_t logical_rate) {
@@ -268,9 +275,13 @@ Generator::Generator(Options options,Plan plan,std::uint64_t epoch,bool punctuat
     // validation or a failed-cipher fallback. Keep the caller's settings intact.
     if(time_key_)options_.callsign.clear();
     validate(options_);
-    if(!std::isfinite(plan_.frequency_hz)||!std::isfinite(plan_.helper_gain)||
+    if(!std::isfinite(plan_.frequency_hz)||!std::isfinite(plan_.auxiliary_frequency_hz)||
+       plan_.auxiliary_frequency_hz<0||
+       (plan_.auxiliary_frequency_hz>0&&plan_.auxiliary_frequency_hz>=plan_.frequency_hz)||
+       !std::isfinite(plan_.helper_gain)||
        !std::isfinite(plan_.data_gain)||plan_.helper_gain<0||plan_.data_gain<0||
-       plan_.helper_gain+plan_.data_gain>1.0000000001)
+       plan_.helper_gain*(pilot_amplitude_fraction+
+            (plan_.auxiliary_frequency_hz>0?auxiliary_amplitude_fraction:0))+plan_.data_gain>1.0000000001)
         throw Error("invalid Helper Carrier mixer plan");
     if(!options_.callsign.empty()) {
         const auto packet=callsign_packet(options_.callsign);
@@ -303,16 +314,15 @@ std::complex<double> Generator::mix_analytic(std::complex<double> payload,long d
         if(!std::isfinite(*start_seconds))throw Error("invalid Helper Carrier initial output coordinate");
         envelope*=smooth((seconds-*start_seconds)/ramp);
     }
-    // Paired8ms C2 reversals cross zero at240/280ms. The32ms inverted
-    // plateau also preserves the existing marker fit's32ms post-flip support.
-    // The original running carrier returns unchanged before metadata; neither
-    // reversal resets its phase. Both constant flanks remain at least20ms.
+    // Only the auxiliary has an 8ms C2 reversal, crossing zero at240ms.
+    // Its inverted state lasts to the zero-amplitude dwell boundary, where it
+    // can reset without an unshaped full-amplitude phase reversal. Metadata
+    // multiplies and returns to this underlying state. Pilot phase is untouched.
     const bool punctuation_fits=punctuate_ &&
         (!start_seconds || (*start_seconds-seconds)+local<=punctuation_latest_start+roundoff) &&
         (!end_seconds || (*end_seconds-seconds)+local+roundoff>=punctuation_protected_end);
     const auto reversal=punctuation_fits?
-        1-2*smooth((local-punctuation_begin)/punctuation_transition)+
-          2*smooth((local-punctuation_return)/punctuation_transition):1.;
+        1-2*smooth((local-punctuation_begin)/punctuation_transition):1.;
     const std::complex<double> punctuation{reversal,0};
     std::complex<double> modulation=punctuation;
     // A time frame has at most three symbols. Cache it before its earliest
@@ -346,7 +356,12 @@ std::complex<double> Generator::mix_analytic(std::complex<double> payload,long d
     }
     const auto cycles=std::fmod(static_cast<long double>(plan_.frequency_hz)*seconds,1.L);
     const auto carrier=std::polar(1.,tau*static_cast<double>(cycles));
-    return payload*plan_.data_gain+plan_.helper_gain*envelope*modulation*carrier;
+    auto helper=pilot_amplitude_fraction*carrier;
+    if(plan_.auxiliary_frequency_hz>0) {
+        const auto auxiliary_cycles=std::fmod(static_cast<long double>(plan_.auxiliary_frequency_hz)*seconds,1.L);
+        helper+=auxiliary_amplitude_fraction*modulation*std::polar(1.,tau*static_cast<double>(auxiliary_cycles));
+    }
+    return payload*plan_.data_gain+plan_.helper_gain*envelope*helper;
 }
 float Generator::mix(float payload,long double seconds,std::uint32_t rate,
                      std::optional<long double> end_seconds,std::optional<long double> start_seconds) const {

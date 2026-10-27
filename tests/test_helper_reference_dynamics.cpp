@@ -1,5 +1,6 @@
 #include "../src/helper_reference_dynamics.hpp"
 #include "datapump/helper_carrier.hpp"
+#include "helper_auxiliary_fixture.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -135,8 +136,8 @@ void receiver_publication_provenance() {
     constexpr std::uint32_t rate=48000;
     constexpr double frequency=2100.37,delay=.03719;
     h::Options options;options.power_w=100;options.callsign="N0CALL";options.timecode=false;
-    h::Generator generator(options,{frequency,.7,.1,100},1700000000,true);
-    h::Receiver receiver(2100,20);
+    datapump::test::AuxiliaryFixture generator(options,frequency,.7,.1,1700000000,true);
+    h::Receiver receiver(2100,20,{},std::nullopt,{},h::PunctuationFormat::auxiliary_single);
     h::ReferenceDynamics gate;gate.reset(rate);
     std::array<float,137> samples{};
     std::size_t observed=0,propagated=0,accepted=0;
@@ -144,7 +145,7 @@ void receiver_publication_provenance() {
         const auto count=std::min<std::size_t>(samples.size(),rate*16/5-first);
         for(std::size_t i=0;i<count;++i) {
             const auto time=static_cast<long double>(first+i)/rate-delay;
-            samples[i]=time<0?0:static_cast<float>(std::real(generator.mix_analytic({},time,rate)*
+            samples[i]=time<0?0:static_cast<float>(std::real(generator.analytic(time,rate)*
                 std::polar(1.,.81)));
         }
         receiver.push(std::span<const float>(samples).first(count),rate,first);
