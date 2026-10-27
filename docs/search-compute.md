@@ -137,8 +137,9 @@ seconds. These are diagnostic reference coordinates, not mandatory new-backend
 execution spans. Qualified component readiness follows its last retained start
 plus the complete 12.8-second symbol and scheduling margin. The GUI reports
 representative readiness and retained positions separately from the initial and
-rolling epoch allowances. Known unsteered simulation uses its original bank;
-hardware retains all possible peer steering lanes. A small GPS selection alone
+rolling epoch allowances. Ordinary Live estimates retain all possible peer
+steering lanes in sampled and hardware execution. The separate known-source
+`transfer::simulate` comparator uses its original unsteered bank. A small GPS selection alone
 earns no discount without a qualified map. See [timing conditions](clock-sync.md).
 
 Automatic Live FFT estimates distinguish the initial epoch radius (default six

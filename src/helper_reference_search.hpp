@@ -138,7 +138,8 @@ inline std::optional<PatternHelperClockInterval> helper_reference_shared_clock_i
 // Admission-time helper-side choice. A weak measured RF interval must not
 // replace a tighter independent RF allowance. With a shared radio oscillator,
 // the clock-correlated RF extent is the RF prior, not a zero independent term.
-// LF and peer UTC uncertainty remain in the unchanged original catalogue.
+// LF and peer UTC uncertainty retain their full physical coverage. The default
+// policy also preserves the original numerical representatives.
 // The physical (pre-UTC) RF floor is conservative for frequency-only widening:
 // declining a marginal helper gain is allowed; enlarging Robust work is not.
 inline bool helper_reference_prefers_original_prior(const Config& config,double uncertainty_hz,
@@ -170,7 +171,8 @@ inline HelperReferenceSearch helper_reference_search(const Config& config,
         double uncertainty_hz,double helper_hz,double residual_center_hz,
         double utc_rate_limit,
         HelperReferenceClockRelation relation=HelperReferenceClockRelation::physical_helper,
-        std::optional<bool> preserve_original_prior={}) {
+        std::optional<bool> preserve_original_prior={},
+        PatternUtcClockGrid utc_grid=PatternUtcClockGrid::preserve_original_lanes) {
     if(!config.oscillator_search || !std::isfinite(uncertainty_hz) || uncertainty_hz<0 ||
        !std::isfinite(helper_hz) || !std::isfinite(residual_center_hz) ||
        !std::isfinite(utc_rate_limit) || utc_rate_limit<0)
@@ -184,9 +186,9 @@ inline HelperReferenceSearch helper_reference_search(const Config& config,
     if(preserve_original_prior.value_or(helper_reference_prefers_original_prior(
             config,uncertainty_hz,helper_hz,utc_rate_limit,relation))) {
         HelperReferenceSearch result;
-        result.catalogue=oscillator_pattern_search(config,utc_rate_limit);
+        result.catalogue=oscillator_pattern_search(config,utc_rate_limit,{},utc_grid);
         result.rf_half_width_hz=rf_width;result.clock_frequency_hz=config.carrier_hz-helper_hz;
-        // q=0 input: original raw RF cells remain EXACT. The measured helper
+        // q=0 input: the full original raw RF/LF prior remains. The measured helper
         // offset M only selects cells through F ~= M+(D-H)*b; it never shifts
         // those cells or replaces their original RF/LF/UTC coverage.
         result.residual_center_hz=residual_center_hz;result.original_prior_retained=true;
@@ -204,7 +206,7 @@ inline HelperReferenceSearch helper_reference_search(const Config& config,
     PatternSearchResolution resolution;
     resolution.clock_frequency_hz=config.carrier_hz-helper_hz;
     HelperReferenceSearch result;
-    result.catalogue=oscillator_pattern_search(corrected,utc_rate_limit,resolution);
+    result.catalogue=oscillator_pattern_search(corrected,utc_rate_limit,resolution,utc_grid);
     result.rf_half_width_hz=rf_width;result.clock_frequency_hz=*resolution.clock_frequency_hz;
     result.residual_center_hz=residual_center_hz;
     for(auto& pair:result.catalogue.hypotheses) {

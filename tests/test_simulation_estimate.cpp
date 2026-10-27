@@ -1850,6 +1850,29 @@ void oscillator_policy_geometry() {
           limited.requested_carrier_search_half_width_hz>limited.carrier_search_half_width_hz,
           "finite radio frequency coverage must expose incomplete oscillator margin even for a central signal");
 }
+void known_source_unsteered_control() {
+    // transfer::simulate owns its fixed-rate source (no hardware UTC resampler).
+    // This is distinct from ordinary unknown-peer Live work in either medium.
+    transfer::Options options;options.timestamp=1800000000;options.search_seconds=0;
+    options.dsp_workspace_bytes=8*1024*1024;
+    auto& c=options.modem;c.sample_rate=400;c.bandwidth_hz=100;c.carrier_hz=50;
+    c.spreading_factor=16;c.pulse_shaping=true;
+    modem::OscillatorSearchConfig policy;policy.lf={10,.05};policy.rf={.01,.005};policy.margin=3;
+    c.oscillator_search=policy;options.clock_sync=clock_sync::Policy{.001,.4,0};
+    const auto fixed=modem::oscillator_pattern_search(c);
+    const auto unknown_peer=transfer::receiver_oscillator_search(c,options);
+    check(unknown_peer.transmit_rate_correction>0&&unknown_peer.hypotheses!=fixed.hypotheses,
+        "known-source control did not distinguish the actual peer-steering policy");
+    Message sent;sent.data={'a'};auto channel=clean_channel();channel.snr_db=30;
+    const auto expected=transfer::message_wire_bits(sent,options);
+    const auto with_clock=transfer::simulate(sent,options,channel);
+    options.clock_sync.reset();const auto without_clock=transfer::simulate(sent,options,channel);
+    for(const auto* received:{&with_clock,&without_clock})check(received->stream_complete&&
+        received->short_text_decoded&&!received->missing_symbols&&received->observed_bits==expected.size()&&
+        received->raw_bits==expected&&
+        received->content.message.data==sent.data,
+        "known fixed-rate source clock controls changed exact bits, physical completion or decoded content");
+}
 void utc_bank_estimate() {
     transfer::Options options;options.modem=tuning::resolve(100,16,tuning::PatternMode::auto_keystream,true).config;
     options.key.emplace(Bytes(32,0x39));options.timestamp=1800000000;options.dsp_workspace_bytes=128*1024*1024;
@@ -1895,10 +1918,23 @@ void utc_bank_estimate() {
         estimate.probability_model_limit.find("UTC")!=std::string::npos,
         "UTC reference must remain distinct from a supported receiver probability");
     const auto simulated=simulation::estimate(wire(3,options.modem),options,true,clean_channel(),{},1,false);
-    check(simulated.frequency_rate_hypotheses==baseline.frequency_rate_hypotheses,
-        "known unsteered sampled simulation must not acquire hardware steering lanes");
-    near(simulated.receiver_cpu_seconds,baseline.receiver_cpu_seconds,
-        "clock controls alone must not increase known unsteered simulation work");
+    // sampled_simulation describes ordinary Live receiving an UNKNOWN peer,
+    // not transfer::simulate's deliberately known fixed-rate source.
+    const auto explicit_peer=simulation::estimate_with_receiver_search(wire(3,options.modem),options,true,
+        clean_channel(),actual);
+    check(simulated.frequency_rate_hypotheses==actual.hypotheses.size()&&
+        simulated.frequency_rate_hypotheses==explicit_peer.frequency_rate_hypotheses,
+        "sampled unknown-peer estimate omitted the exact complete peer-steering catalogue");
+    near(simulated.receiver_cpu_seconds,explicit_peer.receiver_cpu_seconds,
+        "sampled unknown-peer CPU work differs from the explicit complete receiver policy");
+    const auto fixed=modem::oscillator_pattern_search(options.modem);
+    const auto known_source=simulation::estimate_with_receiver_search(wire(3,options.modem),options,true,
+        clean_channel(),fixed);
+    check(known_source.frequency_rate_hypotheses==baseline.frequency_rate_hypotheses,
+        "explicit known unsteered source acquired extra steering lanes");
+    near(known_source.receiver_cpu_seconds,baseline.receiver_cpu_seconds,
+        "clock controls alone increased explicitly known unsteered source work");
+    known_source_unsteered_control();
 }
 void clock_dsss_reference() {
     transfer::Options options;options.modem=tuning::resolve(1200,70,tuning::PatternMode::auto_keystream,true,9000,10).config;
@@ -1917,9 +1953,9 @@ void clock_dsss_reference() {
     check(options.modem.sample_rate==48000&&modem::pattern_chip_samples(options.modem)==8&&
         modem::symbol_sample_count(options.modem)==5120,
         "imported DSSS configuration no longer has its resolved waveform geometry");
-    check(sampled.frequency_rate_hypotheses==original.hypotheses.size()&&
+    check(sampled.frequency_rate_hypotheses==expanded.hypotheses.size()&&
         hardware.frequency_rate_hypotheses==expanded.hypotheses.size(),
-        "work contexts must retain their actual oscillator banks");
+        "both ordinary unknown-peer work contexts must retain the exact peer-steering bank");
     check(sampled.epoch_hypotheses==16&&hardware.epoch_hypotheses==13,
         "sampled startup and hardware initial epoch coverage must remain distinct");
     check(short_timed.timing_window_modeled&&short_timed.timing_hypotheses==hardware.timing_hypotheses&&
@@ -1944,8 +1980,14 @@ void clock_dsss_reference() {
         "DSSS estimate hid its added coherent guard workload allowance");
     options.clock_sync.reset();
     const auto without_clock=simulation::estimate(draft,options,true,clean_channel(),{},1,false);
-    near(sampled.receiver_cpu_seconds,without_clock.receiver_cpu_seconds,
-        "tight clock fields must not invent simulated timing-bank work");
+    check(without_clock.frequency_rate_hypotheses==original.hypotheses.size(),
+        "unsteered peer policy did not retain its exact original oscillator bank");
+    auto known_options=options;known_options.clock_sync=clock_sync::Policy{.0001,.001,0};
+    const auto known_source=simulation::estimate_with_receiver_search(draft,known_options,true,clean_channel(),original);
+    check(known_source.frequency_rate_hypotheses==original.hypotheses.size(),
+        "explicit known unsteered DSSS source acquired peer-steering lanes");
+    near(known_source.receiver_cpu_seconds,without_clock.receiver_cpu_seconds,
+        "tight clock fields invented work for an explicitly known unsteered DSSS source");
 }
 void restricted_fft_direct_and_bounded_fallback() {
     transfer::Options options;options.modem.sample_rate=1024;options.modem.carrier_hz=128;
@@ -2346,8 +2388,10 @@ void rolling_fft_epoch_workload() {
     const auto anchored=estimate(fixed,draft,simulation::ReceiverWorkMode::hardware_timing_model,metadata);
     const auto simulated=estimate(options,draft,simulation::ReceiverWorkMode::sampled_simulation,metadata);
     check(anchored.new_epoch_admissions==0&&anchored.new_epoch_frontend_seconds==0&&
-          simulated.new_epoch_admissions==0&&simulated.frequency_rate_hypotheses==3,
-          "fixed epoch and known sampled simulation must not invent automatic hardware epoch refresh");
+          simulated.new_epoch_admissions==0&&simulated.new_epoch_frontend_seconds==0,
+          "fixed epoch and standalone sampled estimates must not invent automatic epoch refresh");
+    check(simulated.frequency_rate_hypotheses==expanded.hypotheses.size(),
+          "standalone sampled work omitted the unknown peer's expanded oscillator catalogue");
 
     auto illustrated=options;
     illustrated.modem.oscillator_search->rf_shift_hz=20900000; // Fake 0.4s/200,100kHz spacing.

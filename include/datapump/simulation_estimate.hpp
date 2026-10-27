@@ -355,6 +355,16 @@ Estimate estimate_with_receiver_search(const transfer::Estimate&,const transfer:
                   ReceiverWorkMode work_mode=ReceiverWorkMode::sampled_simulation,
                   ReceiverTimingModel timing_model={},const live::Settings* receiver_settings=nullptr,
                   std::stop_token stop={},const modem::PatternHelperFrequencyWindow* execution_window=nullptr);
+// Explicit-policy overload. The original symbol/signature delegates with false.
+Estimate estimate_with_receiver_search(const transfer::Estimate&,const transfer::Options&,bool raw_bits,
+                  const modem::ChannelConfig& translated_channel,const modem::OscillatorPatternSearch&,
+                  std::size_t receive_key_count,double differential_window_seconds,
+                  ReceiverWorkMode work_mode,ReceiverTimingModel timing_model,
+                  const live::Settings* receiver_settings,std::stop_token stop,
+                  const modem::PatternHelperFrequencyWindow* execution_window,bool helper_wait_for_shared_pulse);
+// Explicit helper-only constructor policy: true prices the serial shared-pulse
+// search promised by that admission rule. Enabled helper power or a supplied
+// work-only catalogue alone does not imply this policy or a measured CPU cap.
 // The optional window selects EXACT existing runtime cells for cost only.
 // Original constructor/backend/bin/workspace/trials and full continuation stay
 // charged; compact masked work remains unavailable. It qualifies no reference.

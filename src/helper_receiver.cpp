@@ -1118,7 +1118,12 @@ struct Receiver::Impl {
     }
     bool tone_time(double time) const {
         if(!state.timing_valid)return true;
-        const auto t=local(time);return (t>=.008&&t<.212)||(t>=.268&&t<.308);
+        const auto t=local(time);
+        // The second 8ms reversal restores the running carrier at284ms.
+        // Keep one complete40ms raw fit before the earliest compact metadata
+        // at332ms, with the measured grid error excluded at both boundaries.
+        const auto guard=std::max(1./state.rate,state.timing_uncertainty);
+        return (t>=.008&&t<.212)||(t>=.284+guard&&t<.332-guard);
     }
     void fuse_frequency(Reference& reference) const {
         if(!optional_frequency||!optional_frequency->qualified())return;
@@ -1371,7 +1376,10 @@ struct Receiver::Impl {
         if(!std::isfinite(frequency)||std::abs(frequency-expected)>width+1e-6)return false;
         r.frequency_hz=frequency;
         auto phase=std::arg(c)+tau*s.fit_hz*static_cast<double>(s.fit_size-1)/s.rate;
-        if(s.timing_valid&&local(seconds(r.sample))>=.244)phase-=std::numbers::pi;
+        // The paired punctuation is negative only between the two completed
+        // transitions; metadata and the next dwell share the running phase.
+        const auto dwell_phase=local(seconds(r.sample));
+        if(s.timing_valid&&dwell_phase>=.244&&dwell_phase<.276)phase-=std::numbers::pi;
         r.phase_radians=phase_wrap(phase);
         const auto noise=std::sqrt(residual/degrees);
         // Endpoint evaluation has greater variance than a center phasor. Use
@@ -1861,7 +1869,8 @@ struct Receiver::Impl {
                r.metadata_frequency_uncertainty_hz>.002)return;
             s.metadata_active=true;s.metadata_dwell=dwell;s.bb={};s.dd={};s.bd={};s.rhs={};s.rhs_derivative={};
             s.metadata_energy=0;s.metadata_samples=0;s.metadata_gain=s.amplitude;
-            s.metadata_osc=std::polar(1.,r.phase_radians+std::numbers::pi+tau*r.frequency_hz*age);
+            // Paired punctuation has returned to the canonical running phase.
+            s.metadata_osc=std::polar(1.,r.phase_radians+tau*r.frequency_hz*age);
             s.metadata_step=std::polar(1.,tau*r.frequency_hz/s.rate);
         }
         const auto position=(t-.332)/.008;

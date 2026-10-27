@@ -80,6 +80,14 @@ struct PatternSearchResolution {
 };
 OscillatorPatternSearch oscillator_pattern_search(const Config&,double transmit_rate_correction,
                                                  PatternSearchResolution);
+// Default reception retains the exact original grid when adding UTC steering.
+// A NEW manually helper-conditioned owner may instead use the single complete
+// expanded-domain grid. This changes representatives only: all original clock,
+// residual RF and UTC uncertainty remains covered by the ordinary cells.
+// An incomplete expansion retains the unchanged fallback and explicit status.
+enum class PatternUtcClockGrid { preserve_original_lanes, complete_expanded_domain };
+OscillatorPatternSearch oscillator_pattern_search(const Config&,double transmit_rate_correction,
+                                                 PatternSearchResolution,PatternUtcClockGrid);
 // Candidate steering range for independent audio clocks. The search builder
 // admits it only when the complete expanded domain AND every original lane fit.
 double utc_transmit_rate_limit(const Config&);

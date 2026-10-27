@@ -103,18 +103,38 @@ struct HelperReceiverCostLedger {
 // Unsupported component pricing cannot be promoted to a complete finite or
 // sustained total. Workspace eligibility stays a separate model diagnostic.
 HelperReceiverCostLedger helper_receiver_cost(const simulation::Estimate&);
-struct RealtimeHelperCpuPoint {
-    double target_db_hz=0,realtime_ratio=0,uncertainty_hz=0,observation_seconds=0,minimum_seed_seconds=0;
-    double rf_half_width_hz=0,clock_half_width_ppm=0;
-    std::uint32_t physical_sample_rate=0;
+// Noise-only Cramer--Rao reference for an identified uninterrupted constant
+// tone in white noise. It is neither an operational confidence interval nor a
+// substitute for the waveform/model-aware forecast or measured qualification.
+std::optional<double> helper_ideal_tone_half_width(double cn0_db_hz,double observation_seconds) noexcept;
+struct HelperPrecisionReference {
+    double cn0_db_hz=0,phase_noise_radians_per_sqrt_second=0;
+    // An acceptance guard, not a physical oscillator-drift prior.
+    double maximum_tracking_slew_hz_per_second=0,maximum_source_capture_ratio=1;
+    std::optional<double> ideal_one_second_half_width_hz,ideal_lead_half_width_hz;
+    double ideal_lead_observation_seconds=0;
+};
+// One ordinary receiver work query at an explicitly conditional residual U.
+// This is receiver-model pricing, not measured total helper/application CPU.
+struct RealtimeHelperReceiverWork {
+    double realtime_ratio=0,uncertainty_hz=0,rf_half_width_hz=0,clock_half_width_ppm=0;
     std::size_t frequency_rate_hypotheses=0,retained_clock_rates=0;
     std::optional<modem::PatternHelperClockInterval> shared_frequency_clock;
     std::size_t shared_clock_selected_pairs=0,shared_clock_selected_rates=0;
     bool available=false;
-    helper::TonePrecisionPrediction precision;
-    double planned_lead_seconds=0,planned_tail_seconds=0;
     HelperReceiverCostLedger receiver_cost;
     std::string reason;
+};
+struct RealtimeHelperCpuPoint : RealtimeHelperReceiverWork {
+    double target_db_hz=0,observation_seconds=0,minimum_seed_seconds=0;
+    std::uint32_t physical_sample_rate=0;
+    helper::TonePrecisionPrediction precision;
+    HelperPrecisionReference precision_reference;
+    double planned_lead_seconds=0,planned_tail_seconds=0;
+    // Continued reference reception can improve U after payload starts. This
+    // separate conditional query never changes the selected helper-only lead.
+    std::optional<RealtimeHelperReceiverWork> sustained;
+    double sustained_at_seconds=0; // Source time since helper start, not extra TX delay.
 };
 struct HelperCpuPoint {
     double target_db_hz=0,discovery_cpu_seconds=0,prequalification_broad_cpu_seconds=0;

@@ -1,5 +1,6 @@
 #include "datapump/helper_tone_tracker.hpp"
 #include "datapump/helper_reference_precision.hpp"
+#include "datapump/helper_phase_precision.hpp"
 #include "datapump/helper_carrier.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_receiver.hpp"
@@ -26,7 +27,8 @@ struct Source {
         for(std::size_t i=0;i<count;++i) {
             const auto t=static_cast<double>(first+i)/rate;
             phase+=2*std::numbers::pi*(hz+drift*t)/rate;
-            const auto sign=punctuation && std::fmod(t,.4)>=.24?-1.:1.;
+            const auto local=std::fmod(t,.4);
+            const auto sign=punctuation && local>=.24 && local<.28?-1.:1.;
             out[i]=static_cast<float>(amplitude*sign*std::cos(phase)+noise_sigma*noise(rng));
         }
         return out;
@@ -94,8 +96,9 @@ void narrow_range_and_noise() {
     check(rejected,"tracker silently accepted a capture gap");
 }
 // Actual encrypted Generator windows can bias a4096-point FFT seed by a
-// few Hz even at high C/N0. The fine loop must pull in before the minimum2s
-// helper lead ends, without deriving qualification from the seed itself.
+// few Hz even at high C/N0. The complete measured reference must qualify
+// within the same bounded precision lead-in planned for this physical tone;
+// neither a seed nor elapsed airtime supplies runtime qualification.
 void actual_helper_cold_capture_before_payload() {
     constexpr std::uint32_t rate=48000;
     constexpr std::uint64_t epoch=1793050572;
@@ -106,14 +109,30 @@ void actual_helper_cold_capture_before_payload() {
         {29.296875,.071,2400},{.137,.311,1200}};
     const Crypto key{std::array<std::uint8_t,32>{}}; // Public nonsecret fixture.
     helper::Options options;options.power_w=40;options.data_power_w=4;
+    const helper::ToneTrackerConfig config{rate,helper_hz,90.7,.01,.5};
+    helper::TonePrecisionRequest precision;
+    precision.sample_rate=rate;
+    // Real PCM: sinusoid power=A_peak²/2 and one-sided white N0=2*variance/Fs.
+    precision.straight_cn0_db_hz=10*std::log10((.6*.6/2)/(2*.083*.083/rate));
+    precision.phase_noise_radians_per_sqrt_second=config.phase_noise_radians_per_sqrt_second;
+    precision.maximum_tracking_slew_hz_per_second=config.maximum_tracking_slew_hz_per_second;
+    precision.metadata_symbols=3;precision.punctuate=true;
+    precision.maximum_source_capture_ratio=1;
+    precision.baseline_lead_seconds=2;precision.max_extra_seconds=36;precision.target_half_width_hz=.1;
+    const auto planned=helper::predict_tone_precision(precision);
+    check(std::isfinite(planned.total_lead_seconds) && planned.total_lead_seconds>=2 &&
+        planned.total_lead_seconds<=38 && planned.extra_lead_seconds>=0 && planned.extra_lead_seconds<=36,
+        "actual helper cold-capture plan lost its bounded lead-in");
+    check(planned.supported && planned.target_reached,
+        "strong physical helper did not predict the requested precision within the lead cap");
+    const auto lead_samples=static_cast<std::uint64_t>(std::llround(planned.total_lead_seconds*rate));
     for(const auto c:cases) {
         helper::Generator generator(options,helper::Plan{helper_hz,.6,0,40},epoch,true,key);
-        const helper::ToneTrackerConfig config{rate,helper_hz,90.7,.01,.5};
         helper::ToneTracker tracker(config,helper::ToneTracker::workspace_required(config));
         Source source;std::vector<float> block(c.batch);std::uint64_t first=0,first_qualified=0;
         helper::ToneTrackerSnapshot initial;
-        while(first<2ULL*rate) {
-            const auto n=static_cast<std::size_t>(std::min<std::uint64_t>(block.size(),2ULL*rate-first));
+        while(first<lead_samples) {
+            const auto n=static_cast<std::size_t>(std::min<std::uint64_t>(block.size(),lead_samples-first));
             for(std::size_t i=0;i<n;++i) {
                 const auto sample=first+i;
                 auto value=generator.mix_analytic({},static_cast<long double>(sample)/rate+c.source_phase,rate)*
@@ -128,8 +147,11 @@ void actual_helper_cold_capture_before_payload() {
         std::cout<<"actual cold capture offset="<<c.offset<<" source_phase="<<c.source_phase
             <<" first_qualified_seconds="<<static_cast<double>(first_qualified)/rate
             <<" first_error="<<initial.frequency_hz-helper_hz-c.offset
-            <<" initial_U="<<initial.uncertainty_hz<<'\n';
-        check(first_qualified && first_qualified<2ULL*rate,"actual helper fine capture missed the minimum helper-only lead");
+            <<" initial_U="<<initial.uncertainty_hz<<" expected_CNO="<<precision.straight_cn0_db_hz
+            <<" planned_lead="<<planned.total_lead_seconds<<" planned_extra="<<planned.extra_lead_seconds
+            <<" predicted_U="<<planned.frequency_half_width_hz<<'\n';
+        check(first_qualified && first_qualified<=lead_samples,
+            "actual helper reference did not qualify before its planned payload start");
         check(std::abs(initial.frequency_hz-helper_hz-c.offset)<=initial.uncertainty_hz,
             "first actual helper qualification escaped its engineering interval");
         const auto last=tracker.snapshot();
@@ -137,6 +159,120 @@ void actual_helper_cold_capture_before_payload() {
             "actual helper capture did not hand off to ordinary tracking");
     }
 }
+void phase_kernel_covariance_joint_fit_and_provenance() {
+    using namespace helper::phase_detail;
+    constexpr unsigned rate=48000;
+    constexpr std::uint64_t origin=1ULL<<60;
+    constexpr std::size_t block=960;
+    constexpr double reference=2062.5,sigma=.01,amplitude=.75;
+    std::array<double,context_size> times{},noise{};
+    for(std::size_t i=0;i<context_size;++i){times[i]=(.5+i)*.02;noise[i]=.01*(1+.15*i);}
+    const auto covariance=joint_covariance(times,noise,amplitude*amplitude,sigma,.2);
+    check(covariance.valid,"joint covariance rejected heterogeneous observation weights");
+    auto shifted=times,scaled_noise=noise;
+    for(auto& t:shifted)t+=17.25;
+    for(auto& n:scaled_noise)n*=4;
+    const auto translated=joint_covariance(shifted,noise,amplitude*amplitude,sigma,.2);
+    const auto scaled=joint_covariance(times,scaled_noise,amplitude*amplitude,sigma,.2);
+    const auto close=[](double a,double b){return std::abs(a-b)<=1e-10*std::max({1e-12,std::abs(a),std::abs(b)});};
+    check(translated.valid && close(translated.frequency_variance,covariance.frequency_variance) &&
+        close(translated.phase_variance,covariance.phase_variance),"joint covariance depends on an arbitrary date origin");
+    check(scaled.valid && close(scaled.thermal_phase_variance,4*covariance.thermal_phase_variance) &&
+        close(scaled.thermal_frequency_variance,4*covariance.thermal_frequency_variance) &&
+        close(scaled.process_frequency_variance,covariance.process_frequency_variance),
+        "joint covariance confuses thermal gain with oscillator process noise");
+    // Dense point-Brownian covariance is an independent lower comparison for
+    // the deliberately conservative actual-weight/full-Hann-support bound.
+    double sw=0,st=0;for(std::size_t i=0;i<context_size;++i){sw+=1/noise[i];st+=times[i]/noise[i];}
+    const auto mean=st/sw;double tt=0;
+    for(std::size_t i=0;i<context_size;++i)tt+=(times[i]-mean)*(times[i]-mean)/noise[i];
+    double dense_process=0;
+    for(std::size_t i=0;i<context_size;++i)for(std::size_t j=0;j<context_size;++j)
+        dense_process+=sigma*sigma*std::min(times[i],times[j])*(times[i]-mean)*(times[j]-mean)/
+            (noise[i]*noise[j]*tt*tt*tau*tau);
+    check(covariance.process_frequency_variance+1e-15>=dense_process,
+        "joint process bound dropped weighted Brownian covariance");
+    // Concentrating weight on neighboring 20 ms rows exposes the old
+    // uniform-spread process bound: dense Brownian slope variance approaches
+    // 50*sigma²/tau², exceeding its 10*sigma²/tau² assumption for 200 ms.
+    std::array<double,context_size> concentrated_noise{};concentrated_noise.fill(1e8);
+    concentrated_noise[4]=concentrated_noise[5]=1;
+    const auto concentrated=joint_covariance(times,concentrated_noise,amplitude*amplitude,sigma,.2);
+    double concentrated_sw=0,concentrated_st=0;
+    for(std::size_t i=0;i<context_size;++i){concentrated_sw+=1/concentrated_noise[i];concentrated_st+=times[i]/concentrated_noise[i];}
+    const auto concentrated_mean=concentrated_st/concentrated_sw;double concentrated_tt=0;
+    for(std::size_t i=0;i<context_size;++i)
+        concentrated_tt+=(times[i]-concentrated_mean)*(times[i]-concentrated_mean)/concentrated_noise[i];
+    double concentrated_dense=0;
+    for(std::size_t i=0;i<context_size;++i)for(std::size_t j=0;j<context_size;++j)
+        concentrated_dense+=sigma*sigma*std::min(times[i],times[j])*(times[i]-concentrated_mean)*(times[j]-concentrated_mean)/
+            (concentrated_noise[i]*concentrated_noise[j]*concentrated_tt*concentrated_tt*tau*tau);
+    const auto obsolete_uniform_bound=2*sigma*sigma/(tau*tau*.2);
+    check(concentrated_dense>4*obsolete_uniform_bound,
+        "concentrated covariance fixture did not distinguish the obsolete uniform-spread bound");
+    check(concentrated.valid && concentrated.process_frequency_variance+1e-15>=concentrated_dense,
+        "joint process bound fails concentrated-weight Brownian covariance");
+    double ws=0,w2=0;
+    for(std::size_t i=0;i<block;++i){const auto w=.5-.5*std::cos(tau*i/(block-1));ws+=w;w2+=w*w;}
+    const auto bandwidth=rate*w2/(ws*ws);
+    const auto row=[&](std::uint64_t index,std::uint64_t generation=7){
+        Projection p;p.first=origin+index*block;p.end=p.first+block;p.generation=generation;p.origin=origin;p.rate=rate;
+        const auto t=(static_cast<double>(p.first-origin)+.5*(block-1))/rate;
+        p.value=amplitude*std::polar(1.,tau*(.123+.2*t));
+        p.complex_noise_variance=amplitude*amplitude*bandwidth/1e4;
+        p.fll_hz=reference+.15;p.fll_uncertainty=.1;p.reference_hz=reference;p.qualified=true;
+        return p;
+    };
+    std::array<Projection,context_size> rows{};
+    for(std::size_t i=0;i<context_size;++i)rows[i]=row(i);
+    const auto joint=joint_context(rows,sigma);
+    check(joint.valid && std::abs(joint.hz-reference-.2)<1e-6 &&
+        std::abs(std::remainder(joint.phase-(.123+.2*joint.seconds),1.))<1e-7,
+        "joint complex fit lost frequency or actual large-origin phase coordinates");
+    auto scaled_rows=rows;for(auto& r:scaled_rows){r.value*=2;r.complex_noise_variance*=4;}
+    const auto same=joint_context(scaled_rows,sigma);
+    check(same.valid && close(same.variance,joint.variance) && close(same.frequency_sigma,joint.frequency_sigma),
+        "joint reference precision changes when signal and noise receive the same gain");
+    auto bad=rows;bad[3].first+=1;
+    check(!joint_context(bad,sigma).valid,"joint context accepted a PCM date gap");
+    bad=rows;++bad[3].generation;
+    check(!joint_context(bad,sigma).valid,"joint context combined different NCO generations");
+    bad=rows;for(auto& r:bad)r.complex_noise_variance*=1e6;
+    check(!joint_context(bad,sigma).valid,"joint context qualified insufficient aggregate tone SNR");
+    bad=rows;bad[context_size/2].value*=-1;
+    check(!joint_context(bad,sigma).valid,"joint complex residual accepted a disturbed context");
+    // A narrow FLL interval is not a restriction on this independent local
+    // likelihood maximum; ordinary final FLL compatibility is checked later.
+    bad=rows;for(auto& r:bad){r.fll_hz=reference;r.fll_uncertainty=.001;}
+    check(joint_context(bad,sigma).valid,"old narrow FLL boundary censored an independent joint maximum");
+    bad=rows;
+    for(auto& r:bad){const auto t=(static_cast<double>(r.first-origin)+.5*(block-1))/rate;
+        r.value=amplitude*std::polar(1.,tau*(.123+2.15*t));}
+    check(!joint_context(bad,sigma).valid,"joint fit accepted a clipped coherent-lobe endpoint");
+    Runtime runtime;
+    for(std::uint64_t i=0;i<80;++i)runtime.observe(row(i),sigma);
+    const auto now=80.*block/rate-1./rate;
+    const auto measured=runtime.estimate(now,sigma);
+    check(measured.valid && std::abs(measured.hz-reference-.2)<=measured.uncertainty,
+        "phase-only history did not contain deterministic joint frequency truth");
+    check(measured.first>=origin && measured.end<=origin+80*block && measured.first<measured.end,
+        "phase history manufactured raw support dates");
+    for(std::size_t i=1;i<runtime.used;++i)
+        check(runtime.anchors[i].first>=runtime.anchors[i-1].end,
+            "phase history treated overlapping context thermal noise as independent");
+    const auto anchor_count=runtime.used;
+    auto disturbed=row(80);disturbed.value*=std::complex<double>{0,1};runtime.observe(disturbed,sigma);
+    check(runtime.used==anchor_count && runtime.estimate(now+.02,sigma).valid,
+        "impure current context discarded a fresh independently qualified frequency reference");
+    check(!runtime.estimate(runtime.anchors[runtime.used-1].seconds+.500001,sigma).valid,
+        "phase history leased qualification beyond its actual 0.5 second freshness bound");
+    runtime.observe(row(81,8),sigma);
+    check(!runtime.used && !runtime.estimate(now+.04,sigma).valid,
+        "new mixer generation retained old phase support");
+    runtime.reset();check(!runtime.used && !runtime.current,"phase reset retained a qualified reference");
+    std::cout<<"joint phase covariance/fit/provenance checks passed\n";
+}
+
 void sparse_segments_keep_recent_aperture() {
     const helper::ToneTrackerConfig c{48000,2062.5,20,0,.5};
     helper::ToneTracker tracker(c,helper::ToneTracker::workspace_required(c));Source source;
@@ -198,12 +334,12 @@ void rolling_fifo_and_realistic_helper_modulation() {
             const auto t=static_cast<double>(first+i)/rate;
             const auto hz=2062.5+.08*std::max(0.,t-3.);
             phase+=2*std::numbers::pi*hz/rate;
-            // Match Generator's400ms grid,4ms ramps,8ms C2 reversal and
+            // Match Generator's400ms grid,4ms ramps,paired8ms C2 reversals and
             // three8ms APSK blends ending388ms plus8ms return. The137ms
             // offset deliberately makes transitions cut through loop windows.
             const auto local=std::fmod(t+.137,.4);
             const auto envelope=smooth(std::min(local,.4-local)/.004);
-            const auto punct=1-2*smooth((local-.236)/.008);
+            const auto punct=1-2*smooth((local-.236)/.008)+2*smooth((local-.276)/.008);
             std::complex<double> modulation{punct,0};
             if(local>=.364) {
                 const auto position=(local-.364)/.008;
@@ -257,7 +393,9 @@ helper::ToneTrackerSnapshot clock_wave(double ppm,double seconds,double noise_si
             const auto dwell=static_cast<unsigned>(std::floor(source_time/period));
             const auto envelope=smooth(std::min(local,period-local)/.004);
             auto punct=shape==1?(local<.24?1.:-1.):
-                shape==2?1.:shape==3 && (dwell&1)?1.:1-2*smooth((local-(period*.6-.004))/.008);
+                shape==2?1.:shape==3 && (dwell&1)?1.:
+                    1-2*smooth((local-(period*.6-.004))/.008)+
+                      2*smooth((local-(period*.6+.036))/.008);
             if(shape==6 && (dwell==12 || dwell==25))
                 punct*=1-2*smooth((local-.096)/.008);
             std::complex<double> modulation{punct,0};
@@ -530,9 +668,113 @@ void phase_segment_covariance_and_precision_prediction() {
  std::cout<<"pure precision checks passed\n";
 
 }
+void phase_anchor_precision_prediction() {
+ using namespace datapump::helper;
+ // The entire source calendar is unknown. Adjacent CLOSED intervals
+ // share endpoints, leaving no uncovered phase between0and400ms.
+ check(forecast_detail::source_phase_bins==40,"forecast lost bounded full-source-phase policy");
+ double last_phase=0;
+ for(unsigned bin=0;bin<forecast_detail::source_phase_bins;++bin) {
+  const auto lo=.4*bin/forecast_detail::source_phase_bins;
+  const auto hi=.4*(bin+1)/forecast_detail::source_phase_bins;
+  check(lo==last_phase && hi>lo && hi-lo<=.0100000000000001,"source-phase intervals have a gap or wrong bound");last_phase=hi;
+ }
+ check(last_phase==.4,"source-phase intervals miss calendar tail");
+ TonePrecisionRequest geometry;geometry.sample_rate=48000;
+ check(forecast_detail::clean_window(9600,960,geometry,0,.01),"full-bin clean pre-punctuation support declined");
+ check(!forecast_detail::clean_window(9600,960,geometry,.01,.02),"phase-bin envelope crossed punctuation but stayed clean");
+ check(!forecast_detail::clean_window(0,960,geometry,0,.01),"phase-bin startup ramp counted as clean");
+ check(!forecast_detail::clean_window(13440,960,geometry,0,.01),"paired return transition counted as clean");
+ check(!forecast_detail::clean_window(16704,960,geometry,0,.01),"metadata-spanning phase interval counted as clean");
+ auto no_metadata=geometry;no_metadata.metadata_symbols=0;
+ check(forecast_detail::clean_window(17472,960,no_metadata,0,.01) &&
+       !forecast_detail::clean_window(17472,960,geometry,0,.01),"metadata count did not constrain whole phase interval");
+ check(!forecast_detail::clean_window(18624,960,no_metadata,0,.01),"phase interval crossing400ms wrap counted as clean");
+ TonePrecisionRequest r;r.sample_rate=48000;r.straight_cn0_db_hz=30.020599913279625;
+ r.phase_noise_radians_per_sqrt_second=.008770170951;
+ const auto p=predict_tone_precision(r);
+ check(p.supported && p.target_reached && p.frequency_half_width_hz<=r.target_half_width_hz,
+       "dated-anchor forecast failed conditional30dBHz precision target");
+ check(p.extra_lead_seconds>=0 && p.extra_lead_seconds<=36 && p.total_lead_seconds==r.baseline_lead_seconds+p.extra_lead_seconds,
+       "phase precision forecast relabeled or exceeded baseline/extra lead");
+ check(p.expected_segments>=5 && p.usable_tone_seconds>0 &&
+       p.usable_tone_seconds<=p.total_lead_seconds/r.maximum_source_capture_ratio,
+       "phase forecast invented captured anchor support");
+ check(p.sustained_supported && p.sustained_at_seconds==r.baseline_lead_seconds+36 &&
+       p.sustained_frequency_half_width_hz>0 && p.total_lead_seconds<=p.sustained_at_seconds,
+       "sustained forecast missing or relabeled selected TX lead");
+ auto easier=r;easier.target_half_width_hz=.2;
+ const auto e=predict_tone_precision(easier);
+ check(e.total_lead_seconds<=p.total_lead_seconds && e.sustained_supported &&
+       e.sustained_at_seconds==p.sustained_at_seconds &&
+       e.sustained_frequency_half_width_hz==p.sustained_frequency_half_width_hz,
+       "selected initial target changed sustained covariance/aperture");
+ auto final_aperture=r;final_aperture.baseline_lead_seconds=p.sustained_at_seconds;final_aperture.max_extra_seconds=0;
+ const auto final=predict_tone_precision(final_aperture);
+ check(final.supported && final.extra_lead_seconds==0 &&
+       final.frequency_half_width_hz==p.sustained_frequency_half_width_hz,
+       "sustained field differs from same dated kernel at the explicit final aperture");
+ auto strong=r;strong.straight_cn0_db_hz=60;
+ const auto s=predict_tone_precision(strong);
+ check(s.supported && s.target_reached && s.extra_lead_seconds<=p.extra_lead_seconds,
+       "stronger conditional phase observations required more lead");
+ auto short_lead=r;short_lead.baseline_lead_seconds=.1;short_lead.max_extra_seconds=0;
+ const auto cold=predict_tone_precision(short_lead);
+ check(!cold.supported && cold.total_lead_seconds==.1 && cold.extra_lead_seconds==0,
+       "phase precision forecast manufactured acquisition before two fresh seeds");
+ auto fractional=r;fractional.max_extra_seconds=.3999999995;
+ const auto f=predict_tone_precision(fractional);
+ check(f.extra_lead_seconds<=fractional.max_extra_seconds && f.total_lead_seconds==fractional.baseline_lead_seconds+f.extra_lead_seconds,
+       "phase precision fractional extra cap overshot or relabeled baseline");
+ auto alias=r;alias.sample_rate=96000;
+ check(!predict_tone_precision(alias).supported,"unresolved original coarse-seed cycle alias forecast as precision");
+ auto weak=r;weak.straight_cn0_db_hz=13;
+ const auto w=predict_tone_precision(weak);
+ check(!w.supported && w.extension_capped && !w.target_reached && w.frequency_half_width_hz==0 &&
+       !w.sustained_supported && w.sustained_frequency_half_width_hz==0 && w.sustained_at_seconds==38,
+       "weak software decline created initial or sustained phase precision");
+ // Independent dense frequency/phase-endpoint OLS variance confirms that the
+ // forecast's cycle guide is actual expected FLL covariance, not a magic U.
+ forecast_detail::CleanFll history;constexpr unsigned rate=48000,block=960;
+ constexpr double phase_variance=.0375;constexpr std::uint64_t origin=8192;
+ for(unsigned i=0;i<32;++i)history.append(origin+(i+1)*block,origin+(i+2)*block-1,rate);
+ const auto now=origin+33*block-1;
+ const auto actual=history.uncertainty(now,rate,block,phase_variance,0);
+ double mt=0;for(unsigned i=0;i<32;++i)mt+=(static_cast<double>(origin+(i+1)*block)-now)/rate;mt/=32;
+ double tt=0;for(unsigned i=0;i<32;++i){const auto t=(static_cast<double>(origin+(i+1)*block)-now)/rate-mt;tt+=t*t;}
+ std::array<double,33> phase_weights{};
+ for(unsigned i=0;i<32;++i){const auto t=(static_cast<double>(origin+(i+1)*block)-now)/rate-mt;const auto q=(1./32-mt*t/tt)/(.02*precision_detail::tau);phase_weights[i]-=q;phase_weights[i+1]+=q;}
+ double variance=0;for(const auto q:phase_weights)variance+=q*q*phase_variance;
+ check(std::abs(actual-(3*std::sqrt(variance)+.005))<1e-12,
+       "conditional FLL guide differs from independently assembled endpoint covariance");
+ // Unknown complex amplitude and frequency are both present in the
+ // shared200ms covariance. A centered uniform independent row matrix has
+ // this independently derived Fisher diagonal.
+ std::array<double,phase_detail::context_size> times{},noise{};
+ constexpr double cn0=1000,sigma=.01,duration=.2;
+ double ws=0,w2=0;
+ for(unsigned j=0;j<960;++j){const auto w=.5-.5*std::cos(precision_detail::tau*j/959);ws+=w;w2+=w*w;}
+ const auto bandwidth=48000*w2/(ws*ws),complex_noise=bandwidth/cn0;
+ double sumt2=0;
+ for(std::size_t j=0;j<times.size();++j){times[j]=(static_cast<double>(j)-.5*(times.size()-1))*.02;noise[j]=complex_noise;sumt2+=times[j]*times[j];}
+ const auto joint=phase_detail::joint_covariance(times,noise,1,sigma,duration);
+ check(joint.valid && std::abs(joint.center)<1e-15,"shared joint covariance lost actual centered date");
+ check(std::abs(joint.thermal_phase_variance-complex_noise/(2*times.size()*precision_detail::tau*precision_detail::tau))<1e-15 &&
+       std::abs(joint.thermal_frequency_variance-complex_noise/(2*sumt2*precision_detail::tau*precision_detail::tau))<1e-15,
+       "joint forecast omitted complex-amplitude/frequency nuisance covariance");
+ check(std::abs(joint.process_phase_variance-2*sigma*sigma*duration/(precision_detail::tau*precision_detail::tau))<1e-15,
+       "joint forecast used20ms instead of full200ms Brownian support");
+ double absolute_frequency_weight=0;for(const auto time:times)absolute_frequency_weight+=std::abs(time/sumt2);
+ check(std::abs(joint.process_frequency_variance-sigma*sigma*duration*absolute_frequency_weight*absolute_frequency_weight/
+       (precision_detail::tau*precision_detail::tau))<1e-15,
+       "joint forecast lost actual-weight Minkowski process-frequency bound");
+ std::cout<<"phase-anchor forecast total="<<p.total_lead_seconds<<" U="<<p.frequency_half_width_hz
+          <<" anchors="<<p.expected_segments<<" support="<<p.usable_tone_seconds
+          <<" sustained_at="<<p.sustained_at_seconds<<" sustained_U="<<p.sustained_frequency_half_width_hz<<'\n';
+}
 int main() {
     try {
-        phase_segment_covariance_and_precision_prediction();strong_wide_tone_and_drift();representative_hf_noise_and_eme_level();narrow_range_and_noise();actual_helper_cold_capture_before_payload();sparse_segments_keep_recent_aperture();stable_full_capacity_keeps_moving();rolling_fifo_and_realistic_helper_modulation();shared_endpoint_precision_of_stable_tone();ordinary_payload_does_not_obscure_punctuation_clock();actual_encrypted_helper_boundary_does_not_poison_clock();off_cadence_feature_does_not_poison_established_clock();independent_punctuation_clock();out_of_range_or_large_evolving_shift_declines();
+        phase_segment_covariance_and_precision_prediction();phase_anchor_precision_prediction();phase_kernel_covariance_joint_fit_and_provenance();strong_wide_tone_and_drift();representative_hf_noise_and_eme_level();narrow_range_and_noise();actual_helper_cold_capture_before_payload();sparse_segments_keep_recent_aperture();stable_full_capacity_keeps_moving();rolling_fifo_and_realistic_helper_modulation();shared_endpoint_precision_of_stable_tone();ordinary_payload_does_not_obscure_punctuation_clock();actual_encrypted_helper_boundary_does_not_poison_clock();off_cadence_feature_does_not_poison_established_clock();independent_punctuation_clock();out_of_range_or_large_evolving_shift_declines();
         std::cout<<"helper realtime tone tracker checks passed\n";return 0;
     }catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

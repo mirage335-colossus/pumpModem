@@ -622,6 +622,62 @@ void long_geometry() {
           "long compact helper actual projection/fit work was not reduced");
     check(receiver.working_bytes()<=budget,"long compact helper displaced ordinary workspace");
 }
+void shared_pulse_admission() {
+    auto c=config(128);c.sample_rate=6000;c.carrier_hz=1500;c.bandwidth_hz=1;c.dsss=false;
+    auto make_search=[&](int pairs) {
+        auto s=search(c,7);s.start_uncertainty_seconds=7;s.candidate_limit=128;s.track_limit=8;
+        s.admitted_clock_half_width_ppm=.0003;s.admitted_clock_cell_half_width_ppm=.0003;
+        s.hypotheses.clear();const auto spacing=.25*c.sample_rate/modem::symbol_sample_count(c);
+        for(int f=-(pairs/2);f<=pairs/2;++f)s.hypotheses.push_back({f*spacing,(f+pairs/2)%2?.0003:-.0003});
+        s.receiver_strategy_workspace_bytes=12*1024*1024;return s;
+    };
+    constexpr std::size_t grant=256*1024*1024;
+    auto coarse=make_search(1513);
+    {modem::PatternCorrelator ordinary(c,coarse,grant);
+        check(ordinary.work().backend==modem::PatternCorrelationBackend::pulse_segments && ordinary.work().hypotheses==23451,
+            "coarse control did not reproduce the long compact segmented geometry");}
+    coarse.helper_wait_for_shared_pulse=true;
+    std::size_t required=0;
+    try {modem::PatternCorrelator unexpected(c,coarse,grant);throw Error("helper admitted the unaffordable coarse pulse bank");}
+    catch(const modem::PatternCompactAdmissionPending& pending) {
+        required=pending.required_bytes;
+        check(pending.pairs==1513 && pending.hypotheses==23451 && pending.available_bytes==coarse.receiver_strategy_workspace_bytes && required>pending.available_bytes,
+            "helper waiting outcome did not report the actual constructor geometry and byte shortfall");
+    }
+    auto narrow=make_search(57);narrow.helper_wait_for_shared_pulse=true;
+    auto below=narrow;below.receiver_strategy_workspace_bytes=1;
+    try {modem::PatternCorrelator unexpected(c,below,grant);throw Error("helper pulse gate ignored its cohort share");}
+    catch(const modem::PatternCompactAdmissionPending& pending) {
+        required=pending.required_bytes;
+        check(pending.pairs==57 && pending.hypotheses==883 && required>1,
+            "narrow pulse budget query changed the retained catalogue");
+    }
+    below.receiver_strategy_workspace_bytes=required-1;
+    try {modem::PatternCorrelator unexpected(c,below,grant);throw Error("helper pulse gate rounded an insufficient byte share up");}
+    catch(const modem::PatternCompactAdmissionPending& pending) {
+        check(pending.required_bytes==required && pending.available_bytes==required-1,"pulse budget boundary changed its accounting");
+    }
+    narrow.receiver_strategy_workspace_bytes=required;
+    {modem::PatternCorrelator exact(c,narrow,grant);
+        check(exact.work().lattices>0 && exact.work().backend!=modem::PatternCorrelationBackend::pulse_segments && exact.work().hypotheses==883,
+            "exact funded shared-pulse boundary selected a different catalogue or backend");}
+    narrow.receiver_strategy_workspace_bytes=12*1024*1024;
+    {modem::PatternCorrelator receiver(c,narrow,grant);
+        check(receiver.work().lattices>0 && receiver.work().hypotheses==883 && receiver.working_bytes()<=grant,
+            "measured narrow catalogue did not admit the ordinary shared-pulse backend within its share");}
+    // The wrapper must propagate the typed outcome instead of silently
+    // reporting a missing payload allocation. Isolate its original compact
+    // factory: Auto may legitimately select a different backend for this
+    // sparse diagnostic catalogue. Production Auto remains unchanged.
+    coarse.receiver_strategy_workspace_bytes=12*1024*1024;
+    auto wrapper_config=c;wrapper_config.receiver_strategy=modem::ReceiverStrategy::existing_only;
+    try {modem::StreamingReceiver unexpected(wrapper_config,grant,coarse);throw Error("ordinary wrapper bypassed helper admission waiting");}
+    catch(const modem::PatternCompactAdmissionPending& pending) {
+        check(pending.pairs==1513 && pending.available_bytes==coarse.receiver_strategy_workspace_bytes,
+            "ordinary wrapper lost the constructor waiting report");
+    }
+    std::cout<<"helper compact admission full pairs=1513/57 lanes=23451/883 pulse byte boundary="<<required<<" passed\n";
+}
 }
 int main(int argc,char** argv) {
     try {
@@ -636,6 +692,7 @@ int main(int argc,char** argv) {
         if(mode=="all" || mode=="clock")clock_domain_and_cold();
         if(mode=="calendar"){native_calendar(false);native_calendar(true);}
         if(mode=="dispatch") {
+            shared_pulse_admission();
             dispatch_expiry_negative();native_calendar(false,true);
             native_calendar(false,true,true,false);native_calendar(false,true,true,true);
             matched_payload(true,false,false,true);matched_payload(true,true,false,true);

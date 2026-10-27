@@ -1,4 +1,5 @@
 #pragma once
+#include "datapump/helper_phase_precision.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -21,10 +22,19 @@ struct TonePrecisionPrediction {
     // supported grants a numeric precision estimate, not measured lock. A valid
     // request can select capped airtime while precision remains unsupported.
     bool supported=false,target_reached=false,extension_capped=false;
+    // A separate conditional clean-model estimate at the already bounded
+    // baseline+maximum-extra aperture. This is NOT selected transmit lead,
+    // measured noisy-waveform precision, or a runtime qualification date.
+    bool sustained_supported=false;
     double baseline_lead_seconds=0,extra_lead_seconds=0,total_lead_seconds=0;
     // Numeric precision/support fields are meaningful only when supported;
     // their zero defaults never mean zero measured uncertainty.
+    // Initial clean-model precision at total_lead_seconds. Measured purity,
+    // excess and cycle losses can make actual noisy-waveform precision wider.
     double frequency_half_width_hz=0,usable_tone_seconds=0;
+    // Zero U is unavailable unless sustained_supported; at_seconds merely
+    // identifies the bounded forecast aperture and adds no transmit delay.
+    double sustained_at_seconds=0,sustained_frequency_half_width_hz=0;
     std::size_t expected_segments=0;
     std::string reason;
 };
@@ -184,9 +194,128 @@ struct Runtime {
     }
 };
 }
-// Conditional expected precision from the SAME segment covariance kernel.
-// Clean waveform support and zero measured excess are assumptions, not a
-// synchronization qualification or a guarantee of achieved receiver precision.
+namespace forecast_detail {
+// Cover the entire unknown400ms source calendar, not just the20ms loop
+// residue. Each bin certifies clean support for every phase in its interval.
+constexpr unsigned source_phase_bins=40;
+// Expected clean FLL only. This is the production endpoint covariance algebra
+// with zero frequency/evolution residual, NOT an assigned precision or a lock.
+// Saved phase endpoints cancel only across genuinely adjacent clean windows.
+struct CleanFll {
+    std::array<std::uint64_t,384> samples{};
+    std::size_t used=0;
+    void append(std::uint64_t sample,std::uint64_t now,std::uint32_t rate)noexcept {
+        const auto oldest=now>8ULL*rate?now-8ULL*rate:0;
+        std::size_t keep=0;
+        for(std::size_t i=0;i<used;++i)if(samples[i]>=oldest)samples[keep++]=samples[i];
+        used=keep;
+        if(used==samples.size()){std::move(samples.begin()+1,samples.end(),samples.begin());--used;}
+        samples[used++]=sample;
+    }
+    bool qualified(std::uint64_t now,std::uint32_t rate,std::uint64_t block)const noexcept {
+        return used>=16 && now>=samples[0]-block &&
+            static_cast<double>(now-(samples[0]-block)+1)/rate>=.3;
+    }
+    double uncertainty(std::uint64_t now,std::uint32_t rate,std::uint64_t block,
+            double phase_variance,double sigma)const noexcept {
+        if(!qualified(now,rate,block))return std::numeric_limits<double>::infinity();
+        const auto dt=static_cast<double>(block)/rate;
+        const auto endpoint=phase_variance/(precision_detail::tau*precision_detail::tau*dt*dt);
+        const auto process=sigma*sigma/(precision_detail::tau*precision_detail::tau*dt);
+        double mean=0;
+        for(std::size_t i=0;i<used;++i)mean+=(static_cast<long double>(samples[i])-now)/rate;
+        mean/=used;double tt=0;
+        for(std::size_t i=0;i<used;++i){const auto t=static_cast<double>((static_cast<long double>(samples[i])-now)/rate)-mean;tt+=t*t;}
+        if(!(tt>0))return std::numeric_limits<double>::infinity();
+        double thermal=0,weights=0,previous=0;
+        for(std::size_t i=0;i<used;++i) {
+            const auto t=static_cast<double>((static_cast<long double>(samples[i])-now)/rate)-mean;
+            const auto w=1./used-mean*t/tt;
+            if(i && samples[i]-samples[i-1]==block)thermal+=endpoint*(previous-w)*(previous-w);
+            else {if(i)thermal+=endpoint*previous*previous;thermal+=endpoint*w*w;}
+            previous=w;weights+=w*w;
+        }
+        thermal+=endpoint*previous*previous;
+        const auto support=static_cast<double>(now-(samples[0]-block)+1)/rate;
+        return 3*std::sqrt(thermal+process*weights)+3*sigma/(precision_detail::tau*std::sqrt(std::max(.02,support)))+.005;
+    }
+};
+inline bool clean_window(std::uint64_t first,std::uint64_t block,
+        const TonePrecisionRequest& r,double phase_begin,double phase_end)noexcept {
+    const auto begin=static_cast<double>(first)/r.sample_rate*r.maximum_source_capture_ratio+phase_begin;
+    const auto end=static_cast<double>(first+block-1)/r.sample_rate*r.maximum_source_capture_ratio+phase_end;
+    const auto dwell=std::floor(begin/.4),lo=begin-.4*dwell,hi=end-.4*dwell;
+    const auto metadata_start=r.metadata_symbols?.388-.008*r.metadata_symbols:.396;
+    // Actual paired280ms waveform: both 8ms transitions interrupt phase.
+    // The inverted32ms plateau cannot by itself create a200ms context.
+    const auto punctuation_clean=!r.punctuate ||
+        ((hi<=.236 || lo>=.244) && (hi<=.276 || lo>=.284));
+    return hi<.4 && lo>=.004 && hi<=metadata_start && punctuation_clean;
+}
+struct ExpectedAperture {
+    phase_detail::Runtime phase;
+    CleanFll fll;
+    std::uint64_t first=8192,last_good=0; // two actual fresh4096-point FFTs
+    std::size_t capture_used=0;
+    bool capture_pending=true,previous_clean=false;
+    void advance(std::uint64_t end,const TonePrecisionRequest& r,std::uint64_t block,
+            double phase_variance,double phase_begin,double phase_end)noexcept {
+        while(first<=end && block<=end-first) {
+            const auto next=first+block,now=next-1;
+            const auto clean=clean_window(first,block,r,phase_begin,phase_end);
+            bool accepted=false;
+            if(capture_pending) {
+                if(clean && previous_clean)++capture_used;else capture_used=0;
+                if(capture_used==4){capture_pending=false;capture_used=0;previous_clean=false;}
+                else previous_clean=clean;
+            }else {
+                accepted=clean && previous_clean;previous_clean=clean;
+                if(accepted)fll.append(first,now,r.sample_rate);
+            }
+            const auto qualified=accepted && fll.qualified(now,r.sample_rate,block);
+            if(qualified)last_good=next;
+            // A joint context consumes RAW normalized complex rows, not ten
+            // individually accepted phase estimates. Its unknown amplitude
+            // and residual-frequency nuisance use the shared joint_context
+            // covariance. Known dirty forecast rows break the expected clean
+            // context; actual runtime purity remains an independent test.
+            auto fll_U=std::numeric_limits<double>::infinity();
+            if(qualified && phase.context_used>=phase_detail::context_size-1) {
+                const auto start=phase.context[phase.context_used==phase_detail::context_size?1:0].first;
+                if(!phase.used || start>=phase.anchors[phase.used-1].end)
+                    fll_U=fll.uncertainty(now,r.sample_rate,block,phase_variance,r.phase_noise_radians_per_sqrt_second);
+            }
+            const phase_detail::Projection p{first,next,1,8192,r.sample_rate,0,phase_variance,
+                0,fll_U,0,0,clean,accepted,qualified,{1,0},clean?2*phase_variance:0};
+            phase.observe(p,r.phase_noise_radians_per_sqrt_second);
+            first=next;
+        }
+    }
+    phase_detail::Estimate estimate(std::uint64_t end,const TonePrecisionRequest& r,
+            double& usable)const noexcept {
+        usable=0;
+        // Forecast a dated clean measurement, never relabel the dirty tail or
+        // promise lock at the lead boundary. The actual runtime remains free
+        // to reject its seed, purity, cycle/model tests or current input.
+        if(!last_good || end<last_good || static_cast<double>(end-last_good)/r.sample_rate>.2)return {};
+        const auto horizon=36ULL*r.sample_rate;
+        const auto oldest=last_good>horizon?last_good-horizon:0;
+        std::size_t begin=0;
+        while(begin<phase.used && phase.anchors[begin].first<oldest)++begin;
+        const auto anchors=std::span(phase.anchors).subspan(begin,phase.used-begin);
+        for(const auto& a:anchors) {
+            if(a.end>last_good || a.end<=a.first)return {};
+            usable+=static_cast<double>(a.end-a.first)/r.sample_rate;
+        }
+        return phase_detail::estimate(anchors,static_cast<double>(last_good-1-8192)/r.sample_rate,
+            r.phase_noise_radians_per_sqrt_second,0);
+    }
+};
+}
+// Conditional sampled precision using the SAME dated phase-anchor GLS kernel
+// as runtime. Expected clean joint contexts and zero excess are assumptions;
+// this does not qualify an input, predict its lock date, or create phase/clock
+// authority. The independent current FLL interval must resolve every cycle.
 inline TonePrecisionPrediction predict_tone_precision(const TonePrecisionRequest& r) {
     TonePrecisionPrediction result;result.baseline_lead_seconds=r.baseline_lead_seconds;
     if(r.sample_rate<1000 || r.sample_rate>192000 || !std::isfinite(r.straight_cn0_db_hz) ||
@@ -197,9 +326,6 @@ inline TonePrecisionPrediction predict_tone_precision(const TonePrecisionRequest
        !std::isfinite(r.maximum_source_capture_ratio) || r.maximum_source_capture_ratio<=0 ||
        !std::isfinite(r.maximum_tracking_slew_hz_per_second) || r.maximum_tracking_slew_hz_per_second<0 ||
        r.metadata_symbols>16) {result.reason="invalid precision request";return result;}
-    // Bound BOTH source/calendar coordinates and simulated captured work
-    // before selecting airtime or converting a floating sample coordinate.
-    // Invalid geometry must not turn an optional forecast into extra output.
     const auto maximum_total=static_cast<long double>(r.baseline_lead_seconds)+r.max_extra_seconds;
     const auto maximum_physical=maximum_total/r.maximum_source_capture_ratio;
     if(maximum_total>300 || !std::isfinite(maximum_physical) || maximum_physical>300) {
@@ -210,10 +336,9 @@ inline TonePrecisionPrediction predict_tone_precision(const TonePrecisionRequest
     const auto maximum_extra=.4*max_steps;
     const auto capped_without_precision=[&](const char* reason) {
         TonePrecisionPrediction capped;
-        capped.baseline_lead_seconds=r.baseline_lead_seconds;
-        capped.extra_lead_seconds=maximum_extra;
-        capped.total_lead_seconds=r.baseline_lead_seconds+maximum_extra;
-        capped.extension_capped=true;
+        capped.baseline_lead_seconds=r.baseline_lead_seconds;capped.extra_lead_seconds=maximum_extra;
+        capped.total_lead_seconds=r.baseline_lead_seconds+maximum_extra;capped.extension_capped=true;
+        capped.sustained_at_seconds=capped.total_lead_seconds;
         capped.reason=std::string(reason)+"; "+std::to_string(maximum_extra)+
             " s extra-lead cap selected; precision not predicted; target remains unmet";
         return capped;
@@ -223,55 +348,52 @@ inline TonePrecisionPrediction predict_tone_precision(const TonePrecisionRequest
     for(std::size_t i=0;i<block;++i){const auto w=.5-.5*std::cos(precision_detail::tau*i/(block-1));ws+=w;w2+=w*w;}
     const auto bw=r.sample_rate*w2/(ws*ws),cn0=std::pow(10.,r.straight_cn0_db_hz/10);
     if(!std::isfinite(cn0)) {result.reason="expected straight tone exceeds the numerical precision range";return result;}
-    if(cn0<=4*bw)return capped_without_precision(
-        "expected straight tone is below the independent 20ms following level gate");
-    const auto variance=bw/(2*cn0*precision_detail::tau*precision_detail::tau*dt*dt);
-    for(unsigned step=0;step<=max_steps;++step) {
-        const auto extra=.4*step;if(extra>r.max_extra_seconds || extra>36)break;
-        const auto total=r.baseline_lead_seconds+extra;
-        double worst=0,min_usable=std::numeric_limits<double>::infinity();std::size_t min_segments=SIZE_MAX;bool all=true;
-        // Conditional sampled alignment forecast: evaluate twenty1ms window
-        // offsets within the400ms calendar. This is not a universal boundary
-        // guarantee; actual capture/partial dwell support is independently
-        // measured. Complete windows and known waveform gaps are retained.
-        for(unsigned alignment=0;alignment<20;++alignment) {
-            precision_detail::Runtime runtime;const auto offset=alignment*.001;
-            bool previous_clean=false;std::uint64_t previous_first=0;double usable=0;
-            const auto physical=total/r.maximum_source_capture_ratio;
-            const auto end=static_cast<std::uint64_t>(physical*r.sample_rate);
-            // An expected one-second FFT/cold-loop warmup is excluded. Actual
-            // capture still qualifies independently and can take longer.
-            for(std::uint64_t first=static_cast<std::uint64_t>(std::ceil(1./dt))*block;first+block<=end;first+=block) {
-                const auto source_first=static_cast<double>(first)/r.sample_rate*r.maximum_source_capture_ratio+offset;
-                const auto source_last=static_cast<double>(first+block-1)/r.sample_rate*r.maximum_source_capture_ratio+offset;
-                const auto dwell=std::floor(source_first/.4),lo=source_first-.4*dwell,hi=source_last-.4*dwell;
-                const auto metadata_start=r.metadata_symbols?.388-.008*r.metadata_symbols:.396;
-                const auto clean=hi<.4 && lo>=.004 && hi<=metadata_start && (!r.punctuate || hi<=.236 || lo>=.244);
-                if(clean) {
-                    if(first>= (end>static_cast<std::uint64_t>(precision_detail::recent_seconds*r.sample_rate)?
-                       end-static_cast<std::uint64_t>(precision_detail::recent_seconds*r.sample_rate):0))usable+=dt;
-                    if(previous_clean)runtime.accept(first,previous_first,{0,variance,variance},dt,r.phase_noise_radians_per_sqrt_second,block);
-                }else runtime.reject(dt,r.phase_noise_radians_per_sqrt_second,block);
-                previous_clean=clean;previous_first=first;
-            }
-            if(!end){all=false;break;}
-            const auto estimate=runtime.estimate(end-1,r.sample_rate,r.phase_noise_radians_per_sqrt_second,block);
-            if(!estimate.valid){all=false;break;}
-            worst=std::max(worst,estimate.uncertainty);min_usable=std::min(min_usable,usable);min_segments=std::min(min_segments,estimate.count);
-        }
-        if(all) {
-            result.supported=true;result.total_lead_seconds=total;result.extra_lead_seconds=.4*step;
-            result.frequency_half_width_hz=worst;result.usable_tone_seconds=min_usable;result.expected_segments=min_segments;
-            result.target_reached=worst<=r.target_half_width_hz;
-            if(result.target_reached)break;
+    if(cn0<=4*bw)return capped_without_precision("software unsupported: expected straight tone is below the current independent20ms FLL gate; not a physical precision limit");
+    if(!(2.*r.sample_rate/4096 < .5/dt))return capped_without_precision(
+        "original4096-point seed interval does not establish unique20ms phase cycles");
+    const auto phase_variance=bw/(2*cn0);
+    struct Candidate {bool valid=true;double U=0,usable=std::numeric_limits<double>::infinity();std::size_t count=SIZE_MAX;};
+    std::array<Candidate,91> candidates{};
+    // Build each source-phase interval ONCE. The earliest possible window
+    // start and latest possible end must both be inside the SAME clean
+    // calendar interval, covering every phase within each10ms bin. Ten ms
+    // leaves the232ms pre-punctuation CW flank enough room for a200ms
+    // context plus one20ms grid placement;20ms-wide bins need not do so.
+    // No PCM, FFT, heap history, or repeated aperture replay.
+    for(unsigned bin=0;bin<forecast_detail::source_phase_bins;++bin) {
+        const auto phase_begin=.4*bin/forecast_detail::source_phase_bins;
+        const auto phase_end=.4*(bin+1)/forecast_detail::source_phase_bins;
+        forecast_detail::ExpectedAperture aperture;
+        for(unsigned step=0;step<=max_steps;++step) {
+            const auto total=r.baseline_lead_seconds+.4*step;
+            const auto end=static_cast<std::uint64_t>(total/r.maximum_source_capture_ratio*r.sample_rate);
+            aperture.advance(end,r,block,phase_variance,phase_begin,phase_end);
+            double usable=0;const auto estimate=aperture.estimate(end,r,usable);
+            auto& c=candidates[step];c.valid&=estimate.valid;
+            if(estimate.valid){c.U=std::max(c.U,estimate.uncertainty);c.usable=std::min(c.usable,usable);c.count=std::min(c.count,estimate.count);}
         }
     }
-    // A fit from a shorter failed-target aperture cannot supply precision at
-    // a later unsupported cap. Select the bounded airtime without that U.
-    if(!result.supported || (!result.target_reached && result.extra_lead_seconds!=maximum_extra))
-        return capped_without_precision("insufficient expected independently captured coherent segments at the extra-lead cap");
-    result.extension_capped=result.supported && !result.target_reached;
-    result.reason=result.supported?(result.target_reached?"conditional sampled clean-segment/smooth-evolution target reached; actual capture, rejection and excess remain independent":"extra lead cap reached; conditional sampled clean-segment/smooth-evolution target remains unmet"):"insufficient expected independently captured coherent segments";
+    // The final bounded aperture was already evaluated above. Expose it
+    // separately rather than selecting more TX lead or pricing all future
+    // receiver work at the initial target-crossing width.
+    const auto& sustained=candidates[max_steps];
+    result.sustained_at_seconds=r.baseline_lead_seconds+maximum_extra;
+    result.sustained_supported=sustained.valid;
+    if(sustained.valid)result.sustained_frequency_half_width_hz=sustained.U;
+    for(unsigned step=0;step<=max_steps;++step) {
+        const auto& c=candidates[step];if(!c.valid)continue;
+        result.supported=true;result.extra_lead_seconds=.4*step;result.total_lead_seconds=r.baseline_lead_seconds+result.extra_lead_seconds;
+        result.frequency_half_width_hz=c.U;result.usable_tone_seconds=c.usable;result.expected_segments=c.count;
+        result.target_reached=c.U<=r.target_half_width_hz;if(result.target_reached)break;
+    }
+    if(!result.supported || (!result.target_reached && result.extra_lead_seconds!=maximum_extra))return capped_without_precision(
+        "insufficient expected fresh unambiguous phase anchors at the extra-lead cap");
+    result.extension_capped=!result.target_reached;
+    result.reason=result.target_reached?
+        "initial conditional all-source-phase clean-model200ms anchor target predicted; not noisy-waveform precision or measured lock timing":
+        "extra lead cap reached; initial conditional clean-model phase-anchor target remains unmet";
+    result.reason+="; actual seed, purity, excess, cycle, model and freshness qualification remain independent";
+    if(result.sustained_supported)result.reason+="; separate sustained clean-model prediction uses the bounded aperture and adds no transmit lead";
     return result;
 }
 }

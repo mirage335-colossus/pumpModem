@@ -536,6 +536,61 @@ void verbose_diagnostics() {
     tr::Fields fields;fields.add("utc",1800000000.123456789L);fields.add("unknown",INFINITY);fields.add("text","\"\n");
     check(fields.out.str().find("1800000000.123456")!=std::string::npos&&fields.out.str().find("\"unknown\":null")!=std::string::npos&&
         fields.out.str().find("\\\"\\u000a")!=std::string::npos,"Verbose trace lost absolute timestamp precision or JSON escaping");
+    // Exact trace-only state, including zero work, is emitted first and at
+    // every changed counter/discrete selection or forced lifecycle boundary.
+    check(!tr::work_snapshot_forced("feed_complete",false,false,true)&&
+        !tr::work_snapshot_forced("refresh_before_move",false,false,true)&&
+        tr::work_snapshot_forced("refresh_before_move",true,false,true)&&
+        tr::work_snapshot_forced("refresh_before_move",false,true,true)&&
+        tr::work_snapshot_forced("refresh_before_move",false,false,false)&&
+        tr::work_snapshot_forced("receiver_exception",false,false,true),
+        "Nonterminal refresh coalescing suppressed a failed/retired/unavailable/event snapshot");
+    auto coalescer=std::make_unique<tr::WorkTraceCoalescer>();
+    const tr::WorkTraceCoalescer::Key owner{1,7,120};
+    tr::WorkTraceStamp zero;zero.add("template_jobs",std::uint64_t{0});zero.add("helper_window_active",false);
+    auto decision=coalescer->observe(owner,zero,120,false,false);
+    check(decision.emit&&decision.tracked,"First zero-work owner was omitted");
+    check(!coalescer->observe(owner,zero,121,false,false).emit&&
+        !coalescer->observe(owner,zero,122,false,false).emit,"Unchanged feed snapshots were formatted again");
+    auto one=zero;one.words[0]=1;
+    decision=coalescer->observe(owner,one,123,
+        tr::work_snapshot_forced("refresh_before_move",false,false,true),false);
+    check(decision.emit&&decision.coalesced_calls==2&&decision.first_coalesced_sample==121&&
+        decision.last_coalesced_sample==122,"Changed work lost the intervening zero-work calls");
+    auto selected=one;selected.words[1]=1;
+    check(coalescer->observe(owner,selected,124,false,false).emit,"Discrete helper selection change disappeared");
+    check(coalescer->observe(owner,selected,125,true,false).emit,"Zero-work failed/unwind call disappeared");
+    check(!coalescer->observe(owner,selected,126,false,false).emit,"Unchanged post-event call was not coalesced");
+    decision=coalescer->observe(owner,selected,127,true,true);
+    check(decision.emit&&decision.coalesced_calls==1&&coalescer->stats().open_owners==0&&
+        coalescer->stats().pending_calls==0,"Final owner snapshot lost coalesced calls or retained its cache slot");
+    tr::WorkTraceStamp reference_a,reference_b;
+    reference_a.add("sample",std::uint64_t{10});reference_b.add("sample",std::uint64_t{11});
+    reference_a.add("realtime_clock_lower_ppm",99.);reference_b.add("realtime_clock_lower_ppm",100.);
+    reference_a.add("realtime_clock_source_id",1U);reference_b.add("realtime_clock_source_id",1U);
+    check(reference_a==reference_b,"Reference-only date/precision forced duplicate per-owner work");
+    reference_b.words[0]=2;
+    check(!(reference_a==reference_b),"Clock-source provenance change was coalesced");
+    for(std::size_t i=0;i<tr::WorkTraceCoalescer::capacity*2;++i) {
+        const tr::WorkTraceCoalescer::Key key{1,1000+i,0};
+        check(coalescer->observe(key,zero,0,false,false).emit&&
+            coalescer->observe(key,zero,1,true,true).emit,"Later numeric lifetime lost its zero-work terminal snapshot");
+    }
+    check(coalescer->stats().open_owners==0&&coalescer->stats().capacity_declines==0,
+        "Closed long-message owners exhausted bounded trace storage");
+    for(std::size_t i=0;i<tr::WorkTraceCoalescer::capacity;++i)
+        check(coalescer->observe({2,i,0},zero,0,false,false).tracked,"Exact cache rejected an in-capacity owner");
+    decision=coalescer->observe({2,1000,0},zero,0,false,false);
+    check(decision.emit&&!decision.tracked&&decision.capacity_declined,
+        "Trace cache exhaustion dropped an owner instead of emitting uncoalesced");
+    tr::WorkTraceStamp overflow;
+    for(std::size_t i=0;i<=tr::WorkTraceStamp::capacity;++i)overflow.add("template_jobs",std::uint64_t{i});
+    check(!overflow.valid&&coalescer->observe({2,0,0},overflow,1,true,true).emit&&
+        coalescer->stats().open_owners==tr::WorkTraceCoalescer::capacity-1,
+        "Unknown stamp geometry omitted work or prevented final owner closure");
+    tr::State uncached;uncached.acquisition_work_cache_attempted=true;
+    decision=uncached.work_decision(owner,zero,0,false,false);
+    check(decision.emit&&!decision.cache_available,"Optional logger allocation failure suppressed work evidence");
     tr::State bounded;
     for(unsigned i=0;i<tr::State::capacity+7;++i)bounded.push("fixture\n");
     check(bounded.queued()==tr::State::capacity&&bounded.dropped==7,"Verbose queue was not bounded/accounted");
@@ -545,10 +600,22 @@ void verbose_diagnostics() {
     std::string item;std::set<std::string> unique;while(concurrent.pop(item))check(unique.insert(item).second,"Concurrent trace queue duplicated a record");
     check(unique.size()==tr::State::capacity&&unique.size()+concurrent.dropped==4000,"Concurrent trace queue lost unaccounted records");
     const auto path=std::filesystem::temp_directory_path()/("datapump-trace-test-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl");
-    {tr::Scope trace(path);tr::record("fixture",[](auto& f){f.add("frame",123);});}
+    unsigned formatted_work=0;
+    {tr::Scope trace(path);tr::record("fixture",[](auto& f){f.add("frame",123);});
+        const auto work_fields=[&](auto& f){++formatted_work;f.add("template_jobs",0);};
+        tr::record_work(owner,zero,120,false,false,work_fields);
+        tr::record_work(owner,zero,121,false,false,work_fields);
+        tr::record_work(owner,zero,122,true,true,work_fields);
+    }
+    check(formatted_work==2,"Unchanged work was formatted or final zero-work snapshot was skipped");
     std::ifstream in(path);const std::string text((std::istreambuf_iterator<char>(in)),{});
     check(text.find("\"event\":\"fixture\"")!=std::string::npos&&text.find("\"event\":\"trace_end\"")!=std::string::npos&&
-        text.find("\"prior_io_failed\":false")!=std::string::npos&&text.find("\"finalization_required\":true")!=std::string::npos,
+        text.find("\"prior_io_failed\":false")!=std::string::npos&&text.find("\"finalization_required\":true")!=std::string::npos&&
+        text.find("\"coalesced_acquisition_work_calls\":1")!=std::string::npos&&
+        text.find("\"pending_coalesced_acquisition_work_calls\":0")!=std::string::npos&&
+        text.find("\"acquisition_work_tracked_open_owners\":0")!=std::string::npos&&
+        text.find("\"acquisition_work_tracked_lifecycles_closed\":true")!=std::string::npos&&
+        text.find("tracked coalescer entries only; untracked owners require terminal-event scan")!=std::string::npos,
         "Verbose trace failed to drain before provisional footer");
     auto* close_fixture=std::tmpfile();check(close_fixture!=nullptr,"Cannot create trace close fixture");
     auto final=tr::finish_file(close_fixture,false);
@@ -2125,6 +2192,10 @@ void smoke_shutdown_does_not_resume_workflow() {
 }
 }
 int main(int argc,char** argv) {
+    if(argc==2&&std::string(argv[1])=="--trace-only") {
+        try {verbose_diagnostics();std::cout<<"Bounded work trace diagnostics passed\n";return 0;}
+        catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
+    }
     if(argc==2&&std::string(argv[1])=="--debug-repeat-only") {
         try {physical_debug_workflow();repeated_physical_debug_workflow();std::cout<<"Repeated hardware debug workflow passed\n";return 0;}
         catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}

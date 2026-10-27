@@ -106,7 +106,7 @@ struct Chart {
     std::vector<std::pair<double, double>> points;
     // Unavailable samples keep their position and break the RX line.
     std::vector<std::pair<double, double>> receive_points;
-    std::vector<std::pair<double,double>> helper_points,helper_receive_points,helper_backend_points,helper_feasibility_points;
+    std::vector<std::pair<double,double>> helper_points,helper_sustained_points,helper_receive_points,helper_backend_points,helper_feasibility_points;
     std::vector<Tick> y_ticks;
     double strong = 25, weak = -35, low_log = 0, high_log = 1;
     double selected_target = 0, selected_value = 0;
@@ -194,10 +194,16 @@ Chart cpu_chart_data(const planner::Model& model) {
             point.realtime_ratio:std::numeric_limits<double>::quiet_NaN();
         chart.helper_points.emplace_back(point.target_db_hz,value);
         if(std::isfinite(value)){minimum=std::min(minimum,value);maximum=std::max(maximum,value);}
+        const auto sustained=point.sustained&&point.sustained->available&&
+            std::isfinite(point.sustained->realtime_ratio)&&point.sustained->realtime_ratio>0?
+            point.sustained->realtime_ratio:std::numeric_limits<double>::quiet_NaN();
+        chart.helper_sustained_points.emplace_back(point.target_db_hz,sustained);
+        if(std::isfinite(sustained)){minimum=std::min(minimum,sustained);maximum=std::max(maximum,sustained);}
     }
     if(chart.selected_value>0){minimum=std::min(minimum,chart.selected_value);maximum=std::max(maximum,chart.selected_value);}
     std::sort(chart.points.begin(),chart.points.end(),[](const auto& a,const auto& b){return a.first>b.first;});
     std::sort(chart.helper_points.begin(),chart.helper_points.end(),[](const auto& a,const auto& b){return a.first>b.first;});
+    std::sort(chart.helper_sustained_points.begin(),chart.helper_sustained_points.end(),[](const auto& a,const auto& b){return a.first>b.first;});
     const auto high=std::max(-std::floor(std::log10(minimum)),std::ceil(std::log10(maximum))),low=-high;
     chart.low_log=low-.12;chart.high_log=high+.12;
     const auto upper=std::pow(10.,high);
@@ -252,7 +258,7 @@ BitmapSource chart_bitmap(Chart chart) {
         using Spans=std::vector<std::pair<double,double>>;
         const auto empty_span=std::pair{std::numeric_limits<double>::infinity(),-std::numeric_limits<double>::infinity()};
         Spans spans(damage.width,empty_span),receive_spans(damage.width,empty_span),receive_markers(damage.width,empty_span),
-            helper_spans(damage.width,empty_span),backend_spans(damage.width,empty_span),
+            helper_spans(damage.width,empty_span),sustained_spans(damage.width,empty_span),backend_spans(damage.width,empty_span),
             feasibility_spans(damage.width,empty_span);
         const auto stroke = [&](Spans& destination,double x1, double y1, double x2, double y2) {
             const int first = std::max(static_cast<int>(damage.x), static_cast<int>(std::floor(std::min(x1, x2) - 1)));
@@ -286,6 +292,15 @@ BitmapSource chart_bitmap(Chart chart) {
             if(!i)continue;const auto& a=conditional[i-1];
             if(!std::isfinite(a.second)||((chart.cpu||chart.work)&&a.second<=0))continue;
             stroke(helper_spans,x_at(a.first),chart.cpu||chart.work?y_at(a.second):p_at(a.second),bx,by);
+        }
+        for(std::size_t i=0;i<chart.helper_sustained_points.size();++i) {
+            const auto& b=chart.helper_sustained_points[i];
+            if(!std::isfinite(b.second)||b.second<=0)continue;
+            const auto bx=x_at(b.first),by=y_at(b.second);
+            stroke(sustained_spans,bx,by,bx,by);
+            if(!i)continue;const auto& a=chart.helper_sustained_points[i-1];
+            if(std::isfinite(a.second)&&a.second>0)
+                stroke(sustained_spans,x_at(a.first),y_at(a.second),bx,by);
         }
         for(std::size_t i=0;i<chart.helper_feasibility_points.size();++i) {
             const auto& b=chart.helper_feasibility_points[i];if(!std::isfinite(b.second))continue;
@@ -354,6 +369,9 @@ BitmapSource chart_bitmap(Chart chart) {
                 const auto& helper_span=helper_spans[x-damage.x];
                 if(within&&y>=helper_span.first&&y<=helper_span.second&&x%9<3)
                     ink=theme::grayscale(theme::text);
+                const auto& sustained_span=sustained_spans[x-damage.x];
+                if(within&&y>=sustained_span.first&&y<=sustained_span.second&&x%13<8)
+                    ink=theme::comparison_rgb(color);
                 const auto& marker=receive_markers[x-damage.x];
                 if(within&&y>=marker.first&&y<=marker.second)ink=chart.cpu?data_ink:theme::comparison_rgb(color);
                 const double dx = (x - selected_x) * request.sample_aspect_ratio, dy = y - selected_y;
@@ -472,7 +490,7 @@ Node cpu_graph(const planner::Model& model,float width) {
     paragraph(n,"Receiver work on the reference CPU. Excludes helper frontend, audio I/O, transmit and GUI work; not measured total process CPU.",
         10,Tone::muted,false,4);
     if(model.helper_reference.enabled) {
-        paragraph(n,"Solid: ordinary receiver baseline. Dashed: conditional helper-corrected ordinary receiver cost at the shared lead predictor's achievable precision. Full DATA-clock/UTC search and ordinary storage remain.",
+        paragraph(n,"Solid: ordinary receiver baseline. Dashed: conditional helper-corrected ordinary receiver cost. Short dashes use initial clean-model precision; long dashes use sustained clean-model precision if the reference remains available until its stated observation time. Full unresolved DATA-clock/UTC search and ordinary storage remain.",
             10,Tone::muted,false,4);
         paragraph(n,"Dashed cost excludes uncalibrated helper discovery, tracking and conversion overhead. It is not total CPU, measured speed, or a lock/probability forecast. Payload SNR, Rate and the ordinary PHY reception curve stay unchanged.",
             10,Tone::muted,false,0);
@@ -560,7 +578,7 @@ void oscillator_details(Node& root,const planner::Model& model) {
         }
 
     }
-    paragraph(n,"Before qualification, startup retains ordinary broad acquisition plus discovery. After qualification, this chart shows selected native work geometry only. Physical transforms, cache reuse, helper tracking, bounded probes and fallback CPU need separate calibration; full ordinary continuation and payload functionality remain. No CPU percentage, backlog or RX-probability gain follows from these counts. Curves between checked targets are guides; gaps are unsupported.",10,Tone::muted,false,0);
+    paragraph(n,"Before qualification, manually enabled helper mode waits for its reference. After qualification, this chart shows selected ordinary work geometry only. Physical transforms, cache reuse and helper tracking need separate CPU calibration; full ordinary continuation and payload functionality remain. No CPU percentage, backlog or RX-probability gain follows from these counts. Curves between checked targets are guides; gaps are unsupported.",10,Tone::muted,false,0);
     return n;
 }
 
@@ -721,11 +739,12 @@ void link_budget(Node& root, const planner::Model& model) {
         if(helper.enabled) {
             paragraph(n,"Helper reference on",12,Tone::text,true,4);
             if(helper.budget_available) {
-                paragraph(n,"Effective helper power: "+number(helper.effective_power_w)+" W  ·  Received: "+
-                    db(helper.received_dbm)+" dBm  ·  Expected tone: "+db(helper.cn0_db_hz)+" dB in 1 Hz.",
-                    11,Tone::muted,false,4);
-                if(helper.simulation_level_modeled)paragraph(n,"Sampled simulation helper level: "+
-                    db(helper.simulation_cn0_db_hz)+" dB in 1 Hz. Payload retains its ordinary link budget.",
+                paragraph(n,"Expected helper C/N0: "+db(helper.cn0_db_hz)+" dB-Hz in straight-tone intervals ("+
+                    db(helper.tone_snr_db)+" dB in 10 Hz). Effective power: "+number(helper.effective_power_w)+
+                    " W; received: "+db(helper.received_dbm)+" dBm.",11,Tone::muted,false,4);
+                if(helper.simulation_level_modeled)paragraph(n,"Sampled simulation helper C/N0: "+
+                    db(helper.simulation_cn0_db_hz)+" dB-Hz, including "+db(helper.simulation_level_db)+
+                    " dB waveform amplitude allowance. Payload retains its ordinary link budget.",
                     11,Tone::muted,false,4);
             }
             if(helper.geometry_available)paragraph(n,"Nominal helper audio center: "+frequency(helper.frequency_hz)+
@@ -735,27 +754,39 @@ void link_budget(Node& root, const planner::Model& model) {
                 11,Tone::muted,false,4);
             const auto& conditional=helper.conditional;
             const auto& precision=conditional.precision;
+            const auto& reference=conditional.precision_reference;
+            if(reference.ideal_one_second_half_width_hz) {
+                auto ideal="Ideal noise-only 3σ scale: ±"+number(*reference.ideal_one_second_half_width_hz,4)+
+                    " Hz after 1 s";
+                if(reference.ideal_lead_half_width_hz)ideal+="; ±"+
+                    number(*reference.ideal_lead_half_width_hz,4)+" Hz over the same "+
+                    number(reference.ideal_lead_observation_seconds,4)+" s physical lead";
+                paragraph(n,ideal+". Identified uninterrupted constant tone in white noise; this theoretical reference is not an operational confidence interval or promised precision.",
+                    11,Tone::muted,false,4);
+            }
             if(precision.supported) {
                 paragraph(n,"Automatic helper precision lead: +"+number(precision.extra_lead_seconds,4)+
                     " s extra; "+number(conditional.planned_lead_seconds,4)+" s total helper-only lead. "+
                     (precision.target_reached?"Predicted ±0.1 Hz target reached.":
                         precision.extension_capped?"36 s extra-lead cap reached; ±0.1 Hz target not reached.":
                         "Predicted ±0.1 Hz target not reached.")+
-                    " Expected half-width at payload start: "+frequency(conditional.uncertainty_hz)+".",
+                    " Initial conditional clean-model half-width at payload start: "+frequency(conditional.uncertainty_hz)+"; measured uncertainty can be wider.",
                     11,precision.target_reached?Tone::muted:Tone::caution,false,4);
-                paragraph(n,"Conditional segment model: "+number(precision.usable_tone_seconds,4)+
+                paragraph(n,"Conditional clean-model precision: "+number(precision.usable_tone_seconds,4)+
                     " s usable straight tone across "+std::to_string(precision.expected_segments)+
-                    " segments at "+std::to_string(conditional.physical_sample_rate)+
+                    " dated observations at "+std::to_string(conditional.physical_sample_rate)+
                     " raw samples/s, accounting for configured APSK metadata, punctuation and oscillator process. "+
-                    precision.reason+" Prediction is not measured lock or a lock-probability forecast; "
-                    "unexpected noise, glitches or model mismatch can widen actual uncertainty.",11,Tone::muted,false,4);
+                    precision.reason+" Prediction is not measured lock or a lock-probability forecast; clean-model precision is not an operational confidence interval. "
+                    "Unexpected noise, glitches or model mismatch can widen actual uncertainty.",11,Tone::muted,false,4);
                 paragraph(n,"Helper tail planning minimum: "+planner::duration(conditional.planned_tail_seconds)+
                     ". Robust waveform time remains "+planner::duration(model.send_seconds)+
                     "; helper lead/tail add startup and drain time without changing payload Rate or framing.",
                     11,Tone::muted,false,4);
             } else paragraph(n,"Automatic helper precision lead prediction declined: "+
-                (precision.reason.empty()?conditional.reason:precision.reason),11,Tone::caution,false,4);
-            if(conditional.frequency_rate_hypotheses)paragraph(n,"Conditional residual search: "+
+                (precision.reason.empty()?conditional.reason:precision.reason)+
+                ". This is a limitation of the current forecast/estimator, not proof of a physical precision limit.",
+                11,Tone::caution,false,4);
+            if(conditional.frequency_rate_hypotheses)paragraph(n,"Initial conditional residual search: "+
                 std::to_string(conditional.frequency_rate_hypotheses)+" RF/clock pairs, "+
                 std::to_string(conditional.retained_clock_rates)+" clock rates, full original "+
                 number(conditional.clock_half_width_ppm,6)+" ppm half-width. Helper and DATA share the corrected source clock; individually unknown physical audio and UTC factors are not added twice. No clock narrowing is inferred from tone power.",
@@ -768,9 +799,25 @@ void link_budget(Node& root, const planner::Model& model) {
                 " clock rates. The signed positive input image and no UTC rate steering are conditions. "
                 "This predicts conditional geometry, not measured lock, independent punctuation or calibrated CPU gain.",
                 11,Tone::muted,false,4);
-            paragraph(n,conditional.available?"Conditional ordinary receiver cost: "+number(conditional.realtime_ratio,4)+
+            paragraph(n,conditional.available?"Initial conditional ordinary receiver cost: "+number(conditional.realtime_ratio,4)+
                 " processing seconds per audio second, excluding helper startup/tracking/conversion overhead.":
                 "Conditional helper CPU estimate unavailable: "+conditional.reason,11,Tone::muted,false,4);
+            if(conditional.sustained) {
+                const auto& sustained=*conditional.sustained;
+                const auto at=conditional.sustained_at_seconds/reference.maximum_source_capture_ratio;
+                paragraph(n,"Sustained conditional clean-model precision: ±"+frequency(sustained.uncertainty_hz)+
+                    " if the reference remains available until "+planner::duration(at)+" after helper start; "+
+                    std::to_string(sustained.frequency_rate_hypotheses)+" RF/clock pairs at "+
+                    std::to_string(sustained.retained_clock_rates)+" clock rates. This adds no helper-only transmit lead.",
+                    11,Tone::muted,false,4);
+                paragraph(n,sustained.available?"Sustained conditional ordinary receiver cost: "+
+                    number(sustained.realtime_ratio,4)+
+                    " processing seconds per audio second, excluding helper startup/tracking/conversion overhead.":
+                    "Sustained conditional helper CPU estimate unavailable: "+sustained.reason,
+                    11,Tone::muted,false,4);
+            } else if(precision.sustained_supported)paragraph(n,
+                "Sustained conditional receiver cost unavailable: optional work forecast yielded. Initial lead and receiver forecast remain unchanged.",
+                11,Tone::muted,false,4);
             paragraph(n,"Additional helper discovery/tracking/conversion CPU and post-lock lead-in acquisition are not yet priced. They are unknown additive costs, not zero. No parallel broad helper fallback bank is included.",
                 11,Tone::muted,false,4);
             paragraph(n,"Expected tone power does not report a measured lock. The ordinary baseline and PHY reception curve remain visible; helper power does not increase payload SNR or Rate. Radio/ADC passband, actual tone tracking and steady observations are conditions of the dashed receiver-cost curve.",
@@ -807,6 +854,14 @@ void helper_receiver_details(Node& n,const planner::Model& model) {
     if(!model.helper_reference.enabled)return;
     const auto& conditional=model.helper_reference.conditional;
     const auto& cost=conditional.receiver_cost;
+    const auto& reference=conditional.precision_reference;
+    if(reference.ideal_one_second_half_width_hz)paragraph(n,"Practical precision inputs: "+
+        db(reference.cn0_db_hz)+" dB-Hz straight tone; configured Brownian phase-noise standard deviation "+
+        number(reference.phase_noise_radians_per_sqrt_second,5)+
+        " rad/√s. Sampled clean-tone observations and smooth evolution are conditional assumptions; numeric history duration is not coherent observation time. Static oscillator accuracy in ppm sets initial discovery uncertainty, not a drift rate. The "+
+        number(reference.maximum_tracking_slew_hz_per_second,4)+
+        " Hz/s tracking-slew guard is an acceptance limit, not a physical drift prediction.",
+        11,Tone::muted,false,4);
     if(cost.finite_available)paragraph(n,"Conditional finite receiver ledger: "+
         number(cost.frontend_seconds,4)+" s frontend + "+number(cost.search_seconds,4)+
         " s search + "+number(cost.kernel_seconds,4)+" s kernel + "+
@@ -828,6 +883,21 @@ void helper_receiver_details(Node& n,const planner::Model& model) {
         (cost.workspace_supported?"modeled workspace checks pass":"modeled workspace checks fail")+
         ". Peak rolling-bank storage is unqualified. Backend: "+cost.geometry.backend+".",
         11,Tone::muted,false,4);
+    if(conditional.sustained) {
+        const auto& sustained=conditional.sustained->receiver_cost;
+        if(sustained.finite_available)paragraph(n,"Sustained conditional finite receiver ledger: "+
+            number(sustained.finite_cpu_seconds,4)+" s processing over "+
+            number(sustained.finite_audio_seconds,4)+" s modeled body/absence audio; continuous-listening model: "+
+            (sustained.sustained_available?number(sustained.sustained_realtime_ratio,4):"unavailable")+
+            " processing seconds per audio second. This is a separate ordinary receiver query at the sustained residual uncertainty, not the initial acquisition price or measured CPU.",
+            11,Tone::muted,false,4);
+        if(sustained.geometry.workspace_bytes)paragraph(n,"Sustained conditional receiver storage model: "+
+            number(sustained.geometry.workspace_bytes/1048576.,4)+" MiB configured allowance; "+
+            number(sustained.geometry.per_bank_workspace_bytes/1048576.,4)+" MiB per-bank allowance; "+
+            (sustained.workspace_supported?"modeled workspace checks pass":"modeled workspace checks fail")+
+            ". Peak rolling-bank storage is unqualified. Backend: "+sustained.geometry.backend+".",
+            11,Tone::muted,false,4);
+    }
 }
 void geometry_details(Node& n,const planner::Model& model) {
     if(model.frequency_rate_hypotheses)

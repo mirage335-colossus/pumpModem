@@ -1,6 +1,6 @@
 # Validation status
 
-Updated 26 October 2026. This page records current qualification, release status,
+Updated 27 October 2026. This page records current qualification, release status,
 coverage limits and useful historical anchors. It is not a session log. Replace
 superseded status here; keep one latest [resource snapshot](ci-resource-results.json)
 and use Git history for comparisons. Detailed studies remain in the
@@ -8,27 +8,217 @@ and use Git history for comparisons. Detailed studies remain in the
 
 ## Current Helper Carrier candidate
 
-Preceding V13 GUI `4d0a71d0` retains cold NCO bootstrap and adds per-row fresh
-CLOCK-only metadata. Eight focused and five targeted modes passed. Its
-same-GUI two-cycle cable run completed both exact one-bit payloads through
-ordinary END without input health faults, but only ID 2 had observed pending-to-
-complete coverage; ID 1 first appeared complete. The quiet GPSDO/helper-ON run
-failed on a transient wrong seven-bit prefix despite correct final data/END.
-Quiet crystal/helper-ON passed exact eight-bit prefixes/ordinary END; the
-GPSDO prefix diagnosis remains unresolved. Both completed comparison receipts
-are recorded below without a universal causal CPU claim.
-The reported intermittent missing pending row after the helper tail remains
-unreproduced, not declared resolved. Full regression, sanitizer, long framed
-transfers, weak RF and EME remain unqualified; this is a manual preview.
+R16 remains an experimental manual tracker/NCO route feeding one ordinary
+receiver bank. New acquisition requires fresh helper qualification and a
+suitable typed constructor outcome; bounded already observed first-symbol
+continuation and accepted-owner progress/physical-END rules remain ordinary.
+There is no parallel broad bank or historical-PCM search. Phase correction is
+inactive and Live metadata decoding unqualified; folded real mono has only
+frequency-origin centering, hardware FHSS following is unsupported and Planner
+CPU estimates are not overall runtime calibration.
 
-The 0.6 receiver budget is an Automatic backend-selection objective, measured
-as modeled receiver processing seconds per audio second, not a hard ceiling on
-whole-GUI process CPU. Earlier descriptions of total CPU/audio above 0.6 as
-strict budget failures used the wrong scope. Raw CPU, backlog, progress and
-failed/incomplete receipts below remain unchanged; these process measurements
-do not isolate ordinary receiver work or establish its budget conformance.
+The [current R16 coherent receipt](../local-evidence/helper-v16/integration-build-r16/execution-result.json)
+(`c47163f8`) records application/focused-build/runtime passes in
+107.363/2.227/43.144 seconds, including four focused checks, with unchanged
+inputs and reaped processes. [Bindings](../local-evidence/helper-v16/integration-build-r16/production-binaries.json)
+(`6bff6fc3`) pin GUI `571664fa0faa8bb849165698b57ff6327717c37cd9ba180b2eb295289350f1c5`
+and core `3148dd7b`. The reviewed five-line same-state TRUE guard skips duplicate
+dispatch-control preparation only when both permissions are already true;
+frequency setters and numeric pushes still prepare current closure. The matched
+eight-bit shared-pulse fixture retained exact per-push prefixes, identity,
+pending/END, changing frequency windows, work and storage versus repeated TRUE
+updates. No speed claim follows. The R13 core `05bdf896`/GUI `c7d7100c` baseline
+remains separately preserved. The manual-helper Auto policy waits at a supported
+long-symbol shared-pulse NEW candidate's boundary when a finite provisional
+serial-work price exceeds the receiver CPU objective. Existing/started owners,
+helper OFF, forced strategies, unsupported/unknown estimates keep their prior
+behavior; the estimate interface opts in explicitly, without an Hz threshold.
+It is not an overall calibrated CPU cap or a measured EME cure.
 
-### V14 ideal forecast versus actual tone precision
+Closeout retains the integrated one-bank/NCO, measured RF/LF narrowing, ordered
+lookup-cache and CPU-admission paths with unchanged ordinary payload contracts.
+Two-tone reception is future work: a separate pilot must remain continuously
+unmodulated. The [isolated pilot reference](../tools/pilot-reference/README.md)
+is not used by the application. Its [sealed component receipt](../local-evidence/helper-v16/phase-bridge-prototype/strong-takeover/pilot-closeout-r1/checks/execution-result.json)
+(`b3ae62c6`) records compile and 11-case passes in 2.787 seconds, with unchanged
+inputs and empty owned process groups. The exact-copy source pins are
+`77dc2c16` (reference), `c1c2282a` (coarse FFT), `284a665f` (test) and `0514a32d`
+(README); the README supplies the standalone reproduction command.
+
+In the single-seed 24 kHz constant-carrier controls with Wiener sigma 0.01:
+
+| C/N0 (dB-Hz) | Median interval radius U (Hz) | Final U (Hz) | Final carrier-trend error (Hz) |
+| --- | --- | --- | --- |
+| 20 | 0.012551 | 0.008665 | -0.0003885 |
+| 30 | 0.009660 | 0.007997 | +0.0000214 |
+| 40 | 0.009277 | 0.007924 | +0.0001577 |
+
+The matrix also passed ±0.03 Hz/s trends, wide +3000.58 Hz capture, a large sample
+origin and pilot loss. Present cases first qualified at a captured frontier of
+4.330667 seconds; loss at 26 seconds withdrew qualification by 26.730667 seconds.
+No qualified interval/domain/date escapes occurred in these controls. This is
+conditional engineering evidence, not statistical coverage: intervals assume
+the stated local-linear trend and Wiener model, include an empirical 0.005 Hz
+allowance, and describe actual centers about 0.2 seconds old with 0.4-second
+updates. They provide no future lease, separate RF/audio-clock estimate or epoch.
+
+At 24 kHz the component used 534,056 bytes, including its current FFT buffer;
+its history is bounded numeric observations, not historical PCM search. Thirteen
+FFTs processed each 38-second control. Component CPU/audio was about
+0.00083–0.00086, including diagnostic callbacks but excluding signal generation.
+Application/two-tone integration, ordinary receiver CPU savings, physical cable
+operation, payloads and full qualification were not executed by this component.
+The application cable/EME failures below remain. Full qualification is deferred,
+not passed.
+
+The [final handoff check](../local-evidence/helper-v16/closeout-final/execution-result.json)
+(`b051eacb`) rebuilt the unchanged GUI in 1.968 seconds, compiled the preserved
+`tools/pilot-reference` sources in 2.520 seconds, and passed their eleven-case
+reproduction in 0.968 seconds. The pilot binary exactly matched the reviewed
+component binary (`0c993f90`); GUI/core hashes stayed `571664fa`/`3148dd7b`.
+Input guards stayed unchanged and all owned processes were reaped. The four
+R16 application checks above are reused; no broader qualification ran here.
+
+The [metadata-depth R1/R2 packet](../local-evidence/helper-v16/metadata-tone-depth-r1/README.md)
+was stopped and remains unintegrated; [setup failure `9053df85`](../local-evidence/helper-v16/metadata-tone-depth-r1/checks-r1/setup-failure.txt)
+occurred before any compiler child. The [exact-seed cache component](../local-evidence/helper-v16/projection-cache-seed-r1/component-execution-result.json)
+passed separately but is not integrated: actual normal-correlator CPU evidence
+and cache-hit/arena issues remain unresolved. Neither isolated experiment is a
+current feature. The conditional WLS/L1 numerical rejection below is not a
+physical precision floor.
+
+The [R12 focus](../local-evidence/helper-v16/integration-build-r12/execution-result.json)
+was 11/13 despite a passing application build: a fixture missing production
+Fake-FCC geometry was repaired for R13. The original UTC assertion also failed
+on both pre-CPU R11 overrides and R12 in the [matched counterfactual](../local-evidence/helper-v16/helper-cpu-admission-r1/counterfactual-r11/execution-r1/result.json)
+(`a4a42434`), so it is not attributed to the new gate. The subsequent full
+[R14 simulation check](../local-evidence/helper-v16/integration-build-r14/execution-result.json)
+failed at a later stale fixed-epoch/known-simulation conjunction; both failures
+remain retained. The reviewed test-only repair kept the zero rolling-epoch
+assertions, added zero sampled-refresh frontend work, and required the exact
+five RF lanes in the expanded helper domain; the original independent three
+were already separate. The [R15 receipt](../local-evidence/helper-v16/integration-build-r15/execution-result.json)
+(`b78ac254`) records application/test-build/full `simulation_estimate` passes in
+1.817/9.372/28.579 seconds with unchanged runtime GUI/core, source guards and
+reaped processes. Thirteen R13 focus passes are reused, not rerun. This is not a
+full contract/native/sanitizer or runtime-throughput result. These R13/R15
+checks precede the R16 guard, and all full-case HF, attachment, cable and EME
+measurements below remain bound to R11. The rejected
+merge-bypass proposal was not integrated because it reopened known prefix-rewrite
+behavior.
+The [grid-union component](../local-evidence/helper-v16/helper-grid-union-r1/execution-r1/geometry.log)
+reduced EME 69→35 pairs while preserving the full declared clock domain; ordinary
+defaults stay unchanged. This is component coverage, not an actual EME pass.
+
+The [R11 controlled HF result](../local-evidence/helper-v16/normal-acceptance-private/r11-final-controlled/r16-r11-hf15k-3k-on-v1/sealed-HF-summary.json)
+(`cbefbeb3`) passed all eight physical wire/source bits, retained prefixes,
+pending identity, complete TX/channel drain and ordinary END with zero health
+faults. Truth was actual +3,000 Hz CFO/+100 ppm audio clock on helper and DATA
+before decimation. Whole-process CPU was 51.775831 seconds/195.756209 media
+seconds (0.264491). Independently joined complete disjoint body intervals
+covered 116.885131 media seconds/20.661108 ordinary-feed CPU seconds (0.176764);
+this excludes interinterval gaps and is not whole-body process CPU. Raw helper
+C/N0 median was 48.9042 dB-Hz, separate from RF-budget 55.7609 and sampled
+reference 49.7403 dB-Hz. This is one controlled case, without strict matched
+OFF/GPSDO speedup or physical hardware backlog claims.
+
+The separate [R11 GPSDO-model helper-OFF simulation](../local-evidence/helper-v16/normal-acceptance-private/r11-final-controlled/r16-r11-hf15k-gpsdo-off-v1/sealed-GPSDO-summary.json)
+(`344c3e41`) passed exact eight-bit source/wire, prefixes, identity, END and drain:
+32.531333 CPU seconds/162.758170 media seconds (0.199875). It used raw 6,120 Hz
+versus helper-ON 48,960 Hz, with different TX dates and helper lead, so it is not
+a strict causal speedup or physical GPSDO comparison. These source/prefix/END
+passes do not verify next-poll latency: their retained HF/GPSDO commit→poll
+estimates are 46.919/30.301 seconds. Required progress timing remains separate
+acceptance coverage.
+
+The [R11 attachment result](../local-evidence/helper-v16/attachment-preservation-r11/execution-result.json)
+(`0e8f3570`) passed matched OFF/ON all 2,432 wire bits, authenticated 17-byte
+source, exact prefixes, same pending ID and physical END in 157.36 seconds.
+Bounded trace coalescing kept this case within the unchanged cap. The preceding
+[R9 trace-capped attachment failure](../local-evidence/helper-v16/payload-preservation-r9/execution-result.json)
+remains failed/incomplete, and this small case does not qualify full-size
+attachments or 1,024-byte text. Historical 1,024-bit binary passes are a different
+scope. Current larger text has no passing qualification; earlier deadline
+failures remain failed.
+
+Both connected-cable R11 controls failed strict checks:
+[Default](../local-evidence/helper-v16/live-reliability/cable-r11-host/default/execution-result.json)
+(`8079dc58`) and [GPSDO-configured](../local-evidence/helper-v16/live-reliability/cable-r11-host/gpsdo/execution-result.json)
+(`ce1c1e34`) eventually completed exact eight bits on ID 3, but an earlier
+seven-bit suffix on ID 2 and aliases were unexpected. Correct final data does
+not erase those failures. Health counters were zero, while whole-GUI CPU/audio
+was 0.428860/0.384945 and mean measured helper C/N0 53.908/55.413 dB-Hz versus
+configured 30.0206. Physical cable capture did not inject that RF loss/noise;
+both controls had helper ON and different measured C/N0. The descriptive
+whole-process costs are not a causal hardware-GPSDO speedup or weak-link/
+GPSDO-substitution acceptance.
+
+The [sealed R11 ordinary Auto EME result](../local-evidence/helper-v16/normal-acceptance-private/r11-final-controlled/r16-r11-eme15k-128s-on-v1/sealed-EME-summary.json)
+(`436e9cbd`) is throughput-incomplete: 300.612 wall/301.331672 CPU seconds,
+95.44 captured media seconds (3.1573 CPU/media), no bits/END and unfinished
+TX/channel drain. TX emitted 416,732/1,173,277 samples, below valid payload end
+960,000; this is not a PHY, truncation or END-failure proof. Body measurement
+joins 208 finite disjoint intervals covering 68.8075 media seconds with
+271.481088 ordinary-feed CPU seconds (3.94552 CPU/media); generation CPU was
+1.896628. First admission had 79 pairs/`U` 0.0751499 Hz, with 94 admissions;
+actual masks updated 79→73→63, so a stale-mask explanation is not established.
+Recorded projected-carrier samples were 1.41428 billion with zero native jobs;
+these units are not combined. Peak DSP was 1,354,037,961 bytes and health
+counters zero; hardware backlog/worker fields were unavailable. The sealed
+20,072-record trace had zero drops and closed lifecycles, while conservative
+counter completeness stayed false for 188 records. Longest qualification was
+2.36 seconds. Body qualified C/N0 median was 30.44285 dB-Hz; posthoc known-truth
+frequency error median/p90/max was 0.005519/0.020982/0.085170 Hz against `U`
+0.149679/0.662941/1.864795 Hz. All compared centers were inside `U`, descriptive
+correlated evidence rather than confidence calibration. No full 128-second
+symbol support or PHY deficit test completed.
+
+The [original R8 EME failure](../local-evidence/helper-v16/normal-acceptance-private/r8-final-controlled/r16-r8-eme15k-128s-on-v1/sealed-ordinary-summary.json)
+(`e7e4e5ba`) remains failed/incomplete at 300.7176 wall seconds, with 140.134
+captured media seconds and 2.5937568 body-feed CPU/media. R11 advanced less
+media, so no grid/cache work benefit is claimed. The [earlier R6 startup failure](../local-evidence/helper-v16/normal-acceptance-private/final-controlled/r16-eme15k-128s-on-v1/sealed-metrics-summary.json)
+and [private 0.03 Hz admission diagnostic](../local-evidence/helper-v16/normal-acceptance-private/precision-admission-gate-controlled/r16-eme-useful-precision-gate-v1/sealed-diagnostic-summary.json)
+retain their failed/incomplete scopes. The 1.907 dB PHY deficit remains untested.
+
+The [precision control receipt](../local-evidence/helper-v16/phase-bridge-prototype/strong-takeover/checks-review-r4/execution-result.json)
+retains abrupt step/slope/clock failures with 6/19/5 escaped qualified polls.
+The 0.005 Hz term is an engineering allowance. Private [shared-covariance](../local-evidence/helper-v16/phase-bridge-prototype/strong-takeover/shared-covariance/checks/execution-result.json),
+innovation-coast and [shortened-context](../local-evidence/helper-v16/phase-bridge-prototype/strong-takeover/context-length-r1/checks/execution-result.json)
+variants remain rejected/deferred, not physical impossibility proofs. A [private rectangular-400 ms discriminator](../local-evidence/helper-v16/phase-bridge-prototype/strong-takeover/rect-period-r1/checks-repair1/execution-result.json)
+(`6397b3d6`) failed three causal/domain cases despite 60 real-PCM model checks
+passing. Its laboratory truth-frequency ceiling reached median `U` 0.01836 Hz/
+final 0.01259 Hz at six seconds in a 30.76 dB-Hz/+100 ppm control, while the
+causal full-waveform case could not bootstrap an FLL interval. This was not
+integrated and is not a physical precision limit. The FFT reference experiment
+remains private; work-based CPU admission is the current explicit opt-in policy
+described above, not a private-only proposal.
+The later [private periodic-FFT real-bound control](../local-evidence/helper-v16/phase-bridge-prototype/strong-takeover/rect-real-bound-r1/checks/execution-result.json)
+(`ce5af4aa`) passed its component checks: the 30.76 dB-Hz case had median `U`
+0.0443 Hz, final 0.02617 Hz and median error 0.000576 Hz over 33.6 seconds, at
+about 0.0009 measured component CPU/audio. Other 40/75 dB-Hz and callsign cases
+were worse than the stable kernel, so it was not integrated. This is neither
+ordinary receiver CPU nor a physical precision bound. The later [private
+past-frequency steering receipt](../local-evidence/helper-v16/phase-bridge-prototype/strong-takeover/rect-past-steer-r1/checks/execution-result.json)
+(`582f7ba5`) passed 27 component cases and DATA in 18.79 seconds. Its 30.76 dB-Hz
+control reduced median `U` 0.04428→0.02719 Hz, with final 0.01615 Hz, median error
+0.000571 Hz and zero observed escapes over the 33.6-second control. It is
+not production-eligible: unknown seven-symbol metadata, an unqualified evolution
+prior and worse strong 40/75 dB-Hz cases remain; changed-model cases withdraw
+without recovery. It was not integrated. A separate conditional coarse WLS/L1
+branch was rejected on numerical-proof grounds, not as a physical limit. New
+private precision proposals do not alter the current runtime feature set.
+The original
+compact [test compile failure](../local-evidence/helper-v16/compact-first-symbol-continuation/focused-r1/execution-result.json)
+and [Auto wrapper-control failure](../local-evidence/helper-v16/compact-first-symbol-continuation/focused-r2/execution-result.json)
+remain individually retained; their [focused repair](../local-evidence/helper-v16/compact-first-symbol-continuation/focused-r3/execution-result.json)
+did not weaken payload/progress/END assertions or change production policy.
+
+Full current contract, native and sanitizer coverage, larger framed transfers,
+complete EME reception and cable acceptance are incomplete. The 0.6 receiver
+budget is an Automatic backend-selection objective, not a whole-GUI CPU ceiling.
+No release certification, universal CPU gain or full feature completion follows.
+
+### Earlier ideal forecast versus actual tone precision — V14
 
 V14 changes Planner math/UI wording only; runtime core `7e7f332c` is unchanged.
 The [build receipt](../local-evidence/helper-v14/build-r1/execution-result.json)

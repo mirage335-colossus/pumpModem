@@ -14,12 +14,14 @@
 #include <limits>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <complex>
 #include <numbers>
 #include <numeric>
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <set>
 #include <thread>
 #include <algorithm>
 #include <cstdint>
@@ -536,10 +538,18 @@ bool tail_trace_filter(const char* name) noexcept {
     const std::string_view event{name};return event=="trace_begin"||event=="receiver_signal_commit"||
         event=="receiver_selection"||event=="receiver_bank_admitted"||event.starts_with("receiver_helper_");
 }
+bool framed_tail_trace_filter(const char* name) noexcept {
+    return tail_trace_filter(name)||std::string_view(name)=="receiver_acquisition_work";
+}
 std::uint64_t trace_number(const std::string& line,const std::string& key) {
     const auto needle='"'+key+"\":";const auto at=line.find(needle);
     check(at!=std::string::npos,"payload-tail trace omitted required physical coordinates");
     return std::stoull(line.substr(at+needle.size()));
+}
+double trace_real(const std::string& line,const std::string& key) {
+    const auto needle='"'+key+"\":";const auto at=line.find(needle);
+    check(at!=std::string::npos,"payload-tail trace omitted required measured frequency");
+    return std::stod(line.substr(at+needle.size()));
 }
 struct TailDates {
     std::atomic<std::uint64_t> transmit{0};
@@ -577,7 +587,7 @@ LiveTailResult live_tail(bool helper_on,int kind=0) {
     std::filesystem::create_directories(path.parent_path());
     std::atomic<std::int64_t> replay_ms{0};bool finished=false,exact=false;std::uint64_t admitted=0,samples=0,transmit_epoch=0;
     {
-        audio::trace::Scope trace(path,false,&tail_trace_filter);TailDates dates;
+        audio::trace::Scope trace(path,false,kind?&framed_tail_trace_filter:&tail_trace_filter);TailDates dates;
         // Control only the initial station clock. The receiver still has no
         // fixed message timestamp and must admit later virtual-media epochs.
         live::Session session({},[&]{return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_ms.load());});
@@ -624,10 +634,70 @@ LiveTailResult live_tail(bool helper_on,int kind=0) {
         session.stop();
     }
     std::ifstream input(path);std::string line;std::uint64_t id=0,revision=0,last=0;bool complete=false,pending=false,observed_end=false,assisted_committed=false,phase_applied=false;
+    // Work counters belong to one numeric owner. Commit records identify the
+    // same constructor by its immutable input revision/epoch/family/origin.
+    // This join proves actual payload work rather than unrelated row maxima.
+    using Owner=std::array<std::uint64_t,3>; // revision, instance, input origin
+    using Row=std::array<std::uint64_t,4>; // revision, epoch, family, input origin
+    using Admission=std::array<std::uint64_t,3>; // revision, epoch, family
+    std::map<Owner,std::array<std::uint64_t,4>> row_work;
+    std::map<Row,std::uint64_t> qualified_work;
+    std::map<Admission,std::uint64_t> admitted_at;
+    std::set<Row> payload_rows,narrowed_rows;
+    std::uint64_t first_admission=UINT64_MAX,first_epoch=UINT64_MAX;
+    bool raw_qualified=false,realtime_seen=false,parallel_assistance=false,later_epoch_work=false;
     while(std::getline(input,line)) {
         phase_applied=phase_applied||line.find("\"event\":\"receiver_helper_phase_applied\"")!=std::string::npos;
+        if(kind) {
+            parallel_assistance|=line.find("\"event\":\"receiver_helper_assistance_admitted\"")!=std::string::npos ||
+                line.find("\"event\":\"receiver_helper_conditioning_admitted\"")!=std::string::npos;
+            if(line.find("\"event\":\"receiver_helper_raw_reference\"")!=std::string::npos && trace_number(line,"qualified")) {
+                const auto sample=trace_number(line,"sample"),end=trace_number(line,"captured_end");
+                const auto frequency=trace_real(line,"frequency_hz"),uncertainty=trace_real(line,"uncertainty_hz");
+                check(sample<end && std::isfinite(frequency) && frequency>0 && std::isfinite(uncertainty) && uncertainty>=0,
+                      "framed helper reference lost its actual measured frequency or captured support");
+                raw_qualified=true;
+            }
+            if(line.find("\"event\":\"receiver_bank_admitted\"")!=std::string::npos) {
+                const auto sample=trace_number(line,"sample"),epoch=trace_number(line,"epoch");
+                first_admission=std::min(first_admission,sample);first_epoch=std::min(first_epoch,epoch);
+                admitted_at[{trace_number(line,"revision"),epoch,trace_number(line,"family")}]=sample;
+            }
+            if(line.find("\"event\":\"receiver_acquisition_work\"")!=std::string::npos) {
+                const Owner owner{trace_number(line,"revision"),trace_number(line,"instance_id"),trace_number(line,"sample_origin")};
+                auto& previous=row_work[owner];
+                const std::array current{trace_number(line,"template_jobs"),trace_number(line,"input_transforms"),
+                    trace_number(line,"fft_jobs"),trace_number(line,"direct_jobs")};
+                for(std::size_t i=0;i<current.size();++i)
+                    check(current[i]>=previous[i],"framed tail numeric work reset within one receiver owner");
+                const bool joined=trace_number(line,"numeric_owner") && !trace_number(line,"incomplete") &&
+                    line.find("\"reason\":\"feed_complete\"")!=std::string::npos;
+                const bool executed=current[0]>previous[0] && (current[2]>previous[2] || current[3]>previous[3]);
+                const bool realtime=trace_number(line,"realtime_helper");realtime_seen|=realtime;
+                const auto epoch=trace_number(line,"epoch"),family=trace_number(line,"family");
+                if(joined && executed) {
+                    const auto jobs=current[0]-previous[0];
+                    if(realtime && trace_number(line,"realtime_locked")) {
+                        auto& total=qualified_work[{owner[0],epoch,family,owner[2]}];
+                        check(jobs<=UINT64_MAX-total,"framed helper joined work total overflowed");total+=jobs;
+                        const auto selected=trace_number(line,"helper_window_selected_pairs"),original=trace_number(line,"helper_window_original_pairs");
+                        // A backend may use corrected PCM without supporting
+                        // a pair mask. Report narrowing only when this SAME
+                        // active row really executed a smaller supported set.
+                        if(trace_number(line,"helper_window_supported") && trace_number(line,"helper_window_active") &&
+                           selected && selected<original)narrowed_rows.insert({owner[0],epoch,family,owner[2]});
+                    }
+                    const auto found=admitted_at.find({owner[0],epoch,family});
+                    if(!realtime && found!=admitted_at.end() && found->second>first_admission && epoch>first_epoch &&
+                       trace_number(line,"sample")>found->second)later_epoch_work=true;
+                }
+                previous=current;
+            }
+        }
         if(line.find("\"event\":\"receiver_signal_commit\"")==std::string::npos)continue;
         const auto count=trace_number(line,"received_bits");if(!count)continue;
+        if(kind)payload_rows.insert({trace_number(line,"input_revision"),trace_number(line,"epoch"),
+            trace_number(line,"family"),trace_number(line,"sample_origin")});
         assisted_committed=assisted_committed||line.find("\"helper_assisted\":1")!=std::string::npos;
         const auto current_id=trace_number(line,"signal_id");const auto current_revision=trace_number(line,"revision");
         if(!id){id=current_id;revision=current_revision;}
@@ -645,10 +715,20 @@ LiveTailResult live_tail(bool helper_on,int kind=0) {
                 trace_number(line,"physical_end")+6ULL*c.sample_rate;
         } else pending=true;
     }
+    std::uint64_t payload_jobs=0;bool payload_narrowed_work=false;
+    for(const auto& row:payload_rows)if(const auto found=qualified_work.find(row);found!=qualified_work.end()) {
+        check(found->second<=UINT64_MAX-payload_jobs,"framed payload work total overflowed");payload_jobs+=found->second;
+        payload_narrowed_work|=narrowed_rows.contains(row);
+    }
     std::cout<<"rolling kind="<<kind<<" helper="<<helper_on<<" finished="<<finished<<" exact="<<exact<<" trace_bits="<<last
              <<" transmit_epoch="<<transmit_epoch<<" id="<<id<<" revision="<<revision<<" pending="<<pending<<" complete="<<complete
-             <<" observed_end="<<observed_end<<" helper_assisted_committed="<<assisted_committed<<" phase_applied="<<phase_applied<<" admissions="<<admitted<<" samples="<<samples<<" trace="<<path<<'\n';
-    check(admitted>8,"controlled-clock tail fixture did not retain actual rolling receiver admissions");
+             <<" observed_end="<<observed_end<<" helper_assisted_committed="<<assisted_committed<<" phase_applied="<<phase_applied<<" admissions="<<admitted<<" samples="<<samples
+             <<" raw_qualified="<<raw_qualified<<" payload_joined_jobs="<<payload_jobs<<" payload_narrowed_work="<<payload_narrowed_work<<" later_epoch_work="<<later_epoch_work<<" trace="<<path<<'\n';
+    if(!kind)check(admitted>8,"controlled-clock tail fixture did not retain actual rolling receiver admissions");
+    else if(helper_on)check(raw_qualified && payload_jobs && !parallel_assistance,
+        "framed helper did not feed qualified actual work to its ordinary payload receiver");
+    else check(!raw_qualified && !realtime_seen && !parallel_assistance && later_epoch_work,
+        "framed helper-OFF control lost later ordinary epoch scoring or acquired helper authority");
     check(finished&&exact&&pending&&complete&&observed_end,
           "rolling Auto helper payload-tail fixture lost full payload, progress or physical completion");
     if(!base){std::filesystem::remove(path);std::filesystem::remove(path.string()+".seal");}

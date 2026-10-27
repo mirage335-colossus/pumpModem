@@ -143,10 +143,12 @@ sensitivity. The fixed additional draw table is 1.75 MiB, shared across calls;
 per-waveform summaries are a few KiB in the existing eight-entry thread-local
 cache. Receiver execution, workspace, thresholds and transmitted PCM are unchanged.
 
-Work models distinguish known unsteered sampled simulation, hardware with a full
-fallback window, and hardware with qualified capture timing. Sampled simulation
-uses the original oscillator bank and its own startup-epoch coverage. Hardware
-retains the union of original and peer steering lanes. Long compact paths use a
+Ordinary Live work models retain the unknown peer's full oscillator and UTC
+steering bank in both sampled simulation and hardware. Sampled simulation has
+its own startup-epoch coverage; hardware distinguishes a full fallback window
+from qualified capture timing. The separate `transfer::simulate` experiment owns
+a known fixed-rate source without the hardware UTC resampler and uses its
+original unsteered oscillator bank. Long compact paths use a
 representative-anchor timing-lattice count. Eligible short private coherent banks
 intersect each original canonical phase with each original start cell. Empty
 private-template jobs are omitted. For retained jobs, runtime and estimator use

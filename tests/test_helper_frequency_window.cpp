@@ -101,7 +101,7 @@ template<class Receiver>void poll(Receiver& receiver,Rows& rows,const Bytes& exp
         row.full_pending|=!b.complete && row.bits==expected;if(b.complete)row.completion=at;
     }
 }
-template<class Receiver>void payload(bool compact,bool clock=false) {
+template<class Receiver>void payload(bool compact,bool clock=false,std::size_t chunk=17) {
     const auto c=config();const Bytes bits{0,0,1,0,1,1,0,1,1,0,0,1,0,1,0,0,1,1,0,0,1,0,1,1};
     const auto S=modem::symbol_sample_count(c),delay=2*S+37,origin=delay+modem::pattern_pulse_padding_samples(c);
     modem::PatternTransmitter source(bits,c,c.stream_epoch,0,false);std::vector<std::complex<double>> analytic(source.total_samples());
@@ -123,7 +123,7 @@ template<class Receiver>void payload(bool compact,bool clock=false) {
         "loss/clear permanently prevented current-window reattachment");
     check(!on.set_helper_frequency_window(0,-1,100) && on.helper_frequency_window().active,"invalid refresh changed an active reference");
     for(std::size_t at=0;at<pcm.size();) {
-        const auto n=std::min<std::size_t>(17,pcm.size()-at);const auto block=std::span(pcm).subspan(at,n);
+        const auto n=std::min(chunk,pcm.size()-at);const auto block=std::span(pcm).subspan(at,n);
         off.push(block);on.push(block);at+=n;poll(off,a,bits,at);poll(on,b,bits,at);
         if(!narrowed && at>=(compact?S:delay+3*S)) {
             check(on.set_helper_frequency_window(0,.001,100),"qualified improved precision could not update an existing bank");
@@ -173,14 +173,165 @@ template<class Receiver>void payload(bool compact,bool clock=false) {
     } else {
         check(on.compact_acquisition_state().skipped_lane_samples,"compact window omitted no original cold lane work");
     }
-    (void)allocated;std::cout<<(compact?"compact":"native")<<(clock?" clock":" frequency")<<" exact24bits/pending/physicalEND and final helper loss passed\n";
+    (void)allocated;std::cout<<(compact?"compact":"native")<<(clock?" clock":" frequency")<<" chunk="<<chunk<<" exact24bits/pending/physicalEND and final helper loss passed\n";
+}
+modem::Config continuation_config() {
+    auto c=config();c.sample_rate=512;c.carrier_hz=128;c.bandwidth_hz=.5;c.integration_seconds=128;return c;
+}
+std::size_t continuation_budget(const modem::Config& c,const modem::PatternSearch& s,bool pulse) {
+    if(pulse)return 8*1024*1024;
+    // Preserve the real automatic backend selection. Fund the ordinary
+    // segmented representation, but not the optional shared pulse kernels.
+    modem::PatternCorrelator raw(c,s,8*1024*1024,{true,false});
+    return raw.reserved_workspace_bytes()+24*1024;
+}
+void check_continuation_backend(const modem::PatternCorrelator& receiver,bool pulse) {
+    const auto work=receiver.work();
+    check(pulse?work.lattices>0:work.backend==modem::PatternCorrelationBackend::pulse_segments,
+        "first-symbol continuation fixture selected the wrong ordinary backend");
+}
+void first_symbol_loss(bool pulse,bool first_cell,bool trim=false) {
+    const auto c=continuation_config();const Bytes bits{0,1};
+    const auto S=modem::symbol_sample_count(c);const std::uint64_t delay=37,origin=delay+modem::pattern_pulse_padding_samples(c);
+    modem::PatternCode code(c,c.stream_epoch);const auto chip=code.chip_samples();
+    check(S>=60ULL*c.sample_rate && chip>4,"continuation fixture lost its long-symbol/partial-cell shape");
+    modem::PatternTransmitter source(bits,c,c.stream_epoch,0,false);
+    std::vector<std::complex<double>> analytic(source.total_samples());
+    check(source.read_analytic(analytic)==analytic.size(),"continuation TX failed to drain");
+    const auto end=delay+analytic.size();std::vector<float> pcm(end+std::max<std::uint64_t>(3*S,8*c.sample_rate));
+    std::mt19937 random(529);std::normal_distribution<float> noise(0,.025F);const auto phase=std::polar(1.7,.83);
+    for(std::size_t i=0;i<pcm.size();++i)pcm[i]=noise(random)+(i>=delay && i-delay<analytic.size()?
+        static_cast<float>((phase*analytic[i-delay]).real()):0.F);
+    const auto s=search(c,static_cast<double>(origin)/c.sample_rate,true);const auto budget=continuation_budget(c,s,pulse);
+    modem::PatternCorrelator off(c,s,budget),on(c,s,budget);check_continuation_backend(on,pulse);Rows a,b;
+    check(on.set_helper_frequency_window(0,.0001,0),"first-symbol helper window declined");
+    const auto loss=origin+(first_cell?chip/4:S/3);bool lost=false;const auto allocated=on.working_bytes();
+    for(std::size_t at=0;at<pcm.size();) {
+        // Stop exactly at loss, including inside the first shared cell. The
+        // receiver never receives a caller span from the future before loss.
+        auto n=std::min<std::size_t>(733,pcm.size()-at);
+        if(!lost)n=std::min<std::size_t>(n,loss-at);
+        const auto block=std::span(pcm).subspan(at,n);off.push(block);on.push(block);at+=n;
+        poll(off,a,bits,at);poll(on,b,bits,at);
+        if(!lost && at==loss) {
+            check(!on.synchronized() && std::all_of(b.begin(),b.end(),[](const auto& row){return row.second.bits.empty();}),
+                "helper loss fixture already accepted its first data bit");
+            if(trim) {
+                on.trim_optional_workspace();
+                check(!on.helper_acquisition_dispatch().permitted && !on.helper_frequency_window().active,
+                    "workspace drop did not pause the conditional bank");
+            } else {
+                // This is Live's loss order: snapshot the current qualified
+                // mask before releasing its geometry, then leave it paused.
+                check(on.set_helper_acquisition_dispatch(false),"first-symbol dispatch pause declined");
+                on.clear_helper_frequency_window();
+                check(!on.helper_frequency_window().active && !on.helper_acquisition_dispatch().permitted,
+                    "retained first-symbol cache kept stale frequency authority");
+            }
+            check(on.working_bytes()<=allocated,"first-symbol continuation allocated optional memory");lost=true;
+        }
+        if(lost)check(on.set_helper_acquisition_dispatch(false),"repeated loss refresh declined");
+    }
+    const auto exact=[&](const auto& rows){return std::find_if(rows.begin(),rows.end(),[&](const auto& row){
+        return row.second.complete && row.second.bits==bits;});};
+    const auto x=exact(a),y=exact(b);
+    check(lost && x!=a.end() && y!=b.end(),"helper loss before the first decision discarded ordinary payload or END");
+    check(x->first==y->first && x->second.full_pending && y->second.full_pending,
+        "first-symbol continuation changed pending identity or exact final-bit progress");
+    check(y->second.completion>=end+6*c.sample_rate,"first-symbol continuation bypassed physical absence scoring");
+    std::cout<<(pulse?"shared pulse":"segmented")<<" first-symbol loss "<<(first_cell?"inside first cell":"after closed cells")
+        <<(trim?" via workspace drop":"")<<" exact01/pending/physicalEND passed\n";
+}
+void rejected_continuation(bool pulse) {
+    const auto c=continuation_config();const auto S=modem::symbol_sample_count(c);const std::uint64_t origin=73;
+    modem::PatternCode code(c,c.stream_epoch);const auto chip=code.chip_samples();
+    const auto s=search(c,static_cast<double>(origin)/c.sample_rate,true);
+    modem::PatternCorrelator receiver(c,s,continuation_budget(c,s,pulse));check_continuation_backend(receiver,pulse);
+    check(receiver.set_helper_frequency_window(0,.0001,0,modem::PatternHelperClockInterval{0,0}) &&
+          receiver.helper_frequency_window().selected_pairs==1,"noise continuation did not isolate its existing original cell");
+    const auto loss=origin+chip/4,terminal=origin+S,checkpoint=terminal+2*S+19;
+    std::vector<float> zeros(checkpoint+S,0);std::size_t at=0;bool lost=false,checked=false;
+    modem::PatternCompactAcquisitionState before;
+    std::uint64_t before_cells=0;
+    while(at<zeros.size()) {
+        auto n=std::min<std::size_t>(733,zeros.size()-at);
+        if(!lost)n=std::min<std::size_t>(n,loss-at);
+        if(!checked)n=std::min<std::size_t>(n,checkpoint-at);
+        receiver.push(std::span(zeros).subspan(at,n));at+=n;
+        if(!lost && at==loss) {
+            check(receiver.set_helper_acquisition_dispatch(false),"noise continuation pause declined");
+            receiver.clear_helper_frequency_window();lost=true;
+        }
+        if(lost)check(receiver.set_helper_acquisition_dispatch(false),"repeated noise pause declined");
+        check(receiver.take_bursts().empty(),"rejected continuation manufactured payload or END");
+        if(!checked && at==checkpoint) {
+            before=receiver.compact_acquisition_state();before_cells=receiver.work().cells;
+            const auto expected=before.original_arrival_lanes*(checkpoint-origin)-S;
+            check(before.skipped_lane_samples==expected,
+                "rejected continuation observed a second symbol or missed same-block skipped samples");
+            if(!pulse)check(before.accumulated_lane_samples==S,"rejected segmented continuation outlived its single original symbol");
+            checked=true;
+        }
+    }
+    const auto after=receiver.compact_acquisition_state();
+    check(checked && after.projected_carrier_samples==before.projected_carrier_samples &&
+          after.accumulated_lane_samples==before.accumulated_lane_samples && receiver.work().cells==before_cells,
+        "repeated false refresh rearmed rejected cold work");
+    check(after.observed_samples==zeros.size() && after.skipped_lane_samples==after.original_arrival_lanes*(zeros.size()-origin)-S,
+        "rejected continuation lost sample coordinates or its one-symbol work bound");
+    const auto retained=receiver.working_bytes();receiver.clear_helper_frequency_window();
+    check(receiver.working_bytes()<retained && !receiver.helper_frequency_window().active,
+        "empty paused closure failed to release its inactive cache");
+    std::cout<<(pulse?"shared pulse":"segmented")<<" rejected first-cell continuation stayed within one symbol\n";
+}
+void paused_cache(bool pulse) {
+    const auto c=continuation_config();const auto s=search(c,0,true);
+    const auto budget=continuation_budget(c,s,pulse);
+    modem::PatternCorrelator receiver(c,s,budget);check_continuation_backend(receiver,pulse);
+    std::vector<std::uint8_t> mask(s.hypotheses.size());
+    for(std::size_t i=0;i<mask.size();++i)mask[i]=i%5==2;
+    if(!pulse) {
+        modem::PatternCorrelator control(c,s,budget);
+        check(control.compact_acquisition_state().supported &&
+              control.set_compact_acquisition_prior(0,mask) && control.start_compact_acquisition_audit(),
+            "paused-cache legacy control lacks a supported backend or valid per-clock mask");
+    }
+    check(receiver.set_helper_frequency_window(0,.0001,0),"paused-cache initial measurement declined");
+    receiver.push(std::vector<float>(modem::pattern_chip_samples(c)/4));
+    const auto retained=receiver.working_bytes();
+    check(receiver.set_helper_acquisition_dispatch(false),"paused-cache dispatch withdrawal declined");
+    receiver.clear_helper_frequency_window();
+    check(!receiver.helper_frequency_window().active && receiver.working_bytes()==retained,
+        "paused observed symbol lost its lookup cache or kept measurement authority");
+    check(!receiver.set_compact_acquisition_prior(0,mask) && !receiver.start_compact_acquisition_audit(),
+        "inactive frequency cache was mistaken for legacy acquisition authority");
+    check(!receiver.set_helper_frequency_window(0,-1,0) && !receiver.helper_frequency_window().active,
+        "invalid measurement reactivated cached frequency authority");
+    check(receiver.set_helper_frequency_window(0,.0001,0) && receiver.helper_frequency_window().active &&
+          receiver.working_bytes()==retained && receiver.set_helper_acquisition_dispatch(true),
+        "fresh qualified measurement failed to reuse the paid cache");
+    receiver.push(std::vector<float>(17));receiver.set_helper_acquisition_dispatch(false);
+    receiver.clear_helper_frequency_window();const auto before_trim=receiver.working_bytes();
+    receiver.trim_optional_workspace();
+    check(!receiver.helper_frequency_window().active && !receiver.helper_acquisition_dispatch().permitted &&
+          receiver.working_bytes()<before_trim && receiver.take_bursts().empty(),
+        "ordinary pressure failed to release paused cache without inventing payload");
+    std::cout<<"paused cache revoked authority, reused fresh measurement and yielded to pressure\n";
+}
+void continuation() {
+    paused_cache(false);paused_cache(true);
+    for(const bool pulse:{false,true}) {
+        first_symbol_loss(pulse,true);first_symbol_loss(pulse,false);rejected_continuation(pulse);
+    }
+    first_symbol_loss(true,true,true);
 }
 }
 int main(int argc,char** argv){try {
     const std::string mode=argc>1?argv[1]:"all";
     if(mode=="geometry" || mode=="all")geometry();
     if(mode=="native" || mode=="all")payload<modem::PatternReceiver>(false);
-    if(mode=="compact" || mode=="all")payload<modem::PatternCorrelator>(true);
-    if(mode=="clock" || mode=="all"){payload<modem::PatternReceiver>(false,true);payload<modem::PatternCorrelator>(true,true);}
-    if(mode!="geometry" && mode!="native" && mode!="compact" && mode!="clock" && mode!="all")throw Error("unknown frequency-window test mode");return 0;
+    if(mode=="compact" || mode=="all"){payload<modem::PatternCorrelator>(true);payload<modem::PatternCorrelator>(true,false,733);}
+    if(mode=="clock" || mode=="all"){payload<modem::PatternReceiver>(false,true);payload<modem::PatternCorrelator>(true,true);payload<modem::PatternCorrelator>(true,true,733);}
+    if(mode=="continuation" || mode=="all")continuation();
+    if(mode!="geometry" && mode!="native" && mode!="compact" && mode!="clock" && mode!="continuation" && mode!="all")throw Error("unknown frequency-window test mode");return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

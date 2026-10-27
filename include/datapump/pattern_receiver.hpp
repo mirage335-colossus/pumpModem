@@ -4,6 +4,7 @@
 #include <cfenv>
 #include <cfloat>
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <optional>
 #include "datapump/modem.hpp"
@@ -129,6 +130,16 @@ struct ScheduledCaptureEnvelope {
 // ordinary baseline oscillator/coverage report. Explicit original pairs retain
 // their actual nonzero clock ratios and must cover this entire interval.
 struct PatternClockInterval {double lower_ppm=0,upper_ppm=0,cell_half_width_ppm=0;};
+// A manually enabled helper may defer a NEW long compact receiver until its
+// measured residual catalogue fits the ordinary shared-pulse representation.
+// This is an admission outcome, not missing payload storage or a scored END.
+// Counts/bytes come from the actual constructor after wrapper deductions.
+struct PatternCompactAdmissionPending final : std::exception {
+    std::size_t pairs=0,hypotheses=0,required_bytes=0,available_bytes=0;
+    PatternCompactAdmissionPending(std::size_t p,std::size_t h,std::size_t required,std::size_t available)noexcept
+        :pairs(p),hypotheses(h),required_bytes(required),available_bytes(available) {}
+    const char* what()const noexcept override{return "helper compact acquisition awaits shared-pulse workspace";}
+};
 struct PatternSearch {
     // Live supplies the entire simultaneous key/profile/epoch cohort for the
     // shared CPU-budget policy. These are scheduling inputs, never wire data.
@@ -237,6 +248,9 @@ struct PatternSearch {
     // and projection scratch. Retains every requested correlation hypothesis;
     // requires start_offset_seconds and does not change confidence gates.
     bool compact_clock_search = false;
+    // Helper-only NEW-owner policy. Existing receivers never consult it again.
+    // Unsupported shapes retain the ordinary backend selection unchanged.
+    bool helper_wait_for_shared_pulse = false;
     // Optional system-clock prediction of symbol zero relative to the first
     // supplied sample. The long-symbol correlator searches this entire window
     // at half-chip resolution; it rejects unaffordable coverage explicitly.
@@ -550,7 +564,11 @@ public:
     std::vector<Cell> cells;
     std::size_t selected=0;
     std::uint64_t continuation_fits=0,skipped_continuation_fits=0;
-    static std::size_t maximum_bytes(std::size_t n) noexcept {return sizeof(PatternHelperFrequencySelector)+n*sizeof(Cell);}
+    // Construction preflight includes temporary original-index storage. Only
+    // cells survive initialize; working_bytes reports that retained allocation.
+    static std::size_t maximum_bytes(std::size_t n) noexcept {
+        return sizeof(PatternHelperFrequencySelector)+n*(sizeof(Cell)+sizeof(std::size_t));
+    }
     std::size_t working_bytes()const noexcept {return sizeof(*this)+cells.capacity()*sizeof(Cell);}
     bool initialize(const PatternSearch& search,const PatternHelperFrequencyWindow& requested) {
         if(search.hypotheses.empty() || search.hypotheses.size()>8194 || !requested.valid() ||
@@ -588,18 +606,43 @@ public:
             if(next==covered || pass==search.hypotheses.size())return false;
             covered=next;
         }
+        // Keep the catalogue and cells in their original order. The bounded
+        // construction-only indices are included in maximum_bytes; they have
+        // an exact allocation size and leave no retained cache or new RF lane.
+        auto order=std::make_unique<std::size_t[]>(search.hypotheses.size());
+        for(std::size_t i=0;i<search.hypotheses.size();++i)order[i]=i;
+        std::sort(order.get(),order.get()+search.hypotheses.size(),[&](auto a,auto b) {
+            const auto& x=search.hypotheses[a];const auto& y=search.hypotheses[b];
+            if(x.clock_error_ppm!=y.clock_error_ppm)return x.clock_error_ppm<y.clock_error_ppm;
+            if(x.frequency_offset_hz!=y.frequency_offset_hz)return x.frequency_offset_hz<y.frequency_offset_hz;
+            return a<b;
+        });
         cells.resize(search.hypotheses.size());
-        for(std::size_t i=0;i<cells.size();++i) {
-            const auto& pair=search.hypotheses[i];auto& cell=cells[i];cell.clock_ppm=pair.clock_error_ppm;
-            long double lo=-INFINITY,hi=INFINITY;
-            for(const auto& other:search.hypotheses)if(other.clock_error_ppm==pair.clock_error_ppm) {
-                const auto mid=(static_cast<long double>(other.frequency_offset_hz)+pair.frequency_offset_hz)/2;
-                if(other.frequency_offset_hz<pair.frequency_offset_hz)lo=std::max(lo,mid);
-                if(other.frequency_offset_hz>pair.frequency_offset_hz)hi=std::min(hi,mid);
+        for(std::size_t first=0;first<cells.size();) {
+            auto end=first+1;
+            while(end<cells.size()&&search.hypotheses[order[end]].clock_error_ppm==
+                  search.hypotheses[order[first]].clock_error_ppm)++end;
+            for(auto group=first;group<end;) {
+                const auto frequency=search.hypotheses[order[group]].frequency_offset_hz;
+                auto next=group+1;
+                while(next<end&&search.hypotheses[order[next]].frequency_offset_hz==frequency)++next;
+                // The closest DISTINCT RF neighbors give the same monotone
+                // midpoint extrema as the all-pairs scan. Equal RF entries,
+                // including signed zero, share both original closed bounds.
+                const long double lo=group>first?
+                    (static_cast<long double>(search.hypotheses[order[group-1]].frequency_offset_hz)+frequency)/2:-INFINITY;
+                const long double hi=next<end?
+                    (static_cast<long double>(search.hypotheses[order[next]].frequency_offset_hz)+frequency)/2:INFINITY;
+                auto lower=static_cast<double>(lo),upper=static_cast<double>(hi);
+                if(static_cast<long double>(lower)>lo)lower=std::nextafter(lower,-INFINITY);
+                if(static_cast<long double>(upper)<hi)upper=std::nextafter(upper,INFINITY);
+                for(auto at=group;at<next;++at) {
+                    const auto i=order[at];auto& cell=cells[i];
+                    cell.lower=lower;cell.upper=upper;cell.clock_ppm=search.hypotheses[i].clock_error_ppm;
+                }
+                group=next;
             }
-            cell.lower=static_cast<double>(lo);cell.upper=static_cast<double>(hi);
-            if(static_cast<long double>(cell.lower)>lo)cell.lower=std::nextafter(cell.lower,-INFINITY);
-            if(static_cast<long double>(cell.upper)<hi)cell.upper=std::nextafter(cell.upper,INFINITY);
+            first=end;
         }
         update(requested);return true;
     }

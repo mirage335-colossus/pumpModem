@@ -85,6 +85,74 @@ void clean_precision() {
     }
     check(timed>5);
 }
+void paired_marker_identity_and_missing_return() {
+    constexpr std::uint32_t rate=48000;
+    constexpr double frequency=2100.37,phase=.81;
+    const auto smooth=[](long double x) {
+        const auto t=static_cast<double>(std::clamp(x,0.L,1.L));
+        return t*t*t*(10+t*(-15+6*t));
+    };
+    // Begin between the two edges, so the first observed return must not be
+    // published as the240ms marker. Independently compose the new envelope
+    // around the actual tone/compact-metadata Generator with punctuation off.
+    // This is a receiver discriminator, not a second metadata implementation.
+    for(const unsigned shape:{0U,1U,2U})for(const auto chunk:{137U,4096U}) {
+        const bool lose_return=shape==1,return_only=shape==2;
+        constexpr long double source_origin=.260L;
+        helper::Options options;options.power_w=100;options.callsign="N0CALL";
+        helper::Generator source(options,{frequency,.7,.1,100},1800000000,false);
+        helper::Receiver receiver(frequency,20);
+        std::vector<float> samples(chunk);
+        std::size_t frequencies=0,known=0,metadata=0,timed=0,late_frequencies=0;
+        const auto total=static_cast<std::uint64_t>(3.2*rate);
+        for(std::uint64_t first=0;first<total;first+=samples.size()) {
+            const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(),total-first));
+            for(std::size_t i=0;i<count;++i) {
+                const auto time=source_origin+static_cast<long double>(first+i)/rate;
+                const auto local=std::fmod(time,.4L);
+                const auto first_edge=return_only?-1.:1-2*smooth((local-.236L)/.008L);
+                // A missing companion after warmup preserves the first-edge
+                // train and dwell notches. It must not make negative metadata
+                // or a post-return raw fit into canonical positive evidence.
+                const auto second_edge=lose_return&&time>=2.L?0.:2*smooth((local-.276L)/.008L);
+                const auto envelope=first_edge+second_edge;
+                const auto value=source.mix_analytic({},time,rate)*envelope*std::polar(1.,phase);
+                samples[i]=static_cast<float>(std::round(value.real()*32767)/32767);
+            }
+            receiver.push(std::span(samples).first(count),rate,first);
+            if(const auto update=receiver.take_update()) {
+                ++frequencies;check(update->frequency_valid);
+                const auto time=source_origin+static_cast<long double>(update->sample)/rate;
+                const auto local=std::fmod(time,.4L);
+                check(std::abs(update->frequency_hz-frequency)<.002);
+                if(time>=2.L)++late_frequencies;
+                if(update->punctuation.known) {
+                    ++known;const auto& marker=update->punctuation;
+                    const auto at=source_origin+(static_cast<long double>(marker.sample)+marker.fraction)/rate;
+                    check(std::abs(std::remainder(at-.24L,.4L))<.00015L);
+                    check(marker.first_sample<=marker.sample && marker.last_sample<=update->sample);
+                }
+                if(update->timing_valid)++timed;
+                if(update->timing_valid && update->phase_valid && !update->metadata) {
+                    // The actual canonical carrier phase is continuous across
+                    // both punctuation edges. Retained pre-edge observations
+                    // remain usable when optional post-return evidence fails.
+                    check(std::abs(std::remainder(update->phase_radians-
+                        tau*frequency*static_cast<double>(time)-phase,tau))<.001);
+                    if(lose_return && time>=2.L)check(!(local>.284L && local<.332L));
+                }
+                if(update->metadata) {
+                    ++metadata;check(update->metadata->callsign=="N0CALL");
+                    check(!lose_return || time<2.L);
+                }
+            }
+        }
+        check(frequencies>10 && late_frequencies>5);
+        if(return_only)check(!known && !timed && !metadata);
+        else check(known>5 && metadata>0 && timed>5);
+    }
+}
+
 void metadata() {
     // Includes a one-symbol ID, a two-character ID without spare CRC bits,
     // a normal callsign and the seven-symbol maximum.
@@ -500,10 +568,11 @@ int main(int argc,char** argv) {
         check(argc<=2);std::cout<<std::unitbuf;
         const std::string_view which=argc==2?argv[1]:"all";
         if(which=="all") {
-            clean_precision();metadata();metadata_carrier_images();timecodes_and_corruption();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();realistic_frequency();weak_timecode_frequency();shifted_frequency();chunks_and_gaps();
+            clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();timecodes_and_corruption();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();realistic_frequency();weak_timecode_frequency();shifted_frequency();chunks_and_gaps();
         } else if(which=="strong") {
-            clean_precision();metadata();metadata_carrier_images();timecodes_and_corruption();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();chunks_and_gaps();
-        } else if(which=="realistic")realistic_frequency();
+            clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();timecodes_and_corruption();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();chunks_and_gaps();
+        } else if(which=="pair")paired_marker_identity_and_missing_return();
+        else if(which=="realistic")realistic_frequency();
         else if(which=="legacy30"||which=="legacy24") {
             const bool reduced=which=="legacy24";
             const auto result=realistic_link(reduced?24:30.02,40,reduced?.003:.01,137,581);

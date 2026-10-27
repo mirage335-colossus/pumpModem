@@ -1099,6 +1099,9 @@ struct PatternCorrelator::Impl {
         bool helper_unobserved:1=false;
         bool helper_block_suppressed:1=false;
         bool helper_initial_unscored:1=false;
+        // A reference outage may finish only the ordinary symbol which was
+        // already observed. This bit survives optional mask reclamation.
+        bool helper_continuation:1=false;
     };
     static_assert(sizeof(Hypothesis)==((offsetof(Hypothesis,affine_groups)+sizeof(std::uint8_t)+
         alignof(Hypothesis)-1)/alignof(Hypothesis))*alignof(Hypothesis));
@@ -1116,7 +1119,7 @@ struct PatternCorrelator::Impl {
     // cannot turn a skipped partial symbol into a physical absence test.
     struct CompactControl {
         std::vector<std::uint8_t> selected,active,pairs,banks,audit_seen;
-        bool prior_active=true,audit_active=false,audit_complete=false,dispatch_permitted=true;
+        bool prior_active=true,audit_active=false,audit_complete=false,dispatch_permitted=true,frequency_enabled=true;
         std::uint64_t audit_start=0;
         std::size_t audit_scored=0,timing_selected=0;
         std::optional<PatternPeriodicTimingPrior> timing_prior;
@@ -1132,8 +1135,15 @@ struct PatternCorrelator::Impl {
     // Admission gating is independent of optional RF/clock mask storage. It
     // survives that storage yielding and never suppresses payload dependencies.
     bool helper_dispatch_permitted=true,helper_dispatch_used=false;
-    detail::PatternHelperFrequencySelector* helper_frequency()const noexcept {
+    // Joined dependency closure, refreshed with the per-lane suppression flags.
+    // A cold paused receiver must not rescan every lane for every carrier or
+    // pulse lattice merely to rediscover that none has an evidence dependency.
+    bool helper_any_active=true;
+    detail::PatternHelperFrequencySelector* helper_frequency_cache()const noexcept {
         return compact_control?compact_control->frequency.get():nullptr;
+    }
+    detail::PatternHelperFrequencySelector* helper_frequency()const noexcept {
+        return compact_control && compact_control->frequency_enabled?helper_frequency_cache():nullptr;
     }
     const PatternPhaseCurve* compact_phase_curve=nullptr;
     double compact_phase_carrier_shift=0;
@@ -2132,6 +2142,14 @@ struct PatternCorrelator::Impl {
             fixed+segment_extra+denominator<=bytes;
         const auto pulse_storage_budget=shared_pulse_budget?selection_budget:bytes;
         const bool pulse_enabled=pulse_geometry && fixed+pulse_extra+denominator<=pulse_storage_budget;
+        if(search.helper_wait_for_shared_pulse && shared_compact_storage &&
+           shared_pulse_budget && pulse_geometry && !pulse_enabled) {
+            const auto required=std::ceil(fixed+pulse_extra+denominator);
+            const auto maximum=std::numeric_limits<std::size_t>::max();
+            throw PatternCompactAdmissionPending{pair_count,count,
+                required>=static_cast<long double>(maximum)?maximum:static_cast<std::size_t>(required),
+                pulse_storage_budget};
+        }
         if(pulse_enabled) {fixed+=pulse_extra;pulse_lattices.reserve(pulse_count);pulse_addresses.reserve(count);}
         // Affine spans also retain a whole symbol when its shared-cell kernels
         // cannot fit. They keep the same complete search and pulse geometry
@@ -7893,15 +7911,61 @@ struct PatternCorrelator::Impl {
         return !finished && !hypotheses.empty() && !burst && !scheduled && !options.amplitude_only &&
             config.spreading_mode==SpreadingMode::pattern;
     }
+    bool helper_partial_observed(std::size_t lane)const noexcept {
+        const auto& h=hypotheses[lane];
+        if(h.helper_block_suppressed || h.helper_unobserved)return false;
+        if(h.fits[0].count || h.fits[1].count)return true;
+        if(pulse_lattices.empty())return false;
+        // Shared cells are sufficient statistics too. Before the first cell
+        // closes there need not yet be a private Fit, but its measured prefix
+        // belongs to this lane only if it names the current source symbol.
+        const auto& address=pulse_addresses[lane];
+        const auto& pending=pulse_lattices[address.lattice].pending;
+        if(!pending.count || address.shift<0)return false;
+        const auto chips=code.chips_per_symbol();
+        const auto shift=static_cast<std::uint64_t>(address.shift);
+        const auto limit=static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+        if(!chips || h.index>(limit-shift)/chips)return false;
+        const auto first=address.shift+static_cast<std::int64_t>(h.index*chips);
+        return pending.chip>=first && static_cast<std::uint64_t>(pending.chip-first)<chips;
+    }
+    void set_helper_dispatch(bool permitted)noexcept {
+        if(permitted) {
+            if(!helper_dispatch_permitted)for(auto& h:hypotheses)h.helper_continuation=false;
+        } else if(helper_dispatch_permitted) {
+            for(std::size_t i=0;i<hypotheses.size();++i)
+                hypotheses[i].helper_continuation=helper_partial_observed(i);
+        }
+        helper_dispatch_permitted=permitted;
+    }
+    bool helper_ordinary_dependency(std::size_t lane)const noexcept {
+        const auto& h=hypotheses[lane];
+        if(h.admitted || !h.burst.bits.empty() || h.pending_gaps || h.committed!=0)return true;
+        if(timing)for(const auto& entry:*timing) {
+            if(entry.hypothesis==lane)return true;
+            for(const auto& relation:entry.state.relations)if(relation.neighbor==lane)return true;
+        }
+        for(const auto& emission:emissions)if(emission.owner==&h && !emission.ended)return true;
+        return false;
+    }
+    void retire_helper_continuation(Hypothesis& h,std::size_t lane,bool started)noexcept {
+        const bool retiring=started || h.helper_continuation;h.helper_continuation=false;
+        if(!retiring || helper_dispatch_permitted || helper_ordinary_dependency(lane))return;
+        h.helper_block_suppressed=true;
+        if(compact_control)compact_control->active[lane]=0;
+        // Frontend bank/lattice bits may stay conservatively active for the
+        // remainder already projected by this block. The next preparation
+        // rebuilds them; callers must not start another private symbol now.
+    }
     void drop_compact_control()noexcept {
         if(!compact_control)return;
         const auto bytes=compact_control->working_bytes();
-        if(helper_frequency())helper_dispatch_permitted=false;
+        if(helper_frequency())set_helper_dispatch(false);
         compact_control.reset();compact_workspace_yielded=true;
         accounted_bytes-=bytes;
     }
     void clear_compact_fits(Hypothesis& h,std::size_t lane) {
-        h.fits={};h.affine_groups=0;
+        h.fits={};h.affine_groups=0;h.helper_continuation=false;
         for(std::size_t group=0;group<alternate_groups;++group)alternate_fits[lane*alternate_groups+group]={};
         for(std::size_t group=0;group<=alternate_groups;++group) {
             if(outer_presence)(*outer_evidence)[lane*(alternate_groups+1)+group]={};
@@ -7940,11 +8004,12 @@ struct PatternCorrelator::Impl {
         return first<=last;
     }
     void prepare_compact_control() {
+        bool any_active=false;
         if(!compact_control) {
             if(!helper_dispatch_permitted || helper_frequency()) {
                 // No control allocation or second decoder: reuse per-lane
                 // suppression flags and the ordinary dependency closure.
-                for(auto& h:hypotheses)h.helper_block_suppressed=!(h.admitted ||
+                for(auto& h:hypotheses)h.helper_block_suppressed=!(h.helper_continuation || h.admitted ||
                     !h.burst.bits.empty() || h.pending_gaps || h.committed!=0);
                 if(timing)for(const auto& entry:*timing) {
                     hypotheses[entry.hypothesis].helper_block_suppressed=false;
@@ -7955,13 +8020,17 @@ struct PatternCorrelator::Impl {
                     hypotheses[hypotheses.index(*emission.owner)].helper_block_suppressed=false;
                 for(std::size_t i=0;i<hypotheses.size();++i) {
                     auto& h=hypotheses[i];
+                    any_active|=!h.helper_block_suppressed;
                     if(h.helper_block_suppressed && (h.fits[0].count || h.fits[1].count)) {
                         clear_compact_fits(h,i);h.helper_unobserved=true;
                     }
                 }
-            } else if(compact_controls_used || helper_dispatch_used)
-                for(auto& h:hypotheses)h.helper_block_suppressed=false;
-            return;
+            } else {
+                any_active=!hypotheses.empty();
+                if(compact_controls_used || helper_dispatch_used)
+                    for(auto& h:hypotheses)h.helper_block_suppressed=false;
+            }
+            helper_any_active=any_active;return;
         }
         auto& control=*compact_control;
         std::fill(control.active.begin(),control.active.end(),0);
@@ -7972,7 +8041,7 @@ struct PatternCorrelator::Impl {
             if(timed)++control.timing_selected;
             control.active[i]=(helper_dispatch_permitted && control.dispatch_permitted &&
                 (!helper_frequency() || helper_frequency()->keep(h.rate_index)) &&
-                (broad || (control.selected[h.rate_index] && timed))) || h.admitted ||
+                (broad || (control.selected[h.rate_index] && timed))) || h.helper_continuation || h.admitted ||
                 !h.burst.bits.empty() || h.pending_gaps || h.committed!=0;
         }
         // A subscribed guide remains an evidence dependency even between its
@@ -7990,6 +8059,7 @@ struct PatternCorrelator::Impl {
         for(std::size_t i=0;i<hypotheses.size();++i) {
             auto& h=hypotheses[i];h.helper_block_suppressed=!control.active[i];
             if(control.active[i]) {
+                any_active=true;
                 control.pairs[h.rate_index]=1;control.banks[h.frequency]=1;
                 if(!control.lattices.empty())control.lattices[pulse_addresses[i].lattice]=1;
             } else {
@@ -7998,6 +8068,7 @@ struct PatternCorrelator::Impl {
                 if(h.fits[0].count || h.fits[1].count) {clear_compact_fits(h,i);h.helper_unobserved=true;}
             }
         }
+        helper_any_active=any_active;
     }
     bool compact_lane_active(std::size_t lane)const noexcept {
         return !hypotheses[lane].helper_block_suppressed;
@@ -8031,6 +8102,26 @@ struct PatternCorrelator::Impl {
             if(!cold)break;
         }
         return cursor;
+    }
+    bool advance_helper_pause(std::size_t count,std::stop_token stop) {
+        if(helper_dispatch_permitted || compact_phase_curve || !helper_dispatch_supported())return false;
+        prepare_compact_control();
+        // The closure includes every accepted owner, timing relation and
+        // pending emission. Only entirely cold, explicitly paused acquisition
+        // can advance without the ordinary projection/scoring machinery.
+        if(helper_any_active)return false;
+        const auto end=sample+count;
+        for(std::size_t i=0;i<hypotheses.size();++i) {
+            cancelled(stop);auto& h=hypotheses[i];
+            (void)compact_skip(h,i,initial_cursor(h,end),end,true);
+        }
+        for(std::size_t i=0;i<pulse_lattices.size();++i) {
+            cancelled(stop);skip_helper_pulse_lattice(i,end);
+        }
+        // These are omitted computations, never observed absence. In
+        // particular no complete(), record_point() or physical END runs here.
+        work.skipped_carrier_samples+=static_cast<std::uint64_t>(count)*banks.size();
+        work.samples+=count;sample=end;room_for(0);return true;
     }
     void compact_audit_decision(const Hypothesis& h,std::size_t lane,std::uint64_t end) {
         if(!compact_control || !compact_control->audit_active || compact_control->audit_seen[lane])return;
@@ -8433,6 +8524,7 @@ struct PatternCorrelator::Impl {
         } while(complete || flush || h.committed>=chunk);
     }
     void clear(Hypothesis& h) {
+        h.helper_continuation=false;
         if(burst) {
             auto& lane=burst->lanes[hypotheses.index(h)];
             lane.presentation_score_offset=lane.presentation_support_offset=0;lane.pending_public_window=false;
@@ -8805,6 +8897,7 @@ struct PatternCorrelator::Impl {
     }
     void complete(Hypothesis& h,std::size_t hypothesis,std::uint64_t end,std::stop_token stop,certdiag::Probe* certificate_probe=nullptr) {
         rx_cpu::Scope cpu_scope(rx_cpu::Stage::guards);
+        const bool helper_continuation_started=h.helper_continuation;
         if(h.helper_initial_unscored && !h.helper_unobserved &&
            static_cast<long double>(h.observed_start)==std::max(0.L,std::ceil(symbol_start(h))) &&
            h.fits[0].count==end-h.observed_start)h.helper_initial_unscored=false;
@@ -9231,6 +9324,7 @@ struct PatternCorrelator::Impl {
             }
             carry={};
         }
+        retire_helper_continuation(h,hypothesis,helper_continuation_started);
     }
     std::uint64_t initial_cursor(const Hypothesis& h,std::uint64_t end) const {
         if(burst) {
@@ -11701,6 +11795,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
         return modes.block_raw[static_cast<std::size_t>(static_cast<std::uint64_t>(chip)-static_cast<std::uint64_t>(modes.block_first_chip))];
     }
     bool helper_pulse_lattice_active(std::size_t lattice)const noexcept {
+        if(!helper_any_active)return false;
         if(compact_control && !compact_control->lattices.empty())return compact_control->lattices[lattice]!=0;
         if(helper_dispatch_permitted)return true;
         for(std::size_t h=0;h<hypotheses.size();++h)
@@ -11903,7 +11998,12 @@ template<class Source,class Pulses,class Gain,class Prepare>
                     const auto begin=std::max(sample,cell.first),limit=std::min(sample+current_pulse_count,cell.end);
                     if(begin<limit)require(accumulate(h,hypothesis,begin,limit,code,stop)==limit,
                         "raw pulse cell crossed its source boundary");
-                    if(local+1==static_cast<std::int64_t>(chips))complete(h,hypothesis,cell.end,stop);
+                    if(local+1==static_cast<std::int64_t>(chips)) {
+                        complete(h,hypothesis,cell.end,stop);
+                        if(!compact_lane_active(hypothesis)) {
+                            (void)compact_skip(h,hypothesis,cell.end,sample+current_pulse_count,true);break;
+                        }
+                    }
                     continue;
                 }
                 if(!h.fits[0].count)h.observed_start=cell.first;
@@ -11946,8 +12046,14 @@ template<class Source,class Pulses,class Gain,class Prepare>
                         }
                     }
                 }
-                if(local+1==static_cast<std::int64_t>(chips))complete(h,hypothesis,cell.end,stop);
+                if(local+1==static_cast<std::int64_t>(chips)) {
+                    complete(h,hypothesis,cell.end,stop);
+                    if(!compact_lane_active(hypothesis)) {
+                        (void)compact_skip(h,hypothesis,cell.end,sample+current_pulse_count,true);break;
+                    }
+                }
             }
+            if(!compact_lane_active(hypothesis))continue;
             const auto& pending=lattice.pending;
             if(pending.count&&pulse_cell_raw(lattice,pending.chip)) {
                 if(burst&&h.index!=burst->pulses[address.lattice].slot)continue;
@@ -12083,7 +12189,8 @@ template<class Source,class Pulses,class Gain,class Prepare>
         sample+=consumed;work.samples+=consumed;
         return consumed;
     }
-    void process(std::span<const float> input,std::stop_token stop,detail::CorrelationProjectionCache* cache) {
+    void process(std::span<const float> input,std::stop_token stop,detail::CorrelationProjectionCache* cache,
+                 bool helper_closure_prepared=false) {
         rx_cpu::Scope cpu_search(rx_cpu::Stage::search_residual);
         rx_cpu::Scope cpu_frontend(rx_cpu::Stage::mixing);
         struct ClearSharedViews {
@@ -12109,7 +12216,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
                 }
             }
         }
-        prepare_compact_control();
+        if(!helper_closure_prepared)prepare_compact_control();
         const bool raw_pulse_observations=prepare_pulse_cell_modes(input.size(),stop);
         bool certified_null=scheduled_map()!=nullptr;
         if(certified_null)for(const auto& h:hypotheses) {
@@ -12122,8 +12229,9 @@ template<class Source,class Pulses,class Gain,class Prepare>
         if(!certified_null)for(std::size_t b=0;b<banks.size();++b) {
             cancelled(stop);auto& bank=banks[b];bank.shared_prefix={};bank.shared_moment={};
             if((compact_control && !compact_control->banks[b]) ||
-               (!compact_control && (!helper_dispatch_permitted || helper_frequency()) && std::none_of(hypotheses.begin(),hypotheses.end(),
-                    [&](const auto& h){return h.frequency==b && !h.helper_block_suppressed;}))) {
+               (!compact_control && (!helper_dispatch_permitted || helper_frequency()) &&
+                    (!helper_any_active || std::none_of(hypotheses.begin(),hypotheses.end(),
+                        [&](const auto& h){return h.frequency==b && !h.helper_block_suppressed;})))) {
                 work.skipped_carrier_samples+=input.size();continue;
             }
             if(scheduled && !scheduled->physical_views.empty())scheduled->physical_views[b]={};
@@ -12327,7 +12435,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
                     if(static_cast<long double>(cursor)>=symbol_end)complete(h,hypothesis,cursor,stop);
                 }
             }
-            while(cursor<end) {
+            while(cursor<end && compact_lane_active(hypothesis)) {
                 if(burst)cursor=static_cast<std::uint64_t>(std::min(static_cast<long double>(end),
                     std::max(static_cast<long double>(cursor),std::ceil(symbol_start(h)))));
                 if(cursor>=end || burst_dormant(hypothesis))break;
@@ -12338,6 +12446,7 @@ template<class Source,class Pulses,class Gain,class Prepare>
                 if(compact_control && compact_control->audit_active)work.broad_audit_accumulated_lane_samples+=cursor-before;
                 if(static_cast<long double>(cursor)>=symbol_end)complete(h,hypothesis,cursor,stop);
             }
+            if(!compact_lane_active(hypothesis))(void)compact_skip(h,hypothesis,cursor,end,true);
         }
         settle_timing();
         settle_compact_audit();
@@ -13004,7 +13113,11 @@ void PatternCorrelator::push(std::span<const float> samples,std::stop_token stop
         Impl& state;
         ~ReleaseWorkers() {if(!state.scheduled_map())state.drop_workers();}
     } release{s};
-    if(!samples.empty()){s.prepare_drift(s.sample+samples.size());s.prepare_workers();}
+    if(!samples.empty()) {
+        s.prepare_drift(s.sample+samples.size());
+        if(s.advance_helper_pause(samples.size(),stop))return;
+        s.prepare_workers();
+    }
     struct ClearSharedTemporalPlans {
         Impl::ScheduledState* state;
         ~ClearSharedTemporalPlans(){if(state)for(auto& batch:state->worker_temporal_templates)
@@ -13017,12 +13130,23 @@ void PatternCorrelator::push(std::span<const float> samples,std::stop_token stop
         if(workers && *workers && *workers<=borrow->workers())
             for(std::size_t i=0;i<*workers;++i)s.scheduled->worker_temporal_templates[i]->bind_shared_plan_cache(borrow->slot(i));
     }
+    // Within this joined caller span a cold helper mask has no payload or
+    // timing dependencies to discover until an ordinary symbol decision.
+    // complete() and compact_skip() charge their original logical trials
+    // before they can create those dependencies. Reuse only until that fence;
+    // public polls/setters and warm owners always retain normal preparation.
+    const auto* helper_closure_owner=s.compact_control.get();
+    const bool cache_helper_closure=samples.size()>s.block_samples && s.helper_frequency_cache() &&
+        !s.compact_phase_curve && cold_acquisition_only();
+    const auto helper_closure_trials=s.trials;bool helper_closure_prepared=false;
     for(std::size_t offset=0;offset<samples.size();) {
         auto count=s.process_batch(samples.subspan(offset),stop);
         if(!count) {
             count=std::min(s.block_samples,samples.size()-offset);
             count=s.process_count(count);
-            s.process(samples.subspan(offset,count),stop,cache);
+            s.process(samples.subspan(offset,count),stop,cache,helper_closure_prepared);
+            helper_closure_prepared=cache_helper_closure && s.compact_control.get()==helper_closure_owner &&
+                s.trials==helper_closure_trials;
         }
         offset+=count;
     }
@@ -13130,7 +13254,12 @@ PatternAcquisitionDispatchState PatternCorrelator::helper_acquisition_dispatch()
 bool PatternCorrelator::set_helper_acquisition_dispatch(bool permitted)noexcept {
     auto& s=*impl_;
     if(!s.helper_dispatch_supported())return false;
-    s.helper_dispatch_permitted=permitted;s.helper_dispatch_used|=!permitted;
+    // The frequency setter and every numeric push prepare their own current
+    // closure. A repeated true dispatch with both permissions already true
+    // changes no authority or dependency state and needs no second rebuild.
+    if(permitted && s.helper_dispatch_permitted && s.compact_control &&
+       s.compact_control->dispatch_permitted)return true;
+    s.set_helper_dispatch(permitted);s.helper_dispatch_used|=!permitted;
     if(s.compact_control)s.compact_control->dispatch_permitted=permitted;
     s.prepare_compact_control();return true;
 }
@@ -13141,10 +13270,11 @@ bool PatternCorrelator::set_helper_frequency_window(double center,double radius,
         std::optional<PatternHelperClockInterval> clock)noexcept {
     auto& s=*impl_;const PatternHelperFrequencyWindow requested{center,radius,coefficient,s.search.admitted_clock_cell_half_width_ppm.value_or(-1),clock};
     if(!requested.valid() || !s.helper_dispatch_supported() || s.compact_phase_curve || s.search.hypotheses.empty() ||
-       s.search.hypotheses.size()>8194 || (s.compact_control && !s.helper_frequency()))return false;
-    if(s.helper_frequency()){
-        if(!s.helper_frequency()->accepts(requested))return false;
-        s.helper_frequency()->update(requested);s.prepare_compact_control();return true;
+       s.search.hypotheses.size()>8194 || (s.compact_control && !s.helper_frequency_cache()))return false;
+    if(s.helper_frequency_cache()){
+        if(!s.helper_frequency_cache()->accepts(requested))return false;
+        s.helper_frequency_cache()->update(requested);s.compact_control->frequency_enabled=true;
+        s.prepare_compact_control();return true;
     }
     const auto count=s.hypotheses.size(),pairs=s.search.hypotheses.size(),banks=s.banks.size(),lattices=s.pulse_lattices.size();
     if(count>(SIZE_MAX-sizeof(Impl::CompactControl)-banks-lattices)/2 ||
@@ -13165,7 +13295,14 @@ bool PatternCorrelator::set_helper_frequency_window(double center,double radius,
     }catch(const std::bad_alloc&){return false;}
 }
 void PatternCorrelator::clear_helper_frequency_window()noexcept {
-    auto& s=*impl_;if(!s.helper_frequency())return;
+    auto& s=*impl_;if(!s.helper_frequency_cache())return;
+    // Revoke measurement authority immediately. Already observed ordinary
+    // symbols still need cheap bank/lattice activity lookups while draining.
+    // Retain their paid optional cache, not an old frequency lease. Actual
+    // workspace pressure and an empty paused closure release it completely.
+    if(!s.helper_dispatch_permitted && s.helper_any_active) {
+        s.compact_control->frequency_enabled=false;s.prepare_compact_control();return;
+    }
     const auto before=s.compact_control->working_bytes();s.compact_control.reset();
     s.accounted_bytes-=before;s.prepare_compact_control();
 }
@@ -13218,7 +13355,7 @@ std::span<const PatternFrequencyRateHypothesis> PatternCorrelator::compact_acqui
 }
 bool PatternCorrelator::set_compact_acquisition_prior(double origin,std::span<const std::uint8_t> mask) {
     auto& s=*impl_;
-    if(s.helper_frequency() || !s.compact_supported() || s.compact_workspace_yielded || !std::isfinite(origin) || origin!=0 || mask.size()!=s.search.hypotheses.size() ||
+    if(s.helper_frequency_cache() || !s.compact_supported() || s.compact_workspace_yielded || !std::isfinite(origin) || origin!=0 || mask.size()!=s.search.hypotheses.size() ||
        std::any_of(mask.begin(),mask.end(),[](auto value){return value>1;}))return false;
     const auto selected=std::count(mask.begin(),mask.end(),std::uint8_t{1});
     if(!selected || static_cast<std::size_t>(selected)==mask.size())return false;
@@ -13248,19 +13385,19 @@ bool PatternCorrelator::set_compact_acquisition_prior(double origin,std::span<co
     s.compact_control->prior_active=true;s.prepare_compact_control();return true;
 }
 bool PatternCorrelator::start_compact_acquisition_audit()noexcept {
-    auto& s=*impl_;if(s.helper_frequency() || !s.compact_supported() || !s.compact_control)return false;
+    auto& s=*impl_;if(s.helper_frequency_cache() || !s.compact_supported() || !s.compact_control)return false;
     auto& control=*s.compact_control;
     if(control.audit_active)return true;
     control.audit_active=true;control.audit_complete=false;control.audit_start=s.sample;control.audit_scored=0;
     std::fill(control.audit_seen.begin(),control.audit_seen.end(),0);s.prepare_compact_control();return true;
 }
 bool PatternCorrelator::clear_compact_acquisition_prior()noexcept {
-    auto& s=*impl_;if(s.helper_frequency() || !s.compact_supported() || !s.compact_control)return false;
+    auto& s=*impl_;if(s.helper_frequency_cache() || !s.compact_supported() || !s.compact_control)return false;
     s.compact_control->prior_active=false;return start_compact_acquisition_audit();
 }
 bool PatternCorrelator::set_compact_timing_prior(const PatternPeriodicTimingPrior& prior)noexcept {
     auto& s=*impl_;
-    if(s.helper_frequency() || !s.compact_supported() || !s.compact_control || !s.search.admitted_clock_cell_half_width_ppm ||
+    if(s.helper_frequency_cache() || !s.compact_supported() || !s.compact_control || !s.search.admitted_clock_cell_half_width_ppm ||
        !std::isfinite(*s.search.admitted_clock_cell_half_width_ppm) || *s.search.admitted_clock_cell_half_width_ppm<0 ||
        !std::isfinite(prior.observed_sample) || !std::isfinite(prior.source_phase_samples) ||
        !std::isfinite(prior.period_samples) || prior.period_samples<1 ||
@@ -13269,7 +13406,7 @@ bool PatternCorrelator::set_compact_timing_prior(const PatternPeriodicTimingPrio
     s.compact_control->timing_prior=prior;s.prepare_compact_control();return true;
 }
 bool PatternCorrelator::clear_compact_timing_prior()noexcept {
-    auto& s=*impl_;if(s.helper_frequency() || !s.compact_control)return false;
+    auto& s=*impl_;if(s.helper_frequency_cache() || !s.compact_control)return false;
     s.compact_control->timing_prior.reset();s.prepare_compact_control();return true;
 }
 bool PatternCorrelator::compact_phase_assistance_supported()const noexcept {

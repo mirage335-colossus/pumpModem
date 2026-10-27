@@ -1,4 +1,5 @@
 #include "scheduled_acquisition_policy.hpp"
+#include "helper_compact_cpu_admission.hpp"
 #include "datapump/receiver_strategy.hpp"
 #include "datapump/pattern_correlator.hpp"
 #include "datapump/scheduled_complex_search.hpp"
@@ -362,11 +363,17 @@ ReceiverStrategyPlan resolve_receiver_strategy_impl(const Config& c,const Patter
         const auto width=search.qualified_start_window?2*search.qualified_start_window->half_width_samples/c.sample_rate:2*search.start_uncertainty_seconds;
         const auto starts=std::ceil(width*c.sample_rate/(chip/2.L))+1;
         const auto lanes=correlator_groups*starts*hypotheses.size();
-        old=banks*(frontend+lanes*(c.sample_rate/static_cast<long double>(chip))*12e-6L/workers);
+        // Shared-pulse projection and ordered lane commit run on the caller.
+        // The explicit helper policy waits for that representation; additional
+        // search workers cannot speed it up. Ordinary/default pricing is intact.
+        const auto compact_workers=detail::helper_compact_serial_cpu_model(c,search)?1:workers;
+        old=banks*(frontend+lanes*(c.sample_rate/static_cast<long double>(chip))*12e-6L/compact_workers);
     }
     old+=tracking;
     p.existing_processing_ratio=finite_ratio(old);p.selected_processing_ratio=p.existing_processing_ratio;
     p.reason="existing complex search retained";
+    if(detail::helper_compact_serial_cpu_model(c,search))
+        p.reason+="; helper shared-pulse CPU estimate uses serial caller work (provisional, not a measured cap)";
     const auto core=static_cast<long double>(transform)*16*5+(4.L*n+2.L*hop)*16+
         2.L*n*16+(transform+1.L)*8+hypotheses.size()*512.L+512*1024;
     const auto axis_starts=search.qualified_start_window?std::min<std::size_t>(hop,

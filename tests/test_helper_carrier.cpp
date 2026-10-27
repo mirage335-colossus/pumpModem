@@ -103,8 +103,7 @@ void metadata_vectors() {
         const auto time=.388L-expected.size()*.008L+(i+1)*.008L;
         auto observed=generator.mix_analytic({},time,8000)/
             std::polar(plan.helper_gain,tau*plan.frequency_hz*static_cast<double>(time));
-        // The intentional punctuation has already reversed the reference.
-        observed=-observed;
+        // Both punctuation reversals have restored the running carrier.
         require(std::abs(observed-h::apsk_point(expected[i]))<1e-11,"strong analytic metadata symbol changed");
         const auto ring=std::clamp(std::llround((std::abs(observed)-.9)*10230),0LL,1023LL);
         auto phase=std::llround(std::arg(observed)*2048/tau)%2048;
@@ -118,11 +117,11 @@ void metadata_vectors() {
         const auto begin=.388L-packet.count*.008L;
         const h::Generator compact(options,plan);
         const auto before=begin-.0001L;
-        const auto observed=-compact.mix_analytic({},before,8000)/
+        const auto observed=compact.mix_analytic({},before,8000)/
             std::polar(plan.helper_gain,tau*plan.frequency_hz*static_cast<double>(before));
         require(std::abs(observed-std::complex<double>{1,0})<1e-11,
             "short callsign needlessly occupied fixed metadata airtime");
-        const auto last=-compact.mix_analytic({},.388L,8000)/
+        const auto last=compact.mix_analytic({},.388L,8000)/
             std::polar(plan.helper_gain,tau*plan.frequency_hz*.388);
         require(std::abs(last-h::apsk_point(packet.symbols[packet.count-1]))<1e-11,
             "compact callsign did not finish at388ms");
@@ -147,7 +146,7 @@ void timecode_generation() {
         const auto begin=.388L-count*.008L;
         for(std::size_t i=0;i<count;++i) {
             const auto time=dwell_start+begin+(i+1)*.008L;
-            const auto observed=-generator.mix_analytic({},time,8000)/carrier(time);
+            const auto observed=generator.mix_analytic({},time,8000)/carrier(time);
             const auto ring=std::clamp(std::llround((std::abs(observed)-.9)*10230),0LL,1023LL);
             auto phase=std::llround(std::arg(observed)*2048/tau)%2048;
             if(phase<0)phase+=2048;
@@ -191,7 +190,7 @@ void timecode_generation() {
     require(decoded_callsign&&decoded_callsign->kind==h::MetadataKind::callsign&&
         decoded_callsign->callsign==options.callsign&&decoded_callsign->time_ticks==0,
         "clear-mode callsign did not take exclusive precedence over timecode");
-    const auto before_callsign=-identified.mix_analytic({},.32L,8000)/carrier(.32L);
+    const auto before_callsign=identified.mix_analytic({},.32L,8000)/carrier(.32L);
     require(std::abs(before_callsign-std::complex<double>{1,0})<1e-12,
         "clear callsign transmission also started a timestamp");
     const h::Generator keyed_identified(options,plan,epoch,true,key);
@@ -226,7 +225,7 @@ void timecode_generation() {
         const auto original=packet_at(cached,0,count);
         for(const auto invalid:{-.4L,4294967296.L}) {
             const auto time=invalid+.38L;
-            require(std::abs(-cached.mix_analytic({},time,8000)/carrier(time)-std::complex<double>{1,0})<1e-12,
+            require(std::abs(cached.mix_analytic({},time,8000)/carrier(time)-std::complex<double>{1,0})<1e-12,
                 "out-of-range time was encoded as a timestamp");
             require(packet_at(cached,0,count).symbols==original.symbols,
                 "valid-invalid-same-valid time sequence lost its cached timestamp");
@@ -234,7 +233,7 @@ void timecode_generation() {
     }
     options.timecode=false;
     h::Generator pure(options,plan,epoch,true,key);
-    require(std::abs(-pure.mix_analytic({},.36L,8000)/carrier(.36L)-std::complex<double>{1,0})<1e-12,
+    require(std::abs(pure.mix_analytic({},.36L,8000)/carrier(.36L)-std::complex<double>{1,0})<1e-12,
         "disabled timecode modulates the empty-callsign tone");
     // Fail before output if encryption is configured but unavailable. The
     // public callsign path is independent and never sends both packet types.
@@ -261,16 +260,22 @@ void waveform_coordinates() {
     };
     require(std::abs(baseband(.05L)-std::complex<double>{1,0})<1e-12,"preceding tone not pure");
     require(std::abs(baseband(.215L)-std::complex<double>{1,0})<1e-12,"20ms pre-punctuation guard not pure");
-    require(std::abs(baseband(.265L)+std::complex<double>{1,0})<1e-12,"20ms post-punctuation guard not pure");
-    require(std::abs(baseband(.24L))<1e-12,"punctuation not centered at240ms");
+    for(const auto time:{.244L,.25L,.275999L})
+        require(std::abs(baseband(time)+std::complex<double>{1,0})<1e-12,
+                "paired punctuation lost its32ms constant inverted plateau");
+    for(const auto time:{.284L,.292L,.304L,.32L,.396L})
+        require(std::abs(baseband(time)-std::complex<double>{1,0})<1e-12,
+                "paired punctuation did not restore the underlying running carrier");
+    require(std::abs(baseband(.24L))<1e-12&&std::abs(baseband(.28L))<1e-12,
+            "punctuation zero crossings moved from240/280ms");
     const auto late_start=generator.mix_analytic({},.24L,8000,{},.22L)/
         std::polar(plan.helper_gain,tau*plan.frequency_hz*.24);
     require(std::abs(late_start-std::complex<double>{1,0})<1e-10,
         "partial dwell punctuated without20ms preceding tone");
-    const auto early_end=generator.mix_analytic({},.24L,8000,.26L,0.L)/
+    const auto early_end=generator.mix_analytic({},.24L,8000,.29L,0.L)/
         std::polar(plan.helper_gain,tau*plan.frequency_hz*.24);
     require(std::abs(early_end-std::complex<double>{1,0})<1e-10,
-        "partial dwell punctuated without20ms following tone");
+        "partial dwell emitted a half punctuation pair or omitted restored-carrier guard");
     h::Generator live_generator(options,plan,0,false);
     const auto before_stop=live_generator.mix_analytic({},.249L,8000,.4L,0.L)/
         std::polar(plan.helper_gain,tau*plan.frequency_hz*.249);
@@ -297,17 +302,17 @@ void waveform_coordinates() {
             "non-dwell transmission start4ms envelope wrong");
 }
 void protected_streaming_endpoint() {
-    for(const auto end:{0.L,.1L,.235999L,.268L,.3L,.4L,.635999L})
+    for(const auto end:{0.L,.1L,.235999L,.308L,.4L,.635999L})
         require(h::protected_endpoint(0,0,end)==end,"helper extends an endpoint outside its punctuation guard");
-    for(const auto end:{.236L,.24L,.26L,.267999L})
-        require(std::abs(h::protected_endpoint(0,0,end)-.268L)<1e-15,
-            "helper streaming stop did not protect post-punctuation tone");
-    require(std::abs(h::protected_endpoint(0,.212L,.24L)-.268L)<1e-15&&
+    for(const auto end:{.236L,.24L,.26L,.268L,.28L,.3L,.307999L})
+        require(std::abs(h::protected_endpoint(0,0,end)-.308L)<1e-15,
+            "helper streaming stop did not protect the complete pair and restored-carrier tone");
+    require(std::abs(h::protected_endpoint(0,.212L,.24L)-.308L)<1e-15&&
         h::protected_endpoint(0,.212001L,.24L)==.24L,
         "helper endpoint ignored the preceding clean-tone requirement");
-    require(std::abs(h::protected_endpoint(1,-1.L,.04L)-.068L)<1e-15,
+    require(std::abs(h::protected_endpoint(1,-1.L,.04L)-.108L)<1e-15,
         "protected endpoint lost the UTC dwell grid at odd epochs");
-    require(std::abs(h::protected_endpoint(2,-2.L,-1.76L)+2-.268L)<1e-15,
+    require(std::abs(h::protected_endpoint(2,-2.L,-1.76L)+2-.308L)<1e-15,
         "protected endpoint depends on the physical epoch split");
     rejects([]{h::protected_endpoint(0,1,0);});
     rejects([]{h::protected_endpoint(0,0,std::numeric_limits<long double>::infinity());});
@@ -317,11 +322,46 @@ void protected_streaming_endpoint() {
     const auto before=generator.mix_analytic({},.25L,8000,.4L,0);
     const auto after=generator.mix_analytic({},.25L,8000,h::protected_endpoint(0,0,.26L),0);
     require(std::abs(before-after)<1e-15,"streaming stop retroactively changed punctuation phase");
-    const auto clean=-generator.mix_analytic({},.263L,8000,.268L,0)/
-        std::polar(plan.helper_gain,tau*plan.frequency_hz*.263);
-    require(std::abs(clean-std::complex<double>{1,0})<1e-11,
-        "protected streaming endpoint lacks20ms straight post-flip tone");
-    require(generator.mix(0,.268L,8000,.268L,0)==0,"protected endpoint did not finish its helper ramp");
+    for(const auto time:{.284L,.292L,.303999L}) {
+        const auto clean=generator.mix_analytic({},time,8000,.308L,0)/
+            std::polar(plan.helper_gain,tau*plan.frequency_hz*static_cast<double>(time));
+        require(std::abs(clean-std::complex<double>{1,0})<1e-11,
+            "protected streaming endpoint lacks20ms restored running carrier");
+    }
+    require(generator.mix(0,.308L,8000,.308L,0)==0,"protected endpoint did not finish its helper ramp");
+    // The exact and immediately adjacent representable coordinates must
+    // preserve the pair under either UTC epoch split. Normalized-calendar
+    // roundoff may conservatively include an adjacent onset, never erase it.
+    for(const auto epoch:{0ULL,1ULL,1800000000ULL}) {
+        const auto origin=epoch%2?-.2L:0.L,begin=origin+.236L,end=origin+.308L;
+        const h::Generator dated(options,plan,epoch);
+        long double previous=0;
+        for(const auto stop:{std::nextafter(begin,-std::numeric_limits<long double>::infinity()),
+                             begin,std::nextafter(begin,std::numeric_limits<long double>::infinity())}) {
+            const auto protected_end=h::protected_endpoint(epoch,origin,stop);
+            require(protected_end>=stop&&std::abs(protected_end-end)<1e-15L&&
+                    (!previous||protected_end+1e-15L>=previous),
+                    "adjacent punctuation onset lost monotone paired protection");
+            previous=protected_end;
+            const auto emitted=origin+.25L;
+            require(dated.mix_analytic({},emitted,8000,origin+.4L,origin)==
+                    dated.mix_analytic({},emitted,8000,protected_end,origin),
+                    "calendar protection changed an already emitted inverted plateau");
+        }
+        for(const auto stop:{std::nextafter(end,-std::numeric_limits<long double>::infinity()),
+                             end,std::nextafter(end,std::numeric_limits<long double>::infinity())}) {
+            const auto protected_end=h::protected_endpoint(epoch,origin,stop);
+            require(protected_end>=stop&&std::abs(protected_end-stop)<1e-15L,
+                    "adjacent final guard moved backward or extended beyond calendar roundoff");
+        }
+        require(h::protected_endpoint(epoch,origin,end)==end&&
+                h::protected_endpoint(epoch,origin,begin-.000001L)==begin-.000001L&&
+                h::protected_endpoint(epoch,origin,end+.000001L)==end+.000001L,
+                "punctuation protection changed an exact final or visibly outside endpoint");
+        require(std::abs(h::protected_endpoint(epoch,origin+.212L,begin)-end)<1e-15L&&
+                h::protected_endpoint(epoch,origin+.212001L,begin)==begin,
+                "paired protection lost the latest clean-tone start boundary");
+    }
 }
 void fft(std::vector<std::complex<double>>& samples) {
     const auto size=samples.size();
@@ -347,11 +387,12 @@ void spectrum() {
     std::array<std::uint8_t,32> master{};
     for(std::size_t i=0;i<master.size();++i)master[i]=static_cast<std::uint8_t>(i+23);
     const datapump::Crypto key(master);
-    struct MetadataCase {std::string_view callsign;bool encrypted;};
-    for(const auto& test:std::array<MetadataCase,4>{{{"",false},{"",true},{"N0CALL",false},{"ABCDEFGHIJKLMNOPQRS",false}}}) {
-        h::Options options;options.power_w=100;options.callsign=test.callsign;
+    struct MetadataCase {std::string_view callsign;bool encrypted,timecode;};
+    for(const auto& test:std::array<MetadataCase,5>{{{"",false,false},{"",false,true},{"",true,true},
+            {"N0CALL",false,true},{"ABCDEFGHIJKLMNOPQRS",false,true}}}) {
+        h::Options options;options.power_w=100;options.callsign=test.callsign;options.timecode=test.timecode;
         const auto plan=h::plan(options,1000,200,10240);
-        h::Generator generator(options,plan,0,true,test.encrypted?std::optional<datapump::Crypto>{key}:std::nullopt);
+        h::Generator generator(options,plan,1800000000,true,test.encrypted?std::optional<datapump::Crypto>{key}:std::nullopt);
         std::vector<std::complex<double>> samples(4096);
         for(std::size_t i=0;i<samples.size();++i) {
             const auto time=static_cast<long double>(i)/10240;
@@ -359,17 +400,25 @@ void spectrum() {
                 std::polar(plan.helper_gain,tau*plan.frequency_hz*static_cast<double>(time));
         }
         fft(samples);
-        double total=0,outside=0,data_band=0;
+        double total=0,outside=0,data_band=0,strongest_sideband=0;
         for(std::size_t i=0;i<samples.size();++i) {
             const auto frequency=(i<=samples.size()/2?static_cast<double>(i):
                 static_cast<double>(i)-static_cast<double>(samples.size()))*2.5;
             const auto energy=std::norm(samples[i]);total+=energy;
+            if(i)strongest_sideband=std::max(strongest_sideband,energy);
             if(std::abs(frequency)>150)outside+=energy;
             if(frequency>=900-plan.frequency_hz&&frequency<=1100-plan.frequency_hz)data_band+=energy;
         }
         const auto outside_db=10*std::log10(outside/total),leakage_db=10*std::log10(data_band/total);
-        std::cout<<"helper spectrum callsign="<<test.callsign<<" encrypted="<<test.encrypted<<" outside300Hz_dBc="<<outside_db
-                 <<" adjacent_data_band_dBc="<<leakage_db<<'\n';
+        const auto carrier=std::norm(samples[0]);
+        std::cout<<"helper spectrum callsign="<<test.callsign<<" encrypted="<<test.encrypted<<" timecode="<<test.timecode
+                 <<" carrier_fraction="<<carrier/total<<" strongest_sideband_fraction="<<strongest_sideband/total
+                 <<" normalized_power="<<total/static_cast<double>(samples.size()*samples.size())
+                 <<" outside300Hz_dBc="<<outside_db<<" adjacent_data_band_dBc="<<leakage_db<<'\n';
+        require(carrier>strongest_sideband,"paired punctuation lost the dominant running-carrier line");
+        if(!test.timecode)require(carrier/total>.6&&
+            std::abs(std::sqrt(carrier)/samples.size()-.79)<1e-6,
+            "paired punctuation changed its40ms inversion or dominant carrier line");
         require(outside/total<.01,"helper exceeds300Hz99percent occupied bandwidth");
         require(data_band/total<1e-5,"helper transition leakage exceeds measured-geometry mask");
     }
@@ -564,5 +613,5 @@ void tracker() {
 int main() {
     try {power_and_placement();metadata_vectors();timecode_generation();waveform_coordinates();protected_streaming_endpoint();spectrum();tracker();tracker_lifetime_admission();}
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
-    std::cout<<"helper carrier checks passed\n";
+    std::cout<<"helper carrier checks passed\n";return 0;
 }

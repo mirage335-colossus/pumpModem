@@ -156,6 +156,18 @@ void reference_level_accounting() {
     auto disabled=h;disabled.power_w=0;
     rejects([&] {helper::reference_level(disabled,nominal);},"disabled helper produced a finite tone-level prediction");
 }
+void paired_punctuation_calendar() {
+    for(const auto epoch:{0ULL,1ULL,1800000000ULL}) {
+        const auto origin=epoch%2?-.2L:0.L;
+        const auto first=origin+.236L,last=origin+.308L;
+        for(const auto stop:{first,origin+.244L,origin+.264L,origin+.268L,origin+.272L,last-.000001L})
+            check(std::abs(helper::protected_endpoint(epoch,origin,stop)-last)<1e-15L,
+                  "protected helper stop split its punctuation pair or restored-carrier guard");
+        check(helper::protected_endpoint(epoch,origin,last)==last&&
+              helper::protected_endpoint(epoch,origin+.212001L,first)==first,
+              "punctuation protection changed an unpunctuated partial dwell");
+    }
+}
 void bounded_envelope_planning() {
     const auto c=eme();const auto initial=helper::plan_envelope(c);
     check(initial.lead_seconds==2&&std::abs(initial.tail_seconds-161.2L)<1e-14L,
@@ -238,7 +250,7 @@ void bounded_envelope_planning() {
 }
 int main() {
     try {deferred_support_still_needs_gate_skirt();long_gate_and_nonfolding_identity();malformed_geometry_fails_closed();
-        reference_level_accounting();bounded_envelope_planning();
+        reference_level_accounting();paired_punctuation_calendar();bounded_envelope_planning();
         std::cout<<"Helper calendar bandwidth checks passed\n";return 0;}
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

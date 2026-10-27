@@ -106,9 +106,11 @@ std::uint32_t minimum_output_rate(const Options&,double data_carrier_hz,
 std::uint32_t minimum_output_rate(const Options&,const PlacementBand&,
                                   std::uint32_t logical_rate);
 
-// Protect a punctuation already begun when an open-ended source is stopped.
-// Only the helper is extended, through its 20 ms clean post-flip guard and
-// final 4 ms ramp. Coordinates are the same physical seconds as Generator.
+// Protect a paired punctuation already begun when an open-ended source stops.
+// Reversals cross zero at 240/280ms, with a 32ms inverted plateau between
+// their 8ms transitions. Extend only the helper through the second reversal,
+// its 20ms restored-carrier guard and final 4ms ramp (308ms in that dwell).
+// Coordinates are the same physical seconds as Generator.
 long double protected_endpoint(std::uint64_t epoch,long double start_seconds,long double end_seconds);
 
 // 1024 radii [0.9,1], 2048 phases; high ten bits select radius, low eleven phase.

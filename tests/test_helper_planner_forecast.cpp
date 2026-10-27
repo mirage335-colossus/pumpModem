@@ -23,6 +23,21 @@ bool contains(const gui::ui::DocumentNode& node,const char* text) {
 
 }
 int main(){try{
+    // The ideal reference is separate from every practical forecast and lock
+    // decision. Preserve the requested 1 s/10 s noise-only scales and T^-3/2.
+    for(const auto cn0:{40.,30.,20.,10.,6.,3.,0.,-3.}) {
+        const auto one=gui::planner::helper_ideal_tone_half_width(cn0,1);
+        const auto ten=gui::planner::helper_ideal_tone_half_width(cn0,10);
+        const auto expected=3*std::sqrt(3/(2*std::numbers::pi*std::numbers::pi*std::pow(10.,cn0/10)));
+        check(one&&ten&&std::abs(*one-expected)<1e-14*expected&&
+            std::abs(*ten-*one/std::pow(10.,1.5))<1e-14*(*ten),
+            "ideal helper precision reference lost C/N0 or physical observation scaling");
+    }
+    for(const auto duration:{0.,-1.,std::numeric_limits<double>::infinity()})
+        check(!gui::planner::helper_ideal_tone_half_width(30,duration),
+            "ideal helper precision accepted an invalid observation duration");
+    check(!gui::planner::helper_ideal_tone_half_width(std::numeric_limits<double>::quiet_NaN(),1),
+        "ideal helper precision accepted a nonfinite C/N0");
     // A backend can expose finite partial prices while explicitly declining
     // complete component support (for example V2 compact template rebuilds).
     simulation::Estimate partial;
@@ -116,6 +131,12 @@ int main(){try{
         enabled.helper_reference.conditional.observation_seconds>0,
         "real-time helper did not publish its separate conditional ordinary receiver cost");
     const auto& forecast=enabled.helper_reference.conditional;
+    const auto& ideal=forecast.precision_reference;
+    check(ideal.ideal_one_second_half_width_hz&&ideal.ideal_lead_half_width_hz&&
+        ideal.ideal_lead_observation_seconds==forecast.planned_lead_seconds/ideal.maximum_source_capture_ratio&&
+        ideal.ideal_lead_half_width_hz==gui::planner::helper_ideal_tone_half_width(ideal.cn0_db_hz,
+            ideal.ideal_lead_observation_seconds),
+        "ideal reference used numeric history or usable segments as coherent observation duration");
     check(forecast.precision.supported&&forecast.precision.extra_lead_seconds>=0&&
         forecast.precision.extra_lead_seconds<=36&&forecast.precision.expected_segments>0&&
         forecast.uncertainty_hz==forecast.precision.frequency_half_width_hz&&
@@ -123,6 +144,24 @@ int main(){try{
         forecast.planned_tail_seconds>=2&&
         (!forecast.precision.target_reached||forecast.uncertainty_hz<=.1),
         "selected point lost the shared lead predictor/cap/achievable-precision contract");
+    check(forecast.precision.sustained_supported&&forecast.sustained&&
+        forecast.sustained_at_seconds==forecast.precision.sustained_at_seconds&&
+        forecast.sustained->uncertainty_hz==forecast.precision.sustained_frequency_half_width_hz&&
+        forecast.sustained->rf_half_width_hz==forecast.sustained->uncertainty_hz&&
+        forecast.sustained->clock_half_width_ppm==forecast.clock_half_width_ppm&&
+        forecast.sustained->retained_clock_rates==forecast.retained_clock_rates&&
+        forecast.sustained->frequency_rate_hypotheses>0&&
+        // The envelope accumulates long-double dwell time; the predictor
+        // sums double baseline/extra time. Preserve the same selected airtime
+        // without requiring their final double conversions to be identical.
+        std::abs(forecast.planned_lead_seconds-forecast.precision.total_lead_seconds)<=
+            4*std::numeric_limits<double>::epsilon()*std::max({1.,
+                std::abs(forecast.planned_lead_seconds),std::abs(forecast.precision.total_lead_seconds)}),
+        "sustained receiver query lost its own residual U, unresolved clocks or unchanged initial lead");
+    const auto& sustained_cost=forecast.sustained->receiver_cost;
+    check(!sustained_cost.helper_startup_cpu_seconds&&!sustained_cost.helper_sustained_realtime_ratio&&
+        !sustained_cost.post_lock_lead_receiver_cpu_seconds,
+        "sustained conditional cost invented zero-priced optional helper overhead");
     const auto& cost=enabled.helper_reference.conditional.receiver_cost;
     check(cost.finite_available&&cost.finite_audio_seconds>0&&
         cost.workspace_supported&&cost.geometry.workspace_bytes>0,
@@ -166,11 +205,27 @@ int main(){try{
         "not total CPU, measured speed, or a lock/probability forecast",
         "No clock narrowing is inferred from tone power",
         "helper power does not increase payload SNR or Rate",
-        "DSP fixed workspace", "Automatic helper precision lead:","Conditional segment model:",
+        "DSP fixed workspace", "Automatic helper precision lead:","Conditional clean-model precision:",
+        "Expected helper C/N0:","dB-Hz", "Ideal noise-only 3σ scale:",
+        "not an operational confidence interval", "Practical precision inputs:",
+        "Sustained conditional clean-model precision:","if the reference remains available until",
+        "This adds no helper-only transmit lead", "Short dashes use initial clean-model precision",
+        "long dashes use sustained clean-model precision", "Initial conditional ordinary receiver cost:",
+        "Static oscillator accuracy in ppm sets initial discovery uncertainty, not a drift rate",
+        "tracking-slew guard is an acceptance limit, not a physical drift prediction",
         "Prediction is not measured lock or a lock-probability forecast",
         "Conditional finite receiver ledger:",
         "unknown additive costs, not zero","Peak rolling-bank storage is unqualified"})
         if(!contains(page,required))throw std::runtime_error(std::string("UI omitted manual reference state/limit: ")+required);
+    // A declined optional sustained query cannot relabel initial precision or
+    // hide initial receiver pricing. It also cannot keep a stale curve sample.
+    auto no_sustained=enabled;no_sustained.helper_reference.conditional.sustained.reset();
+    for(auto& point:no_sustained.helper_reference_cpu_points)point.sustained.reset();
+    const auto no_sustained_page=gui::planner_page::build(no_sustained,900,true,false);
+    check(contains(no_sustained_page,"optional work forecast yielded")&&
+        contains(no_sustained_page,"Initial conditional ordinary receiver cost:")&&
+        !contains(no_sustained_page,"Sustained conditional clean-model precision:"),
+        "missing sustained work erased or replaced the initial receiver price");
     auto percentage=enabled;percentage.inputs.dsp_workspace_percent=50;
     const auto percentage_page=gui::planner_page::build(percentage,900,true,false);
     check(contains(percentage_page,"DSP 50% RAM")&&!contains(percentage_page,"DSP fixed workspace"),
@@ -189,13 +244,14 @@ int main(){try{
     capped_point.planned_lead_seconds=capped_point.precision.total_lead_seconds;
     const auto capped_page=gui::planner_page::build(capped,900,true,false);
     check(capped_point.available&&contains(capped_page,"36 s extra-lead cap reached; ±0.1 Hz target not reached")&&
-        contains(capped_page,"Expected half-width at payload start: 0.2 Hz"),
+        contains(capped_page,"Initial conditional clean-model half-width at payload start: 0.2 Hz"),
         "cap outcome hid the supported achievable residual precision/work");
     auto declined=enabled;auto& declined_point=declined.helper_reference.conditional;
     declined_point.precision.supported=false;declined_point.precision.reason="bounded forecast input unavailable";
     declined_point.available=false;
     check(contains(gui::planner_page::build(declined,900,true,false),
-        "Automatic helper precision lead prediction declined: bounded forecast input unavailable"),
+        "Automatic helper precision lead prediction declined: bounded forecast input unavailable")&&
+        contains(gui::planner_page::build(declined,900,true,false),"not proof of a physical precision limit"),
         "unsupported precision forecast was displayed as reached or locked");
     // Shared TX/Planner request uses actual metadata length and key precedence.
     auto metadata=*enabled.inputs.receiver_settings;metadata.helper.callsign="TEST";
@@ -293,6 +349,9 @@ int main(){try{
         simulated_point.precision.frequency_half_width_hz==expected_simulation.frequency_half_width_hz&&
         simulated_point.precision.extra_lead_seconds==expected_simulation.extra_lead_seconds,
         "Planner lead forecast used stale simulation phase process instead of channel inputs");
+    check(simulated_point.precision_reference.cn0_db_hz==expected_request.straight_cn0_db_hz&&
+        simulated_point.precision_reference.phase_noise_radians_per_sqrt_second==expected_request.phase_noise_radians_per_sqrt_second,
+        "precision presentation lost actual sampled waveform C/N0 or configured phase process");
     // The transmit envelope and Planner select identical weak-reference
     // airtime, but neither may assign it RF precision or receiver cost.
     auto weak_inputs=enabled.inputs;weak_inputs.path_loss_db=230;
@@ -316,7 +375,7 @@ int main(){try{
         weak_requirements.frequency_precision_extension_seconds==36&&
         weak_point.planned_lead_seconds==static_cast<double>(weak_envelope.lead_seconds)&&
         weak_point.planned_tail_seconds==static_cast<double>(weak_envelope.tail_seconds)&&
-        weak_point.uncertainty_hz==0&&weak_point.frequency_rate_hypotheses==0&&
+        weak_point.uncertainty_hz==0&&weak_point.frequency_rate_hypotheses==0&&!weak_point.sustained&&
         weak_point.reason.find("precision not predicted")!=std::string::npos,
         "weak lead cap disagreed between transmit and Planner or created an assisted RF estimate");
     check(contains(gui::planner_page::build(weak_model,900,true,false),
@@ -382,7 +441,8 @@ int main(){try{
     const auto raw_utc=transfer::receiver_utc_rate_correction(raw_options.modem,raw_options);
     const auto raw_search=modem::helper_reference_search(raw_options.modem,raw_point.uncertainty_hz,
         raw_plan.frequency_hz,measured_offset,raw_utc,
-        modem::HelperReferenceClockRelation::common_corrected_source);
+        modem::HelperReferenceClockRelation::common_corrected_source,{},
+        modem::PatternUtcClockGrid::complete_expanded_domain);
     check(!raw_search.original_prior_retained&&raw_search.residual_center_hz==measured_offset&&
         raw_search.catalogue.hypotheses.size()==raw_point.frequency_rate_hypotheses&&
         raw_search.rf_half_width_hz==raw_point.rf_half_width_hz&&
@@ -444,7 +504,7 @@ int main(){try{
         shared_point.shared_clock_selected_rates<shared_point.retained_clock_rates &&
         shared_point.available && shared_point.receiver_cost.finite_available &&
         shared_point.receiver_cost.workspace_supported &&
-        shared_point.reason.find("original acquisition cells")!=std::string::npos,
+        shared_point.reason.find("full-domain acquisition cells")!=std::string::npos,
         "shared frequency clock lost its matched ordinary original-cell work ledger");
     check(contains(gui::planner_page::build(shared_model,900,true,false),
         "Conditional shared-radio source clock from frequency:") &&

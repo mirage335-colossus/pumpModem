@@ -558,10 +558,9 @@ inline helper::TonePrecisionPrediction helper_lead_precision_prediction(
 // The acquisition owner supplies its actual aperture/warmup here when its
 // descriptor is available. An absent descriptor asserts no acquisition
 // precision, and cannot qualify presence, frequency, phase or timing.
-inline helper::EnvelopeRequirements helper_envelope_requirements(const Settings& settings,
+inline helper::EnvelopeRequirements helper_envelope_baseline_requirements(const Settings& settings,
         const modem::Config& config,const HelperReceiveEnvelopeBound& receive,
-        const std::optional<helper::EnvelopeRequirements>& acquisition={},
-        helper::TonePrecisionPrediction* precision=nullptr) {
+        const std::optional<helper::EnvelopeRequirements>& acquisition={}) {
     auto result=acquisition.value_or(helper::EnvelopeRequirements{});
     if(!config.sample_rate)throw Error("Helper Carrier envelope has no source sample clock");
     // Reserve every allowed physical profile, including later backend/epoch
@@ -608,6 +607,15 @@ inline helper::EnvelopeRequirements helper_envelope_requirements(const Settings&
             }
         }catch(const Error&) {} // Optional forecast cannot remove the physical baseline.
         catch(const std::bad_alloc&) {}
+    }
+    return result;
+}
+inline helper::EnvelopeRequirements helper_envelope_requirements(const Settings& settings,
+        const modem::Config& config,const HelperReceiveEnvelopeBound& receive,
+        const std::optional<helper::EnvelopeRequirements>& acquisition={},
+        helper::TonePrecisionPrediction* precision=nullptr) {
+    auto result=helper_envelope_baseline_requirements(settings,config,receive,acquisition);
+    if(settings.helper.power_w>0) {
         const auto baseline=helper::plan_envelope(config,result);
         auto forecast=helper_lead_precision_prediction(settings,config,
             static_cast<double>(baseline.lead_seconds),result.maximum_source_capture_ratio);

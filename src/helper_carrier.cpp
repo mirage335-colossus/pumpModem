@@ -13,6 +13,15 @@ namespace datapump::helper {
 namespace {
 constexpr double tau=2*std::numbers::pi;
 constexpr long double dwell=.4L,ramp=.004L,metadata_end=.388L,symbol_time=.008L;
+constexpr long double punctuation_begin=.236L,punctuation_return=.276L,punctuation_transition=.008L;
+// Literal rational-calendar endpoints avoid accumulated rounding at an exact source sample.
+constexpr long double punctuation_latest_start=.212L,punctuation_protected_end=.308L;
+// The calendar is reduced to [0,2) before dwell subtraction. Allow32
+// long-double epsilons per unit for fmod, division and subtract rounding;
+// even a binary64 long double changes a guard by less than1.5e-14 seconds.
+long double calendar_roundoff(long double normalized) {
+    return 32*std::numeric_limits<long double>::epsilon()*std::max(1.L,std::abs(normalized));
+}
 double smooth(long double x) {
     const auto t=static_cast<double>(std::clamp(x,0.L,1.L));
     return t*t*t*(10+t*(-15+6*t));
@@ -34,7 +43,7 @@ std::pair<double,double> gains_from_ratio(double power_ratio) {
 // Bound the periodic complex envelope's energy in either data sideband. Each
 // transition is a quintic smootherstep, whose derivative is Beta(3,3). Its
 // transform has magnitude <=15*(3+z^2+3z)/z^5, z=pi*f*T, and <=1.
-// The envelope has two unit 4ms ramps, one magnitude-two 8ms reversal, and
+// The envelope has two unit 4ms ramps, two magnitude-two 8ms reversals, and
 // <=ten magnitude-two metadata transitions. Integration by parts supplies the
 // additional 1/(2*pi*f*dwell). Coefficients therefore fall at least as f^-4;
 // sum their squared bound over the 2.5Hz dwell harmonics. Factor four includes
@@ -46,7 +55,7 @@ double leakage_bound(double distance,double bandwidth,bool metadata) {
         return std::min(1.,15*(3+z*z+3*z)/std::pow(z,5));
     };
     const auto coefficient=(2*derivative_transform(.004)+
-        (metadata?22:2)*derivative_transform(.008))/(tau*distance*.4);
+        (metadata?24:4)*derivative_transform(.008))/(tau*distance*.4);
     const auto harmonics=1+std::min(std::ceil(bandwidth/2.5),distance/(7*2.5));
     return 4*coefficient*coefficient*harmonics;
 }
@@ -238,9 +247,14 @@ long double protected_endpoint(std::uint64_t epoch,long double start,long double
         throw Error("invalid Helper Carrier protected endpoint");
     auto local=std::fmod(static_cast<long double>(epoch%2)+end,2.L);
     if(local<0)local+=2;
+    const auto roundoff=calendar_roundoff(local);
     local-=std::floor(local/dwell)*dwell;
-    const auto origin=end-local;
-    if(local>=.236L && local<.268L && start<=origin+.212L)return origin+.268L;
+    // Bound the normalized comparisons rather than subtracting an absolute
+    // dwell origin from a possibly large source clock. At the exact final
+    // guard boundary no extension is needed and the endpoint stays bit exact.
+    if(local+roundoff>=punctuation_begin && local+roundoff<punctuation_protected_end &&
+       (start-end)+local<=punctuation_latest_start+roundoff)
+        return std::max(end,end+(punctuation_protected_end-local));
     return end;
 }
 std::complex<double> apsk_point(std::uint32_t symbol) {
@@ -278,6 +292,7 @@ std::complex<double> Generator::mix_analytic(std::complex<double> payload,long d
     // adding a large Unix epoch to each fractional sample coordinate.
     auto local=std::fmod(static_cast<long double>(epoch_%2)+seconds,2.L);
     if(local<0)local+=2;
+    const auto roundoff=calendar_roundoff(local);
     local-=std::floor(local/dwell)*dwell;
     auto envelope=smooth(std::min(local,dwell-local)/ramp);
     if(end_seconds) {
@@ -288,13 +303,17 @@ std::complex<double> Generator::mix_analytic(std::complex<double> payload,long d
         if(!std::isfinite(*start_seconds))throw Error("invalid Helper Carrier initial output coordinate");
         envelope*=smooth((seconds-*start_seconds)/ramp);
     }
-    // An 8ms C2 amplitude reversal has precisely one 180-degree phase flip at
-    // its zero crossing and exactly constant amplitude/phase on either side.
-    // This keeps a bounded polynomial spectrum and avoids a phase-step spur.
-    const auto dwell_start=seconds-local;
-    const bool punctuation_fits=punctuate_ && (!start_seconds || *start_seconds<=dwell_start+.212L) &&
-        (!end_seconds || *end_seconds>=dwell_start+.268L);
-    const std::complex<double> punctuation{punctuation_fits?1-2*smooth((local-.236L)/.008L):1.,0};
+    // Paired8ms C2 reversals cross zero at240/280ms. The32ms inverted
+    // plateau also preserves the existing marker fit's32ms post-flip support.
+    // The original running carrier returns unchanged before metadata; neither
+    // reversal resets its phase. Both constant flanks remain at least20ms.
+    const bool punctuation_fits=punctuate_ &&
+        (!start_seconds || (*start_seconds-seconds)+local<=punctuation_latest_start+roundoff) &&
+        (!end_seconds || (*end_seconds-seconds)+local+roundoff>=punctuation_protected_end);
+    const auto reversal=punctuation_fits?
+        1-2*smooth((local-punctuation_begin)/punctuation_transition)+
+          2*smooth((local-punctuation_return)/punctuation_transition):1.;
+    const std::complex<double> punctuation{reversal,0};
     std::complex<double> modulation=punctuation;
     // A time frame has at most three symbols. Cache it before its earliest
     // possible start, then use its actual compact length. No crypto per sample.

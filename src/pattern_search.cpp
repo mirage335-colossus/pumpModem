@@ -432,6 +432,13 @@ OscillatorPatternSearch oscillator_pattern_search(const Config& config,double co
 
 OscillatorPatternSearch oscillator_pattern_search(const Config& config,double correction,
                                                  PatternSearchResolution resolution) {
+    return oscillator_pattern_search(config,correction,resolution,PatternUtcClockGrid::preserve_original_lanes);
+}
+
+OscillatorPatternSearch oscillator_pattern_search(const Config& config,double correction,
+                                                 PatternSearchResolution resolution,PatternUtcClockGrid grid) {
+    if(grid!=PatternUtcClockGrid::preserve_original_lanes && grid!=PatternUtcClockGrid::complete_expanded_domain)
+        throw Error("invalid UTC clock catalogue policy");
     if(!std::isfinite(correction) || correction<0 || correction>.001)
         throw Error("invalid transmit timing correction search allowance");
     if(!std::isfinite(resolution.maximum_clock_step_ppm) || resolution.maximum_clock_step_ppm<0 ||
@@ -458,6 +465,13 @@ OscillatorPatternSearch oscillator_pattern_search(const Config& config,double co
         std::numeric_limits<double>::infinity());
     auto result=expanded_oscillator_pattern_search(adjusted,resolution);
     if(result.limited)return fallback();
+    if(grid==PatternUtcClockGrid::complete_expanded_domain) {
+        // The expanded symmetric bound A+C+A*C contains the entire original
+        // A domain. This result already meets the same frequency/quarter-chip
+        // cell coverage and passband checks. Retaining almost-identical old
+        // numerical representatives adds work, not physical uncertainty.
+        result.transmit_rate_correction=correction;return result;
+    }
     std::set<std::pair<double,double>> pairs;
     std::set<double> frequencies;
     for(const auto lane:original.hypotheses) {

@@ -1,6 +1,7 @@
 #pragma once
 // Opt-in developer instrumentation. Never call from an audio process callback.
 // Missing records/footer mean incomplete evidence, not a successful timing run.
+#include "trace_work_coalescer.hpp"
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -12,6 +13,7 @@
 #include <limits>
 #include <locale>
 #include <memory>
+#include <new>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -75,6 +77,25 @@ struct State {
     std::FILE* file=nullptr;
     std::string token,path;
     std::mutex mutex;
+    // Lazy bounded logger storage; optional allocation failure emits every call.
+    std::unique_ptr<WorkTraceCoalescer> acquisition_work_cache;
+    bool acquisition_work_cache_attempted=false;
+    WorkTraceDecision work_decision(WorkTraceCoalescer::Key key,const WorkTraceStamp& stamp,
+                                   std::uint64_t sample,bool force,bool retired) noexcept {
+        try {
+            std::lock_guard lock(mutex);
+            if(!acquisition_work_cache_attempted) {
+                acquisition_work_cache_attempted=true;
+                acquisition_work_cache.reset(new(std::nothrow) WorkTraceCoalescer());
+            }
+            if(acquisition_work_cache)return acquisition_work_cache->observe(key,stamp,sample,force,retired);
+        }catch(...){} // Diagnostic pressure cannot alter the receiver.
+        return {};
+    }
+    WorkTraceCoalescer::Stats work_stats() {
+        std::lock_guard lock(mutex);
+        return acquisition_work_cache?acquisition_work_cache->stats():WorkTraceCoalescer::Stats{};
+    }
     std::condition_variable changed,finished;
     struct Slot {std::atomic<std::uint64_t> sequence{0};std::string line;};
     std::array<Slot,capacity> slots;
@@ -123,9 +144,16 @@ struct State {
                 }
                 if(!write(line))++dropped;
             }
+            const auto work=work_stats();
             write("{\"event\":\"trace_end\",\"token\":"+datapump::audio::trace::quoted(token)+",\"finalization_required\":true,\"attempted\":"+std::to_string(attempted.load())+
                 ",\"dropped\":"+std::to_string(dropped.load())+",\"size_limited\":"+(size_limited?"true":"false")+
-                ",\"prior_io_failed\":"+(io_failed?"true":"false")+"}\n",true);
+                ",\"prior_io_failed\":"+(io_failed?"true":"false")+
+                ",\"coalesced_acquisition_work_calls\":"+std::to_string(work.coalesced_calls)+
+                ",\"pending_coalesced_acquisition_work_calls\":"+std::to_string(work.pending_calls)+
+                ",\"acquisition_work_tracked_open_owners\":"+std::to_string(work.open_owners)+
+                ",\"acquisition_work_tracked_lifecycles_closed\":"+(!work.open_owners&&!work.pending_calls?"true":"false")+
+                ",\"acquisition_work_capacity_declines\":"+std::to_string(work.capacity_declines)+
+                ",\"acquisition_work_lifecycle_scope\":\"tracked coalescer entries only; untracked owners require terminal-event scan\"}\n",true);
         }catch(...){io_failed=true;}
         const auto result=finish_file(file,io_failed);
         if(!result.succeeded())io_failed=true;
@@ -184,6 +212,34 @@ template<class F>void record(const char* event,F fields) noexcept {
     }catch(...){++state->dropped;}
     --state->producers;state->changed.notify_one();
 }
+// Joined numeric snapshots alone use this path. Producer registration encloses
+// coalescing, so the final footer cannot race an accepted cache update.
+template<class F>void record_work(WorkTraceCoalescer::Key key,const WorkTraceStamp& stamp,
+        std::uint64_t sample,bool force,bool retired,F fields) noexcept {
+    const auto state=active.load(std::memory_order_acquire);if(!state)return;
+    constexpr auto event="receiver_acquisition_work";
+    if(state->event_filter && !state->event_filter(event))return;
+    ++state->producers;
+    if(state->closing) {--state->producers;state->changed.notify_one();return;}
+    const auto decision=state->work_decision(key,stamp,sample,force,retired);
+    if(decision.emit) {
+        const auto sequence=state->attempted.fetch_add(1)+1;
+        try {
+            Fields f;f.add("sequence",sequence);
+            f.add("steady",std::chrono::duration<long double>(std::chrono::steady_clock::now().time_since_epoch()).count());
+            fields(f);
+            f.add("work_stamp_supported",stamp.valid);
+            f.add("work_coalescer_available",decision.cache_available);
+            f.add("work_coalescer_tracked",decision.tracked);
+            f.add("work_coalescer_capacity_declined",decision.capacity_declined);
+            f.add("coalesced_snapshot_calls",decision.coalesced_calls);
+            f.add("first_coalesced_sample",decision.first_coalesced_sample);
+            f.add("last_coalesced_sample",decision.last_coalesced_sample);
+            state->push("{\"event\":"+quoted(event)+f.out.str()+"}\n");
+        }catch(...){++state->dropped;}
+    }
+    --state->producers;state->changed.notify_one();
+}
 class Scope {
     std::shared_ptr<State> state_;
     std::thread writer_;
@@ -211,6 +267,8 @@ public:
         catch(...){active.store({});throw;}
         record("trace_begin",[&](Fields& f){f.add("schema",2);f.add("token",state_->token);f.add("maximum_queue_records",State::capacity);
             f.add("maximum_record_bytes",State::maximum_record);f.add("maximum_file_bytes",State::maximum_file_bytes);
+            f.add("acquisition_work_coalescer_maximum_owners",WorkTraceCoalescer::capacity);
+            f.add("acquisition_work_coalescer_maximum_bytes",sizeof(WorkTraceCoalescer));
             f.add("long_double_digits",std::numeric_limits<long double>::max_digits10);
             f.add("receiver_probe",receiver_probe);if(event_filter)f.add("event_filter",true);});
     }

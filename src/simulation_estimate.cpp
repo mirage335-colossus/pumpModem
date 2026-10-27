@@ -1104,6 +1104,9 @@ std::optional<modem::PatternStartWindow> fft_anchor_window(const transfer::Optio
 struct ReceiverLayoutContext {
     std::size_t cohort_capacity=0,maximum_consumers=128;
     bool shared_capture_reserved=false;
+    // Only an explicitly supplied realtime-helper residual catalogue receives
+    // the runtime shared-pulse serial policy. The ordinary curve is unchanged.
+    bool helper_shared_pulse_serial=false;
     std::optional<std::size_t> amplitude_family_bank_count,amplitude_fallback_family_bank_count;
 };
 ReceiverLayoutContext receiver_layout_context(const transfer::Options& options,
@@ -2434,6 +2437,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     strategy_search.search_stream_phases=private_pattern&&!config.symbol_burst.enabled();
     strategy_search.prefer_streamed_templates=streamed_templates;
     strategy_search.compact_clock_search=correlator;
+    strategy_search.helper_wait_for_shared_pulse=correlator && layout && layout->helper_shared_pulse_serial;
     strategy_search.start_offset_seconds=options.search_seconds+1.;
     strategy_search.start_uncertainty_seconds=options.search_seconds+1.;
     strategy_search.qualified_start_window=strategy_prior;
@@ -3032,7 +3036,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
                   bool compute_probability,double local_window_seconds,std::size_t probability_trials,
                   ReceiverWorkMode work_mode,ReceiverTimingModel timing_model,const live::Settings* actual_settings,std::stop_token stop,
                   bool support_only=false,const QualifiedHelperFrequencyScenario* helper_scenario=nullptr,
-                  const modem::OscillatorPatternSearch* receiver_search=nullptr) {
+                  const modem::OscillatorPatternSearch* receiver_search=nullptr,bool helper_wait_for_shared_pulse=false) {
     estimate_detail::check(stop);
     auto options=source_options;
     options.search_seconds=live::detail::effective_epoch_search_seconds(options,false);
@@ -3133,6 +3137,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
     }
     std::optional<ReceiverLayoutContext> layout;
     layout=receiver_layout_context(options,profiles,keys,work_mode,actual_settings,timing_model);
+    layout->helper_shared_pulse_serial=receiver_search && helper_wait_for_shared_pulse;
     Estimate result;result.receiver_profiles=profiles.size();result.receiver_work_mode=work_mode;
     result.probability_reference_only=arrival_policy(options,options.modem).has_value()||options.modem.dsss_factor>1;
     result.receiver_work_assumptions=work_mode==ReceiverWorkMode::sampled_simulation?
@@ -4322,8 +4327,15 @@ Estimate estimate_with_receiver_search(const transfer::Estimate& transmission,co
         const modem::ChannelConfig& channel,const modem::OscillatorPatternSearch& search,std::size_t keys,
         double window,ReceiverWorkMode mode,ReceiverTimingModel timing,const live::Settings* settings,std::stop_token stop,
         const modem::PatternHelperFrequencyWindow* execution_window) {
+    return estimate_with_receiver_search(transmission,options,raw_bits,channel,search,keys,window,mode,timing,
+        settings,stop,execution_window,false);
+}
+Estimate estimate_with_receiver_search(const transfer::Estimate& transmission,const transfer::Options& options,bool raw_bits,
+        const modem::ChannelConfig& channel,const modem::OscillatorPatternSearch& search,std::size_t keys,
+        double window,ReceiverWorkMode mode,ReceiverTimingModel timing,const live::Settings* settings,std::stop_token stop,
+        const modem::PatternHelperFrequencyWindow* execution_window,bool helper_wait_for_shared_pulse) {
     auto result=estimate_impl(transmission,options,raw_bits,channel,{},keys,false,window,0,mode,timing,settings,stop,
-        false,nullptr,&search);
+        false,nullptr,&search,helper_wait_for_shared_pulse);
     if(execution_window) {
         if(!execution_window->valid() || execution_window->clock_cell_half_width_ppm!=search.clock_step_ppm/2)
             throw Error("conditional receiver work requires the exact original runtime clock cells");
@@ -4370,7 +4382,7 @@ Estimate estimate_with_receiver_search(const transfer::Estimate& transmission,co
             scenario.profiles.push_back(std::move(profile));
             const auto baseline=result;
             result=estimate_impl(transmission,options,raw_bits,channel,{},keys,false,window,0,mode,timing,settings,stop,
-                false,&scenario,&search);
+                false,&scenario,&search,helper_wait_for_shared_pulse);
             // Future broad work remains the original source/cell catalogue;
             // no selected-domain price represents full fallback coverage.
             result.fallback_receiver_cpu_seconds=baseline.fallback_receiver_cpu_seconds;
