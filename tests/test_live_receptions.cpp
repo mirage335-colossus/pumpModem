@@ -153,6 +153,98 @@ void helper_source_handoff() {
     check(display.source_publication() && !display.source_publication()->count,
           "source metadata invalidation retained authority");
 }
+void helper_missing_prefix_handoff() {
+    using datapump::live::detail::ReceptionSourcePublication;
+    using datapump::live::detail::reception_first_missing_slot;
+    using datapump::live::detail::reception_source_gap_withdraws_prefix;
+    using datapump::live::detail::nominal_reception_support;
+    constexpr std::uint64_t t=15360;
+    // R13 Default-clock trace, seq983 ->1065/1067: the true source-zero
+    // owner exposed two known bits. A differently addressed middle slot then
+    // became unknown while its found third symbol raised normalized support.
+    ReceptionSourcePublication published;
+    published.epoch=1792949971;published.phase=0;published.count=2;
+    published.first=56484;published.end=87264;published.symbol_samples=t;
+    published.sample_rate=6000;published.timing_tolerance=120;
+    published.support=30720;published.helper_assisted=true;
+    datapump::modem::PatternBurst gap,tail;
+    gap.stream_first_sample=tail.stream_first_sample=27540;
+    gap.stream_first_symbol=tail.stream_first_symbol=1;
+    gap.first_stream_symbol=2;gap.end_sample=58260;gap.missing_slots=1;
+    tail.first_stream_symbol=3;tail.end_sample=73680;tail.bits={1};
+    gap.support_samples=tail.support_samples=30840;
+    std::array drained{gap,tail};
+    const auto first_missing=reception_first_missing_slot(drained,27540,1);
+    const auto support=nominal_reception_support(gap,drained,t);
+    check(first_missing==1 && support && std::abs(*support-30799.895968790635)<1e-8,
+          "R13 explicit middle gap or actual competing support changed");
+    const auto fit=[](std::uint64_t id,std::uint64_t first,std::uint64_t end,double score) {
+        auto c=candidate(id,first,end,score);c.family=0;c.symbol_samples=c.absence_samples=t;
+        c.timing_tolerance=120;c.helper_assisted=true;return c;
+    };
+    auto clean=fit(4,56484,87264,published.support);
+    auto gapped=fit(1,56492,102632,*support);
+    const auto eligible=[&](std::uint64_t missing,std::uint64_t owner=4) {
+        return [&,missing,owner](const auto& incoming,std::uint64_t,std::span<const std::uint64_t>,bool completed) {
+            if(completed || incoming.id==owner)return true;
+#if !defined(DATAPUMP_SOURCE_GAP_COUNTERFACTUAL)
+            if(incoming.uniform_source && reception_source_gap_withdraws_prefix(published,incoming.first,
+                incoming.symbol_samples,incoming.timing_tolerance,incoming.helper_assisted,missing))return false;
+#else
+            (void)missing;
+#endif
+            return true; // Unavailable optional source proof retains ordinary arbitration.
+        };
+    };
+    History h;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
+    const auto first=h.observe(clean,allocate);
+    const auto attempted=h.observe(gapped,allocate,eligible(first_missing));
+    check(!attempted.selected && attempted.signal_id==first.signal_id && attempted.revision==first.revision,
+          "R13 competing gap withdrew an already exposed known prefix slot");
+    gapped.complete=true;
+    check(!h.observe(gapped,allocate,eligible(first_missing)).selected,
+          "competing physical END authorized withdrawal of another owner's known prefix");
+    auto canonical=fit(3,56520,102660,46080);
+    const auto corrected=h.observe(canonical,allocate,eligible(UINT64_MAX));
+    check(corrected.selected && corrected.signal_id==first.signal_id,
+          "explicit gap protection froze a stronger fully known canonical correction");
+    canonical.complete=true;
+    check(h.observe(canonical,allocate,eligible(UINT64_MAX,3)).selected,
+          "canonical owner's fully scored END was held by an older prefix");
+    for(const bool completed:{false,true}) {
+        History after;ids=0;const auto old=after.observe(clean,allocate);
+        auto later_gap=gapped;later_gap.complete=completed;
+        const auto admitted=after.observe(later_gap,allocate,eligible(published.count));
+        check(admitted.selected && admitted.signal_id==old.signal_id,
+              "a gap after the known prefix changed ordinary handoff/END policy");
+    }
+    History own;ids=0;const auto own_first=own.observe(clean,allocate);clean.complete=true;
+    const auto own_end=own.observe(clean,allocate,eligible(first_missing));
+    check(own_end.selected && own_end.signal_id==own_first.signal_id,
+          "same owner's physical END acquired a competing-source gap requirement");
+    auto ordinary=published;ordinary.helper_assisted=false;
+    check(!reception_source_gap_withdraws_prefix(ordinary,56492,t,120,false,1) &&
+          !reception_source_gap_withdraws_prefix(published,56484+121,t,120,true,1) &&
+          !reception_source_gap_withdraws_prefix(published,56484,t*2,120,true,1) &&
+          !reception_source_gap_withdraws_prefix(published,56484,t,120,true,UINT64_MAX),
+          "gap protection reached ordinary, unrelated-birth/profile or unsupported historical geometry");
+    // Save explicit placeholders before an earlier chunk moves into content
+    // processing. The same bounded scalar protects every later chunk's turn.
+    auto placeholder=gap;placeholder.missing_slots=0;placeholder.first_stream_symbol=1;
+    placeholder.bits={0,datapump::modem::missing_pattern_bit};
+    std::array moved{placeholder,tail};
+    const auto saved=reception_first_missing_slot(moved,27540,1);
+    auto consumed=std::move(moved[0]);(void)consumed;moved[0].bits.clear();
+    check(saved==1 && reception_first_missing_slot(moved,27540,1)==UINT64_MAX &&
+          reception_source_gap_withdraws_prefix(published,56492,t,120,true,saved),
+          "consuming an earlier placeholder erased the saved current-drain gap witness");
+    placeholder.first_stream_symbol=0;
+    check(reception_first_missing_slot(std::span(&placeholder,1),27540,1)==UINT64_MAX,
+          "an invalid earlier source coordinate acquired gap authority");
+    gap.first_stream_symbol=UINT64_MAX;gap.missing_slots=2;
+    check(reception_first_missing_slot(std::span(&gap,1),27540,1)==UINT64_MAX,
+          "an overflowing missing run acquired gap authority");
+}
 void helper_nominal_support_geometry() {
     using datapump::modem::PatternBurst;
     using datapump::live::detail::nominal_reception_support;
@@ -1086,6 +1178,7 @@ int main() {
     try {
         source_address_sequence_geometry();
         helper_source_handoff();
+        helper_missing_prefix_handoff();
         helper_nominal_support_geometry();
         helper_physical_birth_ownership();
         helper_physical_birth_capacity_boundary();

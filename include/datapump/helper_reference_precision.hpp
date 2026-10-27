@@ -10,6 +10,7 @@
 #include <span>
 #include <string>
 namespace datapump::helper {
+enum class PilotObservationMode { legacy_segmented,continuous_phase,independent_retunes };
 struct TonePrecisionRequest {
     std::uint32_t sample_rate=0;
     double straight_cn0_db_hz=0,phase_noise_radians_per_sqrt_second=0;
@@ -21,6 +22,25 @@ struct TonePrecisionRequest {
     // The legacy modulated-tone forecast remains available for its controls.
     bool pilot_segmented=false;
     double pilot_coherent_aperture_seconds=.2,pilot_estimator_efficiency=1.25;
+    // Opt in explicitly. The default preserves existing TX lead scheduling.
+    PilotObservationMode pilot_observation=PilotObservationMode::legacy_segmented;
+    // Actual settled support within each400ms retune dwell, after ramps/filter
+    // settling. A caller may use400ms only when that full support is available.
+    double pilot_settled_aperture_seconds=.392;
+    // Physical seconds reserved for discovery/initial usable support. Zero
+    // retains the analytic seed+alignment reference. This is a software
+    // planning assumption, never a probability or a qualification deadline.
+    double pilot_discovery_budget_seconds=0;
+};
+struct PilotModelPrediction {
+    bool supported=false,target_reached=false;
+    PilotObservationMode observation=PilotObservationMode::legacy_segmented;
+    double extra_lead_seconds=0,total_lead_seconds=0,usable_seconds=0,coherent_aperture_seconds=0;
+    double discovery_budget_seconds=0;
+    double constant_frequency_noise_half_width_hz=0,constant_drift_endpoint_noise_half_width_hz=0;
+    double brownian_endpoint_half_width_hz=0,conditional_half_width_hz=0;
+    std::size_t independent_apertures=0;
+    std::string reason;
 };
 struct TonePrecisionPrediction {
     // supported grants a numeric precision estimate, not measured lock. A valid
@@ -44,6 +64,9 @@ struct TonePrecisionPrediction {
     // straight-tone forecast. Neither is an observed loss or a physical floor.
     double fallback_information_fraction=1,fallback_frequency_grid_hz=0;
     std::size_t expected_segments=0;
+    // Separate geometry/model comparison. It never changes the legacy lead
+    // schedule or receiver-cost input unless a caller explicitly opts in.
+    PilotModelPrediction pilot_model,retune_model;
     std::string reason;
 };
 namespace precision_detail {
@@ -208,6 +231,78 @@ inline std::size_t pilot_discovery_samples(std::uint32_t sample_rate) noexcept {
     std::size_t n=1024;
     while(n<sample_rate*.16 && n<32768)n*=2;
     return n;
+}
+inline TonePrecisionPrediction pilot_model_prediction(const TonePrecisionRequest& r) {
+    TonePrecisionPrediction out;out.baseline_lead_seconds=r.baseline_lead_seconds;
+    auto& model=out.pilot_model;model.observation=r.pilot_observation;
+    const auto steps=static_cast<unsigned>(std::floor(r.max_extra_seconds/.4));
+    const auto cn0=std::pow(10.,r.straight_cn0_db_hz/10);
+    const auto ratio=r.maximum_source_capture_ratio,dwell=.4/ratio;
+    const auto seed=static_cast<double>(pilot_discovery_samples(r.sample_rate))/r.sample_rate;
+    const auto block=std::max<std::size_t>(16,std::lround(r.sample_rate*.02));
+    double ws=0,w2=0;
+    for(std::size_t i=0;i<block;++i) {const auto w=.5-.5*std::cos(precision_detail::tau*i/(block-1));ws+=w;w2+=w*w;}
+    const auto gate=std::max(r.sample_rate*w2/(ws*ws),
+        16*1.5*r.sample_rate/(pilot_discovery_samples(r.sample_rate)-1));
+    const auto at=[&](double source_seconds) {
+        PilotModelPrediction p;p.observation=r.pilot_observation;p.total_lead_seconds=source_seconds;
+        // Budget discovery plus one unknown-alignment/settling dwell. This is
+        // planning support, not a promised acquisition/qualification date.
+        p.discovery_budget_seconds=std::max(seed+dwell,r.pilot_discovery_budget_seconds);
+        const auto available=std::max(0.,source_seconds/ratio-p.discovery_budget_seconds);
+        if(!std::isfinite(cn0)||cn0<=gate||available<dwell)return p;
+        const auto sigma=r.phase_noise_radians_per_sqrt_second;
+        double noise_variance=0,process_variance=0;
+        if(r.pilot_observation==PilotObservationMode::continuous_phase) {
+            const auto t=available;p.usable_seconds=p.coherent_aperture_seconds=t;p.independent_apertures=1;
+            const auto constant=3/(2*std::numbers::pi*std::numbers::pi*cn0*t*t*t);
+            p.constant_frequency_noise_half_width_hz=3*std::sqrt(constant);
+            // Unknown phase, frequency and constant drift: quadratic phase
+            // Fisher regression gives endpoint variance192 versus12 for a
+            // constant-frequency line fit, hence4× the constant-tone S3.
+            noise_variance=16*constant;
+            // Brownian phase increments with unknown linear frequency trend
+            // give current endpoint variance4*sigma^2/(tau^2*T).
+            process_variance=4*sigma*sigma/(precision_detail::tau*precision_detail::tau*t);
+        } else {
+            const auto count=std::floor(available/dwell);if(count<4)return p;
+            const auto aperture=r.pilot_settled_aperture_seconds/ratio;
+            p.independent_apertures=static_cast<std::size_t>(count);
+            p.coherent_aperture_seconds=aperture;p.usable_seconds=count*aperture;
+            const auto local=3/(2*std::numbers::pi*std::numbers::pi*cn0*aperture*aperture*aperture);
+            p.constant_frequency_noise_half_width_hz=3*std::sqrt(local/count);
+            const auto age=.5*count*dwell+(available-count*dwell);
+            const auto time_square=dwell*dwell*count*(count*count-1)/12;
+            const auto endpoint=1/count+age*age/time_square;
+            noise_variance=endpoint*local;
+            process_variance=endpoint*2*sigma*sigma/(precision_detail::tau*precision_detail::tau*aperture);
+        }
+        p.constant_drift_endpoint_noise_half_width_hz=3*std::sqrt(noise_variance);
+        p.brownian_endpoint_half_width_hz=3*std::sqrt(process_variance);
+        p.conditional_half_width_hz=3*std::sqrt(r.pilot_estimator_efficiency*r.pilot_estimator_efficiency*
+            noise_variance+process_variance);
+        p.supported=std::isfinite(p.conditional_half_width_hz);return p;
+    };
+    const auto sustained=at(r.baseline_lead_seconds+.4*steps);
+    out.sustained_at_seconds=sustained.total_lead_seconds;out.sustained_supported=sustained.supported;
+    if(sustained.supported)out.sustained_frequency_half_width_hz=sustained.conditional_half_width_hz;
+    for(unsigned step=0;step<=steps;++step) {
+        auto p=at(r.baseline_lead_seconds+.4*step);if(!p.supported)continue;
+        p.extra_lead_seconds=.4*step;p.target_reached=p.conditional_half_width_hz<=r.target_half_width_hz;
+        model=std::move(p);if(model.target_reached)break;
+    }
+    if(!model.supported) {model.extra_lead_seconds=.4*steps;model.total_lead_seconds=r.baseline_lead_seconds+.4*steps;}
+    model.reason=r.pilot_observation==PilotObservationMode::continuous_phase?
+        "conditional uninterrupted pilot with unknown constant frequency drift; phase retained across publication windows and amplitude ramps":
+        "conditional compatible common oscillator model from independently phased settled retune apertures; RF/audio mapping must be established; current actual-retune local fits do not establish pooled runtime precision";
+    model.reason+="; configured Brownian phase noise and stated projection efficiency included; straight-power idealization, ramp/filter gains, abrupt drift changes, model-selection delay, fades, self-interference and coverage require measured qualification; earlier seeded interval escapes remain a coverage limitation; not calibrated confidence or a runtime lease";
+    if(!model.supported)model.reason+="; software/bootstrap or available support declined the numeric prediction";
+    out.supported=model.supported;out.target_reached=model.target_reached;out.extension_capped=!model.target_reached;
+    out.extra_lead_seconds=model.extra_lead_seconds;out.total_lead_seconds=model.total_lead_seconds;
+    out.frequency_half_width_hz=model.conditional_half_width_hz;out.usable_tone_seconds=model.usable_seconds;
+    out.coherent_aperture_seconds=model.coherent_aperture_seconds;out.expected_segments=model.independent_apertures;
+    out.segmented_noise_reference_half_width_hz=model.constant_frequency_noise_half_width_hz;out.reason=model.reason;
+    return out;
 }
 // Conditional, deliberately short-aperture pilot model. Frequency summaries
 // share a local linear trend, but never phase. The endpoint regression penalty
@@ -427,12 +522,18 @@ inline TonePrecisionPrediction predict_tone_precision(const TonePrecisionRequest
        !std::isfinite(r.maximum_tracking_slew_hz_per_second) || r.maximum_tracking_slew_hz_per_second<0 ||
        !std::isfinite(r.pilot_coherent_aperture_seconds) || r.pilot_coherent_aperture_seconds<=0 || r.pilot_coherent_aperture_seconds>.392 ||
        !std::isfinite(r.pilot_estimator_efficiency) || r.pilot_estimator_efficiency<1 ||
+       !std::isfinite(r.pilot_settled_aperture_seconds) || r.pilot_settled_aperture_seconds<=0 || r.pilot_settled_aperture_seconds>.4 ||
+       !std::isfinite(r.pilot_discovery_budget_seconds) || r.pilot_discovery_budget_seconds<0 || r.pilot_discovery_budget_seconds>300 ||
+       (r.pilot_observation!=PilotObservationMode::legacy_segmented &&
+        r.pilot_observation!=PilotObservationMode::continuous_phase &&
+        r.pilot_observation!=PilotObservationMode::independent_retunes) ||
        r.metadata_symbols>16) {result.reason="invalid precision request";return result;}
     const auto maximum_total=static_cast<long double>(r.baseline_lead_seconds)+r.max_extra_seconds;
     const auto maximum_physical=maximum_total/r.maximum_source_capture_ratio;
     if(maximum_total>300 || !std::isfinite(maximum_physical) || maximum_physical>300) {
         result.reason="precision forecast exceeds bounded300s source/capture domain";return result;
     }
+    if(r.pilot_observation!=PilotObservationMode::legacy_segmented)return forecast_detail::pilot_model_prediction(r);
     if(r.pilot_segmented)return forecast_detail::pilot_prediction(r);
     auto max_steps=static_cast<unsigned>(std::floor(r.max_extra_seconds/.4));
     while(max_steps && .4*max_steps>r.max_extra_seconds)--max_steps;

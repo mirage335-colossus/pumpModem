@@ -588,6 +588,52 @@ void verbose_diagnostics() {
     check(!overflow.valid&&coalescer->observe({2,0,0},overflow,1,true,true).emit&&
         coalescer->stats().open_owners==tr::WorkTraceCoalescer::capacity-1,
         "Unknown stamp geometry omitted work or prevented final owner closure");
+    auto periodic=std::make_unique<tr::WorkTraceCoalescer>(16,true);
+    std::uint64_t jobs=0,selected_pairs=3,clock_rates=5,source=1,phase_view=0;
+    bool phase_flag=false,dispatch=true,qualified=true,phase_active=false;
+    const auto periodic_stamp=[&] {
+        tr::WorkTraceStamp stamp;stamp.add("template_jobs",jobs);
+        stamp.add("helper_window_selected_pairs",selected_pairs);
+        stamp.add("helper_window_selected_clock_rates",clock_rates);
+        stamp.add("realtime_clock_source_id",source);stamp.add("dispatch_permitted",dispatch);
+        stamp.add("realtime_locked",qualified);stamp.add("realtime_phase_corrected",phase_flag);
+        stamp.add("compact_phase_view_id",phase_view);stamp.add("compact_phase_active",phase_active);
+        return stamp;
+    };
+    check(periodic->observe(owner,periodic_stamp(),0,false,false).emit,"Periodic trace omitted initial counters");
+    ++jobs;phase_flag=true;
+    check(!periodic->observe(owner,periodic_stamp(),1,false,false).emit,"Periodic trace formatted an early cumulative update");
+    ++jobs;
+    check(!periodic->observe(owner,periodic_stamp(),15,false,false).emit,"Periodic trace ignored the declared interval");
+    decision=periodic->observe(owner,periodic_stamp(),16,false,false);
+    check(decision.emit&&decision.coalesced_calls==2&&decision.first_coalesced_sample==1&&
+        decision.last_coalesced_sample==15,"Periodic trace lost an unchanged-at-cadence pending work maximum");
+    ++jobs;check(!periodic->observe(owner,periodic_stamp(),18,false,false).emit,"Periodic trace missed a later counter-only update");
+    --jobs;decision=periodic->observe(owner,periodic_stamp(),19,false,false);
+    check(decision.emit&&decision.counter_regressed,"Periodic trace hid an intermediate counter reset");
+    --selected_pairs;check(periodic->observe(owner,periodic_stamp(),20,false,false).emit,"Periodic trace hid an RF mask change");
+    dispatch=false;check(periodic->observe(owner,periodic_stamp(),21,false,false).emit,"Periodic trace hid dispatch state");
+    --clock_rates;check(periodic->observe(owner,periodic_stamp(),22,false,false).emit,"Periodic trace hid clock selection");
+    ++source;check(periodic->observe(owner,periodic_stamp(),23,false,false).emit,"Periodic trace hid reference source identity");
+    qualified=false;check(periodic->observe(owner,periodic_stamp(),24,false,false).emit,"Periodic trace hid reference qualification");
+    phase_active=true;check(periodic->observe(owner,periodic_stamp(),25,false,false).emit,"Periodic trace hid phase work activation");
+    ++phase_view;check(periodic->observe(owner,periodic_stamp(),26,false,false).emit,"Periodic trace hid a phase input-view change");
+    jobs+=5;check(!periodic->observe(owner,periodic_stamp(),27,false,false).emit,"Periodic trace did not sample stable-state work");
+    decision=periodic->observe(owner,periodic_stamp(),28,true,false);
+    check(decision.emit&&decision.coalesced_calls==1,"Periodic trace hid an incomplete/error/forced snapshot");
+    jobs+=2;check(!periodic->observe(owner,periodic_stamp(),29,false,false).emit,"Periodic trace failed after a forced snapshot");
+    decision=periodic->observe(owner,periodic_stamp(),30,false,true);
+    check(decision.emit&&decision.coalesced_calls==1&&periodic->stats().open_owners==0&&
+        periodic->stats().pending_calls==0,"Periodic retirement lost final counters or an unpublished call");
+    for(std::size_t i=0;i<tr::WorkTraceCoalescer::capacity;++i)
+        check(periodic->observe({3,i,0},zero,0,false,false).tracked,"Periodic cache declined an in-capacity owner");
+    decision=periodic->observe({3,1000,0},zero,1,false,false);
+    check(decision.emit&&!decision.tracked&&decision.capacity_declined,"Periodic cache exhaustion silently dropped work");
+    auto strict_phase=std::make_unique<tr::WorkTraceCoalescer>(16);
+    check(strict_phase->observe(owner,periodic_stamp(),0,false,false).emit,"Counter sampler omitted its initial phase state");
+    phase_flag=!phase_flag;
+    check(strict_phase->observe(owner,periodic_stamp(),1,false,false).emit,
+        "Counter-only opt-in sampled phase state without the separate reference-event promise");
     tr::State uncached;uncached.acquisition_work_cache_attempted=true;
     decision=uncached.work_decision(owner,zero,0,false,false);
     check(decision.emit&&!decision.cache_available,"Optional logger allocation failure suppressed work evidence");
@@ -617,6 +663,27 @@ void verbose_diagnostics() {
         text.find("\"acquisition_work_tracked_lifecycles_closed\":true")!=std::string::npos&&
         text.find("tracked coalescer entries only; untracked owners require terminal-event scan")!=std::string::npos,
         "Verbose trace failed to drain before provisional footer");
+    check(text.find("work_snapshot_mode")==std::string::npos,"Default exact trace acquired periodic-only schema");
+    const auto periodic_path=std::filesystem::path(path.string()+".periodic");
+    unsigned periodic_formatted=0;std::uint64_t periodic_jobs=0;
+    {tr::Scope trace(periodic_path,false,nullptr,16,true);
+        const auto snapshot=[&](std::uint64_t sample,bool force=false,bool retire=false) {
+            tr::WorkTraceStamp stamp;stamp.add("template_jobs",periodic_jobs);
+            tr::record_work(owner,stamp,sample,force,retire,[&](auto& f) {
+                ++periodic_formatted;f.add("template_jobs",periodic_jobs);
+            });
+        };
+        snapshot(0);periodic_jobs=17;snapshot(1);snapshot(16);
+        periodic_jobs=99;snapshot(17);snapshot(18,true,true);
+    }
+    std::ifstream periodic_in(periodic_path);const std::string periodic_text((std::istreambuf_iterator<char>(periodic_in)),{});
+    check(periodic_formatted==3&&periodic_text.find("\"acquisition_work_minimum_interval_samples\":16")!=std::string::npos&&
+        periodic_text.find("\"work_snapshot_mode\":\"periodic_cumulative_counters\"")!=std::string::npos&&
+        periodic_text.find("\"work_reference_phase_flag_periodic\":1")!=std::string::npos&&
+        periodic_text.find("\"template_jobs\":99")!=std::string::npos&&
+        periodic_text.find("\"acquisition_work_tracked_lifecycles_closed\":true")!=std::string::npos,
+        "Periodic trace did not announce its cadence or retain terminal cumulative work");
+    std::filesystem::remove(periodic_path);
     auto* close_fixture=std::tmpfile();check(close_fixture!=nullptr,"Cannot create trace close fixture");
     auto final=tr::finish_file(close_fixture,false);
     check(final.succeeded()&&close_fixture==nullptr&&!tr::finish_file(close_fixture,false).succeeded(),

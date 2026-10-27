@@ -1,10 +1,12 @@
 # Helper Carrier implementation and qualification
 
-Updated 27 October 2026. The current GUI is `build/dev/datapump-gui`.
-The R7 GUI/CLI rebuild and three focused Session/stage/tracker checks pass.
-The later optional metadata-budget CLI edit still needs rebuilding. Full
-qualification remains incomplete. [Validation](validation.md) retains actual
-commands, bindings, failed results and the detailed measured limits.
+Updated 27 October 2026. Human checkpoint `62db765` is committed; the current
+overlay remains under implementation. R13 passes unchanged positive GPS-clock
+reception, while Default source-handoff repair passes a private matched check.
+Fresh R14 application/test builds are pending. The manual GUI remains
+`build/dev/datapump-gui`; no full receiver/contract qualification is claimed.
+[Validation](validation.md) retains commands, source bindings, original failures
+and measured limits.
 
 ## Current implementation
 
@@ -13,11 +15,13 @@ commands, bindings, failed results and the detailed measured limits.
   is data, guard, auxiliary, guard, pure pilot: auxiliary starts 450 Hz above
   the shaped data edge, adjusted by leakage bound; pilot spacing is 400 Hz.
   The radio/audio passband and filter margin remain physical requirements.
-- Full oscillator/capture-derived FFT discovery precedes ten 20 ms projections
-  per independent 200 ms context. Bounded numeric fallback allows one phase gap
-  for frequency only. At most 192 frequency records span 36 seconds. Pooled
-  frequency has no cross-retune phase authority. Measured tracker storage is
-  403,016 bytes; raw staging is separately prepaid and capped at 400 ms.
+- Full oscillator/capture-derived discovery precedes local refinement. The
+  tested segmented 200 ms contexts are software apertures, not a continuous-tone
+  physical limit. The reviewed continuous repair retains 54.805-second actual-
+  channel coherence, but substantial drift-case interval escapes remain; no
+  operational confidence or precision qualification follows.
+  Numeric history retention is separate from the 36-second extra-lead cap.
+  Unknown retune phases remain independent; raw staging stays bounded at 400 ms.
 - One ordinary Robust bank narrows existing and new RF candidates while
   retaining unresolved clock/timing alternatives. Every committed payload sample
   and date remains required. Phase needs local support; later frequency cannot
@@ -34,47 +38,51 @@ together; ramps, metadata and received gains are separate power effects.
 
 ## Measured status and remaining acceptance
 
-A strong RF-only Session control passes 73 independent-phase retunes at
-7/7.7/8.4/9.1 MHz, 887 qualified references with no frequency escape, and exact
-`001` with one pending identity/physical END. The guard accepts +2.19 Hz and
-declines +142.7 Hz while preserving the NCO. Phase-covered feeds execute 3,626
-owner-job deltas; this is not whole-symbol phase coverage. DATA SNR 40 dB,
-zero drift and an exact audio clock are laboratory assumptions. Independent-LF
-Session work is in progress; no hardware retune adapter is qualified.
+Actual random-phase RF Session controls retain exact `001`, pending identity and
+physical END under strong laboratory assumptions. The independent-LF constructor
+reduces 437→5 pairs with the full ±300 ppm domain; further existing-mask work is
+zero/unexercised there. A short continuous EME observation now demonstrates
+existing-owner 33→3 narrowing with three clock alternatives retained, final
+U 0.000189 Hz and actual compact work. Its 96.189 audio seconds end before the
+128-second four-symbol batch: no bits/END or full EME reception is established.
+The collector's earlier zero compact summary and corrected terminal-total replay
+remain separately recorded. There is no qualified hardware retune adapter.
 
-New optional phase bounds give all-sample 128-second component loss
-0.0695/3.6321 dB at 30 dB-Hz continuous/random phase, and 0.00627/0.27925 dB at
-40 dB-Hz. The old 30 dB-Hz gate admitted no phase fits; that was a software
-limit. There are no new-bound escapes over 18,633,600 dense prediction checks.
-These fixed-RF controls exclude the payload notch and ordinary 128-second
-completion. Earlier interval escapes and whole-aperture losses remain retained.
+The actual-channel continuous control retains 54.805 seconds of coherence and
+U 0.001678 Hz, but drift coverage still fails: one case escapes at 507/2,967
+unique current dates, and aligned KF/WLS comparisons do not remove the failures.
+The 384 ms settled-dwell extension has 44 shifted-calendar raw fits without
+escapes. Its amplitude-aware kernel and new frequency-only admissions remain
+unvalidated. The four-state RF/audio-rate model is component-only; positive Q is
+uncalibrated and reaches ±0.103–0.110 Hz at 49 MHz/40 dB-Hz. These results supply
+no operational-confidence guarantee. A private four-second forecast meets its
+25-seed milestone but preserves eight earlier escapes; it remains unbuilt and
+unpromoted, distinct from the 36-second additional-airtime cap.
 
-HF40 remains incomplete after caching: one non-TX-epoch pending bit/no END,
-while the true-epoch owner executes no FFTs. The 96.98% cache hit rate and lower
-descriptive hot-feed CPU do not establish a causal speedup across fresh keyed
-waveforms. HF15k passes the primary fixture with actual 127→2 owner narrowing,
-but signal 4's false/truncated `01` remains a strict qualification failure.
-Signal 6 is a permitted compatible-prefix correction. Rate-360 passes its
-primary fixture but has an epoch ambiguity and unchanged 9→9 masks on folded
-mono. Correct primary data does not establish all-row/cable acceptance.
+The same-input R9 HF window measures 23.04% less process CPU and 27.80% fewer FFT
+jobs, with zero bits in both controls. The full R11 HF run remains incomplete:
+true-TX owner 48 has seven bits; the eight-bit matching primary has a different
+epoch and no END. Existing HF15k/Rate-360 primary passes retain their row/epoch
+limits. GPSDO-model HF controls pass eight bits/END, including a same-lab-key
+control whose different TX epoch prevents exact dated-wire CPU comparison.
+Earlier EME CPU/workspace admission failures and its incomplete GPSDO control
+remain preserved, without physical-limit claims.
 
-EME R5 has zero owners/bits despite sustained pilot qualification: 53,012 modeled
-CPU-admission rejections, minimum prediction 1.221164 above the 0.6 objective.
-The separate actual constructor is also typed pending before PCM: its
-10,092,055-byte share is short 508,071/1,270,881 bytes at 83/89 pairs. Exact-lattice
-reservation saves only 38,880 bytes, remains insufficient and was rejected
-without production edits. EME GPSDO control is incomplete after 2.73067 captured
-seconds and no full symbol/END. None of these is a physical limit or measured
-one-owner throughput. The three HF GPSDO-model controls pass exact eight bits.
+R13 unchanged positive GPS-clock reception passes after repairing optional-owner
+birth funding. The unchanged Default case exposes a gap over a known prefix; its
+narrow handoff repair passes the private same-Default CPU-0/1 check. The rolling
+loss/drain check still fails with processed frontier zero; that frontier repair
+is source-reviewed only. The first dedicated loss attempt is SETUP_INVALID due
+to header ABI mixing and supplies no behavioral coverage. Metadata/API/CLI
+checks pass within the 400,012-byte optional budget at 48 kHz, but metadata never
+qualifies pilot frequency assistance.
 
-The serial-row cache passes 47,462,282 exact score comparisons and nonzero
-acquisition checks (2,107 jobs), using 164,008 bytes. R6 build/selected CTests
-pass; full regression and throughput qualification remain pending. Full-composite
-N0CALL metadata has a first 7/7 component pass; nominal-offset/random-hop tests
-and Live routing remain in progress. Metadata does not qualify frequency aid.
-The controller null guard passes its selected full repair tests; the preceding
-failed GUI group remains retained. Supplied HF/EME completion, larger payloads,
-strict cable, full contract/native/sanitizer and hardware coverage remain open.
+The serial-row cache passes exact arithmetic/acquisition checks; 128-second
+phase-component tests retain measured losses and earlier escapes. Neither is
+full receiver throughput or completion qualification. Local-RF diagnostics retain
+two 30 dB-Hz availability failures, and all historical failed checks remain in
+validation. Full GUI/contract/native/sanitizer groups, large payloads, strict
+cable, supplied HF/EME completion and intended-hardware qualification remain open.
 
 Current preservation requirements are in the [development contract](development.md),
 [build/test stages](building.md#testing-stages) and [Helper reference](helper-carrier.md).

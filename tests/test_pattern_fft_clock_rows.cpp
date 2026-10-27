@@ -54,7 +54,7 @@ struct PatternReceiverStartupGuideTestAccess {
         s.spectrum=s.work;detail::pattern_fft(s.spectrum,false,{});
     }
     static std::vector<detail::FftSearchScore> score(State& s,std::uint64_t symbol,std::size_t f,
-            std::span<const Rows::Pair> rows) {
+            std::span<const Rows::Pair> rows,detail::search_fft::DoubleTableView tables={}) {
         std::vector<detail::FftSearchScore> result(s.hop);
         std::vector<Complex> product(s.transform);
         for(unsigned bit=0;bit<2;++bit) {
@@ -63,9 +63,11 @@ struct PatternReceiverStartupGuideTestAccess {
                 const auto value=s.template_value(i,symbol,bit,f,rows);
                 product[s.length-1-i]=std::conj(value);norm+=std::norm(value);
             }
-            detail::pattern_fft(product,false,{});
+            if(tables.maximum)detail::search_fft::fft(std::span(product),false,tables);
+            else detail::pattern_fft(product,false,{});
             for(std::size_t i=0;i<s.transform;++i)product[i]=s.spectrum[i]*product[i];
-            detail::pattern_fft(product,true,{});
+            if(tables.maximum)detail::search_fft::fft(std::span(product),true,tables);
+            else detail::pattern_fft(product,true,{});
             for(std::size_t j=0;j<s.hop;++j) {
                 const auto value=detail::pattern_evidence(product[s.length-1+j],
                     s.energy_prefix[j+s.length]-s.energy_prefix[j],norm,
@@ -142,6 +144,63 @@ struct PatternReceiverStartupGuideTestAccess {
         check(!Rows::create(s.length,Rows::required_bytes(s.length)-1),"one-byte-short cache grant was ignored");
         std::cout<<"clock rows: exact owner/key/phase/origin identities, low grants and cancellation/retry passed\n";
     }
+    static void serial_tables() {
+        auto grid=search();grid.hypotheses.clear();
+        for(int clock=-17;clock<=17;++clock) {
+            const auto ppm=clock*300./17;grid.hypotheses.push_back({-962.5*ppm*1e-6,ppm});
+        }
+        PatternReceiver receiver(config(),32*1024*1024,grid);auto& s=*receiver.impl_;
+        receiver.set_workspace_bytes(serial_grant(s,true));prepare_input(s);s.prepare_scoring({});
+        check(s.scoring.empty(),"serial tables displaced original worker preparation");
+        const auto before=s.arithmetic_reservation;
+        struct Reservation {std::size_t& value;std::size_t before;~Reservation(){value=before;}} reservation{s.arithmetic_reservation,before};
+        auto rows=s.prepare_serial_clock_rows(1);check(bool(rows),"tables control lost the funded original raw cache");
+        const auto held=s.arithmetic_reservation;const auto input=s.work;
+        std::vector<Complex> inverse;
+        check(!s.prepare_serial_double_tables(1,inverse,{}).maximum && !inverse.capacity() &&
+            s.arithmetic_reservation==held && s.work==input,"low table grant changed backing or original admission");
+        const auto table_bytes=(s.transform-1)*sizeof(Complex)+sizeof(inverse);
+        receiver.set_workspace_bytes(serial_grant(s,true)+table_bytes);
+        check(!s.prepare_serial_double_tables(2,inverse,{}).maximum && !inverse.capacity() &&
+            s.work==input,"multiworker preparation admitted serial tables");
+        const auto rounding=std::fegetround();
+        check(std::fesetround(FE_DOWNWARD)==0,"rounding-mode control unavailable");
+        const auto declined=s.prepare_serial_double_tables(1,inverse,{});
+        check(std::fesetround(rounding)==0,"rounding-mode restoration failed");
+        check(!declined.maximum && !inverse.capacity() && s.work==input && s.arithmetic_reservation==held,
+            "nondefault rounding admitted tables or changed input");
+        {
+            std::vector<Complex> cancelled_inverse;std::stop_source stop;stop.request_stop();bool cancelled=false;
+            try {(void)s.prepare_serial_double_tables(1,cancelled_inverse,stop.get_token());}
+            catch(const Error&){cancelled=true;}
+            check(cancelled && s.work==input,"pre-cancelled table preparation mutated borrowed input");
+        }
+        s.arithmetic_reservation=held;
+        const auto tables=s.prepare_serial_double_tables(1,inverse,{});
+        check(tables.maximum==s.transform && tables.forward.data()==s.work.data() &&
+            tables.inverse.data()==inverse.data() && s.arithmetic_reservation==held+
+            inverse.capacity()*sizeof(Complex)+sizeof(inverse),"table backing/control was not charged or borrowed correctly");
+        std::size_t cohorts=0,comparisons=0;
+        for(std::uint64_t symbol=0;symbol<s.search.initial_stream_symbols;++symbol) {
+            std::size_t n=0;const auto phases=s.phase_groups(symbol,0,s.phase_upper,n);
+            for(std::size_t group=0;group<n;++group) {
+                ++cohorts;s.stream_phase(phases[group].lower);s.prepare_templates(symbol,{});
+                for(std::size_t f=0;f<s.templates.size();++f) {
+                    const auto raw=s.serial_clock_rows(rows.get(),symbol,f,{});
+                    const auto original=score(s,symbol,f,raw),actual=score(s,symbol,f,raw,tables);
+                    for(std::size_t i=0;i<actual.size();++i) {
+                        check(bits(actual[i].zero,original[i].zero) && bits(actual[i].one,original[i].one),
+                            "serial table changed score bit patterns");comparisons+=2;
+                    }
+                }
+            }
+        }
+        check(cohorts==7 && s.fft_workload->exact_clock_row_builds==245 && !s.fft_workload->exact_clock_row_hits,
+            "table control changed the original 35-clock/seven-cohort work");
+        std::cout<<"serial tables: cohorts="<<cohorts<<" clocks=35 score_bit_comparisons="<<comparisons
+            <<" charged_inverse_bytes="<<inverse.capacity()*sizeof(Complex)+sizeof(inverse)
+            <<" borrowed_forward_bytes="<<tables.forward.size_bytes()<<"; low grant/rounding/workers/cancellation passed\n";
+    }
     static void executed_paths() {
         std::vector<PatternFftWork> work;
         std::vector<std::uint64_t> trials;
@@ -153,9 +212,11 @@ struct PatternReceiverStartupGuideTestAccess {
         transmitter.read_analytic(analytic);
         const auto padding=pattern_pulse_padding_samples(c);
         auto actual_search=search();actual_search.retain_score=5;
-        for(const bool cached:{false,true}) {
+        for(const unsigned variant:{0U,1U,2U}) {
+            const bool cached=variant!=0;
             PatternReceiver receiver(c,32*1024*1024,actual_search);auto& s=*receiver.impl_;
-            receiver.set_workspace_bytes(serial_grant(s,cached));
+            const auto table_bytes=(s.transform-1)*sizeof(Complex)+sizeof(std::vector<Complex>);
+            receiver.set_workspace_bytes(serial_grant(s,cached)+(variant==2?table_bytes:0));
             const auto room=receiver.acquisition_state().input_room_samples;
             std::vector<float> pcm(room);std::mt19937_64 random(781);std::normal_distribution<double> noise(0,.03);
             for(auto& sample:pcm)sample=static_cast<float>(noise(random));
@@ -183,26 +244,34 @@ struct PatternReceiverStartupGuideTestAccess {
         check(!work[0].exact_clock_row_builds && !work[0].exact_clock_row_peak_bytes &&
             work[1].exact_clock_row_builds==63 && work[1].exact_clock_row_hits==2044 &&
             work[1].coherent_fft_worker_slots_peak==1,"actual serial cache admission/use was not observed");
-        check(!evidence[0].empty() && !bursts[0].empty() && evidence[0].size()==evidence[1].size() &&
-            bursts[0].size()==bursts[1].size(),"nonzero actual collection comparison was empty or changed extent");
-        for(std::size_t i=0;i<evidence[0].size();++i) {
-            const auto& a=evidence[0][i];const auto& b=evidence[1][i];
-            check(a.first_sample==b.first_sample && a.end_sample==b.end_sample && a.stream_symbol==b.stream_symbol &&
-                bits(a.frequency_hz,b.frequency_hz) && bits(a.score,b.score) && bits(a.alternative_score,b.alternative_score) &&
-                a.bit==b.bit && a.stream_phase_samples==b.stream_phase_samples && bits(a.admission_threshold,b.admission_threshold) &&
-                a.frequency_hypothesis==b.frequency_hypothesis && a.outer_presence_active==b.outer_presence_active &&
-                bits(a.outer_presence_score,b.outer_presence_score) && a.completed_event==b.completed_event,
-                "cache changed ordered actual candidate fields/score bits");
-        }
-        for(std::size_t i=0;i<bursts[0].size();++i) {
-            const auto& a=bursts[0][i];const auto& b=bursts[1][i];
-            check(a.bits==b.bits && a.first_sample==b.first_sample && a.end_sample==b.end_sample &&
-                a.first_stream_symbol==b.first_stream_symbol && bits(a.frequency_hz,b.frequency_hz) && bits(a.score,b.score) &&
-                a.complete==b.complete && a.helper_acquired==b.helper_acquired &&
-                a.helper_conditioned_acquisition==b.helper_conditioned_acquisition &&
-                a.stream_phase_samples==b.stream_phase_samples && a.stream_first_sample==b.stream_first_sample &&
-                a.stream_first_symbol==b.stream_first_symbol && a.missing_slots==b.missing_slots && bits(a.support_samples,b.support_samples),
-                "cache changed ordered actual payload/progress fields or score bits");
+        check(!work[0].tabulated_fp64_transforms && !work[1].tabulated_fp64_transforms &&
+            work[2].tabulated_fp64_transforms==4*work[2].fft_jobs && work[2].template_jobs==work[1].template_jobs &&
+            work[2].input_transforms==1 && work[2].coherent_fft_worker_slots_peak==1 &&
+            work[2].exact_clock_row_builds==work[1].exact_clock_row_builds &&
+            work[2].exact_clock_row_hits==work[1].exact_clock_row_hits && trials[2]==trials[1],
+            "actual tables changed original job, trial, worker or raw-cache admission");
+        for(const unsigned variant:{1U,2U}) {
+            check(!evidence[0].empty() && !bursts[0].empty() && evidence[0].size()==evidence[variant].size() && bursts[0].size()==bursts[variant].size(),
+                "nonzero actual collection comparison was empty or changed extent");
+            for(std::size_t i=0;i<evidence[0].size();++i) {
+                const auto& a=evidence[0][i];const auto& b=evidence[variant][i];
+                check(a.first_sample==b.first_sample && a.end_sample==b.end_sample && a.stream_symbol==b.stream_symbol &&
+                    bits(a.frequency_hz,b.frequency_hz) && bits(a.score,b.score) && bits(a.alternative_score,b.alternative_score) &&
+                    a.bit==b.bit && a.stream_phase_samples==b.stream_phase_samples && bits(a.admission_threshold,b.admission_threshold) &&
+                    a.frequency_hypothesis==b.frequency_hypothesis && a.outer_presence_active==b.outer_presence_active &&
+                    bits(a.outer_presence_score,b.outer_presence_score) && a.completed_event==b.completed_event,
+                    "cache changed ordered actual candidate fields/score bits");
+            }
+            for(std::size_t i=0;i<bursts[0].size();++i) {
+                const auto& a=bursts[0][i];const auto& b=bursts[variant][i];
+                check(a.bits==b.bits && a.first_sample==b.first_sample && a.end_sample==b.end_sample &&
+                    a.first_stream_symbol==b.first_stream_symbol && bits(a.frequency_hz,b.frequency_hz) && bits(a.score,b.score) &&
+                    a.complete==b.complete && a.helper_acquired==b.helper_acquired &&
+                    a.helper_conditioned_acquisition==b.helper_conditioned_acquisition &&
+                    a.stream_phase_samples==b.stream_phase_samples && a.stream_first_sample==b.stream_first_sample &&
+                    a.stream_first_symbol==b.stream_first_symbol && a.missing_slots==b.missing_slots && bits(a.support_samples,b.support_samples),
+                    "cache changed ordered actual payload/progress fields or score bits");
+            }
         }
         PatternReceiver parallel(config(),32*1024*1024,search());auto& p=*parallel.impl_;
         const auto room=parallel.acquisition_state().input_room_samples;std::vector<float> zeros(room);
@@ -213,12 +282,12 @@ struct PatternReceiverStartupGuideTestAccess {
             <<" serial_slots="<<work[1].coherent_fft_worker_slots_peak<<" parallel_slots="<<w.coherent_fft_worker_slots_peak
             <<" builds="<<work[1].exact_clock_row_builds<<" hits="<<work[1].exact_clock_row_hits
             <<" peak_bytes="<<work[1].exact_clock_row_peak_bytes<<" ordered_candidates="<<evidence[0].size()
-            <<" ordered_bursts="<<bursts[0].size()<<'\n';
+            <<" ordered_bursts="<<bursts[0].size()<<" table_transforms="<<work[2].tabulated_fp64_transforms<<'\n';
     }
 };
 } // namespace datapump::modem
 int main(){try {
     using Test=datapump::modem::PatternReceiverStartupGuideTestAccess;
-    Test::seven_cohorts();Test::identity_cancellation_and_grants();Test::executed_paths();
+    Test::seven_cohorts();Test::identity_cancellation_and_grants();Test::serial_tables();Test::executed_paths();
     std::cout<<"exact serial clock rows PASS\n";return 0;
 }catch(const std::exception& error){std::cerr<<"FAIL: "<<error.what()<<'\n';return 1;}}

@@ -18,13 +18,13 @@ straight-tone intervals, before ramps, metadata and channel response. The pilot
 is nine times stronger in power, three times in amplitude and 9.54 dB above the
 auxiliary. The pilot has no intentional phase reversals or metadata modulation.
 
-The rebuilt manual-checkpoint GUI is
-`build/dev/datapump-gui`. The initial application build and five focused checks
-passed. The R7 GUI/CLI rebuild and three focused Session/stage/tracker checks
-pass; broader qualification remains incomplete. The rebuilt
-GUI and archive hashes are recorded in [validation](validation.md). Prior single-tone
-HF, cable and EME results do not qualify this changed waveform. In particular,
-the old strict cable suffix/prefix failures and incomplete EME runs remain open.
+The manual GUI path is `build/dev/datapump-gui`. R13 passes unchanged positive
+GPS-clock reception after optional-owner resource repair. Default source-handoff
+repair passes a private matched check; fresh R14 application/test builds remain
+pending. Loss/drain and full receiver qualification remain open.
+The human checkpoint is `62db765`. Exact earlier binary/source results remain
+in [validation](validation.md); full receiver/regression qualification is incomplete.
+Earlier binaries and failures retain their own source bindings.
 
 ## Manual reception
 
@@ -43,17 +43,23 @@ refresh existing candidates and new admissions. Unresolved audio-clock and
 UTC/timing alternatives remain required. The helper-specific work-admission
 estimate is conditional; it is not a measured total-process CPU ceiling.
 
-The segmented pilot path uses a bounded FFT discovery window (8,192 samples at
-48 kHz), then ten 20 ms Hann projections per independent 200 ms context.
-Frequency-only numeric records, at most 192 spanning 36 seconds, fit a locally
-linear oscillator trend. A bounded numeric fallback fits the current context
-with a possible phase gap; it supplies frequency while phase authority remains
-local. Unknown retune phase is not pooled across contexts.
-The current measured tracker workspace is 403,016 bytes at 48 kHz;
-this excludes the frontend and ordinary receivers. Dated segment interfaces can
-map compatible residual measurements using a signed RF scale, with independently
-unknown phase. Their component controls use known clock relationships; they do
-not resolve arbitrary RF/audio-clock ambiguity.
+The tested segmented path discovers over the oscillator/capture prior, then uses
+ten 20 ms projections per 200 ms software context. These contexts are not a
+physical coherence limit for an uninterrupted non-hopping pilot. Current
+continuous-pilot work retains dated numeric phase/frequency information over
+longer support, without bridging unrelated retune phases or searching old PCM.
+Reviewed repairs now retain long continuous support on the actual channel
+component, but substantial drift-case coverage failures prevent operational
+precision qualification. A reviewed full settled-dwell extension uses 384 ms
+where available; its amplitude-aware kernel and new frequency-only admissions
+remain unvalidated. Numeric history duration is separate from the maximum 36 additional seconds of
+transmitted precision lead. Earlier segmented memory/results remain bound to
+their own source; current continuous workspace must be measured separately.
+
+Dated RF mappings and unresolved audio-clock uncertainty still apply. A tone
+does not universally resolve arbitrary RF/audio-clock ambiguity. The frozen
+local-RF matrix preserves two 30 dB-Hz availability failures despite zero
+endpoint escapes; strong-case success and cold-noise rejection do not erase them.
 
 Current source also contains local context-phase observations and a separately
 funded, at most 400 ms raw staging FIFO. The integration must preserve sample
@@ -71,7 +77,8 @@ passes 73 independent-phase retunes, exact `001`, one pending identity and
 physical END; it uses an exact audio clock, DATA SNR 40 dB and zero drift.
 The source-band guard accepts +2.19 Hz and declines +142.7 Hz while retaining
 the old NCO. Covered-feed job checks pass; independent-clock/supplied-HF and
-ordinary 128-second completion remain unqualified. The application has no actual rig-retune adapter. Fake FHSS keeps physical RF fixed and does not prove
+ordinary 128-second completion remain unqualified. The application has no actual
+rig-retune adapter. Fake FHSS keeps physical RF fixed and does not prove
 reception through hardware phase jumps.
 
 Without a fresh qualified reference, new assisted acquisition may wait. Reference
@@ -93,12 +100,35 @@ or uncertainty-coverage requirements.
 
 R5 component controls retain useful precision without calibrated confidence
 claims. At 24 dB-Hz sampled pilot C/N0, composite availability is 97.45% static
-and 96.39% random-hop, with final U near 0.222/0.250 Hz. The baseline has no
+and 96.39% random-hop, with final U near 0.222/0.250 Hz. Those are short-aperture
+software results, not a physical continuous-tone precision limit. The baseline has no
 observed escapes across 1,551 estimates, but a 12-seed blind 30 dB-Hz ensemble
 retains one escaped straight-fit estimate among 2,225. Twelve actual-waveform
 cases have no observed escapes across 2,071 frequency estimates and 1,339 sampled
 phase fits. Earlier coverage failures remain preserved in validation. Component
 precision, mask counts and phase RMS are not whole-receiver CPU savings.
+
+The finalized actual-channel repair retains 54.805 seconds of coherence with
+one startup reset and final U 0.001678 Hz/error −0.000307 Hz, with no escapes
+over 1,948 unique dates in that control. This does not calibrate the intervals:
+a separate 40 dB-Hz constant-drift case has 507/2,967 escaped unique current
+publication dates (17.1%), including a sustained late excursion. The bounded
+aligned KF/WLS comparison finds no arithmetic discrepancy, and
+known weights do not remove the escapes. Production R5 remains unchanged; no
+multiplier, physical limit or operational-confidence claim follows.
+The full R11 HF run ends incomplete: the true TX owner has seven wire bits;
+the matching eight-bit primary row belongs to a different epoch, and neither
+supplies physical END. More input is not a promised source-identity or completion
+fix.
+
+The matched R9 HF window shows 23.04% less measured process CPU and 27.80%
+fewer executed FFT jobs with continuous estimation, using the same objects,
+key/seed, TX date, 2 GiB workspace, CPUs and 55.294 seconds of captured audio.
+Both controls retain zero bits and no completion claim; true-epoch work still
+has not executed. That R9 runtime has frequent coherence resets; the later actual-channel repair
+addresses them, while full ordinary reception remains unqualified. Clock grids
+retain the full LF domain; denser grids do not mean clock uncertainty resolved.
+Captured input at a stopped checkpoint is not the processed frontier.
 
 HF40 remains incomplete. R5 improves reference availability but yields no bits;
 the cached rerun yields only one pending bit under a non-TX epoch, without END.
@@ -122,11 +152,28 @@ or establish a speedup. The previous GUI group is 38/39 with a controller
 SegFault. A partial-bank retirement guard is implemented and the original
 crashing-subsection check and full selected controller/Planner/self-check repair
 run pass. Final full groups remain pending.
-A new full-composite N0CALL metadata component decodes 7/7 frames; earlier
-failures remain retained. Offset/random-hop and Live metadata routing are still
-in progress, and frequency assistance remains independent of metadata.
+The raw-boundary metadata witness now passes all eight frequency/alignment/
+phase-jump geometries with seven frames each, full strong-receiver checks and
+the unchanged clear/encrypted CLI regression. These have R8 archive pins;
+earlier failures remain retained. The reviewed metadata capture/snapshot API now
+reserves 400,012 bytes at 48 kHz and at most 1.68 seconds of raw PCM, with
+component concurrency/CLI checks passing and a separate conditional auxiliary
+punctuation-clock export. R12 clock failures from premature auxiliary-owner
+retirement remain retained. R13 passes the unchanged positive GPS-clock test
+after repairing birth resources. The unchanged Default case exposes a source
+handoff over a known prefix; its independently approved private repair passes
+exact `001`, stable identity and END. The reviewed Simulation frontier repair
+has no runtime result, and the ABI-mixed first loss fixture is setup-invalid.
+Frequency assistance remains independent of metadata. The bounded Live split passes
+PCM/date conservation checks, while the independent-clock group's old RF-mask
+assertion remains an original failure. Its reviewed test-only criterion repair
+passes the bounded R10 check; constructor reduction remains distinct from zero
+further in-owner RF opportunity.
+No full regression qualification follows.
 All three modeled GPSDO HF controls pass exact eight bits on one visible row
-with ordinary END. The EME R5 run instead has zero owners/bits despite 99.9369%
+with ordinary END. The new same-lab-key R12 HF control also passes eight bits/
+pending/END in 33.821 CPU seconds, but its TX epoch differs from the Helper
+run, so their costs are not an exact same-wire causal comparison. The EME R5 run instead has zero owners/bits despite 99.9369%
 pilot qualification and all 5,397 correction blocks certified: provisional compact
 CPU estimates reject every candidate. Its U median is 0.084627 Hz at measured
 pilot C/N0 30.0399 dB-Hz. This software gate is not measured receiver throughput
@@ -134,9 +181,16 @@ or a physical link limit. The EME GPSDO control is also incomplete, capturing
 only 2.73067 seconds with no full symbol or END. A separate pre-PCM constructor
 check exposes workspace shortfalls at both 83 and 89 pairs; it measures no
 throughput. A narrower exact-lattice reservation saves only 38,880 bytes and
-still cannot fit either constructor; it was rejected without production edits. The reviewed native serial-row cache passes focused
+still cannot fit either constructor; it was rejected without production edits.
+A later R12 continuous EME window retains U 0.000189 Hz over 96.02 seconds and
+narrows existing owners from 33 to 3 pairs while retaining three clocks. Its
+96.189 captured seconds contain nonzero compact work but no bits/END before the
+128-second four-symbol batch. The original zero compact-work summary is a
+collector failure; corrected bounded replay preserves terminal work totals.
+The reviewed native serial-row cache passes focused
 exact-score/acquisition comparisons and R6 build/selected CTests; full groups
-and throughput benefit remain pending. Full regression, cable and intended-hardware qualification remain pending. See
+and cache-specific throughput qualification remain pending. Full regression,
+cable and intended-hardware qualification remain pending. See
 [validation](validation.md) for commands, preserved failures and measured limits.
 
 ## Controls and use
@@ -345,6 +399,13 @@ at 30 dB-Hz give about ±0.029 Hz, rather than the uninterrupted-ten-second
 ±0.00117 Hz. Ramps, rejected contexts, drift, clock ambiguity, local model fits
 and estimator inefficiency need additional treatment. Practical measured
 intervals and their observed escapes remain separately reported in validation.
+A component-only RF/audio frequency-and-rate model retains 373 phase-qualified
+fits without endpoint/next-hop escapes, but positive process noise is uncalibrated
+and its 49 MHz/40 dB-Hz cases still reach ±0.103–0.110 Hz. New frequency-only
+admissions are not validated. A private practical four-second forecast meets
+25 seeded milestone checks versus the older 38-second forecast, while retaining
+eight earlier escaped estimates. It remains unbuilt/unpromoted; it grants no
+runtime authority or confidence calibration.
 
 The ordinary baseline remains visible. Planner shows total Helper and pilot
 C/N0, ideal uninterrupted and segmented references, practical model prediction,

@@ -752,6 +752,17 @@ inline helper::TonePrecisionRequest helper_tone_precision_request(const Settings
     helper::TonePrecisionRequest request;
     request.sample_rate=physical_rate;request.straight_cn0_db_hz=straight_cn0_db_hz;
     request.pilot_segmented=true;
+    // The production route and Fake-FHSS calendar do not retune physical RF.
+    // Continuous pilot phase therefore survives the400ms amplitude ramps.
+    request.pilot_observation=helper::PilotObservationMode::continuous_phase;
+    const auto projection=std::max<std::size_t>(16,std::lround(physical_rate*.02));
+    // Exact symmetric-Hann ENBW times the nonoverlapping projection period;
+    // this is information lost by the implemented window, not fitted inflation.
+    request.pilot_estimator_efficiency=std::sqrt(1.5*projection/(projection-1));
+    // The25-seed actual HF channel has usable support starting0.335..1.063s.
+    // Keep its explicit1.2s startup budget separate from genuine baseline lead.
+    // This conditional software budget cannot qualify an actual reference.
+    request.pilot_discovery_budget_seconds=1.2;
     request.phase_noise_radians_per_sqrt_second=settings.simulation?
         settings.simulation_phase_noise_degrees_per_sqrt_second*std::numbers::pi/180:
         helper_precision_options(config).phase_noise_radians_per_sqrt_second;

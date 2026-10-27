@@ -17,14 +17,38 @@ struct ToneTrackerConfig {
     // Pure pilot: independent short phase apertures, frequency-only pooling.
     // Auxiliary decoding and phase continuity across retunes are not required.
     bool segmented_pilot=false;
+    // An unretuned pure pilot retains phase across publication windows and
+    // amplitude ramps. Explicit retunes always invalidate this coherence.
+    // False retains the independent200ms frequency-pooling baseline.
+    bool continuous_pilot=true;
 };
 struct ToneFrequencyQuery {
     bool valid=false;
     double frequency_hz=0,uncertainty_hz=0;
 };
+// One current straight full-dwell frequency observation. Validity certifies
+// measured support and estimator geometry only; it does not qualify ordinary
+// reception, phase correction, a clock relation or a future frequency lease.
+struct ToneFrequencyObservation {
+    bool valid=false;
+    std::uint64_t first_sample=0,end_sample=0,state_endpoint_sample=0;
+    std::uint64_t mean_sample=0;
+    double mean_sample_fraction=0,frequency_hz=0;
+    // Independent thermal/declared phase-process variance excludes the
+    // separately reported observed residual excess (which can include drift,
+    // model mismatch or self-interference). Neither is the local slew bound.
+    double independent_variance_hz2=0,residual_variance_hz2=0;
+    // Endpoint b is the last observed ADC center, end_sample-1. The frequency
+    // estimate is dated b-mu. The actual linearized phase-fit kernel has
+    // w=-cumulative phase impulses, k''=w and k(a)=k'(a)=0.
+    double mass=0,mu_seconds=0,integral_k_seconds2=0;
+    double integral_b_minus_s_k_seconds3=0,integral_k_squared_seconds3=0;
+    double k_at_end_seconds=0,k_prime_at_end=0;
+};
 struct ToneTrackerSnapshot {
     std::uint64_t sample=0,captured_end_sample=0,first_sample=0;
     std::uint32_t sample_rate=0;
+    ToneFrequencyObservation frequency_observation;
     double frequency_hz=0,uncertainty_hz=0,carrier_to_noise_db_hz=0;
     double frequency_rate_hz_per_second=0;
     // Covariance of the locally linear frequency model evaluated at sample.
@@ -42,6 +66,9 @@ struct ToneTrackerSnapshot {
     // Abrupt frequency or drift changes can temporarily exceed its engineering
     // uncertainty before withdrawal; it grants no future thermal/Doppler bound.
     bool frequency_precision_refined=false;
+    bool frequency_continuous_phase=false;
+    std::uint64_t continuous_phase_resets=0;
+    std::uint64_t continuous_model_resets=0,continuous_last_model_reset_sample=0;
     // Explicit actual-retune mode only: one independently acquired straight
     // aperture, with no pooled RF/audio model. Its constant engineering
     // interval includes the configured operational slew allowance throughout
@@ -129,10 +156,17 @@ public:
     // is always invalidated. Frequency records survive only with an explicitly
     // justified model: (observed_hz-expected_hz)/residual_scale is the common
     // quantity. A single tone cannot establish RF versus audio-clock scaling.
+    // A nonzero settled_end_sample is the caller-justified EXCLUSIVE end of
+    // the usable straight-pilot aperture. No Helper-calendar/ramp alignment is
+    // inferred or subtracted. Its Hann kernel assumes constant amplitude
+    // within each row. It requests one bounded full-dwell fit with one causal
+    // reprojection of its discovery PCM. Phase remains
+    // independent after every retune. Zero preserves ordinary short contexts.
     void begin_pilot_segment(std::uint64_t first_sample,double expected_hz,
                              double search_half_width_hz,bool preserve_frequency=false,
                              double residual_scale=1,std::uint64_t settled_first_sample=0,
-                             bool qualify_local_aperture=false);
+                             bool qualify_local_aperture=false,
+                             std::uint64_t settled_end_sample=0);
     ToneTrackerSnapshot snapshot()const noexcept;
 private:
     struct Impl;

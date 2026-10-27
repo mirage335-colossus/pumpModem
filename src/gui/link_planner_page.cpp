@@ -777,11 +777,36 @@ void link_budget(Node& root, const planner::Model& model) {
                     11,Tone::muted,false,4);
             }
             if(reference.segmented_lead_half_width_hz)paragraph(n,
-                "Independent-hop noise-only 3σ scale: ±"+frequency(*reference.segmented_lead_half_width_hz)+
-                " from "+std::to_string(precision.expected_segments)+" separate "+
-                number(reference.coherent_aperture_seconds,4)+
-                " s coherent apertures. Information sums C/N0 × aperture³; unrelated retune phases cannot supply uninterrupted coherence. This is a theoretical reference, not measured coverage.",
+                "Independent-retune noise-only 3σ scale: ±"+frequency(*reference.segmented_lead_half_width_hz)+
+                " from "+std::to_string(precision.retune_model.independent_apertures)+" separate "+
+                number(precision.retune_model.coherent_aperture_seconds,4)+
+                " s nominal assumed settled apertures at "+number(precision.retune_model.total_lead_seconds,4)+
+                " s total lead. The default392ms excludes only the4ms ramps on each side; actual RF settling can reduce usable support (for example,12ms settling leaves384ms). Information sums C/N0 × aperture³; unrelated retune phases cannot supply uninterrupted coherence. This is a theoretical reference, not measured coverage.",
                 11,Tone::muted,false,4);
+            for(const auto* comparison:{&precision.pilot_model,&precision.retune_model}) {
+                if(!comparison->supported)continue;
+                const bool continuous=comparison->observation==helper::PilotObservationMode::continuous_phase;
+                paragraph(n,std::string(continuous?"Current continuous-pilot practical forecast: ":
+                    "Independent actual-retune comparison: ")+number(comparison->usable_seconds,4)+
+                    " s usable support; "+std::to_string(comparison->independent_apertures)+
+                    " coherent aperture(s) of "+number(comparison->coherent_aperture_seconds,4)+
+                    " s. Constant-frequency noise-only 3σ reference ±"+
+                    frequency(comparison->constant_frequency_noise_half_width_hz)+
+                    "; unknown-constant-drift current-endpoint noise reference ±"+
+                    frequency(comparison->constant_drift_endpoint_noise_half_width_hz)+
+                    (continuous?" (4× the uninterrupted constant-tone reference)":"")+
+                    "; configured Brownian endpoint term ±"+frequency(comparison->brownian_endpoint_half_width_hz)+
+                    ". Conditional clean-model estimate ±"+frequency(comparison->conditional_half_width_hz)+
+                    " at "+number(comparison->total_lead_seconds,4)+" s total lead, with +"+
+                    number(comparison->extra_lead_seconds,4)+" s extension of at most36 s. "+
+                    (comparison->target_reached?"Conditional ±0.1 Hz milestone predicted. ":"Conditional ±0.1 Hz milestone remains unmet. ")+
+                    "Discovery/initial-support budget "+number(comparison->discovery_budget_seconds,4)+
+                    " s is an explicit software assumption, not hidden baseline airtime or a qualification deadline. "+
+                    comparison->reason+(continuous?
+                        ". This continuous model supplies the TX lead and existing conditional ordinary-receiver cost query; the cost comes from the actual receiver model, not interval-width ratios.":
+                        ". This retune comparison assumes nominal settled support and compatible oscillator mapping; actual settling must be measured. It does not select the production lead or imply measured CPU savings."),
+                    11,Tone::muted,false,4);
+            }
             if(precision.fallback_information_fraction<1)paragraph(n,
                 "Conditional fallback planning allowance: a balanced unknown phase gap in every local context retains "+
                 number(100*precision.fallback_information_fraction,4)+
@@ -806,7 +831,7 @@ void link_budget(Node& root, const planner::Model& model) {
                 paragraph(n,"Conditional planning-model precision: "+number(precision.usable_tone_seconds,4)+
                     " s usable straight tone across "+std::to_string(precision.expected_segments)+
                     " dated observations at "+std::to_string(conditional.physical_sample_rate)+
-                    " raw samples/s. Pilot slopes use independent per-dwell phases; auxiliary punctuation/metadata do not interrupt the pure pilot. Configured phase noise, short-aperture estimator efficiency and the stated fallback planning allowance are included. "+
+                    " raw samples/s. The unretuned pilot retains phase through publication windows and400ms amplitude ramps; a Fake-FHSS calendar is not an actual RF retune. Auxiliary punctuation/metadata do not interrupt the pure pilot. Configured phase noise and the exact20ms Hann projection information loss are included. Runtime measured uncertainty remains authoritative; the prediction is not calibrated confidence or a physical precision floor. "+
                     precision.reason+" Prediction is not measured lock or a lock-probability forecast; planning-model precision is not an operational confidence interval. "
                     "Unexpected noise, glitches or model mismatch can widen actual uncertainty.",11,Tone::muted,false,4);
                 if(model.bit_seconds>0)paragraph(n,

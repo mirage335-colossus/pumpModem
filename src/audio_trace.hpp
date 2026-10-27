@@ -71,6 +71,8 @@ struct State {
     std::uint64_t file_bytes=0;
     bool size_limited=false;
     bool receiver_probe=false;
+    std::uint64_t acquisition_work_minimum_interval_samples=0;
+    bool acquisition_work_sample_reference_phase_flag=false;
     // Optional diagnostic selection happens before field formatting. Keep the
     // normal trace unchanged when no selector is supplied.
     bool (*event_filter)(const char*) noexcept=nullptr;
@@ -86,7 +88,8 @@ struct State {
             std::lock_guard lock(mutex);
             if(!acquisition_work_cache_attempted) {
                 acquisition_work_cache_attempted=true;
-                acquisition_work_cache.reset(new(std::nothrow) WorkTraceCoalescer());
+                acquisition_work_cache.reset(new(std::nothrow) WorkTraceCoalescer(
+                    acquisition_work_minimum_interval_samples,acquisition_work_sample_reference_phase_flag));
             }
             if(acquisition_work_cache)return acquisition_work_cache->observe(key,stamp,sample,force,retired);
         }catch(...){} // Diagnostic pressure cannot alter the receiver.
@@ -235,6 +238,12 @@ template<class F>void record_work(WorkTraceCoalescer::Key key,const WorkTraceSta
             f.add("coalesced_snapshot_calls",decision.coalesced_calls);
             f.add("first_coalesced_sample",decision.first_coalesced_sample);
             f.add("last_coalesced_sample",decision.last_coalesced_sample);
+            if(state->acquisition_work_minimum_interval_samples) {
+                f.add("work_snapshot_mode","periodic_cumulative_counters");
+                f.add("work_snapshot_minimum_interval_samples",state->acquisition_work_minimum_interval_samples);
+                f.add("work_reference_phase_flag_periodic",state->acquisition_work_sample_reference_phase_flag);
+                f.add("work_counter_regressed",decision.counter_regressed);
+            }
             state->push("{\"event\":"+quoted(event)+f.out.str()+"}\n");
         }catch(...){++state->dropped;}
     }
@@ -246,12 +255,16 @@ class Scope {
     std::filesystem::path path_;
 public:
     explicit Scope(std::filesystem::path path={},bool receiver_probe=false,
-                   bool (*event_filter)(const char*) noexcept=nullptr) {
+                   bool (*event_filter)(const char*) noexcept=nullptr,
+                   std::uint64_t acquisition_work_minimum_interval_samples=0,
+                   bool acquisition_work_sample_reference_phase_flag=false) {
         if(path.empty())path="datapump-verbose-"+std::to_string(std::chrono::system_clock::now().time_since_epoch().count())+".jsonl";
         path_=std::filesystem::absolute(path);
         state_=std::make_shared<State>();
         state_->receiver_probe=receiver_probe;
         state_->event_filter=event_filter;
+        state_->acquisition_work_minimum_interval_samples=acquisition_work_minimum_interval_samples;
+        state_->acquisition_work_sample_reference_phase_flag=acquisition_work_sample_reference_phase_flag;
         const auto utf8=path_.u8string();state_->path.assign(utf8.begin(),utf8.end());
         state_->token=std::to_string(std::chrono::system_clock::now().time_since_epoch().count())+"-"+std::to_string(identity());
 #if defined(_WIN32) && !defined(__linux__)
@@ -269,6 +282,11 @@ public:
             f.add("maximum_record_bytes",State::maximum_record);f.add("maximum_file_bytes",State::maximum_file_bytes);
             f.add("acquisition_work_coalescer_maximum_owners",WorkTraceCoalescer::capacity);
             f.add("acquisition_work_coalescer_maximum_bytes",sizeof(WorkTraceCoalescer));
+            if(acquisition_work_minimum_interval_samples) {
+                f.add("acquisition_work_snapshot_mode","periodic_cumulative_counters");
+                f.add("acquisition_work_minimum_interval_samples",acquisition_work_minimum_interval_samples);
+                f.add("acquisition_work_reference_phase_flag_periodic",acquisition_work_sample_reference_phase_flag);
+            }
             f.add("long_double_digits",std::numeric_limits<long double>::max_digits10);
             f.add("receiver_probe",receiver_probe);if(event_filter)f.add("event_filter",true);});
     }

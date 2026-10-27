@@ -695,8 +695,8 @@ void ToneTracker::reset(std::uint64_t first)noexcept {impl_->reset(first);}
 void ToneTracker::push(std::span<const float> input,std::uint64_t first) {impl_->push(input,first);}
 ToneTrackerSnapshot ToneTracker::snapshot()const noexcept{return impl_->pilot?impl_->pilot->result:impl_->result;}
 void ToneTracker::begin_pilot_segment(std::uint64_t first,double expected,double width,bool preserve,double scale,std::uint64_t settled_first,
-                                    bool qualify_local_aperture) {
+                                    bool qualify_local_aperture,std::uint64_t settled_end) {
     if(!impl_->pilot)throw Error("dated pilot segment requires segmented pilot mode");
-    impl_->pilot->begin(first,expected,width,preserve,scale,settled_first,qualify_local_aperture);
+    impl_->pilot->begin(first,expected,width,preserve,scale,settled_first,qualify_local_aperture,settled_end);
 }
 }

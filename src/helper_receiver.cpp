@@ -2046,18 +2046,27 @@ struct AuxiliaryMetadataReceiver::Impl {
     std::uint32_t rate;
     double expected_auxiliary,spacing;
     Receiver discovery,decoder;
-    PayloadFilter notch;
-    std::vector<float> raw;
+    std::optional<PayloadFilter> notch;
+    // Capture ownership is disjoint from the joined optional worker. Only
+    // prepare copies capture PCM/dates into the prepaid immutable work ring.
+    std::vector<float> capture,raw;
+    std::uint64_t capture_first,capture_next,generation=1;
+    std::optional<Reference> committed;
+    PunctuationObservation committed_punctuation;
     std::array<float,4096> filtered{},corrected{};
+    std::uint64_t prepared_first=0,prepared_end=0,prepared_generation=0,worker_generation=0;
     std::uint64_t first_raw,next_raw,filtered_next,last_dwell_end=0;
     std::optional<Reference> grid,update;
+    PunctuationObservation pending_punctuation;
+    std::uint64_t punctuation_generation=0,punctuation_sample=0;
     Impl(std::uint32_t r,double auxiliary,double pilot,std::vector<Crypto> keys,
          FrequencyPrecisionOptions precision,std::uint64_t first)
         :rate(r),expected_auxiliary(auxiliary),spacing(pilot-auxiliary),
          discovery(auxiliary,20,{},std::nullopt,precision,PunctuationFormat::auxiliary_single),
          decoder(auxiliary,20,std::move(keys),std::nullopt,precision,PunctuationFormat::auxiliary_single),
-         notch(r,pilot,100),raw(static_cast<std::size_t>(std::ceil(.84*r))+1),
-         first_raw(first),next_raw(first),filtered_next(first+notch.delay()) {}
+         notch(std::in_place,r,pilot,100),capture(static_cast<std::size_t>(r)*84/100),
+         raw(capture.size()),capture_first(first),capture_next(first),
+         first_raw(first),next_raw(first),filtered_next(first+notch->delay()) {}
     float sample(std::uint64_t at) const {return raw[at%raw.size()];}
     template<std::size_t N> static bool solve(std::array<std::array<double,N>,N> a,
             std::array<double,N> b,std::array<double,N>& x) {
@@ -2122,7 +2131,71 @@ struct AuxiliaryMetadataReceiver::Impl {
         if(explained<.9*energy||std::abs(auxiliary-expected_auxiliary)>20)return false;
         pilot_amplitude={x[2],-x[3]};return true;
     }
-    bool advance() {
+    void raw_boundary() {
+        auto& state=discovery.impl_->state;
+        if(state.punctuation<0)return;
+        const auto center=state.punctuation+.16;
+        if(std::abs(state.boundary_notch-center)<1./rate&&state.boundary_level<=.1)return;
+        const auto position=static_cast<long double>(center)*rate;
+        const auto begin=std::ceil(position-.0005L*rate),end=std::ceil(position+.0005L*rate);
+        const auto plateau_begin=std::ceil(position-.012L*rate),plateau_end=std::ceil(position-.008L*rate);
+        const auto retained=std::max(first_raw,next_raw>raw.size()?next_raw-raw.size():0);
+        if(!std::isfinite(position)||plateau_begin<retained||begin<retained||end>next_raw||
+           end-begin<8||plateau_end-plateau_begin<8)return;
+        double energy=0,plateau=0;
+        for(auto at=static_cast<std::uint64_t>(begin);at<static_cast<std::uint64_t>(end);++at)
+            energy+=static_cast<double>(sample(at))*sample(at);
+        for(auto at=static_cast<std::uint64_t>(plateau_begin);at<static_cast<std::uint64_t>(plateau_end);++at)
+            plateau+=static_cast<double>(sample(at))*sample(at);
+        // The diagnostic notch reshapes the ramp and its finite-bin carrier
+        // image. Witness the independently required zero-amplitude boundary
+        // in raw PCM instead, with a stricter 0.1 RMS ratio. The existing
+        // shaped-reversal and 400 ms cadence checks still establish the grid.
+        const auto ratio=plateau>0?energy/(end-begin)/(plateau/(plateau_end-plateau_begin)):1.L;
+        if(ratio<=.01L) {state.boundary_notch=center;state.boundary_level=std::sqrt(ratio);}
+    }
+    void restart_worker() {
+        // Retire old filter storage before rebuilding; the prepaid grant need
+        // never hold two filters. This allocation is optional worker work.
+        if(worker_generation||!notch) {notch.reset();notch.emplace(rate,expected_auxiliary+spacing,100);}
+        discovery.reset();decoder.reset();grid.reset();update.reset();
+        pending_punctuation={};punctuation_generation=punctuation_sample=0;
+        first_raw=next_raw=prepared_first;filtered_next=first_raw+notch->delay();
+        last_dwell_end=0;worker_generation=prepared_generation;
+    }
+    void observe_punctuation() {
+        auto observed=discovery.impl_->state.actual_punctuation;
+        if(!observed.known||!observed.generation||
+           (observed.generation==punctuation_generation&&observed.sample==punctuation_sample))return;
+        // Filter output dates are already raw-center coordinates. Preserve
+        // the fitted edge date/CI, but include EVERY raw FIR dependency in
+        // its immutable support and wait until that support actually exists.
+        const auto delay=notch->delay();
+        if(observed.first_sample<delay||observed.last_sample>UINT64_MAX-delay)return;
+        observed.first_sample-=delay;observed.last_sample+=delay;
+        if(observed.first_sample<first_raw||observed.last_sample>=next_raw)return;
+        pending_punctuation=observed;punctuation_generation=observed.generation;punctuation_sample=observed.sample;
+    }
+    bool advance(std::size_t credit) {
+        if(!prepared_generation||!credit)return false;
+        credit=std::min(credit,filtered.size());
+        if(worker_generation!=prepared_generation||next_raw<prepared_first||next_raw>prepared_end)
+            restart_worker();
+        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(credit,prepared_end-next_raw));
+        for(std::size_t i=0;i<count;++i)corrected[i]=sample(next_raw+i);
+        next_raw+=count;first_raw=prepared_first;
+        if(count) {
+            raw_boundary();
+            const auto produced=notch->push(std::span<const float>(corrected).first(count),filtered);
+            if(produced)discovery.push(std::span<const float>(filtered).first(produced),rate,filtered_next);
+            filtered_next+=produced;
+            observe_punctuation();
+            if(auto current=discovery.take_update();current&&current->timing_valid&&current->frequency_valid)
+                grid=std::move(current);
+        }
+        return decode_latest()||count;
+    }
+    bool decode_latest() {
         if(!grid||!grid->timing_valid||!grid->frequency_valid||!next_raw||
            next_raw-1<grid->sample||next_raw-1-grid->sample>rate)return false;
         const auto frontier=static_cast<double>(next_raw)/rate;
@@ -2171,7 +2244,7 @@ struct AuxiliaryMetadataReceiver::Impl {
 std::size_t AuxiliaryMetadataReceiver::workspace_required(std::uint32_t rate) {
     if(rate<1000||rate>96000)throw Error("optional Helper metadata requires1..96kHz PCM");
     const auto taps=static_cast<std::size_t>(std::ceil(.04*rate))|1U;
-    return sizeof(Impl)+(static_cast<std::size_t>(std::ceil(.84*rate))+1)*sizeof(float)+
+    return sizeof(Impl)+2*(static_cast<std::size_t>(rate)*84/100)*sizeof(float)+
         taps*(sizeof(double)+sizeof(float))+2*Receiver::workspace_bound+2048;
 }
 AuxiliaryMetadataReceiver::AuxiliaryMetadataReceiver(std::uint32_t rate,double auxiliary,double pilot,
@@ -2182,7 +2255,7 @@ AuxiliaryMetadataReceiver::AuxiliaryMetadataReceiver(std::uint32_t rate,double a
        first>UINT64_MAX-static_cast<std::size_t>(std::ceil(.04*rate)))
         throw Error("invalid optional Helper metadata geometry");
     impl_=std::make_unique<Impl>(rate,auxiliary,pilot,std::move(keys),precision,first);
-    if(sizeof(*this)+sizeof(Impl)+impl_->raw.capacity()*sizeof(float)+impl_->notch.allocated_bytes()+
+    if(sizeof(*this)+sizeof(Impl)+(impl_->capture.capacity()+impl_->raw.capacity())*sizeof(float)+impl_->notch->allocated_bytes()+
        2*Receiver::workspace_bound>grant)throw Error("optional Helper metadata exceeds its workspace grant");
 }
 AuxiliaryMetadataReceiver::~AuxiliaryMetadataReceiver()=default;
@@ -2190,23 +2263,58 @@ AuxiliaryMetadataReceiver::AuxiliaryMetadataReceiver(AuxiliaryMetadataReceiver&&
 AuxiliaryMetadataReceiver& AuxiliaryMetadataReceiver::operator=(AuxiliaryMetadataReceiver&&) noexcept=default;
 void AuxiliaryMetadataReceiver::push(std::span<const float> samples,std::uint64_t first) {
     auto& s=*impl_;
-    if(first!=s.next_raw||samples.size()>UINT64_MAX-first)
+    if(first!=s.capture_next||samples.size()>UINT64_MAX-first)
         throw Error("optional Helper metadata capture is discontinuous");
-    for(std::size_t offset=0;offset<samples.size();offset+=s.filtered.size()) {
-        const auto input=samples.subspan(offset,std::min(s.filtered.size(),samples.size()-offset));
-        for(const auto value:input) {
-            if(!std::isfinite(value))throw Error("optional Helper metadata contains a nonfinite sample");
-            s.raw[s.next_raw%s.raw.size()]=value;++s.next_raw;
-        }
-        const auto count=s.notch.push(input,s.filtered);
-        if(count)s.discovery.push(std::span<const float>(s.filtered).first(count),s.rate,s.filtered_next);
-        s.filtered_next+=count;
-        if(auto grid=s.discovery.take_update();grid&&grid->timing_valid&&grid->frequency_valid)s.grid=std::move(grid);
+    for(const auto value:samples) {
+        if(!std::isfinite(value))throw Error("optional Helper metadata contains a nonfinite sample");
+        s.capture[s.capture_next%s.capture.size()]=value;++s.capture_next;
     }
 }
-bool AuxiliaryMetadataReceiver::advance() {return impl_->advance();}
+void AuxiliaryMetadataReceiver::reset(std::uint64_t first) {
+    auto& s=*impl_;
+    if(s.generation==UINT64_MAX||first>UINT64_MAX-static_cast<std::size_t>(std::ceil(.04*s.rate)))
+        throw Error("optional Helper metadata reset coordinate exhausted");
+    ++s.generation;s.capture_first=s.capture_next=first;s.committed.reset();s.committed_punctuation={};
+}
+bool AuxiliaryMetadataReceiver::prepare() {
+    auto& s=*impl_;
+    const auto first=std::max(s.capture_first,s.capture_next>s.capture.size()?s.capture_next-s.capture.size():0);
+    if(first==s.capture_next||
+       (s.prepared_generation==s.generation&&s.prepared_first==first&&s.prepared_end==s.capture_next))return false;
+    for(auto at=first;at<s.capture_next;++at)s.raw[at%s.raw.size()]=s.capture[at%s.capture.size()];
+    s.prepared_first=first;s.prepared_end=s.capture_next;s.prepared_generation=s.generation;
+    s.update.reset();s.pending_punctuation={};return true;
+}
+std::size_t AuxiliaryMetadataReceiver::pending_samples() const {
+    const auto& s=*impl_;
+    if(!s.prepared_generation)return 0;
+    const auto first=s.worker_generation!=s.prepared_generation||s.next_raw<s.prepared_first||s.next_raw>s.prepared_end?
+        s.prepared_first:s.next_raw;
+    return static_cast<std::size_t>(s.prepared_end-first);
+}
+bool AuxiliaryMetadataReceiver::advance(std::size_t credit) {return impl_->advance(credit);}
+bool AuxiliaryMetadataReceiver::commit() {
+    auto& s=*impl_;
+    auto update=std::move(s.update);s.update.reset();
+    const auto punctuation=s.pending_punctuation;s.pending_punctuation={};
+    if(s.prepared_generation!=s.generation)return false;
+    bool accepted=false;
+    if(update&&update->sample>=s.capture_first&&update->sample<s.capture_next) {
+        s.committed=std::move(update);accepted=true;
+    }
+    if(punctuation.known&&punctuation.first_sample>=s.capture_first&&punctuation.last_sample<s.capture_next) {
+        s.committed_punctuation=punctuation;accepted=true;
+    }
+    return accepted;
+}
+bool AuxiliaryMetadataReceiver::advance() {
+    prepare();const auto worked=advance(4096);commit();return worked;
+}
+PunctuationObservation AuxiliaryMetadataReceiver::take_punctuation_update() {
+    const auto out=impl_->committed_punctuation;impl_->committed_punctuation={};return out;
+}
 std::optional<Reference> AuxiliaryMetadataReceiver::take_update() {
-    auto out=std::move(impl_->update);impl_->update.reset();return out;
+    auto out=std::move(impl_->committed);impl_->committed.reset();return out;
 }
 
 }

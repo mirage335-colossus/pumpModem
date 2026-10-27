@@ -1,8 +1,13 @@
 #include "datapump/helper_receiver.hpp"
 #include "datapump/helper_carrier.hpp"
 #include "datapump/helper_filter.hpp"
+#include "datapump/resampler.hpp"
+#include "../src/punctuation_clock.hpp"
 #include "datapump/types.hpp"
 #include <algorithm>
+#include <barrier>
+#include <exception>
+#include <thread>
 #include <source_location>
 #include <stdexcept>
 #include <cmath>
@@ -238,11 +243,13 @@ void metadata_carrier_images() {
 void two_tone_auxiliary_metadata() {
     constexpr std::uint32_t rate=48000;
     constexpr double expected_auxiliary=2100,expected_pilot=expected_auxiliary+helper::auxiliary_pilot_spacing_hz;
-    constexpr double auxiliary=expected_auxiliary+.37,pilot=auxiliary+helper::auxiliary_pilot_spacing_hz,delay=.03719;
     helper::Options options;options.power_w=100;options.callsign="N0CALL";options.timecode=false;
     const auto required=helper::AuxiliaryMetadataReceiver::workspace_required(rate);
     check(required<512*1024);
-    check(helper::AuxiliaryMetadataReceiver::workspace_required(96000)<512*1024);
+    // The second prepaid0.84s ring increases explicit optional storage; a
+    // default512KiB owner may decline96kHz without affecting the pilot.
+    check(helper::AuxiliaryMetadataReceiver::workspace_required(96000)>512*1024);
+    check(helper::AuxiliaryMetadataReceiver::workspace_required(96000)<1024*1024);
     bool declined=false;
     try {helper::AuxiliaryMetadataReceiver unfunded(rate,expected_auxiliary,expected_pilot,{}, {},required-1);}
     catch(const Error&) {declined=true;}
@@ -250,15 +257,22 @@ void two_tone_auxiliary_metadata() {
     std::array<double,16> phases{};std::mt19937 random(8127);
     std::uniform_real_distribution<double> phase(-std::numbers::pi,std::numbers::pi);
     for(auto& value:phases)value=phase(random);
+    struct Geometry {double expected,actual,delay;};
+    // Exact dwell/bin alignment previously hid the ramp in the diagnostic
+    // notch's carrier image, although the raw ramp and reversal were clean.
+    for(const auto geometry:{Geometry{2100,2100.37,.03719},Geometry{2100,2100.37,0},
+                             Geometry{5762.5,5762.5,.03719},Geometry{5762.5,5762.5,0}}) {
+    const auto auxiliary=geometry.actual,pilot=auxiliary+helper::auxiliary_pilot_spacing_hz;
     for(const bool phase_jumps:{false,true}) {
     helper::Generator generator(options,{pilot,.7,.1,100,auxiliary},1800000000,true);
-    helper::AuxiliaryMetadataReceiver receiver(rate,expected_auxiliary,expected_pilot,{}, {},required);
+    helper::AuxiliaryMetadataReceiver receiver(rate,geometry.expected,
+        geometry.expected+helper::auxiliary_pilot_spacing_hz,{}, {},required);
     std::array<float,137> input{};Result result;
     const auto total=static_cast<std::uint64_t>(3.2*rate);
     for(std::uint64_t first=0;first<total;first+=input.size()) {
         const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(input.size(),total-first));
         for(std::size_t i=0;i<count;++i) {
-            const auto time=static_cast<long double>(first+i)/rate-delay;
+            const auto time=static_cast<long double>(first+i)/rate-geometry.delay;
             const auto dwell=static_cast<std::size_t>(std::floor(std::max(0.L,time)/.4L));
             input[i]=time<0?0:static_cast<float>(std::real(generator.mix_analytic({},time,rate)*
                 std::polar(1.,phase_jumps?phases[dwell%phases.size()]:0.)));
@@ -279,9 +293,113 @@ void two_tone_auxiliary_metadata() {
         check(std::abs(update.frequency_hz-auxiliary)<.002);
         ++decoded;
     }
-    std::cout<<"two-tone auxiliary phase_jumps="<<phase_jumps<<" references="<<result.updates.size()
+    std::cout<<"two-tone auxiliary frequency="<<auxiliary<<" delay="<<geometry.delay
+        <<" phase_jumps="<<phase_jumps<<" references="<<result.updates.size()
         <<" metadata="<<decoded<<" workspace_grant="<<required<<'\n';
     check(decoded>0);metadata_has_no_timing_authority(result);
+    }
+    }
+}
+
+void metadata_frozen_work() {
+    constexpr std::uint32_t rate=48000;
+    constexpr double auxiliary=5762.5,pilot=auxiliary+helper::auxiliary_pilot_spacing_hz;
+    helper::Options options;options.power_w=100;options.callsign="N0CALL";options.timecode=false;
+    helper::Generator generator(options,{pilot,.7,.1,100,auxiliary},1800000000,true);
+    std::vector<float> source(static_cast<std::size_t>(rate)*84/100),overwrite(2*rate);
+    for(std::size_t i=0;i<source.size();++i)
+        source[i]=static_cast<float>(generator.mix_analytic({},static_cast<long double>(i)/rate,rate).real());
+    const auto required=helper::AuxiliaryMetadataReceiver::workspace_required(rate);
+    for(const bool reset_before_commit:{false,true}) {
+        helper::AuxiliaryMetadataReceiver receiver(rate,auxiliary,pilot,{}, {},required);
+        receiver.push(source,0);
+        check(!receiver.take_update()&&!receiver.advance(4096)&&!receiver.commit());
+        check(receiver.prepare()&&receiver.pending_samples()==source.size());
+        std::barrier begin(2);std::exception_ptr failure;std::size_t chunks=0;
+        std::jthread worker([&] {
+            try {
+                begin.arrive_and_wait();
+                while(receiver.pending_samples()) {
+                    const auto pending=receiver.pending_samples();
+                    check(receiver.advance(4096));++chunks;
+                    check(pending-receiver.pending_samples()<=4096);
+                }
+            } catch(...) {failure=std::current_exception();}
+        });
+        begin.arrive_and_wait();
+        // Overwrite the entire mutable ring while the worker reads its old,
+        // paid snapshot. The resulting callsign must still use those dates.
+        receiver.push(overwrite,source.size());worker.join();
+        if(failure)std::rethrow_exception(failure);
+        check(!receiver.take_update()&&!receiver.take_punctuation_update().known);
+        check(chunks==(source.size()+4095)/4096);
+        constexpr std::uint64_t restart=200000;
+        if(reset_before_commit)receiver.reset(restart);
+        check(receiver.commit()!=reset_before_commit);
+        const auto update=receiver.take_update();
+        const auto punctuation=receiver.take_punctuation_update();
+        if(reset_before_commit)check(!update&&!punctuation.known);
+        else {
+            check(update&&update->metadata&&update->metadata->callsign=="N0CALL");
+            check(update->sample<source.size());
+            check(punctuation.known&&punctuation.last_sample<source.size());
+            check(!update->frequency_valid&&!update->phase_valid&&!update->timing_valid&&
+                  !update->phase_observation_known&&!update->punctuation.known);
+        }
+        // A generation gap starts new causal support and allows recovery;
+        // stale prepared metadata must never survive into the new capture.
+        receiver.reset(restart);
+        for(std::size_t first=0;first<source.size();first+=137) {
+            receiver.push(std::span(source).subspan(first,std::min<std::size_t>(137,source.size()-first)),restart+first);
+            receiver.advance();
+        }
+        const auto recovered=receiver.take_update();
+        check(recovered&&recovered->metadata&&recovered->metadata->callsign=="N0CALL");
+        check(recovered->sample>=restart&&recovered->sample<restart+source.size());
+        check(!recovered->frequency_valid&&!recovered->phase_valid&&!recovered->timing_valid);
+    }
+    std::cout<<"frozen metadata snapshot/generation passed; workspace_grant="<<required<<'\n';
+}
+
+void auxiliary_punctuation_clock() {
+    constexpr std::uint32_t rate=48000;
+    constexpr double auxiliary=2100,pilot=auxiliary+helper::auxiliary_pilot_spacing_hz;
+    helper::Options options;options.power_w=100;options.timecode=false; // No metadata to decode.
+    helper::Generator generator(options,{pilot,.7,.1,100,auxiliary},1800000000,true);
+    std::vector<float> source(static_cast<std::size_t>(4.8*rate));
+    for(std::size_t i=0;i<source.size();++i)
+        source[i]=static_cast<float>(generator.mix_analytic({},static_cast<long double>(i)/rate,rate).real());
+    for(const auto ppm:{-550.,550.}) {
+        audio::Resampler converter(rate,rate,true);converter.initialize_timing(0,ppm*1e-6);
+        helper::AuxiliaryMetadataReceiver receiver(rate,auxiliary,pilot,{}, {},
+            helper::AuxiliaryMetadataReceiver::workspace_required(rate));
+        helper::PunctuationClock clock;const helper::PunctuationClockDomain domain{1,1,0,1,rate};clock.reset(domain);
+        std::array<float,1031> output{};std::size_t input=0,markers=0;
+        std::uint64_t captured=0;helper::PunctuationObservation first,last;
+        while(!converter.finished()) {
+            const auto count=std::min<std::size_t>(137,source.size()-input);
+            const auto progress=converter.process(std::span(source).subspan(input,count),output,input+count==source.size());
+            check(progress.consumed||progress.produced||converter.finished());input+=progress.consumed;
+            if(!progress.produced)continue;
+            receiver.push(std::span(output).first(progress.produced),captured);captured+=progress.produced;
+            receiver.advance();check(!receiver.take_update());
+            const auto marker=receiver.take_punctuation_update();if(!marker.known)continue;
+            check(marker.last_sample<captured&&marker.first_sample<=marker.sample&&marker.sample<=marker.last_sample);
+            check(marker.last_sample-marker.first_sample+1>=static_cast<std::uint64_t>(.09*rate));
+            helper::Reference evidence;evidence.sample_rate=rate;evidence.sample=marker.last_sample;evidence.punctuation=marker;
+            check(!evidence.frequency_valid&&!evidence.phase_valid&&!evidence.timing_valid);
+            check(clock.observe(evidence,domain,captured)==helper::PunctuationClockReason::accepted);
+            if(!markers++)first=marker;last=marker;
+        }
+        check(markers>=8);
+        helper::PunctuationClockRequest request{first.sample+2,last.sample-2,captured,2ULL*rate,
+            helper::PunctuationClockModel::constant_rate_over_requested_support,{}};
+        const auto fit=clock.qualify({-600.09,600.09},request);
+        std::cout<<"auxiliary actual Resampler clock="<<ppm<<"ppm markers="<<markers
+            <<" measured=["<<fit.physical_audio_lower_ppm<<','<<fit.physical_audio_upper_ppm<<"] reason="
+            <<helper::punctuation_clock_reason(fit.reason)<<'\n';
+        check(fit.qualified_for_acquisition&&fit.physical_audio_lower_ppm<=ppm&&fit.physical_audio_upper_ppm>=ppm);
+        check(fit.physical_audio_upper_ppm-fit.physical_audio_lower_ppm<100);
     }
 }
 void timecodes_and_corruption() {
@@ -649,11 +767,11 @@ int main(int argc,char** argv) {
         check(argc<=2);std::cout<<std::unitbuf;
         const std::string_view which=argc==2?argv[1]:"all";
         if(which=="all") {
-            clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();two_tone_auxiliary_metadata();timecodes_and_corruption();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();realistic_frequency();weak_timecode_frequency();shifted_frequency();chunks_and_gaps();
+            clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();two_tone_auxiliary_metadata();metadata_frozen_work();auxiliary_punctuation_clock();timecodes_and_corruption();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();realistic_frequency();weak_timecode_frequency();shifted_frequency();chunks_and_gaps();
         } else if(which=="strong") {
-            clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();two_tone_auxiliary_metadata();timecodes_and_corruption();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();chunks_and_gaps();
+            clean_precision();paired_marker_identity_and_missing_return();metadata();metadata_carrier_images();two_tone_auxiliary_metadata();metadata_frozen_work();auxiliary_punctuation_clock();timecodes_and_corruption();metadata_with_declared_process();clock_skew();frequency_drift();fallback_and_noise();chunks_and_gaps();
         } else if(which=="pair")paired_marker_identity_and_missing_return();
-        else if(which=="two_tone")two_tone_auxiliary_metadata();
+        else if(which=="two_tone"){two_tone_auxiliary_metadata();metadata_frozen_work();auxiliary_punctuation_clock();}
         else if(which=="realistic")realistic_frequency();
         else if(which=="legacy30"||which=="legacy24") {
             const bool reduced=which=="legacy24";

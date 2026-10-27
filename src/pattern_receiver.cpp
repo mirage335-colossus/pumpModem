@@ -1541,6 +1541,33 @@ struct PatternReceiver::Impl {
         fft_workload->exact_clock_row_peak_bytes=std::max(fft_workload->exact_clock_row_peak_bytes,rows->working_bytes());
         return rows;
     }
+    detail::search_fft::DoubleTableView prepare_serial_double_tables(std::size_t worker_slots,
+            std::vector<Complex>& inverse,std::stop_token stop) {
+        // The original worker/scratch decision and exact raw-row admission
+        // precede this optional public table. Never evict either to fund it.
+        if(worker_slots!=1 || !scoring.empty() || !streamed_templates || !shaped ||
+           (!config.scramble && !config.dsss) || calendar_symbols() || sample_fit ||
+           drift_sections!=1 || differential_window || fft_workload->restricted_timing_active ||
+           acquisition_arithmetic()!=SearchArithmetic::fp64 || std::fegetround()!=FE_TONEAREST ||
+           transform<2 || work.size()!=transform || inverse.capacity())return {};
+        constexpr std::size_t maximum_inverse_bytes=8*1024*1024;
+        if(transform-1>maximum_inverse_bytes/sizeof(Complex))return {};
+        const auto needed=(transform-1)*sizeof(Complex)+sizeof(inverse);
+        if(needed>SIZE_MAX-arithmetic_reservation || !cache_fits(budget,arithmetic_reservation+needed))return {};
+        try {inverse.resize(transform-1);}catch(const std::bad_alloc&){return {};}
+        if(inverse.capacity()>maximum_inverse_bytes/sizeof(Complex)) {
+            std::vector<Complex>().swap(inverse);return {};
+        }
+        const auto bytes=inverse.capacity()*sizeof(Complex)+sizeof(inverse);
+        if(bytes>SIZE_MAX-arithmetic_reservation || !cache_fits(budget,arithmetic_reservation+bytes)) {
+            std::vector<Complex>().swap(inverse);return {};
+        }
+        // The input FFT is finished. Only this guarded full-FFT branch can
+        // borrow work; reference still holds the two per-start bit scores.
+        // The caller owns inverse and restores its reservation on every exit.
+        arithmetic_reservation+=bytes;
+        return detail::search_fft::prepare_double_tables(std::span(work).first(transform-1),inverse,stop);
+    }
     std::span<const detail::PatternFftClockRows::Pair> serial_clock_rows(
             detail::PatternFftClockRows* rows,std::uint64_t index,std::size_t f,std::stop_token stop) {
         if(!rows)return {};
@@ -4274,6 +4301,14 @@ struct PatternReceiver::Impl {
             struct ClockRowsReservation {std::size_t& current;std::size_t before;
                 ~ClockRowsReservation(){current=before;}} clock_rows_reservation{arithmetic_reservation,previous_arithmetic};
             auto exact_clock_rows=prepare_serial_clock_rows(1);
+            std::vector<Complex> inverse_tables;
+            const auto double_tables=prepare_serial_double_tables(1,inverse_tables,stop);
+            const auto serial_fft=[&](bool inverse) {
+                if(double_tables.maximum) {
+                    detail::search_fft::fft(std::span(product),inverse,double_tables,stop);
+                    ++fft_workload->tabulated_fp64_transforms;
+                } else pattern_fft(product,inverse,stop,acquisition_arithmetic());
+            };
             for(std::size_t stream_index=0;stream_index<search.initial_stream_symbols;++stream_index) {
             std::size_t group_count=0;
             const auto groups=phase_groups(stream_index,search.search_stream_phases?0:config.stream_phase_samples,phase_upper,group_count);
@@ -4311,11 +4346,11 @@ struct PatternReceiver::Impl {
                             if(sample_fit)square+=value*value*carrier_square(i);
                         }
                         if(!direct) {
-                            pattern_fft(product,false,stop,acquisition_arithmetic());
+                            serial_fft(false);
                             for(std::size_t i=0;i<transform;++i)product[i]=arithmetic_product(spectrum[i],product[i]);
                         }
                     } else for(std::size_t i=0;i<transform;++i)product[i]=arithmetic_product(spectrum[i],rows[f][b][i]);
-                    if(!direct)pattern_fft(product,true,stop,acquisition_arithmetic());
+                    if(!direct)serial_fft(true);
                     visit_starts(selected,count,[&](std::size_t j) {
                         Complex dot{};
                         if(direct)for(std::size_t i=0;i<length;++i) {

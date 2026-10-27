@@ -370,6 +370,7 @@ inline RawHelperNotchBands raw_helper_notch_bands(const RawHelperNotchDomain& do
 }
 
 class HelperInputFrontend {
+    static constexpr std::size_t maximum_realtime_blocks_per_branch=8;
     static std::size_t converter_reservation(std::uint32_t input,std::uint32_t output) {
         if(input==output)return sizeof(audio::Resampler);
         if(static_cast<std::uint64_t>(input)>4ULL*output) {
@@ -411,6 +412,25 @@ class HelperInputFrontend {
                 }
                 if(cursor!=end)out.valid=out.phase=false;
                 return out;
+            }
+            std::uint64_t homogeneous_end(std::uint64_t first,std::uint64_t end)const noexcept {
+                auto cursor=first;bool have_class=false,qualified=false;
+                for(std::size_t i=0;i<count && cursor<end;++i) {
+                    const auto& row=records[(head+i)%records.size()];
+                    if(row.end<=cursor)continue;
+                    if(row.first>cursor) {
+                        if(have_class && qualified)return cursor;
+                        have_class=true;qualified=false;cursor=std::min(end,row.first);
+                    }
+                    if(cursor>=end)break;
+                    if(!have_class){have_class=true;qualified=row.valid;}
+                    else if(row.valid!=qualified)return cursor;
+                    cursor=std::min(end,row.end);
+                }
+                // Missing records are unsupported, including an overwritten
+                // oldest prefix. They never inherit adjacent qualification.
+                if(cursor<end && have_class && qualified)return cursor;
+                return end;
             }
         } raw_certificates,output_certificates;
         std::shared_ptr<const HelperInputView> view;
@@ -609,7 +629,8 @@ public:
             taps=std::max(taps,physical_notch_taps(physical_rate));
         const auto branch=sizeof(Branch)+sizeof(HelperInputView)+4*sizeof(void*)+
             helper::AnalyticFrequencyTranslator::workspace_required()+converter_reservation(physical_rate,logical_rate)+
-            taps*(sizeof(double)+sizeof(float))+2ULL*logical_rate*sizeof(float)+4096;
+            taps*(sizeof(double)+sizeof(float))+2ULL*logical_rate*sizeof(float)+4096+
+            (realtime_helper_hz>0?maximum_realtime_blocks_per_branch*sizeof(HelperViewBlock):0);
         if(branch>(SIZE_MAX-sizeof(HelperInputFrontend))/2)
             throw Error("conditional helper reservation exceeds the platform range");
         return sizeof(HelperInputFrontend)+2*branch;
@@ -810,37 +831,63 @@ public:
             const std::optional<helper::Reference>& reference,std::uint64_t raw_captured_end=0,
             const std::optional<HelperFrequencyInterval>& frequency_interval={},
             const std::optional<HelperFrequencyPublication>& frequency_publication={}) {
-        std::vector<HelperViewBlock> result;result.reserve(2);
-        for(auto& owned:branches_)if(owned) {
-            auto& branch=*owned;
+        std::vector<HelperViewBlock> result;
+        std::array<std::size_t,2> consumed{};std::size_t descriptors=0;
+        // Count the exact descriptor capacity before allocating or committing
+        // either branch. Fully homogeneous continuous/fixed input stays one
+        // large block; only mixed qualification is separated.
+        for(std::size_t i=0;i<branches_.size();++i)if(branches_[i]) {
+            const auto& branch=*branches_[i];
             if(branch.first>=logical_frontier || branch.pending.empty())continue;
-            const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(branch.pending.size(),logical_frontier-branch.first));
-            HelperViewBlock block;block.view=branch.view;block.first_sample=branch.first;
-            block.samples.assign(branch.pending.begin(),branch.pending.begin()+count);
-            // Prepare both signed blocks before mutating either queue. A
-            // later allocation failure must leave every ordinary input sample
-            // owned by its original branch, including an accepted payload view.
-            // Keep raw frequency provenance for conditional LF catalogue birth.
-            // Phase consumers need a separately transformed/dated certificate.
-            if(reference)block.reference=*reference;
-            if(frequency_publication)try {
-                block.frequency_publication=std::make_unique<const HelperFrequencyPublication>(*frequency_publication);
-            }catch(const std::bad_alloc&) {
-                // The ordinary immutable view PCM still commits. Optional
-                // provenance cannot turn allocation failure into an input gap.
+            consumed[i]=static_cast<std::size_t>(std::min<std::uint64_t>(branch.pending.size(),logical_frontier-branch.first));
+            const auto end=branch.first+consumed[i];auto first=branch.first;
+            std::size_t blocks=0;
+            while(first<end) {
+                ++blocks;
+                first=branch.two_tone_ && blocks<maximum_realtime_blocks_per_branch?
+                    branch.output_certificates.homogeneous_end(first,end):end;
             }
-            block.raw_captured_end=raw_captured_end;block.frequency_interval=frequency_interval;
-            const auto correction=branch.output_certificates.summarize(block.first_sample,
-                block.first_sample+block.samples.size(),false);
-            if(correction.valid)block.corrected_rf_uncertainty_hz=correction.radius;
-            block.applied_correction_hz={correction.q_low,correction.q_high};
-            block.common_phase_corrected=correction.phase;
-            result.push_back(std::move(block));
+            descriptors+=blocks;
         }
-        for(const auto& block:result) {
-            auto& branch=*branches_[static_cast<std::size_t>(block.view->id-1)];
-            const auto count=block.samples.size();
-            branch.pending.erase(branch.pending.begin(),branch.pending.begin()+count);branch.first+=count;
+        result.reserve(descriptors);
+        for(std::size_t i=0;i<branches_.size();++i)if(branches_[i] && consumed[i]) {
+            auto& branch=*branches_[i];const auto end=branch.first+consumed[i];auto first=branch.first;
+            std::size_t blocks=0;
+            while(first<end) {
+                ++blocks;
+                const auto block_end=branch.two_tone_ && blocks<maximum_realtime_blocks_per_branch?
+                    branch.output_certificates.homogeneous_end(first,end):end;
+                // A pathological tail beyond the eight-block ceiling is grouped
+                // conservatively. Its mixed certificate is unqualified; every
+                // sample and date still drains through the ordinary receiver.
+                HelperViewBlock block;block.view=branch.view;block.first_sample=first;
+                const auto offset=static_cast<std::size_t>(first-branch.first);
+                block.samples.assign(branch.pending.begin()+offset,branch.pending.begin()+offset+static_cast<std::size_t>(block_end-first));
+                // Prepare every signed block before mutating either queue. A
+                // later allocation failure must leave every ordinary input sample
+                // owned by its original branch, including an accepted payload view.
+                // Keep raw frequency provenance for conditional LF catalogue birth.
+                // Phase consumers need a separately transformed/dated certificate.
+                if(reference)block.reference=*reference;
+                if(frequency_publication)try {
+                    block.frequency_publication=std::make_unique<const HelperFrequencyPublication>(*frequency_publication);
+                }catch(const std::bad_alloc&) {
+                    // The ordinary immutable view PCM still commits. Optional
+                    // provenance cannot turn allocation failure into an input gap.
+                }
+                block.raw_captured_end=raw_captured_end;block.frequency_interval=frequency_interval;
+                const auto correction=branch.output_certificates.summarize(block.first_sample,
+                    block.first_sample+block.samples.size(),false);
+                if(correction.valid)block.corrected_rf_uncertainty_hz=correction.radius;
+                block.applied_correction_hz={correction.q_low,correction.q_high};
+                block.common_phase_corrected=correction.phase;
+                result.push_back(std::move(block));
+                first=block_end;
+            }
+        }
+        for(std::size_t i=0;i<branches_.size();++i)if(branches_[i] && consumed[i]) {
+            auto& branch=*branches_[i];
+            branch.pending.erase(branch.pending.begin(),branch.pending.begin()+consumed[i]);branch.first+=consumed[i];
         }
         return result;
     }

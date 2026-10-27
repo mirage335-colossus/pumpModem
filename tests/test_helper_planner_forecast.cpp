@@ -97,6 +97,48 @@ int main(){try{
     pilot.pilot_coherent_aperture_seconds=.4;
     check(!helper::predict_tone_precision(pilot).supported,
         "segmented practical predictor accepted coherence across dwell ramps/retunes");
+    helper::TonePrecisionRequest physical;physical.sample_rate=48000;physical.straight_cn0_db_hz=30;
+    physical.pilot_segmented=true;physical.baseline_lead_seconds=10;physical.max_extra_seconds=0;
+    physical.pilot_observation=helper::PilotObservationMode::continuous_phase;
+    const auto continuous=helper::predict_tone_precision(physical);
+    const auto& coherent=continuous.pilot_model;
+    check(continuous.supported&&coherent.independent_apertures==1&&coherent.coherent_aperture_seconds>9&&
+        std::abs(coherent.constant_drift_endpoint_noise_half_width_hz-
+            4*coherent.constant_frequency_noise_half_width_hz)<1e-14&&
+        coherent.brownian_endpoint_half_width_hz==0,
+        "continuous model lost uninterrupted support or constant-drift endpoint Fisher geometry");
+    physical.phase_noise_radians_per_sqrt_second=.03;
+    const auto brownian=helper::predict_tone_precision(physical).pilot_model;
+    const auto expected_process=6*.03/(2*std::numbers::pi*std::sqrt(brownian.coherent_aperture_seconds));
+    check(std::abs(brownian.brownian_endpoint_half_width_hz-expected_process)<1e-14&&
+        brownian.conditional_half_width_hz>coherent.conditional_half_width_hz,
+        "continuous endpoint model omitted declared Brownian phase noise");
+    physical.phase_noise_radians_per_sqrt_second=0;
+    physical.pilot_observation=helper::PilotObservationMode::independent_retunes;
+    physical.pilot_settled_aperture_seconds=.4;
+    const auto retuned=helper::predict_tone_precision(physical).pilot_model;
+    const auto expected_segmented=3*std::sqrt(3/(2*std::numbers::pi*std::numbers::pi*1000*
+        retuned.independent_apertures*.4*.4*.4));
+    check(retuned.supported&&retuned.coherent_aperture_seconds==.4&&
+        std::abs(retuned.constant_frequency_noise_half_width_hz-expected_segmented)<1e-14&&
+        retuned.constant_frequency_noise_half_width_hz>coherent.constant_frequency_noise_half_width_hz&&
+        retuned.reason.find("RF/audio mapping must be established")!=std::string::npos,
+        "retune reference lost full settled aperture cubes or assumed phase/RF-clock continuity");
+    physical.pilot_settled_aperture_seconds=.2;
+    check(helper::predict_tone_precision(physical).pilot_model.constant_frequency_noise_half_width_hz>
+        2.8*retuned.constant_frequency_noise_half_width_hz,
+        "settled retune aperture was silently fixed to200ms");
+    physical.pilot_observation=helper::PilotObservationMode::continuous_phase;
+    physical.baseline_lead_seconds=64;
+    check(helper::predict_tone_precision(physical).pilot_model.coherent_aperture_seconds>63&&
+        helper::predict_tone_precision(physical).frequency_half_width_hz<continuous.frequency_half_width_hz,
+        "36second transmit-extension cap became a continuous numeric-history expiry");
+    physical.pilot_observation=helper::PilotObservationMode::legacy_segmented;
+    physical.baseline_lead_seconds=2;physical.max_extra_seconds=36;
+    helper::TonePrecisionRequest legacy=physical;legacy.pilot_segmented=true;
+    check(helper::predict_tone_precision(legacy).frequency_half_width_hz==pilot30.frequency_half_width_hz&&
+        !helper::predict_tone_precision(legacy).pilot_model.supported,
+        "explicit observation comparisons silently changed existing runtime TX-lead prediction");
     // A backend can expose finite partial prices while explicitly declining
     // complete component support (for example V2 compact template rebuilds).
     simulation::Estimate partial;
@@ -274,9 +316,12 @@ int main(){try{
         "helper power does not increase payload SNR or Rate",
         "DSP fixed workspace", "Automatic helper precision lead:","Conditional planning-model precision:",
         "Expected helper C/N0:","Pure pilot:","90% power share","9× auxiliary power",
-        "dB-Hz", "Ideal noise-only 3σ scale:","Independent-hop noise-only 3σ scale:",
+        "dB-Hz", "Ideal noise-only 3σ scale:","Independent-retune noise-only 3σ scale:",
+        "Current continuous-pilot practical forecast:","Independent actual-retune comparison:",
+        "4× the uninterrupted constant-tone reference","existing conditional ordinary-receiver cost query",
+        "nominal assumed settled apertures","actual RF settling can reduce usable support",
+        "explicit software assumption, not hidden baseline airtime",
         "Information sums C/N0 × aperture³","one complete symbol's coherent half-bin scale",
-        "Conditional fallback planning allowance:","all-context fallback allowance is conservative",
         "Runtime measured uncertainty remains authoritative","not calibrated confidence or a physical precision floor",
         "not an operational confidence interval", "Practical precision inputs:",
         "Sustained conditional planning-model precision:","if the reference remains available until",
@@ -329,6 +374,18 @@ int main(){try{
     const auto public_request=live::detail::helper_tone_precision_request(metadata,metadata.transfer.modem,48000,30,2);
     check(public_request.metadata_symbols==helper::callsign_packet("TEST").count&&public_request.punctuate,
         "lead request ignored actual callsign airtime or punctuation");
+    check(public_request.pilot_observation==helper::PilotObservationMode::continuous_phase&&
+        public_request.pilot_discovery_budget_seconds==1.2&&
+        std::abs(public_request.pilot_estimator_efficiency-std::sqrt(1.5*960/959))<1e-14,
+        "production lead request retained segmented phase, omitted startup support or guessed projection efficiency");
+    auto hf_request=live::detail::helper_tone_precision_request(metadata,metadata.transfer.modem,
+        24480,23.5424250944,2);
+    hf_request.phase_noise_radians_per_sqrt_second=.50249378105604448*std::numbers::pi/180;
+    const auto hf_milestone=helper::predict_tone_precision(hf_request);
+    check(hf_milestone.supported&&hf_milestone.target_reached&&hf_milestone.total_lead_seconds==4&&
+        hf_milestone.extra_lead_seconds==2&&hf_milestone.frequency_half_width_hz<.1&&
+        hf_milestone.pilot_model.discovery_budget_seconds==1.2,
+        "actual sampled HF milestone lost its visible baseline/extension or practical observation model");
     metadata.transfer.key.emplace(Bytes(32,0x52));
     check(live::detail::helper_tone_precision_request(metadata,metadata.transfer.modem,48000,30,2).metadata_symbols==3,
         "encrypted lead prediction used the ignored public callsign");

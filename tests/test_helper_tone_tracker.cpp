@@ -47,7 +47,9 @@ helper::ToneTrackerSnapshot run(helper::ToneTracker& tracker,Source& source,std:
 }
 void segmented_pilot_dates_phase_and_retunes() {
     constexpr unsigned rate=48000;constexpr double tau=2*std::numbers::pi;
-    helper::ToneTrackerConfig c{rate,2062.5,9000,0,.5,true};
+    // Preserve this independent-aperture regression alongside the separate
+    // continuous-pilot tests; its200ms/36s bounds remain intentional.
+    helper::ToneTrackerConfig c{rate,2062.5,9000,0,.5,true,false};
     helper::ToneTracker tracker(c,helper::ToneTracker::workspace_required(c));
     std::array<float,480> block{};double phase=.37,scale=1;unsigned qualified=0,phases=0,phase_fits=0;
     constexpr double common_error=300.37;
@@ -100,7 +102,7 @@ void segmented_frequency_query_dates_and_covariance() {
     constexpr unsigned rate=48000;
     constexpr auto origin=(std::uint64_t{1}<<60)+1234;
     constexpr double f0=5062.87,drift=.5,tau=2*std::numbers::pi;
-    helper::ToneTrackerConfig c{rate,2062.5,9000,0,.5,true};
+    helper::ToneTrackerConfig c{rate,2062.5,9000,0,.5,true,false};
     helper::ToneTracker tracker(c,helper::ToneTracker::workspace_required(c),origin);
     std::array<float,480> block{};unsigned queries=0;
     for(unsigned n=0;n<3*rate;n+=block.size()) {
@@ -123,7 +125,7 @@ void segmented_frequency_query_dates_and_covariance() {
 }
 void segmented_frequency_fallback_is_disjoint_and_frequency_only() {
     constexpr unsigned rate=48000;constexpr double tau=2*std::numbers::pi,f=5062.87;
-    helper::ToneTrackerConfig c{rate,2062.5,9000,.01,.5,true};
+    helper::ToneTrackerConfig c{rate,2062.5,9000,.01,.5,true,false};
     helper::ToneTracker tracker(c,helper::ToneTracker::workspace_required(c));
     std::mt19937 rng{49271};std::normal_distribution<double> normal;
     std::uniform_real_distribution<double> phase_jump(-std::numbers::pi,std::numbers::pi);
@@ -913,9 +915,71 @@ void phase_anchor_precision_prediction() {
           <<" anchors="<<p.expected_segments<<" support="<<p.usable_tone_seconds
           <<" sustained_at="<<p.sustained_at_seconds<<" sustained_U="<<p.sustained_frequency_half_width_hz<<'\n';
 }
+void full_settled_aperture_kernel_and_compatible_history() {
+    constexpr unsigned rate=32000;constexpr double tau=2*std::numbers::pi;
+    for(const auto origin:std::array<std::uint64_t,2>{0,1ULL<<60}) {
+        helper::ToneTrackerConfig c{rate,2500,120,0,.5,true,true};
+        helper::ToneTracker tracker(c,helper::ToneTracker::workspace_required(c),origin);
+        std::array<float,256> pcm{};helper::ToneTrackerSnapshot last;
+        for(const auto bad_end:std::array<std::uint64_t,3>{origin+383,origin+384,origin+384+31*640+1}) {
+            bool rejected=false;try{tracker.begin_pilot_segment(origin,2500,120,false,1,origin+384,true,bad_end);}
+            catch(const Error&){rejected=true;}
+            check(rejected && tracker.snapshot().captured_end_sample==origin,
+                "invalid full-aperture end mutated tracker state or escaped the bounded row guard");
+        }
+        for(unsigned hop=0;hop<8;++hop) {
+            const auto first=origin+static_cast<std::uint64_t>(hop)*12800;
+            const auto scale=hop%4==0?1.:hop%4==1?2.:hop%4==2?-1.:-2.;
+            tracker.begin_pilot_segment(first,2500,120,hop!=0,scale,first+384,false,first+12672);
+            const auto reset=tracker.snapshot();
+            check(!reset.phase_fit_qualified && !reset.frequency_observation.valid && !reset.frequency_continuous_phase,
+                "known retune retained a prior dwell phase or raw frequency certificate");
+            for(unsigned n=0;n<12800;n+=pcm.size()) {
+                for(unsigned j=0;j<pcm.size();++j) {
+                    const auto local=(n+j)/static_cast<double>(rate),t=hop*.4+local;
+                    const auto cycles=2500*local+scale*(7.3*local+.1*(t*t-hop*.4*hop*.4));
+                    pcm[j]=static_cast<float>(std::cos(tau*cycles+.37+.61*hop*hop));
+                }
+                tracker.push(pcm,first+n);
+                if(n+pcm.size()<12672)check(!tracker.snapshot().frequency_observation.valid,
+                    "full aperture exported a future or incomplete fit");
+            }
+            last=tracker.snapshot();const auto& k=last.frequency_observation;
+            check(k.valid && k.first_sample==first+384 && k.end_sample==first+12672 &&
+                k.state_endpoint_sample==first+12671 && k.end_sample<=last.captured_end_sample,
+                "current full-aperture certificate lost its actual causal support");
+            check(k.independent_variance_hz2>0 && k.residual_variance_hz2>=0 &&
+                std::abs(k.mass-1)<1e-10 && std::abs(k.k_prime_at_end-1)<1e-10 &&
+                std::abs(k.k_at_end_seconds-k.mu_seconds)<1e-10 && k.integral_k_squared_seconds3>=0,
+                "full-aperture kernel or independent covariance is invalid");
+            const auto lag=static_cast<long double>(k.state_endpoint_sample-k.mean_sample)-k.mean_sample_fraction;
+            check(std::abs(static_cast<double>(lag)/rate-k.mu_seconds)<1e-12,
+                "full frequency mean date lost its fractional kernel lag");
+            const auto mean_t=(static_cast<long double>(k.mean_sample-origin)+k.mean_sample_fraction)/rate;
+            const auto truth=2500+scale*(7.3+.2*static_cast<double>(mean_t));
+            check(std::abs(k.frequency_hz-truth)<1e-5,"full fit differs from chirp truth at its kernel mean");
+            if(hop>=3) {
+                const auto endpoint_t=static_cast<double>(last.sample-origin)/rate;
+                check(last.qualified && !last.frequency_continuous_phase && last.first_sample<first &&
+                    std::abs(last.frequency_hz-(2500+scale*(7.3+.2*endpoint_t)))<1e-5,
+                    "compatible full-aperture retunes discarded or misdated mapped frequency history");
+            }
+        }
+        const auto boundary=origin+8ULL*12800;
+        tracker.begin_pilot_segment(boundary,2500,120,false,1,boundary+384,true,boundary+12672);
+        for(unsigned n=0;n<12800;n+=pcm.size()) {
+            for(unsigned j=0;j<pcm.size();++j){const auto t=(n+j)/static_cast<double>(rate);
+                pcm[j]=static_cast<float>(std::cos(tau*2507.3*t+.5*std::sin(tau*t/.2)));}
+            tracker.push(pcm,boundary+n);
+        }
+        check(!tracker.snapshot().frequency_observation.valid,
+            "a rejected full fit exported another candidate's frequency kernel");
+    }
+}
+
 int main() {
     try {
-        segmented_pilot_dates_phase_and_retunes();segmented_frequency_query_dates_and_covariance();segmented_frequency_fallback_is_disjoint_and_frequency_only();phase_segment_covariance_and_precision_prediction();phase_anchor_precision_prediction();phase_kernel_covariance_joint_fit_and_provenance();strong_wide_tone_and_drift();representative_hf_noise_and_eme_level();narrow_range_and_noise();actual_helper_cold_capture_before_payload();sparse_segments_keep_recent_aperture();stable_full_capacity_keeps_moving();legacy_paired_modulation_rolling_fifo();shared_endpoint_precision_of_stable_tone();legacy_paired_clock_survives_ordinary_payload();actual_two_tone_pilot_keeps_clock_unresolved();off_cadence_feature_does_not_poison_established_clock();independent_punctuation_clock();out_of_range_or_large_evolving_shift_declines();
+        full_settled_aperture_kernel_and_compatible_history();segmented_pilot_dates_phase_and_retunes();segmented_frequency_query_dates_and_covariance();segmented_frequency_fallback_is_disjoint_and_frequency_only();phase_segment_covariance_and_precision_prediction();phase_anchor_precision_prediction();phase_kernel_covariance_joint_fit_and_provenance();strong_wide_tone_and_drift();representative_hf_noise_and_eme_level();narrow_range_and_noise();actual_helper_cold_capture_before_payload();sparse_segments_keep_recent_aperture();stable_full_capacity_keeps_moving();legacy_paired_modulation_rolling_fifo();shared_endpoint_precision_of_stable_tone();legacy_paired_clock_survives_ordinary_payload();actual_two_tone_pilot_keeps_clock_unresolved();off_cadence_feature_does_not_poison_established_clock();independent_punctuation_clock();out_of_range_or_large_evolving_shift_declines();
         std::cout<<"helper realtime tone tracker checks passed\n";return 0;
     }catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

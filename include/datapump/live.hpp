@@ -203,6 +203,8 @@ struct Snapshot {
     // Decoder frontier in the current input revision, including certified
     // coordinate-only nulls after every required consumer has advanced. Capture
     // ingress and PCM queue sizes are not a substitute for this frontier.
+    // The single-bank sampled Helper simulation reports this same joined
+    // decoder-input coordinate, at the configured logical sample rate.
     std::uint64_t receiver_input_revision = 0, processed_physical_samples = 0;
     std::uint64_t queued_physical_samples = 0, decoding_physical_samples = 0;
     std::size_t buffered_samples = 0;

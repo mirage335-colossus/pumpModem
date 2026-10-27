@@ -1332,6 +1332,164 @@ void gps_clock_live(bool gps,bool enabled) {
     else check(!clock && !joined && !jobs,"helper-OFF acquired helper clock authority");
 }
 
+void final_helper_loss_live() {
+    auto value=settings(true);auto& c=value.transfer.modem;
+    c.sample_rate=6000;c.carrier_hz=1500;c.bandwidth_hz=100;c.spreading_factor=128;
+    c.receiver_strategy=modem::ReceiverStrategy::automatic;
+    c.oscillator_search=modem::OscillatorSearchConfig{{300,0},{.1,0},1e8,1};
+    value.transfer.timestamp=0;value.transfer.search_seconds=0;value.transfer.automatic_receive_profiles=false;
+    value.transfer.clock_sync=std::nullopt;value.transfer.audio_timing_error_seconds=.07;
+    value.transfer.recovery_options.enabled=true;
+    value.helper.power_w=1500;value.helper.callsign.clear();
+    value.simulation_frequency_offset_hz=2.17;value.simulation_clock_error_ppm=0;
+    // This source geometry puts the first accepted pending prefix before 15s
+    // and the last payload symbol after it. Only this LAB channel knows the
+    // cutoff; the ordinary receiver receives neither source length nor date.
+    constexpr std::uint64_t loss_seconds=15;
+    struct Fault {
+        std::atomic<double> transmitted_epoch{0};
+        std::atomic<std::uint32_t> physical_rate{0};
+        std::atomic<bool> invalidated{false};
+        std::uint64_t source_frontier=0,bank_frontier=0,max_staging=0;
+        bool source_seen=false,input_mismatch=false;
+        live::detail::SimulationHook hook{this,[](void* opaque,const live::detail::SimulationObservation& event) {
+            auto& self=*static_cast<Fault*>(opaque);
+            if(event.phase==live::detail::SimulationPhase::transmit_epoch)self.transmitted_epoch=event.epoch;
+            if(event.phase==live::detail::SimulationPhase::input_invalidated)self.invalidated=true;
+            if(event.phase==live::detail::SimulationPhase::before_read) {
+                self.input_mismatch|=self.source_seen && event.source!=self.source_frontier;
+                self.source_seen=true;self.source_frontier=event.source;
+            }
+            if(event.phase==live::detail::SimulationPhase::before_feed) {
+                self.input_mismatch|=event.source<self.source_frontier || event.bank>event.source;
+                self.source_frontier=event.source;
+                if(event.source>=event.bank)self.max_staging=std::max(self.max_staging,event.source-event.bank);
+            }
+            if(event.phase==live::detail::SimulationPhase::after_commit) {
+                self.input_mismatch|=event.bank<self.bank_frontier || event.bank>self.source_frontier;
+                self.bank_frontier=event.bank;
+            }
+        }};
+        Fault() {
+            hook.initial_media_epoch=1792949964.37109375;
+            hook.configure_channel=[](void* opaque,modem::SampledSimulationChannel& channel) {
+                auto& self=*static_cast<Fault*>(opaque);
+                const auto rate=channel.physical_sample_rate();self.physical_rate=rate;
+                channel.set_lab_helper_end_sample(loss_seconds*rate);
+            };
+            live::detail::SimulationHook* empty=nullptr;
+            check(live::detail::simulation_hook.compare_exchange_strong(empty,&hook),"Helper loss hook already installed");
+        }
+        ~Fault(){live::detail::simulation_hook.store(nullptr);}
+    };
+    const auto path=std::filesystem::temp_directory_path()/("datapump-helper-final-loss-"+
+        std::to_string(audio::trace::identity())+"-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl");
+    const auto filter=[](const char* name)noexcept {return trace_filter(name)||std::string_view(name)=="receiver_helper_raw_reference" || std::string_view(name)=="receiver_pattern_wire";};
+    bool finished=false,visible_exact=false,frequency_active=false;
+    std::set<std::uint64_t> visible_pending_before_loss,visible_complete;
+    std::uint64_t samples=0,expected_epoch=0,max_staging=0;std::uint32_t physical_rate=0;
+    const auto cpu_start=std::clock();
+    {
+        audio::trace::Scope trace(path,false,+filter);Fault fault;
+        std::atomic<std::int64_t> replay_ms{0};
+        live::Session session({},[&]{return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_ms.load());});
+        session.start(value);session.transmit_bits(Bytes{0,0,1});
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(30);
+        while(std::chrono::steady_clock::now()<deadline) {
+            const auto snapshot=session.snapshot();samples=snapshot.samples_received;
+            check(snapshot.error.empty() && !snapshot.receiver_health.failed() &&
+                  !snapshot.receiver_health.input_interrupted && !snapshot.receiver_health.dropped_samples,
+                  "final Helper loss reset, interrupted or dropped ordinary payload input");
+            check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"final Helper loss exceeded funded workspace");
+            frequency_active|=snapshot.helper_frequency_assistance_active;
+            if(samples<loss_seconds*c.sample_rate)for(const auto& signal:snapshot.signals) {
+                if(signal.helper_carrier || signal.complete || !signal.received_bits || signal.received_bits>=3)continue;
+                const auto raw=signal.binary?signal.text:signal.raw_bits;
+                if(!signal.missing_symbols && raw==std::string("001").substr(0,signal.received_bits))
+                    visible_pending_before_loss.insert(signal.id);
+            }
+            if(snapshot.transmission_finished && snapshot.simulation_replay) {
+                replay_ms=4000;finished=true;
+                for(const auto& signal:session.snapshot().signals)if(!signal.helper_carrier && signal.complete && signal.received_bits==3)
+                    if((signal.binary?signal.text:signal.raw_bits)=="001")visible_complete.insert(signal.id);
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        session.stop();
+        check(!fault.invalidated,"final Helper loss invalidated the ordinary input transaction");
+        check(fault.source_seen && !fault.input_mismatch,"final Helper loss changed contiguous source/bank input dates");
+        expected_epoch=static_cast<std::uint64_t>(fault.transmitted_epoch.load());physical_rate=fault.physical_rate.load();
+        max_staging=fault.max_staging;
+    }
+    std::ifstream input(path);std::string line;
+    std::uint64_t id=0,revision=0,last=0,first_prefix_feed=0,first_prefix_capture=0,complete_feed=0,physical_end=0;
+    bool pending=false,completed=false,qualified_before=false,reference_lost=false,ordinary_after=false,broad_companion=false;
+    using Owner=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>;
+    std::map<Owner,std::uint64_t> work;
+    while(std::getline(input,line)) {
+        if(line.find("\"event\":\"receiver_signal_commit\"")!=std::string::npos && number(line,"received_bits") &&
+           !number(line,"complete") && gps_clock_source_zero(number(line,"epoch"),number(line,"stream_phase_samples"),
+              number(line,"first_stream_symbol"),number(line,"symbol_samples"),c.sample_rate,expected_epoch)) {
+            if(!id)id=number(line,"signal_id");
+            check(id==number(line,"signal_id"),"final Helper loss split the dated source into pending identities");
+        }
+    }
+    input.clear();input.seekg(0);
+    while(std::getline(input,line)) {
+        const auto is=[&](const char* event){return line.find("\"event\":\""+std::string(event)+"\"")!=std::string::npos;};
+        broad_companion|=is("receiver_helper_assistance_admitted") || is("receiver_helper_conditioning_admitted");
+        if(is("receiver_helper_raw_reference")) {
+            const auto end=number(line,"captured_end");
+            qualified_before|=number(line,"qualified") && end<loss_seconds*physical_rate;
+            reference_lost|=!number(line,"qualified") && !number(line,"present") && end>(loss_seconds+2)*physical_rate;
+        }
+        if(is("receiver_acquisition_work")) {
+            const Owner owner{number(line,"revision"),number(line,"instance_id"),number(line,"sample_origin")};
+            const auto jobs=number(line,"template_jobs");
+            check(jobs>=work[owner],"final Helper loss reset an ordinary worker's cumulative work");
+            ordinary_after|=number(line,"sample")>(loss_seconds+2)*c.sample_rate && !number(line,"incomplete") &&
+                line.find("\"reason\":\"feed_complete\"")!=std::string::npos && number(line,"numeric_owner") &&
+                jobs>work[owner] && number(line,"realtime_helper");
+            work[owner]=jobs;
+            check(!number(line,"helper_input_view") && !number(line,"future_broad_template_jobs"),
+                  "final Helper loss started a separate broad companion receiver");
+        }
+        if(!is("receiver_signal_commit") || !id || number(line,"signal_id")!=id)continue;
+        const auto count=number(line,"received_bits"),next=number(line,"revision"),feed=number(line,"feed_end_sample");
+        const bool done=number(line,"complete");
+        check(next>=revision && count>=last && count<=3 && !number(line,"missing") && !(completed&&!done),
+              "final Helper loss withdrew pending identity, exact progress or historical END");
+        const auto needle=std::string("\"raw_bits_prefix\":\"");const auto at=line.find(needle);
+        const auto begin=at==std::string::npos?at:at+needle.size(),end=line.find('"',begin);
+        check(begin!=std::string::npos && end!=std::string::npos && line.substr(begin,end-begin)==std::string("001").substr(0,count),
+              "final Helper loss changed an accepted source prefix");
+        revision=next;last=count;
+        if(count && !first_prefix_feed){first_prefix_feed=feed;first_prefix_capture=number(line,"captured_samples");}
+        if(done) {
+            const auto symbol=number(line,"symbol_samples"),end=number(line,"physical_end");
+            check(symbol && count==3 && feed>=end && feed-end>=((6ULL*c.sample_rate+symbol-1)/symbol)*symbol,
+                  "final Helper loss invented END before fully scored six-second symbol absence");
+            completed=true;complete_feed=feed;physical_end=end;
+        }else pending=true;
+    }
+    visible_exact=visible_complete.contains(id);
+    const auto cpu=static_cast<double>(std::clock()-cpu_start)/CLOCKS_PER_SEC;
+    std::cout<<"final Helper loss Auto rolling default_clock tx_epoch="<<expected_epoch<<" row="<<id
+             <<" cutoff_seconds="<<loss_seconds<<" first_prefix_feed="<<first_prefix_feed
+             <<" first_prefix_capture="<<first_prefix_capture<<" max_staging="<<max_staging
+             <<" physical_end="<<physical_end<<" complete_feed="<<complete_feed<<" samples="<<samples
+             <<" qualified_before="<<qualified_before<<" reference_lost="<<reference_lost
+             <<" ordinary_after="<<ordinary_after<<" exact="<<visible_exact<<" pending="<<pending
+             <<" END="<<completed<<" CPU="<<cpu<<" trace="<<path<<'\n';
+    check(physical_rate && expected_epoch && finished && visible_exact && id && pending && completed,
+          "final Helper loss lost complete ordinary001, pending progress or physical END");
+    check(first_prefix_feed && first_prefix_capture<loss_seconds*c.sample_rate && visible_pending_before_loss.contains(id) &&
+          physical_end>loss_seconds*c.sample_rate &&
+          complete_feed>physical_end && qualified_before && reference_lost && frequency_active && ordinary_after && !broad_companion,
+          "final Helper loss did not bracket established payload and its ordinary scored drain");
+}
+
 void rolling_primary_declines() {
     std::vector<std::size_t> ordinary,helper;
     conditioned_frequency_bank(false,false,false,true,&ordinary);
@@ -1390,6 +1548,7 @@ void retained_backend_policy() {
 
 }
 int main(int argc,char** argv){try{realtime_window_publication_controls();if(argc==2 && std::string_view(argv[1])=="--realtime-window-status")return 0;if(argc==2 && std::string_view(argv[1])=="--gps-clock-gps-on") {gps_clock_live(true,true);return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-default-on") {gps_clock_live(false,true);return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-gps-off") {gps_clock_live(true,false);return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-positive") {gps_clock_geometry();gps_clock_backend_shapes();gps_clock_actual_source();gps_clock_live(true,true);return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-geometry") {gps_clock_geometry();gps_clock_backend_shapes();return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-source") {gps_clock_actual_source();return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-live") {for(const bool gps:{false,true})for(const bool enabled:{false,true})gps_clock_live(gps,enabled);return 0;}if(argc==2 && std::string_view(argv[1])=="--realtime-clock-refresh") {realtime_shared_frequency_controls();realtime_clock_refresh_controls();realtime_gap_protection(true);return 0;}if(argc==2 && std::string_view(argv[1])=="--realtime-gap") {realtime_gap_protection();return 0;}if(argc==2 && std::string_view(argv[1])=="--realistic-only") {realistic_frequency_benefit();return 0;}
+if(argc==2 && std::string_view(argv[1])=="--final-helper-loss") {final_helper_loss_live();return 0;}
 if(argc==2 && std::string_view(argv[1])=="--finite-replay-budget") {finite_replay_budget();return 0;}
 if(argc==2 && std::string_view(argv[1])=="--rolling-primary-decline") {rolling_primary_declines();return 0;}
 if(argc==2 && std::string_view(argv[1])=="--retained-backend-only") {retained_backend_policy();return 0;}

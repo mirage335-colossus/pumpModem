@@ -230,13 +230,33 @@ public:
     ~AuxiliaryMetadataReceiver();
     AuxiliaryMetadataReceiver(AuxiliaryMetadataReceiver&&) noexcept;
     AuxiliaryMetadataReceiver& operator=(AuxiliaryMetadataReceiver&&) noexcept;
+    // Owner-side capture only: no filtering, fitting or allocation. push/reset
+    // may overlap one advance(credit) call; all other methods require it joined.
     void push(std::span<const float>,std::uint64_t first_sample);
-    // At most one latest complete400ms dwell, no work queue. Owners may omit
-    // this call to yield optional decoding; expired raw support is discarded.
+    void reset(std::uint64_t first_sample=0);
+    // Copy newest <=0.84 seconds into prepaid immutable work storage and
+    // snapshot dates/generation. No DSP or allocation; older support expires.
+    bool prepare();
+    // Joined query: unprocessed raw samples in the frozen opportunity. The
+    // caller may fund several4096-sample credits for one larger raw batch.
+    std::size_t pending_samples() const;
+    // Worker-private DSP only, reading frozen prepared PCM/dates. Credit is
+    // capped at4096 raw samples; at most one latest complete400ms dwell decode.
+    bool advance(std::size_t raw_sample_credit);
+    // Joined owner commits independent metadata/punctuation outputs only if
+    // the capture generation still fits.
+    bool commit();
+    // Synchronous compatibility: prepare, advance(4096), commit. Optional
+    // callers may omit work; no historical queue or iterative PCM search.
     bool advance();
     // Metadata is dated at the consumed raw frontier. All frequency, phase and
     // timing authority flags are false; frequency_hz is diagnostic auxiliary Hz.
     std::optional<Reference> take_update();
+    // Independent actual auxiliary phase-flip observation for clock alignment,
+    // never conditioned on metadata decoding. Center date/CI stay unchanged;
+    // support includes the diagnostic FIR's full raw dependencies. Joined,
+    // consuming accessor; known=false means no newly committed observation.
+    PunctuationObservation take_punctuation_update();
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

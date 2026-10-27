@@ -104,6 +104,11 @@ public:
         double dwell_seconds=.4,settling_seconds=.012;
         std::uint64_t phase_seed=1;
         int sideband_sign=1;
+        // Explicit laboratory RF fractional-frequency slope (1/second), at
+        // physical ADC time t=sample/sample_rate. Adds sideband*RF*slope*t Hz
+        // to the complete analytic mixture. Zero preserves the original path;
+        // oscillator accuracy in ppm supplies no value for this field.
+        double rf_fractional_slew_per_second=0;
     };
     // Called before decimation, with a contiguous physical-clock PCM block and
     // its first physical sample. Bounded centered-FIR lookahead may lead the
@@ -112,6 +117,11 @@ public:
     void set_physical_observer(PhysicalObserver observer);
     void set_physical_rf_observer(PhysicalRfObserver observer);
     void set_rf_retune_simulation(const RfRetuneSimulation&);
+    // Laboratory-only final Helper loss at an absolute physical ADC sample.
+    // Configure before the first capture. The normal final 4ms Helper ramp
+    // precedes this endpoint; DATA gain, source/tail duration, noise, clocks
+    // and sample coordinates are unchanged. Null preserves the ordinary path.
+    void set_lab_helper_end_sample(std::optional<std::uint64_t> sample);
     std::uint32_t physical_sample_rate() const;
     // Actual raw-to-logical construction witness. Legacy interpolation has no
     // such raw observation map; its result stays unknown even at equal rates.

@@ -19,6 +19,40 @@ struct ReceptionSourcePublication {
     std::uint32_t phase=0,sample_rate=0;
     bool helper_assisted=false;
 };
+// Current native drain only. Save this scalar before StreamReceiver consumes
+// any chunk's bit vector. A compact gap and an explicit missing-bit placeholder
+// name observed unknown slots; unsupported coordinates grant no gap authority.
+inline std::uint64_t reception_first_missing_slot(std::span<const modem::PatternBurst> drained,
+        std::uint64_t first_sample,std::uint64_t first_symbol) noexcept {
+    auto first_missing=UINT64_MAX;
+    for(const auto& burst:drained) {
+        if(burst.stream_first_sample!=first_sample || burst.stream_first_symbol!=first_symbol ||
+           burst.first_stream_symbol<first_symbol ||
+           (burst.missing_slots && !burst.bits.empty()))continue;
+        const auto offset=burst.first_stream_symbol-first_symbol;
+        if(burst.missing_slots && burst.bits.empty() &&
+           burst.missing_slots<=UINT64_MAX-burst.first_stream_symbol)
+            first_missing=std::min(first_missing,offset);
+        for(std::size_t i=0;i<burst.bits.size();++i)
+            if(burst.bits[i]==modem::missing_pattern_bit && i<=UINT64_MAX-burst.first_stream_symbol)
+                first_missing=std::min(first_missing,offset+static_cast<std::uint64_t>(i));
+    }
+    return first_missing;
+}
+// A competing same-birth interpretation cannot turn an already exposed known
+// prefix slot into an explicit unknown. This uses only actual native slot
+// coordinates and the durable observed prefix; later gaps remain unconstrained.
+inline bool reception_source_gap_withdraws_prefix(const ReceptionSourcePublication& old,
+        std::uint64_t incoming_first,std::uint64_t incoming_symbol_samples,
+        std::uint64_t incoming_timing_tolerance,bool incoming_helper_assisted,
+        std::uint64_t first_missing_slot) noexcept {
+    if(!(old.helper_assisted || incoming_helper_assisted) || !old.count ||
+       old.end<=old.first || !old.symbol_samples || old.symbol_samples!=incoming_symbol_samples ||
+       first_missing_slot>=old.count)return false;
+    const auto distance=old.first>incoming_first?old.first-incoming_first:incoming_first-old.first;
+    return distance<=std::min(std::max(old.timing_tolerance,incoming_timing_tolerance),
+                              (old.symbol_samples-1)/2);
+}
 namespace source_handoff_detail {
 inline bool multiply(std::uint64_t a,std::uint64_t b,std::uint64_t& out) noexcept {
     if(b && a>UINT64_MAX/b)return false;

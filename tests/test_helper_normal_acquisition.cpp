@@ -856,7 +856,8 @@ std::atomic<bool> trace_tx_diagnostics{false};
 bool trace_filter(const char* event) noexcept {
     const std::string_view name{event};
     if(trace_tx_diagnostics.load(std::memory_order_relaxed)&&name=="receiver_pattern_drain")return true;
-    if(trace_work.load(std::memory_order_relaxed)&&(name=="receiver_helper_raw_reference"||name=="receiver_acquisition_work"||
+    if(trace_work.load(std::memory_order_relaxed)&&(name=="receiver_helper_raw_reference"||name=="receiver_helper_pilot_phase"||
+            name=="receiver_acquisition_work"||
             name=="receiver_helper_compact_work"||name=="receiver_helper_cohort_dispatch"||
             name=="receiver_helper_cohort_prior_decision"||name=="receiver_helper_input_view_admission"))return true;
     if(!trace_detail.load(std::memory_order_relaxed))return name=="trace_begin"||name=="receiver_signal_commit"||
@@ -1010,7 +1011,7 @@ enum CompactCounter : std::size_t {
 };
 struct CompactWork {
     std::array<std::uint64_t,compact_counter_count> samples{};
-    std::uint64_t instances=0;
+    std::uint64_t instances=0,capability_supported_instances=0;
     bool executed_and_omitted() const noexcept {
         return instances&&samples[lane_samples]&&samples[skipped_lane_samples];
     }
@@ -1064,6 +1065,7 @@ TraceResult inspect_trace(const std::filesystem::path& path,const Bytes& expecte
     std::ifstream input(path);std::string line;std::set<std::uint64_t> initial_epochs;
     std::map<std::array<std::uint64_t,3>,std::array<std::uint64_t,4>> work;
     std::map<std::array<std::uint64_t,3>,std::array<std::uint64_t,compact_counter_count>> compact_work;
+    std::set<std::array<std::uint64_t,3>> compact_capability_supported;
     std::map<std::array<std::uint64_t,3>,std::array<std::uint64_t,native_arithmetic_counter_count>> native_arithmetic;
     bool native_arithmetic_missing=false;
     struct RealtimeWork {
@@ -1171,6 +1173,8 @@ TraceResult inspect_trace(const std::filesystem::path& path,const Bytes& expecte
                 wire.helper_conditioned_acquisition=wire.helper_conditioned_acquisition||*conditioned;
         }
         if(line.find("\"event\":\"receiver_acquisition_work\"")!=std::string::npos) {
+            require(!number(line,"work_counter_regressed").value_or(0),
+                    "sampled acquisition work counters reset between published snapshots");
             const auto revision=number(line,"revision"),id=number(line,"instance_id"),origin=number(line,"sample_origin");
             const auto jobs=number(line,"template_jobs"),transforms=number(line,"input_transforms"),
                 conditional=number(line,"conditional_jobs"),audit=number(line,"audit_jobs");
@@ -1241,20 +1245,33 @@ TraceResult inspect_trace(const std::filesystem::path& path,const Bytes& expecte
                         "conditional input-view work changed identity or reset its execution count");
                 found->second.jobs=*view_jobs;
             }
-            if(const auto compact=number(line,"compact_supported");compact&&*compact) {
+            if(const auto compact=number(line,"compact_supported");compact) {
                 constexpr std::array<std::string_view,compact_counter_count> fields{
                     "projected_carrier_samples","accumulated_lane_samples","skipped_carrier_samples",
                     "skipped_lane_samples","broad_audit_projected_carrier_samples","broad_audit_accumulated_lane_samples"};
-                auto& prior=compact_work[{*revision,*id,*origin}];
+                const std::array identity{*revision,*id,*origin};
+                if(*compact)compact_capability_supported.insert(identity);
+                std::array<std::uint64_t,compact_counter_count> current{};
                 for(std::size_t i=0;i<fields.size();++i) {
                     const auto counter=number(line,fields[i]);
                     require(counter.has_value(),"compact acquisition work trace omitted an executed sample counter");
-                    require(*counter>=prior[i],"compact acquisition work counters reset within one traced instance");
-                    prior[i]=*counter;
+                    current[i]=*counter;
                 }
-                require(prior[audit_projected_samples]<=prior[projected_samples]&&
-                        prior[audit_lane_samples]<=prior[lane_samples],
-                        "compact audit work exceeds total executed sample work");
+                // Capability describes a particular assisted feature. Ordinary
+                // compact arithmetic can execute even when that feature was
+                // declined; preserve its actual counters without qualifying it.
+                if(*compact || std::any_of(current.begin(),current.end(),[](auto value){return value!=0;}) ||
+                   compact_work.contains(identity)) {
+                    auto& prior=compact_work[identity];
+                    for(std::size_t i=0;i<fields.size();++i) {
+                        const auto counter=current[i];
+                        require(counter>=prior[i],"compact acquisition work counters reset within one traced instance");
+                        prior[i]=counter;
+                    }
+                    require(prior[audit_projected_samples]<=prior[projected_samples]&&
+                            prior[audit_lane_samples]<=prior[lane_samples],
+                            "compact audit work exceeds total executed sample work");
+                }
             }
         }
         if(line.find("\"event\":\"receiver_bank_admitted\"")!=std::string::npos) {
@@ -1428,6 +1445,7 @@ TraceResult inspect_trace(const std::filesystem::path& path,const Bytes& expecte
         result.unique_conditional_jobs+=conditional;
     }
     result.compact.instances=compact_work.size();
+    result.compact.capability_supported_instances=compact_capability_supported.size();
     for(const auto& [identity,counters]:compact_work) {
         (void)identity;
         for(std::size_t i=0;i<counters.size();++i) {
@@ -1752,7 +1770,15 @@ Result run(Profile profile,bool helper,const Resolved& resolved,const Options& o
     const auto start=std::chrono::steady_clock::now();const auto cpu=std::clock();
     auto metrics=options.runtime_metrics?std::make_unique<RuntimeMetrics>(c.sample_rate):nullptr;
     {
-        audio::trace::Scope trace(path,false,&trace_filter);Dates dates(detailed?nullptr:&collector,metrics.get());
+        // A 128-second EME symbol needs a long diagnostic, while lane-work
+        // counters can change every feed. Sample only cumulative work at a
+        // declared 16-second cadence, identically for Helper ON and OFF. Source,
+        // masks, dispatch, qualification and lifecycle changes remain exact.
+        // The filter separately retains dated pure-pilot phase/reference events;
+        // this permits sampling the bank's last-view phase flag, not phase work.
+        const auto work_interval=profile==Profile::eme&&collect_work?16ULL*c.sample_rate:0;
+        audio::trace::Scope trace(path,false,&trace_filter,work_interval,work_interval!=0);
+        Dates dates(detailed?nullptr:&collector,metrics.get());
         // Empty EpochClock retains the normal sample-driven simulation path.
         live::Session session({},[&]{return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_ms.load());});
         session.start(value);
@@ -1869,7 +1895,7 @@ Result run(Profile profile,bool helper,const Resolved& resolved,const Options& o
     for(const auto counter:observed.compact.samples)std::cout<<','<<counter;
     std::cout<<','<<collect_work<<','<<observed.trace_complete<<','<<observed.compact.executed_and_omitted()<<','
         <<observed.frequency_narrowed<<','<<observed.narrowed_instances.size()<<','<<observed.later_assisted_epoch<<','
-        <<observed.timing<<','<<path.string()<<'\n';
+        <<observed.timing<<','<<path.string()<<','<<observed.compact.capability_supported_instances<<'\n';
     std::cout<<"input_view_work,"<<name(profile)<<','<<helper<<','<<observed.input_view_admissions<<','
         <<observed.input_view_instances<<','<<observed.input_view_jobs<<','<<observed.conditional_jobs<<','
         <<observed.unique_conditional_jobs<<','<<observed.template_jobs<<','<<observed.primary_input_view_certified<<','
@@ -1968,6 +1994,10 @@ int reinspect(const Options& options,const Resolved& resolved) {
         <<observed.pending<<','<<observed.complete<<','<<observed.observed_end<<','<<observed.wire_exact<<','
         <<observed.wire_contiguous<<','<<observed.wire_complete<<','<<observed.identity<<','<<observed.prefix<<','
         <<observed.all_rows_end<<','<<observed.rows<<','<<observed.assisted<<','<<options.inspect_path->string()<<'\n';
+    std::cout<<"posthoc_compact_work,"<<name(profile)<<','<<helper<<','<<observed.compact.instances;
+    for(const auto counter:observed.compact.samples)std::cout<<','<<counter;
+    std::cout<<','<<observed.compact.capability_supported_instances<<','<<observed.trace_complete<<','
+        <<options.inspect_path->string()<<'\n';
     std::cout<<"# posthoc_reinspection checks the original sealed trace only; it does not rerun reception, Snapshot source admission or runtime health, and never replaces the original run outcome\n";
     return status;
 }
@@ -1976,6 +2006,7 @@ int main(int argc,char** argv) {try {
     auto options=parse(argc,argv);row_progress_guards();EphemeralKey key(options);int status=0;
     if(options.inspect_path) {
         std::cout<<"# posthoc_reinspection columns: profile,helper,actual_TX_epoch,actual_bit_count,trace_result,primary_id,primary_revision,primary_bits,primary_wire_bits,pending,complete,scored_END,wire_equal,wire_contiguous,wire_complete,revision_identity,primary_lifetime_prefix,all_historical_completed_END,rows,primary_assisted,original_trace\n";
+        std::cout<<"# posthoc_compact_work columns: profile,helper,traced_compact_instances,projected_carrier_samples,accumulated_lane_samples,skipped_carrier_samples,skipped_lane_samples,broad_audit_projected_carrier_samples,broad_audit_accumulated_lane_samples,capability_supported_instances,complete_trace,original_trace; executed counter maxima do not qualify capability or replace the original run result\n";
         return reinspect(options,resolve(options.profiles.front(),options.helpers.front(),options));
     }
     std::cout<<"# metadata columns: profile,helper,Fs,bandwidth,SF,DSSS,symbol_samples,symbol_seconds,pairs,frequencies,rates,requested_Hz,covered_Hz,limited,dsp_bytes,bank_bytes,simulation_snr,CFO,clock_ppm,phase_noise,RX_keys\n";
@@ -1989,7 +2020,7 @@ int main(int argc,char** argv) {try {
     std::cout<<"# helper_resource_trace columns: trace,frontend_admitted,phase_storage_observed,maximum_actual_bytes,minimum_reported_reserve_bytes,within_public_reserve; long-auto helper ON also requires conditional work and primary assisted provenance\n";
     std::cout<<"# trace_integrity columns: trace,complete_footer,matching_begin_end_tokens,dropped,size_limited,prior_io_failed,complete_evidence; incomplete evidence returns status 2 without payload qualification, while actual runtime or health failures retain status 1\n";
     std::cout<<"# assistance_evidence columns: profile,helper,trace_mode,conditional_count_source,conditional_jobs_for_assistance_gate,maximum_public_snapshot_conditional_jobs,complete_trace,complete_wire_evidence,primary_wire_helper_reference_acquired; the selected primary wire requires actual conditioned birth or the legacy helper tag, never enabled helper/global jobs. Framed payloads retain the bounded typed wire observer. Without --work-trace or a new acceptance profile, light framed mode uses Snapshot maxima and establishes no total-work gain\n";
-    std::cout<<"# compact_work columns: profile,helper,traced_compact_instances,projected_carrier_samples,accumulated_lane_samples,skipped_carrier_samples,skipped_lane_samples,broad_audit_projected_carrier_samples,broad_audit_accumulated_lane_samples,work_trace_requested,complete_trace,executed_and_omitted_cold_lane_work,qualified_frequency_narrowing,narrowed_instances,later_assisted_epoch,timing_narrowing_applied,trace; cumulative maxima per joined ordinary receiver, never FFT jobs\n";
+    std::cout<<"# compact_work columns: profile,helper,traced_compact_instances,projected_carrier_samples,accumulated_lane_samples,skipped_carrier_samples,skipped_lane_samples,broad_audit_projected_carrier_samples,broad_audit_accumulated_lane_samples,work_trace_requested,complete_trace,executed_and_omitted_cold_lane_work,qualified_frequency_narrowing,narrowed_instances,later_assisted_epoch,timing_narrowing_applied,trace,capability_supported_instances; actual cumulative maxima per joined ordinary receiver, never FFT jobs or capability/qualification inferred from executed work\n";
     std::cout<<"# native_arithmetic columns: profile,helper,complete_counter_coverage,traced_counter_instances,ordinary_work_instances,fft_jobs,direct_jobs,exact_reused_template_jobs,partitioned_transform_points,native_fp32_transforms,tabulated_fp64_transforms,template_jobs,input_transforms,process_CPU_seconds,wall_seconds,maximum_backlog_seconds,captured_samples,matched_DSP_workspace_bytes,trace; separate cumulative maxima per joined ordinary receiver through retirement/unwind, no sum across unlike arithmetic units\n";
     std::cout<<"# template_jobs and input_view_native_jobs include exact-reused template descriptor visits; they are not FFT executions. Arithmetic absent from a historical or incomplete counter schema is unavailable, never inferred as zero. Compact sample work remains separate\n";
     std::cout<<"# input_view_admission columns: trace,revision,instance_id,sample_origin,epoch,family,view_id,baseline_original_pairs,actual_conditional_pairs,raw_frequency_Hz,raw_frequency_uncertainty_Hz,raw_reference_sample,raw_frequency_sample,physical_sample_rate,captured_ingress,helper_source_origin,immutable_correction_Hz,conjugate,qualified_clock_lower_ppm,qualified_clock_upper_ppm,later_epoch,joined_executed_native_jobs,primary_wire_view; committed admitted+qualified records only, causal <=1s frequency age and clock interval within the declared prior, not full baseline RF coverage\n";

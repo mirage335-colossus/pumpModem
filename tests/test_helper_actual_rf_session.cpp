@@ -15,6 +15,8 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <numbers>
+#include <set>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -95,6 +97,135 @@ void frozen_source_band_declines_wide_retune() {
         frontend.tracking_decline_reason(),"wide RF retune changed NCO or received a false source-band certificate");
     std::cout<<"actual_rf_source_band,small_shift_accepted=1,wide_shift_declined=1,old_nco_preserved=1\n";
 }
+void mixed_output_certificates_preserve_pcm() {
+    const auto value=settings();const auto& config=value.transfer.modem;
+    constexpr std::uint32_t rate=8000,step=160;constexpr double pilot=2450;
+    helper::Reference reference;reference.sample_rate=rate;reference.frequency_valid=true;
+    reference.frequency_hz=pilot+7.3;reference.frequency_uncertainty_hz=.01;
+    using Frontend=live::detail::HelperInputFrontend;
+    const auto grant=Frontend::reservation_bound(rate,rate,pilot);
+    const auto collect=[&](int pattern) {
+        Frontend frontend(grant,94);frontend.admit_realtime(config,pilot,reference,rate,rate/2.-10,0);
+        std::array<float,step> input{};
+        for(std::uint64_t first=0;first<2*rate;first+=step) {
+            for(std::size_t i=0;i<input.size();++i)input[i]=static_cast<float>(.02*std::cos(
+                2*std::numbers::pi*(config.carrier_hz+7.3)*(first+i)/rate));
+            const bool qualified=pattern==0 || (pattern==1?(first>=3200 && first<9600):first%3200<1600);
+            frontend.push(input,first,qualified?std::optional<double>{.02}:std::nullopt);
+            check(frontend.bytes()<=grant,"certificate split exceeded its prepaid frontend storage");
+        }
+        return frontend.take(UINT64_MAX,reference,2*rate);
+    };
+    const auto baseline=collect(0),mixed=collect(1),fragmented=collect(2);
+    const auto flatten=[](const auto& blocks) {
+        std::vector<float> samples;std::uint64_t next=0;
+        for(const auto& block:blocks) {
+            if(samples.empty())next=block.first_sample;
+            check(block.first_sample==next,"certificate split dropped or redated ordinary PCM");
+            samples.insert(samples.end(),block.samples.begin(),block.samples.end());next+=block.samples.size();
+        }
+        return samples;
+    };
+    const auto expected=flatten(baseline);
+    check(!expected.empty() && flatten(mixed)==expected && flatten(fragmented)==expected,
+        "certificate classification changed actual payload samples");
+    const auto same_dates=[&](const auto& blocks) {
+        return blocks.front().first_sample==baseline.front().first_sample &&
+            blocks.back().first_sample+blocks.back().samples.size()==
+                baseline.back().first_sample+baseline.back().samples.size();
+    };
+    check(same_dates(mixed) && same_dates(fragmented),
+        "certificate classification changed payload support dates");
+    std::size_t qualified=0,unsupported=0;
+    for(const auto& block:mixed) {
+        qualified+=block.corrected_rf_uncertainty_hz.has_value();unsupported+=!block.corrected_rf_uncertainty_hz;
+        check(block.reference && block.reference->frequency_hz==reference.frequency_hz && block.raw_captured_end==2*rate,
+            "certificate split rewrote original measured reference or captured frontier");
+    }
+    check(qualified && unsupported && mixed.size()<=8 && fragmented.size()<=8 &&
+        !fragmented.back().corrected_rf_uncertainty_hz,
+        "mixed certificate splitting lost useful support or qualified its capped unsupported tail");
+    // After startup is drained, an uninterrupted certified interval retains
+    // one coalesced block rather than multiplying ordinary feed calls.
+    Frontend continuous(grant,95);continuous.admit_realtime(config,pilot,reference,rate,rate/2.-10,0);
+    std::array<float,step> silence{};
+    for(std::uint64_t first=0;first<2*rate;first+=step) {
+        continuous.push(silence,first,.02);
+        if(first+step==rate)(void)continuous.take(UINT64_MAX,reference,first+step);
+    }
+    const auto joined=continuous.take(UINT64_MAX,reference,2*rate);
+    check(joined.size()==1 && joined.front().corrected_rf_uncertainty_hz,
+        "homogeneous continuous input lost its large coalesced block");
+    std::cout<<"actual_rf_output_certificates,mixed_blocks="<<mixed.size()<<",qualified_blocks="<<qualified
+        <<",unsupported_blocks="<<unsupported<<",fragmented_capped_blocks="<<fragmented.size()
+        <<",continuous_blocks="<<joined.size()<<",identical_pcm_samples="<<expected.size()<<'\n';
+}
+struct ConstructorGeometry {
+    std::size_t ordinary_pairs=0,assisted_pairs=0,assisted_clock_rates=0;
+    double clock_bound_ppm=0;
+};
+ConstructorGeometry corrected_constructor_geometry(const modem::Config& config,double pilot,double uncertainty,
+        std::size_t actual_pairs,std::size_t actual_clock_rates,bool check_existing_component) {
+    const auto ordinary=modem::oscillator_pattern_search(config,0);
+    const auto corrected=modem::helper_reference_search(config,uncertainty,pilot,0,0,
+        modem::HelperReferenceClockRelation::common_corrected_source,false,
+        modem::PatternUtcClockGrid::complete_expanded_domain);
+    const auto& catalogue=corrected.catalogue;
+    const auto coupling=config.carrier_hz-pilot;
+    const auto clock_bound=config.oscillator_search->lf.accuracy_ppm*config.oscillator_search->margin;
+    std::set<double> clocks;auto ordered=catalogue.hypotheses;
+    for(const auto& pair:ordered)clocks.insert(pair.clock_error_ppm);
+    check(!catalogue.limited && ordered.size()==actual_pairs && clocks.size()==actual_clock_rates &&
+        ordered.size()<ordinary.hypotheses.size() && catalogue.requested_clock_half_width_ppm==clock_bound &&
+        *clocks.begin()==-clock_bound && *clocks.rbegin()==clock_bound,
+        "actual corrected constructor did not reduce RF work over the full original LF domain");
+    std::sort(ordered.begin(),ordered.end(),[](const auto& a,const auto& b) {
+        return a.frequency_offset_hz<b.frequency_offset_hz;
+    });
+    const auto frequency_bound=uncertainty+std::abs(coupling)*clock_bound*1e-6;
+    double maximum_clock_radius=0;
+    // Prove the entire physical RF/LF strip, including its endpoints, fits the
+    // advertised timing cells. Different complete-domain constructor grids
+    // need not use the original grid's exact numerical representatives.
+    for(std::size_t i=0;i<ordered.size();++i) {
+        const auto lower=i?(ordered[i-1].frequency_offset_hz+ordered[i].frequency_offset_hz)/2:-frequency_bound;
+        const auto upper=i+1<ordered.size()?(ordered[i].frequency_offset_hz+ordered[i+1].frequency_offset_hz)/2:frequency_bound;
+        const std::array endpoints{(lower-uncertainty)/coupling*1e6,(lower+uncertainty)/coupling*1e6,
+            (upper-uncertainty)/coupling*1e6,(upper+uncertainty)/coupling*1e6};
+        const auto lo=std::max(-clock_bound,*std::min_element(endpoints.begin(),endpoints.end()));
+        const auto hi=std::min(clock_bound,*std::max_element(endpoints.begin(),endpoints.end()));
+        if(lo<=hi)maximum_clock_radius=std::max({maximum_clock_radius,
+            std::abs(lo-ordered[i].clock_error_ppm),std::abs(hi-ordered[i].clock_error_ppm)});
+    }
+    check(maximum_clock_radius<=std::nextafter(catalogue.clock_step_ppm/2,INFINITY),
+        "corrected constructor lost physical LF alternatives inside a frequency cell");
+    if(check_existing_component) {
+        // A separate existing-catalogue control uses the SAME observed U and
+        // unchanged oscillator priors in corrected input coordinates. It does
+        // not claim that this Session was born with these broader RF cells.
+        modem::PatternSearchResolution resolution;resolution.clock_frequency_hz=coupling;
+        const auto original=modem::oscillator_pattern_search(config,0,resolution,
+            modem::PatternUtcClockGrid::complete_expanded_domain);
+        modem::PatternSearch search;search.hypotheses=original.hypotheses;
+        search.admitted_clock_half_width_ppm=original.requested_clock_half_width_ppm;
+        search.admitted_clock_cell_half_width_ppm=original.clock_step_ppm/2;
+        modem::detail::PatternHelperFrequencySelector selector;
+        modem::PatternHelperFrequencyWindow window{0,original.frequency.requested_half_width_hz,-coupling,
+            original.clock_step_ppm/2,{}};
+        check(selector.initialize(search,window) && selector.selected==search.hypotheses.size(),
+            "existing corrected-coordinate catalogue did not begin with its original RF cells");
+        window.half_width_hz=uncertainty;selector.update(window);
+        check(selector.selected && selector.selected<search.hypotheses.size() &&
+            selector.original_clock_rates>1 && selector.original_clock_rates==selector.selected_clock_rates,
+            "observed local precision failed to narrow existing RF cells while retaining all original LF rates");
+        std::cout<<"actual_rf_existing_selector_component,observed_U_hz="<<uncertainty
+            <<",original_pairs="<<search.hypotheses.size()<<",selected_pairs="<<selector.selected
+            <<",retained_original_clock_rates="<<selector.selected_clock_rates<<'\n';
+        // Existing payload/END refresh coverage remains in helper_frequency_window;
+        // helper_compact_acquisition covers the ordinary128-second API as well.
+    }
+    return {ordinary.hypotheses.size(),catalogue.hypotheses.size(),clocks.size(),clock_bound};
+}
 void run(const std::filesystem::path& path,bool independent_clock) {
     const auto value=settings(independent_clock);const Bytes bits{0,0,1};
     const auto pilot=helper::plan(value.helper,helper::placement_band(value.transfer.modem),120000000,0,
@@ -129,7 +260,9 @@ void run(const std::filesystem::path& path,bool independent_clock) {
     struct Segment {std::uint64_t first,settled,end;double rf;};
     std::map<std::uint64_t,Segment> segments;std::ifstream input(path);std::string line;
     std::uint64_t references=0,escapes=0,phase_updates=0,jobs=0,phase_work_jobs=0,stage_peak=0,pending=0,completed=0;
-    std::uint64_t local_references=0,retained_clock_masks=0,narrowed_masks=0;
+    std::uint64_t local_references=0,retained_clock_masks=0,narrowed_masks=0,existing_mask_opportunities=0;
+    std::set<std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>> constructor_owners;
+    ConstructorGeometry constructors;
     std::map<std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>,std::uint64_t> owner_jobs;
     double maximum_error=0;std::uint64_t identity=0,revision=0,previous_bits=0;
     while(std::getline(input,line)) {
@@ -177,7 +310,13 @@ void run(const std::filesystem::path& path,bool independent_clock) {
                     number(line,"helper_window_original_clock_rates")==number(line,"helper_window_selected_clock_rates"),
                     "independent RF/audio local frequency discarded unresolved LF alternatives");
                 ++retained_clock_masks;
+                existing_mask_opportunities+=number(line,"helper_window_original_pairs")>
+                    number(line,"helper_window_original_clock_rates");
                 narrowed_masks+=number(line,"helper_window_selected_pairs")<number(line,"helper_window_original_pairs");
+                if(constructor_owners.emplace(number(line,"revision"),number(line,"instance_id"),number(line,"sample_origin")).second)
+                    constructors=corrected_constructor_geometry(value.transfer.modem,pilot,
+                        real(line,"realtime_reference_uncertainty_hz"),number(line,"helper_window_original_pairs"),
+                        number(line,"helper_window_original_clock_rates"),constructor_owners.size()==1);
             }
             previous=current;
         }
@@ -207,6 +346,11 @@ void run(const std::filesystem::path& path,bool independent_clock) {
         <<",phase_updates="<<phase_updates<<",ordinary_jobs_peak="<<jobs<<",phase_covered_feed_jobs="<<phase_work_jobs<<",frequency_assisted="<<frequency
         <<",phase_assisted="<<phase<<",pending="<<pending<<",complete="<<completed<<",logical_samples="<<final_samples
         <<",local_reference_polls="<<local_references<<",retained_LF_masks="<<retained_clock_masks<<",narrowed_RF_masks="<<narrowed_masks
+        <<",constructor_catalogues_checked="<<constructor_owners.size()<<",ordinary_constructor_pairs="<<constructors.ordinary_pairs
+        <<",assisted_constructor_pairs="<<constructors.assisted_pairs<<",constructor_clock_domain_low_ppm="<<-constructors.clock_bound_ppm
+        <<",constructor_clock_domain_high_ppm="<<constructors.clock_bound_ppm
+        <<",existing_RF_mask_opportunities="<<existing_mask_opportunities
+        <<",existing_RF_mask_narrowing_tested="<<bool(existing_mask_opportunities)
         <<",workspace_peak_bytes="<<peak_bytes<<",raw_stage_peak_samples="<<stage_peak
         <<",process_cpu_seconds="<<static_cast<double>(std::clock()-cpu)/CLOCKS_PER_SEC
         <<",wall_seconds="<<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()
@@ -215,8 +359,9 @@ void run(const std::filesystem::path& path,bool independent_clock) {
         "actual RF Session did not causally re-acquire independent retuned pilot segments");
     check(finished && exact && pending && completed && jobs && phase_work_jobs && frequency && phase,
         "actual RF Session did not complete ordinary encrypted Auto/rolling reception");
-    if(independent_clock)check(local_references && retained_clock_masks && narrowed_masks,
-        "independent RF/audio local frequency did not preserve LF while narrowing actual RF work");
+    if(independent_clock)check(local_references && retained_clock_masks && !constructor_owners.empty() &&
+        constructors.assisted_pairs<constructors.ordinary_pairs && (!existing_mask_opportunities || narrowed_masks),
+        "independent RF/audio local frequency did not preserve LF while narrowing available actual RF work");
 }
 }
 int main(int argc,char** argv)try {
@@ -228,5 +373,5 @@ int main(int argc,char** argv)try {
     }
     const auto path=requested_path.value_or(std::filesystem::temp_directory_path()/
         ("datapump-helper-actual-rf-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl"));
-    frozen_source_band_declines_wide_retune();run(path,independent_clock);return 0;
+    frozen_source_band_declines_wide_retune();mixed_output_certificates_preserve_pcm();run(path,independent_clock);return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}

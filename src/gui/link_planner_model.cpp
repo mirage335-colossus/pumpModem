@@ -651,7 +651,8 @@ struct CurveEntry {
 // Reuse that bounded numeric forecast under Cache's existing mutex; never
 // cache runtime qualification or a receiver-cost result here.
 struct HelperPrecisionCache {
-    using Key=std::tuple<std::uint32_t,double,double,std::size_t,bool,double,double,double,double,double,bool,double,double>;
+    using Key=std::tuple<std::uint32_t,double,double,std::size_t,bool,double,double,double,double,double,bool,double,double,
+        helper::PilotObservationMode,double,double>;
     struct Entry {Key key;helper::TonePrecisionPrediction prediction;};
     std::array<std::optional<Entry>,16> entries;
     std::size_t next=0;
@@ -659,7 +660,8 @@ struct HelperPrecisionCache {
         const Key key{r.sample_rate,r.straight_cn0_db_hz,r.phase_noise_radians_per_sqrt_second,
             r.metadata_symbols,r.punctuate,r.baseline_lead_seconds,r.target_half_width_hz,
             r.max_extra_seconds,r.maximum_tracking_slew_hz_per_second,r.maximum_source_capture_ratio,
-            r.pilot_segmented,r.pilot_coherent_aperture_seconds,r.pilot_estimator_efficiency};
+            r.pilot_segmented,r.pilot_coherent_aperture_seconds,r.pilot_estimator_efficiency,
+            r.pilot_observation,r.pilot_settled_aperture_seconds,r.pilot_discovery_budget_seconds};
         for(const auto& entry:entries)if(entry && entry->key==key)return entry->prediction;
         auto prediction=helper::predict_tone_precision(r);
         entries[next]=Entry{key,prediction};next=(next+1)%entries.size();
@@ -765,10 +767,15 @@ RealtimeHelperCpuPoint realtime_helper_point(const Inputs& inputs,const modem::C
         reference.phase_noise_radians_per_sqrt_second=request.phase_noise_radians_per_sqrt_second;
         reference.maximum_tracking_slew_hz_per_second=request.maximum_tracking_slew_hz_per_second;
         reference.maximum_source_capture_ratio=request.maximum_source_capture_ratio;
-        reference.coherent_aperture_seconds=request.pilot_coherent_aperture_seconds/request.maximum_source_capture_ratio;
         reference.estimator_efficiency=request.pilot_estimator_efficiency;
         reference.ideal_one_second_half_width_hz=helper_ideal_tone_half_width(reference.cn0_db_hz,1);
         out.precision=precision_cache.predict(request);
+        reference.coherent_aperture_seconds=out.precision.coherent_aperture_seconds;
+        // Price the same continuous production model as TX. Keep independent
+        // actual-retune geometry separate; a Fake calendar is fixed RF.
+        auto comparison=request;
+        comparison.pilot_observation=helper::PilotObservationMode::independent_retunes;
+        out.precision.retune_model=precision_cache.predict(comparison).pilot_model;
         // Match transmit airtime even when the bounded lead is selected without
         // a numeric precision estimate. Such a cap never creates an RF search.
         requirements.frequency_precision_extension_seconds=
@@ -781,8 +788,8 @@ RealtimeHelperCpuPoint realtime_helper_point(const Inputs& inputs,const modem::C
         reference.ideal_lead_observation_seconds=out.planned_lead_seconds/request.maximum_source_capture_ratio;
         reference.ideal_lead_half_width_hz=helper_ideal_tone_half_width(reference.cn0_db_hz,
             reference.ideal_lead_observation_seconds);
-        if(out.precision.supported)
-            reference.segmented_lead_half_width_hz=out.precision.segmented_noise_reference_half_width_hz;
+        if(out.precision.retune_model.supported)
+            reference.segmented_lead_half_width_hz=out.precision.retune_model.constant_frequency_noise_half_width_hz;
         if(!out.precision.supported)throw Error("Automatic helper precision lead prediction declined: "+out.precision.reason);
         out.observation_seconds=out.precision.usable_tone_seconds;
         const auto price_reference=[&](double uncertainty,const std::string& precision_reason) {

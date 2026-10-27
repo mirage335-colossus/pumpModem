@@ -14,10 +14,12 @@
 #include <chrono>
 #include <thread>
 #include <map>
+#include <memory>
 #include <cstdint>
-#include <cstring>
 #include <fstream>
-#include <sstream>
+#include <optional>
+#include <string_view>
+#include <tuple>
 using namespace datapump;
 namespace {
 void check(bool value,const char* what) {if(!value)throw Error(what);}
@@ -296,30 +298,14 @@ void helper_only_live_simulation() {
     session.cancel_transmit();session.stop();
     check(after_clear,"continuous physical helper did not resume its receive row after clear");
 }
-struct LifecycleTraceState {
-    std::atomic<bool> broad_active{false};
-    std::atomic<unsigned> coverage_events{0};
-};
-std::atomic<LifecycleTraceState*> lifecycle_trace_state{nullptr};
-struct LifecycleTraceStateScope {
-    LifecycleTraceState state;
-    LifecycleTraceStateScope() {
-        LifecycleTraceState* empty=nullptr;
-        check(lifecycle_trace_state.compare_exchange_strong(empty,&state),"helper lifecycle trace monitor already active");
-    }
-    ~LifecycleTraceStateScope(){lifecycle_trace_state.store(nullptr);}
-};
-bool lifecycle_trace_event(const char* event)noexcept {
-    if(auto* state=lifecycle_trace_state.load()) {
-        if(std::strcmp(event,"receiver_helper_future_broad_begin")==0)state->broad_active=true;
-        if(std::strcmp(event,"receiver_helper_future_broad_slot_finished")==0)state->broad_active=false;
-        if(std::strcmp(event,"receiver_helper_future_broad_coverage")==0) {
-            state->broad_active=false;++state->coverage_events;
-        }
-    }
-    return std::strcmp(event,"receiver_helper_cohort_resolution")==0 ||
-        std::strcmp(event,"receiver_helper_native_timing")==0 ||
-        std::strncmp(event,"receiver_helper_future_broad_",29)==0;
+bool lifecycle_trace_event(const char* name)noexcept {
+    const std::string_view event{name};
+    return event=="trace_begin" || event=="receiver_helper_raw_reference" ||
+        event=="receiver_helper_corrected_interval" || event=="receiver_helper_reference_reentry" ||
+        event=="receiver_acquisition_work" || event=="receiver_acquisition_work_unavailable" ||
+        event=="receiver_bank_admitted" || event=="receiver_signal_commit" ||
+        event=="receiver_helper_assistance_admitted" || event.starts_with("receiver_helper_cohort_") ||
+        event.starts_with("receiver_helper_conditioning_") || event.starts_with("receiver_helper_future_broad_");
 }
 void helper_audit_work_credit_is_bounded() {
     live::detail::HelperAuditTokens native,compact;
@@ -333,12 +319,8 @@ void helper_audit_work_credit_is_bounded() {
     native.charge(1);native.earn(1);
     check(!native.ready(),"a reset work counter minted optional audit credit");
 }
-void rolling_helper_waits_without_payload_and_audits_future() {
+void rolling_helper_waits_and_drains_after_loss() {
     live::Settings settings;settings.simulation=true;settings.full_duplex=true;
-    // T=.64s leaves more capture margin for the original four-epoch/full-arrival
-    // FFT coverage within the unchanged ten-second post-cancel deadline. The
-    // retained SF128 run (T=1.28s) stopped 2,480 capture frames before its last
-    // fresh-fallback scoring fence; that observation remains incomplete.
     auto& c=settings.transfer.modem;c=config();c.bandwidth_hz=200;c.spreading_factor=64;
     c.pulse_shaping=false;c.scramble=true;c.receiver_strategy=modem::ReceiverStrategy::automatic;
     c.oscillator_search=modem::OscillatorSearchConfig{{.01,0},{1,0},1e6,3};
@@ -350,135 +332,177 @@ void rolling_helper_waits_without_payload_and_audits_future() {
     settings.helper.power_w=1500;settings.helper.data_power_w=4;
     const auto path=std::filesystem::temp_directory_path()/
         ("datapump-helper-lifecycle-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl");
-    bool narrowed=false,waited=false,loss_advanced=false,loss_coverage_observed=false;
-    std::uint64_t loss_origin=0,last_samples=0;
-    double cancel_steady=0;
+    const auto verify=[&](bool ok,const char* what) {
+        if(!ok)throw Error(std::string(what)+"; lifecycle evidence retained: "+path.string());
+    };
+    bool assisted=false,waited=false,withdrawn=false,loss_drained=false;
+    std::uint64_t loss_origin=0,withdraw_processed=0,last_samples=0,last_processed=0;
+    std::uint64_t input_revision=0,withdraw_admissions=0;
+    std::size_t peak_workspace=0;
+    std::shared_ptr<audio::trace::State> trace_state;
     {
-        // The Session joins before the trace/monitor are removed. This observes
-        // executed coverage, without controlling any receiver decision.
-        LifecycleTraceStateScope monitor;
+        // This is one realtime ordinary bank with its normal keyed epoch rows.
+        // Manual Helper loss pauses fresh acquisition; it does not authorize a
+        // second broad bank or turn unprocessed input into observed absence.
         audio::trace::Scope trace(path,false,&lifecycle_trace_event);
+        trace_state=audio::trace::active.load();
+        verify(trace_state && trace_state->path==std::filesystem::absolute(path).string(),
+               "Helper lifecycle did not retain its own trace writer");
         live::Session session;session.start(settings);session.transmit_helper();
+        const auto observe=[&](const live::Snapshot& snapshot) {
+            verify(snapshot.error.empty() && !snapshot.receiver_health.failed() &&
+                   !snapshot.receiver_health.dropped_samples,"rolling Helper changed ordinary receiver health");
+            verify(snapshot.received.empty(),"helper-only rolling wait decoded payload content");
+            for(const auto& event:snapshot.signals)
+                verify(event.helper_carrier || (!event.received_bits && !event.complete),
+                       "helper-only rolling wait invented Robust bits or physical END");
+            verify(snapshot.dsp_buffered_bytes<=settings.dsp_workspace_bytes,
+                   "single realtime Helper bank exceeded its funded DSP workspace");
+            peak_workspace=std::max(peak_workspace,snapshot.dsp_buffered_bytes);
+            verify(snapshot.samples_received>=last_samples && snapshot.processed_physical_samples>=last_processed &&
+                   snapshot.processed_physical_samples<=snapshot.samples_received,
+                   "Helper lifecycle changed capture or processed sample chronology");
+            if(input_revision)verify(snapshot.receiver_input_revision==input_revision,
+                                    "Helper loss replaced the receiver capture revision");
+            else input_revision=snapshot.receiver_input_revision;
+            last_samples=snapshot.samples_received;last_processed=snapshot.processed_physical_samples;
+            verify(!snapshot.helper_audit_jobs && !snapshot.helper_input_view_count,
+                   "manual realtime Helper started a companion broad/input-view audit bank");
+            return snapshot.helper_frequency_assistance_active;
+        };
         const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(25);
         do {
-            const auto snapshot=session.snapshot();
-            check(snapshot.error.empty(),"ordinary rolling helper-only wait failed");
-            check(snapshot.received.empty(),"helper-only rolling wait decoded payload content");
-            for(const auto& event:snapshot.signals)
-                check(event.helper_carrier||!event.received_bits,"helper-only rolling wait invented Robust payload");
-            narrowed=narrowed||snapshot.helper_frequency_assistance_active;
-            last_samples=snapshot.samples_received;
-            if(last_samples>=18ULL*c.sample_rate) {
-                waited=true;break;
-            }
+            const auto snapshot=session.snapshot();assisted=observe(snapshot)||assisted;
+            if(last_samples>=18ULL*c.sample_rate) {waited=true;break;}
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         } while(std::chrono::steady_clock::now()<deadline);
-        loss_origin=session.snapshot().samples_received;
-        const auto coverage_before_cancel=monitor.state.coverage_events.load();
-        cancel_steady=std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        loss_origin=last_samples;
         session.cancel_transmit();
         const auto loss_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
         do {
-            const auto snapshot=session.snapshot();check(snapshot.error.empty(),"helper loss failed ordinary rolling reception");
-            last_samples=snapshot.samples_received;
-            loss_advanced=last_samples>=loss_origin+3ULL*c.sample_rate;
-            loss_coverage_observed=monitor.state.coverage_events.load()>coverage_before_cancel;
-            if(loss_advanced&&loss_coverage_observed)break;
+            const auto snapshot=session.snapshot();const auto active=observe(snapshot);
+            if(!withdrawn && !active && snapshot.helper_status.starts_with("Helper reference lost:")) {
+                withdrawn=true;withdraw_processed=last_processed;withdraw_admissions=snapshot.receiver_admissions;
+            }
+            if(withdrawn) {
+                verify(!active,"final Helper loss regained frequency authority from noise");
+                verify(snapshot.receiver_admissions==withdraw_admissions,
+                       "final Helper loss admitted a fresh ordinary acquisition row");
+                loss_drained=last_processed>=withdraw_processed+3ULL*c.sample_rate;
+            }
+            if(loss_drained)break;
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         } while(std::chrono::steady_clock::now()<loss_deadline);
         session.stop();
     }
-    std::ifstream input(path);check(bool(input),"helper lifecycle evidence was not written");
-    std::string line;bool conditional_after_silence=false,broad_work=false,full_coverage=false,future_loss=false;
-    bool fallback_admission=false,post_loss_coverage=false,partial_slot=false,one_cold_owner=true,workspace_observed=false;
-    std::size_t periodic_admissions=0;
-    std::uint64_t active_probe=0;
-    std::map<std::uint64_t,std::uint64_t> periodic_begins;
-    const auto number=[](const std::string& record,const char* name) {
+    // The finalization receipt is emitted on stderr, not a sidecar file. As in
+    // the cold-start/continuation fixtures, inspect this writer after Scope
+    // teardown: a footer alone cannot prove its final flush and close.
+    {
+        std::lock_guard lock(trace_state->mutex);
+        verify(trace_state->done && !trace_state->file && !trace_state->io_failed &&
+               !trace_state->dropped && !trace_state->size_limited,
+               "Helper lifecycle trace did not finish its flush and close");
+    }
+    const auto number=[&](const std::string& record,const char* name) {
         const auto key="\""+std::string(name)+"\":";const auto field=record.find(key);
-        return field==std::string::npos?std::uint64_t{}:std::stoull(record.substr(field+key.size()));
+        verify(field!=std::string::npos,"lifecycle trace omitted a required executed-work field");
+        return std::stoull(record.substr(field+key.size()));
     };
+    using Owner=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>;
+    std::map<Owner,std::array<std::uint64_t,4>> work;
+    std::ifstream input(path);verify(bool(input),"Helper lifecycle evidence was not written");
+    std::string line;
+    bool raw_qualified=false,corrected_qualified=false,joined_work=false,post_loss_join=false,footer=false;
+    std::optional<std::uint64_t> corrected_end,unlocked_first;
+    std::uint64_t unlocked_end=0,admissions=0,rows=0;
     while(std::getline(input,line)) {
-        if(line.find("receiver_helper_native_timing")!=std::string::npos && number(line,"qualified_reference"))
-            check(number(line,"evidence_local_sample")<=number(line,"observed_samples"),
-                  "native punctuation used evidence beyond its consumed input fence");
-        if(line.find("receiver_helper_future_broad_slot_workspace")!=std::string::npos ||
-           (line.find("receiver_helper_future_broad_row_admitted")!=std::string::npos && number(line,"partial_slot"))) {
-            workspace_observed=true;
-            check(number(line,"cold_workspace_ceiling_bytes")>=number(line,"actual_working_bytes"),
-                  "cold optional audit exceeded its funded numerical ceiling");
-            if(line.find("receiver_helper_future_broad_slot_workspace")!=std::string::npos) {
-                const auto ceiling=number(line,"cold_workspace_ceiling_bytes");
-                check(ceiling>=sizeof(modem::StreamingReceiver) &&
-                      number(line,"workspace_argument")<=ceiling-sizeof(modem::StreamingReceiver),
-                      "cold optional audit loan exceeded its stored argument ceiling");
+        const auto event=[&](std::string_view name) {
+            return line.find("\"event\":\""+std::string(name)+"\"")!=std::string::npos;
+        };
+        verify(!event("receiver_acquisition_work_unavailable"),"Helper lifecycle lost a joined numeric work snapshot");
+        verify(line.find("\"event\":\"receiver_helper_future_broad_")==std::string::npos &&
+               line.find("\"event\":\"receiver_helper_cohort_")==std::string::npos &&
+               line.find("\"event\":\"receiver_helper_conditioning_")==std::string::npos &&
+               !event("receiver_helper_assistance_admitted"),
+               "manual realtime Helper launched a legacy companion receiver or broad probe");
+        if(event("receiver_helper_raw_reference") && number(line,"qualified")) {
+            verify(number(line,"sample")<number(line,"captured_end") &&
+                   number(line,"frequency_first_sample")<=number(line,"sample"),
+                   "qualified raw Helper reference used future or reversed support");
+            raw_qualified=true;
+        }
+        if(event("receiver_helper_corrected_interval")) {
+            const auto first=number(line,"first_sample"),end=number(line,"end_sample");
+            verify(end>first && (!corrected_end || first==*corrected_end),
+                   "single corrected input skipped or replayed payload sample coordinates");
+            corrected_end=end;
+            if(number(line,"locked")) {
+                verify(!unlocked_first,"final Helper loss relocked the ordinary input on noise");
+                verify(number(line,"corrected_interval_valid"),"locked corrected input omitted its measured RF interval");
+                corrected_qualified=true;
+            } else if(corrected_qualified && first>=loss_origin) {
+                if(!unlocked_first)unlocked_first=first;
+                unlocked_end=end;
             }
         }
-        if(line.find("receiver_helper_cohort_resolution")!=std::string::npos &&
-           line.find("\"prior_pending\":1")!=std::string::npos) {
-            check(line.find("\"conditional\":1")!=std::string::npos,
-                "empty/wrong epochs replayed historical exhaustive search despite a qualified helper");
-            const auto field=line.find("\"sample\":");
-            if(field!=std::string::npos && std::stoull(line.substr(field+9))>8ULL*c.sample_rate)
-                conditional_after_silence=true;
+        if(event("receiver_bank_admitted")) {
+            verify(number(line,"revision")==input_revision,"ordinary admission escaped the single capture bank revision");
+            verify(!unlocked_first,"new ordinary receiver admission followed the actual Helper-loss fence");
+            verify(number(line,"workspace")<=settings.dsp_workspace_bytes,
+                   "ordinary admission exceeded the single-bank workspace ceiling");
+            verify(number(line,"admissions")>admissions,"ordinary admission count did not advance");
+            admissions=number(line,"admissions");++rows;
         }
-        if(line.find("receiver_helper_future_broad_slot_finished")!=std::string::npos) {
-            if(!number(line,"promoted_payload"))
-                check(number(line,"actual_working_bytes")<=number(line,"cold_workspace_ceiling_bytes"),
-                      "cold optional audit batch exceeded its funded numerical ceiling");
-            partial_slot=partial_slot||(number(line,"packet_completed")==1 &&
-                number(line,"full_cohort_coverage")==0 && number(line,"unscored_input_is_absence")==0 &&
-                (number(line,"template_jobs")>0 || number(line,"accumulated_lane_samples")>0));
-            broad_work=broad_work||number(line,"template_jobs")>0||number(line,"accumulated_lane_samples")>0;
-            one_cold_owner=one_cold_owner && number(line,"requested")<=1 && number(line,"committed")<=1;
-            if(number(line,"instance_id")==active_probe)active_probe=0;
+        if(event("receiver_acquisition_work")) {
+            verify(number(line,"revision")==input_revision && number(line,"realtime_helper") &&
+                   !number(line,"helper_input_view") && number(line,"numeric_owner") &&
+                   number(line,"counter_snapshot_available") && number(line,"counter_snapshot_joined"),
+                   "executed work did not belong to the joined single realtime bank");
+            verify(!number(line,"future_broad_template_jobs") && !number(line,"future_broad_carrier_samples") &&
+                   !number(line,"future_broad_lane_samples") && !number(line,"audit_jobs"),
+                   "manual realtime Helper executed a parallel broad acquisition");
+            const auto original=number(line,"helper_window_original_pairs"),selected=number(line,"helper_window_selected_pairs");
+            verify(!number(line,"helper_window_active") || (selected && selected<=original),
+                   "executed Helper mask expanded or emptied its original RF/clock catalogue");
+            const Owner owner{number(line,"revision"),number(line,"instance_id"),number(line,"sample_origin")};
+            const std::array<std::uint64_t,4> counts{number(line,"template_jobs"),number(line,"input_transforms"),
+                                                   number(line,"fft_jobs"),number(line,"direct_jobs")};
+            if(const auto prior=work.find(owner);prior!=work.end())
+                for(std::size_t i=0;i<counts.size();++i)
+                    verify(counts[i]>=prior->second[i],"joined ordinary work counters regressed within one owner");
+            work[owner]=counts;
+            joined_work=joined_work || (number(line,"realtime_locked") && counts[0]);
+            if(unlocked_first && !number(line,"realtime_locked")) {
+                verify(!number(line,"dispatch_permitted") && !number(line,"helper_window_active"),
+                       "Helper loss left fresh native acquisition or its RF mask armed");
+                post_loss_join=post_loss_join || number(line,"sample")>=*unlocked_first+3ULL*c.sample_rate;
+            }
         }
-        if(line.find("receiver_helper_future_broad_row_scored")!=std::string::npos) {
-            const auto field=line.find("\"original_template_jobs\":");
-            broad_work=broad_work||(field!=std::string::npos && std::stoull(line.substr(field+25))>0);
-        }
-        full_coverage=full_coverage||(line.find("receiver_helper_future_broad_coverage")!=std::string::npos &&
-            line.find("\"full_cohort_coverage\":1")!=std::string::npos);
-        if(line.find("receiver_helper_future_broad_begin")!=std::string::npos &&
-           line.find("periodic partial future broad probe")!=std::string::npos)
-            periodic_begins.emplace(number(line,"episode"),number(line,"sample"));
-        if(line.find("receiver_helper_future_broad_row_admitted")!=std::string::npos && number(line,"partial_slot")) {
-            ++periodic_admissions;
-            one_cold_owner=one_cold_owner && !active_probe;
-            active_probe=number(line,"instance_id");
-            check(number(line,"maximum_cold_owners")==1 && number(line,"eligible_epochs")>1 &&
-                  number(line,"epoch_rank")<number(line,"eligible_epochs"),
-                  "periodic probe did not retain an explicit single current epoch rank");
-        }
-        if(line.find("receiver_helper_future_broad_fallback")!=std::string::npos &&
-           number(line,"sample")>loss_origin) {
-            future_loss=true;
-        }
-        fallback_admission=fallback_admission||(line.find("receiver_helper_future_broad_row_admitted")!=std::string::npos &&
-            line.find("\"fallback_active\":1")!=std::string::npos && number(line,"sample")>loss_origin);
-        if(line.find("receiver_helper_future_broad_coverage")!=std::string::npos &&
-           number(line,"full_cohort_coverage") && number(line,"origin")>loss_origin) {
-            const auto key=line.find("\"steady\":");
-            post_loss_coverage=number(line,"requested")>0 &&
-                number(line,"committed")==number(line,"requested") && number(line,"scored")==number(line,"requested") &&
-                number(line,"sample")>loss_origin && !periodic_begins.contains(number(line,"episode")) &&
-                key!=std::string::npos && std::stod(line.substr(key+9))>cancel_steady;
+        if(event("receiver_signal_commit"))
+            verify(!number(line,"received_bits") && !number(line,"complete"),
+                   "helper-only joined receiver published invented bits or physical END");
+        if(event("trace_end")) {
+            verify(!number(line,"dropped") && line.find("\"size_limited\":false")!=std::string::npos &&
+                   line.find("\"prior_io_failed\":false")!=std::string::npos,
+                   "lifecycle trace was dropped, truncated or failed to write");
+            footer=true;
         }
     }
-    if(!(narrowed&&waited&&conditional_after_silence&&broad_work&&partial_slot&&one_cold_owner&&workspace_observed&&periodic_admissions&&
-         full_coverage&&loss_advanced&&loss_coverage_observed&&future_loss&&fallback_admission&&post_loss_coverage)) {
-        std::ostringstream diagnosis;
-        diagnosis<<"rolling helper lifecycle coverage incomplete: narrowed="<<narrowed<<", waited="<<waited
-            <<", conditional_after_silence="<<conditional_after_silence<<", broad_work="<<broad_work
-            <<", full_coverage="<<full_coverage<<", loss_advanced="<<loss_advanced<<", future_loss="<<future_loss
-            <<", partial_slot="<<partial_slot<<", one_cold_owner="<<one_cold_owner
-            <<", workspace_observed="<<workspace_observed
-            <<", periodic_admissions="<<periodic_admissions<<", loss_coverage_observed="<<loss_coverage_observed
-            <<", fallback_admission="<<fallback_admission<<", post_loss_coverage="<<post_loss_coverage
-            <<", loss_origin="<<loss_origin<<", last_samples="<<last_samples
-            <<"; evidence retained: "<<path.string();
-        throw Error(diagnosis.str());
-    }
+    // This Helper-only fixture proves waiting and dated PCM drain, not payload
+    // completion. test_helper_live_assistance::realtime_gap_protection separately
+    // uses the actual Session-derived gap context, withdraws it after an accepted
+    // prefix and checks retained ordinal progress plus fully scored physical END.
+    std::cout<<"rolling realtime Helper assisted="<<assisted<<" waited="<<waited
+             <<" raw_qualified="<<raw_qualified<<" corrected_qualified="<<corrected_qualified
+             <<" joined_work="<<joined_work<<" owners="<<work.size()<<" admitted_rows="<<rows
+             <<" peak_workspace="<<peak_workspace<<" withdrawn="<<withdrawn<<" drained="<<loss_drained
+             <<" post_loss_join="<<post_loss_join<<" loss_origin="<<loss_origin
+             <<" last_samples="<<last_samples<<" last_processed="<<last_processed<<'\n';
+    verify(assisted && waited && raw_qualified && corrected_qualified && joined_work && !work.empty() && rows &&
+           peak_workspace && withdrawn && loss_drained && unlocked_first &&
+           unlocked_end>=*unlocked_first+3ULL*c.sample_rate && post_loss_join && footer,
+           "single-bank Helper waiting/loss/drain coverage was incomplete");
     std::filesystem::remove(path);
 }
 std::vector<float> physical_convert(std::span<const float> input,std::uint32_t from,std::uint32_t to,
@@ -632,8 +656,12 @@ void helper_yields_event_queue_to_payload_progress() {
             "helper observation evicted a full queue of payload progress or completion");
 }
 }
-int main() {
-    try {punctuation_requires_consumed_evidence();helper_dates_survive_capture_clear();helper_frequency_support_survives_capture_clear();helper_yields_event_queue_to_payload_progress();helper_preserves_receiver_workspace_capacity();helper_placement_covers_both_profiles();sampled_composite();helper_only_and_callsign_update();callsign_update_preserves_live_reception();helper_only_live_simulation();helper_audit_work_credit_is_bounded();rolling_helper_waits_without_payload_and_audits_future();payload_survives_physical_helper_preselection();helper_presentation();
+int main(int argc,char** argv) {
+    try {
+        if(argc==2 && std::string_view(argv[1])=="--rolling-helper-only") {
+            rolling_helper_waits_and_drains_after_loss();return 0;
+        }
+        punctuation_requires_consumed_evidence();helper_dates_survive_capture_clear();helper_frequency_support_survives_capture_clear();helper_yields_event_queue_to_payload_progress();helper_preserves_receiver_workspace_capacity();helper_placement_covers_both_profiles();sampled_composite();helper_only_and_callsign_update();callsign_update_preserves_live_reception();helper_only_live_simulation();helper_audit_work_credit_is_bounded();rolling_helper_waits_and_drains_after_loss();payload_survives_physical_helper_preselection();helper_presentation();
         std::cout<<"helper live integration passed\n";return 0;}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }
