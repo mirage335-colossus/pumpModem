@@ -117,6 +117,19 @@ public:
     bool cold_acquisition_only() const noexcept;
     PatternAcquisitionDispatchState helper_acquisition_dispatch() const noexcept;
     bool set_helper_acquisition_dispatch(bool permitted) noexcept;
+    // Update only between joined calls, from the current qualified reference.
+    // The first set builds bounded helper-only geometry paid from this loan;
+    // subsequent measurement updates allocate nothing. No basis translation,
+    // clock pruning or automatic broad audit.
+    // Established anchors/dependencies and ordinary physical END remain active.
+    bool set_helper_frequency_window(double center_hz,double half_width_hz,double clock_coefficient_hz=0) noexcept;
+    // Independently measured ORIGINAL DATA LF interval. Unknown/stale clock
+    // uses the three-argument setter to restore all original LF immediately.
+    bool set_helper_frequency_window(double center_hz,double half_width_hz,double clock_coefficient_hz,
+                                    std::optional<PatternHelperClockInterval> clock_interval) noexcept;
+    void clear_helper_frequency_window() noexcept;
+    PatternHelperFrequencyWindowState helper_frequency_window() const noexcept;
+
     bool set_compact_timing_prior(const PatternPeriodicTimingPrior&) noexcept;
     bool clear_compact_timing_prior() noexcept;
     bool compact_phase_assistance_supported() const noexcept;

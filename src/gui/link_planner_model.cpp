@@ -2,6 +2,9 @@
 #include "../live_helper.hpp"
 #include "../live_helper_prior.hpp"
 #include "../live_helper_frontend.hpp"
+#include "../helper_reference_search.hpp"
+#include "../helper_reference_tracking_estimate.hpp"
+#include "../receiver_oscillator_policy.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/helper_filter.hpp"
 #include "link_planner_model.hpp"
@@ -24,6 +27,7 @@
 #include <locale>
 #include <map>
 #include <numeric>
+#include <numbers>
 #include <sstream>
 #include <set>
 #include <tuple>
@@ -108,7 +112,7 @@ void helper_reference_plan(Model& model,const modem::Config& config) {
             settings.helper.data_power_w*std::pow(10.,settings.helper.ratio_limit_db/10));
         result.received_dbm=30+10*std::log10(result.effective_power_w)-model.inputs.path_loss_db;
         result.cn0_db_hz=result.received_dbm-model.inputs.noise_density_dbm_hz;
-        result.tone_snr_db=result.cn0_db_hz-10; // The tracker uses a 10 Hz cell.
+        result.tone_snr_db=result.cn0_db_hz-10; // Legacy presentation cell, not a lock gate.
         if(!std::isfinite(result.received_dbm)||!std::isfinite(result.cn0_db_hz)||!std::isfinite(result.tone_snr_db))
             throw Error("helper link budget exceeds the numerical range");
         result.budget_available=true;
@@ -128,11 +132,7 @@ void helper_reference_plan(Model& model,const modem::Config& config) {
         const auto placement=helper::placement_band(config,live::detail::helper_occupied_bandwidth(settings));
         const auto plan=helper::plan(settings.helper,placement,120000000,0,waveform_gain);
         result.frequency_hz=plan.frequency_hz;result.geometry_available=true;
-        // Manual real-time reference mode does not construct a helper mask,
-        // fallback cohort, retained clock certificate or historical forecast.
-        // Until its corrected-input model is available, show only the unchanged
-        // ordinary receiver baseline and this physical tone link budget.
-        result.status="Manual real-time helper reference: Robust acquisition waits for helper lock. Disable Helper Carrier for ordinary oscillator search. Stabilized RF/CPU/reception estimate unavailable.";
+        result.status="Manual real-time helper reference: Robust acquisition waits for helper lock. Disable Helper Carrier for ordinary oscillator search. Conditional receiver cost preserves the full residual LF domain; helper tracking/conversion cost and lock probability are not calibrated.";
     } catch(const Error& error) {
         result.status="Helper unavailable: "+std::string(error.what());
     }
@@ -676,6 +676,68 @@ CpuPoint cpu_point(double target,const simulation::Estimate& estimate) {
     return {target,std::isfinite(ratio)&&ratio>=0?ratio:0.,estimate.receiver_work_supported&&search_supported(estimate)&&estimate.receiver_workspace_supported&&
         std::isfinite(ratio)&&ratio>0};
 }
+RealtimeHelperCpuPoint realtime_helper_point(const Inputs& inputs,const modem::Config& config,
+        double target,std::stop_token stop) {
+    RealtimeHelperCpuPoint out;out.target_db_hz=target;
+    if(!inputs.receiver_settings || !(inputs.receiver_settings->helper.power_w>0))return out;
+    try {
+        estimate_detail::check(stop);
+        if(!config.oscillator_search)throw Error("Conditional helper search requires an oscillator model");
+        if(config.symbol_burst.enabled() || modem::scheduled_bursts(config))
+            throw Error("Conditional helper cost is not modeled for Symbol_Burst or scheduled bursts");
+        auto settings=*inputs.receiver_settings;settings.transfer.modem=config;
+        settings.helper.data_power_w=std::pow(10.,(inputs.tx_dbm-30)/10);
+        if(settings.transfer.key)settings.helper.callsign.clear();
+        if(settings.helper.frequency==helper::Frequency::cochannel)
+            throw Error("Cochannel helper capture is not modeled by the corrected-input cost estimate");
+        const auto gain=modem::outer_dsss_transmit_gain(config);
+        const auto width=live::detail::helper_occupied_bandwidth(settings);
+        const auto plan=helper::plan(settings.helper,helper::placement_band(config,width),120000000,0,gain);
+        std::uint32_t physical=0;
+        if(inputs.helper_forecast_plan_sampled_capture)physical=modem::SampledSimulationChannel::planned_physical_sample_rate(
+            config,settings.helper,width,live::detail::shared_helper_capture(config,plan.frequency_hz));
+        else if(inputs.helper_forecast_capture_sample_rate && inputs.helper_forecast_fixed_nominal_rate_conversion &&
+                inputs.helper_forecast_capture_logical_sample_rate==config.sample_rate)
+            physical=*inputs.helper_forecast_capture_sample_rate;
+        else throw Error("Raw capture format/fixed nominal conversion is unknown; no helper cost forecast");
+        out.physical_sample_rate=physical;
+        out.minimum_seed_seconds=8192./physical; // Two actual fresh 4096-point seed windows.
+        if(plan.frequency_hz<200 || plan.frequency_hz>physical/2.-200)
+            throw Error("Nominal helper is outside the real-time tracker's DC/Nyquist noise-projection margin");
+        const auto power=std::min(settings.helper.power_w,settings.helper.data_power_w*std::pow(10.,settings.helper.ratio_limit_db/10));
+        auto cno=30+10*std::log10(power)-inputs.path_loss_db-inputs.noise_density_dbm_hz;
+        if(inputs.receiver_work_mode==simulation::ReceiverWorkMode::sampled_simulation)cno+=20*std::log10(gain);
+        const auto effects=modem::oscillator_effects(config);
+        const auto sigma=effects.phase_noise_degrees_per_sqrt_second*std::numbers::pi/180;
+        const auto tracking=helper::steady_tone_estimate(physical,cno,sigma);
+        out.uncertainty_hz=tracking.uncertainty_hz;out.observation_seconds=tracking.observation_seconds;
+        if(!tracking.available)throw Error(tracking.reason);
+        auto options=inputs.options;options.modem=config;
+        const auto correction=transfer::receiver_utc_rate_correction(config,options);
+        const auto search=modem::helper_reference_search(config,tracking.uncertainty_hz,plan.frequency_hz,0,correction);
+        out.rf_half_width_hz=search.rf_half_width_hz;
+        out.clock_half_width_ppm=search.catalogue.requested_clock_half_width_ppm;
+        out.frequency_rate_hypotheses=search.catalogue.hypotheses.size();
+        std::set<double> clocks;
+        for(const auto& pair:search.catalogue.hypotheses)clocks.insert(pair.clock_error_ppm);
+        out.retained_clock_rates=clocks.size();
+        auto channel=inputs.channel;
+        const auto sample_snr=inputs.tx_dbm-inputs.path_loss_db-inputs.noise_density_dbm_hz-10*std::log10(config.sample_rate/2.);
+        if(!std::isfinite(sample_snr)||sample_snr< -300||sample_snr>300)
+            throw Error("Payload sample SNR is outside the ordinary estimator numerical range");
+        channel.snr_db=sample_snr;
+        // Conditional fixed NCO removes the common RF/helper LF contribution.
+        // The configured DATA clock error and phase process remain unchanged.
+        channel.frequency_offset_hz=-plan.frequency_hz*channel.clock_error_ppm*1e-6;
+        const auto estimate=simulation::estimate_with_receiver_search(one_bit_estimate(options),options,true,channel,
+            search.catalogue,1,100,inputs.receiver_work_mode,inputs.receiver_timing_model,&settings,stop);
+        const auto point=cpu_point(target,estimate);
+        out.realtime_ratio=point.realtime_ratio;out.available=point.available;
+        out.reason=tracking.reason+"; full residual clock/UTC, arrival and epoch alternatives retained; ordinary calibrated receiver primitives, helper startup/tracking/conversion overhead excluded";
+        if(!out.available)out.reason+="; residual receiver work/coverage/workspace is unsupported: "+estimate.receiver_work_assumptions;
+    } catch(const Error& error) {out.reason=error.what();}
+    return out;
+}
 void receive_curve(Model& model,const simulation::Estimate& selected_one,CurveCache& cache,std::stop_token stop) {
     if(model.points.empty())return;
     const auto& inputs=model.inputs;
@@ -778,9 +840,16 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one,CurveCa
     for(const auto& [target,point]:output){(void)target;model.receive_points.push_back(point);}
     model.cpu_points.reserve(cpu_output.size());
     for(const auto& [target,point]:cpu_output){(void)target;model.cpu_points.push_back(point);}
-    // The manually enabled real-time reference path does not run the old
-    // mask/cohort/history estimators. All ordinary curves above stay unchanged;
-    // helper-stabilized curves remain explicitly unavailable in the renderer.
+    // Separate cheap ordinary-work queries; no probability draws, source PCM,
+    // historical masks or parallel broad helper bank are constructed.
+    if(model.helper_reference.enabled)for(const auto& [target,point]:cpu_output) {
+        (void)point;estimate_detail::check(stop);
+        if(target==inputs.target_db_hz)model.helper_reference_cpu_points.push_back(model.helper_reference.conditional);
+        else if(const auto config=try_resolve(inputs,target))
+            model.helper_reference_cpu_points.push_back(realtime_helper_point(inputs,*config,target,stop));
+        else {RealtimeHelperCpuPoint gap;gap.target_db_hz=target;gap.reason="Target geometry is unavailable";
+            model.helper_reference_cpu_points.push_back(std::move(gap));}
+    }
 
 }
 }
@@ -1075,6 +1144,8 @@ Model build(const Inputs& inputs,Cache& cache,std::stop_token stop,const std::fu
         }
         if(result.receiver_status.empty())result.receiver_status="Clock and RAM fit · reception unverified";
         helper_reference_plan(result,config);
+        if(result.helper_reference.enabled)
+            result.helper_reference.conditional=realtime_helper_point(inputs,config,inputs.target_db_hz,stop);
 
         if(selected) {
             estimate_detail::check(stop);

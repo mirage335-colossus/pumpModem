@@ -155,6 +155,17 @@ void helper_assistance_debug_fields() {
     check(locked.find(realtime.helper_status)==0&&
         locked.find("frequency-corrected input to ordinary Robust reception")!=std::string::npos&&no_legacy_claims(locked),
         "Locked helper reference lost the real-time correction state or inherited obsolete bank claims");
+    realtime.helper_timing_assistance_active=true;
+    realtime.helper_original_search_pairs=93;realtime.helper_selected_search_pairs=3;
+    realtime.helper_status+="; conditional source clock mean [-3, 3] ppm";
+    const auto clock_assisted=helper_diagnostics(realtime);
+    check(clock_assisted.find("measured dwell-spacing clock interval applied conditionally")!=std::string::npos&&
+        clock_assisted.find("joint pair maxima: selected 3, original 93")!=std::string::npos,
+        "Independently measured helper clock narrowing was hidden");
+    realtime.helper_timing_assistance_active=false;
+    realtime.helper_status="Helper reference locked: receiver frequency origin only; folded mono PCM cannot be continuously corrected";
+    check(helper_diagnostics(realtime)==realtime.helper_status,
+        "Folded real capture incorrectly claimed continuous upstream correction");
     realtime.helper_status="Helper reference lost; acquisition paused";
     const auto lost=helper_diagnostics(realtime);
     check(lost==realtime.helper_status&&lost.find("frequency-corrected")==std::string::npos&&no_legacy_claims(lost),
@@ -232,7 +243,7 @@ void physical_debug_workflow() {
     const auto parse=[&](std::vector<std::string> arguments,bool expected) {
         std::vector<char*> argv;for(auto& arg:arguments)argv.push_back(arg.data());bool called=false;
         const auto result=gui_main(static_cast<int>(argv.size()),argv.data(),"test",[&](Launch launch) {
-            called=true;check(launch.debug_live&&launch.debug_timeout==30&&!launch.simulation&&!launch.smoke&&launch.settings->full_duplex==true,
+            called=true;check(launch.debug_live&&launch.debug_timeout==30&&launch.debug_repeat==1&&!launch.simulation&&!launch.smoke&&launch.settings->full_duplex==true,
                 "Hardware diagnostic CLI policy lost");return 0;
         });
         check(called==expected&&(result==0)==expected,"Hardware diagnostic CLI validation incorrect");
@@ -244,6 +255,140 @@ void physical_debug_workflow() {
     parse({"gui","--debug","--debug-timeout","nan"},false);
     parse({"gui","--debug","--debug-timeout","30","--keyfile","synthetic.keys","--tx-key","named","--debug-bits","1010"},true);
     parse({"gui","--debug","--debug-bits","102"},false);
+}
+
+void repeated_physical_debug_workflow() {
+    using A=DebugLive::Action;
+    static_assert(noexcept(debug_live_detail::reentry_trace_event("receiver_helper_raw_reference")));
+    for(const auto* event:{"trace_begin","gui_start","receiver_helper_raw_reference",
+        "receiver_helper_clock_refresh","receiver_helper_reference_reentry"})
+        check(debug_live_detail::reentry_trace_event(event),"Repeated debug trace lost essential dated reference/re-entry evidence");
+    for(const auto* event:{"receiver_acquisition_work","receiver_acquisition_work_unavailable",
+        "receiver_pattern_wire","gui_state","receiver_helper_reference_reentry_extra"})
+        check(!debug_live_detail::reentry_trace_event(event),"Repeated debug trace admitted an unrelated or per-row event");
+    check(!debug_live_detail::reentry_trace_event(nullptr),"Repeated debug trace admitted an unnamed event");
+    std::ostringstream log;live::Snapshot snap;Signals signals;
+    snap.running=true;snap.samples_received=100;
+    DebugLive repeated(300,log,false,"101",3);
+    check(repeated.step(0,snap,signals,true,true)==A::transmit,"Repeat did not request its first normal transmission");
+    snap.transmission_id=1;snap.transmitting=true;
+    repeated.step(1,snap,signals,false,true);++snap.samples_received;repeated.step(2,snap,signals,false,true);
+    snap.transmitting=false;snap.transmission_finished=true;
+    check(repeated.step(3,snap,signals,true,true)==A::wait,"Repeat treated TX EOF as ordinary physical END");
+    SignalLine row;row.id=100;row.binary=true;row.text="101";row.received_bits=3;row.complete=true;signals.update(row);
+    repeated.step(4,snap,signals,true,true);
+    check(repeated.step(5.99,snap,signals,true,true)==A::wait,"Repeat skipped the two-second post-END settle");
+    check(repeated.step(6,snap,signals,false,true)==A::wait,"Repeat bypassed Controller transmit eligibility");
+    check(repeated.step(6.1,snap,signals,true,true)==A::transmit,"Repeat did not request its second normal transmission");
+    check(repeated.step(7,snap,signals,true,true)==A::wait,"Repeat requested the same cycle twice");
+    snap.transmission_id=2;snap.transmitting=true;snap.transmission_finished=false;
+    repeated.step(8,snap,signals,false,true);++snap.samples_received;repeated.step(9,snap,signals,false,true);
+    snap.transmitting=false;snap.transmission_finished=true;
+    check(repeated.step(10,snap,signals,true,true)==A::wait&&repeated.step(12,snap,signals,true,true)==A::wait,
+        "Earlier completed row satisfied the second diagnostic cycle");
+    row.id=101;row.text="10";row.received_bits=2;row.complete=false;signals.update(row);
+    check(repeated.step(13,snap,signals,true,true)==A::wait,"Repeat mistook a partial prefix for physical completion");
+    row.text="101";row.received_bits=3;row.complete=true;signals.update(row);repeated.step(14,snap,signals,true,true);
+    check(repeated.step(16,snap,signals,true,true)==A::transmit,"Repeat did not request its third transmission");
+    snap.transmission_id=3;snap.transmitting=true;snap.transmission_finished=false;
+    repeated.step(17,snap,signals,false,true);++snap.samples_received;repeated.step(18,snap,signals,false,true);
+    snap.transmitting=false;snap.transmission_finished=true;
+    Signals restored;row.id=100;restored.update(row);
+    check(repeated.step(19,snap,restored,true,true)==A::wait&&repeated.step(21,snap,restored,true,true)==A::wait,
+        "Evicting and restoring an old completed identity satisfied a later cycle");
+    row.id=102;restored.update(row);repeated.step(22,snap,restored,true,true);
+    check(repeated.step(24,snap,restored,true,true)==A::close&&repeated.result()==0,
+        "Three independent completed receptions did not finish one repeated diagnostic");
+    check(log.str().find("\"cycle\":3,\"repeat\":3")!=std::string::npos,"Repeat cycle identity was not logged");
+
+    DebugLive partial_evicted(300,log,false,"1",2);Signals prior;snap={};snap.running=true;snap.samples_received=100;
+    partial_evicted.step(0,snap,prior,true,true);snap.transmission_id=1;snap.transmitting=true;
+    partial_evicted.step(1,snap,prior,false,true);++snap.samples_received;
+    SignalLine partial;partial.id=40;partial.binary=true;partial.text="1";partial.received_bits=1;prior.update(partial);
+    live::SignalUpdate hidden;hidden.id=41;hidden.binary=true;snap.signals={hidden};
+    partial_evicted.step(2,snap,prior,false,true);prior.erase(40);snap.signals.clear();
+    snap.transmitting=false;snap.transmission_finished=true;
+    partial.id=1;partial.complete=true;prior.update(partial);partial_evicted.step(3,snap,prior,true,true);
+    check(partial_evicted.step(5,snap,prior,true,true)==A::transmit,"Evicted partial fixture did not reach its second cycle");
+    snap.transmission_id=2;snap.transmitting=true;snap.transmission_finished=false;
+    partial_evicted.step(6,snap,prior,false,true);++snap.samples_received;partial_evicted.step(7,snap,prior,false,true);
+    snap.transmitting=false;snap.transmission_finished=true;
+    Signals restored_partial;partial.id=40;restored_partial.update(partial);
+    check(partial_evicted.step(8,snap,restored_partial,true,true)==A::wait&&
+        partial_evicted.step(10,snap,restored_partial,true,true)==A::wait,
+        "An earlier evicted partial row completed a later repeat cycle");
+    restored_partial.clear();partial.id=41;restored_partial.update(partial);
+    check(partial_evicted.step(11,snap,restored_partial,true,true)==A::wait&&
+        partial_evicted.step(13,snap,restored_partial,true,true)==A::wait,
+        "A delivered-only earlier identity completed a later repeat cycle");
+    partial.id=42;restored_partial.update(partial);partial_evicted.step(14,snap,restored_partial,true,true);
+    check(partial_evicted.step(16,snap,restored_partial,true,true)==A::close&&partial_evicted.result()==0,
+        "A fresh row could not complete the repeated partial-row fixture");
+
+    DebugLive identity_limit(300,log,false,"1",2);snap={};
+    for(std::size_t i=0;i<=DebugLive::maximum_repeat_seen_ids;++i) {live::SignalUpdate update;update.id=i;snap.signals.push_back(update);}
+    check(identity_limit.step(0,snap,Signals{},false,false)==A::close&&identity_limit.result()!=0&&
+        log.str().find("diagnostic reception identity quota exceeded")!=std::string::npos,
+        "Repeat diagnostic forgot identities instead of failing its bounded history quota");
+
+    const auto first_cycle=[&](DebugLive& debug,live::Snapshot& s,Signals& rows,bool utc=false) {
+        s={};s.running=true;s.samples_received=100;rows.clear();
+        check(debug.step(0,s,rows,true,true)==A::transmit,"Repeated failure fixture did not start");
+        s.transmission_id=1;s.transmitting=true;s.transmit_clock_following=utc;s.transmission_seconds=1;
+        debug.step(1,s,rows,false,true);++s.samples_received;debug.step(2,s,rows,false,true);
+        s.transmitting=false;s.transmission_finished=true;
+        SignalLine line;line.id=1;line.binary=true;line.text="1";line.received_bits=1;line.complete=true;rows.update(line);
+        debug.step(3,s,rows,true,true);
+        check(debug.step(5,s,rows,true,true)==A::transmit,"Repeated failure fixture did not reach second cycle");
+    };
+    DebugLive unhealthy(300,log,false,"1",2);first_cycle(unhealthy,snap,signals);
+    ++snap.receiver_health.input_overruns;
+    check(unhealthy.step(6,snap,signals,true,true)==A::close&&unhealthy.result()!=0,
+        "A later-cycle receiver health failure was forgotten");
+    DebugLive wrong(300,log,false,"1",2);first_cycle(wrong,snap,signals);
+    snap.transmission_id=2;snap.transmitting=true;snap.transmission_finished=false;wrong.step(6,snap,signals,false,true);
+    ++snap.samples_received;SignalLine bad;bad.id=2;bad.binary=true;bad.text="0";bad.received_bits=1;signals.update(bad);
+    wrong.step(7,snap,signals,false,true);signals.erase(2);
+    snap.transmitting=false;snap.transmission_finished=true;bad.id=3;bad.text="1";bad.complete=true;signals.update(bad);
+    wrong.step(8,snap,signals,true,true);
+    check(wrong.step(10,snap,signals,true,true)==A::close&&wrong.result()!=0,
+        "Evicted later-cycle unexpected bits were forgotten");
+    DebugLive no_capture(300,log,false,"1",2);first_cycle(no_capture,snap,signals);
+    snap.transmission_id=2;snap.transmitting=true;snap.transmission_finished=false;no_capture.step(6,snap,signals,false,true);
+    snap.transmitting=false;snap.transmission_finished=true;bad.id=4;signals.update(bad);no_capture.step(7,snap,signals,true,true);
+    check(no_capture.step(9,snap,signals,true,true)==A::close&&no_capture.result()!=0,
+        "First-cycle capture qualified an unobserved second-cycle transmission");
+    for(const bool first_utc:{false,true}) {
+        DebugLive utc(300,log,true,"1",2);first_cycle(utc,snap,signals,first_utc);
+        snap.transmission_id=2;snap.transmitting=true;snap.transmission_finished=false;
+        snap.transmit_clock_following=!first_utc;utc.step(6,snap,signals,false,true);
+        ++snap.samples_received;utc.step(7,snap,signals,false,true);
+        snap.transmitting=false;snap.transmission_finished=true;bad.id=5;signals.update(bad);utc.step(8,snap,signals,true,true);
+        check(utc.step(10,snap,signals,true,true)==A::close&&utc.result()==2,
+            "One UTC cycle qualified another cycle's playback fallback");
+    }
+    for(const unsigned count:{0U,4U}) {
+        bool rejected=false;try {DebugLive invalid(300,log,false,"1",count);}catch(const Error&){rejected=true;}
+        check(rejected,"DebugLive accepted an out-of-range repeat count");
+    }
+    const auto parse=[&](std::vector<std::string> args,bool expected,unsigned count=1) {
+        std::vector<char*> argv;for(auto& arg:args)argv.push_back(arg.data());bool called=false;
+        const auto result=gui_main(argv.size(),argv.data(),"test",[&](Launch launch) {
+            called=true;check(launch.debug_live&&launch.debug_repeat==count&&launch.debug_timeout==300&&
+                launch.settings->full_duplex==true&&!launch.simulation&&!launch.smoke,"Repeat CLI changed hardware diagnostic policy");
+            return 0;
+        });
+        check(called==expected&&(result==0)==expected,"Debug-repeat CLI validation failed");
+    };
+    const std::vector<std::string> base{"gui","--debug","--debug-timeout","300","--keyfile","synthetic.keys","--tx-key","named"};
+    for(const unsigned count:{1U,2U,3U}) {
+        auto args=base;args.insert(args.end(),{"--debug-repeat",std::to_string(count)});parse(args,true,count);
+    }
+    for(const auto* count:{"0","4","1.5","nan"}) {
+        auto args=base;args.insert(args.end(),{"--debug-repeat",count});parse(args,false);
+    }
+    auto missing=base;missing.push_back("--debug-repeat");parse(missing,false);
+    parse({"gui","--debug-repeat","2"},false);
 }
 
 void verbose_diagnostics() {
@@ -1840,6 +1985,10 @@ void smoke_shutdown_does_not_resume_workflow() {
 }
 }
 int main(int argc,char** argv) {
+    if(argc==2&&std::string(argv[1])=="--debug-repeat-only") {
+        try {physical_debug_workflow();repeated_physical_debug_workflow();std::cout<<"Repeated hardware debug workflow passed\n";return 0;}
+        catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
+    }
     if(argc==2&&std::string(argv[1])=="--helper-only") {
         try {helper_assistance_debug_fields();std::cout<<"Helper assistance diagnostics passed\n";return 0;}
         catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
@@ -1859,6 +2008,6 @@ int main(int argc,char** argv) {
         });
     }
 #endif
-    try {helper_assistance_debug_fields();physical_debug_workflow();verbose_diagnostics();probe_fixture::run();fhss_developer_editor();fast_default_console();developer_mode_presentation();helper_developer_visibility();helper_power_declaration();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();expanded_spectrum();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();planner_clock_details();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();smoke_shutdown_does_not_resume_workflow();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {helper_assistance_debug_fields();physical_debug_workflow();repeated_physical_debug_workflow();verbose_diagnostics();probe_fixture::run();fhss_developer_editor();fast_default_console();developer_mode_presentation();helper_developer_visibility();helper_power_declaration();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();expanded_spectrum();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();planner_clock_details();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();smoke_shutdown_does_not_resume_workflow();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

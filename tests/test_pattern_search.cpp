@@ -7,6 +7,7 @@
 #include <iostream>
 #include <limits>
 #include <stdexcept>
+#include <set>
 
 using namespace datapump;
 namespace {
@@ -759,6 +760,130 @@ void utc_correction_coverage() {
         "independent UTC correction was applied to a coupled RF clock");
     rejects([&]{modem::oscillator_pattern_search(config,-1);},"negative timing allowance accepted");
 }
+namespace helper_residual_clock_tests {
+using Pair=modem::PatternFrequencyRateHypothesis;
+void check(bool ok,const char* why){if(!ok)throw std::runtime_error(why);}
+template<class F>void rejects(F&& f){try{f();}catch(const Error&){return;}throw std::runtime_error("invalid residual coefficient accepted");}
+modem::Config config(double rf_half_width=.2) {
+    modem::Config c;c.sample_rate=6120;c.carrier_hz=1500;c.bandwidth_hz=36;c.spreading_factor=256;
+    c.scramble=true;c.dsss=true;c.dsss_factor=10;c.outer_dsss_version=modem::OuterDsssVersion::interleaved_v2;
+    c.oscillator_search=modem::OscillatorSearchConfig{{100,.5},{rf_half_width*1e6/(3e7*3),.05},3e7,3};
+    return c;
+}
+modem::OscillatorPatternSearch residual(const modem::Config& c,double k,double correction=0) {
+    modem::PatternSearchResolution resolution;resolution.clock_frequency_hz=k;
+    return modem::oscillator_pattern_search(c,correction,resolution);
+}
+void equal(const modem::OscillatorPatternSearch& a,const modem::OscillatorPatternSearch& b) {
+    check(a.hypotheses==b.hypotheses && a.frequency.count==b.frequency.count &&
+        a.frequency.step_hz==b.frequency.step_hz && a.frequency.half_width_hz==b.frequency.half_width_hz &&
+        a.frequency.requested_half_width_hz==b.frequency.requested_half_width_hz && a.frequency.limited==b.frequency.limited &&
+        a.requested_clock_half_width_ppm==b.requested_clock_half_width_ppm && a.clock_half_width_ppm==b.clock_half_width_ppm &&
+        a.clock_step_ppm==b.clock_step_ppm && a.limited==b.limited &&
+        a.transmit_rate_correction==b.transmit_rate_correction && a.timing_correction_unavailable==b.timing_correction_unavailable,
+        "absent residual override changed the original search");
+}
+void coverage(const modem::Config& c,const modem::OscillatorPatternSearch& bank,double k,double rf) {
+    check(!bank.limited && bank.clock_half_width_ppm==bank.requested_clock_half_width_ppm,
+        "residual catalogue lost full original physical clock domain");
+    const auto width=bank.requested_clock_half_width_ppm;
+    const auto tolerance=64*std::numeric_limits<double>::epsilon()*std::max(1.,bank.frequency.requested_half_width_hz);
+    for(unsigned i=0;i<=64;++i)for(unsigned j=0;j<=64;++j) {
+        const auto q=-width+2*width*i/64.;const auto f=k*q*1e-6-rf+2*rf*j/64.;
+        check(std::any_of(bank.hypotheses.begin(),bank.hypotheses.end(),[&](Pair p){
+            return std::abs(q-p.clock_error_ppm)<=bank.clock_step_ppm/2+tolerance &&
+                std::abs(f-p.frequency_offset_hz)<=bank.frequency.step_hz/2+tolerance;
+        }),"residual RF/LF rectangle lost a physical cell");
+    }
+    const auto half=(1+modem::pattern_pulse_rolloff)*c.sample_rate/(2.*modem::pattern_chip_samples(c));
+    for(const auto p:bank.hypotheses) {
+        const auto support=half*(1+p.clock_error_ppm*1e-6);
+        check(c.carrier_hz+p.frequency_offset_hz-support>=-1e-10 &&
+            c.carrier_hz+p.frequency_offset_hz+support<=c.sample_rate/2.+1e-10,
+            "residual search validated passband around K instead of physical payload carrier");
+    }
+}
+void defaults_and_signs() {
+    for(const auto c:{config(),config(90)})for(const auto correction:{0.,.0003})
+        equal(modem::oscillator_pattern_search(c,correction),modem::oscillator_pattern_search(c,correction,{}));
+    const auto original=config(90);const auto old=modem::oscillator_pattern_search(original);
+    check(old.limited && old.hypotheses.size()==8181 && old.frequency.requested_half_width_hz==90.45,
+        "legacy capped HF geometry changed");
+    const auto c=config();const auto positive=residual(c,712.5),negative=residual(c,-712.5);
+    coverage(c,positive,712.5,.2);coverage(c,negative,-712.5,.2);coverage(c,residual(c,0),0,.2);
+    check(negative.frequency.requested_half_width_hz<modem::oscillator_pattern_search(c).frequency.requested_half_width_hz,
+        "helper coefficient still built the old D coupling before translation");
+    std::set<std::pair<double,double>> mirrored,actual;
+    for(auto p:positive.hypotheses)mirrored.emplace(-p.frequency_offset_hz,p.clock_error_ppm);
+    for(auto p:negative.hypotheses)actual.emplace(p.frequency_offset_hz,p.clock_error_ppm);
+    check(mirrored==actual,"signed residual coefficient lost reflected LF relation");
+    const auto zero=residual(config(0),0);
+    check(!zero.limited && zero.frequency.count==1 && zero.frequency.requested_half_width_hz==0 &&
+        zero.clock_half_width_ppm==300 && zero.hypotheses.size()>1,
+        "zero residual coefficient collapsed unresolved LF to nominal timing");
+    for(auto p:zero.hypotheses)check(p.frequency_offset_hz==0,"zero coefficient invented RF uncertainty");
+    const auto utc=residual(c,-712.5,.0003);
+    check(!utc.timing_correction_unavailable && utc.transmit_rate_correction==.0003 &&
+        utc.requested_clock_half_width_ppm>600 && utc.clock_half_width_ppm==utc.requested_clock_half_width_ppm,
+        "residual override reduced the unchanged UTC-expanded LF domain");
+    for(auto p:negative.hypotheses)check(std::find(utc.hypotheses.begin(),utc.hypotheses.end(),p)!=utc.hypotheses.end(),
+        "UTC residual union dropped an original exact RF/LF pair");
+}
+void passband_caps_and_validation() {
+    auto c=config(0);const auto half=(1+modem::pattern_pulse_rolloff)*c.sample_rate/(2.*modem::pattern_chip_samples(c));
+    // Even K=0 does not remove waveform bandwidth expansion by the physical LF clock.
+    for(const auto carrier:{half*(1+.00015),c.sample_rate/2.-half*(1+.00015)}) {
+        c.carrier_hz=carrier;const auto bank=residual(c,0);
+        check(bank.limited,"zero carrier coupling hid physical LF-expanded passband loss");
+        check(!bank.hypotheses.empty() && bank.hypotheses.front()==Pair{0,0},"edge residual lost valid nominal lane");
+    }
+    c=config(90);const auto capped=residual(c,-1500);
+    check(capped.limited && capped.hypotheses.size()<=modem::maximum_pattern_frequency_rate_hypotheses &&
+        capped.frequency.count<=modem::maximum_pattern_frequency_hypotheses,
+        "residual override bypassed finite existing catalogue caps");
+    for(const auto k:{std::numeric_limits<double>::infinity(),-std::numeric_limits<double>::infinity(),
+                     std::numeric_limits<double>::quiet_NaN()})rejects([&]{residual(config(),k);});
+    const auto source=config();const auto before=modem::oscillator_effects(source);
+    (void)residual(source,-712.5);const auto after=modem::oscillator_effects(source);
+    check(source.carrier_hz==1500 && source.bandwidth_hz==36 && modem::symbol_sample_count(source)==87040 &&
+        before.clock_error_ppm==after.clock_error_ppm && before.frequency_offset_hz==after.frequency_offset_hz &&
+        before.phase_noise_degrees_per_sqrt_second==after.phase_noise_degrees_per_sqrt_second,
+        "receiver residual override changed physical waveform/oscillator state");
+}
+}
+void helper_residual_utc_physical_coverage() {
+    constexpr double measured=.2,correction=.0003,physical_lf=.0003;
+    for(const double helper_hz:{-712.5,712.5}) {
+        const auto rf=std::nextafter(measured+std::abs(helper_hz)*correction*(1+physical_lf),
+            std::numeric_limits<double>::infinity());
+        const auto c=helper_residual_clock_tests::config(rf);
+        const auto k=c.carrier_hz-helper_hz;
+        const auto bank=helper_residual_clock_tests::residual(c,k,correction);
+        check(!bank.limited && bank.clock_half_width_ppm==bank.requested_clock_half_width_ppm,
+            "UTC RF addend lost full residual RF/LF coverage");
+        const auto tolerance=1e-11;
+        for(unsigned i=0;i<=16;++i)for(unsigned j=0;j<=16;++j)for(double noise:{-measured,0.,measured}) {
+            const auto a=-physical_lf+2*physical_lf*i/16.;
+            const auto steering=-correction+2*correction*j/16.;
+            const auto b=(1+a)*(1+steering)-1;
+            const auto frequency=c.carrier_hz*b-helper_hz*a+noise;
+            check(std::abs(frequency-k*b)<=rf+tolerance,
+                "UTC physical residual escaped H*c*(1+a) RF addend");
+            check(std::any_of(bank.hypotheses.begin(),bank.hypotheses.end(),[&](const auto p){
+                return std::abs(b*1e6-p.clock_error_ppm)<=bank.clock_step_ppm/2+tolerance &&
+                    std::abs(frequency-p.frequency_offset_hz)<=bank.frequency.step_hz/2+tolerance;
+            }),"UTC-steered DATA and unsteered helper lost a physical 2D cell");
+        }
+        check(std::abs(helper_hz)*correction*(1+physical_lf)>measured,
+            "UTC witness no longer distinguishes measurement-only RF bound");
+    }
+}
+void helper_residual_clock_coupling() {
+    helper_residual_clock_tests::defaults_and_signs();
+    helper_residual_clock_tests::passband_caps_and_validation();
+    helper_residual_utc_physical_coverage();
+}
+
 }
 int main() {
     try {
@@ -768,6 +893,7 @@ int main() {
         short_and_bounded_oscillator_searches();invalid_oscillator_policies();
         joint_passband_and_quantized_tones();thin_independent_regions();microwave_tiny_clock_domain();bounded_independent_construction();
         utc_correction_coverage();frequency_only_expansion();
+        helper_residual_clock_coupling();
     }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
     std::cout<<"pattern search tests passed\n";
 }

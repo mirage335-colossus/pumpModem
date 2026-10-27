@@ -53,6 +53,8 @@ int main(){try{
     const auto capture=tuning::receive_profiles(in.options.modem,selected_target,in.mode,false).front().sample_rate;
     in.helper_forecast_capture_sample_rate=capture;
     in.helper_forecast_capture_passband_hz=std::nextafter(capture/2.,0.);
+    in.helper_forecast_fixed_nominal_rate_conversion=true;
+    in.helper_forecast_capture_logical_sample_rate=capture;
     const auto enabled=gui::planner::build(in);
     check(enabled.available&&enabled.helper_reference.enabled&&enabled.helper_reference.budget_available,
         "manual helper mode lost its ordinary plan or physical helper link budget");
@@ -60,6 +62,10 @@ int main(){try{
         enabled.helper_backend_feasibility_points.empty()&&enabled.helper_work_points.empty()&&
         !enabled.helper_reference.conditional_geometry_available,
         "manual helper reference still executed obsolete mask/cohort/history forecasts");
+    check(!enabled.helper_reference_cpu_points.empty()&&enabled.helper_reference.conditional.available&&
+        enabled.helper_reference.conditional.frequency_rate_hypotheses>0&&
+        enabled.helper_reference.conditional.observation_seconds>0,
+        "real-time helper did not publish its separate conditional ordinary receiver cost");
     in.receiver_settings->helper.power_w=0;const auto disabled=gui::planner::build(in);
     check(disabled.cpu_points.size()==enabled.cpu_points.size()&&disabled.receive_points.size()==enabled.receive_points.size(),
         "helper changed ordinary curve target geometry");
@@ -85,8 +91,9 @@ int main(){try{
     for(const auto* required:{"Helper reference on","The strongest tone in the expected helper range",
         "Robust acquisition waits while the helper is unavailable",
         "Disable Helper Carrier to use ordinary oscillator search",
-        "The plots show the ordinary receiver baseline",
-        "A stabilized RF search/CPU/reception estimate for this reference path is not available yet",
+        "Solid: ordinary receiver baseline. Dashed: conditional helper-corrected ordinary receiver cost",
+        "not total CPU, measured speed, or a lock/probability forecast",
+        "No clock narrowing is inferred from tone power",
         "helper power does not increase payload SNR or Rate"})
         if(!contains(page,required))throw std::runtime_error(std::string("UI omitted manual reference state/limit: ")+required);
     for(const auto* obsolete:{"Qualified helper total","Conditional helper 1-bit RX","Conditional acquisition work",

@@ -121,7 +121,8 @@ static OscillatorPatternSearch oscillator_pattern_search_domain(const Config& co
         policy.rf_shift_hz*policy.rf.accuracy_ppm*1e-6L,"RF search allowance exceeds numeric range");
     // The sign is in delivered real-tone coordinates; lower-sideband mixing
     // reverses the RF clock contribution while preserving the symbol rate.
-    const auto coupling=shared && policy.rf_shift_hz!=0?sideband_sign(policy)*physical:config.carrier_hz;
+    const auto original_coupling=shared && policy.rf_shift_hz!=0?sideband_sign(policy)*physical:config.carrier_hz;
+    const auto coupling=resolution.clock_frequency_hz.value_or(original_coupling);
     const auto base_frequency_bound=bounded_value(std::abs(static_cast<long double>(coupling))*clock_bound*1e-6L+oscillator_rf_bound,
         "oscillator frequency allowance exceeds numeric range");
     // Sched_Hop frequency widening adds only residual carrier uncertainty. It
@@ -144,8 +145,11 @@ static OscillatorPatternSearch oscillator_pattern_search_domain(const Config& co
     // A coupled frequency lane also represents clock error. Refining phase
     // alone need not resolve a very low carrier's timing domain; use whichever
     // required spacing is finer without adding Cartesian clock alternatives.
-    const bool correlated=(shared && extra_frequency_bound==0) || rf_bound==0 || clock_bound==0;
-    if((resolution.physical_aperture_samples || resolution.maximum_clock_step_ppm) &&
+    // K=0 removes carrier information about LF; retain the independently
+    // resolved timing lanes instead of collapsing an unknown clock to q=0.
+    const bool correlated=clock_bound==0 || (coupling!=0 &&
+        ((shared && extra_frequency_bound==0) || rf_bound==0));
+    if((resolution.physical_aperture_samples || resolution.maximum_clock_step_ppm || resolution.clock_frequency_hz) &&
        correlated && clock_bound>0)
         maximum_frequency_step=std::min(maximum_frequency_step,std::abs(coupling)*maximum_clock_step*1e-6);
     if(!std::isfinite(maximum_frequency_step) || maximum_frequency_step<=0)
@@ -183,9 +187,9 @@ static OscillatorPatternSearch oscillator_pattern_search_domain(const Config& co
     const auto nominal_lower=static_cast<long double>(config.carrier_hz)-half_band;
     const auto nominal_upper=static_cast<long double>(config.carrier_hz)+half_band;
     const auto required_lower=nominal_lower-
-        (shared?std::abs(static_cast<long double>(coupling)-half_band):config.carrier_hz-half_band)*epsilon-rf_bound;
+        ((shared || resolution.clock_frequency_hz)?std::abs(static_cast<long double>(coupling)-half_band):config.carrier_hz-half_band)*epsilon-rf_bound;
     const auto required_upper=nominal_upper+
-        (shared?std::abs(static_cast<long double>(coupling)+half_band):config.carrier_hz+half_band)*epsilon+rf_bound;
+        ((shared || resolution.clock_frequency_hz)?std::abs(static_cast<long double>(coupling)+half_band):config.carrier_hz+half_band)*epsilon+rf_bound;
     const bool joint_limited=required_lower<-passband_tolerance || required_upper>nyquist+passband_tolerance;
     const auto headroom=offset_limit(config);
     constexpr auto maximum_steps=(maximum_pattern_frequency_hypotheses-1)/2;
@@ -203,7 +207,7 @@ static OscillatorPatternSearch oscillator_pattern_search_domain(const Config& co
         return lattice(frequency.step_hz,count,frequency_bound,count==requested_frequency_steps);
     };
     const auto correlated_rate=[&](double offset) {
-        if(clock_bound==0 || offset==0)return 0.;
+        if(clock_bound==0 || coupling==0 || offset==0)return 0.;
         const auto magnitude=std::abs(offset)==frequency_bound?clock_bound:
             std::min(std::abs(offset/coupling*1e6),clock_bound);
         return std::copysign(magnitude,offset/coupling);
@@ -215,8 +219,8 @@ static OscillatorPatternSearch oscillator_pattern_search_domain(const Config& co
     // Keep one lane per frequency only when that entire strip fits the same
     // quarter-chip timing resolution as the independent rectangular grid.
     auto thin_clock_step=std::numeric_limits<double>::infinity();
-    const auto strip_clock_step=(static_cast<long double>(frequency.step_hz)+2.L*rf_bound)/
-        std::abs(coupling)*1e6L;
+    const auto strip_clock_step=coupling==0?std::numeric_limits<long double>::infinity():
+        (static_cast<long double>(frequency.step_hz)+2.L*rf_bound)/std::abs(coupling)*1e6L;
     // Both the selected rate and every physical rate lie in [-A,A]. Their
     // distance is at most 2A, so twice the clipped cell radius is at most 4A.
     // A large independent RF error must not bypass the exact test below when
@@ -224,7 +228,7 @@ static OscillatorPatternSearch oscillator_pattern_search_domain(const Config& co
     // This only broadens eligibility for that test; its outward-rounded result
     // still has to satisfy the original quarter-chip coverage requirement.
     const auto clipped_clock_step_bound=std::min(strip_clock_step,4.L*clock_bound);
-    if(!correlated && clock_bound<=10000 && clipped_clock_step_bound<=maximum_clock_step) {
+    if(coupling!=0 && !correlated && clock_bound<=10000 && clipped_clock_step_bound<=maximum_clock_step) {
         long double radius=0;
         const auto clock_scale=1e6L/coupling;
         const auto frequency_radius=static_cast<long double>(frequency.step_hz)/2+rf_bound;
@@ -430,7 +434,8 @@ OscillatorPatternSearch oscillator_pattern_search(const Config& config,double co
                                                  PatternSearchResolution resolution) {
     if(!std::isfinite(correction) || correction<0 || correction>.001)
         throw Error("invalid transmit timing correction search allowance");
-    if(!std::isfinite(resolution.maximum_clock_step_ppm) || resolution.maximum_clock_step_ppm<0)
+    if(!std::isfinite(resolution.maximum_clock_step_ppm) || resolution.maximum_clock_step_ppm<0 ||
+       (resolution.clock_frequency_hz && !std::isfinite(*resolution.clock_frequency_hz)))
         throw Error("invalid oscillator search resolution");
     auto original=expanded_oscillator_pattern_search(config,resolution);
     if(correction==0)return original;

@@ -321,10 +321,11 @@ struct SearchBank {
     bool legacy_coupled=false,limited=false;
     const HelperFrequencyProfile* helper_profile=nullptr;
 };
-SearchBank search_bank(const modem::Config& config,const transfer::Options& options) {
+SearchBank search_bank(const modem::Config& config,const transfer::Options& options,
+                       const modem::OscillatorPatternSearch* supplied=nullptr) {
     SearchBank result;
     if(config.oscillator_search) {
-        const auto plan=transfer::receiver_oscillator_search(config,options);
+        const auto plan=supplied?*supplied:transfer::receiver_oscillator_search(config,options);
         result.frequency=plan.frequency;result.hypotheses=plan.hypotheses;
         result.requested_clock_ppm=plan.requested_clock_half_width_ppm;
         result.clock_ppm=plan.clock_half_width_ppm;result.clock_step_ppm=plan.clock_step_ppm;
@@ -608,9 +609,16 @@ RollingFftWork rolling_fft_work(long double samples,std::uint32_t sample_rate,
     const auto hop_seconds=hop*bin/sample_rate;
     const auto first_full=(length+initial_batch-1)*bin/sample_rate;
     const auto first_pass=early_readiness?length*bin/sample_rate:first_full;
-    // New epochs enter no later than epoch-radius. The ORIGINAL legacy hint
-    // ends at epoch+radius+1, independently of a qualified arrival prior.
-    const auto last_start=((2.L*epoch_radius+1)*sample_rate+extra_start_samples)/bin;
+    // New epochs enter no later than epoch-radius. Retirement must also score
+    // the LAST original initial symbol at every canonical phase. Match
+    // PatternReceiver::initial_search_complete's four-bin/roundoff guard;
+    // consuming the first symbol's FFT is not complete search coverage.
+    const auto last_sample=(2.L*epoch_radius+1)*sample_rate+extra_start_samples;
+    const auto magnitude=std::max({1.L,std::abs(last_sample),std::abs(extra_start_samples),
+        std::abs(last_sample)+hop*bin});
+    const auto last_start=std::nextafter((last_sample+4*bin+
+        128*std::numeric_limits<double>::epsilon()*magnitude)/bin,
+        std::numeric_limits<long double>::infinity());
     const auto passes=last_start<initial_batch?1.L:2+outward_floor((last_start-initial_batch)/hop);
     const auto sampled_search_end=first_full+(passes-1)*hop_seconds;
     const auto retirement=(prefix_seconds+symbol_seconds+2.L*epoch_radius+1)/minimum_utc_rate;
@@ -2083,6 +2091,16 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                         static_cast<long double>(modem::scheduled_symbol_offset(representative,parity,phase,
                             modem::deferred_initial_symbols(representative)-1))/bank.minimum_rate);
                 }
+            } else if(private_pattern) {
+                // Ordinary encrypted/non-calendar reception still promises
+                // every initial source ordinal. Its constructor retains four
+                // initial symbols; the last begins three full symbols later.
+                // Canonical phase cells cover the original private epoch,
+                // independently of the physical LF lane/rate being scored.
+                const auto phase=(modem::canonical_phase_extent(config)-1)/
+                    modem::canonical_phase_step(config)*modem::canonical_phase_step(config);
+                calendar_extension=modem::canonical_phase_cell_upper(config,phase)+
+                    (initial_symbols-1)*symbol/bank.minimum_rate;
             }
             const auto fresh_full=rolling_fft_work(samples,config.sample_rate,bin,length,hop,initial_batch,
                 static_cast<long double>(symbol)/config.sample_rate,prefix,options.search_seconds,
@@ -2948,7 +2966,8 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
                   const modem::ChannelConfig& channel,std::span<const modem::Config> profiles,std::size_t keys,
                   bool compute_probability,double local_window_seconds,std::size_t probability_trials,
                   ReceiverWorkMode work_mode,ReceiverTimingModel timing_model,const live::Settings* actual_settings,std::stop_token stop,
-                  bool support_only=false,const QualifiedHelperFrequencyScenario* helper_scenario=nullptr) {
+                  bool support_only=false,const QualifiedHelperFrequencyScenario* helper_scenario=nullptr,
+                  const modem::OscillatorPatternSearch* receiver_search=nullptr) {
     estimate_detail::check(stop);
     auto options=source_options;
     options.search_seconds=live::detail::effective_epoch_search_seconds(options,false);
@@ -3022,6 +3041,20 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         profiles=configured_burst_profiles;keys=1; // Families are explicit rows, never multiplied twice.
     }
     if(profiles.empty())profiles=std::span(&options.modem,1);
+    if(receiver_search) {
+        if(compute_probability || helper_scenario || profiles.size()!=1 || options.modem.symbol_burst.enabled() ||
+           modem::scheduled_bursts(options.modem) ||
+           !options.modem.oscillator_search || receiver_search->hypotheses.empty() ||
+           receiver_search->hypotheses.size()>modem::maximum_pattern_frequency_rate_hypotheses)
+            throw Error("explicit receiver search requires one ordinary work-only oscillator profile");
+        for(const auto& pair:receiver_search->hypotheses)
+            if(!std::isfinite(pair.frequency_offset_hz)||!std::isfinite(pair.clock_error_ppm)||pair.clock_error_ppm<=-1e6)
+                throw Error("explicit receiver search contains an invalid pair");
+        for(const auto value:{receiver_search->frequency.step_hz,receiver_search->frequency.half_width_hz,
+            receiver_search->frequency.requested_half_width_hz,receiver_search->requested_clock_half_width_ppm,
+            receiver_search->clock_half_width_ppm,receiver_search->clock_step_ppm})
+            if(!std::isfinite(value)||value<0)throw Error("explicit receiver search contains invalid coverage metadata");
+    }
     std::vector<modem::Config> normalized_burst_profiles;
     if(std::any_of(profiles.begin(),profiles.end(),[](const auto& c){return c.symbol_burst.enabled();})) {
         normalized_burst_profiles.assign(profiles.begin(),profiles.end());
@@ -3111,7 +3144,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         if(found!=banks.end())return static_cast<std::size_t>(found-banks.begin());
         auto keyed_profile=profile;
         if(options.key&&!profile.symbol_burst.enabled())keyed_profile.data_key=options.key;
-        auto original=search_bank(keyed_profile,options);
+        auto original=search_bank(keyed_profile,options,receiver_search);
         if(helper_profile)banks.push_back({&profile,helper_execution_bank(keyed_profile,original,*helper_profile),std::move(original)});
         else banks.push_back({&profile,std::move(original),std::nullopt});
         return banks.size()-1;
@@ -4189,6 +4222,14 @@ Estimate estimate_with_receiver_settings(const transfer::Estimate& transmission,
         bool compute_probability,double window,std::size_t trials,ReceiverWorkMode mode,
         ReceiverTimingModel timing,std::stop_token stop) {
     return estimate_impl(transmission,options,raw_bits,channel,profiles,keys,compute_probability,window,trials,mode,timing,&settings,stop);
+}
+Estimate estimate_with_receiver_search(const transfer::Estimate& transmission,const transfer::Options& options,bool raw_bits,
+        const modem::ChannelConfig& channel,const modem::OscillatorPatternSearch& search,std::size_t keys,
+        double window,ReceiverWorkMode mode,ReceiverTimingModel timing,const live::Settings* settings,std::stop_token stop) {
+    auto result=estimate_impl(transmission,options,raw_bits,channel,{},keys,false,window,0,mode,timing,settings,stop,
+        false,nullptr,&search);
+    result.receiver_work_assumptions="Conditional real-time helper-corrected input; full residual RF/LF catalogue and ordinary receiver work. Reference startup/tracking and conversion overhead are separate; no lock or probability forecast";
+    return result;
 }
 namespace {
 using HelperVector=std::array<double,6>;

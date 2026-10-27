@@ -1785,30 +1785,38 @@ void receiver_overlay_and_cpu_status() {
     model.points={{25,1,0,false},{0,60,0,false},{-35,86400,0,false}};
     model.one_bit_cpu_available=true;model.one_bit_cpu_seconds=30;
     for(const auto& [ratio,label,tone]:std::array{
-        std::tuple{.2,"CPU estimate: headroom",ui::DocumentTone::positive},
-        std::tuple{.75,"CPU estimate: limited headroom",ui::DocumentTone::caution},
-        std::tuple{1.,"CPU estimate: slower than real time",ui::DocumentTone::negative}}) {
+        std::tuple{.2,"Ordinary receiver CPU model: headroom",ui::DocumentTone::positive},
+        std::tuple{.75,"Ordinary receiver CPU model: limited headroom",ui::DocumentTone::caution},
+        std::tuple{1.,"Ordinary receiver CPU model: slower than real time",ui::DocumentTone::negative}}) {
         model.cpu_realtime_ratio=ratio;
-        const auto page=planner_page::build(model,900,false,false);
-        const auto flat=nodes(page);
-        check(std::any_of(flat.begin(),flat.end(),[&](const auto* node){return node->text==label&&node->tone==tone;}),
-              "CPU headroom must retain a readable status as well as its green/yellow/red semantic color");
+        for(const bool helper:{false,true}) {
+            model.helper_reference.enabled=helper;
+            const auto page=planner_page::build(model,900,false,false);
+            const auto flat=nodes(page);
+            check(std::any_of(flat.begin(),flat.end(),[&](const auto* node){return node->text==label&&node->tone==tone;}),
+                  "CPU headroom must retain a readable status as well as its green/yellow/red semantic color");
+            check(contains_text(page,"Ordinary receiver baseline on the reference CPU")&&
+                  contains_text(page,"Excludes helper frontend, audio I/O, transmit and GUI work")&&
+                  contains_text(page,"not measured total process CPU"),
+                  "CPU headline must retain its ordinary receiver-only scope with helper either enabled or disabled");
+        }
     }
+    model.helper_reference.enabled=false;
     model.receiver_geometry.scheduled=true;
     model.receiver_geometry.scheduled_cost_calibrated=false;
     model.cpu_realtime_ratio=.2;
     const auto engineering=planner_page::build(model,900,false,false);
     const auto engineering_nodes=nodes(engineering);
-    check(contains_text(engineering,"CPU engineering estimate: uncalibrated")&&
-        !contains_text(engineering,"CPU estimate: headroom")&&
+    check(contains_text(engineering,"Ordinary receiver CPU model: uncalibrated")&&
+        !contains_text(engineering,"Ordinary receiver CPU model: headroom")&&
         std::any_of(engineering_nodes.begin(),engineering_nodes.end(),[](const auto* node) {
-            return node->text=="CPU engineering estimate: uncalibrated"&&node->tone==ui::DocumentTone::caution;
+            return node->text=="Ordinary receiver CPU model: uncalibrated"&&node->tone==ui::DocumentTone::caution;
         }),"uncalibrated scheduled work must not advertise measured CPU headroom");
     model.receiver_geometry.scheduled=false;
     model.cpu_realtime_ratio=1;
     model.receiver_workspace_supported=false;
     const auto unsupported=planner_page::build(model,900,false,false);
-    check(contains_text(unsupported,"CPU estimate unavailable")&&!contains_text(unsupported,"CPU estimate: headroom"),
+    check(contains_text(unsupported,"Ordinary receiver CPU model unavailable")&&!contains_text(unsupported,"Ordinary receiver CPU model: headroom"),
           "An unsupported receiver must not advertise CPU feasibility");
     model.receiver_workspace_supported=true;
     const auto render=[&](const planner::Model& input,PixelFormat format,std::string_view name="planner/bit-time") {
@@ -2827,6 +2835,9 @@ void document_semantics_layout_and_plots() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="--cpu-scope-only") {
+            receiver_overlay_and_cpu_status();std::cout<<"Ordinary receiver CPU scope and overlays passed\n";return 0;
+        }
         if(argc==2&&std::string_view(argv[1])=="--symbol-burst-only") {symbol_burst_plan_document();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--eme-only") {earth_moon_earth_estimate();std::cout<<"EME selected RX model limit passed\n";return 0;}
         symbol_burst_plan_document();cancelled_planner_and_inspection();

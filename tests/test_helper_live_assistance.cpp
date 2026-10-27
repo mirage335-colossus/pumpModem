@@ -8,6 +8,9 @@
 #include "datapump/streaming_modem.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/helper_filter.hpp"
+#include "datapump/pattern_pulse.hpp"
+#include "datapump/helper_tone_tracker.hpp"
+#include "../src/live_helper_frontend.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -23,6 +26,12 @@
 #include <thread>
 #include <tuple>
 
+// Private implementation seam, shared by actual Live enqueue and per-row
+// refresh. It exports no public API and supplies no receiver source truth.
+namespace datapump::live::detail {
+std::optional<HelperViewBlock::ClockMeasurement> realtime_helper_clock_measurement(
+    const modem::Config&,bool,const helper::ToneTrackerSnapshot&,std::uint32_t,std::uint64_t) noexcept;
+}
 using namespace datapump;
 namespace {
 void check(bool ok,const char* what){if(!ok)throw Error(what);}
@@ -740,6 +749,175 @@ void finite_replay_budget() {
     }
     check(source.helper_replay_storage_bound(111).has_value(),"finite source replay retained completed candidates");
 }
+// First capture the actual Live context after the realtime path disables
+// recursive helper work. Then replay the established independent-start PCM
+// geometry with that context. Neither stage receives a payload-length hint.
+void realtime_gap_protection(bool clock_probe=false) {
+    const auto path=std::filesystem::temp_directory_path()/
+        ("datapump-helper-realtime-gap-"+std::to_string(audio::trace::identity())+"-"+
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl");
+    bool reference=false;
+    {
+        const auto clock_filter=[](const char* name)noexcept {
+            return trace_filter(name) || std::string_view(name)=="receiver_helper_raw_reference" ||
+                std::string_view(name)=="receiver_helper_clock_refresh" ||
+                std::string_view(name)=="receiver_helper_reference_reentry";
+        };
+        audio::trace::Scope trace(path,false,clock_probe?+clock_filter:&trace_filter);
+        live::Session session;auto value=settings(true);
+        value.transfer.modem.sample_rate=6000;value.transfer.modem.carrier_hz=1500;value.transfer.modem.bandwidth_hz=100;
+        if(clock_probe)value.transfer.modem.oscillator_search=modem::OscillatorSearchConfig{{300,0},{.1,0},1e8,1};
+        value.helper.power_w=1500;value.helper.callsign.clear();
+        value.transfer.search_seconds=0;
+        value.transfer.automatic_receive_profiles=false;
+        session.start(value);session.transmit_bits(Bytes{0,0,1});
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(8);
+        while(std::chrono::steady_clock::now()<deadline) {
+            const auto snapshot=session.snapshot();
+            check(snapshot.error.empty() && !snapshot.receiver_health.failed() && !snapshot.receiver_health.dropped_samples,
+                  "realtime gap context changed ordinary capture health");
+            if(snapshot.helper_frequency_assistance_active && snapshot.samples_received>=4ULL*value.transfer.modem.sample_rate) {
+                reference=true;break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        const auto final=session.snapshot();
+        std::cout<<"realtime_gap samples="<<final.samples_received<<" helper_status="<<final.helper_status
+                 <<" status="<<final.status<<" finished="<<final.transmission_finished<<'\n';
+        session.stop();
+    }
+    std::ifstream input(path);std::string line;bool realtime=false,qualified=false,raw_clock=false,joined_clock=false;
+    while(std::getline(input,line)) {
+        if(clock_probe && line.find("\"event\":\"receiver_helper_raw_reference\"")!=std::string::npos)
+            raw_clock=raw_clock || number(line,"clock_qualified");
+        if(line.find("\"event\":\"receiver_acquisition_work\"")==std::string::npos ||
+           line.find("\"realtime_helper\":1")==std::string::npos)continue;
+        realtime=true;
+        qualified=qualified || number(line,"helper_gap_protection_qualified");
+        if(clock_probe && number(line,"realtime_clock_qualified")) {
+            joined_clock=true;
+            check(number(line,"realtime_clock_first_sample")<=number(line,"realtime_clock_last_sample") &&
+                  number(line,"realtime_clock_last_sample")<number(line,"realtime_clock_captured_end"),
+                  "joined clock trace lost its actual raw support");
+        }
+    }
+    if(clock_probe)check(raw_clock && joined_clock,"actual Session did not publish and join an independent raw clock");
+    std::cout<<"realtime_gap trace="<<path<<" reference="<<reference
+             <<" actual_realtime_row="<<realtime<<" qualified_context="<<qualified<<'\n';
+    check(reference && realtime,"realtime gap fixture never reached a qualified actual Live row");
+
+    modem::Config c;c.pattern_symbols=true;c.constellation_bits=1;c.spreading_factor=64;
+    c.pulse_shaping=false;c.stream_epoch=1789312671;
+    for(std::size_t i=0;i<c.spreading_seed.size();++i)c.spreading_seed[i]=static_cast<std::uint8_t>(3*i+7);
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    const auto start=4*symbol+symbol/3,absence=modem::pattern_absence_samples(c);
+    const Bytes earlier_bits{1,0},later_bits{0,0,1};
+    const auto waveform=[&](const Bytes& bits,std::size_t delay,std::size_t trailing,double phase) {
+        modem::PatternTransmitter tx(bits,c,c.stream_epoch,0,false);
+        std::vector<std::complex<double>> analytic(static_cast<std::size_t>(tx.total_samples()));
+        check(tx.read_analytic(analytic)==analytic.size(),"gap waveform source did not drain");
+        const auto padding=static_cast<std::ptrdiff_t>(modem::pattern_pulse_padding_samples(c));
+        std::vector<float> pcm(delay+analytic.size()-2*static_cast<std::size_t>(padding)+trailing);
+        for(std::size_t i=0;i<analytic.size()-2*static_cast<std::size_t>(padding);++i)
+            pcm[delay+i]=static_cast<float>((analytic[i+static_cast<std::size_t>(padding)]*std::polar(1.,phase)).real());
+        return pcm;
+    };
+    auto samples=waveform(later_bits,start,absence+6*symbol,.73);
+    const auto earlier=waveform(earlier_bits,0,0,.37);
+    std::copy(earlier.begin(),earlier.end(),samples.begin());
+    for(const bool context:{false,qualified}) {
+        modem::PatternReceiver receiver(c);check(receiver.set_helper_gap_protection(context),"native gap context unavailable");
+        struct Observed {modem::PatternBurst burst;std::size_t terminals=0;};
+        std::vector<Observed> streams;bool lost=false;
+        for(std::size_t position=0;position<samples.size();) {
+            const auto causal=context && !lost?start-position:samples.size()-position;
+            check(causal,"gap fixture failed to expose its original owner before the independent start");
+            const auto count=std::min({std::size_t{37},samples.size()-position,causal});
+            receiver.push(std::span(samples).subspan(position,count));position+=count;
+            for(auto& burst:receiver.take_bursts()) {
+                check(!burst.helper_acquired,"gap-only context fabricated conditional source provenance");
+                if(burst.complete)check(position>=burst.end_sample+absence,"gap context manufactured physical END");
+                auto prior=std::find_if(streams.begin(),streams.end(),[&](const auto& item) {
+                    return item.burst.stream_first_sample==burst.stream_first_sample &&
+                        item.burst.stream_first_symbol==burst.stream_first_symbol;
+                });
+                if(prior==streams.end()) {streams.push_back({std::move(burst),0});prior=streams.end()-1;}
+                else {
+                    check(prior->burst.first_stream_symbol+prior->burst.bits.size()==burst.first_stream_symbol,
+                          "gap protection changed the next progress ordinal");
+                    prior->burst.bits.insert(prior->burst.bits.end(),burst.bits.begin(),burst.bits.end());
+                    prior->burst.complete=burst.complete;prior->burst.end_sample=burst.end_sample;
+                }
+                prior->terminals+=prior->burst.complete;
+            }
+            if(context && !lost && !streams.empty() && !streams.front().burst.bits.empty()) {
+                check(position<=start && receiver.retains_stream(0,0),"gap fixture missed the accepted old owner");
+                check(receiver.set_helper_gap_protection(false),"helper loss could not disarm future births");lost=true;
+            }
+        }
+        check(streams.size()==2 && streams.front().burst.bits==earlier_bits && streams.back().burst.bits==later_bits,
+              "realtime gap context lost an accepted prefix or independent stream");
+        check(streams.back().burst.complete && streams.back().terminals==1,"independent stream lost physical END");
+        std::cout<<"realtime_gap context="<<context<<" old_complete="<<streams.front().burst.complete
+                 <<" old_terminals="<<streams.front().terminals<<" later_complete="<<streams.back().burst.complete<<'\n';
+        if(context)check(lost && streams.front().burst.complete && streams.front().terminals==1,
+                         "qualified realtime context abandoned an owner before physical END");
+        else check(!streams.front().burst.complete && !streams.front().terminals,"unassisted retirement policy changed");
+        receiver.finish();check(receiver.take_bursts().empty(),"EOF fabricated realtime gap completion");
+    }
+    check(qualified,"recursion-disabled realtime feed erased qualified gap protection");
+}
+
+void realtime_clock_refresh_controls() {
+    using live::detail::realtime_helper_clock_measurement;
+    auto value=settings(true);auto& c=value.transfer.modem;
+    c.oscillator_search=modem::OscillatorSearchConfig{{300,0},{.1,0},1e8,1};
+    helper::ToneTrackerSnapshot raw;raw.sample_rate=48000;raw.captured_end_sample=480000;
+    raw.clock_first_sample=200000;raw.clock_sample=raw.clock_last_sample=479000;
+    raw.clock_error_ppm=73;raw.clock_uncertainty_ppm=2;raw.clock_qualified=true;
+    // Carrier-frequency presence is deliberately independent of punctuation.
+    raw.qualified=false;
+    const auto measure=[&](const auto& snapshot,bool supported=true) {
+        return realtime_helper_clock_measurement(c,supported,snapshot,48000,480000);
+    };
+    const auto current=measure(raw);
+    check(current && current->interval.lower_ppm<71 && current->interval.upper_ppm>75 &&
+          current->first_sample==raw.clock_first_sample && current->last_sample==raw.clock_last_sample &&
+          current->captured_end_sample==raw.captured_end_sample,"current raw clock lost interval or support provenance");
+    check(!measure(raw,false),"unsupported clock mapping created a DATA clock");
+    auto bad=raw;bad.clock_qualified=false;check(!measure(bad),"clock loss fabricated a current replacement");
+    bad=raw;bad.sample_rate=6000;check(!measure(bad),"foreign-rate raw clock qualified");
+    bad=raw;--bad.captured_end_sample;check(!measure(bad),"foreign captured frontier qualified");
+    bad=raw;bad.clock_first_sample=bad.clock_last_sample+1;check(!measure(bad),"reversed marker support qualified");
+    bad=raw;--bad.clock_sample;check(!measure(bad),"nonfinal marker date qualified");
+    bad=raw;bad.clock_sample=bad.clock_last_sample=480000;check(!measure(bad),"uncaptured marker qualified");
+    bad=raw;bad.clock_sample=bad.clock_last_sample=400000;check(!measure(bad),"expired marker support qualified");
+    bad=raw;bad.clock_uncertainty_ppm=-1;check(!measure(bad),"negative marker uncertainty qualified");
+    bad=raw;bad.clock_error_ppm=400;check(!measure(bad),"disjoint clock enlarged the original LF domain");
+    bad=raw;bad.clock_error_ppm=299;bad.clock_uncertainty_ppm=5;
+    const auto clipped=measure(bad);check(clipped && clipped->interval.lower_ppm<294 && clipped->interval.upper_ppm==300,
+        "clock interval did not intersect the original LF prior");
+    // Exercise the real selector with all original LF cells retained at birth.
+    modem::Config tiny;tiny.sample_rate=256;tiny.carrier_hz=64;tiny.bandwidth_hz=8;tiny.spreading_factor=8;
+    tiny.integration_seconds=1;tiny.pattern_symbols=true;tiny.constellation_bits=1;tiny.pulse_shaping=false;
+    modem::PatternSearch search;search.start_offset_seconds=0;search.start_uncertainty_seconds=.125;
+    search.bit_limit=128;search.worker_threads=1;search.drift_tolerant=false;
+    search.admitted_clock_half_width_ppm=300;search.admitted_clock_cell_half_width_ppm=150;
+    for(const auto ppm:{-300.,0.,300.})for(const auto rf:{-.25,0.,.25})search.hypotheses.push_back({rf,ppm});
+    modem::PatternReceiver receiver(tiny,8*1024*1024,search);
+    check(receiver.set_helper_frequency_window(0,.001,100),"frequency-only selector declined original cells");
+    const auto broad=receiver.helper_frequency_window();
+    check(receiver.set_helper_frequency_window(0,.001,100,current->interval),"qualified raw clock could not refresh selector");
+    const auto narrow=receiver.helper_frequency_window();
+    check(narrow.clock_qualified && narrow.original_pairs==broad.original_pairs && narrow.selected_pairs<broad.selected_pairs,
+        "independent clock did not omit original LF alternatives");
+    check(receiver.set_helper_frequency_window(0,.001,100) &&
+          receiver.helper_frequency_window().selected_pairs==broad.selected_pairs,
+          "frequency-only clock loss did not restore the original LF alternatives");
+    std::cout<<"realtime_clock_controls original="<<broad.original_pairs<<" frequency="<<broad.selected_pairs
+             <<" clock="<<narrow.selected_pairs<<" actual raw guards passed\n";
+}
+
 void rolling_primary_declines() {
     std::vector<std::size_t> ordinary,helper;
     conditioned_frequency_bank(false,false,false,true,&ordinary);
@@ -797,7 +975,7 @@ void retained_backend_policy() {
 }
 
 }
-int main(int argc,char** argv){try{if(argc==2 && std::string_view(argv[1])=="--realistic-only") {realistic_frequency_benefit();return 0;}
+int main(int argc,char** argv){try{if(argc==2 && std::string_view(argv[1])=="--realtime-clock-refresh") {realtime_clock_refresh_controls();realtime_gap_protection(true);return 0;}if(argc==2 && std::string_view(argv[1])=="--realtime-gap") {realtime_gap_protection();return 0;}if(argc==2 && std::string_view(argv[1])=="--realistic-only") {realistic_frequency_benefit();return 0;}
 if(argc==2 && std::string_view(argv[1])=="--finite-replay-budget") {finite_replay_budget();return 0;}
 if(argc==2 && std::string_view(argv[1])=="--rolling-primary-decline") {rolling_primary_declines();return 0;}
 if(argc==2 && std::string_view(argv[1])=="--retained-backend-only") {retained_backend_policy();return 0;}
@@ -806,5 +984,5 @@ if(argc==2 && std::string_view(argv[1])=="--conditioned-control") {conditioned_f
 if(argc==2 && std::string_view(argv[1])=="--conditioned-full") {conditioned_frequency_bank(true,true);return 0;}
 if(argc==2 && std::string_view(argv[1])=="--conditioned-fallback") {conditioned_frequency_bank(true,false,true);return 0;}
 if(argc==2 && std::string_view(argv[1])=="--calendar-only") {realistic_frequency_benefit(true);return 0;}
-if(argc==2 && std::string_view(argv[1])=="--phase-only") {run(true,true);return 0;}run(false);run(true);run(true,true);full_payload(false,false);full_payload(true,false);full_payload(false,true);realistic_frequency_benefit();realistic_frequency_benefit(true);retained_backend_policy();finite_replay_budget();rolling_primary_declines();conditioned_frequency_bank(true);conditioned_frequency_bank(true,true);conditioned_frequency_bank(true,false,true);std::cout<<"helper Live assistance passed\n";return 0;}
+if(argc==2 && std::string_view(argv[1])=="--phase-only") {run(true,true);return 0;}realtime_gap_protection();run(false);run(true);run(true,true);full_payload(false,false);full_payload(true,false);full_payload(false,true);realistic_frequency_benefit();realistic_frequency_benefit(true);retained_backend_policy();finite_replay_budget();rolling_primary_declines();conditioned_frequency_bank(true);conditioned_frequency_bank(true,true);conditioned_frequency_bank(true,false,true);std::cout<<"helper Live assistance passed\n";return 0;}
 catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

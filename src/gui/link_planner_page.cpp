@@ -187,8 +187,16 @@ Chart cpu_chart_data(const planner::Model& model) {
         chart.points.emplace_back(point.target_db_hz,value);
         if(std::isfinite(value)){minimum=std::min(minimum,value);maximum=std::max(maximum,value);}
     }
+    for(const auto& point:model.helper_reference_cpu_points) {
+        if(!std::isfinite(point.target_db_hz))continue;
+        const auto value=point.available&&std::isfinite(point.realtime_ratio)&&point.realtime_ratio>0?
+            point.realtime_ratio:std::numeric_limits<double>::quiet_NaN();
+        chart.helper_points.emplace_back(point.target_db_hz,value);
+        if(std::isfinite(value)){minimum=std::min(minimum,value);maximum=std::max(maximum,value);}
+    }
     if(chart.selected_value>0){minimum=std::min(minimum,chart.selected_value);maximum=std::max(maximum,chart.selected_value);}
     std::sort(chart.points.begin(),chart.points.end(),[](const auto& a,const auto& b){return a.first>b.first;});
+    std::sort(chart.helper_points.begin(),chart.helper_points.end(),[](const auto& a,const auto& b){return a.first>b.first;});
     const auto high=std::max(-std::floor(std::log10(minimum)),std::ceil(std::log10(maximum))),low=-high;
     chart.low_log=low-.12;chart.high_log=high+.12;
     const auto upper=std::pow(10.,high);
@@ -444,8 +452,8 @@ Node cpu_graph(const planner::Model& model,float width) {
     auto n=card(width);n.padding=8;
     const float inner=width-2*n.padding,label_width=38,height=86,plot_width=inner-label_width;
     paragraph(n,"CPU estimate",13,Tone::text,true,2);
-    paragraph(n,model.symbol_burst.modeled?"Processing seconds per second of scheduled reception":
-        "Processing seconds per second of audio",10,Tone::muted,false,4);
+    paragraph(n,model.symbol_burst.modeled?"Receiver model · Processing seconds per second of scheduled reception":
+        "Receiver model · Processing seconds per second of audio",10,Tone::muted,false,4);
     const auto chart=cpu_chart_data(model);
     auto body=row(inner);auto labels=column(label_width);labels.height=height;
     float previous=0;
@@ -460,9 +468,14 @@ Node cpu_graph(const planner::Model& model,float width) {
     body.children.push_back(std::move(plot));n.children.push_back(std::move(body));
     n.children.push_back(target_axis(chart,inner,plot_width,label_width));
     paragraph(n,"Target dB in 1 Hz · 1 = real-time limit",10,Tone::muted,false,0);
-    if(model.helper_reference.enabled)paragraph(n,
-        "Ordinary receiver baseline. A helper-stabilized RF/CPU estimate for the real-time reference path is not available yet; no helper speedup or payload SNR gain is assigned.",
-        10,Tone::muted,false,0);
+    paragraph(n,"Receiver work on the reference CPU. Excludes helper frontend, audio I/O, transmit and GUI work; not measured total process CPU.",
+        10,Tone::muted,false,4);
+    if(model.helper_reference.enabled) {
+        paragraph(n,"Solid: ordinary receiver baseline. Dashed: conditional helper-corrected ordinary receiver cost, after usable tone observations. Full residual audio-clock/UTC search and ordinary storage remain.",
+            10,Tone::muted,false,4);
+        paragraph(n,"Dashed cost excludes uncalibrated helper discovery, tracking and conversion overhead. It is not total CPU, measured speed, or a lock/probability forecast. Payload SNR, Rate and the ordinary PHY reception curve stay unchanged.",
+            10,Tone::muted,false,0);
+    }
 
     return n;
 }
@@ -653,8 +666,8 @@ void link_budget(Node& root, const planner::Model& model) {
             !model.receiver_geometry.scheduled_cost_calibrated;
         const auto cpu_tone=!cpu_available?Tone::muted:cpu_ratio>=1?Tone::negative:
             cpu_ratio>=.5 || uncalibrated_cpu?Tone::caution:Tone::positive;
-        const auto cpu_label=!cpu_available?"CPU estimate unavailable":uncalibrated_cpu?"CPU engineering estimate: uncalibrated":cpu_ratio>=1?"CPU estimate: slower than real time":
-            cpu_ratio>=.5?"CPU estimate: limited headroom":"CPU estimate: headroom";
+        const auto cpu_label=!cpu_available?"Ordinary receiver CPU model unavailable":uncalibrated_cpu?"Ordinary receiver CPU model: uncalibrated":cpu_ratio>=1?"Ordinary receiver CPU model: slower than real time":
+            cpu_ratio>=.5?"Ordinary receiver CPU model: limited headroom":"Ordinary receiver CPU model: headroom";
         const auto pace_unit=model.symbol_burst.modeled?"scheduled reception":"audio";
         const auto pace=!cpu_available?std::string{}:cpu_ratio<.01?"<0.01 s processing per 1 s "+std::string(pace_unit):
             cpu_ratio>1000?">1,000 s processing per 1 s "+std::string(pace_unit):"≈ "+number(cpu_ratio,2)+" s processing per 1 s "+pace_unit;
@@ -672,6 +685,8 @@ void link_budget(Node& root, const planner::Model& model) {
             paragraph(n,verdict,17,rx_tone,true,4);
             paragraph(n,cpu_label+(cpu_available?" · "+pace:""),12,cpu_tone,true,4);
         }
+        if(cpu_available)paragraph(n,"Ordinary receiver baseline on the reference CPU. Excludes helper frontend, audio I/O, transmit and GUI work; not measured total process CPU.",
+            10,Tone::muted,false,4);
         if(model.symbol_burst.enabled) {
             const auto& burst=model.symbol_burst;
             paragraph(n,"Symbol_Burst: "+std::string(burst.modeled?"planned finite and tracked workload":"seeking allowance")+
@@ -709,7 +724,22 @@ void link_budget(Node& root, const planner::Model& model) {
                 11,Tone::muted,false,4);
             paragraph(n,"The strongest tone in the expected helper range supplies the real-time frequency reference for direct conversion. Robust acquisition waits while the helper is unavailable. Disable Helper Carrier to use ordinary oscillator search.",
                 11,Tone::muted,false,4);
-            paragraph(n,"The plots show the ordinary receiver baseline. A stabilized RF search/CPU/reception estimate for this reference path is not available yet. Expected tone power does not report a measured lock, and helper power does not increase payload SNR or Rate.",
+            const auto& conditional=helper.conditional;
+            if(conditional.observation_seconds>0)paragraph(n,"Conditional steady-tone model (ideal uninterrupted, zero-excess): "+
+                number(conditional.observation_seconds,3)+" s of usable observations at "+
+                std::to_string(conditional.physical_sample_rate)+" raw samples/s; residual reference "+
+                frequency(conditional.uncertainty_hz)+" engineering half-width. Discovery first needs at least "+
+                number(conditional.minimum_seed_seconds,3)+" s for two fresh seed windows. 384 uninterrupted accepted 20 ms observations within 8 s and zero excess residual are ideal assumptions. Actual APSK metadata, punctuation, noise gaps or glitches can widen uncertainty; this is not normally achieved precision or a measured helper CPU gain.",
+                11,Tone::muted,false,4);
+            if(conditional.frequency_rate_hypotheses)paragraph(n,"Conditional residual search: "+
+                std::to_string(conditional.frequency_rate_hypotheses)+" RF/clock pairs, "+
+                std::to_string(conditional.retained_clock_rates)+" clock rates, full original "+
+                number(conditional.clock_half_width_ppm,6)+" ppm half-width. No clock narrowing is inferred from tone power.",
+                11,Tone::muted,false,4);
+            paragraph(n,conditional.available?"Conditional ordinary receiver cost: "+number(conditional.realtime_ratio,4)+
+                " processing seconds per audio second, excluding helper startup/tracking/conversion overhead.":
+                "Conditional helper CPU estimate unavailable: "+conditional.reason,11,Tone::muted,false,4);
+            paragraph(n,"Expected tone power does not report a measured lock. The ordinary baseline and PHY reception curve remain visible; helper power does not increase payload SNR or Rate. Radio/ADC passband, actual tone tracking and steady observations are conditions of the dashed receiver-cost curve.",
                 11,Tone::muted,false,0);
         }
     } else paragraph(n, "Link estimate unavailable", 13, Tone::text, true, 0);

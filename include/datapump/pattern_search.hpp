@@ -2,6 +2,7 @@
 
 #include "datapump/modem.hpp"
 #include <cstddef>
+#include <optional>
 #include <vector>
 
 namespace datapump::modem {
@@ -68,6 +69,14 @@ OscillatorPatternSearch oscillator_pattern_search(const Config&,double transmit_
 struct PatternSearchResolution {
     std::uint64_t physical_aperture_samples=0;
     double maximum_clock_step_ppm=0;
+    // Receiver input may already have a common carrier translation removed.
+    // Then frequency residual = K*clock_error_ppm*1e-6 + independent RF error.
+    // Supply that signed K here (for example payload_hz-helper_hz). This changes
+    // only receive search coordinates: actual carrier, occupied bandwidth,
+    // waveform clock, oscillator bounds and symbol geometry remain unchanged.
+    // Absent retains the exact original oscillator-frequency relation. Zero
+    // keeps an independent timing grid even though LF no longer shifts carrier.
+    std::optional<double> clock_frequency_hz;
 };
 OscillatorPatternSearch oscillator_pattern_search(const Config&,double transmit_rate_correction,
                                                  PatternSearchResolution);

@@ -348,6 +348,17 @@ bool StreamingReceiver::cold_acquisition_only()const noexcept{return impl_->patt
 PatternAcquisitionDispatchState StreamingReceiver::helper_acquisition_dispatch()const noexcept {
     return impl_->pattern.helper_acquisition_dispatch();
 }
+bool StreamingReceiver::set_helper_frequency_window(double center,double radius,double coefficient)noexcept {
+    return impl_->pattern.set_helper_frequency_window(center,radius,coefficient);
+}
+bool StreamingReceiver::set_helper_frequency_window(double center,double radius,double coefficient,
+        std::optional<PatternHelperClockInterval> clock)noexcept {
+    return impl_->pattern.set_helper_frequency_window(center,radius,coefficient,clock);
+}
+void StreamingReceiver::clear_helper_frequency_window()noexcept {impl_->pattern.clear_helper_frequency_window();}
+PatternHelperFrequencyWindowState StreamingReceiver::helper_frequency_window()const noexcept {
+    return impl_->pattern.helper_frequency_window();
+}
 bool StreamingReceiver::set_helper_acquisition_dispatch(bool permitted)noexcept {
     return impl_->pattern.set_helper_acquisition_dispatch(permitted);
 }

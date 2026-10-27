@@ -13,8 +13,21 @@ inline std::string helper_diagnostics(const live::Snapshot& snapshot) {
     if(snapshot.helper_status.starts_with("Helper reference ")) {
         if(snapshot.helper_status.starts_with("Helper reference waiting"))
             return snapshot.helper_status+" | Robust acquisition waits for helper lock";
-        if(snapshot.helper_status.starts_with("Helper reference locked:"))
-            return snapshot.helper_status+" | frequency-corrected input to ordinary Robust reception";
+        if(snapshot.helper_status.starts_with("Helper reference locked:") &&
+           snapshot.helper_status.find("folded mono")!=std::string::npos)
+            return snapshot.helper_status;
+        if(snapshot.helper_status.starts_with("Helper reference locked:")) {
+            auto text=snapshot.helper_status+" | frequency-corrected input to ordinary Robust reception";
+            // Old cohort snapshots also used the timing flag. The joined
+            // reference route must publish its current dated clock result.
+            if(snapshot.helper_timing_assistance_active &&
+               snapshot.helper_status.find("conditional source clock mean [")!=std::string::npos) {
+                text+=" | measured dwell-spacing clock interval applied conditionally";
+                text+=" | joint pair maxima: selected "+std::to_string(snapshot.helper_selected_search_pairs)+
+                    ", original "+std::to_string(snapshot.helper_original_search_pairs);
+            }
+            return text;
+        }
         return snapshot.helper_status;
     }
     const bool work=snapshot.helper_frequency_assistance_active||snapshot.helper_phase_assistance_active||

@@ -12,9 +12,17 @@
 #include <map>
 #include <tuple>
 #include <set>
+#include <string_view>
 
 namespace datapump::gui {
 namespace debug_live_detail {
+// The repeated physical diagnostic needs dated reference/re-entry evidence;
+// per-row acquisition records can exhaust the trace before its next cycle.
+inline bool reentry_trace_event(const char* event) noexcept {
+    const std::string_view name=event?event:"";
+    return name=="trace_begin" || name=="gui_start" || name=="receiver_helper_raw_reference" ||
+        name=="receiver_helper_clock_refresh" || name=="receiver_helper_reference_reentry";
+}
 #if defined(__cpp_lib_syncbuf) && __cpp_lib_syncbuf>=201803L
 using LogLine=std::osyncstream;
 #else
@@ -41,10 +49,12 @@ public:
 class DebugLive {
 public:
     enum class Action { wait, transmit, close };
-    explicit DebugLive(double timeout,std::ostream& log,bool require_utc=false,std::string bits="1"):
-        timeout_(timeout),log_(log),expected_(std::move(bits)),require_utc_(require_utc) {
+    static constexpr std::size_t maximum_repeat_seen_ids=1024;
+    explicit DebugLive(double timeout,std::ostream& log,bool require_utc=false,std::string bits="1",unsigned repeat=1):
+        timeout_(timeout),log_(log),expected_(std::move(bits)),require_utc_(require_utc),repeat_(repeat) {
         if(expected_.empty() || expected_.size()>16 || expected_.find_first_not_of("01")!=std::string::npos)
             throw Error("Debug bits must contain 1..16 binary digits");
+        if(repeat_<1 || repeat_>3)throw Error("Debug repeat must be 1..3");
     }
     int result() const {return fallback_received_?2:passed_?0:1;}
     Action step(double elapsed,const live::Snapshot& s,const Signals& signals,bool ready,bool keyed,const std::string& status={}) {
@@ -54,7 +64,21 @@ public:
             debug_live_detail::LogLine(log_)<<"{\"event\":\"status\",\"seconds\":"<<elapsed
                 <<",\"text\":\""<<json_escape(last_status_)<<"\"}\n"<<std::flush;
         }
-        bool complete=false,unexpected=false;
+        bool complete=false,unexpected=false,identity_overflow=false;
+        if(repeat_>1) {
+            const auto observe=[&](std::uint64_t id) {
+                if(seen_ids_.contains(id))return;
+                if(seen_ids_.size()==maximum_repeat_seen_ids)identity_overflow=true;
+                else seen_ids_.insert(id);
+            };
+            // Delivered updates may already have disappeared from bounded
+            // GUI rows. Remember partial rows and superseded aliases too.
+            for(const auto& update:s.signals) {
+                observe(update.id);
+                for(const auto id:update.superseded_ids)observe(id);
+            }
+            for(const auto& line:signals.lines())observe(line.id);
+        }
         // A stronger hypothesis may supersede a wrong admission within the
         // same GUI poll. Inspect delivered updates before bounded row retention
         // hides that evidence; this diagnostic does not alter receiver policy.
@@ -93,6 +117,12 @@ public:
                 <<",\"tx_id\":"<<s.transmission_id<<",\"tx_seconds\":"<<s.transmission_seconds
                 <<",\"tx_fraction\":"<<s.transmission_fraction<<",\"tx_finished\":"<<s.transmission_finished
                 <<",\"samples\":"<<s.samples_received<<",\"hardware_rate\":"<<s.hardware_sample_rate
+                <<",\"processed_physical_samples\":"<<s.processed_physical_samples
+                <<",\"queued_physical_samples\":"<<s.queued_physical_samples
+                <<",\"decoding_physical_samples\":"<<s.decoding_physical_samples
+                <<",\"input_overruns\":"<<s.receiver_health.input_overruns
+                <<",\"dropped_samples\":"<<s.receiver_health.dropped_samples
+                <<",\"receiver_reset\":"<<s.receiver_health.receiver_reset
                 <<",\"backlog\":"<<s.receiver_backlog_seconds<<",\"oldest\":"<<s.receiver_oldest_input_seconds
                 <<",\"banks\":"<<s.receiver_instances<<",\"admissions\":"<<s.receiver_admissions
                 <<",\"rx_timed\":"<<s.clock_window_modeled<<",\"fallback\":"<<s.clock_timing_fallback
@@ -126,10 +156,10 @@ public:
         if(!s.error.empty() || s.transmission_failed || s.transmission_stopping)
             return finish(elapsed,s.error.empty()?"transmit failure/protected stop":s.error,false);
         if(s.receiver_health.failed())return finish(elapsed,"receiver lost input or required coverage",false);
+        if(identity_overflow)return finish(elapsed,"diagnostic reception identity quota exceeded",false);
         if(elapsed>=timeout_)return finish(elapsed,"deadline: incomplete hardware duplex reception",false);
         if(!requested_ && ready && keyed && s.running && s.samples_received) {
-            for(const auto& line:signals.lines())preexisting_.insert(line.id);
-            requested_=true;initial_id_=s.transmission_id;return Action::transmit;
+            return request(elapsed,s,signals);
         }
         if(requested_ && s.transmission_id>initial_id_ && s.transmitting) {
             if(!started_) {started_=true;start_samples_=s.samples_received;}
@@ -141,15 +171,36 @@ public:
         if(started_ && !s.transmitting && s.transmission_finished && complete) {
             if(!settled_)settled_=elapsed;
             if(elapsed-*settled_>=2) {
-                fallback_received_=require_utc_&&!utc_seen_&&capture_advanced_&&!unexpected_seen_&&!s.transmission_cancelled;
-                return finish(elapsed,require_utc_&&!utc_seen_?
+                const bool physical_ok=capture_advanced_&&!unexpected_seen_&&!s.transmission_cancelled;
+                if(physical_ok && completed_+1<repeat_) {
+                    // Keep the same Controller/session. Its ordinary transmit
+                    // eligibility includes the existing hardware separation.
+                    if(!ready || !keyed || !s.running)return Action::wait;
+                    ++completed_;utc_missing_seen_|=require_utc_&&!utc_seen_;
+                    requested_=started_=capture_advanced_=utc_seen_=false;settled_.reset();
+                    return request(elapsed,s,signals);
+                }
+                if(physical_ok)++completed_;
+                const bool utc_missing=require_utc_&&(!utc_seen_||utc_missing_seen_);
+                fallback_received_=utc_missing&&physical_ok;
+                return finish(elapsed,utc_missing?
                 "hardware duplex received; requested UTC playback untested after fallback":"hardware duplex reception",
-                capture_advanced_&&!unexpected_seen_&&!s.transmission_cancelled&&(!require_utc_||utc_seen_));
+                physical_ok&&!utc_missing);
             }
         }
         return Action::wait;
     }
 private:
+    Action request(double elapsed,const live::Snapshot& s,const Signals& signals) {
+        // Repeated runs retain every observed identity, including partial rows
+        // evicted before a request. Overflow fails instead of losing evidence.
+        if(repeat_>1)preexisting_=seen_ids_;
+        else for(const auto& line:signals.lines())preexisting_.insert(line.id);
+        requested_=true;initial_id_=s.transmission_id;
+        if(repeat_>1)debug_live_detail::LogLine(log_)<<"{\"event\":\"cycle\",\"seconds\":"<<elapsed
+            <<",\"cycle\":"<<completed_+1<<",\"repeat\":"<<repeat_<<"}\n"<<std::flush;
+        return Action::transmit;
+    }
     Action finish(double elapsed,const std::string& reason,bool pass) {
         done_=true;passed_=pass;
         debug_live_detail::LogLine(log_)<<"{\"event\":\"result\",\"seconds\":"<<elapsed<<",\"passed\":"<<pass
@@ -157,11 +208,13 @@ private:
         return Action::close;
     }
     std::map<std::uint64_t,std::tuple<std::uint64_t,std::size_t,bool,std::size_t>> rows_;
-    std::set<std::uint64_t> preexisting_; // Bounded snapshot at the single TX request.
+    std::set<std::uint64_t> preexisting_,seen_ids_; // Repeated runs fail at the explicit identity cap.
     double timeout_,next_log_=0;
     std::ostream& log_;
     std::string last_error_,last_status_,expected_;
     bool require_utc_=false,utc_seen_=false,fallback_received_=false;
+    unsigned repeat_=1,completed_=0;
+    bool utc_missing_seen_=false;
     bool requested_=false,started_=false,capture_advanced_=false,done_=false,passed_=false,unexpected_seen_=false;
     std::optional<double> settled_;
     std::uint64_t initial_id_=0,start_samples_=0;

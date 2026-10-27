@@ -337,6 +337,19 @@ Estimate estimate_with_receiver_settings(const transfer::Estimate& transmission,
                   double differential_window_seconds = 100,std::size_t probability_trials = 4096,
                   ReceiverWorkMode work_mode = ReceiverWorkMode::sampled_simulation,
                   ReceiverTimingModel timing_model = {},std::stop_token stop = {});
+// Ordinary receiver work after a fixed input-frequency translation, using the
+// exact full residual catalogue admitted by that receiver. All LF/arrival/key/
+// epoch alternatives and ordinary constructor storage remain priced. This is a
+// work-only conditional estimate: it does not predict reference lock, change
+// payload SNR/Rate, or manufacture a reception probability. The supplied channel
+// must already describe the translated input. One waveform profile per call;
+// callers sum explicitly configured companion profiles separately.
+Estimate estimate_with_receiver_search(const transfer::Estimate&,const transfer::Options&,bool raw_bits,
+                  const modem::ChannelConfig& translated_channel,const modem::OscillatorPatternSearch&,
+                  std::size_t receive_key_count=1,double differential_window_seconds=100,
+                  ReceiverWorkMode work_mode=ReceiverWorkMode::sampled_simulation,
+                  ReceiverTimingModel timing_model={},const live::Settings* receiver_settings=nullptr,
+                  std::stop_token stop={});
 // Explicit conditional frequency work. These inputs never qualify a tone or
 // manufacture a forecast from enabled helper power. They describe a reference
 // already qualified by the actual receiver, or a separately validated forecast.

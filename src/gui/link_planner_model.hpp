@@ -82,6 +82,14 @@ struct CpuPoint {
     double realtime_ratio=0;
     bool available=false;
 };
+struct RealtimeHelperCpuPoint {
+    double target_db_hz=0,realtime_ratio=0,uncertainty_hz=0,observation_seconds=0,minimum_seed_seconds=0;
+    double rf_half_width_hz=0,clock_half_width_ppm=0;
+    std::uint32_t physical_sample_rate=0;
+    std::size_t frequency_rate_hypotheses=0,retained_clock_rates=0;
+    bool available=false;
+    std::string reason;
+};
 struct HelperCpuPoint {
     double target_db_hz=0,discovery_cpu_seconds=0,prequalification_broad_cpu_seconds=0;
     double qualified_finite_receiver_cpu_seconds=0,qualified_sustained_realtime_ratio=0;
@@ -130,6 +138,7 @@ struct HelperReferencePlan {
     double simulation_cn0_db_hz=0;
     double simulation_tone_snr_db=0;
     double frequency_hz=0;
+    RealtimeHelperCpuPoint conditional;
     // Original-grid geometry under an explicit hypothetical qualified helper
     // measurement. This does not certify runtime receiver/profile/resources.
     bool conditional_geometry_available=false;
@@ -166,6 +175,10 @@ struct Model {
     // Receiver CPU time per second of one-bit simulated audio. Uses the same
     // checked target sweep; unsupported Clock/RAM geometry leaves graph gaps.
     std::vector<CpuPoint> cpu_points;
+    // Ordinary receiver primitive-cost model after a conditional synchronous
+    // helper frequency correction. Includes the full residual constructor/LF
+    // catalogue, excludes separately uncalibrated reference/front-end CPU.
+    std::vector<RealtimeHelperCpuPoint> helper_reference_cpu_points;
     // Separate conditional curves. Unsupported residual/backend/forecast
     // coverage stays a gap; ordinary curves above are never overwritten.
     std::vector<ReceivePoint> helper_receive_points;

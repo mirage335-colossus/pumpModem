@@ -51,6 +51,7 @@ struct HelperInputView {
     std::uint32_t physical_rate=0,logical_rate=0;
     double helper_hz=0,clock_center=0,clock_lower=0,clock_upper=0;
     double correction_hz=0,translated_helper_hz=0;
+    bool reference_passthrough=false;
     helper::CaptureBand input_band{},payload_output_band{};
     bool conjugate=false;
 };
@@ -59,6 +60,19 @@ struct HelperViewBlock {
     std::uint64_t first_sample=0;
     std::vector<float> samples;
     std::optional<helper::Reference> reference;
+    // Independent streaming dwell-spacing measurement, in the original
+    // source-clock convention. It supplies no epoch or carrier phase.
+    struct ClockMeasurement {
+        modem::PatternHelperClockInterval interval;
+        std::uint64_t first_sample=0,last_sample=0,captured_end_sample=0;
+        std::uint32_t sample_rate=0;
+        bool valid(std::uint32_t expected_rate)const noexcept {
+            return interval.valid() && sample_rate && sample_rate==expected_rate && first_sample<=last_sample &&
+                last_sample<captured_end_sample && captured_end_sample-1-last_sample<=
+                    static_cast<std::uint64_t>(.55*sample_rate);
+        }
+    };
+    std::optional<ClockMeasurement> clock;
     // Optional frequency-only source identity survives the raw observer ring.
     // Separately owned so metadata pressure can release it before payload PCM.
     std::unique_ptr<const HelperFrequencyPublication> frequency_publication;
@@ -343,6 +357,9 @@ public:
         auto result=sizeof(*this);for(const auto& branch:branches_)if(branch)result+=branch->bytes();return result;
     }
     bool active()const noexcept{return branches_[0] || branches_[1];}
+    bool reference_passthrough()const noexcept {
+        return branches_[0] && branches_[0]->view->reference_passthrough;
+    }
     void reset()noexcept {branches_={};}
     // Manually enabled reference mode has one upstream converter and one
     // ordinary receiver. Positive real-PCM capture is the supported image;
@@ -353,31 +370,38 @@ public:
         if(!reference.frequency_valid || reference.sample_rate!=physical_rate ||
            !std::isfinite(reference.frequency_hz) || !std::isfinite(reference.frequency_uncertainty_hz) ||
            reference.frequency_uncertainty_hz<0 || reference.frequency_hz<=0)return;
-        const auto correction=expected-reference.frequency_hz;
+        auto correction=expected-reference.frequency_hz;
         const auto half=helper::occupied_bandwidth(config)/2;
         const auto uncertainty=std::max(32.,4*reference.frequency_uncertainty_hz);
+        const bool folded=config.carrier_hz-half-uncertainty<=10;
+        if(folded)correction=0; // Ordinary demodulator applies the measured origin.
         const auto data_input=config.carrier_hz-correction;
-        const auto low=std::min(data_input-half,reference.frequency_hz-175)-uncertainty;
+        const auto low=folded?10.001:std::min(data_input-half,reference.frequency_hz-175)-uncertainty;
         const auto high=std::max(data_input+half,reference.frequency_hz+175)+uncertainty;
         if(low<=10 || high>=passband || low+correction<=10 ||
            high+correction>=physical_rate/2.-10)
             throw Error("helper reference or payload lies outside the captured positive passband");
         HelperInputView view;view.id=1;view.budget_serial=budget_serial_;
         view.physical_rate=physical_rate;view.logical_rate=config.sample_rate;
-        view.helper_hz=expected;view.correction_hz=correction;view.translated_helper_hz=expected;
+        view.helper_hz=expected;view.correction_hz=correction;
+        view.reference_passthrough=folded;
+        view.translated_helper_hz=folded?reference.frequency_hz:expected;
         view.input_band={low,high};
-        view.payload_output_band={config.carrier_hz-half-uncertainty,config.carrier_hz+half+uncertainty};
+        view.payload_output_band={folded?0.:config.carrier_hz-half-uncertainty,config.carrier_hz+half+uncertainty};
         const auto quantum=physical_rate/std::gcd(physical_rate,config.sample_rate);
         const auto remainder=next_raw%quantum;
         if(remainder && next_raw>UINT64_MAX-(quantum-remainder))return;
         const auto first=remainder?next_raw+quantum-remainder:next_raw;
-        auto branch=std::make_unique<Branch>(view,first,true);
+        auto branch=std::make_unique<Branch>(view,first,!folded);
         if(sizeof(*this)+branch->bytes()>grant_)throw Error("realtime helper converter exceeds its workspace grant");
         branches_[0]=std::move(branch);
     }
     bool track_frequency(const helper::Reference& reference,double expected)noexcept {
         if(!reference.frequency_valid || !std::isfinite(reference.frequency_hz))return false;
         auto& branch=branches_[0];
+        if(branch && branch->view->reference_passthrough)
+            return reference.sample_rate==branch->view->physical_rate &&
+                std::abs(reference.frequency_hz-branch->view->translated_helper_hz)<25;
         return branch && reference.sample_rate==branch->view->physical_rate &&
             branch->translator.track_frequency(expected-reference.frequency_hz);
     }

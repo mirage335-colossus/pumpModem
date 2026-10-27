@@ -8,14 +8,551 @@ and use Git history for comparisons. Detailed studies remain in the
 
 ## Current Helper Carrier candidate
 
-The current manual-preview direction is an upstream bounded tone tracker and
-continuous NCO feeding one ordinary receiver bank. It is manually enabled;
-without qualified lock it starts no new payload acquisition. The previous
-broad fallback/probe and historical replay/capsule architecture is superseded.
-Live integration and the GUI rebuild are pending. Short focused checks and a
-manual GUI trial are the immediate scope; broad qualification is explicitly
-deferred, not passed. Final preview source/binary/check bindings are pending;
-earlier results below do not qualify this changed route.
+Preceding V13 GUI `4d0a71d0` retains cold NCO bootstrap and adds per-row fresh
+CLOCK-only metadata. Eight focused and five targeted modes passed. Its
+same-GUI two-cycle cable run completed both exact one-bit payloads through
+ordinary END without input health faults, but only ID 2 had observed pending-to-
+complete coverage; ID 1 first appeared complete. The quiet GPSDO/helper-ON run
+failed on a transient wrong seven-bit prefix despite correct final data/END.
+Quiet crystal/helper-ON passed exact eight-bit prefixes/ordinary END; the
+GPSDO prefix diagnosis remains unresolved. Both completed comparison receipts
+are recorded below without a universal causal CPU claim.
+The reported intermittent missing pending row after the helper tail remains
+unreproduced, not declared resolved. Full regression, sanitizer, long framed
+transfers, weak RF and EME remain unqualified; this is a manual preview.
+
+The 0.6 receiver budget is an Automatic backend-selection objective, measured
+as modeled receiver processing seconds per audio second, not a hard ceiling on
+whole-GUI process CPU. Earlier descriptions of total CPU/audio above 0.6 as
+strict budget failures used the wrong scope. Raw CPU, backlog, progress and
+failed/incomplete receipts below remain unchanged; these process measurements
+do not isolate ordinary receiver work or establish its budget conformance.
+
+### V14 ideal forecast versus actual tone precision
+
+V14 changes Planner math/UI wording only; runtime core `7e7f332c` is unchanged.
+The [build receipt](../local-evidence/helper-v14/build-r1/execution-result.json)
+records GUI build 10.67 seconds, focused-test build 3.52 seconds and three
+focused checks passing in 1.75 seconds, with unchanged pins and all processes
+reaped. GUI hash is `49cf3aef7589ecbe02a6e43b630078fd05db62ceb3567ec0e25500c713d08446`.
+There is no new audio or full-regression result.
+The ideal contiguous endpoint covariance corrects forecast `U` from
+0.950280808 to 0.0604611302 Hz at C/N0 30.0206 dB-Hz after 7.7 seconds, retaining
+configured process terms and floors. It assumes 384 uninterrupted accepted
+20 ms observations and zero excess residual, not a measured metadata waveform.
+Runtime already uses actual snapshot `U` (only a 1e-6 Hz numerical floor) plus
+necessary original LF/UTC geometry. The no-FHSS 300 ppm LF term remains
+±0.16875 Hz until clock is independently qualified. The
+[corrected dump](../local-evidence/helper-v14/planner-precision/corrected-dump/estimate-dump.log)
+(`66685d42`; receipt `10ba8d1d`) has ideal RF/LF half-extent 0.2292111302 Hz,
+103 pairs retaining all nine LF centers, and modeled receiver CPU/audio 5.797316
+versus the earlier conditional 1013 pairs/38.609782. The entire ordinary baseline
+is identical; 13 initial epochs, 33 admissions and 78.7978-second cohort lifetime
+remain unchanged. These are conditional model outputs, not measured work gains.
+
+The [tone-precision receipt](../local-evidence/helper-v14/tone-precision/execution-result.json)
+(`127c4dbf`) binds five synthetic 12-second actual-Generator cases, all late
+polls qualified with zero observed interval escapes; compilers/run were reaped.
+At expected C/N0 30.0206, HF metadata plus data had median/p90/maximum `U`
+0.566217/0.626/0.658 Hz and maximum truth error 0.5425 Hz. CW medians were
+0.155–0.174 Hz and GPSDO metadata/data 0.4196 Hz. Adding ordinary payload made
+almost no difference to metadata-only precision in this control. These bounded
+component results do not calibrate confidence, prove normal 0.06 Hz precision,
+measure decoder CPU or qualify the weak RF link. The same ideal assumptions
+cannot be assigned to interrupted metadata observations or empirical excess.
+The [private GLS prototype](../local-evidence/helper-v14/gls-precision/execution-result.json)
+was not integrated: its legacy weak-EME heuristic guard failed (`U` 0.14094 versus required
+>0.2 Hz; later legacy controls unreached), while metadata `U` improved only
+0.5662→0.5322 Hz with roughly 9 KiB extra storage. The earlier V13 GPSDO prefix
+failure and unreproduced no-pending report remain unresolved; prior binary-bound
+cable results are not relabeled current GUI tests.
+
+### Preceding V13 source, reentry and focused cable evidence
+
+The [final build receipt](../local-evidence/helper-v13/build-r2/execution-result.json)
+(`7b887940`) records GUI build 63.98 seconds, test build 13.09 seconds and eight
+focused checks in 6.971 seconds, all exit zero. GUI helper status, debug-repeat,
+actual Session gap routing, clock refresh and CPU-scope rendering also passed.
+Inputs remained unchanged during execution and owned processes were reaped.
+[Binary bindings](../local-evidence/helper-v13/build-r2/production-binaries.json)
+pin GUI `4d0a71d0c61cb83d92d2298303254cb7b44fe2b827ea3a6098477f9bb950f5db`
+and core archive `7e7f332ce636e71236f564c895f1671d5ef8780d7b6be5bfb441b5177dd3b1e3`.
+The preceding build-r1 receipt and its passing checks remain source-bound,
+not a substitute for current cable results.
+
+The [two-cycle cable result](../local-evidence/helper-v13/live-runs/helper40-repeat-r2/result.json)
+(`028ee0cf`, same GUI) exited zero after 204.917 seconds. Both exact one-bit
+payloads completed on IDs 1 and 2 with ordinary END; input overruns, drops and
+resets were zero. ID 1 first appeared already complete at 48.0116 seconds.
+ID 2 was pending at 137.407 then complete at 168.679 on the same ID; first-row
+pending coverage was not observed and is not claimed. Process CPU was 154.929014 seconds
+for 203.315196 observed audio seconds, or 0.76201394 total GUI CPU/audio. Peak
+backlog was 3.125 seconds and final zero; recorded FFT jobs were 10,276.
+Inputs matched and owned groups/children were empty at completion.
+
+Its [low-volume trace](../local-evidence/helper-v13/live-runs/helper40-repeat-r2/reference.jsonl)
+records reentry at sequence 4626, with 77 cold rows and none retired. Raw clock
+qualification at sequence 4660 was 0.852507 seconds later; joined CLOCK refresh
+at sequence 4663 was 0.918698 seconds after reentry, about 66 ms after
+qualification. Bank sample 675,160 and RF/NCO remained unchanged. Observed raw
+clock support 5,277,072–5,337,743 contains queued raw point 5,298,000; refresh
+end 5,341,200 at 48 kHz gives about 0.072 seconds age. This establishes that the
+metadata-refresh mechanism executed on captured support, not a new input
+frontier or a frequency/phase/thermal lease.
+
+The [preceding three-cycle result](../local-evidence/helper-v13/live-runs/helper40-repeat-r1/result.json)
+(`fef55cdc`, GUI `856d46a2`) retains exit 1 at 300.222 seconds: cycle starts
+0.509/108.951/218.148 seconds and roughly 92-second helper output mean the last
+tail needed about 311 seconds. All three distinct payload rows 1/2/3 completed
+exact one bits with ordinary END and no missing/unexpected bits; rows 2/3 had
+observed pending-to-complete identity. This deadline setup failure is separate
+from actual reentry lag: 18.125 seconds peak backlog, 1.232123 total GUI
+CPU/audio and 29,015 recorded jobs, with zero input health faults and final
+backlog zero. The N3/N2 cycle counts and tracing differ, so the lower observed
+N2 backlog is not a universal or matched percentage gain. No retired-row
+replacement policy has been implemented.
+
+The [quiet GPSDO/helper-ON result](../local-evidence/helper-v13/live-runs/gpsdo-helper40-long-r2/result.json)
+(`2c263669`, same `4d0a71d0` GUI) failed with exit 1. At 119.759 seconds,
+ID 1/revision 7 had a wrong seven-bit prefix; revision 8 completed the correct
+`01001101`/ordinary END at 140.971 seconds. Final correctness does not erase
+the prefix failure or make this a functional pass. Source review locates
+revision 6→7→8 in Live owner/merge replacement, which publishes a selected
+candidate's accumulated post-XOR prefix; the GUI does not synthesize bits.
+ReceptionHistory tracks neither bits nor prefix agreement. The quiet log cannot
+identify the wrong candidate or establish root cause. No arbitration policy
+change is justified or made; a bounded joined commit/before-XOR wire trace is
+needed to discriminate the fault. Inputs matched and processes were reaped,
+with zero overruns, drops and resets, peak backlog 0.725 seconds and final zero.
+Process CPU was 132.860561 seconds over 194.440196 observed audio seconds,
+0.6832978 total GUI CPU/audio; wall time was 195.412498 seconds, with 8,267
+recorded FFT jobs. The OS-counter body window, GUI 50.763–109.647 seconds,
+used 44.35 CPU seconds over 58.875 audio seconds, or 0.7532909 CPU/audio.
+Those cost measurements remain valid observations of a failed control, not
+performance or functional acceptance.
+
+The [quiet crystal/helper-ON result](../local-evidence/helper-v13/live-runs/helper40-long-r2/result.json)
+(`e2e22889`, same GUI) exited zero with exact `01001101` and ordinary END at
+141.654 seconds. ID 1 retained correct pending prefixes of 3/5/7 bits at
+48.424/79.83/110.358 seconds, then completed; no eight-bit pending poll is
+claimed. Input overruns, drops and resets were zero, with no extras/missing
+bits. Process CPU was 116.089419 seconds over 195.215196 observed audio seconds,
+0.5946741 total GUI CPU/audio; wall time was 196.021126 seconds. Peak backlog
+was 0.275 seconds, final zero and FFT jobs 6,321. The OS-counter body window,
+GUI 50.7978–109.562, used 38 CPU seconds over 58.775 audio seconds, or
+0.6465334 CPU/audio. Inputs matched and owned groups/children were empty.
+
+| Current quiet case, same `4d0a71d0` GUI | Prefix/END outcome | Total GUI CPU/audio | Body CPU/audio | Peak/final backlog, seconds |
+| --- | --- | --- | --- | --- |
+| Crystal/ic-7100, helper ON | Pass: correct 3/5/7 pending prefixes, then exact eight-bit END | 0.5946741 | 0.6465334 | 0.275/0 |
+| GPSDO-configured, helper ON | Fail: transient wrong seven-bit prefix, then correct final eight-bit END | 0.6832978 | 0.7532909 | 0.725/0 |
+
+The [frozen current comparison](../local-evidence/helper-v13/live-runs/current-comparison.json)
+has SHA-256 `fdb7e0d8cdaf3719c05a59ba1bee564df69415fb5a78a5eaf7235e07ae768b3c`.
+Both use automatic 50% workspace rather than fixed bytes and different keyed
+dates/waveforms. Body median reported helper C/N0 was 49.071252 dB-Hz for
+crystal and 49.868308 for GPSDO, about 19 dB above the configured 30.0206 dB-Hz
+budget; the earlier 60.974331 dB-Hz measurement belongs only to old r7.
+Physical cable capture did not inject the configured RF loss/noise. These
+whole-GUI costs do not isolate ordinary receiver processing or establish a
+universal causal oscillator-cost/CPU gain. The GPSDO control stays failed.
+All audio/monitor processes were reaped. The reported intermittent missing
+pending row after the helper tail remains unreproduced and unresolved; no
+full regression, sanitizer, long framed, weak RF or EME qualification follows.
+
+The [R2 cold-bootstrap receipt](../local-evidence/helper-v13/cold-pullin-r2/execution-result.json)
+(`2228ac0d`) uses four exact-adjacent, mutually consistent fine observations to
+recenter only the NCO. They do not enter fit history or qualify synchronization;
+ordinary 16-observation/0.3-second qualification, model/noise and expiry gates
+remain. Tracker storage is 88,272 bytes. In the actual-metadata +30 Hz component
+case, translator admission changed from 7.525 to 0.675 seconds and whole-waveform
+coverage from 61.86% to 100%, with 0.0084 dB coherent loss. Eight seed/dwell cases
+qualified in 0.700–0.875 seconds with truth inside their intervals; all old
+tracker controls passed. This is not ordinary decoding, CPU, physical END or
+hardware qualification. The [initial widened-gate proposal](../local-evidence/helper-v13/cold-pullin-r1/execution-result.json)
+(`8425cc9d`, proposal `9891340a`) remains failed: it admitted a biased reference
+and regressed coherence. R2 is a separate repair, not a passed original run.
+
+The [actual Session routing regression](../local-evidence/helper-v13/realtime-gap/root-setup-r4/execution-result.json)
+(`c1a7e6b9`) reproduces the baseline's lost qualified real-time context and passes
+after routing repair, retaining exact core prefix/END checks. Earlier passband
+setup failures remain preserved. This component defect is not established as
+the cause of the user's missing-pending report after the helper tail.
+
+The new CLOCK-only refresh uses the shared raw/joined clock builder, same
+generation/frontend serial/raw rate/current captured end, 0.55-second freshness
+and original LF bounds, at post-loan/pre-borrow boundaries. Valid queued clock
+is retained when current clock is absent. Queued RF/U, NCO, PCM, phase, epoch
+and frontiers are unchanged. Controlled guard/selector 9→3→1→restore and actual
+Session raw/joined-clock prefix/END/loss checks passed. The quasi-stationary
+aperture-mean clock assumption remains; frequency is not made dependent on
+punctuation. Verbose formatting is filtered only for debug repeat > 1; normal
+verbose behavior is unchanged. This contributes a tracing-scope difference.
+
+Planner's ordinary cohort lifetime changed from 47.51 to 78.8 seconds, with a
+reference ordinary-receiver estimate 0.093589 to 0.183126 processing seconds
+per audio second. The fixed-256 MiB actual-receiver two-hop regression checks
+retirement timing; it is not end-to-end CPU calibration. UI labels ordinary
+receiver CPU exclude helper tracking/conversion, audio, TX and GUI work. The
+baseline and conditional frequency-only estimate retain their separate scope.
+
+Three new-turn short trials still use preceding GUI `18c77619`: crystal/helper
+ON [r8a](../local-evidence/helper-v12/live-runs/helper40-short-r8a/result.json)
+(`f90dc36d`) and [r8c](../local-evidence/helper-v12/live-runs/helper40-short-r8c/result.json)
+(`9fc0c1e1`) used 0.5214 and 0.4593 total CPU/audio; GPSDO/helper ON
+[r8b](../local-evidence/helper-v12/live-runs/gpsdo-helper40-short-r8b/result.json)
+(`d1873f29`) used 0.5803. All recovered the exact one bit/ordinary END with zero
+health faults, peak backlogs 0.275/0.275/0.75 seconds respectively and final
+zero. They do not reproduce the intermittent report or isolate oscillator cost.
+The earlier eight-bit GPSDO/helper-OFF versus crystal/helper-ON body comparison
+(0.5196 versus 0.6796) also differs in capture rate (8 versus 48 kHz) and total
+GUI overhead. The completed current comparison is recorded above; the GPSDO/helper-ON
+prefix failure remains failed.
+
+### Preceding bounded frequency history and strong-cable results
+
+The [build-r7 receipt](../local-evidence/helper-v12/build-r7/execution-result.json)
+(`1abc1ef8`) records successful GUI build (1.8177 seconds), test build
+(3.4688 seconds), seven checks (6.4199 seconds) and GUI helper status (0.010
+seconds), with unchanged execution inputs and reaped processes.
+[Binary bindings](../local-evidence/helper-v12/build-r7/production-binaries.json)
+pin GUI `18c77619da2aca602c2788b9b499c5602076b61bbef0c276d21014c059ced24b`
+and core archive `b052fa02`.
+
+The [r7 helper cable result](../local-evidence/helper-v12/live-runs/helper40-long-r7/result.json)
+(`e6319b95`, same GUI `18c77619`) exited zero, with unchanged inputs and reaped
+processes. Exact `01001101` progressed on stable ID 1 through 3, 5 and 7
+pending bits, then eight-bit completion, with valid prefixes, ordinary END, no extras/missing bits,
+no late/failure status and explicitly zero overruns, drops or resets. Process
+CPU was 123.640958 seconds over 194.165196 observed audio seconds, or 0.6367823
+CPU/audio; wall time was 195.419154 seconds and peak RSS 161,988 KiB. Peak
+backlog was 0.75 seconds, final backlog zero and first completion 140.963 seconds.
+
+The OS-counter body window, GUI seconds 50.7083–109.49, used 39.96 CPU seconds
+over 58.8 audio seconds: 0.6795918 CPU/audio. All 59 body live polls had clock
+narrowing active. The run kept up in this strong-loopback case. The earlier
+comparison against a supposed strict 0.6 total-GUI ceiling was incorrect;
+these CPU/audio ratios do not isolate the receiver selection objective.
+Its 6,902 recorded native FFT jobs compare with 28,371 in pre-cadence r4 below,
+75.67% fewer in these runs; process CPU was about 62.7% lower. These are
+source-bound executed counters/process measurements, not a universal work,
+probability or sensitivity gain.
+
+Median measured helper C/N0 was 60.974331 dB-Hz. The configured 40 W/180 dB/
+−164 dBm/Hz budget predicts 30.0206 dB-Hz, about 30.95 dB weaker. Physical cable
+capture does not inject the software path-loss/noise settings: this establishes
+an ordinary Auto path and work reduction under a qualified strong reference,
+not that weak RF link, EME, full framed payloads or GPSDO substitution. The
+same-GUI helper-off eight-bit GPSDO comparison is complete as recorded below.
+Prior high-cost observations and original failed receipts remain retained below.
+
+The [GPSDO-configured helper-off result](../local-evidence/helper-v12/live-runs/gpsdo-long-r7/result.json)
+(`1023517b`, same GUI `18c77619`) exited zero with exact eight bits/ordinary
+END, stable prefixes, no extras or missing bits, no late status and explicitly
+zero overruns, drops or resets. It used 59.925182 CPU/141.908700 wall seconds
+over 140.617157 observed audio seconds: 0.4261584 CPU/audio overall. Peak backlog
+was 0.15 seconds and final backlog 0.075 seconds while capture remained open
+until normal close; first completion was 139.757 seconds and peak RSS 125,720
+KiB. Inputs were unchanged and owned processes reaped.
+
+Its OS-counter body window, GUI seconds 50.6119–109.384, used 30.54 CPU seconds
+over 58.775 audio seconds: 0.5196087 CPU/audio. Thus helper body CPU/audio
+0.6795918 is about 30.8% above this reference, not identical to it. Total GUI
+process CPU does not isolate ordinary decoder or optional overhead, and capture
+rates differ (8 kHz helper OFF versus 48 kHz helper ON). No assumed overhead
+subtraction or whole-process ratio establishes receiver-budget conformance. The helper-off
+FFT counter is uninstrumented: its recorded zero is unavailable work evidence,
+not zero actual FFT execution.
+
+The frozen [measured comparison](../local-evidence/helper-v12/live-runs/measured-comparison.json)
+has SHA-256 `c84352c57dfc0c0362fb0f66a4e10fcfdb718b2ca2d161fcb2869f1d94b81c25`.
+It retains the source/binary, progress, status and measurement scopes for these
+cases, including pre-cadence r4 body CPU/audio 2.8526316 versus r7 0.6795918.
+All owned audio/build/private processes were reaped. This is a scoped manual
+preview, with full regression, sanitizer, long framed transfers, weak RF and
+128-second EME still unqualified; it is not overall task completion or release
+certification.
+
+The frequency history is now at most 384 numeric records/eight seconds, rather
+than 128/three seconds. Current-date linear-trend/covariance, process/excess,
+slew, innovation and 0.2-second expiry rules remain; the raw-PCM ring is
+unchanged. The tracker is 88,152 bytes, exactly accounted in helper workspace.
+Planner's ideal assumption becomes 384 accepted 20 ms observations within
+eight seconds; metadata/rejections can prevent that maximum. The estimate
+remains frequency-only, with full LF/UTC/storage geometry and its overhead/
+clock-mask/lock-probability exclusions unchanged.
+
+The [matched component receipt](../local-evidence/helper-v12/frequency-history-r2/second-check/execution-result.json)
+(`139dedb8`) records all four compile/runtime commands exiting zero and reaped
+children. Actual-Generator frequency half-width median/p90 changed from
+0.0318277/0.0356229 Hz to 0.0212528/0.0221695 Hz, with maximum error
+0.02755 to 0.00997 Hz and zero observed interval escapes in both cases.
+Corrected-post-NCO selector-only counterfactual mean count changed from five
+to 3.011, with about 0.65% of cases still wider than three. Raw-passthrough
+geometry is reported separately (new mean 3.14467, p90 four). None of these
+counts is executed receiver work or a CPU claim; they are not a general
+confidence guarantee. The earlier 256-record/six-second candidate remains
+separately retained in `frequency-history-r1/`.
+
+The original [r6 check failure](../local-evidence/helper-v12/build-r6/execution-result.json)
+is retained: GUI/test compilation passed, but `helper_reference_search` still
+asserted the old at-most-three-second observation aperture. The accepted
+test-only repair checks [7.6, 8] seconds around the new ideal 7.698 seconds;
+the r7 focused pass does not erase the original failure.
+
+### Preceding cadence repair and completed cable result
+
+The [build-r5 receipt](../local-evidence/helper-v12/build-r5/execution-result.json)
+(`724344a5`) records successful GUI build (3.0695 seconds), test build
+(2.818 seconds), seven checks (5.7199 seconds) and GUI helper status (0.010
+seconds), with unchanged execution inputs and reaped processes.
+[Binary bindings](../local-evidence/helper-v12/build-r5/production-binaries.json)
+pin GUI `665781bcd799aeb62c6a645bc4039a11471e70dff46693e243dc1c570a442b81`
+and core archive `9a45312e`.
+
+Its completed [eight-bit r5 result](../local-evidence/helper-v12/live-runs/helper40-long-r5/result.json)
+(`bc101c31`) exited zero with exact eight bits, ordinary END, no health faults
+or reported late decisions. It used 163.627883 CPU/195.193789 wall seconds over
+194.265196 observed audio seconds: 0.842291 CPU/audio overall, with reported
+0.9789 in the 50–110-second body window. Peak backlog was 0.875 seconds and
+final backlog zero; the FFT-job count was 11,004 and first completion 141.994
+seconds. This remains a whole-GUI cost observation; its earlier 0.6-budget
+failure label used the wrong scope. It does not establish isolated receiver
+cost, current-source performance or GPSDO substitution.
+
+The preceding [r4 cable result](../local-evidence/helper-v12/live-runs/helper40-long-r4/result.json)
+(`d0284eec`, GUI `4a7b0bcd`) exited zero for exact eight-bit reception,
+ordinary END and zero health faults, with the following high whole-process cost:
+332.043315 CPU/195.798421 wall seconds over 194.315196 observed audio seconds,
+or 1.708787 CPU/audio. Peak backlog was 8.85 seconds and final backlog zero;
+the recorded FFT-job count was 28,371 and first completion 142.13 seconds.
+The earlier budget-failure interpretation is corrected above; raw measurements
+and functional/failed receipts remain unchanged.
+
+An actual encrypted-Generator/ramp reproduction at public zero key and epoch
+1793050572 reproduced a false C2 crossing near the 400 ms boundary, poisoning
+the six-second alias fit. The
+[matched component receipt](../local-evidence/helper-v12/punctuation-clock-r4-actual-waveform/first-check/execution-result.json)
+(`c6a26915`) retains the old runtime's exit 1 (`actual encrypted helper boundary
+poisoned the clock aperture`) and the repaired runtime's exit 0, with all
+children reaped. Qualification rose from 94.3191% to 100%, with unchanged
+maximum interval half-width 5.88554 ppm; the extra off-cadence/fresh-support and
+previous controls passed. This is not a new cable-performance result.
+
+The applied fresh-clock gate checks all integer 400 ms aliases under the broad
+±1% operational bound, including both dated radii. Live separately intersects
+the original configured LF domain. The gate rejects a crossing
+without changing its date or interval. The gate stops at the ordinary 550 ms
+freshness expiry, preserving existing reseeding. Tracker storage stays 75,864
+bytes. No new decoded timecode, phase authority or receiver is introduced.
+
+### Preceding narrow marker repair — component evidence
+
+The [build-r4 receipt](../local-evidence/helper-v12/build-r4/execution-result.json)
+(`02f68d7b`) records successful GUI build (3.468 seconds), test build (2.669
+seconds), seven checks (3.1695 seconds) and GUI helper status (0.010 seconds),
+with reaped processes and unchanged execution inputs.
+[Binary bindings](../local-evidence/helper-v12/build-r4/production-binaries.json)
+pin GUI `4a7b0bcd07965622bb35668e3c9488ae302865872bd95f40db7e3e4a18c22c22`
+and core archive `83128eb8`. Its eight-bit cable run and matched GPSDO comparison
+have no result recorded here yet.
+
+The integrated marker projection uses an 8 ms Hann window in eight staggered
+1 ms branches, preserving the real-PCM image fit. Exact overlap-row bounds and
+finite-flank-noise correction bound the model; an unsigned absolute 80 ms guard
+fixes duplicate-crossing admission. The tracker is now 75,864 bytes, rather
+than 71,968. The
+[fifth component receipt](../local-evidence/helper-v12/punctuation-clock-r3-narrowband/fifth-check/execution-result.json)
+(`b563dbb5`) records passing compile/runtime checks and reaped children.
+All four ±150/±300 ppm cases retain initial qualification/truth inside their
+interval after about 2.3 seconds, with corrected 19–28 ppm half-widths; after
+6.3 seconds the 20 ppm target passed at 4.96–5.51 ppm. Negative, loss and huge
+origin controls also passed. Earlier failures in the same evidence directory
+remain retained; the duplicate admission was a causal defect, not merely
+insufficient warm-up.
+
+In the controlled 450 Hz ordinary-payload/10 dB helper-to-data component case,
+old clock qualification was 66.7%, median half-width 84.35 ppm and 90th
+percentile 106.89 ppm. The repaired component qualified 100%, with median
+5.20 ppm, 90th percentile 5.48 ppm and maximum error 1.65 ppm. These are
+component interference results, not a completed new cable, sustained CPU-budget
+or general confidence qualification.
+
+### Earlier v12 clock-rate source and cable results
+
+The [build-r3 receipt](../local-evidence/helper-v12/build-r3/execution-result.json)
+(`6c43f8e2`) records successful application build (14.72 seconds), test build
+(11.47 seconds), seven focused checks (2.57 seconds) and GUI helper status.
+Inputs remained unchanged during execution and owned processes were reaped.
+[Binary bindings](../local-evidence/helper-v12/build-r3/production-binaries.json)
+pin GUI `70fc25b06fde343599b4a14ee9d313fd4475b41c37d629ed8669bde15b1f7ee3`
+and core archive `bd8a22c8`.
+
+The fixed 71,968-byte tracker adds a streaming 400 ms reversal clock-rate
+estimate with at most 16 markers/six seconds and about 96 ms of recent phasors,
+using the actual real-PCM image model. It measures a conditional aperture-mean
+clock rate under the ordinary constant-clock, locally stationary scored-aperture
+model, not epoch, phase, timecode, thermal stability or future lock authority.
+There is no known TX date, GPS dependency, PCM time warp or new decoder.
+Per-profile eligibility requires continuous zero-UTC steering, no FHSS or
+Symbol_Burst and T ≤ 16 seconds. Qualified clock intervals intersect original
+LF cells and the RF strip in the same bank, retaining the full residual
+catalogue. Clock loss immediately restores the full LF domain; frequency
+qualification remains independent.
+
+Focused tests include ±150/±300 ppm clock cases whose approximately 2.3-second
+aperture intervals have 17–19 ppm half-widths, weak/false-marker declines and
+native/compact 24-bit frequency/clock paths with exact full pending progress,
+identity, ordinary END and final helper loss. These are conditional component
+results, not general false-alarm, weak-EME or current cable qualification.
+Planner now preserves its ordinary baseline and adds a separate frequency-only
+conditional CPU curve using expected helper C/N0, 128 steady 20 ms observations
+and zero excess model noise. It retains full LF/UTC/workspace geometry and
+payload SNR/Rate/PHY, excludes tracker/frontend overhead and clock-mask gains,
+and has no runtime-calibrated lock probability or end-to-end CPU guarantee.
+
+The original [r1 compile failure](../local-evidence/helper-v12/build-r1/execution-result.json)
+for the missing UTC-relation declaration/include remains retained. In
+[r2](../local-evidence/helper-v12/build-r2/execution-result.json), all seven
+focused checks passed but GUI status failed its stale correction-state flag
+expectation; that failed run is preserved after the accepted source repair and
+r3 pass.
+
+The first [helper40 cable result](../local-evidence/helper-v12/live-runs/helper40/result.json)
+(`ed0522b3`, GUI `70fc25b0`) exited zero with the exact one source bit and
+ordinary physical END. It used 73.35876 process CPU/96.713782 wall seconds over
+95.890196 observed audio seconds, or 0.7650288 CPU/audio. Peak backlog was
+1.15 seconds and final backlog zero; input overruns, drops and resets were
+explicitly zero. Clock assistance was observed; the recorded native FFT-job
+count was 4,837, and first observed completion was 49.7092 seconds. Compared
+with the preceding d441 single-case baseline below, this is measured progress,
+not isolated receiver-budget or general real-time qualification.
+
+The subsequent [eight-bit result](../local-evidence/helper-v12/live-runs/helper40-long/result.json)
+(`abd864aa`, same `70fc25b0` GUI) exited zero with exact `01001101`, stable
+prefixes, ordinary END and no unexpected bits. It used 327.618353 process
+CPU/195.983195 wall seconds over 195.215196 observed audio seconds, or
+1.678242 CPU/audio. Peak backlog was 2.85 seconds, final backlog zero and
+input overruns, drops and resets explicitly zero; the recorded FFT-job count
+was 28,595 and first completion 142.002 seconds. This is high total-GUI cost,
+not an isolated test of the receiver selection budget. Wider payload clock
+intervals (about ±80 ppm versus ±3 ppm in the clean helper tail) motivated the
+component repair above; no repaired-source cable gain is claimed yet.
+Long text, attachments,
+128-second EME, folded-input full upstream
+correction and waveform phase assistance are not newly qualified.
+
+### Preceding 40 W cable preview — narrow evidence
+
+The actual tested command enables a 40 W helper: Rate 36, independent crystal
+audio/ic-7100 RF at 30 MHz, Interleave 10, FHSS off, 70 ms audio error and
+Live/duplex. It is not a helper-off control. The quiet cable pair binds the
+[preceding GUI](../local-evidence/helper-v11/live40-before-quiet/result.json)
+(`b075fc91`, GUI `16668651`) and
+[delivered GUI](../local-evidence/helper-v11/live40-delivery-quiet/result.json)
+(`7f390b2b`, GUI
+`d441db117baf5bfc09b9ecabb09204de618f57f464ffc0be5410cfd3e0ef725c`).
+Both runs exited zero with the exact one source bit, ordinary physical END and
+no unexpected bits, input overruns, drops or receiver resets.
+
+| Observation | Preceding GUI | Delivered GUI |
+| --- | --- | --- |
+| Process CPU seconds | 378.492347 | 341.257965 |
+| Wall seconds | 96.1770 | 96.1653 |
+| First observed completed bit, seconds | 63.8757 | 55.7347 |
+| Peak/final capture backlog, seconds | 16.35/16.35 | 9.85/9.85 |
+| Aggregate CPU seconds per observed audio second | 3.9919 | 3.5973 |
+
+The delivered run still does not keep up: backlog remains 9.85 seconds and
+total GUI CPU/audio remains high. This same-case observation is
+neither overall goal completion, GPSDO substitution, general real-time
+qualification nor an RF sensitivity/precision claim. The final UTC guard is
+included: both paths preserve the uncertainty term `U + |H| C (1 + A)`, with
+frequency uncertainty `U`, helper frequency `H`, declared UTC steering bound
+`C` and physical audio-clock bound `A` (clock bounds are fractional). The
+original shared-radio `C = 0` case is retained.
+
+The separately bound [precursor trial](../local-evidence/helper-v11/live40-final-quiet/result.json)
+(`72f7ff33`, GUI `7bafc96a`) used 320.117892 CPU/96.6389 wall seconds and ended
+with 8.25 seconds backlog. It is not the delivered binary's result. The guard
+is equivalent for this HF zero-UTC configuration, but legitimate metadata and
+random trial realizations differ; these runs supply no statistical gain claim.
+
+The corrected preview applies RF masks to executed work in the existing bank
+while retaining original LF values/cells, uses the direct `D − H`
+residual-clock coupling, fixes stale reuse at the 128-entry observation FIFO
+wrap and accounts for frequency-measurement covariance without removing
+model/excess-noise floors. Folded mono is labeled frequency-origin-only;
+full upstream correction is unavailable there. Phase/punctuation assistance is
+inactive. Long text, attachments and 128-second EME are unqualified this iteration.
+
+The final [build-r5 receipt](../local-evidence/helper-v11/build-r5/execution-result.json)
+(`086ca19d`) records six short checks plus GUI helper status passing, with
+unchanged inputs during execution and reaped processes. Native/compact checks
+retain exact 24 bits, full pending progress/identity, ordinary END and final
+helper loss. The native fixture observed 38 actual competing fits and 228
+skips. Earlier SF8 setup and compact warm-skip coverage failures remain in
+[build-r2](../local-evidence/helper-v11/build-r2/execution-result.json) and
+the retained private diagnostics; they are not relabeled passing original runs.
+
+The earlier sandbox [GUI attempt](../local-evidence/helper-v11/live40-before/result.json)
+and [controller attempt](../local-evidence/helper-v11/live40-controller-before/result.json)
+could not access audio and provide no reception qualification. The
+[85-second GUI trial](../local-evidence/helper-v11/live40-gui-before/result.json)
+recovered the one bit and physical END at 66.9981 seconds, but retained exit 1
+because its deadline preceded the conservative helper post-tail (about 92.4
+seconds); it is not an acceptance pass. An intermediate trace-enabled
+[GUI trial](../local-evidence/helper-v11/live40-gui-after/result.json), binary
+`16ae5a92`, used 388.012682 process CPU seconds but capped its 256 MB trace.
+That incomplete trace is excluded from numeric-work proof.
+
+### Initial manual preview checks — preceding build
+
+The [r4 build receipt](../local-evidence/helper-v10/manual-gui-build-r4/execution-result.json)
+(`a6ab1627`) records the GUI rebuild passing in 64.57 seconds. Frontend, tracker
+and Planner checks passed, while dispatch failed an ambiguous-arrival fixture:
+matched OFF/ON both selected the same seven-bit alias. The minimal exact-arrival
+test repair retained payload/progress/END predicates. The subsequent
+[r5 receipt](../local-evidence/helper-v10/manual-gui-build-r5/execution-result.json)
+(`6a5b509e`) records all four short checks passing in 1.535 seconds, including
+exact eight-bit pending/completed OFF/ON dispatch, plus GUI helper status in
+0.010 seconds. All stages exited zero with owned processes reaped, unchanged
+inputs and no added inputs during execution. Its
+[input bindings](../local-evidence/helper-v10/manual-gui-build-r5/inputs.json)
+(`a4dbe5a0`) and
+[binary bindings](../local-evidence/helper-v10/manual-gui-build-r5/production-binaries.json)
+(`872ababc`) pin GUI
+`166686512720582de0474b421bf474daec62c8b704419c831b592197ee503c81`
+and core archive `5613347f`. R5 changes the dispatch test only; the GUI is
+unchanged from r4. The original dispatch failure is retained.
+
+The separate [continuous-NCO smoke receipt](../local-evidence/helper-v10/manual-smoke-nco/execution-result.json)
+records a passing 0.376-second check. A strong B tone diagnostic measured
+5305.523 ± 0.04183 Hz against nominal 5275 Hz, at about 58 dB-Hz C/N0.
+The B waveform folds around DC: `reference_passthrough` preserves its PCM and
+fixed helper notch, setting the first ordinary demodulator reference to the
+measured helper offset plus `(data frequency − helper frequency)` times each
+candidate's fractional audio-clock error. Positive-passband HF instead uses
+the continuous upstream NCO. Both use one ordinary bank. Earlier
+[B preview](../local-evidence/helper-v10/normal-b12-preview/execution-result.json)
+and [r2](../local-evidence/helper-v10/normal-b12-preview-r2/execution-result.json)
+waiting/no-feed failures remain retained; folded-input treatment was corrected
+before r3, not reported as a passed initial run.
+
+The [B12 r3 receipt](../local-evidence/helper-v10/normal-b12-preview-r3/execution-result.json)
+(`f299e170`) retains exit 1. Its complete trace reports all 12 wire/source bits,
+full pending progress, stable identity and ordinary physical END, with no
+overruns, drops or resets. The strict failure is solely the old
+`primary_assisted=0`/cohort-work classification: zero conditional-cohort jobs
+are expected in this new single-ordinary-bank route. It is not relabeled a
+current whole-fixture pass. The locked receiver initially used 19 pairs versus
+2,075 baseline pairs; this is geometry, not a CPU-gain measurement. The
+trace-instrumented process used 65.508563 CPU/15.925781 wall seconds for about
+26.67 captured audio seconds. That total-GUI ratio does not test the configured
+receiver selection budget. No CPU,
+real-time, current cable, long-payload or broad-regression qualification follows
+from these abbreviated checks. Metadata/punctuation timing assistance and
+128-second coherence are not newly qualified.
 
 ### Pre-preview correction — superseded
 

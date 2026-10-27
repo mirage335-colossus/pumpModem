@@ -1,37 +1,141 @@
 # Helper Carrier implementation and qualification plan
 
-Updated 26 October 2026 for the manually enabled tracker/NCO preview. Live
-integration repairs and the rebuilt GUI remain pending. The immediate target
-is a manual GUI trial within the requested one-hour window, with short focused
-checks; broad qualification is explicitly deferred. This is not feature or
+Updated 26 October 2026 for the manually enabled tracker/NCO preview. The GUI
+is rebuilt and short preview checks passed. The immediate scope is manual GUI
+testing; broad qualification is explicitly deferred. This is not feature or
 release completion. Source-bound results and original failures remain in
 [validation](validation.md); waveform details are in the
 [Helper Carrier reference](helper-carrier.md).
 
 ## Current preview design and immediate checks
 
-Use an upstream real-time tone tracker and continuously retuned NCO feeding one
-ordinary Robust receiver bank. Assistance is manually enabled; enabled without
+Use an upstream tone tracker feeding one ordinary Robust receiver bank.
+Positive-passband HF uses a continuously retuned NCO; folded wide real input
+uses `reference_passthrough`, preserving PCM with the fixed helper notch. The
+latter sets the ordinary first demodulator's reference to measured helper
+offset plus data/helper frequency separation times the candidate fractional
+audio-clock error, rather than analytically shifting a payload folded around
+DC. Folded mono is frequency-origin-only, with full upstream correction
+unavailable. Actual RF masks now apply inside the existing ordinary bank;
+all original LF values/cells remain, and direct residual-clock mapping uses
+`D − H`. There is no second or broad bank.
+Assistance is manually enabled; enabled without
 qualified lock admits no new payload acquisition. The preview does not use
 the previous broad fallback/probe banks, old capture replay or receiver
 capsules. Full ordinary wire, framing, long-text/attachment recovery, accepted
 progress and fully scored physical END remain required.
 
-The tracker is fixed at 54,160 bytes: a 4,096-point FFT seed, 20 ms FLL and at
-most 128 recent numeric observations over three seconds, without iterative
-historical work. Standalone tracker cases for drift, punctuation, noise, loss
-and sparse updates passed, and continuous NCO retuning passed a 0.376-second
-smoke check. These are component checks pending final source/check bindings,
-not Live or GUI acceptance. Uncertainty near 0.209 Hz at C/N0 49.7 dB-Hz and
-1.06 Hz near 31 dB-Hz does not establish 128-second-symbol coherence. New
-metadata, punctuation-phase or timing assistance is not qualified; the NCO
-phase stays continuous during retuning.
+Cold startup may recenter the NCO from four exact-adjacent, mutually consistent
+fine observations. They grant no lock and do not enter fit history; ordinary
+16-observation/0.3-second qualification remains. The controlled actual-metadata
++30 Hz case improved translator admission from 7.525 to 0.675 seconds and
+whole-waveform coverage from 61.86% to 100%, with 0.0084 dB coherent loss.
+These are component acquisition/coherence results, not receiver or hardware
+qualification; the failed widened-gate proposal remains in validation.
 
-Build the GUI, exercise lock/no-lock and loss behavior, and verify the complete
-ordinary payload/progress/END path in the manual trial. Link Planner must show
-the ordinary baseline and explicitly unavailable assisted estimates, with the
-old conditional overlays removed. Do not infer a CPU/SNR gain from enabling
-the feature. Final source/binary pins and these focused results are pending.
+The tracker is fixed at 88,272 bytes: a 4,096-point FFT seed, 20 ms FLL and at
+most 384 recent numeric frequency observations over eight seconds, plus at most
+16 clock markers over six seconds and about 96 ms of phasor history, without iterative
+historical work. The earlier stale-FIFO wrap fix is retained;
+clock-marker projection now uses an 8 ms Hann window/eight staggered 1 ms
+branches, exact overlap and finite-flank-noise correction. An unsigned absolute
+80 ms guard fixes duplicate-crossing admission rather than merely extending
+warm-up.
+Fresh qualified clock chains additionally check all integer 400 ms aliases
+under the broad ±1% operational bound and both dated radii. Live separately
+intersects the original configured LF domain.
+This rejects metadata/ramp-induced off-cadence crossings without redating
+evidence or shrinking its interval; after 550 ms the ordinary reseed path is
+unchanged. Tracker storage is exactly funded in helper workspace accounting;
+the raw-PCM ring is unchanged. The longer numeric history preserves the same
+current-date linear trend/covariance and process, excess, slew and innovation
+rules, including 0.2-second frequency expiry.
+Frequency variance includes measurement covariance without removing model or
+excess-noise floors. This does not certify a global confidence level.
+Standalone tracker cases for drift, punctuation, noise, loss
+and sparse updates passed, and continuous NCO retuning passed a 0.376-second
+smoke check. These remain component checks, not broad Live acceptance.
+Earlier source-bound precision results remain in [validation](validation.md);
+they do not establish 128-second-symbol coherence. New
+metadata or epoch/timing assistance is not qualified; waveform phase correction
+is inactive, while the frequency NCO remains phase-continuous during retuning.
+The repeated 400 ms reversal now supplies an independently qualified clock-rate
+interval, using the actual real-PCM image model rather than a known TX date,
+GPS or timecode. It intersects original LF cells with the RF strip in the same
+receiver; all residual catalogue/cells are retained and clock loss immediately
+restores the full LF domain independently of frequency. Eligibility is per-profile:
+continuous zero-UTC steering, no FHSS/Symbol_Burst, T ≤ 16 seconds. This is a
+locally stationary aperture-mean clock estimate for the ordinary constant-clock
+scorer, not thermal/future lock authority. No PCM time warp or new decoder is used.
+Existing rows refresh CLOCK metadata only at post-loan/pre-borrow boundaries,
+using the shared clock builder with the same input generation, frontend serial,
+raw rate, current captured end, 0.55-second age guard and original LF clamp.
+Keep valid queued clock if current clock is unavailable; RF/U, NCO, PCM, phase,
+epoch and frontiers stay unchanged. No second receiver, staging or retired-row
+replacement policy is introduced.
+
+The last physically measured GUI hash begins `4d0a71d0`. Eight focused checks
+plus five targeted GUI/Session/clock-refresh/scope modes passed. The two-cycle actual cable run
+completed both exact one-bit payloads with ordinary END and zero input health
+faults. ID 1 was first seen complete; ID 2 retained observed pending-to-complete
+identity. Total GUI CPU/audio was 0.7620, with peak backlog 3.125
+seconds and final zero. A low-volume trace observes fresh raw-clock qualification
+and joined-row CLOCK refresh 66 ms later without RF/NCO/frontier changes. All
+77 reentry cold rows remain; no retired-row replacement was implemented.
+
+The earlier three-cycle run completed all three payloads, but its third helper
+tail extended beyond the 300-second fixture deadline; that original exit 1
+remains retained. Reentry also caused 18.125 seconds peak backlog and 1.2321
+CPU/audio. Different cycle counts/tracing prevent a universal gain ratio.
+The same-GUI quiet GPSDO/helper-ON eight-bit run failed its exact-prefix
+criterion despite correct final data/END; a transient wrong seven-bit prefix is
+under diagnosis. Source review locates replacement in Live, not GUI bit
+synthesis, but the quiet log cannot identify the wrong candidate or justify an
+arbitration-policy change. Quiet crystal/helper-ON passed exact eight-bit
+prefixes/ordinary END at 0.5947 total GUI CPU/audio overall and 0.6465 in the
+body, peak backlog 0.275 seconds and final zero. GPSDO/helper-ON remained failed
+at 0.6833 overall/0.7533 body; final correctness does not erase its prefix error. The intermittent missing pending row after the helper tail is still
+unreproduced; these component and cable results do not prove its cause or cure.
+
+The 0.6 receiver budget is an Automatic backend-selection objective, not a hard
+whole-GUI CPU ceiling; no process-CPU ratio alone establishes its conformance.
+Current comparisons use automatic 50% workspace, not fixed bytes, and different
+keyed dates/waveforms. Median helper C/N0 was about 49.07/49.87 dB-Hz, about
+19 dB above the configured RF budget; loss/noise settings were not injected.
+No universal causal oscillator-cost gain, weak-RF, EME, full-framed or
+GPSDO-substitution qualification follows. Earlier raw results and original
+failed receipts remain in validation; the missing-pending report remains open.
+The final UTC-coupling guard is included in both paths, retaining the original
+shared-radio zero-UTC case. Earlier `7bafc96a` measurements remain separate
+precursor evidence, with no statistical gain claim across trials.
+
+The V14 change corrects only the ideal Planner endpoint-covariance calculation
+and labels; runtime RF masks already consume actual `U` with a 1e-6 Hz numeric
+floor plus necessary original LF/UTC cells. At expected C/N0 30.0206 dB-Hz,
+ideal 384-contiguous/zero-excess support gives 0.06046 Hz after 7.7 seconds
+and 103 pairs with all nine LF centers; the measured metadata/data
+control median is 0.5662 Hz. Do not substitute the ideal for measured authority or infer CPU gain. Unqualified
+300 ppm LF still contributes ±0.16875 Hz in the no-FHSS example. Core runtime
+remains `7e7f332c`; Planner GUI `49cf3aef` built successfully and three
+focused checks passed. It cannot inherit prior physical-test results. V13's
+failed prefix control and missing-pending report remain unresolved.
+
+Exercise actual
+lock/no-lock/loss behavior and the complete ordinary payload/progress/END path
+in the manual trial. Link Planner retains the ordinary baseline and shows a
+separate frequency-only conditional CPU curve: predicted helper C/N0, an ideal
+384 accepted 20 ms observations within eight seconds and zero excess model
+noise, with full LF/UTC/workspace
+geometry. Its ordinary-receiver CPU label excludes helper tracking/conversion,
+audio, TX and GUI work and clock-mask gain. Lock probability is uncalibrated;
+metadata/rejections may prevent the assumed maximum observation count. The
+rolling-cohort lifetime correction is backed by a fixed-256 MiB actual-receiver
+two-hop regression, not total process-CPU calibration. Payload SNR, Rate and PHY
+stay unchanged.
+Neither these engineering estimates nor enabling the feature establish measured
+end-to-end or universal CPU/SNR gain. Long text,
+attachments and 128-second EME remain unqualified this iteration. See
+[validation](validation.md) for current bindings and the narrow check scopes.
 
 The earlier receiver requirements and rolling architecture below are superseded
 by this preview. Their preserved measurements describe their own builds and do

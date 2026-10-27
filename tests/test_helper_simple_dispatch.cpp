@@ -40,8 +40,8 @@ void plain_128() {
     check(receiver.set_helper_acquisition_dispatch(false) && receiver.working_bytes()==before,"pause allocated optional mask state");
     const auto count=3*modem::symbol_sample_count(c)/2;std::vector<float> zeros(count,0);
     for(std::size_t at=0;at<zeros.size();) {const auto n=std::min<std::size_t>(113,zeros.size()-at);receiver.push(std::span(zeros).subspan(at,n));at+=n;}
-    const auto work=receiver.work();
-    check(work.samples==zeros.size() && !work.projected_carrier_samples && !work.accumulated_lane_samples &&
+    const auto work=receiver.compact_acquisition_state();
+    check(receiver.work().samples==zeros.size() && !work.projected_carrier_samples && !work.accumulated_lane_samples &&
         receiver.take_bursts().empty(),"paused plain compact receiver scored cold input or fabricated payload/END");
     check(receiver.set_helper_acquisition_dispatch(true) && receiver.helper_acquisition_dispatch().permitted,
         "plain compact receiver could not resume without an optional prior");
@@ -54,7 +54,10 @@ void payload() {
     std::vector<float> pcm(end+std::max<std::uint64_t>(3*S,8*c.sample_rate));std::mt19937 random(529);std::normal_distribution<float> noise(0,.025F);
     const auto phase=std::polar(1.7,.83);
     for(std::size_t i=0;i<pcm.size();++i)pcm[i]=noise(random)+(i>=delay && i-delay<analytic.size()?static_cast<float>((phase*analytic[i-delay]).real()):0.F);
-    const auto s=search(c,static_cast<double>(origin)/c.sample_rate);
+    // This fixture isolates dispatch lifetime with an exact arrival. A broad
+    // arrival catalogue can establish an earlier ordinary alias independently
+    // of dispatch and is covered by the acquisition regressions.
+    auto s=search(c,static_cast<double>(origin)/c.sample_rate);s.start_uncertainty_seconds=0;
     modem::PatternCorrelator off(c,s,4*1024*1024),on(c,s,4*1024*1024);Rows a,b;
     check(on.set_helper_acquisition_dispatch(false),"plain ordinary compact pause unsupported");bool resumed=false,lost=false;
     for(std::size_t at=0;at<pcm.size();) {

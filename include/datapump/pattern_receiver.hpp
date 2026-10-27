@@ -470,6 +470,180 @@ struct HelperReplayBudget {
 // continuous phase/input coordinates intact. A native ring can eventually lose
 // an unscored cold aperture; retired then forbids replay on this owner, without
 // asserting that its original acquisition coverage was scored.
+// A joined-call selector for a continuously measured helper reference. The
+// original RF/LF catalogue and input/phase basis never move. The affine clock
+// coefficient describes that catalogue (H-D for the realtime corrected path).
+// Each original LF retains every RF Voronoi cell intersecting this interval;
+// equal-distance boundary cells are both kept. No new RF coverage is created.
+// An independently qualified interval in the ORIGINAL DATA/source clock's
+// ppm coordinate. The caller includes every unresolved transmit-rate factor;
+// a physical audio-only estimate cannot silently stand in for this interval.
+struct PatternHelperClockInterval {
+    double lower_ppm=0,upper_ppm=0;
+    bool valid()const noexcept {
+        return std::isfinite(lower_ppm) && std::isfinite(upper_ppm) && lower_ppm<=upper_ppm;
+    }
+    bool operator==(const PatternHelperClockInterval&)const=default;
+};
+struct PatternHelperFrequencyWindow {
+    double center_hz=0,half_width_hz=0,clock_coefficient_hz=0,clock_cell_half_width_ppm=0;
+    std::optional<PatternHelperClockInterval> clock_interval{};
+    bool valid() const noexcept {
+        return std::isfinite(center_hz) && std::isfinite(half_width_hz) && half_width_hz>=0 &&
+            std::isfinite(clock_coefficient_hz) && std::isfinite(clock_cell_half_width_ppm) && clock_cell_half_width_ppm>=0 &&
+            (!clock_interval || clock_interval->valid());
+    }
+    bool retains(std::span<const PatternFrequencyRateHypothesis> pairs,std::size_t index,
+                 double frequency_origin_hz=0) const noexcept {
+        if(index>=pairs.size() || !valid())return false;
+        const auto& pair=pairs[index];
+        auto clock_lower=std::nextafter(static_cast<long double>(pair.clock_error_ppm)-clock_cell_half_width_ppm,-INFINITY);
+        auto clock_upper=std::nextafter(static_cast<long double>(pair.clock_error_ppm)+clock_cell_half_width_ppm,INFINITY);
+        if(clock_interval) {
+            clock_lower=std::max(clock_lower,static_cast<long double>(clock_interval->lower_ppm));
+            clock_upper=std::min(clock_upper,static_cast<long double>(clock_interval->upper_ppm));
+            if(clock_lower>clock_upper)return false;
+        }
+        long double lower=-INFINITY,upper=INFINITY;
+        for(const auto& other:pairs)if(other.clock_error_ppm==pair.clock_error_ppm) {
+            const auto mid=(static_cast<long double>(other.frequency_offset_hz)+pair.frequency_offset_hz)/2;
+            if(other.frequency_offset_hz<pair.frequency_offset_hz)lower=std::max(lower,mid);
+            if(other.frequency_offset_hz>pair.frequency_offset_hz)upper=std::min(upper,mid);
+        }
+        const auto a=static_cast<long double>(center_hz)-frequency_origin_hz-
+            static_cast<long double>(clock_coefficient_hz)*clock_lower*1e-6L;
+        const auto b=static_cast<long double>(center_hz)-frequency_origin_hz-
+            static_cast<long double>(clock_coefficient_hz)*clock_upper*1e-6L;
+        const auto pad=64*std::numeric_limits<long double>::epsilon()*std::max({1.L,std::abs(a),std::abs(b),
+            std::abs(static_cast<long double>(center_hz)),std::abs(static_cast<long double>(frequency_origin_hz)),
+            std::abs(static_cast<long double>(clock_coefficient_hz)*clock_lower*1e-6L),
+            std::abs(static_cast<long double>(clock_coefficient_hz)*clock_upper*1e-6L),static_cast<long double>(half_width_hz)});
+        return std::max(a,b)+half_width_hz+pad>=lower && std::min(a,b)-half_width_hz-pad<=upper;
+    }
+};
+struct PatternHelperFrequencyWindowState {
+    bool supported=false,active=false,clock_qualified=false;
+    std::optional<PatternHelperClockInterval> clock_interval{};
+    std::size_t original_pairs=0,selected_pairs=0;
+    double unresolved_clock_cell_half_width_ppm=0;
+    // Actual native continuation fits and omitted numerical fits. Compact
+    // execution exposes its existing projected/accumulated/skipped samples.
+    std::uint64_t continuation_fits=0,skipped_continuation_fits=0;
+};
+namespace detail {
+// Optional helper-only geometry. Build RF cells once; changed measurements
+// update one byte per ORIGINAL pair. Numeric hot paths use constant-time flags.
+class PatternHelperFrequencySelector {
+public:
+    struct Cell {double lower=0,upper=0,clock_ppm=0;bool selected=true;};
+    PatternHelperFrequencyWindow window;
+    double domain_lower_ppm=0,domain_upper_ppm=0;
+    std::vector<Cell> cells;
+    std::size_t selected=0;
+    std::uint64_t continuation_fits=0,skipped_continuation_fits=0;
+    static std::size_t maximum_bytes(std::size_t n) noexcept {return sizeof(PatternHelperFrequencySelector)+n*sizeof(Cell);}
+    std::size_t working_bytes()const noexcept {return sizeof(*this)+cells.capacity()*sizeof(Cell);}
+    bool initialize(const PatternSearch& search,const PatternHelperFrequencyWindow& requested) {
+        if(search.hypotheses.empty() || search.hypotheses.size()>8194 || !requested.valid() ||
+           !search.admitted_clock_half_width_ppm || !std::isfinite(*search.admitted_clock_half_width_ppm) ||
+           *search.admitted_clock_half_width_ppm<0)return false;
+#if defined(__FAST_MATH__) || (defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__>0) || FLT_EVAL_METHOD!=0
+        return false;
+#else
+        if(!std::numeric_limits<double>::is_iec559 || std::fegetround()!=FE_TONEAREST)return false;
+#endif
+        if(search.qualified_clock_interval && requested.clock_cell_half_width_ppm<search.qualified_clock_interval->cell_half_width_ppm)return false;
+        // Verify the complete original requested clock domain using closed
+        // source cells. This selector never substitutes a smaller LF domain.
+        const auto lower=search.qualified_clock_interval?search.qualified_clock_interval->lower_ppm:-*search.admitted_clock_half_width_ppm;
+        const auto upper=search.qualified_clock_interval?search.qualified_clock_interval->upper_ppm:*search.admitted_clock_half_width_ppm;
+        if(!std::isfinite(lower) || !std::isfinite(upper) || lower>upper)return false;
+        domain_lower_ppm=lower;domain_upper_ppm=upper;
+        if(!accepts(requested))return false;
+        const auto sum=[](double a,double b) {
+            const auto value=a+b,bv=value-a,error=(a-(value-bv))+(b-bv);
+            return std::array<double,2>{error<0?std::nextafter(value,-INFINITY):value,
+                error>0?std::nextafter(value,INFINITY):value};
+        };
+        auto covered=lower;
+        for(std::size_t pass=0;pass<=search.hypotheses.size();++pass) {
+            auto next=covered;bool bridged=false;
+            for(const auto& pair:search.hypotheses) {
+                if(!std::isfinite(pair.frequency_offset_hz) || !std::isfinite(pair.clock_error_ppm))return false;
+                const auto lo=sum(pair.clock_error_ppm,-requested.clock_cell_half_width_ppm)[1];
+                const auto hi=sum(pair.clock_error_ppm,requested.clock_cell_half_width_ppm)[0];
+                if(lo<=covered && hi>=covered){next=std::max(next,hi);bridged=true;}
+            }
+            if(!bridged)return false;
+            if(next>=upper)break;
+            if(next==covered || pass==search.hypotheses.size())return false;
+            covered=next;
+        }
+        cells.resize(search.hypotheses.size());
+        for(std::size_t i=0;i<cells.size();++i) {
+            const auto& pair=search.hypotheses[i];auto& cell=cells[i];cell.clock_ppm=pair.clock_error_ppm;
+            long double lo=-INFINITY,hi=INFINITY;
+            for(const auto& other:search.hypotheses)if(other.clock_error_ppm==pair.clock_error_ppm) {
+                const auto mid=(static_cast<long double>(other.frequency_offset_hz)+pair.frequency_offset_hz)/2;
+                if(other.frequency_offset_hz<pair.frequency_offset_hz)lo=std::max(lo,mid);
+                if(other.frequency_offset_hz>pair.frequency_offset_hz)hi=std::min(hi,mid);
+            }
+            cell.lower=static_cast<double>(lo);cell.upper=static_cast<double>(hi);
+            if(static_cast<long double>(cell.lower)>lo)cell.lower=std::nextafter(cell.lower,-INFINITY);
+            if(static_cast<long double>(cell.upper)<hi)cell.upper=std::nextafter(cell.upper,INFINITY);
+        }
+        update(requested);return true;
+    }
+    bool keep(std::size_t i,double origin=0)const noexcept {
+        if(i>=cells.size())return false;
+        return origin==0?cells[i].selected:intersects(cells[i],origin);
+    }
+    bool accepts(const PatternHelperFrequencyWindow& requested)const noexcept {
+        return requested.valid() && (!requested.clock_interval ||
+            (requested.clock_interval->upper_ppm>=domain_lower_ppm && requested.clock_interval->lower_ppm<=domain_upper_ppm));
+    }
+    bool update(const PatternHelperFrequencyWindow& requested)noexcept {
+        if(!accepts(requested))return false;
+        if(window.center_hz==requested.center_hz && window.half_width_hz==requested.half_width_hz &&
+           window.clock_coefficient_hz==requested.clock_coefficient_hz &&
+           window.clock_cell_half_width_ppm==requested.clock_cell_half_width_ppm &&
+           window.clock_interval==requested.clock_interval && selected)return false;
+        window=requested;selected=0;bool widens=false;
+        for(auto& cell:cells) {const bool keep=intersects(cell,0);widens|=keep&&!cell.selected;cell.selected=keep;selected+=keep;}
+        return widens;
+    }
+private:
+    bool intersects(const Cell& cell,double origin)const noexcept {
+        if(window.clock_interval) {
+            // Intersect WHOLE original LF coverage cells with the measured
+            // closed interval; retain both cells at an exact shared boundary.
+            const auto lo=std::max({std::nextafter(static_cast<long double>(cell.clock_ppm)-window.clock_cell_half_width_ppm,-INFINITY),
+                static_cast<long double>(domain_lower_ppm),static_cast<long double>(window.clock_interval->lower_ppm)});
+            const auto hi=std::min({std::nextafter(static_cast<long double>(cell.clock_ppm)+window.clock_cell_half_width_ppm,INFINITY),
+                static_cast<long double>(domain_upper_ppm),static_cast<long double>(window.clock_interval->upper_ppm)});
+            if(lo>hi)return false;
+            const auto a=static_cast<long double>(window.center_hz)-origin-
+                static_cast<long double>(window.clock_coefficient_hz)*lo*1e-6L;
+            const auto b=static_cast<long double>(window.center_hz)-origin-
+                static_cast<long double>(window.clock_coefficient_hz)*hi*1e-6L;
+            const auto pad=64*std::numeric_limits<long double>::epsilon()*
+                std::max({1.L,std::abs(a),std::abs(b),std::abs(static_cast<long double>(window.center_hz)),
+                    std::abs(static_cast<long double>(origin)),
+                    std::abs(static_cast<long double>(window.clock_coefficient_hz)*lo*1e-6L),
+                    std::abs(static_cast<long double>(window.clock_coefficient_hz)*hi*1e-6L),static_cast<long double>(window.half_width_hz)});
+            return std::max(a,b)+window.half_width_hz+pad>=cell.lower &&
+                std::min(a,b)-window.half_width_hz-pad<=cell.upper;
+        }
+        // The frequency-only default retains its preceding full-LF arithmetic.
+        const auto center=static_cast<long double>(window.center_hz)-origin-
+            static_cast<long double>(window.clock_coefficient_hz)*cell.clock_ppm*1e-6L;
+        const auto radius=static_cast<long double>(window.half_width_hz)+
+            std::abs(static_cast<long double>(window.clock_coefficient_hz))*window.clock_cell_half_width_ppm*1e-6L;
+        const auto pad=64*std::numeric_limits<long double>::epsilon()*std::max({1.L,std::abs(center),radius});
+        return center+radius+pad>=cell.lower && center-radius-pad<=cell.upper;
+    }
+};
+}
 struct PatternAcquisitionDispatchState {
     bool supported=false,permitted=true,retired=false;
 };
@@ -660,6 +834,20 @@ public:
     bool cold_acquisition_only() const noexcept;
     PatternAcquisitionDispatchState helper_acquisition_dispatch() const noexcept;
     bool set_helper_acquisition_dispatch(bool permitted) noexcept;
+    // Update only between joined calls, from the current qualified reference.
+    // The first set builds bounded helper-only geometry paid from this loan;
+    // subsequent measurement updates allocate nothing. No basis translation,
+    // clock pruning or automatic broad audit. Original LF-cell uncertainty
+    // is added by the engine, never the caller.
+    // Established anchors/dependencies and ordinary physical END remain active.
+    bool set_helper_frequency_window(double center_hz,double half_width_hz,double clock_coefficient_hz=0) noexcept;
+    // Independently measured ORIGINAL DATA LF interval. Unknown/stale clock
+    // uses the three-argument setter to restore all original LF immediately.
+    bool set_helper_frequency_window(double center_hz,double half_width_hz,double clock_coefficient_hz,
+                                    std::optional<PatternHelperClockInterval> clock_interval) noexcept;
+    void clear_helper_frequency_window() noexcept;
+    PatternHelperFrequencyWindowState helper_frequency_window() const noexcept;
+
     bool set_compact_timing_prior(const PatternPeriodicTimingPrior&) noexcept;
     bool clear_compact_timing_prior() noexcept;
     // Attach once before the first observed sample. The borrowed curve must

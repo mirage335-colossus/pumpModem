@@ -14,6 +14,7 @@ struct Launch {
     bool debug_live=false; // Explicit real-audio duplex diagnostic.
     double debug_timeout=120;
     std::string debug_bits="1";
+    unsigned debug_repeat=1;
     bool verbose=false; // Developer timing evidence; no persisted GUI control.
     std::filesystem::path verbose_file;
     double audio_test_seconds=0;
