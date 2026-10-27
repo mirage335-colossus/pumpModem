@@ -15,6 +15,11 @@ struct Launch {
     double debug_timeout=120;
     std::string debug_bits="1";
     unsigned debug_repeat=1;
+    // Explicit diagnostic controls, never persisted as modem preferences.
+    std::optional<std::size_t> debug_workspace_bytes;
+    std::uint32_t debug_capture_rate_hz=0;
+    double debug_post_tail_seconds=2;
+    bool debug_work_trace=false;
     bool verbose=false; // Developer timing evidence; no persisted GUI control.
     std::filesystem::path verbose_file;
     double audio_test_seconds=0;

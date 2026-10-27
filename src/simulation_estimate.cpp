@@ -318,12 +318,15 @@ struct SearchBank {
     std::vector<modem::PatternFrequencyRateHypothesis> hypotheses;
     double requested_clock_ppm=0,clock_ppm=0,clock_step_ppm=0;
     double minimum_rate=1,maximum_rate=1;
-    bool legacy_coupled=false,limited=false;
+    bool legacy_coupled=false,limited=false,explicit_frequency_cells=false;
     const HelperFrequencyProfile* helper_profile=nullptr;
+    // Planning-only full constructor policy. A numeric window mask does not
+    // allocate a smaller decoder or re-resolve backend/cache eligibility.
+    std::shared_ptr<const SearchBank> original_constructor;
 };
 SearchBank search_bank(const modem::Config& config,const transfer::Options& options,
                        const modem::OscillatorPatternSearch* supplied=nullptr) {
-    SearchBank result;
+    SearchBank result;result.explicit_frequency_cells=supplied!=nullptr;
     if(config.oscillator_search) {
         const auto plan=supplied?*supplied:transfer::receiver_oscillator_search(config,options);
         result.frequency=plan.frequency;result.hypotheses=plan.hypotheses;
@@ -436,6 +439,43 @@ SearchBank helper_execution_bank(const modem::Config& config,const SearchBank& o
         if(cell.clock_upper_ppm>domain.clock_lower_ppm&&cell.clock_upper_ppm<domain.clock_upper_ppm)
             endpoints.push_back(cell.clock_upper_ppm);
     }
+    if(profile.owner==HelperExecutionOwner::conditional_window_masked_owner) {
+        const auto& window=profile.original_execution_window;
+        if(!window || !window->valid() || window->clock_cell_half_width_ppm!=original.clock_step_ppm/2 ||
+           profile.input.frequency_correction_hz!=0 || profile.input.conjugate_image ||
+           actual.minimum_rate!=original.minimum_rate || actual.maximum_rate!=original.maximum_rate)
+            throw Error("conditional window changes the original source, clock cells or full rate geometry");
+        modem::PatternSearch declared;declared.hypotheses=original.hypotheses;
+        declared.admitted_clock_half_width_ppm=original.requested_clock_ppm;
+        declared.admitted_clock_cell_half_width_ppm=original.clock_step_ppm/2;
+        modem::detail::PatternHelperFrequencySelector selector;
+        if(!selector.initialize(declared,*window))
+            throw Error("conditional window is unsupported by the exact original runtime selector");
+        std::size_t selected=0;
+        const auto radius=std::min(maximum_radius,original.frequency.step_hz/2);
+        for(std::size_t i=0;i<original.hypotheses.size();++i) {
+            const bool keep=selector.keep(i);
+            const auto found=std::find_if(profile.cells.begin(),profile.cells.end(),
+                [&](const auto& cell){return cell.hypothesis==original.hypotheses[i];});
+            if(keep!=(found!=profile.cells.end()))
+                throw Error("conditional work does not match the exact original runtime window selection");
+            if(!keep)continue;
+            const auto clock=inner_clock(original.hypotheses[i].clock_error_ppm,
+                original.clock_step_ppm/2,original.requested_clock_ppm);
+            if(found->frequency_half_width_hz!=radius || found->clock_lower_ppm!=clock.lower ||
+               found->clock_upper_ppm!=clock.upper)
+                throw Error("conditional work changes an original RF or clock cell");
+            ++selected;
+        }
+        if(!selected || selected!=profile.cells.size())
+            throw Error("conditional work has no exact nonempty original selection");
+        result.requested_clock_ppm=original.requested_clock_ppm;result.clock_ppm=original.clock_ppm;
+        result.original_constructor=std::make_shared<const SearchBank>(original);
+        result.limited=original.limited;result.frequency=original.frequency;
+        std::sort(frequencies.begin(),frequencies.end());
+        result.frequency.count=std::unique(frequencies.begin(),frequencies.end())-frequencies.begin();
+        return result;
+    }
     if(profile.owner==HelperExecutionOwner::executed_joint_masked_owner) {
         const auto& proof=profile.joint_clock_proof;
         if(!proof||!same_joint_profile_numeric(config,*proof,false)||config.oscillator_search!=proof->config.oscillator_search||
@@ -521,6 +561,23 @@ bool within_representation_bound(long double value,long double bound) {
     // intermediate product back to that representation before comparing;
     // the next representable double outside the endpoint stays outside.
     return static_cast<double>(std::abs(value))<=static_cast<double>(bound);
+}
+// Supplied cells may have a nonzero input-frequency origin or holes. Their
+// local scalar radius cannot certify membership in the captured coordinates.
+// Keep the same closed half-step convention as joint RF/clock coverage below.
+bool explicit_frequency_cell_coverage(const SearchBank& bank,long double frequency) {
+    return std::any_of(bank.hypotheses.begin(),bank.hypotheses.end(),[&](const auto& hypothesis) {
+        return within_representation_bound(frequency-hypothesis.frequency_offset_hz,bank.frequency.step_hz/2);
+    });
+}
+// Projection/NCO discretization uses actual absolute input offsets just as
+// PatternReceiver does. This extent is NOT a coverage hull or a replacement
+// for the local RF cell radius, lattice spacing, count or declared domain.
+double projection_frequency_extent(const SearchBank& bank) {
+    if(!bank.explicit_frequency_cells)return bank.frequency.half_width_hz;
+    double maximum=0;
+    for(const auto& pair:bank.hypotheses)maximum=std::max(maximum,std::abs(pair.frequency_offset_hz));
+    return maximum;
 }
 bool paired_clock_coverage(const SearchBank& bank,long double frequency,double clock) {
     if(bank.helper_profile)return std::any_of(bank.helper_profile->cells.begin(),bank.helper_profile->cells.end(),[&](const auto& cell) {
@@ -1218,7 +1275,7 @@ Work scheduled_complex_receiver_work(modem::Config config,const SearchBank& bank
     result.timing_window_modeled=search.qualified_start_window.has_value();
     result.phase_groups=1;
     result.compact=!packed;
-    result.bin_samples=packed?modem::pattern_projection_bin_samples(config,bank.frequency.half_width_hz):1;
+    result.bin_samples=packed?modem::pattern_projection_bin_samples(config,projection_frequency_extent(bank)):1;
     result.search_trials=std::max(1.,p.scheduled_full_timing_positions);
     if(established_stream_bits)result.tracking_windows=static_cast<long double>(established_stream_bits-1)+
         static_cast<long double>(modem::pattern_absence_samples(config))/symbol;
@@ -1331,7 +1388,8 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
                    std::size_t established_stream_bits,double local_window_seconds,ReceiverWorkMode work_mode,
                    const ReceiverTimingModel& timing_model,const ReceiverLayoutContext* layout,std::stop_token stop,
                    bool burst_tracked_slot=false,
-                   std::optional<long double> burst_admission_until_seconds=std::nullopt) {
+                   std::optional<long double> burst_admission_until_seconds=std::nullopt,
+                   bool rolling_live_context=false) {
     estimate_detail::check(stop);
     if(modem::scheduled_bursts(config)&&config.receiver_strategy!=modem::ReceiverStrategy::amplitude_only) {
         auto mapped=scheduled_complex_receiver_work(config,bank,samples,options,profiles,keys,
@@ -1348,6 +1406,11 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
             local_window_seconds):0;
     const auto differential_windows=differential_window?symbol/differential_window:0;
     const bool private_pattern=config.scramble || config.dsss;
+    // Timing/source normalization and receiver lifetime are independent. The
+    // GUI's sampled Live listener uses the ordinary rolling bank, whereas a
+    // standalone sampled estimate still describes its finite capture only.
+    const bool sampled_live_rolling=rolling_live_context && work_mode==ReceiverWorkMode::sampled_simulation &&
+        !config.symbol_burst.enabled() && !modem::scheduled_bursts(config);
     // Rounded allowance for the additional independent candidate stream/map;
     // the detector/FFT costs already include fitting both candidate rows.
     const auto private_pair_generation=private_pattern?40.L:0.L;
@@ -1371,9 +1434,11 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     const bool coupled=bank.legacy_coupled;
     const bool scaled=bank.minimum_rate!=1||bank.maximum_rate!=1;
     const auto frequencies=static_cast<long double>(bank.hypotheses.size());
+    const auto& constructor_bank=bank.original_constructor?*bank.original_constructor:bank;
+    const auto constructor_frequencies=static_cast<long double>(constructor_bank.hypotheses.size());
     const auto maximum_clock_ratio=std::max(1-bank.minimum_rate,bank.maximum_rate-1);
     auto bin=bank.helper_profile?bank.helper_profile->actual_geometry.projection_bin_samples:
-        modem::pattern_projection_bin_samples(config,geometry.half_width_hz);
+        modem::pattern_projection_bin_samples(config,projection_frequency_extent(bank));
     const auto omega=2*std::numbers::pi*config.carrier_hz/config.sample_rate;
     const auto sine=std::sin(omega);
     auto image=std::abs(sine)>1e-12?std::abs(std::sin(static_cast<double>(bin)*omega)/sine):static_cast<double>(bin);
@@ -1420,10 +1485,10 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     }
     const auto fft_core_bytes=burst_fft_bytes+transform*16*5+(4*length+2*hop)*16+
         (separate_tracking_reference?2*length*16:0)+(transform+1)*8+
-        frequencies*(2*24+2*8+2*16+18*8+2*8)+
+        constructor_frequencies*(2*24+2*8+2*16+18*8+2*8)+
         4096*16+4096*sizeof(modem::PatternEvidence)+(drift_sections>1?48*hop:0)+
         (differential_window?hop*sizeof(modem::detail::DifferentialAccumulator):0);
-    const auto fft_bytes=fft_core_bytes+2*frequencies*transform*16;
+    const auto fft_bytes=fft_core_bytes+2*constructor_frequencies*transform*16;
     // Existing-complex constructors can use the remaining cohort up to half
     // the total budget. Even an empty cohort must first reserve shared frontend
     // and receiver-control state. Keep the multi-bank estimate's legacy cap;
@@ -1593,7 +1658,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     // not a generic cryptographic/sample throughput coefficient.
     pricing.template_calibrated=coherent_fft_pricing&&interleaved&&config.sample_rate==40000&&
         chip==8&&bin==4&&length>=65536&&length<=262144;
-    if(automatic_native&&bank.hypotheses.size()>=3) {
+    if(automatic_native&&constructor_bank.hypotheses.size()>=3) {
         modem::detail::FftSearchGeometry g;g.bins_per_symbol=static_cast<std::size_t>(length);
         g.bin_samples=bin;g.search_arithmetic=static_cast<std::uint32_t>(modem::SearchArithmetic::fp32);
         g.private_template_reuse=modem::detail::PrivateTemplateReuse::bounded_interpolation;
@@ -1602,7 +1667,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         g.pattern.legacy_public=modem::legacy_public_pattern(config);
         g.pattern.scramble=config.scramble;g.pattern.dsss=config.dsss;g.pattern.spreading_mode=static_cast<std::uint32_t>(config.spreading_mode);
         bool eligible=true;
-        for(const auto& h:bank.hypotheses) {modem::detail::FftSearchJob job;
+        for(const auto& h:constructor_bank.hypotheses) {modem::detail::FftSearchJob job;
             job.clock_ratio=1+h.clock_error_ppm*1e-6;eligible&=modem::detail::FftPrivateTemplate::eligible(g,job);}
         // Reserve whole-native buffers/plan plus the bounded direct scratch;
         // this intentionally declines reuse when its actual workspace cannot
@@ -2074,7 +2139,7 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
         if(!filtered_operations)result.fft_retained_acquisition_batches=blocks;
         long double first_batches=blocks>0?1.L:0.L;
         if((private_pattern||config.symbol_burst.enabled()) && !native_public_burst &&
-           !options.timestamp && work_mode!=ReceiverWorkMode::sampled_simulation) {
+           !options.timestamp && (work_mode!=ReceiverWorkMode::sampled_simulation || sampled_live_rolling)) {
             const auto prefix=static_cast<long double>(modem::training_sample_count(config)+
                 modem::pattern_pulse_padding_samples(config))/config.sample_rate;
             long double calendar_extension=0;
@@ -2360,11 +2425,11 @@ Work receiver_work(const modem::Config& config,const SearchBank& bank,long doubl
     modem::PatternSearch strategy_search;
     const bool public_burst=config.symbol_burst.enabled() && !config.scramble && !config.dsss;
     if(public_burst)strategy_search.initial_stream_symbols=1;
-    strategy_search.hypotheses=bank.hypotheses;
-    strategy_search.admitted_frequency_half_width_hz=bank.frequency.requested_half_width_hz;
-    strategy_search.admitted_clock_half_width_ppm=bank.requested_clock_ppm;
-    strategy_search.complex_frequency_coverage=!bank.frequency.limited;
-    strategy_search.complex_clock_coverage=bank.clock_ppm>=bank.requested_clock_ppm;
+    strategy_search.hypotheses=constructor_bank.hypotheses;
+    strategy_search.admitted_frequency_half_width_hz=constructor_bank.frequency.requested_half_width_hz;
+    strategy_search.admitted_clock_half_width_ppm=constructor_bank.requested_clock_ppm;
+    strategy_search.complex_frequency_coverage=!constructor_bank.frequency.limited;
+    strategy_search.complex_clock_coverage=constructor_bank.clock_ppm>=constructor_bank.requested_clock_ppm;
     strategy_search.differential_window_seconds=local_window_seconds;
     strategy_search.search_stream_phases=private_pattern&&!config.symbol_burst.enabled();
     strategy_search.prefer_streamed_templates=streamed_templates;
@@ -3042,7 +3107,9 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
     }
     if(profiles.empty())profiles=std::span(&options.modem,1);
     if(receiver_search) {
-        if(compute_probability || helper_scenario || profiles.size()!=1 || options.modem.symbol_burst.enabled() ||
+        const bool window_scenario=helper_scenario && helper_scenario->profiles.size()==1 &&
+            helper_scenario->profiles.front().owner==HelperExecutionOwner::conditional_window_masked_owner;
+        if(compute_probability || (helper_scenario && !window_scenario) || profiles.size()!=1 || options.modem.symbol_burst.enabled() ||
            modem::scheduled_bursts(options.modem) ||
            !options.modem.oscillator_search || receiver_search->hypotheses.empty() ||
            receiver_search->hypotheses.size()>modem::maximum_pattern_frequency_rate_hypotheses)
@@ -3076,6 +3143,9 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         "Assumed UTC hop-calendar model; declared endpoint/Audio/propagation bounds, nominal capture slope; not hardware timing evidence":
         "Supplied capture timing model; admitted UTC correction bank, full arrival-window fallback";
     const auto& config=options.modem;
+    const bool sampled_live_rolling=actual_settings && work_mode==ReceiverWorkMode::sampled_simulation &&
+        !options.timestamp && !config.symbol_burst.enabled() && !modem::scheduled_bursts(config);
+    if(sampled_live_rolling)result.receiver_work_assumptions+="; ordinary rolling Live listener context";
     const auto samples_per_symbol=modem::symbol_sample_count(config);
     const auto seconds=static_cast<long double>(samples_per_symbol)/config.sample_rate;
     result.drift_sections=modem::detail::drift_section_count(config);
@@ -3185,7 +3255,8 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         });
         auto work=existing!=work_entries.end()?existing->work:
             receiver_work(profile,candidate_bank,media*profile.sample_rate,profile_options,profiles.size(),keys,
-                          matches?transmission.wire_bits:0,local_window_seconds,work_mode,timing_model,layout?&*layout:nullptr,stop);
+                          matches?transmission.wire_bits:0,local_window_seconds,work_mode,timing_model,layout?&*layout:nullptr,stop,
+                          false,std::nullopt,actual_settings!=nullptr);
         if(existing==work_entries.end()&&candidate_bank.helper_profile) {
             const auto& actual=candidate_bank.helper_profile->actual_geometry;
             auto corrected_channel=channel;
@@ -3198,13 +3269,14 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
                 throw Error("helper scenario backend/representation differs from actual resolved geometry");
             const auto logical=receiver_work(profile,*banks[index].original,media*profile.sample_rate,profile_options,
                 profiles.size(),keys,matches?transmission.wire_bits:0,local_window_seconds,work_mode,timing_model,
-                layout?&*layout:nullptr,stop);
+                layout?&*layout:nullptr,stop,false,std::nullopt,actual_settings!=nullptr);
             if(work.bin_samples!=logical.bin_samples || work.compact!=logical.compact ||
                work.pulse_projected!=logical.pulse_projected || work.pulse_segmented!=logical.pulse_segmented ||
                work.drift_supported!=logical.drift_supported || work.differential_supported!=logical.differential_supported)
                 throw Error("helper frequency model retains the original fine grid and detector representation");
             if(candidate_bank.helper_profile->owner==HelperExecutionOwner::original_masked_owner||
-               candidate_bank.helper_profile->owner==HelperExecutionOwner::executed_joint_masked_owner) {
+               candidate_bank.helper_profile->owner==HelperExecutionOwner::executed_joint_masked_owner||
+               candidate_bank.helper_profile->owner==HelperExecutionOwner::conditional_window_masked_owner) {
                 // Masking does not construct a smaller owner or unlock a new
                 // allocation/representation. Charge original constructor work.
                 if(work.compact!=logical.compact||work.pulse_projected!=logical.pulse_projected||
@@ -3225,6 +3297,20 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
                         work.initial_epoch_setup_scoring_operations/work.epoch_hypotheses)/keys;
                 }
                 work.workspace_supported&=logical.workspace_supported;
+                if(candidate_bank.helper_profile->owner==HelperExecutionOwner::conditional_window_masked_owner) {
+                    if(work.strategy.backend!=logical.strategy.backend ||
+                       work.strategy.full_frequency_coverage!=logical.strategy.full_frequency_coverage ||
+                       work.strategy.full_clock_coverage!=logical.strategy.full_clock_coverage)
+                        throw Error("conditional window would select a different original backend or coverage policy");
+                    work.work_supported&=logical.work_supported;
+                    work.geometry.workspace_bytes=logical.geometry.workspace_bytes;
+                    work.geometry.per_bank_workspace_bytes=logical.geometry.per_bank_workspace_bytes;
+                    // The retained constructor is restored in the CPU ledger,
+                    // but its hypothetical host/GPU split is not separately
+                    // modeled for an original-window mask. Do not export the
+                    // selected-owner split as a conditional GPU estimate.
+                    result.gpu_work_supported=false;
+                }
             }
             // Executed projection/fit work changes; logical detector penalties
             // do not. The caller separately proves that the core preserves it.
@@ -3266,7 +3352,8 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         gpu_numeric+=work.fft_cost_split?work.fft_gpu_operations:work.parallel;
         const auto fallback_work=work.timing_window_modeled?
             receiver_work(profile,candidate_bank,media*profile.sample_rate,profile_options,profiles.size(),keys,
-                matches?transmission.wire_bits:0,local_window_seconds,ReceiverWorkMode::hardware_fallback,timing_model,layout?&*layout:nullptr,stop):work;
+                matches?transmission.wire_bits:0,local_window_seconds,ReceiverWorkMode::hardware_fallback,timing_model,layout?&*layout:nullptr,stop,
+                false,std::nullopt,actual_settings!=nullptr):work;
         fallback_serial+=fallback_work.serial;fallback_parallel+=fallback_work.parallel;
         fallback_tracking+=fallback_work.tracking_serial;
         all_sustained_modeled&=work.sustained_modeled&&fallback_work.sustained_modeled;
@@ -3286,9 +3373,12 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         any_pulse_segmented|=work.pulse_segmented;any_kernel_upper_bound|=work.kernel_upper_bound;
         tracking_serial+=work.tracking_serial;tracking_windows+=work.tracking_windows;
         if(matches) {
-            const bool frequency_covered=within_representation_bound(candidate_frequency,
-                work.strategy.backend==modem::ReceiverBackend::amplitude_energy?
-                    work.strategy.amplitude_frequency_half_width_hz:candidate_bank.frequency.half_width_hz);
+            const bool frequency_covered=candidate_bank.explicit_frequency_cells &&
+                work.strategy.backend!=modem::ReceiverBackend::amplitude_energy?
+                explicit_frequency_cell_coverage(candidate_bank,candidate_frequency):
+                within_representation_bound(candidate_frequency,
+                    work.strategy.backend==modem::ReceiverBackend::amplitude_energy?
+                        work.strategy.amplitude_frequency_half_width_hz:candidate_bank.frequency.half_width_hz);
             const bool clock_covered=work.strategy.backend==modem::ReceiverBackend::amplitude_energy?
                 within_representation_bound(channel.clock_error_ppm,work.strategy.amplitude_clock_half_width_ppm):
                 (!profile.oscillator_search||paired_clock_coverage(candidate_bank,candidate_frequency,channel.clock_error_ppm));
@@ -3657,6 +3747,8 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
             "Compact bank engineering reference: exact lattice count at a representative anchor under selected GPS/audio bounds and supplied capture metadata (nominal slope and full bank rate allowance when omitted). Full-window fallback is reported separately":
             "Full arrival-window bank; timing prior is unavailable for this backend or model geometry. Configured peer UTC correction lanes are retained";
     }
+    if(sampled_live_rolling)
+        result.receiver_work_assumptions+="; rolling constructor/input/continuation allowances are engineering work on the reference CPU; local FFT calibration is not complete application throughput calibration";
     if(shared_hop_calendar(config)&&work_mode!=ReceiverWorkMode::sampled_simulation) {
         if(work_mode==ReceiverWorkMode::hardware_calendar_model)
             result.receiver_work_assumptions+="; assumed UTC hop-calendar prior, not measured capture or peer TX qualification";
@@ -3679,7 +3771,7 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         result.receiver_work_assumptions+=diagnostic.str();
         if(!result.receiver_geometry.fallback_reason.empty())result.receiver_work_assumptions+="; "+result.receiver_geometry.fallback_reason;
     }
-    if(!options.timestamp&&work_mode!=ReceiverWorkMode::sampled_simulation) {
+    if(!options.timestamp&&(work_mode!=ReceiverWorkMode::sampled_simulation || sampled_live_rolling)) {
         if(matching_work.compact)
             result.receiver_work_assumptions+="; Automatic Live compact rolling-admission work is not modeled";
         result.receiver_work_assumptions+="; Workspace support covers the initial cohort, not peak resident Live banks. "
@@ -3703,7 +3795,10 @@ static Estimate estimate_impl(const transfer::Estimate& transmission,const trans
         result.probability_search_approximation=true;
         result.probability_model_limit="Paired clock candidates use the selected timing coherence and full bank trial penalty; joint timing-path covariance is not simulated";
     }
-    result.carrier_in_search=within_representation_bound(frequency,result.carrier_search_half_width_hz);
+    result.carrier_in_search=bank.explicit_frequency_cells &&
+        matching_work.strategy.backend!=modem::ReceiverBackend::amplitude_energy?
+        explicit_frequency_cell_coverage(bank,frequency):
+        within_representation_bound(frequency,result.carrier_search_half_width_hz);
     result.clock_in_search=matching_work.strategy.backend==modem::ReceiverBackend::amplitude_energy?
         within_representation_bound(channel.clock_error_ppm,matching_work.strategy.amplitude_clock_half_width_ppm):
         (!oscillator_policy||paired_clock_coverage(bank,frequency,channel.clock_error_ppm));
@@ -4225,10 +4320,66 @@ Estimate estimate_with_receiver_settings(const transfer::Estimate& transmission,
 }
 Estimate estimate_with_receiver_search(const transfer::Estimate& transmission,const transfer::Options& options,bool raw_bits,
         const modem::ChannelConfig& channel,const modem::OscillatorPatternSearch& search,std::size_t keys,
-        double window,ReceiverWorkMode mode,ReceiverTimingModel timing,const live::Settings* settings,std::stop_token stop) {
+        double window,ReceiverWorkMode mode,ReceiverTimingModel timing,const live::Settings* settings,std::stop_token stop,
+        const modem::PatternHelperFrequencyWindow* execution_window) {
     auto result=estimate_impl(transmission,options,raw_bits,channel,{},keys,false,window,0,mode,timing,settings,stop,
         false,nullptr,&search);
-    result.receiver_work_assumptions="Conditional real-time helper-corrected input; full residual RF/LF catalogue and ordinary receiver work. Reference startup/tracking and conversion overhead are separate; no lock or probability forecast";
+    if(execution_window) {
+        if(!execution_window->valid() || execution_window->clock_cell_half_width_ppm!=search.clock_step_ppm/2)
+            throw Error("conditional receiver work requires the exact original runtime clock cells");
+        const auto original=search_bank(options.modem,options,&search);
+        modem::PatternSearch declared;declared.hypotheses=original.hypotheses;
+        declared.admitted_clock_half_width_ppm=original.requested_clock_ppm;
+        declared.admitted_clock_cell_half_width_ppm=original.clock_step_ppm/2;
+        modem::detail::PatternHelperFrequencySelector selector;
+        estimate_detail::check(stop);
+        if(!selector.initialize(declared,*execution_window))
+            throw Error("conditional receiver window is unsupported by its original runtime cells");
+        estimate_detail::check(stop);
+        HelperFrequencyProfile profile;profile.profile_index=0;
+        profile.owner=HelperExecutionOwner::conditional_window_masked_owner;
+        profile.original_execution_window=std::make_shared<const modem::PatternHelperFrequencyWindow>(*execution_window);
+        profile.input.logical_sample_rate=profile.input.physical_sample_rate=options.modem.sample_rate;
+        profile.physical_domain={-original.requested_clock_ppm,original.requested_clock_ppm,
+            execution_window->center_hz,-execution_window->clock_coefficient_hz*1e-6,execution_window->half_width_hz};
+        profile.actual_geometry={result.execution_projection_bin_samples,original.minimum_rate,original.maximum_rate,
+            result.execution_compact,result.execution_pulse_projected,result.pulse_segment_projection_modeled,
+            result.execution_drift_supported,result.execution_differential_supported};
+        const auto radius=std::min(modem::native_pattern_frequency_cell_radius(options.modem),original.frequency.step_hz/2);
+        for(std::size_t i=0;i<original.hypotheses.size();++i)if(selector.keep(i)) {
+            if((i&127U)==0)estimate_detail::check(stop);
+            const auto clock=live::detail::helper_prior_detail::inner_clock(original.hypotheses[i].clock_error_ppm,
+                original.clock_step_ppm/2,original.requested_clock_ppm);
+            profile.cells.push_back({original.hypotheses[i],radius,clock.lower,clock.upper});
+        }
+        if(profile.cells.empty())throw Error("conditional receiver window selects no original cell");
+        // An all-selected window restores exactly the ordinary ledger. It is
+        // not a new execution profile or a credited reference speedup.
+        if(profile.cells.size()!=original.hypotheses.size() && result.execution_compact) {
+            // Compact lane work includes established payload continuation.
+            // Selecting cold cells cannot justify discounting that full owner.
+            result.frequency_rate_hypotheses=profile.cells.size();
+            result.receiver_work_supported=false;result.hardware_sustained_modeled=false;
+            result.gpu_work_supported=false;
+            const auto unknown=std::numeric_limits<double>::quiet_NaN();
+            result.cpu_seconds=result.receiver_cpu_seconds=result.gpu_seconds=unknown;
+            result.hardware_sustained_realtime_ratio=unknown;
+            result.receiver_work_assumptions+="; compact masked acquisition/full-owner continuation CPU is not separately modeled; original payload owner and broad fallback remain";
+        } else if(profile.cells.size()!=original.hypotheses.size()) {
+            QualifiedHelperFrequencyScenario scenario;scenario.origin=HelperScenarioOrigin::requirements_forecast;
+            scenario.profiles.push_back(std::move(profile));
+            const auto baseline=result;
+            result=estimate_impl(transmission,options,raw_bits,channel,{},keys,false,window,0,mode,timing,settings,stop,
+                false,&scenario,&search);
+            // Future broad work remains the original source/cell catalogue;
+            // no selected-domain price represents full fallback coverage.
+            result.fallback_receiver_cpu_seconds=baseline.fallback_receiver_cpu_seconds;
+            result.fallback_hardware_sustained_realtime_ratio=baseline.fallback_hardware_sustained_realtime_ratio;
+            result.fallback_timing_hypotheses=baseline.fallback_timing_hypotheses;
+        }
+        result.receiver_work_assumptions+="; Conditional exact original-window execution: only selected acquisition cells are priced; original constructor, input ingestion, backend/bin/workspace, logical thresholds/trials and complete continuation remain. No separate per-clock input-FFT saving is credited by this model; compact masked continuation cost remains unavailable; proper-subset conditional GPU pricing is unavailable";
+    }
+    result.receiver_work_assumptions+="; Conditional real-time helper receiver catalogue; input basis follows caller provenance. Scalar RF half-widths remain catalogue-relative radii, not zero-centered input coverage: actual supplied frequency-cell union and joint RF/clock cells determine coverage. Projection sizing uses actual absolute input offsets without widening cells or changing their spacing/count. Full residual RF/LF catalogue and ordinary receiver work retained; reference startup/tracking/conversion overhead is separate, with no lock or probability forecast";
     return result;
 }
 namespace {

@@ -28,16 +28,18 @@ public:
         std::uint32_t minimum_sample_rate=0;
     };
     static constexpr std::size_t workspace_bound=80*1024;
-    // Guaranteed slack for bounded auxiliary observation during mode handoff.
-    static constexpr std::size_t auxiliary_workspace_bound=16*1024;
+    // Fixed observation/presentation, including the two-record helper END
+    // retry owner. Transfer 256 bytes from each optional cohort allowance;
+    // both mode-specific combined reserves and the total remain unchanged.
+    static constexpr std::size_t auxiliary_workspace_bound=16*1024+256;
     // Shared plot/channel reserve also holds the optional rolling helper
     // frontend. Both channel layouts prove this slack without shrinking any
     // ordinary receiver grant or increasing the existing workspace reserve.
-    static constexpr std::size_t helper_cohort_workspace_bound=7*1024;
+    static constexpr std::size_t helper_cohort_workspace_bound=7*1024-256;
     // The helper-enabled physical route replaces the legacy double-precision
     // interpolation table, leaving this larger mode-specific reserve inside
     // the same 80KiB channel budget. Never use it for a legacy fallback.
-    static constexpr std::size_t physical_helper_cohort_workspace_bound=10*1024;
+    static constexpr std::size_t physical_helper_cohort_workspace_bound=10*1024-256;
     // Helper-enabled transport uses a separate physical integer-multiple sample
     // clock, then bounded anti-alias decimation back to this logical Config rate.
     // Both signals share clock error, oscillator impairments and physical AWGN.

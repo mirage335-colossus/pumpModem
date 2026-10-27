@@ -33,10 +33,13 @@ public:
         std::uint64_t absence_samples = 0;
         double score = 0; // Arbitration support, not a displayed native score.
         bool complete = false;
-        // Durable helper birth or past legacy-assistance provenance. Only a checked
-        // disjoint keyed source envelope may use it to preserve separate rows;
-        // it never lowers ordinary Robust symbol or payload support.
+        // Durable helper birth or past legacy-assistance provenance. Preserve
+        // distinct physical births and checked disjoint keyed source envelopes;
+        // this never lowers ordinary Robust symbol or payload support.
         bool helper_assisted = false;
+        // Physical symbol starts are uniformly spaced. Live explicitly clears
+        // this for amplitude, Burst and scheduled/deferred calendars.
+        bool uniform_source = true;
         std::uint64_t signal_id = 0, symbol_samples = 0, timing_tolerance = 0;
         // Valid only for amplitude candidates. These are actual retained FFT
         // passbands; their reported centers are not coherent carrier estimates.
@@ -56,6 +59,18 @@ public:
             return std::get_if<modem::PatternSourceIdentity>(&source_identity);
         }
     };
+    struct PreviousCandidateLayout {
+        std::uint64_t id=0,family=0,first=0,end=0;
+        double frequency=0,frequency_tolerance=0;
+        std::uint64_t absence_samples=0;
+        double score=0;
+        bool complete=false,helper_assisted=false;
+        std::uint64_t signal_id=0,symbol_samples=0,timing_tolerance=0;
+        double amplitude_low_hz=0,amplitude_high_hz=0;
+        SourceIdentity source_identity;
+    };
+    static_assert(sizeof(Candidate)==sizeof(PreviousCandidateLayout));
+    static_assert(alignof(Candidate)==alignof(PreviousCandidateLayout));
     struct Decision {
         std::uint64_t signal_id = 0;
         bool selected = false, limited = false;
@@ -67,13 +82,23 @@ public:
 
     template<class AllocateId>
     Decision observe(const Candidate& candidate, AllocateId allocate_id) {
+        return observe(candidate,allocate_id,[](const Candidate&,std::uint64_t,
+                std::span<const std::uint64_t>,bool){return true;});
+    }
+    // Optional Live-only publication eligibility. The two-argument ordinary
+    // path has the identical scalar order and no extra state or allocation.
+    // Consult every matched established row before any provisional ownership,
+    // merge, revision or completion mutation.
+    template<class AllocateId,class Eligible>
+    Decision observe(const Candidate& candidate, AllocateId allocate_id, Eligible eligible) {
         auto observed = candidate;
         std::size_t identity = size_;
         for (std::size_t i = 0; i < size_; ++i) {
             const auto& entry = entries_[i];
             if (entry.owner.family != candidate.family) continue;
             if (entry.owner.id == candidate.id) { identity = i; break; }
-            if (candidate.signal_id && contains(entry, candidate.signal_id)) identity = i;
+            if (candidate.signal_id && contains(entry, candidate.signal_id) &&
+                !separate_helper_birth(entry.owner,candidate)) identity = i;
         }
         if (identity < size_ && entries_[identity].owner.id == candidate.id) {
             auto& entry = entries_[identity];
@@ -106,6 +131,11 @@ public:
         for (std::size_t i = 0; i < size_; ++i) {
             if (i != identity) {
                 if(!matches(entries_[i], observed))continue;
+                // An existing row's own/alias progress cannot be stolen by a
+                // different established physical birth, even when that other
+                // row is stronger. Unpublished losing aliases still suppress
+                // normally; only two already stored owner births are compared.
+                if(identity<size_ && different_helper_birth(entries_[i].owner,entries_[identity].owner))continue;
                 // Once separately published, an existing helper-involved
                 // source cannot retract another row merely because a longer
                 // clock cone makes their old separation proof inconclusive.
@@ -125,6 +155,9 @@ public:
             return decision(entries_[selected], false);
         }
         if (count) {
+            for(std::size_t i=0;i<size_;++i)if(matched[i] &&
+                !eligible(observed,entries_[i].signal_id,aliases(entries_[i]),entries_[i].complete))
+                return decision(entries_[i],false);
             // A stronger alias may become this GUI row's owner, but cannot
             // erase helper involvement already attached to its published row.
             for(std::size_t i=0;i<size_;++i)if(matched[i])
@@ -250,9 +283,27 @@ private:
         return std::isfinite(seconds) && seconds<=static_cast<long double>(
             std::numeric_limits<std::uint64_t>::max()-x->epoch);
     }
+    static bool different_helper_birth(const Candidate& owner,const Candidate& candidate) {
+        if(!(owner.helper_assisted || candidate.helper_assisted) ||
+           !owner.uniform_source || !candidate.uniform_source || !owner.symbol_samples ||
+           owner.symbol_samples!=candidate.symbol_samples || owner.burst_identity() || candidate.burst_identity() ||
+           owner.amplitude_high_hz>owner.amplitude_low_hz ||
+           candidate.amplitude_high_hz>candidate.amplitude_low_hz)return false;
+        const auto distance=owner.first>candidate.first?owner.first-candidate.first:candidate.first-owner.first;
+        const auto tolerance=std::min(std::max(owner.timing_tolerance,candidate.timing_tolerance),
+            (owner.symbol_samples-1)/2);
+        // Whole-symbol alignment identifies the clock, not a full prefix.
+        return distance>tolerance;
+    }
+    static bool separate_helper_birth(const Candidate& owner,const Candidate& candidate) {
+        // A stronger suffix/earlier start owns a separate row; it cannot erase
+        // already exposed leading bits. Weaker unpublished suffixes suppress.
+        return stronger(candidate,owner) && different_helper_birth(owner,candidate);
+    }
     static bool matches(const Entry& entry, const Candidate& candidate) {
         const auto& owner = entry.owner;
         if (owner.family != candidate.family) return false;
+        if(separate_helper_birth(owner,candidate))return false;
         const bool owner_amplitude=owner.amplitude_high_hz>owner.amplitude_low_hz;
         const bool candidate_amplitude=candidate.amplitude_high_hz>candidate.amplitude_low_hz;
         const bool amplitude_pair=owner_amplitude&&candidate_amplitude;

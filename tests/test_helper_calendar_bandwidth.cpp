@@ -190,6 +190,32 @@ void bounded_envelope_planning() {
     const auto faster=helper::plan_envelope(c,requirements);
     check(faster.lead_seconds>=1.001L*(6.4L+.08L)&&faster.tail_seconds>=1.001L*(512.L+.08L),
           "source clock allowance shortened the physical acquisition or drain aperture");
+    // Precision airtime is additive to the unchanged physical baseline. It
+    // cannot shorten acquisition/drain obligations or grow beyond 36 seconds.
+    // Binary64 .4 and its next ULP intentionally snap to one exact dwell.
+    // Check independent expected durations rather than an unsnapped request.
+    struct PrecisionCase {double requested;long double aligned;};
+    for(const auto [extra,aligned]:{PrecisionCase{0.,0.L},PrecisionCase{.001,.4L},
+            PrecisionCase{.4,.4L},PrecisionCase{std::nextafter(.4,std::numeric_limits<double>::infinity()),.4L},
+            PrecisionCase{.4001,.8L},PrecisionCase{35.9,36.L},PrecisionCase{36.,36.L}}) {
+        auto precision=requirements;precision.frequency_precision_extension_seconds=extra;
+        const auto extended=helper::plan_envelope(c,precision);
+        check(extended.lead_seconds==faster.lead_seconds+aligned &&
+              extended.lead_seconds<=faster.lead_seconds+36.L &&
+              extended.tail_seconds==faster.tail_seconds,
+              "precision extension changed the physical baseline/tail or exceeded its cap");
+        const auto extension=extended.lead_seconds-faster.lead_seconds;
+        check(std::abs(extended.maximum_stop_extension_seconds-faster.maximum_stop_extension_seconds-
+                  extension)<1e-12L,
+              "precision lead was not reserved through preparation/protected stopping");
+        check(std::abs(extension*2.5L-
+                       std::round(extension*2.5L))<1e-12L,
+              "precision extension did not retain the dwell calendar");
+    }
+    for(const auto extra:{std::nextafter(36.,std::numeric_limits<double>::infinity()),36.01}) {
+        auto invalid_precision=requirements;invalid_precision.frequency_precision_extension_seconds=extra;
+        rejects([&]{helper::plan_envelope(c,invalid_precision);},"precision extension beyond 36 seconds was accepted");
+    }
     for(const auto value:{-1.,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
         helper::EnvelopeRequirements bad;bad.frequency_acquisition_seconds=value;
         rejects([&] {helper::plan_envelope(c,bad);},"invalid acquisition duration was accepted");
@@ -197,6 +223,8 @@ void bounded_envelope_planning() {
         rejects([&] {helper::plan_envelope(c,bad);},"invalid frontend duration was accepted");
         bad={};bad.receiver_buffer_deficit_seconds=value;
         rejects([&] {helper::plan_envelope(c,bad);},"invalid receiver-buffer duration was accepted");
+        bad={};bad.frequency_precision_extension_seconds=value;
+        rejects([&] {helper::plan_envelope(c,bad);},"invalid precision extension was accepted");
         bad={};bad.maximum_source_capture_ratio=value;
         rejects([&] {helper::plan_envelope(c,bad);},"invalid source/capture ratio was accepted");
     }

@@ -19,6 +19,12 @@ struct ToneTrackerSnapshot {
     double frequency_hz=0,uncertainty_hz=0,carrier_to_noise_db_hz=0;
     double frequency_rate_hz_per_second=0;
     bool present=false,qualified=false;
+    // Actual disjoint coherent-segment phase slopes may refine the ordinary
+    // FLL frequency using at most36s of numeric observations. Its full support
+    // is first_sample..sample; dated smooth-evolution engineering evidence
+    // includes a multiscale measured curvature-bias allowance, with
+    // independent current FLL veto, no future thermal or Doppler authority.
+    bool frequency_precision_refined=false;
     // Independent source-clock evidence from actual periodic reversals.
     // Positive ppm means the generator's400ms intervals arrive in fewer ADC
     // samples. A quasistationary local aperture-mean engineering estimate with

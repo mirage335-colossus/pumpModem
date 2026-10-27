@@ -358,6 +358,11 @@ void native_calendar(bool competing,bool pause_dispatch=false,bool large_span=fa
     }
     constexpr std::size_t delay=137;const auto base=delay+modem::pattern_pulse_padding_samples(c);
     auto s=search(c,static_cast<double>(base)/c.sample_rate);s.compact_clock_search=false;
+    // The one-span API test deliberately cannot drain within its call. Use
+    // the ordinary default event batch (still capped by the SAME bit quota),
+    // rather than requesting 32 one-bit events from an eight-event queue.
+    // take_bursts() still flushes each accepted prefix at every earlier poll.
+    if(large_span)s.chunk_bits=modem::PatternSearch{}.chunk_bits;
     s.search_stream_phases=false;s.early_qualified_fft=false;s.component_qualified_search=false;
     s.qualified_start_window=modem::PatternStartWindow{static_cast<long double>(base),1,competing?2.L*c.sample_rate:2.L};
     auto pcm=waveform(c,first,delay);
@@ -391,12 +396,17 @@ void native_calendar(bool competing,bool pause_dispatch=false,bool large_span=fa
     for(std::size_t at=0;at<pcm.size();) {
         const auto count=large_span && loss?pcm.size()-at:std::min<std::size_t>(113,pcm.size()-at);
         const auto input=std::span(pcm).subspan(at,count);
-        off.push(input);
+        // OFF is the ordinary streaming control and retains its original
+        // bounded push/drain cadence. Only ON tests a single large call.
+        for(std::size_t baseline_at=0;baseline_at<input.size();) {
+            const auto n=std::min<std::size_t>(113,input.size()-baseline_at);
+            off.push(input.subspan(baseline_at,n));collect(off,off_rows);baseline_at+=n;
+        }
         if(large_span && loss) {
             large_span_samples=count;
             if(ordinary_push)on.push(input);else feed_native(on,input);
         } else feed_native(on,input);
-        at+=count;collect(off,off_rows);collect(on,on_rows);
+        at+=count;collect(on,on_rows);
         const auto accepted_prefix=std::any_of(on_rows.begin(),on_rows.end(),[&](const auto& item) {
             const auto& row=item.second;
             return !row.complete && !row.bits.empty() && row.bits.size()<first.size() &&
@@ -475,8 +485,30 @@ void dispatch_expiry_negative() {
 
     auto long_c=config(128);long_c.sample_rate=512;long_c.carrier_hz=128;long_c.bandwidth_hz=.5;
     auto long_s=search(long_c);long_s.start_uncertainty_seconds=0;long_s.search_stream_phases=false;
+    // Keep the formerly failing 8 MiB shape explicit: it affords the ordinary
+    // shared pulse lattices, whose legacy segmented-only mask API must decline.
     modem::PatternCorrelator compact(long_c,long_s,8*1024*1024);
-    check(compact.set_compact_acquisition_prior(0,mask(long_s)),"128-second expiry prior declined");
+    check(compact.work().lattices>0 && !compact.compact_acquisition_state().supported,
+          "128-second expiry control no longer exercises the legacy unsupported pulse shape");
+    check(!compact.set_compact_acquisition_prior(0,mask(long_s)),
+          "legacy segmented-only prior unexpectedly accepted the pulse-lattice shape");
+    // This is the actual manual receive API. It conditions the original bank
+    // in place and retains the complete unresolved LF domain.
+    check(compact.set_helper_frequency_window(0,.0001,0),"128-second manual frequency window declined");
+    const auto frequency=compact.helper_frequency_window();
+    check(frequency.supported && frequency.active && frequency.original_pairs==long_s.hypotheses.size() &&
+          frequency.selected_pairs==3 && !frequency.clock_qualified &&
+          frequency.unresolved_clock_cell_half_width_ppm==*long_s.admitted_clock_cell_half_width_ppm,
+          "128-second manual window did not narrow RF while retaining all original clock cells");
+    // The legacy regression still has its own supported, bounded ordinary
+    // segmented constructor policy; changing APIs must not erase that coverage.
+    modem::PatternCorrelator raw(long_c,long_s,8*1024*1024,{true,false});
+    const auto legacy_budget=raw.reserved_workspace_bytes()+24*1024;
+    modem::PatternCorrelator legacy(long_c,long_s,legacy_budget);
+    check(legacy.work().backend==modem::PatternCorrelationBackend::pulse_segments &&
+          legacy.compact_acquisition_state().supported && legacy.set_compact_acquisition_prior(0,mask(long_s)),
+          "bounded 128-second legacy segmented prior declined");
+    check(legacy.working_bytes()<=legacy_budget,"legacy 128-second helper exceeded its bounded constructor grant");
     check(compact.set_helper_acquisition_dispatch(false),"128-second dispatch pause declined");
     const auto compact_before=compact.compact_acquisition_state();
     std::vector<float> silence(static_cast<std::size_t>(2*modem::symbol_sample_count(long_c)+17));push(compact,silence);

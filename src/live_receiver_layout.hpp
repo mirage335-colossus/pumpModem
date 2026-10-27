@@ -4,6 +4,7 @@
 #include "datapump/pattern_correlator.hpp"
 #include "datapump/symbol_burst.hpp"
 #include "live_pattern_scores.hpp"
+#include "live_source_handoff.hpp"
 #include "native_point_workspace.hpp"
 #include "live_deferred_pattern_history.hpp"
 #include "scheduled_source_binding_types.hpp"
@@ -14,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <utility>
+#include <type_traits>
 #include <vector>
 
 namespace datapump::modem::detail {struct SourceFamily;}
@@ -60,9 +62,42 @@ struct ReceiverState {
     struct Presentation {
         std::uint64_t candidate_id=0, signal_id=0, published_revision=0;
         bool content_reported=false;
+        enum class CoordinateKind : std::uint8_t {burst,ordinary};
+        CoordinateKind coordinate_kind=CoordinateKind::burst;
+        struct BurstCoordinates {
+            std::optional<modem::SymbolBurstCoordinate> first;
+            std::optional<modem::SymbolBurstSlot> next;
+        };
+        union Coordinates {
+            BurstCoordinates burst{};
+            ReceptionSourcePublication ordinary;
+        } coordinates{};
+        const ReceptionSourcePublication* source_publication()const noexcept {
+            return coordinate_kind==CoordinateKind::ordinary?&coordinates.ordinary:nullptr;
+        }
+        void source_publication(const ReceptionSourcePublication& value) noexcept {
+            if(coordinate_kind!=CoordinateKind::ordinary) {
+                std::construct_at(&coordinates.ordinary,value);coordinate_kind=CoordinateKind::ordinary;
+            } else coordinates.ordinary=value;
+        }
+        void clear_source_publication()noexcept {
+            if(coordinate_kind==CoordinateKind::ordinary)coordinates.ordinary={};
+        }
+        // Exactly the preceding Burst-only fixed footprint. Ordinary helper-off
+        // rows neither reserve nor allocate any additional publication state.
+        static_assert(sizeof(ReceptionSourcePublication)<=sizeof(BurstCoordinates));
+        static_assert(sizeof(Coordinates)==sizeof(BurstCoordinates));
+        static_assert(std::is_trivially_destructible_v<BurstCoordinates> &&
+            std::is_trivially_destructible_v<ReceptionSourcePublication>);
+    };
+    struct PreviousPresentationLayout {
+        std::uint64_t candidate_id=0,signal_id=0,published_revision=0;
+        bool content_reported=false;
         std::optional<modem::SymbolBurstCoordinate> burst_first;
         std::optional<modem::SymbolBurstSlot> burst_next;
     };
+    static_assert(sizeof(Presentation)==sizeof(PreviousPresentationLayout));
+    static_assert(alignof(Presentation)==alignof(PreviousPresentationLayout));
     // Candidate chunks may interleave. Retain an identity while a detector or
     // queued chunk can publish it; abandonment never implies physical END.
     std::map<std::pair<std::uint64_t,std::uint64_t>,Presentation> presentations;

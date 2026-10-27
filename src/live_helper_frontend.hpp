@@ -10,6 +10,7 @@
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/resampler.hpp"
 #include "live_helper.hpp"
+#include "helper_reference_search.hpp"
 #include "live_helper_frequency_publication.hpp"
 #include "live_helper_prior.hpp"
 #include <algorithm>
@@ -24,25 +25,6 @@
 
 namespace datapump::live::detail {
 
-inline std::optional<modem::SampledSimulationChannel::PreconversionCapture> shared_helper_capture(
-        const modem::Config& config,double expected) {
-    if(!config.oscillator_search)return {};
-    const auto& policy=*config.oscillator_search;
-    if(policy.reference!=modem::OscillatorReference::shared_radio || policy.rf_shift_hz<=0)return {};
-    const auto sign=policy.sideband==modem::OscillatorSideband::upper?1.L:-1.L;
-    const auto epsilon=static_cast<long double>(policy.rf.accuracy_ppm)*policy.margin*1e-6L;
-    const auto kd=sign*policy.rf_shift_hz+config.carrier_hz,kh=sign*policy.rf_shift_hz+expected;
-    const auto half=helper::occupied_bandwidth(config)/2;
-    const auto low=std::min(static_cast<long double>(config.carrier_hz)-std::abs(kd)*epsilon-half*(1+epsilon),
-        static_cast<long double>(expected)-std::abs(kh)*epsilon-150*(1+epsilon));
-    const auto high=std::max(static_cast<long double>(config.carrier_hz)+std::abs(kd)*epsilon+half*(1+epsilon),
-        static_cast<long double>(expected)+std::abs(kh)*epsilon+150*(1+epsilon));
-    const auto rate=std::ceil(std::max(std::abs(low),std::abs(high))/.42L)+64;
-    if(!std::isfinite(low)||!std::isfinite(high)||!std::isfinite(rate)||rate>120000000)return {};
-    return modem::SampledSimulationChannel::PreconversionCapture{static_cast<double>(low),
-        static_cast<double>(high),static_cast<std::uint32_t>(std::max(64.L,rate))};
-}
-
 // A real capture cannot distinguish the two signs of its analytic image.
 // Each admissible branch has its own immutable NCO/input provenance. These
 // facts describe a conditional common link, never full ordinary RF coverage.
@@ -52,9 +34,15 @@ struct HelperInputView {
     double helper_hz=0,clock_center=0,clock_lower=0,clock_upper=0;
     double correction_hz=0,translated_helper_hz=0;
     bool reference_passthrough=false;
+    // Latched q=0 basis: preserve a tighter ordinary RF prior for this view's
+    // whole lifetime. Later precision may select raw cells, never retune PCM.
+    bool original_prior_retained=false;
     helper::CaptureBand input_band{},payload_output_band{};
     bool conjugate=false;
 };
+static_assert(offsetof(HelperInputView,input_band)==
+    (offsetof(HelperInputView,reference_passthrough)+sizeof(bool)+alignof(helper::CaptureBand)-1)/
+        alignof(helper::CaptureBand)*alignof(helper::CaptureBand));
 struct HelperViewBlock {
     std::shared_ptr<const HelperInputView> view;
     std::uint64_t first_sample=0;
@@ -66,6 +54,16 @@ struct HelperViewBlock {
         modem::PatternHelperClockInterval interval;
         std::uint64_t first_sample=0,last_sample=0,captured_end_sample=0;
         std::uint32_t sample_rate=0;
+        enum class Source : std::uint8_t {punctuation_cadence,shared_radio_frequency,shared_frequency_and_punctuation};
+        Source source=Source::punctuation_cadence;
+        const char* source_name()const noexcept {
+            switch(source) {
+                case Source::punctuation_cadence:return "punctuation cadence";
+                case Source::shared_radio_frequency:return "shared-radio frequency";
+                case Source::shared_frequency_and_punctuation:return "shared-radio frequency intersected with punctuation cadence";
+            }
+            return "unknown";
+        }
         bool valid(std::uint32_t expected_rate)const noexcept {
             return interval.valid() && sample_rate && sample_rate==expected_rate && first_sample<=last_sample &&
                 last_sample<captured_end_sample && captured_end_sample-1-last_sample<=
@@ -296,6 +294,67 @@ inline bool shared_helper_search(const modem::Config& config,const HelperInputVi
     return true;
 }
 
+// A q=0 real-PCM view cannot remove a common RF drift by analytic mixing:
+// it deliberately preserves the existing raw image convention. Its ONE
+// bandstop FIR may nevertheless follow the measured helper in place. The
+// original full DATA LF/UTC domain remains authoritative for the passband.
+struct RawHelperNotchDomain {
+    helper_prior_detail::Interval data_minus_helper{},one_plus_clock{};
+    double physical_passband=0;
+    bool valid=false;
+};
+struct RawHelperNotchBands {
+    helper::CaptureBand data{},helper{};
+    bool valid=false;
+};
+inline RawHelperNotchDomain raw_helper_notch_domain(const modem::Config& config,
+        double expected,double passband,double utc_rate_limit)noexcept {
+    using namespace helper_prior_detail;
+    RawHelperNotchDomain result;
+    try {
+    if(!config.oscillator_search || !environment() || !std::isfinite(expected) ||
+       !std::isfinite(passband) || passband<=10)return result;
+    const auto bound=std::numeric_limits<double>::max();
+    const auto clock=modem::helper_reference_data_clock_interval(config,{-bound,bound},utc_rate_limit,
+        modem::HelperReferenceClockRelation::common_corrected_source);
+    if(!clock)return result;
+    const auto fraction=ppm({clock->lower_ppm,clock->upper_ppm});
+    result.one_plus_clock={sum(1,fraction.lower).lower,sum(1,fraction.upper).upper};
+    const auto delta=sum(config.carrier_hz,-expected);
+    const auto half=helper::occupied_bandwidth(config)/2;
+    result.data_minus_helper={sum(delta.lower,-half).lower,sum(delta.upper,half).upper};
+    result.physical_passband=passband;
+    result.valid=finite(result.one_plus_clock) && result.one_plus_clock.lower>0 &&
+        finite(result.data_minus_helper) && result.data_minus_helper.lower<=result.data_minus_helper.upper;
+    return result;
+    }catch(...) {return {};}
+}
+inline RawHelperNotchBands raw_helper_notch_bands(const RawHelperNotchDomain& domain,
+        helper_prior_detail::Interval measured)noexcept {
+    using namespace helper_prior_detail;
+    using shared_helper_detail::plus;
+    using shared_helper_detail::times;
+    RawHelperNotchBands result;
+    if(!domain.valid || !environment() || !finite(measured) || measured.lower<=0 ||
+       measured.lower>measured.upper)return result;
+    const auto signed_data=plus(measured,times(domain.data_minus_helper,domain.one_plus_clock));
+    // A folded real waveform contains both signs. Certify their COMPLETE
+    // absolute-frequency union; there is no claimed inverse analytic image.
+    const auto absolute=[](Interval band) {
+        return helper::CaptureBand{band.lower<=0 && band.upper>=0?0.:
+            std::min(std::abs(band.lower),std::abs(band.upper)),
+            std::max(std::abs(band.lower),std::abs(band.upper))};
+    };
+    result.data=absolute(signed_data);
+    const auto metadata=plus(measured,times({-150,150},domain.one_plus_clock));
+    result.helper={metadata.lower,metadata.upper};
+    result.valid=finite(signed_data) && finite(metadata) &&
+        std::isfinite(result.data.upper_hz) && result.data.lower_hz>=0 &&
+        result.data.upper_hz<domain.physical_passband && result.helper.lower_hz>10 &&
+        result.helper.upper_hz<domain.physical_passband;
+    return result;
+}
+
 class HelperInputFrontend {
     static std::size_t converter_reservation(std::uint32_t input,std::uint32_t output) {
         if(input==output)return sizeof(audio::Resampler);
@@ -316,20 +375,104 @@ class HelperInputFrontend {
         helper::PayloadFilter filter;
         std::uint64_t first_raw=0,next_raw=0,origin=0,first=0,eligible=0;
         std::vector<float> pending;
-        Branch(HelperInputView v,std::uint64_t at,bool realtime=false):view(std::make_shared<const HelperInputView>(v)),
+        RawHelperNotchDomain raw_domain;
+        helper_prior_detail::Interval raw_certified_frequency{};
+        const char* tracking_decline=nullptr;
+        double last_notch_transition_l1=0;
+        bool filter_before_converter()const noexcept {
+            return view->translated_helper_hz<=225 || view->translated_helper_hz+225>=view->logical_rate/2.;
+        }
+        static std::uint64_t logical_origin(const HelperInputView& v,std::uint64_t at,std::size_t delay) {
+            if(at>UINT64_MAX-delay)throw Error("helper filter sample origin exceeds the capture counter");
+            at+=delay;
+            const auto whole=at/v.physical_rate,tail=(at%v.physical_rate)*v.logical_rate/v.physical_rate;
+            if(whole>(UINT64_MAX-tail)/v.logical_rate)
+                throw Error("helper filter sample origin exceeds the logical counter");
+            return whole*v.logical_rate+tail;
+        }
+        Branch(HelperInputView v,std::uint64_t at,bool realtime=false,bool physical_notch=false):view(std::make_shared<const HelperInputView>(v)),
             translator({v.physical_rate,v.correction_hz,v.input_band,at,v.conjugate,realtime},
                        helper::AnalyticFrequencyTranslator::workspace_required()),
-            converter(v.physical_rate,v.logical_rate),filter(v.logical_rate,v.translated_helper_hz),
-            first_raw(at),next_raw(at),origin(at/v.physical_rate*v.logical_rate+
-                (at%v.physical_rate)*v.logical_rate/v.physical_rate),first(origin+filter.delay()) {
-            eligible=origin+static_cast<std::uint64_t>(std::ceil(
+            converter(v.physical_rate,v.logical_rate),
+            filter(physical_notch?v.physical_rate:v.logical_rate,v.translated_helper_hz),
+            first_raw(at),next_raw(at),origin(physical_notch?logical_origin(v,at,filter.delay()):
+                at/v.physical_rate*v.logical_rate+(at%v.physical_rate)*v.logical_rate/v.physical_rate),
+            first(origin+(physical_notch?0:filter.delay())) {
+            if(physical_notch) {
+                // Filter output zero is the raw center at at+M, not at or
+                // at+2M. Admission puts that center on the exact logical grid.
+                const auto quantum=v.physical_rate/std::gcd(v.physical_rate,v.logical_rate);
+                if((at+filter.delay())%quantum)
+                    throw Error("physical helper filter center is off the logical sample grid");
+                const auto warmup=static_cast<long double>(
+                    2*helper::AnalyticFrequencyTranslator::group_delay)/v.physical_rate+
+                    static_cast<long double>(converter.source_lookahead_seconds());
+                const auto samples=std::ceil(warmup*v.logical_rate)+1;
+                if(samples>UINT64_MAX-origin)throw Error("helper filter warmup exceeds the sample counter");
+                eligible=origin+static_cast<std::uint64_t>(samples);
+            }else eligible=origin+static_cast<std::uint64_t>(std::ceil(
                 static_cast<long double>(2*helper::AnalyticFrequencyTranslator::group_delay)*v.logical_rate/v.physical_rate))+
                 filter.delay()+1;
+            // Independent of notch placement, conversion must retain the
+            // ENTIRE raw DATA image hull. The immutable converter rolls off
+            // before its output Nyquist; a physical helper notch cannot make
+            // DATA in that transition/passband gap recoverable.
+            if(v.reference_passthrough && v.payload_output_band.upper_hz>=converter.passband_hz())
+                throw Error("raw DATA band lies outside the immutable converter passband");
             // Fund the maximum queued capture lead before any ordinary owner
             // can depend on this view. No later PCM push grows this capacity.
             pending.reserve(2ULL*v.logical_rate);
             if(filter.maximum_amplitude_error(v.payload_output_band.lower_hz,v.payload_output_band.upper_hz)>.001)
                 throw Error("conditional helper filter does not preserve the payload passband");
+        }
+        bool track_raw_notch(const helper::Reference& reference)noexcept {
+            using namespace helper_prior_detail;
+            const auto decline=[&](const char* reason){tracking_decline=reason;return false;};
+            if(!raw_domain.valid || !environment() || !reference.frequency_valid ||
+               !std::isfinite(reference.frequency_hz) || !std::isfinite(reference.frequency_uncertainty_hz) ||
+               reference.frequency_uncertainty_hz<0 || reference.sample_rate!=view->physical_rate)
+                return decline("raw helper notch lacks a finite original LF/UTC or measured frequency domain");
+            // The tracker already enforces its explicit .5-Hz/s operational
+            // following gate. This is NOT a slew inferred from ppm accuracy or
+            // a lease on future Doppler. Include the actual queued-source age
+            // and symmetric filter support in this local engineering envelope.
+            const auto distance=reference.sample>next_raw?reference.sample-next_raw:next_raw-reference.sample;
+            const auto filter_rate=filter_before_converter()?view->physical_rate:view->logical_rate;
+            const auto support=static_cast<double>(distance)/view->physical_rate+
+                2.*helper::AnalyticFrequencyTranslator::group_delay/view->physical_rate+
+                2.*converter.source_lookahead_seconds()+2.*filter.delay()/filter_rate;
+            const auto radius=sum(reference.frequency_uncertainty_hz,.5*support).upper;
+            const Interval current{sum(reference.frequency_hz,-radius).lower,
+                sum(reference.frequency_hz,radius).upper};
+            if(!finite(current))return decline("raw helper notch support exceeds its finite numeric domain");
+            if(raw_certified_frequency.lower<=current.lower && current.upper<=raw_certified_frequency.upper) {
+                tracking_decline=nullptr;return true;
+            }
+            // A one-Hz hold domain avoids expensive whole-band recertification
+            // on every 20-ms observation. At .5 Hz/s sustained drift its center
+            // needs renewal roughly every two seconds, independent of total
+            // accumulated drift. Every accepted current interval is contained.
+            const Interval proposal{sum(current.lower,-1).lower,sum(current.upper,1).upper};
+            const auto bands=raw_helper_notch_bands(raw_domain,proposal);
+            if(!bands.valid)return decline("raw helper or DATA band moved outside physical capture");
+            if(bands.data.upper_hz>=converter.passband_hz())
+                return decline("raw DATA band moved outside the immutable converter passband");
+            if(!HelperInputFrontend::logical_notch_supported(filter_rate,reference.frequency_hz))
+                return decline("raw helper moved outside the immutable physical/logical notch placement");
+            const auto previous=filter.center_hz();double transition=0;
+            if(!filter.retune(reference.frequency_hz,&transition))
+                return decline("raw helper notch retuning is unsupported in the current FP environment");
+            const auto preserved=filter.maximum_amplitude_error(bands.data.lower_hz,bands.data.upper_hz)<=.001;
+            const auto stopped=filter.maximum_response(bands.helper.lower_hz,bands.helper.upper_hz)<=.001;
+            if(!preserved || !stopped) {
+                // Same rate, formula, length and FP environment: restore old
+                // coefficient bits BEFORE any PCM push. No ring, delay, NCO,
+                // pending output or absolute sample coordinate was changed.
+                (void)filter.retune(previous);
+                return decline("raw helper notch cannot certify full DATA passband and helper metadata stopband");
+            }
+            raw_certified_frequency=proposal;last_notch_transition_l1=transition;
+            tracking_decline=nullptr;return true;
         }
         std::size_t bytes()const noexcept{return sizeof(*this)+sizeof(HelperInputView)+4*sizeof(void*)+translator.workspace_bytes()+
             converter.workspace_bytes()+filter.allocated_bytes()+pending.capacity()*sizeof(float);}
@@ -342,10 +485,21 @@ public:
     // Reserve BOTH real-capture image branches before the first ordinary row
     // can depend on one. This is a lifetime ceiling, including the full fixed
     // pending capacity; actual bytes remain a separate telemetry quantity.
-    static std::size_t reservation_bound(std::uint32_t physical_rate,std::uint32_t logical_rate) {
+    static bool logical_notch_supported(std::uint32_t rate,double helper_hz)noexcept {
+        return rate && std::isfinite(helper_hz) && helper_hz>225 && helper_hz+225<rate/2.;
+    }
+    static std::size_t physical_notch_taps(std::uint32_t rate) {
+        const auto count=static_cast<std::size_t>(std::ceil(rate*.04))|1U;
+        if(count<3||count>4097)throw Error("physical helper filter exceeds its optional 4097-tap bound");
+        return count;
+    }
+    static std::size_t reservation_bound(std::uint32_t physical_rate,std::uint32_t logical_rate,
+            double realtime_helper_hz=0) {
         if(!physical_rate || !logical_rate || logical_rate>120000000 || physical_rate>120000000)
             throw Error("conditional helper reservation has an invalid sample clock");
-        const auto taps=static_cast<std::size_t>((static_cast<std::uint64_t>(logical_rate)+24)/25+4)|1U;
+        auto taps=static_cast<std::size_t>((static_cast<std::uint64_t>(logical_rate)+24)/25+4)|1U;
+        if(realtime_helper_hz>0 && !logical_notch_supported(logical_rate,realtime_helper_hz))
+            taps=std::max(taps,physical_notch_taps(physical_rate));
         const auto branch=sizeof(Branch)+sizeof(HelperInputView)+4*sizeof(void*)+
             helper::AnalyticFrequencyTranslator::workspace_required()+converter_reservation(physical_rate,logical_rate)+
             taps*(sizeof(double)+sizeof(float))+2ULL*logical_rate*sizeof(float)+4096;
@@ -360,12 +514,21 @@ public:
     bool reference_passthrough()const noexcept {
         return branches_[0] && branches_[0]->view->reference_passthrough;
     }
+    bool original_prior_retained()const noexcept {
+        return branches_[0] && branches_[0]->view->original_prior_retained;
+    }
+    const char* tracking_decline_reason()const noexcept {
+        return branches_[0]?branches_[0]->tracking_decline:nullptr;
+    }
+    double last_notch_transition_l1()const noexcept {
+        return branches_[0]?branches_[0]->last_notch_transition_l1:0;
+    }
     void reset()noexcept {branches_={};}
     // Manually enabled reference mode has one upstream converter and one
     // ordinary receiver. Positive real-PCM capture is the supported image;
     // bands crossing DC/Nyquist decline instead of adding a second receiver.
     void admit_realtime(const modem::Config& config,double expected,const helper::Reference& reference,
-            std::uint32_t physical_rate,double passband,std::uint64_t next_raw) {
+            std::uint32_t physical_rate,double passband,std::uint64_t next_raw,double utc_rate_limit=0) {
         if(active())return;
         if(!reference.frequency_valid || reference.sample_rate!=physical_rate ||
            !std::isfinite(reference.frequency_hz) || !std::isfinite(reference.frequency_uncertainty_hz) ||
@@ -374,7 +537,10 @@ public:
         const auto half=helper::occupied_bandwidth(config)/2;
         const auto uncertainty=std::max(32.,4*reference.frequency_uncertainty_hz);
         const bool folded=config.carrier_hz-half-uncertainty<=10;
-        if(folded)correction=0; // Ordinary demodulator applies the measured origin.
+        const bool preserve=modem::helper_reference_prefers_original_prior(config,
+            reference.frequency_uncertainty_hz,expected,utc_rate_limit,
+            modem::HelperReferenceClockRelation::common_corrected_source);
+        if(folded || preserve)correction=0; // Preserve the existing raw input basis.
         const auto data_input=config.carrier_hz-correction;
         const auto low=folded?10.001:std::min(data_input-half,reference.frequency_hz-175)-uncertainty;
         const auto high=std::max(data_input+half,reference.frequency_hz+175)+uncertainty;
@@ -384,24 +550,50 @@ public:
         HelperInputView view;view.id=1;view.budget_serial=budget_serial_;
         view.physical_rate=physical_rate;view.logical_rate=config.sample_rate;
         view.helper_hz=expected;view.correction_hz=correction;
-        view.reference_passthrough=folded;
-        view.translated_helper_hz=folded?reference.frequency_hz:expected;
+        view.reference_passthrough=folded || preserve;view.original_prior_retained=preserve;
+        view.translated_helper_hz=view.reference_passthrough?reference.frequency_hz:expected;
         view.input_band={low,high};
         view.payload_output_band={folded?0.:config.carrier_hz-half-uncertainty,config.carrier_hz+half+uncertainty};
+        RawHelperNotchDomain raw_domain;
+        if(view.reference_passthrough) {
+            raw_domain=raw_helper_notch_domain(config,expected,passband,utc_rate_limit);
+            const auto bands=raw_helper_notch_bands(raw_domain,
+                {helper_prior_detail::sum(reference.frequency_hz,-reference.frequency_uncertainty_hz).lower,
+                 helper_prior_detail::sum(reference.frequency_hz,reference.frequency_uncertainty_hz).upper});
+            if(!bands.valid)throw Error("raw helper notch has no valid original LF/UTC and capture-band certificate");
+            // q=0/conjugate=false is only the existing fixed delay, without a
+            // Hilbert analytic inversion. Its declared positive band need not
+            // pretend a folded DATA image is positive complex baseband.
+            view.input_band={10.001,passband};view.payload_output_band=bands.data;
+        }
+        const bool physical_notch=!logical_notch_supported(view.logical_rate,view.translated_helper_hz);
+        const auto delay=physical_notch?physical_notch_taps(physical_rate)/2:0;
+        if(physical_notch && reservation_bound(physical_rate,config.sample_rate,view.translated_helper_hz)>grant_)
+            throw Error("physical helper filter was not prepaid by its frontend workspace grant");
+        if(physical_notch && !logical_notch_supported(physical_rate,view.translated_helper_hz))
+            throw Error("helper notch is outside both physical and logical passbands");
         const auto quantum=physical_rate/std::gcd(physical_rate,config.sample_rate);
-        const auto remainder=next_raw%quantum;
+        if(next_raw>UINT64_MAX-delay)return;
+        const auto remainder=(next_raw+delay)%quantum;
         if(remainder && next_raw>UINT64_MAX-(quantum-remainder))return;
         const auto first=remainder?next_raw+quantum-remainder:next_raw;
-        auto branch=std::make_unique<Branch>(view,first,!folded);
+        if(first>UINT64_MAX-delay)return;
+        auto branch=std::make_unique<Branch>(view,first,!folded && !preserve,physical_notch);
+        if(view.reference_passthrough) {
+            branch->raw_domain=raw_domain;
+            if(!branch->track_raw_notch(reference))throw Error(branch->tracking_decline);
+        }
         if(sizeof(*this)+branch->bytes()>grant_)throw Error("realtime helper converter exceeds its workspace grant");
         branches_[0]=std::move(branch);
     }
     bool track_frequency(const helper::Reference& reference,double expected)noexcept {
         if(!reference.frequency_valid || !std::isfinite(reference.frequency_hz))return false;
         auto& branch=branches_[0];
+        // A prior-preserving view never changes its q=0 oscillator slope or
+        // phase, even if later observations become more precise. Existing
+        // corrected views retain their old continuous-NCO policy unchanged.
         if(branch && branch->view->reference_passthrough)
-            return reference.sample_rate==branch->view->physical_rate &&
-                std::abs(reference.frequency_hz-branch->view->translated_helper_hz)<25;
+            return branch->track_raw_notch(reference);
         return branch && reference.sample_rate==branch->view->physical_rate &&
             branch->translator.track_frequency(expected-reference.frequency_hz);
     }
@@ -439,15 +631,24 @@ public:
                 const auto count=std::min(translated.size(),input.size()-at);
                 branch.translator.push(input.subspan(at,count),std::span(translated).first(count),first_raw+at);
                 branch.next_raw+=count;at+=count;
+                // A helper outside the logical Nyquist band is removed
+                // BEFORE decimation. The same single FIR owner is used; no
+                // unfiltered helper metadata can alias into payload samples.
+                const auto converter_count=branch.filter_before_converter()?
+                    branch.filter.push(std::span(translated).first(count),filtered):count;
+                const auto converter_input=branch.filter_before_converter()?
+                    std::span<const float>(filtered).first(converter_count):std::span<const float>(translated).first(count);
                 std::size_t consumed=0;
                 for(;;) {
-                    const auto progress=branch.converter.process(std::span(translated).first(count).subspan(consumed),converted);
+                    const auto progress=branch.converter.process(converter_input.subspan(consumed),converted);
                     consumed+=progress.consumed;
-                    const auto produced=branch.filter.push(std::span(converted).first(progress.produced),filtered);
+                    const auto produced=branch.filter_before_converter()?progress.produced:
+                        branch.filter.push(std::span(converted).first(progress.produced),filtered);
+                    const auto* output=branch.filter_before_converter()?converted.data():filtered.data();
                     if(produced) {
                         if(branch.pending.size()+produced>2ULL*branch.view->logical_rate)
                             throw Error("conditional helper input-view queue exceeded its bounded capture lead");
-                        branch.pending.insert(branch.pending.end(),filtered.begin(),filtered.begin()+produced);
+                        branch.pending.insert(branch.pending.end(),output,output+produced);
                         if(branch.first<branch.eligible) {
                             const auto warmup=static_cast<std::size_t>(std::min<std::uint64_t>(
                                 branch.pending.size(),branch.eligible-branch.first));
@@ -455,9 +656,9 @@ public:
                         }
                     }
                     if(!progress.consumed && !progress.produced)break;
-                    if(consumed==count && !progress.produced)break;
+                    if(consumed==converter_count && !progress.produced)break;
                 }
-                if(consumed!=count)throw Error("conditional helper resampler did not consume its physical input");
+                if(consumed!=converter_count)throw Error("conditional helper resampler did not consume its physical input");
             }
         }
         if(bytes()>grant_)throw Error("conditional helper input views exceed their workspace grant");

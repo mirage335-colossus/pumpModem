@@ -1,6 +1,8 @@
 #pragma once
 #include "datapump/live.hpp"
+#include "datapump/channel.hpp"
 #include "datapump/helper_receiver.hpp"
+#include "datapump/helper_reference_precision.hpp"
 #include "datapump/helper_frontend.hpp"
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/pattern_search.hpp"
@@ -16,6 +18,44 @@
 #include <numbers>
 
 namespace datapump::live::detail {
+// Joined current-owner pair totals, not independent per-column maxima or a
+// claim that every owner uses one mask. A broad owner must not hide another
+// owner's qualified narrowing. This call-scope fold owns no allocation.
+struct RealtimeHelperWindowSummary {
+    std::uint64_t original_pairs=0,selected_pairs=0;
+    bool narrowed=false,clock_active=false,valid=true;
+    void observe(const modem::PatternHelperFrequencyWindowState& window) noexcept {
+        if(!valid)return;
+        const auto original=static_cast<std::uint64_t>(window.original_pairs);
+        const auto selected=static_cast<std::uint64_t>(window.selected_pairs);
+        if(selected>original || original>UINT64_MAX-original_pairs || selected>UINT64_MAX-selected_pairs) {
+            original_pairs=selected_pairs=0;narrowed=clock_active=valid=false;return;
+        }
+        original_pairs+=original;selected_pairs+=selected;
+        const bool qualified=window.supported && window.active && selected && selected<original;
+        narrowed|=qualified;clock_active|=qualified && window.clock_qualified;
+    }
+};
+inline std::optional<modem::SampledSimulationChannel::PreconversionCapture> shared_helper_capture(
+        const modem::Config& config,double expected) {
+    if(!config.oscillator_search)return {};
+    const auto& policy=*config.oscillator_search;
+    if(policy.reference!=modem::OscillatorReference::shared_radio || policy.rf_shift_hz<=0)return {};
+    const auto sign=policy.sideband==modem::OscillatorSideband::upper?1.L:-1.L;
+    const auto epsilon=static_cast<long double>(policy.rf.accuracy_ppm)*policy.margin*1e-6L;
+    const auto kd=sign*policy.rf_shift_hz+config.carrier_hz,kh=sign*policy.rf_shift_hz+expected;
+    const auto half=helper::occupied_bandwidth(config)/2;
+    const auto low=std::min(static_cast<long double>(config.carrier_hz)-std::abs(kd)*epsilon-half*(1+epsilon),
+        static_cast<long double>(expected)-std::abs(kh)*epsilon-150*(1+epsilon));
+    const auto high=std::max(static_cast<long double>(config.carrier_hz)+std::abs(kd)*epsilon+half*(1+epsilon),
+        static_cast<long double>(expected)+std::abs(kh)*epsilon+150*(1+epsilon));
+    const auto rate=std::ceil(std::max(std::abs(low),std::abs(high))/.42L)+64;
+    if(!std::isfinite(low)||!std::isfinite(high)||!std::isfinite(rate)||rate>120000000)return {};
+    return modem::SampledSimulationChannel::PreconversionCapture{static_cast<double>(low),
+        static_cast<double>(high),static_cast<std::uint32_t>(std::max(64.L,rate))};
+}
+
+
 // Raw history deliberately retains measurements, not Metadata's string
 // owner. Metadata already has its own reception publication owner. Keeping all
 // four numeric/provenance records avoids borrowing extra payload workspace as
@@ -485,12 +525,43 @@ inline HelperReceiveEnvelopeBound helper_receive_envelope_bound(const Settings& 
     }
     return result;
 }
+inline helper::PlacementBand helper_placement_band(const Settings&);
+inline std::uint32_t helper_predicted_capture_sample_rate(const Settings&,const modem::Config&);
+// Same centered-support geometry as the optional fixed Resampler, without
+// allocating one during a source-envelope forecast. Include every intermediate
+// stage's finite queue just as source_lookahead_seconds() does.
+inline long double helper_converter_lookahead(std::uint32_t input,std::uint32_t output) {
+    if(input==output)return 2.L/input;
+    if(static_cast<std::uint64_t>(input)>4ULL*output) {
+        auto middle=output;while(4ULL*middle<input)middle*=4;
+        return helper_converter_lookahead(input,middle)+helper_converter_lookahead(middle,output)+256.L/middle;
+    }
+    const auto ratio=std::min(1.,static_cast<double>(output)/input);
+    const auto radius=std::ceil(std::nextafter(48/ratio,std::numeric_limits<double>::infinity()));
+    return (static_cast<long double>(radius)+2)/input;
+}
+inline double helper_physical_notch_support(std::uint32_t physical_rate,std::uint32_t logical_rate) {
+    if(!physical_rate||!logical_rate)throw Error("physical helper support has no sample clock");
+    const auto count=static_cast<std::size_t>(std::ceil(physical_rate*.04))|1U;
+    if(count<3||count>4097)throw Error("physical helper filter exceeds its optional 4097-tap bound");
+    // Complete actually observed Hilbert startup, both sides of the centered
+    // physical notch, both resampler startup/production supports, one raw
+    // grid-alignment step, and ceiling/+1 rounding of the eligible logical bin.
+    const auto quantum=physical_rate/std::gcd(physical_rate,logical_rate);
+    const auto support=(2.L*helper::AnalyticFrequencyTranslator::group_delay+count-1+quantum)/physical_rate+
+        2*helper_converter_lookahead(physical_rate,logical_rate)+2.L/logical_rate;
+    return std::nextafter(static_cast<double>(support),std::numeric_limits<double>::infinity());
+}
+inline helper::TonePrecisionPrediction helper_lead_precision_prediction(
+    const Settings&,const modem::Config&,double baseline_lead_seconds,double maximum_source_capture_ratio);
+
 // The acquisition owner supplies its actual aperture/warmup here when its
 // descriptor is available. An absent descriptor asserts no acquisition
 // precision, and cannot qualify presence, frequency, phase or timing.
 inline helper::EnvelopeRequirements helper_envelope_requirements(const Settings& settings,
         const modem::Config& config,const HelperReceiveEnvelopeBound& receive,
-        const std::optional<helper::EnvelopeRequirements>& acquisition={}) {
+        const std::optional<helper::EnvelopeRequirements>& acquisition={},
+        helper::TonePrecisionPrediction* precision=nullptr) {
     auto result=acquisition.value_or(helper::EnvelopeRequirements{});
     if(!config.sample_rate)throw Error("Helper Carrier envelope has no source sample clock");
     // Reserve every allowed physical profile, including later backend/epoch
@@ -520,6 +591,32 @@ inline helper::EnvelopeRequirements helper_envelope_requirements(const Settings&
             transfer::effective_clock_sync(options)?modem::utc_transmit_rate_limit(config):0);
         result.maximum_source_capture_ratio=std::max(result.maximum_source_capture_ratio,
             1+search.requested_clock_half_width_ppm*1e-6);
+    }
+    if(settings.helper.power_w>0) {
+        // Compute the existing aperture/latency baseline first. Prediction only
+        // adds bounded airtime; it never changes the Robust source calendar.
+        try {
+            const auto raw_rate=helper_predicted_capture_sample_rate(settings,config);
+            if(raw_rate)result.frequency_acquisition_seconds=std::max(
+                result.frequency_acquisition_seconds,8192./raw_rate+.4);
+            if(raw_rate) {
+                const auto expected=helper::plan(settings.helper,helper_placement_band(settings),raw_rate,0,
+                    modem::outer_dsss_transmit_gain(config)).frequency_hz;
+                if(expected<=225 || expected+225>=config.sample_rate/2.)
+                    result.frontend_lookahead_seconds=std::max(result.frontend_lookahead_seconds,
+                        helper_physical_notch_support(raw_rate,config.sample_rate));
+            }
+        }catch(const Error&) {} // Optional forecast cannot remove the physical baseline.
+        catch(const std::bad_alloc&) {}
+        const auto baseline=helper::plan_envelope(config,result);
+        auto forecast=helper_lead_precision_prediction(settings,config,
+            static_cast<double>(baseline.lead_seconds),result.maximum_source_capture_ratio);
+        // Capped airtime remains planned when this valid request cannot predict
+        // precision; it grants no frequency/phase/clock authority. Invalid or
+        // allocation-failed forecasts keep both flags false and yield safely.
+        if(forecast.supported || forecast.extension_capped)
+            result.frequency_precision_extension_seconds=forecast.extra_lead_seconds;
+        if(precision)*precision=std::move(forecast);
     }
     return result;
 }
@@ -618,6 +715,50 @@ inline helper::FrequencyPrecisionOptions helper_precision_options(const modem::C
         result.maximum_audio_clock_ppm=std::max(result.maximum_audio_clock_ppm,
             config.oscillator_search->lf.accuracy_ppm*config.oscillator_search->margin);
     }
+    return result;
+}
+
+// Model the format selected by the same helper audio/channel negotiation.
+// Hardware runtime qualification still uses the actual negotiated raw format.
+inline std::uint32_t helper_predicted_capture_sample_rate(const Settings& settings,
+        const modem::Config& config) {
+    if(!settings.simulation)return helper::minimum_output_rate(settings.helper,
+        helper_placement_band(settings),config.sample_rate);
+    const auto h=helper::plan(settings.helper,helper_placement_band(settings),120000000,0,
+        modem::outer_dsss_transmit_gain(config)).frequency_hz;
+    return modem::SampledSimulationChannel::planned_physical_sample_rate(config,settings.helper,
+        helper_occupied_bandwidth(settings),shared_helper_capture(config,h));
+}
+// Shared TX/Planner inputs. Metadata changes expected clean-tone support,
+// never receiver qualification. Callsigns use their actual symbol count; three
+// time symbols conservatively cover current/future Unix timestamps (early test
+// epochs may use fewer). The current software always punctuates helper.
+inline helper::TonePrecisionRequest helper_tone_precision_request(const Settings& settings,
+        const modem::Config& config,std::uint32_t physical_rate,double straight_cn0_db_hz,
+        double baseline_lead_seconds,double maximum_source_capture_ratio=1) {
+    helper::TonePrecisionRequest request;
+    request.sample_rate=physical_rate;request.straight_cn0_db_hz=straight_cn0_db_hz;
+    request.phase_noise_radians_per_sqrt_second=settings.simulation?
+        settings.simulation_phase_noise_degrees_per_sqrt_second*std::numbers::pi/180:
+        helper_precision_options(config).phase_noise_radians_per_sqrt_second;
+    const auto& callsign=settings.helper.callsign;
+    request.metadata_symbols=!settings.transfer.key && !callsign.empty()?
+        helper::callsign_packet(callsign).count:settings.helper.timecode?3:0;
+    request.punctuate=true;request.baseline_lead_seconds=baseline_lead_seconds;
+    request.maximum_source_capture_ratio=maximum_source_capture_ratio;
+    return request;
+}
+inline helper::TonePrecisionPrediction helper_lead_precision_prediction(const Settings& settings,
+        const modem::Config& config,double baseline_lead_seconds,double maximum_source_capture_ratio) {
+    helper::TonePrecisionPrediction result;
+    try {
+        const auto physical_rate=helper_predicted_capture_sample_rate(settings,config);
+        const auto level=helper_configured_reference_level(settings,config);
+        result=helper::predict_tone_precision(helper_tone_precision_request(settings,config,
+            physical_rate,level.straight_cn0_db_hz,baseline_lead_seconds,maximum_source_capture_ratio));
+    }catch(const Error& error) {
+        try {result.reason=error.what();}catch(const std::bad_alloc&) {}
+    }catch(const std::bad_alloc&) {} // Precision prediction yields before waveform functionality.
     return result;
 }
 

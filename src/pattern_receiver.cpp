@@ -359,9 +359,20 @@ struct PatternReceiver::Impl {
         std::vector<double> frequency_scores;
         std::size_t confirmed=0,gap_slots=0;
         std::uint64_t confirmed_end=0;
-        // Calendar continuation is predicted from the last accepted start.
-        // Failed slots/nulls never reset accumulated timing displacement.
-        std::uint64_t anchor_start=0,anchor_index=0;
+        // Immutable calendar geometry selects this union's active member.
+        // Only calendar paths read physical start/index anchors; continuous
+        // helpers reuse those SAME16B for one exact pre-last prefix checkpoint.
+        struct CalendarAnchor {std::uint64_t start=0,index=0;};
+        struct PrefixCheckpoint {
+            double support=std::numeric_limits<double>::quiet_NaN();
+            std::uint64_t end=0;
+        };
+        union Coordinates {
+            CalendarAnchor calendar{};
+            PrefixCheckpoint prefix;
+        } coordinates{};
+        static_assert(sizeof(Coordinates)==2*sizeof(std::uint64_t));
+        static_assert(alignof(Coordinates)==alignof(std::uint64_t));
         long double absent_samples=0;
         std::size_t frequency=0;
         bool admitted=false,established=false,pending_gap=false,helper_gap_protected=false;
@@ -1705,7 +1716,7 @@ struct PatternReceiver::Impl {
     }
     std::uint64_t track_radius(const Track& track) const {
         if(!packed_calendar && !burst_plan)return 2;
-        const auto distance=source_start(track.index,track.phase_lower)-source_start(track.anchor_index,track.phase_lower);
+        const auto distance=source_start(track.index,track.phase_lower)-source_start(track.coordinates.calendar.index,track.phase_lower);
         const auto radius=2+std::ceil(static_cast<long double>(distance)*packed_rate_displacement/bin_samples);
         if(!std::isfinite(radius) || radius>std::numeric_limits<std::uint64_t>::max()/2 ||
            radius>(ring.size()-std::min(ring.size(),length))/2)
@@ -1714,11 +1725,11 @@ struct PatternReceiver::Impl {
     }
     std::uint64_t track_start(const Track& track,std::uint64_t index) const {
         if(!packed_calendar && !burst_plan)return track.next+advance_bins(track.index,track.phase_lower,track.frequency);
-        const auto delta=source_start(index,track.phase_lower)-source_start(track.anchor_index,track.phase_lower);
+        const auto delta=source_start(index,track.phase_lower)-source_start(track.coordinates.calendar.index,track.phase_lower);
         const auto offset=std::round(static_cast<long double>(delta)/clock_ratio(track.frequency)/bin_samples);
-        if(!std::isfinite(offset) || offset>std::numeric_limits<std::uint64_t>::max()-track.anchor_start)
+        if(!std::isfinite(offset) || offset>std::numeric_limits<std::uint64_t>::max()-track.coordinates.calendar.start)
             throw Error("packed complex continuation coordinate would overflow");
-        return track.anchor_start+static_cast<std::uint64_t>(offset);
+        return track.coordinates.calendar.start+static_cast<std::uint64_t>(offset);
     }
     std::pair<long double,long double> original_burst_rates() const {
         return {burst_policy->minimum_rate,burst_policy->maximum_rate};
@@ -1753,7 +1764,7 @@ struct PatternReceiver::Impl {
                     burst_policy->capture_revoked=true;accepted.reset();
                 }
             }
-            if(accepted){track.anchor_start=*accepted;track.anchor_index=track.index;}
+            if(accepted){track.coordinates.calendar.start=*accepted;track.coordinates.calendar.index=track.index;}
             track.next=track_start(track,symbol_schedule_detail::add(track.index,1));
         } else track.next=accepted.value_or(track.next)+advance_bins(track.index,track.phase_lower,track.frequency);
         track.index=symbol_schedule_detail::add(track.index,1);
@@ -2438,6 +2449,7 @@ struct PatternReceiver::Impl {
     }
     void emit_gap(Track& track,std::uint64_t resumed_sample,std::uint64_t resumed_symbol) {
         if(!track.gap_slots)return;
+        if(!calendar_symbols())track.coordinates.prefix={std::numeric_limits<double>::quiet_NaN(),UINT64_MAX};
         publish(track,false,true);
         if(bursts.size()>=search.track_limit)throw Error("pattern output queue requires draining");
         PatternBurst event;
@@ -2781,6 +2793,7 @@ struct PatternReceiver::Impl {
                     if(track.admitted && !gap_expired) {
                         if(!track.pending_gap) {
                             track.gap_slots=track.burst.bits.size()-track.confirmed;
+                            if(!calendar_symbols())track.coordinates.prefix={std::numeric_limits<double>::quiet_NaN(),UINT64_MAX};
                             track.burst.bits.resize(track.confirmed);
                         }
                         if(track.gap_slots==std::numeric_limits<std::size_t>::max())throw Error("pattern missing-slot count overflow");
@@ -2812,7 +2825,9 @@ struct PatternReceiver::Impl {
                     const auto bound=score>n?score-n-n*std::log(score/n)-track.penalty-continuation_penalty(radius):0;
                     if(bound<threshold()) {
                         if(track.admitted) {
-                            track.gap_slots=track.burst.bits.size()-track.confirmed;track.burst.bits.resize(track.confirmed);
+                            track.gap_slots=track.burst.bits.size()-track.confirmed;
+                            if(!calendar_symbols())track.coordinates.prefix={std::numeric_limits<double>::quiet_NaN(),UINT64_MAX};
+                            track.burst.bits.resize(track.confirmed);
                             track.pending_gap=true;
                             track.total_score=track.confirmed_score;track.pending_score=track.penalty=0;
                             track.total_support=track.confirmed_support;
@@ -2823,6 +2838,8 @@ struct PatternReceiver::Impl {
                     }
                 }
                 if(standalone) {
+                    if(!calendar_symbols() && selected.lower!=track.burst.stream_phase_samples)
+                        track.coordinates.prefix={std::numeric_limits<double>::quiet_NaN(),UINT64_MAX};
                     emit_gap(track,best.first_sample,best.stream_symbol);
                     track.phase_lower=selected.lower;track.phase_upper=selected.upper;
                     track.burst.stream_phase_samples=selected.lower;
@@ -2840,14 +2857,25 @@ struct PatternReceiver::Impl {
                         std::fill(track.frequency_scores.begin(),track.frequency_scores.end(),0.);
                         track.confirmed=0;track.confirmed_score=0;
                         track.total_support=track.confirmed_support=0;
+                        if(!calendar_symbols())track.coordinates.prefix=Track::PrefixCheckpoint{};
                     }
                 }
                 if(track.burst.bits.size()==search.bit_limit && track.admitted && !standalone) {
-                    track.gap_slots=track.burst.bits.size()-track.confirmed+1;track.burst.bits.resize(track.confirmed);
+                    track.gap_slots=track.burst.bits.size()-track.confirmed+1;
+                    if(!calendar_symbols())track.coordinates.prefix={std::numeric_limits<double>::quiet_NaN(),UINT64_MAX};
+                    track.burst.bits.resize(track.confirmed);
                     track.pending_gap=true;track.pending_score=track.penalty=0;track.total_score=track.confirmed_score;
                     track.total_support=track.confirmed_support;
                     advance_track(track);continue;
                 }
+                // This evidence is available NOW even for an unconfirmed
+                // weak tail. Preserve it only if this step confirms the chain;
+                // no future symbol's support is attributed to the old prefix.
+                const auto pre_last_support=track.total_support;
+                const auto pre_last_end=track.burst.end_sample;
+                const bool checkpoint=!calendar_symbols() && track.coordinates.prefix.end!=UINT64_MAX &&
+                    !track.pending_gap && !track.gap_slots &&
+                    (track.helper_gap_protected || track.burst.helper_acquired || helper_gap_protection);
                 append_bit(track.burst.bits,static_cast<std::uint8_t>(best.bit));track.burst.end_sample=best.end_sample;
                 track.total_score+=best.score;track.pending_score+=track.established?best.score:chain_score;track.penalty+=continuation_penalty(radius);
                 track.total_support+=symbol_support;
@@ -2872,6 +2900,10 @@ struct PatternReceiver::Impl {
                     if(track.confirmed>prior_confirmed)record_link(selected_frequency,track.frequency_origin_hz);
                     track.confirmed_score=track.total_score;track.pending_score=0;track.penalty=0;
                     track.confirmed_support=track.total_support;
+                    if(!calendar_symbols() && track.coordinates.prefix.end!=UINT64_MAX) {
+                        track.coordinates.prefix=checkpoint?Track::PrefixCheckpoint{pre_last_support,pre_last_end}:
+                            Track::PrefixCheckpoint{};
+                    }
                     audio::trace::record("pattern_confirmation",[&](auto& f) {
                         f.add("phase","continuation");f.add("epoch",config.stream_epoch);f.add("input_samples",sample);
                         f.add("stream_first_sample",track.burst.stream_first_sample);f.add("stream_first_symbol",track.burst.stream_first_symbol);
@@ -3006,7 +3038,11 @@ struct PatternReceiver::Impl {
             }
         }
         track.burst.stream_phase_samples=track.phase_lower;
-        track.anchor_start=item.first_sample/bin_samples;track.anchor_index=item.stream_symbol;track.frequency=f;
+        if(calendar_symbols()) {
+            track.coordinates.calendar.start=item.first_sample/bin_samples;
+            track.coordinates.calendar.index=item.stream_symbol;
+        } else std::construct_at(&track.coordinates.prefix,Track::PrefixCheckpoint{});
+        track.frequency=f;
         track.next=(packed_calendar || burst_plan)?track_start(track,track.index):
             item.first_sample/bin_samples+advance_bins(item.stream_symbol,track.phase_lower,f);
         track.total_score=item.score;track.penalty=std::log(2.);
@@ -3956,7 +3992,10 @@ struct PatternReceiver::Impl {
         const auto consumed=std::max(t.burst.end_sample,guide.end_sample);
         // This is the same published prefix. It emits no bit and lends no
         // reused score/support to future admission; measure excludes this fence.
-        t.anchor_start=start;t.anchor_index=guide.stream_symbol;t.frequency=f;t.next=start+advance;
+        // startup_guide_owner requires a noncalendar public receiver. Its
+        // consumption-fence refinement supplies no fresh prefix evidence.
+        t.coordinates.prefix={std::numeric_limits<double>::quiet_NaN(),UINT64_MAX};
+        t.frequency=f;t.next=start+advance;
         t.burst.first_sample=t.burst.end_sample=t.confirmed_end=consumed;
         t.burst.frequency_hz=guide.frequency_hz;
         std::fill(t.frequency_scores.begin(),t.frequency_scores.end(),0.);
@@ -5344,6 +5383,25 @@ std::vector<PatternBurst> PatternReceiver::take_bursts(){
 PatternBurst PatternReceiver::provisional()const{return impl_->fallback?impl_->fallback->provisional():impl_->provisional();}
 std::optional<PatternSourceIdentity> PatternReceiver::source_identity(const PatternBurst& burst)const {
     return impl_->source_identity(burst.stream_first_symbol,burst.stream_phase_samples);
+}
+std::optional<PatternPrefixSupport> PatternReceiver::prefix_support_before_last(
+        std::uint64_t first,std::uint64_t symbol)const noexcept {
+    const auto& s=*impl_;
+    if(s.fallback || s.calendar_symbols() || s.finished || s.early_eof_pending || s.final_component_replay)return {};
+    for(const auto& t:s.tracks) {
+        const auto& b=t.burst;
+        if(b.stream_first_sample!=first || b.stream_first_symbol!=symbol || !t.established ||
+           t.pending_gap || t.gap_slots || b.first_stream_symbol<symbol ||
+           t.confirmed>UINT64_MAX-b.first_stream_symbol)continue;
+        const auto after=b.first_stream_symbol+t.confirmed;
+        if(after<symbol || after-symbol<2)return {};
+        const auto& checkpoint=t.coordinates.prefix;
+        if(checkpoint.end==UINT64_MAX || checkpoint.end<=first || checkpoint.end>t.confirmed_end ||
+           !std::isfinite(checkpoint.support) || checkpoint.support<0 ||
+           checkpoint.support>static_cast<long double>(checkpoint.end-first))return {};
+        return PatternPrefixSupport{first,symbol,after-symbol-1,checkpoint.end,b.stream_phase_samples,checkpoint.support};
+    }
+    return {};
 }
 bool PatternReceiver::retains_stream(std::uint64_t first_sample,std::uint64_t first_symbol)const {
     const auto& s=*impl_;

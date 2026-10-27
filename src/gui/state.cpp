@@ -287,6 +287,7 @@ bool Signals::update(SignalLine line) {
         line.validated=false;line.binary=false;line.reception_id.clear();line.text_message=false;
         line.received_bits=line.expected_bits=0;line.raw_bits.clear();line.pattern_score.reset();
         line.preamble_received_percent.reset();line.pre_fec_accuracy.reset();line.fec_stats={};
+        line.missing_symbols=0;line.recovery_progress={};
     }
     if (line.binary) {
         line.validated=false; line.reception_id.clear(); line.text_message=false;
@@ -303,7 +304,14 @@ bool Signals::update(SignalLine line) {
             ((found->binary || found->pattern_score || found->helper_carrier) && found->complete && !line.complete)))return false;
         *found=std::move(line);
     } else {
-        if (lines_.size()>=64) lines_.pop_front();
+        if (lines_.size()>=64) {
+            const auto helper=std::find_if(lines_.begin(),lines_.end(),[](const auto& row){return row.helper_carrier;});
+            if(helper!=lines_.end())lines_.erase(helper);
+            // Optional helper history cannot displace a retained payload row.
+            // A full payload-only history may decline a new helper episode.
+            else if(line.helper_carrier)return false;
+            else lines_.pop_front();
+        }
         lines_.push_back(std::move(line));
     }
     return true;

@@ -104,6 +104,9 @@ EnvelopePlan plan_envelope(const modem::Config& config,const EnvelopeRequirement
     for(const auto duration:{requirements.frequency_acquisition_seconds,requirements.frontend_lookahead_seconds,
                              requirements.receiver_buffer_deficit_seconds})
         if(!std::isfinite(duration)||duration<0)throw Error("invalid Helper Carrier envelope duration");
+    if(!std::isfinite(requirements.frequency_precision_extension_seconds)||
+       requirements.frequency_precision_extension_seconds<0||requirements.frequency_precision_extension_seconds>36)
+        throw Error("invalid Helper Carrier precision lead extension");
     if(!std::isfinite(requirements.maximum_source_capture_ratio)||requirements.maximum_source_capture_ratio<=0)
         throw Error("invalid Helper Carrier envelope clock ratio");
     const auto ratio=std::max(1.L,static_cast<long double>(requirements.maximum_source_capture_ratio));
@@ -114,6 +117,12 @@ EnvelopePlan plan_envelope(const modem::Config& config,const EnvelopeRequirement
     EnvelopePlan result;
     result.lead_seconds=aligned_duration(ratio*(std::max(2.L,
         static_cast<long double>(requirements.frequency_acquisition_seconds))+lookahead),rate);
+    auto precision_extension=aligned_duration(
+        static_cast<long double>(requirements.frequency_precision_extension_seconds),rate);
+    // 36 seconds is exactly 90 dwells. Clamp only input-rounding residue;
+    // validated additional airtime may never exceed that independent cap.
+    precision_extension=std::min(36.L,precision_extension);
+    result.lead_seconds+=precision_extension;
     result.tail_seconds=aligned_duration(ratio*(std::max({2.L,ordinary_tail,
         static_cast<long double>(requirements.receiver_buffer_deficit_seconds)})+lookahead),rate);
     result.preparation_seconds=result.lead_seconds+dwell+1/rate;

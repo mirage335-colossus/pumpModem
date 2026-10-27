@@ -13,6 +13,7 @@
 #include "../src/receiver_probability.hpp"
 #include "../src/live_receiver_admission.hpp"
 #include "../src/estimate_cancellation.hpp"
+#include "../src/helper_reference_search.hpp"
 #include <atomic>
 #include <thread>
 #include "../src/pattern_correlator_batch.hpp"
@@ -463,6 +464,261 @@ void sustained_hardware_acquisition() {
         simulated.cpu_seconds>0&&simulated.gpu_seconds>0,
         "hardware steady allowance must not replace finite simulation estimates");
     }
+}
+void rolling_live_simulation_workload() {
+    transfer::Options o;auto& c=o.modem;
+    c.sample_rate=2000;c.carrier_hz=500;c.bandwidth_hz=200;c.spreading_factor=128;
+    c.integration_seconds=.64;c.pattern_symbols=true;c.constellation_bits=1;c.scramble=true;
+    c.stream_epoch=1800000000;o.key.emplace(Bytes(32,0x5c));o.search_seconds=3;
+    o.automatic_receive_profiles=false;o.dsp_workspace_bytes=64*1024*1024;
+    modem::OscillatorSearchConfig oscillator;oscillator.lf={.001,0};oscillator.rf={.01,0};
+    oscillator.rf_shift_hz=3e7;oscillator.margin=3;
+    oscillator.reference=modem::OscillatorReference::independent_audio;c.oscillator_search=oscillator;
+    live::Settings settings;settings.transfer=o;settings.simulation=true;
+    settings.content_limit=o.content_limit;settings.dsp_workspace_bytes=o.dsp_workspace_bytes;
+    settings.simulation_clock_error_ppm=0;settings.simulation_phase_noise_degrees_per_sqrt_second=0;
+    const auto draft=wire(1,c);const auto mode=simulation::ReceiverWorkMode::sampled_simulation;
+    const auto finite=simulation::estimate(draft,o,true,clean_channel(),{},1,true,100,32,mode);
+    const auto rolling=simulation::estimate_with_receiver_settings(draft,o,true,clean_channel(),settings,
+        {},1,true,100,32,mode);
+    check(finite.receiver_work_supported&&rolling.receiver_work_supported&&
+          finite.receiver_workspace_supported&&rolling.receiver_workspace_supported,
+          "rolling simulation fixture lost its original ordinary receiver or fixed workspace");
+    check(finite.new_epoch_admissions==0&&!finite.hardware_sustained_modeled&&
+          rolling.new_epoch_admissions>=std::floor(rolling.simulated_seconds)&&
+          rolling.new_epoch_admissions<=std::ceil(rolling.simulated_seconds)+1&&
+          rolling.new_epoch_full_fft_batches>0&&rolling.new_epoch_setup_seconds>0&&
+          rolling.new_epoch_frontend_seconds>0&&rolling.hardware_sustained_modeled&&
+          rolling.hardware_sustained_realtime_ratio>0&&rolling.receiver_cpu_seconds>finite.receiver_cpu_seconds,
+          "ordinary Live simulation omitted one-new-UTC-cohort-per-second lifecycle work");
+    // Lifecycle changes cost only: no waveform, Rate, SNR, evidence/trial,
+    // probability, backend or workspace change may create the apparent gain.
+    near(rolling.simulated_seconds,finite.simulated_seconds,"rolling context changed physical observation duration");
+    near(rolling.logical_search_trials,finite.logical_search_trials,"rolling cost changed one-bank logical trials");
+    near(rolling.logical_acquisition_threshold,finite.logical_acquisition_threshold,"rolling cost changed admission threshold");
+    near(rolling.success_probability,finite.success_probability,"rolling cost changed payload probability");
+    near(rolling.one_bit_success_probability,finite.one_bit_success_probability,"rolling cost changed one-bit probability");
+    near(rolling.modeled_symbol_snr_db,finite.modeled_symbol_snr_db,"rolling cost changed payload SNR");
+    check(rolling.frequency_rate_hypotheses==finite.frequency_rate_hypotheses&&
+          rolling.epoch_hypotheses==finite.epoch_hypotheses&&
+          rolling.receiver_geometry.symbol_samples==finite.receiver_geometry.symbol_samples&&
+          rolling.receiver_geometry.fine_chip_samples==finite.receiver_geometry.fine_chip_samples&&
+          rolling.receiver_geometry.receiver_strategy_selected==finite.receiver_geometry.receiver_strategy_selected&&
+          rolling.receiver_geometry.workspace_bytes==o.dsp_workspace_bytes&&
+          finite.receiver_geometry.workspace_bytes==o.dsp_workspace_bytes,
+          "rolling work silently changed original search, backend, Rate or byte budget");
+    auto longer=draft;longer.total_seconds+=10; // Same one-bit desired stream; longer listening only.
+    const auto extended=simulation::estimate_with_receiver_settings(longer,o,true,clean_channel(),settings,
+        {},1,false,100,32,mode);
+    check(extended.new_epoch_admissions>=rolling.new_epoch_admissions+9&&
+          extended.receiver_cpu_seconds>rolling.receiver_cpu_seconds,
+          "continuing Live simulation stopped pricing fresh epochs after a finite one-bit horizon");
+    near(extended.hardware_sustained_realtime_ratio,rolling.hardware_sustained_realtime_ratio,
+        "sustained Live simulation cost depended on draft duration");
+    auto fixed=o;fixed.timestamp=1800000000;auto fixed_settings=settings;fixed_settings.transfer=fixed;
+    const auto anchored=simulation::estimate_with_receiver_settings(draft,fixed,true,clean_channel(),fixed_settings,
+        {},1,false,100,32,mode);
+    check(anchored.new_epoch_admissions==0&&anchored.new_epoch_frontend_seconds==0&&!anchored.hardware_sustained_modeled,
+          "a fixed timestamp was incorrectly promoted to ordinary rolling admission");
+
+    // Same fixed bytes and lifecycle for ordinary and conditionally residual
+    // helper catalogues. This is receiver-work accounting, not a lock forecast
+    // or calibrated helper tracking/conversion CPU allowance.
+    const auto original=modem::oscillator_pattern_search(c);
+    const auto helper=modem::helper_reference_search(c,.01,800,0,0,
+        modem::HelperReferenceClockRelation::common_corrected_source,false);
+    check(helper.catalogue.hypotheses.size()<original.hypotheses.size()&&
+          helper.catalogue.requested_clock_half_width_ppm==original.requested_clock_half_width_ppm,
+          "conditional work fixture did not preserve its independent clock domain");
+    const auto work=[&](const modem::OscillatorPatternSearch& search,const live::Settings* context) {
+        return simulation::estimate_with_receiver_search(draft,o,true,clean_channel(),search,1,100,mode,{},context);
+    };
+    const auto baseline=work(original,&settings),assisted=work(helper.catalogue,&settings);
+    const auto finite_assisted=work(helper.catalogue,nullptr);
+    check(baseline.receiver_work_supported&&assisted.receiver_work_supported&&
+          baseline.receiver_workspace_supported&&assisted.receiver_workspace_supported&&
+          baseline.hardware_sustained_modeled&&assisted.hardware_sustained_modeled&&
+          baseline.new_epoch_setup_seconds>0&&assisted.new_epoch_setup_seconds>0&&
+          baseline.new_epoch_frontend_seconds>0&&assisted.new_epoch_frontend_seconds>0&&
+          finite_assisted.new_epoch_admissions==0&&!finite_assisted.hardware_sustained_modeled,
+          "baseline/helper catalogues used different ordinary rolling/finite lifecycle accounting");
+    near(baseline.new_epoch_admissions,assisted.new_epoch_admissions,
+        "a conditional helper changed UTC admission cadence");
+    check(assisted.receiver_work_assumptions.find("newly admitted epochs")!=std::string::npos&&
+          assisted.receiver_work_assumptions.find("not peak resident Live banks")!=std::string::npos&&
+          assisted.receiver_work_assumptions.find("engineering work on the reference CPU")!=std::string::npos&&
+          assisted.receiver_work_assumptions.find("input basis follows caller provenance")!=std::string::npos,
+          "conditional helper explanation erased rolling, calibration or peak-workspace limits");
+    check(baseline.receiver_geometry.workspace_bytes==o.dsp_workspace_bytes&&
+          assisted.receiver_geometry.workspace_bytes==o.dsp_workspace_bytes&&
+          !baseline.confidence_available&&!assisted.confidence_available,
+          "helper work accounting invented a workspace or probability benefit");
+    std::cout<<"Live sampled rolling births="<<rolling.new_epoch_admissions<<"/"<<rolling.simulated_seconds
+        <<"s; standalone="<<finite.new_epoch_admissions<<"; baseline/helper="
+        <<baseline.new_epoch_admissions<<'/'<<assisted.new_epoch_admissions
+        <<"; reference operation coefficients remain engineering allowances\n";
+}
+void helper_original_window_workload() {
+    transfer::Options o;auto& c=o.modem;
+    c.sample_rate=2000;c.carrier_hz=500;c.bandwidth_hz=200;c.spreading_factor=512;
+    c.pattern_symbols=true;c.scramble=true;c.pulse_shaping=false;c.training_seconds=2;
+    c.stream_epoch=1800000000;c.receiver_strategy=modem::ReceiverStrategy::complex_only;
+    o.key.emplace(Bytes(32,0x6c));o.search_seconds=3;o.automatic_receive_profiles=false;
+    o.dsp_workspace_bytes=64*1024*1024;
+    c.oscillator_search.emplace();auto& policy=*c.oscillator_search;
+    policy.lf={100,0};policy.rf={100,0};policy.margin=3;policy.rf_shift_hz=30e6;
+    policy.reference=modem::OscillatorReference::shared_radio;
+    constexpr double H=800,U=.002,a=100;
+    const auto catalogue=modem::helper_reference_search(c,U,H,0,0,
+        modem::HelperReferenceClockRelation::common_corrected_source).catalogue;
+    const auto clock=modem::helper_reference_shared_clock_interval(c,H+(30e6+H)*a*1e-6,H,U,0,
+        modem::HelperReferenceClockRelation::common_corrected_source);
+    check(clock.has_value(),"original-window cost fixture lost its conditional shared clock");
+    modem::PatternHelperFrequencyWindow window{0,U,H-c.carrier_hz,catalogue.clock_step_ppm/2,clock};
+    modem::PatternSearch declared;declared.hypotheses=catalogue.hypotheses;
+    declared.admitted_clock_half_width_ppm=catalogue.requested_clock_half_width_ppm;
+    declared.admitted_clock_cell_half_width_ppm=catalogue.clock_step_ppm/2;
+    modem::detail::PatternHelperFrequencySelector selector;
+    check(selector.initialize(declared,window),"cost fixture did not match the actual runtime original-cell selector");
+    const auto selected=selector.selected;
+    check(selected>0 && selected<catalogue.hypotheses.size(),"original-window cost fixture did not select fewer existing cells");
+    auto channel=clean_channel();channel.clock_error_ppm=a;channel.frequency_offset_hz=-H*a*1e-6;
+    live::Settings settings;settings.transfer=o;settings.simulation=true;
+    settings.content_limit=o.content_limit;settings.dsp_workspace_bytes=o.dsp_workspace_bytes;
+    settings.simulation_clock_error_ppm=a;settings.simulation_phase_noise_degrees_per_sqrt_second=0;
+    auto draft=wire(3,c);draft.total_seconds=30;
+    constexpr auto mode=simulation::ReceiverWorkMode::sampled_simulation;
+    const auto evaluate=[&](const modem::PatternHelperFrequencyWindow* selected_window=nullptr) {
+        return simulation::estimate_with_receiver_search(draft,o,true,channel,catalogue,1,100,mode,{},&settings,{},selected_window);
+    };
+    const auto ordinary=evaluate(),masked=evaluate(&window);
+    check(ordinary.receiver_work_supported && masked.receiver_work_supported &&
+        ordinary.receiver_workspace_supported && masked.receiver_workspace_supported &&
+        ordinary.hardware_sustained_modeled && masked.hardware_sustained_modeled &&
+        !ordinary.execution_compact && !masked.execution_compact,
+        "original-window cost changed ordinary backend eligibility or lost native pricing");
+    check(masked.frequency_rate_hypotheses==selected &&
+        masked.receiver_cpu_seconds>0 && masked.receiver_cpu_seconds<ordinary.receiver_cpu_seconds &&
+        masked.hardware_sustained_realtime_ratio<ordinary.hardware_sustained_realtime_ratio,
+        "exact selected acquisition cells did not reduce the native work ledger");
+    for(const auto values:{std::pair{masked.logical_search_trials,ordinary.logical_search_trials},
+        std::pair{masked.logical_acquisition_threshold,ordinary.logical_acquisition_threshold},
+        std::pair{masked.initial_epoch_setup_seconds,ordinary.initial_epoch_setup_seconds},
+        std::pair{masked.new_epoch_setup_seconds,ordinary.new_epoch_setup_seconds},
+        std::pair{masked.new_epoch_frontend_seconds,ordinary.new_epoch_frontend_seconds},
+        std::pair{masked.new_epoch_admissions,ordinary.new_epoch_admissions},
+        std::pair{masked.tracking_seconds,ordinary.tracking_seconds},
+        std::pair{masked.tracking_symbol_windows,ordinary.tracking_symbol_windows},
+        std::pair{masked.hardware_sustained_tracking_realtime_ratio,ordinary.hardware_sustained_tracking_realtime_ratio},
+        std::pair{masked.execution_minimum_rate,ordinary.execution_minimum_rate},
+        std::pair{masked.execution_maximum_rate,ordinary.execution_maximum_rate},
+        std::pair{masked.fallback_receiver_cpu_seconds,ordinary.fallback_receiver_cpu_seconds},
+        std::pair{masked.fallback_hardware_sustained_realtime_ratio,ordinary.fallback_hardware_sustained_realtime_ratio},
+        std::pair{masked.receiver_geometry.per_bank_workspace_bytes,ordinary.receiver_geometry.per_bank_workspace_bytes}})
+        near(values.first,values.second,"conditional acquisition mask discounted ordinary constructor/trials/input/tracking/fallback");
+    check(masked.execution_projection_bin_samples==ordinary.execution_projection_bin_samples &&
+        masked.receiver_geometry.receiver_strategy_selected==ordinary.receiver_geometry.receiver_strategy_selected &&
+        masked.receiver_geometry.workspace_bytes==ordinary.receiver_geometry.workspace_bytes &&
+        masked.receiver_geometry.workspace_bytes==o.dsp_workspace_bytes &&
+        !masked.gpu_work_supported && !std::isfinite(masked.gpu_seconds) &&
+        !masked.confidence_available && !masked.reference_probability_available &&
+        masked.receiver_work_assumptions.find("Conditional exact original-window execution")!=std::string::npos,
+        "masked pricing changed representation/workspace or manufactured PHY/reference qualification");
+    // Restoring all cells restores the exact ordinary accounting. A malformed
+    // or empty mask never becomes an available zero-cost acquisition path.
+    auto all=window;all.clock_interval.reset();all.half_width_hz=1e6;
+    const auto restored=evaluate(&all);
+    near(restored.receiver_cpu_seconds,ordinary.receiver_cpu_seconds,"all-selected window changed the ordinary ledger");
+    near(evaluate().receiver_cpu_seconds,ordinary.receiver_cpu_seconds,"optional mask persisted after call completion");
+    const auto rejects=[&](const auto& invalid) {
+        bool refused=false;try {(void)evaluate(&invalid);}catch(const Error&){refused=true;}
+        check(refused,"invalid/empty original window became an available CPU price");
+    };
+    auto bad=window;bad.half_width_hz=-1;rejects(bad);
+    bad=window;bad.clock_cell_half_width_ppm*=.5;rejects(bad);
+    bad=window;bad.clock_interval=modem::PatternHelperClockInterval{1000,1001};rejects(bad);
+    bad=window;bad.center_hz=NAN;rejects(bad);
+    // Place the original owner just below its native-scratch boundary, but
+    // above the boundary a newly constructed selected-row owner would have.
+    // This is an allocation-policy control: a mask must not promote arithmetic
+    // merely because fewer numeric jobs are dispatched on that retained owner.
+    auto tight=o;tight.search_seconds=0;tight.timestamp=1800000000;
+    tight.modem.sample_rate=16000;tight.modem.bandwidth_hz=4000;tight.modem.carrier_hz=4000;
+    tight.modem.integration_seconds=8;
+    constexpr double tight_helper=7000;
+    const auto tight_clock=modem::helper_reference_shared_clock_interval(tight.modem,
+        tight_helper+(30e6+tight_helper)*a*1e-6,tight_helper,U,0,
+        modem::HelperReferenceClockRelation::common_corrected_source);
+    check(tight_clock.has_value(),"tight layout fixture lost its conditional shared clock");
+    const auto tight_catalogue=modem::helper_reference_search(tight.modem,U,tight_helper,0,0,
+        modem::HelperReferenceClockRelation::common_corrected_source).catalogue;
+    const modem::PatternHelperFrequencyWindow tight_window{0,U,tight_helper-tight.modem.carrier_hz,
+        tight_catalogue.clock_step_ppm/2,tight_clock};
+    auto tight_settings=settings;tight_settings.transfer=tight;
+    auto tight_channel=channel;tight_channel.frequency_offset_hz=-tight_helper*a*1e-6;
+    auto tight_draft=wire(3,tight.modem);tight_draft.total_seconds=64;
+    const auto tight_evaluate=[&](const modem::PatternHelperFrequencyWindow* mask=nullptr) {
+        tight_settings.transfer=tight;tight_settings.dsp_workspace_bytes=tight.dsp_workspace_bytes;
+        return simulation::estimate_with_receiver_search(tight_draft,tight,true,tight_channel,tight_catalogue,
+            1,100,mode,{},&tight_settings,{},mask);
+    };
+    const auto roomy=tight_evaluate();
+    check(!roomy.execution_compact && roomy.receiver_geometry.arithmetic_backend.find("Native serial")!=std::string::npos,
+        "tight retained-layout fixture never admitted native arithmetic with ample scratch");
+    const auto symbol=modem::symbol_sample_count(tight.modem);
+    const auto bin=roomy.execution_projection_bin_samples;
+    const auto length=std::ceil(static_cast<long double>(symbol)/roomy.execution_minimum_rate/bin);
+    const auto nominal=std::ceil(static_cast<long double>(symbol)/bin);
+    const auto transform=std::exp2(std::max(std::ceil(std::log2(2*nominal)),std::ceil(std::log2(length))));
+    const auto hop=transform-length+1;
+    // These are the original FFT/ring/row-metadata and native scratch bytes;
+    // no template cache or helper allocation is released by the numeric mask.
+    constexpr long double row_metadata=2*24+2*8+2*16+18*8+2*8;
+    const auto core=transform*16*5+(4*length+2*hop)*16+2*length*16+(transform+1)*8+
+        tight_catalogue.hypotheses.size()*row_metadata+4096*16+4096*sizeof(modem::PatternEvidence);
+    modem::PatternSearch tight_declared;tight_declared.hypotheses=tight_catalogue.hypotheses;
+    tight_declared.admitted_clock_half_width_ppm=tight_catalogue.requested_clock_half_width_ppm;
+    tight_declared.admitted_clock_cell_half_width_ppm=tight_catalogue.clock_step_ppm/2;
+    modem::detail::PatternHelperFrequencySelector tight_selector;
+    check(tight_selector.initialize(tight_declared,tight_window) &&
+        tight_selector.selected<tight_catalogue.hypotheses.size(),"tight layout lost its proper subset");
+    const auto removed_metadata=(tight_catalogue.hypotheses.size()-tight_selector.selected)*row_metadata;
+    const auto allowance=core+24*transform+65536-removed_metadata/2;
+    check(allowance>core && transform>=65536 && symbol<16ULL*tight.modem.sample_rate,
+        "tight scratch fixture lost its native FFT geometry");
+    tight.dsp_workspace_bytes=static_cast<std::size_t>(2*allowance);
+    const auto tight_ordinary=tight_evaluate(),tight_masked=tight_evaluate(&tight_window);
+    check(tight_ordinary.receiver_work_supported && tight_masked.receiver_work_supported &&
+        !tight_ordinary.execution_compact && !tight_masked.execution_compact &&
+        tight_ordinary.receiver_geometry.arithmetic_backend.find("FP64")!=std::string::npos &&
+        tight_masked.receiver_geometry.arithmetic_backend==tight_ordinary.receiver_geometry.arithmetic_backend &&
+        tight_masked.receiver_geometry.template_reuse==tight_ordinary.receiver_geometry.template_reuse &&
+        tight_masked.receiver_geometry.arithmetic_operands==tight_ordinary.receiver_geometry.arithmetic_operands,
+        "a selected-row scratch allowance changed the retained owner's arithmetic/cache policy");
+    near(tight_ordinary.receiver_geometry.per_bank_workspace_bytes,allowance,
+        "tight retained-owner allocation was not at the intended boundary");
+    near(tight_masked.initial_epoch_setup_seconds,tight_ordinary.initial_epoch_setup_seconds,
+        "tight mask discounted the original constructor");
+    near(tight_masked.logical_search_trials,tight_ordinary.logical_search_trials,
+        "tight mask discounted the original logical search trials");
+    near(tight_masked.tracking_seconds,tight_ordinary.tracking_seconds,
+        "tight mask discounted complete ordinary payload continuation");
+    // The compact model combines acquisition with full owner continuation;
+    // no selected-lane discount may masquerade as payload CPU functionality.
+    auto long_options=o;long_options.modem.integration_seconds=128;
+    auto long_settings=settings;long_settings.transfer=long_options;
+    const auto long_search=modem::helper_reference_search(long_options.modem,.00001,H,0,0,
+        modem::HelperReferenceClockRelation::common_corrected_source).catalogue;
+    const modem::PatternHelperFrequencyWindow long_window{0,.00001,H-c.carrier_hz,
+        long_search.clock_step_ppm/2,clock};
+    const auto compact=simulation::estimate_with_receiver_search(wire(3,long_options.modem),long_options,true,channel,
+        long_search,1,100,mode,{},&long_settings,{},&long_window);
+    check(compact.execution_compact && !compact.receiver_work_supported &&
+        !compact.hardware_sustained_modeled && !std::isfinite(compact.receiver_cpu_seconds) &&
+        compact.receiver_work_assumptions.find("compact")!=std::string::npos,
+        "unsupported compact masked continuation received a finite discounted CPU claim");
+    std::cout<<"original-window native work cells="<<selected<<'/'<<catalogue.hypotheses.size()
+        <<" constructors/trials/input/tracking preserved; compact price unavailable\n";
 }
 void search_arithmetic_model_identity() {
     transfer::Options options;
@@ -2945,6 +3201,8 @@ void projected_pattern_workload() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string_view(argv[1])=="--helper-window-work-only") {helper_original_window_workload();return 0;}
+        if(argc==2&&std::string_view(argv[1])=="--live-simulation-rolling-only") {rolling_live_simulation_workload();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--symbol-burst-only") {symbol_burst_amplitude_residency();symbol_burst_work_model();symbol_burst_configured_bank();symbol_burst_pulse_geometry();symbol_burst_initial_cohort_geometry();symbol_burst_kernel_reuse_and_upper_cost();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--symbol-burst-initial-only") {symbol_burst_initial_cohort_geometry();return 0;}
         if(argc==2&&std::string_view(argv[1])=="--symbol-burst-kernel-only") {symbol_burst_kernel_reuse_and_upper_cost();return 0;}
@@ -2969,7 +3227,7 @@ int main(int argc,char** argv) {
         advisory_cancellation();
         if(argc==2&&std::string(argv[1])=="--cancellation-only") {std::cout<<"advisory cancellation tests passed\n";return 0;}
         if(argc==2&&std::string(argv[1])=="--rolling-epochs-only") {
-            rolling_fft_epoch_workload();std::cout<<"rolling FFT epoch work tests passed\n";return 0;
+            rolling_fft_epoch_workload();rolling_live_simulation_workload();std::cout<<"rolling FFT epoch work tests passed\n";return 0;
         }
         if(argc==2&&std::string(argv[1])=="--utc-only") {
             utc_bank_estimate();clock_dsss_reference();restricted_fft_direct_and_bounded_fallback();guarded_component_workload();versioned_outer_work_and_probability_scope();rolling_fft_epoch_workload();compact_clock_prior_workload();std::cout<<"UTC bank estimate tests passed\n";return 0;
@@ -2981,7 +3239,7 @@ int main(int argc,char** argv) {
         if(argc==2&&std::string(argv[1])=="--partial-only") {
             partial_compact_probability();std::cout<<"partial simulation estimate tests passed\n";return 0;
         }
-        receiver_strategy_model();scheduled_strategy_model();default_hop_calendar_model();scheduled_short_phase_prior_model();scheduled_packed_complex_model();scheduled_split_complex_model();scheduled_shared_layout_callers();sustained_hardware_acquisition();
+        receiver_strategy_model();scheduled_strategy_model();default_hop_calendar_model();scheduled_short_phase_prior_model();scheduled_packed_complex_model();scheduled_split_complex_model();scheduled_shared_layout_callers();sustained_hardware_acquisition();rolling_live_simulation_workload();helper_original_window_workload();
         utc_bank_estimate();clock_dsss_reference();restricted_fft_direct_and_bounded_fallback();guarded_component_workload();versioned_outer_work_and_probability_scope();rolling_fft_epoch_workload();compact_clock_prior_workload();probability_and_framing();workload_and_impairments();receiver_cpu_budget();received_processing_budget();whole_symbol_phase_coherence();partial_compact_probability();spread_example_reference();sub9_probability_model_limits();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
         coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();oscillator_policy_geometry();nearby_shift_workload();equivalent_receive_profiles();affine_coefficient_workload();projected_pattern_workload();
         std::cout<<"simulation estimate tests passed\n";return 0;}

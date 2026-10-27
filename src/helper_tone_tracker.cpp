@@ -1,4 +1,5 @@
 #include "datapump/helper_tone_tracker.hpp"
+#include "datapump/helper_reference_precision.hpp"
 #include "datapump/types.hpp"
 #include <algorithm>
 #include <array>
@@ -69,6 +70,7 @@ struct ToneTracker::Impl {
     std::array<float,maximum_block> window{};
     std::array<float,128> noise_bins{};
     std::array<Observation,history_size> history{};
+    precision_detail::Runtime precision;
     ToneTrackerSnapshot result;
     std::uint64_t next=0,last_good=0,tracking_first=0;
     std::size_t seed_used=0,block_used=0,block_size=0,history_used=0;
@@ -124,7 +126,7 @@ struct ToneTracker::Impl {
         center_hz=previous_center_hz=previous_seed_hz=0;noise_psd=signal_power=previous_phase_variance=0;
         oscillator=side={1,0};step={1,0};sum=lower=upper=previous={};locked=previous_valid=false;
         capture_used=0;capture_seed_hz=0;capture_pending=true;
-        result={};result.sample_rate=config.sample_rate;result.captured_end_sample=first;reset_clock();
+        precision.reset();result={};result.sample_rate=config.sample_rate;result.captured_end_sample=first;reset_clock();
     }
     void reset_clock()noexcept {
         clock_count=clock_next=clock_markers_used=0;clock_sums={};
@@ -389,10 +391,11 @@ struct ToneTracker::Impl {
         capture_used=0;capture_pending=true;
         noise_psd=2*floor/(w2*config.sample_rate);signal_power=2*power/(ws*ws);
         tracking_first=last_good=next;locked=true;previous_valid=false;reset_clock();
-        block_used=history_used=0;sum=lower=upper={};oscillator=side={1,0};
+        block_used=history_used=0;precision.reset();sum=lower=upper={};oscillator=side={1,0};
         result.frequency_hz=center_hz;result.uncertainty_hz=2*df;
     }
     void fit(std::uint64_t now)noexcept {
+        result.frequency_precision_refined=false;
         // Sparse accepted segments must not turn the fixed record count into
         // an arbitrarily old thermal/reference history. Retain only the last
         // eight actual captured seconds, with no allocation or replay.
@@ -483,17 +486,37 @@ struct ToneTracker::Impl {
         result.uncertainty_hz=uncertainty;result.frequency_rate_hz_per_second=slope;
         result.qualified=history_used>=16 && support>=.3 && trend_ok && in_band &&
             frequency>=200 && frequency<=config.sample_rate/2.-200 && std::isfinite(uncertainty);
+        if(result.qualified) {
+            const auto refined=precision.estimate(now,config.sample_rate,
+                config.phase_noise_radians_per_sqrt_second,block_size);
+            const auto old_slope_uncertainty=3*std::sqrt(variance/tt);
+            // The existing short FLL is an independent current-model veto.
+            // A coherent-segment result does not create qualification, carry
+            // a stale frequency forward, or bypass nonlinear/drift failures.
+            if(refined.valid && refined.hz>=low && refined.hz<=high &&
+               refined.hz>=200 && refined.hz<=config.sample_rate/2.-200 &&
+               std::abs(refined.slope)<=config.maximum_tracking_slew_hz_per_second+refined.slope_uncertainty &&
+               std::abs(refined.hz-frequency)<=uncertainty+refined.uncertainty &&
+               std::abs(refined.slope-slope)<=old_slope_uncertainty+refined.slope_uncertainty) {
+                // A justified model allowance may be wider than an
+                // optimistic contaminated FLL interval. Never select the
+                // latter merely because its nominal width is smaller.
+                result.frequency_hz=refined.hz;result.frequency_rate_hz_per_second=refined.slope;
+                result.uncertainty_hz=refined.uncertainty;result.first_sample=refined.first;
+                result.frequency_precision_refined=true;
+            }
+        }
         if(in_band && trend_ok) {
             const auto seconds=static_cast<double>(block_size)/config.sample_rate;
             const auto limit=result.qualified?config.maximum_tracking_slew_hz_per_second*seconds:
                 std::max(.1,5*seconds);
             // Changing the increment preserves the running NCO phase. No
             // punctuation or rejected projection resets this convention.
-            set_center(center_hz+std::clamp(.3*(frequency-center_hz),-limit,limit));
+            set_center(center_hz+std::clamp(.3*(result.frequency_hz-center_hz),-limit,limit));
         }
     }
     void finish_block()noexcept {
-        bool discard_bridge=false;
+        bool discard_bridge=false,accepted_edge=false;
         const auto dt=static_cast<double>(block_size)/config.sample_rate;
         const auto block_center_hz=center_hz;
         const auto bandwidth=config.sample_rate*window_square_sum/(window_sum*window_sum);
@@ -565,24 +588,29 @@ struct ToneTracker::Impl {
                 if(history_used==history.size()) {
                     std::move(history.begin()+1,history.end(),history.begin());--history_used;
                 }
-                history[history_used++]={block_first,block_first>=block_size?block_first-block_size:tracking_first,
+                const auto first_endpoint=block_first>=block_size?block_first-block_size:tracking_first;
+                history[history_used++]={block_first,first_endpoint,
                     observation,variance,first_endpoint_thermal_variance,last_endpoint_thermal_variance};
-                last_good=next;fit(next-1);
+                precision.accept(block_first,first_endpoint,
+                    {observation,first_endpoint_thermal_variance,last_endpoint_thermal_variance},dt,
+                    config.phase_noise_radians_per_sqrt_second,block_size);
+                accepted_edge=true;last_good=next;fit(next-1);
             }
         } else if(capture_pending)capture_used=0;
         // Re-anchor after intentional phase reversals or metadata; this does
         // not feed their phase jump into the frequency estimate. A completed
         // cold capture never reopens on later qualification loss: only a new
         // FFT seed/reset starts another capture cluster.
+        if(!accepted_edge)precision.reject(dt,config.phase_noise_radians_per_sqrt_second,block_size);
         previous=sum;previous_valid=level_ok && !discard_bridge;previous_center_hz=block_center_hz;
         previous_phase_variance=phase_variance;
         sum=lower=upper={};side={1,0};block_used=0;
         const auto age=static_cast<double>(next-last_good)/config.sample_rate;
-        if(age>.2)result.qualified=false;
+        if(age>.2){result.qualified=false;result.frequency_precision_refined=false;}
         result.present=history_used>=4 && age<=.5 && cno/bandwidth>=4;
         if(age>1.) {
             locked=false;seed_used=seed_support=0;history_used=0;previous_valid=false;
-            result.present=result.qualified=false;reset_clock();
+            result.present=result.qualified=false;result.frequency_precision_refined=false;precision.reset();reset_clock();
         }
     }
     void push(std::span<const float> input,std::uint64_t first) {

@@ -66,6 +66,7 @@ struct Options {
     bool metadata_only=false,ephemeral_key=false,keyfile_explicit=false,bit_count_explicit=false,wall_explicit=false;
     bool work_trace=false,runtime_metrics=false,gpsdo_reference=false;
     std::optional<std::size_t> workspace_bytes;
+    std::optional<std::string> clock_sync_text,audio_error_text;
     std::optional<unsigned> source_bytes;
     std::optional<std::uint64_t> observe_samples;
     std::optional<std::filesystem::path> inspect_path;
@@ -95,6 +96,11 @@ Options parse(int argc,char** argv) {
             require(!text.empty()&&text.front()>='0'&&text.front()<='9'&&consumed==text.size()&&bytes>0&&
                     bytes<=std::numeric_limits<std::size_t>::max(),"fixture workspace must be positive bytes fitting size_t");
             result.workspace_bytes=static_cast<std::size_t>(bytes);
+        }
+        else if(argument=="--clock-sync")result.clock_sync_text=clock_sync::format(clock_sync::parse(value()));
+        else if(argument=="--audio-error") {
+            const auto text=value();const auto seconds=clock_sync::parse_audio_error(text);
+            clock_sync::validate_audio_error(seconds);result.audio_error_text=text;
         }
         else if(argument=="--ephemeral-key")result.ephemeral_key=true;
         else if(argument=="--hf")add_profile(Profile::hf);
@@ -197,7 +203,7 @@ std::vector<std::string> launch_arguments(Profile profile,bool helper,const Opti
         "--helper-power",helper?options.helper_power_text:"0","--helper-ratio-limit","90",
         "--helper-frequency","high","--helper-callsign=","--noise-dbm-hz","-164",
         "--search-margin","3","--reference",profile==Profile::hf_crystal?"shared-radio":"independent","--doppler","0.000000c",
-        "--clock-sync","default","--audio-error","0ms","--dsss-factor","10",
+        "--clock-sync",options.clock_sync_text.value_or("default"),"--audio-error",options.audio_error_text.value_or("0ms"),"--dsss-factor","10",
         "--dsss-version","interleave","--search-arithmetic","default",
         "--receiver-strategy","auto","--receiver-cpu-budget","0.6","--live-duplex","yes",
         "--sched-hop-dilution","0","--sched-hop","0","--sched-frequency-search","1",
@@ -373,6 +379,9 @@ Resolved resolve(Profile profile,bool helper,const Options& options) {
             close(c.oscillator_search->margin,3)&&close(c.carrier_hz,1500),
             "Controller changed the declared clock topology, search margin or audio carrier");
     require(settings.long_message_modem.has_value(),"Controller omitted the configured long-message profile");
+    require(settings.transfer.clock_sync==clock_sync::parse(options.clock_sync_text.value_or("default"))&&
+            close(settings.transfer.audio_timing_error_seconds,clock_sync::parse_audio_error(options.audio_error_text.value_or("0ms"))),
+            "Controller changed requested clock synchronization or causal audio lag");
     if(profile==Profile::hf) {
         require(patch.workspace_percent==50&&close(*patch.target_db_hz,8)&&c.sample_rate==6120&&
                 close(c.bandwidth_hz,36)&&c.spreading_factor==256&&c.dsss_factor==10&&
@@ -842,7 +851,7 @@ std::atomic<bool> trace_tx_diagnostics{false};
 bool trace_filter(const char* event) noexcept {
     const std::string_view name{event};
     if(trace_tx_diagnostics.load(std::memory_order_relaxed)&&name=="receiver_pattern_drain")return true;
-    if(trace_work.load(std::memory_order_relaxed)&&(name=="receiver_acquisition_work"||
+    if(trace_work.load(std::memory_order_relaxed)&&(name=="receiver_helper_raw_reference"||name=="receiver_acquisition_work"||
             name=="receiver_helper_compact_work"||name=="receiver_helper_cohort_dispatch"||
             name=="receiver_helper_cohort_prior_decision"||name=="receiver_helper_input_view_admission"))return true;
     if(!trace_detail.load(std::memory_order_relaxed))return name=="trace_begin"||name=="receiver_signal_commit"||
@@ -1027,6 +1036,8 @@ struct TraceResult {
     std::uint64_t work_instances=0,template_jobs=0,input_transforms=0,conditional_jobs=0,audit_jobs=0;
     std::uint64_t unique_conditional_jobs=0,input_view_jobs=0,input_view_instances=0,input_view_admissions=0;
     bool primary_input_view_certified=false,later_input_view_assisted=false;
+    bool realtime_primary_qualified=false,realtime_later_qualified=false,realtime_trace_present=false;
+    std::uint64_t realtime_qualified_instances=0;
     CompactWork compact{};
     NativeArithmetic native_arithmetic{};
     bool frequency_narrowed=false,timing=false,later_assisted_epoch=false;
@@ -1038,7 +1049,7 @@ struct TraceResult {
     std::set<std::string> selection_backends;
 };
 TraceResult inspect_trace(const std::filesystem::path& path,const Bytes& expected,const Bytes& dated_wire,const modem::Config& config,
-                          const WireCollector* collector=nullptr) {
+                          const WireCollector* collector=nullptr,const modem::OscillatorPatternSearch* ordinary_baseline=nullptr) {
     const auto rate=config.sample_rate;
     TraceResult result;result.wire_evidence_complete=!collector||collector->complete();
     result.trace_complete=trace_integrity(path);
@@ -1050,6 +1061,15 @@ TraceResult inspect_trace(const std::filesystem::path& path,const Bytes& expecte
     std::map<std::array<std::uint64_t,3>,std::array<std::uint64_t,compact_counter_count>> compact_work;
     std::map<std::array<std::uint64_t,3>,std::array<std::uint64_t,native_arithmetic_counter_count>> native_arithmetic;
     bool native_arithmetic_missing=false;
+    struct RealtimeWork {
+        std::uint64_t epoch=0,family=0,sample=0,original=0,selected=0,last_native=0,last_skipped=0,last_lanes=0,last_skipped_lanes=0;
+        bool qualified_execution=false,actual_omission=false,clock_qualified=false;
+        long double unresolved_clock_cell_half_width_ppm=0;
+    };
+    std::map<std::array<std::uint64_t,3>,RealtimeWork> realtime_work;
+    // Selection is pre-constructor geometry, not executed work. It is used
+    // only with a joined numeric owner and same physical modem geometry.
+    std::map<std::array<std::uint64_t,3>,std::set<std::uint64_t>> realtime_selections;
     struct InputViewAdmission {
         std::uint64_t epoch=0,family=0,view=0,sample=0,original=0,selected=0;
         std::uint64_t raw_reference_sample=0,raw_frequency_sample=0,physical_rate=0,captured_ingress=0,source_origin=0;
@@ -1080,6 +1100,13 @@ TraceResult inspect_trace(const std::filesystem::path& path,const Bytes& expecte
             native_arithmetic_missing=true;
         if(line.find("\"event\":\"receiver_selection\"")!=std::string::npos)
             if(const auto backend=string_field(line,"backend"))result.selection_backends.insert(*backend);
+        if(line.find("\"event\":\"receiver_selection\"")!=std::string::npos) {
+            const auto revision=number(line,"revision"),epoch=number(line,"epoch"),family=number(line,"family"),pairs=number(line,"frequency_rate_pairs");
+            if(revision&&epoch&&family&&pairs&&number(line,"sample_rate")==config.sample_rate&&
+               number(line,"symbol_samples")==modem::symbol_sample_count(config)&&
+               number(line,"fine_chip_samples")==modem::pattern_chip_samples(config)&&number(line,"dsss_factor")==config.dsss_factor)
+                realtime_selections[{*revision,*epoch,*family}].insert(*pairs);
+        }
         const bool frontend=line.find("\"event\":\"receiver_helper_cohort_frontend\"")!=std::string::npos;
         const bool phase_storage=line.find("\"event\":\"receiver_helper_cohort_phase_storage\"")!=std::string::npos;
         if(frontend||phase_storage) {
@@ -1168,6 +1195,34 @@ TraceResult inspect_trace(const std::filesystem::path& path,const Bytes& expecte
                     prior[i]=*arithmetic[i];
                 }
             } else native_arithmetic_missing=true; // Historical traces cannot establish zero arithmetic.
+            if(number(line,"realtime_helper").value_or(0)) {
+                result.realtime_trace_present=true;
+                const auto locked=number(line,"realtime_locked"),supported=number(line,"helper_window_supported"),
+                    active=number(line,"helper_window_active"),original=number(line,"helper_window_original_pairs"),
+                    selected=number(line,"helper_window_selected_pairs"),epoch=number(line,"epoch"),family=number(line,"family"),
+                    fft=number(line,"fft_jobs"),direct=number(line,"direct_jobs"),skipped=number(line,"skipped_template_jobs"),
+                    lanes=number(line,"accumulated_lane_samples"),skipped_lanes=number(line,"skipped_lane_samples");
+                const auto uncertainty=real_number(line,"realtime_reference_uncertainty_hz"),
+                    unresolved_clock=real_number(line,"helper_window_unresolved_clock_cell_half_width_ppm");
+                const auto clock_qualified=number(line,"helper_window_clock_qualified");
+                // Missing additive schema is unavailable evidence, never zero
+                // work or implied lock. Original payload parsing still runs.
+                if(locked&&supported&&active&&original&&selected&&epoch&&family&&fft&&direct&&skipped&&lanes&&skipped_lanes&&uncertainty&&unresolved_clock&&clock_qualified) {
+                    auto& prior=realtime_work[identity];
+                    require(*fft<=UINT64_MAX-*direct,"ordinary native work counter overflowed");
+                    const auto native=*fft+*direct;
+                    require(native>=prior.last_native&&*skipped>=prior.last_skipped&&*lanes>=prior.last_lanes&&*skipped_lanes>=prior.last_skipped_lanes,
+                        "realtime ordinary work reset within one owner");
+                    const bool executed=native>prior.last_native||*lanes>prior.last_lanes;
+                    const bool omitted=*skipped>prior.last_skipped||*skipped_lanes>prior.last_skipped_lanes;
+                    const bool qualified=*locked&&*supported&&*active&&*original&&*selected&&*selected<=*original&&*uncertainty>=0;
+                    prior.qualified_execution|=qualified&&executed;
+                    prior.actual_omission|=qualified&&executed&&omitted&&*selected<*original;
+                    if(qualified&&executed) {prior.epoch=*epoch;prior.family=*family;prior.sample=number(line,"sample").value_or(0);prior.original=*original;prior.selected=*selected;
+                        prior.clock_qualified=*clock_qualified!=0;prior.unresolved_clock_cell_half_width_ppm=*unresolved_clock;}
+                    prior.last_native=native;prior.last_skipped=*skipped;prior.last_lanes=*lanes;prior.last_skipped_lanes=*skipped_lanes;
+                }
+            }
             const auto [view_identity,inserted]=input_view_identities.emplace(identity,view);
             require(inserted||view_identity->second==view,"ordinary receiver changed its immutable input-view identity");
             if(view) {
@@ -1414,6 +1469,23 @@ TraceResult inspect_trace(const std::filesystem::path& path,const Bytes& expecte
             <<(executed==input_view_work.end()?0:executed->second.jobs)<<','
             <<(result.primary_input_view_certified&&primary_numeric_key&&identity==*primary_numeric_key)<<'\n';
     }
+    for(const auto& [identity,executed]:realtime_work) {
+        const auto selected=realtime_selections.find({identity[0],executed.epoch,executed.family});
+        const bool matched_geometry=selected!=realtime_selections.end()&&selected->second.contains(executed.original);
+        const bool conditional_birth=ordinary_baseline&&executed.original>0&&executed.original<ordinary_baseline->hypotheses.size();
+        const bool qualified=executed.qualified_execution&&matched_geometry&&(conditional_birth||executed.actual_omission);
+        result.realtime_qualified_instances+=qualified;
+        result.realtime_later_qualified|=qualified&&executed.sample&&!initial_epochs.contains(executed.epoch);
+        const bool primary_owner=primary_numeric_key&&identity==*primary_numeric_key&&
+            executed.epoch==primary_epoch&&executed.family==primary_family;
+        result.realtime_primary_qualified|=qualified&&primary_owner;
+        std::cout<<"realtime_work_provenance,"<<path.string()<<','<<identity[0]<<','<<identity[1]<<','<<identity[2]<<','
+            <<executed.epoch<<','<<executed.family<<','<<executed.original<<','<<executed.selected<<','
+            <<executed.clock_qualified<<','<<executed.unresolved_clock_cell_half_width_ppm<<',';
+        if(ordinary_baseline)std::cout<<ordinary_baseline->hypotheses.size();else std::cout<<"unavailable";
+        std::cout<<','<<matched_geometry<<','<<executed.qualified_execution<<','<<conditional_birth<<','<<executed.actual_omission<<','
+            <<qualified<<','<<primary_owner<<'\n';
+    }
     require(result.input_view_jobs<=result.template_jobs&&result.unique_conditional_jobs<=result.template_jobs,
             "conditional view accounting counted native execution more than once");
     return result;
@@ -1610,6 +1682,7 @@ bool requires_v9_assistance(Profile profile) {
 bool assistance_trace_qualified(Profile profile,bool helper,const TraceResult& observed,
                                 std::uint64_t native_conditional_jobs,bool detailed) {
     if(!helper)return true;
+    if(observed.realtime_trace_present)return observed.realtime_primary_qualified&&observed.realtime_later_qualified;
     if(profile==Profile::long_auto)return observed.cohort_frontend&&observed.cohort_resources_valid&&
         native_conditional_jobs>0&&observed.assisted&&(detailed||observed.wire_assisted);
     if(!requires_v9_assistance(profile))return true;
@@ -1734,7 +1807,9 @@ Result run(Profile profile,bool helper,const Resolved& resolved,const Options& o
         }
     }
     if(!detailed)collector.report(path);
-    const auto observed=inspect_trace(path,expected,dated_wire,c,detailed?nullptr:&collector);
+    const auto ordinary_baseline=modem::oscillator_pattern_search(c,
+        transfer::effective_clock_sync(value.transfer)?modem::utc_transmit_rate_limit(c):0);
+    const auto observed=inspect_trace(path,expected,dated_wire,c,detailed?nullptr:&collector,&ordinary_baseline);
     if(metrics)report_tx_epoch_diagnostic(profile,helper,resolved,
         options.payload!=Payload::bits&&value.long_message_modem&&!transfer::uses_raw_message(message)?*value.long_message_modem:c,
         transmit_epoch,dated_wire,observed,path,detailed?nullptr:&collector);
@@ -1919,6 +1994,7 @@ int main(int argc,char** argv) {try {
     std::cout<<"# wire_collector columns: trace,complete_evidence,failure,observations,candidates,logical_bit_bytes,current_data_capacity_bytes,peak_data_capacity_bytes_including_transient_growth,data_capacity_bound_bytes,fixed_candidate_metadata_bytes,collector_control_bytes,candidate_capacity; diagnostic element capacities only, never a DSP budget claim\n";
     std::cout<<"# observed work sums each traced instance's maximum cumulative execution counters; no work is inferred from search-pair counts or absent trace records\n";
     std::cout<<"# prior_geometry columns: profile,helper,original_pairs,predicted_selected_pairs,original_clock_lanes,represented_clock_lanes,assumed_reference_uncertainty_Hz,predicted_helper_offset_Hz,predicted_mask_radius_Hz,authoritative_clock_cell_half_width_ppm,predicted_prior_admitted; shared-selector geometry only, not a received measurement\n";
+    std::cout<<"# realtime_work_provenance columns: trace,revision,instance_id,sample_origin,epoch,family,conditional_original_pairs,selected_pairs,clock_qualified,unresolved_clock_cell_half_width_ppm,separate_ordinary_baseline_pairs,physical_geometry_matched,qualified_executed_work,conditional_birth_smaller_than_baseline,actual_in_owner_omissions,qualified,selected_primary_owner; original factory baseline is test-only metadata; counts imply no CPU gain and expected length never enters RX\n";
     std::cout<<"# workspace columns: profile,helper,requested_percent,Controller_resolved_bytes,matched_workspace_bytes,matched_bank_bytes,policy\n";
     if(options.runtime_metrics) {
         std::cout<<"# runtime_cpu columns: profile,helper,control,complete_feed_intervals,invalid_checkpoint_joins,feed_overflow,poll_overflow,unfinished_reads,uncommitted_final_read,startup_process_CPU_seconds,startup_wall_seconds,active_after_first_read_process_CPU_seconds,active_after_first_read_wall_seconds,stop_join_trace_process_CPU_seconds,stop_join_trace_wall_seconds,posthoc_process_CPU_seconds,posthoc_wall_seconds,payload_wall_media_factor,simulation_queue_backlog_seconds,trace\n";

@@ -49,6 +49,9 @@ struct Settings {
     bool exclusive = false;
     // Append optional extension fields to preserve existing aggregate positions.
     helper::Options helper;
+    // Hardware diagnostic only: exact raw capture rate, zero preserves provider
+    // selection. The GUI exposes 48000 only with --debug; no modem clock changes.
+    std::uint32_t diagnostic_capture_rate_hz = 0;
     // Selecting a transmit key restricts reception to matching keyed streams.
     // Pattern-only raw results carry no separate authentication tag.
     bool permits_plaintext() const noexcept {
@@ -248,6 +251,8 @@ struct Snapshot {
     bool helper_frequency_assistance_active = false;
     bool helper_phase_assistance_active = false;
     bool helper_timing_assistance_active = false;
+    // Realtime mode sums the same current numeric owners' original/selected
+    // RF-clock pairs. A mixed broad/narrow bank does not imply one common mask.
     std::uint64_t helper_original_search_pairs = 0;
     std::uint64_t helper_selected_search_pairs = 0;
     // Actual joined work, kept separate from prospective planner pair limits.

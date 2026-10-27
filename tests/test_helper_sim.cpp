@@ -13,6 +13,13 @@
 using namespace datapump;
 namespace {
 void check(bool value,const char* message) {if(!value)throw Error(message);}
+// Moving fixed presentation storage must not grow either mode's reserved
+// share, or the existing total plot/channel budget.
+static_assert(modem::SampledSimulationChannel::workspace_bound==80*1024);
+static_assert(modem::SampledSimulationChannel::auxiliary_workspace_bound+
+    modem::SampledSimulationChannel::helper_cohort_workspace_bound==23*1024);
+static_assert(modem::SampledSimulationChannel::auxiliary_workspace_bound+
+    modem::SampledSimulationChannel::physical_helper_cohort_workspace_bound==26*1024);
 modem::Config config(std::uint32_t rate=8000) {
     modem::Config c;c.sample_rate=rate;c.carrier_hz=rate==8000?1500:500;
     c.bandwidth_hz=rate==8000?1000:200;c.spreading_factor=64;c.stream_epoch=1800000000;
@@ -45,7 +52,11 @@ void logical_contract_and_chunking() {
     const auto h=helper_options();
     modem::SampledSimulationChannel one(c,impairment,h),many(c,impairment,h);
     check(one.physical_sample_rate()>2*c.sample_rate,"helper did not receive a separate physical sample clock");
-    check(one.working_bytes()+one.auxiliary_workspace_bound<=one.workspace_bound,"physical channel consumed Robust workspace");
+    modem::SampledSimulationChannel plain(c,impairment);
+    check(plain.working_bytes()+plain.auxiliary_workspace_bound+plain.helper_cohort_workspace_bytes()<=plain.workspace_bound,
+          "legacy channel and helper reserves consumed Robust workspace");
+    check(one.working_bytes()+one.auxiliary_workspace_bound+one.helper_cohort_workspace_bytes()<=one.workspace_bound,
+          "physical channel and helper reserves consumed Robust workspace");
     Observer a,b;one.set_physical_observer(std::ref(a));many.set_physical_observer(std::ref(b));
     std::array<float,701> noise_a{},noise_b{};one.read_noise(noise_a);many.read_noise(noise_b);
     check(noise_a==noise_b,"helper physical idle noise depends on read size");

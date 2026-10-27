@@ -12,6 +12,7 @@
 #include "datapump/transfer.hpp"
 #include <array>
 #include <iostream>
+#include <limits>
 #include <set>
 #include <thread>
 
@@ -42,7 +43,8 @@ void helper_assistance_debug_fields() {
     check(presence_text.find("acquisition not narrowed: insufficient workspace")!=std::string::npos&&
           presence_text.find("frequency assistance not applied")!=std::string::npos&&
           presence_text.find("phase assistance not applied")!=std::string::npos&&
-          presence_text.find("punctuation timing assistance not applied")!=std::string::npos,
+          presence_text.find("punctuation timing assistance not applied")!=std::string::npos&&
+          presence_text.find("measured SNR (10 Hz) 12.0 dB (C/N0 22.0 dB-Hz)")!=std::string::npos,
           "Measured helper presence claimed narrowed search or applied phase");
     snapshot.helper_status.clear();
     check(helper_diagnostics(snapshot).find("acquisition not narrowed: no committed frequency assistance")!=std::string::npos,
@@ -137,39 +139,95 @@ void helper_assistance_debug_fields() {
           phase_log.str().find("\"helper_compact_phase_moment_updates\":29")!=std::string::npos,
           "Actual compact phase work was omitted from debug JSON");
     // Manual real-time reference state supersedes stale bank/probe counters.
-    auto realtime=snapshot;
+    auto realtime=snapshot;realtime.helper_snr_db=12;
     realtime.helper_frequency_assistance_active=realtime.helper_phase_assistance_active=
         realtime.helper_timing_assistance_active=true;
     realtime.helper_conditional_jobs=123;realtime.helper_audit_jobs=45;
     const auto no_legacy_claims=[](const std::string& text) {
         return text.find("native FFT")==std::string::npos&&text.find("pair maxima")==std::string::npos&&
-            text.find("phase assistance")==std::string::npos&&text.find("broad/probe")==std::string::npos;
+            text.find("broad/probe")==std::string::npos;
+    };
+    const auto phase_declined=[](const std::string& text) {
+        return text.find("phase assistance not applied: no independently qualified phase reference")!=std::string::npos;
     };
     realtime.helper_status="Helper reference waiting";
     const auto waiting=helper_diagnostics(realtime);
     check(waiting.find("Robust acquisition waits for helper lock")!=std::string::npos&&
-        waiting.find("frequency-corrected")==std::string::npos&&no_legacy_claims(waiting),
-        "Waiting helper reference inherited stale assistance/search claims");
-    realtime.helper_status="Helper reference locked: offset +12.5 Hz";
+        waiting.find("frequency assistance not active; acquisition narrowing not active")!=std::string::npos&&
+        waiting.find("frequency-corrected")==std::string::npos&&no_legacy_claims(waiting)&&phase_declined(waiting)&&
+        waiting.find("SNR (10 Hz) 12.0 dB (C/N0 22.0 dB-Hz)")!=std::string::npos,
+        "Waiting helper reference inherited stale assistance/search claims or hid its measured level/phase decline");
+    realtime.helper_status="Helper reference locked: realtime corrected ordinary reception";
+    realtime.helper_frequency_assistance_active=false;
+    const auto ready=helper_diagnostics(realtime);
+    check(ready.find("Helper reference ready")==0&&ready.find("frequency assistance not active")!=std::string::npos&&
+        ready.find("corrected")==std::string::npos&&phase_declined(ready)&&no_legacy_claims(ready),
+        "Reference readiness claimed frequency assistance before joined work");
+    realtime.helper_frequency_assistance_active=true;
+    // The authoritative joined flag also covers compact work with no native
+    // FFT counter. A zero native counter cannot negate actual assistance.
+    realtime.helper_conditional_jobs=0;
     const auto locked=helper_diagnostics(realtime);
-    check(locked.find(realtime.helper_status)==0&&
-        locked.find("frequency-corrected input to ordinary Robust reception")!=std::string::npos&&no_legacy_claims(locked),
-        "Locked helper reference lost the real-time correction state or inherited obsolete bank claims");
+    check(locked.find(realtime.helper_status)==0&&locked.find("frequency assistance active")!=std::string::npos&&
+        locked.find("frequency-corrected input to ordinary Robust reception")!=std::string::npos&&
+        no_legacy_claims(locked)&&phase_declined(locked),
+        "Joined helper assistance or explicit phase decline was hidden/inherited obsolete bank claims");
     realtime.helper_timing_assistance_active=true;
     realtime.helper_original_search_pairs=93;realtime.helper_selected_search_pairs=3;
-    realtime.helper_status+="; conditional source clock mean [-3, 3] ppm";
+    const auto locked_status=realtime.helper_status;
+    realtime.helper_status=locked_status+"; conditional source clock from punctuation cadence [-3, 3] ppm";
     const auto clock_assisted=helper_diagnostics(realtime);
     check(clock_assisted.find("measured dwell-spacing clock interval applied conditionally")!=std::string::npos&&
-        clock_assisted.find("joint pair maxima: selected 3, original 93")!=std::string::npos,
+        clock_assisted.find("joint pair totals across owners: selected 3, original 93")!=std::string::npos&&
+        clock_assisted.find("frequency-derived clock interval")==std::string::npos&&phase_declined(clock_assisted),
         "Independently measured helper clock narrowing was hidden");
+    realtime.helper_status=locked_status+"; conditional source clock from shared-radio frequency [99.998, 100.002] ppm";
+    const auto frequency_clock=helper_diagnostics(realtime);
+    check(frequency_clock.find("shared-radio frequency-derived clock interval applied conditionally")!=std::string::npos&&
+        frequency_clock.find("joint pair totals across owners: selected 3, original 93")!=std::string::npos&&
+        frequency_clock.find("measured dwell-spacing clock interval")==std::string::npos&&phase_declined(frequency_clock),
+        "Frequency-derived shared clock was hidden or mislabeled as independent punctuation/phase");
+    realtime.helper_status=locked_status+"; conditional source clock from shared-radio frequency intersected with punctuation cadence [99.998, 100.002] ppm";
+    const auto intersected_clock=helper_diagnostics(realtime);
+    check(intersected_clock.find("shared-radio frequency-derived clock interval intersected with measured dwell spacing applied conditionally")!=std::string::npos&&
+        intersected_clock.find("joint pair totals across owners: selected 3, original 93")!=std::string::npos&&
+        phase_declined(intersected_clock),"Intersected helper clock evidence lost its two distinct sources or invented phase");
+    realtime.helper_timing_assistance_active=false;
+    check(helper_diagnostics(realtime).find("spacing applied conditionally")==std::string::npos&&
+        helper_diagnostics(realtime).find("joint pair totals")==std::string::npos,
+        "A dated clock status without the joined timing flag claimed active clock assistance");
+    realtime.helper_timing_assistance_active=true;
+    realtime.helper_status=locked_status+"; conditional source clock mean [-3, 3] ppm";
+    check(helper_diagnostics(realtime).find("clock interval applied conditionally")==std::string::npos&&
+        helper_diagnostics(realtime).find("joint pair totals")==std::string::npos,
+        "An untyped legacy clock suffix acquired source-specific authority");
+    for(const auto* status:{"Helper reference waiting","Helper reference lost; acquisition paused"}) {
+        realtime.helper_status=std::string(status)+"; conditional source clock from shared-radio frequency [99.998, 100.002] ppm";
+        const auto inactive_clock=helper_diagnostics(realtime);
+        check(inactive_clock.find("clock interval applied conditionally")==std::string::npos&&
+            inactive_clock.find("joint pair totals")==std::string::npos&&phase_declined(inactive_clock),
+            "Waiting/lost reference inherited active frequency-derived clock or phase");
+    }
     realtime.helper_timing_assistance_active=false;
     realtime.helper_status="Helper reference locked: receiver frequency origin only; folded mono PCM cannot be continuously corrected";
-    check(helper_diagnostics(realtime)==realtime.helper_status,
-        "Folded real capture incorrectly claimed continuous upstream correction");
+    const auto folded=helper_diagnostics(realtime);
+    check(folded.find(realtime.helper_status)==0&&folded.find("frequency assistance active")!=std::string::npos&&
+        folded.find("frequency-corrected input")==std::string::npos&&phase_declined(folded)&&no_legacy_claims(folded),
+        "Folded real capture claimed continuous upstream correction or hid phase decline");
+    realtime.helper_status="Helper reference present: original oscillator prior retained; raw-cell selection without NCO retuning";
+    const auto prior=helper_diagnostics(realtime);
+    check(prior.find(realtime.helper_status)==0&&prior.find("frequency assistance active")!=std::string::npos&&
+        prior.find("frequency-corrected input")==std::string::npos&&phase_declined(prior)&&no_legacy_claims(prior),
+        "Prior-preserving raw-cell selection claimed NCO correction or hid active assistance");
     realtime.helper_status="Helper reference lost; acquisition paused";
     const auto lost=helper_diagnostics(realtime);
-    check(lost==realtime.helper_status&&lost.find("frequency-corrected")==std::string::npos&&no_legacy_claims(lost),
-        "Lost helper reference inherited an active lock or broad fallback claim");
+    check(lost.find(realtime.helper_status)==0&&lost.find("frequency assistance not active")!=std::string::npos&&
+        lost.find("frequency-corrected")==std::string::npos&&no_legacy_claims(lost)&&phase_declined(lost)&&
+        lost.find("last reported SNR (10 Hz) 12.0 dB")!=std::string::npos,
+        "Lost helper reference inherited active lock/broad fallback claims or hid phase decline");
+    realtime.helper_snr_db=std::numeric_limits<double>::quiet_NaN();
+    check(helper_diagnostics(realtime).find("SNR (10 Hz)")==std::string::npos,
+        "Nonfinite helper level was shown as a measured SNR");
 
 }
 
@@ -255,6 +313,64 @@ void physical_debug_workflow() {
     parse({"gui","--debug","--debug-timeout","nan"},false);
     parse({"gui","--debug","--debug-timeout","30","--keyfile","synthetic.keys","--tx-key","named","--debug-bits","1010"},true);
     parse({"gui","--debug","--debug-bits","102"},false);
+    const auto controlled=[&](std::vector<std::string> extra,bool expected) {
+        std::vector<std::string> arguments{"gui","--debug","--debug-timeout","30","--keyfile","synthetic.keys","--tx-key","named"};
+        arguments.insert(arguments.end(),extra.begin(),extra.end());std::vector<char*> argv;
+        for(auto& argument:arguments)argv.push_back(argument.data());bool called=false;
+        const auto result=gui_main(static_cast<int>(argv.size()),argv.data(),"test",[&](Launch value) {
+            called=true;check(value.debug_live&&!value.simulation&&value.debug_workspace_bytes==257u*1024*1024+37&&
+                value.debug_capture_rate_hz==48000,"Fixed diagnostic launch controls changed");return 0;
+        });
+        check(called==expected&&(result==0)==expected,"Fixed diagnostic launch validation changed");
+    };
+    const std::vector<std::string> valid{"--debug-workspace-bytes","269484069","--debug-capture-rate","48000"};
+    controlled(valid,true);
+    const auto post_tail_parse=[&](std::string text,bool expected) {
+        std::vector<std::string> arguments{"gui","--debug","--debug-timeout","30","--keyfile","synthetic.keys","--tx-key","named",
+            "--debug-post-tail-seconds",std::move(text),"--debug-work-trace"};
+        std::vector<char*> argv;for(auto& a:arguments)argv.push_back(a.data());bool called=false;
+        const auto result=gui_main(static_cast<int>(argv.size()),argv.data(),"test",[&](Launch value) {
+            called=true;check(value.debug_post_tail_seconds==8&&value.debug_work_trace&&value.verbose,
+                "Debug observation controls changed");return 0;
+        });check(called==expected&&(result==0)==expected,"Debug observation parser changed");
+    };
+    post_tail_parse("8",true);
+    for(const auto* bad:{"0","1","16","nan","8x"})post_tail_parse(bad,false);
+    DebugLive post_tail(40,log,false,"1",1,0,0,8);
+    live::Snapshot tail;tail.running=true;tail.samples_received=1;
+    check(post_tail.step(0,tail,Signals{},true,true)==A::transmit,"Post-tail fixture did not request TX");
+    tail.transmission_id=1;tail.transmitting=true;post_tail.step(1,tail,Signals{},false,true);++tail.samples_received;
+    post_tail.step(2,tail,Signals{},false,true);
+    live::SignalUpdate full;full.id=97;full.binary=true;full.text="1";full.received_bits=1;full.complete=true;
+    tail.signals={full};tail.transmitting=false;tail.transmission_finished=true;
+    Inbox tail_inbox;Signals tail_rows;apply_receptions(tail_inbox,tail_rows,tail);
+    check(post_tail.step(3,tail,tail_rows,true,true)==A::wait&&post_tail.step(10.9,tail,tail_rows,true,true)==A::wait,
+        "Debug closed before requested post-tail observation");
+    check(post_tail.step(11,tail,tail_rows,true,true)==A::close&&post_tail.result()==0,
+        "Debug did not close after complete post-tail observation");
+    for(const auto* bad:{"0","-1","+1","1.5","NaN","1x","18446744073709551616"})
+        controlled({"--debug-workspace-bytes",bad,"--debug-capture-rate","48000"},false);
+    for(const auto* bad:{"0","47999","96000","-48000","48000x"})
+        controlled({"--debug-workspace-bytes","269484069","--debug-capture-rate",bad},false);
+    controlled({"--debug-workspace-bytes","269484069","--debug-capture-rate","48000","--simulation"},false);
+    for(const auto* flag:{"--debug-workspace-bytes","--debug-capture-rate"}) {
+        std::vector<std::string> arguments{"gui",flag,flag==std::string_view("--debug-capture-rate")?"48000":"269484069"};
+        std::vector<char*> argv;for(auto& argument:arguments)argv.push_back(argument.data());bool called=false;
+        check(gui_main(static_cast<int>(argv.size()),argv.data(),"test",[&](Launch){called=true;return 0;})!=0&&!called,
+            "Diagnostic controls accepted without --debug");
+    }
+    live::Snapshot fixed_snapshot;fixed_snapshot.running=true;fixed_snapshot.samples_received=1;
+    fixed_snapshot.capture_raw_sample_rate=48000;
+    DebugLive fixed_debug(30,log,false,"1",1,269484069,48000);
+    check(fixed_debug.step(0,fixed_snapshot,Signals{},false,true,{},269484069,269484069)==A::wait,
+        "Matching fixed diagnostics were rejected");
+    fixed_snapshot.capture_raw_sample_rate=96000;
+    check(fixed_debug.step(1,fixed_snapshot,Signals{},false,true,{},269484069,269484069)==A::close&&fixed_debug.result()!=0,
+        "Mismatched actual capture rate passed diagnostic");
+    DebugLive wrong_budget(30,log,false,"1",1,269484069,0);
+    check(wrong_budget.step(0,fixed_snapshot,Signals{},false,true,{},269484069,269484068)==A::close&&wrong_budget.result()!=0,
+        "Session/Transfer diagnostic budget mismatch passed");
+
 }
 
 void repeated_physical_debug_workflow() {
@@ -267,6 +383,30 @@ void repeated_physical_debug_workflow() {
         "receiver_pattern_wire","gui_state","receiver_helper_reference_reentry_extra"})
         check(!debug_live_detail::reentry_trace_event(event),"Repeated debug trace admitted an unrelated or per-row event");
     check(!debug_live_detail::reentry_trace_event(nullptr),"Repeated debug trace admitted an unnamed event");
+    static_assert(noexcept(debug_live_detail::pending_prefix_trace_event("receiver_signal_commit")));
+    for(const auto* event:{"trace_begin","gui_start","gui_inspection_launch","receiver_pattern_wire","receiver_signal_commit"})
+        check(debug_live_detail::pending_prefix_trace_event(event),"Prefix trace lost actual wire/selection evidence");
+    for(const auto* event:{"receiver_acquisition_work","receiver_pattern_drain","receiver_helper_raw_reference",
+        "receiver_signal_commit_extra","gui_state"})
+        check(!debug_live_detail::pending_prefix_trace_event(event),"Prefix trace admitted an unrelated or per-row search event");
+    check(!debug_live_detail::pending_prefix_trace_event(nullptr),"Prefix trace admitted an unnamed event");
+    using debug_live_detail::trace_event_filter;
+    check(!trace_event_filter(false,1,nullptr,true),"Work selector changed normal verbose tracing");
+    check(trace_event_filter(true,1,nullptr,true)==&debug_live_detail::work_trace_event,
+        "Explicit debug work selector unavailable");
+    for(const auto* event:{"receiver_acquisition_work","receiver_helper_raw_reference","receiver_pattern_wire","receiver_signal_commit"})
+        check(debug_live_detail::work_trace_event(event),"Causal work selector omitted required observation");
+    for(const auto* event:{"receiver_pattern_drain","gui_state","receiver_template","receiver_helper_raw_reference_extra"})
+        check(!debug_live_detail::work_trace_event(event),"Causal work selector admitted unrelated detail");
+    check(!trace_event_filter(false,3,"1"),"Prefix switch altered an ordinary verbose run");
+    for(const auto* setting:{static_cast<const char*>(nullptr),"","0","true","01","1 "}) {
+        check(!trace_event_filter(true,1,setting),"Default single debug trace changed without explicit opt-in");
+        check(trace_event_filter(true,2,setting)==&debug_live_detail::reentry_trace_event,
+              "Default repeated debug trace changed without explicit opt-in");
+    }
+    for(const unsigned repeat:{1U,2U,3U})
+        check(trace_event_filter(true,repeat,"1")==&debug_live_detail::pending_prefix_trace_event,
+              "Explicit prefix tracing did not select the bounded diagnostic filter");
     std::ostringstream log;live::Snapshot snap;Signals signals;
     snap.running=true;snap.samples_received=100;
     DebugLive repeated(300,log,false,"101",3);

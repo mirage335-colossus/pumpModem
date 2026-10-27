@@ -394,6 +394,10 @@ PatternFftWork StreamingReceiver::fft_work()const{return impl_->pattern.fft_work
 std::optional<PatternSourceIdentity> StreamingReceiver::source_identity(const PatternBurst& burst)const {
     return impl_->pattern.source_identity(burst);
 }
+std::optional<PatternPrefixSupport> StreamingReceiver::prefix_support_before_last(
+        std::uint64_t first,std::uint64_t symbol)const noexcept {
+    return impl_->pattern.prefix_support_before_last(first,symbol);
+}
 bool StreamingReceiver::phase_assistance_supported()const noexcept{return impl_->pattern.phase_assistance_supported();}
 std::size_t StreamingReceiver::phase_assistance_bin_samples()const noexcept{return impl_->pattern.phase_assistance_bin_samples();}
 bool StreamingReceiver::suspend_helper_acquisition(){return impl_->pattern.suspend_helper_acquisition();}

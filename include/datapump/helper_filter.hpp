@@ -22,6 +22,7 @@ class PayloadFilter {
     std::size_t next_=0,seen_=0;
     std::uint64_t output_=0;
     std::uint32_t rate_=0;
+    double center_=0;
     // Every bound operation rounds away from the exact nonnegative result.
     // This certificate is deliberately unavailable under altered FP modes.
     static double upper(double value) noexcept {
@@ -72,6 +73,19 @@ class PayloadFilter {
         };
         return {enclose(cosine),enclose(sine)};
     }
+    bool valid_center(double center)const noexcept {
+        return rate_ && std::isfinite(center) && center>225 && center+225<rate_/2.;
+    }
+    double coefficient(std::size_t i,double center)const noexcept {
+        constexpr double half_width=225;
+        const auto middle=taps_.size()/2;
+        const auto k=static_cast<double>(i)-middle;
+        const auto window=.42-.5*std::cos(2*std::numbers::pi*i/(taps_.size()-1))+
+            .08*std::cos(4*std::numbers::pi*i/(taps_.size()-1));
+        const auto low=k==0?2*half_width/rate_:
+            std::sin(2*std::numbers::pi*half_width*k/rate_)/(std::numbers::pi*k);
+        return (i==middle?1.:0.)-2*low*std::cos(2*std::numbers::pi*center*k/rate_)*window;
+    }
     double response_error(double frequency)const noexcept {
         // These adjacent binary64 values bracket mathematical pi.
         constexpr double pi_low=0x1.921fb54442d18p+1,pi_high=0x1.921fb54442d19p+1;
@@ -100,27 +114,76 @@ class PayloadFilter {
         }
         return add_upper(std::abs(value),error);
     }
+    double response_magnitude(double frequency)const noexcept {
+        // These adjacent binary64 values bracket mathematical pi.
+        constexpr double pi_low=0x1.921fb54442d18p+1,pi_high=0x1.921fb54442d19p+1;
+        const Interval angle{lower(lower(2*pi_low*frequency)/rate_),
+                             upper(upper(2*pi_high*frequency)/rate_)};
+        const auto [cosine,sine]=rotation(angle);
+        const auto a=(cosine.low+cosine.high)*.5,b=(sine.low+sine.high)*.5;
+        const auto radius=add_upper(upper(std::max(a-cosine.low,cosine.high-a)),
+                                    upper(std::max(b-sine.low,sine.high-b)));
+        constexpr auto epsilon=std::numeric_limits<double>::epsilon();
+        double real=1,imaginary=0,rotation_error=0;
+        double value=taps_[delay()],error=multiply_upper(epsilon,std::abs(taps_[delay()]));
+        for(std::size_t k=1;k<=delay();++k) {
+            const auto next_real=real*a-imaginary*b,next_imaginary=real*b+imaginary*a;
+            real=next_real;imaginary=next_imaginary;
+            if(!std::isfinite(real)||!std::isfinite(imaginary)||std::abs(real)>2||std::abs(imaginary)>2)
+                return std::numeric_limits<double>::infinity();
+            // Exact rotations have unit norm. The L1 enclosure radius also
+            // bounds the complex step error; 32 eps covers the two native
+            // complex multiply outputs while their components are <=2.
+            rotation_error=add_upper(add_upper(multiply_upper(add_upper(1,radius),rotation_error),radius),32*epsilon);
+            const auto coefficient=2*taps_[delay()-k],term=coefficient*real;
+            const auto rounding=multiply_upper(8*epsilon,add_upper(add_upper(std::abs(value),std::abs(term)),std::abs(coefficient)));
+            error=add_upper(error,add_upper(multiply_upper(std::abs(coefficient),rotation_error),rounding));
+            value+=term;
+        }
+        return add_upper(std::abs(value),error);
+    }
 public:
     PayloadFilter()=default;
     PayloadFilter(std::uint32_t rate,double center):rate_(rate) {
-        constexpr double half_width=225;
-        if(!rate||!std::isfinite(center)||center<=half_width||center+half_width>=rate/2.)
+        if(!valid_center(center))
             throw Error("adjacent helper filter is outside the receiver passband");
         const auto count=static_cast<std::size_t>(std::ceil(rate*.04))|1U;
         if(count<3||count>4097)throw Error("adjacent helper filter exceeds its optional workspace bound");
         taps_.resize(count);history_.resize(count);
-        const auto middle=count/2;double sum=0;
-        for(std::size_t i=0;i<count;++i) {
-            const auto k=static_cast<double>(i)-middle;
-            const auto window=.42-.5*std::cos(2*std::numbers::pi*i/(count-1))+
-                .08*std::cos(4*std::numbers::pi*i/(count-1));
-            const auto low=k==0?2*half_width/rate:
-                std::sin(2*std::numbers::pi*half_width*k/rate)/(std::numbers::pi*k);
-            taps_[i]=(i==middle?1.:0.)-2*low*std::cos(2*std::numbers::pi*center*k/rate)*window;
-            sum+=taps_[i];
-        }
-        for(auto& value:taps_)value/=sum;
+        if(!retune(center))throw Error("adjacent helper filter cannot establish a finite kernel in this FP environment");
     }
+    // Replace only the coefficients of this SAME-rate, SAME-length symmetric
+    // FIR. The input ring, warmup, output counter, delay and capacities remain
+    // untouched. A rejected center/FP mode cannot mutate even one tap. The
+    // first pass validates the complete normalization; the second repeats the
+    // fixed formula and commits without allocation. Recomputing an old center
+    // in an unchanged FP environment restores its coefficient bits exactly.
+    // l1_change bounds an instantaneous coefficient transition for bounded PCM:
+    // |new_output-old_output| <= l1_change * max|input| (before float rounding).
+    // This is NOT an all-time spectral certificate for a time-varying kernel.
+    bool retune(double center,double* l1_change=nullptr)noexcept {
+        if(!enabled() || !valid_center(center) || !certificate_environment())return false;
+        if(center==center_) {if(l1_change)*l1_change=0;return true;}
+        double sum=0,largest=0;
+        for(std::size_t i=0;i<taps_.size();++i) {
+            const auto value=coefficient(i,center);
+            if(!std::isfinite(value))return false;
+            sum+=value;largest=std::max(largest,std::abs(value));
+        }
+        if(!std::isfinite(sum) || sum==0 ||
+           !std::isfinite(largest/std::abs(sum)) ||
+           largest/std::abs(sum)>std::numeric_limits<double>::max()/(4*taps_.size()))return false;
+        double change=0;
+        for(std::size_t i=0;i<taps_.size();++i) {
+            const auto value=coefficient(i,center)/sum;
+            change=add_upper(change,upper(std::abs(value-taps_[i])));
+            taps_[i]=value;
+        }
+        center_=center;if(l1_change)*l1_change=change;
+        return true;
+    }
+    double center_hz()const noexcept{return center_;}
+    std::span<const double> coefficients()const noexcept{return taps_;}
     bool enabled()const noexcept{return !taps_.empty();}
     std::size_t delay()const noexcept{return taps_.size()/2;}
     std::size_t allocated_bytes()const noexcept {
@@ -161,6 +224,43 @@ public:
         for(std::size_t cell=1;cell<=cells;++cell) {
             const auto frequency=cell==cells?high_hz:low_hz+(high_hz-low_hz)*(static_cast<double>(cell)/static_cast<double>(cells));
             const auto response=response_error(frequency),width=upper(frequency-previous_frequency);
+            const auto remainder=upper(multiply_upper(second_derivative,multiply_upper(width,width))/8);
+            maximum=std::max(maximum,add_upper(std::max(previous,response),remainder));
+            previous_frequency=frequency;previous=response;
+        }
+        return std::min(triangle,maximum);
+    }
+    // Continuous-band bound on |H(f)| from the same actual centered kernel.
+    // This is a stopband certificate, not a promise about input energy, float
+    // PCM rounding, or receiver false alarms. No state or allocation is added.
+    double maximum_response(double low_hz,double high_hz)const noexcept {
+        constexpr auto infinity=std::numeric_limits<double>::infinity();
+        if(!std::isfinite(low_hz)||!std::isfinite(high_hz)||low_hz<0||high_hz<low_hz)return infinity;
+        if(!enabled())return 1;
+        if(high_hz>rate_/2.||!certificate_environment())return infinity;
+        constexpr double pi_high=0x1.921fb54442d19p+1;
+        double triangle=upper(std::abs(taps_[delay()])),second_derivative=0;
+        for(std::size_t k=1;k<=delay();++k) {
+            const auto coefficient=upper(2*std::abs(taps_[delay()-k]));
+            const auto omega=upper(multiply_upper(2*pi_high,static_cast<double>(k))/rate_);
+            triangle=add_upper(triangle,coefficient);
+            second_derivative=add_upper(second_derivative,multiply_upper(coefficient,multiply_upper(omega,omega)));
+        }
+        if(!std::isfinite(triangle)||!std::isfinite(second_derivative))return infinity;
+        if(low_hz==high_hz)return std::min(triangle,response_magnitude(low_hz));
+        // Linear interpolation error is <=sup|H''|*width^2/8 on EACH complete
+        // cell. Endpoint bounds therefore certify all frequencies between
+        // them; this is not a sampled-response claim. Aim for 1e-5 slack, but
+        // cap work at about two million tap visits and 16384 cells.
+        const auto span=upper(high_hz-low_hz);
+        const auto requested=std::ceil(span*std::sqrt(second_derivative/(8e-5)));
+        const auto limit=std::min<std::size_t>(16384,std::max<std::size_t>(1,2000000/std::max<std::size_t>(1,delay())));
+        const auto cells=std::isfinite(requested)&&requested<static_cast<double>(limit)?
+            std::max<std::size_t>(1,static_cast<std::size_t>(requested)):limit;
+        double previous_frequency=low_hz,previous=response_magnitude(low_hz),maximum=previous;
+        for(std::size_t cell=1;cell<=cells;++cell) {
+            const auto frequency=cell==cells?high_hz:low_hz+(high_hz-low_hz)*(static_cast<double>(cell)/static_cast<double>(cells));
+            const auto response=response_magnitude(frequency),width=upper(frequency-previous_frequency);
             const auto remainder=upper(multiply_upper(second_derivative,multiply_upper(width,width))/8);
             maximum=std::max(maximum,add_upper(std::max(previous,response),remainder));
             previous_frequency=frequency;previous=response;

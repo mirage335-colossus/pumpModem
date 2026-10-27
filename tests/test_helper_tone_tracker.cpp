@@ -1,4 +1,5 @@
 #include "datapump/helper_tone_tracker.hpp"
+#include "datapump/helper_reference_precision.hpp"
 #include "datapump/helper_carrier.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_receiver.hpp"
@@ -70,7 +71,13 @@ void representative_hf_noise_and_eme_level() {
     s=run(tracker,source,c.sample_rate,0,10,5062.5,0,.6,1.87,true);
     std::cout<<"EMEnoise frequency="<<s.frequency_hz<<" uncertainty="<<s.uncertainty_hz
         <<" CNO="<<s.carrier_to_noise_db_hz<<" present="<<s.present<<" qualified="<<s.qualified<<'\n';
-    check(!s.qualified || s.uncertainty_hz>.2,"weak EME helper invented high frequency precision");
+    // The precision estimator now uses independently dated phase slopes;
+    // a fixed old-estimator width is not a physical noise limit. Retain the
+    // actual weak observation's truth, process guard and measured support.
+    check(!s.qualified || (std::abs(s.frequency_hz-5062.5)<=s.uncertainty_hz && s.uncertainty_hz>=.005+3*c.phase_noise_radians_per_sqrt_second/
+            (2*std::numbers::pi*std::sqrt(std::max(.02,static_cast<double>(s.sample-s.first_sample+1)/c.sample_rate)))-1e-12 &&
+        s.first_sample<=s.sample && s.sample<s.captured_end_sample),
+        "weak noisy helper escaped its measured interval or process/support guard");
 }
 void narrow_range_and_noise() {
     const helper::ToneTrackerConfig c{6000,2062.5,3,0,.5};
@@ -147,19 +154,21 @@ void sparse_segments_keep_recent_aperture() {
     const auto aperture=static_cast<double>(s.sample-s.first_sample+1)/c.sample_rate;
     std::cout<<"sparse actual_measurement_aperture="<<aperture<<'\n';
     check(s.sample>2ULL*c.sample_rate,"sparse control never formed a later actual fit");
-    check(aperture<=8.05,"sparse valid segments retained unbounded old frequency history");
+    check(aperture<=36.05,"sparse valid segments retained unbounded old frequency history");
 }
 void stable_full_capacity_keeps_moving() {
     constexpr std::uint32_t rate=48000;
     const helper::ToneTrackerConfig c{rate,2062.5,20,0,.5};
     helper::ToneTracker tracker(c,helper::ToneTracker::workspace_required(c));Source source;
-    for(std::uint64_t first=0;first<10ULL*rate;first+=960) {
+    for(std::uint64_t first=0;first<40ULL*rate;first+=960) {
         auto block=source.block(rate,first,960,2063.2,0,.6,.02);
         tracker.push(block,first);const auto s=tracker.snapshot();
         if(first>=5ULL*rate) {
             check(s.qualified,"stable full-capacity history lost qualification");
             const auto span=static_cast<double>(s.sample-s.first_sample+1)/rate;
-            check(span<=7.73,"full history stopped evicting its oldest observation on each accepted update");
+            check(span<=36.05,"numeric phase history exceeded its36s source support bound");
+            if(first>=38ULL*rate)check(s.first_sample>=static_cast<std::uint64_t>(1.9*rate),
+                "full precision history stopped advancing its source support");
         }
     }
 }
@@ -220,7 +229,11 @@ void rolling_fifo_and_realistic_helper_modulation() {
         <<" uncertainty="<<s.uncertainty_hz<<" CNO="<<s.carrier_to_noise_db_hz
         <<" support_first_seconds="<<static_cast<double>(s.first_sample)/rate<<'\n';
     check(s.qualified && std::abs(s.frequency_hz-expected)<.2,"realistic rolling helper did not track after multiple history capacities");
-    check(s.first_sample>static_cast<std::uint64_t>(3.95*rate),"realistic FIFO retained observations beyond its source-date window");
+    check(std::abs(s.frequency_hz-expected)<=s.uncertainty_hz,
+        "realistic rolling helper escaped its measured model interval");
+    check(s.first_sample<=s.sample && s.sample<s.captured_end_sample &&
+        static_cast<double>(s.sample-s.first_sample+1)/rate<=36.05,
+        "realistic numeric phase support exceeded its source-date window");
 }
 struct ClockPayloadStats {
     std::size_t polls=0,qualified=0;
@@ -481,9 +494,45 @@ void out_of_range_or_large_evolving_shift_declines() {
     check(!s.qualified,"large changing offset received oscillator-following authority");
 }
 }
+void phase_segment_covariance_and_precision_prediction() {
+    using namespace datapump::helper;
+
+ for(const auto m:{4u,8u,16u})for(const bool hetero:{false,true}) {
+  std::array<precision_detail::Edge,16> e{};std::array<double,17> phase{},v{};
+  constexpr double dt=.02;for(unsigned j=0;j<=m;++j){phase[j]=.031*std::sin(j*1.7)+.4*j*dt;v[j]=hetero?.02+.003*j:.02;}
+  for(unsigned j=0;j<m;++j)e[j]={(phase[j+1]-phase[j])/dt,v[j]/(dt*dt),v[j+1]/(dt*dt)};
+  precision_detail::Segment s;check(precision_detail::make_segment(std::span(e).first(m),dt,0,0,(m+1)*960,s),"kernel rejected valid edge chain");
+  double mp=0;for(unsigned j=0;j<=m;++j)mp+=phase[j];mp/=m+1;double tt=0,tp=0,thermal=0;
+  for(unsigned j=0;j<=m;++j){const auto u=(j-.5*m)*dt;tt+=u*u;tp+=u*(phase[j]-mp);}
+  for(unsigned j=0;j<=m;++j){const auto u=(j-.5*m)*dt;thermal+=v[j]*(u/tt)*(u/tt);}
+  check(std::abs(s.hz-tp/tt)<1e-12,"edge weights differ from independent phase OLS");
+  check(s.variance+1e-12>=thermal,"kernel dropped dense endpoint covariance");
+  auto bad=e;bad[1].first_variance+=.1;check(!precision_detail::make_segment(std::span(bad).first(m),dt,0,0,100,s),"inconsistent shared endpoint accepted");
+ }
+ for(const bool curved:{false,true}) {
+  std::array<precision_detail::Segment,64> records{};constexpr unsigned rate=48000;constexpr std::uint64_t now=40ULL*rate-1;
+  for(std::size_t i=0;i<records.size();++i){auto& e=records[i];e.first=(4ULL*rate)+i*rate/2;e.end=e.first+rate/10;
+   const auto t=(double(e.first)+.5*(e.end-e.first-1)-now)/rate;e.hz=100+.08*t+(curved?.002*t*t:0);e.variance=.0001*(1+i%3);}
+  const auto e=precision_detail::pool(records,nullptr,now,rate,0);
+  check(e.valid && std::abs(e.hz-100)<=e.uncertainty,"two-scale geometry failed exact linear/quadratic current truth");
+  auto bad=records;bad[2].first=bad[1].end-1;check(!precision_detail::pool(bad,nullptr,now,rate,0).valid,"overlapping phase support pooled as independent");
+ }
+ TonePrecisionRequest r;r.sample_rate=48000;r.straight_cn0_db_hz=30.020599913279625;r.phase_noise_radians_per_sqrt_second=.008770170951;
+ const auto predicted=predict_tone_precision(r);std::cout<<"expected30 supported="<<predicted.supported<<" total="<<predicted.total_lead_seconds<<" extra="<<predicted.extra_lead_seconds<<" U="<<predicted.frequency_half_width_hz<<" usable="<<predicted.usable_tone_seconds<<" segments="<<predicted.expected_segments<<" reached="<<predicted.target_reached<<" capped="<<predicted.extension_capped<<'\n';
+ check(predicted.supported && predicted.extra_lead_seconds<=36 && predicted.extra_lead_seconds>=0,"prediction lost cap");
+ r.max_extra_seconds=.3999999995;const auto fractional=predict_tone_precision(r);
+ check(fractional.extra_lead_seconds<=r.max_extra_seconds,"fractional precision cap overshot");
+ r.max_extra_seconds=36;r.baseline_lead_seconds=1e300;
+ check(!predict_tone_precision(r).supported,"huge baseline entered unbounded forecast");
+ r.baseline_lead_seconds=2;r.maximum_source_capture_ratio=1e-300;
+ check(!predict_tone_precision(r).supported,"tiny source ratio entered unbounded forecast");
+ r.maximum_source_capture_ratio=1;r.straight_cn0_db_hz=13;check(!predict_tone_precision(r).supported,"weak following gate forecast implied qualification");
+ std::cout<<"pure precision checks passed\n";
+
+}
 int main() {
     try {
-        strong_wide_tone_and_drift();representative_hf_noise_and_eme_level();narrow_range_and_noise();actual_helper_cold_capture_before_payload();sparse_segments_keep_recent_aperture();stable_full_capacity_keeps_moving();rolling_fifo_and_realistic_helper_modulation();shared_endpoint_precision_of_stable_tone();ordinary_payload_does_not_obscure_punctuation_clock();actual_encrypted_helper_boundary_does_not_poison_clock();off_cadence_feature_does_not_poison_established_clock();independent_punctuation_clock();out_of_range_or_large_evolving_shift_declines();
+        phase_segment_covariance_and_precision_prediction();strong_wide_tone_and_drift();representative_hf_noise_and_eme_level();narrow_range_and_noise();actual_helper_cold_capture_before_payload();sparse_segments_keep_recent_aperture();stable_full_capacity_keeps_moving();rolling_fifo_and_realistic_helper_modulation();shared_endpoint_precision_of_stable_tone();ordinary_payload_does_not_obscure_punctuation_clock();actual_encrypted_helper_boundary_does_not_poison_clock();off_cadence_feature_does_not_poison_established_clock();independent_punctuation_clock();out_of_range_or_large_evolving_shift_declines();
         std::cout<<"helper realtime tone tracker checks passed\n";return 0;
     }catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

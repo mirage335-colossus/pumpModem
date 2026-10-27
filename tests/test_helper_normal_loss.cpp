@@ -13,6 +13,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
+#include <map>
 #include <numbers>
 #include <random>
 #include <string>
@@ -61,7 +63,7 @@ live::Settings settings() {
 }
 bool trace_filter(const char* name) noexcept {
     const std::string_view event{name};
-    return event=="trace_begin" || event=="receiver_signal_commit" ||
+    return event=="trace_begin" || event=="receiver_signal_commit" || event=="receiver_acquisition_work" ||
         event=="receiver_bank_admitted" || event.starts_with("receiver_helper_");
 }
 std::uint64_t number(const std::string& line,std::string_view key) {
@@ -156,7 +158,7 @@ std::vector<float> physical_recording(Provider& script) {
 }
 
 struct Result {std::string bits;bool phase_applied=false;};
-Result run(bool lose_helper) {
+Result run(bool lose_helper,bool require_phase=false) {
     auto value=settings();const auto& c=value.transfer.modem;
     Provider script{value,lose_helper};provider=&script;
     struct Release {~Release(){provider=nullptr;}}release;
@@ -167,7 +169,7 @@ Result run(bool lose_helper) {
     std::filesystem::create_directories(path.parent_path());
     const auto expected=binary(payload());
     std::string actual;
-    bool exact=false,narrowed=false,phase_active=false,loss_observed=false,pending=false;
+    bool exact=false,narrowed=false,phase_active=false,phase_claimed=false,loss_observed=false,pending=false;
     std::uint64_t selected_id=0,last_count=0,last_revision=0,admissions=0;
     {
         audio::trace::Scope trace(path,false,&trace_filter);
@@ -180,6 +182,7 @@ Result run(bool lose_helper) {
                   "normal helper loss reset or dropped ordinary receive input");
             check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,
                   "normal helper loss exceeded ordinary DSP accounting");
+            phase_claimed=phase_claimed||snapshot.helper_phase_assistance_active;
             if(script.ready.load()) {
                 const auto delivered=script.logical_delivered.load();
                 if(delivered<script.helper_cut) {
@@ -213,11 +216,56 @@ Result run(bool lose_helper) {
         }
         session.stop();
     }
-    bool phase_applied=false,scored_end=false,trace_pending=false,later_admission=false;std::uint64_t id=0,count=0;
+    bool phase_applied=false,phase_work=false,scored_end=false,trace_pending=false,later_admission=false;
+    bool narrowed_work=false,later_epoch_work=false;
+    std::uint64_t id=0,count=0,first_admission=UINT64_MAX,first_work_epoch=UINT64_MAX;
+    std::uint64_t qualified_jobs=0,later_jobs=0,later_work_epoch=0;
+    // Cumulative numeric owners are identified exactly as the joined Live
+    // recorder specifies. A later admission alone does not prove any scoring.
+    using RowIdentity=std::array<std::uint64_t,3>;
+    std::map<RowIdentity,std::array<std::uint64_t,7>> row_work;
+    std::map<RowIdentity,std::uint64_t> admitted_at; // revision, epoch, family
     std::ifstream input(path);std::string line;
     while(std::getline(input,line)) {
-        if(line.find("\"event\":\"receiver_bank_admitted\"")!=std::string::npos)
-            later_admission=later_admission||number(line,"sample")>0;
+        if(line.find("\"event\":\"receiver_bank_admitted\"")!=std::string::npos) {
+            const auto sample=number(line,"sample");
+            later_admission=later_admission||sample>0;
+            first_admission=std::min(first_admission,sample);
+            admitted_at[{number(line,"revision"),number(line,"epoch"),number(line,"family")}]=sample;
+        }
+        if(line.find("\"event\":\"receiver_acquisition_work\"")!=std::string::npos) {
+            const RowIdentity identity{number(line,"revision"),number(line,"instance_id"),number(line,"sample_origin")};
+            auto& previous=row_work[identity];
+            const std::array current{number(line,"template_jobs"),number(line,"input_transforms"),
+                number(line,"fft_jobs"),number(line,"direct_jobs"),number(line,"phase_jobs"),
+                number(line,"phase_tracking_fits"),number(line,"phase_corrected_bins")};
+            for(std::size_t i=0;i<current.size();++i)
+                check(current[i]>=previous[i],"normal helper numeric work reset within one traced owner");
+            const bool joined=number(line,"numeric_owner") && !number(line,"incomplete") &&
+                line.find("\"reason\":\"feed_complete\"")!=std::string::npos;
+            const auto original=number(line,"helper_window_original_pairs"),selected=number(line,"helper_window_selected_pairs");
+            const bool qualified=joined && number(line,"realtime_helper") && number(line,"realtime_locked") &&
+                number(line,"helper_window_supported") && number(line,"helper_window_active") &&
+                selected && selected<original;
+            const bool executed=current[0]>previous[0] && (current[2]>previous[2] || current[3]>previous[3]);
+            // The dynamic window does not use legacy conditional/skip counters.
+            // Use this SAME row's active selected domain and actual job delta.
+            if(qualified && executed) {
+                narrowed_work=true;const auto epoch=number(line,"epoch"),jobs=current[0]-previous[0];
+                first_work_epoch=std::min(first_work_epoch,epoch);
+                check(jobs<=UINT64_MAX-qualified_jobs,"normal helper work total overflowed");qualified_jobs+=jobs;
+                const RowIdentity admission{identity[0],epoch,number(line,"family")};
+                const auto found=admitted_at.find(admission);
+                if(found!=admitted_at.end() && found->second>first_admission && epoch>first_work_epoch &&
+                   number(line,"sample")>found->second) {
+                    later_epoch_work=true;
+                    if(!later_work_epoch || epoch<later_work_epoch)later_work_epoch=epoch;
+                    check(jobs<=UINT64_MAX-later_jobs,"normal later-epoch work total overflowed");later_jobs+=jobs;
+                }
+            }
+            phase_work=phase_work||(joined && (current[4]>previous[4] || current[5]>previous[5] || current[6]>previous[6]));
+            previous=current;
+        }
         if(line.find("\"event\":\"receiver_helper_cohort_phase_applied\"")!=std::string::npos) {
             check(number(line,"timing_qualified")==1 && number(line,"phase_jobs")>0,
                   "normal helper phase event did not represent qualified joined phase work");
@@ -242,18 +290,28 @@ Result run(bool lose_helper) {
     }
     std::cout<<"normal_helper_loss="<<lose_helper<<" exact="<<exact<<" bits="<<count<<" row="<<selected_id
              <<" pending="<<pending<<" scored_end="<<scored_end<<" narrowed="<<narrowed
-             <<" phase_active="<<phase_active<<" phase_applied="<<phase_applied<<" loss_observed="<<loss_observed
+             <<" phase_active="<<phase_active<<" phase_applied="<<phase_applied<<" phase_work="<<phase_work
+             <<" phase_required="<<require_phase<<" phase_scope="<<(require_phase?"optional_phase_positive":"frequency_only_no_phase_qualification")
+             <<" narrowed_work="<<narrowed_work<<" qualified_jobs="<<qualified_jobs
+             <<" first_work_epoch="<<first_work_epoch<<" later_work_epoch="<<later_work_epoch
+             <<" first_admission_sample="<<first_admission
+             <<" later_epoch_work="<<later_epoch_work<<" later_jobs="<<later_jobs<<" loss_observed="<<loss_observed
              <<" capture_epoch="<<script.capture_epoch<<" private_tx_epoch="<<script.transmit_epoch
              <<" helper_cut="<<script.helper_cut<<" payload_end="<<script.payload_end
              <<" admissions="<<admissions<<" later_admission="<<later_admission<<" trace="<<path<<'\n';
     check(script.captures==1 && script.exhausted,"normal helper fixture reopened or truncated actual capture");
     check(exact && pending && trace_pending && scored_end && admissions>8 && later_admission,
           "normal Auto rolling helper loss lost payload, progress or scored physical END");
-    check(narrowed,"normal helper fixture never used its measured carrier in the rolling cohort");
-    // Mandatory normal-cohort phase acceptance. A legacy auxiliary-lane phase
-    // event cannot satisfy this actual joined-work check. Constant CFO checks
-    // the phase plumbing; nonidentity correction has separate causal coverage.
-    check(phase_active && phase_applied,"normal rolling helper phase/timing assistance never became active");
+    check(narrowed,"normal helper fixture never used its measured carrier in ordinary reception");
+    check(narrowed_work && later_epoch_work && qualified_jobs && later_jobs,
+          "normal rolling helper lacked actual same-row narrowing or later-epoch scored work");
+    // The current enabled Live route is frequency-only. Keep the former phase
+    // acceptance as an explicit positive mode, never infer phase qualification
+    // from frequency narrowing, an admission, or a legacy auxiliary-lane event.
+    check((!phase_claimed || (phase_applied && phase_work)) && (!phase_applied || phase_work),
+          "normal helper claimed phase assistance without qualified joined phase work");
+    if(require_phase)check(phase_active && phase_applied && phase_work,
+          "normal rolling helper phase/timing assistance never became active");
     if(lose_helper)check(loss_observed,"normal rolling receiver did not observe physical helper loss");
     if(!directory) {std::filesystem::remove(path);std::filesystem::remove(path.string()+".seal");}
     return {actual,phase_applied};
@@ -321,7 +379,8 @@ std::vector<float> record(double,std::uint32_t,const std::string&,std::size_t,st
 }
 }
 int main(int argc,char** argv) {try {
-    if(argc==2 && std::string_view(argv[1])=="--continuous")run(false);
+    if(argc==2 && std::string_view(argv[1])=="--phase-positive")run(false,true);
+    else if(argc==2 && std::string_view(argv[1])=="--continuous")run(false);
     else if(argc==2 && std::string_view(argv[1])=="--loss")run(true);
     else if(argc==1) {
         // Separate fresh private epochs legitimately produce different keyed

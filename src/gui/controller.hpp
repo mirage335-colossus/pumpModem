@@ -19,6 +19,9 @@ public:
         // Native smoke can control its interruption fixture's presentation
         // clock without changing sampled computation or ordinary application time.
         live::Session::ReplayClock replay_clock = {};
+        // Lifetime-fixed diagnostic controls; ordinary callers leave these empty.
+        std::optional<std::size_t> debug_workspace_bytes;
+        std::uint32_t diagnostic_capture_rate_hz = 0;
     };
     Controller();
     explicit Controller(Options options);

@@ -15,6 +15,7 @@ class PatternAcquisitionClockPrior;
 struct PatternAcquisitionClockResult;
 struct PatternAcquisitionState;
 struct PatternAcquisitionWorkBound;
+struct PatternHelperFrequencyWindow;
 }
 
 namespace datapump::simulation {
@@ -244,6 +245,10 @@ struct Estimate {
     // Finite coverage of the configured bank; oscillator_search_limited distinguishes
     // it from the full model/margin request below. An unaffordable legacy bank
     // may fall back locally at runtime; no probability models that fallback.
+    // A supplied work-only paired catalogue retains its local scalar radii
+    // even when its input origin is nonzero. These radii are not membership
+    // bounds in raw input coordinates; carrier_in_search/clock_in_search use
+    // the actual frequency-cell union and matching joint cells instead.
     double carrier_search_half_width_hz = 0;
     double requested_carrier_search_half_width_hz = 0;
     double clock_search_half_width_ppm = 0;
@@ -349,7 +354,10 @@ Estimate estimate_with_receiver_search(const transfer::Estimate&,const transfer:
                   std::size_t receive_key_count=1,double differential_window_seconds=100,
                   ReceiverWorkMode work_mode=ReceiverWorkMode::sampled_simulation,
                   ReceiverTimingModel timing_model={},const live::Settings* receiver_settings=nullptr,
-                  std::stop_token stop={});
+                  std::stop_token stop={},const modem::PatternHelperFrequencyWindow* execution_window=nullptr);
+// The optional window selects EXACT existing runtime cells for cost only.
+// Original constructor/backend/bin/workspace/trials and full continuation stay
+// charged; compact masked work remains unavailable. It qualifies no reference.
 // Explicit conditional frequency work. These inputs never qualify a tone or
 // manufacture a forecast from enabled helper power. They describe a reference
 // already qualified by the actual receiver, or a separately validated forecast.
@@ -358,7 +366,8 @@ namespace detail {struct HelperJointClockProof;}
 // The joint owner consumes an opaque diagnostic copy supplied by the trusted
 // joined runtime producer after ACTUAL core execution. Its public result fields
 // are consistency-checked metadata, not an unforgeable execution receipt.
-enum class HelperExecutionOwner { original_masked_owner, conditional_catalogue_owner, executed_joint_masked_owner };
+enum class HelperExecutionOwner { original_masked_owner, conditional_catalogue_owner, executed_joint_masked_owner,
+    conditional_window_masked_owner };
 struct HelperFrequencyCell {
     modem::PatternFrequencyRateHypothesis hypothesis;
     double frequency_half_width_hz=0,clock_lower_ppm=0,clock_upper_ppm=0;
@@ -423,6 +432,9 @@ struct HelperFrequencyProfile {
     // diagnostic original-pair counts alone cannot set this evidence.
     std::string original_trial_policy_evidence;
     std::shared_ptr<const detail::HelperJointClockProof> joint_clock_proof;
+    // Planning-only exact original-window selection; never an executed joint
+    // receipt or a smaller decoder. The helper window owns its lifetime.
+    std::shared_ptr<const modem::PatternHelperFrequencyWindow> original_execution_window;
 };
 enum class HelperForecastUtilityScope { unavailable, validated_strong_only, validated_global };
 struct HelperFrequencyForecastCoverage {

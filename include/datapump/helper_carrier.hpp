@@ -60,6 +60,10 @@ struct EnvelopeRequirements {
     // Actual receiver aperture, including any sequential discovery/warmup.
     // No level-to-precision prediction or metadata requirement is inferred.
     double frequency_acquisition_seconds=0,frontend_lookahead_seconds=0;
+    // Optional predicted source-clock airtime beyond the complete baseline.
+    // A duration never qualifies the received reference. Bounded independently
+    // of the existing aperture/drain requirement and rounded to full dwells.
+    double frequency_precision_extension_seconds=0;
     // Total additional capture obligation from the payload endpoint, including
     // any required absence coverage. This is frozen at source completion, not
     // elapsed queue lag or a deadline renewed by later cold admissions.

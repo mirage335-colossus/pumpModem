@@ -2,6 +2,7 @@
 #include "fhss_profile.hpp"
 #include "datapump/transfer.hpp"
 #include "datapump/live.hpp"
+#include "datapump/helper_reference_precision.hpp"
 #include "datapump/lpi_estimate.hpp"
 #include "datapump/simulation_estimate.hpp"
 #include <memory>
@@ -82,12 +83,37 @@ struct CpuPoint {
     double realtime_ratio=0;
     bool available=false;
 };
+// Prices inherited from the ordinary receiver estimator, not measured total
+// application CPU. The finite components are disjoint; epoch setup diagnostics
+// below are already included in frontend/search and must not be added again.
+struct HelperReceiverCostLedger {
+    bool finite_available=false,sustained_available=false,workspace_supported=false;
+    double finite_cpu_seconds=0,finite_audio_seconds=0,finite_realtime_ratio=0;
+    double frontend_seconds=0,search_seconds=0,kernel_seconds=0;
+    double continuation_seconds=0,payload_seconds=0,startup_other_seconds=0;
+    double sustained_realtime_ratio=0,sustained_continuation_ratio=0;
+    double initial_epoch_setup_seconds=0,new_epoch_setup_seconds=0,new_epoch_frontend_seconds=0;
+    double initial_epochs=0,new_epoch_admissions=0,cohort_lifetime_seconds=0,resident_instances=0;
+    simulation::ReceiverSearchDiagnostics geometry;
+    // Separate additive terms. Missing calibration stays missing, never zero.
+    // New manual-reference mode has no parallel broad fallback or audit bank.
+    std::optional<double> helper_startup_cpu_seconds,helper_sustained_realtime_ratio;
+    std::optional<double> post_lock_lead_receiver_cpu_seconds;
+};
+// Unsupported component pricing cannot be promoted to a complete finite or
+// sustained total. Workspace eligibility stays a separate model diagnostic.
+HelperReceiverCostLedger helper_receiver_cost(const simulation::Estimate&);
 struct RealtimeHelperCpuPoint {
     double target_db_hz=0,realtime_ratio=0,uncertainty_hz=0,observation_seconds=0,minimum_seed_seconds=0;
     double rf_half_width_hz=0,clock_half_width_ppm=0;
     std::uint32_t physical_sample_rate=0;
     std::size_t frequency_rate_hypotheses=0,retained_clock_rates=0;
+    std::optional<modem::PatternHelperClockInterval> shared_frequency_clock;
+    std::size_t shared_clock_selected_pairs=0,shared_clock_selected_rates=0;
     bool available=false;
+    helper::TonePrecisionPrediction precision;
+    double planned_lead_seconds=0,planned_tail_seconds=0;
+    HelperReceiverCostLedger receiver_cost;
     std::string reason;
 };
 struct HelperCpuPoint {

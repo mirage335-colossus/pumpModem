@@ -20,6 +20,8 @@
 #include "datapump/tuning.hpp"
 #include <algorithm>
 #include <chrono>
+#include <charconv>
+#include <limits>
 #include <cmath>
 #include <iostream>
 #include <map>
@@ -30,7 +32,8 @@ using Clock=std::chrono::steady_clock;
 struct Application::Impl {
     explicit Impl(const Launch& launch):smoke_clock(launch.smoke?std::make_shared<smoke_detail::InterruptionClock>():nullptr),
         controller({launch.simulation||launch.smoke,launch.smoke,launch.settings,
-            smoke_clock?live::Session::ReplayClock([clock=smoke_clock]{return clock->now();}):live::Session::ReplayClock{}}),
+            smoke_clock?live::Session::ReplayClock([clock=smoke_clock]{return clock->now();}):live::Session::ReplayClock{},
+            launch.debug_workspace_bytes,launch.debug_capture_rate_hz}),
         fast_controller([this] {
             if(legacy_controller.active())return false;
             // The first attempt can initiate asynchronous device closure.
@@ -120,7 +123,8 @@ Application::~Application()=default;
 void Application::start() {
     if(impl_->started_session)return;
     if(launch.verbose) {
-        const auto filter=launch.debug_live&&launch.debug_repeat>1?&debug_live_detail::reentry_trace_event:nullptr;
+        const auto filter=debug_live_detail::trace_event_filter(launch.debug_live,launch.debug_repeat,
+            std::getenv("DATAPUMP_DEBUG_PREFIX_TRACE"),launch.debug_work_trace);
         impl_->trace=std::make_unique<audio::trace::Scope>(launch.verbose_file,false,filter);
         std::cerr<<"Verbose timing trace: "<<impl_->trace->path()<<'\n';
         audio::trace::record("gui_start",[&](auto& f){f.add("version",DATAPUMP_VERSION);f.add("debug",launch.debug_live);
@@ -132,7 +136,8 @@ void Application::start() {
     if(launch.debug_live) {
         if(launch.simulation||launch.smoke)throw Error("Hardware debug cannot use Simulation/smoke");
         impl_->debug=std::make_unique<DebugLive>(launch.debug_timeout,std::cerr,
-            launch.settings && launch.settings->clock_sync && *launch.settings->clock_sync!="default",launch.debug_bits,launch.debug_repeat);
+            launch.settings && launch.settings->clock_sync && *launch.settings->clock_sync!="default",launch.debug_bits,launch.debug_repeat,
+            launch.debug_workspace_bytes.value_or(0),launch.debug_capture_rate_hz,launch.debug_post_tail_seconds);
         impl_->controller.toggle(ui::Field::live_duplex,true);
         impl_->controller.edit(ui::Field::binary,launch.debug_bits);
     }
@@ -173,7 +178,8 @@ bool Application::tick() {
         if(impl_->debug&&!closing()) {
             const auto action=impl_->debug->step(std::chrono::duration<double>(now-impl_->started).count(),
                 impl_->controller.snapshot(),impl_->controller.signals(),impl_->controller.enabled(ui::Command::transmit),
-                impl_->controller.settings().transfer.key.has_value(),impl_->controller.field(ui::Field::status).text);
+                impl_->controller.settings().transfer.key.has_value(),impl_->controller.field(ui::Field::status).text,
+                impl_->controller.settings().dsp_workspace_bytes,impl_->controller.settings().transfer.dsp_workspace_bytes);
             if(action==DebugLive::Action::transmit) {
                 impl_->controller.activate(ui::Command::transmit);
                 // The normal action seeds a new draft after accepting TX.
@@ -652,12 +658,20 @@ void gui_self_check() {
 int gui_main(int argc,char** argv,const char* backend,const std::function<int(Launch)>& run,const char* program_name) {
     bool smoke_requested=false,self_check_requested=false;
     try {
-        Launch launch;bool audio_device_option=false,debug_repeat_option=false;
+        Launch launch;bool audio_device_option=false,debug_repeat_option=false,debug_post_tail_option=false;
         const auto frontend_label=std::string_view(program_name)=="datapump-gui"?"GUI backend: ":"Frontend: ";
         std::vector<std::string> settings_arguments;
+        const auto debug_unsigned=[](std::string_view option,std::string_view text) {
+            std::uint64_t value=0;
+            const auto parsed=std::from_chars(text.data(),text.data()+text.size(),value);
+            if(text.empty()||text.front()<'0'||text.front()>'9'||parsed.ec!=std::errc{}||
+               parsed.ptr!=text.data()+text.size()||!value)
+                throw Error(std::string(option)+" requires a positive unsigned decimal integer");
+            return value;
+        };
         for(int i=1;i<argc;++i) {
             const std::string arg=argv[i];
-            if(arg=="--help") {std::cout<<"Data Pump continuous console\n"<<frontend_label<<backend<<" (selected at build time)\nUsage: "<<program_name<<" [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nLink settings: --tx-dbm DBM --path-loss-db DB --noise-dbm-hz DBM/Hz\n  --oscillator ID --rf-oscillator ID --shift HZ (default 0) --search-margin N (default 3)\n  --clock-sync default|GPS_1ms-400ms_region-2564ms_offset\n  --audio-error default|TIME (total lag 0..+70ms per station by default)\n  --keyfile PATH --tx-key named|none --key-name NAME (all loaded entries remain RX keys)\n  --dsss-mode off|interleave --dsss-factor 1|10|100|1000 --dsss-version interleave|legacy (both peers must match)\n  --search-arithmetic default|fp32-min|fp64-force (experimental CPU policy; legacy IDs accepted)\n  --receiver-strategy auto|existing|complex|amplitude (receiver only)\n  --helper-power WATTS --helper-ratio-limit 10|20|40|60|80|90\n  --helper-frequency high|low|0 --helper-callsign ASCII (maximum 19 characters)\n  --receiver-cpu-budget RATIO (estimated processing s / audio s, default 0.6)\n  --fhss off|fake-fcc|fake-eu|fake-list (legacy fake-0.4s-200 maps to fake-fcc)\n  --fhss-list '30MHz,30.006MHz' or --fhss-list-file PATH (2-200 Shift frequencies)\n  --symbol-burst off|1|2|3|5|10 (symbol waits; UTC 30s grid, at least 60s between starts)\n  --symbol-burst-random 0|1|2|3 (additional whole-symbol waits; effective zero without encryption)\n  --sched-hop 0|3|5 (secret burst nominal total-time multiplier; key required)\n  --sched-hop-dilution 0|3 (0: one active hop; 3: three active hops; developer control)\n  --sched-frequency-search 1|2|4|8|16|32 (frequency uncertainty multiplier with Sched_Hop)\n  --live-duplex yes|no (default no; simultaneous hardware input/output)\n  --reference independent|shared-radio --lf-reference 0 (shared-radio shorthand)\n  --doppler VELOCITY (c, knots, mph, kph or %; default 0.000000c)\n  --carrier HZ is configured absolute; stream is Doppler-adjusted Carrier minus Shift (>0)\n  --target-snr DB-Hz --rate HZ --carrier HZ --dsp-workspace 25%|50%|75%\n  --auto-pattern or --pattern MODE; --bw is an alias for --rate\n  --target-snr sets preview, short and long targets; --short-target-snr / --long-target-snr override them\nHardware diagnostic: --debug [--debug-bits BITS] [--debug-repeat 1..3] [--debug-timeout 10..300]\n  Sends 1..16 raw bits (default 1) using a supplied synthetic named key through real GUI duplex audio;\n  Repeats wait for physical RX completion and 2 seconds settling in the same GUI.\n  Repeated debug with --verbose keeps helper reference, clock refresh and re-entry events.\n  JSON lines on stderr; one overall deadline; never enables Simulation.\nDeveloper timing trace: --verbose [--verbose-file NEW-PATH] (bounded asynchronous JSONL; no secrets/PCM)\nPhysical audio instrument: --audio-timing-test 5..300 [--audio-test-device DEVICE]\n  Emits a low-level public probe; physical return path required for measured latency/jitter.\n  No GUI or modem; does not calibrate the hardware clock or change mixer routing.\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
+            if(arg=="--help") {std::cout<<"Data Pump continuous console\n"<<frontend_label<<backend<<" (selected at build time)\nUsage: "<<program_name<<" [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nLink settings: --tx-dbm DBM --path-loss-db DB --noise-dbm-hz DBM/Hz\n  --oscillator ID --rf-oscillator ID --shift HZ (default 0) --search-margin N (default 3)\n  --clock-sync default|GPS_1ms-400ms_region-2564ms_offset\n  --audio-error default|TIME (total lag 0..+70ms per station by default)\n  --keyfile PATH --tx-key named|none --key-name NAME (all loaded entries remain RX keys)\n  --dsss-mode off|interleave --dsss-factor 1|10|100|1000 --dsss-version interleave|legacy (both peers must match)\n  --search-arithmetic default|fp32-min|fp64-force (experimental CPU policy; legacy IDs accepted)\n  --receiver-strategy auto|existing|complex|amplitude (receiver only)\n  --helper-power WATTS --helper-ratio-limit 10|20|40|60|80|90\n  --helper-frequency high|low|0 --helper-callsign ASCII (maximum 19 characters)\n  --receiver-cpu-budget RATIO (estimated processing s / audio s, default 0.6)\n  --fhss off|fake-fcc|fake-eu|fake-list (legacy fake-0.4s-200 maps to fake-fcc)\n  --fhss-list '30MHz,30.006MHz' or --fhss-list-file PATH (2-200 Shift frequencies)\n  --symbol-burst off|1|2|3|5|10 (symbol waits; UTC 30s grid, at least 60s between starts)\n  --symbol-burst-random 0|1|2|3 (additional whole-symbol waits; effective zero without encryption)\n  --sched-hop 0|3|5 (secret burst nominal total-time multiplier; key required)\n  --sched-hop-dilution 0|3 (0: one active hop; 3: three active hops; developer control)\n  --sched-frequency-search 1|2|4|8|16|32 (frequency uncertainty multiplier with Sched_Hop)\n  --live-duplex yes|no (default no; simultaneous hardware input/output)\n  --reference independent|shared-radio --lf-reference 0 (shared-radio shorthand)\n  --doppler VELOCITY (c, knots, mph, kph or %; default 0.000000c)\n  --carrier HZ is configured absolute; stream is Doppler-adjusted Carrier minus Shift (>0)\n  --target-snr DB-Hz --rate HZ --carrier HZ --dsp-workspace 25%|50%|75%\n  --auto-pattern or --pattern MODE; --bw is an alias for --rate\n  --target-snr sets preview, short and long targets; --short-target-snr / --long-target-snr override them\nHardware diagnostic: --debug [--debug-bits BITS] [--debug-repeat 1..3] [--debug-timeout 10..300]\n  Sends 1..16 raw bits (default 1) using a supplied synthetic named key through real GUI duplex audio;\n  Repeats wait for physical RX completion and 2 seconds settling in the same GUI.\n  Repeated debug with --verbose keeps helper reference, clock refresh and re-entry events.\n  Optional --debug-workspace-bytes N fixes DSP bytes; --debug-capture-rate 48000 requires exact raw capture.\n  --debug-post-tail-seconds 2..15 observes after TX tail and ordinary RX completion (default 2).\n  --debug-work-trace opts into bounded ordinary-work/reference/wire tracing.\n  Diagnostic controls require --debug and are never saved modem preferences.\n  JSON lines on stderr; one overall deadline; never enables Simulation.\nDeveloper timing trace: --verbose [--verbose-file NEW-PATH] (bounded asynchronous JSONL; no secrets/PCM)\nPhysical audio instrument: --audio-timing-test 5..300 [--audio-test-device DEVICE]\n  Emits a low-level public probe; physical return path required for measured latency/jitter.\n  No GUI or modem; does not calibrate the hardware clock or change mixer routing.\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
             if(arg=="--version") {std::cout<<"Data Pump "<<DATAPUMP_VERSION<<' '<<frontend_label<<backend<<'\n';return 0;}
             if(arg=="--self-check") {self_check_requested=true;continue;}
             if(arg=="--color")launch.color=true;
@@ -673,6 +687,24 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
                     throw Error("Audio timing test must be 5..300 seconds");
             }
             else if(arg=="--debug"||arg=="--debug-live-duplex")launch.debug_live=true;
+            else if(arg=="--debug-work-trace") {launch.debug_work_trace=true;launch.verbose=true;}
+            else if(arg=="--debug-post-tail-seconds"&&i+1<argc) {
+                debug_post_tail_option=true;const std::string text=argv[++i];std::size_t used=0;
+                launch.debug_post_tail_seconds=std::stod(text,&used);
+                if(used!=text.size()||!std::isfinite(launch.debug_post_tail_seconds)||
+                   launch.debug_post_tail_seconds<2||launch.debug_post_tail_seconds>15)
+                    throw Error("Debug post-tail observation must be 2..15 seconds");
+            }
+            else if(arg=="--debug-workspace-bytes"&&i+1<argc) {
+                const auto value=debug_unsigned(arg,argv[++i]);
+                if(value>std::numeric_limits<std::size_t>::max())throw Error("Debug workspace does not fit size_t");
+                launch.debug_workspace_bytes=static_cast<std::size_t>(value);
+            }
+            else if(arg=="--debug-capture-rate"&&i+1<argc) {
+                const auto value=debug_unsigned(arg,argv[++i]);
+                if(value!=48000)throw Error("Debug capture rate must be 48000 Hz");
+                launch.debug_capture_rate_hz=48000;
+            }
             else if(arg=="--debug-bits"&&i+1<argc) {
                 launch.debug_bits=argv[++i];
                 if(launch.debug_bits.empty()||launch.debug_bits.size()>16||launch.debug_bits.find_first_not_of("01")!=std::string::npos)
@@ -711,6 +743,8 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
         if(!settings_arguments.empty())launch.settings=launch_command::parse_arguments(settings_arguments);
         if(audio_device_option&&!launch.audio_test_seconds)throw Error("--audio-test-device requires --audio-timing-test");
         if(debug_repeat_option&&!launch.debug_live)throw Error("--debug-repeat requires --debug");
+        if((launch.debug_workspace_bytes||launch.debug_capture_rate_hz||debug_post_tail_option||launch.debug_work_trace)&&!launch.debug_live)
+            throw Error("Debug workspace/capture controls require --debug");
         if(launch.audio_test_seconds) {
             if(launch.debug_live||launch.smoke||launch.simulation||self_check_requested||launch.settings)
                 throw Error("Audio timing test cannot combine with modem settings, debug, Simulation, smoke or self-check");

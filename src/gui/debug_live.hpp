@@ -9,6 +9,7 @@
 #include <mutex>
 #include <sstream>
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <tuple>
 #include <set>
@@ -22,6 +23,34 @@ inline bool reentry_trace_event(const char* event) noexcept {
     const std::string_view name=event?event:"";
     return name=="trace_begin" || name=="gui_start" || name=="receiver_helper_raw_reference" ||
         name=="receiver_helper_clock_refresh" || name=="receiver_helper_reference_reentry";
+}
+// Explicit physical-prefix diagnostics retain actual detector chunks and
+// selected Live prefixes while omitting high-volume per-row search events.
+// This selector changes tracing only; neither expected bits nor its environment
+// switch enters receiver admission, reconciliation, masking or completion.
+inline bool pending_prefix_trace_event(const char* event) noexcept {
+    const std::string_view name=event?event:"";
+    return name=="trace_begin" || name=="gui_start" || name=="gui_inspection_launch" ||
+        name=="receiver_pattern_wire" || name=="receiver_signal_commit";
+}
+// Explicit causal-work observation omits template/per-candidate internals.
+// The existing asynchronous trace byte/record bounds still apply.
+inline bool work_trace_event(const char* event) noexcept {
+    const std::string_view name=event?event:"";
+    return name=="trace_begin"||name=="gui_start"||name=="gui_inspection_launch"||
+        name=="receiver_selection"||name=="receiver_bank_admitted"||
+        name=="receiver_acquisition_work"||name=="receiver_acquisition_work_unavailable"||
+        name=="receiver_pattern_wire"||name=="receiver_signal_commit"||
+        name=="receiver_helper_raw_reference"||name=="receiver_helper_clock_refresh"||
+        name=="receiver_helper_reference_reentry";
+}
+using TraceEventFilter=bool(*)(const char*) noexcept;
+inline TraceEventFilter trace_event_filter(bool hardware_debug,unsigned repeat,
+                                          const char* pending_prefix,bool work_trace=false) noexcept {
+    if(!hardware_debug)return nullptr;
+    if(work_trace)return &work_trace_event;
+    if(pending_prefix && std::string_view(pending_prefix)=="1")return &pending_prefix_trace_event;
+    return repeat>1?&reentry_trace_event:nullptr;
 }
 #if defined(__cpp_lib_syncbuf) && __cpp_lib_syncbuf>=201803L
 using LogLine=std::osyncstream;
@@ -50,15 +79,24 @@ class DebugLive {
 public:
     enum class Action { wait, transmit, close };
     static constexpr std::size_t maximum_repeat_seen_ids=1024;
-    explicit DebugLive(double timeout,std::ostream& log,bool require_utc=false,std::string bits="1",unsigned repeat=1):
-        timeout_(timeout),log_(log),expected_(std::move(bits)),require_utc_(require_utc),repeat_(repeat) {
+    explicit DebugLive(double timeout,std::ostream& log,bool require_utc=false,std::string bits="1",unsigned repeat=1,
+            std::size_t workspace_bytes=0,std::uint32_t capture_rate_hz=0,double post_tail_seconds=2):
+        timeout_(timeout),log_(log),expected_(std::move(bits)),require_utc_(require_utc),repeat_(repeat),
+        requested_workspace_bytes_(workspace_bytes),requested_capture_rate_hz_(capture_rate_hz),post_tail_seconds_(post_tail_seconds) {
         if(expected_.empty() || expected_.size()>16 || expected_.find_first_not_of("01")!=std::string::npos)
             throw Error("Debug bits must contain 1..16 binary digits");
         if(repeat_<1 || repeat_>3)throw Error("Debug repeat must be 1..3");
+        if(!std::isfinite(post_tail_seconds_)||post_tail_seconds_<2||post_tail_seconds_>15)
+            throw Error("Debug post-tail observation must be 2..15 seconds");
     }
     int result() const {return fallback_received_?2:passed_?0:1;}
-    Action step(double elapsed,const live::Snapshot& s,const Signals& signals,bool ready,bool keyed,const std::string& status={}) {
+    Action step(double elapsed,const live::Snapshot& s,const Signals& signals,bool ready,bool keyed,const std::string& status={},
+            std::size_t workspace_bytes=0,std::size_t transfer_workspace_bytes=0) {
         if(done_)return Action::close;
+        if(requested_workspace_bytes_ && (workspace_bytes!=requested_workspace_bytes_||transfer_workspace_bytes!=requested_workspace_bytes_))
+            return finish(elapsed,"diagnostic workspace differs from requested fixed bytes",false);
+        if(requested_capture_rate_hz_ && s.samples_received && s.capture_raw_sample_rate!=requested_capture_rate_hz_)
+            return finish(elapsed,"diagnostic raw capture rate unavailable or mismatched",false);
         if(status.substr(0,2048)!=last_status_) {
             last_status_=status.substr(0,2048);
             debug_live_detail::LogLine(log_)<<"{\"event\":\"status\",\"seconds\":"<<elapsed
@@ -97,13 +135,16 @@ public:
             if(!rows_.contains(line.id)||rows_.at(line.id)!=identity) {
                 rows_[line.id]=identity;
                 debug_live_detail::LogLine(log_)<<"{\"event\":\"stream\",\"seconds\":"<<elapsed<<",\"id\":"<<line.id
-                    <<",\"revision\":"<<line.revision<<",\"bits\":"<<line.received_bits
+                    <<",\"revision\":"<<line.revision<<",\"helper_carrier\":"<<line.helper_carrier
+                    <<",\"helper_text\":\""<<json_escape(line.helper_carrier?line.text.substr(0,512):std::string{})<<"\""
+                    <<",\"bits\":"<<line.received_bits
                     <<",\"complete\":"<<line.complete<<",\"missing\":"<<line.missing_symbols
                     <<",\"expected_prefix\":"<<expected_.starts_with(bits)<<"}\n"<<std::flush;
             }
         }
         // State follows the GUI's bounded retained identities, not an unbounded
-        // history of incoming streams. No contents or cryptographic bytes logged.
+        // history of incoming streams. No message contents or cryptographic bytes
+        // are logged; helper rows expose only their bounded public display text.
         for(auto it=rows_.begin();it!=rows_.end();) {
             if(std::none_of(signals.lines().begin(),signals.lines().end(),[&](const auto& line){return line.id==it->first;}))it=rows_.erase(it);
             else ++it;
@@ -117,16 +158,28 @@ public:
                 <<",\"tx_id\":"<<s.transmission_id<<",\"tx_seconds\":"<<s.transmission_seconds
                 <<",\"tx_fraction\":"<<s.transmission_fraction<<",\"tx_finished\":"<<s.transmission_finished
                 <<",\"samples\":"<<s.samples_received<<",\"hardware_rate\":"<<s.hardware_sample_rate
+                <<",\"debug_requested_workspace_bytes\":"<<requested_workspace_bytes_
+                <<",\"actual_workspace_bytes\":"<<workspace_bytes<<",\"actual_transfer_workspace_bytes\":"<<transfer_workspace_bytes
+                <<",\"debug_requested_capture_rate\":"<<requested_capture_rate_hz_
+                <<",\"capture_raw_sample_rate\":"<<s.capture_raw_sample_rate
+                <<",\"capture_converter_passband_hz\":"<<s.capture_converter_passband_hz
+                <<",\"capture_transport_kind\":"<<static_cast<unsigned>(s.capture_transport.kind)
+                <<",\"capture_transport_raw_rate\":"<<s.capture_transport.raw_rate
+                <<",\"capture_transport_logical_rate\":"<<s.capture_transport.logical_rate
                 <<",\"processed_physical_samples\":"<<s.processed_physical_samples
                 <<",\"queued_physical_samples\":"<<s.queued_physical_samples
                 <<",\"decoding_physical_samples\":"<<s.decoding_physical_samples
                 <<",\"input_overruns\":"<<s.receiver_health.input_overruns
                 <<",\"dropped_samples\":"<<s.receiver_health.dropped_samples
                 <<",\"receiver_reset\":"<<s.receiver_health.receiver_reset
+                <<",\"input_interrupted\":"<<s.receiver_health.input_interrupted
+                <<",\"search_limited\":"<<s.receiver_health.search_limited
                 <<",\"backlog\":"<<s.receiver_backlog_seconds<<",\"oldest\":"<<s.receiver_oldest_input_seconds
                 <<",\"banks\":"<<s.receiver_instances<<",\"admissions\":"<<s.receiver_admissions
                 <<",\"rx_timed\":"<<s.clock_window_modeled<<",\"fallback\":"<<s.clock_timing_fallback
                 <<",\"tx_timed\":"<<s.transmit_clock_following<<",\"streams\":"<<signals.lines().size()
+                <<",\"helper_rows_retained\":"<<std::count_if(signals.lines().begin(),signals.lines().end(),[](const auto& row){return row.helper_carrier;})
+                <<",\"helper_rows_pending\":"<<std::count_if(signals.lines().begin(),signals.lines().end(),[](const auto& row){return row.helper_carrier&&!row.complete;})
                 <<",\"complete_match\":"<<complete<<",\"unexpected_bits\":"<<unexpected
                 <<",\"unexpected_seen\":"<<unexpected_seen_
                 <<",\"helper_status\":\""<<json_escape(s.helper_status)<<"\",\"helper_snr_db\":"
@@ -170,7 +223,7 @@ public:
         // TX EOF or our deadline. Examine all retained rows, including extras.
         if(started_ && !s.transmitting && s.transmission_finished && complete) {
             if(!settled_)settled_=elapsed;
-            if(elapsed-*settled_>=2) {
+            if(elapsed-*settled_>=post_tail_seconds_) {
                 const bool physical_ok=capture_advanced_&&!unexpected_seen_&&!s.transmission_cancelled;
                 if(physical_ok && completed_+1<repeat_) {
                     // Keep the same Controller/session. Its ordinary transmit
@@ -214,6 +267,9 @@ private:
     std::string last_error_,last_status_,expected_;
     bool require_utc_=false,utc_seen_=false,fallback_received_=false;
     unsigned repeat_=1,completed_=0;
+    std::size_t requested_workspace_bytes_=0;
+    std::uint32_t requested_capture_rate_hz_=0;
+    double post_tail_seconds_=2;
     bool utc_missing_seen_=false;
     bool requested_=false,started_=false,capture_advanced_=false,done_=false,passed_=false,unexpected_seen_=false;
     std::optional<double> settled_;

@@ -225,6 +225,7 @@ std::string lock_time_text(double seconds) {
 std::string workspace_text(unsigned percent,std::size_t bytes) {
     constexpr std::size_t gib=1024*1024*1024,mib=1024*1024;
     std::ostringstream text;
+    if(!percent)return "Debug fixed "+std::to_string(bytes)+" bytes";
     text<<percent<<"% RAM ("<<std::fixed<<std::setprecision(bytes>=gib?1:0)
         <<static_cast<double>(bytes)/static_cast<double>(bytes>=gib?gib:mib)
         <<(bytes>=gib?" GiB)":" MiB)");
@@ -334,6 +335,12 @@ struct Controller::Impl {
     std::optional<Clock::time_point> receive_targets_due;
     std::uint64_t next_pattern_text_id=std::numeric_limits<std::uint64_t>::max();
     explicit Impl(Options value):options(value),session({},value.replay_clock) {
+        if(options.debug_workspace_bytes) {
+            if(!*options.debug_workspace_bytes)throw Error("Debug workspace must be positive");
+            dsp_workspace_bytes=*options.debug_workspace_bytes;
+        }
+        if(options.diagnostic_capture_rate_hz&&options.diagnostic_capture_rate_hz!=48000)
+            throw Error("Debug capture rate must be 48000 Hz");
         f(UiField::transmit_scope).records=transmit_scope_records({});
         f(UiField::transmit_scope_caption).text=transmit_scope_caption({});
         f(UiField::transmit_scope_format).options={{"none","None"},{"hex-auto-hide","Hex, auto-hide"},{"hex","Hex"},{"bits","Bits"}};
@@ -992,8 +999,12 @@ struct Controller::Impl {
                 f(UiField::dsp_workspace).selected=="ram-25"?25u:f(UiField::dsp_workspace).selected=="ram-75"?75u:50u;
             if(workspace_percent!=25&&workspace_percent!=50&&workspace_percent!=75)
                 throw Error("DSP workspace must be 25%, 50% or 75%");
-            const auto workspace_bytes=workspace_percent!=dsp_workspace_percent?
-                runtime::dsp_workspace_budget(workspace_percent):dsp_workspace_bytes;
+            const auto workspace_bytes=options.debug_workspace_bytes?*options.debug_workspace_bytes:
+                workspace_percent!=dsp_workspace_percent?runtime::dsp_workspace_budget(workspace_percent):dsp_workspace_bytes;
+            next.diagnostic_capture_rate_hz=options.diagnostic_capture_rate_hz;
+            if(next.diagnostic_capture_rate_hz&&next.simulation)
+                throw Error("Debug capture rate cannot use Simulation");
+            next_planner.dsp_workspace_percent=options.debug_workspace_bytes?0:workspace_percent;
             next.content_limit=default_memory_limit; next.dsp_workspace_bytes=workspace_bytes;
             next.transfer.dsp_workspace_bytes=next.dsp_workspace_bytes;
 
@@ -1202,7 +1213,7 @@ struct Controller::Impl {
                 encryption_changed();
             }
             dsp_workspace_percent=workspace_percent;dsp_workspace_bytes=workspace_bytes;
-            f(UiField::dsp_workspace).display_text=workspace_text(workspace_percent,next.dsp_workspace_bytes);
+            f(UiField::dsp_workspace).display_text=workspace_text(options.debug_workspace_bytes?0:workspace_percent,next.dsp_workspace_bytes);
             f(UiField::oscillator_reference).selected=reference;
             f(UiField::simulation_oscillator_detail).text=oscillator_detail.str();
             f(UiField::oscillator_search_detail).text=search_detail.str();
@@ -1261,7 +1272,7 @@ struct Controller::Impl {
         input.receiver_settings=settings;
         input.receiver_work_mode=receiver_work_mode();
         input.receiver_timing_model=receiver_timing_model();
-        input.dsp_workspace_percent=dsp_workspace_percent;
+        input.dsp_workspace_percent=options.debug_workspace_bytes?0:dsp_workspace_percent;
         input.mode=settings.transfer.receive_pattern_mode;
         input.channel.clock_error_ppm=settings.simulation_clock_error_ppm;
         input.channel.frequency_offset_hz=settings.simulation_frequency_offset_hz;

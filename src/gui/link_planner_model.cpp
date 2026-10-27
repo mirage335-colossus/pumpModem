@@ -3,7 +3,7 @@
 #include "../live_helper_prior.hpp"
 #include "../live_helper_frontend.hpp"
 #include "../helper_reference_search.hpp"
-#include "../helper_reference_tracking_estimate.hpp"
+#include "datapump/helper_reference_precision.hpp"
 #include "../receiver_oscillator_policy.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/helper_filter.hpp"
@@ -101,6 +101,12 @@ void helper_reference_plan(Model& model,const modem::Config& config) {
     if(!model.inputs.receiver_settings || model.inputs.receiver_settings->helper.power_w==0)return;
     auto& result=model.helper_reference;result.enabled=true;
     auto settings=*model.inputs.receiver_settings;
+    settings.transfer=model.inputs.options;
+    settings.simulation=model.inputs.receiver_work_mode==simulation::ReceiverWorkMode::sampled_simulation;
+    if(settings.simulation) {
+        settings.simulation_phase_noise_degrees_per_sqrt_second=model.inputs.channel.phase_noise_degrees_per_sqrt_second;
+        settings.simulation_clock_error_ppm=model.inputs.channel.clock_error_ppm;
+    }
     // The planner's editable power is authoritative for this hypothetical
     // link. A retained Live snapshot can still contain the previous value.
     settings.helper.data_power_w=std::pow(10.,(model.inputs.tx_dbm-30)/10);
@@ -685,7 +691,16 @@ RealtimeHelperCpuPoint realtime_helper_point(const Inputs& inputs,const modem::C
         if(!config.oscillator_search)throw Error("Conditional helper search requires an oscillator model");
         if(config.symbol_burst.enabled() || modem::scheduled_bursts(config))
             throw Error("Conditional helper cost is not modeled for Symbol_Burst or scheduled bursts");
-        auto settings=*inputs.receiver_settings;settings.transfer.modem=config;
+        auto settings=*inputs.receiver_settings;settings.transfer=inputs.options;settings.transfer.modem=config;
+        settings.simulation=inputs.receiver_work_mode==simulation::ReceiverWorkMode::sampled_simulation;
+        if(settings.simulation) {
+            settings.simulation_phase_noise_degrees_per_sqrt_second=inputs.channel.phase_noise_degrees_per_sqrt_second;
+            settings.simulation_clock_error_ppm=inputs.channel.clock_error_ppm;
+        }
+        // The duplicate shared baseline forecast must also see the editable
+        // link budget, rather than a retained Live settings snapshot.
+        settings.simulation_snr_db=inputs.tx_dbm-inputs.path_loss_db-inputs.noise_density_dbm_hz-
+            10*std::log10(config.sample_rate/2.);
         settings.helper.data_power_w=std::pow(10.,(inputs.tx_dbm-30)/10);
         if(settings.transfer.key)settings.helper.callsign.clear();
         if(settings.helper.frequency==helper::Frequency::cochannel)
@@ -707,35 +722,104 @@ RealtimeHelperCpuPoint realtime_helper_point(const Inputs& inputs,const modem::C
         const auto power=std::min(settings.helper.power_w,settings.helper.data_power_w*std::pow(10.,settings.helper.ratio_limit_db/10));
         auto cno=30+10*std::log10(power)-inputs.path_loss_db-inputs.noise_density_dbm_hz;
         if(inputs.receiver_work_mode==simulation::ReceiverWorkMode::sampled_simulation)cno+=20*std::log10(gain);
-        const auto effects=modem::oscillator_effects(config);
-        const auto sigma=effects.phase_noise_degrees_per_sqrt_second*std::numbers::pi/180;
-        const auto tracking=helper::steady_tone_estimate(physical,cno,sigma);
-        out.uncertainty_hz=tracking.uncertainty_hz;out.observation_seconds=tracking.observation_seconds;
-        if(!tracking.available)throw Error(tracking.reason);
+        // Use the shared production request: actual metadata/punctuation and
+        // oscillator process, not the retired uninterrupted 384-date ideal.
+        const auto receive_bound=live::detail::helper_receive_envelope_bound(settings);
+        auto requirements=live::detail::helper_envelope_requirements(settings,config,receive_bound);
+        requirements.frequency_precision_extension_seconds=0;
+        const auto baseline=helper::plan_envelope(config,requirements);
+        const auto request=live::detail::helper_tone_precision_request(settings,config,physical,cno,
+            static_cast<double>(baseline.lead_seconds),requirements.maximum_source_capture_ratio);
+        out.precision=helper::predict_tone_precision(request);
+        // Match transmit airtime even when the bounded lead is selected without
+        // a numeric precision estimate. Such a cap never creates an RF search.
+        requirements.frequency_precision_extension_seconds=
+            (out.precision.supported || out.precision.extension_capped)?out.precision.extra_lead_seconds:0;
+        const auto envelope=helper::plan_envelope(config,requirements);
+        out.planned_lead_seconds=static_cast<double>(envelope.lead_seconds);
+        out.planned_tail_seconds=static_cast<double>(envelope.tail_seconds);
+        if(!out.precision.supported)throw Error("Automatic helper precision lead prediction declined: "+out.precision.reason);
+        out.uncertainty_hz=out.precision.frequency_half_width_hz;
+        out.observation_seconds=out.precision.usable_tone_seconds;
         auto options=inputs.options;options.modem=config;
         const auto correction=transfer::receiver_utc_rate_correction(config,options);
-        const auto search=modem::helper_reference_search(config,tracking.uncertainty_hz,plan.frequency_hz,0,correction);
+        // Match HelperInputFrontend::admit_realtime: when the nominal payload
+        // guard reaches DC, its immutable input basis is raw mono PCM (q=0).
+        // The measured helper offset M then centers the ordinary templates;
+        // DATA retains the residual (D-H)*clock term, not a fictitious NCO.
+        const auto reference_guard=std::max(32.,4*out.uncertainty_hz);
+        const bool folded_reference=config.carrier_hz-helper::occupied_bandwidth(config)/2-reference_guard<=10;
+        const auto reference_center=folded_reference?
+            inputs.channel.frequency_offset_hz+plan.frequency_hz*inputs.channel.clock_error_ppm*1e-6:0.;
+        const auto search=modem::helper_reference_search(config,out.uncertainty_hz,plan.frequency_hz,
+            reference_center,correction,modem::HelperReferenceClockRelation::common_corrected_source);
         out.rf_half_width_hz=search.rf_half_width_hz;
         out.clock_half_width_ppm=search.catalogue.requested_clock_half_width_ppm;
         out.frequency_rate_hypotheses=search.catalogue.hypotheses.size();
         std::set<double> clocks;
         for(const auto& pair:search.catalogue.hypotheses)clocks.insert(pair.clock_error_ppm);
         out.retained_clock_rates=clocks.size();
+        // This is a conditional forecast at the configured channel offset,
+        // never qualification inferred from expected power. Match the runtime
+        // shared-radio/no-UTC formula and ORIGINAL-cell intersection exactly.
+        const auto observed_helper=plan.frequency_hz+inputs.channel.frequency_offset_hz+
+            plan.frequency_hz*inputs.channel.clock_error_ppm*1e-6;
+        out.shared_frequency_clock=modem::helper_reference_shared_clock_interval(config,observed_helper,
+            plan.frequency_hz,out.uncertainty_hz,correction,
+            modem::HelperReferenceClockRelation::common_corrected_source);
+        std::optional<modem::PatternHelperFrequencyWindow> execution_window;
+        if(out.shared_frequency_clock) {
+            execution_window.emplace(modem::PatternHelperFrequencyWindow{reference_center,out.rf_half_width_hz,
+                plan.frequency_hz-config.carrier_hz,search.catalogue.clock_step_ppm/2,out.shared_frequency_clock});
+            const auto& window=*execution_window;
+            modem::PatternSearch declared;declared.hypotheses=search.catalogue.hypotheses;
+            declared.admitted_clock_half_width_ppm=search.catalogue.requested_clock_half_width_ppm;
+            declared.admitted_clock_cell_half_width_ppm=search.catalogue.clock_step_ppm/2;
+            modem::detail::PatternHelperFrequencySelector selector;
+            estimate_detail::check(stop);
+            if(!selector.initialize(declared,window))throw Error("Shared-radio clock forecast is unsupported by original runtime cells");
+            std::set<double> selected_clocks;
+            for(std::size_t i=0;i<search.catalogue.hypotheses.size();++i)if(selector.keep(i)) {
+                if((i&127U)==0)estimate_detail::check(stop);
+                ++out.shared_clock_selected_pairs;selected_clocks.insert(search.catalogue.hypotheses[i].clock_error_ppm);
+            }
+            out.shared_clock_selected_rates=selected_clocks.size();
+            if(!out.shared_clock_selected_pairs)throw Error("Shared-radio clock forecast has no selected original cells");
+            // Price this exact selection below. No smaller owner or stronger
+            // waveform replaces the original constructor/trial/continuation path.
+        }
         auto channel=inputs.channel;
         const auto sample_snr=inputs.tx_dbm-inputs.path_loss_db-inputs.noise_density_dbm_hz-10*std::log10(config.sample_rate/2.);
         if(!std::isfinite(sample_snr)||sample_snr< -300||sample_snr>300)
             throw Error("Payload sample SNR is outside the ordinary estimator numerical range");
         channel.snr_db=sample_snr;
-        // Conditional fixed NCO removes the common RF/helper LF contribution.
-        // The configured DATA clock error and phase process remain unchanged.
-        channel.frequency_offset_hz=-plan.frequency_hz*channel.clock_error_ppm*1e-6;
+        // Only the positive-band converter removes the common RF/helper LF
+        // contribution. Raw folded PCM and a retained original prior keep the
+        // actual channel CFO and ordinary real-image waveform unchanged.
+        if(!search.original_prior_retained && !folded_reference)
+            channel.frequency_offset_hz=-plan.frequency_hz*channel.clock_error_ppm*1e-6;
         const auto estimate=simulation::estimate_with_receiver_search(one_bit_estimate(options),options,true,channel,
-            search.catalogue,1,100,inputs.receiver_work_mode,inputs.receiver_timing_model,&settings,stop);
+            search.catalogue,1,100,inputs.receiver_work_mode,inputs.receiver_timing_model,&settings,stop,
+            execution_window?&*execution_window:nullptr);
         const auto point=cpu_point(target,estimate);
+        out.receiver_cost=helper_receiver_cost(estimate);
         out.realtime_ratio=point.realtime_ratio;out.available=point.available;
-        out.reason=tracking.reason+"; full residual clock/UTC, arrival and epoch alternatives retained; ordinary calibrated receiver primitives, helper startup/tracking/conversion overhead excluded";
+        out.reason=out.precision.reason+(search.original_prior_retained?
+            "; conditional reference forecast; original oscillator prior retained; ordinary baseline, no NCO retuning or claimed RF gain":
+            folded_reference?
+            "; conditional raw mono Robust source; measured helper offset centers ordinary RF templates; no upstream NCO correction":
+            "; conditional same corrected Robust source")+
+            (out.shared_frequency_clock?
+            "; conditional shared-radio frequency-derived clock selects original acquisition cells; original catalogue, constructor, backend/bin/workspace, logical trials, arrival/epoch alternatives and complete continuation retained":
+            "; full DATA-clock/UTC, arrival and epoch alternatives retained")+
+            "; ordinary reference-model receiver work, helper startup/tracking/conversion overhead excluded";
         if(!out.available)out.reason+="; residual receiver work/coverage/workspace is unsupported: "+estimate.receiver_work_assumptions;
     } catch(const Error& error) {out.reason=error.what();}
+    catch(const std::bad_alloc&) {
+        // Optional forecasting/work yields without retaining partial airtime,
+        // precision or cost claims. The ordinary baseline is unaffected.
+        out={};out.target_db_hz=target;
+    }
     return out;
 }
 void receive_curve(Model& model,const simulation::Estimate& selected_one,CurveCache& cache,std::stop_token stop) {
@@ -852,6 +936,38 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one,CurveCa
     }
 
 }
+}
+
+HelperReceiverCostLedger helper_receiver_cost(const simulation::Estimate& estimate) {
+    HelperReceiverCostLedger out;
+    out.finite_cpu_seconds=estimate.receiver_cpu_seconds;out.finite_audio_seconds=estimate.simulated_seconds;
+    out.frontend_seconds=estimate.receiver_frontend_seconds;out.search_seconds=estimate.receiver_search_seconds;
+    out.kernel_seconds=estimate.receiver_kernel_rebuild_seconds;out.continuation_seconds=estimate.tracking_seconds;
+    out.payload_seconds=estimate.payload_processing_seconds;
+    const auto components=out.frontend_seconds+out.search_seconds+out.kernel_seconds+
+        out.continuation_seconds+out.payload_seconds;
+    const auto nonnegative=[](double value){return std::isfinite(value)&&value>=0;};
+    out.finite_available=estimate.receiver_work_supported&&nonnegative(out.finite_cpu_seconds)&&out.finite_audio_seconds>0&&
+        std::isfinite(out.finite_audio_seconds)&&nonnegative(out.frontend_seconds)&&nonnegative(out.search_seconds)&&
+        nonnegative(out.kernel_seconds)&&nonnegative(out.continuation_seconds)&&nonnegative(out.payload_seconds)&&
+        components<=out.finite_cpu_seconds+1e-10*std::max(1.,out.finite_cpu_seconds);
+    if(out.finite_available) {
+        out.startup_other_seconds=std::max(0.,out.finite_cpu_seconds-components);
+        out.finite_realtime_ratio=out.finite_cpu_seconds/out.finite_audio_seconds;
+    }
+    out.sustained_available=estimate.receiver_work_supported&&estimate.hardware_sustained_modeled&&
+        nonnegative(estimate.hardware_sustained_realtime_ratio)&&
+        nonnegative(estimate.hardware_sustained_tracking_realtime_ratio);
+    out.sustained_realtime_ratio=estimate.hardware_sustained_realtime_ratio;
+    out.sustained_continuation_ratio=estimate.hardware_sustained_tracking_realtime_ratio;
+    out.initial_epoch_setup_seconds=estimate.initial_epoch_setup_seconds;
+    out.new_epoch_setup_seconds=estimate.new_epoch_setup_seconds;
+    out.new_epoch_frontend_seconds=estimate.new_epoch_frontend_seconds;
+    out.initial_epochs=estimate.epoch_hypotheses;out.new_epoch_admissions=estimate.new_epoch_admissions;
+    out.cohort_lifetime_seconds=estimate.hardware_cohort_lifetime_seconds;
+    out.resident_instances=estimate.hardware_sustained_receiver_instances;
+    out.workspace_supported=estimate.receiver_workspace_supported;out.geometry=estimate.receiver_geometry;
+    return out;
 }
 
 HelperBackendFeasibilityPoint helper_backend_feasibility(const ReceivePoint& ordinary,

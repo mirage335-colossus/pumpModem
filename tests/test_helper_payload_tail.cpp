@@ -1,4 +1,5 @@
 #include "../src/live_receptions.hpp"
+#include "../src/live_helper_frontend.hpp"
 #include "datapump/types.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/helper_filter.hpp"
@@ -8,8 +9,14 @@
 #include "../src/audio_trace.hpp"
 #include "../src/live_simulation_clock.hpp"
 #include <array>
+#include <bit>
+#include <cfenv>
+#include <limits>
 #include <atomic>
 #include <chrono>
+#include <complex>
+#include <numbers>
+#include <numeric>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -63,6 +70,394 @@ void history_preserves_complete_tail() {
     std::cout<<"stage=ordinary_full_stronger selected="<<revised.selected<<" signal_id="<<revised.signal_id
              <<" revision="<<revised.revision<<" visible_count="<<visible.size()<<'\n';
 }
+// The raw helper is valid at 8 kHz but its 300-Hz metadata band aliases
+// across the wanted band at 2 kHz. A post-decimation notch cannot represent it.
+void frontend_physical_notch() {
+    constexpr std::uint32_t raw_rate=8000,logical_rate=2000;
+    constexpr double helper_hz=1250;
+    modem::Config c;c.sample_rate=logical_rate;c.carrier_hz=500;c.bandwidth_hz=200;
+    c.spreading_factor=16;c.pulse_shaping=false;
+    helper::Reference ref;ref.sample_rate=raw_rate;ref.frequency_valid=true;
+    ref.frequency_hz=helper_hz;ref.frequency_uncertainty_hz=.01;
+    using Frontend=live::detail::HelperInputFrontend;
+    const auto old_grant=Frontend::reservation_bound(raw_rate,logical_rate);
+    const auto grant=Frontend::reservation_bound(raw_rate,logical_rate,helper_hz);
+    check(grant>old_grant,"physical-rate notch did not prepay its larger retained FIR");
+    Frontend short_grant(old_grant);bool declined=false;
+    try {short_grant.admit_realtime(c,helper_hz,ref,raw_rate,3990,37);}
+    catch(const Error&){declined=true;}
+    check(declined&&!short_grant.active()&&short_grant.bytes()==sizeof(Frontend),
+          "unfunded physical notch allocated or admitted an input basis");
+    helper::PayloadFilter filter(raw_rate,helper_hz);
+    const auto suppression=filter.maximum_response(helper_hz-150,helper_hz+150);
+    const auto passband=filter.maximum_amplitude_error(368,632);
+    check(suppression<=.001&&passband<=.001,
+          "actual physical FIR did not certify the full helper metadata and wanted payload bands");
+    constexpr std::uint64_t raw_first=37;
+    const auto quantum=raw_rate/std::gcd(raw_rate,logical_rate);
+    const auto remainder=(raw_first+filter.delay())%quantum;
+    const auto admitted=raw_first+(remainder?quantum-remainder:0);
+    const auto center=admitted+filter.delay();
+    const auto origin=center/raw_rate*logical_rate+(center%raw_rate)*logical_rate/raw_rate;
+    audio::Resampler support(raw_rate,logical_rate);
+    const auto warm=static_cast<std::uint64_t>(std::ceil((
+        2.L*helper::AnalyticFrequencyTranslator::group_delay/raw_rate+
+        static_cast<long double>(support.source_lookahead_seconds()))*logical_rate))+1;
+    const auto expected_first=origin+warm;
+    const auto apply=[&](std::size_t chunk) {
+        Frontend frontend(grant,19);frontend.admit_realtime(c,helper_hz,ref,raw_rate,3990,raw_first);
+        check(frontend.active()&&frontend.bytes()<=grant,"funded physical notch did not admit one immutable view");
+        std::vector<float> result;std::uint64_t next=0;
+        std::vector<float> input(3*raw_rate);
+        for(std::size_t i=0;i<input.size();++i) {
+            const auto t=static_cast<double>(raw_first+i)/raw_rate;
+            input[i]=static_cast<float>(.02*std::cos(2*std::numbers::pi*500*t)+
+                .3*std::cos(2*std::numbers::pi*1100*t)+.3*std::cos(2*std::numbers::pi*1250*t)+
+                .3*std::cos(2*std::numbers::pi*1400*t));
+        }
+        for(std::size_t at=0;at<input.size();) {
+            const auto count=std::min(chunk,input.size()-at),end=raw_first+at+count;
+            frontend.push(std::span(input).subspan(at,count),raw_first+at);at+=count;
+            auto blocks=frontend.take(end/raw_rate*logical_rate+(end%raw_rate)*logical_rate/raw_rate,ref,end);
+            for(const auto& block:blocks) {
+                if(!next) {
+                    next=expected_first;
+                    if(chunk==1)check(live::detail::helper_physical_notch_support(raw_rate,logical_rate)*raw_rate>=end-raw_first,
+                        "helper envelope omitted the actual first published output's complete capture support");
+                }
+                check(block.first_sample==next&&block.view->budget_serial==19&&block.raw_captured_end==end,
+                      "physical notch changed its sample-center grid, input identity or raw frontier");
+                next+=block.samples.size();
+                const auto raw_last=(next-1)/logical_rate*raw_rate+((next-1)%logical_rate)*raw_rate/logical_rate;
+                constexpr auto converter_radius=192; // actual fixed 8k -> 2k FIR
+                check(raw_last+filter.delay()+converter_radius<end,
+                      "physical notch/converter published an unobserved right support window");
+                result.insert(result.end(),block.samples.begin(),block.samples.end());
+            }
+            check(frontend.bytes()<=grant,"physical notch exceeded its fixed prepayment during capture");
+        }
+        const auto end=raw_first+input.size();
+        check(frontend.take(UINT64_MAX,ref,end).empty(),"physical notch retained hidden future/EOF output");
+        frontend.push({},end);
+        check(frontend.take(UINT64_MAX,ref,end).empty(),"empty/EOF input flushed unobserved filter samples");
+        check(result.size()>2*logical_rate,"physical notch component did not retain a complete measured interval");
+        std::complex<double> wanted{},aliased{};
+        for(std::size_t i=0;i<result.size();++i) {
+            const auto t=static_cast<double>(expected_first+i)/logical_rate;
+            wanted+=static_cast<double>(result[i])*std::polar(1.,-2*std::numbers::pi*500*t);
+            aliased+=static_cast<double>(result[i])*std::polar(1.,-2*std::numbers::pi*750*t);
+        }
+        check(std::abs(2*std::abs(wanted)/result.size()-.02)<.0001&&2*std::abs(aliased)/result.size()<.0003,
+              "physical notch/downsampling changed payload gain or retained a bright aliased helper");
+        return result;
+    };
+    check(apply(1)==apply(173),"physical-notch output or dates depend on caller chunk boundaries");
+    const auto forecast=live::detail::helper_physical_notch_support(raw_rate,logical_rate);
+    check(forecast>2.*filter.delay()/raw_rate+2*support.source_lookahead_seconds()&&forecast<2,
+          "helper envelope omitted actual physical notch/converter support");
+    check(Frontend::reservation_bound(raw_rate,logical_rate,750)==old_grant,
+          "valid logical notch changed its original frontend reservation");
+    // Literal former logical-notch pipeline: keep its sample values and dates
+    // exact, including the existing analytic translator's delay convention.
+    {
+        auto valid=c;valid.sample_rate=6000;valid.carrier_hz=1500;
+        auto valid_ref=ref;valid_ref.frequency_hz=2450;
+        const auto valid_grant=Frontend::reservation_bound(raw_rate,valid.sample_rate);
+        Frontend frontend(valid_grant);frontend.admit_realtime(valid,2450,valid_ref,raw_rate,3990,40);
+        helper::AnalyticFrequencyTranslator translator({raw_rate,0,{1368,2657},40,false,true},
+            helper::AnalyticFrequencyTranslator::workspace_required());
+        audio::Resampler converter(raw_rate,valid.sample_rate);
+        helper::PayloadFilter logical_filter(valid.sample_rate,2450);
+        std::array<float,173> input{},translated{};std::array<float,2048> converted{},filtered{};
+        std::vector<float> actual,previous;std::uint64_t actual_first=0;
+        for(std::size_t at=0;at<2*raw_rate;) {
+            const auto count=std::min(input.size(),2*raw_rate-at),end=40+at+count;
+            for(std::size_t i=0;i<count;++i)input[i]=static_cast<float>(
+                .02*std::cos(2*std::numbers::pi*1500*(40+at+i)/raw_rate)+
+                .5*std::cos(2*std::numbers::pi*2450*(40+at+i)/raw_rate));
+            frontend.push(std::span(input).first(count),40+at);
+            translator.push(std::span(input).first(count),std::span(translated).first(count),40+at);
+            std::size_t consumed=0;
+            for(;;) {
+                const auto progress=converter.process(std::span(translated).first(count).subspan(consumed),converted);
+                consumed+=progress.consumed;
+                const auto produced=logical_filter.push(std::span(converted).first(progress.produced),filtered);
+                previous.insert(previous.end(),filtered.begin(),filtered.begin()+produced);
+                if(!progress.consumed&&!progress.produced)break;
+                if(consumed==count&&!progress.produced)break;
+            }
+            for(const auto& block:frontend.take(end/raw_rate*valid.sample_rate+
+                    (end%raw_rate)*valid.sample_rate/raw_rate,valid_ref,end)) {
+                if(actual.empty())actual_first=block.first_sample;
+                actual.insert(actual.end(),block.samples.begin(),block.samples.end());
+            }
+            at+=count;
+        }
+        const auto old_first=30+logical_filter.delay();
+        const auto eligible=30+static_cast<std::uint64_t>(std::ceil(
+            2.L*helper::AnalyticFrequencyTranslator::group_delay*valid.sample_rate/raw_rate))+
+            logical_filter.delay()+1;
+        previous.erase(previous.begin(),previous.begin()+static_cast<std::ptrdiff_t>(eligible-old_first));
+        check(actual_first==eligible&&actual==previous,
+              "valid logical-rate notch changed its former PCM or sample dates");
+    }
+    bool too_large=false;try {Frontend::reservation_bound(200000,logical_rate,helper_hz);}
+    catch(const Error&){too_large=true;}
+    check(too_large,"physical helper notch silently exceeded the 4097-tap optional bound");
+    std::cout<<"frontend_physical_notch raw_rate="<<raw_rate<<" logical_rate="<<logical_rate
+             <<" full_metadata_response="<<suppression<<" payload_error="<<passband
+             <<" first="<<expected_first<<" old_grant="<<old_grant<<" grant="<<grant
+             <<" envelope_support="<<forecast<<'\n';
+}
+
+// Pure optional-front-end checks. No payload endpoint, message timestamp,
+// decoder, sound device or expected receive length participates in these.
+void filter_retune_preserves_state() {
+    constexpr std::uint32_t rate=8000;constexpr double helper_hz=2500;
+    helper::PayloadFilter filter(rate,helper_hz),control(rate,helper_hz);
+    const auto bytes=filter.allocated_bytes(),delay=filter.delay();
+    std::vector<double> original(filter.coefficients().begin(),filter.coefficients().end());
+    const auto same_coefficients=[&] {
+        return original.size()==filter.coefficients().size() &&
+            std::equal(original.begin(),original.end(),filter.coefficients().begin(),
+                [](double a,double b){return std::bit_cast<std::uint64_t>(a)==std::bit_cast<std::uint64_t>(b);});
+    };
+    std::array<float,173> input{},actual{},expected{};
+    std::uint64_t at=0;
+    const auto consume=[&] {
+        for(std::size_t i=0;i<input.size();++i) {
+            const auto n=at+i;
+            input[i]=static_cast<float>(.2*std::sin(.037*n)+.3*std::cos(.793*n)+.1*std::sin(1.79*n));
+        }
+        const auto a=filter.push(input,actual),b=control.push(input,expected);at+=input.size();
+        check(a==b && std::equal(actual.begin(),actual.begin()+a,expected.begin()),
+            "retuning reset filter history, sample counts or the previous kernel");
+    };
+    consume();consume();
+    const auto count=filter.output_samples();
+    for(const auto invalid:{0.,225.,rate/2.-225.,std::numeric_limits<double>::infinity(),
+                            std::numeric_limits<double>::quiet_NaN()}) {
+        check(!filter.retune(invalid) && same_coefficients() && filter.center_hz()==helper_hz,
+              "invalid filter retune changed the kernel or its center");
+    }
+    const auto previous_round=std::fegetround();
+    if(std::fesetround(FE_DOWNWARD)==0) {
+        const auto rejected=!filter.retune(helper_hz+1);
+        const auto restored=std::fesetround(previous_round)==0;
+        check(rejected && restored && same_coefficients(),"unsupported FP retune mutated a coefficient");
+    }
+    check(filter.retune(helper_hz) && same_coefficients(),"same-center retune changed coefficient bits");
+    double transition=0;
+    check(filter.retune(helper_hz+1,&transition) && transition>0 && std::isfinite(transition),
+          "valid allocation-free filter retune failed to report its coefficient transition bound");
+    check(filter.retune(helper_hz) && same_coefficients(),
+          "transactional candidate rollback did not restore exact coefficient bits");
+    check(filter.output_samples()==count && filter.delay()==delay && filter.allocated_bytes()==bytes,
+          "retune changed filter output count, delay or fixed memory allocation");
+    for(unsigned i=0;i<9;++i) {check(filter.retune(helper_hz),"same-center filter renewal failed");consume();}
+    std::cout<<"filter_retune same_center_bits=exact rollback_coefficients=exact output_samples="
+             <<filter.output_samples()<<" allocated_bytes="<<bytes<<" one_hz_l1_transition="<<transition<<'\n';
+}
+void raw_notch_drift(bool physical_notch) {
+    using Frontend=live::detail::HelperInputFrontend;
+    constexpr std::uint32_t raw_rate=8000;
+    const auto logical_rate=physical_notch?4000U:8000U;
+    const double helper_hz=physical_notch?2500:3000,data_hz=physical_notch?500:1000;
+    modem::Config c;c.sample_rate=logical_rate;c.carrier_hz=data_hz;c.bandwidth_hz=2*data_hz;
+    c.spreading_factor=16;c.pulse_shaping=false;
+    c.oscillator_search=modem::OscillatorSearchConfig{{100,.5},{.5,.1},30000000,3,
+        modem::OscillatorReference::independent_audio,modem::OscillatorSideband::upper};
+    constexpr double utc_rate_limit=.0003;
+    const auto domain=live::detail::raw_helper_notch_domain(c,helper_hz,3990,utc_rate_limit);
+    check(domain.valid && domain.one_plus_clock.lower<.9994 && domain.one_plus_clock.upper>1.0006,
+          "raw notch did not retain the full original LF plus unresolved UTC clock domain");
+    const auto bands=live::detail::raw_helper_notch_bands(domain,{helper_hz-.2,helper_hz+.2});
+    check(bands.valid && bands.data.lower_hz==0,"folded raw notch lost its conjugate DATA image union");
+    for(const auto b:{domain.one_plus_clock.lower,1.,domain.one_plus_clock.upper})
+        for(const auto h:{helper_hz-.2,helper_hz+.2})for(const auto side:{-1.,1.}) {
+            const auto truth=std::abs(h+(data_hz-helper_hz+side*helper::occupied_bandwidth(c)/2)*b);
+            check(truth>=bands.data.lower_hz && truth<=bands.data.upper_hz,
+                  "raw notch certificate excluded an original DATA clock/frequency boundary");
+        }
+    helper::Reference ref;ref.sample_rate=raw_rate;ref.frequency_valid=true;
+    ref.frequency_hz=helper_hz;ref.frequency_uncertainty_hz=.01;
+    const auto grant=Frontend::reservation_bound(raw_rate,logical_rate,helper_hz);
+    Frontend frontend(grant,27);frontend.admit_realtime(c,helper_hz,ref,raw_rate,3990,0,utc_rate_limit);
+    check(frontend.active() && frontend.reference_passthrough(),"folded raw notch fixture did not select q=0");
+    const auto retained=frontend.bytes();std::uint64_t first=0,next=0,total=0;
+    double maximum_transition=0;
+    std::vector<float> input(2*raw_rate),observed;observed.reserve(64*logical_rate);
+    // 64 seconds at the tracker's existing .5-Hz/s operational gate traverses
+    // 32 Hz, exceeding the former forever-frozen 25-Hz admission guard.
+    for(std::uint64_t at=0;at<64ULL*raw_rate;at+=input.size()) {
+        ref.sample=at;ref.frequency_hz=helper_hz+.5*at/raw_rate;
+        check(frontend.track_frequency(ref,helper_hz),"raw notch lost valid cumulative drift beyond its first 25 Hz");
+        maximum_transition=std::max(maximum_transition,frontend.last_notch_transition_l1());
+        for(std::size_t i=0;i<input.size();++i) {
+            const auto t=static_cast<double>(at+i)/raw_rate;
+            input[i]=static_cast<float>(.02*std::cos(2*std::numbers::pi*(data_hz*t+.25*t*t))+
+                .5*std::cos(2*std::numbers::pi*(helper_hz*t+.25*t*t)));
+        }
+        frontend.push(input,at);
+        for(const auto& block:frontend.take((at+input.size())/raw_rate*logical_rate,ref,at+input.size())) {
+            if(!total)first=next=block.first_sample;
+            check(block.first_sample==next && block.view->correction_hz==0 && !block.view->conjugate &&
+                block.view->reference_passthrough && block.view->budget_serial==27,
+                "raw notch retune changed NCO phase convention, row-view identity or sample coordinates");
+            next+=block.samples.size();total+=block.samples.size();
+            observed.insert(observed.end(),block.samples.begin(),block.samples.end());
+        }
+        check(frontend.bytes()==retained && retained<=grant,"raw notch drift grew its optional allocation");
+    }
+    check(total>62ULL*logical_rate && first+total==next,
+          "raw notch drift discarded history or inserted/removed capture samples");
+    std::complex<double> data{},helper_tone{};const auto begin=observed.size()-8*logical_rate;
+    for(std::size_t i=begin;i<observed.size();++i) {
+        const auto t=static_cast<double>(first+i)/logical_rate-
+            static_cast<double>(helper::AnalyticFrequencyTranslator::group_delay)/raw_rate;
+        const auto common=.25*t*t;
+        data+=static_cast<double>(observed[i])*std::polar(1.,-2*std::numbers::pi*(data_hz*t+common));
+        helper_tone+=static_cast<double>(observed[i])*std::polar(1.,-2*std::numbers::pi*(helper_hz*t+common));
+    }
+    const auto count=static_cast<double>(observed.size()-begin);
+    const auto data_gain=2*std::abs(data)/count,helper_leak=2*std::abs(helper_tone)/count;
+    check(std::abs(data_gain-.02)<.0001 && helper_leak<.0005,
+          "drift-following raw notch damaged DATA or retained the strong helper after 25 Hz");
+    ref.sample=64ULL*raw_rate;ref.frequency_hz=3900;
+    check(!frontend.track_frequency(ref,helper_hz) && frontend.tracking_decline_reason(),
+          "raw notch moved to an unsupported capture/immutable-notch boundary");
+    const auto before=next;
+    frontend.push(input,64ULL*raw_rate);
+    for(const auto& block:frontend.take(66ULL*logical_rate,ref,66ULL*raw_rate)) {
+        check(block.first_sample==next,"declined raw retune reset established payload coordinates");
+        next+=block.samples.size();
+    }
+    check(next>before && frontend.bytes()==retained,"declined raw retune stopped established PCM draining");
+    std::cout<<"raw_notch_drift physical_notch="<<physical_notch<<" drift_hz=32 output_samples="<<total
+             <<" first="<<first<<" data_gain="<<data_gain<<" helper_leak="<<helper_leak
+             <<" maximum_l1_transition="<<maximum_transition<<" optional_bytes="<<retained
+             <<" boundary_decline="<<frontend.tracking_decline_reason()<<'\n';
+}
+void raw_notch_converter_boundary(bool physical_notch) {
+    using Frontend=live::detail::HelperInputFrontend;
+    constexpr std::uint32_t raw_rate=8000,logical_rate=4000;
+    const double helper_hz=physical_notch?2500:700,data_hz=physical_notch?500:1500;
+    const double data_width=physical_notch?1000:200,offset=physical_notch?700:100;
+    modem::Config c;c.sample_rate=logical_rate;c.carrier_hz=data_hz;c.bandwidth_hz=data_width;
+    c.spreading_factor=16;c.pulse_shaping=false;
+    // Zero independent RF prior selects raw q=0 in the nonfolded low-helper
+    // arrangement. The other arrangement is folded and uses a physical FIR.
+    c.oscillator_search=modem::OscillatorSearchConfig{{100,.5},{0,.1},30000000,3,
+        modem::OscillatorReference::independent_audio,modem::OscillatorSideband::upper};
+    helper::Reference ref;ref.sample_rate=raw_rate;ref.frequency_valid=true;
+    ref.frequency_hz=helper_hz;ref.frequency_uncertainty_hz=.01;
+    const auto grant=Frontend::reservation_bound(raw_rate,logical_rate,helper_hz);
+    audio::Resampler converter(raw_rate,logical_rate);
+    const auto domain=live::detail::raw_helper_notch_domain(c,helper_hz,3990,0);
+    const auto moved=live::detail::raw_helper_notch_bands(domain,
+        {helper_hz+offset-.01,helper_hz+offset+.01});
+    check(moved.valid && moved.data.upper_hz>converter.passband_hz() &&
+          moved.data.upper_hz<logical_rate/2.,
+          "converter-boundary fixture lost its ADC-valid DATA inside the conversion transition below Nyquist");
+    auto outside=ref;outside.frequency_hz+=offset;
+    Frontend unborn(grant);bool birth_declined=false;
+    try {unborn.admit_realtime(c,helper_hz,outside,raw_rate,3990,0);}
+    catch(const Error& error){birth_declined=std::string_view(error.what()).find("immutable converter passband")!=std::string_view::npos;}
+    check(birth_declined && !unborn.active(),"raw notch admitted DATA already outside the converter flat passband");
+    Frontend frontend(grant);frontend.admit_realtime(c,helper_hz,ref,raw_rate,3990,0);
+    check(frontend.active() && frontend.reference_passthrough(),"converter-boundary fixture failed initial q=0 admission");
+    const auto bytes=frontend.bytes();std::array<float,raw_rate> zeros{};
+    frontend.push(zeros,0);auto before=frontend.take(logical_rate,ref,raw_rate);
+    check(!before.empty(),"converter-boundary fixture did not establish ordinary dated PCM");
+    auto next=before.back().first_sample+before.back().samples.size();outside.sample=raw_rate;
+    check(!frontend.track_frequency(outside,helper_hz) && frontend.tracking_decline_reason() &&
+          std::string_view(frontend.tracking_decline_reason()).find("immutable converter passband")!=std::string_view::npos,
+          "raw notch renewal silently moved DATA into converter rolloff");
+    frontend.push(zeros,raw_rate);
+    for(const auto& block:frontend.take(2ULL*logical_rate,outside,2ULL*raw_rate)) {
+        check(block.first_sample==next,"converter decline changed established PCM coordinates");
+        next+=block.samples.size();
+    }
+    check(next>before.back().first_sample+before.back().samples.size() && frontend.bytes()==bytes,
+          "converter decline stopped PCM draining or changed optional allocations");
+    std::cout<<"raw_notch_converter_boundary physical_notch="<<physical_notch
+             <<" moved_data_high="<<moved.data.upper_hz<<" converter_passband="<<converter.passband_hz()
+             <<" birth_declined=1 renewal_declined=1 continued_pcm=1\n";
+}
+void filter_retune_transition_peak() {
+    // An independently specified complex linear chirp provides the exact
+    // center phase for EVERY observed output, including the first sample after
+    // a coefficient swap. Unlike an eight-second average this catches peak
+    // transition gain/phase errors. It is still a controlled waveform test,
+    // not an all-time certificate for arbitrary helper metadata or DATA.
+    constexpr std::uint32_t rate=8000;constexpr double data_hz=500,helper_hz=2500;
+    constexpr double slope=.5,amplitude=.02;
+    helper::PayloadFilter real_filter(rate,helper_hz),imaginary_filter(rate,helper_hz);
+    const auto delay=real_filter.delay(),bytes=real_filter.allocated_bytes();
+    std::array<float,173> real_input{},imaginary_input{},real_output{},imaginary_output{};
+    std::uint64_t output_count=0,next_retune=0;double peak_error=0,peak_phase=0,relative_bound=0,maximum_transition=0;
+    for(std::uint64_t at=0;at<16ULL*rate;) {
+        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(real_input.size(),16ULL*rate-at));
+        if(at>=next_retune) {
+            const auto center=helper_hz+slope*at/rate;double transition=0;
+            check(real_filter.retune(center,&transition) && imaginary_filter.retune(center),
+                  "complex-chirp control could not renew its existing FIR kernel");
+            maximum_transition=std::max(maximum_transition,transition);next_retune=at+2ULL*rate;
+            // For this chirp, departure from the local linear-phase tone at
+            // lag k is <= pi*slope*(k/rate)^2. Triangle-summing actual FIR
+            // coefficients bounds that remainder, without assuming that the
+            // time-varying system is LTI. Input/output float rounding is added
+            // separately below. This assertion does not cover arbitrary phase
+            // steps, metadata, aliased capture or unqualified reference loss.
+            double quadratic=0;
+            for(std::size_t k=1;k<=delay;++k) {
+                const auto seconds=static_cast<double>(k)/rate;
+                // push() mirrors the stored LEFT taps, not the separately
+                // rounded right entries. Use exactly those coefficients.
+                const auto term=2*std::abs(real_filter.coefficients()[delay-k])*
+                    0x1.921fb54442d19p+1*slope*seconds*seconds;
+                quadratic=std::nextafter(quadratic+term,std::numeric_limits<double>::infinity());
+            }
+            const auto linear=real_filter.maximum_amplitude_error(data_hz-1,data_hz+10);
+            check(linear<=.001,"complex-chirp DATA passband failed its static-kernel control");
+            relative_bound=std::max(relative_bound,linear+quadratic);
+        }
+        for(std::size_t i=0;i<count;++i) {
+            const auto t=static_cast<double>(at+i)/rate;
+            const auto angle=2*std::numbers::pi*(data_hz*t+.5*slope*t*t);
+            real_input[i]=static_cast<float>(amplitude*std::cos(angle));
+            imaginary_input[i]=static_cast<float>(amplitude*std::sin(angle));
+        }
+        const auto produced=real_filter.push(std::span(real_input).first(count),real_output);
+        check(produced==imaginary_filter.push(std::span(imaginary_input).first(count),imaginary_output),
+              "complex-chirp FIR quadratures changed sample counts at a retune");
+        for(std::size_t i=0;i<produced;++i) {
+            const auto t=static_cast<double>(output_count+i+delay)/rate;
+            const auto ideal=std::polar(amplitude,2*std::numbers::pi*(data_hz*t+.5*slope*t*t));
+            const std::complex<double> actual{real_output[i],imaginary_output[i]};
+            peak_error=std::max(peak_error,std::abs(actual-ideal));
+            peak_phase=std::max(peak_phase,std::abs(std::arg(actual*std::conj(ideal))));
+        }
+        output_count+=produced;at+=count;
+        check(real_filter.output_samples()==output_count && imaginary_filter.output_samples()==output_count &&
+              real_filter.allocated_bytes()==bytes && imaginary_filter.allocated_bytes()==bytes,
+              "complex-chirp retune changed FIR counters or allocations");
+    }
+    constexpr double pcm_rounding=1e-7;
+    const auto error_bound=amplitude*relative_bound+pcm_rounding;
+    check(output_count==16ULL*rate-2*delay && peak_error<=error_bound &&
+          peak_phase<=std::asin(std::min(.99,error_bound/amplitude))+1e-5,
+          "changing FIR kernel exceeded its pointwise chirp amplitude/phase/coordinate control");
+    std::cout<<"filter_retune_transition_peak output_samples="<<output_count<<" peak_complex_error="<<peak_error
+             <<" pointwise_error_bound="<<error_bound<<" peak_phase_radians="<<peak_phase
+             <<" maximum_l1_transition="<<maximum_transition<<'\n';
+}
+void notch_retune_components() {
+    filter_retune_preserves_state();filter_retune_transition_peak();
+    raw_notch_converter_boundary(false);raw_notch_converter_boundary(true);
+    raw_notch_drift(false);raw_notch_drift(true);
+}
+
 struct PhysicalResult {Bytes bits;std::vector<std::size_t> progress;std::uint64_t first=0,physical_end=0,completed_at=0;std::size_t completed=0;};
 PhysicalResult physical(bool helper_on) {
     modem::Config c;c.sample_rate=8000;c.carrier_hz=1500;c.bandwidth_hz=1000;
@@ -273,11 +668,13 @@ void live_matched(int kind=0) {
 
 }
 int main(int argc,char** argv) {try {
+    if(argc==2&&std::string(argv[1])=="--retune-only"){notch_retune_components();return 0;}
     if(argc==2&&std::string(argv[1])=="--history-only"){history_preserves_complete_tail();return 0;}
+    if(argc==2&&std::string(argv[1])=="--frontend-only"){frontend_physical_notch();notch_retune_components();return 0;}
     if(argc==2&&std::string(argv[1])=="--physical-only"){physical_matched();return 0;}
     if(argc==2&&std::string(argv[1])=="--live-only"){live_matched();return 0;}
     if(argc==2&&std::string(argv[1])=="--framed-text-only"){live_matched(1);return 0;}
     if(argc==2&&std::string(argv[1])=="--attachment-only"){live_matched(2);return 0;}
-    if(argc==1){history_preserves_complete_tail();physical_matched();live_matched();live_matched(1);live_matched(2);return 0;}
+    if(argc==1){history_preserves_complete_tail();frontend_physical_notch();notch_retune_components();physical_matched();live_matched();live_matched(1);live_matched(2);return 0;}
     throw std::runtime_error("unknown helper payload-tail test mode");
 } catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

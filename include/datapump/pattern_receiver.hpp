@@ -91,6 +91,15 @@ struct PatternSourceIdentity {
     double clock_half_width_ppm=0;
     std::uint32_t phase_lower=0,phase_upper=0,sample_rate=0;
 };
+// Exact native evidence through the symbol immediately before the latest
+// confirmation's last symbol. Joined query only, after draining accepted chunks.
+// It owns no samples/bits and never confirms a symbol or physical completion.
+// A valid query also binds the unchanged exact source phase over this birth;
+// any gap, truncation or phase change poisons that authority until a new birth.
+struct PatternPrefixSupport {
+    std::uint64_t stream_first_sample=0,stream_first_symbol=0,prefix_symbols=0,end_sample=0,stream_phase_samples=0;
+    double support_samples=0;
+};
 // True only when the entire physical overlap has disjoint source addresses.
 // Unsupported/ambiguous geometry retains the existing overlap arbitration.
 bool pattern_source_identities_disjoint(const PatternSourceIdentity&,std::uint64_t first_a,
@@ -962,6 +971,12 @@ public:
     bool retains_stream(std::uint64_t first_sample, std::uint64_t first_symbol) const;
     PatternBurst provisional() const;
     std::optional<PatternSourceIdentity> source_identity(const PatternBurst&)const;
+    // Optional native continuous-helper evidence. Unknown/missing, gaps,
+    // erased/completed tracks and calendars return nullopt. Caller must match
+    // prefix_symbols exactly; no subtraction, extrapolation or recomputation.
+    std::optional<PatternPrefixSupport> prefix_support_before_last(
+        std::uint64_t first_sample,std::uint64_t first_symbol)const noexcept;
+
     // Numerical acquisition may defer diagnostic history; admission/progress never wait for it.
     // Receiver-worker only: score retained observations with cancellable bounded batching.
     // Publication polls never perform the deferred search or manufacture input.

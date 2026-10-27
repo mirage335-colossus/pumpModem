@@ -1070,8 +1070,37 @@ void fhss_list_settings() {
         "Removing encryption key left spreading active");
     controller.close();
 }
+void fixed_debug_controls() {
+    constexpr std::size_t fixed=257u*1024*1024+37;
+    Controller::Options options;options.simulation=true;options.debug_workspace_bytes=fixed;
+    Controller controller(options);
+    const auto verify=[&] {
+        const auto& value=controller.settings();
+        check(value.dsp_workspace_bytes==fixed&&value.transfer.dsp_workspace_bytes==fixed,
+            "Debug fixed workspace did not reach Session and transfer");
+        check(controller.field(F::dsp_workspace).display_text=="Debug fixed "+std::to_string(fixed)+" bytes",
+            "Debug fixed workspace falsely displayed a percentage grant");
+        const auto plan=controller.link_plan();
+        check(plan&&plan->inputs.options.dsp_workspace_bytes==fixed&&plan->inputs.receiver_settings&&
+            plan->inputs.receiver_settings->dsp_workspace_bytes==fixed&&plan->inputs.dsp_workspace_percent==0,
+            "Planner did not receive actual fixed debug workspace");
+    };
+    verify();load_synthetic_key(controller);verify();
+    controller.select(F::dsp_workspace,"ram-75");verify();
+    controller.edit(F::helper_power,"40 W");verify();controller.close();
+    Controller::Options hardware;hardware.diagnostic_capture_rate_hz=48000;
+    Controller capture(hardware);
+    check(!capture.settings().simulation&&capture.settings().diagnostic_capture_rate_hz==48000,
+        "Explicit debug raw-capture rate did not reach settings");capture.close();
+    bool rejected=false;try {hardware.simulation=true;Controller invalid(hardware);}catch(const Error&){rejected=true;}
+    check(rejected,"Debug hardware capture rate accepted Simulation");
+    Controller normal({true,false});
+    check(normal.settings().diagnostic_capture_rate_hz==0&&
+        !normal.field(F::dsp_workspace).display_text.starts_with("Debug fixed"),
+        "Normal Controller acquired diagnostic overrides");normal.close();
+}
 int main(int argc,char** argv) {
-    try {symbol_burst_settings();if(argc>1&&std::string_view(argv[1])=="--symbol-burst"){std::cout<<"Symbol_Burst settings passed\n";return 0;}exact_scheduled_target_import();if(argc>1&&std::string_view(argv[1])=="--sched-target-import"){std::cout<<"Exact scheduled target import passed\n";return 0;}scheduled_hop_settings();if(argc>1&&std::string_view(argv[1])=="--sched-hop"){std::cout<<"Scheduled hop settings passed\n";return 0;}receiver_strategy_settings();if(argc>1&&std::string_view(argv[1])=="--receiver-strategy"){std::cout<<"Receiver strategy settings passed\n";return 0;}fhss_list_settings();if(argc>1&&std::string_view(argv[1])=="--fhss-list"){std::cout<<"FHSS list passed\n";return 0;}fhss_profiles();if(argc>1&&std::string_view(argv[1])=="--fhss-profiles"){std::cout<<"FHSS profiles passed\n";return 0;}doppler_settings();arithmetic_settings();duplex_settings();clock_and_spread_controls();generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();narrow_rate_round_trips();live_validation_is_atomic();real_radio_configuration();invalid_shift_edit_recovers();absolute_carrier_and_shift();zero_shift_legacy_and_shared_round_trip();
+    try {fixed_debug_controls();if(argc>1&&std::string_view(argv[1])=="--debug-controls"){std::cout<<"Fixed debug controls passed\n";return 0;}symbol_burst_settings();if(argc>1&&std::string_view(argv[1])=="--symbol-burst"){std::cout<<"Symbol_Burst settings passed\n";return 0;}exact_scheduled_target_import();if(argc>1&&std::string_view(argv[1])=="--sched-target-import"){std::cout<<"Exact scheduled target import passed\n";return 0;}scheduled_hop_settings();if(argc>1&&std::string_view(argv[1])=="--sched-hop"){std::cout<<"Scheduled hop settings passed\n";return 0;}receiver_strategy_settings();if(argc>1&&std::string_view(argv[1])=="--receiver-strategy"){std::cout<<"Receiver strategy settings passed\n";return 0;}fhss_list_settings();if(argc>1&&std::string_view(argv[1])=="--fhss-list"){std::cout<<"FHSS list passed\n";return 0;}fhss_profiles();if(argc>1&&std::string_view(argv[1])=="--fhss-profiles"){std::cout<<"FHSS profiles passed\n";return 0;}doppler_settings();arithmetic_settings();duplex_settings();clock_and_spread_controls();generated_and_pasted_settings();rejected_settings_remain_atomic();startup_and_submit_behavior();narrow_rate_round_trips();live_validation_is_atomic();real_radio_configuration();invalid_shift_edit_recovers();absolute_carrier_and_shift();zero_shift_legacy_and_shared_round_trip();
         std::cout<<"Planner launch setting round trips passed.\n";return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

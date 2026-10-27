@@ -1,6 +1,7 @@
 #include "link_planner_page.hpp"
 #include "theme.hpp"
 #include "datapump/pattern_search.hpp"
+#include "../receiver_oscillator_policy.hpp"
 #include <algorithm>
 #include <array>
 #include <climits>
@@ -471,7 +472,7 @@ Node cpu_graph(const planner::Model& model,float width) {
     paragraph(n,"Receiver work on the reference CPU. Excludes helper frontend, audio I/O, transmit and GUI work; not measured total process CPU.",
         10,Tone::muted,false,4);
     if(model.helper_reference.enabled) {
-        paragraph(n,"Solid: ordinary receiver baseline. Dashed: conditional helper-corrected ordinary receiver cost, after usable tone observations. Full residual audio-clock/UTC search and ordinary storage remain.",
+        paragraph(n,"Solid: ordinary receiver baseline. Dashed: conditional helper-corrected ordinary receiver cost at the shared lead predictor's achievable precision. Full DATA-clock/UTC search and ordinary storage remain.",
             10,Tone::muted,false,4);
         paragraph(n,"Dashed cost excludes uncalibrated helper discovery, tracking and conversion overhead. It is not total CPU, measured speed, or a lock/probability forecast. Payload SNR, Rate and the ordinary PHY reception curve stay unchanged.",
             10,Tone::muted,false,0);
@@ -487,7 +488,9 @@ void oscillator_details(Node& root,const planner::Model& model) {
     const auto& config=model.inputs.options.modem;
     if(config.oscillator_search) {
         try {
-            const auto search=modem::oscillator_pattern_search(config);
+            auto options=model.inputs.options;options.modem=config;
+            const auto utc=transfer::receiver_utc_rate_correction(config,options);
+            const auto search=transfer::receiver_oscillator_search(config,options);
             const auto effects=modem::oscillator_effects(config);
             const auto& policy=*config.oscillator_search;
             const bool active_shift=policy.rf_shift_hz!=0;
@@ -503,6 +506,12 @@ void oscillator_details(Node& root,const planner::Model& model) {
                 ". Sample-clock half-width: requested "+number(search.requested_clock_half_width_ppm)+" ppm, covered "+number(search.clock_half_width_ppm)+
                 " ppm. "+std::to_string(search.hypotheses.size())+" paired hypotheses."+(search.limited?" LIMITED COVERAGE.":""),11,
                 search.limited?Tone::accent:Tone::muted);
+            if(utc>0) {
+                if(search.timing_correction_unavailable)paragraph(clocks,"Peer UTC-rate allowance: "+number(utc*1e6,6)+
+                    " ppm requested; full DATA-clock union is unavailable within the current passband/catalogue limits. Displayed search retains the original oscillator domain.",11,Tone::accent);
+                else paragraph(clocks,"Peer UTC-rate allowance: "+number(utc*1e6,6)+
+                    " ppm; its full DATA-clock union remains in the displayed ordinary search.",11,Tone::muted);
+            }
         } catch(const std::exception& error) {paragraph(clocks,error.what(),11,Tone::accent);}
     }
     root.children.push_back(std::move(clocks));
@@ -725,20 +734,45 @@ void link_budget(Node& root, const planner::Model& model) {
             paragraph(n,"The strongest tone in the expected helper range supplies the real-time frequency reference for direct conversion. Robust acquisition waits while the helper is unavailable. Disable Helper Carrier to use ordinary oscillator search.",
                 11,Tone::muted,false,4);
             const auto& conditional=helper.conditional;
-            if(conditional.observation_seconds>0)paragraph(n,"Conditional steady-tone model (ideal uninterrupted, zero-excess): "+
-                number(conditional.observation_seconds,3)+" s of usable observations at "+
-                std::to_string(conditional.physical_sample_rate)+" raw samples/s; residual reference "+
-                frequency(conditional.uncertainty_hz)+" engineering half-width. Discovery first needs at least "+
-                number(conditional.minimum_seed_seconds,3)+" s for two fresh seed windows. 384 uninterrupted accepted 20 ms observations within 8 s and zero excess residual are ideal assumptions. Actual APSK metadata, punctuation, noise gaps or glitches can widen uncertainty; this is not normally achieved precision or a measured helper CPU gain.",
-                11,Tone::muted,false,4);
+            const auto& precision=conditional.precision;
+            if(precision.supported) {
+                paragraph(n,"Automatic helper precision lead: +"+number(precision.extra_lead_seconds,4)+
+                    " s extra; "+number(conditional.planned_lead_seconds,4)+" s total helper-only lead. "+
+                    (precision.target_reached?"Predicted ±0.1 Hz target reached.":
+                        precision.extension_capped?"36 s extra-lead cap reached; ±0.1 Hz target not reached.":
+                        "Predicted ±0.1 Hz target not reached.")+
+                    " Expected half-width at payload start: "+frequency(conditional.uncertainty_hz)+".",
+                    11,precision.target_reached?Tone::muted:Tone::caution,false,4);
+                paragraph(n,"Conditional segment model: "+number(precision.usable_tone_seconds,4)+
+                    " s usable straight tone across "+std::to_string(precision.expected_segments)+
+                    " segments at "+std::to_string(conditional.physical_sample_rate)+
+                    " raw samples/s, accounting for configured APSK metadata, punctuation and oscillator process. "+
+                    precision.reason+" Prediction is not measured lock or a lock-probability forecast; "
+                    "unexpected noise, glitches or model mismatch can widen actual uncertainty.",11,Tone::muted,false,4);
+                paragraph(n,"Helper tail planning minimum: "+planner::duration(conditional.planned_tail_seconds)+
+                    ". Robust waveform time remains "+planner::duration(model.send_seconds)+
+                    "; helper lead/tail add startup and drain time without changing payload Rate or framing.",
+                    11,Tone::muted,false,4);
+            } else paragraph(n,"Automatic helper precision lead prediction declined: "+
+                (precision.reason.empty()?conditional.reason:precision.reason),11,Tone::caution,false,4);
             if(conditional.frequency_rate_hypotheses)paragraph(n,"Conditional residual search: "+
                 std::to_string(conditional.frequency_rate_hypotheses)+" RF/clock pairs, "+
                 std::to_string(conditional.retained_clock_rates)+" clock rates, full original "+
-                number(conditional.clock_half_width_ppm,6)+" ppm half-width. No clock narrowing is inferred from tone power.",
+                number(conditional.clock_half_width_ppm,6)+" ppm half-width. Helper and DATA share the corrected source clock; individually unknown physical audio and UTC factors are not added twice. No clock narrowing is inferred from tone power.",
+                11,Tone::muted,false,4);
+            if(conditional.shared_frequency_clock)paragraph(n,"Conditional shared-radio source clock from frequency: ["+
+                number(conditional.shared_frequency_clock->lower_ppm,9)+", "+
+                number(conditional.shared_frequency_clock->upper_ppm,9)+"] ppm; selects "+
+                std::to_string(conditional.shared_clock_selected_pairs)+" original RF/clock cells at "+
+                std::to_string(conditional.shared_clock_selected_rates)+
+                " clock rates. The signed positive input image and no UTC rate steering are conditions. "
+                "This predicts conditional geometry, not measured lock, independent punctuation or calibrated CPU gain.",
                 11,Tone::muted,false,4);
             paragraph(n,conditional.available?"Conditional ordinary receiver cost: "+number(conditional.realtime_ratio,4)+
                 " processing seconds per audio second, excluding helper startup/tracking/conversion overhead.":
                 "Conditional helper CPU estimate unavailable: "+conditional.reason,11,Tone::muted,false,4);
+            paragraph(n,"Additional helper discovery/tracking/conversion CPU and post-lock lead-in acquisition are not yet priced. They are unknown additive costs, not zero. No parallel broad helper fallback bank is included.",
+                11,Tone::muted,false,4);
             paragraph(n,"Expected tone power does not report a measured lock. The ordinary baseline and PHY reception curve remain visible; helper power does not increase payload SNR or Rate. Radio/ADC passband, actual tone tracking and steady observations are conditions of the dashed receiver-cost curve.",
                 11,Tone::muted,false,0);
         }
@@ -768,6 +802,32 @@ void planner_footer(Node& root,const planner::Model& model,bool show_details) {
         root.children.push_back(std::move(controls));
     }
     buttons(root,{{show_details?"Hide details":"Model limits and references",Command::planner_toggle_details}});
+}
+void helper_receiver_details(Node& n,const planner::Model& model) {
+    if(!model.helper_reference.enabled)return;
+    const auto& conditional=model.helper_reference.conditional;
+    const auto& cost=conditional.receiver_cost;
+    if(cost.finite_available)paragraph(n,"Conditional finite receiver ledger: "+
+        number(cost.frontend_seconds,4)+" s frontend + "+number(cost.search_seconds,4)+
+        " s search + "+number(cost.kernel_seconds,4)+" s kernel + "+
+        number(cost.continuation_seconds,4)+" s continuation + "+number(cost.payload_seconds,4)+
+        " s payload + "+number(cost.startup_other_seconds,4)+" s startup/other allowance = "+
+        number(cost.finite_cpu_seconds,4)+" s processing over "+number(cost.finite_audio_seconds,4)+
+        " s modeled body/absence audio. These are ordinary reference-model prices, not measured CPU.",
+        11,Tone::muted,false,4);
+    if(cost.sustained_available)paragraph(n,"Conditional continuous listening model: "+
+        number(cost.sustained_realtime_ratio,4)+" s processing per audio second, including "+
+        number(cost.sustained_continuation_ratio,4)+" for one established stream's continuation. "+
+        number(cost.initial_epochs,5)+" initial epochs; "+number(cost.new_epoch_admissions,5)+
+        " fresh admissions over the finite observation; cohort lifetime "+
+        planner::duration(cost.cohort_lifetime_seconds)+". Setup costs are already included above.",
+        11,Tone::muted,false,4);
+    if(cost.geometry.workspace_bytes)paragraph(n,"Conditional receiver storage model: "+
+        number(cost.geometry.workspace_bytes/1048576.,4)+" MiB configured allowance; "+
+        number(cost.geometry.per_bank_workspace_bytes/1048576.,4)+" MiB per-bank allowance; "+
+        (cost.workspace_supported?"modeled workspace checks pass":"modeled workspace checks fail")+
+        ". Peak rolling-bank storage is unqualified. Backend: "+cost.geometry.backend+".",
+        11,Tone::muted,false,4);
 }
 void geometry_details(Node& n,const planner::Model& model) {
     if(model.frequency_rate_hypotheses)
@@ -904,6 +964,7 @@ void details(Node& root,const planner::Model& model) {
         }
     }
     geometry_details(n,model);
+    helper_receiver_details(n,model);
     const auto& g=model.receiver_geometry;
     const auto requested=g.receiver_strategy_requested.empty()?
         std::string(tuning::receiver_strategy_id(model.inputs.options.modem.receiver_strategy)):
@@ -1031,7 +1092,7 @@ ui::DocumentNode build(const planner::Model& model, float width, bool show_detai
     link_budget(root, model);
     const auto& config = model.inputs.options.modem;
     paragraph(root, "Rate " + frequency(config.bandwidth_hz) + "  ·  Stream tone " + frequency(config.carrier_hz) +
-        "  ·  DSP " + (model.inputs.dsp_workspace_percent ? std::to_string(model.inputs.dsp_workspace_percent) + "% RAM · " : "") +
+        "  ·  DSP " + (model.inputs.dsp_workspace_percent ? std::to_string(model.inputs.dsp_workspace_percent) + "% RAM · " : "fixed workspace · ") +
         number(static_cast<double>(model.inputs.options.dsp_workspace_bytes) / (1024 * 1024 * 1024)) + " GiB", 11, Tone::muted, false, 6);
     planner_controls(root,model,use_draft);
     if (!model.available) {

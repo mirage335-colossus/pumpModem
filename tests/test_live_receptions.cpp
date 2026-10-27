@@ -1,4 +1,7 @@
 #include "../src/live_receptions.hpp"
+#include "../src/live_reception_support.hpp"
+#include "../src/live_source_handoff.hpp"
+#include "../src/live_receiver_layout.hpp"
 #include "../src/live_deferred_pattern_history.hpp"
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/pattern_code.hpp"
@@ -11,8 +14,405 @@ namespace {
 using History = datapump::live::detail::ReceptionHistory;
 void check(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
 History::Candidate candidate(std::uint64_t id, std::uint64_t first, std::uint64_t end, double score) {
-    return {id, 1, first, end, 1500, 10, 6000, score, false};
+    History::Candidate value;
+    value.id=id;value.family=1;value.first=first;value.end=end;
+    value.frequency=1500;value.frequency_tolerance=10;value.absence_samples=6000;
+    value.score=score;return value;
 }
+void source_address_sequence_geometry() {
+    using datapump::live::detail::ReceptionSourcePublication;
+    using datapump::live::detail::reception_source_conflict;
+    // Complete small modular periods, including T shorter/longer than one
+    // second. The oracle is the actual Data address helper, not test payload.
+    for(std::uint32_t fs=2;fs<=10;++fs)for(std::uint64_t t=1;t<=2*fs;++t)
+        for(std::uint32_t a=0;a<fs;++a)for(std::uint32_t b=0;b<fs;++b)
+            for(std::uint64_t n=1;n<=2*fs;++n) {
+                ReceptionSourcePublication x,y;
+                x.epoch=y.epoch=100;x.phase=a;y.phase=b;
+                x.sample_rate=y.sample_rate=fs;x.symbol_samples=y.symbol_samples=t;
+                bool different=false;
+                for(std::uint64_t i=0;i<n;++i) {
+                    const auto p=datapump::modem::symbol_stream_address(100,a,i,t,fs);
+                    const auto q=datapump::modem::symbol_stream_address(100,b,i,t,fs);
+                    different|=p.epoch!=q.epoch || p.ordinal!=q.ordinal;
+                }
+                const auto result=reception_source_conflict(x,y,n);
+                check(result && *result==different,"closed-form Data-address sequence disagrees with actual address helper");
+            }
+    ReceptionSourcePublication a,b;
+    a.epoch=b.epoch=1792949976;a.phase=0;b.phase=4080;
+    a.sample_rate=b.sample_rate=6000;a.symbol_samples=b.symbol_samples=15360;
+    check(reception_source_conflict(a,b,1)==false && reception_source_conflict(a,b,2)==true,
+          "actual phase4080 alias did not preserve first Data epoch and conflict at second");
+    a.epoch=b.epoch=UINT64_MAX;
+    a.phase=b.phase=0;a.symbol_samples=b.symbol_samples=3;
+    a.sample_rate=b.sample_rate=10;
+    check(!reception_source_conflict(a,b,UINT64_MAX),"overflowing Data-address sequence acquired equality authority");
+    a.symbol_samples=b.symbol_samples=30;a.sample_rate=b.sample_rate=10;
+    check(!reception_source_conflict(a,b,2),"T>=Fs equality skipped overflowing endpoint validation");
+    b=a;b.sample_rate=0;check(!reception_source_conflict(a,b,1),"invalid source rate acquired address authority");
+}
+void helper_source_handoff() {
+    using datapump::live::detail::ReceptionSourcePublication;
+    using datapump::live::detail::reception_source_handoff_allowed;
+    constexpr std::uint64_t t=15360;
+    const auto publication=[](std::uint32_t phase,std::uint64_t count,std::uint64_t first,
+                             std::uint64_t end,double raw,double score) {
+        ReceptionSourcePublication p;p.epoch=1792949976;p.phase=phase;p.count=count;
+        p.sample_rate=6000;p.symbol_samples=t;p.first=first;p.end=end;p.raw_support=raw;
+        p.support=score;p.timing_tolerance=24;p.helper_assisted=true;return p;
+    };
+    // Values from the actual failed GPS/helper001 trace: c7's already exposed
+    // correct2 prefix, c2's same-birth weak middle plus strong third, then c3.
+    auto old=publication(0,2,86497,117277,30780,30720);
+    auto wrong=publication(4080,3,86488,132628,31495.7,31373.17606067473);
+    // Derive the raw total from the actually logged normalized candidate score.
+    wrong.raw_support=wrong.support*(wrong.end-wrong.first)/(3.*t);
+    auto correct=publication(0,3,86512,132652,46140,46080);
+    // Controlled exact pre-append evidence: the middle symbol is weak and
+    // the following symbol is strong. Total geometry/score is actual traced;
+    // this split exercises the native checkpoint contract, not recorded data.
+    datapump::modem::PatternPrefixSupport wrong_prefix{wrong.first,3,2,117248,0,16000};
+    datapump::modem::PatternPrefixSupport correct_prefix{correct.first,2,2,117292,5280,30780};
+    History h;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
+    const auto fit=[](std::uint64_t id,const ReceptionSourcePublication& p) {
+        auto c=candidate(id,p.first,p.end,p.support);c.family=0;c.symbol_samples=t;
+        c.timing_tolerance=24;c.helper_assisted=true;return c;
+    };
+    auto established=fit(7,old);const auto first=h.observe(established,allocate);
+    auto alias=fit(2,wrong);alias.signal_id=first.signal_id;
+    const auto eligible=[&](const ReceptionSourcePublication& incoming,
+                            std::optional<datapump::modem::PatternPrefixSupport> prefix) {
+        return [&,incoming,prefix](const auto&,std::uint64_t id,std::span<const std::uint64_t>,bool completed) {
+            check(id==first.signal_id,"source guard was applied to an unrelated reception");
+            if(completed)return true;
+#if defined(DATAPUMP_SOURCE_HANDOFF_COUNTERFACTUAL)
+            (void)incoming;(void)prefix;return true;
+#else
+            return reception_source_handoff_allowed(old,incoming,prefix).value_or(true);
+#endif
+        };
+    };
+    auto provisional=alias;provisional.complete=false;
+    const auto attempted=h.observe(provisional,allocate,eligible(wrong,wrong_prefix));
+    check(!attempted.selected && attempted.signal_id==first.signal_id,
+          "weak differently-addressed source reinterpreted an established pending prefix");
+    const auto final_attempt=h.observe(alias,allocate,eligible(wrong,wrong_prefix));
+    check(!final_attempt.selected && final_attempt.revision==first.revision,
+          "rejected source alias changed provisional ownership or revision");
+    auto right=fit(3,correct);right.signal_id=first.signal_id;
+    const auto corrected=h.observe(right,allocate,eligible(correct,correct_prefix));
+    check(corrected.selected && corrected.signal_id==first.signal_id,
+          "canonical alias could not expose the actual valid final bit");
+    right.complete=true;
+    check(h.observe(right,allocate,eligible(correct,correct_prefix)).selected,
+          "source ownership guard suppressed the owner's physical END");
+    // A consistent-source extension may have arbitrarily weak new-last-bit
+    // support. It must not be subjected to the conservative tail subtraction.
+    auto weak_last=correct;weak_last.raw_support=30780+10;
+    weak_last.support=weak_last.raw_support/(weak_last.end-weak_last.first)*3.*t;
+    check(reception_source_handoff_allowed(old,weak_last,correct_prefix)==true,
+          "consistent-source weak final bit was delayed by a prefix support lower bound");
+    // A genuinely stronger source can correct a weak false early address.
+    auto false_early=old;false_early.phase=4080;false_early.support=1000;
+    false_early.raw_support=1000*(false_early.end-false_early.first)/(2.*t);
+    check(reception_source_handoff_allowed(false_early,correct,correct_prefix)==true,
+          "strong source correction was frozen behind a weak false early prefix");
+    // A FULL false early source must not freeze a full correct source, or a
+    // correct full prefix with a weak final symbol. Actual prefix support ties
+    // honestly; no B>T tail ceiling or total deficit can destroy that tie.
+    auto full_false=old;full_false.phase=4080;
+    check(reception_source_handoff_allowed(full_false,correct,correct_prefix)==true &&
+          reception_source_handoff_allowed(full_false,weak_last,correct_prefix)==true,
+          "full false early source froze a correct growing prefix or weak final bit");
+    auto absent=correct_prefix;absent.prefix_symbols=1;
+    check(!reception_source_handoff_allowed(full_false,correct,absent),
+          "a different prefix count was extrapolated into handoff authority");
+    auto ordinary=old;ordinary.helper_assisted=false;auto ordinary_new=wrong;ordinary_new.helper_assisted=false;
+    check(!reception_source_handoff_allowed(ordinary,ordinary_new,wrong_prefix),
+          "ordinary helper-off policy was given a source handoff restriction");
+    check(!reception_source_handoff_allowed(old,wrong,{}),
+          "unknown support geometry silently froze a candidate");
+    auto later=wrong;later.first+=t;later.end+=t;
+    check(!reception_source_handoff_allowed(old,later,wrong_prefix),
+          "later independent physical source was treated as same-birth handoff");
+    auto shorter=wrong;shorter.symbol_samples=t/2;
+    check(!reception_source_handoff_allowed(old,shorter,wrong_prefix),
+          "source guard changed competing profile policy");
+    // The tagged union replaces the existing inactive Burst storage exactly;
+    // ordinary construction allocates nothing and Burst coordinates survive.
+    using Presentation=datapump::live::detail::ReceiverState::Presentation;
+    Presentation display;
+    display.coordinates.burst.first=datapump::modem::SymbolBurstCoordinate{100,3};
+    check(display.coordinates.burst.first->epoch==100 && !display.source_publication(),
+          "ordinary source storage affected Burst coordinate ownership");
+    display.source_publication(old);
+    check(display.source_publication() && display.source_publication()->count==2,
+          "source metadata did not activate its existing-coordinate union");
+    display.clear_source_publication();
+    check(display.source_publication() && !display.source_publication()->count,
+          "source metadata invalidation retained authority");
+}
+void helper_nominal_support_geometry() {
+    using datapump::modem::PatternBurst;
+    using datapump::live::detail::nominal_reception_support;
+    using datapump::live::detail::reception_arbitration_support;
+    const auto burst=[](std::uint64_t first,std::uint64_t end,std::uint64_t offset,
+                        std::size_t bits,double support) {
+        PatternBurst b;b.stream_first_sample=first;b.end_sample=end;
+        b.first_stream_symbol=offset;b.bits.assign(bits,0);b.support_samples=support;return b;
+    };
+    constexpr std::uint64_t t=87040;
+    // Actual traced first/last sample dates. A native drain may split seven
+    // confirmed symbols into earlier chunks which ALL carry seven-symbol support.
+    auto first=burst(24088,285225,0,3,609297);
+    auto second=burst(24088,459305,3,2,609297);
+    auto third=burst(24088,633385,5,2,609297);
+    auto end=burst(24088,633385,7,0,609297);end.complete=true;
+    std::array chunks{first,second,third,end};
+    check(!nominal_reception_support(first,std::span(&first,1),t),
+          "earlier chunk's cumulative support was treated as local media");
+    for(const auto& b:chunks)check(nominal_reception_support(b,chunks,t)==7.*t,
+          "complete drain did not normalize every cumulative chunk identically");
+    // Live consumes earlier chunks before later ones. Their scalar coordinates
+    // survive moves; each unconsumed current/future chunk still supplies the end.
+    chunks[0].bits.clear();
+    check(nominal_reception_support(chunks[1],chunks,t)==7.*t,"consuming an earlier chunk changed support units");
+    chunks[1].bits.clear();chunks[2].bits.clear();
+    check(nominal_reception_support(chunks[3],chunks,t)==7.*t,"physical END changed the confirmed-data denominator");
+    for(const auto& b:std::array{first,second,third,end})
+        check(reception_arbitration_support(b,chunks,t)==b.support_samples,
+              "ordinary/unsupported path changed its raw support");
+    auto unrelated=burst(1,UINT64_MAX,0,1,1e12);
+    std::array peers{first,second,third,end,unrelated};
+    check(nominal_reception_support(first,peers,t)==7.*t,"another physical stream changed the drain envelope");
+    auto data=burst(100,100+3*t,0,3,3.*t);
+    auto gap=burst(100,100+5*t,3,0,3.*t);gap.missing_slots=2;
+    auto tail=burst(100,100+7*t,5,2,5.*t);
+    std::array gapped{data,gap,tail};
+    check(nominal_reception_support(gap,gapped,t)==5.*t,"unknown source slots added presentation support");
+    auto weak=burst(100,100+7*t+17,0,7,(7.*t+17)*.2);
+    const auto weak_support=nominal_reception_support(weak,std::span(&weak,1),t);
+    check(weak_support && std::abs(*weak_support-7.*t*.2)<1e-8,
+          "weak coverage was promoted to full-symbol support");
+    auto invalid=first;
+    for(unsigned variant=0;variant<8;++variant) {
+        invalid=first;
+        switch(variant) {
+        case 0:invalid.end_sample=invalid.stream_first_sample;break;
+        case 1:invalid.support_samples=-1;break;
+        case 2:invalid.support_samples=std::numeric_limits<double>::quiet_NaN();break;
+        case 3:invalid.support_samples=std::numeric_limits<double>::infinity();break;
+        case 4:invalid.support_samples=1e9;break;
+        case 5:invalid.first_stream_symbol=UINT64_MAX;break;
+        case 6:invalid.missing_slots=1;break;
+        case 7:invalid.stream_first_symbol=4;break;
+        }
+        check(!nominal_reception_support(invalid,std::span(&invalid,1),t),"malformed support envelope was normalized");
+        const auto raw=reception_arbitration_support(invalid,std::span(&invalid,1),t,true);
+        check(std::isnan(invalid.support_samples)?std::isnan(raw):raw==invalid.support_samples,
+              "malformed envelope did not retain the ordinary raw fallback");
+    }
+    auto huge=burst(0,10,0,2,10);
+    check(!nominal_reception_support(huge,std::span(&huge,1),UINT64_MAX),"nominal duration overflow was normalized");
+    auto limit=burst(UINT64_MAX-50,UINT64_MAX,UINT64_MAX-1,1,50);
+    limit.stream_first_symbol=UINT64_MAX-1;
+    check(nominal_reception_support(limit,std::span(&limit,1),50)==50.,"ordered large sample/source differences overflowed");
+    check(!nominal_reception_support(first,{},t) && !nominal_reception_support(first,peers,0),
+          "missing envelope or zero duration acquired support");
+}
+// Optional field keeps the same counterfactual source buildable against the
+// unmodified History. Live explicitly excludes scheduled/nonuniform sources.
+template<class Candidate> void uniform_source(Candidate& value,bool uniform) {
+    if constexpr(requires{value.uniform_source=uniform;})value.uniform_source=uniform;
+}
+void helper_physical_birth_ownership() {
+    using datapump::modem::PatternSourceIdentity;
+    constexpr std::uint64_t t=87040;
+    const auto fit=[](std::uint64_t id,std::uint64_t first,std::uint64_t end,double support) {
+        auto c=candidate(id,first,end,support);c.family=0;c.symbol_samples=t;
+        c.absence_samples=t;c.timing_tolerance=34;c.helper_assisted=true;return c;
+    };
+    // Exact first bad R9 transition: c1 already published 11; c6 is the real
+    // later suffix 10, born T-13 samples later. Its larger support cannot make
+    // those suffix bits the first two bits of c1's physical reception.
+    for(const bool known:{false,true}) {
+        History h;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
+        auto prefix=fit(1,49793,223890,11305.251769);
+        auto suffix=fit(6,136820,310917,11976.190939);
+        if(known) {
+            prefix.source_identity=PatternSourceIdentity{.epoch=1799999994,.first_symbol=1,.sample_rate=6120};
+            suffix.source_identity=PatternSourceIdentity{.epoch=1800000022,.sample_rate=6120};
+        }
+        const auto first=h.observe(prefix,allocate);
+        auto weak=suffix;weak.score=1;
+        const auto losing=h.observe(weak,allocate);
+        check(!losing.selected && losing.signal_id==first.signal_id,
+              "R9 losing suffix did not establish the actual signal_id shortcut setup");
+        suffix.signal_id=losing.signal_id;
+        const auto next=h.observe(suffix,allocate);
+        check(next.selected && next.signal_id!=first.signal_id && next.superseded_ids.empty() && ids==2,
+              "R9 stronger one-symbol-later suffix rewrote the established prefix row");
+        check(h.observe(prefix,allocate).selected,
+              "independent suffix suppressed the earlier owner's accepted progress");
+        auto canonical=fit(2,49793,659056,36118.630785);
+        if(known)canonical.source_identity=PatternSourceIdentity{
+            .epoch=1799999993,.first_symbol=1,.phase_lower=4760,.phase_upper=4760,.sample_rate=6120};
+        const auto seven=h.observe(canonical,allocate);
+        check(seven.selected && seven.signal_id==first.signal_id && seven.superseded_ids.empty(),
+              "same-birth canonical hypothesis failed to continue the original seven-bit prefix");
+        suffix.end+=t;suffix.score+=1; // A weaker established owner's next bit.
+        const auto suffix_progress=h.observe(suffix,allocate);
+        check(suffix_progress.selected && suffix_progress.signal_id==next.signal_id &&
+              suffix_progress.superseded_ids.empty(),
+              "strong canonical progress swallowed a weaker established suffix's next bit");
+        canonical.end=746079;canonical.score=40990.176726;canonical.complete=true;
+        const auto eight=h.observe(canonical,allocate);
+        check(eight.selected && eight.signal_id==first.signal_id && eight.superseded_ids.empty(),
+              "source-birth separation withheld original eight-bit physical completion");
+        suffix.complete=true;
+        const auto suffix_end=h.observe(suffix,allocate);
+        check(suffix_end.selected && suffix_end.signal_id==next.signal_id && ids==2,
+              "later physical suffix completion lost its own established identity");
+    }
+    for(const int jitter:{-34,0,34}) {
+        History h;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
+        auto weak=fit(1,49793,223890,100);
+        const auto first=h.observe(weak,allocate);
+        auto correct=fit(2,static_cast<std::uint64_t>(49793+jitter),310917,3.*t);
+        const auto recovered=h.observe(correct,allocate);
+        check(recovered.selected && recovered.signal_id==first.signal_id && ids==1,
+              "same-birth stronger recovery was frozen by helper source ownership");
+        // Weak final evidence on the same owner still publishes physical END.
+        correct.score+=1;correct.end+=t;correct.complete=true;
+        check(h.observe(correct,allocate).selected,"same-birth weak final progress lost physical END");
+    }
+    // These control paths retain the previous ordinary scalar arbitration.
+    for(unsigned excluded=0;excluded<5;++excluded) {
+        History h;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
+        auto old=fit(1,49793,223890,11305.251769);
+        auto next=fit(6,136820,310917,11976.190939);
+        switch(excluded) {
+        case 0:old.helper_assisted=next.helper_assisted=false;break;
+        case 1:next.symbol_samples*=2;break;
+        case 2:uniform_source(old,false);uniform_source(next,false);break;
+        case 3:old.source_identity=History::BurstIdentity{};next.source_identity=History::BurstIdentity{};break;
+        case 4:old.amplitude_low_hz=next.amplitude_low_hz=1490;
+               old.amplitude_high_hz=next.amplitude_high_hz=1510;break;
+        }
+        const auto first=h.observe(old,allocate),second=h.observe(next,allocate);
+        check(second.selected && second.signal_id==first.signal_id && ids==1,
+              "source-birth protection changed an ordinary or nonuniform arbitration path");
+    }
+}
+void helper_physical_birth_capacity_boundary() {
+    // This is an explicit coverage boundary, not an unbounded alias guarantee.
+    // 64 established active physical births retain their existing allocation;
+    // a newly discovered earlier birth at that bound is UNSUPPORTED/limited.
+    constexpr std::uint64_t t=1000;
+    History h;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
+    std::array<History::Candidate,History::capacity> owners;
+    std::array<std::uint64_t,History::capacity> rows{};
+    for(std::size_t i=0;i<owners.size();++i) {
+        auto c=candidate(i+1,(i+1)*t,(1000+i)*t,static_cast<double>(i+1));
+        c.symbol_samples=c.absence_samples=t;c.timing_tolerance=10;c.helper_assisted=true;
+        owners[i]=c;const auto admitted=h.observe(c,allocate);rows[i]=admitted.signal_id;
+        check(admitted.selected && !admitted.limited && admitted.superseded_ids.empty(),
+              "helper active-birth capacity fixture merged an established physical prefix");
+    }
+    check(h.size()==History::capacity && ids==History::capacity,
+          "helper active-birth fixture did not reach its existing fixed resource bound");
+    auto late=candidate(1000,0,2000*t,10000);late.symbol_samples=late.absence_samples=t;
+    late.timing_tolerance=10;late.helper_assisted=true;
+    const auto unsupported=h.observe(late,allocate);
+    check(!unsupported.selected && unsupported.limited && !unsupported.signal_id &&
+          unsupported.superseded_ids.empty() && h.size()==History::capacity && ids==History::capacity,
+          "65th late canonical birth evicted an active prefix or exceeded the fixed History bound");
+    for(std::size_t i=0;i<owners.size();++i) {
+        owners[i].end+=t;owners[i].score+=20000;
+        const auto progress=h.observe(owners[i],allocate);
+        check(progress.selected && !progress.limited && progress.signal_id==rows[i] &&
+              progress.superseded_ids.empty() && h.size()==History::capacity && ids==History::capacity,
+              "capacity refusal mutated an established canonical/suffix owner's next-bit identity");
+    }
+    for(std::size_t i=0;i<owners.size();++i) {
+        owners[i].complete=true;
+        const auto end=h.observe(owners[i],allocate);
+        check(end.selected && !end.limited && end.signal_id==rows[i] && end.superseded_ids.empty() &&
+              h.size()==History::capacity && ids==History::capacity,
+              "fixed helper-history pressure withheld an established owner's physical END");
+    }
+}
+void helper_nominal_suffix_arbitration() {
+    using datapump::modem::PatternBurst;
+    using datapump::modem::PatternSourceIdentity;
+    using datapump::live::detail::reception_arbitration_support;
+    constexpr std::uint64_t t=87040;
+    const auto fit=[](std::uint64_t id,std::uint64_t first,std::uint64_t end,unsigned symbols,
+                      double fraction,bool known,std::uint64_t epoch) {
+        auto c=candidate(id,first,end,(end-first)*fraction);c.family=0;
+        c.symbol_samples=c.absence_samples=t;c.timing_tolerance=34;c.helper_assisted=true;
+        c.frequency_tolerance=6120./t;
+        if(known)c.source_identity=PatternSourceIdentity{.epoch=epoch,.sample_rate=6120};
+        PatternBurst b;b.stream_first_sample=first;b.end_sample=end;
+        b.bits.assign(symbols,0);b.support_samples=c.score;
+        c.score=reception_arbitration_support(b,std::span(&b,1),t,true);
+        return c;
+    };
+    for(const bool known:{false,true})for(const int offset:{-17,0,17}) {
+        History h;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
+        auto full=fit(2,24088,633385,7,1,known,1793065127);
+        const auto initial=h.observe(full,allocate);
+        const auto first=static_cast<std::uint64_t>(111117+offset);
+        auto suffix=fit(4,first,720414,7,1,known,1793065141);
+        suffix.signal_id=initial.signal_id; // A previously losing suffix aliases this row.
+        const auto later=h.observe(suffix,allocate);
+        check(initial.selected && !later.selected && later.signal_id==initial.signal_id,
+              "rounding-only later suffix replaced an established complete prefix");
+        full.end=720425;full.score=8.*t;full.complete=true;
+        check(h.observe(full,allocate).selected,"normalization withheld the actual owner's completion");
+    }
+    for(const bool known:{false,true}) {
+        std::array<unsigned,3> order{0,1,2};
+        do {
+            History h;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
+            std::array fits{fit(2,24088,633385,7,1,known,1793065127),
+                fit(4,111100,720414,7,1,known,1793065141),
+                fit(5,198140,807454,7,.8,known,1793065155)};
+            // Separately published physical births retain their own prefix;
+            // weaker unpublished suffixes may still be suppressed as aliases.
+            std::array<std::uint64_t,4> births{};
+            const auto observe=[&](unsigned i) {
+                const auto d=h.observe(fits[i],allocate);
+                if(d.selected) {
+                    check(d.signal_id<births.size(),"helper permutation grew beyond its three candidates");
+                    auto& birth=births[d.signal_id];
+                    check(!birth || birth==fits[i].first,
+                          "three-way helper arbitration reassigned a published physical birth");
+                    birth=fits[i].first;
+                }
+                return d;
+            };
+            for(auto i:order)observe(i);
+            check(observe(0).selected,"the strongest complete-prefix birth was suppressed");
+            for(auto i:order)observe(i);
+        }while(std::next_permutation(order.begin(),order.end()));
+    }
+    History stronger;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
+    auto weak=fit(2,24088,633385,7,.2,false,1793065127);
+    const auto old=stronger.observe(weak,allocate);
+    auto better=fit(4,111100,720414,7,.8,false,1793065141);
+    const auto improved=stronger.observe(better,allocate);
+    check(improved.selected && improved.signal_id!=old.signal_id && improved.superseded_ids.empty(),
+          "a stronger different-birth helper stream rewrote a weak earlier prefix");
+    check(stronger.observe(weak,allocate).selected,
+          "separating a stronger later stream suppressed the earlier owner");
+    better.complete=true;stronger.observe(better,allocate);
+    auto independent=fit(6,900000,987040,1,1,false,1793065300);
+    check(stronger.observe(independent,allocate).selected && ids==3,
+          "normalization swallowed a later independent reception");
+}
+
 void amplitude_passband_aliases() {
     History history;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
     auto first=candidate(1,100,1100,80);first.frequency=1499;first.frequency_tolerance=.002;
@@ -611,14 +1011,15 @@ void helper_source_domains_remain_independent() {
         case 7:std::get<PatternSourceIdentity>(old.source_identity).clock_half_width_ppm=1e6;break;
         }
         const auto original=ambiguous.observe(old,allocate),observed=ambiguous.observe(next,allocate);
-        check(observed.signal_id==original.signal_id && ids==1,
-              "unknown, unassisted or compatible source identity changed ordinary overlap arbitration");
+        const bool separate=variant!=0 && variant!=4;
+        check((observed.signal_id!=original.signal_id)==separate && ids==(separate?2U:1U),
+              "helper physical births depended on unavailable source identity or changed ordinary profile competition");
     }
     History rebased;ids=0;old=first();const auto original=rebased.observe(old,allocate);
     old.first=11000;old.end=45000;rebased.observe(old,allocate);
     next=later();next.first=21000;next.end=22000;
-    check(rebased.observe(next,allocate).signal_id==original.signal_id && ids==1,
-          "rebasing a physical start retained an identity anchored at a different sample");
+    check(rebased.observe(next,allocate).signal_id!=original.signal_id && ids==2,
+          "a rebased helper source replaced a different established physical birth");
     History replaced;ids=0;old=first();const auto helper_row=replaced.observe(old,allocate);
     auto alias=old;alias.id=3;alias.helper_assisted=false;alias.score=100;
     check(replaced.observe(alias,allocate).signal_id==helper_row.signal_id && ids==1,
@@ -683,6 +1084,12 @@ void established_helper_rows_survive_widening_clock_cones() {
 }
 int main() {
     try {
+        source_address_sequence_geometry();
+        helper_source_handoff();
+        helper_nominal_support_geometry();
+        helper_physical_birth_ownership();
+        helper_physical_birth_capacity_boundary();
+        helper_nominal_suffix_arbitration();
         amplitude_passband_aliases();
         optional_history_priority();
         deferred_provenance_growth();

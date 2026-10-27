@@ -163,6 +163,10 @@ public:
     bool acquisition_phase_view_active() const noexcept;
     PatternFftWork fft_work() const;
     std::optional<PatternSourceIdentity> source_identity(const PatternBurst&)const;
+    // Joined native query; never feeds, confirms, reinterprets or fabricates END.
+    std::optional<PatternPrefixSupport> prefix_support_before_last(
+        std::uint64_t first_sample,std::uint64_t first_symbol)const noexcept;
+
     bool phase_assistance_supported() const noexcept;
     std::size_t phase_assistance_bin_samples() const noexcept;
     bool push_phase_assisted(std::span<const float>,std::span<const PatternPhaseKnot>,

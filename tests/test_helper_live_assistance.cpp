@@ -3,6 +3,7 @@
 #include "../src/pattern_permutation_cache.hpp"
 #include "../src/live_simulation_clock.hpp"
 #include "datapump/boundary_sync.hpp"
+#include "datapump/symbol_schedule.hpp"
 #include "datapump/pattern_search.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/streaming_modem.hpp"
@@ -11,6 +12,11 @@
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/helper_tone_tracker.hpp"
 #include "../src/live_helper_frontend.hpp"
+#include "../src/live_helper.hpp"
+#include "../src/helper_reference_search.hpp"
+#include "../src/receiver_oscillator_policy.hpp"
+#include "datapump/resampler.hpp"
+#include "datapump/fhss_schedule.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -19,6 +25,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -30,7 +38,8 @@
 // refresh. It exports no public API and supplies no receiver source truth.
 namespace datapump::live::detail {
 std::optional<HelperViewBlock::ClockMeasurement> realtime_helper_clock_measurement(
-    const modem::Config&,bool,const helper::ToneTrackerSnapshot&,std::uint32_t,std::uint64_t) noexcept;
+    const modem::Config&,bool,const helper::ToneTrackerSnapshot&,std::uint32_t,std::uint64_t,
+    double=0,modem::HelperReferenceClockRelation=modem::HelperReferenceClockRelation::physical_helper,double=0) noexcept;
 }
 using namespace datapump;
 namespace {
@@ -41,7 +50,7 @@ bool trace_filter(const char* name)noexcept {
     const std::string_view event{name};
     if(event=="receiver_helper_conditioning_replayed")conditioning_replayed=true;
     if(event=="receiver_helper_conditioning_backend_retained")conditioning_backend_retained=true;
-    return event=="receiver_helper_assistance_admitted" || event=="receiver_helper_assistance_retired" ||
+    return event=="receiver_helper_raw_reference" || event=="receiver_helper_assistance_admitted" || event=="receiver_helper_assistance_retired" ||
         event=="receiver_signal_commit" || event=="receiver_helper_payload_retained" ||
         event=="receiver_helper_assistance_suspended" || event=="receiver_permutation_counts" ||
         event=="receiver_bank_admitted" || event=="receiver_helper_phase_qualified" ||
@@ -94,13 +103,14 @@ void run(bool enabled,bool strong_phase=false) {
         ("datapump-helper-live-assistance-"+std::to_string(audio::trace::identity())+"-"+
          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl");
     std::atomic<std::int64_t> replay_ms{0};bool exact_complete=false;
+    bool frequency_reported=false,phase_reported=false,clock_reported=false;
     {
         audio::trace::Scope trace(path,false,&trace_filter);
         live::Session session({},[&]{return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_ms.load());});
         auto value=settings(enabled);
         if(strong_phase) {
-            // Punctuation qualification needs a clean coherent reference;
-            // preserve the ordinary lower-ratio frequency case separately.
+            // Retain the strong-reference waveform as a frequency/decline
+            // control. The current manual route does not implement phase gain.
             value.helper.power_w=1500;value.helper.data_power_w=.004;
         }
         session.start(value);session.transmit_bits(Bytes{0,0,1});
@@ -111,6 +121,11 @@ void run(bool enabled,bool strong_phase=false) {
             check(snapshot.error.empty(),"keyed helper assistance caused a Live receiver/transmitter error");
             check(!snapshot.receiver_health.receiver_reset && !snapshot.receiver_health.input_interrupted &&
                   !snapshot.receiver_health.dropped_samples,"optional helper assistance degraded ordinary receiver health");
+            frequency_reported=frequency_reported||snapshot.helper_frequency_assistance_active;
+            phase_reported=phase_reported||snapshot.helper_phase_assistance_active;
+            clock_reported=clock_reported||snapshot.helper_timing_assistance_active;
+            check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,
+                  "manual helper reception exceeded ordinary DSP accounting");
             if(snapshot.transmission_finished&&snapshot.simulation_replay) {
                 replay_ms=4000;finished=true;
                 const auto visible=session.snapshot();
@@ -126,26 +141,94 @@ void run(bool enabled,bool strong_phase=false) {
         }
         session.stop();check(finished,"bounded keyed helper assistance simulation did not finish");
     }
-    std::ifstream input(path);std::string line;bool admitted=false,assisted_complete=false,observed_end=false,gained=false,phase_applied=false;
+    std::ifstream input(path);std::string line;
+    bool admitted=false,ordinary_complete=false,observed_end=false,pending=false;
+    bool raw_qualified=false,gained=false,phase_applied=false,phase_work=false,realtime_seen=false;
+    std::uint64_t id=0,revision=0,count=0,joined_jobs=0;
+    using Owner=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>;
+    using Row=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t,std::uint64_t>;
+    std::map<Owner,std::array<std::uint64_t,4>> counters;
+    std::set<Row> scored_rows,payload_rows;
     while(std::getline(input,line)) {
         admitted=admitted||line.find("\"event\":\"receiver_helper_assistance_admitted\"")!=std::string::npos;
         gained=gained||line.find("\"event\":\"receiver_helper_phase_qualified\"")!=std::string::npos;
         phase_applied=phase_applied||line.find("\"event\":\"receiver_helper_phase_applied\"")!=std::string::npos;
-        if(line.find("\"event\":\"receiver_signal_commit\"")==std::string::npos ||
-           line.find("\"helper_assisted\":1")==std::string::npos || line.find("\"complete\":1")==std::string::npos)continue;
-        assisted_complete=true;
-        observed_end=number(line,"feed_end_sample")>=number(line,"physical_end")+6*2000;
+        if(line.find("\"event\":\"receiver_helper_raw_reference\"")!=std::string::npos && number(line,"qualified")) {
+            const auto sample=number(line,"sample"),end=number(line,"captured_end");
+            check(sample<end && std::isfinite(real_number(line,"frequency_hz")) && real_number(line,"frequency_hz")>0 &&
+                  std::isfinite(real_number(line,"uncertainty_hz")) && real_number(line,"uncertainty_hz")>=0,
+                  "manual helper reference lost its measured frequency/support");
+            raw_qualified=true;
+        }
+        if(line.find("\"event\":\"receiver_acquisition_work\"")!=std::string::npos) {
+            const Owner owner{number(line,"revision"),number(line,"instance_id"),number(line,"sample_origin")};
+            auto& previous=counters[owner];
+            const std::array current{number(line,"template_jobs"),number(line,"input_transforms"),
+                number(line,"fft_jobs"),number(line,"direct_jobs")};
+            for(std::size_t i=0;i<current.size();++i)
+                check(current[i]>=previous[i],"manual ordinary receiver counters reset within one owner");
+            const bool joined=number(line,"numeric_owner") && !number(line,"incomplete") &&
+                line.find("\"reason\":\"feed_complete\"")!=std::string::npos;
+            const bool executed=current[0]>previous[0] && (current[2]>previous[2] || current[3]>previous[3]);
+            const bool realtime=number(line,"realtime_helper");realtime_seen|=realtime;
+            // This fixed complex-only backend need not support a dynamic RF/LF
+            // window. Prove the corrected input's actual ordinary work; claim
+            // neither pair narrowing nor legacy conditional/skip counters.
+            if(joined && executed && realtime && number(line,"realtime_locked")) {
+                scored_rows.emplace(number(line,"revision"),number(line,"epoch"),number(line,"family"),number(line,"sample_origin"));
+                check(current[0]-previous[0]<=UINT64_MAX-joined_jobs,"manual joined work counter overflowed");
+                joined_jobs+=current[0]-previous[0];
+            }
+            phase_work|=number(line,"phase_jobs") || number(line,"phase_tracking_fits") || number(line,"phase_corrected_bins");
+            previous=current;
+        }
+        if(line.find("\"event\":\"receiver_signal_commit\"")==std::string::npos || !number(line,"received_bits"))continue;
+        const auto received=number(line,"received_bits"),next=number(line,"revision");
+        const bool complete=number(line,"complete");
+        if(!id)id=number(line,"signal_id");
+        check(number(line,"signal_id")==id && next>=revision && received>=count && received<=3 &&
+              !number(line,"missing") && !(ordinary_complete&&!complete),
+              "manual ordinary reception withdrew its pending identity, prefix or historical END");
+        revision=next;count=received;
+        const auto marker=std::string("\"raw_bits_prefix\":\"");const auto at=line.find(marker);
+        check(at!=std::string::npos,"manual ordinary trace omitted the accepted prefix");
+        const auto begin=at+marker.size(),end=line.find('"',begin);
+        check(end!=std::string::npos && line.substr(begin,end-begin)==std::string("001").substr(0,received),
+              "manual ordinary trace changed an exact accepted bit prefix");
+        payload_rows.emplace(number(line,"input_revision"),number(line,"epoch"),number(line,"family"),number(line,"sample_origin"));
+        if(complete) {
+            check(received==3,"manual ordinary reception completed a truncated payload");
+            const auto symbol=number(line,"symbol_samples"),feed=number(line,"feed_end_sample"),physical=number(line,"physical_end");
+            check(symbol,"manual ordinary END omitted its full symbol duration");
+            const auto slots=6ULL*2000/symbol+(6ULL*2000%symbol!=0);
+            check(slots && symbol<=UINT64_MAX/slots,"manual ordinary END duration overflowed");
+            const auto absence=slots*symbol;
+            check(feed>=physical && feed-physical>=6ULL*2000 && feed-physical>=absence,
+                  "manual ordinary END skipped fully scored six-second absence");
+            ordinary_complete=true;observed_end=true;
+        }else pending=true;
     }
+    bool ordinary_work=false;
+    for(const auto& row:payload_rows)ordinary_work|=scored_rows.contains(row);
+    std::cout<<"manual_helper enabled="<<enabled<<" strong_reference="<<strong_phase
+             <<" exact="<<exact_complete<<" row="<<id<<" bits="<<count<<" pending="<<pending
+             <<" END="<<ordinary_complete<<" observed_end="<<observed_end
+             <<" raw_qualified="<<raw_qualified<<" ordinary_joined_work="<<ordinary_work<<" jobs="<<joined_jobs
+             <<" phase_status=DECLINED_NOT_QUALIFIED trace="<<path<<'\n';
+    check(!admitted,"manual helper created a parallel legacy assisted receiver");
+    check(!phase_reported && !gained && !phase_applied && !phase_work,
+          "frequency-only manual reception falsely claimed phase assistance");
     if(enabled) {
-        if(!admitted || !exact_complete || !assisted_complete || !observed_end)
-            std::cerr<<"helper assistance trace retained at "<<path<<'\n';
-        check(admitted,"actual Live helper reference did not admit an optional assisted receiver");
-        check(exact_complete&&assisted_complete,"Live optional assisted receiver did not deliver exact completed 001");
+        if(!exact_complete || !ordinary_complete || !observed_end || !ordinary_work)
+            std::cerr<<"manual helper trace retained at "<<path<<'\n';
+        check(exact_complete&&ordinary_complete&&pending,"manual ordinary receiver lost exact completed001 or pending progress");
         check(observed_end,"Live helper-assisted physical completion skipped six seconds of observed absence");
-        if(strong_phase)check(gained&&phase_applied,"Live punctuation qualification did not activate actual dated phase assistance");
-    }else check(!admitted&&!assisted_complete,"helper-disabled control admitted a helper search");
+        check(raw_qualified&&ordinary_work&&joined_jobs,"qualified helper did not feed actual ordinary payload scoring");
+    }else check(!raw_qualified && !realtime_seen && !frequency_reported && !clock_reported,
+                    "helper-disabled control acquired helper reference authority");
     std::filesystem::remove(path);std::filesystem::remove(path.string()+".seal");
 }
+
 void full_payload(bool attachment,bool constrained) {
     const auto path=std::filesystem::temp_directory_path()/
         ("datapump-helper-full-payload-"+std::to_string(audio::trace::identity())+"-"+
@@ -868,6 +951,49 @@ void realtime_gap_protection(bool clock_probe=false) {
     check(qualified,"recursion-disabled realtime feed erased qualified gap protection");
 }
 
+void realtime_window_publication_controls() {
+    using datapump::live::detail::RealtimeHelperWindowSummary;
+    const auto window=[](std::size_t original,std::size_t selected,bool active=true,
+                         bool supported=true,bool clock=false) {
+        modem::PatternHelperFrequencyWindowState w;
+        w.original_pairs=original;w.selected_pairs=selected;w.active=active;
+        w.supported=supported;w.clock_qualified=clock;return w;
+    };
+    RealtimeHelperWindowSummary mixed;
+    mixed.observe(window(3,1));mixed.observe(window(3,3));
+    check(mixed.valid && mixed.narrowed && !mixed.clock_active &&
+          mixed.original_pairs==6 && mixed.selected_pairs==4,
+          "broad3/3 owner hid another owner's measured3/1 narrowing");
+    RealtimeHelperWindowSummary different;
+    different.observe(window(3,1,true,true,true));different.observe(window(9,9));
+    check(different.valid && different.narrowed && different.clock_active &&
+          different.original_pairs==12 && different.selected_pairs==10,
+          "independent owner maxima fabricated or hid a mixed-size search mask");
+    // Actual failing R11 batch:13 current owners3/1 plus one broad3/3.
+    RealtimeHelperWindowSummary actual;
+    for(unsigned i=0;i<13;++i)actual.observe(window(3,1));
+    actual.observe(window(3,3));
+    check(actual.valid && actual.narrowed && actual.original_pairs==42 && actual.selected_pairs==16,
+          "R11 actual owner-pair fold lost its qualified acquisition window");
+    RealtimeHelperWindowSummary inactive;
+    inactive.observe(window(3,1,false,true,true));inactive.observe(window(3,1,true,false,true));
+    inactive.observe(window(0,0));inactive.observe(window(3,3,true,true,true));
+    check(inactive.valid && !inactive.narrowed && !inactive.clock_active,
+          "inactive, unsupported or full windows claimed measured frequency/clock narrowing");
+    RealtimeHelperWindowSummary invalid;
+    invalid.observe(window(3,4));invalid.observe(window(3,1));
+    check(!invalid.valid && !invalid.narrowed && !invalid.clock_active &&
+          !invalid.original_pairs && !invalid.selected_pairs,
+          "invalid owner pair counts acquired publication authority");
+    if constexpr(sizeof(std::size_t)==sizeof(std::uint64_t)) {
+        RealtimeHelperWindowSummary overflow;
+        overflow.observe(window(SIZE_MAX,SIZE_MAX));overflow.observe(window(3,1));
+        check(!overflow.valid && !overflow.narrowed && !overflow.clock_active &&
+              !overflow.original_pairs && !overflow.selected_pairs,
+              "owner-pair total overflow fabricated a narrowed bank");
+    }
+    std::cout<<"realtime helper window publication controls passed\n";
+}
 void realtime_clock_refresh_controls() {
     using live::detail::realtime_helper_clock_measurement;
     auto value=settings(true);auto& c=value.transfer.modem;
@@ -916,6 +1042,290 @@ void realtime_clock_refresh_controls() {
           "frequency-only clock loss did not restore the original LF alternatives");
     std::cout<<"realtime_clock_controls original="<<broad.original_pairs<<" frequency="<<broad.selected_pairs
              <<" clock="<<narrow.selected_pairs<<" actual raw guards passed\n";
+}
+
+
+void realtime_shared_frequency_controls() {
+    using Relation=modem::HelperReferenceClockRelation;
+    using Measurement=live::detail::HelperViewBlock::ClockMeasurement;
+    static_assert(sizeof(Measurement)==48,"clock provenance displaced the existing optional control budget");
+    auto c=tuning::resolve(36,8,tuning::PatternMode::auto_keystream,true,1500,10,
+        modem::OuterDsssVersion::interleaved_v2).config;
+    c.oscillator_search.emplace();auto& policy=*c.oscillator_search;
+    policy.lf={100,.5};policy.rf={100,.5};policy.margin=3;policy.rf_shift_hz=30e6;
+    policy.reference=modem::OscillatorReference::shared_radio;
+    constexpr double H=2462.5;
+    helper::ToneTrackerSnapshot raw;raw.sample_rate=48000;raw.captured_end_sample=480000;
+    raw.first_sample=478000;raw.sample=479000;raw.frequency_hz=H+(30e6+H)*100e-6;
+    raw.uncertainty_hz=.04;raw.present=raw.qualified=true;
+    const auto measure=[&](const auto& snapshot,double correction=0,bool mapping=true) {
+        return live::detail::realtime_helper_clock_measurement(c,mapping,snapshot,48000,480000,
+            correction,Relation::common_corrected_source,H);
+    };
+    const auto frequency=measure(raw);
+    check(frequency && frequency->source==Measurement::Source::shared_radio_frequency &&
+        frequency->interval.lower_ppm<100 && frequency->interval.upper_ppm>100 &&
+        frequency->interval.upper_ppm-frequency->interval.lower_ppm<.002667 &&
+        frequency->first_sample==raw.first_sample && frequency->last_sample==raw.sample &&
+        frequency->captured_end_sample==raw.captured_end_sample && !raw.clock_qualified,
+        "actual frequency clock lost measured support or manufactured marker evidence");
+    auto bad=raw;bad.qualified=false;check(!measure(bad),"unqualified tone gained source clock");
+    bad=raw;bad.sample=raw.captured_end_sample;check(!measure(bad),"uncaptured frequency support gained source clock");
+    bad=raw;bad.first_sample=bad.sample+1;check(!measure(bad),"reversed frequency support gained source clock");
+    bad=raw;bad.sample=400000;check(!measure(bad),"stale frequency support gained current source clock");
+    check(!measure(raw,.0003) && !measure(raw,0,false),"unknown steering or mapping gained frequency clock");
+    raw.clock_first_sample=200000;raw.clock_sample=raw.clock_last_sample=478500;
+    raw.clock_error_ppm=101.8;raw.clock_uncertainty_ppm=57.6;raw.clock_qualified=true;
+    const auto both=measure(raw);
+    check(both && both->source==Measurement::Source::shared_frequency_and_punctuation &&
+        both->interval==frequency->interval && both->first_sample==raw.clock_first_sample &&
+        both->last_sample==raw.sample,"combined clock erased source provenance or invented dates");
+    bad=raw;bad.clock_error_ppm=-100;bad.clock_uncertainty_ppm=1;
+    check(!measure(bad),"conflicting independent clock evidence narrowed DATA acquisition");
+    policy.reference=modem::OscillatorReference::independent_audio;
+    const auto marker=measure(raw);
+    check(marker && marker->source==Measurement::Source::punctuation_cadence &&
+        marker->interval.upper_ppm-marker->interval.lower_ppm>100,
+        "independent audio clock was narrowed by unrelated RF frequency");
+    std::cout<<"realtime shared frequency-clock measured provenance and loss guards passed\n";
+}
+
+
+// A receiver can name source zero through an older epoch plus an initial
+// stream index/phase. Identify the actual transmitted private address after
+// normalizing that native geometry, never by received length or final content.
+bool gps_clock_source_zero(std::uint64_t receiver_epoch,std::uint64_t phase,
+        std::uint64_t first_symbol,std::uint64_t symbol,std::uint32_t rate,std::uint64_t transmitted_epoch) {
+    const auto address=modem::symbol_stream_address(receiver_epoch,phase,first_symbol,symbol,rate);
+    return address.epoch==transmitted_epoch && address.ordinal==0 && address.sample_in_second==0;
+}
+
+// A source-coordinate regression. These controls never supply a clock or a
+// source length to the public receiver: only the actual raw tracker does that.
+void gps_clock_geometry() {
+    check(gps_clock_source_zero(1792949970,5280,2,15360,6000,1792949976) &&
+          gps_clock_source_zero(1792949968,1920,3,15360,6000,1792949976) &&
+          gps_clock_source_zero(1792949976,0,0,15360,6000,1792949976),
+          "equivalent native epoch/index/phase could not identify actual source zero");
+    check(!gps_clock_source_zero(1792949969,0,3,15360,6000,1792949976) &&
+          !gps_clock_source_zero(1792949976,0,0,15360,6000,1792949975),
+          "a different source phase or epoch became the transmitted source anchor");
+    using Relation=modem::HelperReferenceClockRelation;
+    auto value=settings(true);auto& c=value.transfer.modem;
+    c.sample_rate=6000;c.carrier_hz=1500;c.bandwidth_hz=100;c.spreading_factor=128;
+    c.oscillator_search=modem::OscillatorSearchConfig{{300,0},{.1,0},1e8,1};
+    value.transfer.clock_sync=clock_sync::Policy{.010,.001,0};value.transfer.audio_timing_error_seconds=.07;
+    const auto C=transfer::receiver_utc_rate_correction(c,value.transfer);
+    check(C==modem::utc_transmit_rate_limit(c) && C>0,"GPS control lost its actual unknown-peer steering policy");
+    constexpr double U=.02;
+    std::size_t checked=0;
+    for(const double helper_hz:{-712.5,2062.5}) {
+        const auto K=c.carrier_hz-helper_hz;
+        const auto physical=modem::helper_reference_search(c,U,helper_hz,0,C);
+        const auto common=modem::helper_reference_search(c,U,helper_hz,0,C,Relation::common_corrected_source);
+        const auto original=transfer::receiver_oscillator_search(c,value.transfer);
+        check(!common.catalogue.limited && !common.catalogue.timing_correction_unavailable &&
+              common.catalogue.requested_clock_half_width_ppm>=original.requested_clock_half_width_ppm &&
+              common.catalogue.requested_clock_half_width_ppm>600,
+              "common helper construction dropped the original UTC-expanded DATA domain");
+        check(common.rf_half_width_hz==U && physical.rf_half_width_hz>U,
+              "common source double-counted UTC RF or physical helper lost it");
+        const auto plain=modem::helper_reference_search(c,U,helper_hz,0,0);
+        const auto zero=modem::helper_reference_search(c,U,helper_hz,0,0,Relation::common_corrected_source);
+        check(plain.catalogue.hypotheses==zero.catalogue.hypotheses &&
+              plain.catalogue.requested_clock_half_width_ppm==zero.catalogue.requested_clock_half_width_ppm &&
+              plain.rf_half_width_hz==zero.rf_half_width_hz,"C0 helper geometry changed without UTC steering");
+        modem::PatternSearch search;search.start_offset_seconds=1.25;search.start_uncertainty_seconds=.0905;
+        search.search_stream_phases=true;search.input_sample_origin=173;
+        auto applied=common;modem::apply_helper_reference_search(std::move(applied),search);
+        check(search.start_offset_seconds==1.25 && search.start_uncertainty_seconds==.0905 &&
+              search.search_stream_phases && search.input_sample_origin==173,
+              "clock relation changed arrival/epoch/phase/capture policy");
+        const auto cells=*search.admitted_clock_cell_half_width_ppm;
+        for(const double a_ppm:{-300.,-275.,-1.,0.,1.,275.,300.})for(const double steering:{-C,-C/2,0.,C/2,C}) {
+            const long double a=static_cast<long double>(a_ppm)*1e-6L;
+            const double b=static_cast<double>((a+steering+a*steering)*1e6L);
+            const auto p=modem::helper_reference_data_clock_interval(c,{a_ppm,a_ppm},C);
+            const auto q=modem::helper_reference_data_clock_interval(c,{b-.001,b+.001},C,Relation::common_corrected_source);
+            check(p && p->lower_ppm<=b && p->upper_ppm>=b && q && q->lower_ppm<=b && q->upper_ppm>=b,
+                  "physical a/c or common b truth escaped the DATA interval");
+            modem::detail::PatternHelperFrequencySelector selected;
+            check(selected.initialize(search,{0,U,-K,cells,*q}),"GPS DATA cells could not be selected");
+            for(const double noise:{-U,0.,U}) {
+                const auto truth=K*b*1e-6+noise;bool covered=false;
+                for(std::size_t i=0;i<search.hypotheses.size();++i) {
+                    const auto& lane=search.hypotheses[i];
+                    if(!selected.keep(i) || std::abs(lane.clock_error_ppm-b)>cells+1e-8)continue;
+                    const auto at_lane=truth+K*(lane.clock_error_ppm-b)*1e-6;
+                    const auto& cell=selected.cells[i];
+                    covered|=at_lane>=cell.lower-1e-10 && at_lane<=cell.upper+1e-10;
+                }
+                check(covered,"common-source clock/RF truth lost its original closed LF/RF cell");++checked;
+            }
+        }
+    }
+    const auto expanded=modem::helper_reference_data_clock_interval(c,{549,551},C,Relation::common_corrected_source);
+    check(expanded && expanded->lower_ppm==549 && expanded->upper_ppm==551 &&
+          !modem::helper_reference_data_clock_interval(c,{549,551},C),
+          "common b outside physical a domain was reclipped or a physical helper invented steering knowledge");
+    const auto broad=modem::helper_reference_data_clock_interval(c,{-1000,1000},C,Relation::common_corrected_source);
+    check(broad && broad->lower_ppm< -600 && broad->upper_ppm>600,"GPS DATA clipping used the unsteered LF bound");
+    const auto zero=modem::helper_reference_data_clock_interval(c,{71,75},0);
+    check(zero && zero->lower_ppm==71 && zero->upper_ppm==75,"C0 scalar transform changed its exact original interval");
+    helper::ToneTrackerSnapshot raw;raw.sample_rate=48000;raw.captured_end_sample=480000;
+    raw.clock_first_sample=200000;raw.clock_sample=raw.clock_last_sample=479000;
+    raw.clock_error_ppm=550;raw.clock_uncertainty_ppm=1;raw.clock_qualified=true;
+    const auto joined=live::detail::realtime_helper_clock_measurement(c,true,raw,48000,480000,C,Relation::common_corrected_source);
+    check(joined && joined->interval.lower_ppm<549 && joined->interval.upper_ppm>551 &&
+          !live::detail::realtime_helper_clock_measurement(c,true,raw,48000,480000,C),
+          "actual joined builder lost common-vs-physical clock relation");
+    auto invalid=c;invalid.oscillator_search.reset();
+    check(!modem::helper_reference_data_clock_interval(invalid,{0,1},C,Relation::common_corrected_source) &&
+          !modem::helper_reference_data_clock_interval(c,{0,1},NAN,Relation::common_corrected_source),
+          "unavailable clock policy gained a DATA interval");
+    std::cout<<"GPS common/physical original-domain and signed closed-cell truth cases="<<checked<<'\n';
+}
+
+void gps_clock_backend_shapes() {
+    // Structural support only; 128s receiver construction does not qualify
+    // long-aperture hardware clock coherence or a weak EME link.
+    modem::Config c;c.sample_rate=256;c.carrier_hz=64;c.bandwidth_hz=8;c.spreading_factor=64;
+    c.integration_seconds=128;c.pattern_symbols=true;c.constellation_bits=1;c.pulse_shaping=false;
+    c.data_key=Crypto(std::array<std::uint8_t,32>{});c.receiver_strategy=modem::ReceiverStrategy::automatic;
+    modem::PatternSearch s;s.compact_clock_search=true;s.start_offset_seconds=0;s.start_uncertainty_seconds=.1;
+    s.initial_stream_symbols=1;s.bit_limit=128;s.track_limit=2;s.candidate_limit=128;s.worker_threads=1;
+    s.admitted_clock_half_width_ppm=600.09;s.admitted_clock_cell_half_width_ppm=300.045;
+    for(const auto ppm:{-600.09,0.,600.09})for(const auto f:{-.01,0.,.01})s.hypotheses.push_back({f,ppm});
+    for(const bool fake:{false,true}) {
+        if(fake) {auto hops=std::make_shared<modem::FhssPlan>();hops->channels=2;hops->shifts[1]=100;
+            hops->dwell_seconds=.4;c.fake_hopping=hops;}
+        modem::StreamingReceiver receiver(c,16*1024*1024,s);
+        check(receiver.clock_windowed() && receiver.helper_frequency_window().supported &&
+              receiver.set_helper_frequency_window(0,.001,100,modem::PatternHelperClockInterval{549,551}) &&
+              receiver.helper_frequency_window().clock_qualified,
+              "128s compact/fake calendar lost supported optional clock masking");
+    }
+    // The actual short deferred native calendar remains eligible too.
+    c.integration_seconds=0;c.sample_rate=14400;c.carrier_hz=1500;c.bandwidth_hz=360;c.spreading_factor=64;c.pulse_shaping=true;
+    c.scramble=true;c.dsss=true;c.dsss_factor=10;
+    c.receiver_strategy=modem::ReceiverStrategy::complex_only;
+    auto hops=std::make_shared<modem::FhssPlan>();hops->channels=2;hops->shifts[1]=100;hops->dwell_seconds=.4;
+    hops->clock_error_seconds=hops->peer_clock_error_seconds=.001;hops->audio_error_seconds=.002;
+    c.fake_hopping=modem::resolve_fhss_power(*hops,c);
+    check(c.fake_hopping->defer_symbols,"native fake control did not resolve the ordinary deferred calendar");
+    s.compact_clock_search=false;s.early_qualified_fft=false;s.component_qualified_search=false;
+    modem::StreamingReceiver native(c,16*1024*1024,s);
+    check(!native.clock_windowed() && native.helper_frequency_window().supported &&
+          native.set_helper_frequency_window(0,.001,100,modem::PatternHelperClockInterval{549,551}),
+          "native deferred fake calendar declined a supported DATA clock mask");
+    std::cout<<"128s compact+fake and native deferred optional clock capability passed\n";
+}
+
+// Exercise the actual software composition point with nonzero adjustable
+// Resampler correction: no analytic/synthetic clock snapshot is substituted.
+void gps_clock_actual_source() {
+    constexpr unsigned rate=48000;constexpr std::uint64_t epoch=1793050572;
+    for(const double b_ppm:{-550.,550.}) {
+        helper::Options options;options.power_w=40;options.data_power_w=4;
+        helper::Generator generator(options,helper::Plan{2062.5,.6,0,40},epoch,true,Crypto(std::array<std::uint8_t,32>{}));
+        audio::Resampler converter(rate,rate,true);converter.initialize_timing(0,b_ppm*1e-6);
+        converter.set_output_transform([&](float payload,long double seconds,std::uint32_t fs) {
+            return generator.mix(payload,seconds+.137L,fs);
+        });
+        const helper::ToneTrackerConfig config{rate,2062.5,20,0,.5};
+        helper::ToneTracker tracker(config,helper::ToneTracker::workspace_required(config));
+        std::vector<float> input(5*rate),block(733);std::size_t consumed=0;std::uint64_t produced=0;
+        while(!converter.finished()) {
+            const auto progress=converter.process(std::span(input).subspan(consumed),block,true);consumed+=progress.consumed;
+            tracker.push(std::span(block).first(progress.produced),produced);produced+=progress.produced;
+            check(progress.consumed || progress.produced || converter.finished(),"actual source converter stalled");
+        }
+        const auto result=tracker.snapshot();
+        check(result.clock_qualified && result.clock_first_sample<=result.clock_last_sample &&
+              result.clock_last_sample<produced && result.clock_error_ppm-result.clock_uncertainty_ppm<=b_ppm &&
+              result.clock_error_ppm+result.clock_uncertainty_ppm>=b_ppm,
+              "actual corrected-source helper clock did not enclose DATA b");
+        std::cout<<"actual Resampler helper b="<<b_ppm<<" measured="<<result.clock_error_ppm
+                 <<" uncertainty="<<result.clock_uncertainty_ppm<<" support="<<result.clock_first_sample<<".."<<result.clock_last_sample<<'\n';
+    }
+}
+
+void gps_clock_live(bool gps,bool enabled) {
+    auto value=settings(enabled);auto& c=value.transfer.modem;
+    c.sample_rate=6000;c.carrier_hz=1500;c.bandwidth_hz=100;c.spreading_factor=128;
+    c.receiver_strategy=modem::ReceiverStrategy::automatic;
+    c.oscillator_search=modem::OscillatorSearchConfig{{300,0},{.1,0},1e8,1};
+    value.transfer.timestamp=0;value.transfer.search_seconds=0;value.transfer.automatic_receive_profiles=false;
+    value.transfer.clock_sync=gps?std::optional{clock_sync::Policy{.010,.001,0}}:std::nullopt;
+    value.transfer.audio_timing_error_seconds=.07;
+    value.helper.power_w=enabled?1500:0;value.helper.callsign.clear();
+    value.simulation_frequency_offset_hz=0;value.simulation_clock_error_ppm=73;
+    const auto path=std::filesystem::temp_directory_path()/("datapump-helper-gps-clock-"+
+        std::to_string(audio::trace::identity())+"-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl");
+    const auto filter=[](const char* name)noexcept {return trace_filter(name)||std::string_view(name)=="receiver_helper_raw_reference" || std::string_view(name)=="receiver_pattern_wire";};
+    bool finished=false,exact=false,clock=false;std::uint64_t jobs=0,original=0,selected=0,expected_epoch=0;
+    const auto cpu_start=std::clock();
+    {
+        audio::trace::Scope trace(path,false,+filter);SimulationDates dates(true,1792949964.37109375);
+        std::atomic<std::int64_t> replay_ms{0};
+        live::Session session({},[&]{return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_ms.load());});
+        session.start(value);session.transmit_bits(Bytes{0,0,1});
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(45);
+        while(std::chrono::steady_clock::now()<deadline) {
+            const auto snapshot=session.snapshot();
+            check(snapshot.error.empty() && !snapshot.receiver_health.failed() && !snapshot.receiver_health.dropped_samples,
+                  "GPS/default rolling clock changed ordinary health");
+            check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"GPS/default clock exceeded funded workspace");
+            clock|=snapshot.helper_timing_assistance_active;jobs=std::max(jobs,snapshot.helper_conditional_jobs);
+            original=std::max(original,snapshot.helper_original_search_pairs);selected=std::max(selected,snapshot.helper_selected_search_pairs);
+            if(snapshot.transmission_finished && snapshot.simulation_replay) {
+                replay_ms=4000;finished=true;
+                for(const auto& signal:session.snapshot().signals)if(!signal.helper_carrier && signal.complete && signal.received_bits==3)
+                    exact|=(signal.binary?signal.text:signal.raw_bits)=="001";
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        }
+        session.stop();check(dates.transmit.load()>0,"GPS rolling source omitted its actual transmit observation");
+        expected_epoch=static_cast<std::uint64_t>(dates.transmit.load());
+    }
+    std::cout<<"GPS source observation gps="<<gps<<" helper="<<enabled<<" tx_epoch="<<expected_epoch<<" phase=0 ordinal=0\n";
+    std::ifstream in(path);std::string line;std::uint64_t id=0,revision=0,last=0;bool pending=false,completed=false,joined=false;
+    while(std::getline(in,line)) {
+        if(line.find("\"event\":\"receiver_acquisition_work\"")!=std::string::npos &&
+           line.find("\"realtime_helper\":1")!=std::string::npos)joined|=number(line,"realtime_clock_qualified")!=0;
+        if(line.find("\"event\":\"receiver_signal_commit\"")==std::string::npos || !number(line,"received_bits"))continue;
+        if(!id && !number(line,"complete") && gps_clock_source_zero(number(line,"epoch"),
+                number(line,"stream_phase_samples"),number(line,"first_stream_symbol"),
+                number(line,"symbol_samples"),c.sample_rate,expected_epoch))id=number(line,"signal_id");
+    }
+    in.clear();in.seekg(0);
+    while(std::getline(in,line)) {
+        if(line.find("\"event\":\"receiver_signal_commit\"")==std::string::npos || !id || number(line,"signal_id")!=id)continue;
+        const auto count=number(line,"received_bits"),next=number(line,"revision");const bool done=number(line,"complete");
+        check(next>=revision && count>=last && count<=3 && !number(line,"missing") && !(completed&&!done),
+              "GPS/default primary lost pending identity, exact progress or historical END");
+        revision=next;last=count;
+        if(done) {
+            const auto symbol=number(line,"symbol_samples"),feed=number(line,"feed_end_sample"),end=number(line,"physical_end");
+            check(symbol && count==3 && feed>=end && feed-end>=((6ULL*c.sample_rate+symbol-1)/symbol)*symbol,
+                  "GPS/default clock invented END before full scored six-second symbol absence");completed=true;
+        }else {
+            const auto needle=std::string("\"raw_bits_prefix\":\"");const auto at=line.find(needle);
+            check(at!=std::string::npos && line.substr(at+needle.size(),static_cast<std::size_t>(count))==std::string("001").substr(0,count),
+                  "GPS/default primary changed accepted wire prefix");pending=true;
+        }
+    }
+    const auto cpu=static_cast<double>(std::clock()-cpu_start)/CLOCKS_PER_SEC;
+    std::cout<<"GPS live gps="<<gps<<" helper="<<enabled<<" finished="<<finished<<" exact="<<exact<<" pending="<<pending
+             <<" END="<<completed<<" clock="<<clock<<" joined="<<joined<<" pairmax="<<selected<<'/'<<original<<" jobs="<<jobs<<" CPU="<<cpu
+             <<" tx_epoch="<<expected_epoch<<" subject="<<id<<" trace="<<path<<'\n';
+    check(finished && exact && id && pending && completed,"GPS/default Auto rolling lost full001/pending/physical END");
+    // Live sets clock only from a SAME-row active qualified mask with fewer
+    // selected than original pairs. Maxima above are descriptive across rows
+    // and time, so comparing those independent maxima is not a proof.
+    if(enabled)check(clock && joined && jobs>0,"GPS/default actual clock did not narrow scored ordinary work");
+    else check(!clock && !joined && !jobs,"helper-OFF acquired helper clock authority");
 }
 
 void rolling_primary_declines() {
@@ -975,7 +1385,7 @@ void retained_backend_policy() {
 }
 
 }
-int main(int argc,char** argv){try{if(argc==2 && std::string_view(argv[1])=="--realtime-clock-refresh") {realtime_clock_refresh_controls();realtime_gap_protection(true);return 0;}if(argc==2 && std::string_view(argv[1])=="--realtime-gap") {realtime_gap_protection();return 0;}if(argc==2 && std::string_view(argv[1])=="--realistic-only") {realistic_frequency_benefit();return 0;}
+int main(int argc,char** argv){try{realtime_window_publication_controls();if(argc==2 && std::string_view(argv[1])=="--realtime-window-status")return 0;if(argc==2 && std::string_view(argv[1])=="--gps-clock-gps-on") {gps_clock_live(true,true);return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-default-on") {gps_clock_live(false,true);return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-gps-off") {gps_clock_live(true,false);return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-positive") {gps_clock_geometry();gps_clock_backend_shapes();gps_clock_actual_source();gps_clock_live(true,true);return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-geometry") {gps_clock_geometry();gps_clock_backend_shapes();return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-source") {gps_clock_actual_source();return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-live") {for(const bool gps:{false,true})for(const bool enabled:{false,true})gps_clock_live(gps,enabled);return 0;}if(argc==2 && std::string_view(argv[1])=="--realtime-clock-refresh") {realtime_shared_frequency_controls();realtime_clock_refresh_controls();realtime_gap_protection(true);return 0;}if(argc==2 && std::string_view(argv[1])=="--realtime-gap") {realtime_gap_protection();return 0;}if(argc==2 && std::string_view(argv[1])=="--realistic-only") {realistic_frequency_benefit();return 0;}
 if(argc==2 && std::string_view(argv[1])=="--finite-replay-budget") {finite_replay_budget();return 0;}
 if(argc==2 && std::string_view(argv[1])=="--rolling-primary-decline") {rolling_primary_declines();return 0;}
 if(argc==2 && std::string_view(argv[1])=="--retained-backend-only") {retained_backend_policy();return 0;}
@@ -984,5 +1394,5 @@ if(argc==2 && std::string_view(argv[1])=="--conditioned-control") {conditioned_f
 if(argc==2 && std::string_view(argv[1])=="--conditioned-full") {conditioned_frequency_bank(true,true);return 0;}
 if(argc==2 && std::string_view(argv[1])=="--conditioned-fallback") {conditioned_frequency_bank(true,false,true);return 0;}
 if(argc==2 && std::string_view(argv[1])=="--calendar-only") {realistic_frequency_benefit(true);return 0;}
-if(argc==2 && std::string_view(argv[1])=="--phase-only") {run(true,true);return 0;}realtime_gap_protection();run(false);run(true);run(true,true);full_payload(false,false);full_payload(true,false);full_payload(false,true);realistic_frequency_benefit();realistic_frequency_benefit(true);retained_backend_policy();finite_replay_budget();rolling_primary_declines();conditioned_frequency_bank(true);conditioned_frequency_bank(true,true);conditioned_frequency_bank(true,false,true);std::cout<<"helper Live assistance passed\n";return 0;}
+if(argc==2 && std::string_view(argv[1])=="--phase-only")throw Error("manual Live measured-phase positive is unqualified: waveform phase assistance is not implemented");realtime_gap_protection();run(false);run(true);run(true,true);full_payload(false,false);full_payload(true,false);full_payload(false,true);realistic_frequency_benefit();realistic_frequency_benefit(true);retained_backend_policy();finite_replay_budget();rolling_primary_declines();conditioned_frequency_bank(true);conditioned_frequency_bank(true,true);conditioned_frequency_bank(true,false,true);std::cout<<"helper Live assistance passed\n";return 0;}
 catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
