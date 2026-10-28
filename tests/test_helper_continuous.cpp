@@ -510,5 +510,90 @@ void independent_frequency_records_remain_dated_and_disjoint() {
     }
 }
 
+
+void independent_frequency_veto_reports_model_rejection_but_phase_jump_does_not() {
+    // Ordinary discovery consumes8192 samples before independent200ms rows.
+    // Place the step on that ACTUAL context lattice, without a frequency seed.
+    // Continuous fitting is disabled so its CUSUM cannot supply the counter.
+    constexpr unsigned raw_rate=48000,chunk=960,context=9600;
+    constexpr std::uint64_t event=8192+10*context,count=raw_rate*16/5;
+    constexpr double expected=2400,before_hz=5400;
+    bool frequency_veto_reported=false;
+    for(const bool phase_control:{false,true}) {
+        helper::ToneTrackerConfig config{raw_rate,expected,9000,0,.5,true,false};
+        helper::ToneTracker tracker(config,helper::ToneTracker::workspace_required(config));
+        std::mt19937 random{49271};std::normal_distribution<double> noise;
+        std::array<float,chunk> pcm{};
+        helper::ToneTrackerSnapshot prior,final;
+        helper::ToneFrequencyInterval replacement;
+        std::uint64_t first_qualified=0,first_counter_capture=0,replacement_capture=0,recovery_capture=0;
+        std::size_t qualified_contexts_before=0,escapes=0;bool phase_fallback=false;
+        for(std::uint64_t first=0;first<count;first+=chunk) {
+            for(std::size_t i=0;i<pcm.size();++i) {
+                const auto sample=first+i;const auto time=static_cast<double>(sample)/raw_rate;
+                const auto after=std::max(0.,static_cast<double>(sample)-event)/raw_rate;
+                // The+.7Hz arm remains phase-continuous. The other arm has
+                // constant frequency and one phase jump INSIDE a context.
+                const auto angle=.37+tau*(before_hz*time+(phase_control?0:.7*after))+
+                    (phase_control&&sample>=event+context/2?1.1:0.);
+                pcm[i]=static_cast<float>(.6*std::cos(angle)+.001*noise(random));
+            }
+            tracker.push(pcm,first);const auto snapshot=tracker.snapshot();final=snapshot;
+            check(snapshot.captured_end_sample==first+chunk,"frequency-veto fixture changed actual ingress dates");
+            if(snapshot.qualified&&!first_qualified)first_qualified=first+chunk;
+            if(snapshot.qualified&&first+chunk<=event) {
+                prior=snapshot;
+                if((first+chunk)%context==0)++qualified_contexts_before;
+            }
+            if(snapshot.continuous_model_resets&&!first_counter_capture)first_counter_capture=first+chunk;
+            if(first+chunk>=event+context) {
+                const auto interval=tracker.frequency_interval(event,event+context);
+                if(interval.valid) {
+                    interval_dates(interval,event,event+context,snapshot.captured_end_sample);
+                    const auto truth=before_hz+(phase_control?0:.7);
+                    escapes+=std::abs(interval.frequency_hz-truth)>interval.uncertainty_hz+1e-7;
+                    if(!replacement_capture){replacement=interval;replacement_capture=first+chunk;}
+                }
+                if(snapshot.qualified&&!recovery_capture&&snapshot.first_sample>=event)recovery_capture=first+chunk;
+            }
+            if(phase_control&&snapshot.frequency_used_fallback&&snapshot.frequency_context_first_sample<=event+context/2&&
+               event+context/2<snapshot.frequency_context_end_sample)phase_fallback=true;
+            const auto after_query=tracker.snapshot();
+            check(after_query.captured_end_sample==snapshot.captured_end_sample&&
+                  after_query.phase_fit_qualified==snapshot.phase_fit_qualified&&
+                  after_query.phase_fit_first_sample==snapshot.phase_fit_first_sample&&
+                  after_query.phase_fit_end_sample==snapshot.phase_fit_end_sample&&
+                  after_query.phase_fit_sample==snapshot.phase_fit_sample&&after_query.phase_fit_cycles==snapshot.phase_fit_cycles,
+                  "frequency-veto interval query advanced capture or manufactured phase authority");
+        }
+        check(first_qualified&&prior.qualified&&qualified_contexts_before>=4,
+              "frequency-veto fixture did not causally acquire four qualified pre-event contexts");
+        check(replacement_capture&&replacement.first_sample==event&&replacement.end_sample==event+context&&
+              replacement.evidence_end_sample<=replacement_capture&&escapes==0,
+              "frequency-veto replacement lost dated support or escaped its interval");
+        check(!tracker.frequency_interval(final.captured_end_sample,final.captured_end_sample+1).valid,
+              "frequency-veto replacement manufactured future frequency evidence");
+        const auto retained=tracker.frequency_interval(prior.first_sample,prior.sample+1);
+        if(phase_control) {
+            // Compatible older frequency evidence remains useful across an
+            // unknown phase. The gap fit must not act as a frequency rejection.
+            check(phase_fallback&&final.qualified&&final.frequency_knowledge_valid&&final.frequency_covariance_valid&&
+                  !final.continuous_model_resets&&retained.valid&&retained.evidence_first_sample<event,
+                  "inside-context phase jump revoked compatible frequency knowledge");
+        } else {
+            check(replacement.evidence_first_sample>=event&&recovery_capture&&!retained.valid,
+                  "independent frequency contradiction reused rejected pre-event support");
+            frequency_veto_reported=final.continuous_model_resets==1&&
+                final.continuous_last_model_reset_sample==event-1&&first_counter_capture>=event+context;
+        }
+        std::cout<<"independent frequency veto phase_control="<<phase_control
+            <<" counter="<<final.continuous_model_resets<<" inclusive_boundary="<<final.continuous_last_model_reset_sample
+            <<" replacement_capture="<<replacement_capture<<" evidence_first="<<replacement.evidence_first_sample
+            <<" recovery_capture="<<recovery_capture<<" escapes="<<escapes<<" truth_seed=0\n";
+    }
+    check(frequency_veto_reported,
+          "independent frequency contradiction did not publish exactly one model-rejection counter and boundary");
 }
-int main(){try{continuous_phase_survives_ramps_and_exceeds_old_history();model_change_restarts_numeric_fit_and_loss_withdraws();long_observation_gap_is_callback_independent();unknown_phase_return_keeps_frequency_marginal();local_frequency_does_not_require_phase_correction();frequency_process_dense_gaussian_oracle();const auto loss_failures=positive_frequency_process_ensemble();positive_process_phase_reset_and_zero_slew();fixed_lag_freezes_on_phase_loss_and_mapping_revokes_it();fixed_lag_survives_128_second_numeric_refit();independent_frequency_records_remain_dated_and_disjoint();check(loss_failures==0,"process model retained loss authority or discarded dated knowledge");return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+
+}
+int main(){try{independent_frequency_veto_reports_model_rejection_but_phase_jump_does_not();continuous_phase_survives_ramps_and_exceeds_old_history();model_change_restarts_numeric_fit_and_loss_withdraws();long_observation_gap_is_callback_independent();unknown_phase_return_keeps_frequency_marginal();local_frequency_does_not_require_phase_correction();frequency_process_dense_gaussian_oracle();const auto loss_failures=positive_frequency_process_ensemble();positive_process_phase_reset_and_zero_slew();fixed_lag_freezes_on_phase_loss_and_mapping_revokes_it();fixed_lag_survives_128_second_numeric_refit();independent_frequency_records_remain_dated_and_disjoint();check(loss_failures==0,"process model retained loss authority or discarded dated knowledge");return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

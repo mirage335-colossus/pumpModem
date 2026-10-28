@@ -13535,9 +13535,13 @@ std::optional<std::uint64_t> PatternCorrelator::earliest_future_frequency_scorin
     // additional retained support; an ordinary-lane scan cannot certify them.
     if(s.scheduled || s.burst || s.options.amplitude_only || s.amplitude_geometry)return {};
     auto first=s.sample;
-    // Empty/suppressed fits can become active again. Keep their original
-    // starts rather than treating current dispatch eligibility as retirement.
-    for(const auto& h:s.hypotheses)first=std::min(first,h.observed_start);
+    // Every ordinary private input statistic is dominated by the whole Fit
+    // counts. The ordinary reset paths clear alternate/drift/local/chip/outer
+    // statistics together. An empty lane can only start with future input;
+    // its old observed_start is not retained scoring support after a pause.
+    // Dispatch eligibility alone never retires a nonempty partial fit.
+    for(const auto& h:s.hypotheses)
+        if(h.fits[0].count || h.fits[1].count)first=std::min(first,h.observed_start);
     // Shared pulse observations can precede transfer into a hypothesis fit.
     for(const auto& lattice:s.pulse_lattices) {
         if(lattice.pending.count)first=std::min(first,lattice.pending.first);

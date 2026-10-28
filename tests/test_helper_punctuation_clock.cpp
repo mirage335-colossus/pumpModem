@@ -1,5 +1,6 @@
 #include "datapump/helper_carrier.hpp"
 #include "datapump/helper_receiver.hpp"
+#include "helper_auxiliary_fixture.hpp"
 #include "../src/punctuation_clock.hpp"
 #include <algorithm>
 #include <cmath>
@@ -174,14 +175,18 @@ void high_dates_and_fresh_window() {
 void actual_helper_publications() {
     h::Options options;options.power_w=15000;options.data_power_w=4;options.timecode=false;
     const auto plan=h::plan(options,1000,100,rate);
-    h::Generator source(options,plan,1800000000,true);
-    h::Receiver receiver(plan.frequency_hz,20);h::PunctuationClock clock;
+    // Isolate and normalize the actual Generator auxiliary for this Receiver
+    // republication contract. Composite-pilot isolation is covered separately;
+    // no reversal is added to the pure pilot and no paired legacy shape used.
+    datapump::test::AuxiliaryFixture source(options,plan.auxiliary_frequency_hz,plan.helper_gain,plan.data_gain,1800000000);
+    h::Receiver receiver(plan.auxiliary_frequency_hz,20,{},std::nullopt,{},h::PunctuationFormat::auxiliary_single);
+    h::PunctuationClock clock;
     std::vector<float> input(113);std::map<std::pair<std::uint64_t,std::uint64_t>,h::PunctuationObservation> identities;
-    std::size_t repeats=0,known=0;h::Reference first,last;
+    std::size_t repeats=0,known=0;h::Reference first,last,last_distinct;
     constexpr long double ratio=1.0001L;
     for(std::uint64_t at=0;at<6ULL*rate;) {
         const auto n=std::min<std::uint64_t>(input.size(),6ULL*rate-at);
-        for(std::size_t i=0;i<n;++i)input[i]=source.mix(0,ratio*(at+i)/rate,rate);
+        for(std::size_t i=0;i<n;++i)input[i]=source.mix(ratio*(at+i)/rate,rate);
         receiver.push(std::span(input).first(n),rate,at);at+=n;
         if(auto update=receiver.take_update();update && update->punctuation.known) {
             const auto& p=update->punctuation;check(p.last_sample<=update->sample,"actual helper publication manufactured a future marker");
@@ -192,18 +197,23 @@ void actual_helper_publications() {
             const auto reason=clock.observe(*update,domain(),at);
             check(reason==h::PunctuationClockReason::accepted || reason==h::PunctuationClockReason::duplicate_marker,
                 "actual helper marker provenance failed clock ingestion");
+            if(reason==h::PunctuationClockReason::accepted)last_distinct=*update;
             if(!known++)first=*update;last=*update;
         }
     }
     check(identities.size()>=8 && repeats>identities.size(),"helper did not expose distinct actual markers and carried publications");
-    const auto fit=clock.qualify({-300,300},request(first,last));
+    // Qualify at the last independently observed marker publication. Carried
+    // tone updates retain their marker's dates; they cannot renew freshness.
+    const auto fit=clock.qualify({-300,300},request(first,last_distinct));
     check(fit.qualified_for_acquisition && fit.physical_audio_lower_ppm<=100 && fit.physical_audio_upper_ppm>=100 && fit.physical_audio_upper_ppm-fit.physical_audio_lower_ppm<100,
         "actual Generator/Receiver punctuation did not bound the channel's signed audio clock");
+    check(clock.qualify({-300,300},request(first,last)).reason==h::PunctuationClockReason::stale_marker,
+        "carried tone publication renewed the actual marker's freshness");
     const auto generation=last.punctuation.generation;receiver.reset();
     bool poisoned=false;
     for(std::uint64_t at=0;at<2ULL*rate;) {
         const auto n=std::min<std::uint64_t>(input.size(),2ULL*rate-at);
-        for(std::size_t i=0;i<n;++i)input[i]=source.mix(0,ratio*(at+i)/rate,rate);
+        for(std::size_t i=0;i<n;++i)input[i]=source.mix(ratio*(at+i)/rate,rate);
         const auto previous=std::fegetround();
         const bool poison=!poisoned && at>=rate/2;
         if(poison)check(std::fesetround(FE_DOWNWARD)==0,"test cannot poison marker-support rounding");
@@ -218,14 +228,14 @@ void actual_helper_publications() {
     bool new_generation=false;
     for(std::uint64_t at=0;at<2ULL*rate;) {
         const auto n=std::min<std::uint64_t>(input.size(),2ULL*rate-at);
-        for(std::size_t i=0;i<n;++i)input[i]=source.mix(0,ratio*(at+i)/rate,rate);
+        for(std::size_t i=0;i<n;++i)input[i]=source.mix(ratio*(at+i)/rate,rate);
         receiver.push(std::span(input).first(n),rate,at);at+=n;
         if(auto r=receiver.take_update();r && r->punctuation.known) {
             check(r->punctuation.generation>generation,"actual provider reset reused marker generation");new_generation=true;
         }
     }
     check(new_generation,"actual reset never reacquired punctuation provenance");
-    std::cout<<"actual punctuation unique="<<identities.size()<<" carried="<<repeats<<" clock_ppm=["
+    std::cout<<"actual isolated auxiliary punctuation unique="<<identities.size()<<" carried="<<repeats<<" clock_ppm=["
              <<fit.physical_audio_lower_ppm<<','<<fit.physical_audio_upper_ppm<<"] history_bytes="<<clock.working_bytes()<<'\n';
 }
 }

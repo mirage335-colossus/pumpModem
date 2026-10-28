@@ -305,9 +305,22 @@ void joint_bridge() {
     retrospective.frequency_observation_frontier=raw_frame.captured_end_sample;
     retrospective.frequency=raw_frame.frequency;
     context.snapshot_target()=retrospective;
-    check(!context.prepare(c,retrospective_request) &&
+    check(!context.prepare(c,retrospective_request) && !context.prior() &&
+          context.result().reason==d::LiveHelperClockReason::unqualified_audio_clock &&
+          context.result().raw_first_sample==38464 && context.result().raw_last_sample==361536 &&
+          context.result().clock==h::PunctuationClockReason::unsupported_future_model,
+        "owned frequency SourceDate authorized post-marker clock use without an explicit future model");
+    // The SourceDate permits this captured frequency support, not new markers.
+    // Keep a separate left-support negative: its right edge is bracketed by
+    // actual markers, but its mapped first sample precedes the first marker.
+    retrospective_request.scored.first_sample=3600;
+    retrospective_request.scored.last_sample=50000;
+    context.snapshot_target()=retrospective;
+    check(!context.prepare(c,retrospective_request) && !context.prior() &&
+          context.result().reason==d::LiveHelperClockReason::unqualified_audio_clock &&
+          context.result().raw_first_sample==12864 && context.result().raw_last_sample==201536 &&
           context.result().clock==h::PunctuationClockReason::uncovered_scored_support,
-        "owned frequency SourceDate manufactured markers beyond their actual support");
+        "owned frequency SourceDate authorized clock support before the first actual marker");
 }
 void common_source_cells() {
     modem::Config c;c.sample_rate=14400;c.carrier_hz=1500;c.bandwidth_hz=360;
@@ -373,6 +386,22 @@ void common_source_cells() {
     }
     std::cout<<"common source maximum selected original cells="<<maximum_selected<<" of "<<pairs.size()<<"\n";
 }
+// Actual composite auxiliary observations carry only marker provenance.
+// Frequency/phase/timing assistance never depends on this optional worker.
+std::optional<h::Reference> take_auxiliary_marker(h::AuxiliaryMetadataReceiver& receiver,
+        std::uint32_t rate,std::uint64_t captured_end) {
+    check(!receiver.take_update(),"unmodulated auxiliary clock fixture invented metadata");
+    const auto marker=receiver.take_punctuation_update();
+    if(!marker.known)return {};
+    check(marker.first_sample<=marker.sample && marker.sample<=marker.last_sample && marker.last_sample<captured_end,
+        "composite auxiliary marker escaped its actual captured support");
+    check(marker.last_sample-marker.first_sample+1>=static_cast<std::uint64_t>(.09*rate),
+        "composite auxiliary marker omitted raw filter dependencies");
+    h::Reference evidence;evidence.sample_rate=rate;evidence.sample=marker.last_sample;evidence.punctuation=marker;
+    check(!evidence.frequency_valid && !evidence.phase_valid && !evidence.timing_valid,
+        "auxiliary clock observation acquired frequency/phase/timing authority");
+    return evidence;
+}
 // Actual hardware composition seam: the real adjustable Resampler calls the
 // real Generator with its continuous corrected SOURCE seconds, exactly as
 // PlaybackSource/Live do. The receiver sees only output PCM and dated markers.
@@ -388,16 +417,21 @@ void actual_corrected_source() {
             if(!generated)first_source=seconds;last_source=seconds;++generated;
             return generator.mix(payload,seconds,output_rate);
         });
-        h::Receiver receiver(plan.frequency_hz,20);h::PunctuationClock clock;
+        h::AuxiliaryMetadataReceiver receiver(rate,plan.auxiliary_frequency_hz,plan.frequency_hz,{}, {},
+            h::AuxiliaryMetadataReceiver::workspace_required(rate));
+        h::PunctuationClock clock;
         const auto raw=domain(rate);clock.reset(raw);
         std::vector<float> input(14400*5,0),output(113);
         std::size_t consumed=0;std::uint64_t observed=0;h::Reference first,last;std::size_t distinct=0;
         while(!playback.finished()) {
             const auto progress=playback.process(std::span(input).subspan(consumed),output,true);consumed+=progress.consumed;
             if(progress.produced) {
-                receiver.push(std::span(output).first(progress.produced),rate,observed);observed+=progress.produced;
-                if(auto r=receiver.take_update();r && r->punctuation.known) {
+                receiver.push(std::span(output).first(progress.produced),observed);observed+=progress.produced;
+                receiver.advance();
+                if(auto r=take_auxiliary_marker(receiver,rate,observed)) {
                     const auto status=clock.observe(*r,raw,observed);
+                    check(status==h::PunctuationClockReason::accepted || status==h::PunctuationClockReason::duplicate_marker,
+                        "actual corrected-source auxiliary marker lost its clock provenance");
                     if(status==h::PunctuationClockReason::accepted){if(!distinct++)first=*r;last=*r;}
                 }
             }
@@ -427,13 +461,18 @@ void actual_sampled_common_source() {
         modem::SampledSimulationChannel channel(c,impairment,options);
         const auto rate=channel.physical_sample_rate();const auto raw=domain(rate);
         const auto plan=h::plan(options,h::placement_band(c),rate,0,modem::outer_dsss_transmit_gain(c));
-        h::Receiver receiver(plan.frequency_hz,20);h::PunctuationClock clock;clock.reset(raw);
+        h::AuxiliaryMetadataReceiver receiver(rate,plan.auxiliary_frequency_hz,plan.frequency_hz,{}, {},
+            h::AuxiliaryMetadataReceiver::workspace_required(rate));
+        h::PunctuationClock clock;clock.reset(raw);
         h::Reference first,last;std::size_t distinct=0;std::uint64_t raw_end=0;
         channel.set_physical_observer([&](std::span<const float> samples,std::uint32_t fs,std::uint64_t at) {
             check(fs==rate && at==raw_end,"actual sampled common-source capture lost contiguous coordinates");
-            receiver.push(samples,fs,at);raw_end=at+samples.size();
-            if(auto r=receiver.take_update();r && r->punctuation.known) {
+            receiver.push(samples,at);raw_end=at+samples.size();
+            receiver.advance();
+            if(auto r=take_auxiliary_marker(receiver,fs,raw_end)) {
                 const auto status=clock.observe(*r,raw,raw_end);
+                check(status==h::PunctuationClockReason::accepted || status==h::PunctuationClockReason::duplicate_marker,
+                    "actual sampled-source auxiliary marker lost its clock provenance");
                 if(status==h::PunctuationClockReason::accepted){if(!distinct++)first=*r;last=*r;}
             }
         });

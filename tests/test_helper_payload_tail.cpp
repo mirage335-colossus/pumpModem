@@ -354,8 +354,10 @@ void raw_notch_converter_boundary(bool physical_notch) {
     const double data_width=physical_notch?1000:200,offset=physical_notch?700:100;
     modem::Config c;c.sample_rate=logical_rate;c.carrier_hz=data_hz;c.bandwidth_hz=data_width;
     c.spreading_factor=16;c.pulse_shaping=false;
-    // Zero independent RF prior selects raw q=0 in the nonfolded low-helper
-    // arrangement. The other arrangement is folded and uses a physical FIR.
+    // LAB manually supplied references isolate input-basis/passband policy;
+    // this is not causal acquisition outside the zero RF prior. An overlapping
+    // reference selects raw q=0; a disjoint reference may select correction.
+    // The other arrangement is folded and always uses a physical FIR.
     c.oscillator_search=modem::OscillatorSearchConfig{{100,.5},{0,.1},30000000,3,
         modem::OscillatorReference::independent_audio,modem::OscillatorSideband::upper};
     helper::Reference ref;ref.sample_rate=raw_rate;ref.frequency_valid=true;
@@ -369,15 +371,15 @@ void raw_notch_converter_boundary(bool physical_notch) {
           moved.data.upper_hz<logical_rate/2.,
           "converter-boundary fixture lost its ADC-valid DATA inside the conversion transition below Nyquist");
     auto outside=ref;outside.frequency_hz+=offset;
-    Frontend unborn(grant);bool birth_declined=false;
-    try {unborn.admit_realtime(c,helper_hz,outside,raw_rate,3990,0);}
-    catch(const Error& error){birth_declined=std::string_view(error.what()).find("immutable converter passband")!=std::string_view::npos;}
-    check(birth_declined && !unborn.active(),"raw notch admitted DATA already outside the converter flat passband");
     Frontend frontend(grant);frontend.admit_realtime(c,helper_hz,ref,raw_rate,3990,0);
     check(frontend.active() && frontend.reference_passthrough(),"converter-boundary fixture failed initial q=0 admission");
     const auto bytes=frontend.bytes();std::array<float,raw_rate> zeros{};
     frontend.push(zeros,0);auto before=frontend.take(logical_rate,ref,raw_rate);
     check(!before.empty(),"converter-boundary fixture did not establish ordinary dated PCM");
+    const auto& raw_view=*before.front().view;
+    check(raw_view.reference_passthrough && raw_view.correction_hz==0 &&
+          raw_view.payload_output_band.upper_hz<converter.passband_hz(),
+          "overlapping LAB reference did not establish an actual safe q=0 DATA view");
     auto next=before.back().first_sample+before.back().samples.size();outside.sample=raw_rate;
     check(!frontend.track_frequency(outside,helper_hz) && frontend.tracking_decline_reason() &&
           std::string_view(frontend.tracking_decline_reason()).find("immutable converter passband")!=std::string_view::npos,
@@ -389,9 +391,42 @@ void raw_notch_converter_boundary(bool physical_notch) {
     }
     check(next>before.back().first_sample+before.back().samples.size() && frontend.bytes()==bytes,
           "converter decline stopped PCM draining or changed optional allocations");
+
+    Frontend unborn(grant);bool birth_declined=false,birth_corrected=false;
+    double birth_q=0,translated_low=0,translated_high=0;
+    auto birth_reference=outside;birth_reference.sample=0;
+    if(physical_notch) {
+        try {unborn.admit_realtime(c,helper_hz,birth_reference,raw_rate,3990,0);}
+        catch(const Error& error){birth_declined=std::string_view(error.what()).find("immutable converter passband")!=std::string_view::npos;}
+        check(birth_declined && !unborn.active(),
+              "folded raw notch admitted DATA already outside the converter flat passband");
+    } else {
+        unborn.admit_realtime(c,helper_hz,birth_reference,raw_rate,3990,0);
+        check(unborn.active() && !unborn.reference_passthrough(),
+              "disjoint LAB reference did not select a corrected input basis");
+        unborn.push(zeros,0);const auto born=unborn.take(logical_rate,birth_reference,raw_rate);
+        check(!born.empty(),"corrected LAB birth did not publish its actual dated input view");
+        const auto& view=*born.front().view;birth_q=view.correction_hz;
+        translated_low=moved.data.lower_hz+birth_q;translated_high=moved.data.upper_hz+birth_q;
+        check(!view.reference_passthrough && birth_q==-offset &&
+              translated_low>0 && translated_high<converter.passband_hz() &&
+              view.payload_output_band.lower_hz<=translated_low &&
+              translated_high<=view.payload_output_band.upper_hz &&
+              view.payload_output_band.upper_hz<converter.passband_hz(),
+              "corrected LAB birth did not preserve the complete DATA band inside the flat passband");
+        check(unborn.bytes()<=grant,"corrected LAB birth exceeded its immutable workspace grant");
+        birth_corrected=true;
+    }
     std::cout<<"raw_notch_converter_boundary physical_notch="<<physical_notch
-             <<" moved_data_high="<<moved.data.upper_hz<<" converter_passband="<<converter.passband_hz()
-             <<" birth_declined=1 renewal_declined=1 continued_pcm=1\n";
+             <<" reference_source=LAB_MANUAL_NOT_CAUSAL_ACQUISITION"
+             <<" raw_view="<<raw_view.id<<" raw_q="<<raw_view.correction_hz
+             <<" raw_data_low="<<raw_view.payload_output_band.lower_hz
+             <<" raw_data_high="<<raw_view.payload_output_band.upper_hz
+             <<" moved_data_low="<<moved.data.lower_hz<<" moved_data_high="<<moved.data.upper_hz
+             <<" converter_passband="<<converter.passband_hz()<<" birth_declined="<<birth_declined
+             <<" birth_corrected="<<birth_corrected<<" birth_q="<<birth_q
+             <<" translated_data_low="<<translated_low<<" translated_data_high="<<translated_high
+             <<" renewal_declined=1 continued_pcm=1\n";
 }
 void filter_retune_transition_peak() {
     // An independently specified complex linear chirp provides the exact

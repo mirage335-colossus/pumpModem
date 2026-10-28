@@ -86,6 +86,10 @@ struct ToneTrackerSnapshot {
     bool frequency_precision_refined=false;
     bool frequency_continuous_phase=false;
     std::uint64_t continuous_phase_resets=0;
+    // Frequency-model contradictions: CUSUM or an independent frequency veto.
+    // The dated boundary is the last sample before replacement support; the
+    // captured frontier separately records when rejection became observable.
+    // Phase ambiguity and ordinary reference loss do not increment this count.
     std::uint64_t continuous_model_resets=0,continuous_last_model_reset_sample=0;
     // Explicit actual-retune mode only: one independently acquired straight
     // aperture, with no pooled RF/audio model. Its constant engineering

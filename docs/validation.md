@@ -1,6 +1,6 @@
 # Validation status
 
-Updated 27 October 2026. This page records current qualification, release status,
+Updated 28 October 2026. This page records current qualification, release status,
 coverage limits and useful historical anchors. It is not a session log. Replace
 superseded status here; keep one latest [resource snapshot](ci-resource-results.json)
 and use Git history for comparisons. Detailed studies remain in the
@@ -8,8 +8,9 @@ and use Git history for comparisons. Detailed studies remain in the
 
 ## Current two-tone Helper Carrier candidate
 
-The current human checkpoint is `65ee248`, committing the preceding shared
-overlay. Runtime remains frozen for the current contract run; documentation
+The current human checkpoint is `b0fb5dc`, including the concise documentation.
+The completed contract binds the `65ee248` implementation/core `341b2b35…`;
+later focused builds have separate bindings. Documentation
 updates do not establish new runtime qualification. Earlier receipts retain
 their own source/configure-version bindings. Final qualification remains
 pending. The preceding checkpoints `871a55a`, `aef6580`, `62db765` and `8355e64` and their
@@ -58,23 +59,86 @@ GUI/source hashes; the initial checkpoint does not bind those evolving inputs.
 
 ### Current measured status and remaining failures
 
-The full **299-case contract run is RUNNING**, including differential calibration
-with four workers; no final runtime outcome is available. Prerequisites pass in
-[the current contract scope](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/result-partial.json),
-with [registered selection](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/registered-tests.json)
-and [frozen pretest binaries](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/runtime-pretest.json).
-An [attempted pretest hold](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/intentional-hold.json)
-was ineffective: the guard checked its original file set and ignored a newly
-created noncompiled sentinel, so CTest/calibration started. This is a **failure
-of the hold mechanism, not a contract failure**. The sentinel was removed; the
-[post-hold comparison](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/post-hold-binding-check.json)
-finds all 1,169 original source files and four runtime/app hashes unchanged.
-The coordinator directed the frozen run to continue. [Commands](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/commands.json)
-and [contract output](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/contract.log)
-retain the actual scope; private whole-score/gate/terminal prototypes remain
-unpromoted.
+The source-frozen contract stage is **FAILED: 299 invoked, 288 passed, 11 failed**
+(two timeouts and nine assertions), in 3,397.34 wall/10,019.79 CPU seconds.
+[Outcomes](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/outcomes.json)
+and the [terminal receipt](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/terminal-receipt.json)
+confirm the run is reaped, with all 1,169 source inputs and 271 binary pins
+unchanged. It binds the `65ee248`/`b0fb5dc` baseline, core `341b2b35…` and GUI
+`0feb6a00…`; later focused repairs below do not change this result. Native
+display/audio coverage is excluded. Every failed test remains distinct:
 
-The rebuilt GUI is `build/dev/datapump-gui`. The coast/support-API
+| Test | Outcome | Observed scope and incomplete coverage |
+| --- | --- | --- |
+| [differential_receiver_probability](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/differential_receiver_probability-ctest-receipt.log) | Timeout, 1,500.10 s | Partial calibration only; no final probability assertion or completed remaining internal matrix. |
+| [scheduled_parallel_preparation](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/scheduled_parallel_preparation-ctest-receipt.log) | Timeout, 1,500.04 s | Arithmetic controls finish; timeout in `shared.serial`. Shared completion/comparison and later internal cases are incomplete. |
+| [helper_normal_loss](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/helper_normal_loss-ctest-receipt.log) | Assertion, 33.55 s | Exact 64 bits/pending/scored END pass, but `phase_active=1` versus legacy `phase_applied=0`/`phase_work=0` fails. Subsequent loss leg is unexecuted. |
+| [helper_conditioned_native](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/helper_conditioned_native-ctest-receipt.log) | Assertion, 1.04 s | No required primary conditioning transaction; later native fault/loss coverage is unexecuted. |
+| [live_helper_clock_bridge](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/live_helper_clock_bridge-ctest-receipt.log) | Assertion, 0.01 s | Owned frequency `SourceDate` marker-support assertion; later bridge cases are unexecuted. |
+| [helper_cohort_recovery](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/helper_cohort_recovery-ctest-receipt.log) | Assertion, 0.92 s | Fixture does not reach a narrowed native cohort batch; recovery tail is unexecuted. |
+| [helper_punctuation_clock](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/helper_punctuation_clock-ctest-receipt.log) | Assertion, 0.02 s | Actual-marker versus carried-publication assertion; later clock cases are unexecuted. |
+| [helper_local_aperture](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/helper_local_aperture-ctest-receipt.log) | Assertion, 0.01 s | Qualified joint phase-support fit absent; following aperture cases are unexecuted. |
+| [helper_payload_tail_retune](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/helper_payload_tail_retune-ctest-receipt.log) | Assertion, 0.12 s | Filter exactness/transition controls finish, then DATA-flat-passband admission fails; later retune payload/tail coverage is unexecuted. |
+| [helper_live_assistance](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/helper_live_assistance-ctest-receipt.log) | Assertion, 46.43 s | 1,024-byte text stops at 12,340/17,024 bits before physical source end: 3,954.85 versus needed 5,458.8 audio seconds under its 45 s allowance. No large backlog is proved; full text/END and later attachment coverage are absent. |
+| [helper_receiver](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/helper_receiver-ctest-receipt.log) | Assertion, 72.69 s | Weak TIMECODE frequency case fails at line 709. Earlier below-nominal zero references are the expected passing control, not this failure; subsequent cases are unexecuted. |
+
+The [failed-trace preservation receipt](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/final-failure-trace-preservation.json)
+keeps each source-bound result. An
+[attempted pretest hold](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/intentional-hold.json)
+was ineffective because the guard ignored a new noncompiled sentinel. This
+hold-mechanism setup failure is separate from the eleven contract failures.
+The sentinel was removed; the [post-hold comparison](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-coast-r1/post-hold-binding-check.json)
+confirmed the original inputs/apps unchanged before the coordinator continued
+that run. Private whole-score/gate/terminal prototypes remain unpromoted.
+
+The later [focused repair receipt](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-fixes/focused-current-r1/terminal-receipt.json)
+binds core `72abf76e…`/GUI `14b44569…`, with unchanged source/app/test guards.
+Application and four-target builds pass in 86.41/13.18 wall seconds
+(87.36/24.67 CPU seconds). Exact support-substring and headless GUI self-check
+pass. `helper_normal_loss` passes in 67.86 s and `live_helper_clock_bridge` in
+2.67 s; `helper_punctuation_clock` fails in 0.04 s on its actual signed
+clock bound. The selected CTest group uses 67.92 wall/13.22 CPU seconds, without
+comparison attribution or an overall pass. Native/cohort callback coverage
+remains unreachable/unfixed; none relabels the old 288/299.
+
+The [local-aperture/passband focused receipt](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-fixes/local-passband-r1/integrated-focused-r1/terminal-receipt.json)
+retains unchanged 1,169-source/six-binary pins. Two targets build in 7.52 wall/
+10.40 CPU seconds. Payload-tail retune passes in 2.66 seconds; local aperture
+fails its first 30 dB-Hz seed with 11 frequency hops, five phase-eligible and
+six frequency-only, zero exclusions/wrong tones. That revision's new ≥6 phase
+gate conflicts with separate frequency authority. The 2.687 wall/
+2.756 CPU-second group does not execute the remaining matrix or new frequency-gap
+negative case.
+
+The [punctuation-date diagnostic](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-fixes/punctuation-clock-dates-r1/measured-diagnosis.json)
+contains the configured +100 ppm in [80.762640,119.231871] ppm, width 38.469 ppm,
+using 14 unique markers and 78 carried publications. All marker errors are below
+0.000445 sample versus uncertainty ≥1 sample. The final carried publication is
+rejected solely because its marker age is 1,191 samples against the unchanged
+1,000-sample limit. The [fixture-only repair](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-fixes/authority-separation-r2/helper_punctuation_clock-ctest-receipt.log)
+passes in 0.06 seconds: the positive fit uses the actual last distinct publication
+and a separate negative checks carried staleness. No production change follows.
+
+The same [R2 local-aperture check](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-fixes/authority-separation-r2/helper_local_aperture-ctest-receipt.log)
+fails its newly added gap-positive case: at 48 kHz/4,096 samples, a 23.4375 Hz
+radius on the fixed 0.1 Hz grid needs 469 cells against a 251-cell budget, so it
+declines before fitting. This is an implementation limit, not a physical SNR
+floor or successful gap-positive coverage. The [R3 check](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-fixes/local-aperture-r3/ctest-LastTest.log)
+passes in 1.99 seconds, retaining that unsupported decline without authority,
+then recovering causally from a straight 200 ms aperture [93,699,103,299): error
+0.000763273 Hz versus U 0.0524458 Hz, without reset, truth seed or storage growth.
+Its 40 channel/noise cases have zero exclusions, wrong tones or cold-noise fits;
+the separate drift case has eight fits and zero exclusions. Both receipts retain
+unchanged source/binary guards and core `72abf76e…`/GUI `14b44569…`; these targeted
+passes do not relabel the failed full contract.
+
+The [unchanged weak-case descriptor](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-fixes/weak-descriptor-r1/descriptor-summary.json)
+records 31 looks from 8–20 seconds, all `presence_unqualified` before precision
+cells (0/20,480), with zero commits. The zero SNR field is an unmeasured sentinel,
+not a C/N0 measurement. The diagnostic uses 3.055 CPU seconds and establishes
+no physical SNR floor or successful frequency acquisition.
+
+The rebuilt GUI is `build/dev/datapump-gui`. The preceding coast/support-API
 [app build](../local-evidence/helper-two-tone/record-frequency-integration-r1/frequency-coast/apps-result.json)
 passes in 162.506 wall/317.220 CPU seconds, with
 [GUI `0feb6a00…`/core `341b2b35…` and source pins](../local-evidence/helper-two-tone/record-frequency-integration-r1/frequency-coast/apps-source-binding.json).
@@ -103,6 +167,51 @@ END certificate. Current RF mask windows are not yet whole-score frequency
 certificates; the new DATA-specific mask and Live rolling provenance are not
 integrated. Known-null settlement alone cannot replace history through Hilbert/
 FIR transients; that private history work remains held.
+A private [whole-score/frontier experiment](../local-evidence/helper-two-tone/record-frequency-integration-r1/whole-score-r1/build-and-live/runtime-results.json)
+**fails its performance acceptance**. The baseline completes source/bank fence
+285,835/283,313 in 24.704222 CPU seconds. The new branch reaches its 75-second
+CPU cap (75.104459 seconds, exit −9) before its unjoined final first-FFT work
+completes; it has no completed current fence/digest or final FFT total. The
+[partial-trace audits](../local-evidence/helper-two-tone/record-frequency-integration-r1/whole-score-r1/build-and-live/)
+retain 2,241 matching raw records/certificates without unsupported gaps, the
+same 60 owners and 1 GiB factory grants. Retaining early ±0.389 Hz support means
+445 pairs versus baseline 109; audited pending-drain work is 3.89× slower.
+The private whole-score/frontier patches remain unpromoted, without new gain or
+qualification. The earlier 9.17% prefix saving retains its original whole-score
+limitation; it does not validate this failed branch.
+
+A private [non-hopping refinement probe](../local-evidence/helper-two-tone/record-frequency-integration-r1/whole-score-r1/refinement-probe-r1/operational.log)
+uses operational positive Q = 0.0009000576 without truth seeding. In one seed,
+186/197 qualified spans improve: the span hull changes from ±0.21225 Hz to
+[−0.098664,+0.103985] Hz, with zero exclusions in 539,348 overlapping endpoint
+checks. Those checks are not independent coverage trials; 42 unsupported spans
+remain unsupported. The separate
+[Q=0 laboratory control](../local-evidence/helper-two-tone/record-frequency-integration-r1/whole-score-r1/refinement-probe-r1/constant-drift-lab.log)
+fails, retaining 61 raw-poll and at least 62 refined-span exclusions. The
+[results and bindings](../local-evidence/helper-two-tone/record-frequency-integration-r1/whole-score-r1/refinement-probe-r1/)
+do not qualify Live whole-score support or authorize a Q=0 production rollback.
+The first private refined-Live source was rejected on model-veto lifecycle
+handling. Its [matched R2 runtime](../local-evidence/helper-two-tone/record-frequency-integration-r1/whole-score-r1/refined-live-r2/matched-72ab-r1/matched-live-analysis.json)
+**fails cost acceptance** against core `72ab…`. Both arms hash identical physical
+PCM [0,1,143,721), SHA `d3f3749e…`, and join source/bank 285,835/283,313 at revision
+1/TX epoch `1800000005`. FFT jobs rise **10,682→35,672 (+233.94%)**;
+[external CPU](../local-evidence/helper-two-tone/record-frequency-integration-r1/whole-score-r1/refined-live-r2/matched-72ab-r1/runtime-results.json)
+rises 23.731863→65.756964 seconds (wall 23.577→65.602 seconds). Both retain only
+two of eight bits and intentionally stop incomplete, without payload/END proof.
+Inputs, key hash and source/binary guards pass with no runtime error. This
+constant fixed-RF prefix comparison is not general veto safety, Live gain or
+promotion; its trace audit remains pending.
+
+The [R3 veto discriminator](../local-evidence/helper-two-tone/record-frequency-integration-r1/whole-score-r1/frequency-veto-r3/checks/repair-results.json)
+retains expected old failure/new pass: the independent-frequency veto counter
+increments 0→1 at inclusive boundary 104,191 and revokes older frozen authority.
+Replacement support [104,192,113,792), captured at 114,240, has error 0.000166375 Hz
+versus U 0.100391165 Hz. Its pure-phase control leaves the counter zero and older
+frequency knowledge intact. Compilation uses 9.548 CPU seconds; total private
+runtime uses 0.060 seconds. The reviewed two-header counter fix is now applied
+to MAIN, but its main build/focused tests are pending. It does not validate
+general reset safety or the private R3 Live integration; refined whole-score
+integration remains unpromoted.
 
 The independently reviewed [matched actual-RF final-loss comparison](../local-evidence/helper-two-tone/record-frequency-integration-r1/frequency-coast/matched-final-loss/measured-comparison.json)
 holds physical PCM [0,900,000) equal (SHA `5398cc4c…`) and final media dates
@@ -786,7 +895,7 @@ matches the scalar score to 5.85e−12, but this is truth-timed/generated PCM,
 not the original Live noise/filter/phase realization or an acquisition result.
 [Bindings](../local-evidence/helper-two-tone/eme-gate-template-discriminator/bindings.json)
 retain the concrete template-efficiency opportunity. No production gate edit,
-eight-bit/END or physical-floor claim follows. The current frozen contract run
+eight-bit/END or physical-floor claim follows. The completed frozen contract run
 above does not promote this private experiment.
 A private [shared-gate producer/selector component](../local-evidence/helper-two-tone/eme-gate-template-discriminator/shared-gate-r1/analysis.json)
 passes 12 numerical geometries, with maximum score error 7.59e−13 and quarter
@@ -794,6 +903,21 @@ error 1.55e−12 against its scalar controls. Its repaired runtime uses 8.99483
 CPU seconds. The original setup and signed-shift audit failures remain retained.
 This is not full-correlator family integration, Live acquisition, physical END
 or a promoted production gate; its proposed integration remains private.
+A later [copied actual-correlator component](../local-evidence/helper-two-tone/eme-gate-template-discriminator/shared-gate-r1/correlator-r1/analysis.json)
+checks nominal/split, unsupported, full-zero and absence behavior. Nominal
+guarded score is 17.980448→20.306594 after charging the extra-family `ln(2)`;
+storage is 24,856 bytes/lattice. The strong scalar absolute-1e−8 comparisons
+**fail**, retaining separate errors +3.53e−7 for `q` and +9.72e−6 for `q*g`.
+Functional controls do not erase those numerical failures. Reviewed native-export
+R2 remains unexecuted/unwired. A later
+[private O3 Live gate experiment](../local-evidence/helper-two-tone/eme-gate-template-discriminator/shared-gate-r1/correlator-r1/live-O3-r1/analysis.json)
+fails at its CPU limit (`SIGXCPU`, 145.868 process CPU seconds) before the
+canonical first-symbol checkpoint. Required PCM hash/fence and canonical gate
+score are unavailable. Its eight ordinary work frontiers remain at sample
+681,750, with 144 owners and about 91.31 MB additional optional projector storage.
+The matching 5,640 frequency-trace records establish trace identity, not PCM
+identity or a matched whole-work CPU comparison. No complete eight-bit/END,
+physical SNR floor, production promotion or broad Live qualification follows.
 
 An [actual auxiliary phase control](../local-evidence/helper-two-tone/hf-native-batch/auxiliary-phase-control/run.log)
 retains zero markers in the requested noisy pilot/auxiliary/DATA mixture. With

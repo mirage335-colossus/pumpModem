@@ -1,8 +1,9 @@
 # Helper Carrier implementation and qualification
 
-Updated 27 October 2026. Human checkpoint `65ee248` is committed. The rebuilt
+Updated 28 October 2026. Human checkpoint `65ee248` is committed. The rebuilt
 GUI is `build/dev/datapump-gui`; source-bound results and remaining limits are in
-[validation](validation.md). The current contract run remains in progress.
+[validation](validation.md). The completed contract stage failed; qualification
+remains incomplete.
 
 ## Current implementation
 
@@ -58,9 +59,9 @@ qualification remain open. The HF15k alias fully scores absent address 74 while
 true address 75 is strong in the same window: this is an END-authority defect,
 not insufficient scored duration, with no receiver fix or strict pass.
 Estimator escapes remain part of qualification. The full contract run is
-**RUNNING**, not passed; private gate and terminal-join prototypes remain
-unpromoted. Ordinary wire/framing, progress, identity and END requirements are
-unchanged.
+**FAILED**, with two timeouts and nine assertions; qualification is incomplete.
+Private gate and terminal-join prototypes remain unpromoted. Ordinary
+wire/framing, progress, identity and END requirements are unchanged.
 
 Current preservation requirements are in the [development contract](development.md),
 [build/test stages](building.md#testing-stages) and [Helper reference](helper-carrier.md).

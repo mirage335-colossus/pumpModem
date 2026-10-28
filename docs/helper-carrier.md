@@ -80,8 +80,9 @@ unfixed false-END/code-calendar-alias authority defect, rather than a duration
 shortfall. Full EME, current 1,024-byte completion and hardware retune testing
 remain unqualified; estimator coverage retains documented escapes. Framed-text,
 attachment and bounded retune/loss passes retain their own scope. The full
-contract run is in progress, with no result yet. Private whole-score, gate and
-terminal-join prototypes are not maintained receiver fixes. See
+contract run has failed, with incomplete internal coverage and retained
+assertion failures; overall qualification remains incomplete. Private whole-score,
+gate and terminal-join prototypes are not maintained receiver fixes. See
 [validation](validation.md) for every failed case, command and exact binding.
 
 ## Controls and use

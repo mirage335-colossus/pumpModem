@@ -2,6 +2,7 @@
 #include "datapump/helper_tone_tracker.hpp"
 #include "datapump/helper_segmented_precision.hpp"
 #include "datapump/transfer.hpp"
+#include "../src/live_helper_pilot_stage.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -15,7 +16,7 @@ using namespace datapump;
 namespace {
 void check(bool value,const char* reason){if(!value)throw Error(reason);}
 struct Measurements {
-    std::size_t fits=0,escapes=0,wrong=0,hops=0;
+    std::size_t fits=0,escapes=0,wrong=0,hops=0,phase_fits=0,frequency_only_fits=0,phase_hops=0;
     double maximum_error=0,maximum_uncertainty=0,first_qualified_seconds=0;
 };
 Measurements channel_case(double cn0,unsigned seed,bool wide=false,bool noise_only=false,double phase_noise=.0) {
@@ -43,7 +44,7 @@ Measurements channel_case(double cn0,unsigned seed,bool wide=false,bool noise_on
     modem::SampledSimulationChannel::RfRetuneSimulation retunes;
     retunes.rf_shift_hz={rf0,1.1*rf0,1.2*rf0,1.3*rf0};retunes.phase_seed=49273+seed;
     channel.set_rf_retune_simulation(retunes);
-    Measurements out;std::uint64_t last_fit=0;std::set<std::uint64_t> qualified_hops;
+    Measurements out;std::uint64_t last_fit=0;std::set<std::uint64_t> qualified_hops,phase_hops;
     channel.set_physical_rf_observer([&](const auto& next,std::uint32_t observed_rate) {
         check(observed_rate==rate,"local aperture changed ADC clock");segment=next;
         const auto& policy=*config.oscillator_search;
@@ -63,8 +64,18 @@ Measurements channel_case(double cn0,unsigned seed,bool wide=false,bool noise_on
             "local aperture escaped its independently observed RF segment");
         check(!fit.frequency_at(fit.first_sample-1).valid && !fit.frequency_at(fit.sample+1).valid,
             "local aperture granted earlier or future frequency authority");
-        check(fit.phase_fit_support_uncertainty_cycles && *fit.phase_fit_support_uncertainty_cycles<.125,
-            "local aperture lacked a qualified joint phase-support fit");
+        const auto support=fit.phase_fit_support_uncertainty_cycles;
+        const bool phase_eligible=fit.phase_fit_qualified && !fit.frequency_used_fallback && support &&
+            std::isfinite(*support) && *support>=0 && *support<.125;
+        if(phase_eligible) {
+            check(fit.phase_fit_first_sample==fit.first_sample && fit.phase_fit_end_sample==fit.sample+1,
+                "local phase eligibility borrowed another frequency aperture's dates");
+            ++out.phase_fits;phase_hops.insert(segment.phase_segment);
+        } else {
+            ++out.frequency_only_fits;
+            check(!live::detail::helper_pilot_phase_observation(fit,plan.frequency_hz,rate),
+                "frequency-only local fit granted payload phase authority");
+        }
         const auto truth=plan.frequency_hz*(1+impairment.clock_error_ppm*1e-6)+
             impairment.frequency_offset_hz*segment.rf_shift_hz/rf0;
         for(const auto date:std::array{fit.first_sample,fit.sample}) {
@@ -82,13 +93,78 @@ Measurements channel_case(double cn0,unsigned seed,bool wide=false,bool noise_on
         if(noise_only){channel.read_noise(std::span(discarded).first(count));logical+=count;}
         else {const auto n=channel.read(*source,std::span(discarded).first(count));check(n,"local aperture source unexpectedly ended");logical+=n;}
     }
-    out.hops=qualified_hops.size();
+    out.hops=qualified_hops.size();out.phase_hops=phase_hops.size();
     std::cout<<"local_aperture_component,cn0="<<cn0<<",seed="<<seed<<",wide="<<wide<<",noise_only="<<noise_only
         <<",phase_noise_degrees="<<phase_noise<<",fits="<<out.fits<<",qualified_hops="<<out.hops
+        <<",phase_eligible_fits="<<out.phase_fits<<",phase_eligible_hops="<<out.phase_hops
+        <<",frequency_only_fits="<<out.frequency_only_fits
         <<",endpoint_escapes="<<out.escapes<<",wrong_tones="<<out.wrong<<",max_error_hz="<<out.maximum_error
         <<",max_U_hz="<<out.maximum_uncertainty<<",first_qualified_seconds="<<out.first_qualified_seconds
         <<",tracker_bytes="<<tracker.workspace_bytes()<<'\n';
     return out;
+}
+void unsupported_gap_then_straight_recovery() {
+    constexpr std::uint32_t rate=48000;
+    constexpr std::uint64_t first=80003,discovery=4096,aperture=rate/5;
+    constexpr auto context_first=first+discovery,end=context_first+aperture,jump=context_first+rate/10;
+    constexpr double truth=2413.37,tau=2*std::numbers::pi;
+    helper::ToneTrackerConfig config{rate,2400,9000,0,.5,true};
+    helper::ToneTracker tracker(config,helper::ToneTracker::workspace_required(config),first);
+    tracker.begin_pilot_segment(first,2400,9000,false,1,first,true);
+    const auto bytes=tracker.workspace_bytes();
+    std::mt19937 random{89471};std::normal_distribution<double> normal;
+    std::array<float,960> pcm{};
+    // At this rate the local discovery aperture is4096 samples. Put the
+    // second unknown phase on the fifth actual20ms row boundary afterward.
+    // The truth frequency only generates PCM; acquisition receives no seed.
+    for(auto at=first;at<end;) {
+        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(pcm.size(),end-at));
+        for(std::size_t i=0;i<count;++i) {
+            const auto sample=at+i;const auto t=static_cast<double>(sample)/rate;
+            pcm[i]=static_cast<float>(.6*std::cos(.37+tau*truth*t+(sample>=jump?2.:0.))+.01*normal(random));
+        }
+        tracker.push(std::span(pcm).first(count),at);at+=count;
+    }
+    const auto fit=tracker.snapshot();
+    const auto phase=live::detail::helper_pilot_phase_observation(fit,2400,rate);
+    std::cout<<"local_frequency_only_gap,qualified="<<fit.qualified<<",fallback="<<fit.frequency_used_fallback
+        <<",gap_index="<<fit.frequency_gap_index<<",first="<<fit.first_sample<<",end="<<fit.sample+1
+        <<",captured_end="<<fit.captured_end_sample<<",phase_fit="<<fit.phase_fit_qualified
+        <<",phase_plan="<<phase.has_value()<<",frequency_error_hz="<<std::abs(fit.frequency_hz-truth)
+        <<",U_hz="<<fit.uncertainty_hz<<'\n';
+    // This local4096-point acquisition requires469 gap-profile grid points;
+    // the bounded profile has251. It declines before fitting. This is an
+    // implementation limit, not an SNR limit or positive gap-fit coverage.
+    check(!fit.qualified && !fit.frequency_knowledge_valid && !fit.frequency_covariance_valid &&
+          !fit.phase_fit_qualified && !fit.phase_fit_support_uncertainty_cycles && !phase &&
+          fit.captured_end_sample==end && tracker.workspace_bytes()==bytes &&
+          !fit.frequency_at(context_first).valid && !fit.frequency_at(end-1).valid,
+          "unsupported local gap manufactured frequency or phase authority");
+    // A fresh straight context recovers causally, without reset or a frequency
+    // seed. Neither the declined gap nor future input belongs to its support.
+    const auto recovered_end=end+aperture;
+    for(auto at=end;at<recovered_end;) {
+        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(pcm.size(),recovered_end-at));
+        for(std::size_t i=0;i<count;++i)pcm[i]=static_cast<float>(
+            .6*std::cos(.37+tau*truth*static_cast<double>(at+i)/rate+2.)+.01*normal(random));
+        tracker.push(std::span(pcm).first(count),at);at+=count;
+    }
+    const auto recovered=tracker.snapshot();
+    check(recovered.qualified && recovered.frequency_local_aperture && !recovered.frequency_used_fallback &&
+          recovered.frequency_knowledge_valid && recovered.frequency_covariance_valid &&
+          recovered.first_sample==end && recovered.sample+1==recovered_end &&
+          recovered.captured_end_sample==recovered_end && tracker.workspace_bytes()==bytes,
+          "straight local context did not recover on its own bounded support");
+    for(const auto date:std::array{end,recovered_end-1}) {
+        const auto frequency=recovered.frequency_at(date);
+        check(frequency.valid && std::abs(frequency.frequency_hz-truth)<=frequency.uncertainty_hz,
+            "recovered local frequency did not cover its observed endpoints");
+    }
+    check(!recovered.frequency_at(end-1).valid && !recovered.frequency_at(recovered_end).valid,
+          "local recovery borrowed declined or future support");
+    std::cout<<"local_unsupported_gap_recovery,first="<<recovered.first_sample<<",end="<<recovered.sample+1
+        <<",error_hz="<<std::abs(recovered.frequency_hz-truth)<<",U_hz="<<recovered.uncertainty_hz
+        <<",gap_positive_coverage=0\n";
 }
 void local_drift() {
     constexpr std::uint32_t rate=32000;constexpr std::size_t dwell=rate*2/5,settle=384;
@@ -137,7 +213,7 @@ int main()try {
         check(noisy.hops>=6,"supported phase-noise local reference did not acquire enough independent hops");
     }
     for(unsigned seed=1;seed<=12;++seed)noise_fits+=channel_case(40,seed,false,true).fits;
-    local_drift();
+    unsupported_gap_then_straight_recovery();local_drift();
     std::cout<<"local_aperture_ensemble,endpoint_escapes="<<escapes<<",wrong_tones="<<wrong<<",cold_noise_qualified_fits="<<noise_fits
         <<",process_cpu_seconds="<<static_cast<double>(std::clock()-start)/CLOCKS_PER_SEC<<'\n';
     return escapes||wrong||noise_fits?2:0;

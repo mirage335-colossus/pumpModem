@@ -102,6 +102,28 @@ void future_frequency_support_retains_observations() {
         compact.push(partial);
         check(compact.earliest_future_frequency_scoring_sample()==0,
               "frequency suppression discarded retained compact scoring support");
+
+        // Pausing a partially observed symbol preserves its scored support.
+        modem::PatternCorrelator draining(slow,search,budget,options);draining.push(partial);
+        check(draining.set_helper_acquisition_dispatch(false),"partial support pause was unsupported");
+        draining.push(partial);
+        check(draining.earliest_future_frequency_scoring_sample()==0 &&
+              draining.candidates().empty() && draining.take_bursts().empty(),
+              "partial support pause discarded observations or manufactured evidence/END");
+
+        // Cleared cold lanes retain no earlier input statistics. Crossing
+        // symbol boundaries while paused is neither evidence nor silence.
+        modem::PatternCorrelator cold(slow,search,budget,options);
+        check(cold.set_helper_acquisition_dispatch(false),"cold support pause was unsupported");
+        std::array<float,257> zeros{};std::uint64_t pushed=0;
+        constexpr std::uint64_t total=2*128*256+17;
+        while(pushed<total) {
+            const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(zeros.size(),total-pushed));
+            cold.push(std::span<const float>(zeros).first(count));pushed+=count;
+        }
+        check(cold.earliest_future_frequency_scoring_sample()==pushed && cold.work().samples==pushed &&
+              cold.candidates().empty() && cold.take_bursts().empty(),
+              "empty paused lanes pinned retired support, lost dates or manufactured evidence/END");
     }
 }
 Reception receive(const std::vector<float>& samples,const modem::Config& c,

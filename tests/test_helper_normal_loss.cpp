@@ -1,5 +1,6 @@
 #include "datapump/live.hpp"
 #include "datapump/helper_carrier.hpp"
+#include "datapump/helper_frontend.hpp"
 #include "datapump/pattern_search.hpp"
 #include "datapump/resampler.hpp"
 #include "../src/audio_trace.hpp"
@@ -70,6 +71,11 @@ std::uint64_t number(const std::string& line,std::string_view key) {
     const auto marker='"'+std::string(key)+"\":";const auto at=line.find(marker);
     check(at!=std::string::npos,"normal helper-loss trace omitted a required coordinate");
     return std::stoull(line.substr(at+marker.size()));
+}
+double decimal(const std::string& line,std::string_view key) {
+    const auto marker='"'+std::string(key)+"\":";const auto at=line.find(marker);
+    check(at!=std::string::npos,"normal helper-loss trace omitted a required phase fraction");
+    return std::stod(line.substr(at+marker.size()));
 }
 struct Provider {
     live::Settings value;
@@ -216,7 +222,9 @@ Result run(bool lose_helper,bool require_phase=false) {
         }
         session.stop();
     }
-    bool phase_applied=false,phase_work=false,scored_end=false,trace_pending=false,later_admission=false;
+    bool phase_applied=false,phase_work=false,phase_input_committed=false;
+    bool legacy_phase_applied=false,legacy_phase_work=false;
+    bool scored_end=false,trace_pending=false,later_admission=false;
     bool narrowed_work=false,later_epoch_work=false;
     std::uint64_t id=0,count=0,first_admission=UINT64_MAX,first_work_epoch=UINT64_MAX;
     std::uint64_t qualified_jobs=0,later_jobs=0,later_work_epoch=0;
@@ -225,8 +233,49 @@ Result run(bool lose_helper,bool require_phase=false) {
     using RowIdentity=std::array<std::uint64_t,3>;
     std::map<RowIdentity,std::array<std::uint64_t,7>> row_work;
     std::map<RowIdentity,std::uint64_t> admitted_at; // revision, epoch, family
+    struct PilotPhase {std::uint64_t sequence=0;};
+    struct PhaseInput {std::uint64_t first=0,sequence=0;};
+    std::map<std::uint64_t,PilotPhase> pilot_phases; // raw aperture endpoint minus one
+    std::map<std::uint64_t,PhaseInput> phase_inputs; // certified logical input end
+    std::uint64_t capture_revision=0;unsigned trace_scopes=0;
+    // This fixture owns exactly one Session/capture. Enforce one receive
+    // revision: old event schemas omit revision IDs on frontend certificates.
     std::ifstream input(path);std::string line;
     while(std::getline(input,line)) {
+        if(line.find("\"event\":\"trace_begin\"")!=std::string::npos)++trace_scopes;
+        const bool work=line.find("\"event\":\"receiver_acquisition_work\"")!=std::string::npos;
+        const bool admission=line.find("\"event\":\"receiver_bank_admitted\"")!=std::string::npos;
+        if(work || admission) {
+            const auto revision=number(line,"revision");
+            check(revision && (!capture_revision || capture_revision==revision),
+                  "normal helper phase provenance crossed receiver revisions");
+            capture_revision=revision;
+        }
+        if(line.find("\"event\":\"receiver_helper_pilot_phase\"")==std::string::npos)continue;
+        const auto first=number(line,"first_sample"),end=number(line,"end_sample");
+        const auto phase=number(line,"phase_sample"),applied=number(line,"applied_first_raw");
+        const auto captured=number(line,"captured_end");
+        const auto fraction=decimal(line,"phase_sample_fraction");
+        check(std::isfinite(fraction) && fraction>=0 && fraction<1 && first<end && first<=phase && phase<end && end<=captured &&
+              first<=UINT64_MAX-2*helper::AnalyticFrequencyTranslator::group_delay &&
+              applied>=first+2*helper::AnalyticFrequencyTranslator::group_delay && applied<end,
+              "normal helper pilot phase lacked observed raw support/capture dates");
+        check(pilot_phases.emplace(end-1,PilotPhase{number(line,"sequence")}).second,
+              "normal helper pilot phase reused a raw aperture endpoint");
+    }
+    check(trace_scopes==1 && capture_revision,"normal helper phase trace lacked a unique capture revision");
+    input.clear();input.seekg(0);
+    while(std::getline(input,line)) {
+        if(line.find("\"event\":\"receiver_helper_corrected_interval\"")!=std::string::npos &&
+           number(line,"common_phase_corrected")) {
+            const auto first=number(line,"first_sample"),end=number(line,"end_sample");
+            const auto evidence=pilot_phases.find(number(line,"raw_reference_sample"));
+            check(first<end && number(line,"corrected_interval_valid") && number(line,"locked") &&
+                  evidence!=pilot_phases.end() && evidence->second.sequence<number(line,"sequence"),
+                  "normal helper corrected phase input lacked its matching observed pilot certificate");
+            check(phase_inputs.emplace(end,PhaseInput{first,number(line,"sequence")}).second,
+                  "normal helper phase input reused a logical endpoint");
+        }
         if(line.find("\"event\":\"receiver_bank_admitted\"")!=std::string::npos) {
             const auto sample=number(line,"sample");
             later_admission=later_admission||sample>0;
@@ -263,13 +312,26 @@ Result run(bool lose_helper,bool require_phase=false) {
                     check(jobs<=UINT64_MAX-later_jobs,"normal later-epoch work total overflowed");later_jobs+=jobs;
                 }
             }
-            phase_work=phase_work||(joined && (current[4]>previous[4] || current[5]>previous[5] || current[6]>previous[6]));
+            legacy_phase_work=legacy_phase_work||(joined && (current[4]>previous[4] || current[5]>previous[5] || current[6]>previous[6]));
+            phase_work=phase_work||legacy_phase_work;
+            if(joined && number(line,"realtime_phase_corrected")) {
+                const auto interval=phase_inputs.find(number(line,"sample"));
+                check(number(line,"revision")==capture_revision && interval!=phase_inputs.end() &&
+                      interval->second.first>=identity[2] && interval->second.sequence<number(line,"sequence"),
+                      "normal helper joined phase input lost its receiver revision/logical dates");
+                phase_input_committed=true;
+                phase_applied=phase_applied||number(line,"sample")<script.helper_cut;
+                // The upstream analytic translator corrects PCM before the
+                // ordinary FFT. Legacy phase_view counters remain separate.
+                phase_work=phase_work||(executed && current[2]>previous[2]);
+            }
             previous=current;
         }
         if(line.find("\"event\":\"receiver_helper_cohort_phase_applied\"")!=std::string::npos) {
             check(number(line,"timing_qualified")==1 && number(line,"phase_jobs")>0,
                   "normal helper phase event did not represent qualified joined phase work");
-            phase_applied=phase_applied||number(line,"sample")<script.helper_cut;
+            legacy_phase_applied=legacy_phase_applied||number(line,"sample")<script.helper_cut;
+            phase_applied=phase_applied||legacy_phase_applied;
         }
         if(line.find("\"event\":\"receiver_signal_commit\"")==std::string::npos)continue;
         const auto received=number(line,"received_bits");if(!received)continue;
@@ -291,7 +353,8 @@ Result run(bool lose_helper,bool require_phase=false) {
     std::cout<<"normal_helper_loss="<<lose_helper<<" exact="<<exact<<" bits="<<count<<" row="<<selected_id
              <<" pending="<<pending<<" scored_end="<<scored_end<<" narrowed="<<narrowed
              <<" phase_active="<<phase_active<<" phase_applied="<<phase_applied<<" phase_work="<<phase_work
-             <<" phase_required="<<require_phase<<" phase_scope="<<(require_phase?"optional_phase_positive":"frequency_only_no_phase_qualification")
+             <<" phase_input_committed="<<phase_input_committed
+             <<" phase_required="<<require_phase<<" phase_scope="<<(require_phase?"optional_phase_positive":"optional_measured_pilot_phase")
              <<" narrowed_work="<<narrowed_work<<" qualified_jobs="<<qualified_jobs
              <<" first_work_epoch="<<first_work_epoch<<" later_work_epoch="<<later_work_epoch
              <<" first_admission_sample="<<first_admission
@@ -305,10 +368,11 @@ Result run(bool lose_helper,bool require_phase=false) {
     check(narrowed,"normal helper fixture never used its measured carrier in ordinary reception");
     check(narrowed_work && later_epoch_work && qualified_jobs && later_jobs,
           "normal rolling helper lacked actual same-row narrowing or later-epoch scored work");
-    // The current enabled Live route is frequency-only. Keep the former phase
-    // acceptance as an explicit positive mode, never infer phase qualification
-    // from frequency narrowing, an admission, or a legacy auxiliary-lane event.
-    check((!phase_claimed || (phase_applied && phase_work)) && (!phase_applied || phase_work),
+    // A phase claim requires certified corrected PCM committed to this ordinary
+    // capture/revision. The optional positive mode also requires actual joined
+    // FFT work; neither frequency, auxiliary decoding nor clock grants phase.
+    check((!phase_claimed || phase_input_committed || (legacy_phase_applied && legacy_phase_work)) &&
+          (!legacy_phase_applied || legacy_phase_work),
           "normal helper claimed phase assistance without qualified joined phase work");
     if(require_phase)check(phase_active && phase_applied && phase_work,
           "normal rolling helper phase/timing assistance never became active");

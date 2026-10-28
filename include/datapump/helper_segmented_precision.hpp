@@ -1004,6 +1004,11 @@ private:
             const auto process_sigma=std::sqrt(result.frequency_acceleration_psd_hz2_per_second3*std::pow(std::abs(dt),3)/3);
             if(old_variance>=0 && std::isfinite(old_variance) &&
                std::abs(f-prediction)>3*(std::sqrt(old_variance)+process_sigma)+6*std::sqrt(var)) {
+                ++result.continuous_model_resets;
+                // This independent context replaces the contradicted model.
+                // Its own dated support remains usable; publication still
+                // occurs only after the entire context was actually captured.
+                result.continuous_last_model_reset_sample=context_first_?context_first_-1:0;
                 rn_=0;reject_frequency_knowledge();clear_continuous();
                 retain_publication=false;
                 result.frequency_used_fallback=fit.fallback;result.frequency_gap_index=fit.gap;
