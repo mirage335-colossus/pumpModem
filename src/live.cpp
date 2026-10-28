@@ -22,6 +22,7 @@
 #include "live_helper_frontend.hpp"
 #include "live_helper_constructor_radius.hpp"
 #include "live_helper_pilot_stage.hpp"
+#include "live_helper_raw_frequency.hpp"
 #include "live_helper_oscillator.hpp"
 #include "live_helper_data_parameter.hpp"
 #include "live_cold_input_stage.hpp"
@@ -5043,7 +5044,9 @@ struct Session::Impl {
         const bool dependencies=view.corrected_dependency_first>=delay &&
             view.corrected_dependency_first<view.corrected_dependency_end &&
             view.corrected_dependency_end<=view.raw_captured_end;
-        const bool supported=dependencies && !view.view->reference_passthrough && !view.view->original_prior_retained &&
+        const auto raw_bound=detail::helper_raw_frequency_m_bound(view,bank.realtime_expected_hz,
+            owner.model_rejection_first_sample);
+        const bool analytic=dependencies && !view.view->reference_passthrough && !view.view->original_prior_retained &&
             !view.view->conjugate && owner.history.sample_rate()==view.view->logical_rate &&
             view.corrected_rf_uncertainty_hz && std::isfinite(*view.corrected_rf_uncertainty_hz) &&
             *view.corrected_rf_uncertainty_hz>=0 && view.view->helper_hz==bank.realtime_expected_hz &&
@@ -5051,8 +5054,10 @@ struct Session::Impl {
             (!owner.model_rejection_first_sample ||
                 (owner.model_rejection_first_sample<=UINT64_MAX-2*helper::AnalyticFrequencyTranslator::group_delay &&
                  view.corrected_dependency_first>=owner.model_rejection_first_sample+2*helper::AnalyticFrequencyTranslator::group_delay));
-        const auto radius=supported?*view.corrected_rf_uncertainty_hz:0.;
-        if(!owner.history.append({view.first_sample,end,-radius,radius,owner.stamp(),supported})) {
+        const bool supported=analytic || (raw_bound && owner.history.sample_rate()==view.view->logical_rate);
+        const auto radius=analytic?*view.corrected_rf_uncertainty_hz:0.;
+        const auto lower=raw_bound?(*raw_bound)[0]:-radius,upper=raw_bound?(*raw_bound)[1]:radius;
+        if(!owner.history.append({view.first_sample,end,lower,upper,owner.stamp(),supported})) {
             owner.history.invalidate_model();release_realtime_score_history(bank);return false;
         }
         const auto hull=owner.query(view.first_sample,end);
@@ -6696,7 +6701,9 @@ struct Session::Impl {
                 locked=!value.transfer.modem.oscillator_search?
                     (view.view->reference_passthrough?raw_frequency_qualified:corrected_frequency_qualified):
                     view.view->original_prior_retained?raw_frequency_qualified:
-                    whole_current && !view.view->reference_passthrough && corrected_frequency_qualified;
+                    whole_current && (view.view->reference_passthrough?
+                        bool(detail::helper_raw_frequency_m_bound(view,bank.realtime_expected_hz,
+                            bank.realtime_score_history->model_rejection_first_sample)):corrected_frequency_qualified);
             }
             bank.realtime_locked=locked;
             bank.realtime_phase_corrected=view.common_phase_corrected;
@@ -6748,6 +6755,16 @@ struct Session::Impl {
                 f.add("applied_correction_low_hz",view.applied_correction_hz.lower_hz);
                 f.add("applied_correction_high_hz",view.applied_correction_hz.upper_hz);
                 f.add("common_phase_corrected",view.common_phase_corrected);f.add("locked",locked);
+                if(view.view->reference_passthrough && !view.view->original_prior_retained) {
+                    const auto raw=detail::helper_raw_frequency_m_bound(view,bank.realtime_expected_hz,
+                        bank.realtime_score_history?bank.realtime_score_history->model_rejection_first_sample:0);
+                    f.add("raw_q0_frequency_valid",bool(raw));
+                    if(raw) {
+                        f.add("raw_M_lower_hz",(*raw)[0]);f.add("raw_M_upper_hz",(*raw)[1]);
+                        f.add("raw_frequency_support_first",view.frequency_interval->first_sample);
+                        f.add("raw_frequency_support_end",view.frequency_interval->last_sample+1);
+                    }
+                }
                 f.add("coordinate",view.data_parameter_domain?"DATA":"M");
                 if(view.data_parameter_domain) {
                     f.add("DATA_kind",static_cast<unsigned>(view.data_parameter.kind));
@@ -6762,8 +6779,9 @@ struct Session::Impl {
             });
             bank.realtime_original_prior=view.view->original_prior_retained;
             if(locked) {
-                bank.realtime_offset_hz=view.view->reference_passthrough?view.reference->frequency_hz-bank.realtime_expected_hz:0;
-                if(!view.view->reference_passthrough && value.transfer.modem.oscillator_search && bank.realtime_score_history) {
+                bank.realtime_offset_hz=view.view->reference_passthrough && view.reference?
+                    view.reference->frequency_hz-bank.realtime_expected_hz:0;
+                if(!view.view->original_prior_retained && value.transfer.modem.oscillator_search && bank.realtime_score_history) {
                     const auto current=bank.realtime_score_history->history.query(view.first_sample,view.first_sample+view.samples.size());
                     if(const auto interval=detail::helper_score_center_radius(current.lower_hz,current.upper_hz);current.valid&&interval)
                         bank.realtime_offset_hz=(*interval)[0];
@@ -7748,12 +7766,23 @@ struct Session::Impl {
                 }
                 block.score_authority_generation=work.realtime->score_authority_generation;
                 block.score_rejection_first_sample=work.realtime->score_rejection_first_sample;
+                // The real q=0 path has no applied frequency/phase correction.
+                // Qualify its raw M only over the FULL produced dependency
+                // interval, using captured numeric frequency support.
+                if(!work.realtime->rf_segment_count) {
+                    if(const auto raw=detail::helper_raw_frequency_support(block)) {
+                        const auto measured=work.realtime->tracker->frequency_interval((*raw)[0],(*raw)[1]);
+                        block.frequency_interval=detail::helper_raw_frequency_interval(block,measured);
+                    }
+                }
                 auto* score=work.realtime->score.get();if(!score)continue;
                 if(changed) {
                     score->view=block.view;score->view_generation=work.realtime->score_authority_generation;
                     score->history={};score->history.configure(block.view->logical_rate,block.view->physical_rate);
                 }
-                const bool supported=!block.view->reference_passthrough&&!block.view->original_prior_retained&&!block.view->conjugate&&
+                const auto raw_bound=detail::helper_raw_frequency_m_bound(block,work.expected,
+                    work.realtime->score_rejection_first_sample);
+                const bool analytic=!block.view->reference_passthrough&&!block.view->original_prior_retained&&!block.view->conjugate&&
                     block.corrected_rf_uncertainty_hz&&std::isfinite(*block.corrected_rf_uncertainty_hz)&&*block.corrected_rf_uncertainty_hz>=0&&
                     (!work.realtime->score_rejection_first_sample ||
                      (work.realtime->score_rejection_first_sample<=UINT64_MAX-2*helper::AnalyticFrequencyTranslator::group_delay&&
@@ -7761,10 +7790,12 @@ struct Session::Impl {
                 constexpr auto delay=helper::AnalyticFrequencyTranslator::group_delay;
                 const bool dependencies=block.corrected_dependency_first>=delay&&block.corrected_dependency_first<block.corrected_dependency_end&&
                     block.corrected_dependency_end<=work.next_raw;
+                const bool supported=analytic || bool(raw_bound);
                 const bool refine=supported&&dependencies&&!work.realtime->rf_segment_count;
-                const auto radius=supported?*block.corrected_rf_uncertainty_hz:0.;
+                const auto radius=analytic?*block.corrected_rf_uncertainty_hz:0.;
+                const auto lower=raw_bound?(*raw_bound)[0]:-radius,upper=raw_bound?(*raw_bound)[1]:radius;
                 const auto end=block.first_sample+block.samples.size();
-                if(!score->history.append({block.first_sample,end,-radius,radius,score->stamp(block.view->budget_serial),supported},
+                if(!score->history.append({block.first_sample,end,lower,upper,score->stamp(block.view->budget_serial),supported},
                         dependencies?block.corrected_dependency_first-delay:0,dependencies?block.corrected_dependency_end-delay:0,
                         block.applied_correction_hz.lower_hz,block.applied_correction_hz.upper_hz,refine,work.next_raw)) {
                     score->history={};score->history.configure(block.view->logical_rate,block.view->physical_rate);
@@ -8314,8 +8345,13 @@ struct Session::Impl {
                 // no later phase observation is projected onto its past.
                 realtime.pilot_stage.make_room(count,active,consume);
                 realtime.pilot_stage.append(input,first);
-                if(active)realtime.pilot_stage.drain(work.frontend->reference_passthrough()?
-                    work.next_raw:realtime.last_phase_fit_end,consume);
+                // A folded q=0 view also uses the prepaid400ms FIFO. This
+                // allows frequency-only fits to cover its delayed FIR support;
+                // latest Reference values cannot qualify unsupported old PCM.
+                // The age cap above still drains every admitted sample on loss.
+                if(active && (!work.frontend->reference_passthrough() || work.frontend->original_prior_retained()))
+                    realtime.pilot_stage.drain(work.frontend->reference_passthrough()?
+                        work.next_raw:realtime.last_phase_fit_end,consume);
                 at+=count;
             }
             const auto tracked=with_auxiliary_clock(work,realtime.tracker->snapshot());

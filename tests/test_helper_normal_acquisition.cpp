@@ -857,6 +857,7 @@ std::atomic<bool> trace_tx_diagnostics{false};
 std::atomic<bool> trace_receiver_probe{false};
 bool trace_filter(const char* event) noexcept {
     const std::string_view name{event};
+    if(name=="simulation_source_binding")return true;
     if(name=="correlator_probe_decision" || name=="native_probe_continuation")
         return trace_receiver_probe.load(std::memory_order_relaxed);
     if(trace_tx_diagnostics.load(std::memory_order_relaxed)&&
@@ -1057,10 +1058,13 @@ struct TraceResult {
     std::uint64_t cohort_peak_bytes=0,cohort_reserve_bytes=0;
     bool trace_complete=false;
     bool wire_evidence_complete=true,wire_assisted=false;
+    bool native_end_requested=false,native_end_available=false;
+    std::uint64_t native_end_conflicts=0;
     std::set<std::string> selection_backends;
 };
 TraceResult inspect_trace(const std::filesystem::path& path,const Bytes& expected,const Bytes& dated_wire,const modem::Config& config,
-                          const WireCollector* collector=nullptr,const modem::OscillatorPatternSearch* ordinary_baseline=nullptr) {
+                          const WireCollector* collector=nullptr,const modem::OscillatorPatternSearch* ordinary_baseline=nullptr,
+                          std::optional<std::uint64_t> actual_tx_epoch={},std::optional<std::uint64_t> actual_tx_family={}) {
     const auto rate=config.sample_rate;
     TraceResult result;result.wire_evidence_complete=!collector||collector->complete();
     result.trace_complete=trace_integrity(path);
@@ -1102,12 +1106,66 @@ TraceResult inspect_trace(const std::filesystem::path& path,const Bytes& expecte
         bool initialized=false,contiguous=true,consistent=true,complete=false,observed_end=false,helper_acquired=false;
         bool helper_conditioned_acquisition=false;
         std::string bits;
+        std::optional<std::uint64_t> phase;
+        bool same_piece_phase=true;
+        std::uint64_t end=0,terminal_sequence=0,terminal_feed=0;
     };
     std::map<std::array<std::uint64_t,2>,Wire> wires;
+    struct NativeEndProbe {
+        std::uint64_t sequence=0,epoch=0,origin=0,birth=0,first_symbol=0,index=0,serial=0;
+        std::uint64_t first=0,end=0,observed=0,address_epoch=0,address_ordinal=0,bin=0;
+        long double score=0,threshold=0,absent=0;
+        bool positive=false,negative=false;
+    };
+    std::vector<NativeEndProbe> end_probes;
+    constexpr std::size_t maximum_end_probes=4096;
+    bool probe_requested=false,seen_native_probe=false,probe_evidence=true;
+    std::uint64_t source_bindings=0;std::optional<long double> source_end;long double source_pad=0;
     constexpr std::size_t trace_bit_capacity=32*1024*1024;
     std::size_t trace_bits=0;
     const auto expected_text=binary(expected),expected_wire=binary(dated_wire);
     while(std::getline(input,line)) {
+        if(line.find("\"event\":\"trace_begin\"")!=std::string::npos)
+            probe_requested=number(line,"receiver_probe").value_or(0)!=0;
+        if(line.find("\"event\":\"simulation_source_binding\"")!=std::string::npos) {
+            ++source_bindings;
+            const auto lr=number(line,"logical_rate"),pr=number(line,"physical_rate"),factor=number(line,"physical_factor"),
+                origin=number(line,"logical_origin"),valid_end=number(line,"source_physical_valid_payload_end"),total=number(line,"source_total_samples");
+            const auto startup=real_number(line,"logical_startup"),ratio=real_number(line,"source_rate_ratio"),delay=real_number(line,"logical_filter_group_delay");
+            if(source_bindings==1&&lr&&*lr==rate&&pr&&*pr&&*pr<=120000000&&factor&&*factor&&*factor<=UINT64_MAX/ *lr&&*pr==*factor * *lr&&origin&&valid_end&&total&&*valid_end<=*total&&
+               startup&&*startup>=0&&ratio&&*ratio>0&&delay&&*delay>=0) {
+                source_end=static_cast<long double>(*origin)+*startup+static_cast<long double>(*valid_end)/ *ratio;
+                const auto lookahead=[](auto&& self,std::uint64_t input,std::uint64_t output)->long double {
+                    if(input>4*output){auto middle=output;while(4*middle<input)middle*=4;
+                        return self(self,input,middle)+self(self,middle,output)+256.L/middle;}
+                    return (std::ceil(48.L/std::min(1.L,static_cast<long double>(output)/input))+2)/input;
+                };
+                const auto width=[](std::uint64_t hz){return static_cast<long double>((static_cast<std::uint64_t>(std::ceil(hz*.04L))|1U)-1);};
+                // Same loose finite-support envelope as the retained audit;
+                // this is not a measured phase centre or a DATA-start claim.
+                source_pad=8/ *ratio+*delay+2.L*helper::AnalyticFrequencyTranslator::group_delay*rate/ *pr+
+                    std::max(width(rate),width(*pr)*rate/ *pr)+lookahead(lookahead,*pr,rate)*rate+1;
+            } else source_end.reset();
+        }
+        if(line.find("\"event\":\"native_probe_continuation\"")!=std::string::npos) {
+            seen_native_probe=true;
+            const auto seq=number(line,"sequence"),epoch=number(line,"epoch"),origin=number(line,"sample_origin"),birth=number(line,"stream_first_sample"),
+                first_symbol=number(line,"stream_first_symbol"),index=number(line,"index"),serial=number(line,"track_serial"),first=number(line,"chosen_first_sample"),
+                end=number(line,"chosen_end_sample"),observed=number(line,"sample"),ae=number(line,"source_epoch"),ao=number(line,"source_ordinal"),bin=number(line,"bin_samples");
+            const auto score=real_number(line,"best_score"),threshold=real_number(line,"threshold"),absent=real_number(line,"failed_source_samples");
+            if(end_probes.size()==maximum_end_probes||!seq||!epoch||!origin||!birth||!first_symbol||!index||!serial||!first||!end||!observed||!ae||!ao||!bin||!*bin||
+               !score||!threshold||!absent||!*end||*first>=*end||*end>*observed||*observed>UINT64_MAX-*origin||
+               number(line,"symbol_samples")!=modem::symbol_sample_count(config)||!number(line,"source_address_available").value_or(0))probe_evidence=false;
+            else {
+                const bool rejected=number(line,"reject_presence").value_or(0)||number(line,"reject_retain_floor").value_or(0)||
+                    number(line,"reject_bit_margin").value_or(0)||number(line,"reject_multiple_groups").value_or(0)||number(line,"reject_pending_gap").value_or(0);
+                const bool established=number(line,"established").value_or(0)&&number(line,"admitted").value_or(0);
+                const bool standalone=number(line,"standalone").value_or(0)!=0;
+                end_probes.push_back({*seq,*epoch,*origin,*birth,*first_symbol,*index,*serial,*origin+*first,*origin+*end,*origin+*observed,*ae,*ao,*bin,
+                    *score,*threshold,*absent,established&&standalone&&!rejected&&*score>=*threshold,
+                    established&&!standalone&&rejected&&number(line,"gap_expired").value_or(0)&&*absent>=6.L*rate});
+            }
+        }
         if(line.find("\"event\":\"receiver_acquisition_work_unavailable\"")!=std::string::npos)
             native_arithmetic_missing=true;
         if(line.find("\"event\":\"receiver_selection\"")!=std::string::npos)
@@ -1152,6 +1210,11 @@ TraceResult inspect_trace(const std::filesystem::path& path,const Bytes& expecte
                     wire.first_symbol==*first_symbol&&wire.family==*family&&wire.origin==*origin&&*ordinal>=*first_symbol,
                     "physical wire candidate changed its instance or stable stream coordinates");
             const auto relative=*ordinal-*first_symbol;
+            if(!bits->empty()) {
+                const auto phase=number(line,"stream_phase_samples");
+                if(!phase||*phase>=rate)wire.same_piece_phase=false;
+                else if(!wire.phase)wire.phase=phase;else wire.same_piece_phase=wire.same_piece_phase&&*wire.phase==*phase;
+            }
             require(relative<=trace_bit_capacity&&*missing<=trace_bit_capacity,"physical wire observation exceeds the test evidence bound");
             if(*missing)bits->assign(static_cast<std::size_t>(*missing),'2');
             require(bits->size()<=trace_bit_capacity-static_cast<std::size_t>(relative),"physical wire ordinal exceeds the test evidence bound");
@@ -1172,6 +1235,7 @@ TraceResult inspect_trace(const std::filesystem::path& path,const Bytes& expecte
             if(line.find("\"complete\":1")!=std::string::npos) {
                 wire.complete=true;const auto end=number(line,"physical_end"),feed=number(line,"feed_end_sample");
                 wire.observed_end=end&&feed&&*feed>=*end+6ULL*rate;
+                wire.end=end.value_or(0);wire.terminal_feed=feed.value_or(0);wire.terminal_sequence=number(line,"sequence").value_or(0);
             }
             if(const auto assisted=number(line,"helper_acquired"))wire.helper_acquired=wire.helper_acquired||*assisted;
             if(const auto conditioned=number(line,"helper_conditioned_acquisition"))
@@ -1368,6 +1432,74 @@ TraceResult inspect_trace(const std::filesystem::path& path,const Bytes& expecte
         const auto prefix=string_field(line,"raw_bits_prefix");
         row.observe(*revision,*count,completed,scored_end,prefix?std::optional<std::string_view>(*prefix):std::nullopt,expected_text);
     }
+    // Test-only single-source counterexample audit. No value enters reception.
+    // A date before the final DATA endpoint alone cannot condemn a lead-in
+    // noise candidate. Require the complete observed suffix's Data addresses,
+    // bits and physical alignment, then an actual overlapping positive peer.
+    result.native_end_requested=probe_requested&&seen_native_probe;
+    const Wire* canonical=nullptr;
+    if(actual_tx_epoch&&actual_tx_family)for(const auto& [key,w]:wires) {
+        (void)key;
+        if(w.epoch==*actual_tx_epoch&&w.family==*actual_tx_family&&w.first_symbol==0&&w.bits==expected_wire&&
+           w.contiguous&&w.consistent&&w.complete&&w.phase&&w.same_piece_phase&&*w.phase==config.stream_phase_samples) {
+            if(canonical){canonical=nullptr;probe_evidence=false;break;}canonical=&w;
+        }
+    }
+    if(canonical)for(const auto& [key,w]:wires) {
+        (void)key;if(&w!=canonical&&w.epoch==canonical->epoch&&w.origin==canonical->origin&&w.first_sample==canonical->first_sample&&w.first_symbol==canonical->first_symbol){canonical=nullptr;probe_evidence=false;break;}
+    }
+    const auto belongs=[](const NativeEndProbe& p,const Wire& w){return p.epoch==w.epoch&&p.origin==w.origin&&p.birth==w.first_sample&&p.first_symbol==w.first_symbol;};
+    std::map<std::uint64_t,const NativeEndProbe*> positives;
+    if(canonical)for(const auto& p:end_probes)if(belongs(p,*canonical)&&p.positive&&p.index<canonical->bits.size()) {
+        const auto address=modem::symbol_stream_address(config,canonical->epoch,*canonical->phase,p.index);
+        if(address.epoch==p.address_epoch&&address.ordinal==p.address_ordinal)positives[p.index]=&p;
+    }
+    std::uint64_t complete_native=0,receipts=0,quiet=0,unresolved=0;
+    const auto chip=modem::pattern_chip_samples(config),symbol=modem::symbol_sample_count(config);
+    const auto near=[&](std::uint64_t a,std::uint64_t b){return a>b?a-b<=chip:b-a<=chip;};
+    for(const auto& [key,w]:wires)if(w.complete) {
+        ++complete_native;const NativeEndProbe* failed=nullptr;std::optional<std::uint64_t> serial;bool ambiguous=false;
+        if(w.bits.size()>UINT64_MAX-w.first_symbol){++unresolved;continue;}
+        for(const auto& [other_key,other]:wires)if(other_key!=key&&other.epoch==w.epoch&&other.origin==w.origin&&other.first_sample==w.first_sample&&other.first_symbol==w.first_symbol)ambiguous=true;
+        for(const auto& p:end_probes)if(belongs(p,w)) {
+            if(serial&&*serial!=p.serial)ambiguous=true;else serial=p.serial;
+            if(p.negative&&p.index>=w.first_symbol+w.bits.size()&&p.sequence<w.terminal_sequence&&p.observed<=w.terminal_feed&&(!failed||failed->sequence<p.sequence))failed=&p;
+        }
+        if(!failed||ambiguous){++unresolved;continue;}++receipts;
+        if(source_end&&static_cast<long double>(failed->end)>=std::ceil(*source_end)+std::ceil(source_pad+failed->bin)+6.L*rate){++quiet;continue;}
+        bool conflict=false;
+        if(canonical&&w.family==canonical->family&&w.contiguous&&w.consistent&&w.phase&&w.same_piece_phase&&
+           w.bits.find('2')==std::string::npos&&w.bits.size()<=positives.size()&&w.origin<=UINT64_MAX-w.first_sample) {
+            for(const auto& [anchor,a]:positives) {
+                if(w.bits.size()>canonical->bits.size()-anchor||!near(w.origin+w.first_sample,a->first))continue;
+                bool prefix=true;const NativeEndProbe* last=nullptr;
+                for(std::size_t i=0;i<w.bits.size()&&prefix;++i) {
+                    const auto at=positives.find(anchor+i);
+                    if(at==positives.end()||w.bits[i]!=canonical->bits[anchor+i]){prefix=false;break;}
+                    const auto address=modem::symbol_stream_address(config,w.epoch,*w.phase,w.first_symbol+i);
+                    last=at->second;prefix=address.epoch==last->address_epoch&&address.ordinal==last->address_ordinal;
+                }
+                if(!prefix||!last||!near(w.end,last->end))continue;
+                for(const auto& [index,positive]:positives)if(index>=anchor+w.bits.size()) {
+                    const auto lo=std::max(failed->first,positive->first),hi=std::min(failed->end,positive->end);
+                    if(source_end&&failed->end<*source_end&&hi>lo&&symbol>2*chip&&hi-lo>=symbol-2*chip&&
+                       (failed->address_epoch!=positive->address_epoch||failed->address_ordinal!=positive->address_ordinal)) {
+                        conflict=true;++result.native_end_conflicts;
+                        std::cout<<"native_end_conflict,"<<path.string()<<','<<key[0]<<','<<key[1]<<','<<w.instance<<','<<w.epoch<<','<<w.bits.size()<<','
+                            <<failed->sequence<<','<<failed->first<<','<<failed->end<<','<<failed->address_epoch<<','<<failed->address_ordinal<<','<<failed->score<<','
+                            <<positive->sequence<<','<<positive->first<<','<<positive->end<<','<<positive->address_epoch<<','<<positive->address_ordinal<<','<<positive->score<<','<<*source_end<<'\n';break;
+                    }
+                }
+                if(conflict)break;
+            }
+        }
+        if(!conflict)++unresolved;
+    }
+    result.native_end_available=result.native_end_requested&&source_bindings==1&&source_end&&canonical&&!positives.empty()&&probe_evidence&&complete_native&&unresolved==0;
+    std::cout<<"native_end_audit,"<<path.string()<<','<<result.native_end_requested<<','<<result.native_end_available<<','<<complete_native<<','<<receipts<<','<<quiet<<','
+        <<result.native_end_conflicts<<','<<unresolved<<','<<source_bindings<<',';
+    if(source_end)std::cout<<*source_end;else std::cout<<"unavailable";
+    std::cout<<",test_only_no_receiver_authority\n";
     // The known transmitted sequence identifies a test subject; it is never
     // supplied to the receiver. Other rolling epochs may independently expose
     // valid suffixes with different row IDs and physical starts.
@@ -1846,7 +1978,8 @@ Result run(Profile profile,bool helper,const Resolved& resolved,const Options& o
     if(!detailed)collector.report(path);
     const auto ordinary_baseline=modem::oscillator_pattern_search(c,
         transfer::effective_clock_sync(value.transfer)?modem::utc_transmit_rate_limit(c):0);
-    const auto observed=inspect_trace(path,expected,dated_wire,c,detailed?nullptr:&collector,&ordinary_baseline);
+    const auto tx_family=value.transfer.key?std::optional<std::uint64_t>{value.permits_plaintext()?1ULL:0ULL}:std::nullopt;
+    const auto observed=inspect_trace(path,expected,dated_wire,c,detailed?nullptr:&collector,&ordinary_baseline,transmit_epoch,tx_family);
     if(metrics)report_tx_epoch_diagnostic(profile,helper,resolved,
         options.payload!=Payload::bits&&value.long_message_modem&&!transfer::uses_raw_message(message)?*value.long_message_modem:c,
         transmit_epoch,dated_wire,observed,path,detailed?nullptr:&collector);
@@ -1865,14 +1998,16 @@ Result run(Profile profile,bool helper,const Resolved& resolved,const Options& o
     const bool success=finished&&exact&&observed.pending&&observed.complete&&observed.observed_end&&
         observed.wire_exact&&observed.wire_contiguous&&observed.wire_complete&&
         observed.identity&&observed.prefix&&observed.all_rows_end&&observed.later_epoch&&!runtime_error&&assistance_qualified&&
-        observed.trace_complete&&observed.wire_evidence_complete;
+        observed.trace_complete&&observed.wire_evidence_complete&&!observed.native_end_conflicts&&
+        (!observed.native_end_requested||observed.native_end_available);
     // A time limit with partial input/decisions is explicitly incomplete.
     // Incorrect completed payload, physical END or progress is a failure.
-    const bool invalid=runtime_error||!observed.identity||!observed.prefix||!observed.all_rows_end||
+    const bool invalid=runtime_error||!observed.identity||!observed.prefix||!observed.all_rows_end||observed.native_end_conflicts||
         (assistance_required&&!observed.cohort_resources_valid)||
         (observed.wire_bits&&!observed.wire_contiguous)||
         (finished&&(!exact||!observed.complete||!observed.observed_end||!observed.wire_exact||!observed.wire_complete||!assistance_qualified));
-    const bool incomplete_evidence=!observed.trace_complete||!observed.wire_evidence_complete;
+    const bool incomplete_evidence=!observed.trace_complete||!observed.wire_evidence_complete||
+        (observed.native_end_requested&&!observed.native_end_available&&!observed.native_end_conflicts);
     const int exit=runtime_error?1:incomplete_evidence?2:success?0:invalid?1:2;
     if(metrics)metrics->posthoc=ProcessStamp::now();
     const auto process_cpu_seconds=static_cast<double>(std::clock()-cpu)/CLOCKS_PER_SEC;
@@ -1986,14 +2121,17 @@ int reinspect(const Options& options,const Resolved& resolved) {
     const auto profile=options.profiles.front();const auto helper=options.helpers.front();
     const auto expected=known_bits(options.bit_count);auto dated=resolved.settings.transfer;
     dated.timestamp=*options.inspect_epoch;auto wire=expected;transfer::xor_binary_bits(wire,dated);
-    const auto observed=inspect_trace(*options.inspect_path,expected,wire,dated.modem);
+    const auto tx_family=resolved.settings.transfer.key?std::optional<std::uint64_t>{resolved.settings.permits_plaintext()?1ULL:0ULL}:std::nullopt;
+    const auto observed=inspect_trace(*options.inspect_path,expected,wire,dated.modem,nullptr,nullptr,*options.inspect_epoch,tx_family);
     if(options.runtime_metrics)report_tx_epoch_diagnostic(options.profiles.front(),options.helpers.front(),resolved,
         dated.modem,*options.inspect_epoch,wire,observed,*options.inspect_path);
     const bool assisted=assistance_trace_qualified(profile,helper,observed,observed.unique_conditional_jobs,true);
     const bool valid=observed.pending&&observed.complete&&observed.bits==expected.size()&&observed.observed_end&&
         observed.wire_exact&&observed.wire_contiguous&&observed.wire_complete&&observed.identity&&observed.prefix&&
-        observed.all_rows_end&&observed.later_epoch&&assisted;
-    const int status=!observed.trace_complete||!observed.wire_evidence_complete?2:valid?0:1;
+        observed.all_rows_end&&observed.later_epoch&&assisted&&!observed.native_end_conflicts&&
+        (!observed.native_end_requested||observed.native_end_available);
+    const int status=!observed.trace_complete||!observed.wire_evidence_complete||
+        (observed.native_end_requested&&!observed.native_end_available&&!observed.native_end_conflicts)?2:valid?0:1;
     std::cout<<"posthoc_reinspection,"<<name(profile)<<','<<helper<<','<<*options.inspect_epoch<<','<<options.bit_count<<','
         <<(status==2?"incomplete_evidence":valid?"trace_checks_passed":"trace_checks_failed")<<','
         <<observed.id<<','<<observed.revision<<','<<observed.bits<<','<<observed.wire_bits<<','
@@ -2010,6 +2148,8 @@ int reinspect(const Options& options,const Resolved& resolved) {
 }
 int main(int argc,char** argv) {try {
     auto options=parse(argc,argv);row_progress_guards();EphemeralKey key(options);int status=0;
+    std::cout<<"# native_end_audit columns: trace,native_probe_scope_requested,complete_evidence,native_complete_wires,joined_failed_receipts,source_bound_quiet_controls,positive_conflicts,unresolved,source_bindings,mapped_source_valid_end,scope; probe-disabled/missing/ambiguous evidence is unavailable, never a physical-END pass\n";
+    std::cout<<"# native_end_conflict columns: trace,capture,candidate,instance,epoch,full_prefix_bits,negative_sequence,negative_first,negative_end,negative_Data_epoch,negative_Data_ordinal,negative_score,positive_sequence,positive_first,positive_end,positive_Data_epoch,positive_Data_ordinal,positive_score,mapped_source_valid_end; entire aligned suffix proof plus actual standalone overlapping positive, posthoc only\n";
     if(options.inspect_path) {
         std::cout<<"# posthoc_reinspection columns: profile,helper,actual_TX_epoch,actual_bit_count,trace_result,primary_id,primary_revision,primary_bits,primary_wire_bits,pending,complete,scored_END,wire_equal,wire_contiguous,wire_complete,revision_identity,primary_lifetime_prefix,all_historical_completed_END,rows,primary_assisted,original_trace\n";
         std::cout<<"# posthoc_compact_work columns: profile,helper,traced_compact_instances,projected_carrier_samples,accumulated_lane_samples,skipped_carrier_samples,skipped_lane_samples,broad_audit_projected_carrier_samples,broad_audit_accumulated_lane_samples,capability_supported_instances,complete_trace,original_trace; executed counter maxima do not qualify capability or replace the original run result\n";
@@ -2044,7 +2184,7 @@ int main(int argc,char** argv) {try {
         std::cout<<"# runtime_feed columns: profile,helper,control,index,input_revision,source_begin,source_end,bank_begin,bank_end,sample_rate,read_available_steady,feed_available_steady,commit_steady,generation_process_CPU_seconds,generation_wall_seconds,ordinary_feed_process_CPU_seconds,ordinary_feed_wall_seconds,trace\n";
         std::cout<<"# decision_timing columns: profile,helper,control,input_revision,primary_signal_id,new_bit_progress_commits,block_availability_joins,public_poll_joins,presentation_replay_polls,maximum_candidate_end_media_lookahead_seconds,maximum_simulated_candidate_end_block_availability_to_commit_wall_seconds,maximum_commit_to_public_poll_wall_seconds,trace\n";
         std::cout<<"# runtime metrics: actual process clocks across all threads, never CPU inferred from work counts. Startup ends at first before_read; active ends before stop; join includes stop/destruction/trace finalization; posthoc is separate. Feed intervals exclude posthoc and are not isolated receiver-thread CPU. Simulated block availability is not hardware capture. Publication delay includes reported presentation-replay polls. Zero hardware queue backlog in simulation is not measured gain\n";
-        std::cout<<"# payload-media window unavailable: the existing hook has no TX-owned physical payload start/end mapping through resampling/calendar/filters. Expected wire length or TX epoch is not substituted. No helper lead/tail samples enter a payload CPU/audio or wall/audio denominator. Raw actual feed intervals remain available for source-window review\n";
+        std::cout<<"# payload-media CPU window unavailable: the existing hook has no TX-owned physical payload start mapping. simulation_source_binding records the source-owned valid endpoint and fractional channel map for separate END audits. Expected wire length or TX epoch is not substituted. No helper lead/tail samples enter a payload CPU/audio or wall/audio denominator. Raw actual feed intervals remain available for source-window review\n";
         std::cout<<"# decision timing uses the actual selected candidate physical endpoint for each commit which advances bit progress. A commit may publish several symbols together; these are progress-commit delays, not inferred individual per-symbol latency. Publication delay and candidate-end media lookahead remain separate; physical completion still requires the ordinary scored-END rules\n";
         std::cout<<"# runtime metric storage: bounded test-only heap bytes="<<RuntimeMetrics::capacity*(sizeof(RuntimeMetrics::Feed)+sizeof(RuntimeMetrics::Poll))<<"; observer overflow makes timing evidence unavailable and never truncates ordinary payload\n";
     }

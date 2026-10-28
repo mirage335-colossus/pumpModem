@@ -98,7 +98,7 @@ public:
             if (entry.owner.family != candidate.family) continue;
             if (entry.owner.id == candidate.id) { identity = i; break; }
             if (candidate.signal_id && contains(entry, candidate.signal_id) &&
-                !separate_helper_birth(entry.owner,candidate)) identity = i;
+                !separate_uniform_birth(entry.owner,candidate)) identity = i;
         }
         if (identity < size_ && entries_[identity].owner.id == candidate.id) {
             auto& entry = entries_[identity];
@@ -135,7 +135,7 @@ public:
                 // different established physical birth, even when that other
                 // row is stronger. Unpublished losing aliases still suppress
                 // normally; only two already stored owner births are compared.
-                if(identity<size_ && different_helper_birth(entries_[i].owner,entries_[identity].owner))continue;
+                if(identity<size_ && different_uniform_birth(entries_[i].owner,entries_[identity].owner))continue;
                 // Once separately published, an existing helper-involved
                 // source cannot retract another row merely because a longer
                 // clock cone makes their old separation proof inconclusive.
@@ -283,9 +283,8 @@ private:
         return std::isfinite(seconds) && seconds<=static_cast<long double>(
             std::numeric_limits<std::uint64_t>::max()-x->epoch);
     }
-    static bool different_helper_birth(const Candidate& owner,const Candidate& candidate) {
-        if(!(owner.helper_assisted || candidate.helper_assisted) ||
-           !owner.uniform_source || !candidate.uniform_source || !owner.symbol_samples ||
+    static bool different_uniform_birth(const Candidate& owner,const Candidate& candidate) {
+        if(!owner.uniform_source || !candidate.uniform_source || !owner.symbol_samples ||
            owner.symbol_samples!=candidate.symbol_samples || owner.burst_identity() || candidate.burst_identity() ||
            owner.amplitude_high_hz>owner.amplitude_low_hz ||
            candidate.amplitude_high_hz>candidate.amplitude_low_hz)return false;
@@ -293,17 +292,20 @@ private:
         const auto tolerance=std::min(std::max(owner.timing_tolerance,candidate.timing_tolerance),
             (owner.symbol_samples-1)/2);
         // Whole-symbol alignment identifies the clock, not a full prefix.
+        // This protects ordinary accepted progress across owner revisions as
+        // well as Helper-assisted progress; receiver provenance cannot grant
+        // a later source birth ownership of already exposed leading slots.
         return distance>tolerance;
     }
-    static bool separate_helper_birth(const Candidate& owner,const Candidate& candidate) {
+    static bool separate_uniform_birth(const Candidate& owner,const Candidate& candidate) {
         // A stronger suffix/earlier start owns a separate row; it cannot erase
         // already exposed leading bits. Weaker unpublished suffixes suppress.
-        return stronger(candidate,owner) && different_helper_birth(owner,candidate);
+        return stronger(candidate,owner) && different_uniform_birth(owner,candidate);
     }
     static bool matches(const Entry& entry, const Candidate& candidate) {
         const auto& owner = entry.owner;
         if (owner.family != candidate.family) return false;
-        if(separate_helper_birth(owner,candidate))return false;
+        if(separate_uniform_birth(owner,candidate))return false;
         const bool owner_amplitude=owner.amplitude_high_hz>owner.amplitude_low_hz;
         const bool candidate_amplitude=candidate.amplitude_high_hz>candidate.amplitude_low_hz;
         const bool amplitude_pair=owner_amplitude&&candidate_amplitude;

@@ -328,10 +328,11 @@ void helper_physical_birth_ownership() {
     // Exact first bad R9 transition: c1 already published 11; c6 is the real
     // later suffix 10, born T-13 samples later. Its larger support cannot make
     // those suffix bits the first two bits of c1's physical reception.
-    for(const bool known:{false,true}) {
+    for(const bool assisted:{false,true})for(const bool known:{false,true}) {
         History h;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
         auto prefix=fit(1,49793,223890,11305.251769);
         auto suffix=fit(6,136820,310917,11976.190939);
+        prefix.helper_assisted=suffix.helper_assisted=assisted;
         if(known) {
             prefix.source_identity=PatternSourceIdentity{.epoch=1799999994,.first_symbol=1,.sample_rate=6120};
             suffix.source_identity=PatternSourceIdentity{.epoch=1800000022,.sample_rate=6120};
@@ -348,6 +349,7 @@ void helper_physical_birth_ownership() {
         check(h.observe(prefix,allocate).selected,
               "independent suffix suppressed the earlier owner's accepted progress");
         auto canonical=fit(2,49793,659056,36118.630785);
+        canonical.helper_assisted=assisted;
         if(known)canonical.source_identity=PatternSourceIdentity{
             .epoch=1799999993,.first_symbol=1,.phase_lower=4760,.phase_upper=4760,.sample_rate=6120};
         const auto seven=h.observe(canonical,allocate);
@@ -367,11 +369,13 @@ void helper_physical_birth_ownership() {
         check(suffix_end.selected && suffix_end.signal_id==next.signal_id && ids==2,
               "later physical suffix completion lost its own established identity");
     }
-    for(const int jitter:{-34,0,34}) {
+    for(const bool assisted:{false,true})for(const int jitter:{-34,0,34}) {
         History h;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
         auto weak=fit(1,49793,223890,100);
+        weak.helper_assisted=assisted;
         const auto first=h.observe(weak,allocate);
         auto correct=fit(2,static_cast<std::uint64_t>(49793+jitter),310917,3.*t);
+        correct.helper_assisted=assisted;
         const auto recovered=h.observe(correct,allocate);
         check(recovered.selected && recovered.signal_id==first.signal_id && ids==1,
               "same-birth stronger recovery was frozen by helper source ownership");
@@ -379,13 +383,12 @@ void helper_physical_birth_ownership() {
         correct.score+=1;correct.end+=t;correct.complete=true;
         check(h.observe(correct,allocate).selected,"same-birth weak final progress lost physical END");
     }
-    // These control paths retain the previous ordinary scalar arbitration.
-    for(unsigned excluded=0;excluded<5;++excluded) {
+    // Different-duration and nonuniform paths retain scalar arbitration.
+    for(unsigned excluded=1;excluded<5;++excluded) {
         History h;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
         auto old=fit(1,49793,223890,11305.251769);
         auto next=fit(6,136820,310917,11976.190939);
         switch(excluded) {
-        case 0:old.helper_assisted=next.helper_assisted=false;break;
         case 1:next.symbol_samples*=2;break;
         case 2:uniform_source(old,false);uniform_source(next,false);break;
         case 3:old.source_identity=History::BurstIdentity{};next.source_identity=History::BurstIdentity{};break;
@@ -394,7 +397,7 @@ void helper_physical_birth_ownership() {
         }
         const auto first=h.observe(old,allocate),second=h.observe(next,allocate);
         check(second.selected && second.signal_id==first.signal_id && ids==1,
-              "source-birth protection changed an ordinary or nonuniform arbitration path");
+              "source-birth protection changed a different-duration or nonuniform arbitration path");
     }
 }
 void helper_physical_birth_capacity_boundary() {
@@ -402,38 +405,89 @@ void helper_physical_birth_capacity_boundary() {
     // 64 established active physical births retain their existing allocation;
     // a newly discovered earlier birth at that bound is UNSUPPORTED/limited.
     constexpr std::uint64_t t=1000;
+    for(const bool assisted:{false,true}) {
+        // Keep the same fixed capacity for ordinary and assisted receptions.
+        History h;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
+        std::array<History::Candidate,History::capacity> owners;
+        std::array<std::uint64_t,History::capacity> rows{};
+        for(std::size_t i=0;i<owners.size();++i) {
+            auto c=candidate(i+1,(i+1)*t,(1000+i)*t,static_cast<double>(i+1));
+            c.symbol_samples=c.absence_samples=t;c.timing_tolerance=10;c.helper_assisted=assisted;
+            owners[i]=c;const auto admitted=h.observe(c,allocate);rows[i]=admitted.signal_id;
+            check(admitted.selected && !admitted.limited && admitted.superseded_ids.empty(),
+                  "active-birth capacity fixture merged an established physical prefix");
+        }
+        check(h.size()==History::capacity && ids==History::capacity,
+              "active-birth fixture did not reach its existing fixed resource bound");
+        auto late=candidate(1000,0,2000*t,10000);late.symbol_samples=late.absence_samples=t;
+        late.timing_tolerance=10;late.helper_assisted=assisted;
+        const auto unsupported=h.observe(late,allocate);
+        check(!unsupported.selected && unsupported.limited && !unsupported.signal_id &&
+              unsupported.superseded_ids.empty() && h.size()==History::capacity && ids==History::capacity,
+              "65th late canonical birth evicted an active prefix or exceeded the fixed History bound");
+        for(std::size_t i=0;i<owners.size();++i) {
+            owners[i].end+=t;owners[i].score+=20000;
+            const auto progress=h.observe(owners[i],allocate);
+            check(progress.selected && !progress.limited && progress.signal_id==rows[i] &&
+                  progress.superseded_ids.empty() && h.size()==History::capacity && ids==History::capacity,
+                  "capacity refusal mutated an established canonical/suffix owner's next-bit identity");
+        }
+        for(std::size_t i=0;i<owners.size();++i) {
+            owners[i].complete=true;
+            const auto end=h.observe(owners[i],allocate);
+            check(end.selected && !end.limited && end.signal_id==rows[i] && end.superseded_ids.empty() &&
+                  h.size()==History::capacity && ids==History::capacity,
+                  "fixed history pressure withheld an established owner's physical END");
+        }
+    }
+}
+void ordinary_physical_birth_ownership() {
+    constexpr std::uint64_t t=87040;
+    const auto fit=[](std::uint64_t id,std::uint64_t first,std::uint64_t end,double score) {
+        auto c=candidate(id,first,end,score);c.family=0;c.symbol_samples=t;
+        c.absence_samples=t;c.timing_tolerance=34;return c;
+    };
     History h;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
-    std::array<History::Candidate,History::capacity> owners;
-    std::array<std::uint64_t,History::capacity> rows{};
-    for(std::size_t i=0;i<owners.size();++i) {
-        auto c=candidate(i+1,(i+1)*t,(1000+i)*t,static_cast<double>(i+1));
-        c.symbol_samples=c.absence_samples=t;c.timing_tolerance=10;c.helper_assisted=true;
-        owners[i]=c;const auto admitted=h.observe(c,allocate);rows[i]=admitted.signal_id;
-        check(admitted.selected && !admitted.limited && admitted.superseded_ids.empty(),
-              "helper active-birth capacity fixture merged an established physical prefix");
-    }
-    check(h.size()==History::capacity && ids==History::capacity,
-          "helper active-birth fixture did not reach its existing fixed resource bound");
-    auto late=candidate(1000,0,2000*t,10000);late.symbol_samples=late.absence_samples=t;
-    late.timing_tolerance=10;late.helper_assisted=true;
-    const auto unsupported=h.observe(late,allocate);
-    check(!unsupported.selected && unsupported.limited && !unsupported.signal_id &&
-          unsupported.superseded_ids.empty() && h.size()==History::capacity && ids==History::capacity,
-          "65th late canonical birth evicted an active prefix or exceeded the fixed History bound");
-    for(std::size_t i=0;i<owners.size();++i) {
-        owners[i].end+=t;owners[i].score+=20000;
-        const auto progress=h.observe(owners[i],allocate);
-        check(progress.selected && !progress.limited && progress.signal_id==rows[i] &&
-              progress.superseded_ids.empty() && h.size()==History::capacity && ids==History::capacity,
-              "capacity refusal mutated an established canonical/suffix owner's next-bit identity");
-    }
-    for(std::size_t i=0;i<owners.size();++i) {
-        owners[i].complete=true;
-        const auto end=h.observe(owners[i],allocate);
-        check(end.selected && !end.limited && end.signal_id==rows[i] && end.superseded_ids.empty() &&
-              h.size()==History::capacity && ids==History::capacity,
-              "fixed helper-history pressure withheld an established owner's physical END");
-    }
+    // Actual RF-only control: c6 is two symbols later than the exposed c2
+    // prefix, within 13 samples of its clock, and overlaps c5 as well.
+    auto prefix=fit(2,31365,205462,19246.89031400221);
+    auto middle=fit(5,292452,379526,8534.748368459339);
+    auto suffix=fit(6,205432,379529,20703.391189714675);
+    const auto first=h.observe(prefix,allocate);const auto first_id=first.signal_id;
+    const auto second=h.observe(middle,allocate);const auto second_id=second.signal_id;
+    check(first.selected && second.selected && first_id!=second_id && ids==2,
+          "ordinary retained prefixes did not establish independent rows");
+    auto weak=suffix;weak.score=1;
+    const auto losing=h.observe(weak,allocate);
+    check(!losing.selected && losing.signal_id==first_id && ids==2,
+          "ordinary losing suffix missed the old signal-id shortcut");
+    suffix.signal_id=losing.signal_id;
+    const auto entered=h.observe(suffix,allocate);const auto suffix_id=entered.signal_id;
+    check(entered.selected && suffix_id!=first_id && suffix_id!=second_id &&
+          entered.superseded_ids.empty() && ids==3 && h.size()==3,
+          "ordinary stronger suffix rewrote or merged accepted prefixes");
+    prefix.end=466565;prefix.score=49384.753330355765;
+    const auto progress=h.observe(prefix,allocate);
+    check(progress.selected && progress.signal_id==first_id && progress.superseded_ids.empty(),
+          "ordinary canonical progress stole an established suffix row");
+    suffix.end=553592;suffix.score=40000;
+    const auto suffix_progress=h.observe(suffix,allocate);
+    check(suffix_progress.selected && suffix_progress.signal_id==suffix_id &&
+          suffix_progress.superseded_ids.empty(),"ordinary suffix lost its subsequent progress");
+    middle.end=466566;middle.score=17000;
+    const auto middle_progress=h.observe(middle,allocate);
+    check(middle_progress.selected && middle_progress.signal_id==second_id &&
+          middle_progress.superseded_ids.empty(),"ordinary middle source lost its row");
+    // History routes an already scored native END; this is not an absence test.
+    prefix.end=727651;prefix.score=76963.44369070149;prefix.complete=true;
+    const auto end=h.observe(prefix,allocate);
+    check(end.selected && end.signal_id==first_id && end.superseded_ids.empty() &&
+          h.size()==3 && !h.observe(prefix,allocate).selected,
+          "ordinary END routing merged another source or repeated completion");
+    suffix.complete=true;
+    const auto suffix_end=h.observe(suffix,allocate);
+    check(suffix_end.selected && suffix_end.signal_id==suffix_id && suffix_end.superseded_ids.empty(),
+          "ordinary separate suffix lost its own END routing");
 }
 void helper_nominal_suffix_arbitration() {
     using datapump::modem::PatternBurst;
@@ -627,9 +681,9 @@ void incompatible_same_duration_clocks_stay_independent() {
         History history;std::uint64_t ids=0;const auto allocate=[&]{return ++ids;};
         const auto initial=history.observe(raw(1,1164,1676,128),allocate);
         const auto next=history.observe(raw(2,1164+offset,1804,256),allocate);
-        const bool aligned=offset==0 || offset==tolerance || offset==128-tolerance || offset==128;
+        const bool aligned=offset<=tolerance;
         check(next.selected && (next.signal_id==initial.signal_id)==aligned && ids==(aligned?1U:2U),
-              "ordinary overlap ignored its symmetric symbol-clock tolerance");
+              "ordinary overlap changed physical-prefix ownership beyond its timing cell");
     }
 }
 void stronger_profile_replaces_prefix() {
@@ -1103,9 +1157,9 @@ void helper_source_domains_remain_independent() {
         case 7:std::get<PatternSourceIdentity>(old.source_identity).clock_half_width_ppm=1e6;break;
         }
         const auto original=ambiguous.observe(old,allocate),observed=ambiguous.observe(next,allocate);
-        const bool separate=variant!=0 && variant!=4;
+        const bool separate=variant!=4;
         check((observed.signal_id!=original.signal_id)==separate && ids==(separate?2U:1U),
-              "helper physical births depended on unavailable source identity or changed ordinary profile competition");
+              "physical births depended on Helper/source metadata or changed profile competition");
     }
     History rebased;ids=0;old=first();const auto original=rebased.observe(old,allocate);
     old.first=11000;old.end=45000;rebased.observe(old,allocate);
@@ -1182,6 +1236,7 @@ int main() {
         helper_nominal_support_geometry();
         helper_physical_birth_ownership();
         helper_physical_birth_capacity_boundary();
+        ordinary_physical_birth_ownership();
         helper_nominal_suffix_arbitration();
         amplitude_passband_aliases();
         optional_history_priority();

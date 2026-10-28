@@ -8,14 +8,20 @@ and use Git history for comparisons. Detailed studies remain in the
 
 ## Current two-tone Helper Carrier candidate
 
-The current human checkpoint is `61e66b3` with the funded-provenance overlay:
-Live source `dce06cda…`, now with the accepted additive-headroom headers, core
-`85a53d89…`/GUI `d8e3be8d…`. Actual-RF/provenance, 64-bit continuity/loss and
-headless GUI checks pass. Current full HF40 also passes exact public completion;
-the preceding `f37/949` pass keeps its own binding.
-Current fully GPSDO-disciplined HF control passes, while Rate-360 Fake-FHSS fails
-with no owners despite qualified reference; its provenance-admission repair is
-private and pending.
+The current human checkpoint is `572b051`, with initial-descriptor support
+source `9977084b…`/test `8fd185fa…`, unchanged core `2c118bf0…` and Live
+`70a546c1…`. Current GUI `79d40073…` passes the EME Planner caution check and
+headless self-check. The prior `64824037…` GUI retains its standard build and
+five focused passes. The retained HF15k capture restores the collision owner but is **STRICTFAIL**: four
+premature native ENDs among 17 identities despite fixture exit 0/canonical
+exact eight bits. The private calendar-END proposal is held, unbuilt and
+unintegrated after bounded review. The older `2101/3b7` END-consistent capture left this collision unexercised.
+Per-ID public Snapshot lifetimes remain unavailable. The preceding `0463/276e`
+binding retains History/pending-GUI, raw/provenance/actual-RF, full GUI 39/39 and
+six selected ordinary-Live passes, including unskipped exact-source coverage;
+these are not full reruns on `2c118`.
+Strict Rate-360 `21bf/913` and full HF40/fully GPSDO-disciplined HF `85a5/d8e3`
+passes retain their own bindings; those full runs have not been repeated on this app.
 Measured HF40 reference quality is accepted as useful for that six-physical-core/
 2 GiB simulator; estimator tuning remains frozen rather than chasing GPSDO
 specifications or a CRLB target.
@@ -29,7 +35,7 @@ pending. The preceding checkpoints `871a55a`, `aef6580`, `62db765` and `8355e64`
 source-bound evidence remain distinct from the superseded single-tone R16 source/binary.
 R17 measured retune-prefix FFT work falls with all LF alternatives retained,
 but total CPU rises. Earlier HF40 deadline failures remain preserved separately
-from the current pass. The current HF15k primary pass
+from the current pass. An earlier HF15k primary pass
 retains a strict secondary-row failure, and full EME fails. The rebuilt GUI is
 available; bounded probes now narrow the failed-decision mechanisms, while
 controlled diagnosis and full qualification remain open.
@@ -71,7 +77,200 @@ GUI/source hashes; the initial checkpoint does not bind those evolving inputs.
 
 ### Current measured status and remaining failures
 
-The [current additive build](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r3-additive/build/terminal.json)
+The [Planner caution build/checks](../local-evidence/helper-two-tone/architecture-review-r1/planner-caution-r1/results.json)
+pass: standard build 8.323048 CPU seconds, target build 13.684663,
+`gui_link_planner` 63.336637 CPU/71.120531 wall seconds, and GUI self-check
+6.846337 CPU/6.974529 wall seconds. [Launch/source bindings](../local-evidence/helper-two-tone/architecture-review-r1/planner-caution-r1/launch.json)
+retain page `f2e0436e…`/test `b9fd3c27…`; output GUI is `79d40073…`, with core
+`2c118bf0…` unchanged. Pins are unchanged and all processes are reaped. The
+specific caution is tested at 220/900-pixel widths; this diagnostic is built
+and tested, without changing the strict HF15k or private EME failure outcomes.
+
+The [current initial-descriptor main checks](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/containment-r1/descriptor-initial-r1/main-checks-r1/results.json)
+pass with unchanged pins/all processes reaped: standard build, target build,
+five focused tests (40.627300 CPU seconds) and GUI self-check (6.817171).
+[Launch/source bindings](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/containment-r1/descriptor-initial-r1/main-checks-r1/launch.json)
+retain header `9977084b…`, test `8fd185fa…`, Live `70a546c1…`, core `2c118bf0…`
+and GUI `64824037…`. No estimator tuning changed.
+
+The [original full HF15k fixture](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/containment-r1/descriptor-initial-r1/full-r1/results.json)
+exits 0 but is **STRICTFAIL**. It captures all 1,188,236 samples, with 11,711 FFT
+jobs/306 transforms/207 owners, 152.656895 external CPU/41.049254 wall seconds.
+[Actual launch and pins](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/containment-r1/descriptor-initial-r1/full-r1/launch.json)
+retain the maintained +3 kHz/+100 ppm shared-radio profile. The corrected
+[17-identity audit](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/containment-r1/descriptor-initial-r1/full-r1/audit-r2.json)
+(`ee6f7088…`) retains **four premature native ENDs**. Owner 39 now executes
+56 FFT jobs, with 77/77 whole-score queries contained, instead of zero work.
+Its alias next address 74 fails while canonical address 75 scores 110.90 in the
+same window and TX DATA continues. Exact canonical eight bits and monotone
+intended commits do not waive this physical-END failure. The sealed trace has
+zero drops, but per-ID public lifetimes remain unavailable. Three qualified
+poll escapes represent two distinct dates; they remain engineering coverage
+failures, not independent confidence trials. Bounded Astra review closes private
+calendar-END proposal `038e1a30…` as **held, unbuilt and unintegrated**:
+`confirmed_positive` includes accumulated weak chains, so exact prefixes/date
+cones cannot manufacture historical standalone positives. Candidate quotas can
+return before the content callback, and zero-bit retry must occur after append
+at the next symbol. A minimal two-pass Bank publication/actual-receipt join,
+separately funded bounded tokens and retirement protection remain unresolved.
+No END repair pass or matched-PCM CPU-gain claim follows. The earlier audit metadata error and its correction
+remain retained together, without another DSP run. The specific EME Planner
+caution is subsequently built/tested as recorded above.
+
+The [new strict fixture target build](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/containment-r1/descriptor-initial-r1/full-r1/newstrict-fixture-r1/main-check-r1/results.json)
+passes using 14.357223 CPU seconds, source `427f9b7b…`/binary `ae65dc37…`.
+Retained-trace reinspection then exits 1 in 0.378098 CPU seconds with requested/
+available audit: 17 native completions/17 failed receipts, 13 quiet controls,
+four conflicts and zero unresolved. [Actual commands/bindings](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/containment-r1/descriptor-initial-r1/full-r1/newstrict-fixture-r1/main-check-r1/launch.json)
+retain GUI `79d40073…`/core `2c118bf0…`; pins are unchanged/all processes reaped.
+Owners 25, 39, 53 and 41 join actual same-window standalone/full-suffix DATA
+addresses/bits and TX end. Missing evidence/probe-off states remain explicitly
+unavailable. Online fixture success/invalid now includes this guard, but there
+is **no new Receiver, PCM or Session run**, no END repair and no new acquisition
+qualification.
+
+The [original matched-inspector assumption](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/containment-r1/descriptor-initial-r1/full-r1/newstrict-fixture-r1/main-check-r1/matched-results.json)
+**fails**: it expected old exit 0, but the old posthoc inspector also exits 1
+(0.342272 CPU seconds), with the same existing summary. Reinspection supplies
+`ordinary_baseline=nullptr`, so an independent no-omission conditional-birth
+check cannot qualify the primary. The [corrected comparison scope](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/containment-r1/descriptor-initial-r1/full-r1/newstrict-fixture-r1/main-check-r1/comparison-r2.json)
+verifies only the new four-witness diagnostic/13 quiet controls; this is not an
+old-pass/new-fail acquisition comparison. The original full Live fixture exit
+0 remains separate, and the independent inspector limitation is unfixed.
+
+The [preceding `2101` HF15k containment run](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/containment-r1/full-r1/results.json)
+passes the fixture, exit 0, with final public exact `11010110`: 1,188,236 samples,
+6,412 FFT jobs/145 transforms/207 owners, 712,631,312 peak DSP bytes, 92.415521
+external CPU/30.661176 wall seconds, all processes reaped and pins unchanged.
+[Launch/bindings](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/containment-r1/full-r1/launch.json)
+retain the same maintained +3 kHz/+100 ppm shared-radio profile, six physical
+cores/2 GiB, core `2101c0c9…`/GUI `3b7ed788…`, fixture `50ece258…`, channel
+`e0b3ed7e…` and observation fixture source `4da37fd1…`. The [audit](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/containment-r1/full-r1/audit.json)
+finds canonical owner 9 now executes 266 FFT jobs/four transforms, with 140/140
+whole-score queries valid and contained, versus zero FFT work on `0463`. These
+separate captures provide no matched-PCM CPU-gain claim.
+
+The sealed 53,792-line trace has zero drops. TX-owned valid DATA maps to sample
+721,767.83094; a conservative finite-support envelope ends at 722,404. All five
+native failed-next-address-117 windows end at 808,612–808,630, at least 14.086
+seconds after that bound. This establishes END consistency in this capture,
+not general old-collision repair. Four intended commit IDs/twelve records are
+monotone, and the final public Snapshot has the exact row; all per-ID public
+Snapshot lifetimes were not retained. Epoch-31 collision owner 39 executes zero
+FFT jobs, with 155/170 receipt lockouts, so historical wrong-address END remains
+**unexercised**. [Read-only owner-39 analysis](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/containment-r1/full-r1/owner39-readonly-r2.json)
+finds actual produced block U ≤0.0233486 Hz throughout its support, inside birth
+radius 0.0298115 Hz. An optional one-second posterior widens to 0.0338673 Hz;
+mandatory sixteen-bucket coarsening includes startup U 0.0888925 Hz. A proposed
+immutable initial-descriptor fallback/persisted disjoint-support walk has no
+history/storage growth. Its [reviewed source](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/containment-r1/descriptor-initial-r1/source-binding.json)
+`9977084b…`/test `8fd185fa…` was subsequently built and passed focused checks;
+the separately bound full run above exposes the strict END failure.
+Bounded review also finds missing full-prefix/negative-proof API support for an
+END-ambiguity component; that component is setup-blocked, not passed.
+
+The [five containment checks](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/containment-r1/main-focused-r1/results.json)
+pass on their preceding `e5b6/c5be` binding. The [observation rebuild/simulation](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/containment-r1/observation-build-r1/results.json)
+binds `2101/3b7`; `helper_sim` passes in 2.686303 CPU seconds. The
+[that GUI self-check](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/containment-r1/current-gui-self-check-r1/results.json)
+passes in 6.944563 CPU seconds. Full GUI/Live results below retain `0463` bindings.
+
+The [paired actual-History validation](../local-evidence/helper-two-tone/hf15k-terminal-join-r1/newpending-prefix-r1/validation-results.json)
+retains old failure/new pass for the pending-ID replacement. Main source
+`12cff263…` makes physical-birth separation independent of Helper, without END,
+scoring or layout changes. ±chip timing refinements, different-duration and
+nonuniform timelines remain supported; the 64-entry cap applies to both modes.
+The [main build](../local-evidence/helper-two-tone/hf15k-terminal-join-r1/newpending-prefix-r1/main-build-r1/results.json)
+passes using 95.735690 CPU seconds, binding core `0463aa14…`/GUI `276e70e2…`.
+The [first focused run](../local-evidence/helper-two-tone/hf15k-terminal-join-r1/newpending-prefix-r1/main-focused-r1/results.json)
+retains one stale ordinary-alias expectation failure; raw/provenance/actual-RF
+DATA checks pass on this exact core. After a reviewed two-line expectation-only
+repair, [R2 checks](../local-evidence/helper-two-tone/hf15k-terminal-join-r1/newpending-prefix-r1/main-focused-r2/results.json)
+pass: History 0.034022 CPU seconds, GUI pending batch 0.676285 and GUI self-check
+8.816532, after 8.628461 test-only relink CPU seconds. [Inputs](../local-evidence/helper-two-tone/hf15k-terminal-join-r1/newpending-prefix-r1/main-focused-r2/inputs.json)
+bind current test `1a025fcb…`; all processes are reaped. These bounded History
+checks do not establish native END or a new full RF-only/Rate-360/HF40 run.
+The [full GUI stage](../local-evidence/helper-two-tone/hf15k-terminal-join-r1/newpending-prefix-r1/gui-stage-r1/results.json)
+passes **39/39**, using `./build.sh test gui --build-jobs 2 --jobs 1` under
+affinity 0–11: 236.586954 CPU/400.415282 wall seconds, all processes reaped and
+core `0463aa14…`/GUI `276e70e2…` pins unchanged. The failed 299-case contract
+below remains distinct; no platform/display/audio or hardware coverage follows.
+The [six-case ordinary-Live selection](../local-evidence/helper-two-tone/hf15k-terminal-join-r1/newpending-prefix-r1/live-stage-r1/results.json)
+passes **6/6**: `live`, profiles, resources, transmit-lock, replay staging and
+`live_exact_source` (passed, not skipped). It uses 261.415944 test CPU/173.261488
+wall seconds plus 16.408227 build CPU seconds, all processes reaped, with core
+`0463aa14…`/GUI `276e70e2…` pins unchanged. This selected coverage does not rerun
+the full 299-case contract or qualify other payload/platform configurations.
+
+The [preceding `0463` HF15k run](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/results.json)
+finishes **FAILED**, exit 1 without a cap: full capture 1,188,236 samples, zero
+primary bits/END, 3,878 FFT jobs/111 transforms/207 owners, 65.401327 external
+CPU/27.549556 wall seconds, all processes reaped and pins unchanged.
+[Commands](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/commands.json)
+retain crystal/crystal shared radio, actual +3 kHz/+100 ppm, 15,000 W Helper/4 W
+DATA, 30 MHz Shift, Rate 36/interleave 10, path loss 180 dB, seed 5181, Default
+clock/0 ms configured audio error, 2 GiB and six physical cores.
+`--receiver-probe` is observation-only. The [fixture binding](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/fixture-binding.json)
+is source `98041e95…`/binary `86e5ab58…` on core `0463aa14…`.
+
+Independent source/trace diagnosis confirms the clock sign and finds canonical
+epoch 1,800,000,004/owner 9 executes **zero FFT jobs**. Valid mandatory block
+uncertainty is at most ±0.088892536958 Hz, inside constructor radius
+0.097681599458 Hz. Optional historical refinement instead widens the hull to
+[−0.887628370, +0.846202091] Hz and overrides the base, causing containment
+lockout. The [full trace](../local-evidence/helper-two-tone/hf-crystal15k-current-0463-r1/full/hf-crystal-on-bits-61534043810390.jsonl)
+contains two suffix rows/four commits: zero primary bits does not mean no
+accepted bits globally. This source-bound failure remains failed. Its later
+containment repair/pass is separately bound above, with rejection/reset behavior
+preserved; this failure does not establish a physical precision limit.
+
+This failure is distinct from the old R17 core `adb6234d…`/fixture `ad61…`
+(GUI sibling `8b68…`) that printed `decoded_exact` while its independent audit
+failed alias end 460,517 before true payload end 721,595. R19 core `091bb…`/
+fixture `c7b8…` probe exits 2 and confirms wrong address 74 versus strong 75.
+That false-END defect remains unresolved. A fixture's six-second gap does not
+establish actual-source absence; original source-bound failures remain.
+
+The [raw-frequency main build](../local-evidence/helper-two-tone/rate360-frequency-admission-r1/main-build-r1/terminal.json)
+and targets pass with unchanged source guards, 93.052755 aggregate CPU seconds.
+The [frozen `21bf/913` focused terminal](../local-evidence/helper-two-tone/rate360-frequency-admission-r1/main-focused-r1/terminal.json)
+is all-pass/reaped/guarded: strict supplied Rate-360 Fake-FHSS retains all eight
+source/full-wire bits, public pending **one row**, scored END and replay over
+355,201 samples/24.666736 audio seconds. It executes 28,998 FFT jobs/537 transforms/
+40 owners, 553,372,420 peak DSP bytes within 2 GiB, in 58.419223 external CPU/
+14.884920 wall seconds on six physical cores. [Actual commands/bindings](../local-evidence/helper-two-tone/rate360-frequency-admission-r1/main-focused-r1/inputs.json)
+retain Default/70 ms, 1,500 W Helper and fixed physical RF; this is Fake-FHSS,
+not hardware RF retuning. The original zero-owner failure below remains failed.
+The new mandatory contract test `helper_raw_frequency` and provenance/actual
+changing-RF independent-hop-phase/loss DATA checks pass, as does 64-bit normal
+loss (9.845437 CPU/68.080925 wall seconds). GUI self-check passes in 7.754300 CPU/
+6.790075 wall seconds. These are selected checks, not a full contract rerun.
+
+The repair uses the existing prepaid 400 ms FIFO and provider stamps for dated
+raw M support, including full FIR dependencies/−512 real-delay coordinates.
+It retains all nine unresolved LF choices, exact `q=0` and no phase authority,
+without estimator, split, lead or threshold changes. The
+[5.505507-CPU-second component](../local-evidence/helper-two-tone/rate360-frequency-admission-r1/component-r1/results.json)
+is geometry-only. The [completed folded-job/date audit](../local-evidence/helper-two-tone/rate360-frequency-admission-r1/main-focused-r1/folded-raw-frequency-audit.json)
+matches all 2,803 scientific frequency observations to the old zero-owner
+failure; only raw-stage retention changes. Its 2,726 qualified polls have maximum
+diagnostic error 0.0110401 Hz/zero exclusions, but are correlated, not calibrated
+confidence trials. All 224 input descriptors have exact `q=0`/no phase correction;
+491 whole-score queries and every one of 28,998 FFT jobs join stamped current
+dated M support with all nine LF alternatives. The first M certificate at
+sequence 107 precedes optional 108,368-byte reclamation at 108/constructor 110;
+mandatory provenance survives. ID 2/revision 1 progresses `110`→`11010`→`1101011`→
+`11010110`, completing at feed 247,077 after payload end 159,432 with 87,645
+fully scored absent samples. Capture 355,201 and ordinary frontier 349,201 remain
+distinct. Raw staging is 23,040 samples at 57,600 Hz = 400 ms/92,160 bytes.
+One invalid checkpoint join/eight unfinished reads prevent zero-backlog or
+hardware real-time claims. Coarse native CPU is 55.828286 seconds: search
+48.225582, control 7.319191, rolling 0.255678, publication 0.021394 and setup
+0.006442. Fine FFT/Helper/frontend costs are unpartitioned, not zero. The normal
+branch has focused coverage; older full-HF40 receipts are separate, without
+another heavy repetition.
+
+The [preceding additive build](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r3-additive/build/terminal.json)
 passes in 144.180073 aggregate CPU seconds, binding core `85a53d89…`/GUI
 `d8e3be8d…`, accepted headers `20e5ff86…`/`1167dca8…` and regression `4fdaafbd…`.
 [Focused checks](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r3-additive/focused/terminal.json)
@@ -86,7 +285,7 @@ of zero each; outside-constructor pauses fall 252→0. Measured U stays
 Every one of the 6,195 jobs joins dated current-witness support. This restores
 required work, without a CPU-saving or improved-precision claim.
 
-The [current additive full-HF40 terminal](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r3-additive/qualification-hf40/terminal.json)
+The [preceding additive full-HF40 terminal](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r3-additive/qualification-hf40/terminal.json)
 passes/reaps with all source/binary/key guards unchanged. It retains exact eight
 source/full-wire bits, public pending identity, scored END and replay over
 1,193,132 samples/194.9562 audio seconds, 208 owners, 103,663 FFT jobs/82 transforms,
@@ -118,19 +317,97 @@ separate; this maintained pass is not single-row/suffix-free strict cable
 qualification. This source-bound cost increase is not a general cheap-receiver
 or total-work-saving claim.
 
-The [current GPSDO/Fake-FHSS controls](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r3-additive/fhss-gps-controls/terminal.json)
+The full-HF40 [trace](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r3-additive/qualification-hf40/full/hf-on-bits-52547576982689.jsonl)
+uses **legacy M**, not typed DATA marginalization. Constructor sequence 106 has
+H 2462.5 Hz, D 1500 Hz, measured U 0.3890134488845302 Hz, radius
+0.3978025113845302 Hz and 467 pairs. Mask sequence 161 retains nine original/nine
+selected LF alternatives, not 55. Its existing `D−H` shear preserves pilot/audio
+correlation. The actual-RF typed DATA path conservatively marginalizes the full
+joint covariance to scalar `fD`/clock coefficient zero, losing conditional
+correlation. That is a separate unquantified optimization gap, not a bound
+correctness failure, physical floor or cause of this HF40 cost. A possible dated
+affine parameter could reuse the selector; none is implemented or measured.
+
+The [preceding `85a5` GPSDO/Fake-FHSS controls](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r3-additive/fhss-gps-controls/terminal.json)
 are reaped with unchanged source/binary/key guards. Fully disciplined RF **and
 audio** HF control passes exact eight bits/END with Default/70 ms: 63.283963 CPU/
 16.188821 wall seconds, 5,103 FFT jobs/243 transforms/176 owners and 996,080
 samples. It is distinct from the RF-only control below, without a matched helper
-CPU ratio. The current Rate-360 Fake-FHSS case **fails** after 355,201 samples/
+CPU ratio. That Rate-360 Fake-FHSS case **fails** after 355,201 samples/
 24.667 audio seconds, 1.416671 CPU seconds, zero owners/bits/END despite qualified
 pilot U ≈0.0157 Hz. Bounded diagnosis identifies folded raw `q=0`/provenance
 admission lockout; no physical precision, phase or C/N0 cause is established.
-The fix remains private/pending; older Rate-360 passes retain their earlier
-bindings. [Actual commands and scope](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r3-additive/fhss-gps-controls/inputs.json)
-preserve the fixed-physical-RF Fake-FHSS distinction. EME private work remains
-closure preparation, without a new full-correlator/Live result.
+The current repair/pass above has a different binding; this failure and older
+Rate-360 passes remain retained. [Actual commands and scope](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r3-additive/fhss-gps-controls/inputs.json)
+preserve the fixed-physical-RF Fake-FHSS distinction. The separate private EME
+closure has no acceptance result. Its
+[47-member closure compile](../local-evidence/helper-two-tone/eme-shared-gate-r1/closure-r1/compile-execution.json)
+passes in 112.514430 CPU seconds with the public ABI frozen to `85a5`. The
+[first numeric control](../local-evidence/helper-two-tone/eme-shared-gate-r1/closure-r1/validation-oracle-coordinate-failed/controls-on/run.json)
+fails in 1.193671 CPU seconds on the scalar absolute-carrier-phase oracle. An
+authorized one-line oracle-coordinate repair leaves the core unchanged. The
+[final bounded result](../local-evidence/helper-two-tone/eme-shared-gate-r1/closure-r1/bounded-first-score-cost-result.json)
+is **private COSTFAIL**: total compile 117.579083/150 CPU seconds, numeric controls
+5.821313/10 including both preserved failures, total runtime 273.081667 seconds;
+[final bindings](../local-evidence/helper-two-tone/eme-shared-gate-r1/closure-r1/final-bindings.json)
+retain all 47 members/ABI and reaped processes. OFF finishes its fixed fence in
+77.181022 CPU seconds; its best full symbol-index-0/lane-7 score
+30.1203018283641 is below **31.7153153422971** in this callback scope. The older
+31.0201 threshold remains a separate source-bound result. Ordinary cache use is
+active on all 85,253 pushes, with 1,886,843 hits/11,982,303 misses. ON reaches its
+190-CPU cap (190.079332 CPU/189.184817 wall seconds, exit −9) before canonical
+first score, fixed fence and public-input hash. There is no ON score gain or
+whole-fence cost ratio.
+
+OFF/ON corrected-input equality is not established: first selection is 455
+versus 437 pairs, start offsets 15.641/15.627 seconds, admission 30,856/29,656,
+and initial captured ends 1,581/2,048. A read-only source explanation involving
+start/async TX-ready timing and partial-read flush partitioning is plausible,
+not sole-cause proof. Bounded Astra review keeps the implementation private.
+The later [ordinary-cell/gate-deficit component](../local-evidence/helper-two-tone/eme-shared-gate-r1/deficit-component-r1/analysis.json)
+passes geometry/Fit/scalar/quarter/`ln(2)`/split checks at 1e−8 tolerance in three
+combined geometries. In one fixed-order comparison, optional CPU changes
+0.681269→0.382669 seconds; ordinary-base CPU 0.124015 seconds is separate. All N
+samples are classified, while 32.65864% need nonunity row reads. This proves
+neither Live cost nor an isolated score gain. [Final bindings](../local-evidence/helper-two-tone/eme-shared-gate-r1/deficit-component-r1/final-bindings.json)
+retain all reaped runs and cumulative 121.301076 compile/275.907174 runtime CPU
+seconds including original failures, without a reset. The later private
+`deficit-live-r1` integration is now **COSTFAIL**, not a main change or promotion.
+Its [compile](../local-evidence/helper-two-tone/eme-shared-gate-r1/deficit-live-r1/compile-execution.json)
+uses 178.601767 CPU seconds; [six controls](../local-evidence/helper-two-tone/eme-shared-gate-r1/deficit-live-r1/controls/execution.json)
+pass using 5.523147. Archive `9478fde5…`/binary `49680bf7…` OFF completes in
+80.967815 CPU seconds, with first score 30.1203 below 31.7153. The original
+[serial-1 parser failure](../local-evidence/helper-two-tone/eme-shared-gate-r1/deficit-live-r1/parser-serial1-failed/OFF/guards.json)
+is retained; a one-line serial-2 parser repair and [read-only guard](../local-evidence/helper-two-tone/eme-shared-gate-r1/deficit-live-r1/OFF/guards-serial2.json)
+pass without rerunning OFF. [ON](../local-evidence/helper-two-tone/eme-shared-gate-r1/deficit-live-r1/ON/run.json)
+hits its cap at 190.066988 CPU seconds before a canonical score, sealed footer,
+fixed fence or raw/read/scorer binding. Its last joined sample is 695,304 from
+owner origin 83,304. [Partial-scope accounting](../local-evidence/helper-two-tone/eme-shared-gate-r1/deficit-live-r1/ON/partial-scope-run.json)
+ends at 278.141803/280 new-stage runtime CPU seconds, 554.048977 cumulative,
+all processes reaped. No matched score gain or CPU ratio follows; earlier gate
+cost failures and partial mismatches remain preserved. Read-only auxiliary
+review of [OFF stdout](../local-evidence/helper-two-tone/eme-shared-gate-r1/deficit-live-r1/OFF/stdout.log),
+[trace](../local-evidence/helper-two-tone/eme-shared-gate-r1/deficit-live-r1/OFF/eme-on-bits-63100411869505.jsonl)
+and guarded inputs separates configured straight-tone C/N0 before waveform gains—total
+30.7609/pilot 30.3033/auxiliary 20.7609 dB-Hz—from OFF measured pilot median
+30.0119 dB-Hz (lead through 20 seconds: 30.0025). No independent measured
+auxiliary C/N0 is available. OFF has 495 pilot phase updates but no qualified
+clock over 8,215 raw publications. Actual optional auxiliary work uses 1.56155
+CPU seconds/175.0527 audio seconds (0.00892 CPU/audio), distinct from whole OFF
+fixture CPU 80.85284/external 80.967815.
+
+Current markers feed only the clock owner, not a qualified timing Reference.
+The [pulse-lattice backend](../src/pattern_correlator.cpp) declines the compact timing-prior API, and even a
+perfect 400 ms periodic prior intersects every one-second origin cell before
+padding. Stronger markers alone therefore cannot remove the observed 46
+arrival alternatives. This is an implementation/alias-geometry limit, not a
+physical timing/noise bound. The earlier private punctuation estimator's
+0.282916 CPU/audio and 75/81 detections could be worthwhile if measured receiver
+work were removed; it has no current selector authority, so neither intrinsic
+impracticality nor a need for weaker-tone acquisition follows. The proposed
+RF-only fair-conditioning component is **unbuilt/setup-blocked**: whole-symbol support 87,040
+exceeds its 32,768-sample export, with unresolved 512-sample/filter-date setup
+gaps; it supplies no matched control.
 
 The [preceding supplied HF40 qualification](../local-evidence/helper-two-tone/record-frequency-integration-r1/main-integration-r2/qualification-hf40-r1/results.json)
 passes (exit 0): all eight source/full-wire bits, public pending identity,
@@ -176,6 +453,22 @@ retain the private RF-only override. The [link-output incident](../local-evidenc
 overwrote the old R4 `link.map`, which is invalid as R4 authority. Source/core/
 binary pins remain unchanged; the corrected control uses its own map without
 the redundant wrapper. No original map reconstruction is claimed.
+A separate full RF-only control based on frozen `85a5` builds, but both runtime
+budgets fail incomplete with `SIGXCPU` and no final trace/total-work receipt:
+
+| Retained RF-only control | External CPU / wall | Joined work lower bound |
+| --- | --- | --- |
+| [250-CPU budget](../local-evidence/helper-two-tone/architecture-review-r1/rf-only-control/full-85a5-r1/runtime/audit.json) | 250.260031 / 37.319753 s | 28,490 FFT jobs/74 transforms, 53 executing owners |
+| [900-CPU followup](../local-evidence/helper-two-tone/architecture-review-r1/rf-only-control/full-85a5-r1/runtime-r2/audit.json) | 899.450912 / 132.945986 s | 102,795 FFT jobs/267 transforms, 143 executing owners |
+
+The latter observes canonical eight bits/END but the same ID 1 publishes
+`11`→`01`→`11010`, violating the prefix contract. Canonical completion cannot
+make this a full control pass. No complete CPU ratio, source-finished result or
+post-signal backlog/health conclusion follows. Helper-OFF receives the mixture
+unnotched, while the assisted frontend isolates it: that fairness difference
+remains unquantified. The current History guard above passes its bounded paired
+and GUI checks but has no full 900-CPU RF-only rerun; the original strict failure
+and HF15k's independent false-END failure remain unchanged.
 
 The [source-derived R24 tail budget](../local-evidence/helper-two-tone/architecture-review-r1/hf40-tail-budget.json)
 requires at least about 191.71 capture seconds versus 162.18 observed. Tail/stage/
@@ -1119,8 +1412,9 @@ score are unavailable. Its eight ordinary work frontiers remain at sample
 That prototype already uses eight active-lattice shared projectors, not one per
 arrival; new "sharing" is not an untested cure. The private alternative replacing
 33 × Moments prefixes with streaming segments has a limited private component
-acceptance (17.64% producer CPU and 60% storage reduction). The full correlator
-is uncompiled, with no Live acquisition or receiver-completion claim.
+acceptance (17.64% producer CPU and 60% storage reduction). The later closure
+compile/oracle failure above retains its own binding; no Live acquisition or
+receiver-completion claim follows.
 The matching 5,640 frequency-trace records establish trace identity, not PCM
 identity or a matched whole-work CPU comparison. No complete eight-bit/END,
 physical SNR floor, production promotion or broad Live qualification follows.

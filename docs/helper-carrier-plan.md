@@ -1,11 +1,22 @@
 # Helper Carrier implementation and qualification
 
-Updated 28 October 2026. Human checkpoint `61e66b3` is committed. The rebuilt
+Updated 28 October 2026. Human checkpoint `572b051` is committed. The rebuilt
 GUI is `build/dev/datapump-gui`; source-bound results and remaining limits are in
 [validation](validation.md). The completed contract stage failed; qualification
-remains incomplete. Current core `85a53d89…`/GUI `d8e3be8d…` passes targeted
-actual-RF/continuity/loss, self-checks and full HF40 public completion. The prior
-`f37/949` HF40 pass keeps its own binding.
+remains incomplete. Current GUI `79d40073…` passes the EME Planner caution
+check and headless self-check; core `2c118bf0…` is unchanged, retaining its five
+focused passes on the preceding `64824037…` GUI binding. The retained HF15k
+capture strictly fails four premature native ENDs among 17 identities despite
+its original fixture exit 0/canonical exact eight bits. A new test-only guard
+verifies four conflicts and 13 quiet controls by trace reinspection, without a
+new receiver/PCM run; neither old nor new posthoc inspector is an acquisition
+pass. The private calendar-END proposal is held,
+unbuilt/unintegrated after bounded review: weak-chain confirmation cannot prove
+a historical standalone positive. Full GUI 39/39 and six selected ordinary-Live passes
+retain the preceding `0463/276e` binding, including unskipped exact-source
+coverage. Full Rate-360 `21bf/913` and HF40 `85a5/d8e3`/`f37/949` passes retain
+their own bindings; those full runs have not been repeated on this binary.
+No full-contract/platform/hardware qualification follows.
 
 ## Current implementation
 
@@ -39,11 +50,11 @@ remain separate.
 
 ## Measured status and remaining acceptance
 
-Checkpoint `61e66b3` has a rebuilt GUI and the two-tone/one-bank implementation
+Checkpoint `572b051` has a rebuilt GUI and the two-tone/one-bank implementation
 summarized above. The [operating guide](helper-carrier.md#manual-reception) gives
 a compact measured comparison; [validation](validation.md) retains precision,
 work, CPU, support dates, exact bindings and every individual failed result.
-The current supplied HF40 case passes exact eight-bit/full-wire reception, public
+The preceding `85a5/d8e3` supplied HF40 case passes exact eight-bit/full-wire reception, public
 pending identity, scored END and replay: 194.956 source-audio seconds and
 869.479448 process CPU/114.150555 wall seconds on six physical cores/2 GiB,
 103,663 FFT jobs/82 transforms. This restores scoring but increases cost over
@@ -71,12 +82,17 @@ Whole-score provenance is funded and additive constructor headroom restores all
 four early owners in the targeted actual-RF case, with unchanged measured U and
 all three LF alternatives retained. Its 6,195 witnessed FFT jobs include restored
 work; the old 609-FFT result remains a cold-lockout failure, not an RF-saving proof.
-Current Rate-360 Fake-FHSS fails with no owners despite qualified reference;
-folded-mono provenance admission is the next focused repair. HF15k physical-END
-authority, full EME, 1,024-byte reception, 54–450 MHz coverage and hardware
-qualification remain open. The HF15k alias fully scores absent address 74 while
-true address 75 is strong in the same window: this is an END-authority defect,
-not insufficient scored duration, with no receiver fix or strict pass.
+Frozen `21bf/913` Rate-360 Fake-FHSS passes full eight-bit/public pending one-row/END/replay
+after bounded raw-`q=0` provenance repair; its earlier zero-owner failure remains
+preserved. No estimator, split, lead or threshold changed. Current HF15k restores
+collision owner 39 from zero to 56 FFT jobs, with 77/77 contained queries.
+Total work is 11,711 FFT jobs/306 transforms/152.656895 CPU seconds; separate
+captures supply no matched CPU gain. Four premature native ENDs remain a strict
+failure. Address 74 fails while canonical address 75 scores 110.90 in the same
+window and DATA continues: this is a calendar-END authority defect, not an
+established precision limit. The older `2101/3b7` END-consistent capture left this
+collision unexercised. Full EME, 1,024-byte reception, 54–450 MHz coverage and
+hardware qualification remain open. No END repair or strict pass is claimed.
 Estimator escapes remain part of qualification. The full contract run is
 **FAILED**, with two timeouts and nine assertions, and has not been rerun on the
 current app; qualification is incomplete.
@@ -89,15 +105,33 @@ Freeze Q, lag/history, uncertainty multipliers and additional lead. Preserve the
 funded minimum provenance and validated additive constructor headroom before more
 estimator tuning. Accept measured HF40 reference quality as useful on the stated
 six-physical-core/2 GiB simulator, without a GPSDO-specification or CRLB target
-criterion. A whole instantaneous hull is sufficient for that conservative design
+criterion; a modest residual RF penalty can still be useful. A whole instantaneous
+hull is sufficient for that conservative design
 but not proved necessary for a score; accumulated phase, FIR support and
-correlations require proof before substituting a later average. Preserve unresolved LF/UTC/key and
+correlations require proof before substituting or retrodating a later average. Preserve unresolved LF/UTC/key and
 independent hop phase. See the [architecture/error review](helper-carrier.md#receiver-architecture-decision)
 for primary references and the three short discriminators, with the compact
 [reference/error-work budget](../local-evidence/helper-two-tone/architecture-review-r1/reference-budget.json).
 Targeted passes do not establish general safety or full practical acceptance.
-The RF-only control has no matched-frontier cost ratio; EME gating/template/cost
-remains separate from the unproved pilot-CFO-loss explanation.
+Full HF40 retains pilot/audio correlation through legacy M/`D−H` geometry; typed
+DATA scalar marginalization is a separate unquantified optimization gap, not
+the HF40 cost cause. No affine-parameter implementation or CPU gain is claimed.
+The RF-only control has no matched-frontier cost ratio. Its full 250/900-CPU
+controls remain incomplete and violate an ID's published prefix;
+neither canonical eight bits/END nor the current paired History guard test
+qualifies that full control. The guard is independent of Helper and preserves
+legitimate timing refinement; no END/scoring/layout change or full control rerun follows.
+Helper-OFF's unnotched mixture is also an unquantified fairness difference;
+the fully GPSDO-disciplined control changes audio and lead. Neither gives a fair
+CPU ratio. EME's roughly 1.52 dB component gating opportunity remains separate
+from the unproved pilot-CFO-loss explanation. The private gated Live attempt fails its CPU budget before a
+matched first score; no isolated gain follows. A bounded ordinary-cell
+gate-deficit component passes exact arithmetic and a single fixed-order cost
+comparison. The private deficit integration then exhausts its 190-CPU ON cap
+before a canonical score/fence/raw binding; OFF scores 30.1203 below 31.7153.
+It remains unpromoted, with no matched gain. The current EME backend cannot
+consume the compact auxiliary timing prior; stronger markers alone do not
+remove its timing alternatives.
 
 Current preservation requirements are in the [development contract](development.md),
 [build/test stages](building.md#testing-stages) and [Helper reference](helper-carrier.md).

@@ -2133,6 +2133,11 @@ void helper_conditional_acquisition_plan() {
                   contains_text(page,"unknown additive costs, not zero")&&
                   !contains_text(page,"Optional future broad probes become eligible after"),
                   "Planner hid independent-phase, long-symbol, ordinary-cost or manual-reference limits");
+            check(contains_text(page,"practical reception of this 128-second encrypted setup remains unqualified")==eme,
+                  "Planner omitted the microwave acquisition limit or applied it to the supplied HF setup");
+            if(eme)check(contains_text(page,"Clock and arrival searches remain; auxiliary timing cannot currently narrow these arrival cells")&&
+                contains_text(page,"Complete measured receiver cost and score coverage are unavailable"),
+                "Microwave Planner frequency assistance implied qualified timing, score coverage or measured receiver cost");
         }
         auto unknown=input;unknown.helper_forecast_capture_sample_rate.reset();
         const auto uncaptured=selected(unknown,cache);

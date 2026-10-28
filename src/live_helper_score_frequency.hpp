@@ -240,7 +240,7 @@ private:
     struct Recent {
         HelperScoreFrequencyCertificate certificate;
         std::uint64_t raw_first=0,raw_end=0,evidence_first=0,evidence_end=0,evidence_capture_end=0;
-        double q_low=0,q_high=0,rejected_lower=0,rejected_upper=0;
+        double q_low=0,q_high=0,original_lower=0,original_upper=0;
         bool eligible=false,veto=false;
     };
     HelperScoreFrequencyHistory frozen_;
@@ -250,9 +250,24 @@ private:
     std::uint64_t next_=0,last_model_sample_=UINT64_MAX,last_context_end_=0,last_model_reset_=0;
     double last_frequency_=0,last_variance_=0,last_rate_variance_=0,last_covariance_=0;
     bool have_dates_=false,have_model_=false;
+    static HelperScoreFrequencyCertificate selected(const Recent& r)noexcept {
+        auto c=r.certificate;
+        if(r.veto){c.signal_supported=false;return c;}
+        if(!c.signal_supported)return c;
+        if(!std::isfinite(r.original_lower)||!std::isfinite(r.original_upper)||r.original_lower>r.original_upper ||
+           c.upper_hz<r.original_lower || c.lower_hz>r.original_upper) {
+            c.signal_supported=false;return c;
+        }
+        // Compare with the immutable produced certificate, not the best of
+        // earlier polls. An overlapping non-subset remains diagnostic only.
+        if(!(r.original_lower<=c.lower_hz && c.upper_hz<=r.original_upper)) {
+            c.lower_hz=r.original_lower;c.upper_hz=r.original_upper;
+        }
+        return c;
+    }
     void freeze_front(bool early=false)noexcept {
         if(!count_)return;
-        frozen_.append(recent_[0].certificate);
+        frozen_.append(selected(recent_[0]));
         for(std::size_t i=1;i<count_;++i)recent_[i-1]=recent_[i];--count_;
         ++diagnostics.frozen;diagnostics.early_frozen+=early;
     }
@@ -290,13 +305,15 @@ public:
             Recent gap;gap.certificate={next_,c.first_sample,0,0,c.stamp,false};add(gap);
         }
         Recent r;r.certificate=c;r.raw_first=raw_first;r.raw_end=raw_end;r.q_low=q_low;r.q_high=q_high;
+        r.original_lower=c.lower_hz;r.original_upper=c.upper_hz;
         r.evidence_capture_end=captured;
         r.eligible=allow_refinement&&c.signal_supported&&c.stamp.valid()&&raw_first<raw_end&&raw_end<=captured&&
             std::isfinite(c.lower_hz)&&std::isfinite(c.upper_hz)&&c.lower_hz<=c.upper_hz&&
             std::isfinite(q_low)&&std::isfinite(q_high)&&q_low<=q_high;
         add(r);next_=c.end_sample;have_dates_=true;age(captured);return true;
     }
-    void publish(const helper::ToneTracker& tracker,const helper::ToneTrackerSnapshot& model,
+    template<class FrequencySource>
+    void publish(const FrequencySource& tracker,const helper::ToneTrackerSnapshot& model,
             double helper_hz,bool nonhop)noexcept {
         const auto captured=model.captured_end_sample;
         // Geometry/continuous-model reset ends the old refinement eligibility;
@@ -340,10 +357,12 @@ public:
             diagnostics.posterior_lower=lo;diagnostics.posterior_upper=hi;
             diagnostics.last_evidence_first=q.evidence_first_sample;diagnostics.last_evidence_end=q.evidence_end_sample;
             r.evidence_first=q.evidence_first_sample;r.evidence_end=q.evidence_end_sample;r.evidence_capture_end=captured;
-            if(hi<c.lower_hz||lo>c.upper_hz) {
+            if(hi<c.lower_hz||lo>c.upper_hz || hi<r.original_lower||lo>r.original_upper) {
                 // Retain contradictory posterior for diagnosis. Never intersect
-                // it away or promote this descriptor again implicitly.
-                r.rejected_lower=lo;r.rejected_upper=hi;r.veto=true;c.signal_supported=false;
+                // it away or promote this descriptor again implicitly. Check
+                // the initial bound too: adjacent overlapping updates can walk
+                // away from it. Numeric rejection remains in diagnostics above.
+                r.veto=true;c.signal_supported=false;
                 ++diagnostics.contradictions;continue;
             }
             diagnostics.widenings+=(hi-lo>c.upper_hz-c.lower_hz);
@@ -367,7 +386,7 @@ public:
             if(!absorb(frozen_.query(cursor,stop)))return {};cursor=stop;
         }
         for(std::size_t i=0;i<count_&&cursor<end;++i) {
-            const auto& c=recent_[i].certificate;if(c.end_sample<=cursor)continue;
+            const auto c=selected(recent_[i]);if(c.end_sample<=cursor)continue;
             if(c.first_sample>cursor||!c.signal_supported||!c.stamp.valid()||!std::isfinite(c.lower_hz)||!std::isfinite(c.upper_hz)||c.lower_hz>c.upper_hz)return {};
             if(!absorb({true,c.first_sample,c.end_sample,c.lower_hz,c.upper_hz,c.stamp}))return {};
             cursor=std::min(end,c.end_sample);
@@ -416,7 +435,12 @@ struct HelperScorePublication {
         if(!base.valid)return base;
         if(refinement && refinement->view==view && refinement->view_generation==view_generation) {
             const auto fine=refinement->history.query(first,end);
-            if(fine.valid && fine.stamp==stamp())return fine;
+            // Optional smoothing may improve an executed bound, but a wider
+            // or shifted estimate cannot revoke still-supported mandatory
+            // input. Explicit contradictions/model resets reach history via
+            // observe_rejections/observe_authority before this query.
+            if(fine.valid && fine.stamp==stamp() &&
+               base.lower_hz<=fine.lower_hz && fine.upper_hz<=base.upper_hz)return fine;
         }
         return base;
     }

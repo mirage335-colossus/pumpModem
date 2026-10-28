@@ -11,7 +11,7 @@ regulatory power limit or certify an installation's compliance.
 
 ## Current two-tone preview
 
-Human checkpoint `61e66b3` retains a **90/10 straight-tone power split**:
+Human checkpoint `572b051` retains a **90/10 straight-tone power split**:
 90% pure frequency/phase pilot and 10% auxiliary punctuation/optional metadata.
 The pilot is nine times stronger in power, three times in amplitude and 9.54 dB
 above the auxiliary. Only the auxiliary has intentional phase reversals or
@@ -20,9 +20,17 @@ Robust, with the pure pilot highest in the usable passband.
 
 The rebuilt GUI is `build/dev/datapump-gui`. It is available for manual testing;
 its headless self-check does not qualify physical display/audio hardware.
-The current additive-headroom app (core `85a53d89…`, GUI `d8e3be8d…`) passes its
-headless self-check, 64-bit continuity/loss, actual-RF targeted checks and the
-supplied full HF40 public-completion test.
+The current GUI `79d40073…` passes the specific EME Planner caution check and
+headless self-check; core `2c118bf0…` is unchanged and retains its five focused
+passes on the preceding `64824037…` GUI binding. The retained full HF15k
+capture's original fixture exits 0 with the canonical exact row, but independent
+and current test-only audits identify four premature native ENDs among 17
+identities. The new strict guard is verified on that trace without another
+receiver/PCM run. The calendar-END authority defect remains unfixed.
+The full 39/39 GUI group and six selected ordinary-Live regressions, including
+unskipped `live_exact_source`, retain their preceding `0463/276e` binding. The frozen
+`21bf/913` Rate-360 pass and prior `85a5/d8e3` full HF40 pass keep their own
+bindings; neither full run has been repeated on this binary.
 Manual display/radio testing and full regression qualification remain open.
 [Validation](validation.md#current-measured-status-and-remaining-failures) records
 the current build bindings, focused results and incomplete qualification.
@@ -42,6 +50,8 @@ filtering/downsampling. Folded real mono retains its frequency-origin-only path.
 Dated residual-frequency windows narrow existing and new RF catalogues while
 retaining unresolved clock/timing alternatives. Dated whole-score support now
 has funded minimum provenance even after optional refinement is reclaimed.
+Folded real mono now receives dated raw frequency provenance through the same
+bounded stage, preserving `q=0`, no phase correction and unresolved LF choices.
 Additive constructor headroom restores the previously blocked early owners in
 the targeted actual-RF case, without changing measured uncertainty or dropping
 unresolved LF alternatives. Every
@@ -65,15 +75,16 @@ nor expected length completes reception: consecutive fully scored absent-symbol
 durations must cover six seconds. Optional Helper work yields to payload work;
 no complete broad receiver bank runs beside the assisted bank.
 
-Useful savings are measured in specific matched prefixes:
+Measured work changes retain their comparison scope:
 
-| Change | Reported RF half-width or support | Executed FFT work | Process CPU |
+| Change | Support or comparison scope | Executed FFT work | Process CPU |
 | --- | --- | --- | --- |
 | R4 whole-score refinement versus R2, private matched prefix | 364→268 pairs; all nine unresolved LF alternatives retained | 35,672→26,264 (−26.37%) | 65.756964→49.005478 s (−25.47%) |
 | Filter/Hilbert index walks | Identical reference/support records, 785 detector bits and 260 GUI commits | 3,930 unchanged | 4.435823→2.610347 s (−41.15%) |
+| HF15k initial-descriptor support, separate captures | Collision owner restored; 77/77 queries contained, strict END failure exposed | Owner 0→56; total 6,412→11,711 | 92.415521→152.656895 s; no matched-PCM ratio |
 
 These are separate source-bound comparisons, not additive savings, calibrated
-confidence or full-payload/hardware-throughput guarantees. The later record
+confidence or hardware-throughput guarantees. The later record
 fallback adds no benefit in the HF cohort where its new branch is unexercised.
 The earlier 109-pair mask lacks whole-score certification and is not a valid
 baseline for R4. The R4 prefix remains two of eight bits, without END.
@@ -82,7 +93,7 @@ including five after loss without renewal/new phase, while retaining exact
 `001`, ID 2 and scored END. Its FFT work rises 8.16% and CPU does not improve;
 only an END-covering PCM prefix is hashed, not the entire tail.
 
-The current supplied HF40 run passes exact eight-bit wire, public pending identity,
+The preceding `85a5/d8e3` supplied HF40 run passes exact eight-bit wire, public pending identity,
 scored END and replay: 194.956 source-audio seconds, 103,663 FFT jobs and
 869.479 process CPU/114.151 wall seconds on six physical cores. Cost increases
 over the preceding `f37/949` pass (66,192 FFT jobs/562.537 CPU seconds). The
@@ -91,11 +102,30 @@ the rest is wider dynamic masks. This is simulator acceptance, not CPU savings,
 hardware real-time or complete
 block-latency/backlog qualification. Earlier HF40 failures remain preserved.
 
-Qualification remains incomplete. HF15k retains an
-unfixed false-END/code-calendar-alias authority defect, rather than a duration
-shortfall. The current Rate-360 Fake-FHSS case fails with zero owners despite a
-qualified pilot; folded-mono provenance admission is under repair, without an
-established physical precision cause. Full EME, current 1,024-byte completion,
+Current HF15k captures 1,188,236 samples and executes 11,711 FFT jobs/306
+transforms/207 owners in 152.657 CPU/41.049 wall seconds. Initial-descriptor
+support restores epoch-31 owner 39 to 56 FFT jobs, with 77/77 queries contained.
+It then declares END after failed address 74 while canonical address 75 scores
+110.90 in the same window and DATA continues. Four premature native ENDs make
+this a strict failure despite exact canonical eight bits and intended prefixes.
+The older `2101/3b7` capture has consistent END timing only with that collision
+owner unexercised. Per-ID public Snapshot lifetimes remain unavailable. A
+calendar-END proposal is held, unbuilt and unintegrated after bounded review:
+weak-chain confirmation cannot prove a historical standalone positive.
+
+Qualification remains incomplete. The frozen `21bf/913` Rate-360 Fake-FHSS case passes exact eight bits, one public
+pending row, END and replay after the dated-provenance repair; the old zero-owner
+failure remains separate and was not a physical precision limit. Every FFT job
+joins dated support with all nine LF alternatives; its polls are correlated and
+its incomplete timing joins do not qualify hardware backlog. The RF-only full
+control exhausts both CPU budgets and revises an ID's published prefix, so it
+is not accepted and gives no full cost ratio. The current physical-birth guard
+passes paired actual-History checks, without a full control rerun or END fix.
+The latest private EME deficit-gate attempt reaches its CPU cap before a
+canonical first score or fixed-fence input binding; it supplies no cost ratio
+or score gain. Stronger auxiliary markers alone cannot remove the current
+backend's timing alternatives; that is an implementation limitation.
+Full EME, current 1,024-byte completion,
 54–450 MHz coverage and hardware retune testing remain unqualified; estimator
 coverage retains documented escapes. Framed-text,
 attachment and bounded retune/loss passes retain their own scope. The full
@@ -109,23 +139,31 @@ private. See
 
 The bounded code/evidence review, including Astra, freezes estimator tuning:
 Q, lag/history, uncertainty multipliers and extra lead remain unchanged. The
-HF40 reference quality is accepted as useful on the stated six-physical-core/
-2 GiB simulator; matching GPSDO specifications or an ideal CRLB is not the
-acceptance criterion. Complete platform acceptance remains unproved. Minimum
+HF40 reference quality and its modest residual RF penalty are accepted as useful
+on the stated six-physical-core/2 GiB simulator; matching GPSDO specifications or
+an ideal CRLB is not the acceptance criterion. Complete platform acceptance remains unproved. Minimum
 provenance is funded after optional-refinement reclamation;
 additive constructor headroom passes the targeted counterexample. A newest-only mask or unsupported broad shadow
 bank would discard the evidence obligation.
 
 The compact [error/work budget](../local-evidence/helper-two-tone/architecture-review-r1/reference-budget.json)
-separates executed costs and physical references. The RF-only GPSDO control
-retains the audio/UTC setup but has a different scored frontier, so supplies no
-exact cost ratio. Coupled RF/clock catalogues are not independent factors.
+is an immutable earlier-binding snapshot; [validation](validation.md) links
+current audits and numbers separately. The RF-only GPSDO control retains
+100 ppm audio/Default 70 ms timing, but its capped run and unnotched Helper-OFF
+mixture supply no fair CPU ratio. The fully disciplined control also changes
+audio and lead. Coupled RF/clock catalogues are not independent factors.
+Full HF40 uses the legacy M route: its existing `D−H` shear retains pilot/audio
+correlation and all nine LF alternatives. The actual-RF typed DATA route instead
+marginalizes joint covariance to a conservative scalar DATA-frequency bound with
+zero clock coefficient. That separate, unquantified optimization gap is neither
+an HF40 cost explanation nor a correctness/physical-floor finding. A future dated
+affine parameter has no implementation or CPU claim.
 
 A whole instantaneous-frequency hull is a conservative sufficient condition,
 not a proven necessary statistic for the detector; this conservative design is
 sufficient for the supplied HF40 simulator case. Scores depend on accumulated
 residual phase, complete FIR/support history and correlation. A later narrow
-average cannot replace that history without a score-level proof. Constant CFO
+average cannot replace that history or retrodate support without a score-level proof. Constant CFO
 can be searched with RF candidates; constant phase is absorbed by quadrature.
 Drift, random phase and correction modulation can reduce coherence, which extra
 constant-frequency lanes cannot restore. LF, UTC and key alternatives remain.
@@ -145,12 +183,15 @@ models tracking loss through phase error under stated conditions. These support
 model-aware measurements, not transplanted DSN limits or a physical SNR floor.
 
 Funding-pressure continuity/loss and the actual-RF constructor-headroom
-counterexample and current full HF40 now pass. The next focused repair is
-folded-mono provenance admission. A matched RF-only GPSDO scoring cohort and
+counterexample, prior full HF40 and frozen Rate-360 Fake-FHSS now pass. A
+valid RF-only GPSDO control, its unresolved pending-prefix/fairness issues and
 stage CPU remain after integration stabilizes.
 Detailed failures and bindings remain in [validation](validation.md).
-EME's gating/template efficiency and receiver cost remain separate practical
-limits; an ideal CFO diagnostic does not establish a pilot-frequency-loss cause.
+EME's roughly 1.52 dB component gating opportunity remains separate from the
+private Live prototype's 190-CPU cost failure before a canonical score. The
+pulse-lattice backend rejects the compact timing prior, and 400 ms aliases
+intersect its one-second arrival cells. These are receiver implementation/work
+limits, not an established physical SNR limit or pilot-frequency-loss cause.
 
 ## Controls and use
 

@@ -839,6 +839,18 @@ void link_budget(Node& root, const planner::Model& model) {
                     "; one complete symbol's coherent half-bin scale is "+frequency(.5/model.bit_seconds)+
                     ". The ±0.1 Hz lead milestone does not guarantee inexpensive acquisition for long symbols. Unresolved clock and timing alternatives remain in the ordinary receiver cost query.",
                     11,Tone::muted,false,4);
+                const auto& config=model.inputs.options.modem;
+                const auto& geometry=model.receiver_geometry;
+                // Current qualification limit of the supplied microwave
+                // profile, including its highest Fake-FHSS hop. This does not
+                // classify other long-symbol or physical-radio geometries.
+                if(model.inputs.options.key && config.fake_hopping && config.pulse_shaping &&
+                   config.bandwidth_hz==1 && geometry.sample_rate==6000 &&
+                   geometry.symbol_samples==768000 && geometry.dsss_factor==1 &&
+                   config.oscillator_search && config.oscillator_search->rf_shift_hz>=5.8e9 &&
+                   config.oscillator_search->rf_shift_hz<5.802e9)
+                    paragraph(n,"Frequency assistance is available, but practical reception of this 128-second encrypted setup remains unqualified. Clock and arrival searches remain; auxiliary timing cannot currently narrow these arrival cells. Complete measured receiver cost and score coverage are unavailable.",
+                        11,Tone::caution,false,4);
                 paragraph(n,"Helper tail planning minimum: "+planner::duration(conditional.planned_tail_seconds)+
                     ". Robust waveform time remains "+planner::duration(model.send_seconds)+
                     "; helper lead/tail add startup and drain time without changing payload Rate or framing.",

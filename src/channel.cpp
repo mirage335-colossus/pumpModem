@@ -1,5 +1,6 @@
 #include "datapump/channel.hpp"
 #include "live_simulation_clock.hpp"
+#include "audio_trace.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -430,6 +431,18 @@ struct SampledPhysical {
         startup=next_startup;
         burst_rotation=phase_rotation(tau*config.carrier_hz*rate*(static_cast<long double>(origin)+startup)/config.sample_rate);
         generator=std::move(next_generator);
+        // Observation only: source-owned valid support excludes independent
+        // suppression cover. It is never passed to the receiver as END or
+        // length authority. Preserve the fractional channel map for audits.
+        audio::trace::record("simulation_source_binding",[&](auto& f) {
+            f.add("logical_rate",config.sample_rate);f.add("physical_rate",physical_rate);
+            f.add("physical_factor",factor);f.add("logical_origin",origin);
+            f.add("logical_startup",startup);f.add("source_rate_ratio",rate);
+            f.add("source_physical_output_origin",physical_origin);
+            f.add("source_total_samples",total);
+            f.add("source_physical_valid_payload_end",transmitter.physical_valid_payload_end());
+            f.add("logical_filter_group_delay",group_delay());
+        });
     }
     void flush_observer() {
         if(observer&&observer_count)observer(std::span(observer_buffer).first(observer_count),physical_rate,physical_received-observer_count);
