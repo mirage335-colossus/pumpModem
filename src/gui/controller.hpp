@@ -56,6 +56,7 @@ public:
     const live::Settings& settings() const;
     // Configured receive-domain union in audio Hz; computed on settings changes.
     std::optional<std::pair<double,double>> spectrum_search_band() const;
+    std::optional<std::pair<double,double>> spectrum_helper_band() const;
     const std::vector<audio::Device>& audio_devices() const;
     const Inbox& inbox() const;
     const Signals& signals() const;

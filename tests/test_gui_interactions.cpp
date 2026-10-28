@@ -124,6 +124,10 @@ int main() {
         require(events.pointer(control,11,21,now+200ms).command==control.click,"Third click reused the completed double-click");
         require(events.pointer(control,50,21,now+250ms).command==control.click,"Different pointer location became a double-click");
         require(events.pointer(control,50,21,now+900ms).command==control.click,"Expired click became a double-click");
+        require(!events.right_pointer(control),"Undeclared right-click action was consumed");
+        control.right_click=ui::Command::toggle_helper_waterfall_expanded;
+        require(events.right_pointer(control).command==control.right_click,"Right click did not use its declared action");
+        require(events.pointer(control,50,21,now+950ms).command==control.click,"Right click retained left double-click history");
         unsigned commands=0;
         ui::ControlInteractions::wheel(control,3).dispatch([&](ui::Command command) {
             require(command==control.wheel_up,"Positive detents changed direction");++commands;

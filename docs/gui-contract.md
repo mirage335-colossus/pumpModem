@@ -1434,6 +1434,12 @@ coverage certificate for an unsupported receiver. The bounded history and
 immutable snapshots must be included in total display-memory accounting; see
 [detail storage and limits](scheduled-hops.md#fullscreen-configured-searched-spectrum).
 
+With Helper Carrier enabled, right-clicking the Robust waterfall opens the same
+detail display around its configured auxiliary and pilot tones. The lower
+auxiliary's nominal 300 Hz metadata band is included. Left-click, right-click or
+Escape dismisses this view. It shares the retained FFT history and native
+resolution; opening it does not alter receiver settings or Helper Carrier power.
+
 The live oscilloscope uses a fixed environmental timebase, independently of
 the expected carrier. Its default spans up to 2,048 captured samples, capped
 at half a second for low-rate streams. Missing startup time remains blank;

@@ -1502,6 +1502,24 @@ void expanded_spectrum() {
     check(app.field(F::bandwidth).text==rate&&app.field(F::carrier).text==carrier,
           "opening a display changed receiver sample geometry");
     check(app.overlay_key({ui::Key::escape})&&!app.overlay()&&!app.closing(),"Escape did not restore the compact waterfall");
+    check(compact.right_click==C::toggle_helper_waterfall_expanded&&!app.enabled(compact.right_click),
+          "helper spectrum gesture must be unavailable with Helper Carrier disabled");
+    app.gesture(compact,compact.right_click);
+    check(!app.overlay(),"disabled Helper Carrier opened a helper spectrum");
+    app.edit(F::helper_power,"10 W");
+    check(app.enabled(compact.right_click),"enabled Helper Carrier did not enable its spectrum gesture");
+    app.gesture(compact,compact.right_click);
+    const auto helper_view=app.overlay();
+    check(helper_view&&helper_view->controls.front().bitmap==B::waterfall_helper_detail,
+          "right-click did not open the Helper Carrier detail spectrum");
+    const auto& helper_source=helper_view->controls.front();
+    app.tick();
+    check(app.bitmap(helper_source).caption.find("Helper Carrier")!=std::string::npos,
+          "helper detail spectrum did not identify the helper frequency range");
+    app.gesture(helper_source,helper_source.right_click);
+    check(!app.overlay(),"right-click did not restore the compact waterfall");
+    check(app.field(F::bandwidth).text==rate&&app.field(F::carrier).text==carrier,
+          "opening Helper Carrier detail changed receiver geometry");
     app.gesture(compact,compact.click);const auto current=app.overlay();
     check(current&&current->generation!=view->generation,"expanded spectrum reused a stale callback surface");
     app.gesture(stale,C::dismiss_overlay);

@@ -144,13 +144,15 @@ void menus() {
     theme::apply_palette();
 }
 void generic_gestures_and_bitmaps() {
-    const auto& declaration=datapump::gui::test::extension_controls().front();
+    auto declaration=datapump::gui::test::extension_controls().front();
+    declaration.right_click=ui::Command::toggle_helper_waterfall_expanded;
     NativeControlGroup control(declaration);control.resize(0,0,160,40);control.end();
     std::vector<ui::Command> commands;control.dispatch=[&](ui::Command command){commands.push_back(command);};
     const auto button=Fl::e_keysym,x=Fl::e_x,y=Fl::e_y,dy=Fl::e_dy;
     Fl::e_keysym=FL_Button+FL_LEFT_MOUSE;Fl::e_x=8;Fl::e_y=8;
     control.handle(FL_PUSH);control.handle(FL_PUSH);Fl::e_dy=-3;control.handle(FL_MOUSEWHEEL);Fl::e_dy=2;control.handle(FL_MOUSEWHEEL);
-    const std::vector<ui::Command> expected{declaration.click,declaration.double_click,declaration.wheel_up,declaration.wheel_up,declaration.wheel_up,declaration.wheel_down,declaration.wheel_down};
+    Fl::e_keysym=FL_Button+FL_RIGHT_MOUSE;control.handle(FL_PUSH);
+    const std::vector<ui::Command> expected{declaration.click,declaration.double_click,declaration.wheel_up,declaration.wheel_up,declaration.wheel_up,declaration.wheel_down,declaration.wheel_down,declaration.right_click};
     require(commands==expected,"Generic label gestures did not use the shared click/wheel commands and repetition");
     control.deactivate();control.handle(FL_PUSH);control.handle(FL_MOUSEWHEEL);require(commands==expected,"Disabled generic control still dispatched gestures");
     Fl::e_keysym=button;Fl::e_x=x;Fl::e_y=y;Fl::e_dy=dy;

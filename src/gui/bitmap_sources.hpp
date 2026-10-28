@@ -61,6 +61,12 @@ public:
         if(update.clear_waterfall || append || band!=searched_band_ || !frames_.contains(ui::Bitmap::waterfall_detail))
             put(ui::Bitmap::waterfall_detail,plots::PlotSnapshot::waterfall_detail(frozen_history_,band));
         searched_band_=band;
+        const auto helper_band=controller.spectrum_helper_band();
+        if((helper_band || helper_band_) && (update.clear_waterfall || append || helper_band!=helper_band_ || !frames_.contains(ui::Bitmap::waterfall_helper_detail)))
+            put(ui::Bitmap::waterfall_helper_detail,helper_band?
+                plots::PlotSnapshot::waterfall_detail(frozen_history_,helper_band,"Helper Carrier"):
+                plots::PlotSnapshot{});
+        helper_band_=helper_band;
         const auto& bytes = controller.message_bytes();
         const std::string text(bytes.begin(), bytes.end());
         const auto& brightness = controller.field(ui::Field::qr_brightness).selected;
@@ -106,7 +112,7 @@ public:
                 "Horizontal P0 / vertical P1: waiting for retained evidence from complete pattern windows";
         }
         auto result = get(id).caption(width);
-        if(id==ui::Bitmap::waveform || id==ui::Bitmap::waterfall || id==ui::Bitmap::waterfall_detail)
+        if(id==ui::Bitmap::waveform || id==ui::Bitmap::waterfall || id==ui::Bitmap::waterfall_detail || id==ui::Bitmap::waterfall_helper_detail)
             result+=environment_monitor_?" / input monitor":simulation_?" / simulated stream":" / modem stream";
         if (id == ui::Bitmap::constellation && constellation_dropped_)
             result += " / " + std::to_string(constellation_dropped_) + " omitted";
@@ -118,6 +124,7 @@ public:
         case ui::Bitmap::waveform: return replaying_ ? "Simulation replay / waveform" : "Live waveform";
         case ui::Bitmap::waterfall: return replaying_ ? "Replay spectrum" : "Spectrum";
         case ui::Bitmap::waterfall_detail: return replaying_ ? "Replay / configured searched spectrum" : "Configured searched spectrum";
+        case ui::Bitmap::waterfall_helper_detail: return "Helper Carrier / auxiliary and pilot";
         case ui::Bitmap::constellation:
             return constellation_source_ == live::ConstellationSource::received ? "Received constellation" :
                 constellation_source_ == live::ConstellationSource::transmitted ? "Transmitted constellation" : "Receiver input I/Q";
@@ -132,6 +139,7 @@ private:
     plots::SpectrumHistory history_;
     std::shared_ptr<const plots::SpectrumHistory> frozen_history_=std::make_shared<const plots::SpectrumHistory>();
     std::optional<std::pair<double,double>> searched_band_;
+    std::optional<std::pair<double,double>> helper_band_;
     std::optional<std::uint64_t> spectrum_revision_;
     PatternScoreView pattern_view_;
     std::vector<plots::PatternScore> pattern_scores_;

@@ -25,4 +25,13 @@ inline OverlayDefinition waterfall_overlay_definition() {
     view.controls.push_back(spectrum);
     return view;
 }
+inline OverlayDefinition helper_waterfall_overlay_definition() {
+    auto view=waterfall_overlay_definition();
+    auto& spectrum=view.controls.front();
+    spectrum.bitmap=Bitmap::waterfall_helper_detail;
+    spectrum.label="Helper Carrier / auxiliary and pilot / amplitude and phase";
+    spectrum.right_click=Command::dismiss_overlay;
+    spectrum.help="Zoomed Helper Carrier spectrum: the auxiliary tone and its metadata band are on the left, and the pure pilot is on the right. Frequency increases left to right. Adjacent columns show amplitude and wrapped phase at the retained FFT resolution. Click, right-click or press Escape to return.";
+    return view;
+}
 }

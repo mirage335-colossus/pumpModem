@@ -1110,7 +1110,12 @@ public:
             {
                 auto interactions=std::make_shared<ui::ControlInteractions>();
                 container->onMouseDown(callback(lifetime,alive,[this,control=&c,interactions,container](re::Event& event){
-                    if(!event.mouse.lb||!allows_input(container)||(control->click==ui::Command::none&&control->double_click==ui::Command::none))return;
+                    if(!allows_input(container))return;
+                    if(event.mouse.rb) {
+                        if(interactions->right_pointer(*control).dispatch([this,control](ui::Command command){application.gesture(*control,command);if(command_observer)command_observer(command);}))event.propagate=false;
+                        return;
+                    }
+                    if(!event.mouse.lb||(control->click==ui::Command::none&&control->double_click==ui::Command::none))return;
                     if(interactions->pointer(*control,event.mouse.pos.x,event.mouse.pos.y).dispatch([this,control](ui::Command command){application.gesture(*control,command);if(command_observer)command_observer(command);}))event.propagate=false;
                 }));
             }

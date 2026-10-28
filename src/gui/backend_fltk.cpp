@@ -214,6 +214,8 @@ public:
     std::function<void(ui::Command)> dispatch;
     int handle(int event) override {
         if(active_r()&&dispatch) {
+            if(event==FL_PUSH&&Fl::event_button()==FL_RIGHT_MOUSE&&Fl::event_inside(this)&&
+               interactions_.right_pointer(control_).dispatch(dispatch))return 1;
             if(event==FL_PUSH&&Fl::event_button()==FL_LEFT_MOUSE&&Fl::event_inside(this)&&
                (control_.click!=ui::Command::none||control_.double_click!=ui::Command::none)) {
                 if(interactions_.pointer(control_,static_cast<float>(Fl::event_x()),static_cast<float>(Fl::event_y())).dispatch(dispatch))return 1;

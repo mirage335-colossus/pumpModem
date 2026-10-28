@@ -43,12 +43,12 @@ enum class Command {
     fast_open_key, fast_generate_key, fast_choose_file, fast_transmit, fast_listen, fast_cancel, fast_save, fast_use_text, fast_clear_received, fast_copy_signal, fast_paste_signal, fast_toggle_qr_expanded,
     legacy_transmit,
     planner_example_spread, planner_example_weak, planner_example_sub9, planner_example_eme, fhss_apply,
-    toggle_waterfall_expanded
+    toggle_waterfall_expanded, toggle_helper_waterfall_expanded
 };
 enum class Bitmap {
     none, qr, waveform, waterfall, constellation, pattern_scores, pattern, pattern_distances,
     pattern_evidence, payload_alphabet, reference_alphabet, fast_waveform, fast_waterfall, fast_constellation, fast_qr,
-    legacy_waterfall, waterfall_detail
+    legacy_waterfall, waterfall_detail, waterfall_helper_detail
 };
 enum class ScreenScope { regular, fast, legacy, shared };
 enum class Kind { label, action, toggle, choice, text, list, bitmap };
@@ -131,6 +131,7 @@ struct Control {
     ScreenScope scope = ScreenScope::regular;
     bool read_only = false; // Selectable/scrollable native text without editing.
     ControlPurpose purpose = ControlPurpose::auxiliary;
+    Command right_click = Command::none;
 };
 const std::vector<Control>& console_screen();
 struct PageDefinition {

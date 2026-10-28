@@ -12,7 +12,7 @@ struct Waveform { std::vector<float> samples; modem::Config config; double zoom;
 struct Constellation { std::vector<std::complex<double>> points; bool symbols; };
 struct PatternScores { std::vector<PatternScore> scores; bool enabled; };
 struct Waterfall { std::shared_ptr<const SpectrumHistory> history; bool overview; };
-struct SpectrumDetail { std::shared_ptr<const SpectrumHistory> history; std::optional<std::pair<double,double>> band; };
+struct SpectrumDetail { std::shared_ptr<const SpectrumHistory> history; std::optional<std::pair<double,double>> band; std::string label; };
 struct Qr { std::optional<QrCode> code; QrBrightness brightness; };
 struct Pattern { inspection::PatternSpace model; std::size_t first, count; enum Kind { chips, distances, evidence } kind; };
 struct Codeword { std::size_t data, parity; };
@@ -149,11 +149,11 @@ PlotSnapshot PlotSnapshot::waterfall_shared(std::shared_ptr<const SpectrumHistor
     return PlotSnapshot(std::make_shared<Data>(Waterfall{std::move(history),overview}));
 }
 PlotSnapshot PlotSnapshot::waterfall_detail(std::shared_ptr<const SpectrumHistory> history,
-    std::optional<std::pair<double,double>> band) {
+    std::optional<std::pair<double,double>> band,std::string band_label) {
     if(!history)throw Error("missing detailed waterfall history");
     if(band && (!std::isfinite(band->first) || !std::isfinite(band->second) || band->first>band->second))
         throw Error("invalid searched spectrum band");
-    return PlotSnapshot(std::make_shared<Data>(SpectrumDetail{std::move(history),band}));
+    return PlotSnapshot(std::make_shared<Data>(SpectrumDetail{std::move(history),band,std::move(band_label)}));
 }
 PlotSnapshot PlotSnapshot::qr(std::optional<QrCode> code, QrBrightness brightness) {
     return PlotSnapshot(std::make_shared<Data>(Qr{std::move(code), brightness}));
@@ -550,7 +550,7 @@ std::string PlotSnapshot::caption(unsigned width) const {
             const bool context=data.band && (low!=std::clamp(data.band->first,0.,data.history->max_hz()) ||
                                              high!=std::clamp(data.band->second,0.,data.history->max_hz()));
             out << std::setprecision(6);
-            if(data.band)out << "Search " << data.band->first << ".." << data.band->second << " Hz"
+            if(data.band)out << data.label << " " << data.band->first << ".." << data.band->second << " Hz"
                 << (context?" + surrounding spectrum; ":"; ");
             out << low << ".." << high << " Hz shown / retained " << spacing << " Hz/bin; ";
             out << data.history->lower_db() << ".." << data.history->upper_db()

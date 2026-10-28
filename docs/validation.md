@@ -6,6 +6,20 @@ superseded status here; keep one latest [resource snapshot](ci-resource-results.
 and use Git history for comparisons. Detailed studies remain in the
 [evidence index](indexes/evidence.md).
 
+## Helper Carrier waterfall manual-test build
+
+The 28 October 2026 local GUI build on `d4b76ec` plus the uncommitted Helper
+Carrier waterfall changes is available at `build/dev/datapump-gui`.
+`CCACHE_DIR="$PWD/build/ccache" CCACHE_TEMPDIR=/tmp ./build.sh --jobs 12`
+completed successfully after the initial default compiler-cache path was
+read-only. Focused checks passed: `test_gui_application --expanded-spectrum`,
+`test_gui_bitmaps --waterfall-only`, `test_gui_interactions`, and
+`datapump-gui --self-check`. The helper overlay preserves receiver settings and
+uses the existing retained FFT bins. At the user's request, validation was
+limited for immediate manual testing: native display checks, the Rev build,
+full regression and receiver qualification were not run. This is not release
+certification and does not extend the receiver evidence below.
+
 ## Current two-tone Helper Carrier candidate
 
 The current human checkpoint is `572b051`, with initial-descriptor support

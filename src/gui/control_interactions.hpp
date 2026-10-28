@@ -42,6 +42,10 @@ public:
         const auto command=twice&&control.double_click!=Command::none?control.double_click:control.click;
         return {command,command==Command::none?0U:1U};
     }
+    InteractionCommands right_pointer(const Control& control) {
+        clicks_.reset();
+        return {control.right_click,control.right_click==Command::none?0U:1U};
+    }
     static InteractionCommands wheel(const Control& control,double upward_detents) {
         if(!std::isfinite(upward_detents)||upward_detents==0)return {};
         const auto command=upward_detents>0?control.wheel_up:control.wheel_down;

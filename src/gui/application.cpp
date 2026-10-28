@@ -308,6 +308,9 @@ void Application::activate(ui::Command command) {
     } else if(command==ui::Command::toggle_waterfall_expanded) {
         if(!enabled(command))return;
         if(impl_->overlay)dismiss_overlay();else show_overlay(ui::waterfall_overlay_definition());
+    } else if(command==ui::Command::toggle_helper_waterfall_expanded) {
+        if(!enabled(command))return;
+        if(impl_->overlay)dismiss_overlay();else show_overlay(ui::helper_waterfall_overlay_definition());
     } else if(command==ui::Command::dismiss_overlay) {
         dismiss_overlay();
     } else impl_->controller.activate(command);
@@ -317,7 +320,7 @@ void Application::activate(const ui::Control& declaration) {
 }
 void Application::gesture(const ui::Control& declaration,ui::Command command) {
     if(command==ui::Command::none)return;
-    if(command!=declaration.click&&command!=declaration.double_click&&command!=declaration.wheel_up&&command!=declaration.wheel_down)return;
+    if(command!=declaration.click&&command!=declaration.right_click&&command!=declaration.double_click&&command!=declaration.wheel_up&&command!=declaration.wheel_down)return;
     if(accepts_input(declaration)&&enabled(command))activate(command);
 }
 std::shared_ptr<const ui::OverlayDefinition> Application::overlay() const {return impl_->overlay;}
@@ -457,6 +460,7 @@ bool Application::enabled(ui::Command command) const {
     if(!impl_->regular_selected()||impl_->auxiliary_active())return false;
     if(command==ui::Command::toggle_qr_expanded)return !closing()&&page()==ui::Page::console;
     if(command==ui::Command::toggle_waterfall_expanded)return !closing()&&page()==ui::Page::console;
+    if(command==ui::Command::toggle_helper_waterfall_expanded)return !closing()&&page()==ui::Page::console&&impl_->controller.spectrum_helper_band().has_value();
     if(command==ui::Command::dismiss_overlay)return !closing()&&bool(impl_->overlay);
     return impl_->controller.enabled(command);
 }

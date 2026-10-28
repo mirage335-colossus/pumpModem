@@ -9,6 +9,7 @@
 #include "controller.hpp"
 #include "../estimate_cancellation.hpp"
 #include "../audio_trace.hpp"
+#include "../live_helper.hpp"
 #include "receiver_health.hpp"
 #include "helper_status.hpp"
 #include "helper_forecast_capture.hpp"
@@ -2712,6 +2713,16 @@ std::chrono::steady_clock::time_point Controller::presentation_time() const {
 }
 const live::Settings& Controller::settings() const { return impl_->settings; }
 std::optional<std::pair<double,double>> Controller::spectrum_search_band() const { return impl_->settings_valid?impl_->searched_spectrum:std::nullopt; }
+std::optional<std::pair<double,double>> Controller::spectrum_helper_band() const {
+    if(!impl_->settings_valid || impl_->settings.helper.power_w<=0)return {};
+    try {
+        // Display nominal placement independently of hardware format negotiation.
+        const auto plan=helper::plan(impl_->settings.helper,
+            live::detail::helper_placement_band(impl_->settings),120000000);
+        // Include the auxiliary's nominal 300 Hz metadata band and pilot context.
+        return std::pair{plan.auxiliary_frequency_hz-150,plan.frequency_hz+150};
+    } catch(const Error&) {return {};}
+}
 const std::vector<audio::Device>& Controller::audio_devices() const {return impl_->audio_devices;}
 const Inbox& Controller::inbox() const { return impl_->inbox; }
 const Signals& Controller::signals() const { return impl_->signals; }
