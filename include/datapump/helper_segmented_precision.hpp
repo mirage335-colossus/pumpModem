@@ -64,7 +64,10 @@ class Pilot {
     std::array<Record,records> r_{};
     std::array<PhaseObservation,phase_records> phase_rows_{};
     PhaseState continuous_;
-    std::array<LagNode,64> lag_nodes_{};
+    // Accepted numeric endpoints: 256 nodes are an opportunistic lag, not a
+    // guaranteed time span. Sparse observations and phase/model boundaries
+    // retain their existing support and invalidation rules; no PCM is added.
+    std::array<LagNode,256> lag_nodes_{};
     std::size_t lag_head_=0,lag_count_=0;
     std::size_t phase_head_=0,phase_count_=0,phase_since_refit_=0,phase_updates_=0;
     std::uint64_t phase_origin_=0,phase_support_first_=0,phase_frequency_support_first_=0;

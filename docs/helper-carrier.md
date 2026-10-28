@@ -11,7 +11,7 @@ regulatory power limit or certify an installation's compliance.
 
 ## Current two-tone preview
 
-Human checkpoint `65ee248` implements a **90/10 straight-tone power split**:
+Human checkpoint `2466865` retains a **90/10 straight-tone power split**:
 90% pure frequency/phase pilot and 10% auxiliary punctuation/optional metadata.
 The pilot is nine times stronger in power, three times in amplitude and 9.54 dB
 above the auxiliary. Only the auxiliary has intentional phase reversals or
@@ -20,6 +20,8 @@ Robust, with the pure pilot highest in the usable passband.
 
 The rebuilt GUI is `build/dev/datapump-gui`. It is available for manual testing;
 its headless self-check does not qualify physical display/audio hardware.
+The latest validated app includes the frequency-veto counter fix; the integrated
+R4 whole-score refinement awaits its main build and focused checks.
 [Validation](validation.md#current-measured-status-and-remaining-failures) records
 the current build bindings, focused results and incomplete qualification.
 
@@ -36,9 +38,10 @@ qualification; its modulation is never applied to payload phase.
 One ordinary Robust bank receives upstream stabilized input before narrow
 filtering/downsampling. Folded real mono retains its frequency-origin-only path.
 Dated residual-frequency windows narrow existing and new RF catalogues while
-retaining unresolved clock/timing alternatives. **Current masks do not yet
-certify frequency support over the whole scored observation.** Whole-score
-support integration and a new DATA-specific mask remain unpromoted. Every
+retaining unresolved clock/timing alternatives. **The last validated app's masks
+do not certify frequency support over the whole scored observation.** R4
+whole-score support is integrated in source with validation pending; the
+DATA-specific lease remains private. Every
 payload sample and date remains required; frequency knowledge cannot manufacture
 an earlier phase observation or advance the processed frontier.
 
@@ -64,11 +67,14 @@ Useful savings are measured in specific matched prefixes:
 | Change | Reported RF half-width or support | Executed FFT work | Process CPU |
 | --- | --- | --- | --- |
 | Fixed-lag frequency refinement, same HF cohort | ±0.07950→±0.06641 Hz; 125→109 pairs; all nine LF alternatives retained; phase off | 12,250→10,682 (−12.8%) | 26.425964→24.002513 s (−9.17%) |
+| R4 whole-score refinement versus R2, private matched prefix | 364→268 pairs; all nine unresolved LF alternatives retained | 35,672→26,264 (−26.37%) | 65.756964→49.005478 s (−25.47%) |
 | Filter/Hilbert index walks | Identical reference/support records, 785 detector bits and 260 GUI commits | 3,930 unchanged | 4.435823→2.610347 s (−41.15%) |
 
 These are separate source-bound comparisons, not additive savings, calibrated
 confidence or full-payload/hardware-throughput guarantees. The later record
 fallback adds no benefit in the HF cohort where its new branch is unexercised.
+The earlier 109-pair mask lacks whole-score certification and is not a valid
+baseline for R4. The R4 prefix remains two of eight bits, without END.
 A separate actual-RF loss control demonstrates 30 prior-only corrections,
 including five after loss without renewal/new phase, while retaining exact
 `001`, ID 2 and scored END. Its FFT work rises 8.16% and CPU does not improve;
@@ -81,8 +87,9 @@ shortfall. Full EME, current 1,024-byte completion and hardware retune testing
 remain unqualified; estimator coverage retains documented escapes. Framed-text,
 attachment and bounded retune/loss passes retain their own scope. The full
 contract run has failed, with incomplete internal coverage and retained
-assertion failures; overall qualification remains incomplete. Private whole-score,
-gate and terminal-join prototypes are not maintained receiver fixes. See
+assertion failures; overall qualification remains incomplete. R4 source integration
+is not full receiver qualification; gate and terminal-join prototypes remain
+private. See
 [validation](validation.md) for every failed case, command and exact binding.
 
 ## Controls and use

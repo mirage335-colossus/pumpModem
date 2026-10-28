@@ -195,7 +195,8 @@ public:
                              bool qualify_local_aperture=false,
                              std::uint64_t settled_end_sample=0);
     ToneTrackerSnapshot snapshot()const noexcept;
-    // Serialized with push/reset, like snapshot(). A small numeric lag smoother
+    // Serialized with push/reset, like snapshot(). A bounded 256-node numeric lag
+    // smoother
     // can improve buffered frequency using already captured observations under
     // the SAME process model. Frozen historical marginals survive phase loss
     // only inside their dated support; resets/model rejection revoke them.

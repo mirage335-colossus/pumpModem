@@ -1,6 +1,6 @@
 # Helper Carrier implementation and qualification
 
-Updated 28 October 2026. Human checkpoint `65ee248` is committed. The rebuilt
+Updated 28 October 2026. Human checkpoint `2466865` is committed. The rebuilt
 GUI is `build/dev/datapump-gui`; source-bound results and remaining limits are in
 [validation](validation.md). The completed contract stage failed; qualification
 remains incomplete.
@@ -37,14 +37,18 @@ remain separate.
 
 ## Measured status and remaining acceptance
 
-Checkpoint `65ee248` has a rebuilt GUI and the two-tone/one-bank implementation
+Checkpoint `2466865` has a rebuilt GUI and the two-tone/one-bank implementation
 summarized above. The [operating guide](helper-carrier.md#manual-reception) gives
 a compact measured comparison; [validation](validation.md) retains precision,
 work, CPU, support dates, exact bindings and every individual failed result.
 Fixed-lag refinement narrows the matched HF cohort from 125 to 109 pairs and
 12,250 to 10,682 FFT jobs, with 9.17% lower process CPU. Separate bitwise-preserving
 filter/Hilbert changes reduce another prefix's CPU by 41.15%. These source-bound
-prefix results do not establish full reception or general throughput.
+prefix results do not establish full reception or general throughput. Private
+matched R4 whole-score refinement reduces R2's 35,672→26,264 FFT jobs and CPU
+by 25.47%, with all nine unresolved LF alternatives retained, but only two of
+eight bits/no END. The earlier 109-pair mask lacks whole-score support and is
+not a valid R4 baseline. R4 is integrated in source; main build/checks are pending.
 
 The actual-RF loss case demonstrates 30 prior-only frequency corrections,
 including five after loss, with exact `001`/ID 2/scored END and no witness
@@ -52,8 +56,8 @@ renewal/new phase. FFT work rises 8.16% and CPU does not improve. The strong
 engineered phase-gap case exercises independent frequency records but publishes
 only a wrong-epoch pending one-bit suffix, without canonical payload/END proof.
 
-Current masks still lack whole-score frequency-support certification; the new
-DATA-specific mask is not promoted. Current strict HF40 public completion,
+The last validated app's masks lack whole-score frequency-support certification;
+R4 validation is pending and the DATA-specific lease remains private. Current strict HF40 public completion,
 HF15k physical-END authority, full EME, 1,024-byte reception and hardware
 qualification remain open. The HF15k alias fully scores absent address 74 while
 true address 75 is strong in the same window: this is an END-authority defect,

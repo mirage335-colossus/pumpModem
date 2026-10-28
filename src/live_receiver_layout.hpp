@@ -5,6 +5,7 @@
 #include "datapump/symbol_burst.hpp"
 #include "live_pattern_scores.hpp"
 #include "live_source_handoff.hpp"
+#include "live_helper_score_frequency.hpp"
 #include "native_point_workspace.hpp"
 #include "live_deferred_pattern_history.hpp"
 #include "scheduled_source_binding_types.hpp"
@@ -21,6 +22,7 @@
 namespace datapump::modem::detail {struct SourceFamily;}
 namespace datapump::live::detail {
 struct HelperInputRecipe;
+struct HelperInputView;
 // The runtime owns these SAME types; allocation accounting never duplicates a
 // guessed representation. Include the complete SourceFamily before creating or
 // destroying ReceiverState. Pure layout callers only inspect sizeof.
@@ -107,6 +109,10 @@ struct ReceiverState {
     std::unique_ptr<modem::StreamingReceiver> modem;
     std::unique_ptr<transfer::StreamReceiver> content;
     std::shared_ptr<const HelperInputRecipe> helper_input_recipe;
+    // Immutable actual-constructor coverage; no heap receipt, PCM, timestamp,
+    // phase or END authority. Only full numeric reconstruction renews it.
+    std::optional<HelperScoreFrequencyLease> realtime_constructor_lease;
+    std::weak_ptr<const HelperInputView> realtime_constructor_view;
 };
 // The helper controls must fit the padding that already followed the two
 // bools. Fail on any ABI that would move ordinary amplitude/payload state.

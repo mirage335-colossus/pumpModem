@@ -8,7 +8,9 @@ and use Git history for comparisons. Detailed studies remain in the
 
 ## Current two-tone Helper Carrier candidate
 
-The current human checkpoint is `b0fb5dc`, including the concise documentation.
+The current human checkpoint is `2466865`, including the preceding documentation
+and counter-fix changes. The R4 whole-score overlay is integrated in source but
+its main build/focused tests remain pending.
 The completed contract binds the `65ee248` implementation/core `341b2b35…`;
 later focused builds have separate bindings. Documentation
 updates do not establish new runtime qualification. Earlier receipts retain
@@ -163,9 +165,9 @@ model capacity, with no approval denial reported. The const native/compact
 earliest-future-frequency-scoring-support API passes its
 [focused test](../local-evidence/helper-two-tone/record-frequency-integration-r1/frequency-coast/support.log).
 It is a receiver-local support bound, not a processed/capture frontier, phase or
-END certificate. Current RF mask windows are not yet whole-score frequency
-certificates; the new DATA-specific mask and Live rolling provenance are not
-integrated. Known-null settlement alone cannot replace history through Hilbert/
+END certificate. That validated app's RF mask windows are not whole-score
+frequency certificates; the R4 source overlay below awaits main validation and
+the DATA-specific lease remains private. Known-null settlement alone cannot replace history through Hilbert/
 FIR transients; that private history work remains held.
 A private [whole-score/frontier experiment](../local-evidence/helper-two-tone/record-frequency-integration-r1/whole-score-r1/build-and-live/runtime-results.json)
 **fails its performance acceptance**. The baseline completes source/bank fence
@@ -208,10 +210,46 @@ increments 0→1 at inclusive boundary 104,191 and revokes older frozen authorit
 Replacement support [104,192,113,792), captured at 114,240, has error 0.000166375 Hz
 versus U 0.100391165 Hz. Its pure-phase control leaves the counter zero and older
 frequency knowledge intact. Compilation uses 9.548 CPU seconds; total private
-runtime uses 0.060 seconds. The reviewed two-header counter fix is now applied
-to MAIN, but its main build/focused tests are pending. It does not validate
-general reset safety or the private R3 Live integration; refined whole-score
-integration remains unpromoted.
+runtime uses 0.060 seconds. The [main counter-fix build/checks](../local-evidence/helper-two-tone/record-frequency-integration-r1/contract-fixes/main-veto-r3/terminal.json)
+pass: `./build.sh` uses 73.837 wall/78.328 CPU seconds, `helper_continuous`
+1.405 wall/1.406 CPU seconds and headless GUI self-check 8.285 wall/8.164 CPU
+seconds. The receipt binds core `492851dc…`/GUI `43e523e8…` with no runtime-source
+changes during testing. This target still retains the deliberate zero-process
+late-drift control's 48 exclusions and one model reset; only the new counter
+controls have zero exclusions. Its constant-Q0 128-second refit is not FHSS or
+positive-Q qualification. Native display/radio and general R3 Live safety remain
+unvalidated; the original full contract remains failed.
+
+The [private matched R4 prefix](../local-evidence/helper-two-tone/record-frequency-integration-r1/whole-score-r1/refined-live-r4/matched-analysis.json)
+uses the same `d3f3749e…` PCM/fence/TX epoch as R2 above. All 2,241 raw, 4,467
+buffered, 138 corrected records and 60 constructors are identical, with the same
+14 owners, nine unqualified LF alternatives, 14 transforms and one worker slot.
+The valid whole-score hull changes [−0.313923139,+0.307877191]→
+[−0.257774507,+0.179742089] Hz: 364→268 pairs and **35,672→26,264 FFT jobs
+(−26.37%)**. [External CPU](../local-evidence/helper-two-tone/record-frequency-integration-r1/whole-score-r1/refined-live-r4/runtime-results.json)
+falls 65.756964→49.005478 seconds (−25.47%). Both retain the same incomplete
+two-bit prefix/identity, without END or drops/resets. The older 109-pair mask
+does not cover the whole score and is not a valid R4 cost baseline.
+DSP workspace rises 613,155,001→613,239,457 bytes (+84,456); tracker storage adds
+29,184 bytes, with 63,784-byte producer/63,808-byte snapshots, at most 256 recent
+numeric descriptors/4.8 seconds and the unchanged 400 ms PCM stage.
+
+R4's unchanged private continuous target passes in 1.505 CPU seconds, while
+[64-versus-256-node evidence](../local-evidence/helper-two-tone/record-frequency-integration-r1/whole-score-r1/refined-live-r4/unit-64-vs256-escape-proof.json)
+retains the identical 14 positive-Q smoothed-query exclusions among 34,623 queries
+(maximum ratio 1.1231), 6.6–7.3 seconds after drift-rate onset, not immediate
+onset latency. Eight short seeded cases have zero exclusions in 1,582 correlated
+descriptors per arm; no known-truth precision claim follows for the matched Live prefix.
+These are conditional intervals, not calibrated confidence. R4's reviewed six-file
+source integration is pinned; main build, five focused targets and GUI check
+remain pending.
+
+The separate [private actual-DATA R3 experiment](../local-evidence/helper-two-tone/record-frequency-integration-r1/actual-data-lease-r3/runtime-results.json)
+fails with zero owners/FFT/exact payload/END despite 77 qualified outputs and
+504 covered raw projections. Diagnosis finds a funding/bootstrap-capacity
+initialization cycle. The [R4 initializer repair](../local-evidence/helper-two-tone/record-frequency-integration-r1/actual-data-lease-r4/source-freeze.json)
+is source-review accepted and building, without a runtime pass. No DATA-lease
+promotion or complete HF/128-second EME/native qualification follows.
 
 The independently reviewed [matched actual-RF final-loss comparison](../local-evidence/helper-two-tone/record-frequency-integration-r1/frequency-coast/matched-final-loss/measured-comparison.json)
 holds physical PCM [0,900,000) equal (SHA `5398cc4c…`) and final media dates

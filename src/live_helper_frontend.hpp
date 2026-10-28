@@ -93,6 +93,8 @@ struct HelperViewBlock {
     // Reference remains independently dated and unchanged for clock mapping.
     std::optional<double> corrected_rf_uncertainty_hz;
     helper::CaptureBand applied_correction_hz{};
+    // Translator OUTPUT dependency; carrier centers are these dates minus512.
+    std::uint64_t corrected_dependency_first=0,corrected_dependency_end=0;
     std::size_t bytes()const noexcept{return samples.capacity()*sizeof(float)+sizeof(*this)+
         (frequency_publication?sizeof(HelperFrequencyPublication):0);}
 };
@@ -388,6 +390,7 @@ class HelperInputFrontend {
             std::uint64_t first=0,end=0;
             double radius=0,q_low=0,q_high=0;
             bool valid=false,phase=false;
+            std::uint64_t dependency_first=UINT64_MAX,dependency_end=0;
         };
         struct Certificates {
             std::array<Certificate,512> records{};
@@ -405,6 +408,8 @@ class HelperInputFrontend {
                     if(r.end<=cursor)continue;
                     if(r.first>cursor){out.valid=out.phase=false;return out;}
                     out.valid=out.valid && r.valid;out.radius=std::max(out.radius,r.radius);
+                    out.dependency_first=std::min(out.dependency_first,r.dependency_first);
+                    out.dependency_end=std::max(out.dependency_end,r.dependency_end);
                     out.phase=all_phase?(out.phase && r.phase):(out.phase || r.phase);
                     out.q_low=have_q?std::min(out.q_low,r.q_low):r.q_low;
                     out.q_high=have_q?std::max(out.q_high,r.q_high):r.q_high;have_q=true;
@@ -599,6 +604,7 @@ class HelperInputFrontend {
             // next_raw is the actual upper support frontier at production;
             // including its extra samples conservatively encloses q changes.
             auto result=raw_certificates.summarize(lower,next_raw,true);
+            result.dependency_first=lower;result.dependency_end=next_raw;
             result.first=first;result.end=end;return result;
         }
         std::size_t bytes()const noexcept{return sizeof(*this)+sizeof(HelperInputView)+4*sizeof(void*)+translator.workspace_bytes()+
@@ -880,6 +886,8 @@ public:
                     block.first_sample+block.samples.size(),false);
                 if(correction.valid)block.corrected_rf_uncertainty_hz=correction.radius;
                 block.applied_correction_hz={correction.q_low,correction.q_high};
+                block.corrected_dependency_first=correction.dependency_first;
+                block.corrected_dependency_end=correction.dependency_end;
                 block.common_phase_corrected=correction.phase;
                 result.push_back(std::move(block));
                 first=block_end;
