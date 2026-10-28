@@ -26,6 +26,10 @@ double smooth(long double x) {
     const auto t=static_cast<double>(std::clamp(x,0.L,1.L));
     return t*t*t*(10+t*(-15+6*t));
 }
+double auxiliary_smooth(long double x) {
+    const auto t=static_cast<double>(std::clamp(x,0.L,1.L));
+    return t*t*t*t*(35+t*(-84+t*(70-20*t)));
+}
 void validate_callsign(std::string_view callsign) {
     if(callsign.size()>19)throw Error("Helper Carrier callsign must contain at most 19 seven-bit ASCII characters");
     for(const char c:callsign)
@@ -41,10 +45,15 @@ std::pair<double,double> gains_from_ratio(double power_ratio) {
     const auto composite_peak=relative_peak*(pilot_amplitude_fraction+auxiliary_amplitude_fraction);
     return {relative_peak,.95/(1+composite_peak)};
 }
-// Bound the periodic complex envelope's energy in either data sideband. Each
-// transition is a quintic smootherstep, whose derivative is Beta(3,3). Its
-// transform has magnitude <=15*(3+z^2+3z)/z^5, z=pi*f*T, and <=1.
-// The envelope has two unit 4ms ramps, one magnitude-two 8ms reversal, and
+// Bound the periodic complex envelope's energy in either data sideband. The
+// pilot4ms ramps retain quintic smootherstep (C2), whose Beta(3,3) derivative
+// transform has magnitude <=15*(3+3z+z^2)/z^5, z=pi*f*T, and <=1.
+// The auxiliary8ms transitions use septic smootherstep (C3), with bound
+// 105*(15+15z+6z^2+z^3)/z^7. For z>=10 this is below the old quintic bound;
+// the minimum450Hz planning distance gives z>=11.31 for8ms transitions.
+// Retain the conservative old bound, so shaping changes no planned frequency.
+// The bound retains two unit4ms ramps (the auxiliary now uses8ms C2 ramps),
+// one magnitude-two 8ms reversal, and
 // <=ten magnitude-two metadata transitions. Integration by parts supplies the
 // additional 1/(2*pi*f*dwell). Coefficients therefore fall at least as f^-4;
 // sum their squared bound over the 2.5Hz dwell harmonics. Factor four includes
@@ -306,15 +315,20 @@ std::complex<double> Generator::mix_analytic(std::complex<double> payload,long d
     const auto roundoff=calendar_roundoff(local);
     local-=std::floor(local/dwell)*dwell;
     auto envelope=smooth(std::min(local,dwell-local)/ramp);
+    // The auxiliary's periodic boundary gate has twice the pilot's support.
+    // Explicit source start/end ramps still occupy4ms on both components.
+    auto auxiliary_envelope=smooth(std::min(local,dwell-local)/.008L);
     if(end_seconds) {
         if(!std::isfinite(*end_seconds))throw Error("invalid Helper Carrier final output coordinate");
         envelope*=smooth((*end_seconds-seconds)/ramp);
+        auxiliary_envelope*=smooth((*end_seconds-seconds)/ramp);
     }
     if(start_seconds) {
         if(!std::isfinite(*start_seconds))throw Error("invalid Helper Carrier initial output coordinate");
         envelope*=smooth((seconds-*start_seconds)/ramp);
+        auxiliary_envelope*=smooth((seconds-*start_seconds)/ramp);
     }
-    // Only the auxiliary has an 8ms C2 reversal, crossing zero at240ms.
+    // Only the auxiliary has an 8ms C3 reversal, crossing zero at240ms.
     // Its inverted state lasts to the zero-amplitude dwell boundary, where it
     // can reset without an unshaped full-amplitude phase reversal. Metadata
     // multiplies and returns to this underlying state. Pilot phase is untouched.
@@ -322,7 +336,7 @@ std::complex<double> Generator::mix_analytic(std::complex<double> payload,long d
         (!start_seconds || (*start_seconds-seconds)+local<=punctuation_latest_start+roundoff) &&
         (!end_seconds || (*end_seconds-seconds)+local+roundoff>=punctuation_protected_end);
     const auto reversal=punctuation_fits?
-        1-2*smooth((local-punctuation_begin)/punctuation_transition):1.;
+        1-2*auxiliary_smooth((local-punctuation_begin)/punctuation_transition):1.;
     const std::complex<double> punctuation{reversal,0};
     std::complex<double> modulation=punctuation;
     // A time frame has at most three symbols. Cache it before its earliest
@@ -346,22 +360,23 @@ std::complex<double> Generator::mix_analytic(std::complex<double> payload,long d
         const auto index=static_cast<std::size_t>(std::floor(position));
         if(index<symbol_count_) {
             const auto previous=index?symbols_[index-1]:std::complex<double>{1,0};
-            const auto blend=smooth(position-index);
+            const auto blend=auxiliary_smooth(position-index);
             modulation=punctuation*(previous+(symbols_[index]-previous)*blend);
         } else if(symbol_count_ && index==symbol_count_) {
-            const auto blend=smooth(position-index);
+            const auto blend=auxiliary_smooth(position-index);
             const auto last=symbols_[symbol_count_-1];
             modulation=punctuation*(last+(std::complex<double>{1,0}-last)*blend);
         }
     }
     const auto cycles=std::fmod(static_cast<long double>(plan_.frequency_hz)*seconds,1.L);
     const auto carrier=std::polar(1.,tau*static_cast<double>(cycles));
-    auto helper=pilot_amplitude_fraction*carrier;
+    auto helper=plan_.helper_gain*envelope*(pilot_amplitude_fraction*carrier);
     if(plan_.auxiliary_frequency_hz>0) {
         const auto auxiliary_cycles=std::fmod(static_cast<long double>(plan_.auxiliary_frequency_hz)*seconds,1.L);
-        helper+=auxiliary_amplitude_fraction*modulation*std::polar(1.,tau*static_cast<double>(auxiliary_cycles));
+        helper+=plan_.helper_gain*auxiliary_envelope*
+            (auxiliary_amplitude_fraction*modulation*std::polar(1.,tau*static_cast<double>(auxiliary_cycles)));
     }
-    return payload*plan_.data_gain+plan_.helper_gain*envelope*helper;
+    return payload*plan_.data_gain+helper;
 }
 float Generator::mix(float payload,long double seconds,std::uint32_t rate,
                      std::optional<long double> end_seconds,std::optional<long double> start_seconds) const {

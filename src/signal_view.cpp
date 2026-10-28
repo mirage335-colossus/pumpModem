@@ -100,6 +100,87 @@ std::optional<double> spectrum_display_gain(std::optional<double> reference_gain
         waveform_samples==3?1.:1.5/static_cast<double>(waveform_samples-1);
     return *reference_gain_db+10*std::log10(complete/partial);
 }
+std::optional<HelperSpectrumMeasurement> helper_spectrum_measurement(
+    std::span<const float> waveform,std::uint32_t sample_rate,double pilot_hz,
+    std::uint64_t end_sample) {
+    if(waveform.size()!=signal_window_size || !sample_rate ||
+       !std::isfinite(pilot_hz) || pilot_hz<=0 || end_sample<signal_window_size)
+        return std::nullopt;
+    const double bin_hz=static_cast<double>(sample_rate)/signal_window_size;
+    // This fixed raw window must resolve the separate auxiliary main lobe,
+    // 400 Hz below the pilot, outside the integrated pilot lobe.
+    if(16*bin_hz>=400.)return std::nullopt;
+    const double upper_hz=std::min(20000.,.45*sample_rate);
+    const double lower_hz=pilot_hz+std::max(600.,16*bin_hz);
+    if(lower_hz>upper_hz || pilot_hz<=8*bin_hz ||
+       pilot_hz+8*bin_hz>=.5*sample_rate || upper_hz<=300.)
+        return std::nullopt;
+    const auto noise_first=static_cast<std::size_t>(std::ceil(lower_hz/bin_hz));
+    // Prefer the receiver voice band where it has a resolvable region beyond
+    // the pilot guard. Unknown remote data geometry makes the opposite side
+    // unsafe to assume quiet. Otherwise sample the first 2.7 kHz above the
+    // guard, limited to the usable baseband.
+    const auto voice_last=static_cast<std::size_t>(std::floor(std::min(3000.,upper_hz)/bin_hz));
+    const bool voice_usable=voice_last>=noise_first && voice_last-noise_first+1>=16;
+    const auto noise_last=voice_usable?voice_last:
+        static_cast<std::size_t>(std::floor(std::min(upper_hz,lower_hz+2700.)/bin_hz));
+    if(noise_last<noise_first || noise_last-noise_first+1<16)
+        return std::nullopt;
+
+    std::array<std::complex<double>,signal_window_size> bins{};
+    double squared_weight=0;
+    double capture_peak=0;
+    for(std::size_t i=0;i<waveform.size();++i) {
+        if(!std::isfinite(waveform[i])) return std::nullopt;
+        capture_peak=std::max(capture_peak,std::abs(static_cast<double>(waveform[i])));
+        // Hann^6 has a broad main lobe but suppresses the distant pilot and
+        // auxiliary sidelobes enough to resolve a 16-bit converter noise floor.
+        const double sine=std::sin(std::numbers::pi*static_cast<double>(i)/
+                                   static_cast<double>(signal_window_size-1));
+        const double sine2=sine*sine,sine6=sine2*sine2*sine2;
+        const double weight=sine6*sine6;
+        bins[i]=static_cast<double>(waveform[i])*weight;
+        squared_weight+=weight*weight;
+    }
+    fft(bins);
+    // One-sided PSD: integrating over frequency recovers mean-square power,
+    // independently of window gain and equivalent noise bandwidth.
+    const double psd_scale=2./(sample_rate*squared_weight);
+    std::array<double,signal_window_size/2+1> noise_powers{};
+    const auto noise_count=noise_last-noise_first+1;
+    double noise_density=0;
+    for(auto i=noise_first;i<=noise_last;++i) {
+        const auto power=std::norm(bins[i]);
+        noise_powers[i-noise_first]=power;
+        noise_density+=power*psd_scale;
+    }
+    noise_density/=static_cast<double>(noise_count);
+    const auto median_at=noise_powers.begin()+noise_count/2;
+    std::nth_element(noise_powers.begin(),median_at,noise_powers.begin()+noise_count);
+    double median_power=*median_at;
+    if(noise_count%2==0) {
+        const auto lower=*std::max_element(noise_powers.begin(),median_at);
+        median_power=(lower+median_power)/2;
+    }
+    // Gaussian white noise has exponentially distributed spectral power; its
+    // population median is ln(2) times its mean.
+    const double floor_density=median_power*psd_scale/std::log(2.);
+    const auto pilot_first=static_cast<std::size_t>(std::ceil(pilot_hz/bin_hz-8));
+    const auto pilot_last=static_cast<std::size_t>(std::floor(pilot_hz/bin_hz+8));
+    double pilot_power=0;
+    for(auto i=pilot_first;i<=pilot_last;++i)
+        pilot_power+=std::norm(bins[i])*psd_scale*bin_hz;
+    pilot_power-=noise_density*static_cast<double>(pilot_last-pilot_first+1)*bin_hz;
+    if(!(noise_density>0) || !(floor_density>0) || !(pilot_power>0) ||
+       !std::isfinite(noise_density) || !std::isfinite(floor_density) || !std::isfinite(pilot_power))
+        return std::nullopt;
+    constexpr double reference_bandwidth=2700.;
+    const double cn0_db_hz=10*std::log10(pilot_power/noise_density);
+    return HelperSpectrumMeasurement{
+        cn0_db_hz-10*std::log10(reference_bandwidth),cn0_db_hz,
+        noise_first*bin_hz,noise_last*bin_hz,reference_bandwidth,pilot_power,
+        sample_rate,end_sample,10*std::log10(pilot_power/(floor_density*reference_bandwidth)),capture_peak};
+}
 SignalPlots signal_plots(std::span<const float> samples,const modem::Config& config,std::uint64_t first_sample,SignalView view) {
     if (samples.size()>SignalWindow::sample_capacity(config)) throw Error("signal preview exceeds its frame window");
     SignalPlots result;

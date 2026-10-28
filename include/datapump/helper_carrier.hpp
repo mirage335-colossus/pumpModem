@@ -122,7 +122,7 @@ std::uint32_t minimum_output_rate(const Options&,const PlacementBand&,
                                   std::uint32_t logical_rate);
 
 // Protect auxiliary punctuation already begun when an open-ended source stops.
-// One 8ms reversal crosses zero at 240ms. Extend only the helper through its
+// One C3-shaped8ms reversal crosses zero at 240ms. Extend only the helper through its
 // 20ms inverted straight-tone flank and final 4ms ramp (268ms in that dwell).
 // Coordinates are the same physical seconds as Generator.
 long double protected_endpoint(std::uint64_t epoch,long double start_seconds,long double end_seconds);

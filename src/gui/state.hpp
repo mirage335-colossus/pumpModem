@@ -122,7 +122,8 @@ std::string signal_data_label(const SignalLine& line);
 // Pending decoder observations can be replaced as more symbols/parity arrive.
 // Verified streams have clipboard lookup identities. Complete raw binary
 // observations use a text/byte view when byte-aligned and an exact bit-string
-// path otherwise. Neither raw view has a stream/authentication ID.
+// path otherwise. Neither raw view has a stream/authentication ID. Helper
+// diagnostics may be copied as displayed text, even while pending.
 class Signals {
 public:
     bool update(SignalLine line);

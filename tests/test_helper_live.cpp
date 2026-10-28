@@ -635,14 +635,17 @@ void helper_presentation() {
     live::SignalUpdate event;event.id=17;event.helper_carrier=true;event.frequency_hz=2450;
     event.text="Tone SNR 24 dB";event.revision=1;poll.signals={event};
     gui::apply_receptions(inbox,signals,poll);
-    check(signals.lines().size()==1 && gui::signal_status_label(signals.lines().front())=="helper pending",
+    check(signals.lines().size()==1 && gui::signal_status_label(signals.lines().front())=="helper pending" &&
+        gui::signal_records(signals).front().activatable &&
+        signals.copy_text(0)==gui::signal_records(signals).front().cells[4].text,
         "helper pending presentation missing");
     event.complete=true;event.text="Tone SNR 25 dB";poll.signals={event};
     gui::apply_receptions(inbox,signals,poll);
     check(signals.lines().size()==1 && signals.lines().front().id==17 &&
         gui::signal_status_label(signals.lines().front())=="helper received", "helper replaced its stable pending row");
     check(!signals.copy_id(0)&&!signals.copy_bits(0)&&!signals.copy_raw_bits(0)&&!signals.copy_bytes(0)&&
-        !signals.copy_text(0)&&!gui::signal_records(signals).front().activatable && inbox.items().empty(),
+        signals.copy_text(0)==gui::signal_records(signals).front().cells[4].text &&
+        gui::signal_records(signals).front().activatable && inbox.items().empty(),
         "helper observation acquired payload copy/save or decoded-content eligibility");
     gui::SignalLine misleading=signals.lines().front();misleading.binary=true;misleading.validated=true;
     misleading.text="001";misleading.raw_bits="001";misleading.received_bits=3;misleading.reception_id="invalid";
@@ -680,6 +683,9 @@ void helper_yields_event_queue_to_payload_progress() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc==2 && std::string_view(argv[1])=="--helper-presentation-only") {
+            helper_presentation();return 0;
+        }
         if(argc==2 && std::string_view(argv[1])=="--rolling-helper-only") {
             rolling_helper_waits_and_drains_after_loss();return 0;
         }

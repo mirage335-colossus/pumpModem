@@ -2,10 +2,13 @@
 #include "../src/signal_view.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/resampler.hpp"
+#include "datapump/helper_carrier.hpp"
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <numbers>
+#include <random>
 
 using namespace datapump;
 namespace {
@@ -180,9 +183,161 @@ void native_spectrum_phase() {
     const auto iq=window.frame(config,live::detail::SignalView::constellation);
     check(iq.spectrum_complex.empty() && !iq.spectrum_sample_count,"I/Q-only publication performed an extra display FFT");
 }
+void helper_spectrum_snr() {
+    constexpr std::uint32_t sample_rate=48000;
+    constexpr double pilot_hz=4103.71,pilot_amplitude=.45,auxiliary_amplitude=.3;
+    constexpr double reference_bandwidth=2700.;
+    constexpr double pilot_power=pilot_amplitude*pilot_amplitude/2;
+    constexpr std::uint64_t end_sample=900137;
+    const auto fixture=[&](double snr_db,double spur_amplitude=0.) {
+        // White noise variance is defined independently in the time domain.
+        // Its one-sided density is 2*variance/Fs, so this specifies audio SNR.
+        const double sigma=std::sqrt(pilot_power*sample_rate/
+            (2*reference_bandwidth)*std::pow(10.,-snr_db/10));
+        std::mt19937_64 random(912731);
+        std::normal_distribution<double> noise(0,sigma);
+        std::vector<float> samples(live::detail::signal_window_size);
+        for(std::size_t i=0;i<samples.size();++i) {
+            const double time=static_cast<double>(i)/sample_rate;
+            samples[i]=static_cast<float>(
+                pilot_amplitude*std::cos(2*std::numbers::pi*pilot_hz*time+.31)+
+                auxiliary_amplitude*std::cos(2*std::numbers::pi*(pilot_hz-400)*time+.79)+
+                spur_amplitude*std::cos(2*std::numbers::pi*6003.17*time)+noise(random));
+        }
+        return samples;
+    };
+    for(const double expected_snr:{90.,100.}) {
+        auto samples=fixture(expected_snr);
+        const auto measured=live::detail::helper_spectrum_measurement(samples,sample_rate,pilot_hz,end_sample);
+        check(measured.has_value(),"complete helper spectrum did not produce an SNR measurement");
+        check(std::abs(measured->pilot_snr_db-expected_snr)<2.,
+              "remote-band helper SNR did not resolve deterministic 90/100 dB noise below real off-bin tones");
+        check(std::abs(measured->floor_snr_db-expected_snr)<2. &&
+              std::abs(measured->floor_snr_db-measured->pilot_snr_db)<2.,
+              "median helper floor did not resolve the seeded white-noise SNR");
+        check(std::abs(measured->cn0_db_hz-(expected_snr+10*std::log10(reference_bandwidth)))<2.,
+              "helper C/N0 does not retain its independent one-Hz reference");
+        check(std::abs(measured->pilot_power/pilot_power-1)<.001,
+              "helper pilot lobe did not integrate to the real sinusoid's mean-square power");
+        check(measured->sample_rate==sample_rate && measured->end_sample==end_sample &&
+              measured->reference_bandwidth_hz==reference_bandwidth &&
+              measured->noise_band_lower_hz==4710.9375 && measured->noise_band_upper_hz==7382.8125,
+              "helper spectrum lost its exact noise bins, audio bandwidth or capture identity");
+        for(auto& value:samples) value*=.125f;
+        const auto scaled=live::detail::helper_spectrum_measurement(samples,sample_rate,pilot_hz,end_sample);
+        check(scaled && std::abs(scaled->pilot_snr_db-measured->pilot_snr_db)<.02 &&
+              std::abs(scaled->floor_snr_db-measured->floor_snr_db)<.02 &&
+              std::abs(scaled->cn0_db_hz-measured->cn0_db_hz)<.02 &&
+              scaled->capture_peak==measured->capture_peak*.125 &&
+              std::abs(scaled->pilot_power*64/measured->pilot_power-1)<1e-9,
+              "helper spectral SNR or power normalization depends on capture gain");
+    }
+    auto peak_samples=fixture(100.);
+    // Include the raw window endpoints, where the spectral window is zero.
+    peak_samples.front()=-.875f;
+    auto peak=live::detail::helper_spectrum_measurement(peak_samples,sample_rate,pilot_hz,end_sample);
+    check(peak && peak->capture_peak==.875,"helper capture peak did not include the raw window endpoint");
+    peak_samples.back()=-1.f;
+    peak=live::detail::helper_spectrum_measurement(peak_samples,sample_rate,pilot_hz,end_sample);
+    check(peak && peak->capture_peak==1.,"helper capture peak did not detect a full-scale sample");
+    constexpr double spur_amplitude=.0002;
+    const auto with_spur=live::detail::helper_spectrum_measurement(
+        fixture(100.,spur_amplitude),sample_rate,pilot_hz,end_sample);
+    check(with_spur.has_value(),"helper spectrum with a remote-band spur became unavailable");
+    // All spur power is inside the measured remote band. Averaging its density
+    // must count it, rather than selecting only the quietest FFT bins.
+    constexpr double noise_bandwidth=(315-201+1)*sample_rate/2048.;
+    const double expected_density=pilot_power/(reference_bandwidth*1e10)+
+        spur_amplitude*spur_amplitude/(2*noise_bandwidth);
+    const double expected_snr=10*std::log10(pilot_power/(expected_density*reference_bandwidth));
+    check(std::abs(with_spur->pilot_snr_db-expected_snr)<.1,
+          "helper spectral noise estimate omitted genuine power in its declared remote band");
+    check(std::abs(with_spur->floor_snr_db-100.)<3. &&
+          with_spur->floor_snr_db>with_spur->pilot_snr_db+5.,
+          "narrow remote spur obscured the broadband floor or vanished from mean power");
+
+    const auto selectable_band=[&](double frequency,double outside_spur) {
+        std::mt19937_64 random(33919);
+        std::normal_distribution<double> noise(0,2e-5);
+        std::array<float,live::detail::signal_window_size> input{};
+        for(std::size_t i=0;i<input.size();++i) {
+            const double time=static_cast<double>(i)/sample_rate;
+            input[i]=static_cast<float>(.45*std::cos(2*std::numbers::pi*frequency*time)+
+                outside_spur*std::cos(2*std::numbers::pi*3500*time)+noise(random));
+        }
+        return live::detail::helper_spectrum_measurement(input,sample_rate,frequency,end_sample);
+    };
+    // Above-pilot bins within 300–3000 Hz take precedence when there are at
+    // least 16, while a distant strong tone outside that band is ignored.
+    const auto voice=selectable_band(1600,0),voice_spur=selectable_band(1600,.01);
+    check(voice && voice_spur && voice->reference_bandwidth_hz==2700 &&
+          voice->noise_band_lower_hz==2203.125 && voice->noise_band_upper_hz==3000 &&
+          std::abs(voice->pilot_snr_db-voice_spur->pilot_snr_db)<.02,
+          "helper did not prefer the resolvable above-guard voice-band bins");
+    const auto narrow_voice=selectable_band(2300,0);
+    check(narrow_voice && narrow_voice->noise_band_lower_hz==2906.25 &&
+          narrow_voice->noise_band_upper_hz==5578.125 && narrow_voice->reference_bandwidth_hz==2700,
+          "helper did not fall back when the voice-band segment had too few bins");
+    const auto limited=selectable_band(18400,0);
+    check(limited && limited->noise_band_lower_hz==19007.8125 &&
+          limited->noise_band_upper_hz==19992.1875 && limited->reference_bandwidth_hz==2700,
+          "helper fallback did not respect the baseband limit and 2700 Hz reference");
+
+    auto samples=fixture(100.);
+    check(!live::detail::helper_spectrum_measurement(std::span(samples).first(2047),sample_rate,pilot_hz,end_sample),
+          "partial helper spectrum was reported as a complete SNR observation");
+    check(!live::detail::helper_spectrum_measurement(samples,96000,pilot_hz,end_sample) &&
+          !live::detail::helper_spectrum_measurement(samples,8000,3200,end_sample) &&
+          !live::detail::helper_spectrum_measurement(samples,sample_rate,19500,end_sample) &&
+          !live::detail::helper_spectrum_measurement(samples,sample_rate,19050,end_sample) &&
+          !live::detail::helper_spectrum_measurement(samples,120000000,9000000,end_sample),
+          "helper spectral SNR accepted an absent or undersized remote noise band");
+    check(!live::detail::helper_spectrum_measurement(samples,0,pilot_hz,end_sample) &&
+          !live::detail::helper_spectrum_measurement(samples,sample_rate,0,end_sample) &&
+          !live::detail::helper_spectrum_measurement(samples,sample_rate,
+              std::numeric_limits<double>::quiet_NaN(),end_sample) &&
+          !live::detail::helper_spectrum_measurement(samples,sample_rate,pilot_hz,2047),
+          "helper spectral SNR accepted invalid rate, frequency or sample metadata");
+    samples[171]=std::numeric_limits<float>::infinity();
+    check(!live::detail::helper_spectrum_measurement(samples,sample_rate,pilot_hz,end_sample),
+          "helper spectral SNR accepted a nonfinite capture sample");
+}
+void generated_helper_floor() {
+    constexpr std::uint32_t sample_rate=48000;
+    constexpr double pilot_hz=2462.36,gain=.5,reference_bandwidth=2700.;
+    const helper::Options options{.power_w=40};
+    const helper::Plan plan{.frequency_hz=pilot_hz,.helper_gain=gain,.data_gain=0,
+                            .auxiliary_frequency_hz=pilot_hz-400};
+    helper::Generator generator(options,plan,1700000000,true);
+    const double pilot_power=gain*gain*helper::pilot_power_fraction/2;
+    const double sigma=std::sqrt(pilot_power*sample_rate/(2*reference_bandwidth)*1e-10);
+    const auto measure=[&](double center) {
+        std::mt19937 random(93);
+        std::normal_distribution<double> noise(0,sigma);
+        std::array<float,live::detail::signal_window_size> samples{};
+        const auto first=static_cast<std::uint64_t>(center*sample_rate)-samples.size()/2;
+        for(std::size_t i=0;i<samples.size();++i)
+            samples[i]=generator.mix(0,static_cast<long double>(first+i)/sample_rate,sample_rate)+noise(random);
+        return live::detail::helper_spectrum_measurement(samples,sample_rate,pilot_hz,first+samples.size());
+    };
+    // The matched diagnostic's 1.5833 s is the window start; its center is
+    // 1,024 samples later, just after the 1.6 s dwell boundary.
+    const auto clean=measure(1.1),transition=measure((76000.+1024.)/sample_rate);
+    check(clean && transition,"generated helper window could not be measured");
+    check(std::abs(clean->pilot_snr_db-100.)<3. && std::abs(clean->floor_snr_db-100.)<3.,
+          "generated helper clean window failed the white-noise reference");
+    // The narrower fallback band is close enough to this transition that its
+    // broadband tails elevate the median too; it must not be presented as the
+    // original clean white-noise floor. The mean still includes more power.
+    check(transition->pilot_snr_db<75. && transition->floor_snr_db<clean->floor_snr_db-8. &&
+          transition->floor_snr_db>transition->pilot_snr_db+15.,
+          "generated helper transition did not raise the measured mean and median band power");
+}
 }
 int main() {
     try {
+        helper_spectrum_snr();
+        generated_helper_floor();
         native_spectrum_phase();
         fractional_carrier_capture();
         actual_default_clock_carrier();

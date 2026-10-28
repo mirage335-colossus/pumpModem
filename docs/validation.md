@@ -6,19 +6,249 @@ superseded status here; keep one latest [resource snapshot](ci-resource-results.
 and use Git history for comparisons. Detailed studies remain in the
 [evidence index](indexes/evidence.md).
 
-## Helper Carrier waterfall manual-test build
+## Helper radio-band SNR manual-test build
 
-The 28 October 2026 local GUI build on `d4b76ec` plus the uncommitted Helper
-Carrier waterfall changes is available at `build/dev/datapump-gui`.
+The 28 October 2026 local GUI on `458c2d2` plus uncommitted Helper changes is
+available at `build/dev/datapump-gui`, SHA-256
+`52d529f7335bcfe45af3246f2ad450487eabe6baa23aa4c214473212461da7d2`;
+core archive SHA-256 is
+`d4c9f0430acf7391ab408e35b4d4488f8a5e29e6aac3a5e8ede5f80f9ee57459`.
+The standard build, focused `signal_view` and `live_helper_presence` tests
+(2/2), GUI headless self-check and `git diff --check` passed. The initial focused
+test build needed the workspace ccache path, and the first `signal_view` run
+failed because its old transition fixture assumed the closer, narrower band
+would retain a clean floor. The fixture now asserts the measured transition's
+increased median as well as mean power; both focused tests pass. No full
+regression, qualification or native GUI interaction was run.
+
+The meter now extrapolates the selected noise density to 2,700 Hz. It prefers
+the measurable part of 300–3,000 Hz above the pilot's guarded region, otherwise
+uses up to 2,700 Hz above that guard and within the usable baseband. It does not
+search below the pilot for clean regions because remote occupied-band geometry
+is unavailable here. A narrow selected band and colored noise limit the
+estimate; other signals and Helper transitions may contaminate it. In a bounded
+physical `live::Session` cable test with synthetic key and unchanged mixer, the
+Helper locked and the display reported a 3070.3–5742.2 Hz measured band,
+2700 Hz reference, 76.3–78.9 dB current floor and 76.2–79.0 dB mean-band SNR.
+This is one live session, not native GUI verification. Initial ALSA fallback
+warnings appeared, but the session reported no errors and shut down normally.
+Evidence: ignored `local-evidence/helper-radio-snr-*.log`.
+
+## Follow-up cable spectrum and output-gain check
+
+The steady 2462.36 Hz capture at the +9 dB setting below was reanalyzed on
+28 October 2026. Extending the 300 Hz–20 kHz band down to 20 Hz reduced the
+averaged-channel SNR by about 0.7 dB; low-frequency noise does not account for
+the difference from 90 dB. The earlier SNR method removed fitted harmonics
+through the sixth; prominent peaks around 17.24 and 19.70 kHz are the seventh
+and eighth. Removing those two as well increased broadband SNR by about 0.35 dB.
+Across steady 200 ms windows, the averaged-channel SNR with harmonics 2–8
+removed was 88.6–89.5 dB over 300–3000 Hz and 82.5–82.8 dB over 300 Hz–20 kHz.
+One repeat had slow amplitude drift near startup, making a constant-amplitude
+fit underestimate SNR; stable windows were used in the comparison. The saved
+digital stimulus itself measured approximately 154 dB SNR under the analyzer,
+so these residuals arise later in the path or analysis. See ignored
+`local-evidence/audio-tone-sweep/audit-*.txt`.
+
+One additional live test changed headphone output from 100% to 80%, with capture
+gain +15 dB rather than +9 dB, retaining 0 dB mic boost. For 0.98-FS playback,
+the steady averaged captured tone was 0.723 FS, compared with 0.694 FS at the
+100%/+9 dB setting. In matched 0.65 s steady windows with harmonics 2–8
+removed, averaged 300 Hz–20 kHz SNR/SINAD were 77.28/76.84 dB at 80%/+15 dB
+versus 82.73/80.61 dB at 100%/+9 dB. The 80% test had a brief full-scale
+transient at onset, outside the analyzed window; steady samples did not clip.
+This is one extra gain comparison, not an exhaustive routing or gain search.
+Output and input were restored to 100% and 10%, respectively. Evidence is in
+ignored `local-evidence/audio-tone-sweep/sink80-*.txt` and the associated raw
+capture.
+
+## Steady-tone physical cable level sweep
+
+On 28 October 2026, a brief physical Realtek ALC257 headphone-to-external-mic
+loopback sweep used a 2462.36 Hz sine, 48 kHz float32 playback routed to the
+left output and 48 kHz stereo s32 capture through PipeWire. The left and right
+capture channels were also averaged for analysis; this is not a single-channel
+converter specification. The playback sine amplitude was 0.98 full scale and
+the output volume 100%. With capture at Pulse raw 9258 (14%, ALSA Capture
+35, +9 dB relative to the initial 0 dB setting), and Mic Boost 0 dB, the
+captured tone peaked at 0.694 full scale. After onset, 300 Hz–20 kHz SNR/SINAD
+were 82.34/80.61 dB averaged across channels, with a repeat of 82.08/80.43 dB.
+The corresponding first-run 20 Hz–20 kHz figures were 81.74/80.20 dB. The
+left channel alone measured 80.03/78.98 dB over 300 Hz–20 kHz.
+
+At +12 dB input gain, the average measured 82.38/80.66 dB over 300 Hz–20 kHz,
+but its peak was 0.981 full scale, leaving little headroom. A 997 Hz test at
++9 dB input gain measured 81.73/80.40 dB. Only left playback reached the
+connected cable. No setting achieved 90 dB over the stated broadband ranges.
+SNR excludes fitted harmonics through sixth order; SINAD includes harmonic
+distortion. Windows contaminated by startup were excluded from the final
+analysis; the short test does not establish a hardware performance rating.
+Input and output settings were restored, including Pulse input 6554 (10%,
+ALSA Capture 23, 0 dB), output 100%, and Mic Boost 0 dB. Captures, settings and
+analysis are in ignored `local-evidence/audio-tone-sweep/`.
+
+## Auxiliary-tone physical loopback comparison
+
+On 28 October 2026, three sequential hardware `live::Session` noise transmissions
+used the Realtek headphone-to-microphone cable, 48 kHz capture, unchanged
+100% output and 10% input mixer settings, synthetic key material and the
+principal 36 Hz, interleaved DSSS ×10, 40 W Helper and 4 W data settings. The
+production Helper generator was linked from temporary test-only variants; the
+pilot gain, frequencies, plan, data and receiver were unchanged. In run order,
+the auxiliary was normal, scaled to 0.0001 of its normal amplitude (−80 dB
+power), then replaced by a continuous unmodulated tone at its normal amplitude.
+Each session exited cleanly and the microphone capture had no samples at or
+above 98% of full scale. No tracked source was changed for the experiment.
+
+Across 11 received diagnostic updates per run, median pilot floor SNR was
+69.1, 68.9 and 69.0 dB respectively; median mean-band SNR was 69.0, 69.0 and
+68.7 dB. An independent recording of the same returns, measured in 81 windows
+per run using the same band estimator, yielded median floor SNR of 67.23, 67.25
+and 67.13 dB, with median pilot level −24.25 dBFS in each. The separate capture
+and live diagnostic need not sample identical windows. One short sequential
+comparison supports no material improvement in the measured above-pilot floor
+from suppressing or straightening the auxiliary; it does not measure all spill
+near the pilot or data band. In a separate capture analysis, 1800–1900 Hz band
+power was −48.2 dB relative to pilot power for normal modulation and −68.9 and
+−69.0 dB for suppressed and straight variants, respectively. This comparison
+of separate runs shows extra energy below the approximately 2062 Hz auxiliary;
+it does not isolate auxiliary-only power or cleanly attribute pilot-adjacent
+spill. The straight and suppressed variants omit timing and metadata and are
+not operational replacements. Details and captures are in ignored
+`local-evidence/aux-experiment/`.
+
+## Helper loopback and copy manual-test build
+
+The preceding 28 October 2026 local GUI on `458c2d2` plus the uncommitted Helper
+changes has been superseded at `build/dev/datapump-gui`. Its SHA-256 is
+`319fd8a11961116b81b8453b6cb478b285d4c3f24842781ff8cd55dc1bbc0a1b`; the
+core archive SHA-256 is
+`b8a4ca3aa2cc4ae3fd260287a6800ae2f77ed5189eb8cb08d6402f9e658eeff6`.
+The standard `./build.sh --jobs 12` build, focused `signal_view` and
+`live_helper_presence` CTest cases (2/2), `test_helper_live
+--helper-presentation-only` and GUI headless self-check passed. Full regression,
+qualification, and a native GUI clipboard interaction were not run, at the
+user's request for short checks. The shared presentation checks cover copying
+the displayed Helper diagnostic without exposing payload-copy operations.
+
+A physical analog cable loopback was tested through the Realtek ALC257
+headphone output and external microphone input at 48 kHz. Output was 100% and
+input 10% (Pulse volume 6554 on each channel); temporary input gain adjustments
+were restored to those values. A three-second waveform generated with the
+production noise transmitter, Helper generator and audio resampler used 36 Hz,
+interleaved DSSS ×10, 40 W Helper, 4 W data and synthetic metadata key material.
+Its pilot was 2462.36 Hz. The physical 16-bit playback and capture were aligned
+to the source with correlation 0.991. The median of the display's floor estimate
+was 67.1 dB and the median mean-band estimate 67.0 dB; the capture peak was
+−18.2 dBFS with no captured sample at or above 98% of full scale. This was a
+generated waveform played through the physical path, not a full GUI session.
+An additional bounded hardware `live::Session` test used the same principal
+settings, independent crystal and IC-7100 oscillators, default audio devices,
+and synthetic key material. It acquired and locked the Helper Carrier at
+48 kHz; after startup its diagnostic reported 68.3–69.4 dB floor SNR,
+68.3–69.3 dB mean-band SNR and −18.9 to −19.8 dBFS input peak. One startup
+mean-band reading was 52.5 dB. The session reported no errors and stopped
+transmission and capture normally. ALSA emitted dsnoop/dmix fallback warnings.
+The native GUI itself was not exercised in this test; details are in
+`local-evidence/helper-live-loopback/session-check.log`.
+
+An independent steady sine at the same pilot frequency, analyzed over
+300–20,000 Hz, measured 66.94 dB SNR and 66.60 dB SINAD at comparable pilot
+level. At twice and four times the digital sine amplitude it measured 73.09 and
+78.91 dB SNR respectively, without captured near-full-scale samples. Raising
+input volume by 6 and 12 dB at the original sine amplitude measured 67.61 and
+67.68 dB SNR; it did not recover 90 dB. These are measurements of this path and
+level, not a general DAC or ADC specification. The GUI peak is a recent
+2048-sample window, not a latched clipping detector; the Helper mean-band meter
+includes modulation and is not a full-band SINAD measurement. Captures and
+analysis are retained in ignored `local-evidence/helper-live-loopback/`.
+
+## Previous Helper noise-floor SNR manual-test build
+
+The preceding 28 October 2026 local GUI on `458c2d2` plus the uncommitted Helper changes
+has been superseded at `build/dev/datapump-gui` by the build above. Its SHA-256 is
+`1f109acbe1429b1cd752e243684bd2a90b2303e9ad0a232b90c5a19e2e30f358`; the
+core archive SHA-256 is
+`ac77b1e6f9d97a010fe417c56c90a758ea7f2491a939b6b80433c6c39831e9d9`.
 `CCACHE_DIR="$PWD/build/ccache" CCACHE_TEMPDIR=/tmp ./build.sh --jobs 12`
-completed successfully after the initial default compiler-cache path was
-read-only. Focused checks passed: `test_gui_application --expanded-spectrum`,
-`test_gui_bitmaps --waterfall-only`, `test_gui_interactions`, and
-`datapump-gui --self-check`. The helper overlay preserves receiver settings and
-uses the existing retained FFT bins. At the user's request, validation was
-limited for immediate manual testing: native display checks, the Rev build,
-full regression and receiver qualification were not run. This is not release
-certification and does not extend the receiver evidence below.
+passed. Focused `signal_view` and `live_helper_presence` CTest cases passed
+2/2, and the GUI headless self-check passed. No broader regression or physical
+loopback test was run at the user's request.
+
+The previous mean-based estimate included helper transition energy and could
+read 60–70 dB despite a quiet noise floor. A separate matched generated
+experiment used 36 Hz Robust noise, interleaved DSSS ×10, the production audio
+resampler, a 40 W helper against 4 W data, encrypted test metadata and 100 dB
+injected white noise. A 48 kHz window starting at 1.5833 s read 59.30 dB by
+the previous mean-band estimate and 97.96 dB by the new median-based floor;
+steady windows read approximately 100 dB by both. The deterministic seeded
+results are retained in `local-evidence/helper-floor-snr-resampled.log`.
+The focused regression also checks actual Generator transition windows, separate
+90/100 dB noise, gain scaling and a spur. Both readouts remain visible: the
+floor is a white-noise-equivalent estimate and the mean includes actual energy
+and spurs in the stated band. Their extrapolation assumes a flat floor; neither
+establishes actual full-band converter SNR or SINAD. No physical cable, mixer,
+ADC or DAC performance was measured. The audio capture device was enumerated,
+but no GUI capture was active and no recording was made.
+
+## Previous Helper Carrier clean-band SNR and auxiliary ramps manual-test build
+
+The preceding 28 October 2026 local GUI on `458c2d2` plus the uncommitted
+display-meter and auxiliary-shaping changes has been superseded at
+`build/dev/datapump-gui` by the build above.
+GUI SHA-256 is
+`b19df26d749a0e96dcceff9a88e57faf527bd8ee0ea2849b3146624e3bf7abdf`;
+core archive SHA-256 is
+`3b16b6284be8f58671fecbc7ebfe4c5bb50f3ce2548f008135cf24551ee55e36`.
+`CCACHE_DIR="$PWD/build/ccache" CCACHE_TEMPDIR=/tmp ./build.sh --jobs 12`
+passed. The first build failed the unchanged fixed Helper workspace assertion
+(16,816 bytes versus the existing 16,640-byte bound). Compact display-only
+storage repaired that failure without increasing the bound; the second build
+passed. Evidence is in ignored `local-evidence/helper-clean-band-*`.
+
+Focused targets were rebuilt with `cmake --build build/dev --target
+ test_helper_carrier test_helper_receiver test_live_helper_presence test_signal_view
+ --parallel 12`. CTest cases `helper_carrier`, `live_helper_presence` and
+`signal_view` passed 3/3 in 0.23 seconds. The signal-view checks include seeded
+90/100 dB white noise, an off-bin real pilot with auxiliary 400 Hz below,
+amplitude scaling, an included remote spur and unavailable/invalid geometries.
+`test_helper_receiver two_tone`, `test_helper_receiver pair` and
+`datapump-gui --self-check` also passed. The two-tone fixture includes metadata,
+frozen-work behavior and actual-resampler punctuation clocks at ±550 ppm;
+its measured clock intervals are unchanged from the preceding build. No new
+physical timing-accuracy measurement was made.
+
+The final actual Generator spectrum fixture covers no metadata, clear/encrypted
+time, N0CALL and a 19-character callsign. Auxiliary power inside the pilot's
+±25 Hz band is −90.49, −90.24, −89.94, −89.39 and −89.42 dBc relative to pure
+pilot power. Against the preceding C3/4 ms auxiliary-ramp build, the new 8 ms
+auxiliary ramp improves those five results by 5.9–6.7 dB. Adjacent-data-band
+power relative to auxiliary power improves by 10.5–15.2 dB. The first same-duration
+C3-only change had improved pilot spill by just 0.6–2.1 dB versus C2; its original
+results remain in the earlier ignored `local-evidence/helper-smoothing-*` logs.
+Pilot and explicit transmission start/end ramps remain 4 ms. Frequencies,
+punctuation, metadata endpoints and partial-stop protection remain unchanged;
+the receiver models the auxiliary ramp during metadata return.
+
+The new display-only SNR uses mean PSD above the pilot with at least 600 Hz
+separation, extending to min(20 kHz, 90% of Nyquist); it displays that measured
+band and extrapolates to the audio reference bandwidth above 300 Hz. It does
+not reuse the receiver's ±200 Hz noise estimate. A separate Hann^6 FFT rejects
+analysis leakage; insufficient tone separation at 96/192 kHz is unavailable
+rather than silently mixing auxiliary power into pilot power. Ordinary 44.1/48 kHz
+capture is supported. A stale/gapped/rate-changed spectrum is withdrawn, the same
+helper row is updated, and last measured SNR survives observed absence. Receiver
+qualification and the original local C/N0 remain separate. Simulation without
+the hardware monitor shows raw-spectrum SNR unavailable.
+
+The numeric range and generated spill results do not establish actual cable,
+DAC/ADC, integrated noise/distortion or SINAD performance. No physical device or
+mixer settings were changed or measured. At the user's request, native
+display/audio checks, the Rev build, full regression, sanitizers and receiver
+qualification were not run. Use matching builds for the current experimental
+auxiliary shape; there is no automatic prior-auxiliary template fallback.
+The older paired-marker path retains its own quintic waveform. This is not
+release certification and does not extend the receiver evidence below.
 
 ## Current two-tone Helper Carrier candidate
 

@@ -144,7 +144,7 @@ void metadata_vectors() {
         const auto last=auxiliary_baseband(compact,pilot,plan,.388L,8000);
         require(std::abs(last+h::apsk_point(packet.symbols[packet.count-1]))<1e-11,
             "compact callsign did not finish at388ms");
-        require(std::abs(auxiliary_baseband(compact,pilot,plan,.396L,8000)+std::complex<double>{1,0})<1e-11,
+        require(std::abs(auxiliary_baseband(compact,pilot,plan,.396L,8000)+std::complex<double>{.5,0})<1e-11,
             "metadata did not return to the auxiliary's underlying inverted state");
     }
 }
@@ -278,11 +278,33 @@ void waveform_coordinates() {
     };
     require(std::abs(baseband(.05L)-std::complex<double>{1,0})<1e-12,"preceding auxiliary tone not pure");
     require(std::abs(baseband(.215L)-std::complex<double>{1,0})<1e-12,"20ms pre-punctuation guard not pure");
-    for(const auto time:{.244L,.25L,.275999L,.284L,.292L,.304L,.32L,.396L})
+    for(const auto time:{.244L,.25L,.275999L,.284L,.292L,.304L,.32L,.392L})
         require(std::abs(baseband(time)+std::complex<double>{1,0})<1e-12,
                 "single auxiliary punctuation did not retain its inverted underlying state");
     require(std::abs(baseband(.24L))<1e-12&&std::abs(baseband(.28L)+std::complex<double>{1,0})<1e-12,
             "auxiliary reversal moved from240ms or unexpectedly restored at280ms");
+    // Independent dyadic values distinguish the new C3 shape from the C2
+    // common ramps without changing the8ms support or its center crossing.
+    constexpr std::array<double,5> blend{0,289./4096,.5,3807./4096,1};
+    for(std::size_t i=0;i<blend.size();++i)
+        require(std::abs(baseband(.236L+.002L*i)-std::complex<double>{1-2*blend[i],0})<1e-11,
+            "auxiliary reversal does not follow its C3 shape");
+    constexpr std::array<double,5> boundary_blend{0,106./1024,.5,918./1024,1};
+    for(std::size_t i=0;i<boundary_blend.size();++i) {
+        const auto edge=.002L*i;
+        for(const bool falling:{false,true}) {
+            const auto time=falling?.4L-edge:edge;
+            const auto auxiliary=(falling?-1:1)*boundary_blend[i];
+            require(std::abs(baseband(time)-std::complex<double>{auxiliary,0})<1e-11,
+                "auxiliary periodic boundary ramp is not8ms C2");
+            const auto pilot_envelope=i==0?0.:i==1?.5:1.;
+            const auto expected=plan.helper_gain*(
+                h::pilot_amplitude_fraction*pilot_envelope*oscillator(plan.frequency_hz,time)+
+                h::auxiliary_amplitude_fraction*auxiliary*oscillator(plan.auxiliary_frequency_hz,time));
+            require(std::abs(generator.mix_analytic({},time,8000)-expected)<1e-11,
+                "auxiliary boundary shaping changed the independent4ms pilot ramp");
+        }
+    }
     const auto late_start=auxiliary_baseband(generator,pilot,plan,.24L,8000,{},.22L);
     require(std::abs(late_start-std::complex<double>{1,0})<1e-10,
         "partial dwell punctuated without20ms preceding tone");
@@ -323,6 +345,19 @@ void waveform_coordinates() {
     options.callsign="ABCDEFGHIJKLMNOPQRS";
     h::Generator metadata(options,plan);
     const auto packet=h::callsign_packet(options.callsign);
+    const auto auxiliary_gate=[](long double time) {
+        const auto u=static_cast<double>(std::clamp((.4L-time)/.008L,0.L,1.L));
+        return u*u*u*(10+u*(-15+6*u));
+    };
+    for(std::size_t symbol=0;symbol<=packet.count;++symbol) {
+        const auto previous=symbol?h::apsk_point(packet.symbols[symbol-1]):std::complex<double>{1,0};
+        const auto next=symbol<packet.count?h::apsk_point(packet.symbols[symbol]):std::complex<double>{1,0};
+        const auto begin=.388L-(packet.count-symbol)*.008L;
+        for(std::size_t i=0;i<blend.size();++i)
+            require(std::abs(auxiliary_baseband(metadata,pilot,plan,begin+.002L*i,8000)+
+                (previous+(next-previous)*blend[i])*auxiliary_gate(begin+.002L*i))<1e-11,
+                "auxiliary metadata or return does not follow its C3 shape");
+    }
     const auto check_pilot=[&](long double time,std::complex<double> auxiliary) {
         const auto total=metadata.mix_analytic({},time,8000);
         const auto aux=auxiliary*plan.helper_gain*h::auxiliary_amplitude_fraction*
@@ -331,7 +366,7 @@ void waveform_coordinates() {
             std::complex<double>{1,0})<1e-11,"auxiliary punctuation or metadata reversed the pilot");
     };
     check_pilot(.235L,{1,0});check_pilot(.24L,{});check_pilot(.244L,{-1,0});
-    check_pilot(.28L,{-1,0});check_pilot(.396L,{-1,0});
+    check_pilot(.28L,{-1,0});check_pilot(.396L,{-.5,0});
     for(std::size_t i=0;i<packet.count;++i)
         check_pilot(.388L-(packet.count-i-1)*.008L,-h::apsk_point(packet.symbols[i]));
     require(generator.mix(0,.15L,8000,.15L)==0,"finite transmission lacks final helper ramp");
@@ -340,6 +375,10 @@ void waveform_coordinates() {
     require(generator.mix(0,.15L,8000,{},.15L)==0,"non-dwell transmission start lacks helper ramp");
     require(std::abs(generator.mix_analytic({},.152L,8000,{},.15L))<=peak*.500000001,
             "non-dwell transmission start4ms envelope wrong");
+    const auto pilot_quarter=pilot.mix_analytic({},.151L,8000,{},.15L)/
+        (plan.helper_gain*h::pilot_amplitude_fraction*oscillator(plan.frequency_hz,.151L));
+    require(std::abs(pilot_quarter-std::complex<double>{106./1024,0})<1e-12,
+        "common4ms ramp changed from its C2 shape");
 }
 void protected_streaming_endpoint() {
     for(const auto end:{0.L,.1L,.235999L,.268L,.3L,.4L,.635999L})
@@ -422,6 +461,14 @@ void fft(std::vector<std::complex<double>>& samples) {
     }
 }
 void spectrum() {
+    // The unchanged placement calculation may keep its conservative C2
+    // derivative-transform bound: C3 is bounded more tightly throughout the
+    // permitted data-band distances (at least450Hz for an8ms transition).
+    for(const auto z:{std::numbers::pi*450*.008,20.,100.,1000.}) {
+        const auto old_bound=15*(3+3*z+z*z)/std::pow(z,5);
+        const auto new_bound=105*(15+15*z+6*z*z+z*z*z)/std::pow(z,7);
+        require(new_bound<=old_bound,"C3 spectral tail invalidates the retained placement bound");
+    }
     // One complete dwell has zero endpoints; no analysis window hides ramps,
     // punctuation or modulation sidebands. 2.5Hz FFT bins at10240Hz.
     std::array<std::uint8_t,32> master{};

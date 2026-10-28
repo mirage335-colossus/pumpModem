@@ -428,6 +428,12 @@ std::optional<std::string> Signals::copy_raw_bits(std::size_t index) const {
     return line.raw_bits;
 }
 std::optional<std::string> Signals::copy_text(std::size_t index, bool shellcode) const {
+    if(index<lines_.size() && lines_[index].helper_carrier) {
+        if(lines_[index].text.empty())return {};
+        // Copy exactly the safely presented diagnostic, including while it is
+        // being updated. Helper rows do not expose decoded payload bytes.
+        return signal_display_text(lines_[index]);
+    }
     const auto bytes=copy_bytes(index);
     if(!bytes)return {};
     return received_text(*bytes,shellcode);

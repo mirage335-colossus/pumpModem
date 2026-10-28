@@ -225,7 +225,8 @@ struct Smoke::Impl {
     void inspect_records(Controller& controller) {
         const auto& records=controller.field(F::signals).records;
         require(records.size()==controller.signals().lines().size(),"Signal collection did not present every retained reception");
-        for(const auto& signal:controller.signals().lines()) {
+        for(std::size_t index=0;index<controller.signals().lines().size();++index) {
+            const auto& signal=controller.signals().lines()[index];
             const auto row=std::find_if(records.begin(),records.end(),[&](const auto& value){return value.id==std::to_string(signal.id);});
             require(row!=records.end(),"Signal collection lost its stable reception identity");
             const auto has=[&](const std::string& text){return std::any_of(row->cells.begin(),row->cells.end(),[&](const auto& cell){return cell.text==text;});};
@@ -234,8 +235,17 @@ struct Smoke::Impl {
             require(has(std::to_string(static_cast<long long>(std::llround(signal.frequency_hz)))+" Hz")&&
                     has(signal_status_label(signal))&&has(signal_preamble_label(signal))&&has(signal_data_label(signal))&&has(signal_display_text(signal)),
                     "Signal record omitted frequency, status, preamble, data accuracy or complete received text");
-            require(row->activatable==(signal.binary?signal.complete:(signal.validated||signal.complete&&signal.pattern_score)&&signal.text_message),
-                    "Signal record activation disagreed with verified-text or completed-raw clipboard eligibility");
+            const bool expected_activation=signal.helper_carrier?!signal.text.empty():
+                signal.binary?signal.complete:(signal.validated||signal.complete&&signal.pattern_score)&&signal.text_message;
+            require(row->activatable==expected_activation,
+                    "Signal record activation disagreed with clipboard eligibility");
+            if(signal.helper_carrier) {
+                require(!controller.signals().copy_id(index)&&!controller.signals().copy_bits(index)&&
+                        !controller.signals().copy_raw_bits(index)&&!controller.signals().copy_bytes(index)&&
+                        (signal.text.empty()?!controller.signals().copy_text(index):
+                            controller.signals().copy_text(index)==signal_display_text(signal)),
+                        "Helper diagnostic copying exposed payload actions or changed displayed text");
+            }
         }
     }
     void step(Controller& controller,const BitmapSources* bitmaps) {

@@ -25,6 +25,30 @@ SignalPlots signal_plots(std::span<const float> samples,const modem::Config& con
 // display metadata only. Full windows and unreferenced hardware stay unchanged.
 std::optional<double> spectrum_display_gain(std::optional<double> reference_gain_db,
                                              std::size_t waveform_samples);
+struct HelperSpectrumMeasurement {
+    double pilot_snr_db=0;
+    double cn0_db_hz=0;
+    double noise_band_lower_hz=0;
+    double noise_band_upper_hz=0;
+    double reference_bandwidth_hz=0;
+    double pilot_power=0;
+    std::uint32_t sample_rate=0;
+    std::uint64_t end_sample=0;
+    // Median-based white-noise-equivalent floor; narrow spurs are excluded
+    // statistically, while pilot_snr_db retains all power in the band.
+    double floor_snr_db=0;
+    // Largest absolute raw capture sample in this same window (1 = full scale).
+    double capture_peak=0;
+};
+// Display-only measurement from one complete raw capture window. Estimate the
+// mean noise density above the pilot, away from its lobe and the auxiliary tone.
+// Prefer 300–3000 Hz where at least 16 bins are available, otherwise use up to
+// 2700 Hz above the guard. Refer SNR to 2700 Hz by extrapolating that density.
+// A separate median-based floor estimate describes noise in the same band.
+// No receiver state is used.
+std::optional<HelperSpectrumMeasurement> helper_spectrum_measurement(
+    std::span<const float> waveform,std::uint32_t sample_rate,double pilot_hz,
+    std::uint64_t end_sample);
 // Storage for the live environment monitor. Construct once per prepared live
 // format and reuse for each frame; callers must consume the borrowed view
 // synchronously before the next call.

@@ -30,21 +30,50 @@ struct Result {std::vector<helper::Reference> updates;};
 // fixtures; this is explicitly not composite-pilot isolation coverage.
 class AuxiliaryFixture {
     helper::Generator composite_,pilot_;
-    bool paired_;
+    double frequency_;
+    bool paired_,legacy_metadata_;
 public:
     AuxiliaryFixture(helper::Options options,double frequency,double amplitude,double data_gain,
-                     std::uint64_t epoch,bool punctuate=true,std::optional<Crypto> key={},bool paired=false)
+                     std::uint64_t epoch,bool punctuate=true,std::optional<Crypto> key={},bool paired=false,
+                     bool legacy_metadata=false)
         :composite_(options,{frequency+helper::auxiliary_pilot_spacing_hz,amplitude,data_gain,options.power_w,frequency},
-                    epoch,punctuate,key),
+                    epoch,punctuate&&!paired,key),
          pilot_(options,{frequency+helper::auxiliary_pilot_spacing_hz,amplitude,data_gain,options.power_w},
-                epoch,false,key),paired_(paired) {}
+                epoch,false,key),frequency_(frequency),paired_(paired),legacy_metadata_(paired||legacy_metadata) {}
     std::complex<double> analytic(long double time,std::uint32_t rate) const {
-        auto value=(composite_.mix_analytic({},time,rate)-pilot_.mix_analytic({},time,rate))/
-            helper::auxiliary_amplitude_fraction;
+        const auto extract=[&](long double at) {
+            auto value=(composite_.mix_analytic({},at,rate)-pilot_.mix_analytic({},at,rate))/
+                helper::auxiliary_amplitude_fraction;
+            if(legacy_metadata_) {
+                const auto local=std::fmod(at,.4L),edge=std::min(local,.4L-local);
+                const auto smooth=[](long double position) {
+                    const auto u=static_cast<double>(std::clamp(position,0.L,1.L));
+                    return u*u*u*(10+u*(-15+6*u));
+                };
+                const auto gate=smooth(edge/.008L);
+                if(gate>0)value*=smooth(edge/.004L)/gate;
+            }
+            return value;
+        };
+        auto value=extract(time);
+        const auto local=std::fmod(time,.4L);
+        // Retain literal C2 legacy fixtures while the production Generator
+        // uses C3. Read its unchanged symbol endpoints, then interpolate them
+        // independently on the original8ms metadata grid.
+        if(legacy_metadata_&&local>=.332L&&local<.396L) {
+            const auto position=(local-.332L)/.008L,index=std::floor(position);
+            const auto u=static_cast<double>(position-index),h=u*u*u*(10+u*(-15+6*u));
+            const auto begin=time-local+.332L+index*.008L,end=begin+.008L;
+            const auto oscillator=[&](long double at) {
+                return std::polar(1.,tau*static_cast<double>(std::fmod(frequency_*at,1.L)));
+            };
+            value=((1-h)*extract(begin)/oscillator(begin)+h*extract(end)/oscillator(end))*oscillator(time);
+        }
         if(paired_) {
-            const auto local=std::fmod(time,.4L);
+            const auto first=static_cast<double>(std::clamp((local-.236L)/.008L,0.L,1.L));
             const auto u=static_cast<double>(std::clamp((local-.276L)/.008L,0.L,1.L));
-            value*=1-2*u*u*u*(10+u*(-15+6*u));
+            value*=(1-2*first*first*first*(10+first*(-15+6*first)))*
+                (1-2*u*u*u*(10+u*(-15+6*u)));
         }
         return value;
     }
@@ -136,7 +165,7 @@ void paired_marker_identity_and_missing_return() {
         const bool lose_return=shape==1,return_only=shape==2;
         constexpr long double source_origin=.260L;
         helper::Options options;options.power_w=100;options.callsign="N0CALL";
-        AuxiliaryFixture source(options,frequency,.7,.1,1800000000,false);
+        AuxiliaryFixture source(options,frequency,.7,.1,1800000000,false,{},false,true);
         helper::Receiver receiver(frequency,20);
         std::vector<float> samples(chunk);
         std::size_t frequencies=0,known=0,metadata=0,timed=0,late_frequencies=0;

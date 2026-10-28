@@ -78,6 +78,14 @@ double dot(Pair a,Pair b) {return a[0]*b[0]+a[1]*b[1];}
 double phase_wrap(double x) {return std::remainder(x,tau);}
 double smooth(double x) {x=std::clamp(x,0.,1.);return x*x*x*(10+x*(-15+6*x));}
 double smooth_derivative(double x) {return x<=0||x>=1?0:30*x*x*(1-x)*(1-x);}
+// Auxiliary reversal and metadata templates match the C3 transmit shape;
+// common/pilot4ms ramps continue to use the C2 smooth() above.
+double auxiliary_smooth(double x) {
+    x=std::clamp(x,0.,1.);return x*x*x*x*(35+x*(-84+x*(70-20*x)));
+}
+double auxiliary_smooth_derivative(double x) {
+    return x<=0||x>=1?0:140*x*x*x*(1-x)*(1-x)*(1-x);
+}
 bool solve6(std::array<std::array<double,6>,6> a,std::array<double,6> b,
             std::array<double,6>& x) {
     for(unsigned i=0;i<6;++i) {
@@ -1603,7 +1611,8 @@ struct Receiver::Impl {
                 auto position=(b.begin-crossing+.004)/.008;
                 double ac=0,as=0,bc=0,bs=0;
                 for(std::size_t j=0;j<s.bin_size;++j) {
-                    const auto envelope=1-2*smooth(position);
+                    const auto envelope=1-2*(punctuation_format==PunctuationFormat::auxiliary_single?
+                        auxiliary_smooth(position):smooth(position));
                     const auto cosine=carrier.real()*envelope;
                     const auto sine=-carrier.imag()*envelope;
                     ac+=cosine*basis.real();as+=cosine*basis.imag();
@@ -1886,10 +1895,21 @@ struct Receiver::Impl {
         }
         const auto position=(t-.332)/.008;
         const auto i=std::min<std::size_t>(vertices-2,static_cast<std::size_t>(std::floor(std::max(0.,position))));
-        const auto u=position-i,h=smooth(u),d=smooth_derivative(u)*s.waveform_scale/.008;
+        const auto u=position-i;
+        const bool auxiliary=punctuation_format==PunctuationFormat::auxiliary_single;
+        const auto h=auxiliary?auxiliary_smooth(u):smooth(u);
+        const auto d=(auxiliary?auxiliary_smooth_derivative(u):smooth_derivative(u))*s.waveform_scale/.008;
+        // The current auxiliary's8ms boundary gate overlaps the last4ms of
+        // its metadata return. The nuisance shift moves the whole waveform,
+        // so differentiate both gate and interpolation in physical seconds.
+        const auto gate_position=(.4-t)/.008;
+        const auto gate=auxiliary?smooth(gate_position):1.;
+        const auto gate_derivative=auxiliary?
+            -smooth_derivative(gate_position)*s.waveform_scale/.008:0.;
         const Pair v{s.metadata_gain*s.metadata_osc.real(),-s.metadata_gain*s.metadata_osc.imag()};
         const auto vv=outer(v,1);
-        const std::array<double,2> b{1-h,h},derivative{-d,d};
+        const std::array<double,2> b{gate*(1-h),gate*h},
+            derivative{gate_derivative*(1-h)-gate*d,gate_derivative*h+gate*d};
         for(std::size_t j=0;j<2;++j) {
             const auto vertex=i+j;
             s.bb.diagonal[vertex]=add(s.bb.diagonal[vertex],vv,b[j]*b[j]);

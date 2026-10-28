@@ -1854,6 +1854,17 @@ struct Session::Impl {
         {
 #endif
         const auto measured=window.environment_frame(workspace);
+        std::optional<double> pilot_hz;
+        {
+            std::lock_guard lock(mutex);
+            if(generation==version && current.running) {
+                helper_presence.synchronize(generation,receive_clear_generation);
+                pilot_hz=helper_presence.pilot_frequency();
+            }
+        }
+        const auto pilot_spectrum=pilot_hz?detail::helper_spectrum_measurement(measured.waveform,
+            config.sample_rate,*pilot_hz,measured.spectrum_start_sample+measured.spectrum_sample_count):
+            std::optional<detail::HelperSpectrumMeasurement>{};
 #if defined(DATAPUMP_LIVE_SNAPSHOT_PROBE)
         capture_monitor_probe::mark(capture_monitor_probe::Phase::frame_ready);
         {
@@ -1863,6 +1874,7 @@ struct Session::Impl {
         capture_monitor_probe::mark(capture_monitor_probe::Phase::lock_acquired);
 #endif
         if(!current.running || generation!=version)return;
+        if(pilot_spectrum)helper_presence.update_spectrum(*pilot_spectrum);
         publish_spectrum_metadata(measured.spectrum_complex,measured.spectrum_start_sample,
             measured.spectrum_sample_count,static_cast<double>(config.sample_rate)/plot_size,
             std::numeric_limits<std::uint64_t>::max());

@@ -1,5 +1,6 @@
 #include "live_helper_presence.hpp"
 #include "gui/state.hpp"
+#include "gui/record_presentations.hpp"
 #include "live_signal_queue.hpp"
 #include <iostream>
 #include <atomic>
@@ -86,6 +87,35 @@ void interruptions() {
     row=f.observe(125999,126000,false,40,true,2000);
     check(row && row->complete,"rate-changed helper failed to complete after six seconds");
 }
+void pilot_snr_bandwidth() {
+    Fixture f;
+    auto row=f.observe(0,48000,true,120,true,48000);
+    check(row && row->text.find("Pilot noise-floor SNR estimate awaiting usable raw spectrum")!=std::string::npos,
+          "local receiver noise was presented as measured broadband SNR");
+    f.presence.update_spectrum({65,99.314,3100,5800,2700,.2,48000,48000,95,.125});
+    row=f.observe(48000,48200,true,120,true,48000);
+    check(row && row->id==100 && row->snr_db==110 &&
+          row->text.find("Pilot noise-floor SNR estimate current 95.0 dB (white-noise equivalent); mean-band SNR including spurs 65.0 dB; input peak -18.1 dBFS (noise band 3100.0..5800.0 Hz; 2700.0 Hz reference BW; peak noise-floor SNR 95.0 dB)")!=std::string::npos &&
+          row->text.find("C/N0 current 120.0 dB-Hz, peak 120.0 dB-Hz")!=std::string::npos,
+          "raw pilot SNR or separate receiver C/N0 units lost");
+    row=f.observe(48200,49000,false,120,true,48000);
+    check(row && row->text.find("Pilot noise-floor SNR estimate last 95.0 dB")!=std::string::npos,
+          "absence lost the last measured raw-spectrum SNR");
+    row=f.observe(49000,50000,true,119,true,96000);
+    check(row && row->text.find("Pilot noise-floor SNR estimate awaiting usable raw spectrum")!=std::string::npos,
+          "rate change reused stale raw-spectrum noise");
+    f.presence.update_spectrum({60,94.314,3100,5800,2700,.2,48000,50000,96,1.0});
+    f.presence.update_spectrum({64,98.314,3100,5800,2700,.2,96000,50000,94,1.0});
+    row=f.observe(50000,50200,true,119,true,96000);
+    check(row && row->text.find("Pilot noise-floor SNR estimate current 94.0 dB")!=std::string::npos &&
+          row->text.find("peak noise-floor SNR 95.0 dB")!=std::string::npos &&
+          row->text.find("input peak 0.0 dBFS near full scale")!=std::string::npos,
+          "raw-spectrum SNR failed to use matching capture rate or independent peak");
+    row=f.observe(80000,81000,true,119,true,96000);
+    check(row && row->text.find("Pilot noise-floor SNR estimate awaiting usable raw spectrum")!=std::string::npos,
+          "capture gap retained current raw-spectrum SNR");
+}
+
 void invalid_and_sparse() {
     Fixture f;f.observe(0,1000,true);f.observe(1000,2000,false);f.observe(2000,7000,false);
     check(!f.observe(7000,7100,true,std::numeric_limits<double>::quiet_NaN()),
@@ -150,7 +180,7 @@ void terminal_delivery_and_allocation() {
 void gui_sanitization() {
     gui::Signals signals;gui::SignalLine line;line.id=12;line.helper_carrier=true;
     line.binary=true;line.complete=false;line.validated=true;line.reception_id="invalid";
-    line.text="Helper carrier; C/N0 current 30 dB-Hz; SNR (10 Hz) current 20 dB";
+    line.text="Helper carrier; C/N0 current 30 dB-Hz; SNR (10 Hz) current 20 dB\x1b";
     line.received_bits=line.expected_bits=3;line.raw_bits="001";line.pattern_score=1;
     line.missing_symbols=8;line.recovery_progress.state=transfer::RecoveryState::running;
     check(signals.update(line),"helper row not added");
@@ -161,10 +191,16 @@ void gui_sanitization() {
           gui::signal_recovery_label(stored).empty() && gui::signal_gap_label(stored).empty(),
           "helper row retained payload/recovery fields");
     check(!signals.copy_id(0) && !signals.copy_bits(0) && !signals.copy_raw_bits(0) &&
-          !signals.copy_bytes(0) && !signals.copy_text(0),"helper enabled payload copy/recovery operations");
+          !signals.copy_bytes(0),"helper enabled payload copy/recovery operations");
+    const auto rows=gui::signal_records(signals);
+    check(rows.front().activatable && signals.copy_text(0)==rows.front().cells[4].text &&
+          signals.copy_text(0,true)==signals.copy_text(0) &&
+          signals.copy_text(0)->find('\x1b')==std::string::npos,
+          "pending helper copy must match the restricted displayed diagnostic");
     check(gui::signal_status_label(stored)=="helper pending","helper pending label lost");
     line.complete=true;signals.update(line);
-    check(signals.lines().size()==1 && gui::signal_status_label(signals.lines().front())=="helper received",
+    check(signals.lines().size()==1 && gui::signal_status_label(signals.lines().front())=="helper received" &&
+          gui::signal_records(signals).front().activatable && signals.copy_text(0)==gui::signal_display_text(signals.lines().front()),
           "helper physical END did not update same GUI row");
 }
 void bounded_history_and_queue() {
@@ -202,7 +238,7 @@ void bounded_history_and_queue() {
 int main(int argc,char** argv) {
     try {
         if(argc==2 && std::string_view(argv[1])=="--gui-sanitization-only")gui_sanitization();
-        else {lifecycle();interruptions();invalid_and_sparse();terminal_delivery_and_allocation();gui_sanitization();bounded_history_and_queue();}
+        else {lifecycle();interruptions();pilot_snr_bandwidth();invalid_and_sparse();terminal_delivery_and_allocation();gui_sanitization();bounded_history_and_queue();}
         std::cout<<"helper presence lifecycle passed\n";return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

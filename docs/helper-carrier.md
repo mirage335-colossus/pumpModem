@@ -334,10 +334,45 @@ gates are engineering checks, not a calibrated 99% lifetime-confidence claim.
 Terminal diagnostic updates can be retried without taking storage from ordinary
 payload progress.
 
-The entry labels current or last measured C/N0 and peak C/N0 in dB-Hz, alongside
-SNR in a 10 Hz reference bandwidth in dB and the dated capture observations.
+The entry leads with current or last pilot SNR in dB from a separate raw-ADC
+spectrum measurement. A 2,048-sample Hann-to-the-sixth-power window suppresses
+analysis leakage. Pilot power is integrated across its main lobe. The displayed
+noise-floor estimate uses the median spectral power divided by ln(2), a
+white-noise-equivalent estimate; it suppresses narrow spectral lines. A separate
+mean-band SNR uses all power in the measured band, including spurs and real
+helper-transition emissions. The measured interval begins at least 600 Hz above
+the pilot, or 16 FFT bins when that is a larger guard. If at least 16 bins fit,
+it uses the part of 300–3,000 Hz above that guard; otherwise it uses up to
+2,700 Hz above the guard, limited to 20 kHz or 45% of the sample rate, whichever
+is lower. The meter does not know the occupied bands of other transmissions,
+which can therefore affect the measurement. The exact measured interval, given
+by its first and last FFT bin
+center frequencies, is displayed. Both estimates extrapolate their measured
+noise densities to a 2,700 Hz reference bandwidth; they do not integrate noise
+across 300–3,000 Hz. Extrapolation assumes similar noise density across the
+reference band, and narrow measured intervals can fluctuate because neighboring
+windowed FFT bins are correlated. The independent peak noise-floor estimate
+retains its best observation. Capture gaps, stale
+measurements and rate changes withdraw the current value. A complete window
+and enough resolved noise bins are required; ordinary 44.1/48 kHz audio
+is supported, but the fixed window cannot resolve the two tones at 96/192 kHz.
+Simulation without the raw hardware monitor shows the measurement unavailable.
+These display-only measurements do not alter receiver qualification. They are
+noise estimates, not integrated ADC noise/distortion or SINAD tests; colored
+noise, unguarded transmissions, omitted spurs and hardware response still matter.
+In particular, noise outside the selected band need not have the same density.
+Actual helper
+ramps can produce temporary mean-band readings near 60 dB even with a 100 dB
+injected white-noise floor. Focused synthetic 90 and 100 dB checks establish the
+meter's numerical range, not physical loopback SNR.
+The entry separately retains the receiver's current or last local C/N0 and peak
+C/N0 in dB-Hz, alongside SNR in a 10 Hz reference bandwidth and dated observations.
 `SNR(10 Hz) = C/N0 - 10 dB`; these are different units, not two estimates of the
-same bandwidth. Metadata, if decoded, is advisory information. Helper entries
+same bandwidth. The same row reports the raw input's peak dBFS over its latest
+2,048-sample measurement window; it is not a continuously latched clipping
+detector, so a transient between windows can be missed. Metadata, if decoded,
+is advisory information. A pending or completed Helper entry can be copied as
+the same restricted diagnostic text shown in the signal browser. Helper entries
 contain no message bits, grant no payload copy/save permission and neither hold
 an ordinary reception open nor supply its physical END. The ordinary Robust
 receiver still needs complete scored absent-symbol durations covering six
@@ -462,12 +497,27 @@ from digital isolation or a single controlled payload result.
 ## Dwell waveform and metadata
 
 Every dwell is exactly 400 ms on the physical calendar, including when FHSS
-is off. Entry and exit ramps occupy 4 ms at each boundary and affect both tones.
+is off. Pilot entry and exit ramps occupy 4 ms at each boundary; the auxiliary
+uses gentler 8 ms ramps. Explicit transmission start/end ramps remain 4 ms for
+both tones, preserving partial-dwell punctuation protection.
 Only the auxiliary has one shaped reversal, over 236–244 ms and crossing zero at
 240 ms. It stays inverted through the rest of the dwell, including metadata,
 and resets while amplitude is zero at the boundary. There is no unintended
 full-amplitude boundary reversal. The pilot remains unmodulated apart from
 necessary start/end and dwell/hop ramps.
+
+The auxiliary reversal and metadata blends now use a septic smootherstep with
+three continuous derivatives at their endpoints. The 8 ms intervals, 240 ms
+timing reference, metadata endpoints and both tone frequencies are unchanged.
+The dwell ramps retain their quintic shape. The wider auxiliary ramps reduce
+far-out gate energy without widening the timing marker. The pilot's own 4 ms
+ramps still contribute spectral skirts. A waterfall phase column can change sharply as the
+auxiliary passes through zero amplitude, where phase is undefined, even though
+the emitted waveform is smooth.
+The current receiver matches this new auxiliary shape; the immediately prior
+quintic auxiliary waveform has no automatic template fallback. Use matching
+builds when testing auxiliary timing or metadata. The older paired-marker
+receiver path retains its separate quintic templates.
 
 Partial dwells omit punctuation unless its required support fits. Graceful
 streaming stop protects a reversal already begun: helper-only continuation can
@@ -484,9 +534,9 @@ Metadata uses APSK-2097152 at 125 baud, with only the symbols needed for the
 selected identifier or time value, on the auxiliary only. A frame contains one
 to seven symbols and ends at 388 ms; its start is `388 - 8 * symbol_count` milliseconds. The return to
 the auxiliary's applicable underlying straight-tone state completes at 396 ms,
-before the exit ramp. A maximum-length
+overlapping the final 4 ms of its exit ramp; the receiver models both. A maximum-length
 callsign therefore occupies seven symbols, 56 ms; timestamps need at most three
-symbols, 24 ms. Transitions use quintic interpolation in the complex plane. The
+symbols, 24 ms. Auxiliary transitions use septic interpolation in the complex plane. The
 high ten bits of each 21-bit symbol select one of 1024 radii
 `0.9 + 0.1 * index / 1023`; its low eleven bits select one of 2048 phases
 `2*pi*index/2048`. The alphabet contains exactly 2,097,152 points.

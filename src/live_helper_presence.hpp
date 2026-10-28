@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/live.hpp"
+#include "signal_view.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -42,6 +43,23 @@ public:
     }
     void interrupt()noexcept {continuous_=false;absent_first_.reset();}
     std::uint64_t pending_id()const noexcept{return active_==none?0:records_[active_].id;}
+    std::optional<double> pilot_frequency()const noexcept {
+        if(active_==none || !records_[active_].present)return {};
+        return records_[active_].frequency;
+    }
+    void update_spectrum(const HelperSpectrumMeasurement& value)noexcept {
+        if(active_==none || !records_[active_].present || value.sample_rate!=rate_ ||
+           value.end_sample>end_ || end_-value.end_sample>rate_/4)return;
+        auto& record=records_[active_];
+        if(record.spectrum && value.end_sample<=record.spectrum->end_sample)return;
+        if(!record.spectrum)record.changed=true;
+        record.spectrum=SpectrumDisplay{static_cast<float>(value.pilot_snr_db),
+            static_cast<float>(value.floor_snr_db),
+            static_cast<float>(value.noise_band_lower_hz),static_cast<float>(value.noise_band_upper_hz),
+            static_cast<float>(value.reference_bandwidth_hz),static_cast<float>(value.capture_peak),value.end_sample};
+        if(!record.peak_spectrum || value.floor_snr_db>*record.peak_spectrum)
+            record.peak_spectrum=static_cast<float>(value.floor_snr_db);
+    }
     std::size_t retained_records()const noexcept {
         return static_cast<std::size_t>(records_[0].id!=0)+static_cast<std::size_t>(records_[1].id!=0);
     }
@@ -65,6 +83,7 @@ public:
         }
         const bool contiguous=continuous_ && rate_==value.sample_rate && end_==value.first_sample;
         if(!contiguous)absent_first_.reset();
+        if(!contiguous && active_!=none && value.present)records_[active_].spectrum.reset();
         continuous_=true;rate_=value.sample_rate;end_=value.end_sample;
         if(value.present && (!std::isfinite(value.frequency_hz) ||
                              !std::isfinite(value.carrier_to_noise_db_hz))) {
@@ -84,6 +103,8 @@ public:
             auto& record=records_[active_];record.changed=record.changed || !record.present;
             record.present=true;record.frequency=value.frequency_hz;record.cn0=value.carrier_to_noise_db_hz;
             record.measurement_end=value.end_sample;record.measurement_rate=value.sample_rate;
+            if(record.spectrum && (record.spectrum->end_sample>value.end_sample ||
+               value.end_sample-record.spectrum->end_sample>value.sample_rate/4))record.spectrum.reset();
             record.revision=value.revision;
             if(!record.have_measurement || record.cn0>record.peak_cn0) {
                 record.peak_cn0=record.cn0;record.peak_end=value.end_sample;record.peak_rate=value.sample_rate;
@@ -121,11 +142,19 @@ public:
         return {};
     }
 private:
+    // Presentation needs only tenths of a dB/Hz. Retain a compact dated value
+    // inside the existing fixed Helper workspace reservation.
+    struct SpectrumDisplay {
+        float pilot_snr_db=0,floor_snr_db=0,noise_band_lower_hz=0,noise_band_upper_hz=0,reference_bandwidth_hz=0,capture_peak=0;
+        std::uint64_t end_sample=0;
+    };
     struct Record {
         std::uint64_t id=0,revision=0,measurement_end=0,peak_end=0;
         std::uint32_t measurement_rate=0,peak_rate=0;
         bool present=false,complete=false,have_measurement=false,changed=false;
         double frequency=0,cn0=0,peak_cn0=0;
+        std::optional<SpectrumDisplay> spectrum;
+        std::optional<float> peak_spectrum;
         std::array<char,20> callsign{};
         std::optional<AdvisoryTime> advisory_time;
         std::optional<Clock::time_point> last_attempt;
@@ -144,11 +173,25 @@ private:
         text.imbue(std::locale::classic());
         text<<"Helper carrier "<<(record.complete?"ended after captured absence":record.present?"present":"absent; awaiting captured END");
         const auto label=record.present?"current":"last";
-        text<<std::fixed<<std::setprecision(1)<<"; C/N0 "<<label<<' '<<record.cn0<<" dB-Hz, peak "<<record.peak_cn0
+        text<<std::fixed<<std::setprecision(1)<<"; Pilot noise-floor SNR estimate ";
+        if(record.spectrum) {
+            const auto& measured=*record.spectrum;
+            text<<label<<' '<<measured.floor_snr_db<<" dB (white-noise equivalent); mean-band SNR including spurs "
+                <<measured.pilot_snr_db<<" dB";
+            if(measured.capture_peak>0 && std::isfinite(measured.capture_peak)) {
+                text<<"; input peak "<<20*std::log10(measured.capture_peak)<<" dBFS";
+                if(measured.capture_peak>=.999)text<<" near full scale";
+            }
+            text<<" (noise band "
+                <<measured.noise_band_lower_hz<<".."<<measured.noise_band_upper_hz
+                <<" Hz; "<<measured.reference_bandwidth_hz
+                <<" Hz reference BW; peak noise-floor SNR "<<*record.peak_spectrum<<" dB)";
+        } else text<<"awaiting usable raw spectrum";
+        text<<"; receiver local C/N0 "<<label<<' '<<record.cn0<<" dB-Hz, peak "<<record.peak_cn0
             <<" dB-Hz; SNR (10 Hz) "<<label<<' '<<record.cn0-10<<" dB, peak "<<record.peak_cn0-10<<" dB";
         text<<std::setprecision(3)<<"; observed capture "<<static_cast<double>(record.measurement_end)/record.measurement_rate
             <<" s (sample "<<record.measurement_end<<" @ "<<record.measurement_rate<<" Hz)";
-        text<<"; peak capture "<<static_cast<double>(record.peak_end)/record.peak_rate
+        text<<"; receiver C/N0 peak capture "<<static_cast<double>(record.peak_end)/record.peak_rate
             <<" s (sample "<<record.peak_end<<" @ "<<record.peak_rate<<" Hz)";
         if(record.callsign[0])text<<"; callsign "<<record.callsign.data();
         else if(record.advisory_time)text<<"; "<<(record.advisory_time->encrypted?"encrypted advisory":"clear advisory")
