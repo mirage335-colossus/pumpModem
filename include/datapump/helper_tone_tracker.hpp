@@ -14,17 +14,31 @@ struct ToneTrackerConfig {
     // Operational following gate, not a drift rate inferred from ppm accuracy.
     // Unknown temperature evolution is not a prediction or a future lease.
     double maximum_tracking_slew_hz_per_second=.5;
-    // Pure pilot: independent short phase apertures, frequency-only pooling.
-    // Auxiliary decoding and phase continuity across retunes are not required.
+    // Pure pilot with independent-aperture frequency fallback. An unretuned
+    // pilot may also use continuous phase below; auxiliary decoding is separate.
     bool segmented_pilot=false;
     // An unretuned pure pilot retains phase across publication windows and
     // amplitude ramps. Explicit retunes always invalidate this coherence.
     // False retains the independent200ms frequency-pooling baseline.
     bool continuous_pilot=true;
+    // Explicit operational evolution model, not static oscillator accuracy.
+    // Zero retains the conditional constant-drift control. Positive values
+    // permit changing drift with white frequency-rate acceleration (Hz^2/s^3).
+    double frequency_acceleration_psd_hz2_per_second3=0;
 };
 struct ToneFrequencyQuery {
     bool valid=false;
     double frequency_hz=0,uncertainty_hz=0;
+};
+// Frequency only over an actually captured raw interval. Later observations
+// may refine its frequency; they never supply its earlier carrier phase.
+struct ToneFrequencyInterval {
+    // Independent-aperture intervals use their first observed sample as a
+    // bookkeeping anchor, not as a claim about a gap fit's effective mean.
+    bool valid=false,smoothed=false,independent_aperture=false;
+    double frequency_hz=0,uncertainty_hz=0;
+    std::uint64_t first_sample=0,end_sample=0,anchor_sample=0;
+    std::uint64_t evidence_first_sample=0,evidence_end_sample=0,captured_end_sample=0;
 };
 // One current straight full-dwell frequency observation. Validity certifies
 // measured support and estimator geometry only; it does not qualify ordinary
@@ -58,11 +72,15 @@ struct ToneTrackerSnapshot {
     double frequency_rate_variance_hz2_per_second2=0;
     double frequency_model_expected_hz=0,frequency_model_residual_scale=1;
     bool frequency_covariance_valid=false;
+    // Dated oscillator knowledge survives phase ambiguity and temporary loss.
+    // This alone grants no current presence/acquisition or phase authority.
+    bool frequency_knowledge_valid=false;
+    double frequency_acceleration_psd_hz2_per_second3=0;
     bool present=false,qualified=false;
-    // Joint phase/frequency fits to disjoint200ms contexts refine the FLL
-    // using at most36s of bounded numeric anchors. Full support is
-    // first_sample..sample. This conditional locally linear evolution model
-    // includes measured curvature/noise allowances and a current FLL veto.
+    // Independent contexts refine the FLL; a continuous unretuned pilot also
+    // retains up to128s of numeric phase observations. Full frequency support
+    // is first_sample..sample. This conditional evolution model includes the
+    // declared process, measured residual inflation and a current tone witness.
     // Abrupt frequency or drift changes can temporarily exceed its engineering
     // uncertainty before withdrawal; it grants no future thermal/Doppler bound.
     bool frequency_precision_refined=false;
@@ -128,7 +146,12 @@ struct ToneTrackerSnapshot {
             2*frequency_rate_covariance_hz2_per_second),frequency_variance_hz2);
         out.frequency_hz=std::fma(frequency_rate_hz_per_second,dt,frequency_hz);
         if(!(variance>=0) || !std::isfinite(variance) || !std::isfinite(out.frequency_hz))return out;
-        out.uncertainty_hz=3*std::sqrt(variance);out.valid=true;return out;
+        // Reverse process noise and newest-state error are correlated. Their
+        // RMS sum encloses the backward constant-rate projection under the
+        // declared process model; this is not an exact conditional smoother.
+        const auto process=frequency_acceleration_psd_hz2_per_second3*(-dt)*dt*dt/3;
+        if(!(process>=0)||!std::isfinite(process))return out;
+        out.uncertainty_hz=3*(std::sqrt(variance)+std::sqrt(process));out.valid=true;return out;
     }
 };
 // workspace_required/bytes include this object and its fixed owned implementation.
@@ -168,6 +191,15 @@ public:
                              bool qualify_local_aperture=false,
                              std::uint64_t settled_end_sample=0);
     ToneTrackerSnapshot snapshot()const noexcept;
+    // Serialized with push/reset, like snapshot(). A small numeric lag smoother
+    // can improve buffered frequency using already captured observations under
+    // the SAME process model. Frozen historical marginals survive phase loss
+    // only inside their dated support; resets/model rejection revoke them.
+    // Accepted independent frequency apertures remain a dated fallback without
+    // phase authority; their local slew enclosure grants no extrapolation.
+    // The independent-window snapshot also remains available. No PCM is stored.
+    ToneFrequencyInterval frequency_interval(std::uint64_t first_sample,
+                                             std::uint64_t end_sample)const noexcept;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

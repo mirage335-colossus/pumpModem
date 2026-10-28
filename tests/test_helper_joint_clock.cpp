@@ -1,4 +1,6 @@
 #include "datapump/helper_carrier.hpp"
+#include "datapump/helper_receiver.hpp"
+#include "datapump/helper_tone_tracker.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/symbol_schedule.hpp"
@@ -205,20 +207,36 @@ struct Measured {
 Measured actual_helper(const modem::Config& c) {
     h::Options options;options.power_w=15000;options.data_power_w=4;options.timecode=false;
     const auto plan=h::plan(options,h::placement_band(c),c.sample_rate);
-    h::Generator source(options,plan,c.stream_epoch,true);h::Receiver receiver(plan.frequency_hz,20);
+    h::Generator source(options,plan,c.stream_epoch,true);
+    h::ToneTrackerConfig pilot_config{c.sample_rate,plan.frequency_hz,20};pilot_config.segmented_pilot=true;
+    h::ToneTracker pilot(pilot_config,h::ToneTracker::workspace_required(pilot_config));
+    h::AuxiliaryMetadataReceiver auxiliary(c.sample_rate,plan.auxiliary_frequency_hz,plan.frequency_hz,{}, {},
+        h::AuxiliaryMetadataReceiver::workspace_required(c.sample_rate));
     Measured measured;measured.actual=mapping(plan.frequency_hz);
     constexpr long double ratio=1.0001L;std::array<float,113> input{};std::size_t unique=0;
     for(std::uint64_t at=0;at<6ULL*c.sample_rate;) {
         const auto n=std::min<std::uint64_t>(input.size(),6ULL*c.sample_rate-at);
         for(std::size_t i=0;i<n;++i)input[i]=source.mix(0,ratio*(at+i)/c.sample_rate,c.sample_rate);
-        receiver.push(std::span(input).first(n),c.sample_rate,at);at+=n;
-        if(auto update=receiver.take_update()) {
-            measured.last=*update;
-            if(update->punctuation.known) {
-                const auto result=measured.clock.observe(*update,raw_domain(),at);
-                check(result==h::PunctuationClockReason::accepted || result==h::PunctuationClockReason::duplicate_marker,
-                    "actual helper punctuation lost provenance");unique+=result==h::PunctuationClockReason::accepted;
-            }
+        const auto samples=std::span(input).first(n);
+        pilot.push(samples,at);auxiliary.push(samples,at);auxiliary.advance();at+=n;
+        // Use the same independently qualified pure-pilot observer and dated
+        // Reference mapping as Live; legacy metadata reception can go stale
+        // on a pilot which deliberately carries no punctuation or metadata.
+        const auto tracked=pilot.snapshot();
+        check(!tracked.clock_qualified,"pure pilot supplied auxiliary clock punctuation");
+        measured.last={};measured.last.sample=measured.last.frequency_sample=tracked.sample;
+        measured.last.sample_rate=tracked.sample_rate;measured.last.frequency_first_sample=tracked.first_sample;
+        measured.last.frequency_hz=tracked.frequency_hz;measured.last.frequency_uncertainty_hz=tracked.uncertainty_hz;
+        measured.last.frequency_fit=h::FrequencyFit::local_polynomial;measured.last.frequency_valid=tracked.qualified;
+        // The actual auxiliary reversal supplies clock evidence independently
+        // of optional metadata and the pure pilot's frequency measurement.
+        check(!auxiliary.take_update(),"metadata-free clock fixture decoded metadata");
+        if(const auto marker=auxiliary.take_punctuation_update();marker.known) {
+            check(marker.last_sample<at,"actual auxiliary FIR support is ahead of capture");
+            h::Reference clock;clock.sample_rate=c.sample_rate;clock.sample=marker.last_sample;clock.punctuation=marker;
+            const auto result=measured.clock.observe(clock,raw_domain(),at);
+            check(result==h::PunctuationClockReason::accepted || result==h::PunctuationClockReason::duplicate_marker,
+                "actual helper punctuation lost provenance");unique+=result==h::PunctuationClockReason::accepted;
         }
     }
     check(unique>=8,"actual source did not expose enough independent markers");

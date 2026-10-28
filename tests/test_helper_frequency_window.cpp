@@ -2,6 +2,7 @@
 #include "datapump/pattern_correlator.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "../src/helper_reference_search.hpp"
 #include <algorithm>
 #include <complex>
 #include <iostream>
@@ -12,7 +13,168 @@
 using namespace datapump;
 namespace {
 void check(bool v,const char* text){if(!v)throw Error(text);}
+void frequency_truth_coverage(const modem::PatternSearch& search,
+        const modem::detail::PatternHelperFrequencySelector& selector,double origin) {
+    const auto& window=selector.window;
+    const auto point=[&](long double ppm,long double residual) {
+        const auto frequency=static_cast<long double>(window.center_hz)+residual-origin-
+            static_cast<long double>(window.clock_coefficient_hz)*ppm*1e-6L;
+        std::size_t clock_cells=0;
+        for(std::size_t i=0;i<search.hypotheses.size();++i) {
+            const auto& pair=search.hypotheses[i];
+            if(std::abs(ppm-pair.clock_error_ppm)>window.clock_cell_half_width_ppm)continue;
+            ++clock_cells;
+            // A physical point belongs to its nearest original RF cell in
+            // EVERY compatible original LF cell. Exact RF ties retain both.
+            const auto distance=std::abs(frequency-pair.frequency_offset_hz);
+            bool nearest=true;
+            for(const auto& other:search.hypotheses)
+                if(other.clock_error_ppm==pair.clock_error_ppm &&
+                   std::abs(frequency-other.frequency_offset_hz)<distance)nearest=false;
+            if(nearest)check(selector.keep(i,origin),"frequency-only mask discarded a physical RF/LF point");
+        }
+        check(clock_cells>0,"truth point fell outside the original LF coverage");
+    };
+    for(int at=0;at<=20;++at) {
+        const auto ppm=selector.domain_lower_ppm+
+            (selector.domain_upper_ppm-selector.domain_lower_ppm)*at/20.L;
+        for(const auto residual:{-window.half_width_hz,0.,window.half_width_hz})point(ppm,residual);
+    }
+    for(const auto& pair:search.hypotheses)for(const auto direction:{-1.,1.}) {
+        const auto ppm=static_cast<long double>(pair.clock_error_ppm)+direction*window.clock_cell_half_width_ppm;
+        if(ppm>=selector.domain_lower_ppm && ppm<=selector.domain_upper_ppm)
+            point(ppm,0);
+    }
+}
+void admitted_domain_geometry() {
+    // This is the real SF512 Live catalogue which retained all 21 pairs when
+    // the measured interval improved: padding beyond +/-300 ppm kept four
+    // physically unavailable RF alternatives alive at the two LF edges.
+    modem::Config c;c.sample_rate=8000;c.carrier_hz=1500;c.bandwidth_hz=200;
+    c.spreading_factor=512;c.pulse_shaping=false;
+    c.oscillator_search=modem::OscillatorSearchConfig{{100,0},{2,0},7e6,3};
+    constexpr double birth_width=.16443402071333751,measured_width=.051562846476435685;
+    const auto reference=modem::helper_reference_search(c,birth_width,2500,0,0,
+        modem::HelperReferenceClockRelation::common_corrected_source,false,
+        modem::PatternUtcClockGrid::complete_expanded_domain);
+    const auto& catalogue=reference.catalogue;
+    modem::PatternSearch search;search.hypotheses=catalogue.hypotheses;
+    search.admitted_clock_half_width_ppm=catalogue.requested_clock_half_width_ppm;
+    search.admitted_clock_cell_half_width_ppm=catalogue.clock_step_ppm/2;
+    modem::detail::PatternHelperFrequencySelector actual;
+    modem::PatternHelperFrequencyWindow window{0,birth_width,1000,catalogue.clock_step_ppm/2};
+    check(actual.initialize(search,window) && actual.selected==21 && actual.original_clock_rates==15,
+        "Live domain-edge fixture lost its original 21-pair/15-LF catalogue");
+    const auto bytes=actual.working_bytes();window.half_width_hz=measured_width;actual.update(window);
+    check(actual.selected==17 && actual.selected_clock_rates==15 && !actual.window.clock_interval &&
+          actual.working_bytes()==bytes,
+        "frequency-only precision failed to narrow the admitted domain without losing LF or allocating");
+    frequency_truth_coverage(search,actual,0);
+
+    // The established clock-interval path with the WHOLE original domain is
+    // a test oracle, not independent clock evidence. A frequency-only mask
+    // must be identical, including signs and translated accepted origins.
+    for(const auto sign:{-1.,1.}) {
+        auto reflected=search;
+        for(auto& pair:reflected.hypotheses)pair.frequency_offset_hz*=sign;
+        modem::detail::PatternHelperFrequencySelector frequency,domain;
+        auto requested=window;requested.clock_coefficient_hz*=sign;
+        check(frequency.initialize(reflected,requested),"signed frequency-only geometry declined");
+        const auto retained=frequency.working_bytes();
+        requested.clock_interval=modem::PatternHelperClockInterval{-300,300};
+        check(domain.initialize(reflected,requested),"original-domain interval oracle declined");
+        for(const auto center:{0.,.017,-.025})for(const auto width:{measured_width,0.}) {
+            requested.center_hz=center;requested.half_width_hz=width;
+            domain.update(requested);requested.clock_interval.reset();frequency.update(requested);
+            check(!frequency.window.clock_interval && frequency.selected_clock_rates==15 &&
+                  frequency.working_bytes()==retained,
+                "frequency-only update gained clock authority, discarded LF or allocated");
+            for(const auto origin:{0.,.017,-.031}) {
+                for(std::size_t i=0;i<reflected.hypotheses.size();++i)
+                    check(frequency.keep(i,origin)==domain.keep(i,origin),
+                        "frequency-only mask differs from the original-domain oracle");
+                frequency_truth_coverage(reflected,frequency,origin);
+            }
+            requested.clock_interval=modem::PatternHelperClockInterval{-300,300};
+        }
+    }
+    // Closed RF and LF boundaries are genuine physical ties. Domain clipping
+    // must preserve them even with a nonzero accepted frequency origin.
+    modem::PatternSearch edges;edges.admitted_clock_half_width_ppm=100;
+    edges.admitted_clock_cell_half_width_ppm=50;
+    for(const auto ppm:{-100.,0.,100.})for(const auto rf:{0.,.25})
+        edges.hypotheses.push_back({rf,ppm});
+    modem::detail::PatternHelperFrequencySelector ties;
+    check(ties.initialize(edges,{.25,0,0,50}) && ties.selected==3,
+        "closed-edge fixture lost its initial RF representatives");
+    for(std::size_t i=0;i<edges.hypotheses.size();++i)
+        check(ties.keep(i,.125),"frequency-only origin discarded a closed RF tie");
+    ties.update({.25,0,0,50,modem::PatternHelperClockInterval{50,50}});
+    std::size_t selected=0;
+    for(std::size_t i=0;i<edges.hypotheses.size();++i)if(ties.keep(i,.125)) {
+        check(edges.hypotheses[i].clock_error_ppm==0 || edges.hypotheses[i].clock_error_ppm==100,
+            "closed LF tie admitted a disjoint original clock cell");++selected;
+    }
+    check(selected==4,"domain clipping discarded a closed RF/LF boundary tie");
+    std::cout<<"Live SF512 domain clipping 21->17 pairs/all15LF, physical coverage and signed/origin edge ties passed\n";
+}
+void implicit_frequency_geometry() {
+    modem::PatternSearch implicit;
+    // Keep the native catalogue implicit and deliberately unsorted. Geometry
+    // must preserve its original indices rather than build a new search bank.
+    implicit.frequency_offsets_hz={.5,-.5,.25,0.,-.25};
+    const auto original=implicit.frequency_offsets_hz;
+    for(const bool declared_zero_domain:{false,true}) {
+        if(declared_zero_domain) {
+            implicit.admitted_clock_half_width_ppm=0;
+            implicit.admitted_clock_cell_half_width_ppm=0;
+            implicit.qualified_clock_interval=modem::PatternClockInterval{0,0,0};
+        }
+        auto explicit_pairs=implicit;explicit_pairs.frequency_offsets_hz.clear();
+        explicit_pairs.admitted_clock_half_width_ppm=0;explicit_pairs.admitted_clock_cell_half_width_ppm=0;
+        for(const auto f:original)explicit_pairs.hypotheses.push_back({f,0});
+        modem::detail::PatternHelperFrequencySelector scalar,paired;
+        check(modem::detail::PatternHelperFrequencySelector::implicit_frequency_only(implicit) &&
+              modem::detail::PatternHelperFrequencySelector::catalogue_size(implicit)==original.size() &&
+              modem::detail::PatternHelperFrequencySelector::clock_cell_half_width(implicit)==0,
+            "native implicit RF-only catalogue was not recognized without a clock domain");
+        check(scalar.initialize(implicit,{0,.001,1000,0}) && paired.initialize(explicit_pairs,{0,.001,1000,0}),
+            "equivalent scalar/explicit RF-only selector geometry declined");
+        const auto bytes=scalar.working_bytes();
+        for(const auto coefficient:{-1000.,0.,1000.})for(const auto center:{-.375,-.125,0.,.125,.375})
+            for(const auto width:{0.,.001,.25}) {
+                scalar.update({center,width,coefficient,0});paired.update({center,width,coefficient,0});
+                check(scalar.selected==paired.selected && scalar.original_clock_rates==1 &&
+                      scalar.selected_clock_rates==1 && scalar.working_bytes()==bytes,
+                    "implicit RF measurement refresh changed clock alternatives or allocated");
+                for(const auto origin:{-.25,-.125,0.,.0625,.25})for(std::size_t i=0;i<original.size();++i)
+                    check(scalar.keep(i,origin)==paired.keep(i,origin),
+                        "implicit RF-only cells differ from equivalent explicit pairs");
+            }
+        scalar.update({.375,0,0,0});std::size_t ties=0;
+        for(std::size_t i=0;i<original.size();++i)if(scalar.keep(i,.25)) {
+            check(original[i]==0 || original[i]==.25,"nonzero RF origin selected an unrelated closed cell");++ties;
+        }
+        check(ties==2,"implicit RF-only geometry discarded a closed nonzero-origin tie");
+        check(implicit.hypotheses.empty() && implicit.frequency_offsets_hz==original,
+            "selector changed ordinary implicit catalogue construction");
+    }
+    const auto decline=[&](const modem::PatternSearch& candidate) {
+        modem::detail::PatternHelperFrequencySelector selector;
+        check(!selector.initialize(candidate,{0,.001,0,0}),
+            "implicit RF-only selector accepted coupled or unresolved clock geometry");
+    };
+    auto bad=implicit;bad.couple_clock_to_carrier=true;decline(bad);
+    bad=implicit;bad.clock_errors_ppm={0,0};decline(bad);
+    bad=implicit;bad.clock_errors_ppm={0,100};decline(bad);
+    bad=implicit;bad.admitted_clock_half_width_ppm=1;decline(bad);
+    bad=implicit;bad.admitted_clock_cell_half_width_ppm=1;decline(bad);
+    bad=implicit;bad.qualified_clock_interval=modem::PatternClockInterval{-1,1,0};decline(bad);
+    bad=implicit;bad.qualified_clock_interval=modem::PatternClockInterval{0,0,1};decline(bad);
+    std::cout<<"native implicit RF-only geometry equals explicit zero-clock pairs, including closed ties/origins; coupled/clock domains declined\n";
+}
 void geometry() {
+    admitted_domain_geometry();implicit_frequency_geometry();
     modem::PatternSearch search;search.admitted_clock_half_width_ppm=100;search.admitted_clock_cell_half_width_ppm=50;
     constexpr double coefficient=1000;
     for(const auto ppm:{-100.,0.,100.})for(const auto r:{-.5,-.25,0.,.25,.5})
@@ -27,8 +189,14 @@ void geometry() {
     auto broad_cells=search;
     for(auto& pair:broad_cells.hypotheses)pair.frequency_offset_hz-=9000*pair.clock_error_ppm*1e-6;
     modem::detail::PatternHelperFrequencySelector inflated;
-    check(inflated.initialize(broad_cells,{0,0,10000,50}) && inflated.selected==15,
+    // In the admitted +/-100 ppm domain the three LF cells imply RF
+    // intervals [0.5,1], [-0.5,0.5] and [-1,-0.5] Hz. Their original
+    // nearest-RF cells number 3+5+3; the other four require LF beyond the
+    // admitted domain, while the central cell still needs all five RFs.
+    check(inflated.initialize(broad_cells,{0,0,10000,50}) && inflated.selected==11 &&
+          inflated.selected_clock_rates==3 && !inflated.window.clock_interval,
         "selector dropped physical uncertainty inside an LF coverage cell");
+    frequency_truth_coverage(broad_cells,inflated,0);
     check(selector.working_bytes()==storage,"measurement refresh allocated new geometry");
     auto gap=search;gap.admitted_clock_cell_half_width_ppm=49;
     modem::detail::PatternHelperFrequencySelector invalid;
@@ -129,6 +297,9 @@ template<class Receiver>void payload(bool compact,bool clock=false,std::size_t c
             check(on.set_helper_frequency_window(0,.001,100),"qualified improved precision could not update an existing bank");
             const auto state=on.helper_frequency_window();check(state.selected_pairs==3 && state.original_pairs==15,
                 "existing bank retained all cold RF cells after precision improved");
+            check(!state.clock_qualified && !state.clock_interval && state.clock_counts_available &&
+                  state.selected_clock_rates==state.original_clock_rates,
+                "frequency-only precision gained clock authority or discarded unresolved LF alternatives");
             check(on.set_helper_frequency_window(0,.001,100),"identical joined refresh was refused");narrowed=true;
         }
         if(clock && narrowed && !clock_narrowed && at>=(compact?3*S/2:delay+4*S)) {
@@ -174,6 +345,69 @@ template<class Receiver>void payload(bool compact,bool clock=false,std::size_t c
         check(on.compact_acquisition_state().skipped_lane_samples,"compact window omitted no original cold lane work");
     }
     (void)allocated;std::cout<<(compact?"compact":"native")<<(clock?" clock":" frequency")<<" chunk="<<chunk<<" exact24bits/pending/physicalEND and final helper loss passed\n";
+}
+void implicit_frequency_payload() {
+    const auto c=config();const Bytes bits{0,0,1,0,1,1,0,1,1,0,0,1};
+    const auto S=modem::symbol_sample_count(c),delay=2*S+37,origin=delay+modem::pattern_pulse_padding_samples(c);
+    auto s=search(c,static_cast<double>(origin)/c.sample_rate,false);
+    s.hypotheses.clear();s.admitted_clock_half_width_ppm.reset();s.admitted_clock_cell_half_width_ppm.reset();
+    const auto step=.25*c.sample_rate/S;
+    s.frequency_offsets_hz={-2*step,-step,0.,step,2*step};
+    check(modem::detail::PatternHelperFrequencySelector::implicit_frequency_only(s),
+        "native payload fixture is not the original uncoupled zero-clock RF catalogue");
+    modem::PatternTransmitter source(bits,c,c.stream_epoch,0,false);
+    std::vector<std::complex<double>> analytic(source.total_samples());
+    check(source.read_analytic(analytic)==analytic.size(),"implicit RF-only source did not drain");
+    const auto end=delay+analytic.size();std::vector<float> pcm(end+std::max<std::uint64_t>(3*S,8*c.sample_rate));
+    std::mt19937 random(529);std::normal_distribution<float> noise(0,.025F);const auto phase=std::polar(1.7,.83);
+    for(std::size_t i=0;i<pcm.size();++i)pcm[i]=noise(random)+(i>=delay&&i-delay<analytic.size()?static_cast<float>((phase*analytic[i-delay]).real()):0.F);
+    // The existing owner receives part of the first payload symbol before
+    // refinement; the new owner installs the same precision at construction.
+    // All three ordinary receivers consume exactly the same complete PCM.
+    modem::PatternReceiver off(c,4*1024*1024,s),existing(c,4*1024*1024,s),fresh(c,4*1024*1024,s);
+    Rows a,b,d;bool narrowed=false,lost=false;std::array<std::uint64_t,3> fft_before_loss{};
+    const auto mask=[&](const modem::PatternReceiver& receiver,std::size_t selected) {
+        const auto state=receiver.helper_frequency_window();
+        check(state.supported&&state.active&&state.original_pairs==5&&state.selected_pairs==selected&&
+              state.clock_counts_available&&state.original_clock_rates==1&&state.selected_clock_rates==1&&
+              !state.clock_qualified&&!state.clock_interval&&state.unresolved_clock_cell_half_width_ppm==0,
+            "native implicit RF-only window changed its original catalogue or gained clock authority");
+    };
+    check(existing.set_helper_frequency_window(0,3*step,0),"existing implicit native bank declined broad helper geometry");mask(existing,5);
+    check(fresh.set_helper_frequency_window(0,3*step,0),"new implicit native bank declined original helper geometry");mask(fresh,5);
+    check(fresh.set_helper_frequency_window(0,step/16,0),"new implicit native bank declined precise helper geometry");mask(fresh,1);
+    for(std::size_t at=0;at<pcm.size();) {
+        const auto count=std::min<std::size_t>(17,pcm.size()-at);const auto block=std::span(pcm).subspan(at,count);
+        off.push(block);existing.push(block);fresh.push(block);at+=count;
+        poll(off,a,bits,at);poll(existing,b,bits,at);poll(fresh,d,bits,at);
+        if(!narrowed&&at>=origin+S/2) {
+            check(!existing.synchronized(),"implicit existing-bank refresh happened after its first complete decision");
+            check(existing.set_helper_frequency_window(0,step/16,0),"improved precision failed to narrow an existing implicit bank");
+            mask(existing,1);narrowed=true;
+        }
+        if(!lost&&at>=end-S/2) {
+            check(existing.synchronized()&&fresh.synchronized(),"implicit helper loss preceded ordinary acquisition");
+            fft_before_loss={off.fft_work().fft_jobs,existing.fft_work().fft_jobs,fresh.fft_work().fft_jobs};
+            check(fft_before_loss[0]>0&&fft_before_loss[1]>0&&fft_before_loss[2]>0&&
+                  fft_before_loss[1]<fft_before_loss[0]&&fft_before_loss[2]<fft_before_loss[0],
+                "implicit RF masks did not reduce actual native FFT jobs before reference loss");
+            existing.clear_helper_frequency_window();fresh.clear_helper_frequency_window();
+            check(existing.set_helper_acquisition_dispatch(false)&&fresh.set_helper_acquisition_dispatch(false),
+                "implicit helper loss failed to pause new acquisition");
+            check(!existing.helper_frequency_window().active&&!fresh.helper_frequency_window().active,
+                "implicit helper loss retained current frequency authority");lost=true;
+        }
+    }
+    const auto exact=[&](const Rows& rows){return std::find_if(rows.begin(),rows.end(),[&](const auto& row){return row.second.complete&&row.second.bits==bits;});};
+    const auto x=exact(a),y=exact(b),z=exact(d);
+    check(narrowed&&lost&&x!=a.end()&&y!=b.end()&&z!=d.end(),"implicit RF-only helper lost complete ordinary payload or END");
+    check(x->first==y->first&&x->first==z->first&&x->second.full_pending&&y->second.full_pending&&z->second.full_pending,
+        "implicit RF-only helper changed pending identity or withheld exact final-bit progress");
+    check(y->second.completion+2>=end+6*c.sample_rate&&z->second.completion+2>=end+6*c.sample_rate,
+        "implicit helper loss bypassed fully scored physical absence");
+    std::cout<<"native implicit RF-only existing/new 5->1 exact12bits/pending/physicalEND/loss; actual FFT jobs before loss off="
+        <<fft_before_loss[0]<<" existing="<<fft_before_loss[1]<<" new="<<fft_before_loss[2]
+        <<" whole-window="<<off.fft_work().fft_jobs<<'/'<<existing.fft_work().fft_jobs<<'/'<<fresh.fft_work().fft_jobs<<'\n';
 }
 modem::Config continuation_config() {
     auto c=config();c.sample_rate=512;c.carrier_hz=128;c.bandwidth_hz=.5;c.integration_seconds=128;return c;
@@ -329,9 +563,10 @@ void continuation() {
 int main(int argc,char** argv){try {
     const std::string mode=argc>1?argv[1]:"all";
     if(mode=="geometry" || mode=="all")geometry();
-    if(mode=="native" || mode=="all")payload<modem::PatternReceiver>(false);
+    if(mode=="native" || mode=="all"){payload<modem::PatternReceiver>(false);implicit_frequency_payload();}
+    if(mode=="implicit"){implicit_frequency_geometry();implicit_frequency_payload();}
     if(mode=="compact" || mode=="all"){payload<modem::PatternCorrelator>(true);payload<modem::PatternCorrelator>(true,false,733);}
     if(mode=="clock" || mode=="all"){payload<modem::PatternReceiver>(false,true);payload<modem::PatternCorrelator>(true,true);payload<modem::PatternCorrelator>(true,true,733);}
     if(mode=="continuation" || mode=="all")continuation();
-    if(mode!="geometry" && mode!="native" && mode!="compact" && mode!="clock" && mode!="continuation" && mode!="all")throw Error("unknown frequency-window test mode");return 0;
+    if(mode!="geometry" && mode!="native" && mode!="compact" && mode!="clock" && mode!="continuation" && mode!="implicit" && mode!="all")throw Error("unknown frequency-window test mode");return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

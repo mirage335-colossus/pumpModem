@@ -2853,6 +2853,51 @@ struct PatternReceiver::Impl {
                 ++track.unconfirmed_symbols;
                 const auto gap_expired=detail::fft_failed_duration_complete(track.absent_samples,
                     track.unconfirmed_symbols,code.symbol_samples(),config.sample_rate,variable_clock);
+                if(audio::trace::receiver_probe_enabled())audio::trace::record("native_probe_continuation",[&](auto& f) {
+                    f.add("epoch",config.stream_epoch);f.add("sample_origin",search.input_sample_origin);
+                    f.add("sample",sample);f.add("bins",bins);f.add("bin_samples",bin_samples);f.add("symbol_samples",code.symbol_samples());
+                    f.add("track_serial",track.serial);f.add("index",track.index);f.add("admitted",track.admitted);f.add("established",track.established);
+                    f.add("best_score",best.score);f.add("alternative_score",best.alternative_score);f.add("bit",best.bit);
+                    f.add("zero",best.bit?best.alternative_score:best.score);f.add("one",best.bit?best.score:best.alternative_score);
+                    f.add("presence",presence);f.add("standalone",standalone);f.add("threshold",threshold());f.add("retain_floor",search.retain_score);
+                    f.add("reject_presence",!presence);f.add("reject_retain_floor",best.score<search.retain_score);
+                    f.add("reject_bit_margin",best.score-best.alternative_score<1);f.add("reject_multiple_groups",group_count>1 && !standalone);
+                    f.add("reject_pending_gap",track.pending_gap && !standalone);f.add("group_count",group_count);f.add("radius_bins",radius);
+                    f.add("chosen_bin",chosen);f.add("chosen_first_sample",best.first_sample);f.add("chosen_end_sample",best.end_sample);
+                    f.add("track_frequency_index",track.frequency);f.add("selected_frequency_index",selected_frequency);
+                    f.add("track_frequency_offset_hz",frequency_offset(track.frequency));f.add("selected_frequency_offset_hz",frequency_offset(selected_frequency));
+                    f.add("frequency_origin_hz",track.frequency_origin_hz);f.add("best_frequency_hz",best.frequency_hz);
+                    f.add("track_clock_ratio",clock_ratio(track.frequency));f.add("selected_clock_ratio",clock_ratio(selected_frequency));
+                    f.add("phase",active_stream_phase);f.add("selected_phase_lower",selected.lower);f.add("selected_phase_upper",selected.upper);
+                    f.add("track_phase_lower",track.phase_lower);f.add("track_phase_upper",track.phase_upper);
+                    f.add("stream_first_sample",track.burst.stream_first_sample);f.add("stream_first_symbol",track.burst.stream_first_symbol);
+                    f.add("burst_first_sample",track.burst.first_sample);f.add("burst_first_symbol",track.burst.first_stream_symbol);
+                    f.add("burst_end_sample",track.burst.end_sample);f.add("burst_phase",track.burst.stream_phase_samples);f.add("burst_bits",track.burst.bits.size());
+                    f.add("confirmed",track.confirmed);f.add("confirmed_end",track.confirmed_end);f.add("pending_gap",track.pending_gap);f.add("gap_slots",track.gap_slots);
+                    f.add("next_bin",track.next);f.add("failed_source_samples",track.absent_samples);f.add("unconfirmed_symbols",track.unconfirmed_symbols);f.add("gap_expired",gap_expired);
+                    f.add("chain_score",chain_score);f.add("pending_score",track.pending_score);f.add("confirmed_score",track.confirmed_score);f.add("penalty",track.penalty);
+                    f.add("trials",trials);f.add("shifted_trials",shifted_trials);f.add("outer_presence_active",best.outer_presence_active);f.add("outer_presence_score",best.outer_presence_score);
+                    // Bounded continuous coordinates only: unsupported dates
+                    // stay unavailable, without throwing or advancing a cursor.
+                    const auto source_address=[&](std::uint64_t index,std::uint64_t phase,SymbolStreamAddress& out)noexcept {
+                        const auto symbol=code.symbol_samples(),rate=static_cast<std::uint64_t>(config.sample_rate);
+                        if(!symbol || !rate || phase>=rate || index>UINT64_MAX/symbol)return false;
+                        auto offset=index*symbol;
+                        if(phase>UINT64_MAX-offset)return false;
+                        offset+=phase;
+                        if(offset/rate>UINT64_MAX-config.stream_epoch)return false;
+                        const auto sample_in_second=static_cast<std::uint32_t>(offset%rate);
+                        out={config.stream_epoch+offset/rate,sample_in_second/symbol,sample_in_second};return true;
+                    };
+                    SymbolStreamAddress address{},anchor{};
+                    const bool source_available=!calendar_symbols() && source_address(track.index,active_stream_phase,address) &&
+                        source_address(track.burst.stream_first_symbol,track.burst.stream_phase_samples,anchor);
+                    f.add("source_address_available",source_available);
+                    if(source_available) {
+                        f.add("source_epoch",address.epoch);f.add("source_ordinal",address.ordinal);f.add("source_sample",address.sample_in_second);
+                        f.add("anchor_source_epoch",anchor.epoch);f.add("anchor_source_ordinal",anchor.ordinal);f.add("anchor_source_sample",anchor.sample_in_second);
+                    }
+                });
                 if(!presence || best.score<search.retain_score || best.score-best.alternative_score<1 || (group_count>1 && !standalone) ||
                    (track.pending_gap && !standalone)) {
                     if(track.admitted && !gap_expired) {
@@ -4793,9 +4838,10 @@ bool PatternReceiver::set_helper_frequency_window(double center,double radius,do
         std::optional<PatternHelperClockInterval> clock)noexcept {
     auto& s=*impl_;
     if(s.fallback)return s.fallback->set_helper_frequency_window(center,radius,coefficient,clock);
-    const PatternHelperFrequencyWindow requested{center,radius,coefficient,s.search.admitted_clock_cell_half_width_ppm.value_or(-1),clock};
+    const PatternHelperFrequencyWindow requested{center,radius,coefficient,detail::PatternHelperFrequencySelector::clock_cell_half_width(s.search),clock};
     if(!requested.valid() || !helper_acquisition_dispatch().supported ||
-       s.search.hypotheses.size()!=s.templates.size() || s.search.hypotheses.empty() || s.search.hypotheses.size()>8194 ||
+       detail::PatternHelperFrequencySelector::catalogue_size(s.search)!=s.templates.size() ||
+       s.templates.empty() || s.templates.size()>8194 ||
        s.phase_curve || s.execution_phase_view || s.cached_phase_view || s.prior_pending_count || s.prior_dispatch ||
        !s.acquisition_mask.empty() || (!s.helper_frequency() && s.helper_optional))return false;
     if(s.helper_frequency()) {
@@ -4824,8 +4870,9 @@ void PatternReceiver::clear_helper_frequency_window()noexcept {
 PatternHelperFrequencyWindowState PatternReceiver::helper_frequency_window()const noexcept {
     const auto& s=*impl_;if(s.fallback)return s.fallback->helper_frequency_window();
     PatternHelperFrequencyWindowState out;
-    out.supported=helper_acquisition_dispatch().supported && s.search.hypotheses.size()==s.templates.size() &&
-        !s.search.hypotheses.empty() && s.search.hypotheses.size()<=8194 && !s.phase_curve && !s.execution_phase_view && !s.cached_phase_view;
+    out.supported=helper_acquisition_dispatch().supported &&
+        detail::PatternHelperFrequencySelector::catalogue_size(s.search)==s.templates.size() &&
+        !s.templates.empty() && s.templates.size()<=8194 && !s.phase_curve && !s.execution_phase_view && !s.cached_phase_view;
     out.active=s.helper_frequency()!=nullptr;out.original_pairs=s.templates.size();
     out.selected_pairs=s.helper_frequency()?s.helper_frequency()->selected:out.original_pairs;
     if(out.supported && s.helper_frequency()) {

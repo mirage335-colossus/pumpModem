@@ -584,10 +584,35 @@ public:
         return sizeof(PatternHelperFrequencySelector)+n*(sizeof(Cell)+sizeof(std::size_t));
     }
     std::size_t working_bytes()const noexcept {return sizeof(*this)+cells.capacity()*sizeof(Cell);}
+    // Ordinary uncoupled scalar searches already score exactly one nominal
+    // clock lane. Select their original RF cells without converting them to
+    // paired hypotheses, which would change ordinary timing/scoring geometry.
+    // Coupled clocks and any wider admitted LF domain still need paired cells.
+    static bool implicit_frequency_only(const PatternSearch& search) noexcept {
+        return search.hypotheses.empty() && !search.frequency_offsets_hz.empty() &&
+            !search.couple_clock_to_carrier && search.clock_errors_ppm.size()==1 && search.clock_errors_ppm[0]==0 &&
+            (!search.admitted_clock_half_width_ppm || *search.admitted_clock_half_width_ppm==0) &&
+            (!search.admitted_clock_cell_half_width_ppm || *search.admitted_clock_cell_half_width_ppm==0) &&
+            (!search.qualified_clock_interval || (search.qualified_clock_interval->lower_ppm==0 &&
+                                                  search.qualified_clock_interval->upper_ppm==0 &&
+                                                  search.qualified_clock_interval->cell_half_width_ppm==0));
+    }
+    static std::size_t catalogue_size(const PatternSearch& search) noexcept {
+        return !search.hypotheses.empty()?search.hypotheses.size():
+            implicit_frequency_only(search)?search.frequency_offsets_hz.size():0;
+    }
+    static double clock_cell_half_width(const PatternSearch& search) noexcept {
+        return implicit_frequency_only(search)?0:search.admitted_clock_cell_half_width_ppm.value_or(-1);
+    }
     bool initialize(const PatternSearch& search,const PatternHelperFrequencyWindow& requested) {
-        if(search.hypotheses.empty() || search.hypotheses.size()>8194 || !requested.valid() ||
-           !search.admitted_clock_half_width_ppm || !std::isfinite(*search.admitted_clock_half_width_ppm) ||
-           *search.admitted_clock_half_width_ppm<0)return false;
+        const auto count=catalogue_size(search);
+        const auto implicit=implicit_frequency_only(search);
+        const auto pair=[&](std::size_t i) {
+            return implicit?PatternFrequencyRateHypothesis{search.frequency_offsets_hz[i],0}:search.hypotheses[i];
+        };
+        if(!count || count>8194 || !requested.valid() ||
+           (!implicit && (!search.admitted_clock_half_width_ppm ||
+            !std::isfinite(*search.admitted_clock_half_width_ppm) || *search.admitted_clock_half_width_ppm<0)))return false;
 #if defined(__FAST_MATH__) || (defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__>0) || FLT_EVAL_METHOD!=0
         return false;
 #else
@@ -596,8 +621,8 @@ public:
         if(search.qualified_clock_interval && requested.clock_cell_half_width_ppm<search.qualified_clock_interval->cell_half_width_ppm)return false;
         // Verify the complete original requested clock domain using closed
         // source cells. This selector never substitutes a smaller LF domain.
-        const auto lower=search.qualified_clock_interval?search.qualified_clock_interval->lower_ppm:-*search.admitted_clock_half_width_ppm;
-        const auto upper=search.qualified_clock_interval?search.qualified_clock_interval->upper_ppm:*search.admitted_clock_half_width_ppm;
+        const auto lower=implicit?0.:search.qualified_clock_interval?search.qualified_clock_interval->lower_ppm:-*search.admitted_clock_half_width_ppm;
+        const auto upper=implicit?0.:search.qualified_clock_interval?search.qualified_clock_interval->upper_ppm:*search.admitted_clock_half_width_ppm;
         if(!std::isfinite(lower) || !std::isfinite(upper) || lower>upper)return false;
         domain_lower_ppm=lower;domain_upper_ppm=upper;
         if(!accepts(requested))return false;
@@ -607,53 +632,54 @@ public:
                 error>0?std::nextafter(value,INFINITY):value};
         };
         auto covered=lower;
-        for(std::size_t pass=0;pass<=search.hypotheses.size();++pass) {
+        for(std::size_t pass=0;pass<=count;++pass) {
             auto next=covered;bool bridged=false;
-            for(const auto& pair:search.hypotheses) {
-                if(!std::isfinite(pair.frequency_offset_hz) || !std::isfinite(pair.clock_error_ppm))return false;
-                const auto lo=sum(pair.clock_error_ppm,-requested.clock_cell_half_width_ppm)[1];
-                const auto hi=sum(pair.clock_error_ppm,requested.clock_cell_half_width_ppm)[0];
+            for(std::size_t i=0;i<count;++i) {
+                const auto value=pair(i);
+                if(!std::isfinite(value.frequency_offset_hz) || !std::isfinite(value.clock_error_ppm))return false;
+                const auto lo=sum(value.clock_error_ppm,-requested.clock_cell_half_width_ppm)[1];
+                const auto hi=sum(value.clock_error_ppm,requested.clock_cell_half_width_ppm)[0];
                 if(lo<=covered && hi>=covered){next=std::max(next,hi);bridged=true;}
             }
             if(!bridged)return false;
             if(next>=upper)break;
-            if(next==covered || pass==search.hypotheses.size())return false;
+            if(next==covered || pass==count)return false;
             covered=next;
         }
         // Keep the catalogue and cells in their original order. The bounded
         // construction-only indices are included in maximum_bytes; they have
         // an exact allocation size and leave no retained cache or new RF lane.
-        auto order=std::make_unique<std::size_t[]>(search.hypotheses.size());
-        for(std::size_t i=0;i<search.hypotheses.size();++i)order[i]=i;
-        std::sort(order.get(),order.get()+search.hypotheses.size(),[&](auto a,auto b) {
-            const auto& x=search.hypotheses[a];const auto& y=search.hypotheses[b];
+        auto order=std::make_unique<std::size_t[]>(count);
+        for(std::size_t i=0;i<count;++i)order[i]=i;
+        std::sort(order.get(),order.get()+count,[&](auto a,auto b) {
+            const auto x=pair(a),y=pair(b);
             if(x.clock_error_ppm!=y.clock_error_ppm)return x.clock_error_ppm<y.clock_error_ppm;
             if(x.frequency_offset_hz!=y.frequency_offset_hz)return x.frequency_offset_hz<y.frequency_offset_hz;
             return a<b;
         });
-        cells.resize(search.hypotheses.size());original_clock_rates=0;
+        cells.resize(count);original_clock_rates=0;
         for(std::size_t first=0;first<cells.size();) {
             auto end=first+1;
-            while(end<cells.size()&&search.hypotheses[order[end]].clock_error_ppm==
-                  search.hypotheses[order[first]].clock_error_ppm)++end;
+            while(end<cells.size()&&pair(order[end]).clock_error_ppm==
+                  pair(order[first]).clock_error_ppm)++end;
             const auto clock_group=static_cast<std::uint16_t>(original_clock_rates++);
             for(auto group=first;group<end;) {
-                const auto frequency=search.hypotheses[order[group]].frequency_offset_hz;
+                const auto frequency=pair(order[group]).frequency_offset_hz;
                 auto next=group+1;
-                while(next<end&&search.hypotheses[order[next]].frequency_offset_hz==frequency)++next;
+                while(next<end&&pair(order[next]).frequency_offset_hz==frequency)++next;
                 // The closest DISTINCT RF neighbors give the same monotone
                 // midpoint extrema as the all-pairs scan. Equal RF entries,
                 // including signed zero, share both original closed bounds.
                 const long double lo=group>first?
-                    (static_cast<long double>(search.hypotheses[order[group-1]].frequency_offset_hz)+frequency)/2:-INFINITY;
+                    (static_cast<long double>(pair(order[group-1]).frequency_offset_hz)+frequency)/2:-INFINITY;
                 const long double hi=next<end?
-                    (static_cast<long double>(search.hypotheses[order[next]].frequency_offset_hz)+frequency)/2:INFINITY;
+                    (static_cast<long double>(pair(order[next]).frequency_offset_hz)+frequency)/2:INFINITY;
                 auto lower=static_cast<double>(lo),upper=static_cast<double>(hi);
                 if(static_cast<long double>(lower)>lo)lower=std::nextafter(lower,-INFINITY);
                 if(static_cast<long double>(upper)<hi)upper=std::nextafter(upper,INFINITY);
                 for(auto at=group;at<next;++at) {
                     const auto i=order[at];auto& cell=cells[i];
-                    cell.lower=lower;cell.upper=upper;cell.clock_ppm=search.hypotheses[i].clock_error_ppm;
+                    cell.lower=lower;cell.upper=upper;cell.clock_ppm=pair(i).clock_error_ppm;
                     cell.clock_group=clock_group;
                 }
                 group=next;
@@ -692,33 +718,31 @@ public:
     }
 private:
     bool intersects(const Cell& cell,double origin)const noexcept {
+        // Original LF cells stop at the already-admitted domain even when
+        // no clock measurement exists. Outside-domain padding must not
+        // retain impossible RF alternatives as frequency precision grows.
+        auto lo=std::max(std::nextafter(static_cast<long double>(cell.clock_ppm)-window.clock_cell_half_width_ppm,-INFINITY),
+            static_cast<long double>(domain_lower_ppm));
+        auto hi=std::min(std::nextafter(static_cast<long double>(cell.clock_ppm)+window.clock_cell_half_width_ppm,INFINITY),
+            static_cast<long double>(domain_upper_ppm));
         if(window.clock_interval) {
-            // Intersect WHOLE original LF coverage cells with the measured
-            // closed interval; retain both cells at an exact shared boundary.
-            const auto lo=std::max({std::nextafter(static_cast<long double>(cell.clock_ppm)-window.clock_cell_half_width_ppm,-INFINITY),
-                static_cast<long double>(domain_lower_ppm),static_cast<long double>(window.clock_interval->lower_ppm)});
-            const auto hi=std::min({std::nextafter(static_cast<long double>(cell.clock_ppm)+window.clock_cell_half_width_ppm,INFINITY),
-                static_cast<long double>(domain_upper_ppm),static_cast<long double>(window.clock_interval->upper_ppm)});
-            if(lo>hi)return false;
-            const auto a=static_cast<long double>(window.center_hz)-origin-
-                static_cast<long double>(window.clock_coefficient_hz)*lo*1e-6L;
-            const auto b=static_cast<long double>(window.center_hz)-origin-
-                static_cast<long double>(window.clock_coefficient_hz)*hi*1e-6L;
-            const auto pad=64*std::numeric_limits<long double>::epsilon()*
-                std::max({1.L,std::abs(a),std::abs(b),std::abs(static_cast<long double>(window.center_hz)),
-                    std::abs(static_cast<long double>(origin)),
-                    std::abs(static_cast<long double>(window.clock_coefficient_hz)*lo*1e-6L),
-                    std::abs(static_cast<long double>(window.clock_coefficient_hz)*hi*1e-6L),static_cast<long double>(window.half_width_hz)});
-            return std::max(a,b)+window.half_width_hz+pad>=cell.lower &&
-                std::min(a,b)-window.half_width_hz-pad<=cell.upper;
+            // A measured interval may further intersect whole original
+            // cells; shared closed boundaries retain both neighbors.
+            lo=std::max(lo,static_cast<long double>(window.clock_interval->lower_ppm));
+            hi=std::min(hi,static_cast<long double>(window.clock_interval->upper_ppm));
         }
-        // The frequency-only default retains its preceding full-LF arithmetic.
-        const auto center=static_cast<long double>(window.center_hz)-origin-
-            static_cast<long double>(window.clock_coefficient_hz)*cell.clock_ppm*1e-6L;
-        const auto radius=static_cast<long double>(window.half_width_hz)+
-            std::abs(static_cast<long double>(window.clock_coefficient_hz))*window.clock_cell_half_width_ppm*1e-6L;
-        const auto pad=64*std::numeric_limits<long double>::epsilon()*std::max({1.L,std::abs(center),radius});
-        return center+radius+pad>=cell.lower && center-radius-pad<=cell.upper;
+        if(lo>hi)return false;
+        const auto a=static_cast<long double>(window.center_hz)-origin-
+            static_cast<long double>(window.clock_coefficient_hz)*lo*1e-6L;
+        const auto b=static_cast<long double>(window.center_hz)-origin-
+            static_cast<long double>(window.clock_coefficient_hz)*hi*1e-6L;
+        const auto pad=64*std::numeric_limits<long double>::epsilon()*
+            std::max({1.L,std::abs(a),std::abs(b),std::abs(static_cast<long double>(window.center_hz)),
+                std::abs(static_cast<long double>(origin)),
+                std::abs(static_cast<long double>(window.clock_coefficient_hz)*lo*1e-6L),
+                std::abs(static_cast<long double>(window.clock_coefficient_hz)*hi*1e-6L),static_cast<long double>(window.half_width_hz)});
+        return std::max(a,b)+window.half_width_hz+pad>=cell.lower &&
+            std::min(a,b)-window.half_width_hz-pad<=cell.upper;
     }
 };
 }

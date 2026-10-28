@@ -652,7 +652,7 @@ struct CurveEntry {
 // cache runtime qualification or a receiver-cost result here.
 struct HelperPrecisionCache {
     using Key=std::tuple<std::uint32_t,double,double,std::size_t,bool,double,double,double,double,double,bool,double,double,
-        helper::PilotObservationMode,double,double>;
+        helper::PilotObservationMode,double,double,double>;
     struct Entry {Key key;helper::TonePrecisionPrediction prediction;};
     std::array<std::optional<Entry>,16> entries;
     std::size_t next=0;
@@ -661,7 +661,8 @@ struct HelperPrecisionCache {
             r.metadata_symbols,r.punctuate,r.baseline_lead_seconds,r.target_half_width_hz,
             r.max_extra_seconds,r.maximum_tracking_slew_hz_per_second,r.maximum_source_capture_ratio,
             r.pilot_segmented,r.pilot_coherent_aperture_seconds,r.pilot_estimator_efficiency,
-            r.pilot_observation,r.pilot_settled_aperture_seconds,r.pilot_discovery_budget_seconds};
+            r.pilot_observation,r.pilot_settled_aperture_seconds,r.pilot_discovery_budget_seconds,
+            r.frequency_acceleration_psd_hz2_per_second3};
         for(const auto& entry:entries)if(entry && entry->key==key)return entry->prediction;
         auto prediction=helper::predict_tone_precision(r);
         entries[next]=Entry{key,prediction};next=(next+1)%entries.size();
@@ -771,8 +772,11 @@ RealtimeHelperCpuPoint realtime_helper_point(const Inputs& inputs,const modem::C
         reference.ideal_one_second_half_width_hz=helper_ideal_tone_half_width(reference.cn0_db_hz,1);
         out.precision=precision_cache.predict(request);
         reference.coherent_aperture_seconds=out.precision.coherent_aperture_seconds;
-        // Price the same continuous production model as TX. Keep independent
-        // actual-retune geometry separate; a Fake calendar is fixed RF.
+        // Price the same continuous production model as TX. The separate
+        // constant-drift/Brownian retune comparison excludes operational
+        // RF/audio acceleration, retune scatter and integrated-model precision;
+        // it supplies neither TX lead nor receiver-cost precision. A Fake
+        // calendar is fixed RF.
         auto comparison=request;
         comparison.pilot_observation=helper::PilotObservationMode::independent_retunes;
         out.precision.retune_model=precision_cache.predict(comparison).pilot_model;

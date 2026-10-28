@@ -280,10 +280,17 @@ public:
             next_=(next_+1)%history_.size();
             if(seen_<history_.size())++seen_;
             if(seen_<history_.size())continue;
-            const auto at=[&](std::size_t age){return history_[(newest+history_.size()-age)%history_.size()];};
-            const auto middle=delay();double value=taps_[middle]*at(middle);
-            for(std::size_t i=0;i<middle;++i)
-                value+=taps_[i]*(static_cast<double>(at(i))+at(taps_.size()-1-i));
+            const auto size=history_.size(),middle=delay();
+            const auto center=newest>=middle?newest-middle:newest+size-middle;
+            auto left=newest,right=newest+1;if(right==size)right=0;
+            double value=taps_[middle]*history_[center];
+            // Walk the same symmetric pairs in the same accumulation order.
+            // Keep variable-length modulo outside the per-tap hot loop.
+            for(std::size_t i=0;i<middle;++i) {
+                value+=taps_[i]*(static_cast<double>(history_[left])+history_[right]);
+                if(left==0)left=size-1;else --left;
+                if(++right==size)right=0;
+            }
             output[count++]=static_cast<float>(value);++output_;
         }
         return count;

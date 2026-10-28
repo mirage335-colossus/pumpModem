@@ -9052,6 +9052,12 @@ struct PatternCorrelator::Impl {
         if(burst && burst->support_sections && !differential_window)
             symbol_support=std::min(symbol_support,
                 (*temporal_support_fits(hypothesis,selected))[e.bit].support(code.chip_samples()));
+        // Admission below can clear a lane. Keep the opt-in decision census
+        // tied to the fit and Helper state which produced this evidence.
+        const bool receiver_probe=audio::trace::receiver_probe_enabled();
+        const auto probe_fit_count=receiver_probe?fits(h,hypothesis,selected)[e.bit].count:0;
+        const bool probe_helper_unobserved=receiver_probe && h.helper_unobserved;
+        const bool probe_helper_block_suppressed=receiver_probe && h.helper_block_suppressed;
         // Reclaim known duplicate alias bits before the original quota check.
         // Retained unpublished suffixes remain charged to their existing vector.
         trim_known_alias_prefix(h);
@@ -9162,16 +9168,20 @@ struct PatternCorrelator::Impl {
             } else {publish(h);clear(h);}
         }
         timing_decision(h,hypothesis,e,selected);
-        if(audio::trace::receiver_probe_enabled()) {
+        if(receiver_probe) {
             const auto* probe_timing=timing_state(hypothesis);
             const auto* decision=probe_timing && probe_timing->decisions[h.index%2].index==h.index?
                 &probe_timing->decisions[h.index%2]:nullptr;
             const auto* stream=existing_output_stream(h);
             audio::trace::record("correlator_probe_decision",[&](auto& f) {
                 f.add("stage","after_admission_before_settlement");
+                f.add("epoch",config.stream_epoch);
                 f.add("lane_slot",hypothesis);f.add("lane_id",logical_id(hypothesis));
                 f.add("block_first_sample",sample);f.add("symbol",h.index);
                 f.add("observed_first_sample",e.first_sample);f.add("symbol_end_sample",end);
+                f.add("fit_count",probe_fit_count);f.add("helper_unobserved",probe_helper_unobserved);
+                f.add("helper_block_suppressed",probe_helper_block_suppressed);
+                f.add("whole_symbol",whole_symbol);f.add("can_start",can_start);
                 f.add("origin",h.origin);f.add("rate",h.rate);f.add("bit",e.bit);
                 f.add("score",e.score);f.add("alternative_score",e.alternative_score);
                 f.add("threshold",threshold());f.add("standalone",standalone);

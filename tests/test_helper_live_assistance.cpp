@@ -54,7 +54,8 @@ bool trace_filter(const char* name)noexcept {
     return event=="receiver_helper_raw_reference" || event=="receiver_helper_assistance_admitted" || event=="receiver_helper_assistance_retired" ||
         event=="receiver_signal_commit" || event=="receiver_helper_payload_retained" ||
         event=="receiver_helper_assistance_suspended" || event=="receiver_permutation_counts" ||
-        event=="receiver_bank_admitted" || event=="receiver_helper_phase_qualified" ||
+        event=="receiver_bank_admitted" || event=="receiver_selection" ||
+        event=="receiver_helper_constructor_frequency" || event=="receiver_helper_phase_qualified" ||
         event=="receiver_helper_phase_applied" || event=="receiver_acquisition_work" ||
         event.starts_with("receiver_helper_cohort_") || event.starts_with("receiver_helper_conditioning_") || event=="trace_begin";
 }
@@ -274,6 +275,7 @@ void full_payload(bool attachment,bool constrained) {
     if(!attachment&&!constrained)check(bits.size()>8192,"long assisted fixture did not exceed the former helper bit limit");
     std::string expected;for(auto bit:bits)expected+=bit?'1':'0';
     std::atomic<std::int64_t> replay_ms{0};bool exact=false,finished=false;
+    const auto cpu_start=std::clock();const auto wall_start=std::chrono::steady_clock::now();
     {
         audio::trace::Scope trace(path,false,&trace_filter);
         live::Session session({},[&]{return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_ms.load());});
@@ -299,28 +301,69 @@ void full_payload(bool attachment,bool constrained) {
         }
         session.stop();
     }
+    const auto cpu=static_cast<double>(std::clock()-cpu_start)/CLOCKS_PER_SEC;
+    const auto wall=std::chrono::duration<double>(std::chrono::steady_clock::now()-wall_start).count();
     std::ifstream input(path);std::string line;bool admitted=false,promoted=false,completed=false,observed_end=false;
-    std::uint64_t id=0,revision=0,last=0;bool pending=false;
+    std::uint64_t id=0,revision=0,last=0;bool pending=false,raw_qualified=false;
+    using Owner=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>;
+    using Row=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t,std::uint64_t>;
+    std::set<Owner> ordinary_owners;std::map<Owner,std::array<std::uint64_t,3>> counters;
+    std::set<Row> payload_rows,scored_rows,narrowed_rows;
+    std::uint64_t jobs=0,transforms=0,narrowed_jobs=0;
     while(std::getline(input,line)) {
-        if(line.find("\"event\":\"receiver_helper_assistance_admitted\"")!=std::string::npos) {
-            admitted=true;
-            check(number(line,"content_limit")==value.content_limit &&
-                  number(line,"configured_bit_limit")==transfer::pattern_bit_limit(value.content_limit) &&
-                  number(line,"recovery_enabled")==1 &&
-                  number(line,"recovery_budget_ms")==static_cast<std::uint64_t>(value.transfer.recovery_options.budget.count()) &&
-                  number(line,"recovery_workspace")==value.transfer.recovery_options.workspace_bytes,
-                  "assisted Robust payload options differ from the ordinary decoder");
+        admitted|=line.find("\"event\":\"receiver_helper_assistance_admitted\"")!=std::string::npos;
+        promoted|=line.find("\"event\":\"receiver_helper_payload_retained\"")!=std::string::npos;
+        if(line.find("\"event\":\"receiver_helper_raw_reference\"")!=std::string::npos && number(line,"qualified")) {
+            check(number(line,"sample")<number(line,"captured_end") &&
+                  number(line,"frequency_first_sample")<=number(line,"sample") &&
+                  std::isfinite(real_number(line,"frequency_hz")) &&
+                  std::isfinite(real_number(line,"uncertainty_hz")) && real_number(line,"uncertainty_hz")>=0,
+                  "full payload helper reference lost its actual measured frequency/support");
+            raw_qualified=true;
         }
-        promoted=promoted||line.find("\"event\":\"receiver_helper_payload_retained\"")!=std::string::npos;
+        if(line.find("\"event\":\"receiver_acquisition_work\"")!=std::string::npos) {
+            const Owner owner{number(line,"revision"),number(line,"instance_id"),number(line,"sample_origin")};
+            const std::array now{number(line,"template_jobs"),number(line,"input_transforms"),number(line,"fft_jobs")};
+            auto& before=counters[owner];
+            for(std::size_t i=0;i<now.size();++i)
+                check(now[i]>=before[i],"full payload ordinary work counter reset within one owner");
+            const bool numeric=number(line,"numeric_owner");
+            if(numeric) {
+                ordinary_owners.insert(owner);
+                check(number(line,"realtime_helper") && !number(line,"helper_input_view"),
+                      "full payload used a parallel or legacy helper receiver input");
+            }
+            const bool joined=numeric && number(line,"counter_snapshot_joined") && !number(line,"incomplete") &&
+                line.find("\"reason\":\"feed_complete\"")!=std::string::npos;
+            const auto executed=now[2]-before[2];
+            if(joined) {
+                jobs+=executed;transforms+=now[1]-before[1];
+                if(executed && number(line,"realtime_locked")) {
+                    const Row row{number(line,"revision"),number(line,"epoch"),number(line,"family"),number(line,"sample_origin")};
+                    scored_rows.insert(row);
+                    const bool active=number(line,"helper_window_supported") && number(line,"helper_window_active");
+                    if(active)check(number(line,"helper_window_clock_counts_available") &&
+                        number(line,"helper_window_original_clock_rates")==number(line,"helper_window_selected_clock_rates") &&
+                        !number(line,"helper_window_clock_qualified"),
+                        "frequency-only long-payload assistance discarded an original clock alternative");
+                    if(active && number(line,"helper_window_selected_pairs")<number(line,"helper_window_original_pairs")) {
+                        narrowed_rows.insert(row);narrowed_jobs+=executed;
+                    }
+                }
+            }
+            before=now;
+        }
         if(line.find("\"event\":\"receiver_signal_commit\"")==std::string::npos)continue;
-        const auto assisted=line.find("\"helper_assisted\":1")!=std::string::npos;
-        if(assisted==constrained)continue;
+        // The current manual Helper feeds the same ordinary receiver even
+        // when optional work yields. A legacy helper_assisted tag cannot
+        // select, discard or merge pending payload rows in this test.
         const auto count=number(line,"received_bits");
         if(!count)continue;
         if(!id){id=number(line,"signal_id");revision=number(line,"revision");}
         check(number(line,"signal_id")==id && number(line,"revision")==revision && count>=last,
               "full assisted payload replaced its accepted prefix identity or hid progress");
         last=count;
+        payload_rows.emplace(number(line,"input_revision"),number(line,"epoch"),number(line,"family"),number(line,"sample_origin"));
         if(line.find("\"complete\":1")!=std::string::npos) {
             completed=count==bits.size();
             observed_end=number(line,"feed_end_sample")>=number(line,"physical_end")+6*value.transfer.modem.sample_rate;
@@ -332,12 +375,31 @@ void full_payload(bool attachment,bool constrained) {
                   "full assisted payload changed an accepted raw bit prefix");
         }
     }
-    if(!finished||!exact||!pending||!completed||!observed_end||(!constrained&&(!admitted||!promoted))||(constrained&&admitted))
+    const auto covered=[&](const auto& work) {
+        return !payload_rows.empty() && std::all_of(payload_rows.begin(),payload_rows.end(),
+            [&](const auto& row){return work.contains(row);});
+    };
+    const bool ordinary_work=covered(scored_rows),narrowed_work=covered(narrowed_rows);
+    std::cout<<"full_manual_payload attachment="<<attachment<<" constrained="<<constrained
+             <<" source_bytes="<<sent.data.size()<<" wire_bits="<<bits.size()<<" finished="<<finished<<" exact="<<exact
+             <<" pending="<<pending<<" END="<<completed<<" observed_end="<<observed_end<<" received_bits="<<last
+             <<" ordinary_owners="<<ordinary_owners.size()<<" raw_qualified="<<raw_qualified
+             <<" ordinary_joined_work="<<ordinary_work<<" narrowed_joined_work="<<narrowed_work
+             <<" fft_jobs="<<jobs<<" input_transforms="<<transforms<<" narrowed_fft_jobs="<<narrowed_jobs
+             <<" CPU="<<cpu<<" wall="<<wall<<" optional_yield_evidence=unavailable trace="<<path<<'\n';
+    if(!finished||!exact||!pending||!completed||!observed_end||admitted||promoted||ordinary_owners.size()!=1||
+       !raw_qualified||!ordinary_work||(!constrained&&!narrowed_work))
         std::cerr<<"full helper payload trace retained at "<<path<<'\n';
     check(finished&&exact,"full assisted payload failed exact long-text/attachment decoding");
     check(pending&&completed&&observed_end,"full assisted payload lost immediate prefixes or six-second physical END");
-    if(constrained)check(!admitted,"resource-constrained helper failed to yield before ordinary payload admission");
-    else check(admitted&&promoted,"full payload did not use a promoted measurement-assisted Robust receiver");
+    check(!admitted&&!promoted,"manual long-payload Helper created a parallel legacy assisted receiver");
+    check(ordinary_owners.size()==1 && raw_qualified && ordinary_work && jobs,
+          "full payload did not use one measured-reference ordinary receiver with joined work");
+    // This fixed no-oscillator fixture has only its original nominal DATA
+    // clock. Require actual RF work narrowing where funded, without treating
+    // a small workspace or absent legacy events as proof of optional yielding.
+    if(!constrained)check(narrowed_work&&narrowed_jobs,
+        "qualified long-payload precision did not narrow executed ordinary RF work");
     std::filesystem::remove(path);std::filesystem::remove(path.string()+".seal");
 }
 
@@ -357,17 +419,16 @@ void realistic_frequency_benefit(bool calendar=false) {
             value.transfer.receive_targets_db_hz={8};
         }
         const auto capacity=live::receiver_workspace_capacity(value);
-        const auto allowance=std::min<std::size_t>(64*1024*1024,capacity/8);
         std::cout<<"realistic helper fixture DSP "<<value.dsp_workspace_bytes<<" bytes; receiver bank "
-                 <<capacity<<" bytes; optional allowance "<<allowance<<" bytes\n";
+                 <<capacity<<" bytes\n";
         // Actual data C/N0=20.02 dB-Hz, helper C/N0=30.02 dB-Hz.
         // The interleaved outer waveform has half the amplitude of the
         // nominal unit waveform used by ChannelConfig's noise parameter.
         value.simulation_snr_db=20.020599913279625-10*std::log10(c.sample_rate/2.)-
             20*std::log10(modem::outer_dsss_transmit_gain(c));
         // Keep the realistic weak fixed-epoch comparison separately. The
-        // calendar case qualifies the ordinary rolling cohort with an early
-        // strong reference and retains its independent broad acquisition audit.
+        // calendar case qualifies the ordinary rolling bank with an early
+        // strong reference while retaining its original clock/epoch coverage.
         if(calendar)value.simulation_snr_db+=40;
         value.simulation_phase_noise_degrees_per_sqrt_second=.5;
         value.helper.power_w=enabled?(calendar?1500:40):0;value.helper.callsign.clear();
@@ -385,8 +446,8 @@ void realistic_frequency_benefit(bool calendar=false) {
         // Deliberately outside the declared GPSDO bank: this is an experiment
         // with an extra LO error, using the same long-symbol waveform/link.
         value.simulation_frequency_offset_hz=2.17;
-        // Twelve calendar symbols keep captured media past the eight-symbol
-        // audit due date AND the next ready FFT batch. The weak fixed-epoch
+        // Twelve calendar symbols retain the original long observation window
+        // and subsequent ordinary FFT batches. The weak fixed-epoch
         // control remains one bit; receiver completion never uses this length.
         const Bytes sent_bits=calendar?Bytes{1,0,1,1,0,0,1,0,1,1,0,1}:Bytes{1};
         const std::string expected=calendar?"101100101101":"1";
@@ -426,6 +487,8 @@ void realistic_frequency_benefit(bool calendar=false) {
                 const auto snapshot=session.snapshot();
                 check(snapshot.error.empty() && !snapshot.receiver_health.failed() && !snapshot.receiver_health.dropped_samples,
                       "realistic optional helper changed ordinary receiver health");
+                check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,
+                      "realistic helper exceeded its configured DSP workspace");
                 if(snapshot.transmission_finished&&snapshot.simulation_replay) {
                     observed_samples=snapshot.samples_received;
                     replay_ms=4000;finished=true;
@@ -446,137 +509,251 @@ void realistic_frequency_benefit(bool calendar=false) {
                     "helper-disabled transmit date missed the original fractional-onset fixture");
             }
         }
-        std::ifstream input(path);std::string line;bool admitted=false,completed=false,observed_end=false,isolated_counter=false,pending=false;
-        bool cohort_frontend=false,cohort_aligned=false,cohort_audited=false,later_epoch_admitted=false,primary_replaced=false;
-        std::uint64_t first=UINT64_MAX,initial_epoch=UINT64_MAX,helper_epoch=UINT64_MAX,later_epoch_sample=UINT64_MAX;
-        std::uint64_t conditional_jobs=0,audit_jobs=0;
-        std::uint64_t payload_id=0,payload_revision=0,payload_first=0,last_count=0;
+        std::ifstream input(path);std::string line;
+        bool legacy_receiver=false,completed=false,observed_end=false,pending=false,raw_qualified=false;
+        bool later_epoch_admitted=false;
+        std::uint64_t first=UINT64_MAX,initial_epoch=UINT64_MAX,initial_admission_sample=UINT64_MAX;
+        std::uint64_t later_epoch_sample=UINT64_MAX,payload_id=0,payload_revision=0,payload_first=0,last_count=0;
         bool payload_completed=false;
+        if(!calendar)expected_epoch=value.transfer.timestamp;
+        using Context=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>;
+        using Owner=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>;
+        using Row=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t,std::uint64_t>;
+        struct Constructor {
+            double uncertainty=0,expected_hz=0,center=0;
+            std::uint64_t epoch=0,family=0,pairs=0,grant=0;
+        };
+        std::map<std::pair<std::uint64_t,std::uint64_t>,Constructor> constructors;
+        std::map<Owner,std::array<std::uint64_t,3>> counters;
         std::set<std::uint64_t> initial_epochs;
-        using RowIdentity=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>;
-        std::set<RowIdentity> admitted_alignments,conditional_alignments,periodic_audits;
-        std::size_t helper_admissions=0;
+        std::set<Context> admitted_contexts,selected_contexts;
+        std::map<Context,std::uint64_t> selected_pair_counts;
+        std::set<Row> payload_rows,reference_rows,clock_preserved_rows;
+        std::set<Owner> numeric_owners,checked_constructors;
+        using ClockDates=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>;
+        std::map<ClockDates,modem::PatternHelperClockInterval> measured_clocks;
+        const auto utc=transfer::receiver_utc_rate_correction(c,value.transfer);
+        const auto original_clock_bound=modem::oscillator_pattern_search(c,utc).requested_clock_half_width_ppm;
+        const auto profiles=value.transfer.automatic_receive_profiles?
+            tuning::receive_profiles(c,value.transfer.receive_targets_db_hz,value.transfer.receive_pattern_mode,value.transfer.key.has_value()):
+            std::vector<modem::Config>{c};
+        check(profiles.size()==1,"realistic constructor proof needs this fixture's single actual receive profile");
+        std::uint64_t jobs=0,transforms=0,constructor_checks=0,qualified_clock_checks=0;
         while(std::getline(input,line)) {
+            legacy_receiver|=line.find("\"event\":\"receiver_helper_assistance_admitted\"")!=std::string::npos ||
+                line.find("\"event\":\"receiver_helper_payload_retained\"")!=std::string::npos ||
+                line.find("\"event\":\"receiver_helper_conditioning_admitted\"")!=std::string::npos ||
+                line.find("\"event\":\"receiver_helper_conditioning_committed\"")!=std::string::npos ||
+                line.find("\"event\":\"receiver_helper_cohort_frontend\"")!=std::string::npos;
+            if(line.find("\"event\":\"receiver_helper_raw_reference\"")!=std::string::npos) {
+                if(number(line,"qualified")) {
+                    check(number(line,"sample")<number(line,"captured_end") &&
+                          number(line,"frequency_first_sample")<=number(line,"sample") &&
+                          std::isfinite(real_number(line,"frequency_hz")) &&
+                          std::isfinite(real_number(line,"uncertainty_hz")) && real_number(line,"uncertainty_hz")>=0,
+                          "realistic helper reference lost its measured frequency/support");
+                    raw_qualified=true;
+                }
+                if(number(line,"clock_qualified")) {
+                    const auto center=real_number(line,"clock_error_ppm"),radius=real_number(line,"clock_uncertainty_ppm");
+                    // A raw estimate outside the declared clock domain may
+                    // legitimately decline. Only an interval actually used by
+                    // ordinary work below must have this valid measured source.
+                    if(std::isfinite(center) && std::isfinite(radius) && radius>=0 &&
+                       number(line,"clock_first_sample")<=number(line,"clock_last_sample") &&
+                       number(line,"clock_sample")==number(line,"clock_last_sample") &&
+                       number(line,"clock_last_sample")<number(line,"captured_end"))
+                        if(const auto interval=modem::helper_reference_data_clock_interval(c,
+                            {std::nextafter(center-radius,-INFINITY),std::nextafter(center+radius,INFINITY)},utc,
+                            modem::HelperReferenceClockRelation::common_corrected_source))
+                            measured_clocks.insert_or_assign(ClockDates{number(line,"clock_first_sample"),
+                                number(line,"clock_last_sample"),number(line,"captured_end")},*interval);
+                }
+            }
             if(line.find("\"event\":\"receiver_bank_admitted\"")!=std::string::npos) {
                 const auto epoch=number(line,"epoch"),sample=number(line,"sample");
-                if(initial_epoch==UINT64_MAX)initial_epoch=epoch;
-                if(!sample)initial_epochs.insert(epoch);
-                if(calendar && cohort_frontend && sample>0 && !initial_epochs.contains(epoch)) {
+                if(initial_epoch==UINT64_MAX){initial_epoch=epoch;initial_admission_sample=sample;}
+                if(sample==initial_admission_sample)initial_epochs.insert(epoch);
+                if(calendar && sample>initial_admission_sample && !initial_epochs.contains(epoch)) {
                     later_epoch_admitted=true;later_epoch_sample=std::min(later_epoch_sample,sample);
                 }
+                check(number(line,"workspace")<=capacity && number(line,"constructor_grant")>0 &&
+                      number(line,"constructor_grant")<=capacity,
+                      "realistic ordinary receiver exceeded its actual bank/constructor grant");
+                admitted_contexts.emplace(number(line,"revision"),epoch,number(line,"family"));
             }
-            if(line.find("\"event\":\"receiver_permutation_counts\"")!=std::string::npos) {
-                if(!calendar)check(number(line,"eligible")==1 && !number(line,"projection_context_created") && !number(line,"pool_present"),
+            if(line.find("\"event\":\"receiver_selection\"")!=std::string::npos && number(line,"supported")) {
+                check(number(line,"full_frequency_coverage") && number(line,"full_clock_coverage"),
+                      "realistic ordinary selection omitted declared RF/clock coverage");
+                auto options=value.transfer;options.modem=profiles.front();
+                const auto config=transfer::seeded_config(options,number(line,"epoch"));
+                check(number(line,"family")==0 && number(line,"sample_rate")==config.sample_rate &&
+                      number(line,"fine_chip_samples")==modem::pattern_chip_samples(config) &&
+                      number(line,"symbol_samples")==modem::symbol_sample_count(config) &&
+                      number(line,"dsss_factor")==config.dsss_factor,
+                      "realistic constructor selection did not match the actual keyed receive profile");
+                const Context context{number(line,"revision"),number(line,"epoch"),number(line,"family")};
+                selected_contexts.insert(context);
+                selected_pair_counts.insert_or_assign(context,number(line,"frequency_rate_pairs"));
+            }
+            if(line.find("\"event\":\"receiver_permutation_counts\"")!=std::string::npos && !calendar)
+                check(number(line,"eligible")==1 && number(line,"resident")==1 &&
+                      !number(line,"projection_context_created") && !number(line,"pool_present"),
                       "optional helper changed the original one-receiver cache cohort/counters");
-                isolated_counter=isolated_counter||number(line,"resident")>1;
+            if(line.find("\"event\":\"receiver_helper_constructor_frequency\"")!=std::string::npos) {
+                const Constructor birth{real_number(line,"helper_constructor_uncertainty_hz"),
+                    real_number(line,"helper_constructor_expected_hz"),real_number(line,"helper_constructor_center_hz"),
+                    number(line,"epoch"),number(line,"family"),number(line,"pairs"),number(line,"factory_grant")};
+                check(std::isfinite(birth.uncertainty) && birth.uncertainty>=0 &&
+                      std::isfinite(birth.expected_hz) && birth.expected_hz>0 && std::isfinite(birth.center) &&
+                      birth.pairs && birth.grant && birth.grant<=capacity &&
+                      real_number(line,"clock_frequency_hz")==c.carrier_hz-birth.expected_hz,
+                      "realistic ordinary factory lost its immutable measured frequency input");
+                const auto selected=selected_pair_counts.find({number(line,"revision"),birth.epoch,birth.family});
+                check(selected!=selected_pair_counts.end() && selected->second==birth.pairs,
+                      "realistic immutable constructor did not match its actual selected profile/catalogue count");
+                const auto key=std::pair{number(line,"revision"),number(line,"instance_id")};
+                const auto [where,inserted]=constructors.emplace(key,birth);
+                if(!inserted) {
+                    const auto& old=where->second;
+                    check(old.uncertainty==birth.uncertainty && old.expected_hz==birth.expected_hz &&
+                          old.center==birth.center && old.epoch==birth.epoch && old.family==birth.family && old.pairs==birth.pairs,
+                          "realistic receiver retry changed its immutable search input");
+                }
             }
-            if(line.find("\"event\":\"receiver_helper_assistance_admitted\"")!=std::string::npos) {
-                admitted=true;++helper_admissions;helper_epoch=number(line,"epoch");
-                check(number(line,"clock_windowed")==0 && number(line,"allowance")+number(line,"history_bytes")==allowance &&
-                      number(line,"numeric_limit")<allowance,"realistic helper bypassed its normalized FFT receiver grant");
-            }
-            if(calendar) {
-                cohort_frontend=cohort_frontend||line.find("\"event\":\"receiver_helper_cohort_frontend\"")!=std::string::npos;
-                primary_replaced=primary_replaced||line.find("\"event\":\"receiver_helper_conditioning_admitted\"")!=std::string::npos;
-                // This thin GPSDO catalogue has one pair per clock value.
-                // A translated full mask assists RF alignment while retaining
-                // all three clock values; it makes no search-work reduction.
-                if(line.find("\"event\":\"receiver_helper_cohort_prior_decision\"")!=std::string::npos &&
-                   number(line,"epoch")==expected_epoch && number(line,"admitted")) {
-                    check(number(line,"prior_active") && number(line,"original_pairs")==3 &&
-                          number(line,"selected_pairs")==3 && number(line,"clock_rates")==3 &&
-                          number(line,"represented_rates")==3 && std::isfinite(real_number(line,"origin_hz")) &&
-                          real_number(line,"origin_hz")!=0,
-                          "rolling helper RF alignment changed the original three clock cells");
-                    admitted_alignments.emplace(number(line,"revision"),number(line,"instance_id"),number(line,"sample_origin"));
+            if(line.find("\"event\":\"receiver_acquisition_work\"")!=std::string::npos) {
+                const Owner owner{number(line,"revision"),number(line,"instance_id"),number(line,"sample_origin")};
+                const Row row{number(line,"revision"),number(line,"epoch"),number(line,"family"),number(line,"sample_origin")};
+                const std::array now{number(line,"template_jobs"),number(line,"input_transforms"),number(line,"fft_jobs")};
+                auto& before=counters[owner];
+                for(std::size_t i=0;i<now.size();++i)
+                    check(now[i]>=before[i],"realistic ordinary counter reset inside one numeric owner");
+                const bool numeric=number(line,"numeric_owner");
+                if(enabled && numeric) {
+                    numeric_owners.insert(owner);
+                    check(number(line,"realtime_helper") && !number(line,"helper_input_view") &&
+                          !number(line,"future_broad_template_jobs"),
+                          "realistic helper created a parallel/legacy/broad receiver input");
                 }
-                if(line.find("\"event\":\"receiver_helper_cohort_resolution\"")!=std::string::npos) {
-                    const RowIdentity identity{number(line,"revision"),number(line,"instance_id"),number(line,"sample_origin")};
-                    if(number(line,"audit_due") && !number(line,"conditional")) {
-                        periodic_audits.insert(identity);cohort_audited=true;
-                    }
-                    if(number(line,"epoch")==expected_epoch && number(line,"conditional")) {
-                        check(admitted_alignments.contains(identity) && number(line,"original_pairs")==3 &&
-                              number(line,"selected_pairs")==3 && std::isfinite(real_number(line,"origin_hz")) &&
-                              real_number(line,"origin_hz")!=0,
-                              "rolling helper did not conditionally resolve its measured RF alignment");
-                        conditional_alignments.insert(identity);cohort_aligned=true;
+                const bool joined=numeric && number(line,"counter_snapshot_joined") && !number(line,"incomplete") &&
+                    line.find("\"reason\":\"feed_complete\"")!=std::string::npos;
+                const auto executed=now[2]-before[2];
+                if(joined && enabled && number(line,"realtime_locked")) {
+                    jobs+=executed;transforms+=now[1]-before[1];
+                    if(executed)reference_rows.insert(row);
+                    if(number(line,"helper_window_supported") && number(line,"helper_window_active")) {
+                        check(number(line,"helper_window_clock_counts_available") &&
+                              number(line,"helper_window_original_clock_rates")>0 &&
+                              number(line,"helper_window_original_clock_rates")==number(line,"helper_window_selected_clock_rates") &&
+                              number(line,"helper_window_selected_pairs")<=number(line,"helper_window_original_pairs"),
+                              "frequency-only realistic assistance discarded an unresolved clock alternative");
+                        if(number(line,"helper_window_clock_qualified")) {
+                            const ClockDates dates{number(line,"realtime_clock_first_sample"),
+                                number(line,"realtime_clock_last_sample"),number(line,"realtime_clock_captured_end")};
+                            const auto lower=real_number(line,"realtime_clock_lower_ppm"),upper=real_number(line,"realtime_clock_upper_ppm");
+                            const auto measured=measured_clocks.find(dates);
+                            check(number(line,"realtime_clock_qualified") &&
+                                  std::get<0>(dates)<=std::get<1>(dates) && std::get<1>(dates)<std::get<2>(dates) &&
+                                  std::isfinite(lower) && std::isfinite(upper) && lower<=upper &&
+                                  lower>=-original_clock_bound && upper<=original_clock_bound &&
+                                  measured!=measured_clocks.end() && lower<=measured->second.lower_ppm && upper>=measured->second.upper_ppm,
+                                  "realistic qualified clock lost its dated measurement or original-domain clamp");
+                            ++qualified_clock_checks;
+                        }
+                        const auto birth=constructors.find({number(line,"revision"),number(line,"instance_id")});
+                        check(birth!=constructors.end() && birth->second.epoch==number(line,"epoch") &&
+                              birth->second.family==number(line,"family") &&
+                              birth->second.pairs==number(line,"helper_window_original_pairs"),
+                              "realistic clock coverage was not bound to the actual receiver constructor");
+                        // Translation outside the raw prior may need more RF
+                        // cells at the actual measured U. Retain the SAME three
+                        // original LF alternatives, binding the RF count to the
+                        // immutable constructor and actual profile selection.
+                        if(calendar)check(number(line,"helper_window_original_clock_rates")==3,
+                            "rolling helper RF alignment changed the original three clock cells");
+                        if(checked_constructors.insert(owner).second)++constructor_checks;
+                        if(executed)clock_preserved_rows.insert(row);
                     }
                 }
-                if(line.find("\"event\":\"receiver_acquisition_work\"")!=std::string::npos) {
-                    const RowIdentity identity{number(line,"revision"),number(line,"instance_id"),number(line,"sample_origin")};
-                    if(periodic_audits.contains(identity))audit_jobs=std::max(audit_jobs,number(line,"audit_jobs"));
-                    if(number(line,"epoch")==expected_epoch && conditional_alignments.contains(identity)) {
-                        conditional_jobs=std::max(conditional_jobs,number(line,"conditional_jobs"));
-                        if(conditional_jobs)helper_epoch=number(line,"epoch");
-                    }
-                }
+                before=now;
             }
             if(line.find("\"event\":\"receiver_signal_commit\"")==std::string::npos || !number(line,"received_bits"))continue;
-            if(calendar) {
-                if(number(line,"epoch")!=expected_epoch || number(line,"first_stream_symbol")!=0)continue;
-                const auto count=number(line,"received_bits");
-                check(count<=expected.size() && !number(line,"missing") &&
-                      line.find("\"raw_bits_prefix\":\""+expected.substr(0,count)+"\"")!=std::string::npos,
-                      "rolling helper changed an exact dated payload prefix");
-                if(!payload_id) {
-                    payload_id=number(line,"signal_id");payload_revision=number(line,"revision");
-                    payload_first=number(line,"physical_first");
-                }
-                const auto is_complete=number(line,"complete")!=0;
-                // A stronger ordinary owner may revise its interpretation in
-                // the same GUI row. Never reset that row's lifetime prefix or
-                // completed status when its revision advances.
-                check(number(line,"signal_id")==payload_id && number(line,"revision")>=payload_revision &&
-                      number(line,"physical_first")==payload_first && count>=last_count &&
-                      (!payload_completed||is_complete),
-                      "rolling helper replaced its pending row or lost bit progress");
-                payload_revision=number(line,"revision");last_count=count;
-                payload_completed|=is_complete;
-            } else if(line.find("\"helper_assisted\":1")==std::string::npos)continue;
+            if(!enabled && !calendar)continue; // The original OFF control has no selected Helper subject.
+            if(number(line,"epoch")!=expected_epoch || number(line,"first_stream_symbol")!=0)continue;
+            const auto count=number(line,"received_bits");
+            check(count<=expected.size() && !number(line,"missing") &&
+                  line.find("\"raw_bits_prefix\":\""+expected.substr(0,count)+"\"")!=std::string::npos,
+                  "realistic helper changed an exact dated payload prefix");
+            if(!payload_id) {
+                payload_id=number(line,"signal_id");payload_revision=number(line,"revision");
+                payload_first=number(line,"physical_first");
+            }
+            const auto is_complete=number(line,"complete")!=0;
+            // A stronger ordinary owner may revise its interpretation in the
+            // same GUI row; the row's lifetime prefix/physical source remain.
+            check(number(line,"signal_id")==payload_id && number(line,"revision")>=payload_revision &&
+                  number(line,"physical_first")==payload_first && count>=last_count && (!payload_completed||is_complete),
+                  "realistic helper replaced its pending row or lost bit progress");
+            payload_revision=number(line,"revision");last_count=count;payload_completed|=is_complete;
+            payload_rows.emplace(number(line,"input_revision"),number(line,"epoch"),number(line,"family"),number(line,"sample_origin"));
             first=std::min(first,number(line,"feed_end_sample"));
-            if(line.find("\"complete\":1")!=std::string::npos) {
-                completed=number(line,"received_bits")==sent_bits.size();
+            if(is_complete) {
+                completed=count==sent_bits.size();
                 observed_end=number(line,"feed_end_sample")>=number(line,"physical_end")+required_absence;
-            }else pending=true;
+            } else pending=true;
         }
-        const bool used_assistance=calendar?(cohort_frontend&&cohort_aligned&&conditional_jobs):admitted;
-        if(!finished || (enabled?(!exact||!used_assistance||!completed||!observed_end):exact))
+        const auto covered=[&](const auto& rows) {
+            return !payload_rows.empty() && std::all_of(payload_rows.begin(),payload_rows.end(),[&](const auto& row) {
+                return rows.contains(row) && admitted_contexts.contains({std::get<0>(row),std::get<1>(row),std::get<2>(row)}) &&
+                    selected_contexts.contains({std::get<0>(row),std::get<1>(row),std::get<2>(row)});
+            });
+        };
+        const bool used_assistance=raw_qualified && jobs && covered(reference_rows) && covered(clock_preserved_rows);
+        if(!finished || legacy_receiver || (enabled?(!exact||!used_assistance||!completed||!observed_end):exact))
             std::cerr<<"realistic helper trace retained at "<<path<<'\n';
         check(finished,"bounded realistic helper simulation did not finish");
         check(observed_samples>45ULL*c.sample_rate,"frequency control ended before ordinary FFT acquisition could run");
+        check(!legacy_receiver,"realistic Helper used a legacy parallel receiver or broad audit path");
         if(enabled) {
-            check(exact&&used_assistance&&completed&&observed_end,"realistic weak helper failed exact payload acquisition/physical END");
+            check(exact&&used_assistance&&completed&&observed_end,"realistic weak helper failed exact ordinary acquisition/physical END");
             check(first<60ULL*c.sample_rate,"helper failed bounded first-symbol acquisition");
             if(calendar) {
                 check(pending,"rolling helper omitted pending progress before payload completion");
-                check(!admitted && !primary_replaced && !helper_admissions,
-                      "rolling helper replaced the ordinary acquisition executor");
-                check(initial_epoch!=UINT64_MAX && helper_epoch==expected_epoch &&
-                      later_epoch_admitted && later_epoch_sample<first,
+                check(initial_epoch!=UINT64_MAX && later_epoch_admitted && later_epoch_sample<first,
                       "rolling helper did not retain new ordinary epoch admission before the actual dated payload");
-                check(cohort_audited && audit_jobs>0,
-                      "rolling helper omitted measured periodic broad acquisition work");
             }
-            if(!calendar && modem::detail::pattern_permutation_sharing_supported)
-                check(isolated_counter,"actual helper receiver was not excluded from ordinary cohort counters");
-        }else check(!exact&&!admitted&&!cohort_frontend&&!conditional_jobs,
-                    "realistic helper-disabled frequency control unexpectedly decoded or admitted helper acquisition");
+        } else check(!exact&&!raw_qualified&&constructors.empty()&&!jobs,
+                     "realistic helper-disabled frequency control unexpectedly decoded or admitted helper authority");
         std::cout<<"realistic helper="<<enabled<<" calendar="<<calendar<<" exact="<<exact
                  <<" observed_seconds="<<static_cast<double>(observed_samples)/c.sample_rate
                  <<" first_seconds="<<(first==UINT64_MAX?-1.:static_cast<double>(first)/c.sample_rate)
-                 <<" helper_epoch="<<helper_epoch<<" expected_epoch="<<expected_epoch
-                 <<" later_epoch_sample="<<later_epoch_sample
-                 <<" actual_transmit_phase="<<actual_transmit_phase
-                 <<" rf_aligned="<<cohort_aligned<<" alignment_work_reduction=0"
-                 <<" pending_observed="<<pending
-                 <<" conditional_jobs="<<conditional_jobs<<" audit_jobs="<<audit_jobs<<'\n';
+                 <<" expected_epoch="<<expected_epoch<<" later_epoch_sample="<<later_epoch_sample
+                 <<" actual_transmit_phase="<<actual_transmit_phase<<" pending_observed="<<pending
+                 <<" raw_qualified="<<raw_qualified<<" ordinary_owners="<<numeric_owners.size()
+                 <<" ordinary_joined_fft_jobs="<<jobs<<" input_transforms="<<transforms
+                 <<" LF_constructor_checks="<<constructor_checks<<" qualified_clock_checks="<<qualified_clock_checks
+                 <<" alignment_work_reduction=unclaimed"
+                 <<" legacy_optional_grant_equivalence=unvalidated\n";
         std::filesystem::remove(path);std::filesystem::remove(path.string()+".seal");
     }
 }
 
-double conditioned_frequency_bank(bool enabled,bool full_message=false,bool beacon_only=false,
-        bool rolling=false,std::vector<std::size_t>* constructor_grants=nullptr) {
+auto conditioned_frequency_bank(bool enabled,bool full_message=false,bool beacon_only=false,bool rolling=false) {
+    using Context=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>;
+    using Owner=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>;
+    using Row=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t,std::uint64_t>;
+    struct EpochEvidence {
+        std::uint64_t pairs=0,grant=0,workspace=0,first_admission=UINT64_MAX,jobs=0;
+        std::uint64_t original_clocks=0,selected_clocks=0;
+        bool selected=false,admitted=false,joined=false,clock_qualified=false;
+        std::string backend;
+    };
+    struct Evidence {
+        double cpu=0;
+        std::uint64_t payload_epoch=0;
+        bool raw_qualified=false,exact=false,pending=false,observed_end=false,fresh_epoch_work=false;
+        std::map<Context,EpochEvidence> epochs;
+    } evidence;
     auto value=settings(enabled);auto& c=value.transfer.modem;
     c.sample_rate=4000;c.carrier_hz=1000;c.bandwidth_hz=200;c.spreading_factor=64;
     const auto audio_model=tuning::oscillator_model(tuning::parse_oscillator_preset("crystal"));
@@ -597,11 +774,21 @@ double conditioned_frequency_bank(bool enabled,bool full_message=false,bool beac
         value.simulation_frequency_offset_hz=0;value.simulation_clock_error_ppm=0;
     }
     check(modem::oscillator_pattern_search(c).hypotheses.size()>=512,"conditioned fixture lacks a broad ordinary frequency bank");
+    const auto original_search=transfer::receiver_oscillator_search(c,value.transfer);
+    std::set<double> original_clocks;
+    for(const auto& lane:original_search.hypotheses)original_clocks.insert(lane.clock_error_ppm);
+    const auto utc_rate=transfer::receiver_utc_rate_correction(c,value.transfer);
+    const auto& oscillator=*c.oscillator_search;
+    const bool shared=oscillator.reference==modem::OscillatorReference::shared_radio && oscillator.rf_shift_hz!=0;
+    const auto physical_clock=static_cast<long double>(oscillator.margin)*
+        (shared?oscillator.rf.accuracy_ppm:oscillator.lf.accuracy_ppm)*1e-6L;
+    const auto data_clock_bound=(physical_clock+utc_rate+physical_clock*utc_rate)*1e6L;
     Message message;message.data=Bytes{'c','o','n','d','i','t','i','o','n','e','d',' ','p','a','y','l','o','a','d'};
     value.transfer.fec=FecMode::rs60;value.transfer.compression=true;
     value.transfer.recovery_options.enabled=true;value.transfer.recovery_options.workers=1;
     value.transfer.recovery_options.budget=std::chrono::seconds(5);
     value.transfer.recovery_options.workspace_bytes=16*1024*1024;
+    const auto capacity=live::receiver_workspace_capacity(value);
     auto wire=full_message?transfer::message_wire_bits(message,value.transfer):Bytes{0,0,1};
     if(full_message)transfer::xor_binary_bits(wire,value.transfer);
     std::string expected;for(auto bit:wire)expected+=bit?'1':'0';
@@ -609,8 +796,8 @@ double conditioned_frequency_bank(bool enabled,bool full_message=false,bool beac
         ("datapump-helper-conditioned-"+std::to_string(audio::trace::identity())+"-"+
          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl");
     std::atomic<std::int64_t> replay_ms{0};bool exact=false,finished=false;
-    std::uint64_t samples=0,replayed_at=0,expected_epoch=value.transfer.timestamp;
-    const auto cpu_start=std::clock();conditioning_replayed=false;
+    std::uint64_t samples=0,processed=0,qualified_capture=0,qualified_processed=0,expected_epoch=value.transfer.timestamp;
+    const auto cpu_start=std::clock();
     {
         audio::trace::Scope trace(path,false,&trace_filter);
         // Reproduce the private-code/arrival alignment that previously left
@@ -629,8 +816,25 @@ double conditioned_frequency_bank(bool enabled,bool full_message=false,bool beac
             check(snapshot.error.empty() && !snapshot.receiver_health.failed() && !snapshot.receiver_health.dropped_samples,
                   "conditioned ordinary acquisition changed receiver health");
             check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"conditioned acquisition exceeded its workspace");
-            if(beacon_only && conditioning_replayed && !replayed_at)replayed_at=samples;
-            if(beacon_only && replayed_at && samples>replayed_at+2ULL*c.sample_rate) {finished=true;break;}
+            if(beacon_only) {
+                check(snapshot.received.empty(),"helper-only ordinary bank decoded payload content");
+                for(const auto& signal:snapshot.signals)
+                    check(signal.helper_carrier || (!signal.received_bits && !signal.complete),
+                          "helper-only ordinary bank accepted bits or invented physical END");
+                check(snapshot.processed_physical_samples>=processed && snapshot.processed_physical_samples<=samples,
+                      "helper-only ordinary processed frontier lost its capture chronology");
+                processed=snapshot.processed_physical_samples;
+                if(snapshot.helper_frequency_assistance_active && !qualified_capture) {
+                    qualified_capture=samples;qualified_processed=processed;
+                }
+                // The former fallback-replay observer no longer exists: this
+                // manual path feeds one ordinary bank. Keep the original >2s
+                // observation, requiring actual capture AND joined processing.
+                if(qualified_capture && samples>qualified_capture+2ULL*c.sample_rate &&
+                   processed>qualified_processed+2ULL*c.sample_rate && snapshot.helper_conditional_jobs) {
+                    finished=true;break;
+                }
+            }
             if(!beacon_only && snapshot.transmission_finished && snapshot.simulation_replay) {
                 replay_ms=4000;finished=true;const auto visible=session.snapshot();
                 if(full_message) {
@@ -655,8 +859,17 @@ double conditioned_frequency_bank(bool enabled,bool full_message=false,bool beac
         }
     }
     const auto cpu=static_cast<double>(std::clock()-cpu_start)/CLOCKS_PER_SEC;
-    std::ifstream input(path);std::string line;bool admitted=false,committed=false,fallback=false,replayed=false,completed=false,observed_end=false,pending=false;
-    std::size_t admissions=0;std::uint64_t id=0,revision=0,last=0,replay_end=0;
+    std::ifstream input(path);std::string line;
+    bool legacy_receiver=false,completed=false,observed_end=false,pending=false;
+    std::uint64_t id=0,revision=0,last=0,jobs=0,narrowed_jobs=0,clock_checks=0;
+    std::uint64_t initial_admission=UINT64_MAX;
+    std::set<std::uint64_t> initial_epochs;
+    std::set<Row> payload_rows,reference_rows,clock_rows,narrowed_rows;
+    struct Constructor {double uncertainty=0,expected=0,center=0;std::uint64_t epoch=0,family=0,pairs=0;};
+    std::map<std::pair<std::uint64_t,std::uint64_t>,Constructor> constructors;
+    std::map<Owner,std::array<std::uint64_t,3>> counters;
+    using ClockDates=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>;
+    std::map<ClockDates,modem::PatternHelperClockInterval> measured_clocks;
     std::uint64_t payload_capture=0,revision_first=0;
     const auto exact_pending_prefix=[&](const std::string& record,std::uint64_t count) {
         const auto key=std::string("\"raw_bits_prefix\":\"");const auto at=record.find(key);
@@ -683,33 +896,133 @@ double conditioned_frequency_bank(bool enabled,bool full_message=false,bool beac
         input.clear();input.seekg(0);
         check(bool(input),"conditioned trace could not rewind its selected row lifecycle");
     }
-    bool rolling_declined=false,primary_pending=false;
     while(std::getline(input,line)) {
-        if(rolling && enabled && primary_pending && !completed)
-            check(line.find("\"event\":\"receiver_helper_assistance_admitted\"")==std::string::npos,
-                "legacy helper acquisition re-admitted while the dated primary payload was active");
-        if(line.find("\"event\":\"receiver_helper_conditioning_declined\"")!=std::string::npos &&
-           line.find("rolling_ordinary_admission")!=std::string::npos)rolling_declined=true;
-        if(constructor_grants && line.find("\"event\":\"receiver_bank_admitted\"")!=std::string::npos)
-            constructor_grants->push_back(static_cast<std::size_t>(number(line,"constructor_grant")));
-        if(line.find("\"event\":\"receiver_helper_conditioning_admitted\"")!=std::string::npos) {
-            admitted=true;++admissions;
-            check(number(line,"resident")==5,"conditioned acquisition dropped an original encrypted epoch");
-            check(number(line,"conditioned_lanes")*2<number(line,"original_lanes"),"helper did not narrow actual acquisition work");
-            check(number(line,"fallback_samples")>number(line,"preroll_samples"),"conditioned acquisition lacks bounded fallback PCM");
-            check(number(line,"workspace")<=number(line,"capacity"),"frozen original bank was not included in the workspace charge");
-            std::cout<<"conditioned lanes "<<number(line,"original_lanes")<<" -> "<<number(line,"conditioned_lanes")
-                     <<" across "<<number(line,"resident")<<" original epochs\n";
+        const auto event=[&](std::string_view name) {
+            return line.find("\"event\":\""+std::string(name)+"\"")!=std::string::npos;
+        };
+        legacy_receiver|=event("receiver_helper_assistance_admitted") || event("receiver_helper_payload_retained") ||
+            event("receiver_helper_conditioning_admitted") || event("receiver_helper_conditioning_committed") ||
+            event("receiver_helper_conditioning_fallback") || event("receiver_helper_conditioning_replayed") ||
+            event("receiver_helper_cohort_frontend");
+        if(event("receiver_helper_raw_reference")) {
+            if(number(line,"qualified")) {
+                check(number(line,"sample")<number(line,"captured_end") &&
+                      number(line,"frequency_first_sample")<=number(line,"sample") &&
+                      std::isfinite(real_number(line,"frequency_hz")) &&
+                      std::isfinite(real_number(line,"uncertainty_hz")) && real_number(line,"uncertainty_hz")>=0,
+                      "ordinary measured reference lost causal frequency support");
+                evidence.raw_qualified=true;
+            }
+            if(number(line,"clock_qualified")) {
+                const auto center=real_number(line,"clock_error_ppm"),radius=real_number(line,"clock_uncertainty_ppm");
+                // Declined raw clock candidates have no authority. Any clock
+                // interval actually used below must match this measured source.
+                if(std::isfinite(center) && std::isfinite(radius) && radius>=0 &&
+                   number(line,"clock_first_sample")<=number(line,"clock_last_sample") &&
+                   number(line,"clock_sample")==number(line,"clock_last_sample") &&
+                   number(line,"clock_last_sample")<number(line,"captured_end"))
+                    if(const auto interval=modem::helper_reference_data_clock_interval(c,
+                        {std::nextafter(center-radius,-INFINITY),std::nextafter(center+radius,INFINITY)},utc_rate,
+                        modem::HelperReferenceClockRelation::common_corrected_source))
+                        measured_clocks.insert_or_assign(ClockDates{number(line,"clock_first_sample"),
+                            number(line,"clock_last_sample"),number(line,"captured_end")},*interval);
+            }
         }
-        committed=committed||line.find("\"event\":\"receiver_helper_conditioning_committed\"")!=std::string::npos;
-        if(line.find("\"event\":\"receiver_helper_conditioning_fallback\"")!=std::string::npos) {
-            fallback=true;replay_end=number(line,"replay_end");
-            check(number(line,"replay_samples")>0 && replay_end-number(line,"sample")==number(line,"replay_samples"),
-                  "conditional fallback has a gap in its captured PCM interval");
+        if(event("receiver_selection") && number(line,"supported")) {
+            check(number(line,"full_frequency_coverage") && number(line,"full_clock_coverage") &&
+                  line.find("\"backend\":\"existing complex\"")!=std::string::npos,
+                  "ordinary frequency fixture lost its configured backend or declared RF/LF coverage");
+            auto& epoch=evidence.epochs[{number(line,"revision"),number(line,"epoch"),number(line,"family")}];
+            epoch.selected=true;epoch.backend="existing complex";epoch.pairs=number(line,"frequency_rate_pairs");
+            if(!enabled)check(epoch.pairs==original_search.hypotheses.size(),
+                             "Helper-OFF ordinary owner changed the original RF/LF catalogue");
         }
-        if(line.find("\"event\":\"receiver_helper_conditioning_replayed\"")!=std::string::npos) {
-            replayed=true;check(number(line,"sample")==replay_end && number(line,"resident")==5,
-                "conditional fallback did not restore all original epochs at the exact physical frontier");
+        if(event("receiver_bank_admitted")) {
+            const auto sample=number(line,"sample"),date=number(line,"epoch");
+            if(initial_admission==UINT64_MAX)initial_admission=sample;
+            if(sample==initial_admission)initial_epochs.insert(date);
+            check(number(line,"workspace")<=capacity && number(line,"constructor_grant") &&
+                  number(line,"constructor_grant")<=capacity,
+                  "ordinary receiver exceeded its real bank/constructor workspace grant");
+            auto& epoch=evidence.epochs[{number(line,"revision"),date,number(line,"family")}];
+            check(epoch.selected,"ordinary admission lost its actual backend selection");
+            epoch.admitted=true;epoch.first_admission=std::min(epoch.first_admission,sample);
+            epoch.grant=std::max(epoch.grant,number(line,"constructor_grant"));
+            epoch.workspace=std::max(epoch.workspace,number(line,"workspace"));
+        }
+        if(event("receiver_helper_constructor_frequency")) {
+            check(enabled,"Helper-OFF ordinary owner acquired a Helper constructor input");
+            const Constructor birth{real_number(line,"helper_constructor_uncertainty_hz"),
+                real_number(line,"helper_constructor_expected_hz"),real_number(line,"helper_constructor_center_hz"),
+                number(line,"epoch"),number(line,"family"),number(line,"pairs")};
+            check(std::isfinite(birth.uncertainty) && birth.uncertainty>=0 &&
+                  std::isfinite(birth.expected) && birth.expected>0 && std::isfinite(birth.center) &&
+                  birth.pairs && number(line,"factory_grant") && number(line,"factory_grant")<=capacity &&
+                  real_number(line,"clock_frequency_hz")==c.carrier_hz-birth.expected,
+                  "ordinary factory lost its immutable measured RF/clock input");
+            const auto [at,inserted]=constructors.emplace(std::pair{number(line,"revision"),number(line,"instance_id")},birth);
+            if(!inserted)check(at->second.uncertainty==birth.uncertainty && at->second.expected==birth.expected &&
+                at->second.center==birth.center && at->second.epoch==birth.epoch && at->second.family==birth.family &&
+                at->second.pairs==birth.pairs,"ordinary factory retry changed its measured search input");
+        }
+        if(event("receiver_acquisition_work")) {
+            const Owner owner{number(line,"revision"),number(line,"instance_id"),number(line,"sample_origin")};
+            const Context context{number(line,"revision"),number(line,"epoch"),number(line,"family")};
+            const Row row{number(line,"revision"),number(line,"epoch"),number(line,"family"),number(line,"sample_origin")};
+            const std::array now{number(line,"template_jobs"),number(line,"input_transforms"),number(line,"fft_jobs")};
+            auto& before=counters[owner];
+            for(std::size_t i=0;i<now.size();++i)
+                check(now[i]>=before[i],"ordinary work counters regressed inside a numeric owner");
+            if(number(line,"numeric_owner"))check(bool(number(line,"realtime_helper"))==enabled &&
+                !number(line,"helper_input_view") && !number(line,"future_broad_template_jobs") &&
+                !number(line,"audit_jobs"),"ordinary fixture ran a parallel/legacy/broad Helper receiver");
+            const bool joined=number(line,"numeric_owner") && number(line,"counter_snapshot_joined") &&
+                !number(line,"incomplete") && line.find("\"reason\":\"feed_complete\"")!=std::string::npos;
+            const auto executed=now[2]-before[2];
+            if(joined) {
+                auto& epoch=evidence.epochs[context];
+                check(epoch.selected && epoch.admitted,"joined ordinary work lost its selected/admitted epoch");
+                epoch.joined=true;epoch.jobs+=executed;jobs+=executed;
+                if(enabled && number(line,"realtime_locked") && executed) {
+                    reference_rows.insert(row);
+                    check(number(line,"helper_window_supported") && number(line,"helper_window_active") &&
+                          number(line,"helper_window_clock_counts_available"),
+                          "executed assisted work omitted its actual RF/LF mask");
+                    const auto original=number(line,"helper_window_original_clock_rates");
+                    const auto selected=number(line,"helper_window_selected_clock_rates");
+                    check(original && selected && selected<=original,"ordinary Helper discarded every LF alternative");
+                    const auto birth=constructors.find({number(line,"revision"),number(line,"instance_id")});
+                    check(birth!=constructors.end() && birth->second.epoch==number(line,"epoch") &&
+                          birth->second.family==number(line,"family") &&
+                          birth->second.pairs==number(line,"helper_window_original_pairs"),
+                          "ordinary RF/LF mask was not bound to its actual constructor");
+                    const bool clock_qualified=number(line,"helper_window_clock_qualified");
+                    if(clock_qualified) {
+                        const auto lower=real_number(line,"realtime_clock_lower_ppm"),upper=real_number(line,"realtime_clock_upper_ppm");
+                        const ClockDates dates{number(line,"realtime_clock_first_sample"),
+                            number(line,"realtime_clock_last_sample"),number(line,"realtime_clock_captured_end")};
+                        const auto measured=measured_clocks.find(dates);
+                        check(number(line,"realtime_clock_qualified") &&
+                              std::get<0>(dates)<=std::get<1>(dates) && std::get<1>(dates)<std::get<2>(dates) &&
+                              std::isfinite(lower) && std::isfinite(upper) && lower<=upper &&
+                              lower>=-data_clock_bound-1e-8L && upper<=data_clock_bound+1e-8L &&
+                              measured!=measured_clocks.end() && lower<=measured->second.lower_ppm &&
+                              upper>=measured->second.upper_ppm &&
+                              lower<=value.simulation_clock_error_ppm && upper>=value.simulation_clock_error_ppm,
+                              "ordinary LF narrowing lacked dated evidence inside the original physical/UTC domain");
+                    } else check(selected==original,"frequency-only ordinary Helper removed unresolved LF alternatives");
+                    epoch.original_clocks=std::max(epoch.original_clocks,original);
+                    epoch.selected_clocks=std::max(epoch.selected_clocks,selected);
+                    epoch.clock_qualified|=clock_qualified;++clock_checks;clock_rows.insert(row);
+                    // Constructor reduction and refreshed existing masks are
+                    // measured separately. Both are actual scored work, not
+                    // hypothetical savings from an interval-width ratio.
+                    const bool narrowed=birth->second.pairs*2<original_search.hypotheses.size() ||
+                        number(line,"helper_window_selected_pairs")*2<number(line,"helper_window_original_pairs");
+                    if(narrowed){narrowed_rows.insert(row);narrowed_jobs+=executed;}
+                } else if(!enabled)epoch.original_clocks=epoch.selected_clocks=original_clocks.size();
+            }
+            before=now;
         }
         if(line.find("\"event\":\"receiver_signal_commit\"")!=std::string::npos) {
             const auto count=number(line,"received_bits");const bool ended=number(line,"complete")!=0;
@@ -727,6 +1040,7 @@ double conditioned_frequency_bank(bool enabled,bool full_message=false,bool beac
                   count>=last && count<=wire.size() && !number(line,"missing") && !(completed&&!ended),
                 "conditioned ordinary reception changed its pending identity, start or exact progress");
             revision=next_revision;revision_first=first_sample;last=count;
+            payload_rows.emplace(number(line,"input_revision"),number(line,"epoch"),number(line,"family"),number(line,"sample_origin"));
             if(ended) {
                 const auto symbol=number(line,"symbol_samples");
                 const std::uint64_t target=6ULL*c.sample_rate;
@@ -743,24 +1057,51 @@ double conditioned_frequency_bank(bool enabled,bool full_message=false,bool beac
                 check(exact_pending_prefix(line,count),
                     "conditioned ordinary reception changed an exact accepted bit prefix");
                 pending=true;
-                if(count)primary_pending=true;
             }
         }
     }
-    if(!finished || (!beacon_only&&!exact) || (enabled&&!rolling&&(!admitted || (beacon_only?!fallback:!committed))))
-        std::cerr<<"conditioned trace retained at "<<path<<'\n';
-    check(finished,"bounded conditioned acquisition did not finish");
-    if(beacon_only)check(admitted && fallback && replayed && !committed && admissions==1 && !completed,
-        "persistent helper without payload did not replay fallback once without accepting bits or inventing END");
+    const auto covered=[&](const auto& rows) {
+        return !payload_rows.empty() && std::all_of(payload_rows.begin(),payload_rows.end(),[&](const auto& row) {
+            const auto found=evidence.epochs.find({std::get<0>(row),std::get<1>(row),std::get<2>(row)});
+            return rows.contains(row) && found!=evidence.epochs.end() && found->second.selected &&
+                found->second.admitted && found->second.joined;
+        });
+    };
+    for(const auto& [context,epoch]:evidence.epochs)
+        if(epoch.admitted && epoch.joined && epoch.jobs && epoch.first_admission>initial_admission &&
+           !initial_epochs.contains(std::get<1>(context)))evidence.fresh_epoch_work=true;
+    if(!rolling)for(int offset=-2;offset<=2;++offset)
+        check(std::any_of(evidence.epochs.begin(),evidence.epochs.end(),[&](const auto& item) {
+            return std::get<1>(item.first)==expected_epoch+offset && item.second.selected && item.second.admitted;
+        }),"ordinary fixed-date bank dropped an original encrypted epoch");
+    if(!finished || (!beacon_only&&!exact) || legacy_receiver || (enabled && !evidence.raw_qualified))
+        std::cerr<<"ordinary frequency fixture trace retained at "<<path<<'\n';
+    check(finished,"bounded ordinary measured-frequency acquisition did not finish");
+    check(!legacy_receiver,"manual Helper created a companion conditioning/replay receiver");
+    if(enabled)check(evidence.raw_qualified && !constructors.empty() && jobs && clock_checks && narrowed_jobs,
+                     "qualified precision did not narrow actual ordinary scored RF work with preserved LF provenance");
+    else check(!evidence.raw_qualified && constructors.empty() && reference_rows.empty() && !narrowed_jobs,
+               "Helper-OFF ordinary receiver acquired Helper frequency/clock authority");
+    if(beacon_only)check(qualified_capture && samples>qualified_capture+2ULL*c.sample_rate &&
+        processed>qualified_processed+2ULL*c.sample_rate && !completed && !pending && payload_rows.empty(),
+        "persistent Helper did not advance bounded ordinary capture/processing without inventing payload or END");
     else {
         check(exact && pending && completed && observed_end,"conditioned ordinary receiver lost exact progress, payload or physical completion");
-        check(enabled&&!rolling?(admitted&&committed&&!fallback):(!admitted&&!committed),"unexpected helper-conditioned acquisition path");
-        if(rolling && enabled)check(rolling_declined,"rolling helper fixture did not exercise the primary admission gate");
+        if(enabled)check(covered(reference_rows) && covered(clock_rows) && covered(narrowed_rows),
+            "dated payload did not belong to measured-reference ordinary work with actual RF savings and LF coverage");
+        if(rolling)check(evidence.fresh_epoch_work,"rolling ordinary bank did not admit and score a fresh epoch");
     }
-    std::cout<<"conditioned helper="<<enabled<<" full="<<full_message<<" beacon="<<beacon_only
+    evidence.cpu=cpu;evidence.payload_epoch=expected_epoch;evidence.exact=exact;
+    evidence.pending=pending;evidence.observed_end=observed_end;
+    std::cout<<"ordinary measured-frequency helper="<<enabled<<" full="<<full_message<<" beacon="<<beacon_only
+             <<" rolling="<<rolling<<" measured_reference="<<evidence.raw_qualified<<" epochs="<<evidence.epochs.size()
+             <<" fresh_epoch_work="<<evidence.fresh_epoch_work<<" FFT_jobs="<<jobs<<" narrowed_FFT_jobs="<<narrowed_jobs
+             <<" LF_checks="<<clock_checks<<" captured="<<samples<<" processed="<<processed
+             <<" exact="<<exact<<" pending="<<pending<<" scored_END="<<observed_end
+             <<" legacy_replay_coverage=not_applicable constructor_grant_equivalence=unvalidated"
              <<" CPU="<<cpu<<" audio_seconds="<<static_cast<double>(samples)/c.sample_rate<<'\n';
     std::filesystem::remove(path);std::filesystem::remove(path.string()+".seal");
-    return cpu;
+    return evidence;
 }
 
 void finite_replay_budget() {
@@ -1386,13 +1727,13 @@ void final_helper_loss_live() {
         std::to_string(audio::trace::identity())+"-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl");
     const auto filter=[](const char* name)noexcept {return trace_filter(name)||std::string_view(name)=="receiver_helper_raw_reference" || std::string_view(name)=="receiver_pattern_wire";};
     bool finished=false,visible_exact=false,frequency_active=false;
-    std::set<std::uint64_t> visible_pending_before_loss,visible_complete;
+    std::set<std::uint64_t> visible_pending,visible_complete;
     std::uint64_t samples=0,expected_epoch=0,max_staging=0;std::uint32_t physical_rate=0;
     const auto cpu_start=std::clock();
     {
         audio::trace::Scope trace(path,false,+filter);Fault fault;
-        std::atomic<std::int64_t> replay_ms{0};
-        live::Session session({},[&]{return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_ms.load());});
+        std::atomic<std::int64_t> replay_ns{0};
+        live::Session session({},[&]{return std::chrono::steady_clock::time_point{}+std::chrono::nanoseconds(replay_ns.load());});
         session.start(value);session.transmit_bits(Bytes{0,0,1});
         const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(30);
         while(std::chrono::steady_clock::now()<deadline) {
@@ -1402,16 +1743,23 @@ void final_helper_loss_live() {
                   "final Helper loss reset, interrupted or dropped ordinary payload input");
             check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"final Helper loss exceeded funded workspace");
             frequency_active|=snapshot.helper_frequency_assistance_active;
-            if(samples<loss_seconds*c.sample_rate)for(const auto& signal:snapshot.signals) {
-                if(signal.helper_carrier || signal.complete || !signal.received_bits || signal.received_bits>=3)continue;
-                const auto raw=signal.binary?signal.text:signal.raw_bits;
-                if(!signal.missing_symbols && raw==std::string("001").substr(0,signal.received_bits))
-                    visible_pending_before_loss.insert(signal.id);
-            }
             if(snapshot.transmission_finished && snapshot.simulation_replay) {
-                replay_ms=4000;finished=true;
-                for(const auto& signal:session.snapshot().signals)if(!signal.helper_carrier && signal.complete && signal.received_bits==3)
-                    if((signal.binary?signal.text:signal.raw_bits)=="001")visible_complete.insert(signal.id);
+                // Simulation stages public rows until generation completes.
+                // Visit every presentation frame before draining completion;
+                // capture-time ordering is independently checked in the trace.
+                const auto frames=snapshot.replay_frame_count;
+                check(frames>0 && frames<=3000000000ULL,"final Helper loss lost bounded replay geometry");
+                for(std::uint64_t frame=0;frame<=frames;++frame) {
+                    replay_ns=static_cast<std::int64_t>((frame*3000000000ULL+frames-1)/frames);
+                    for(const auto& signal:session.snapshot().signals) {
+                        if(signal.helper_carrier || !signal.received_bits || signal.received_bits>3)continue;
+                        const auto raw=signal.binary?signal.text:signal.raw_bits;
+                        if(signal.missing_symbols || raw!=std::string("001").substr(0,signal.received_bits))continue;
+                        if(!signal.complete && signal.received_bits<3)visible_pending.insert(signal.id);
+                        if(signal.complete && signal.received_bits==3)visible_complete.insert(signal.id);
+                    }
+                }
+                finished=true;
                 break;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -1424,9 +1772,18 @@ void final_helper_loss_live() {
     }
     std::ifstream input(path);std::string line;
     std::uint64_t id=0,revision=0,last=0,first_prefix_feed=0,first_prefix_capture=0,complete_feed=0,physical_end=0;
+    std::uint64_t measured_loss_raw=0,post_loss_acquisition_jobs=0,post_loss_bit_feed=0,post_loss_end_feed=0;
     bool pending=false,completed=false,qualified_before=false,reference_lost=false,ordinary_after=false,broad_companion=false;
     using Owner=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>;
+    using Source=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t,std::uint64_t,std::uint64_t>;
     std::map<Owner,std::uint64_t> work;
+    std::set<Source> selected_sources,post_loss_bit_sources,post_loss_end_sources;
+    const auto source=[](const std::string& record) {
+        return Source{number(record,"input_revision"),number(record,"epoch"),number(record,"family"),
+            number(record,"sample_origin"),number(record,"candidate_id")};
+    };
+    check(physical_rate && physical_rate%c.sample_rate==0,"final Helper loss lost its integral physical/logical clock map");
+    const auto physical_factor=physical_rate/c.sample_rate;
     while(std::getline(input,line)) {
         if(line.find("\"event\":\"receiver_signal_commit\"")!=std::string::npos && number(line,"received_bits") &&
            !number(line,"complete") && gps_clock_source_zero(number(line,"epoch"),number(line,"stream_phase_samples"),
@@ -1442,20 +1799,26 @@ void final_helper_loss_live() {
         if(is("receiver_helper_raw_reference")) {
             const auto end=number(line,"captured_end");
             qualified_before|=number(line,"qualified") && end<loss_seconds*physical_rate;
+            if(qualified_before && !measured_loss_raw && !number(line,"qualified") && !number(line,"present") &&
+               end>=loss_seconds*physical_rate)measured_loss_raw=end;
             reference_lost|=!number(line,"qualified") && !number(line,"present") && end>(loss_seconds+2)*physical_rate;
         }
         if(is("receiver_acquisition_work")) {
             const Owner owner{number(line,"revision"),number(line,"instance_id"),number(line,"sample_origin")};
             const auto jobs=number(line,"template_jobs");
             check(jobs>=work[owner],"final Helper loss reset an ordinary worker's cumulative work");
-            ordinary_after|=number(line,"sample")>(loss_seconds+2)*c.sample_rate && !number(line,"incomplete") &&
-                line.find("\"reason\":\"feed_complete\"")!=std::string::npos && number(line,"numeric_owner") &&
-                jobs>work[owner] && number(line,"realtime_helper");
+            if(measured_loss_raw && number(line,"sample")>=(measured_loss_raw+physical_factor-1)/physical_factor) {
+                check(jobs-work[owner]<=UINT64_MAX-post_loss_acquisition_jobs,"post-loss acquisition counter overflowed");
+                post_loss_acquisition_jobs+=jobs-work[owner];
+            }
             work[owner]=jobs;
             check(!number(line,"helper_input_view") && !number(line,"future_broad_template_jobs"),
                   "final Helper loss started a separate broad companion receiver");
         }
         if(!is("receiver_signal_commit") || !id || number(line,"signal_id")!=id)continue;
+        if(gps_clock_source_zero(number(line,"epoch"),number(line,"stream_phase_samples"),
+                number(line,"first_stream_symbol"),number(line,"symbol_samples"),c.sample_rate,expected_epoch))
+            selected_sources.insert(source(line));
         const auto count=number(line,"received_bits"),next=number(line,"revision"),feed=number(line,"feed_end_sample");
         const bool done=number(line,"complete");
         check(next>=revision && count>=last && count<=3 && !number(line,"missing") && !(completed&&!done),
@@ -1473,31 +1836,85 @@ void final_helper_loss_live() {
             completed=true;complete_feed=feed;physical_end=end;
         }else pending=true;
     }
+    // Established tracks score timing/frequency fits and physical absence in
+    // continue_tracks(); those fits need not add acquisition template jobs.
+    // Require new actual source data and END after measured reference loss,
+    // joined to this same pending row's normalized native source identity.
+    input.clear();input.seekg(0);
+    const auto measured_loss_logical=(measured_loss_raw+physical_factor-1)/physical_factor;
+    while(std::getline(input,line)) {
+        if(!measured_loss_raw || line.find("\"event\":\"receiver_pattern_wire\"")==std::string::npos ||
+           !selected_sources.contains(source(line)) || number(line,"missing_slots") ||
+           number(line,"feed_end_sample")<=measured_loss_logical ||
+           !gps_clock_source_zero(number(line,"epoch"),number(line,"stream_phase_samples"),
+               number(line,"stream_first_symbol"),modem::symbol_sample_count(c),c.sample_rate,expected_epoch))continue;
+        const auto key=source(line);
+        const auto feed=number(line,"feed_end_sample"),end=number(line,"physical_end");
+        const auto needle=std::string("\"bits\":\"");const auto at=line.find(needle);
+        check(at!=std::string::npos,"post-loss ordinary wire omitted its actual scored bits");
+        const auto begin=at+needle.size(),after=line.find('"',begin);
+        check(after!=std::string::npos,"post-loss ordinary wire truncated its scored bits");
+        if(after>begin && end>measured_loss_logical) {
+            post_loss_bit_sources.insert(key);post_loss_bit_feed=std::max(post_loss_bit_feed,feed);
+        }
+        if(number(line,"complete") && end==physical_end) {
+            const auto symbol=modem::symbol_sample_count(c);
+            check(feed>=end && feed-end>=((6ULL*c.sample_rate+symbol-1)/symbol)*symbol,
+                  "post-loss ordinary wire END lacked fully scored six-second absence");
+            post_loss_end_sources.insert(key);post_loss_end_feed=std::max(post_loss_end_feed,feed);
+        }
+    }
+    for(const auto& key:post_loss_bit_sources)ordinary_after|=post_loss_end_sources.contains(key);
     visible_exact=visible_complete.contains(id);
     const auto cpu=static_cast<double>(std::clock()-cpu_start)/CLOCKS_PER_SEC;
     std::cout<<"final Helper loss Auto rolling default_clock tx_epoch="<<expected_epoch<<" row="<<id
              <<" cutoff_seconds="<<loss_seconds<<" first_prefix_feed="<<first_prefix_feed
              <<" first_prefix_capture="<<first_prefix_capture<<" max_staging="<<max_staging
              <<" physical_end="<<physical_end<<" complete_feed="<<complete_feed<<" samples="<<samples
+             <<" measured_loss_raw="<<measured_loss_raw<<" post_loss_bit_feed="<<post_loss_bit_feed
+             <<" post_loss_END_feed="<<post_loss_end_feed<<" post_loss_acquisition_jobs="<<post_loss_acquisition_jobs
              <<" qualified_before="<<qualified_before<<" reference_lost="<<reference_lost
              <<" ordinary_after="<<ordinary_after<<" exact="<<visible_exact<<" pending="<<pending
+             <<" public_pending="<<visible_pending.contains(id)<<" frequency_active="<<frequency_active
              <<" END="<<completed<<" CPU="<<cpu<<" trace="<<path<<'\n';
     check(physical_rate && expected_epoch && finished && visible_exact && id && pending && completed,
           "final Helper loss lost complete ordinary001, pending progress or physical END");
-    check(first_prefix_feed && first_prefix_capture<loss_seconds*c.sample_rate && visible_pending_before_loss.contains(id) &&
+    check(first_prefix_feed && first_prefix_capture<loss_seconds*c.sample_rate && visible_pending.contains(id) &&
           physical_end>loss_seconds*c.sample_rate &&
           complete_feed>physical_end && qualified_before && reference_lost && frequency_active && ordinary_after && !broad_companion,
           "final Helper loss did not bracket established payload and its ordinary scored drain");
 }
 
 void rolling_primary_declines() {
-    std::vector<std::size_t> ordinary,helper;
-    conditioned_frequency_bank(false,false,false,true,&ordinary);
-    conditioned_frequency_bank(true,false,false,true,&helper);
-    check(ordinary.size()>=2 && helper.size()>=2,"rolling helper fixture did not admit a fresh ordinary epoch");
-    const auto common=std::min(ordinary.size(),helper.size());
-    check(std::equal(ordinary.begin(),ordinary.begin()+static_cast<std::ptrdiff_t>(common),helper.begin()),
-          "declined primary assistance changed ordinary receiver constructor grants");
+    const auto ordinary=conditioned_frequency_bank(false,false,false,true);
+    const auto helper=conditioned_frequency_bank(true,false,false,true);
+    check(!ordinary.raw_qualified && helper.raw_qualified && ordinary.fresh_epoch_work && helper.fresh_epoch_work,
+          "rolling OFF/ON comparison lost its actual reference or fresh ordinary epoch coverage");
+    check(ordinary.exact && helper.exact && ordinary.pending && helper.pending &&
+          ordinary.observed_end && helper.observed_end,
+          "rolling OFF/ON comparison lost exact payload, pending identity or scored physical END");
+    std::size_t primary_contexts=0;
+    // Helper lead can change the actual transmit epoch. Compare each dated
+    // source's epoch/family context, not unrelated constructor-vector positions.
+    for(const auto& [context,baseline]:ordinary.epochs) {
+        if(std::get<1>(context)!=ordinary.payload_epoch || !baseline.joined || !baseline.jobs)continue;
+        const auto found=std::find_if(helper.epochs.begin(),helper.epochs.end(),[&](const auto& item) {
+            return std::get<1>(item.first)==helper.payload_epoch && std::get<2>(item.first)==std::get<2>(context) &&
+                item.second.joined && item.second.jobs;
+        });
+        check(found!=helper.epochs.end(),"rolling Helper omitted the actual primary ordinary epoch/family work");
+        const auto& assisted=found->second;
+        check(baseline.selected && baseline.admitted && assisted.selected && assisted.admitted &&
+              baseline.backend=="existing complex" && assisted.backend==baseline.backend &&
+              baseline.original_clocks && assisted.original_clocks && baseline.grant && assisted.grant &&
+              baseline.workspace && assisted.workspace,
+              "rolling primary changed its actual backend, original LF domain or funded constructor ownership");
+        ++primary_contexts;
+    }
+    check(primary_contexts,"rolling OFF/ON comparison did not join its actual dated primary context");
+    std::cout<<"rolling ordinary primary contexts="<<primary_contexts
+             <<" OFF_epoch="<<ordinary.payload_epoch<<" ON_epoch="<<helper.payload_epoch
+             <<" actual_backend_LF_workspace_progress_END=checked constructor_grant_equivalence=unvalidated\n";
 }
 
 void retained_backend_policy() {
@@ -1515,39 +1932,98 @@ void retained_backend_policy() {
     const auto path=std::filesystem::temp_directory_path()/
         ("datapump-helper-retained-backend-"+std::to_string(audio::trace::identity())+"-"+
          std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl");
-    conditioning_backend_retained=false;
+    const auto capacity=live::receiver_workspace_capacity(value);
     {
         audio::trace::Scope trace(path,false,&trace_filter);
         live::Session session;session.start(value);session.transmit_helper();
-        // Stop at a qualified helper acquisition decision, before the costly
-        // original bank's complete symbol search. This is a policy regression,
-        // not another broad-bank throughput benchmark.
+        // Realtime admission requires measured pilot qualification. Stop after
+        // its ordinary numeric owner is published, before a costly complete
+        // symbol search. This checks backend policy, not broad-bank throughput.
         const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(8);
-        while(!conditioning_backend_retained && std::chrono::steady_clock::now()<deadline) {
+        while(std::chrono::steady_clock::now()<deadline) {
             const auto snapshot=session.snapshot();
             check(snapshot.error.empty() && !snapshot.receiver_health.failed() && !snapshot.receiver_health.dropped_samples,
                   "helper backend policy check changed ordinary receiver health");
+            check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,
+                  "helper backend policy exceeded its configured DSP workspace");
+            if(snapshot.receiver_instances && snapshot.helper_frequency_offset_hz)break;
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
         session.stop();
     }
-    std::ifstream input(path);std::string line;bool retained=false,replaced=false;
+    using Context=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>;
+    using Owner=std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>;
+    std::ifstream input(path);std::string line;
+    bool raw_qualified=false,replaced=false,numeric_policy=false;
+    std::set<Context> selected,admitted;
+    std::set<std::pair<std::uint64_t,std::uint64_t>> constructors;
+    std::set<Owner> numeric_owners;
+    std::uint64_t fft_jobs=0;
     while(std::getline(input,line)) {
-        if(line.find("\"event\":\"receiver_helper_conditioning_backend_retained\"")!=std::string::npos) {
-            retained=true;
-            check(number(line,"strategy")==static_cast<unsigned>(modem::ReceiverStrategy::existing_only),
-                  "helper backend gate did not retain the explicit ordinary receiver policy");
+        if(line.find("\"event\":\"receiver_helper_raw_reference\"")!=std::string::npos && number(line,"qualified")) {
+            check(number(line,"sample")<number(line,"captured_end") &&
+                  number(line,"frequency_first_sample")<=number(line,"sample") &&
+                  std::isfinite(real_number(line,"frequency_hz")) &&
+                  std::isfinite(real_number(line,"uncertainty_hz")) && real_number(line,"uncertainty_hz")>=0,
+                  "retained backend lacked a dated measured pilot reference");
+            raw_qualified=true;
         }
-        replaced=replaced || line.find("\"event\":\"receiver_helper_conditioning_admitted\"")!=std::string::npos ||
-            line.find("\"event\":\"receiver_helper_conditioning_committed\"")!=std::string::npos;
+        if(line.find("\"event\":\"receiver_selection\"")!=std::string::npos) {
+            // existing_only names an operator policy; its actual numeric
+            // implementation must still be the ordinary existing complex backend.
+            check(number(line,"supported") && number(line,"full_frequency_coverage") && number(line,"full_clock_coverage") &&
+                  line.find("\"backend\":\"existing complex\"")!=std::string::npos,
+                  "qualified Helper changed the explicit existing-only ordinary backend/coverage");
+            selected.emplace(number(line,"revision"),number(line,"epoch"),number(line,"family"));
+        }
+        if(line.find("\"event\":\"receiver_bank_admitted\"")!=std::string::npos) {
+            check(number(line,"workspace")<=capacity && number(line,"constructor_grant")>0 &&
+                  number(line,"constructor_grant")<=capacity,
+                  "retained ordinary backend exceeded its actual workspace/constructor grant");
+            admitted.emplace(number(line,"revision"),number(line,"epoch"),number(line,"family"));
+        }
+        if(line.find("\"event\":\"receiver_helper_constructor_frequency\"")!=std::string::npos) {
+            check(std::isfinite(real_number(line,"helper_constructor_uncertainty_hz")) &&
+                  real_number(line,"helper_constructor_uncertainty_hz")>=0 && number(line,"pairs") &&
+                  number(line,"factory_grant") && number(line,"factory_grant")<=capacity,
+                  "retained backend lost its actual measured-reference constructor");
+            constructors.emplace(number(line,"revision"),number(line,"instance_id"));
+        }
+        if(line.find("\"event\":\"receiver_acquisition_work\"")!=std::string::npos && number(line,"numeric_owner")) {
+            const Context context{number(line,"revision"),number(line,"epoch"),number(line,"family")};
+            check(number(line,"realtime_helper") && !number(line,"helper_input_view") &&
+                  !number(line,"future_broad_template_jobs"),
+                  "retained backend used a parallel/legacy/broad Helper receiver");
+            if(number(line,"counter_snapshot_joined") && !number(line,"incomplete") &&
+               line.find("\"reason\":\"feed_complete\"")!=std::string::npos &&
+               number(line,"sample")>number(line,"sample_origin")) {
+                check(selected.contains(context) && admitted.contains(context) &&
+                      constructors.contains({number(line,"revision"),number(line,"instance_id")}),
+                      "retained backend selection did not own the actual joined ordinary samples");
+                numeric_policy=true;
+                numeric_owners.emplace(number(line,"revision"),number(line,"instance_id"),number(line,"sample_origin"));
+                fft_jobs=std::max(fft_jobs,number(line,"fft_jobs"));
+            }
+        }
+        if(line.find("\"event\":\"receiver_signal_commit\"")!=std::string::npos)
+            check(!number(line,"received_bits") && !number(line,"complete"),
+                  "Helper-only backend policy accepted payload bits or invented END");
+        replaced|=line.find("\"event\":\"receiver_helper_assistance_admitted\"")!=std::string::npos ||
+            line.find("\"event\":\"receiver_helper_conditioning_admitted\"")!=std::string::npos ||
+            line.find("\"event\":\"receiver_helper_conditioning_committed\"")!=std::string::npos ||
+            line.find("\"event\":\"receiver_helper_cohort_frontend\"")!=std::string::npos;
     }
-    if(!retained || replaced)std::cerr<<"retained backend trace at "<<path<<'\n';
-    check(retained && !replaced,"qualified helper replaced an explicit existing-only ordinary receiver");
+    if(!raw_qualified || !numeric_policy || replaced)std::cerr<<"retained backend trace at "<<path<<'\n';
+    check(raw_qualified && numeric_policy && !replaced,
+          "qualified Helper did not retain an actual existing-only ordinary numeric owner");
+    std::cout<<"retained backend existing_only=1 measured_reference="<<raw_qualified
+             <<" ordinary_numeric_owners="<<numeric_owners.size()<<" FFT_jobs_peak="<<fft_jobs
+             <<" throughput_coverage=unexecuted trace="<<path<<'\n';
     std::filesystem::remove(path);std::filesystem::remove(path.string()+".seal");
 }
 
 }
-int main(int argc,char** argv){try{realtime_window_publication_controls();if(argc==2 && std::string_view(argv[1])=="--realtime-window-status")return 0;if(argc==2 && std::string_view(argv[1])=="--gps-clock-gps-on") {gps_clock_live(true,true);return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-default-on") {gps_clock_live(false,true);return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-gps-off") {gps_clock_live(true,false);return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-positive") {gps_clock_geometry();gps_clock_backend_shapes();gps_clock_actual_source();gps_clock_live(true,true);return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-geometry") {gps_clock_geometry();gps_clock_backend_shapes();return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-source") {gps_clock_actual_source();return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-live") {for(const bool gps:{false,true})for(const bool enabled:{false,true})gps_clock_live(gps,enabled);return 0;}if(argc==2 && std::string_view(argv[1])=="--realtime-clock-refresh") {realtime_shared_frequency_controls();realtime_clock_refresh_controls();realtime_gap_protection(true);return 0;}if(argc==2 && std::string_view(argv[1])=="--realtime-gap") {realtime_gap_protection();return 0;}if(argc==2 && std::string_view(argv[1])=="--realistic-only") {realistic_frequency_benefit();return 0;}
+int main(int argc,char** argv){try{realtime_window_publication_controls();if(argc==2 && std::string_view(argv[1])=="--full-payload-only") {full_payload(false,false);return 0;}if(argc==2 && std::string_view(argv[1])=="--realtime-window-status")return 0;if(argc==2 && std::string_view(argv[1])=="--gps-clock-gps-on") {gps_clock_live(true,true);return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-default-on") {gps_clock_live(false,true);return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-gps-off") {gps_clock_live(true,false);return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-positive") {gps_clock_geometry();gps_clock_backend_shapes();gps_clock_actual_source();gps_clock_live(true,true);return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-geometry") {gps_clock_geometry();gps_clock_backend_shapes();return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-source") {gps_clock_actual_source();return 0;}if(argc==2 && std::string_view(argv[1])=="--gps-clock-live") {for(const bool gps:{false,true})for(const bool enabled:{false,true})gps_clock_live(gps,enabled);return 0;}if(argc==2 && std::string_view(argv[1])=="--realtime-clock-refresh") {realtime_shared_frequency_controls();realtime_clock_refresh_controls();realtime_gap_protection(true);return 0;}if(argc==2 && std::string_view(argv[1])=="--realtime-gap") {realtime_gap_protection();return 0;}if(argc==2 && std::string_view(argv[1])=="--realistic-only") {realistic_frequency_benefit();return 0;}
 if(argc==2 && std::string_view(argv[1])=="--final-helper-loss") {final_helper_loss_live();return 0;}
 if(argc==2 && std::string_view(argv[1])=="--finite-replay-budget") {finite_replay_budget();return 0;}
 if(argc==2 && std::string_view(argv[1])=="--rolling-primary-decline") {rolling_primary_declines();return 0;}
@@ -1557,5 +2033,5 @@ if(argc==2 && std::string_view(argv[1])=="--conditioned-control") {conditioned_f
 if(argc==2 && std::string_view(argv[1])=="--conditioned-full") {conditioned_frequency_bank(true,true);return 0;}
 if(argc==2 && std::string_view(argv[1])=="--conditioned-fallback") {conditioned_frequency_bank(true,false,true);return 0;}
 if(argc==2 && std::string_view(argv[1])=="--calendar-only") {realistic_frequency_benefit(true);return 0;}
-if(argc==2 && std::string_view(argv[1])=="--phase-only")throw Error("manual Live measured-phase positive is unqualified: waveform phase assistance is not implemented");realtime_gap_protection();run(false);run(true);run(true,true);full_payload(false,false);full_payload(true,false);full_payload(false,true);realistic_frequency_benefit();realistic_frequency_benefit(true);retained_backend_policy();finite_replay_budget();rolling_primary_declines();conditioned_frequency_bank(true);conditioned_frequency_bank(true,true);conditioned_frequency_bank(true,false,true);std::cout<<"helper Live assistance passed\n";return 0;}
+if(argc==2 && std::string_view(argv[1])=="--phase-only")throw Error("--phase-only has no maintained in-process Live positive fixture; measured-phase coverage remains unvalidated here; use the separate test_helper_actual_rf_session for its bounded laboratory scope");realtime_gap_protection();run(false);run(true);run(true,true);full_payload(false,false);full_payload(true,false);full_payload(false,true);realistic_frequency_benefit();realistic_frequency_benefit(true);retained_backend_policy();finite_replay_budget();rolling_primary_declines();conditioned_frequency_bank(true);conditioned_frequency_bank(true,true);conditioned_frequency_bank(true,false,true);std::cout<<"helper Live assistance passed\n";return 0;}
 catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

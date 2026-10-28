@@ -39,7 +39,9 @@ bool filter(const char* name)noexcept {
     const std::string_view event{name};
     return event=="trace_begin" || event=="receiver_signal_commit" ||
         event=="receiver_acquisition_work" || event=="receiver_helper_raw_reference" ||
-        event=="receiver_helper_actual_rf_segment" || event=="receiver_helper_pilot_phase";
+        event=="receiver_helper_actual_rf_segment" || event=="receiver_helper_pilot_phase" ||
+        event=="receiver_helper_oscillator" || event=="receiver_helper_oscillator_correction" ||
+        event=="receiver_helper_corrected_interval" || event=="receiver_helper_constructor_frequency";
 }
 struct Laboratory {
     std::atomic<std::uint64_t> transmit_epoch=0,channels=0;
@@ -182,18 +184,24 @@ ConstructorGeometry corrected_constructor_geometry(const modem::Config& config,d
     std::sort(ordered.begin(),ordered.end(),[](const auto& a,const auto& b) {
         return a.frequency_offset_hz<b.frequency_offset_hz;
     });
-    const auto frequency_bound=uncertainty+std::abs(coupling)*clock_bound*1e-6;
-    double maximum_clock_radius=0;
+    // Evaluate the geometry from the actual double catalogue in extended
+    // precision: cancellation at a cell edge can otherwise add two double
+    // ULPs and fail the one-ULP comparison despite an enclosed LF endpoint.
+    const auto physical_coupling=static_cast<long double>(coupling);
+    const auto physical_clock_bound=static_cast<long double>(clock_bound);
+    const auto physical_uncertainty=static_cast<long double>(uncertainty);
+    const auto frequency_bound=physical_uncertainty+std::abs(physical_coupling)*physical_clock_bound*1e-6L;
+    long double maximum_clock_radius=0;
     // Prove the entire physical RF/LF strip, including its endpoints, fits the
     // advertised timing cells. Different complete-domain constructor grids
     // need not use the original grid's exact numerical representatives.
     for(std::size_t i=0;i<ordered.size();++i) {
-        const auto lower=i?(ordered[i-1].frequency_offset_hz+ordered[i].frequency_offset_hz)/2:-frequency_bound;
-        const auto upper=i+1<ordered.size()?(ordered[i].frequency_offset_hz+ordered[i+1].frequency_offset_hz)/2:frequency_bound;
-        const std::array endpoints{(lower-uncertainty)/coupling*1e6,(lower+uncertainty)/coupling*1e6,
-            (upper-uncertainty)/coupling*1e6,(upper+uncertainty)/coupling*1e6};
-        const auto lo=std::max(-clock_bound,*std::min_element(endpoints.begin(),endpoints.end()));
-        const auto hi=std::min(clock_bound,*std::max_element(endpoints.begin(),endpoints.end()));
+        const auto lower=i?(static_cast<long double>(ordered[i-1].frequency_offset_hz)+ordered[i].frequency_offset_hz)/2:-frequency_bound;
+        const auto upper=i+1<ordered.size()?(static_cast<long double>(ordered[i].frequency_offset_hz)+ordered[i+1].frequency_offset_hz)/2:frequency_bound;
+        const std::array endpoints{(lower-physical_uncertainty)/physical_coupling*1e6L,(lower+physical_uncertainty)/physical_coupling*1e6L,
+            (upper-physical_uncertainty)/physical_coupling*1e6L,(upper+physical_uncertainty)/physical_coupling*1e6L};
+        const auto lo=std::max(-physical_clock_bound,*std::min_element(endpoints.begin(),endpoints.end()));
+        const auto hi=std::min(physical_clock_bound,*std::max_element(endpoints.begin(),endpoints.end()));
         if(lo<=hi)maximum_clock_radius=std::max({maximum_clock_radius,
             std::abs(lo-ordered[i].clock_error_ppm),std::abs(hi-ordered[i].clock_error_ppm)});
     }
@@ -226,7 +234,7 @@ ConstructorGeometry corrected_constructor_geometry(const modem::Config& config,d
     }
     return {ordinary.hypotheses.size(),catalogue.hypotheses.size(),clocks.size(),clock_bound};
 }
-void run(const std::filesystem::path& path,bool independent_clock) {
+void run(const std::filesystem::path& path,bool independent_clock,bool require_oscillator_model=false) {
     const auto value=settings(independent_clock);const Bytes bits{0,0,1};
     const auto pilot=helper::plan(value.helper,helper::placement_band(value.transfer.modem),120000000,0,
         modem::outer_dsss_transmit_gain(value.transfer.modem)).frequency_hz;
@@ -257,15 +265,39 @@ void run(const std::filesystem::path& path,bool independent_clock) {
         }
         session.stop();
     }
-    struct Segment {std::uint64_t first,settled,end;double rf;};
+    struct Segment {std::uint64_t first,settled,end,phase,rate;double rf;};
     std::map<std::uint64_t,Segment> segments;std::ifstream input(path);std::string line;
     std::uint64_t references=0,escapes=0,phase_updates=0,jobs=0,phase_work_jobs=0,stage_peak=0,pending=0,completed=0;
     std::uint64_t local_references=0,retained_clock_masks=0,narrowed_masks=0,existing_mask_opportunities=0;
     std::set<std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>> constructor_owners;
     ConstructorGeometry constructors;
-    std::map<std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>,std::uint64_t> owner_jobs;
+    struct OwnerWork {std::uint64_t jobs=0,fft=0,transforms=0;};
+    std::map<std::tuple<std::uint64_t,std::uint64_t,std::uint64_t>,OwnerWork> owner_jobs;
+    std::uint64_t first_qualified_capture=0,first_positive_fft_frontier=0,last_work_frontier=0,worker_slots_peak=0;
+    struct ConstructorInput {double uncertainty=0,center=0,expected=0;std::uint64_t pairs=0,epoch=0,family=0;};
+    std::map<std::pair<std::uint64_t,std::uint64_t>,ConstructorInput> constructor_inputs;
+    std::uint64_t model_updates=0,raw_only_updates=0,phase_unqualified_updates=0,phase_fit_unqualified_updates=0;
+    std::uint64_t innovation_vetoes=0,model_epoch=0,model_epoch_changes=0;
+    std::uint64_t model_corrections=0,raw_escapes=0,model_escapes=0,data_diagnostic_escapes=0,correction_escapes=0;
+    std::uint64_t last_model_capture=0,last_qualified_capture=0;
+    std::set<double> model_rf;
+    std::map<std::uint64_t,std::uint64_t> model_support_end;
+    double raw_error_max=0,model_error_max=0,data_diagnostic_error_max=0,correction_error_max=0;
+    double model_uncertainty_max=0,model_uncertainty_min=INFINITY,correction_uncertainty_min=INFINITY;
     double maximum_error=0;std::uint64_t identity=0,revision=0,previous_bits=0;
     while(std::getline(input,line)) {
+        if(line.find("\"event\":\"receiver_helper_constructor_frequency\"")!=std::string::npos) {
+            const ConstructorInput input{real(line,"helper_constructor_uncertainty_hz"),real(line,"helper_constructor_center_hz"),
+                real(line,"helper_constructor_expected_hz"),number(line,"pairs"),number(line,"epoch"),number(line,"family")};
+            check(std::isfinite(input.uncertainty) && input.uncertainty>0 && input.center==0 && input.expected==pilot &&
+                real(line,"clock_frequency_hz")==value.transfer.modem.carrier_hz-pilot && number(line,"factory_grant"),
+                "actual RF constructor trace lacks its immutable search inputs");
+            const auto [found,inserted]=constructor_inputs.emplace(std::pair{number(line,"revision"),number(line,"instance_id")},input);
+            check(inserted || (found->second.uncertainty==input.uncertainty && found->second.center==input.center &&
+                found->second.expected==input.expected && found->second.pairs==input.pairs &&
+                found->second.epoch==input.epoch && found->second.family==input.family),
+                "actual RF factory retry changed its immutable search");
+        }
         if(line.find("\"event\":\"receiver_helper_actual_rf_segment\"")!=std::string::npos) {
             const auto first=number(line,"first_sample"),settled=number(line,"settled_first_sample"),end=number(line,"end_sample");
             check(bool(number(line,"frequency_pooling_compatible"))==!independent_clock &&
@@ -274,10 +306,12 @@ void run(const std::filesystem::path& path,bool independent_clock) {
             const auto rate=number(line,"sample_rate");
             check(end-first==rate*2/5 && settled>first && settled<end,"actual RF dwell or settling date changed");
             if(!segments.empty())check(first==segments.rbegin()->second.end,"actual RF descriptor omitted ADC samples");
-            segments.emplace(first,Segment{first,settled,end,real(line,"actual_rf_shift_hz")});
+            segments.emplace(first,Segment{first,settled,end,number(line,"phase_segment"),rate,real(line,"actual_rf_shift_hz")});
             stage_peak=std::max(stage_peak,number(line,"raw_stage_samples"));
         }
         if(line.find("\"event\":\"receiver_helper_raw_reference\"")!=std::string::npos && number(line,"qualified")) {
+            if(!first_qualified_capture)first_qualified_capture=number(line,"captured_end");
+            last_qualified_capture=number(line,"captured_end");
             const auto date=number(line,"sample");auto found=segments.upper_bound(date);
             check(found!=segments.begin(),"actual RF fit predates its observed mapping");--found;
             check(date>=found->second.settled && date<found->second.end,"actual RF fit used retune settling or another phase segment");
@@ -293,6 +327,75 @@ void run(const std::filesystem::path& path,bool independent_clock) {
             const auto error=std::abs(real(line,"frequency_hz")-truth);maximum_error=std::max(maximum_error,error);
             escapes+=error>real(line,"uncertainty_hz");++references;
         }
+        if(line.find("\"event\":\"receiver_helper_oscillator\"")!=std::string::npos) {
+            const auto first=number(line,"first_sample"),end=number(line,"end_sample"),endpoint=number(line,"state_endpoint");
+            auto found=segments.upper_bound(first);check(found!=segments.begin(),"oscillator fit predates actual RF mapping");--found;
+            const auto& segment=found->second;const auto mean=number(line,"mean_sample");const auto fraction=real(line,"mean_fraction");
+            check(first>=segment.settled && first<end && end<=segment.end-segment.rate/250 && endpoint==end-1 &&
+                mean>=first && mean<end && std::isfinite(fraction) && fraction>=0 && fraction<1 &&
+                number(line,"phase_segment")==segment.phase && real(line,"actual_rf_shift_hz")==segment.rf &&
+                number(line,"sideband_sign")==1 && !number(line,"phase_UTC_authority") &&
+                number(line,"current_hop_pilot") && number(line,"raw_frequency_valid") && number(line,"DATA_projection_diagnostic_only"),
+                "oscillator observation crossed settled support or invented phase/UTC authority");
+            const auto independent=real(line,"independent_variance_hz2"),residual=real(line,"residual_variance_hz2");
+            const auto uncertainty=real(line,"helper_uncertainty_hz"),data_uncertainty=real(line,"DATA_uncertainty_hz");
+            check(std::isfinite(independent) && independent>0 && std::isfinite(residual) && residual>=0 &&
+                std::isfinite(uncertainty) && uncertainty>0 && std::isfinite(data_uncertainty) && data_uncertainty>0,
+                "oscillator observation has invalid independent/residual covariance");
+            const auto truth=pilot*value.simulation_clock_error_ppm*1e-6+value.simulation_frequency_offset_hz*segment.rf/7e6;
+            const auto raw_error=std::abs(real(line,"raw_frequency_hz")-pilot-truth);
+            const auto model_error=std::abs(real(line,"helper_frequency_hz")-pilot-truth);
+            const auto data_truth=value.transfer.modem.carrier_hz*value.simulation_clock_error_ppm*1e-6+
+                value.simulation_frequency_offset_hz*segment.rf/7e6;
+            const auto data_error=std::abs(real(line,"DATA_residual_hz")-data_truth);
+            raw_escapes+=raw_error>3*std::sqrt(independent+residual);model_escapes+=model_error>uncertainty;
+            data_diagnostic_escapes+=data_error>data_uncertainty;
+            raw_error_max=std::max(raw_error_max,raw_error);model_error_max=std::max(model_error_max,model_error);
+            data_diagnostic_error_max=std::max(data_diagnostic_error_max,data_error);
+            model_uncertainty_min=std::min(model_uncertainty_min,uncertainty);model_uncertainty_max=std::max(model_uncertainty_max,uncertainty);
+            const auto epoch=number(line,"model_epoch");check(epoch>=model_epoch && epoch,"oscillator model epoch went backward");
+            model_epoch_changes+=model_epoch && epoch!=model_epoch;model_epoch=epoch;
+            check(!model_support_end.contains(segment.phase),"oscillator reused a full fit from the same independent hop");
+            model_support_end.emplace(segment.phase,end);model_rf.insert(segment.rf);
+            raw_only_updates+=number(line,"raw_frequency_only");innovation_vetoes+=number(line,"innovation_veto");++model_updates;
+            phase_unqualified_updates+=!number(line,"phase_correction_qualified");
+            phase_fit_unqualified_updates+=!number(line,"phase_fit_qualified");
+        }
+        if(line.find("\"event\":\"receiver_helper_oscillator_correction\"")!=std::string::npos) {
+            const auto first=number(line,"first_center"),last=number(line,"last_center"),captured=number(line,"captured_end");
+            auto found=segments.upper_bound(first);check(found!=segments.begin(),"oscillator correction predates actual RF mapping");--found;
+            const auto& segment=found->second;const auto pilot_end=number(line,"current_pilot_end");
+            check(first>=segment.settled && first<=last && last<segment.end && last<captured &&
+                number(line,"frequency_evidence_end")<=captured && pilot_end<=captured &&
+                model_support_end.contains(segment.phase) && model_support_end.at(segment.phase)==pilot_end &&
+                number(line,"phase_segment")==segment.phase && real(line,"actual_rf_shift_hz")==segment.rf &&
+                number(line,"original_LF_UTC_union_retained") && !number(line,"phase_UTC_authority"),
+                "oscillator correction lacked current dated evidence or escaped its actual RF segment");
+            const auto q=real(line,"applied_correction_hz"),tracking=real(line,"tracking_frequency_hz");
+            const auto uncertainty=real(line,"residual_uncertainty_hz"),coefficient=real(line,"ordinary_clock_coefficient_hz");
+            check(std::isfinite(uncertainty) && uncertainty>0 && std::abs(q+tracking-pilot)<1e-9 &&
+                coefficient==pilot-value.transfer.modem.carrier_hz,"oscillator correction changed receiver phase/frequency coordinates");
+            const auto b=value.simulation_clock_error_ppm*1e-6;
+            const auto rf=value.simulation_frequency_offset_hz*segment.rf/7e6;
+            const auto data_residual=rf+value.transfer.modem.carrier_hz*b+q;
+            const auto error=std::abs(data_residual+coefficient*b);
+            correction_escapes+=error>uncertainty;correction_error_max=std::max(correction_error_max,error);
+            correction_uncertainty_min=std::min(correction_uncertainty_min,uncertainty);
+            // Preserve every original B alternative. For each endpoint, the
+            // conditional RF value reproduces this same observed Helper; no
+            // RF/audio decomposition or UTC authority is invented by the NCO.
+            const auto bound=value.transfer.modem.oscillator_search->lf.accuracy_ppm*
+                value.transfer.modem.oscillator_search->margin*1e-6;
+            for(const auto alternative:std::array{-bound,bound}) {
+                const auto conditional_rf=rf+pilot*(b-alternative);
+                const auto conditional_data=conditional_rf+value.transfer.modem.carrier_hz*alternative+q;
+                const auto& policy=*value.transfer.modem.oscillator_search;
+                check(std::abs(conditional_rf)<=policy.rf.accuracy_ppm*policy.margin*policy.rf_shift_hz*1e-6 &&
+                    std::abs(conditional_data+coefficient*alternative)<=uncertainty+1e-12,
+                    "current oscillator Helper/NCO mask lost a genuine unresolved clock endpoint");
+            }
+            last_model_capture=std::max(last_model_capture,captured);++model_corrections;
+        }
         if(line.find("\"event\":\"receiver_helper_pilot_phase\"")!=std::string::npos) {
             const auto first=number(line,"first_sample"),end=number(line,"end_sample");auto found=segments.upper_bound(first);
             check(found!=segments.begin(),"actual RF phase lacks an actual segment");--found;
@@ -302,8 +405,13 @@ void run(const std::filesystem::path& path,bool independent_clock) {
         if(line.find("\"event\":\"receiver_acquisition_work\"")!=std::string::npos) {
             const auto current=number(line,"template_jobs");jobs=std::max(jobs,current);
             auto& previous=owner_jobs[{number(line,"revision"),number(line,"instance_id"),number(line,"sample_origin")}];
-            check(current>=previous,"actual RF ordinary work counter reset");
-            if(number(line,"realtime_locked") && number(line,"realtime_phase_corrected"))phase_work_jobs+=current-previous;
+            check(current>=previous.jobs && number(line,"fft_jobs")>=previous.fft &&
+                number(line,"input_transforms")>=previous.transforms,
+                "actual RF ordinary work counter reset");
+            if(number(line,"fft_jobs") && !first_positive_fft_frontier)first_positive_fft_frontier=number(line,"sample");
+            last_work_frontier=std::max(last_work_frontier,number(line,"sample"));
+            worker_slots_peak=std::max(worker_slots_peak,number(line,"coherent_fft_worker_slots_peak"));
+            if(number(line,"realtime_locked") && number(line,"realtime_phase_corrected"))phase_work_jobs+=current-previous.jobs;
             if(independent_clock && number(line,"helper_window_active")) {
                 check(number(line,"helper_window_clock_counts_available") && !number(line,"helper_window_clock_qualified") &&
                     number(line,"helper_window_original_clock_rates")>1 &&
@@ -313,12 +421,16 @@ void run(const std::filesystem::path& path,bool independent_clock) {
                 existing_mask_opportunities+=number(line,"helper_window_original_pairs")>
                     number(line,"helper_window_original_clock_rates");
                 narrowed_masks+=number(line,"helper_window_selected_pairs")<number(line,"helper_window_original_pairs");
-                if(constructor_owners.emplace(number(line,"revision"),number(line,"instance_id"),number(line,"sample_origin")).second)
-                    constructors=corrected_constructor_geometry(value.transfer.modem,pilot,
-                        real(line,"realtime_reference_uncertainty_hz"),number(line,"helper_window_original_pairs"),
-                        number(line,"helper_window_original_clock_rates"),constructor_owners.size()==1);
+                if(constructor_owners.emplace(number(line,"revision"),number(line,"instance_id"),number(line,"sample_origin")).second) {
+                    const auto birth=constructor_inputs.find({number(line,"revision"),number(line,"instance_id")});
+                    check(birth!=constructor_inputs.end() && birth->second.pairs==number(line,"helper_window_original_pairs") &&
+                        birth->second.epoch==number(line,"epoch") && birth->second.family==number(line,"family"),
+                        "actual RF owner lacks its own immutable constructor frequency input");
+                    constructors=corrected_constructor_geometry(value.transfer.modem,pilot,birth->second.uncertainty,
+                        birth->second.pairs,number(line,"helper_window_original_clock_rates"),constructor_owners.size()==1);
+                }
             }
-            previous=current;
+            previous={current,number(line,"fft_jobs"),number(line,"input_transforms")};
         }
         if(line.find("\"event\":\"receiver_signal_commit\"")!=std::string::npos && number(line,"received_bits")) {
             const auto count=number(line,"received_bits"),id=number(line,"signal_id");
@@ -341,10 +453,27 @@ void run(const std::filesystem::path& path,bool independent_clock) {
             } else ++pending;
         }
     }
+    std::uint64_t total_jobs=0,total_fft=0,total_transforms=0;
+    for(const auto& [_,row]:owner_jobs){total_jobs+=row.jobs;total_fft+=row.fft;total_transforms+=row.transforms;}
     std::cout<<"actual_rf_session,independent_clock="<<independent_clock<<",finished="<<finished<<",exact="<<exact<<",segments="<<segments.size()
         <<",references="<<references<<",frequency_escapes="<<escapes<<",max_frequency_error_hz="<<maximum_error
         <<",phase_updates="<<phase_updates<<",ordinary_jobs_peak="<<jobs<<",phase_covered_feed_jobs="<<phase_work_jobs<<",frequency_assisted="<<frequency
         <<",phase_assisted="<<phase<<",pending="<<pending<<",complete="<<completed<<",logical_samples="<<final_samples
+        <<",ordinary_owner_count="<<owner_jobs.size()<<",ordinary_jobs_sum="<<total_jobs<<",ordinary_fft_jobs_sum="<<total_fft
+        <<",ordinary_transforms_sum="<<total_transforms<<",worker_slots_peak="<<worker_slots_peak
+        <<",first_qualified_raw_capture="<<first_qualified_capture<<",first_positive_fft_frontier="<<first_positive_fft_frontier
+        <<",last_ordinary_frontier="<<last_work_frontier
+        <<",oscillator_updates="<<model_updates<<",oscillator_RF_values="<<model_rf.size()<<",oscillator_raw_only_updates="<<raw_only_updates
+        <<",oscillator_phase_unqualified_frequency_updates="<<phase_unqualified_updates
+        <<",oscillator_phase_fit_unqualified_frequency_updates="<<phase_fit_unqualified_updates
+        <<",oscillator_innovation_vetoes="<<innovation_vetoes<<",oscillator_epoch_changes="<<model_epoch_changes
+        <<",oscillator_raw_frequency_escapes="<<raw_escapes<<",oscillator_raw_error_max_hz="<<raw_error_max
+        <<",oscillator_helper_escapes="<<model_escapes<<",oscillator_helper_error_max_hz="<<model_error_max
+        <<",oscillator_helper_U_min_hz="<<model_uncertainty_min<<",oscillator_helper_U_max_hz="<<model_uncertainty_max
+        <<",oscillator_DATA_diagnostic_escapes="<<data_diagnostic_escapes<<",oscillator_DATA_diagnostic_error_max_hz="<<data_diagnostic_error_max
+        <<",oscillator_corrections="<<model_corrections<<",oscillator_correction_escapes="<<correction_escapes
+        <<",oscillator_correction_error_max_hz="<<correction_error_max<<",oscillator_correction_U_min_hz="<<correction_uncertainty_min
+        <<",last_oscillator_correction_capture="<<last_model_capture<<",last_qualified_capture="<<last_qualified_capture
         <<",local_reference_polls="<<local_references<<",retained_LF_masks="<<retained_clock_masks<<",narrowed_RF_masks="<<narrowed_masks
         <<",constructor_catalogues_checked="<<constructor_owners.size()<<",ordinary_constructor_pairs="<<constructors.ordinary_pairs
         <<",assisted_constructor_pairs="<<constructors.assisted_pairs<<",constructor_clock_domain_low_ppm="<<-constructors.clock_bound_ppm
@@ -362,16 +491,21 @@ void run(const std::filesystem::path& path,bool independent_clock) {
     if(independent_clock)check(local_references && retained_clock_masks && !constructor_owners.empty() &&
         constructors.assisted_pairs<constructors.ordinary_pairs && (!existing_mask_opportunities || narrowed_masks),
         "independent RF/audio local frequency did not preserve LF while narrowing available actual RF work");
+    if(require_oscillator_model)check(model_updates>=4 && model_rf.size()>=2 && model_corrections &&
+        !raw_escapes && !model_escapes && !data_diagnostic_escapes && !correction_escapes,
+        "persistent actual RF/audio model lacked dated useful corrections or escaped its reported uncertainty");
 }
 }
 int main(int argc,char** argv)try {
-    bool independent_clock=false;std::optional<std::filesystem::path> requested_path;
+    bool independent_clock=false,require_oscillator_model=false;std::optional<std::filesystem::path> requested_path;
     for(int i=1;i<argc;++i) {
         if(std::string_view(argv[i])=="--independent-clock")independent_clock=true;
+        else if(std::string_view(argv[i])=="--require-oscillator-model")require_oscillator_model=true;
         else if(!requested_path)requested_path=argv[i];
         else throw Error("unexpected actual RF fixture argument");
     }
     const auto path=requested_path.value_or(std::filesystem::temp_directory_path()/
         ("datapump-helper-actual-rf-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".jsonl"));
-    frozen_source_band_declines_wide_retune();mixed_output_certificates_preserve_pcm();run(path,independent_clock);return 0;
+    check(!require_oscillator_model || independent_clock,"oscillator-model fixture requires independent RF/audio clocks");
+    frozen_source_band_declines_wide_retune();mixed_output_certificates_preserve_pcm();run(path,independent_clock,require_oscillator_model);return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}

@@ -254,11 +254,16 @@ int main(){try {shared_frequency_clock_controls();
     };
     static_assert(sizeof(OriginalHelperInputView)==sizeof(live::detail::HelperInputView));
     static_assert(alignof(OriginalHelperInputView)==alignof(live::detail::HelperInputView));
+    // Use the current two-tone placement. The former 2-kHz single-tone
+    // placeholder puts its new auxiliary in this DATA passband.
+    helper::Options helper_options;helper_options.power_w=40;helper_options.data_power_w=4;
+    const auto held_pilot=helper::plan(helper_options,helper::placement_band(gps),24000).frequency_hz;
     helper::Reference weak_reference;weak_reference.frequency_valid=true;weak_reference.sample_rate=24000;
-    weak_reference.frequency_hz=2000.25;weak_reference.frequency_uncertainty_hz=.5;
+    weak_reference.frequency_hz=held_pilot+.25;weak_reference.frequency_uncertainty_hz=.5;
     live::detail::HelperInputFrontend held_frontend(
         live::detail::HelperInputFrontend::reservation_bound(24000,gps.sample_rate),1);
-    held_frontend.admit_realtime(gps,2000,weak_reference,24000,11990,0);
+    try {held_frontend.admit_realtime(gps,held_pilot,weak_reference,24000,11990,0);}
+    catch(const Error& e){throw Error(std::string("prior-preserving frontend: ")+e.what());}
     check(held_frontend.active() && held_frontend.original_prior_retained(),
         "detected weak helper paused a valid tighter ordinary prior");
     std::array<float,4096> silence{};
@@ -267,12 +272,51 @@ int main(){try {shared_frequency_clock_controls();
     check(!first_blocks.empty() && first_blocks.front().view->original_prior_retained &&
         first_blocks.front().view->correction_hz==0,"weak reference injected an NCO correction");
     const auto immutable_view=first_blocks.front().view;
-    weak_reference.frequency_hz=2000.1;weak_reference.frequency_uncertainty_hz=1e-6;
-    check(held_frontend.track_frequency(weak_reference,2000),"later precision interrupted prior-preserving PCM");
+    weak_reference.frequency_hz=held_pilot+.1;weak_reference.frequency_uncertainty_hz=1e-6;
+    check(held_frontend.track_frequency(weak_reference,held_pilot),"later precision interrupted prior-preserving PCM");
     held_frontend.push(silence,silence.size());
     auto next_blocks=held_frontend.take(100000,weak_reference);
     check(!next_blocks.empty() && next_blocks.front().view==immutable_view &&
         next_blocks.front().view->correction_hz==0,"improved measurement changed raw PCM phase/basis");
+    // Equal precision can be useful outside the nominal GPSDO location. The
+    // measured interval chooses the input basis once; it does not remove any
+    // original LF/UTC alternative or rebase the accepted raw owner above.
+    auto tight=gps;
+    const auto gpsdo=tuning::oscillator_model(tuning::parse_oscillator_preset("gpsdo-xo"));
+    tight.oscillator_search->lf=tight.oscillator_search->rf=gpsdo;
+    const auto pilot=held_pilot;constexpr double radius=.415663;
+    for(const auto utc:{0.,modem::utc_transmit_rate_limit(tight)}) {
+        const auto original=modem::oscillator_pattern_search(tight,utc);
+        const auto contact=radius+original.frequency.requested_half_width_hz+
+            std::abs(pilot-tight.carrier_hz)*original.requested_clock_half_width_ppm*1e-6;
+        for(const auto center:{0.,contact,-contact})
+            check(modem::helper_reference_prefers_original_prior(tight,radius,pilot,utc,
+                modem::HelperReferenceClockRelation::common_corrected_source,center),
+                "compatible/contacting GPSDO interval discarded the tighter original basis");
+        for(const auto center:{2.17,-2.17}) {
+            check(!modem::helper_reference_prefers_original_prior(tight,radius,pilot,utc,
+                modem::HelperReferenceClockRelation::common_corrected_source,center),
+                "contradicted GPSDO location retained impossible raw RF cells");
+            const auto translated=modem::helper_reference_search(tight,radius,pilot,0,utc,
+                modem::HelperReferenceClockRelation::common_corrected_source,false);
+            check(translated.catalogue.requested_clock_half_width_ppm>=original.requested_clock_half_width_ppm &&
+                translated.catalogue.clock_half_width_ppm>=original.clock_half_width_ppm,
+                "GPSDO retranslation discarded original LF/UTC coverage");
+            auto observed=weak_reference;observed.frequency_hz=pilot+center;
+            observed.frequency_uncertainty_hz=radius;
+            live::detail::HelperInputFrontend frontend(
+                live::detail::HelperInputFrontend::reservation_bound(24000,tight.sample_rate),1);
+            try {frontend.admit_realtime(tight,pilot,observed,24000,11990,0,utc);}
+            catch(const Error& e){throw Error(std::string("translated GPSDO frontend: ")+e.what());}
+            check(frontend.active() && !frontend.original_prior_retained(),
+                "frontend retained a GPSDO prior contradicted by its qualified observation");
+            frontend.push(silence,0);
+            const auto blocks=frontend.take(100000,observed);
+            check(!blocks.empty() && !blocks.front().view->reference_passthrough &&
+                blocks.front().view->correction_hz==pilot-observed.frequency_hz,
+                "out-of-prior pilot did not select the existing translated input basis");
+        }
+    }
     // A constant-variance contiguous endpoint chain is the explicit ideal
     // forecast, not a claim that the modulated helper reaches this precision.
     constexpr auto cn0=30.020599913279625;

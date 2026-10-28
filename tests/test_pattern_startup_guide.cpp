@@ -177,7 +177,10 @@ struct PatternReceiverStartupGuideTestAccess {
             burst(o,t.burst);o<<t.next<<' '<<t.index<<' '<<t.unconfirmed_symbols<<' '<<t.phase_lower<<' '<<t.phase_upper<<' '
              <<t.total_score<<' '<<t.penalty<<' '<<t.pending_score<<' '<<t.confirmed_score<<' '
              <<t.total_support<<' '<<t.confirmed_support<<' '<<t.confirmed<<' '<<t.gap_slots<<' '<<t.confirmed_end<<' '
-             <<t.anchor_start<<' '<<t.anchor_index<<' '<<t.absent_samples<<' '<<t.frequency<<' '
+             <<s.calendar_symbols()<<' ';
+            if(s.calendar_symbols())o<<t.coordinates.calendar.start<<' '<<t.coordinates.calendar.index<<' ';
+            else o<<t.coordinates.prefix.support<<' '<<t.coordinates.prefix.end<<' ';
+            o<<t.absent_samples<<' '<<t.frequency<<' '
              <<t.admitted<<' '<<t.established<<' '<<t.pending_gap<<' '<<t.frequency_scores.size()<<' ';
             for(auto value:t.frequency_scores)o<<value<<' ';
         }
@@ -193,7 +196,7 @@ struct PatternReceiverStartupGuideTestAccess {
         PatternSearch search;search.hypotheses={{0,-.0003},{1.75,.0003}};
         search.worker_threads=1;search.chunk_bits=1;search.track_limit=4;search.candidate_limit=8;
         auto receiver=std::make_unique<PatternReceiver>(c,8*1024*1024,search);auto& s=*receiver->impl_;
-        check(!s.fallback && s.fft_workload && s.long_symbol && s.shaped && s.drift_sections==4,
+        check(!s.fallback && s.fft_workload && s.long_symbol && s.shaped && s.drift_sections==4 && !s.calendar_symbols(),
             "startup guide test lost its original public FFT geometry");
         const auto initial=std::min(s.hop,std::max<std::size_t>(1,c.sample_rate/s.bin_samples));
         check(s.bin_samples==750 && s.length==1025 && s.transform==2048 && s.hop==512 && initial==8 &&
@@ -294,7 +297,10 @@ struct PatternReceiverStartupGuideTestAccess {
             t.confirmed==old.confirmed && t.gap_slots==old.gap_slots && t.pending_gap==old.pending_gap &&
             t.unconfirmed_symbols==old.unconfirmed_symbols && t.absent_samples==old.absent_samples && s.trials==trials,
             "startup guide emitted a bit, reset absence or borrowed prefix admission evidence");
-        check(t.next==expected_next && t.anchor_start==guide.first_sample/s.bin_samples && t.anchor_index==0 &&
+        // A timing/frequency guide consumes this already-published prefix;
+        // it supplies no independent pre-last support checkpoint to reuse.
+        check(!s.calendar_symbols() && std::isnan(t.coordinates.prefix.support) && t.coordinates.prefix.end==UINT64_MAX &&
+            t.next==expected_next &&
             t.frequency==guide.frequency_hypothesis && t.burst.frequency_hz==guide.frequency_hz &&
             t.confirmed_end==guide.end_sample && t.burst.first_sample==guide.end_sample && t.burst.end_sample==guide.end_sample,
             "startup guide lost the original pair or consumed-prefix fence");

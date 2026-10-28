@@ -31,6 +31,7 @@ struct TonePrecisionRequest {
     // retains the analytic seed+alignment reference. This is a software
     // planning assumption, never a probability or a qualification deadline.
     double pilot_discovery_budget_seconds=0;
+    double frequency_acceleration_psd_hz2_per_second3=0;
 };
 struct PilotModelPrediction {
     bool supported=false,target_reached=false;
@@ -227,6 +228,89 @@ struct Runtime {
 }
 namespace forecast_detail {
 inline constexpr double pilot_balanced_gap_information_fraction=.25,pilot_fallback_frequency_grid_hz=.1;
+// Covariance only, with diffuse initial phase/frequency/rate. The first three
+// independent phase rows remove those nuisance coordinates; no truth or finite
+// oscillator-accuracy prior supplies frequency information. Later rows use the
+// same correlated finite-Hann process observation as the streaming receiver.
+struct ContinuousProcessForecast {
+    using Matrix=std::array<std::array<long double,3>,3>;
+    Matrix covariance{},diffuse{{{{1,0,0}},{{0,1,0}},{{0,0,1}}}};
+    std::array<long double,3> h{},cross{};
+    double period=0,phase_density=0,frequency_density=0;
+    long double measurement_variance=0;
+    std::size_t observations=0;
+    bool valid=true;
+    ContinuousProcessForecast()noexcept=default;
+    ContinuousProcessForecast(std::uint32_t rate,std::size_t block,double cn0,double sigma,double q)noexcept:
+            period(static_cast<double>(block)/rate),phase_density(sigma*sigma/(precision_detail::tau*precision_detail::tau)),frequency_density(q) {
+        double ws=0,w2=0,lag=0,lag2=0,i1=0,i2=0,cumulative=0;
+        for(std::size_t i=0;i<block;++i) {const auto w=.5-.5*std::cos(precision_detail::tau*i/(block-1));ws+=w;w2+=w*w;}
+        for(std::size_t i=0;i<block;++i) {
+            const auto w=.5-.5*std::cos(precision_detail::tau*i/(block-1));
+            const auto t=static_cast<double>(block-1-i)/rate,fraction=cumulative/ws;
+            lag+=w*t/ws;lag2+=w*t*t/ws;i1+=fraction/rate;i2+=fraction*fraction/rate;cumulative+=w;
+        }
+        h={1,-lag,.5*lag2};
+        const auto projection=phase_detail::hann_frequency_process(block,rate);
+        for(std::size_t i=0;i<3;++i)cross[i]=q*projection.cross[i];
+        cross[0]-=phase_density*i1;
+        measurement_variance=rate*w2/(ws*ws)/(2*cn0*precision_detail::tau*precision_detail::tau)+
+            phase_density*i2+q*projection.variance;
+    }
+    Matrix propagate(const Matrix& p,double dt,bool process)const noexcept {
+        const Matrix f{{{{1,dt,.5*dt*dt}},{{0,1,dt}},{{0,0,1}}}};
+        Matrix fp{},out{};
+        for(std::size_t i=0;i<3;++i)for(std::size_t j=0;j<3;++j)
+            for(std::size_t k=0;k<3;++k)fp[i][j]+=f[i][k]*p[k][j];
+        const auto q=phase_detail::frequency_process_covariance(frequency_density,dt);
+        for(std::size_t i=0;i<3;++i)for(std::size_t j=0;j<3;++j) {
+            for(std::size_t k=0;k<3;++k)out[i][j]+=fp[i][k]*f[j][k];
+            if(process)out[i][j]+=q[i][j];
+        }
+        if(process)out[0][0]+=phase_density*dt;
+        return out;
+    }
+    void advance()noexcept {
+        const auto prior=propagate(covariance,period,true);
+        const auto infinite=observations<3?propagate(diffuse,period,false):Matrix{};
+        std::array<long double,3> ph{},dh{},gain{};
+        long double variance=measurement_variance,infinite_variance=0;
+        for(std::size_t i=0;i<3;++i) {
+            for(std::size_t j=0;j<3;++j){ph[i]+=prior[i][j]*h[j];dh[i]+=infinite[i][j]*h[j];}
+            variance+=2*h[i]*cross[i];
+        }
+        for(std::size_t i=0;i<3;++i){variance+=h[i]*ph[i];infinite_variance+=h[i]*dh[i];}
+        const auto is_diffuse=observations<3;
+        if((is_diffuse&&!(infinite_variance>0)) || (!is_diffuse&&!(variance>0))){valid=false;return;}
+        for(std::size_t i=0;i<3;++i)gain[i]=is_diffuse?dh[i]/infinite_variance:(ph[i]+cross[i])/variance;
+        Matrix a{},ap{},ad{},posterior{},remaining{};
+        std::array<long double,3> ac{};
+        for(std::size_t i=0;i<3;++i)for(std::size_t j=0;j<3;++j){a[i][j]=(i==j?1.L:0.L)-gain[i]*h[j];ac[i]+=a[i][j]*cross[j];}
+        for(std::size_t i=0;i<3;++i)for(std::size_t j=0;j<3;++j)for(std::size_t k=0;k<3;++k) {
+            ap[i][j]+=a[i][k]*prior[k][j];if(is_diffuse)ad[i][j]+=a[i][k]*infinite[k][j];
+        }
+        for(std::size_t i=0;i<3;++i)for(std::size_t j=0;j<3;++j) {
+            for(std::size_t k=0;k<3;++k){posterior[i][j]+=ap[i][k]*a[j][k];if(is_diffuse)remaining[i][j]+=ad[i][k]*a[j][k];}
+            posterior[i][j]+=gain[i]*measurement_variance*gain[j]-ac[i]*gain[j]-gain[i]*ac[j];
+        }
+        ++observations;
+        for(std::size_t i=0;i<3;++i)for(std::size_t j=0;j<3;++j) {
+            covariance[i][j]=.5L*(posterior[i][j]+posterior[j][i]);
+            diffuse[i][j]=observations<3?.5L*(remaining[i][j]+remaining[j][i]):0;
+            if(!std::isfinite(covariance[i][j]) || (observations>=3&&i==j&&covariance[i][j]<0))valid=false;
+        }
+    }
+    double uncertainty(double available)noexcept {
+        // At unusual sample rates rounding20ms down could otherwise exceed
+        // 15000 updates in300s. Ignore further rows and age the retained state.
+        const auto count=std::min<std::size_t>(15000,static_cast<std::size_t>(std::floor(available/period)));
+        while(valid&&observations<count)advance();
+        if(!valid||observations<3)return std::numeric_limits<double>::infinity();
+        const auto age=std::max(0.,available-observations*period);
+        const auto current=propagate(covariance,age,true);
+        return current[1][1]>=0?3*std::sqrt(static_cast<double>(current[1][1])):std::numeric_limits<double>::infinity();
+    }
+};
 inline std::size_t pilot_discovery_samples(std::uint32_t sample_rate) noexcept {
     std::size_t n=1024;
     while(n<sample_rate*.16 && n<32768)n*=2;
@@ -244,6 +328,10 @@ inline TonePrecisionPrediction pilot_model_prediction(const TonePrecisionRequest
     for(std::size_t i=0;i<block;++i) {const auto w=.5-.5*std::cos(precision_detail::tau*i/(block-1));ws+=w;w2+=w*w;}
     const auto gate=std::max(r.sample_rate*w2/(ws*ws),
         16*1.5*r.sample_rate/(pilot_discovery_samples(r.sample_rate)-1));
+    ContinuousProcessForecast continuous;
+    if(r.pilot_observation==PilotObservationMode::continuous_phase&&r.frequency_acceleration_psd_hz2_per_second3>0)
+        continuous=ContinuousProcessForecast(r.sample_rate,block,cn0,
+            r.phase_noise_radians_per_sqrt_second,r.frequency_acceleration_psd_hz2_per_second3);
     const auto at=[&](double source_seconds) {
         PilotModelPrediction p;p.observation=r.pilot_observation;p.total_lead_seconds=source_seconds;
         // Budget discovery plus one unknown-alignment/settling dwell. This is
@@ -281,22 +369,33 @@ inline TonePrecisionPrediction pilot_model_prediction(const TonePrecisionRequest
         p.brownian_endpoint_half_width_hz=3*std::sqrt(process_variance);
         p.conditional_half_width_hz=3*std::sqrt(r.pilot_estimator_efficiency*r.pilot_estimator_efficiency*
             noise_variance+process_variance);
+        if(r.pilot_observation==PilotObservationMode::continuous_phase&&r.frequency_acceleration_psd_hz2_per_second3>0)
+            p.conditional_half_width_hz=continuous.uncertainty(available);
         p.supported=std::isfinite(p.conditional_half_width_hz);return p;
     };
-    const auto sustained=at(r.baseline_lead_seconds+.4*steps);
+    PilotModelPrediction sustained;
+    for(unsigned step=0;step<=steps;++step) {
+        auto p=at(r.baseline_lead_seconds+.4*step);if(step==steps)sustained=p;
+        if(!p.supported||model.target_reached)continue;
+        p.extra_lead_seconds=.4*step;p.target_reached=p.conditional_half_width_hz<=r.target_half_width_hz;
+        model=std::move(p);
+    }
     out.sustained_at_seconds=sustained.total_lead_seconds;out.sustained_supported=sustained.supported;
     if(sustained.supported)out.sustained_frequency_half_width_hz=sustained.conditional_half_width_hz;
-    for(unsigned step=0;step<=steps;++step) {
-        auto p=at(r.baseline_lead_seconds+.4*step);if(!p.supported)continue;
-        p.extra_lead_seconds=.4*step;p.target_reached=p.conditional_half_width_hz<=r.target_half_width_hz;
-        model=std::move(p);if(model.target_reached)break;
-    }
     if(!model.supported) {model.extra_lead_seconds=.4*steps;model.total_lead_seconds=r.baseline_lead_seconds+.4*steps;}
+    const auto continuous_process=r.pilot_observation==PilotObservationMode::continuous_phase&&r.frequency_acceleration_psd_hz2_per_second3>0;
     model.reason=r.pilot_observation==PilotObservationMode::continuous_phase?
+        continuous_process?
+        "conditional uninterrupted pilot with unknown initial phase/frequency/rate and operational frequency-rate evolution; phase retained across publication windows and amplitude ramps":
         "conditional uninterrupted pilot with unknown constant frequency drift; phase retained across publication windows and amplitude ramps":
-        "conditional compatible common oscillator model from independently phased settled retune apertures; RF/audio mapping must be established; current actual-retune local fits do not establish pooled runtime precision";
-    model.reason+="; configured Brownian phase noise and stated projection efficiency included; straight-power idealization, ramp/filter gains, abrupt drift changes, model-selection delay, fades, self-interference and coverage require measured qualification; earlier seeded interval escapes remain a coverage limitation; not calibrated confidence or a runtime lease";
-    if(!model.supported)model.reason+="; software/bootstrap or available support declined the numeric prediction";
+        "conditional constant-drift/Brownian comparison from independently phased nominal settled retune apertures; compatible RF/audio mapping is assumed; excludes operational RF/audio acceleration, retune scatter and integrated-model precision; not a forecast of measured runtime precision or practical confidence";
+    model.reason+=continuous_process?"; configured Brownian phase noise and finite-Hann projection loss included":
+        "; configured Brownian phase noise and stated projection efficiency included";
+    model.reason+="; straight-power idealization, ramp/filter gains, abrupt drift changes, model-selection delay, fades, self-interference and coverage require measured qualification; earlier seeded interval escapes remain a coverage limitation; not calibrated confidence or a runtime lease";
+    if(continuous_process)
+        model.reason+="; positive operational frequency-rate acceleration PSD included with exact20ms finite-Hann covariance and unknown initial phase/frequency/rate; noise-only references remain separate; at most15000 observations, older retained state ages with process uncertainty";
+    if(!model.supported)model.reason+="; software/bootstrap or available support declined the numeric prediction; "+
+        std::to_string(.4*steps)+" s extra-lead cap selected; precision not predicted; target remains unmet";
     out.supported=model.supported;out.target_reached=model.target_reached;out.extension_capped=!model.target_reached;
     out.extra_lead_seconds=model.extra_lead_seconds;out.total_lead_seconds=model.total_lead_seconds;
     out.frequency_half_width_hz=model.conditional_half_width_hz;out.usable_tone_seconds=model.usable_seconds;
@@ -515,6 +614,7 @@ inline TonePrecisionPrediction predict_tone_precision(const TonePrecisionRequest
     TonePrecisionPrediction result;result.baseline_lead_seconds=r.baseline_lead_seconds;
     if(r.sample_rate<1000 || r.sample_rate>192000 || !std::isfinite(r.straight_cn0_db_hz) ||
        !std::isfinite(r.phase_noise_radians_per_sqrt_second) || r.phase_noise_radians_per_sqrt_second<0 ||
+       !std::isfinite(r.frequency_acceleration_psd_hz2_per_second3) || r.frequency_acceleration_psd_hz2_per_second3<0 ||
        !std::isfinite(r.baseline_lead_seconds) || r.baseline_lead_seconds<0 ||
        !std::isfinite(r.target_half_width_hz) || r.target_half_width_hz<=0 ||
        !std::isfinite(r.max_extra_seconds) || r.max_extra_seconds<0 || r.max_extra_seconds>36 ||

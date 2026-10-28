@@ -64,7 +64,7 @@ struct Options {
     std::vector<bool> helpers{false,true};
     Payload payload=Payload::bits;
     bool metadata_only=false,ephemeral_key=false,keyfile_explicit=false,bit_count_explicit=false,wall_explicit=false;
-    bool work_trace=false,runtime_metrics=false,gpsdo_reference=false,gpsdo_only=false;
+    bool work_trace=false,runtime_metrics=false,gpsdo_reference=false,gpsdo_only=false,receiver_probe=false;
     std::optional<std::size_t> workspace_bytes;
     std::optional<std::string> clock_sync_text,audio_error_text;
     std::optional<unsigned> source_bytes;
@@ -89,6 +89,7 @@ Options parse(int argc,char** argv) {
         const auto value=[&]() {require(i+1<argc,"missing fixture option value");return std::string(argv[++i]);};
         if(argument=="--metadata-only")result.metadata_only=true;
         else if(argument=="--work-trace")result.work_trace=true;
+        else if(argument=="--receiver-probe")result.receiver_probe=true;
         else if(argument=="--runtime-metrics")result.runtime_metrics=true;
         else if(argument=="--gpsdo-reference")result.gpsdo_reference=result.runtime_metrics=true;
         else if(argument=="--gpsdo-only") {
@@ -853,8 +854,11 @@ struct Dates {
 std::atomic<bool> trace_detail{true};
 std::atomic<bool> trace_work{false};
 std::atomic<bool> trace_tx_diagnostics{false};
+std::atomic<bool> trace_receiver_probe{false};
 bool trace_filter(const char* event) noexcept {
     const std::string_view name{event};
+    if(name=="correlator_probe_decision" || name=="native_probe_continuation")
+        return trace_receiver_probe.load(std::memory_order_relaxed);
     if(trace_tx_diagnostics.load(std::memory_order_relaxed)&&name=="receiver_pattern_drain")return true;
     if(trace_work.load(std::memory_order_relaxed)&&(name=="receiver_helper_raw_reference"||name=="receiver_helper_pilot_phase"||
             name=="receiver_acquisition_work"||
@@ -1767,6 +1771,7 @@ Result run(Profile profile,bool helper,const Resolved& resolved,const Options& o
     trace_detail.store(detailed,std::memory_order_relaxed);
     trace_work.store(collect_work,std::memory_order_relaxed);
     trace_tx_diagnostics.store(options.runtime_metrics,std::memory_order_relaxed);
+    trace_receiver_probe.store(options.receiver_probe,std::memory_order_relaxed);
     const auto start=std::chrono::steady_clock::now();const auto cpu=std::clock();
     auto metrics=options.runtime_metrics?std::make_unique<RuntimeMetrics>(c.sample_rate):nullptr;
     {
@@ -1777,7 +1782,7 @@ Result run(Profile profile,bool helper,const Resolved& resolved,const Options& o
         // The filter separately retains dated pure-pilot phase/reference events;
         // this permits sampling the bank's last-view phase flag, not phase work.
         const auto work_interval=profile==Profile::eme&&collect_work?16ULL*c.sample_rate:0;
-        audio::trace::Scope trace(path,false,&trace_filter,work_interval,work_interval!=0);
+        audio::trace::Scope trace(path,options.receiver_probe,&trace_filter,work_interval,work_interval!=0);
         Dates dates(detailed?nullptr:&collector,metrics.get());
         // Empty EpochClock retains the normal sample-driven simulation path.
         live::Session session({},[&]{return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_ms.load());});

@@ -1,6 +1,7 @@
 #include "datapump/channel.hpp"
 #include "datapump/live.hpp"
 #include "datapump/resampler.hpp"
+#include "datapump/tuning.hpp"
 #include "../src/live_helper.hpp"
 #include "../src/live_signal_queue.hpp"
 #include "../src/gui/state.hpp"
@@ -259,17 +260,33 @@ void callsign_update_preserves_live_reception() {
         "helper callsign edit interrupted active transmission or replaced the pending receiver");
     session.cancel_transmit();session.stop();
 }
-void helper_only_live_simulation() {
+void helper_only_live_simulation(bool wide_offset=false) {
     live::Settings settings;settings.simulation=true;settings.full_duplex=true;settings.transfer.modem=config();
     settings.transfer.timestamp=1800000000;settings.transfer.search_seconds=0;settings.simulation_snr_db=100;
     settings.simulation_clock_error_ppm=0;settings.simulation_phase_noise_degrees_per_sqrt_second=0;
     settings.dsp_workspace_bytes=32*1024*1024;settings.content_limit=1024*1024;
     settings.helper.power_w=1500;settings.helper.callsign="N0CALL";
+    if(wide_offset) {
+        const auto crystal=tuning::oscillator_model(tuning::parse_oscillator_preset("crystal"));
+        settings.transfer.modem.oscillator_search=modem::OscillatorSearchConfig{
+            crystal,crystal,3e7,3,modem::OscillatorReference::shared_radio};
+        settings.transfer.timestamp=0;
+        settings.simulation_frequency_offset_hz=3000;settings.simulation_clock_error_ppm=100;
+        check(settings.transfer.modem.receiver_strategy==modem::ReceiverStrategy::automatic &&
+              crystal.accuracy_ppm==100,"wide auxiliary fixture changed its ordinary oscillator/Auto policy");
+    }
     live::Session session;session.start(settings);session.transmit_helper();
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
-    bool helper_row=false,callsign=false;std::uint64_t helper_id=0;
+    bool helper_row=false,callsign=false,observed_wide_offset=false;std::uint64_t helper_id=0;
     do {
         const auto snapshot=session.snapshot();check(snapshot.error.empty(),"helper-only Live simulation failed");
+        if(wide_offset) {
+            check(!snapshot.receiver_health.failed() && !snapshot.receiver_health.dropped_samples &&
+                  snapshot.dsp_buffered_bytes<=settings.dsp_workspace_bytes,
+                  "wide auxiliary helper changed receiver health or exceeded its original workspace");
+            observed_wide_offset=observed_wide_offset || (snapshot.helper_frequency_offset_hz &&
+                std::abs(*snapshot.helper_frequency_offset_hz)>2500);
+        }
         check(snapshot.received.empty(),"helper-only Live simulation manufactured received payload content");
         for(const auto& event:snapshot.signals) {
             check(event.helper_carrier||!event.received_bits,"helper-only Live simulation manufactured binary bits");
@@ -278,11 +295,12 @@ void helper_only_live_simulation() {
             check(event.id==helper_id,"ongoing Live helper replaced its stable signal row");
             callsign=callsign||event.text.find("N0CALL")!=std::string::npos;
         }
-        if(helper_row&&callsign&&snapshot.helper_frequency_offset_hz)break;
+        if(helper_row&&callsign&&snapshot.helper_frequency_offset_hz&&(!wide_offset||observed_wide_offset))break;
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     } while(std::chrono::steady_clock::now()<deadline);
     check(helper_row,"helper-only physical simulation did not publish a received helper row");
     check(callsign,"strong coherent Live helper did not decode its callsign metadata");
+    if(wide_offset)check(observed_wide_offset,"wide auxiliary fixture did not acquire its actual displaced pilot");
     session.clear_received();
     bool after_clear=false;
     const auto clear_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
@@ -336,7 +354,7 @@ void rolling_helper_waits_and_drains_after_loss() {
         if(!ok)throw Error(std::string(what)+"; lifecycle evidence retained: "+path.string());
     };
     bool assisted=false,waited=false,withdrawn=false,loss_drained=false;
-    std::uint64_t loss_origin=0,withdraw_processed=0,last_samples=0,last_processed=0;
+    std::uint64_t loss_origin=0,withdraw_capture=0,last_samples=0,last_processed=0;
     std::uint64_t input_revision=0,withdraw_admissions=0;
     std::size_t peak_workspace=0;
     std::shared_ptr<audio::trace::State> trace_state;
@@ -382,13 +400,17 @@ void rolling_helper_waits_and_drains_after_loss() {
         do {
             const auto snapshot=session.snapshot();const auto active=observe(snapshot);
             if(!withdrawn && !active && snapshot.helper_status.starts_with("Helper reference lost:")) {
-                withdrawn=true;withdraw_processed=last_processed;withdraw_admissions=snapshot.receiver_admissions;
+                withdrawn=true;withdraw_capture=last_samples;withdraw_admissions=snapshot.receiver_admissions;
             }
             if(withdrawn) {
                 verify(!active,"final Helper loss regained frequency authority from noise");
                 verify(snapshot.receiver_admissions==withdraw_admissions,
                        "final Helper loss admitted a fresh ordinary acquisition row");
-                loss_drained=last_processed>=withdraw_processed+3ULL*c.sample_rate;
+                // The observed withdrawal belongs to this capture date. The
+                // processed frontier can still precede the first unlocked
+                // input interval; wait until it has crossed the dated loss
+                // itself plus three seconds of ordinary input.
+                loss_drained=last_processed>=withdraw_capture+3ULL*c.sample_rate;
             }
             if(loss_drained)break;
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
@@ -661,7 +683,10 @@ int main(int argc,char** argv) {
         if(argc==2 && std::string_view(argv[1])=="--rolling-helper-only") {
             rolling_helper_waits_and_drains_after_loss();return 0;
         }
-        punctuation_requires_consumed_evidence();helper_dates_survive_capture_clear();helper_frequency_support_survives_capture_clear();helper_yields_event_queue_to_payload_progress();helper_preserves_receiver_workspace_capacity();helper_placement_covers_both_profiles();sampled_composite();helper_only_and_callsign_update();callsign_update_preserves_live_reception();helper_only_live_simulation();helper_audit_work_credit_is_bounded();rolling_helper_waits_and_drains_after_loss();payload_survives_physical_helper_preselection();helper_presentation();
+        if(argc==2 && std::string_view(argv[1])=="--wide-auxiliary-only") {
+            helper_only_live_simulation(true);return 0;
+        }
+        punctuation_requires_consumed_evidence();helper_dates_survive_capture_clear();helper_frequency_support_survives_capture_clear();helper_yields_event_queue_to_payload_progress();helper_preserves_receiver_workspace_capacity();helper_placement_covers_both_profiles();sampled_composite();helper_only_and_callsign_update();callsign_update_preserves_live_reception();helper_only_live_simulation();helper_only_live_simulation(true);helper_audit_work_credit_is_bounded();rolling_helper_waits_and_drains_after_loss();payload_survives_physical_helper_preselection();helper_presentation();
         std::cout<<"helper live integration passed\n";return 0;}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

@@ -1071,6 +1071,10 @@ struct Receiver::Impl {
         bool timing_valid=false,metadata_timing_hint=false;
         std::uint64_t punctuation_count=0;
         double metadata_dwell=0,metadata_last_dwell=-1;
+        // Source seconds per capture second. Only the private auxiliary
+        // decoder sets this from the two measured tone frequencies; the
+        // ordinary reference/discovery path retains its original clock.
+        double waveform_scale=1;
         bool metadata_active=false;
         std::complex<double> metadata_osc{1,0},metadata_step{};
         Tri bb{},dd{};Cross bd{};
@@ -1117,14 +1121,14 @@ struct Receiver::Impl {
     }
     double seconds(std::uint64_t sample) const {return static_cast<double>(sample)/state.rate;}
     double local(double time) const {
-        auto t=std::fmod(time-state.anchor,.4);return t<0?t+.4:t;
+        auto t=std::fmod((time-state.anchor)*state.waveform_scale,.4);return t<0?t+.4:t;
     }
     bool tone_time(double time) const {
         if(!state.timing_valid)return true;
         const auto t=local(time);
         // Both formats leave a straight flank before compact metadata. The
         // separate auxiliary remains inverted after its single240ms edge.
-        const auto guard=std::max(1./state.rate,state.timing_uncertainty);
+        const auto guard=std::max(1./state.rate,state.timing_uncertainty)*state.waveform_scale;
         const auto straight_begin=punctuation_format==PunctuationFormat::auxiliary_single?.244:.284;
         return (t>=.008&&t<.212)||(t>=straight_begin+guard&&t<.332-guard);
     }
@@ -1438,7 +1442,7 @@ struct Receiver::Impl {
         r.frequency_uncertainty_hz=local_frequency_uncertainty+r.frequency_process_uncertainty_hz;
         r.frequency_valid=r.phase_valid=true;
         r.timing_valid=s.timing_valid;r.dwell_uncertainty_seconds=s.timing_uncertainty;
-        r.dwell_start_seconds=seconds(r.sample)-local(seconds(r.sample));
+        r.dwell_start_seconds=seconds(r.sample)-local(seconds(r.sample))/s.waveform_scale;
         if constexpr(std::is_same_v<Result,Reference>)attach_punctuation(r,s.actual_punctuation);
         output_amplitude=frontier_amplitude;return true;
     }
@@ -1795,7 +1799,7 @@ struct Receiver::Impl {
     }
     void finish_metadata() {
         auto& s=state;s.metadata_active=false;
-        if(s.metadata_samples<static_cast<std::size_t>(.063*s.rate)||!s.reference)return;
+        if(s.metadata_samples<static_cast<std::size_t>(.063*s.rate/s.waveform_scale)||!s.reference)return;
         std::array<Pair,vertices> points{};double residual=0;
         double lo=-.0002,hi=.0002;
         for(unsigned i=0;i<24;++i) {
@@ -1858,11 +1862,12 @@ struct Receiver::Impl {
     void metadata_sample(float sample,std::uint64_t index) {
         auto& s=state;if(!s.timing_valid||!s.reference)return;
         const auto time=seconds(index);
-        const auto dwell=s.anchor+.4*std::floor((time-s.anchor)/.4),t=time-dwell;
+        const auto period=.4/s.waveform_scale;
+        const auto dwell=s.anchor+period*std::floor((time-s.anchor)/period),t=(time-dwell)*s.waveform_scale;
         if(s.metadata_active&&(dwell!=s.metadata_dwell||t>=.396))finish_metadata();
         if(t<.332||t>=.396)return;
         if(!s.metadata_active) {
-            if(std::abs(s.metadata_last_dwell-dwell)<.1||t>.332+1.5/s.rate)return;
+            if(std::abs(s.metadata_last_dwell-dwell)<.1||t>.332+1.5*s.waveform_scale/s.rate)return;
             s.metadata_last_dwell=dwell;
             const auto& r=*s.reference;
             const auto age=time-seconds(r.sample);
@@ -1881,7 +1886,7 @@ struct Receiver::Impl {
         }
         const auto position=(t-.332)/.008;
         const auto i=std::min<std::size_t>(vertices-2,static_cast<std::size_t>(std::floor(std::max(0.,position))));
-        const auto u=position-i,h=smooth(u),d=smooth_derivative(u)/.008;
+        const auto u=position-i,h=smooth(u),d=smooth_derivative(u)*s.waveform_scale/.008;
         const Pair v{s.metadata_gain*s.metadata_osc.real(),-s.metadata_gain*s.metadata_osc.imag()};
         const auto vv=outer(v,1);
         const std::array<double,2> b{1-h,h},derivative{-d,d};
@@ -2056,6 +2061,7 @@ struct AuxiliaryMetadataReceiver::Impl {
     std::array<float,4096> filtered{},corrected{};
     std::uint64_t prepared_first=0,prepared_end=0,prepared_generation=0,worker_generation=0;
     std::uint64_t first_raw,next_raw,filtered_next,last_dwell_end=0;
+    double last_nominal_dwell=-1;
     std::optional<Reference> grid,update;
     PunctuationObservation pending_punctuation;
     std::uint64_t punctuation_generation=0,punctuation_sample=0;
@@ -2161,7 +2167,7 @@ struct AuxiliaryMetadataReceiver::Impl {
         discovery.reset();decoder.reset();grid.reset();update.reset();
         pending_punctuation={};punctuation_generation=punctuation_sample=0;
         first_raw=next_raw=prepared_first;filtered_next=first_raw+notch->delay();
-        last_dwell_end=0;worker_generation=prepared_generation;
+        last_dwell_end=0;last_nominal_dwell=-1;worker_generation=prepared_generation;
     }
     void observe_punctuation() {
         auto observed=discovery.impl_->state.actual_punctuation;
@@ -2202,21 +2208,45 @@ struct AuxiliaryMetadataReceiver::Impl {
         auto dwell=grid->dwell_start_seconds+.4*std::floor((frontier-grid->dwell_start_seconds)/.4);
         if(dwell+.4>frontier)dwell-=.4;
         if(dwell<0)return false;
-        const auto first=static_cast<std::uint64_t>(std::ceil(dwell*rate));
-        const auto end=static_cast<std::uint64_t>(std::ceil((dwell+.4)*rate));
+        // The fitted clock moves a physical end by a few samples. Identify
+        // attempts on the nominal waveform calendar instead, so updated grid
+        // or spacing estimates cannot replay the same completed dwell.
+        const auto nominal_dwell=dwell;
+        if(last_nominal_dwell>=0&&std::llround((nominal_dwell-last_nominal_dwell)/.4)<=0)return false;
+        auto first=static_cast<std::uint64_t>(std::ceil(dwell*rate));
+        auto end=static_cast<std::uint64_t>(std::ceil((dwell+.4)*rate));
         const auto retained=std::max(first_raw,next_raw>raw.size()?next_raw-raw.size():0);
         if(end>next_raw||end<=last_dwell_end||first<retained)return false;
-        last_dwell_end=end;
         const auto fit_first=static_cast<std::uint64_t>(std::ceil((dwell+.04)*rate));
         const auto fit_end=static_cast<std::uint64_t>(std::ceil((dwell+.20)*rate));
         double auxiliary=grid->frequency_hz,pilot=auxiliary+spacing;
         std::complex<double> amplitude;
-        if(fit_end<=fit_first||!fit(fit_first,fit_end,auxiliary,pilot,amplitude))return true;
+        if(fit_end<=fit_first||!fit(fit_first,fit_end,auxiliary,pilot,amplitude)) {
+            last_dwell_end=end;last_nominal_dwell=nominal_dwell;return true;
+        }
+        // RF offset is common to both tones. Their measured spacing supplies
+        // the local waveform clock without decoding metadata or assigning
+        // that clock any receiver-assistance authority. A scalar timing shift
+        // cannot fit clock stretch across the eight metadata transitions.
+        const auto scale=(pilot-auxiliary)/spacing;
+        if(!std::isfinite(scale)||std::abs(scale-1)>.001) {
+            last_dwell_end=end;last_nominal_dwell=nominal_dwell;return true;
+        }
+        const auto period=.4/scale;
+        const auto anchor=grid->dwell_start_seconds+.24-.24/scale;
+        dwell=anchor+period*std::floor((frontier-anchor)/period);
+        if(dwell+period>frontier)dwell-=period;
+        if(dwell<0)return true;
+        first=static_cast<std::uint64_t>(std::ceil(dwell*rate));
+        end=static_cast<std::uint64_t>(std::ceil((dwell+period)*rate));
+        if(end>next_raw||end<=last_dwell_end||first<retained||fit_first<first||fit_end>end)return true;
+        last_dwell_end=end;last_nominal_dwell=nominal_dwell;
         decoder.reset();decoder.push({},rate,first);
         auto& state=decoder.impl_->state;
         // Private metadata decoding may use the independently observed grid.
         // None of these conditioned tone/phase fits is exposed as assistance.
         state.metadata_timing_hint=true;state.timing_valid=true;state.anchor=dwell;
+        state.waveform_scale=scale;
         state.timing_uncertainty=grid->dwell_uncertainty_seconds;state.punctuation=dwell;
         state.coarse_valid=true;state.coarse_hz=state.guess_hz=auxiliary;
         for(auto at=first;at<end;) {
@@ -2225,7 +2255,7 @@ struct AuxiliaryMetadataReceiver::Impl {
                 (static_cast<long double>(at)-fit_first)/rate));
             const auto step=std::polar(1.,tau*pilot/rate);
             for(std::size_t i=0;i<count;++i) {
-                const auto t=static_cast<double>(at+i)/rate-dwell;
+                const auto t=(static_cast<double>(at+i)/rate-dwell)*scale;
                 const auto envelope=smooth(std::min(t,.4-t)/.004);
                 corrected[i]=static_cast<float>(sample(at+i)-envelope*std::real(amplitude*oscillator));
                 oscillator*=step;

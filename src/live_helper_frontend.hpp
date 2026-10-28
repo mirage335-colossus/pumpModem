@@ -667,7 +667,7 @@ public:
         const bool folded=config.carrier_hz-half-uncertainty<=10;
         const bool preserve=modem::helper_reference_prefers_original_prior(config,
             reference.frequency_uncertainty_hz,expected,utc_rate_limit,
-            modem::HelperReferenceClockRelation::common_corrected_source);
+            modem::HelperReferenceClockRelation::common_corrected_source,reference.frequency_hz-expected);
         if(folded || preserve)correction=0; // Preserve the existing raw input basis.
         const auto data_input=config.carrier_hz-correction;
         const auto low=folded?10.001:std::min(data_input-half,reference.frequency_hz-625)-uncertainty;

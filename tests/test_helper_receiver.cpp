@@ -257,13 +257,22 @@ void two_tone_auxiliary_metadata() {
     std::array<double,16> phases{};std::mt19937 random(8127);
     std::uniform_real_distribution<double> phase(-std::numbers::pi,std::numbers::pi);
     for(auto& value:phases)value=phase(random);
-    struct Geometry {double expected,actual,delay;};
+    struct Geometry {double expected,actual,delay,clock_ppm=0;};
     // Exact dwell/bin alignment previously hid the ramp in the diagnostic
     // notch's carrier image, although the raw ramp and reversal were clean.
     for(const auto geometry:{Geometry{2100,2100.37,.03719},Geometry{2100,2100.37,0},
-                             Geometry{5762.5,5762.5,.03719},Geometry{5762.5,5762.5,0}}) {
+                             Geometry{5762.5,5762.5,.03719},Geometry{5762.5,5762.5,0},
+                             Geometry{5762.5,5762.5,.03719,-100},Geometry{5762.5,5762.5,.03719,100}}) {
     const auto auxiliary=geometry.actual,pilot=auxiliary+helper::auxiliary_pilot_spacing_hz;
+    // Scale the actual source clock, including punctuation and metadata, while
+    // retaining the nominal discovery centers. No known clock or tone truth
+    // is supplied to the receiver; its measured two-tone spacing must suffice.
+    const auto clock_ppm=geometry.clock_ppm;
+    const auto clock_scale=1+clock_ppm*1e-6;
     for(const bool phase_jumps:{false,true}) {
+    // Preserve the original eight cases; two additional clock cases exercise
+    // both signs with unknown per-dwell phase without a Cartesian expansion.
+    if(clock_ppm!=0&&!phase_jumps)continue;
     helper::Generator generator(options,{pilot,.7,.1,100,auxiliary},1800000000,true);
     helper::AuxiliaryMetadataReceiver receiver(rate,geometry.expected,
         geometry.expected+helper::auxiliary_pilot_spacing_hz,{}, {},required);
@@ -272,7 +281,7 @@ void two_tone_auxiliary_metadata() {
     for(std::uint64_t first=0;first<total;first+=input.size()) {
         const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(input.size(),total-first));
         for(std::size_t i=0;i<count;++i) {
-            const auto time=static_cast<long double>(first+i)/rate-geometry.delay;
+            const auto time=static_cast<long double>(first+i)/rate*clock_scale-geometry.delay;
             const auto dwell=static_cast<std::size_t>(std::floor(std::max(0.L,time)/.4L));
             input[i]=time<0?0:static_cast<float>(std::real(generator.mix_analytic({},time,rate)*
                 std::polar(1.,phase_jumps?phases[dwell%phases.size()]:0.)));
@@ -286,15 +295,17 @@ void two_tone_auxiliary_metadata() {
             result.updates.push_back(std::move(*update));
         }
     }
-    std::size_t decoded=0;
+    std::size_t decoded=0;std::int64_t last_decoded_dwell=-1;
     for(const auto& update:result.updates)if(update.metadata) {
         check(update.metadata->kind==helper::MetadataKind::callsign);
         check(update.metadata->callsign=="N0CALL"&&!update.metadata->authenticated);
-        check(std::abs(update.frequency_hz-auxiliary)<.002);
+        check(std::abs(update.frequency_hz-auxiliary*clock_scale)<.002);
+        const auto source_dwell=std::llround((update.dwell_start_seconds*clock_scale-geometry.delay)/.4);
+        check(source_dwell>last_decoded_dwell);last_decoded_dwell=source_dwell;
         ++decoded;
     }
     std::cout<<"two-tone auxiliary frequency="<<auxiliary<<" delay="<<geometry.delay
-        <<" phase_jumps="<<phase_jumps<<" references="<<result.updates.size()
+        <<" clock_ppm="<<clock_ppm<<" phase_jumps="<<phase_jumps<<" references="<<result.updates.size()
         <<" metadata="<<decoded<<" workspace_grant="<<required<<'\n';
     check(decoded>0);metadata_has_no_timing_authority(result);
     }

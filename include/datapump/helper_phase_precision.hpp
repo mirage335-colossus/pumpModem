@@ -11,6 +11,45 @@
 namespace datapump::helper::phase_detail {
 constexpr double tau=2*std::numbers::pi;
 constexpr std::size_t capacity=240,context_size=10;
+// White frequency-rate acceleration, in cycles/Hz/Hz-per-second coordinates.
+// The density q has units Hz^2/s^3; it is independent of static ppm accuracy.
+using PhaseCovariance=std::array<std::array<double,3>,3>;
+inline PhaseCovariance frequency_process_covariance(double q,double t)noexcept {
+    const auto t2=t*t,t3=t2*t,t4=t3*t,t5=t4*t;
+    return {{{{q*t5/20,q*t4/8,q*t3/6}},{{q*t4/8,q*t3/3,q*t2/2}},{{q*t3/6,q*t2/2,q*t}}}};
+}
+struct FrequencyProcessProjection {
+    std::array<double,3> cross{};
+    double variance=0;
+};
+// Exact piecewise-polynomial integrals for a discrete Hann phase average.
+// For acceleration at u, measurement error relative to the endpoint is
+// g(u)=-sum_{t_i<=u} w_i*(u-t_i)^2/2. Integrate g^2 and
+// ([(b-u)^2/2,b-u,1])*g; multiply by q at the caller.
+inline FrequencyProcessProjection hann_frequency_process(std::size_t count,std::uint32_t rate)noexcept {
+    FrequencyProcessProjection out;if(count<2||!rate)return out;
+    double total=0;
+    for(std::size_t i=0;i<count;++i)total+=.5-.5*std::cos(tau*i/(count-1));
+    if(!(total>0))return out;
+    double m0=0,m1=0,m2=0;
+    for(std::size_t i=0;i+1<count;++i) {
+        const auto lag=static_cast<double>(count-1-i)/rate;
+        const auto w=(.5-.5*std::cos(tau*i/(count-1)))/total;
+        m0+=w;m1+=w*lag;m2+=w*lag*lag;
+        const std::array<double,3> g{-.5*m2,m1,-.5*m0};
+        const auto lo=lag-1./rate,hi=lag;
+        std::array<double,5> integrals{};double low=lo,high=hi;
+        for(std::size_t k=0;k<integrals.size();++k) {
+            integrals[k]=(high-low)/(k+1);low*=lo;high*=hi;
+        }
+        for(std::size_t j=0;j<3;++j) {
+            out.cross[0]+=.5*g[j]*integrals[j+2];
+            out.cross[1]+=g[j]*integrals[j+1];out.cross[2]+=g[j]*integrals[j];
+            for(std::size_t k=0;k<3;++k)out.variance+=g[j]*g[k]*integrals[j+k];
+        }
+    }
+    return out;
+}
 struct Anchor {
     double seconds=0,phase=0,variance=0;
     std::uint64_t first=0,end=0;

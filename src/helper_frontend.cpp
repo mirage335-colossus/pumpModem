@@ -377,10 +377,17 @@ void AnalyticFrequencyTranslator::push(std::span<const float> input,std::span<fl
         if(s.config.correction_hz==0 && !s.config.conjugate && !s.config.continuous_reference)output[n]=static_cast<float>(real);
         else {
             double imaginary=0;
+            auto left=s.position+group_delay;
+            if(left>=tap_count)left-=tap_count;
+            auto right=left+2;
+            if(right>=tap_count)right-=tap_count;
+            // Preserve antisymmetric pair order and the fixed group delay.
+            // Odd ring length requires both stride-two boundary residues.
             for(std::size_t i=0;i<s.taps.size();++i) {
-                const auto k=2*i+1;
-                imaginary+=s.taps[i]*(static_cast<double>(s.at_delay(group_delay+k))-
-                                      static_cast<double>(s.at_delay(group_delay-k)));
+                imaginary+=s.taps[i]*(static_cast<double>(s.history[left])-
+                                      static_cast<double>(s.history[right]));
+                left=left<2?left+tap_count-2:left-2;
+                right+=2;if(right>=tap_count)right-=tap_count;
             }
             if(s.config.conjugate)imaginary=-imaginary;
             output[n]=static_cast<float>(real*s.oscillator.real()-imaginary*s.oscillator.imag());

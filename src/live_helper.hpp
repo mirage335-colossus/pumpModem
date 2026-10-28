@@ -8,6 +8,8 @@
 #include "datapump/pattern_search.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "helper_link_state.hpp"
+#include "helper_oscillator_model.hpp"
+#include "receiver_oscillator_policy.hpp"
 #include "helper_phase_chord.hpp"
 #include "datapump/tuning.hpp"
 #include <algorithm>
@@ -730,6 +732,28 @@ inline helper::FrequencyPrecisionOptions helper_precision_options(const modem::C
     }
     return result;
 }
+// Same conditional HF evolution assumptions as the dated retune predictor.
+// Project using actual RF/sideband geometry. Shared radio has one common
+// oscillator coefficient, whereas independent RF/audio contributions add.
+// Presets declare accuracy/phase noise, not a calibrated acceleration PSD.
+inline double helper_continuous_frequency_process(const Settings& settings,const modem::Config& config,double pilot_hz) {
+    if(!config.oscillator_search)return 0;
+    const auto& p=*config.oscillator_search;
+    if(p.rf_shift_hz<0||p.rf_shift_hz>54e6)return 0;
+    const bool shared=p.reference==modem::OscillatorReference::shared_radio&&p.rf_shift_hz>0;
+    const auto utc=transfer::receiver_utc_rate_correction(config,settings.transfer);
+    const auto rf=p.sideband==modem::OscillatorSideband::upper?p.rf_shift_hz:-p.rf_shift_hz;
+    const auto qr=p.rf.accuracy_ppm>0&&p.rf_shift_hz>0?
+        helper::operational_hf_rf_acceleration_psd_ppm2_per_second3*1e-12:0.;
+    // The operational source process includes the unresolved UTC correction
+    // coordinate, as in the persistent model's effective B domain. Shared
+    // radio's crystal contribution is already in (RF+H); only its additional
+    // UTC coordinate is independent of that common crystal.
+    const auto source_active=utc>0||(!shared&&p.lf.accuracy_ppm>0);
+    const auto qa=source_active?helper::operational_hf_audio_acceleration_psd_ppm2_per_second3*1e-12:0.;
+    const auto coefficient=rf+(shared?pilot_hz:0.);
+    return coefficient*coefficient*qr+pilot_hz*pilot_hz*qa;
+}
 
 // Model the format selected by the same helper audio/channel negotiation.
 // Hardware runtime qualification still uses the actual negotiated raw format.
@@ -763,6 +787,9 @@ inline helper::TonePrecisionRequest helper_tone_precision_request(const Settings
     // Keep its explicit1.2s startup budget separate from genuine baseline lead.
     // This conditional software budget cannot qualify an actual reference.
     request.pilot_discovery_budget_seconds=1.2;
+    const auto pilot=helper::plan(settings.helper,helper_placement_band(settings),120000000,0,
+        modem::outer_dsss_transmit_gain(config)).frequency_hz;
+    request.frequency_acceleration_psd_hz2_per_second3=helper_continuous_frequency_process(settings,config,pilot);
     request.phase_noise_radians_per_sqrt_second=settings.simulation?
         settings.simulation_phase_noise_degrees_per_sqrt_second*std::numbers::pi/180:
         helper_precision_options(config).phase_noise_radians_per_sqrt_second;

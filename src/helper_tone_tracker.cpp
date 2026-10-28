@@ -21,6 +21,7 @@ void validate(const ToneTrackerConfig& c) {
        !std::isfinite(c.search_half_width_hz) || c.search_half_width_hz<0 ||
        !std::isfinite(c.phase_noise_radians_per_sqrt_second) || c.phase_noise_radians_per_sqrt_second<0 ||
        !std::isfinite(c.maximum_tracking_slew_hz_per_second) || c.maximum_tracking_slew_hz_per_second<0 ||
+       !std::isfinite(c.frequency_acceleration_psd_hz2_per_second3) || c.frequency_acceleration_psd_hz2_per_second3<0 ||
        std::max(20.,c.expected_hz-c.search_half_width_hz)>
            std::min(c.sample_rate/2.-20.,c.expected_hz+c.search_half_width_hz))
         throw Error("invalid realtime helper tone tracking geometry");
@@ -694,6 +695,9 @@ std::size_t ToneTracker::workspace_bytes()const noexcept{return sizeof(ToneTrack
 void ToneTracker::reset(std::uint64_t first)noexcept {impl_->reset(first);}
 void ToneTracker::push(std::span<const float> input,std::uint64_t first) {impl_->push(input,first);}
 ToneTrackerSnapshot ToneTracker::snapshot()const noexcept{return impl_->pilot?impl_->pilot->result:impl_->result;}
+ToneFrequencyInterval ToneTracker::frequency_interval(std::uint64_t first,std::uint64_t end)const noexcept {
+    return impl_->pilot?impl_->pilot->frequency_interval(first,end):ToneFrequencyInterval{};
+}
 void ToneTracker::begin_pilot_segment(std::uint64_t first,double expected,double width,bool preserve,double scale,std::uint64_t settled_first,
                                     bool qualify_local_aperture,std::uint64_t settled_end) {
     if(!impl_->pilot)throw Error("dated pilot segment requires segmented pilot mode");

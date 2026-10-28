@@ -132,6 +132,58 @@ void produced_certificates_bound_actual_correction_and_expire_phase() {
     check(phase_seen && expired_seen && unqualified_seen,"production certificate fixture omitted phase, expiry or loss coverage");
 }
 
+void independent_frequency_survives_phase_failure_without_joining_records() {
+    constexpr std::uint32_t rate=48000;constexpr std::size_t chunk=960;
+    constexpr std::uint64_t retune=rate*6/5,record_end=retune+rate/5;
+    constexpr double tau=2*std::numbers::pi,truth=2413.37;
+    helper::ToneTrackerConfig config{rate,2400,9000,0,.5,true};
+    helper::ToneTracker tracker(config,helper::ToneTracker::workspace_required(config));
+    std::mt19937 random{89471};std::normal_distribution<double> normal;
+    std::array<float,chunk> pcm{};
+    for(std::uint64_t first=0;first<record_end;first+=chunk) {
+        if(first==retune)tracker.begin_pilot_segment(first,2400,9000,true,1);
+        for(std::size_t i=0;i<chunk;++i) {
+            const auto sample=first+i;const auto t=static_cast<double>(sample)/rate;
+            // The new aperture has a second unknown phase halfway through it.
+            // Frequency remains measurable while its straight phase fit fails.
+            const auto jump=sample<retune?0.:.83+(sample>=retune+rate/10?2.:0.);
+            pcm[i]=static_cast<float>(.6*std::cos(.37+tau*truth*t+jump)+.01*normal(random));
+        }
+        tracker.push(pcm,first);
+    }
+    const auto before=tracker.snapshot();
+    const auto query_first=retune+1024,query_end=record_end-512;
+    constexpr auto delay=helper::AnalyticFrequencyTranslator::group_delay;
+    const auto old=helper_pilot_frequency_plan(before,query_first+delay,query_end+delay);
+    const auto independent=tracker.frequency_interval(query_first,query_end);
+    const auto crossing=tracker.frequency_interval(retune-1,query_first);
+    const auto after=tracker.snapshot();
+    const bool publication_unchanged=before.sample==after.sample && before.first_sample==after.first_sample &&
+        before.frequency_hz==after.frequency_hz && before.uncertainty_hz==after.uncertainty_hz &&
+        before.frequency_rate_hz_per_second==after.frequency_rate_hz_per_second && before.qualified==after.qualified &&
+        before.frequency_covariance_valid==after.frequency_covariance_valid &&
+        before.frequency_knowledge_valid==after.frequency_knowledge_valid &&
+        before.frequency_variance_hz2==after.frequency_variance_hz2 &&
+        before.frequency_rate_covariance_hz2_per_second==after.frequency_rate_covariance_hz2_per_second &&
+        before.frequency_rate_variance_hz2_per_second2==after.frequency_rate_variance_hz2_per_second2;
+    std::cout<<"INDEPENDENT_PHASE_UNQUALIFIED_CONTROL global_qualified="<<before.qualified
+        <<" local_phase_qualified="<<before.phase_fit_qualified<<" snapshot_plan_valid="<<old.valid
+        <<" independent_valid="<<independent.valid<<" independent_aperture="<<independent.independent_aperture
+        <<" smoothed="<<independent.smoothed<<" frequency_error_hz="<<std::abs(independent.frequency_hz-truth)
+        <<" U_hz="<<independent.uncertainty_hz<<" crossing_valid="<<crossing.valid
+        <<" publication_unchanged="<<publication_unchanged<<'\n';
+    check(before.qualified && !before.phase_fit_qualified && !helper_pilot_phase_observation(before,2400,rate),
+        "phase-unqualified frequency control unexpectedly had phase authority");
+    check(!old.valid && independent.valid && independent.independent_aperture && !independent.smoothed &&
+        independent.first_sample==query_first && independent.end_sample==query_end &&
+        independent.evidence_first_sample==retune && independent.evidence_end_sample==record_end &&
+        independent.anchor_sample==retune && independent.captured_end_sample==record_end &&
+        std::abs(independent.frequency_hz-truth)<=independent.uncertainty_hz,
+        "independent accepted frequency required phase or changed its dated support");
+    check(!crossing.valid,"independent frequency query joined records across a boundary");
+    check(publication_unchanged,"independent frequency query changed the fine publication");
+}
+
 void causal_mixed_pilot_corrects_ordinary_robust(double cn0_db_hz,unsigned seed,bool actual_rf_mapping=false) {
     using Translator=helper::AnalyticFrequencyTranslator;
     constexpr std::uint32_t rate=48000;
@@ -230,7 +282,16 @@ void causal_mixed_pilot_corrects_ordinary_robust(double cn0_db_hz,unsigned seed,
                 dated_model.frequency_model_expected_hz=pilot;
                 dated_model.frequency_model_residual_scale=target_scale;
             }
-            const auto plan=helper_pilot_frequency_plan(dated_model,at,at+used);
+            auto plan=helper_pilot_frequency_plan(dated_model,at,at+used);
+            // Match Live's fixed-RF selection. The explicit LAB RF calendar
+            // above retains its separate dated RF mapping and snapshot route.
+            constexpr auto delay=Translator::group_delay;
+            if(!actual_rf_mapping && at>=delay) {
+                const auto buffered=tracker.frequency_interval(at-delay,at+used-delay);
+                if(buffered.valid && buffered.evidence_end_sample<=frequency_model.captured_end_sample &&
+                   (!plan.valid || buffered.uncertainty_hz<plan.residual_uncertainty_hz))
+                    plan={true,buffered.frequency_hz,buffered.uncertainty_hz};
+            }
             if(plan.valid)++frequency_query_valid;else ++frequency_query_declined;
             if(plan.valid) {
                 // Post-hoc only: verify the actual RF geometry at each consumed
@@ -479,6 +540,7 @@ int main() {
         admitted_fifo_preserves_dates_through_loss_and_wrap();only_waiting_input_may_be_forgotten();
         projection_and_pooled_frequency_never_grant_phase_authority();
         produced_certificates_bound_actual_correction_and_expire_phase();
+        independent_frequency_survives_phase_failure_without_joining_records();
         causal_mixed_pilot_corrects_ordinary_robust(40,49271);
         causal_mixed_pilot_corrects_ordinary_robust(60,49272);
         causal_mixed_pilot_corrects_ordinary_robust(60,49273,true);

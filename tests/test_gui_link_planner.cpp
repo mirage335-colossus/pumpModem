@@ -2124,7 +2124,7 @@ void helper_conditional_acquisition_plan() {
         if(eme)near(assisted.bit_seconds,128,"Microwave helper advice changed the active128s waveform");
         for(const auto width:{220.f,900.f}) {
             const auto page=planner_page::build(assisted,width,false,false);
-            check(contains_text(page,"Independent-hop noise-only 3σ scale:")&&
+            check(contains_text(page,"Independent-retune noise-only 3σ scale:")&&
                   contains_text(page,"unrelated retune phases")&&
                   contains_text(page,"one complete symbol's coherent half-bin scale")&&
                   contains_text(page,"Unresolved clock and timing alternatives remain")&&

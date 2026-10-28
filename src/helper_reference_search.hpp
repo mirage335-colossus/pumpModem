@@ -144,7 +144,8 @@ inline std::optional<PatternHelperClockInterval> helper_reference_shared_clock_i
 // declining a marginal helper gain is allowed; enlarging Robust work is not.
 inline bool helper_reference_prefers_original_prior(const Config& config,double uncertainty_hz,
         double helper_hz,double utc_rate_limit,
-        HelperReferenceClockRelation relation=HelperReferenceClockRelation::physical_helper) {
+        HelperReferenceClockRelation relation=HelperReferenceClockRelation::physical_helper,
+        std::optional<double> measured_residual_hz={}) {
     if(!config.oscillator_search)return false;
     validate(config);
     const auto width=helper_reference_rf_half_width(config,uncertainty_hz,helper_hz,utc_rate_limit,relation);
@@ -156,7 +157,39 @@ inline bool helper_reference_prefers_original_prior(const Config& config,double 
     const auto allowance=shared?
         std::abs(coupling)*lf*config.frequency_search_multiplier:
         rf+(std::abs(coupling)*lf+rf)*(config.frequency_search_multiplier-1);
-    return static_cast<long double>(width)>=allowance;
+    if(static_cast<long double>(width)<allowance)return false;
+    if(!measured_residual_hz)return true;
+    // Width alone cannot preserve a prior whose LOCATION is contradicted by
+    // the measured pilot. At admission only, enclose the full original joint
+    // DATA frequency/clock domain in a rectangle and project M=F+(H-D)*B.
+    // The enclosure deliberately ignores correlations: only definite
+    // disjointness selects the existing translated basis. Touching or
+    // numerically uncertain intervals keep the original basis.
+    if(!std::isfinite(*measured_residual_hz) || !std::numeric_limits<double>::is_iec559 ||
+       std::fegetround()!=FE_TONEAREST)return true;
+    const auto infinity=std::numeric_limits<long double>::infinity();
+    const auto up=[&](long double x){return std::nextafter(x,infinity);};
+    const auto down=[&](long double x){return std::nextafter(x,-infinity);};
+    const auto bound_up=[](long double x){return static_cast<long double>(
+        std::nextafter(static_cast<double>(x),INFINITY));};
+    // Same scalar physical/UTC expansion as oscillator_pattern_search, with
+    // outward rounding. Do not allocate its potentially large catalogue just
+    // to decide the input basis on the capture/admission path.
+    auto accuracy=shared?policy.rf.accuracy_ppm:policy.lf.accuracy_ppm;
+    if(utc_rate_limit!=0) {
+        const auto expanded=lf+utc_rate_limit+lf*utc_rate_limit;
+        const auto ppm=expanded*1e6L/policy.margin;
+        if(!std::isfinite(ppm) || ppm>10000)return true;
+        accuracy=std::nextafter(static_cast<double>(ppm),INFINITY);
+    }
+    const auto b=up(bound_up(static_cast<long double>(policy.margin)*accuracy)*1e-6L);
+    const auto base=bound_up(up(std::abs(coupling)*b)+bound_up(rf));
+    const auto f=bound_up(base+bound_up(base*(config.frequency_search_multiplier-1)));
+    const auto separation=up(std::abs(static_cast<long double>(helper_hz)-config.carrier_hz));
+    const auto half=up(f+up(separation*b));
+    const auto low=down(static_cast<long double>(*measured_residual_hz)-width);
+    const auto high=up(static_cast<long double>(*measured_residual_hz)+width);
+    return !std::isfinite(half) || !(low>half || high<-half);
 }
 // Search coordinates AFTER the synchronous helper translation. This is not a
 // waveform/configuration change or evidence that the helper is locked. Every
@@ -183,8 +216,9 @@ inline HelperReferenceSearch helper_reference_search(const Config& config,
     const auto original_lf=policy.reference==OscillatorReference::shared_radio && policy.rf_shift_hz!=0?
         policy.rf.accuracy_ppm:policy.lf.accuracy_ppm;
     const auto rf_width=helper_reference_rf_half_width(config,uncertainty_hz,helper_hz,utc_rate_limit,relation);
-    if(preserve_original_prior.value_or(helper_reference_prefers_original_prior(
-            config,uncertainty_hz,helper_hz,utc_rate_limit,relation))) {
+    const bool preserve=preserve_original_prior?*preserve_original_prior:
+        helper_reference_prefers_original_prior(config,uncertainty_hz,helper_hz,utc_rate_limit,relation,residual_center_hz);
+    if(preserve) {
         HelperReferenceSearch result;
         result.catalogue=oscillator_pattern_search(config,utc_rate_limit,{},utc_grid);
         result.rf_half_width_hz=rf_width;result.clock_frequency_hz=config.carrier_hz-helper_hz;

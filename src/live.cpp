@@ -21,6 +21,7 @@
 #include "live_helper_prior.hpp"
 #include "live_helper_frontend.hpp"
 #include "live_helper_pilot_stage.hpp"
+#include "live_helper_oscillator.hpp"
 #include "live_cold_input_stage.hpp"
 #include "live_helper_clock.hpp"
 #include "live_helper_continuation.hpp"
@@ -4107,6 +4108,12 @@ struct Session::Impl {
                         auto loan_grant=ordinary_grant;
                         const auto factory=[&](std::size_t actual_grant) {
                             constructor_grant=actual_grant;
+                            if(bank.realtime_helper)audio::trace::record("receiver_helper_constructor_frequency",[&](auto& f) {
+                                f.add("revision",bank.revision);f.add("instance_id",receiver.point_consumer);f.add("epoch",receiver.epoch);f.add("family",receiver.family);
+                                f.add("helper_constructor_uncertainty_hz",bank.realtime_residual_hz);f.add("helper_constructor_center_hz",bank.realtime_offset_hz);
+                                f.add("helper_constructor_expected_hz",bank.realtime_expected_hz);f.add("pairs",search.hypotheses.size());
+                                f.add("clock_frequency_hz",config.carrier_hz-bank.realtime_expected_hz);f.add("factory_grant",actual_grant);
+                            });
                             return std::make_unique<modem::StreamingReceiver>(config,actual_grant,search);
                         };
                         try {
@@ -4653,6 +4660,9 @@ struct Session::Impl {
             std::optional<helper::Reference> reference;
             detail::HelperPilotPcmStage pilot_stage;
             helper::ToneTrackerSnapshot frequency_model;
+            std::optional<detail::HelperOscillatorConfig> oscillator_config;
+            std::unique_ptr<detail::LiveHelperOscillator> oscillator;
+            std::size_t oscillator_reservation=0;
             std::optional<helper::AnalyticFrequencyTranslator::PilotObservation> phase_model;
             std::uint64_t last_phase_fit_end=0,last_applied_phase_end=0,phase_updates=0;
             struct RfSegment {
@@ -4660,6 +4670,8 @@ struct Session::Impl {
                 double residual_scale=1;
                 bool compatible=false;
                 std::optional<helper::ToneTrackerSnapshot> local_frequency_model;
+                std::optional<detail::HelperOscillatorSeed> oscillator_seed;
+                helper::ToneFrequencyObservation raw_frequency;
             };
             // Covers far more than the fixed .4-second raw FIFO and Hilbert
             // support, without retaining or searching historical PCM.
@@ -4710,7 +4722,7 @@ struct Session::Impl {
             // views wait for a real Bank surplus grant. No DSP/128 guess is a
             // reservation, and a capture callback never allocates this grant.
         }
-        std::size_t frontend_bytes()const noexcept{return (realtime?sizeof(RealtimeState)+realtime->pilot_stage.workspace_bytes()+(realtime->tracker?realtime->tracker->workspace_bytes():0):0)+(coarse?coarse->workspace_bytes():0)+
+        std::size_t frontend_bytes()const noexcept{return (realtime?sizeof(RealtimeState)+realtime->pilot_stage.workspace_bytes()+(realtime->tracker?realtime->tracker->workspace_bytes():0)+(realtime->oscillator?detail::LiveHelperOscillator::storage_required():0):0)+(coarse?coarse->workspace_bytes():0)+
             (frontend?frontend->bytes():0)+(continuity?sizeof(HelperContinuity):0)+
             (frequency_state?sizeof(FrontendFrequencyState)+
                 (frequency_state->current_links?sizeof(CurrentLinkOwners):0):0)+
@@ -5356,6 +5368,13 @@ struct Session::Impl {
         if(!helper_workspace || helper_workspace->generation!=version)return false;
         auto& work=*helper_workspace;
         if(!work.realtime || work.optional_owner)return false;
+        // The optional auxiliary receiver is a local +/-20Hz observer. Seed
+        // it from the independently acquired pilot, rather than asking that
+        // observer to discover an oscillator-scale RF offset. This grants no
+        // pilot-frequency, common-phase or clock authority to the auxiliary.
+        const auto pilot=work.realtime->tracker->snapshot();
+        if(!pilot.present || !pilot.qualified || pilot.sample_rate!=work.rate ||
+           pilot.sample>=work.next_raw || !std::isfinite(pilot.frequency_hz))return false;
         std::uint64_t clear=0;
         {std::lock_guard state_lock(mutex);
             if(!current.running || generation!=version || bank.revision!=receive_revision)return false;
@@ -5378,8 +5397,13 @@ struct Session::Impl {
                 0,modem::outer_dsss_transmit_gain(value.transfer.modem));
             if(plan.frequency_hz!=work.expected || !(plan.auxiliary_frequency_hz>0))
                 throw Error("optional auxiliary does not match the current pilot geometry");
+            const auto auxiliary=pilot.frequency_hz-(work.expected-plan.auxiliary_frequency_hz);
+            // This optional observer implements the positive ordered branch.
+            // A branch crossing DC/Nyquist cannot supply this decoder's band.
+            if(auxiliary<=20 || pilot.frequency_hz+100>=work.rate/2.)
+                throw Error("observed auxiliary band is outside the supported positive capture");
             owner->auxiliary=std::make_unique<helper::AuxiliaryMetadataReceiver>(work.rate,
-                plan.auxiliary_frequency_hz,work.expected,std::move(keys),detail::helper_precision_options(value.transfer.modem),
+                auxiliary,pilot.frequency_hz,std::move(keys),detail::helper_precision_options(value.transfer.modem),
                 external,work.next_raw);
             if(external>SIZE_MAX-work.optional_external_bytes)throw Error("optional auxiliary accounting overflow");
             work.auxiliary_work=owner.get();work.optional_owner=owner->serial;
@@ -5387,6 +5411,8 @@ struct Session::Impl {
             {std::lock_guard state_lock(mutex);if(generation==version)helper_frontend_bytes=work.frontend_bytes();}
             audio::trace::record("receiver_helper_auxiliary_funded",[&](auto& f) {
                 f.add("revision",bank.revision);f.add("owner_serial",work.optional_owner);f.add("first_raw_sample",work.next_raw);
+                f.add("pilot_observation_sample",pilot.sample);f.add("observed_pilot_hz",pilot.frequency_hz);
+                f.add("auxiliary_center_hz",auxiliary);
                 f.add("reservation_bytes",required);f.add("external_heap_bytes",external);
                 f.add("frequency_or_phase_authority",false);f.add("payload_source_quota_changed",false);
             });
@@ -6214,9 +6240,16 @@ struct Session::Impl {
         for(const auto& view:supplied_views) {
             if(view.first_sample<bank.helper_input_origin_samples)continue;
             const bool was_locked=locked;
-            locked=view.reference && view.reference->frequency_valid &&
-                std::isfinite(view.reference->frequency_uncertainty_hz) && view.reference->frequency_uncertainty_hz>=0 &&
-                (view.view->reference_passthrough || bool(view.corrected_rf_uncertainty_hz));
+            const auto raw_frequency_qualified=view.reference && view.reference->frequency_valid &&
+                std::isfinite(view.reference->frequency_uncertainty_hz) && view.reference->frequency_uncertainty_hz>=0;
+            // Analytic PCM owns the dated certificate of the correction that
+            // actually passed through its FIR/resampler support. A newer raw
+            // snapshot may be reacquiring after a retune; it cannot revoke that
+            // observed buffered frequency support. Unsupported settling/loss
+            // samples have no correction certificate and still drain unlocked.
+            const auto corrected_frequency_qualified=view.corrected_rf_uncertainty_hz &&
+                std::isfinite(*view.corrected_rf_uncertainty_hz) && *view.corrected_rf_uncertainty_hz>=0;
+            locked=view.view->reference_passthrough?raw_frequency_qualified:corrected_frequency_qualified;
             bank.realtime_locked=locked;
             bank.realtime_phase_corrected=view.common_phase_corrected;
             if(locked && !was_locked) {
@@ -6231,7 +6264,7 @@ struct Session::Impl {
                 }
                 audio::trace::record("receiver_helper_reference_reentry",[&](auto& f) {
                     f.add("revision",bank.revision);f.add("sample",bank.samples);f.add("input_first_sample",view.first_sample);
-                    f.add("raw_captured_end",view.raw_captured_end);f.add("reference_sample",view.reference->sample);
+                    f.add("raw_captured_end",view.raw_captured_end);f.add("reference_sample",view.reference?view.reference->sample:0);
                     f.add("queued_clock_available",bool(view.clock));f.add("native_rows",native);f.add("cold_native_rows",cold);
                     f.add("retired_native_rows",retired);f.add("permitted_native_rows",permitted);
                     f.add("cold_retired_native_rows",cold_retired);f.add("cold_permitted_native_rows",cold_permitted);
@@ -6679,7 +6712,34 @@ struct Session::Impl {
                                           bool original_constructor_envelope=false) {
         const auto optional_yielded=yield_optional_helper_for_growth(bank,value,input_samples,additional,reason,
             original_constructor_envelope);
-        if(bank.realtime_helper)return optional_yielded; // The single ordinary input basis is mandatory.
+        if(bank.realtime_helper) {
+            bool released=false;
+            const auto capacity=bank_capacity(value);
+            // Retain an existing actual-RF model across ordinary payload
+            // admission when the unchanged constructor peak AND retained
+            // source/COW promises fit. This optional owner yields on pressure,
+            // not merely because the decoder reaches a routine growth barrier.
+            const auto fits=original_constructor_envelope?
+                ordinary_constructor_envelope_fits(bank,capacity,additional,input_samples):
+                additional<=capacity && helper_retained_union_available(bank,capacity-additional,input_samples);
+            std::lock_guard lifetime_lock(helper_work_lifetime_mutex);
+            std::lock_guard helper_lock(helper_mutex);
+            if(helper_workspace && helper_workspace->frontend_owner_serial==bank.helper_frontend_serial && helper_workspace->realtime) {
+                auto& work=*helper_workspace;auto& realtime=*work.realtime;
+                const auto charge=realtime.oscillator_reservation;
+                // A fixed-RF capture never constructs this optional model; keep
+                // its existing release of unused prefunding at payload onset.
+                if(charge && (!realtime.oscillator || !fits)) {
+                    realtime.oscillator.reset();realtime.oscillator_config.reset();realtime.oscillator_reservation=0;
+                    for(auto& segment:realtime.rf_segments){segment.oscillator_seed.reset();segment.raw_frequency={};}
+                    bank.working_bytes-=charge;bank.helper_frontend_reservation-=charge;bank.helper_frontend_view_ceiling-=charge;
+                    released=true;
+                    {std::lock_guard state_lock(mutex);if(generation==work.generation)helper_frontend_bytes=work.frontend_bytes();}
+                    audio::trace::record("receiver_helper_oscillator_yield",[&](auto& f){f.add("released_bytes",charge);f.add("reason",reason);});
+                }
+            }
+            return optional_yielded||released; // The ordinary input basis remains mandatory.
+        }
         const auto capacity=bank_capacity(value);
         bool clock_released=false;
         // A birth envelope is maxG+control+node, not new retained payload.
@@ -6814,16 +6874,40 @@ struct Session::Impl {
             if(work.frontend_owner_serial && work.frontend_owner_serial!=bank.helper_frontend_serial)return;
             helper::ToneTrackerConfig config{work.rate,work.expected,work.realtime_search_width,work.phase_sigma,.5};
             config.segmented_pilot=true;
+            config.frequency_acceleration_psd_hz2_per_second3=
+                detail::helper_continuous_frequency_process(value,value.transfer.modem,work.expected);
             const auto tracker_bytes=helper::ToneTracker::workspace_required(config);
             const auto view_bytes=detail::HelperInputFrontend::reservation_bound(work.rate,value.transfer.modem.sample_rate,work.expected);
             const auto stage_bytes=detail::HelperPilotPcmStage::reservation_bytes(work.rate);
             if(tracker_bytes>SIZE_MAX-view_bytes || stage_bytes>SIZE_MAX-tracker_bytes-view_bytes ||
                sizeof(HelperWorkspace::RealtimeState)>SIZE_MAX-tracker_bytes-view_bytes-stage_bytes)return;
-            const auto required=tracker_bytes+view_bytes+stage_bytes+sizeof(HelperWorkspace::RealtimeState);
+            // Prefund the bounded actual-HF model; fixed-RF reception never
+            // constructs or uses it. Gaussian assumptions are declared here,
+            // not derived drift from the preset's static ppm or phase noise.
+            std::optional<detail::HelperOscillatorConfig> oscillator_config;
+            if(value.transfer.modem.oscillator_search) {
+                const auto& policy=*value.transfer.modem.oscillator_search;
+                if(policy.rf_shift_hz>0 && policy.rf_shift_hz<=54e6) {
+                    const auto physical_audio=(policy.reference==modem::OscillatorReference::shared_radio?
+                        policy.rf.accuracy_ppm:policy.lf.accuracy_ppm)*policy.margin*1e-6;
+                    const auto utc=transfer::receiver_utc_rate_correction(value.transfer.modem,value.transfer);
+                    const auto source=physical_audio+utc+physical_audio*utc;
+                    // The complete static envelope is an explicitly conservative
+                    // Gaussian prior sigma, with no /3 confidence conversion.
+                    oscillator_config=detail::declared_hf_oscillator_tracking(
+                        policy.rf.accuracy_ppm*policy.margin*(1+physical_audio),source*1e6,0);
+                }
+            }
+            const auto oscillator_bytes=oscillator_config?detail::LiveHelperOscillator::storage_required()+detail::LiveHelperOscillator::scratch_allowance:0;
+            auto required=tracker_bytes+view_bytes+stage_bytes+sizeof(HelperWorkspace::RealtimeState);
             const auto capacity=bank_capacity(value);
             if(bank.working_bytes>capacity || required>capacity-bank.working_bytes) {
                 helper_unavailable(work.generation,"realtime tracker/input workspace unavailable; reception waits for helper");return;
             }
+            // The predictor and its capture-worker stack margin are OPTIONAL.
+            // Insufficient surplus preserves the mandatory direct/scalar path.
+            const bool fund_oscillator=oscillator_config && oscillator_bytes<=capacity-bank.working_bytes-required;
+            if(fund_oscillator)required+=oscillator_bytes;else oscillator_config.reset();
             if(helper_frontend_serial==UINT64_MAX)throw Error("realtime helper input identity exhausted");
             const auto serial=++helper_frontend_serial;
             auto realtime=std::make_unique<HelperWorkspace::RealtimeState>(value.transfer.modem,work.rate,work.next_raw);
@@ -6832,6 +6916,8 @@ struct Session::Impl {
             // Measured marker cadence is DATA b, while a/c remain unresolved.
             realtime->utc_rate_limit=transfer::receiver_utc_rate_correction(value.transfer.modem,value.transfer);
             realtime->clock_mapping_supported=true; // Software helper and DATA share that source coordinate.
+            realtime->oscillator_config=oscillator_config;
+            realtime->oscillator_reservation=fund_oscillator?oscillator_bytes:0;
             realtime->tracker=std::make_unique<helper::ToneTracker>(config,tracker_bytes,work.next_raw);
             auto frontend=std::make_unique<detail::HelperInputFrontend>(view_bytes,serial);
             const auto actual=sizeof(HelperWorkspace::RealtimeState)+realtime->pilot_stage.workspace_bytes()+realtime->tracker->workspace_bytes()+frontend->bytes();
@@ -7249,10 +7335,30 @@ struct Session::Impl {
             width=std::max(width,std::nextafter(actual_radius,std::numeric_limits<double>::infinity()));
         }
         realtime.rf_segments[realtime.rf_segment_next]={segment,scale,compatible};
+        auto& dated_segment=realtime.rf_segments[realtime.rf_segment_next];
+        if(realtime.oscillator_config) {
+            if(!realtime.oscillator)try {
+                auto owner=std::make_unique<detail::LiveHelperOscillator>();
+                if(owner->configure(*realtime.oscillator_config,{work.frontend_owner_serial,work.phase_sigma},
+                        detail::LiveHelperOscillator::storage_required()))realtime.oscillator=std::move(owner);
+            }catch(const std::bad_alloc&) {realtime.oscillator_config.reset();}
+            if(realtime.oscillator) {
+                helper::LinkMapping mapping;mapping.capture_generation=work.generation;
+                mapping.timebase_identity=work.frontend_owner_serial;mapping.reference_identity_known=true;
+                mapping.reference_identity=0;mapping.sample_rate=rate;mapping.phase_segment=segment.phase_segment;
+                mapping.settled_first_sample=segment.settled_first_sample;mapping.settled_end_sample=segment.end_sample;
+                mapping.actual_rf_shift_hz=segment.rf_shift_hz;mapping.helper_audio_hz=work.expected;
+                mapping.data_audio_hz=realtime.config.carrier_hz;mapping.sideband_sign=segment.sideband_sign;
+                mapping.provenance=helper::LinkMappingProvenance::modelled_physical_capture;
+                if(realtime.oscillator->begin_segment(segment.first_sample,mapping,
+                        {work.frontend_owner_serial,work.phase_sigma},work.next_raw))dated_segment.oscillator_seed=realtime.oscillator->seed();
+            }
+        }
         realtime.rf_segment_next=(realtime.rf_segment_next+1)%realtime.rf_segments.size();
         realtime.rf_segment_count=std::min(realtime.rf_segment_count+1,realtime.rf_segments.size());
         realtime.tracker->begin_pilot_segment(segment.first_sample,work.expected,width,compatible,scale,
-            segment.settled_first_sample,!compatible);
+            segment.settled_first_sample,!compatible,
+            segment.end_sample-std::min<std::uint64_t>(rate*4/1000,segment.end_sample-segment.settled_first_sample-1));
         realtime.frequency_model=realtime.tracker->snapshot();
         realtime.frequency_model_segment=segment.phase_segment;
         realtime.phase_model.reset();realtime.last_phase_fit_end=0;realtime.reference.reset();
@@ -7283,6 +7389,7 @@ struct Session::Impl {
                 work.realtime->pilot_stage.reset(first_raw);work.realtime->last_phase_fit_end=0;
                 work.realtime->last_applied_phase_end=0;work.realtime->phase_model.reset();work.realtime->frequency_model={};
                 work.realtime->rf_segment_count=work.realtime->rf_segment_next=0;
+                if(work.realtime->oscillator)work.realtime->oscillator->reset_provider({work.frontend_owner_serial,work.phase_sigma});
                 if(work.frontend)work.frontend->reset();
             }
             // Observe before expensive Robust work, in detector-sized chunks.
@@ -7306,7 +7413,10 @@ struct Session::Impl {
                             const auto end=segment->capture.end_sample;
                             if(end<=UINT64_MAX-delay && end+delay>at)
                                 count=static_cast<std::size_t>(std::min<std::uint64_t>(count,end+delay-at));
-                            if(!segment->compatible) {
+                            for(const auto boundary:std::array{segment->raw_frequency.first_sample,segment->raw_frequency.end_sample})
+                                if(segment->raw_frequency.valid && boundary<=UINT64_MAX-delay && boundary+delay>at)
+                                    count=static_cast<std::size_t>(std::min<std::uint64_t>(count,boundary+delay-at));
+                            if(segment->local_frequency_model || !segment->compatible || dated_model.frequency_local_aperture) {
                                 if(segment->local_frequency_model)dated_model=*segment->local_frequency_model;
                                 else dated_model.qualified=false;
                                 // A local aperture belongs ONLY to this dated
@@ -7318,8 +7428,7 @@ struct Session::Impl {
                                         if(boundary<=UINT64_MAX-delay && boundary+delay>at)
                                             count=static_cast<std::size_t>(std::min<std::uint64_t>(count,boundary+delay-at));
                                 }
-                            } else if(dated_model.frequency_local_aperture)dated_model.qualified=false;
-                            else {
+                            } else {
                                 const auto ratio=segment->residual_scale/dated_model.frequency_model_residual_scale;
                                 dated_model.frequency_hz=work.expected+(dated_model.frequency_hz-work.expected)*ratio;
                                 dated_model.uncertainty_hz*=std::abs(ratio);
@@ -7327,6 +7436,7 @@ struct Session::Impl {
                                 dated_model.frequency_variance_hz2*=ratio*ratio;
                                 dated_model.frequency_rate_covariance_hz2_per_second*=ratio*ratio;
                                 dated_model.frequency_rate_variance_hz2_per_second2*=ratio*ratio;
+                                dated_model.frequency_acceleration_psd_hz2_per_second3*=ratio*ratio;
                                 dated_model.frequency_model_residual_scale=segment->residual_scale;
                             }
                         }
@@ -7336,7 +7446,58 @@ struct Session::Impl {
                             2*helper::AnalyticFrequencyTranslator::group_delay;
                         if(at<activation && activation-at<count)count=static_cast<std::size_t>(activation-at);
                     }
-                    const auto plan=detail::helper_pilot_frequency_plan(dated_model,at,at+count);
+                    auto plan=detail::helper_pilot_frequency_plan(dated_model,at,at+count);
+                    // Fixed-RF only: the capture worker can refine buffered
+                    // frequency with observations already seen during the
+                    // existing400ms staging. Its bounded numeric lag keeps
+                    // the declared drift model and supplies no past phase.
+                    // Actual retunes use the separately mapped RF/audio model.
+                    if(!realtime.rf_segment_count && at>=delay) {
+                        const auto buffered=realtime.tracker->frequency_interval(at-delay,at+count-delay);
+                        if(buffered.valid && buffered.evidence_end_sample<=work.next_raw &&
+                           (!plan.valid || buffered.uncertainty_hz<plan.residual_uncertainty_hz)) {
+                            const auto previous=plan.valid?plan.residual_uncertainty_hz:-1.;
+                            plan={true,buffered.frequency_hz,buffered.uncertainty_hz};
+                            if(buffered.smoothed || buffered.independent_aperture)audio::trace::record("receiver_helper_buffered_frequency",[&](auto& f) {
+                                f.add("first_center",buffered.first_sample);f.add("end_center",buffered.end_sample);
+                                f.add("anchor_sample",buffered.anchor_sample);f.add("evidence_first",buffered.evidence_first_sample);
+                                f.add("evidence_end",buffered.evidence_end_sample);f.add("captured_end",work.next_raw);
+                                f.add("tracking_frequency_hz",buffered.frequency_hz);f.add("uncertainty_hz",buffered.uncertainty_hz);
+                                f.add("backward_projection_uncertainty_hz",previous);f.add("phase_authority",false);
+                                f.add("independent_aperture",buffered.independent_aperture);
+                            });
+                        }
+                    }
+                    const HelperWorkspace::RealtimeState::RfSegment* oscillator_segment=nullptr;
+                    std::uint64_t oscillator_evidence_end=0;
+                    // Keep the existing ordinary relation F'=M-Mhat+(D-H)*B:
+                    // only M's measured uncertainty is replaced. The complete
+                    // original B/UTC grid and its H-D coefficient stay intact.
+                    if(realtime.oscillator && at>=delay) {
+                        const auto* segment=realtime.segment_at(at-delay);
+                        if(segment && segment->oscillator_seed) {
+                            const auto first_center=at-delay,last_center=at+count-1-delay;
+                            detail::HelperPilotFrequencyPlan chosen;
+                            for(unsigned family=0;family<3;++family) {
+                                const auto candidate=[&](std::uint64_t date) {
+                                    if(family==0)return realtime.oscillator->query(*segment->oscillator_seed,date,work.next_raw,realtime.config.carrier_hz);
+                                    if(family==1)return realtime.oscillator->direct(segment->raw_frequency,*segment->oscillator_seed,date,work.next_raw);
+                                    return realtime.oscillator->current(date,work.next_raw,realtime.config.carrier_hz);
+                                };
+                                const auto a=candidate(first_center),b=candidate(last_center),middle=candidate(first_center+(last_center-first_center)/2);
+                                if(!a.available || !b.available || !middle.available)continue;
+                                const auto width=std::nextafter(std::max({middle.helper_uncertainty_hz,
+                                    a.helper_uncertainty_hz+std::abs(a.helper_residual_hz-middle.helper_residual_hz),
+                                    b.helper_uncertainty_hz+std::abs(b.helper_residual_hz-middle.helper_residual_hz)}),INFINITY);
+                                if(chosen.valid && width>=chosen.residual_uncertainty_hz)continue;
+                                chosen={true,work.expected+middle.helper_residual_hz,width};oscillator_segment=segment;
+                                oscillator_evidence_end=std::max({a.direct_aperture?segment->raw_frequency.end_sample:a.state.evidence_end_sample,
+                                    b.direct_aperture?segment->raw_frequency.end_sample:b.state.evidence_end_sample,
+                                    middle.direct_aperture?segment->raw_frequency.end_sample:middle.state.evidence_end_sample});
+                            }
+                            if(chosen.valid)plan=chosen;
+                        }
+                    }
                     std::optional<double> residual;
                     if(plan.valid) {
                         helper::Reference correction;correction.sample_rate=rate;correction.frequency_valid=true;
@@ -7344,6 +7505,15 @@ struct Session::Impl {
                         correction.frequency_uncertainty_hz=plan.residual_uncertainty_hz;
                         if(work.frontend->track_frequency(correction,work.expected)) {
                             residual=plan.residual_uncertainty_hz;
+                            if(oscillator_segment)audio::trace::record("receiver_helper_oscillator_correction",[&](auto& f) {
+                                f.add("first_raw",at);f.add("end_raw",at+count);f.add("first_center",at-delay);f.add("last_center",at+count-1-delay);
+                                f.add("phase_segment",oscillator_segment->capture.phase_segment);f.add("actual_rf_shift_hz",oscillator_segment->capture.rf_shift_hz);
+                                f.add("captured_end",work.next_raw);f.add("frequency_evidence_end",oscillator_evidence_end);
+                                f.add("current_pilot_end",oscillator_segment->raw_frequency.end_sample);f.add("model_epoch",oscillator_segment->oscillator_seed->epoch);
+                                f.add("tracking_frequency_hz",plan.tracking_frequency_hz);f.add("residual_uncertainty_hz",plan.residual_uncertainty_hz);
+                                f.add("applied_correction_hz",work.frontend->current_correction_hz());f.add("ordinary_clock_coefficient_hz",work.expected-realtime.config.carrier_hz);
+                                f.add("original_LF_UTC_union_retained",true);f.add("phase_UTC_authority",false);
+                            });
                             if(realtime.phase_model && realtime.phase_model->end_sample>realtime.last_applied_phase_end &&
                                at>=realtime.phase_model->first_sample+2*helper::AnalyticFrequencyTranslator::group_delay &&
                                at<realtime.phase_model->end_sample) {
@@ -7377,17 +7547,65 @@ struct Session::Impl {
                 realtime.frequency_model=tracked;
                 if(auto* segment=realtime.segment_at(first)) {
                     realtime.frequency_model_segment=segment->capture.phase_segment;
-                    if(!segment->compatible && tracked.qualified && tracked.frequency_local_aperture)
+                    if(tracked.qualified && tracked.frequency_local_aperture)
                         segment->local_frequency_model=tracked;
                 }
                 work.next_raw=first+count; // Actual raw ingress, not stage output.
+                if(realtime.oscillator) {
+                    if(auto* segment=realtime.segment_at(first);segment && segment->oscillator_seed) {
+                        const auto& raw=tracked.frequency_observation;
+                        const auto update=realtime.oscillator->observe(raw,{work.frontend_owner_serial,work.phase_sigma},work.next_raw);
+                        if(update.accepted) {
+                            segment->oscillator_seed=update.seed;segment->raw_frequency=raw;
+                            const auto current=realtime.oscillator->current(raw.state_endpoint_sample,work.next_raw,realtime.config.carrier_hz);
+                            audio::trace::record("receiver_helper_oscillator",[&](auto& f) {
+                                f.add("phase_segment",segment->capture.phase_segment);f.add("actual_rf_shift_hz",segment->capture.rf_shift_hz);
+                                f.add("sideband_sign",segment->capture.sideband_sign);f.add("first_sample",raw.first_sample);
+                                f.add("end_sample",raw.end_sample);f.add("state_endpoint",raw.state_endpoint_sample);
+                                f.add("mean_sample",raw.mean_sample);f.add("mean_fraction",raw.mean_sample_fraction);
+                                f.add("raw_frequency_hz",raw.frequency_hz);f.add("independent_variance_hz2",raw.independent_variance_hz2);
+                                f.add("residual_variance_hz2",raw.residual_variance_hz2);f.add("raw_frequency_only",!tracked.qualified);
+                                f.add("raw_frequency_valid",raw.valid);f.add("frequency_qualified",tracked.qualified);
+                                f.add("phase_fit_qualified",tracked.phase_fit_qualified);
+                                f.add("phase_correction_qualified",bool(detail::helper_pilot_phase_observation(tracked,work.expected,rate)));
+                                f.add("model_epoch",update.seed.epoch);f.add("innovation_veto",update.innovation_veto);
+                                f.add("innovation_hz",update.innovation_hz);f.add("innovation_variance_hz2",update.innovation_variance_hz2);
+                                f.add("helper_uncertainty_hz",current.helper_uncertainty_hz);f.add("helper_residual_hz",current.helper_residual_hz);
+                                f.add("helper_frequency_hz",work.expected+current.helper_residual_hz);f.add("DATA_residual_hz",current.data_residual_hz);
+                                f.add("DATA_uncertainty_hz",current.data_uncertainty_hz);f.add("DATA_projection_diagnostic_only",true);
+                                f.add("current_hop_pilot",true);f.add("q_RF_ppm2_per_s3",*realtime.oscillator->assumptions().model.rf_acceleration_psd_ppm2_per_second3);
+                                f.add("q_source_ppm2_per_s3",*realtime.oscillator->assumptions().model.audio_acceleration_psd_ppm2_per_second3);
+                                f.add("retune_variance_floor_hz2",realtime.oscillator->assumptions().model.retune_variance_floor_hz2);
+                                f.add("measured_retune_variance_hz2",current.state.retune_variance_hz2);
+                                f.add("phase_UTC_authority",false);
+                            });
+                        }
+                        if(!tracked.present && !raw.valid)realtime.oscillator->close_reference();
+                    }
+                }
                 publish_helper_presence(work,first,work.next_raw,rate,tracked.present,
                     tracked.frequency_hz,tracked.carrier_to_noise_db_hz,version);
                 helper::Reference reference;reference.sample=tracked.sample;reference.sample_rate=tracked.sample_rate;
                 reference.frequency_sample=tracked.sample;reference.frequency_first_sample=tracked.first_sample;
                 reference.frequency_hz=tracked.frequency_hz;reference.frequency_uncertainty_hz=tracked.uncertainty_hz;
-                reference.frequency_fit=helper::FrequencyFit::local_polynomial;reference.frequency_valid=tracked.qualified;
-                if(work.frontend && tracked.qualified) {
+                reference.frequency_fit=helper::FrequencyFit::local_polynomial;
+                // Retained oscillator knowledge can be numerically qualified
+                // while the new retune has no current pilot yet. It is not a
+                // new raw observation or current presence certificate.
+                reference.frequency_valid=tracked.qualified&&tracked.present;
+                if(realtime.oscillator && tracked.frequency_observation.valid) {
+                    if(const auto* segment=realtime.segment_at(first);segment && segment->oscillator_seed) {
+                        const auto direct=realtime.oscillator->direct(tracked.frequency_observation,
+                            *segment->oscillator_seed,tracked.frequency_observation.state_endpoint_sample,work.next_raw);
+                        if(direct.available) {
+                            reference.sample=reference.frequency_sample=tracked.frequency_observation.state_endpoint_sample;
+                            reference.frequency_first_sample=tracked.frequency_observation.first_sample;
+                            reference.frequency_hz=work.expected+direct.helper_residual_hz;
+                            reference.frequency_uncertainty_hz=direct.helper_uncertainty_hz;reference.frequency_valid=true;
+                        }
+                    }
+                }
+                if(work.frontend && reference.frequency_valid) {
                     try {
                         if(!work.frontend->active())work.frontend->admit_realtime(realtime.config,work.expected,
                             reference,work.rate,work.rate/2.-10.,realtime.pilot_stage.first_sample(),realtime.utc_rate_limit);
@@ -7425,11 +7643,13 @@ struct Session::Impl {
                 f.add("sample",tracked.sample);f.add("captured_end",tracked.captured_end_sample);
                 f.add("frequency_hz",tracked.frequency_hz);f.add("expected_hz",work.expected);
                 f.add("uncertainty_hz",tracked.uncertainty_hz);f.add("present",tracked.present);
-                f.add("qualified",tracked.qualified);f.add("cn0_db_hz",tracked.carrier_to_noise_db_hz);
+                f.add("qualified",tracked.qualified&&tracked.present);f.add("frequency_knowledge_valid",tracked.frequency_knowledge_valid);
+                f.add("phase_fit_qualified",tracked.phase_fit_qualified);f.add("cn0_db_hz",tracked.carrier_to_noise_db_hz);
                 f.add("frequency_local_aperture",tracked.frequency_local_aperture);
                 f.add("frequency_continuous_phase",tracked.frequency_continuous_phase);
                 f.add("coherent_aperture_seconds",tracked.coherent_aperture_seconds);
                 f.add("frequency_support_seconds",tracked.frequency_support_seconds);
+                f.add("frequency_acceleration_psd_hz2_per_second3",tracked.frequency_acceleration_psd_hz2_per_second3);
                 f.add("observation_age_seconds",tracked.observation_age_seconds);
                 f.add("continuous_phase_resets",tracked.continuous_phase_resets);
                 f.add("continuous_model_resets",tracked.continuous_model_resets);

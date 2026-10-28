@@ -8,6 +8,10 @@
 #include <optional>
 
 namespace datapump::helper {
+// Shared, explicitly operational HF assumptions; no preset/hardware drift
+// calibration is implied. A statically exact coordinate still uses zero Q.
+inline constexpr double operational_hf_rf_acceleration_psd_ppm2_per_second3=1e-6;
+inline constexpr double operational_hf_audio_acceleration_psd_ppm2_per_second3=.01;
 // Conditional Gaussian frequency model only: no PCM, phase, UTC, receiver
 // admission or completion authority. Prior sigmas and process densities are
 // explicit assumptions, never derived from configured static ppm accuracy.
